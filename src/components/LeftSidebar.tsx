@@ -348,6 +348,13 @@ export function LeftSidebar({
         {/* Divider between menu items and repo folders */}
         <div className="mx-3 my-1 border-t border-neutral-8/40" />
 
+        {/* Section label for active sessions */}
+        {repoNodes.length > 0 && (
+          <div className="px-4 pt-1.5 pb-0.5 text-[11px] font-medium uppercase tracking-wider text-neutral-6">
+            Active sessions
+          </div>
+        )}
+
         {/* Repo nodes */}
         {repoNodes.map(node => (
           <RepoSection
@@ -514,6 +521,9 @@ function RepoSection({
           }
           <span className={`inline-block h-1.5 w-1.5 rounded-full flex-shrink-0 ${statusDot}`} />
           <span className="truncate text-[15px] font-semibold tracking-wide">{node.displayName}</span>
+          {!expanded && node.sessions.length > 1 && (
+            <span className="text-[12px] text-neutral-6 flex-shrink-0">({node.sessions.length})</span>
+          )}
         </button>
         <button
           onClick={() => setApprovalsOpen(!approvalsOpen)}
