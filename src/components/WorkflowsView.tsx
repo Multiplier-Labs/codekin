@@ -10,7 +10,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   IconPlus, IconPlayerPlay, IconPlayerStop, IconPlayerPause,
   IconExternalLink, IconTrash, IconChevronDown, IconChevronRight,
-  IconCheck, IconX, IconLoader2, IconMinus, IconCircle, IconClock, IconPencil,
+  IconCheck, IconX, IconLoader2, IconMinus, IconCircle, IconPencil,
   IconCalendarEvent, IconArrowRight,
 } from '@tabler/icons-react'
 import { useWorkflows } from '../hooks/useWorkflows'
@@ -18,7 +18,7 @@ import { getRun } from '../lib/workflowApi'
 import type { WorkflowRun, WorkflowRunWithSteps, WorkflowStep, CronSchedule, ReviewRepoConfig } from '../lib/workflowApi'
 import { AddWorkflowModal } from './AddWorkflowModal'
 import { EditWorkflowModal } from './EditWorkflowModal'
-import { StatusBadge, CategoryBadge } from './WorkflowBadges'
+import { StatusBadge } from './WorkflowBadges'
 import { kindLabel, statusBadge, describeCron, formatDuration, formatTime, repoNameFromRun } from '../lib/workflowHelpers'
 
 // ---------------------------------------------------------------------------
@@ -226,10 +226,10 @@ function HealthDot({ status }: { status: string | undefined }) {
 }
 
 // ---------------------------------------------------------------------------
-// WorkflowCard — one card per configured workflow
+// WorkflowRow — compact row for a single workflow within a repo group
 // ---------------------------------------------------------------------------
 
-function WorkflowCard({
+function WorkflowRow({
   repo,
   schedule,
   recentRuns,
@@ -261,146 +261,163 @@ function WorkflowCard({
   const [showRuns, setShowRuns] = useState(false)
   const paused = schedule ? !schedule.enabled : false
   const lastRun = recentRuns[0]
-  const repoShortName = repo.repoPath.split('/').pop() || repo.name
 
   return (
-    <div className={`rounded-xl border transition-colors ${
-      paused
-        ? 'border-neutral-8/40 bg-neutral-11/20'
-        : 'border-neutral-8/60 bg-neutral-11/40'
-    }`}>
-      {/* Card header */}
-      <div className="px-4 pt-3.5 pb-3">
-        <div className="flex items-start gap-3">
-          {/* Health dot + repo info */}
-          <div className="pt-1.5">
-            <HealthDot status={lastRun?.status} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className={`text-[15px] font-semibold ${paused ? 'text-neutral-4' : 'text-neutral-1'}`}>
-                {repoShortName}
-              </span>
-              <CategoryBadge kind={repo.kind ?? ''} />
-              {paused && (
-                <span className="inline-flex items-center gap-1 text-[12px] font-medium text-warning-5 bg-warning-10/40 border border-warning-8/40 rounded-full px-2 py-0.5">
-                  <IconPlayerPause size={11} stroke={2} />
-                  paused
-                </span>
-              )}
-            </div>
-            <div className={`text-[14px] font-medium mt-0.5 ${paused ? 'text-neutral-5' : 'text-neutral-3'}`}>
-              {kindLabel(repo.kind ?? '')}
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={() => onToggleEnabled(repo.id, !schedule?.enabled)}
-              className={`rounded-md p-1.5 transition-colors ${
-                paused
-                  ? 'text-success-5 hover:text-success-3 hover:bg-neutral-9'
-                  : 'text-neutral-5 hover:text-warning-4 hover:bg-neutral-9'
-              }`}
-              title={paused ? 'Resume' : 'Pause'}
-            >
-              {paused
-                ? <IconPlayerPlay size={15} stroke={2} />
-                : <IconPlayerPause size={15} stroke={2} />
-              }
-            </button>
-            <button
-              onClick={() => onEdit(repo)}
-              className="rounded-md p-1.5 text-neutral-5 hover:text-neutral-2 hover:bg-neutral-9 transition-colors"
-              title="Edit"
-            >
-              <IconPencil size={15} stroke={2} />
-            </button>
-            <button
-              onClick={() => onDelete(repo.id)}
-              className="rounded-md p-1.5 text-neutral-6 hover:text-error-4 hover:bg-neutral-9 transition-colors"
-              title="Delete"
-            >
-              <IconTrash size={15} stroke={2} />
-            </button>
-          </div>
-        </div>
-
-        {/* Schedule + next run + Run Now */}
-        <div className="mt-3 flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-1.5 text-[13px] text-neutral-4">
-            <IconCalendarEvent size={14} stroke={2} className="text-neutral-5" />
-            {schedule ? describeCron(schedule.cronExpression) : describeCron(repo.cronExpression)}
-          </div>
-          {schedule?.nextRunAt && !paused && (
-            <div className="flex items-center gap-1 text-[13px] text-neutral-5">
-              <IconClock size={12} stroke={2} />
-              Next: {formatTime(schedule.nextRunAt)}
-            </div>
-          )}
-          <div className="ml-auto">
-            <button
-              onClick={() => onTrigger(repo.id)}
-              className="rounded-md border border-neutral-7 bg-neutral-9 px-3 py-1 text-[13px] text-neutral-2 hover:bg-neutral-8 hover:text-neutral-1 transition-colors flex items-center gap-1.5"
-            >
-              <IconPlayerPlay size={12} stroke={2} />
-              Run Now
-            </button>
-          </div>
-        </div>
-
-        {/* Last run summary */}
-        {lastRun && (
-          <div className="mt-2.5 flex items-center gap-2 text-[13px] text-neutral-5">
-            <span>Last run:</span>
-            <StatusBadge status={lastRun.status} />
-            <span className="tabular-nums">{formatTime(lastRun.createdAt)}</span>
-            <span className="tabular-nums">{formatDuration(lastRun.startedAt, lastRun.completedAt)}</span>
-          </div>
+    <div>
+      <div className={`group flex items-center gap-3 px-3 py-2 rounded-md transition-colors hover:bg-neutral-10/50 ${paused ? 'opacity-60' : ''}`}>
+        <HealthDot status={lastRun?.status} />
+        <span className={`text-[13px] font-medium min-w-0 truncate ${paused ? 'text-neutral-5' : 'text-neutral-2'}`}>
+          {kindLabel(repo.kind ?? '')}
+        </span>
+        {paused && (
+          <span className="text-[11px] text-warning-5 shrink-0">paused</span>
         )}
-      </div>
-
-      {/* Recent runs toggle */}
-      {recentRuns.length > 0 && (
-        <div className="border-t border-neutral-8/40">
+        <span className="text-[13px] text-neutral-5 whitespace-nowrap shrink-0">
+          {schedule ? describeCron(schedule.cronExpression) : describeCron(repo.cronExpression)}
+        </span>
+        {lastRun && (
+          <>
+            <StatusBadge status={lastRun.status} />
+            <span className="text-[12px] text-neutral-5 tabular-nums whitespace-nowrap shrink-0">
+              {formatTime(lastRun.createdAt)}
+            </span>
+          </>
+        )}
+        {/* Run history dots */}
+        {recentRuns.length > 0 && (
           <button
             onClick={() => setShowRuns(!showRuns)}
-            className="w-full flex items-center gap-2 px-4 py-2 text-[13px] text-neutral-4 hover:text-neutral-2 transition-colors"
+            className="flex items-center gap-0.5 shrink-0 rounded px-1 py-0.5 hover:bg-neutral-9 transition-colors"
+            title={`${recentRuns.length} recent runs`}
           >
-            {showRuns
-              ? <IconChevronDown size={13} stroke={2} />
-              : <IconChevronRight size={13} stroke={2} />
-            }
-            <span>Recent runs ({recentRuns.length})</span>
-            {/* Mini status dots for last few runs */}
-            {!showRuns && (
-              <div className="flex items-center gap-1 ml-1">
-                {recentRuns.slice(0, 5).map(r => (
-                  <HealthDot key={r.id} status={r.status} />
-                ))}
-              </div>
-            )}
+            {recentRuns.slice(0, 5).map(r => (
+              <HealthDot key={r.id} status={r.status} />
+            ))}
           </button>
+        )}
+        {/* Actions — visible on hover */}
+        <div className="flex items-center gap-0.5 shrink-0 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={() => onTrigger(repo.id)}
+            className="rounded p-1 text-neutral-5 hover:text-accent-3 hover:bg-neutral-9 transition-colors"
+            title="Run now"
+          >
+            <IconPlayerPlay size={14} stroke={2} />
+          </button>
+          <button
+            onClick={() => onToggleEnabled(repo.id, !schedule?.enabled)}
+            className={`rounded p-1 transition-colors ${
+              paused
+                ? 'text-success-5 hover:text-success-3 hover:bg-neutral-9'
+                : 'text-neutral-5 hover:text-warning-4 hover:bg-neutral-9'
+            }`}
+            title={paused ? 'Resume' : 'Pause'}
+          >
+            {paused ? <IconPlayerPlay size={14} stroke={2} /> : <IconPlayerPause size={14} stroke={2} />}
+          </button>
+          <button
+            onClick={() => onEdit(repo)}
+            className="rounded p-1 text-neutral-5 hover:text-neutral-2 hover:bg-neutral-9 transition-colors"
+            title="Edit"
+          >
+            <IconPencil size={14} stroke={2} />
+          </button>
+          <button
+            onClick={() => onDelete(repo.id)}
+            className="rounded p-1 text-neutral-6 hover:text-error-4 hover:bg-neutral-9 transition-colors"
+            title="Delete"
+          >
+            <IconTrash size={14} stroke={2} />
+          </button>
+        </div>
+      </div>
 
-          {showRuns && (
-            <div className="pb-2 px-1">
-              {recentRuns.map(run => (
-                <MiniRunRow
-                  key={run.id}
-                  run={run}
-                  selected={selectedRunId === run.id}
-                  detail={selectedRunId === run.id ? runDetail : null}
-                  detailLoading={selectedRunId === run.id ? detailLoading : false}
-                  onToggle={() => onToggleRun(run.id)}
-                  onCancel={onCancel}
-                  onNavigateToSession={onNavigateToSession}
-                />
-              ))}
-            </div>
-          )}
+      {/* Expandable run history */}
+      {showRuns && recentRuns.length > 0 && (
+        <div className="ml-6 border-l border-neutral-8/40 pl-2 pb-1">
+          {recentRuns.map(run => (
+            <MiniRunRow
+              key={run.id}
+              run={run}
+              selected={selectedRunId === run.id}
+              detail={selectedRunId === run.id ? runDetail : null}
+              detailLoading={selectedRunId === run.id ? detailLoading : false}
+              onToggle={() => onToggleRun(run.id)}
+              onCancel={onCancel}
+              onNavigateToSession={onNavigateToSession}
+            />
+          ))}
         </div>
       )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// RepoGroup — groups workflows under a single repo header
+// ---------------------------------------------------------------------------
+
+function RepoGroup({
+  repoPath,
+  workflows,
+  scheduleMap,
+  runsPerRepo,
+  selectedRunId,
+  runDetail,
+  detailLoading,
+  onTrigger,
+  onToggleEnabled,
+  onEdit,
+  onDelete,
+  onToggleRun,
+  onCancel,
+  onNavigateToSession,
+}: {
+  repoPath: string
+  workflows: ReviewRepoConfig[]
+  scheduleMap: Map<string, CronSchedule>
+  runsPerRepo: Map<string, WorkflowRun[]>
+  selectedRunId: string | null
+  runDetail: WorkflowRunWithSteps | null
+  detailLoading: boolean
+  onTrigger: (id: string) => void
+  onToggleEnabled: (id: string, enabled: boolean) => void
+  onEdit: (repo: ReviewRepoConfig) => void
+  onDelete: (id: string) => void
+  onToggleRun: (runId: string) => void
+  onCancel: (runId: string) => void
+  onNavigateToSession?: (sessionId: string) => void
+}) {
+  const repoName = repoPath.split('/').pop() || repoPath
+
+  return (
+    <div className="rounded-xl border border-neutral-8/50 bg-neutral-11/30 overflow-hidden">
+      {/* Repo header */}
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-neutral-8/30">
+        <span className="text-[14px] font-semibold text-neutral-2">{repoName}</span>
+        <span className="text-[12px] text-neutral-6">{workflows.length}</span>
+      </div>
+      {/* Workflow rows */}
+      <div className="py-1 px-1">
+        {workflows.map(repo => (
+          <WorkflowRow
+            key={repo.id}
+            repo={repo}
+            schedule={scheduleMap.get(repo.id)}
+            recentRuns={runsPerRepo.get(repo.id) ?? []}
+            selectedRunId={selectedRunId}
+            runDetail={runDetail}
+            detailLoading={detailLoading}
+            onTrigger={onTrigger}
+            onToggleEnabled={onToggleEnabled}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onToggleRun={onToggleRun}
+            onCancel={onCancel}
+            onNavigateToSession={onNavigateToSession}
+          />
+        ))}
+      </div>
     </div>
   )
 }
@@ -442,6 +459,76 @@ function ActivityRow({
         >
           <IconExternalLink size={13} stroke={2} />
         </button>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// CustomWorkflowGuide — collapsible instructions for defining workflow.md files
+// ---------------------------------------------------------------------------
+
+function CustomWorkflowGuide() {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="mt-6 rounded-xl border border-neutral-8/40 bg-neutral-11/20">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 px-4 py-3 text-left text-[14px] font-medium text-neutral-3 hover:text-neutral-1 transition-colors"
+      >
+        {open
+          ? <IconChevronDown size={14} stroke={2} className="text-neutral-5" />
+          : <IconChevronRight size={14} stroke={2} className="text-neutral-5" />
+        }
+        Defining Custom Workflows
+        <span className="text-[12px] text-neutral-5 font-normal ml-1">via workflow.md files</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 text-[13px] text-neutral-4 space-y-3 border-t border-neutral-8/30 pt-3">
+          <p>
+            You can define custom workflow types per-repo by adding <code className="text-accent-3 bg-neutral-10 px-1 rounded">.md</code> files to:
+          </p>
+          <pre className="rounded-md bg-neutral-12 px-3 py-2 text-[13px] text-neutral-3 font-mono overflow-x-auto">
+{'<repo>/.codekin/workflows/<kind>.md'}
+          </pre>
+
+          <p>Each file uses YAML frontmatter + a prompt body:</p>
+          <pre className="rounded-md bg-neutral-12 px-3 py-2 text-[13px] text-neutral-3 font-mono overflow-x-auto leading-relaxed">{
+`---
+kind: api-docs.weekly
+name: API Documentation Check
+sessionPrefix: api-docs
+outputDir: .codekin/reports/api-docs
+filenameSuffix: _api-docs.md
+commitMessage: chore: api docs check
+---
+You are reviewing the API documentation for this project.
+
+1. Find all REST endpoints and verify they have docs
+2. Check for outdated examples or missing parameters
+3. Produce a Markdown report
+
+Important: Do NOT modify any source files.`
+          }</pre>
+
+          <div className="space-y-1.5 text-[13px]">
+            <p className="font-medium text-neutral-3">Frontmatter fields:</p>
+            <ul className="list-disc list-inside space-y-0.5 text-neutral-4 ml-1">
+              <li><code className="text-neutral-3">kind</code> — unique ID, e.g. <code className="text-neutral-3">code-review.daily</code></li>
+              <li><code className="text-neutral-3">name</code> — display name shown in the UI</li>
+              <li><code className="text-neutral-3">sessionPrefix</code> — prefix for the session name</li>
+              <li><code className="text-neutral-3">outputDir</code> — where reports are saved in the repo</li>
+              <li><code className="text-neutral-3">filenameSuffix</code> — appended to the date for the report filename</li>
+              <li><code className="text-neutral-3">commitMessage</code> — git commit message prefix</li>
+            </ul>
+          </div>
+
+          <p className="text-neutral-5">
+            Custom workflows appear automatically when adding a new workflow for that repo. To override a built-in workflow{"'"}s prompt, use the same <code className="text-neutral-3">kind</code> value.
+          </p>
+        </div>
       )}
     </div>
   )
@@ -537,6 +624,13 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
 
   const repos = config?.reviewRepos ?? []
 
+  // Group workflows by repoPath
+  const repoGroups = new Map<string, ReviewRepoConfig[]>()
+  for (const repo of repos) {
+    if (!repoGroups.has(repo.repoPath)) repoGroups.set(repo.repoPath, [])
+    repoGroups.get(repo.repoPath)!.push(repo)
+  }
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
@@ -561,7 +655,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
           </div>
         )}
 
-        {/* Workflow cards */}
+        {/* Workflow groups by repo */}
         {repos.length === 0 ? (
           <div className="rounded-xl border border-dashed border-neutral-8 px-6 py-10 text-center">
             <div className="text-neutral-5 mb-1">
@@ -581,12 +675,13 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
           </div>
         ) : (
           <div className="space-y-3">
-            {repos.map(repo => (
-              <WorkflowCard
-                key={repo.id}
-                repo={repo}
-                schedule={scheduleMap.get(repo.id)}
-                recentRuns={runsPerRepo.get(repo.id) ?? []}
+            {Array.from(repoGroups.entries()).map(([repoPath, workflows]) => (
+              <RepoGroup
+                key={repoPath}
+                repoPath={repoPath}
+                workflows={workflows}
+                scheduleMap={scheduleMap}
+                runsPerRepo={runsPerRepo}
                 selectedRunId={selectedRunId}
                 runDetail={runDetail}
                 detailLoading={detailLoading}
@@ -630,6 +725,9 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
             )}
           </div>
         )}
+
+        {/* Custom workflow guide */}
+        <CustomWorkflowGuide />
       </div>
 
       {/* Add Workflow Modal */}

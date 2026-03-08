@@ -212,6 +212,13 @@ function StepKind({
           </div>
         ))}
       </div>
+
+      {!loading && (
+        <p className="mt-4 text-[12px] text-neutral-5 leading-relaxed">
+          You can define custom workflow types by adding <code className="text-neutral-4">.md</code> files
+          to <code className="text-neutral-4">{repoPath}/.codekin/workflows/</code>. See the guide on the Workflows page for details.
+        </p>
+      )}
     </div>
   )
 }
