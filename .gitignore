@@ -27,6 +27,7 @@ dist-ssr
 # Local settings (not for distribution)
 .claude/settings.local.json
 .codekin/settings.json
+.codekin/scripts/
 
 # Generated workflow outputs
 .codekin/outputs/
