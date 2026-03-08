@@ -191,25 +191,22 @@ export default function App() {
     if (!settings.token) setSettingsOpen(true) // eslint-disable-line react-hooks/set-state-in-effect -- initial setup
   }, [settings.token])
 
-  const handleOpenSession = useCallback(async (repo: Repo, sessionName?: string) => {
-    // If no custom name, check for existing sessions for this repo
-    if (!sessionName) {
-      const existing = sessions.filter(s => groupKey(s) === repo.workingDir)
-      if (existing.length > 0) {
-        // Join the most recent existing session
-        const latest = existing[existing.length - 1]
-        clearMessages()
-        leaveSession()
-        joinSession(latest.id)
-        return
-      }
+  const handleOpenSession = useCallback(async (repo: Repo) => {
+    // Check for existing sessions for this repo
+    const existing = sessions.filter(s => groupKey(s) === repo.workingDir)
+    if (existing.length > 0) {
+      // Join the most recent existing session
+      const latest = existing[existing.length - 1]
+      clearMessages()
+      leaveSession()
+      joinSession(latest.id)
+      return
     }
 
     // Create via WebSocket
-    const name = sessionName || `hub:${repo.id}`
     clearMessages()
     leaveSession()
-    wsCreateSession(name, repo.workingDir)
+    wsCreateSession(`hub:${repo.id}`, repo.workingDir)
   }, [sessions, joinSession, wsCreateSession, leaveSession, clearMessages])
 
   const handleSelectSession = useCallback((sessionId: string) => {

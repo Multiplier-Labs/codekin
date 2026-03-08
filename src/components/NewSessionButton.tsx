@@ -2,7 +2,7 @@
  * Sidebar button with a dropdown for creating new Claude sessions.
  *
  * Shows a repo browser grouped by owner. Selecting a repo opens a new
- * session; an optional name field allows custom session labels. Remote
+ * session. Remote
  * (uncloned) repos are cloned on-demand before the session starts.
  * Dismisses on click-outside or Escape.
  */
@@ -16,16 +16,14 @@ import { RepoList } from './RepoList'
 interface Props {
   groups: RepoGroup[]
   token?: string
-  onOpen: (repo: Repo, sessionName?: string) => void
+  onOpen: (repo: Repo) => void
 }
 
 export function NewSessionButton({ groups, token, onOpen }: Props) {
   const [open, setOpen] = useState(false)
-  const [sessionName, setSessionName] = useState('')
   const [cloning, setCloning] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const popupRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
 
   // Position popup below button, clamped to viewport
   useLayoutEffect(() => {
@@ -37,13 +35,6 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
     const left = Math.max(8, Math.min(btn.right - popupWidth, window.innerWidth - popupWidth - 8))
     popup.style.top = `${top}px`
     popup.style.left = `${left}px`
-  }, [open])
-
-  // Focus input when dropdown opens
-  useEffect(() => {
-    if (open) {
-      setTimeout(() => inputRef.current?.focus(), 0)
-    }
   }, [open])
 
   // Close on Escape or click outside
@@ -71,8 +62,6 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
 
   async function handleSelect(repo: ApiRepo) {
     if (cloning) return
-    const name = sessionName.trim() || undefined
-
     if (!repo.cloned) {
       setCloning(repo.id)
       try {
@@ -96,8 +85,7 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
     }
 
     setOpen(false)
-    setSessionName('')
-    onOpen(repo, name)
+    onOpen(repo)
   }
 
   return (
@@ -115,16 +103,6 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
           <div className="px-3 pt-3 pb-1">
             <h3 className="text-[15px] font-medium text-neutral-3">New Session</h3>
             <p className="mt-0.5 text-[13px] text-neutral-6">Choose a repository to work on</p>
-          </div>
-          <div className="p-2">
-            <input
-              ref={inputRef}
-              type="text"
-              value={sessionName}
-              onChange={e => setSessionName(e.target.value)}
-              placeholder="Session name (optional)"
-              className="w-full rounded border border-neutral-10 bg-neutral-11 px-2.5 py-1.5 text-[15px] text-neutral-2 placeholder-neutral-8 outline-none focus:border-primary-8/50"
-            />
           </div>
           <div className="px-2 pb-2">
             <RepoList
