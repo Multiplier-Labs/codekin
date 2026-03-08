@@ -316,23 +316,23 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
           const REPORTS_BRANCH = 'codekin/reports'
           try {
             const relativePath = `${def.outputDir}/${filename}`
-            const originalBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: repoPath, timeout: 5_000 }).toString().trim()
+            const originalBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoPath, timeout: 5_000 }).toString().trim()
 
             // Ensure the reports branch exists (create as orphan if needed)
             try {
-              execSync(`git rev-parse --verify ${REPORTS_BRANCH}`, { cwd: repoPath, timeout: 5_000, stdio: 'pipe' })
+              execFileSync('git', ['rev-parse', '--verify', REPORTS_BRANCH], { cwd: repoPath, timeout: 5_000, stdio: 'pipe' })
             } catch {
               // Branch doesn't exist yet — create it from the current branch
-              execSync(`git branch ${REPORTS_BRANCH}`, { cwd: repoPath, timeout: 5_000 })
+              execFileSync('git', ['branch', REPORTS_BRANCH], { cwd: repoPath, timeout: 5_000 })
               console.log(`[workflow:${def.kind}] Created branch ${REPORTS_BRANCH}`)
             }
 
             // Stash any uncommitted changes on the working branch
-            const stashResult = execSync('git stash --include-untracked', { cwd: repoPath, timeout: 10_000 }).toString().trim()
+            const stashResult = execFileSync('git', ['stash', '--include-untracked'], { cwd: repoPath, timeout: 10_000 }).toString().trim()
             const didStash = !stashResult.includes('No local changes')
 
             try {
-              execSync(`git checkout ${REPORTS_BRANCH}`, { cwd: repoPath, timeout: 10_000 })
+              execFileSync('git', ['checkout', REPORTS_BRANCH], { cwd: repoPath, timeout: 10_000 })
 
               // Re-create the report file on this branch (the file was written while on the original branch)
               const reportsDirOnBranch = join(repoPath, def.outputDir)
@@ -341,25 +341,25 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
               }
               writeFileSync(join(reportsDirOnBranch, filename), markdown, 'utf-8')
 
-              execSync(`git add "${relativePath}"`, { cwd: repoPath, timeout: 10_000 })
-              execSync(
-                `git commit -m "${def.commitMessage} ${dateStr}"`,
+              execFileSync('git', ['add', relativePath], { cwd: repoPath, timeout: 10_000 })
+              execFileSync(
+                'git', ['commit', '-m', `${def.commitMessage} ${dateStr}`],
                 { cwd: repoPath, timeout: 15_000 }
               )
               console.log(`[workflow:${def.kind}] Committed ${relativePath} on ${REPORTS_BRANCH}`)
 
               // Push to remote
               try {
-                execSync(`git push origin ${REPORTS_BRANCH}`, { cwd: repoPath, timeout: 30_000, stdio: 'pipe' })
+                execFileSync('git', ['push', 'origin', REPORTS_BRANCH], { cwd: repoPath, timeout: 30_000, stdio: 'pipe' })
                 console.log(`[workflow:${def.kind}] Pushed ${REPORTS_BRANCH} to origin`)
               } catch (pushErr) {
                 console.warn(`[workflow:${def.kind}] Could not push ${REPORTS_BRANCH}: ${pushErr}`)
               }
             } finally {
               // Always switch back to the original branch
-              execSync(`git checkout ${originalBranch}`, { cwd: repoPath, timeout: 10_000 })
+              execFileSync('git', ['checkout', originalBranch], { cwd: repoPath, timeout: 10_000 })
               if (didStash) {
-                execSync('git stash pop', { cwd: repoPath, timeout: 10_000 })
+                execFileSync('git', ['stash', 'pop'], { cwd: repoPath, timeout: 10_000 })
               }
             }
           } catch (err) {
