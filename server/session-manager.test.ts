@@ -2212,4 +2212,266 @@ describe('SessionManager', () => {
       expect((sm as any)._exitListeners).toHaveLength(2)
     })
   })
+
+  describe('broadcast() back-pressure', () => {
+    it('drops message when client buffer exceeds 1MB', () => {
+      const s = sm.create('bp-test', '/tmp')
+      const overloaded = fakeWs()
+      overloaded.bufferedAmount = 2_000_000
+      const normal = fakeWs()
+      sm.join(s.id, overloaded)
+      sm.join(s.id, normal)
+      sm.broadcast(sm.get(s.id)!, { type: 'result' } as any)
+      expect(overloaded.send).not.toHaveBeenCalled()
+      expect(normal.send).toHaveBeenCalled()
+    })
+
+    it('skips clients that are not OPEN', () => {
+      const s = sm.create('closed-test', '/tmp')
+      const closed = fakeWs(false)
+      sm.join(s.id, closed)
+      sm.broadcast(sm.get(s.id)!, { type: 'result' } as any)
+      expect(closed.send).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('restoreRepoApprovalsFromDisk() error handling', () => {
+    it('handles corrupted JSON gracefully', () => {
+      const mockedExistsSync = vi.mocked(existsSync)
+      const mockedReadFileSync = vi.mocked(readFileSync)
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      mockedExistsSync.mockImplementation((p) => String(p).includes('repo-approvals.json') ? true : false)
+      mockedReadFileSync.mockImplementation((p) => {
+        if (String(p).includes('repo-approvals.json')) return '{invalid json'
+        return '[]'
+      })
+
+      // Should not throw - constructor parses the corrupted JSON
+      expect(() => new SessionManager()).not.toThrow()
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to restore repo approvals'), expect.any(Error))
+
+      consoleSpy.mockRestore()
+      mockedExistsSync.mockImplementation((p) => String(p).includes('sessions.json') ? false : true)
+      mockedReadFileSync.mockReturnValue('[]')
+    })
+  })
+
+  describe('restoreActiveSessions() continuation message', () => {
+    it('sends continuation message after system_init event', () => {
+      vi.useFakeTimers()
+      const mockedExistsSync = vi.mocked(existsSync)
+      const mockedReadFileSync = vi.mocked(readFileSync)
+
+      const sessionData = [{
+        id: 'continue-test',
+        name: 'Continue Test',
+        workingDir: '/tmp',
+        created: '2025-01-01T00:00:00.000Z',
+        claudeSessionId: 'claude-continue',
+        wasActive: true,
+        outputHistory: [],
+      }]
+
+      mockedExistsSync.mockImplementation((p) => String(p).includes('sessions.json') ? true : false)
+      mockedReadFileSync.mockReturnValue(JSON.stringify(sessionData))
+
+      const sm2 = new SessionManager()
+
+      // Create a fake claude process that captures the `once` callback
+      const onceCallbacks: Record<string, (...args: unknown[]) => void> = {}
+      const fakeCp = {
+        ...fakeClaudeProcess(),
+        once: vi.fn((event: string, cb: (...args: unknown[]) => void) => { onceCallbacks[event] = cb }),
+      }
+
+      vi.spyOn(sm2, 'startClaude').mockImplementation((id) => {
+        const session = sm2.get(id)
+        if (session) (session as any).claudeProcess = fakeCp
+        return true
+      })
+
+      sm2.restoreActiveSessions()
+      vi.advanceTimersByTime(0)
+
+      // Verify once was registered for system_init
+      expect(fakeCp.once).toHaveBeenCalledWith('system_init', expect.any(Function))
+
+      // Fire the system_init callback
+      onceCallbacks['system_init']()
+      expect(fakeCp.sendMessage).toHaveBeenCalledWith(expect.stringContaining('Session restored'))
+
+      mockedExistsSync.mockImplementation((p) => String(p).includes('sessions.json') ? false : true)
+      mockedReadFileSync.mockReturnValue('[]')
+      vi.useRealTimers()
+    })
+
+    it('skips already-running sessions during restore', () => {
+      vi.useFakeTimers()
+      const mockedExistsSync = vi.mocked(existsSync)
+      const mockedReadFileSync = vi.mocked(readFileSync)
+
+      const sessionData = [{
+        id: 'already-running',
+        name: 'Already Running',
+        workingDir: '/tmp',
+        created: '2025-01-01T00:00:00.000Z',
+        claudeSessionId: 'claude-running',
+        wasActive: true,
+        outputHistory: [],
+      }]
+
+      mockedExistsSync.mockImplementation((p) => String(p).includes('sessions.json') ? true : false)
+      mockedReadFileSync.mockReturnValue(JSON.stringify(sessionData))
+
+      const sm2 = new SessionManager()
+
+      // Pre-assign a running ClaudeProcess
+      const session = sm2.get('already-running')!
+      ;(session as any).claudeProcess = fakeClaudeProcess(true)
+
+      const startClaudeSpy = vi.spyOn(sm2, 'startClaude').mockReturnValue(true)
+
+      sm2.restoreActiveSessions()
+      vi.advanceTimersByTime(0)
+
+      // Should not start Claude since it's already alive
+      expect(startClaudeSpy).not.toHaveBeenCalled()
+
+      startClaudeSpy.mockRestore()
+      mockedExistsSync.mockImplementation((p) => String(p).includes('sessions.json') ? false : true)
+      mockedReadFileSync.mockReturnValue('[]')
+      vi.useRealTimers()
+    })
+  })
+
+  describe('handleClaudeExit behavior', () => {
+    it('stops auto-restart when _stoppedByUser is set', () => {
+      vi.useFakeTimers()
+      const s = sm.create('stopped-user', '/tmp')
+      const session = sm.get(s.id)!
+
+      // Simulate that Claude was running and user stopped it
+      ;(session as any)._stoppedByUser = true
+      ;(session as any).claudeProcess = fakeClaudeProcess()
+
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      // Trigger exit via the private method by calling it directly
+      ;(sm as any).handleClaudeExit(session, s.id, 1, null)
+
+      // Should broadcast exit, not restart
+      const messages = ws.send.mock.calls.map((c: any) => JSON.parse(c[0]))
+      const exitMsg = messages.find((m: any) => m.type === 'system_message' && m.subtype === 'exit')
+      expect(exitMsg).toBeDefined()
+      expect(exitMsg.text).toContain('code=1')
+
+      // Should NOT broadcast restart message
+      const restartMsg = messages.find((m: any) => m.subtype === 'restart')
+      expect(restartMsg).toBeUndefined()
+      vi.useRealTimers()
+    })
+
+    it('clears stale claudeSessionId on code=1 first restart', () => {
+      vi.useFakeTimers()
+      const s = sm.create('stale-id', '/tmp')
+      const session = sm.get(s.id)!
+      ;(session as any).claudeSessionId = 'stale-session'
+      ;(session as any).restartCount = 0
+      ;(session as any).lastRestartAt = null
+
+      ;(sm as any).handleClaudeExit(session, s.id, 1, null)
+
+      expect(session.claudeSessionId).toBeNull()
+      vi.useRealTimers()
+    })
+
+    it('resets restart count after cooldown period', () => {
+      vi.useFakeTimers()
+      const s = sm.create('cooldown-test', '/tmp')
+      const session = sm.get(s.id)!
+      ;(session as any).restartCount = 2
+      ;(session as any).lastRestartAt = Date.now() - 600_000 // 10 minutes ago (> 5 min cooldown)
+
+      ;(sm as any).handleClaudeExit(session, s.id, 0, null)
+
+      // restartCount should have been reset to 0 before incrementing to 1
+      expect((session as any).restartCount).toBe(1)
+      vi.useRealTimers()
+    })
+
+    it('broadcasts error when all restart attempts exhausted', () => {
+      vi.useFakeTimers()
+      const s = sm.create('exhausted-test', '/tmp')
+      const session = sm.get(s.id)!
+      ;(session as any).restartCount = 5 // MAX_RESTARTS is 5
+      ;(session as any).lastRestartAt = Date.now()
+
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      ;(sm as any).handleClaudeExit(session, s.id, 1, null)
+
+      const messages = ws.send.mock.calls.map((c: any) => JSON.parse(c[0]))
+      const errorMsg = messages.find((m: any) => m.subtype === 'error')
+      expect(errorMsg).toBeDefined()
+      expect(errorMsg.text).toContain('Auto-restart disabled')
+      vi.useRealTimers()
+    })
+
+    it('notifies exit listeners with willRestart=true on auto-restart', () => {
+      vi.useFakeTimers()
+      const listener = vi.fn()
+      sm.onSessionExit(listener)
+
+      const s = sm.create('listener-test', '/tmp')
+      const session = sm.get(s.id)!
+      ;(session as any).restartCount = 0
+
+      ;(sm as any).handleClaudeExit(session, s.id, 1, 'SIGTERM')
+
+      expect(listener).toHaveBeenCalledWith(s.id, 1, 'SIGTERM', true)
+      vi.useRealTimers()
+    })
+
+    it('notifies exit listeners with willRestart=false when stopped by user', () => {
+      const listener = vi.fn()
+      sm.onSessionExit(listener)
+
+      const s = sm.create('listener-stopped', '/tmp')
+      const session = sm.get(s.id)!
+      ;(session as any)._stoppedByUser = true
+
+      ;(sm as any).handleClaudeExit(session, s.id, 0, null)
+
+      expect(listener).toHaveBeenCalledWith(s.id, 0, null, false)
+    })
+  })
+
+  describe('handleClaudeResult API retry', () => {
+    it('broadcasts exhaustion message after MAX_API_RETRIES', () => {
+      vi.useFakeTimers()
+      const s = sm.create('retry-exhaust', '/tmp')
+      const session = sm.get(s.id)!
+      ;(session as any)._apiRetryCount = 3 // MAX_API_RETRIES is 3
+      ;(session as any)._lastUserInput = 'test input'
+      ;(session as any).claudeProcess = fakeClaudeProcess()
+
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      // Simulate a retryable error result with retries exhausted
+      ;(sm as any).handleClaudeResult(session, s.id, 'API error: overloaded', true)
+
+      const messages = ws.send.mock.calls.map((c: any) => JSON.parse(c[0]))
+      const errorMsg = messages.find((m: any) => m.subtype === 'error' && m.text?.includes('retries'))
+      expect(errorMsg).toBeDefined()
+      expect(errorMsg.text).toContain('3 retries')
+
+      // Retry counter should be reset
+      expect((session as any)._apiRetryCount).toBe(0)
+      vi.useRealTimers()
+    })
+  })
 })

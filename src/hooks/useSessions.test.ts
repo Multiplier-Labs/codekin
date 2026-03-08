@@ -10,6 +10,7 @@ vi.mock('../lib/ccApi', () => ({
   listSessions: vi.fn(async () => []),
   createSession: vi.fn(async () => ({ sessionId: 'new-session-1' })),
   deleteSession: vi.fn(async () => undefined),
+  renameSession: vi.fn(async () => undefined),
 }))
 
 import { useSessions } from './useSessions.js'
@@ -55,6 +56,7 @@ describe('useSessions', () => {
     vi.mocked(api.listSessions).mockResolvedValue([])
     vi.mocked(api.createSession).mockResolvedValue({ sessionId: 'new-session-1' })
     vi.mocked(api.deleteSession).mockResolvedValue(undefined as never)
+    vi.mocked(api.renameSession).mockResolvedValue(undefined as never)
   })
 
   afterEach(() => {
@@ -225,6 +227,117 @@ describe('useSessions', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
 
       expect(api.listSessions).not.toHaveBeenCalled()
+      unmount()
+    })
+  })
+
+  describe('rename', () => {
+    it('calls renameSession and refreshes', async () => {
+      const { result, unmount } = renderHook(() => useSessions('tok'))
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+      await act(async () => {
+        await result.current.rename('s1', 'New Name')
+      })
+
+      expect(api.renameSession).toHaveBeenCalledWith('tok', 's1', 'New Name')
+      // Should have refreshed
+      expect(api.listSessions).toHaveBeenCalledTimes(2)
+      unmount()
+    })
+
+    it('sets error on rename failure', async () => {
+      vi.mocked(api.renameSession).mockRejectedValueOnce(new Error('rename failed'))
+
+      const { result, unmount } = renderHook(() => useSessions('tok'))
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+      await act(async () => {
+        await result.current.rename('s1', 'New Name')
+      })
+
+      expect(result.current.error).toBe('rename failed')
+      unmount()
+    })
+
+    it('does nothing when token is empty', async () => {
+      const { result, unmount } = renderHook(() => useSessions(''))
+
+      await act(async () => {
+        await result.current.rename('s1', 'New Name')
+      })
+
+      expect(api.renameSession).not.toHaveBeenCalled()
+      unmount()
+    })
+
+    it('handles non-Error objects in catch', async () => {
+      vi.mocked(api.renameSession).mockRejectedValueOnce('string error')
+
+      const { result, unmount } = renderHook(() => useSessions('tok'))
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+      await act(async () => {
+        await result.current.rename('s1', 'Name')
+      })
+
+      expect(result.current.error).toBe('Failed to rename session')
+      unmount()
+    })
+  })
+
+  describe('error handling edge cases', () => {
+    it('handles non-Error objects in refresh catch', async () => {
+      vi.mocked(api.listSessions).mockRejectedValueOnce('raw string error')
+
+      const { result, unmount } = renderHook(() => useSessions('tok'))
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+      expect(result.current.error).toBe('Failed to load sessions')
+      unmount()
+    })
+
+    it('handles non-Error objects in create catch', async () => {
+      vi.mocked(api.createSession).mockRejectedValueOnce(42)
+
+      const { result, unmount } = renderHook(() => useSessions('tok'))
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+      await act(async () => {
+        await result.current.create('test', '/tmp')
+      })
+
+      expect(result.current.error).toBe('Failed to create session')
+      unmount()
+    })
+
+    it('handles non-Error objects in remove catch', async () => {
+      vi.mocked(api.deleteSession).mockRejectedValueOnce({ code: 500 })
+
+      const { result, unmount } = renderHook(() => useSessions('tok'))
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+      await act(async () => {
+        await result.current.remove('s1')
+      })
+
+      expect(result.current.error).toBe('Failed to delete session')
+      unmount()
+    })
+
+    it('clears error on successful refresh after failure', async () => {
+      vi.mocked(api.listSessions).mockRejectedValueOnce(new Error('fail'))
+
+      const { result, unmount } = renderHook(() => useSessions('tok'))
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(result.current.error).toBe('fail')
+
+      // Next refresh succeeds
+      vi.mocked(api.listSessions).mockResolvedValueOnce([])
+      await act(async () => {
+        await result.current.refresh()
+      })
+      expect(result.current.error).toBeNull()
       unmount()
     })
   })
