@@ -1,6 +1,6 @@
 # Codekin Setup Guide
 
-Codekin is a web UI for managing multiple Claude Code terminal sessions. It connects to [cc-web](https://github.com/nicobailon/claude-code-web) (Claude Code Web Terminal) via WebSocket and provides repo browsing, skill discovery, and screenshot uploads.
+Codekin is a web UI for managing multiple Claude Code terminal sessions. It connects to [cc-web](https://github.com/anthropics/claude-code-web) (Claude Code Web Terminal) via WebSocket and provides repo browsing, skill discovery, and screenshot uploads.
 
 ## Architecture
 
@@ -36,7 +36,6 @@ GitHub (webhook events)
 ## 1. Clone and Install
 
 ```bash
-cd /srv/repos
 git clone <repo-url> codekin
 cd codekin
 npm install
@@ -47,14 +46,14 @@ npm install
 All API keys and secrets are stored in a single file and sourced from `~/.bashrc`:
 
 ```bash
-# Create the env directory
-mkdir -p ~/.config/env
+# Create the codekin config directory
+mkdir -p ~/.codekin
 
-# Create the api-keys file
-nano ~/.config/env/api-keys
+# Create the env file
+nano ~/.codekin/env
 ```
 
-Contents of `~/.config/env/api-keys`:
+Contents of `~/.codekin/env`:
 
 ```bash
 export GEMINI_API_KEY="your-gemini-key"
@@ -67,28 +66,28 @@ export GITHUB_WEBHOOK_SECRET="your-webhook-secret"
 Source it from `~/.bashrc` so it's available to all shells and systemd user services:
 
 ```bash
-echo 'source ~/.config/env/api-keys' >> ~/.bashrc
-source ~/.config/env/api-keys
+echo 'source ~/.codekin/env' >> ~/.bashrc
+source ~/.codekin/env
 ```
 
 To add a new env var later:
 
 ```bash
-echo 'export NEW_VAR="value"' >> ~/.config/env/api-keys
-source ~/.config/env/api-keys
+echo 'export NEW_VAR="value"' >> ~/.codekin/env
+source ~/.codekin/env
 # Then restart any services that need it:
 sudo systemctl restart claude-code-web
 ```
 
-> **Note**: The systemd services run as your user with `WorkingDirectory=/home/YOUR_USER`, so they inherit env vars from the user's shell profile.
+> **Note**: You can override the env file location with `CODEKIN_ENV_FILE`. The systemd services run as your user with `WorkingDirectory=/home/YOUR_USER`, so they inherit env vars from the user's shell profile.
 
 ## 3. Configure cc-web
 
 ### Generate a token
 
 ```bash
-mkdir -p ~/.config
-openssl rand -hex 32 > ~/.config/claude-code-web-token
+mkdir -p ~/.codekin
+openssl rand -hex 32 > ~/.codekin/auth-token
 ```
 
 ### Create systemd service
@@ -106,7 +105,7 @@ After=network.target
 Type=simple
 User=YOUR_USER
 WorkingDirectory=/home/YOUR_USER
-ExecStart=/bin/bash -c '$(which cc-web) --port 32352 --no-open --auth "$(cat /home/YOUR_USER/.config/claude-code-web-token)"'
+ExecStart=/bin/bash -c '$(which cc-web) --port 32352 --no-open --auth "$(cat /home/YOUR_USER/.codekin/auth-token)"'
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production
@@ -137,7 +136,7 @@ mkdir -p ~/.codekin/screenshots
 
 ### Option A: Auto-scan (default)
 
-The repo scanner will scan `/srv/repos/` automatically:
+The repo scanner will scan the configured repos directory automatically:
 
 ```bash
 node scripts/scan-repos.mjs
@@ -147,7 +146,7 @@ This generates `public/data/repos.json` which lists all discovered repos with th
 
 ### Option B: Manual config
 
-Create `~/.config/codekin/repos.yml`:
+Create `~/.codekin/repos.yml`:
 
 ```yaml
 - name: my-project
@@ -160,18 +159,38 @@ Then run the scanner:
 node scripts/scan-repos.mjs
 ```
 
-## 6. Build and Deploy
+## 6. Deploy Settings
+
+Copy the example settings and customize for your environment:
+
+```bash
+cp .codekin/settings.example.json .codekin/settings.json
+nano .codekin/settings.json
+```
+
+Key fields in `settings.json`:
+
+| Field       | Description                                | Default              |
+|-------------|--------------------------------------------|----------------------|
+| `webRoot`   | Where the built frontend is deployed to    | `./dist-deploy`      |
+| `serverDir` | Runtime directory for the server           | `./server`           |
+| `port`      | cc-web server port                         | `32352`              |
+| `authFile`  | Path to the auth token file                | `~/.codekin/auth-token` |
+| `log`       | Server log file path                       | `/tmp/cc-web.log`    |
+
+> **Note**: `settings.json` is gitignored — your local config won't be overwritten by `git pull`.
+
+## 7. Build and Deploy
 
 ```bash
 # Build frontend
-cd /srv/repos/codekin
 npm run build
 
-# Deploy to web root
-sudo cp -r dist/* /var/www/codekin/
+# Deploy to web root (adjust path as needed)
+sudo cp -r dist/* /var/www/your-web-root/
 ```
 
-## 7. Configure nginx
+## 8. Configure nginx
 
 Copy the provided config:
 
@@ -204,23 +223,23 @@ sudo systemctl reload nginx
 | `/cc/api/webhooks/github` | `127.0.0.1:32352` | GitHub webhooks (no auth — HMAC validated) |
 | `/authelia/`  | `127.0.0.1:9091`           | Auth UI + API                      |
 
-## 8. First Login
+## 9. First Login
 
 1. Open `https://YOUR_DOMAIN` in a browser
 2. Authenticate via Authelia
-3. The Settings modal opens automatically — paste your cc-web token (from `~/.config/claude-code-web-token`)
+3. The Settings modal opens automatically — paste your cc-web token (from `~/.codekin/auth-token`)
 4. Click a repo to open a terminal session
 
-## 9. Configure GitHub Webhooks (Optional)
+## 10. Configure GitHub Webhooks (Optional)
 
 Codekin can receive GitHub webhook events and automatically create Claude sessions to diagnose and fix CI failures. See [GITHUB-WEBHOOKS-SPEC.md](./GITHUB-WEBHOOKS-SPEC.md) for the full specification.
 
 ### Server environment variables
 
-Add the webhook env vars to `~/.config/env/api-keys` (see [step 2](#2-environment-variables)):
+Add the webhook env vars to `~/.codekin/env` (see [step 2](#2-environment-variables)):
 
 ```bash
-cat >> ~/.config/env/api-keys << 'EOF'
+cat >> ~/.codekin/env << 'EOF'
 export GITHUB_WEBHOOK_SECRET="your-webhook-secret-here"
 export GITHUB_WEBHOOK_ENABLED=true
 # Optional overrides:
@@ -238,7 +257,7 @@ openssl rand -hex 32
 Reload and restart:
 
 ```bash
-source ~/.config/env/api-keys
+source ~/.codekin/env
 sudo systemctl restart claude-code-web
 ```
 
@@ -286,7 +305,7 @@ sudo systemctl reload nginx
    |-------|-------|
    | **Payload URL** | `https://YOUR_DOMAIN/cc/api/webhooks/github` |
    | **Content type** | `application/json` |
-   | **Secret** | Same value as `GITHUB_WEBHOOK_SECRET` in `~/.config/env/api-keys` |
+   | **Secret** | Same value as `GITHUB_WEBHOOK_SECRET` in `~/.codekin/env` |
    | **SSL verification** | Enable SSL verification |
 
 3. Under **"Which events would you like to trigger this webhook?"**, select **"Let me select individual events"** and check:
@@ -320,8 +339,8 @@ To trigger a real test, push a commit that intentionally fails CI (e.g., a synta
 | Problem | Solution |
 |---------|----------|
 | GitHub shows "failed to deliver" | Check nginx is proxying `/cc/api/webhooks/github` — run `curl -X POST https://YOUR_DOMAIN/cc/api/webhooks/github` and verify you get a `401` (not `404` or `502`) |
-| `401 Unauthorized` on valid deliveries | Verify `GITHUB_WEBHOOK_SECRET` matches between GitHub and `~/.config/env/api-keys`, then restart the service |
-| Session not created after failure event | Check that `GITHUB_WEBHOOK_ENABLED=true` is set and `gh auth status` succeeds for the `dev` user |
+| `401 Unauthorized` on valid deliveries | Verify `GITHUB_WEBHOOK_SECRET` matches between GitHub and `~/.codekin/env`, then restart the service |
+| Session not created after failure event | Check that `GITHUB_WEBHOOK_ENABLED=true` is set and `gh auth status` succeeds for your user |
 | `429 Too Many Requests` | Max concurrent webhook sessions reached — increase `GITHUB_WEBHOOK_MAX_SESSIONS` or wait for existing sessions to finish |
 | Webhook received but logs say "gh not found" | Ensure the `gh` CLI is on the PATH in the systemd service `Environment` line |
 
@@ -339,11 +358,10 @@ The dev server proxies:
 ## Updating
 
 ```bash
-cd /srv/repos/codekin
 git pull
 npm install
 npm run build
-sudo cp -r dist/* /var/www/codekin/
+sudo cp -r dist/* /var/www/your-web-root/
 
 # If server dependencies changed:
 cd server && npm install && cd ..
@@ -372,7 +390,7 @@ lsof -i :32352
 
 ### Token issues
 
-- Verify the token file exists: `cat ~/.config/claude-code-web-token`
+- Verify the token file exists: `cat ~/.codekin/auth-token`
 - Test token verification: `curl -X POST http://127.0.0.1:32352/auth-verify -H 'Content-Type: application/json' -H 'Authorization: Bearer <token>' -d '{"token":"<token>"}'`
 
 ### Server health
@@ -385,7 +403,7 @@ curl http://127.0.0.1:32352/health
 ## Directory Structure
 
 ```
-/srv/repos/codekin/
+codekin/
 ├── src/                        # React + TypeScript source
 │   ├── App.tsx                 # Main component
 │   ├── components/             # UI components
@@ -413,10 +431,10 @@ curl http://127.0.0.1:32352/health
 
 | Path                                          | Purpose                        |
 |-----------------------------------------------|--------------------------------|
-| `~/.config/env/api-keys`                      | API keys and secrets (sourced from ~/.bashrc) |
-| `/var/www/codekin/`                           | Deployed frontend (configurable via `FRONTEND_WEB_ROOT`) |
-| `~/.config/claude-code-web-token`             | cc-web auth token              |
-| `~/.config/codekin/repos.yml`                 | Optional repo list             |
+| `~/.codekin/env` (or `CODEKIN_ENV_FILE`)      | API keys and secrets           |
+| Web root (set via `FRONTEND_WEB_ROOT` or `settings.json`) | Deployed frontend |
+| `~/.codekin/auth-token` (or `AUTH_FILE`)      | cc-web auth token              |
+| `~/.codekin/repos.yml`                        | Optional repo list             |
 | `~/.codekin/screenshots/`                     | Uploaded screenshots           |
 | `/etc/nginx/sites-available/codekin`          | nginx config (production)      |
 | `/etc/systemd/system/claude-code-web.service` | cc-web systemd unit            |

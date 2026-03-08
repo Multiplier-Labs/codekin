@@ -8,7 +8,7 @@ vi.mock('node:child_process', () => ({
 
 describe('GitContext', () => {
   const ctx = new GitContext();
-  const input = { cwd: '/srv/repos/codekin' };
+  const input = { cwd: '/tmp/test-project' };
 
   beforeEach(() => {
     vi.mocked(execSync).mockReset();

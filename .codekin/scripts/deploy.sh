@@ -4,8 +4,9 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-# Source API keys / env vars (not auto-sourced in non-interactive shells like git hooks)
-ENV_FILE="$HOME/.config/env/api-keys"
+# Source API keys / env vars (not auto-sourced in non-interactive shells like git hooks).
+# Set CODEKIN_ENV_FILE to point to your env/secrets file, or place it at ~/.codekin/env.
+ENV_FILE="${CODEKIN_ENV_FILE:-$HOME/.codekin/env}"
 if [ -f "$ENV_FILE" ]; then
   source "$ENV_FILE"
   echo "[deploy] Loaded env from $ENV_FILE" >&2

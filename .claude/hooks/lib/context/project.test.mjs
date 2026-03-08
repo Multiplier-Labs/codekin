@@ -19,7 +19,7 @@ describe('ProjectContext', () => {
       scripts: { build: 'vite build', test: 'vitest run', lint: 'eslint .' },
     }));
 
-    const result = await ctx.gather({ cwd: '/srv/repos/codekin' });
+    const result = await ctx.gather({ cwd: '/tmp/test-project' });
     expect(result).toEqual({
       name: 'codekin',
       hasLint: true,

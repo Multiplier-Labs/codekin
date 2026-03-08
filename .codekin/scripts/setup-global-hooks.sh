@@ -5,12 +5,13 @@
 
 set -e
 
-HOOK_DIR="/srv/repos/codekin/.claude/hooks"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+HOOK_DIR="$REPO_ROOT/.claude/hooks"
 GLOBAL_SETTINGS="$HOME/.claude/settings.json"
-LOCAL_SETTINGS="/srv/repos/codekin/.claude/settings.local.json"
+LOCAL_SETTINGS="$REPO_ROOT/.claude/settings.local.json"
 
 echo "==> Writing global settings to $GLOBAL_SETTINGS"
-cat > "$GLOBAL_SETTINGS" << 'ENDJSON'
+cat > "$GLOBAL_SETTINGS" << ENDJSON
 {
   "hooks": {
     "PreToolUse": [
@@ -19,7 +20,7 @@ cat > "$GLOBAL_SETTINGS" << 'ENDJSON'
         "hooks": [
           {
             "type": "command",
-            "command": "node /srv/repos/codekin/.claude/hooks/pre-tool-use.mjs",
+            "command": "node $HOOK_DIR/pre-tool-use.mjs",
             "timeout": 65
           }
         ]
@@ -29,7 +30,7 @@ cat > "$GLOBAL_SETTINGS" << 'ENDJSON'
         "hooks": [
           {
             "type": "command",
-            "command": "node /srv/repos/codekin/.claude/hooks/pre-tool-use.mjs",
+            "command": "node $HOOK_DIR/pre-tool-use.mjs",
             "timeout": 65
           }
         ]
@@ -39,7 +40,7 @@ cat > "$GLOBAL_SETTINGS" << 'ENDJSON'
         "hooks": [
           {
             "type": "command",
-            "command": "node /srv/repos/codekin/.claude/hooks/pre-tool-use.mjs",
+            "command": "node $HOOK_DIR/pre-tool-use.mjs",
             "timeout": 65
           }
         ]
@@ -50,7 +51,7 @@ cat > "$GLOBAL_SETTINGS" << 'ENDJSON'
         "hooks": [
           {
             "type": "command",
-            "command": "node /srv/repos/codekin/.claude/hooks/permission-request.mjs",
+            "command": "node $HOOK_DIR/permission-request.mjs",
             "timeout": 65
           }
         ]
@@ -61,7 +62,7 @@ cat > "$GLOBAL_SETTINGS" << 'ENDJSON'
         "hooks": [
           {
             "type": "command",
-            "command": "node /srv/repos/codekin/.claude/hooks/user-prompt-submit.mjs",
+            "command": "node $HOOK_DIR/user-prompt-submit.mjs",
             "timeout": 5
           }
         ]
@@ -73,7 +74,7 @@ cat > "$GLOBAL_SETTINGS" << 'ENDJSON'
         "hooks": [
           {
             "type": "command",
-            "command": "node /srv/repos/codekin/.claude/hooks/session-start.mjs",
+            "command": "node $HOOK_DIR/session-start.mjs",
             "timeout": 10
           }
         ]
@@ -84,7 +85,7 @@ cat > "$GLOBAL_SETTINGS" << 'ENDJSON'
         "hooks": [
           {
             "type": "command",
-            "command": "node /srv/repos/codekin/.claude/hooks/subagent-start.mjs",
+            "command": "node $HOOK_DIR/subagent-start.mjs",
             "timeout": 5
           }
         ]
@@ -95,7 +96,7 @@ cat > "$GLOBAL_SETTINGS" << 'ENDJSON'
         "hooks": [
           {
             "type": "command",
-            "command": "node /srv/repos/codekin/.claude/hooks/notification.mjs",
+            "command": "node $HOOK_DIR/notification.mjs",
             "timeout": 5
           }
         ]
@@ -107,7 +108,7 @@ cat > "$GLOBAL_SETTINGS" << 'ENDJSON'
         "hooks": [
           {
             "type": "command",
-            "command": "node /srv/repos/codekin/.claude/hooks/post-tool-use-failure.mjs",
+            "command": "node $HOOK_DIR/post-tool-use-failure.mjs",
             "timeout": 5
           }
         ]
@@ -119,27 +120,13 @@ ENDJSON
 echo "    Done."
 
 echo "==> Updating local settings $LOCAL_SETTINGS (removing duplicate hooks)"
-cat > "$LOCAL_SETTINGS" << 'ENDJSON'
+cat > "$LOCAL_SETTINGS" << ENDJSON
 {
   "permissions": {
     "allow": [
-      "Bash(grep -r \"xterm\" /srv/repos/codekin/src --include=\"*.ts\" --include=\"*.tsx\" --include=\"*.js\" --include=\"*.jsx\" 2>/dev/null | head -20)",
       "Bash(npx tsc --noEmit 2>&1 | head -50)",
-      "Bash(npx vite build && sudo cp -r dist/* /var/www/codekin/ 2>&1)",
-      "Bash(grep -rn \"className=\\\"[^\\\"]*\\s\\(bg-|text-|border-|shadow-|divide-|ring-\\)\" /srv/repos/codekin/src --include=\"*.tsx\" 2>/dev/null | grep -E \"\\(gray|red|green|blue|yellow|orange|purple|pink|indigo|teal|cyan|rose|violet|fuchsia|lime|emerald|sky|slate|zinc|stone|amber\\)-\\(50|100|200|300|400|500|600|700|800|900\\)\" | head -50)",
       "WebSearch",
-      "Bash(find /home/dev/repos/codekin -type f \\( -name \"*.ts\" -o -name \"*.js\" -o -name \"*.mjs\" \\) ! -path \"*/node_modules/*\" 2>/dev/null | head -20)",
-      "Bash(env -u CLAUDECODE claude --version 2>&1)",
-      "Bash(timeout 35 node test-stream7.mjs 2>&1)",
-      "Bash(timeout 40 node test-stream8.mjs 2>&1)",
-      "Bash(timeout 40 node test-stream9.mjs 2>&1)",
-      "Bash(timeout 30 node test-stream10.mjs 2>&1)",
-      "Bash(timeout 35 node test-stream11.mjs 2>&1)",
-      "Bash(timeout 35 node test-stream12.mjs 2>&1)",
-      "Bash(timeout 25 node test-stream13.mjs 2>&1)",
-      "Bash(timeout 35 node test-stream-final.mjs 2>&1)",
-      "Bash(timeout 35 node test-multiturn.mjs 2>&1)",
-      "Bash(cd /srv/repos/codekin/server && npm install 2>&1)"
+      "Bash(env -u CLAUDECODE claude --version 2>&1)"
     ]
   },
   "hooks": {
@@ -149,7 +136,7 @@ cat > "$LOCAL_SETTINGS" << 'ENDJSON'
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-tool-use.mjs",
+            "command": "node \"\$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-tool-use.mjs",
             "timeout": 30
           }
         ]
@@ -160,7 +147,7 @@ cat > "$LOCAL_SETTINGS" << 'ENDJSON'
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop.mjs",
+            "command": "node \"\$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop.mjs",
             "timeout": 120
           }
         ]

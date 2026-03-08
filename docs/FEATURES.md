@@ -303,7 +303,7 @@ A per-session registry that remembers which tools and commands have been approve
 Browser (React SPA)
   ↕ WebSocket + REST
 nginx (port 443, HTTPS)
-  ├── /      → Static files (/var/www/codekin/)
+  ├── /      → Static files (web root)
   └── /cc/   → cc-web server (port 32352) — WebSocket + REST + uploads
                     ↕
                Claude Code CLI

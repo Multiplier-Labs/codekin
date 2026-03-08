@@ -1,6 +1,6 @@
 # Claude Code Hooks — Specification
 
-**Status**: Draft
+**Status**: All 8 hooks implemented and in production. Extraction plan is future work.
 **Date**: 2026-02-25
 **Author**: Codekin Team
 
@@ -15,18 +15,18 @@
 - [Module Structure](#module-structure)
 - [Core Interfaces](#core-interfaces)
 - [Hook Specifications](#hook-specifications)
-  - [Hook 1: PostToolUse — Auto-Lint](#hook-1-posttooluse--auto-lint)
-  - [Hook 2: Stop — Completion Enforcement](#hook-2-stop--completion-enforcement)
-  - [Hook 3: PermissionRequest — Approval Simplification](#hook-3-permissionrequest--approval-simplification)
-  - [Hook 4: UserPromptSubmit — Context Injection](#hook-4-userpromptsubmit--context-injection)
-  - [Hook 5: SessionStart — Environment Bootstrap](#hook-5-sessionstart--environment-bootstrap)
-  - [Hook 6: PostToolUseFailure — Error Recovery](#hook-6-posttoolusefailure--error-recovery)
-  - [Hook 7: SubagentStart — Convention Injection](#hook-7-subagentstart--convention-injection)
-  - [Hook 8: Notification — UI Forwarding](#hook-8-notification--ui-forwarding)
+  - [Hook 1: PostToolUse — Auto-Lint [Implemented]](#hook-1-posttooluse--auto-lint-implemented)
+  - [Hook 2: Stop — Completion Enforcement [Implemented]](#hook-2-stop--completion-enforcement-implemented)
+  - [Hook 3: PermissionRequest — Approval Simplification [Implemented]](#hook-3-permissionrequest--approval-simplification-implemented)
+  - [Hook 4: UserPromptSubmit — Context Injection [Implemented]](#hook-4-userpromptsubmit--context-injection-implemented)
+  - [Hook 5: SessionStart — Environment Bootstrap [Implemented]](#hook-5-sessionstart--environment-bootstrap-implemented)
+  - [Hook 6: PostToolUseFailure — Error Recovery [Implemented]](#hook-6-posttoolusefailure--error-recovery-implemented)
+  - [Hook 7: SubagentStart — Convention Injection [Implemented]](#hook-7-subagentstart--convention-injection-implemented)
+  - [Hook 8: Notification — UI Forwarding [Implemented]](#hook-8-notification--ui-forwarding-implemented)
 - [Settings Configuration](#settings-configuration)
 - [Integration with Codekin](#integration-with-codekin)
 - [Testing Strategy](#testing-strategy)
-- [Extraction Plan](#extraction-plan)
+- [Extraction Plan [Future]](#extraction-plan-future)
 - [Open Questions](#open-questions)
 
 ---
@@ -428,7 +428,7 @@ export class ProjectContext {
 
 ## Hook Specifications
 
-### Hook 1: PostToolUse — Auto-Lint
+### Hook 1: PostToolUse — Auto-Lint [Implemented]
 
 **Event**: `PostToolUse`
 **Matcher**: `Edit|Write`
@@ -446,11 +446,11 @@ After every `Edit` or `Write` tool call, run ESLint on the changed file. If ther
   "hook_event_name": "PostToolUse",
   "tool_name": "Write",
   "tool_input": {
-    "file_path": "/srv/repos/codekin/src/components/ChatView.tsx",
+    "file_path": "/path/to/codekin/src/components/ChatView.tsx",
     "content": "..."
   },
   "tool_response": {
-    "filePath": "/srv/repos/codekin/src/components/ChatView.tsx",
+    "filePath": "/path/to/codekin/src/components/ChatView.tsx",
     "success": true
   }
 }
@@ -575,7 +575,7 @@ export function autoLint({ fix = false } = {}) {
 
 ---
 
-### Hook 2: Stop — Completion Enforcement
+### Hook 2: Stop — Completion Enforcement [Implemented]
 
 **Event**: `Stop`
 **Matcher**: none (fires on every stop)
@@ -729,7 +729,7 @@ export function completionGate({ runTests = true, runBuild = false } = {}) {
 
 ---
 
-### Hook 3: PermissionRequest — Approval Simplification
+### Hook 3: PermissionRequest — Approval Simplification [Implemented]
 
 **Event**: `PermissionRequest`
 **Matcher**: `.*` (all tools)
@@ -945,7 +945,7 @@ This replaces the existing `POST /api/tool-approval` endpoint. The server-side l
 
 ---
 
-### Hook 4: UserPromptSubmit — Context Injection
+### Hook 4: UserPromptSubmit — Context Injection [Implemented]
 
 **Event**: `UserPromptSubmit`
 **Matcher**: none (fires on every prompt)
@@ -1030,7 +1030,7 @@ Must be fast — runs on every prompt submission. Target: <200ms.
 
 ---
 
-### Hook 5: SessionStart — Environment Bootstrap
+### Hook 5: SessionStart — Environment Bootstrap [Implemented]
 
 **Event**: `SessionStart`
 **Matcher**: `startup` (new sessions only, not resume/compact)
@@ -1143,7 +1143,7 @@ createHook({
 
 ---
 
-### Hook 6: PostToolUseFailure — Error Recovery
+### Hook 6: PostToolUseFailure — Error Recovery [Implemented]
 
 **Event**: `PostToolUseFailure`
 **Matcher**: `Bash` (focus on command failures)
@@ -1271,7 +1271,7 @@ The `ERROR_PATTERNS` array is designed for easy additions. Codekin-specific patt
 
 ---
 
-### Hook 7: SubagentStart — Convention Injection
+### Hook 7: SubagentStart — Convention Injection [Implemented]
 
 **Event**: `SubagentStart`
 **Matcher**: none (fires for all subagent types)
@@ -1380,7 +1380,7 @@ createHook({
 
 ---
 
-### Hook 8: Notification — UI Forwarding
+### Hook 8: Notification — UI Forwarding [Implemented]
 
 **Event**: `Notification`
 **Matcher**: none (all notification types)
@@ -1582,7 +1582,7 @@ All hooks are registered in `.claude/settings.local.json` (not committed — spe
 }
 ```
 
-> **Note**: All hook commands reference `$CLAUDE_PROJECT_DIR`, an environment variable provided automatically by the Claude Code CLI. It resolves to the project root directory (the directory containing `.claude/`). If this variable is not set (e.g., when running hooks manually for testing), the commands will fail. For manual testing, set it explicitly: `CLAUDE_PROJECT_DIR=/srv/repos/codekin node .claude/hooks/post-tool-use.mjs`.
+> **Note**: All hook commands reference `$CLAUDE_PROJECT_DIR`, an environment variable provided automatically by the Claude Code CLI. It resolves to the project root directory (the directory containing `.claude/`). If this variable is not set (e.g., when running hooks manually for testing), the commands will fail. For manual testing, set it explicitly: `CLAUDE_PROJECT_DIR=/path/to/codekin node .claude/hooks/post-tool-use.mjs`.
 
 **Timeout rationale**:
 
@@ -1675,14 +1675,14 @@ class MockTransport {
 Each hook can be tested independently from the command line:
 
 ```bash
-echo '{"hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":"src/test.ts"},"cwd":"/srv/repos/codekin"}' | node .claude/hooks/post-tool-use.mjs
+echo '{"hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":"src/test.ts"},"cwd":"/path/to/codekin"}' | node .claude/hooks/post-tool-use.mjs
 ```
 
 ---
 
-## Extraction Plan
+## Extraction Plan [Future]
 
-When ready to publish as `@multiplier-labs/claude-hooks`:
+When ready to publish as a standalone package:
 
 1. **Move** `.claude/hooks/lib/` to a new repo
 2. **Add** `package.json` with sub-path exports (following stepflow pattern):

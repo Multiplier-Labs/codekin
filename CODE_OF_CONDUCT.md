@@ -24,7 +24,7 @@ This code of conduct applies to all project spaces including GitHub issues, pull
 
 ## Reporting
 
-If you experience or witness unacceptable behavior, please report it by emailing **ripe.floor1024@fastmail.com**. All reports will be reviewed and handled confidentially.
+If you experience or witness unacceptable behavior, please report it by [opening a GitHub issue](https://github.com/Multiplier-Labs/codekin/issues/new) or contacting the maintainers via [GitHub Discussions](https://github.com/Multiplier-Labs/codekin/discussions). All reports will be reviewed and handled confidentially.
 
 ## Attribution
 

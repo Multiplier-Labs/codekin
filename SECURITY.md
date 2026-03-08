@@ -12,7 +12,7 @@ If you discover a security vulnerability in Codekin, please report it responsibl
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Instead, please email **ripe.floor1024@fastmail.com** with:
+Instead, please use [GitHub Security Advisories](https://github.com/Multiplier-Labs/codekin/security/advisories/new) to report the issue privately. Include:
 
 - A description of the vulnerability
 - Steps to reproduce the issue
