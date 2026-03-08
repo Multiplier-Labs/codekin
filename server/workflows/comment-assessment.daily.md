@@ -2,7 +2,7 @@
 kind: comment-assessment.daily
 name: Comment Assessment
 sessionPrefix: comments
-outputDir: comment-reports
+outputDir: .codekin/reports/comments
 filenameSuffix: _comment-assessment.md
 commitMessage: chore: comment assessment
 ---

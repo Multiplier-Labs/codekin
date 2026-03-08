@@ -2,7 +2,7 @@
 kind: code-review.daily
 name: Daily Code Review
 sessionPrefix: review
-outputDir: review logs
+outputDir: .codekin/reports/code-review
 filenameSuffix: _code-review-daily.md
 commitMessage: chore: code review
 ---

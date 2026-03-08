@@ -2,7 +2,7 @@
 kind: complexity.weekly
 name: Complexity Report
 sessionPrefix: complexity
-outputDir: complexity-reports
+outputDir: .codekin/reports/complexity
 filenameSuffix: _complexity-report.md
 commitMessage: chore: complexity report
 ---

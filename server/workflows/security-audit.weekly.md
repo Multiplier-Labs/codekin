@@ -2,7 +2,7 @@
 kind: security-audit.weekly
 name: Security Audit
 sessionPrefix: security
-outputDir: security-reports
+outputDir: .codekin/reports/security
 filenameSuffix: _security-audit.md
 commitMessage: chore: security audit
 ---

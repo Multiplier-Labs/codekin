@@ -2,7 +2,7 @@
 kind: coverage.daily
 name: Coverage Assessment
 sessionPrefix: coverage
-outputDir: coverage-reports
+outputDir: .codekin/reports/coverage
 filenameSuffix: _coverage-assessment.md
 commitMessage: chore: coverage report
 ---

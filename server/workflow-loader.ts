@@ -8,7 +8,7 @@
  *   1. validate_repo  — verify path exists, is a git repo, check staleness
  *   2. create_session — create a Codekin session for the run
  *   3. run_prompt     — start Claude, send the prompt, wait for result
- *   4. save_report    — write Markdown output to outputDir, commit
+ *   4. save_report    — write Markdown output to outputDir, commit on codekin/reports branch, push
  *
  * MD file format — YAML frontmatter followed by the Claude prompt:
  *
@@ -16,7 +16,7 @@
  *   kind: code-review.daily
  *   name: Daily Code Review
  *   sessionPrefix: review
- *   outputDir: review logs
+ *   outputDir: .codekin/reports/code-review
  *   filenameSuffix: _code-review-daily.md
  *   commitMessage: chore: code review
  *   ---
@@ -312,14 +312,56 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
 
           console.log(`[workflow:${def.kind}] Saved report to ${filePath}`)
 
+          // Commit on a dedicated branch so reports don't pollute the working branch
+          const REPORTS_BRANCH = 'codekin/reports'
           try {
             const relativePath = `${def.outputDir}/${filename}`
-            execSync(`git add "${relativePath}"`, { cwd: repoPath, timeout: 10_000 })
-            execSync(
-              `git commit -m "${def.commitMessage} ${dateStr}"`,
-              { cwd: repoPath, timeout: 15_000 }
-            )
-            console.log(`[workflow:${def.kind}] Committed ${relativePath}`)
+            const originalBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: repoPath, timeout: 5_000 }).toString().trim()
+
+            // Ensure the reports branch exists (create as orphan if needed)
+            try {
+              execSync(`git rev-parse --verify ${REPORTS_BRANCH}`, { cwd: repoPath, timeout: 5_000, stdio: 'pipe' })
+            } catch {
+              // Branch doesn't exist yet — create it from the current branch
+              execSync(`git branch ${REPORTS_BRANCH}`, { cwd: repoPath, timeout: 5_000 })
+              console.log(`[workflow:${def.kind}] Created branch ${REPORTS_BRANCH}`)
+            }
+
+            // Stash any uncommitted changes on the working branch
+            const stashResult = execSync('git stash --include-untracked', { cwd: repoPath, timeout: 10_000 }).toString().trim()
+            const didStash = !stashResult.includes('No local changes')
+
+            try {
+              execSync(`git checkout ${REPORTS_BRANCH}`, { cwd: repoPath, timeout: 10_000 })
+
+              // Re-create the report file on this branch (the file was written while on the original branch)
+              const reportsDirOnBranch = join(repoPath, def.outputDir)
+              if (!existsSync(reportsDirOnBranch)) {
+                mkdirSync(reportsDirOnBranch, { recursive: true })
+              }
+              writeFileSync(join(reportsDirOnBranch, filename), markdown, 'utf-8')
+
+              execSync(`git add "${relativePath}"`, { cwd: repoPath, timeout: 10_000 })
+              execSync(
+                `git commit -m "${def.commitMessage} ${dateStr}"`,
+                { cwd: repoPath, timeout: 15_000 }
+              )
+              console.log(`[workflow:${def.kind}] Committed ${relativePath} on ${REPORTS_BRANCH}`)
+
+              // Push to remote
+              try {
+                execSync(`git push origin ${REPORTS_BRANCH}`, { cwd: repoPath, timeout: 30_000, stdio: 'pipe' })
+                console.log(`[workflow:${def.kind}] Pushed ${REPORTS_BRANCH} to origin`)
+              } catch (pushErr) {
+                console.warn(`[workflow:${def.kind}] Could not push ${REPORTS_BRANCH}: ${pushErr}`)
+              }
+            } finally {
+              // Always switch back to the original branch
+              execSync(`git checkout ${originalBranch}`, { cwd: repoPath, timeout: 10_000 })
+              if (didStash) {
+                execSync('git stash pop', { cwd: repoPath, timeout: 10_000 })
+              }
+            }
           } catch (err) {
             console.warn(`[workflow:${def.kind}] Could not commit report: ${err}`)
           }

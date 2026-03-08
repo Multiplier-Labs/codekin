@@ -2,7 +2,7 @@
 kind: dependency-health.daily
 name: Dependency Health Report
 sessionPrefix: deps
-outputDir: dependency-reports
+outputDir: .codekin/reports/dependencies
 filenameSuffix: _dependency-health.md
 commitMessage: chore: dependency health report
 ---
