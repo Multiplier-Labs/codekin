@@ -36,9 +36,10 @@ npm run lint         # eslint
 
 ## Branching & Release Policy
 
-- `main` is stable and always releasable — no direct pushes
-- Feature branches: `feat/description`, bug fixes: `fix/description`
-- All changes go through PRs with review and passing CI
+- **NEVER commit or push directly to `main`.** Always create a feature/fix branch and open a PR.
+- When committing changes, first create a branch using `feat/description` or `fix/description` naming.
+- When asked to push, push the feature branch and create a PR — do NOT push to `main`.
+- All changes go through PRs with review and passing CI.
 - Releases are tagged with semver: `v0.2.0`, `v1.0.0`, etc.
 
 ## Output Conventions
