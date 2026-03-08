@@ -51,12 +51,12 @@ function JsonBlock({ label, data, defaultOpen = false }: {
 
   return (
     <details open={defaultOpen} className="mt-1.5">
-      <summary className="cursor-pointer select-none text-[13px] text-neutral-5 hover:text-neutral-3 list-none flex items-center gap-1">
+      <summary className="cursor-pointer select-none text-[14px] text-neutral-5 hover:text-neutral-3 list-none flex items-center gap-1">
         <IconChevronRight size={12} stroke={2} className="details-arrow transition-transform" />
         {label}
         <span className="text-neutral-6">({Object.keys(data).length} fields)</span>
       </summary>
-      <pre className="mt-1 overflow-x-auto rounded-md bg-neutral-12 p-2.5 text-[13px] text-neutral-3 font-mono leading-relaxed max-h-64 overflow-y-auto">
+      <pre className="mt-1 overflow-x-auto rounded-md bg-neutral-12 p-2.5 text-[14px] text-neutral-3 font-mono leading-relaxed max-h-64 overflow-y-auto">
         {display}
       </pre>
     </details>
@@ -72,17 +72,17 @@ function StepCard({ step }: { step: WorkflowStep }) {
     <div className="rounded-md border border-neutral-8/40 bg-neutral-11/60 px-3 py-2">
       <div className="flex items-center gap-2">
         <StepIcon status={step.status} />
-        <span className="font-mono text-[13px] text-neutral-2 font-medium">{step.key}</span>
-        <span className={`ml-auto inline-flex items-center rounded px-1.5 py-0.5 text-[12px] font-medium ${statusBadge(step.status)}`}>
+        <span className="font-mono text-[14px] text-neutral-2 font-medium">{step.key}</span>
+        <span className={`ml-auto inline-flex items-center rounded px-1.5 py-0.5 text-[13px] font-medium ${statusBadge(step.status)}`}>
           {step.status}
         </span>
-        <span className="text-[13px] text-neutral-5 tabular-nums">
+        <span className="text-[14px] text-neutral-5 tabular-nums">
           {formatDuration(step.startedAt, step.completedAt)}
         </span>
       </div>
 
       {step.error && (
-        <div className="mt-1.5 rounded bg-error-10/50 px-2 py-1 text-[13px] text-error-4 font-mono">
+        <div className="mt-1.5 rounded bg-error-10/50 px-2 py-1 text-[14px] text-error-4 font-mono">
           {step.error}
         </div>
       )}
@@ -102,10 +102,10 @@ function StepCard({ step }: { step: WorkflowStep }) {
 function RunDetail({ run }: { run: WorkflowRunWithSteps }) {
   return (
     <div className="mt-2 space-y-1.5 border-l-2 border-neutral-8/50 pl-3">
-      <div className="text-[13px] font-medium text-neutral-5 uppercase tracking-wider mb-2">Steps</div>
+      <div className="text-[14px] font-medium text-neutral-5 uppercase tracking-wider mb-2">Steps</div>
 
       {run.steps.length === 0 ? (
-        <div className="text-[13px] text-neutral-5 py-1">No steps recorded yet.</div>
+        <div className="text-[14px] text-neutral-5 py-1">No steps recorded yet.</div>
       ) : (
         run.steps.map(step => <StepCard key={step.id} step={step} />)
       )}
@@ -117,7 +117,7 @@ function RunDetail({ run }: { run: WorkflowRunWithSteps }) {
       )}
 
       {run.error && (
-        <div className="rounded-md bg-error-10/50 px-3 py-2 text-[13px] text-error-4 font-mono">
+        <div className="rounded-md bg-error-10/50 px-3 py-2 text-[14px] text-error-4 font-mono">
           {run.error}
         </div>
       )}
@@ -162,10 +162,10 @@ function MiniRunRow({
             : <IconChevronRight size={13} stroke={2} />
           }
         </span>
-        <span className="text-[13px] text-neutral-4 tabular-nums whitespace-nowrap">
+        <span className="text-[14px] text-neutral-4 tabular-nums whitespace-nowrap">
           {formatTime(run.createdAt)}
         </span>
-        <span className="text-[13px] text-neutral-4 tabular-nums whitespace-nowrap">
+        <span className="text-[14px] text-neutral-4 tabular-nums whitespace-nowrap">
           {formatDuration(run.startedAt, run.completedAt)}
         </span>
         <span className="ml-auto">
@@ -195,7 +195,7 @@ function MiniRunRow({
       {selected && (
         <div className="px-3 pb-2">
           {detailLoading ? (
-            <div className="flex items-center gap-2 py-3 text-[13px] text-neutral-5">
+            <div className="flex items-center gap-2 py-3 text-[14px] text-neutral-5">
               <IconLoader2 size={16} stroke={2} className="animate-spin" />
               Loading steps…
             </div>
@@ -266,19 +266,19 @@ function WorkflowRow({
     <div>
       <div className={`group flex items-center gap-3 px-3 py-2 rounded-md transition-colors hover:bg-neutral-10/50 ${paused ? 'opacity-60' : ''}`}>
         <HealthDot status={lastRun?.status} />
-        <span className={`text-[13px] font-medium min-w-0 truncate ${paused ? 'text-neutral-5' : 'text-neutral-2'}`}>
+        <span className={`text-[14px] font-medium min-w-0 truncate ${paused ? 'text-neutral-5' : 'text-neutral-2'}`}>
           {kindLabel(repo.kind ?? '')}
         </span>
         {paused && (
-          <span className="text-[11px] text-warning-5 shrink-0">paused</span>
+          <span className="text-[12px] text-warning-5 shrink-0">paused</span>
         )}
-        <span className="text-[13px] text-neutral-5 whitespace-nowrap shrink-0">
+        <span className="text-[14px] text-neutral-5 whitespace-nowrap shrink-0">
           {schedule ? describeCron(schedule.cronExpression) : describeCron(repo.cronExpression)}
         </span>
         {lastRun && (
           <>
             <StatusBadge status={lastRun.status} />
-            <span className="text-[12px] text-neutral-5 tabular-nums whitespace-nowrap shrink-0">
+            <span className="text-[13px] text-neutral-5 tabular-nums whitespace-nowrap shrink-0">
               {formatTime(lastRun.createdAt)}
             </span>
           </>
@@ -394,8 +394,8 @@ function RepoGroup({
     <div className="rounded-xl border border-neutral-8/80 bg-neutral-11/50 overflow-hidden">
       {/* Repo header */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-neutral-8/50 bg-neutral-11/40">
-        <span className="text-[14px] font-semibold text-neutral-2">{repoName}</span>
-        <span className="text-[12px] text-neutral-6">{workflows.length}</span>
+        <span className="text-[15px] font-semibold text-neutral-2">{repoName}</span>
+        <span className="text-[13px] text-neutral-6">{workflows.length}</span>
       </div>
       {/* Workflow rows */}
       <div className="py-1 px-1">
@@ -438,16 +438,16 @@ function ActivityRow({
   return (
     <div className="flex items-center gap-3 px-4 py-2 hover:bg-neutral-10/30 transition-colors rounded-md">
       <HealthDot status={run.status} />
-      <span className="text-[14px] font-medium text-neutral-2 min-w-0 truncate max-w-[140px]">
+      <span className="text-[15px] font-medium text-neutral-2 min-w-0 truncate max-w-[140px]">
         {repoNameFromRun(run)}
       </span>
-      <span className="text-[13px] text-neutral-4">
+      <span className="text-[14px] text-neutral-4">
         {kindLabel(run.kind)}
       </span>
-      <span className="text-[13px] text-neutral-5 tabular-nums ml-auto whitespace-nowrap">
+      <span className="text-[14px] text-neutral-5 tabular-nums ml-auto whitespace-nowrap">
         {formatTime(run.createdAt)}
       </span>
-      <span className="text-[13px] text-neutral-5 tabular-nums whitespace-nowrap">
+      <span className="text-[14px] text-neutral-5 tabular-nums whitespace-nowrap">
         {formatDuration(run.startedAt, run.completedAt)}
       </span>
       <StatusBadge status={run.status} />
@@ -475,27 +475,27 @@ function CustomWorkflowGuide() {
     <div className="mt-6 rounded-xl border border-neutral-8/40 bg-neutral-11/20">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 px-4 py-3 text-left text-[14px] font-medium text-neutral-3 hover:text-neutral-1 transition-colors"
+        className="w-full flex items-center gap-2 px-4 py-3 text-left text-[15px] font-medium text-neutral-3 hover:text-neutral-1 transition-colors"
       >
         {open
           ? <IconChevronDown size={14} stroke={2} className="text-neutral-5" />
           : <IconChevronRight size={14} stroke={2} className="text-neutral-5" />
         }
         Defining Custom Workflows
-        <span className="text-[12px] text-neutral-5 font-normal ml-1">via workflow.md files</span>
+        <span className="text-[13px] text-neutral-5 font-normal ml-1">via workflow.md files</span>
       </button>
 
       {open && (
-        <div className="px-4 pb-4 text-[13px] text-neutral-4 space-y-3 border-t border-neutral-8/30 pt-3">
+        <div className="px-4 pb-4 text-[14px] text-neutral-4 space-y-3 border-t border-neutral-8/30 pt-3">
           <p>
             You can define custom workflow types per-repo by adding <code className="text-accent-3 bg-neutral-10 px-1 rounded">.md</code> files to:
           </p>
-          <pre className="rounded-md bg-neutral-12 px-3 py-2 text-[13px] text-neutral-3 font-mono overflow-x-auto">
+          <pre className="rounded-md bg-neutral-12 px-3 py-2 text-[14px] text-neutral-3 font-mono overflow-x-auto">
 {'<repo>/.codekin/workflows/<kind>.md'}
           </pre>
 
           <p>Each file uses YAML frontmatter + a prompt body:</p>
-          <pre className="rounded-md bg-neutral-12 px-3 py-2 text-[13px] text-neutral-3 font-mono overflow-x-auto leading-relaxed">{
+          <pre className="rounded-md bg-neutral-12 px-3 py-2 text-[14px] text-neutral-3 font-mono overflow-x-auto leading-relaxed">{
 `---
 kind: api-docs.weekly
 name: API Documentation Check
@@ -513,7 +513,7 @@ You are reviewing the API documentation for this project.
 Important: Do NOT modify any source files.`
           }</pre>
 
-          <div className="space-y-1.5 text-[13px]">
+          <div className="space-y-1.5 text-[14px]">
             <p className="font-medium text-neutral-3">Frontmatter fields:</p>
             <ul className="list-disc list-inside space-y-0.5 text-neutral-4 ml-1">
               <li><code className="text-neutral-3">kind</code> — unique ID, e.g. <code className="text-neutral-3">code-review.daily</code></li>
@@ -636,11 +636,11 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-neutral-8/50 px-5 py-3">
-        <h1 className="text-[17px] font-medium text-neutral-1">Workflows</h1>
+        <h1 className="text-[18px] font-medium text-neutral-1">Workflows</h1>
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => setShowAddForm(true)}
-            className="flex items-center gap-1.5 rounded-md bg-accent-7 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-accent-6 transition-colors"
+            className="flex items-center gap-1.5 rounded-md bg-accent-7 px-3 py-1.5 text-[14px] font-medium text-white hover:bg-accent-6 transition-colors"
           >
             <IconPlus size={14} stroke={2} />
             New Workflow
@@ -651,7 +651,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
       <div className="flex-1 overflow-y-auto p-5">
         {/* Error */}
         {error && (
-          <div className="rounded-lg border border-error-8/50 bg-error-10/30 px-4 py-2 text-[15px] text-error-4 mb-4">
+          <div className="rounded-lg border border-error-8/50 bg-error-10/30 px-4 py-2 text-[16px] text-error-4 mb-4">
             {error}
           </div>
         )}
@@ -661,14 +661,14 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
           <div className="rounded-xl border border-dashed border-neutral-8 px-6 py-10 text-center">
             <div className="text-neutral-5 mb-1">
               <IconCalendarEvent size={32} stroke={1.5} className="mx-auto mb-3 text-neutral-6" />
-              <div className="text-[15px] text-neutral-3 font-medium mb-1">No workflows configured</div>
-              <div className="text-[13px] text-neutral-5">
+              <div className="text-[16px] text-neutral-3 font-medium mb-1">No workflows configured</div>
+              <div className="text-[14px] text-neutral-5">
                 Set up automated code reviews, security audits, and more.
               </div>
             </div>
             <button
               onClick={() => setShowAddForm(true)}
-              className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-accent-7 px-4 py-2 text-[13px] font-medium text-white hover:bg-accent-6 transition-colors"
+              className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-accent-7 px-4 py-2 text-[14px] font-medium text-white hover:bg-accent-6 transition-colors"
             >
               <IconPlus size={14} stroke={2} />
               Create your first workflow
@@ -703,14 +703,14 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
           <div className="mt-6">
             <button
               onClick={() => setShowActivity(!showActivity)}
-              className="flex items-center gap-2 text-[14px] font-medium text-neutral-3 hover:text-neutral-1 transition-colors mb-2"
+              className="flex items-center gap-2 text-[15px] font-medium text-neutral-3 hover:text-neutral-1 transition-colors mb-2"
             >
               {showActivity
                 ? <IconChevronDown size={14} stroke={2} />
                 : <IconArrowRight size={14} stroke={2} />
               }
               Recent Activity
-              <span className="text-[12px] text-neutral-5 font-normal">({runs.length} runs)</span>
+              <span className="text-[13px] text-neutral-5 font-normal">({runs.length} runs)</span>
             </button>
 
             {showActivity && (
