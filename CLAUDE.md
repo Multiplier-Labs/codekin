@@ -34,6 +34,13 @@ npm run lint         # eslint
 - WebSocket message types defined in `src/types.ts` (shared between client and server)
 - Monospace font: Inconsolata; Sans font: Lato
 
+## Branching & Release Policy
+
+- `main` is stable and always releasable — no direct pushes
+- Feature branches: `feat/description`, bug fixes: `fix/description`
+- All changes go through PRs with review and passing CI
+- Releases are tagged with semver: `v0.2.0`, `v1.0.0`, etc.
+
 ## Output Conventions
 
 - When sharing code snippets, configuration files, or file contents with the user, always use fenced code blocks (```language) so they render properly in the terminal UI

@@ -2,7 +2,16 @@
   "name": "codekin",
   "version": "0.1.8",
   "license": "MIT",
+  "author": "multiplier-labs",
   "description": "Web UI for Claude Code sessions with multi-session support and WebSocket streaming",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Multiplier-Labs/codekin"
+  },
+  "bugs": {
+    "url": "https://github.com/Multiplier-Labs/codekin/issues"
+  },
+  "keywords": ["claude", "terminal", "ai", "coding-assistant"],
   "type": "module",
   "bin": {
     "codekin": "bin/codekin.mjs"

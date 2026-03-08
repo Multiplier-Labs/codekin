@@ -64,6 +64,14 @@ npm run build
 - **Monospace font**: Inconsolata; **Sans font**: Lato
 - WebSocket message types are defined in `src/types.ts`
 
+## Branching & Release Policy
+
+- **`main`** — stable, always releasable. No direct pushes once public.
+- **Feature branches** — use `feat/description` naming, merged via PR.
+- **Bug fix branches** — use `fix/description` naming.
+- **Release tags** — follow [semver](https://semver.org/): `v0.2.0`, `v1.0.0`, etc.
+- **Branch protection** — PRs require review and passing CI before merge.
+
 ## Pull Request Process
 
 1. Fork the repository and create your branch from `main`.
