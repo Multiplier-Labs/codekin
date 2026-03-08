@@ -82,18 +82,30 @@ export function useWorkflows(token: string): UseWorkflowsResult {
   }, [refresh, intervalMs])
 
   const triggerRun = useCallback(async (kind: string, input?: Record<string, unknown>) => {
-    await apiTriggerRun(token, kind, input)
-    await refresh()
+    try {
+      await apiTriggerRun(token, kind, input)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to trigger run')
+    }
   }, [token, refresh])
 
   const cancelRun = useCallback(async (runId: string) => {
-    await apiCancelRun(token, runId)
-    await refresh()
+    try {
+      await apiCancelRun(token, runId)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to cancel run')
+    }
   }, [token, refresh])
 
   const triggerSchedule = useCallback(async (id: string) => {
-    await apiTriggerSchedule(token, id)
-    await refresh()
+    try {
+      await apiTriggerSchedule(token, id)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to trigger schedule')
+    }
   }, [token, refresh])
 
   const addRepo = useCallback(async (repo: ReviewRepoConfig) => {

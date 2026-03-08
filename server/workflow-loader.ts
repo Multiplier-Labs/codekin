@@ -87,7 +87,15 @@ function parseMdWorkflow(content: string, sourcePath: string): WorkflowDef {
 // File discovery
 // ---------------------------------------------------------------------------
 
-const WORKFLOWS_DIR = join(dirname(fileURLToPath(import.meta.url)), 'workflows')
+/**
+ * Resolve the workflows directory. When running from dist/ (compiled JS),
+ * the MD files live one level up in server/workflows/. When running from
+ * source (ts-node / tsx), they're a sibling directory.
+ */
+const __ownDir = dirname(fileURLToPath(import.meta.url))
+const WORKFLOWS_DIR = existsSync(join(__ownDir, 'workflows'))
+  ? join(__ownDir, 'workflows')
+  : join(__ownDir, '..', 'workflows')
 
 /** Load all *.md files from the built-in server/workflows/ directory. */
 function loadBuiltinWorkflows(): WorkflowDef[] {
