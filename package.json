@@ -1,6 +1,6 @@
 {
   "name": "codekin",
-  "version": "0.1.8",
+  "version": "0.2.0",
   "license": "MIT",
   "author": "multiplier-labs",
   "description": "Web UI for Claude Code sessions with multi-session support and WebSocket streaming",
