@@ -12,6 +12,7 @@ import {
   buildCron, formatHour, describeCron, slugify,
 } from '../lib/workflowHelpers'
 import { CategoryBadge } from './WorkflowBadges'
+import { RepoList } from './RepoList'
 
 interface FormState {
   kind: string
@@ -131,20 +132,12 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
                 Failed to load repos: {reposError}
               </div>
             ) : (
-              <select
-                value={selectedRepoId}
-                onChange={e => handleRepoSelect(e.target.value)}
-                className="w-full rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-1 focus:border-accent-6 focus:outline-none"
-              >
-                <option value="">Select a repository…</option>
-                {groups.map(group => (
-                  <optgroup key={group.owner} label={group.owner}>
-                    {group.repos.map(repo => (
-                      <option key={repo.id} value={repo.id}>{repo.name}</option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+              <RepoList
+                groups={groups}
+                selectedId={selectedRepoId}
+                onSelect={repo => handleRepoSelect(repo.id)}
+                maxHeight="180px"
+              />
             )}
           </div>
 
