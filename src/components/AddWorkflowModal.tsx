@@ -2,10 +2,11 @@
  * Modal dialog for registering a new scheduled workflow.
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { IconX, IconLoader2 } from '@tabler/icons-react'
 import { useRepos } from '../hooks/useRepos'
-import type { ReviewRepoConfig } from '../lib/workflowApi'
+import { listKinds } from '../lib/workflowApi'
+import type { ReviewRepoConfig, WorkflowKindInfo } from '../lib/workflowApi'
 import {
   WORKFLOW_KINDS, DAY_PATTERNS,
   buildCron, formatHour, describeCron, slugify,
@@ -22,17 +23,18 @@ interface FormState {
 }
 
 interface Props {
+  token: string
   onClose: () => void
   onAdd: (repo: ReviewRepoConfig) => Promise<void>
 }
 
-export function AddWorkflowModal({ onClose, onAdd }: Props) {
+export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
   const { groups, loading: reposLoading } = useRepos()
   const allRepos = groups.flatMap(g => g.repos)
 
   const [selectedRepoId, setSelectedRepoId] = useState<string>('')
   const [form, setForm] = useState<FormState>({
-    kind: 'coverage.daily',
+    kind: '',
     repoPath: '',
     repoName: '',
     cronHour: 6,
@@ -41,6 +43,32 @@ export function AddWorkflowModal({ onClose, onAdd }: Props) {
   })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+
+  // Dynamic kinds: built-in fallback + fetched from server (repo-aware)
+  const [kinds, setKinds] = useState<WorkflowKindInfo[]>(
+    WORKFLOW_KINDS.map(k => ({ kind: k.value, name: k.label, source: 'builtin' as const }))
+  )
+  const [kindsLoading, setKindsLoading] = useState(false)
+
+  // Fetch kinds when repo selection changes (includes repo-specific workflows)
+  useEffect(() => {
+    let cancelled = false
+    setKindsLoading(true)
+    listKinds(token, form.repoPath || undefined)
+      .then(fetched => {
+        if (cancelled) return
+        if (fetched.length > 0) {
+          setKinds(fetched)
+          // Auto-select first kind if current selection is not in the new list
+          if (!fetched.some(k => k.kind === form.kind)) {
+            setForm(f => ({ ...f, kind: fetched[0].kind }))
+          }
+        }
+      })
+      .catch(() => { /* keep fallback */ })
+      .finally(() => { if (!cancelled) setKindsLoading(false) })
+    return () => { cancelled = true }
+  }, [token, form.repoPath])
 
   const handleRepoSelect = (repoId: string) => {
     setSelectedRepoId(repoId)
@@ -53,6 +81,7 @@ export function AddWorkflowModal({ onClose, onAdd }: Props) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.repoPath.trim()) { setFormError('Please select a repository'); return }
+    if (!form.kind) { setFormError('Please select a workflow'); return }
 
     setSaving(true)
     setFormError(null)
@@ -119,21 +148,27 @@ export function AddWorkflowModal({ onClose, onAdd }: Props) {
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="block text-[13px] font-medium text-neutral-3">Workflow</label>
-              <CategoryBadge kind={form.kind} />
+              <div className="flex items-center gap-2">
+                {kindsLoading && <IconLoader2 size={12} stroke={2} className="animate-spin text-neutral-5" />}
+                {form.kind && <CategoryBadge kind={form.kind} />}
+              </div>
             </div>
             <div className="grid grid-cols-3 gap-2">
-              {WORKFLOW_KINDS.map(k => (
+              {kinds.map(k => (
                 <button
-                  key={k.value}
+                  key={k.kind}
                   type="button"
-                  onClick={() => setForm(f => ({ ...f, kind: k.value }))}
+                  onClick={() => setForm(f => ({ ...f, kind: k.kind }))}
                   className={`rounded-md border py-2 text-[13px] font-medium transition-colors
-                    ${form.kind === k.value
+                    ${form.kind === k.kind
                       ? 'border-accent-6 bg-accent-9/40 text-accent-2'
                       : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
                     }`}
                 >
-                  {k.label}
+                  {k.name}
+                  {k.source === 'repo' && (
+                    <span className="block text-[10px] text-neutral-5 font-normal mt-0.5">repo</span>
+                  )}
                 </button>
               ))}
             </div>

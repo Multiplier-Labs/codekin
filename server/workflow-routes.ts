@@ -15,12 +15,17 @@ import {
   updateReviewRepo,
   type ReviewRepoConfig,
 } from './workflow-config.js'
+import { listAvailableKinds, ensureRepoWorkflowsRegistered } from './workflow-loader.js'
+import type { SessionManager } from './session-manager.js'
 
 type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
 
-/** Sync cron schedules with the current workflow config. */
-export function syncSchedules() {
+/**
+ * Sync cron schedules with the current workflow config.
+ * When `sessions` is provided, also registers any standalone repo workflows.
+ */
+export function syncSchedules(sessions?: SessionManager) {
   const engine = getWorkflowEngine()
   const config = loadWorkflowConfig()
   const existingSchedules = engine.listSchedules()
@@ -28,6 +33,11 @@ export function syncSchedules() {
 
   // Create or update schedules for configured repos
   for (const repo of config.reviewRepos) {
+    // Register any standalone repo workflows before scheduling
+    if (sessions) {
+      ensureRepoWorkflowsRegistered(engine, sessions, repo.repoPath)
+    }
+
     engine.upsertSchedule({
       id: repo.id,
       kind: repo.kind ?? 'code-review.daily',
@@ -45,7 +55,7 @@ export function syncSchedules() {
   }
 }
 
-export function createWorkflowRouter(verifyToken: VerifyFn, extractToken: ExtractFn): Router {
+export function createWorkflowRouter(verifyToken: VerifyFn, extractToken: ExtractFn, sessions?: SessionManager): Router {
   const router = Router()
 
   /** Auth middleware for all workflow routes. */
@@ -69,6 +79,16 @@ export function createWorkflowRouter(verifyToken: VerifyFn, extractToken: Extrac
       return null
     }
   }
+
+  // -------------------------------------------------------------------------
+  // Kinds
+  // -------------------------------------------------------------------------
+
+  router.get('/kinds', (req, res) => {
+    const repoPath = req.query.repoPath as string | undefined
+    const kinds = listAvailableKinds(repoPath)
+    res.json({ kinds })
+  })
 
   // -------------------------------------------------------------------------
   // Runs
@@ -203,6 +223,13 @@ export function createWorkflowRouter(verifyToken: VerifyFn, extractToken: Extrac
       return res.status(400).json({ error: 'Missing required fields: id, name, repoPath, cronExpression' })
     }
 
+    // Register any standalone repo workflows before saving config
+    if (sessions) {
+      try {
+        ensureRepoWorkflowsRegistered(getWorkflowEngine(), sessions, repoPath)
+      } catch { /* engine may not be ready */ }
+    }
+
     const config = addReviewRepo({
       id,
       name,
@@ -215,7 +242,7 @@ export function createWorkflowRouter(verifyToken: VerifyFn, extractToken: Extrac
 
     // Re-sync schedules with updated config
     try {
-      syncSchedules()
+      syncSchedules(sessions)
     } catch {
       // Engine might not be ready yet
     }
@@ -226,7 +253,7 @@ export function createWorkflowRouter(verifyToken: VerifyFn, extractToken: Extrac
   router.patch('/config/repos/:id', (req, res) => {
     try {
       const config = updateReviewRepo(req.params.id, req.body)
-      try { syncSchedules() } catch { /* engine may not be ready */ }
+      try { syncSchedules(sessions) } catch { /* engine may not be ready */ }
       res.json({ config })
     } catch (err) {
       res.status(404).json({ error: err instanceof Error ? err.message : 'Repo not found' })
@@ -238,7 +265,7 @@ export function createWorkflowRouter(verifyToken: VerifyFn, extractToken: Extrac
 
     // Re-sync schedules with updated config
     try {
-      syncSchedules()
+      syncSchedules(sessions)
     } catch {
       // Engine might not be ready yet
     }

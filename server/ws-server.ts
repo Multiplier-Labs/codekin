@@ -226,7 +226,7 @@ app.use(createAuthRouter(verifyToken, extractToken, sessions, claudeAvailable, c
 app.use(createSessionRouter(verifyToken, extractToken, sessions))
 app.use(createWebhookRouter(verifyToken, extractToken, webhookHandler, stepflowHandler))
 app.use(createUploadRouter(verifyToken, extractToken))
-app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken))
+app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessions))
 
 // --- SPA fallback: serve index.html for non-API routes (client-side routing) ---
 if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
@@ -469,7 +469,7 @@ server.listen(port, '0.0.0.0', () => {
     })
 
     // Sync cron schedules with config and start scheduler
-    syncSchedules()
+    syncSchedules(sessions)
     engine.startCronScheduler()
     console.log('[workflow] Workflow engine ready')
   } catch (err) {
