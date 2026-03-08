@@ -1,10 +1,9 @@
 /**
- * Workflows page — setup, scheduling, and run monitoring with debug detail.
+ * Workflows page — unified card-based layout with inline run history.
  *
- * Sections:
- *   - Scheduled Workflows: configured repos with cron, Run Now, and delete
- *   - Add Workflow modal: form to register a new repo/workflow
- *   - Run History: timeline of runs; click to expand step-by-step debug detail
+ * Each configured workflow gets a card showing identity, schedule, health,
+ * and expandable recent runs. A "Recent Activity" feed at the bottom shows
+ * the latest runs across all workflows.
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -12,13 +11,14 @@ import {
   IconRefresh, IconPlus, IconPlayerPlay, IconPlayerStop, IconPlayerPause,
   IconExternalLink, IconTrash, IconChevronDown, IconChevronRight,
   IconCheck, IconX, IconLoader2, IconMinus, IconCircle, IconClock, IconPencil,
+  IconCalendarEvent, IconArrowRight,
 } from '@tabler/icons-react'
 import { useWorkflows } from '../hooks/useWorkflows'
 import { getRun } from '../lib/workflowApi'
 import type { WorkflowRun, WorkflowRunWithSteps, WorkflowStep, CronSchedule, ReviewRepoConfig } from '../lib/workflowApi'
 import { AddWorkflowModal } from './AddWorkflowModal'
 import { EditWorkflowModal } from './EditWorkflowModal'
-import { StatusBadge } from './WorkflowBadges'
+import { StatusBadge, CategoryBadge } from './WorkflowBadges'
 import { kindLabel, statusBadge, describeCron, formatDuration, formatTime, repoNameFromRun } from '../lib/workflowHelpers'
 
 // ---------------------------------------------------------------------------
@@ -47,7 +47,6 @@ function JsonBlock({ label, data, defaultOpen = false }: {
 }) {
   if (!data || Object.keys(data).length === 0) return null
   const json = JSON.stringify(data, null, 2)
-  // Truncate very long values (e.g. full review text)
   const display = json.length > 4000 ? json.slice(0, 4000) + '\n… (truncated)' : json
 
   return (
@@ -111,7 +110,6 @@ function RunDetail({ run }: { run: WorkflowRunWithSteps }) {
         run.steps.map(step => <StepCard key={step.id} step={step} />)
       )}
 
-      {/* Run-level output (e.g. filePath, sessionId) */}
       {run.output && Object.keys(run.output).length > 0 && (
         <div className="pt-1">
           <JsonBlock label="run output" data={run.output} defaultOpen />
@@ -128,10 +126,10 @@ function RunDetail({ run }: { run: WorkflowRunWithSteps }) {
 }
 
 // ---------------------------------------------------------------------------
-// RunTableRow
+// MiniRunRow — compact run entry for the card's recent runs
 // ---------------------------------------------------------------------------
 
-function RunTableRow({
+function MiniRunRow({
   run,
   selected,
   detail,
@@ -151,168 +149,300 @@ function RunTableRow({
   const sessionId = (run.output?.sessionId || run.input?.sessionId) as string | undefined
 
   return (
-    <>
-      <tr
+    <div>
+      <div
         onClick={onToggle}
-        className={`cursor-pointer transition-colors ${
+        className={`flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors rounded-md ${
           selected ? 'bg-neutral-10' : 'hover:bg-neutral-10/50'
         }`}
       >
-        <td className="py-2.5 pl-3 pr-1 text-neutral-5 w-8">
+        <span className="text-neutral-5 w-4 shrink-0">
           {selected
-            ? <IconChevronDown size={14} stroke={2} />
-            : <IconChevronRight size={14} stroke={2} />
+            ? <IconChevronDown size={13} stroke={2} />
+            : <IconChevronRight size={13} stroke={2} />
           }
-        </td>
-        <td className="py-2.5 px-3 text-[15px] font-medium text-neutral-1 max-w-[180px] truncate">
-          {repoNameFromRun(run)}
-        </td>
-        <td className="py-2.5 px-3 text-[13px] text-neutral-4 whitespace-nowrap">
-          {kindLabel(run.kind)}
-        </td>
-        <td className="py-2.5 px-3 text-[13px] text-neutral-4 tabular-nums whitespace-nowrap">
+        </span>
+        <span className="text-[13px] text-neutral-4 tabular-nums whitespace-nowrap">
           {formatTime(run.createdAt)}
-        </td>
-        <td className="py-2.5 px-3 text-[13px] text-neutral-4 tabular-nums whitespace-nowrap">
+        </span>
+        <span className="text-[13px] text-neutral-4 tabular-nums whitespace-nowrap">
           {formatDuration(run.startedAt, run.completedAt)}
-        </td>
-        <td className="py-2.5 px-3">
+        </span>
+        <span className="ml-auto">
           <StatusBadge status={run.status} />
-        </td>
-        <td className="py-2.5 pl-1 pr-3 w-14" onClick={e => e.stopPropagation()}>
-          <div className="flex items-center gap-1 justify-end">
-            {run.status === 'running' && (
-              <button
-                onClick={() => onCancel(run.id)}
-                className="rounded p-1 text-neutral-4 hover:text-error-4 hover:bg-neutral-9 transition-colors"
-                title="Cancel"
-              >
-                <IconPlayerStop size={14} stroke={2} />
-              </button>
-            )}
-            {sessionId && onNavigateToSession && (
-              <button
-                onClick={() => onNavigateToSession(sessionId)}
-                className="rounded p-1 text-neutral-4 hover:text-accent-3 hover:bg-neutral-9 transition-colors"
-                title="View Session"
-              >
-                <IconExternalLink size={14} stroke={2} />
-              </button>
-            )}
-          </div>
-        </td>
-      </tr>
+        </span>
+        <div className="flex items-center gap-0.5 shrink-0" onClick={e => e.stopPropagation()}>
+          {run.status === 'running' && (
+            <button
+              onClick={() => onCancel(run.id)}
+              className="rounded p-1 text-neutral-4 hover:text-error-4 hover:bg-neutral-9 transition-colors"
+              title="Cancel"
+            >
+              <IconPlayerStop size={13} stroke={2} />
+            </button>
+          )}
+          {sessionId && onNavigateToSession && (
+            <button
+              onClick={() => onNavigateToSession(sessionId)}
+              className="rounded p-1 text-neutral-4 hover:text-accent-3 hover:bg-neutral-9 transition-colors"
+              title="View session"
+            >
+              <IconExternalLink size={13} stroke={2} />
+            </button>
+          )}
+        </div>
+      </div>
       {selected && (
-        <tr className="bg-neutral-10/30">
-          <td colSpan={7} className="px-4 pb-3 pt-1">
-            {detailLoading ? (
-              <div className="flex items-center gap-2 py-3 text-[13px] text-neutral-5">
-                <IconLoader2 size={16} stroke={2} className="animate-spin" />
-                Loading steps…
-              </div>
-            ) : detail ? (
-              <RunDetail run={detail} />
-            ) : null}
-          </td>
-        </tr>
+        <div className="px-3 pb-2">
+          {detailLoading ? (
+            <div className="flex items-center gap-2 py-3 text-[13px] text-neutral-5">
+              <IconLoader2 size={16} stroke={2} className="animate-spin" />
+              Loading steps…
+            </div>
+          ) : detail ? (
+            <RunDetail run={detail} />
+          ) : null}
+        </div>
       )}
-    </>
+    </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// ScheduleRow — a single workflow entry within a repo group
+// HealthIndicator — dot showing last run status
 // ---------------------------------------------------------------------------
 
-function ScheduleRow({
-  schedule,
+function HealthDot({ status }: { status: string | undefined }) {
+  if (!status) return <span className="w-2.5 h-2.5 rounded-full bg-neutral-7 shrink-0" title="No runs yet" />
+  const colors: Record<string, string> = {
+    succeeded: 'bg-success-5',
+    failed: 'bg-error-5',
+    running: 'bg-accent-5 animate-pulse',
+    queued: 'bg-neutral-5 animate-pulse',
+    canceled: 'bg-warning-5',
+    skipped: 'bg-neutral-6',
+  }
+  return <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${colors[status] || 'bg-neutral-7'}`} title={status} />
+}
+
+// ---------------------------------------------------------------------------
+// WorkflowCard — one card per configured workflow
+// ---------------------------------------------------------------------------
+
+function WorkflowCard({
   repo,
+  schedule,
+  recentRuns,
+  selectedRunId,
+  runDetail,
+  detailLoading,
   onTrigger,
   onToggleEnabled,
   onEdit,
   onDelete,
+  onToggleRun,
+  onCancel,
+  onNavigateToSession,
 }: {
-  schedule: CronSchedule
-  repo?: ReviewRepoConfig
+  repo: ReviewRepoConfig
+  schedule?: CronSchedule
+  recentRuns: WorkflowRun[]
+  selectedRunId: string | null
+  runDetail: WorkflowRunWithSteps | null
+  detailLoading: boolean
   onTrigger: (id: string) => void
   onToggleEnabled: (id: string, enabled: boolean) => void
   onEdit: (repo: ReviewRepoConfig) => void
   onDelete: (id: string) => void
+  onToggleRun: (runId: string) => void
+  onCancel: (runId: string) => void
+  onNavigateToSession?: (sessionId: string) => void
 }) {
-  const paused = !schedule.enabled
+  const [showRuns, setShowRuns] = useState(false)
+  const paused = schedule ? !schedule.enabled : false
+  const lastRun = recentRuns[0]
+  const repoShortName = repo.repoPath.split('/').pop() || repo.name
+
   return (
-    <div className={`flex items-center gap-3 rounded-md border px-3 py-2.5 transition-colors ${
+    <div className={`rounded-xl border transition-colors ${
       paused
-        ? 'border-neutral-8/40 bg-neutral-11/20 opacity-60'
+        ? 'border-neutral-8/40 bg-neutral-11/20'
         : 'border-neutral-8/60 bg-neutral-11/40'
     }`}>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className={`shrink-0 text-[13px] font-medium rounded px-2 py-0.5 ${
-            paused
-              ? 'text-neutral-5 bg-neutral-9/60'
-              : 'text-neutral-3 bg-neutral-9'
-          }`}>
-            {kindLabel(repo?.kind ?? schedule.kind)}
-          </span>
-          <span className={`text-[13px] font-mono ${paused ? 'text-neutral-5' : 'text-neutral-3'}`}>
-            {describeCron(schedule.cronExpression)}
-          </span>
-          {paused && (
-            <span className="inline-flex items-center gap-1 text-[12px] font-medium text-warning-5 bg-warning-10/40 border border-warning-8/40 rounded-full px-2 py-0.5">
-              <IconPlayerPause size={12} stroke={2} />
-              paused
-            </span>
-          )}
+      {/* Card header */}
+      <div className="px-4 pt-3.5 pb-3">
+        <div className="flex items-start gap-3">
+          {/* Health dot + repo info */}
+          <div className="pt-1.5">
+            <HealthDot status={lastRun?.status} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`text-[15px] font-semibold ${paused ? 'text-neutral-4' : 'text-neutral-1'}`}>
+                {repoShortName}
+              </span>
+              <CategoryBadge kind={repo.kind ?? ''} />
+              {paused && (
+                <span className="inline-flex items-center gap-1 text-[12px] font-medium text-warning-5 bg-warning-10/40 border border-warning-8/40 rounded-full px-2 py-0.5">
+                  <IconPlayerPause size={11} stroke={2} />
+                  paused
+                </span>
+              )}
+            </div>
+            <div className={`text-[14px] font-medium mt-0.5 ${paused ? 'text-neutral-5' : 'text-neutral-3'}`}>
+              {kindLabel(repo.kind ?? '')}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => onToggleEnabled(repo.id, !schedule?.enabled)}
+              className={`rounded-md p-1.5 transition-colors ${
+                paused
+                  ? 'text-success-5 hover:text-success-3 hover:bg-neutral-9'
+                  : 'text-neutral-5 hover:text-warning-4 hover:bg-neutral-9'
+              }`}
+              title={paused ? 'Resume' : 'Pause'}
+            >
+              {paused
+                ? <IconPlayerPlay size={15} stroke={2} />
+                : <IconPlayerPause size={15} stroke={2} />
+              }
+            </button>
+            <button
+              onClick={() => onEdit(repo)}
+              className="rounded-md p-1.5 text-neutral-5 hover:text-neutral-2 hover:bg-neutral-9 transition-colors"
+              title="Edit"
+            >
+              <IconPencil size={15} stroke={2} />
+            </button>
+            <button
+              onClick={() => onDelete(repo.id)}
+              className="rounded-md p-1.5 text-neutral-6 hover:text-error-4 hover:bg-neutral-9 transition-colors"
+              title="Delete"
+            >
+              <IconTrash size={15} stroke={2} />
+            </button>
+          </div>
         </div>
-        {schedule.nextRunAt && !paused && (
-          <div className="mt-1 flex items-center gap-1 text-[13px] text-neutral-5">
-            <IconClock size={12} stroke={2} />
-            Next: {formatTime(schedule.nextRunAt)}
+
+        {/* Schedule + next run + Run Now */}
+        <div className="mt-3 flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-1.5 text-[13px] text-neutral-4">
+            <IconCalendarEvent size={14} stroke={2} className="text-neutral-5" />
+            {schedule ? describeCron(schedule.cronExpression) : describeCron(repo.cronExpression)}
+          </div>
+          {schedule?.nextRunAt && !paused && (
+            <div className="flex items-center gap-1 text-[13px] text-neutral-5">
+              <IconClock size={12} stroke={2} />
+              Next: {formatTime(schedule.nextRunAt)}
+            </div>
+          )}
+          <div className="ml-auto">
+            <button
+              onClick={() => onTrigger(repo.id)}
+              className="rounded-md border border-neutral-7 bg-neutral-9 px-3 py-1 text-[13px] text-neutral-2 hover:bg-neutral-8 hover:text-neutral-1 transition-colors flex items-center gap-1.5"
+            >
+              <IconPlayerPlay size={12} stroke={2} />
+              Run Now
+            </button>
+          </div>
+        </div>
+
+        {/* Last run summary */}
+        {lastRun && (
+          <div className="mt-2.5 flex items-center gap-2 text-[13px] text-neutral-5">
+            <span>Last run:</span>
+            <StatusBadge status={lastRun.status} />
+            <span className="tabular-nums">{formatTime(lastRun.createdAt)}</span>
+            <span className="tabular-nums">{formatDuration(lastRun.startedAt, lastRun.completedAt)}</span>
           </div>
         )}
       </div>
 
-      <div className="flex items-center gap-1 shrink-0">
-        <button
-          onClick={() => onToggleEnabled(schedule.id, !schedule.enabled)}
-          className={`rounded p-1.5 transition-colors ${
-            paused
-              ? 'text-success-5 hover:text-success-3 hover:bg-neutral-9'
-              : 'text-neutral-5 hover:text-warning-4 hover:bg-neutral-9'
-          }`}
-          title={paused ? 'Resume schedule' : 'Pause schedule'}
-        >
-          {paused
-            ? <IconPlayerPlay size={14} stroke={2} />
-            : <IconPlayerPause size={14} stroke={2} />
-          }
-        </button>
-        <button
-          onClick={() => onTrigger(schedule.id)}
-          className="rounded-md border border-neutral-7 bg-neutral-9 px-2.5 py-1 text-[13px] text-neutral-2 hover:bg-neutral-8 hover:text-neutral-1 transition-colors flex items-center gap-1.5"
-          title="Run now"
-        >
-          <IconPlayerPlay size={12} stroke={2} />
-          Run Now
-        </button>
-        {repo && (
+      {/* Recent runs toggle */}
+      {recentRuns.length > 0 && (
+        <div className="border-t border-neutral-8/40">
           <button
-            onClick={() => onEdit(repo)}
-            className="rounded p-1.5 text-neutral-5 hover:text-neutral-2 hover:bg-neutral-9 transition-colors"
-            title="Edit workflow"
+            onClick={() => setShowRuns(!showRuns)}
+            className="w-full flex items-center gap-2 px-4 py-2 text-[13px] text-neutral-4 hover:text-neutral-2 transition-colors"
           >
-            <IconPencil size={14} stroke={2} />
+            {showRuns
+              ? <IconChevronDown size={13} stroke={2} />
+              : <IconChevronRight size={13} stroke={2} />
+            }
+            <span>Recent runs ({recentRuns.length})</span>
+            {/* Mini status dots for last few runs */}
+            {!showRuns && (
+              <div className="flex items-center gap-1 ml-1">
+                {recentRuns.slice(0, 5).map(r => (
+                  <HealthDot key={r.id} status={r.status} />
+                ))}
+              </div>
+            )}
           </button>
-        )}
+
+          {showRuns && (
+            <div className="pb-2 px-1">
+              {recentRuns.map(run => (
+                <MiniRunRow
+                  key={run.id}
+                  run={run}
+                  selected={selectedRunId === run.id}
+                  detail={selectedRunId === run.id ? runDetail : null}
+                  detailLoading={selectedRunId === run.id ? detailLoading : false}
+                  onToggle={() => onToggleRun(run.id)}
+                  onCancel={onCancel}
+                  onNavigateToSession={onNavigateToSession}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ActivityRow — compact run for the activity feed
+// ---------------------------------------------------------------------------
+
+function ActivityRow({
+  run,
+  onNavigateToSession,
+}: {
+  run: WorkflowRun
+  onNavigateToSession?: (sessionId: string) => void
+}) {
+  const sessionId = (run.output?.sessionId || run.input?.sessionId) as string | undefined
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-2 hover:bg-neutral-10/30 transition-colors rounded-md">
+      <HealthDot status={run.status} />
+      <span className="text-[14px] font-medium text-neutral-2 min-w-0 truncate max-w-[140px]">
+        {repoNameFromRun(run)}
+      </span>
+      <span className="text-[13px] text-neutral-4">
+        {kindLabel(run.kind)}
+      </span>
+      <span className="text-[13px] text-neutral-5 tabular-nums ml-auto whitespace-nowrap">
+        {formatTime(run.createdAt)}
+      </span>
+      <span className="text-[13px] text-neutral-5 tabular-nums whitespace-nowrap">
+        {formatDuration(run.startedAt, run.completedAt)}
+      </span>
+      <StatusBadge status={run.status} />
+      {sessionId && onNavigateToSession && (
         <button
-          onClick={() => onDelete(schedule.id)}
-          className="rounded p-1.5 text-neutral-6 hover:text-error-4 hover:bg-neutral-9 transition-colors"
-          title="Delete"
+          onClick={() => onNavigateToSession(sessionId)}
+          className="rounded p-1 text-neutral-5 hover:text-accent-3 hover:bg-neutral-9 transition-colors shrink-0"
+          title="View session"
         >
-          <IconTrash size={14} stroke={2} />
+          <IconExternalLink size={13} stroke={2} />
         </button>
-      </div>
+      )}
     </div>
   )
 }
@@ -329,32 +459,42 @@ interface Props {
 export function WorkflowsView({ token, onNavigateToSession }: Props) {
   const { runs, schedules, config, loading, error, refresh, cancelRun, triggerSchedule, addRepo, removeRepo, updateRepo, toggleScheduleEnabled } = useWorkflows(token)
 
-  const [activeTab, setActiveTab] = useState<'schedules' | 'runs'>('schedules')
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [runDetail, setRunDetail] = useState<WorkflowRunWithSteps | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingRepo, setEditingRepo] = useState<ReviewRepoConfig | null>(null)
+  const [showActivity, setShowActivity] = useState(false)
 
-  // Derived: loading when selected run doesn't match the fetched detail yet
   const detailLoading = selectedRunId !== null && (runDetail === null || runDetail.id !== selectedRunId)
 
-  // Build repo map for schedule cards
+  // Build repo map
   const repoMap = new Map<string, ReviewRepoConfig>()
   if (config) {
     for (const repo of config.reviewRepos) repoMap.set(repo.id, repo)
   }
 
-  // Group schedules by repoPath
-  const scheduleGroups: { repoPath: string; repoName: string; items: CronSchedule[] }[] = []
-  const groupIndex = new Map<string, number>()
-  for (const schedule of schedules) {
-    const repo = repoMap.get(schedule.id)
-    const key = repo?.repoPath ?? schedule.id
-    if (!groupIndex.has(key)) {
-      groupIndex.set(key, scheduleGroups.length)
-      scheduleGroups.push({ repoPath: key, repoName: repo?.name ?? schedule.id, items: [] })
+  // Build schedule map
+  const scheduleMap = new Map<string, CronSchedule>()
+  for (const s of schedules) scheduleMap.set(s.id, s)
+
+  // Build runs-per-repo map
+  const runsPerRepo = new Map<string, WorkflowRun[]>()
+  for (const run of runs) {
+    const repoPath = run.input.repoPath as string | undefined
+    if (!repoPath) continue
+    // Find matching repo config
+    const matchingRepo = config?.reviewRepos.find(r => r.repoPath === repoPath && r.kind === run.kind)
+    if (matchingRepo) {
+      const key = matchingRepo.id
+      if (!runsPerRepo.has(key)) runsPerRepo.set(key, [])
+      runsPerRepo.get(key)!.push(run)
     }
-    scheduleGroups[groupIndex.get(key)!].items.push(schedule)
+  }
+
+  // Orphan runs (not matching any config)
+  const assignedRunIds = new Set<string>()
+  for (const arr of runsPerRepo.values()) {
+    for (const r of arr) assignedRunIds.add(r.id)
   }
 
   // Fetch run detail when selection changes
@@ -395,11 +535,13 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
     }
   }, [toggleScheduleEnabled])
 
+  const repos = config?.reviewRepos ?? []
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-neutral-8/50 px-5 py-3">
-        <h1 className="text-[17px] font-medium text-neutral-1">AI Workflows</h1>
+        <h1 className="text-[17px] font-medium text-neutral-1">Workflows</h1>
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => refresh()}
@@ -410,29 +552,12 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
           </button>
           <button
             onClick={() => setShowAddForm(true)}
-            className="flex items-center gap-1.5 rounded-md border border-neutral-7 bg-neutral-9 px-2.5 py-1.5 text-[13px] text-neutral-2 hover:bg-neutral-8 hover:text-neutral-1 transition-colors"
+            className="flex items-center gap-1.5 rounded-md bg-accent-7 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-accent-6 transition-colors"
           >
             <IconPlus size={14} stroke={2} />
-            Add
+            New Workflow
           </button>
         </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex border-b border-neutral-8/50 px-5">
-        {(['schedules', 'runs'] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`mr-4 pb-2.5 pt-2 text-[15px] font-medium border-b-2 transition-colors ${
-              activeTab === tab
-                ? 'border-accent-5 text-accent-3'
-                : 'border-transparent text-neutral-4 hover:text-neutral-2'
-            }`}
-          >
-            {tab === 'schedules' ? 'Scheduled' : 'Run History'}
-          </button>
-        ))}
       </div>
 
       <div className="flex-1 overflow-y-auto p-5">
@@ -443,87 +568,74 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
           </div>
         )}
 
-        {/* Scheduled Workflows — grouped by repo */}
-        {activeTab === 'schedules' && (
-          <section>
-            {scheduleGroups.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-neutral-8 px-4 py-6 text-center">
-                <div className="text-[15px] text-neutral-4 mb-1">No workflows configured</div>
-                <button
-                  onClick={() => setShowAddForm(true)}
-                  className="text-[13px] text-accent-4 hover:text-accent-3 underline underline-offset-2"
-                >
-                  Add your first workflow
-                </button>
+        {/* Workflow cards */}
+        {repos.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-neutral-8 px-6 py-10 text-center">
+            <div className="text-neutral-5 mb-1">
+              <IconCalendarEvent size={32} stroke={1.5} className="mx-auto mb-3 text-neutral-6" />
+              <div className="text-[15px] text-neutral-3 font-medium mb-1">No workflows configured</div>
+              <div className="text-[13px] text-neutral-5">
+                Set up automated code reviews, security audits, and more.
               </div>
-            ) : (
-              <div className="space-y-3">
-                {scheduleGroups.map(group => (
-                  <div key={group.repoPath} className="rounded-lg border border-neutral-8 bg-neutral-10/50">
-                    {/* Repo header */}
-                    <div className="flex items-center gap-2 px-3 pt-2.5 pb-2 border-b border-neutral-8/60">
-                      <span className="text-[15px] font-bold text-neutral-1">{group.repoPath.split('/').pop() || group.repoName}</span>
-                    </div>
-                    {/* Schedule rows */}
-                    <div className="p-2 space-y-1.5">
-                      {group.items.map(schedule => (
-                        <ScheduleRow
-                          key={schedule.id}
-                          schedule={schedule}
-                          repo={repoMap.get(schedule.id)}
-                          onTrigger={triggerSchedule}
-                          onToggleEnabled={handleToggleEnabled}
-                          onEdit={setEditingRepo}
-                          onDelete={handleDeleteSchedule}
-                        />
-                      ))}
-                    </div>
-                  </div>
+            </div>
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-accent-7 px-4 py-2 text-[13px] font-medium text-white hover:bg-accent-6 transition-colors"
+            >
+              <IconPlus size={14} stroke={2} />
+              Create your first workflow
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {repos.map(repo => (
+              <WorkflowCard
+                key={repo.id}
+                repo={repo}
+                schedule={scheduleMap.get(repo.id)}
+                recentRuns={runsPerRepo.get(repo.id) ?? []}
+                selectedRunId={selectedRunId}
+                runDetail={runDetail}
+                detailLoading={detailLoading}
+                onTrigger={triggerSchedule}
+                onToggleEnabled={handleToggleEnabled}
+                onEdit={setEditingRepo}
+                onDelete={handleDeleteSchedule}
+                onToggleRun={handleToggleRun}
+                onCancel={cancelRun}
+                onNavigateToSession={onNavigateToSession}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Recent Activity */}
+        {runs.length > 0 && (
+          <div className="mt-6">
+            <button
+              onClick={() => setShowActivity(!showActivity)}
+              className="flex items-center gap-2 text-[14px] font-medium text-neutral-3 hover:text-neutral-1 transition-colors mb-2"
+            >
+              {showActivity
+                ? <IconChevronDown size={14} stroke={2} />
+                : <IconArrowRight size={14} stroke={2} />
+              }
+              Recent Activity
+              <span className="text-[12px] text-neutral-5 font-normal">({runs.length} runs)</span>
+            </button>
+
+            {showActivity && (
+              <div className="rounded-xl border border-neutral-8/50 bg-neutral-11/30 py-1 divide-y divide-neutral-8/30">
+                {runs.slice(0, 20).map(run => (
+                  <ActivityRow
+                    key={run.id}
+                    run={run}
+                    onNavigateToSession={onNavigateToSession}
+                  />
                 ))}
               </div>
             )}
-          </section>
-        )}
-
-        {/* Run History */}
-        {activeTab === 'runs' && (
-          <section>
-            {runs.length === 0 ? (
-              <div className="text-[15px] text-neutral-5 py-2">
-                {loading ? 'Loading…' : 'No workflow runs yet.'}
-              </div>
-            ) : (
-              <div className="rounded-lg border border-neutral-8 overflow-hidden">
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr className="border-b border-neutral-8/60 bg-neutral-11/80">
-                      <th className="w-8 py-2.5 pl-3 pr-1" />
-                      <th className="py-2.5 px-3 text-left text-[13px] font-medium text-neutral-4 uppercase tracking-wider">Repo</th>
-                      <th className="py-2.5 px-3 text-left text-[13px] font-medium text-neutral-4 uppercase tracking-wider">Kind</th>
-                      <th className="py-2.5 px-3 text-left text-[13px] font-medium text-neutral-4 uppercase tracking-wider">Started</th>
-                      <th className="py-2.5 px-3 text-left text-[13px] font-medium text-neutral-4 uppercase tracking-wider">Duration</th>
-                      <th className="py-2.5 px-3 text-left text-[13px] font-medium text-neutral-4 uppercase tracking-wider">Status</th>
-                      <th className="w-14 py-2.5 pl-1 pr-3" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-neutral-8/40">
-                    {runs.map(run => (
-                      <RunTableRow
-                        key={run.id}
-                        run={run}
-                        selected={selectedRunId === run.id}
-                        detail={selectedRunId === run.id ? runDetail : null}
-                        detailLoading={selectedRunId === run.id ? detailLoading : false}
-                        onToggle={() => handleToggleRun(run.id)}
-                        onCancel={cancelRun}
-                        onNavigateToSession={onNavigateToSession}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
+          </div>
         )}
       </div>
 
