@@ -1,6 +1,6 @@
 # Codekin Setup Guide
 
-Codekin is a web UI for managing multiple Claude Code terminal sessions. It connects to [cc-web](https://github.com/nicobailon/claude-code-web) (Claude Code Web Terminal) via WebSocket and provides repo browsing, skill discovery, and screenshot uploads.
+Codekin is a web UI for managing multiple Claude Code terminal sessions. It connects to [cc-web](https://github.com/anthropics/claude-code-web) (Claude Code Web Terminal) via WebSocket and provides repo browsing, skill discovery, and screenshot uploads.
 
 ## Architecture
 
@@ -36,7 +36,6 @@ GitHub (webhook events)
 ## 1. Clone and Install
 
 ```bash
-cd /srv/repos
 git clone <repo-url> codekin
 cd codekin
 npm install
@@ -137,7 +136,7 @@ mkdir -p ~/.codekin/screenshots
 
 ### Option A: Auto-scan (default)
 
-The repo scanner will scan `/srv/repos/` automatically:
+The repo scanner will scan the configured repos directory automatically:
 
 ```bash
 node scripts/scan-repos.mjs
@@ -164,10 +163,9 @@ node scripts/scan-repos.mjs
 
 ```bash
 # Build frontend
-cd /srv/repos/codekin
 npm run build
 
-# Deploy to web root
+# Deploy to web root (adjust path as needed)
 sudo cp -r dist/* /var/www/codekin/
 ```
 
@@ -321,7 +319,7 @@ To trigger a real test, push a commit that intentionally fails CI (e.g., a synta
 |---------|----------|
 | GitHub shows "failed to deliver" | Check nginx is proxying `/cc/api/webhooks/github` — run `curl -X POST https://YOUR_DOMAIN/cc/api/webhooks/github` and verify you get a `401` (not `404` or `502`) |
 | `401 Unauthorized` on valid deliveries | Verify `GITHUB_WEBHOOK_SECRET` matches between GitHub and `~/.config/env/api-keys`, then restart the service |
-| Session not created after failure event | Check that `GITHUB_WEBHOOK_ENABLED=true` is set and `gh auth status` succeeds for the `dev` user |
+| Session not created after failure event | Check that `GITHUB_WEBHOOK_ENABLED=true` is set and `gh auth status` succeeds for your user |
 | `429 Too Many Requests` | Max concurrent webhook sessions reached — increase `GITHUB_WEBHOOK_MAX_SESSIONS` or wait for existing sessions to finish |
 | Webhook received but logs say "gh not found" | Ensure the `gh` CLI is on the PATH in the systemd service `Environment` line |
 
@@ -339,7 +337,6 @@ The dev server proxies:
 ## Updating
 
 ```bash
-cd /srv/repos/codekin
 git pull
 npm install
 npm run build
@@ -385,7 +382,7 @@ curl http://127.0.0.1:32352/health
 ## Directory Structure
 
 ```
-/srv/repos/codekin/
+codekin/
 ├── src/                        # React + TypeScript source
 │   ├── App.tsx                 # Main component
 │   ├── components/             # UI components
@@ -414,7 +411,7 @@ curl http://127.0.0.1:32352/health
 | Path                                          | Purpose                        |
 |-----------------------------------------------|--------------------------------|
 | `~/.config/env/api-keys`                      | API keys and secrets (sourced from ~/.bashrc) |
-| `/var/www/codekin/`                           | Deployed frontend (configurable via `FRONTEND_WEB_ROOT`) |
+| `/var/www/codekin/` (or `FRONTEND_WEB_ROOT`)  | Deployed frontend                |
 | `~/.config/claude-code-web-token`             | cc-web auth token              |
 | `~/.config/codekin/repos.yml`                 | Optional repo list             |
 | `~/.codekin/screenshots/`                     | Uploaded screenshots           |
