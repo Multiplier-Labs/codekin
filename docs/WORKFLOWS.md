@@ -1,6 +1,6 @@
 # Automated Workflows
 
-Codekin includes an automated workflow system that runs Claude Code sessions on a schedule to produce structured reports — code reviews, security audits, coverage assessments, and more. Workflows are defined as Markdown files with YAML frontmatter.
+Codekin includes an automated workflow system that runs Claude Code sessions on a schedule to produce structured reports — code reviews, security audits, coverage assessments, and more. Workflows are defined as Markdown files with YAML frontmatter. Codekin ships with six built-in workflows, and you can define your own custom workflows per-repo.
 
 ---
 
@@ -77,34 +77,77 @@ All built-in workflows are loaded automatically at server start.
 
 ---
 
-## Per-Repo Prompt Overrides
+## Custom Repo Workflows
 
-You can override the prompt for any workflow kind on a per-repository basis without modifying the built-in definitions. Create a file at:
+You can define your own workflow types on a per-repository basis — no changes to Codekin itself are needed. Place `.md` workflow files at:
 
 ```
 {repoPath}/.codekin/workflows/{kind}.md
 ```
 
-For example, to override the daily code review prompt for a specific repo:
+These files use the exact same format as built-in definitions (YAML frontmatter + prompt body). Codekin discovers them automatically and they appear alongside built-in workflows in the UI.
+
+### Creating a Custom Workflow
+
+1. Create the directory `{repoPath}/.codekin/workflows/` in your repo.
+
+2. Add a `.md` file with the full frontmatter and prompt:
+
+```markdown
+---
+kind: api-docs.weekly
+name: API Documentation Check
+sessionPrefix: api-docs
+outputDir: .codekin/reports/api-docs
+filenameSuffix: _api-docs.md
+commitMessage: chore: api docs check
+---
+You are reviewing the API documentation for this project.
+
+1. Find all REST endpoints and verify they have corresponding documentation
+2. Check for outdated examples or missing parameters
+3. Produce a Markdown report with a table of endpoints and their doc status
+
+Important: Do NOT modify any source files.
+```
+
+3. In the Codekin UI, select a repo and click **Add Workflow**. Custom workflows defined in that repo will appear in the workflow selector with a "repo" label.
+
+### Overriding Built-in Prompts
+
+If a repo workflow file uses the same `kind` as a built-in (e.g. `code-review.daily`), the repo file's **prompt** replaces the built-in prompt at run time. The metadata (outputDir, commitMessage, etc.) still comes from the built-in definition.
+
+For example, to customize the daily code review for a specific repo:
 
 ```
 my-repo/.codekin/workflows/code-review.daily.md
 ```
 
-The override file uses the same MD format (frontmatter + prompt body). At run time, the loader checks for this file first; if found, its prompt replaces the global one for that run. The frontmatter in an override file is parsed but only the `prompt` body is used — the workflow metadata (outputDir, commitMessage, etc.) always comes from the built-in definition.
-
-**Use cases for per-repo overrides:**
+**Use cases for overrides:**
 
 - Focus the review on areas specific to this codebase (e.g. "pay special attention to the payment module")
 - Adjust the report format or section headings
 - Add repo-specific shell commands or file paths
 - Restrict scope to certain directories or file types
 
+### API: Listing Available Kinds
+
+The `GET /api/workflows/kinds` endpoint returns all available workflow kinds. Pass `?repoPath=/path/to/repo` to include repo-specific workflows in the response:
+
+```json
+{
+  "kinds": [
+    { "kind": "code-review.daily", "name": "Daily Code Review", "source": "builtin" },
+    { "kind": "api-docs.weekly", "name": "API Documentation Check", "source": "repo" }
+  ]
+}
+```
+
 ---
 
-## Adding New Workflow Types
+## Adding New Built-in Workflow Types
 
-To add a new built-in workflow, create a `.md` file in `server/workflows/` following the format above. It will be discovered and registered automatically at next server start — no code changes required.
+To add a new built-in workflow that ships with Codekin, create a `.md` file in `server/workflows/` following the format above. It will be discovered and registered automatically at next server start — no code changes required.
 
 Choose a `kind` that doesn't conflict with existing workflows. The convention is `<topic>.<frequency>` where frequency is one of `daily`, `weekly`, or `monthly`.
 

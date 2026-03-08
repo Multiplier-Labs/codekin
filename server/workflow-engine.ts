@@ -228,6 +228,10 @@ export class WorkflowEngine extends EventEmitter {
     console.log(`[workflow] Registered workflow: ${definition.kind} (${definition.steps.length} steps)`)
   }
 
+  hasWorkflow(kind: string): boolean {
+    return this.workflows.has(kind)
+  }
+
   // -------------------------------------------------------------------------
   // Run management
   // -------------------------------------------------------------------------

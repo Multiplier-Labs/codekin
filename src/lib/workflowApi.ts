@@ -72,6 +72,29 @@ export interface WorkflowConfig {
   reviewRepos: ReviewRepoConfig[]
 }
 
+export interface WorkflowKindInfo {
+  kind: string
+  name: string
+  source: 'builtin' | 'repo'
+}
+
+// ---------------------------------------------------------------------------
+// Kinds
+// ---------------------------------------------------------------------------
+
+export async function listKinds(
+  token: string,
+  repoPath?: string,
+): Promise<WorkflowKindInfo[]> {
+  const params = new URLSearchParams()
+  if (repoPath) params.set('repoPath', repoPath)
+  const qs = params.toString()
+  const res = await fetch(`${BASE}/kinds${qs ? `?${qs}` : ''}`, { headers: headers(token) })
+  if (!res.ok) throw new Error(`Failed to list kinds: ${res.status}`)
+  const data = await res.json()
+  return data.kinds
+}
+
 // ---------------------------------------------------------------------------
 // Runs
 // ---------------------------------------------------------------------------

@@ -530,6 +530,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
       {/* Add Workflow Modal */}
       {showAddForm && (
         <AddWorkflowModal
+          token={token}
           onClose={() => setShowAddForm(false)}
           onAdd={addRepo}
         />
