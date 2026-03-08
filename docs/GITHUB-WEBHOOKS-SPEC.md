@@ -1,6 +1,6 @@
 # GitHub Webhooks Integration — Specification
 
-**Status**: Draft
+**Status**: Phase 1 implemented and in production. Phases 2-4 are roadmap.
 **Date**: 2026-02-23
 **Author**: Codekin Team
 
@@ -723,29 +723,29 @@ Last 100 webhook events stored in memory, accessible via:
 
 ## Implementation Phases
 
-### Phase 1 — Core Webhook Handler
+### Phase 1 — Core Webhook Handler [Implemented]
 
 **Scope**: Receive webhooks, validate, create sessions with failure context.
 
-- [ ] Add `POST /api/webhooks/github` endpoint to `ws-server.ts`
-- [ ] Implement HMAC-SHA256 signature validation (with raw body middleware)
-- [ ] Parse `workflow_run` events with `conclusion: failure`
-- [ ] Fetch failed run logs via `gh run view --log-failed`
-- [ ] Fetch annotations via jobs API → check-runs → annotations traversal chain
-- [ ] Create session with structured prompt
-- [ ] Add `GITHUB_WEBHOOK_SECRET` and `GITHUB_WEBHOOK_ENABLED` env vars
-- [ ] `gh` CLI startup health check (installed, authenticated, `gh api /user` succeeds)
-- [ ] Composite idempotency key deduplication with disk persistence
-- [ ] Rate limiting: HTTP intake (30 req/min per repo) + session cap check (no queuing in Phase 1)
-- [ ] Per-session workspace isolation (bare mirror + session-specific clone)
-- [ ] Bearer token auth on management endpoints (`/api/webhooks/events`, `/config`)
-- [ ] Robot icon on webhook-created session tabs
-- [ ] `source` field on Session types (server + client)
-- [ ] Basic event logging with WebhookEvent state machine transitions
+- [x] Add `POST /api/webhooks/github` endpoint to `ws-server.ts`
+- [x] Implement HMAC-SHA256 signature validation (with raw body middleware)
+- [x] Parse `workflow_run` events with `conclusion: failure`
+- [x] Fetch failed run logs via `gh run view --log-failed`
+- [x] Fetch annotations via jobs API → check-runs → annotations traversal chain
+- [x] Create session with structured prompt
+- [x] Add `GITHUB_WEBHOOK_SECRET` and `GITHUB_WEBHOOK_ENABLED` env vars
+- [x] `gh` CLI startup health check (installed, authenticated, `gh api /user` succeeds)
+- [x] Composite idempotency key deduplication with disk persistence
+- [x] Rate limiting: HTTP intake (30 req/min per repo) + session cap check (no queuing in Phase 1)
+- [x] Per-session workspace isolation (bare mirror + session-specific clone)
+- [x] Bearer token auth on management endpoints (`/api/webhooks/events`, `/config`)
+- [x] Robot icon on webhook-created session tabs
+- [x] `source` field on Session types (server + client)
+- [x] Basic event logging with WebhookEvent state machine transitions
 
 **Deliverable**: Webhooks trigger Claude sessions that diagnose and fix CI failures. Webhook sessions are visually distinct in the UI.
 
-### Phase 2 — Configuration & Modes
+### Phase 2 — Configuration & Modes [Roadmap]
 
 **Scope**: Make behavior configurable, add operating modes.
 
@@ -759,7 +759,7 @@ Last 100 webhook events stored in memory, accessible via:
 
 **Deliverable**: Configurable, production-ready webhook processing.
 
-### Phase 3 — UI Integration
+### Phase 3 — UI Integration [Roadmap]
 
 **Scope**: Surface webhook activity in the frontend.
 
@@ -772,7 +772,7 @@ Last 100 webhook events stored in memory, accessible via:
 
 **Deliverable**: Full visibility into webhook activity from the browser.
 
-### Phase 4 — Expanded Events
+### Phase 4 — Expanded Events [Roadmap]
 
 **Scope**: Handle more GitHub event types.
 
