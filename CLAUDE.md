@@ -1,0 +1,40 @@
+# Codekin
+
+Web-based terminal UI for Claude Code sessions with multi-session support, WebSocket streaming, and slash-command skills.
+
+## Architecture
+
+- **Frontend**: React + Vite + TailwindCSS 4
+- **WebSocket server**: Node.js + Express + ws, runs on port 32352 (configurable)
+- **Claude CLI**: Spawned per-session with `--output-format stream-json --input-format stream-json`
+
+## Development
+
+```bash
+npm install          # install dependencies
+npm run dev          # start Vite dev server
+npm run build        # typecheck + production build
+npm test             # run tests once
+npm run test:watch   # watch mode
+npm run lint         # eslint
+```
+
+## Key Directories
+
+- `src/` — React frontend source
+- `src/components/` — UI components (ChatView, InputBar, RepoSelector, etc.)
+- `src/hooks/` — WebSocket and session hooks
+- `server/` — WebSocket server, Claude process manager, session manager
+- `docs/` — Protocol and setup documentation
+
+## Coding Conventions
+
+- TypeScript strict mode for server code
+- Frontend uses TailwindCSS utility classes with custom color theme defined in `src/index.css`
+- WebSocket message types defined in `src/types.ts` (shared between client and server)
+- Monospace font: Inconsolata; Sans font: Lato
+
+## Output Conventions
+
+- When sharing code snippets, configuration files, or file contents with the user, always use fenced code blocks (```language) so they render properly in the terminal UI
+- Never rely on tool output alone to show file contents — if the user needs to see it, paste it in a code block in your response

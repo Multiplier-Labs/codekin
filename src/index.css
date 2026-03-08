@@ -1,0 +1,655 @@
+@import url('https://fonts.googleapis.com/css2?family=Inconsolata:wght@300..700&family=Lato:wght@300;400;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  /* Primary — warm gold / amber */
+  --color-primary-1: #fef8ec;
+  --color-primary-2: #fcedcc;
+  --color-primary-3: #f8dca0;
+  --color-primary-4: #f0c56e;
+  --color-primary-5: #e4ae42;
+  --color-primary-6: #cf9a2d;
+  --color-primary-7: #9d7440;
+  --color-primary-8: #9e7335;
+  --color-primary-9: #7d5b2a;
+  --color-primary-10: #5c4420;
+  --color-primary-11: #3a2c15;
+  --color-primary-12: #1e170a;
+
+  /* Secondary — warm terracotta / rose (replaces purple/magenta) */
+  --color-secondary-1: #fef5f0;
+  --color-secondary-2: #fce6da;
+  --color-secondary-3: #f5cbb5;
+  --color-secondary-4: #e8ab8d;
+  --color-secondary-5: #d4896a;
+  --color-secondary-6: #b8704f;
+  --color-secondary-7: #9c5d42;
+  --color-secondary-8: #7f4b35;
+  --color-secondary-9: #633a29;
+  --color-secondary-10: #4a2b1e;
+  --color-secondary-11: #321d14;
+  --color-secondary-12: #1c100b;
+
+  /* Accent — teal-blue */
+  --color-accent-1: #eef9fb;
+  --color-accent-2: #d0f0f5;
+  --color-accent-3: #a5e0ea;
+  --color-accent-4: #74cbda;
+  --color-accent-5: #45b5c9;
+  --color-accent-6: #2d9bb0;
+  --color-accent-7: #248192;
+  --color-accent-8: #1d6876;
+  --color-accent-9: #17515c;
+  --color-accent-10: #113c44;
+  --color-accent-11: #0c282e;
+  --color-accent-12: #07171a;
+
+  /* Neutral — teal-tinted grays */
+  --color-neutral-1: #dce4e5;
+  --color-neutral-2: #c6d4d5;
+  --color-neutral-3: #b8ccce;
+  --color-neutral-4: #94aeb1;
+  --color-neutral-5: #748d91;
+  --color-neutral-6: #5c7377;
+  --color-neutral-7: #465c60;
+  --color-neutral-8: #354a4e;
+  --color-neutral-9: #263a3e;
+  --color-neutral-10: #1a2c30;
+  --color-neutral-11: #101e21;
+  --color-neutral-12: #090e0f;
+
+  /* Error — warm red */
+  --color-error-1: #fef2f2;
+  --color-error-2: #fddcdc;
+  --color-error-3: #f9b5b5;
+  --color-error-4: #f28a8a;
+  --color-error-5: #e86060;
+  --color-error-6: #d94444;
+  --color-error-7: #c03636;
+  --color-error-8: #a12c2c;
+  --color-error-9: #822323;
+  --color-error-10: #631b1b;
+  --color-error-11: #411212;
+  --color-error-12: #230a0a;
+
+  /* Warning — warm yellow */
+  --color-warning-1: #fefaec;
+  --color-warning-2: #fdf1c8;
+  --color-warning-3: #fae295;
+  --color-warning-4: #f4ce5e;
+  --color-warning-5: #e8b830;
+  --color-warning-6: #d0a020;
+  --color-warning-7: #b08618;
+  --color-warning-8: #906d12;
+  --color-warning-9: #73560e;
+  --color-warning-10: #56400a;
+  --color-warning-11: #382a07;
+  --color-warning-12: #1e1604;
+
+  /* Success — teal-green */
+  --color-success-1: #effaf5;
+  --color-success-2: #d0f2e2;
+  --color-success-3: #a0e4c4;
+  --color-success-4: #6dd1a2;
+  --color-success-5: #40bc80;
+  --color-success-6: #2da368;
+  --color-success-7: #248854;
+  --color-success-8: #1d6e43;
+  --color-success-9: #175634;
+  --color-success-10: #114027;
+  --color-success-11: #0c2b1a;
+  --color-success-12: #07180e;
+
+  /* Info — cyan-blue */
+  --color-info-1: #eff8fb;
+  --color-info-2: #d0edf5;
+  --color-info-3: #a0d9ea;
+  --color-info-4: #6dc2da;
+  --color-info-5: #40a9c8;
+  --color-info-6: #2d8fb0;
+  --color-info-7: #247592;
+  --color-info-8: #1d5e76;
+  --color-info-9: #17495c;
+  --color-info-10: #113644;
+  --color-info-11: #0c242e;
+  --color-info-12: #07151a;
+
+  /* Font family */
+  --font-sans: 'Lato', sans-serif;
+}
+
+/* Terminal / chat area — warm gray palette.
+   Desaturated ~40% from base teal, shifted warm (R≥G≥B), text lightened 10%.
+   Scoped via .terminal-area so header & sidebar keep original palette. */
+.terminal-area {
+  /* Primary — warm gold, text lightened */
+  --color-primary-1: #fef9f1;
+  --color-primary-2: #faefd8;
+  --color-primary-3: #f5e1b6;
+  --color-primary-4: #eccc8e;
+  --color-primary-5: #deb769;
+  --color-primary-6: #cba557;
+  --color-primary-7: #96754b;
+  --color-primary-8: #977443;
+  --color-primary-9: #775c35;
+  --color-primary-10: #584528;
+  --color-primary-11: #382c1a;
+  --color-primary-12: #1d170d;
+
+  /* Secondary — terracotta, text lightened */
+  --color-secondary-1: #fef6f3;
+  --color-secondary-2: #fbe9e2;
+  --color-secondary-3: #f2d3c3;
+  --color-secondary-4: #e4b8a2;
+  --color-secondary-5: #d09984;
+  --color-secondary-6: #b5826b;
+  --color-secondary-7: #93604b;
+  --color-secondary-8: #774e3c;
+  --color-secondary-9: #5d3c2e;
+  --color-secondary-10: #452d22;
+  --color-secondary-11: #2f1e17;
+  --color-secondary-12: #1a110d;
+
+  /* Accent — warmer teal, text lightened */
+  --color-accent-1: #f4f9f8;
+  --color-accent-2: #ddf0ee;
+  --color-accent-3: #bae1dc;
+  --color-accent-4: #93ccc6;
+  --color-accent-5: #6cb7af;
+  --color-accent-6: #559f97;
+  --color-accent-7: #42847d;
+  --color-accent-8: #356b65;
+  --color-accent-9: #29524d;
+  --color-accent-10: #1e3c39;
+  --color-accent-11: #152928;
+  --color-accent-12: #0c1918;
+
+  /* Neutral — warm gray, teal removed, text lightened */
+  --color-neutral-1: #e2e1de;
+  --color-neutral-2: #d1cfcb;
+  --color-neutral-3: #cccac5;
+  --color-neutral-4: #b0ada7;
+  --color-neutral-5: #93918c;
+  --color-neutral-6: #777571;
+  --color-neutral-7: #555350;
+  --color-neutral-8: #424040;
+  --color-neutral-9: #333130;
+  --color-neutral-10: #272524;
+  --color-neutral-11: #1b1a18;
+  --color-neutral-12: #0f0e0d;
+
+  /* Error — warm red, text lightened */
+  --color-error-1: #fdf5f5;
+  --color-error-2: #f9e1e1;
+  --color-error-3: #f1c0c0;
+  --color-error-4: #e69b9b;
+  --color-error-5: #d97777;
+  --color-error-6: #ca5f5f;
+  --color-error-7: #ad3e3e;
+  --color-error-8: #913333;
+  --color-error-9: #752929;
+  --color-error-10: #591f1f;
+  --color-error-11: #3a1515;
+  --color-error-12: #1f0b0b;
+
+  /* Warning — warm yellow, text lightened */
+  --color-warning-1: #fefbf1;
+  --color-warning-2: #fbf2d6;
+  --color-warning-3: #f7e5ae;
+  --color-warning-4: #eed382;
+  --color-warning-5: #e2bf5d;
+  --color-warning-6: #ccaa4e;
+  --color-warning-7: #a8862e;
+  --color-warning-8: #896d24;
+  --color-warning-9: #6d561c;
+  --color-warning-10: #524015;
+  --color-warning-11: #352a0e;
+  --color-warning-12: #1c1608;
+
+  /* Success — warmer teal-green, text lightened */
+  --color-success-1: #f4faf5;
+  --color-success-2: #daf2e5;
+  --color-success-3: #b5e2ca;
+  --color-success-4: #8ccfab;
+  --color-success-5: #66bb8e;
+  --color-success-6: #53a578;
+  --color-success-7: #3f8559;
+  --color-success-8: #326c48;
+  --color-success-9: #275438;
+  --color-success-10: #1d3f2a;
+  --color-success-11: #142b1d;
+  --color-success-12: #0b1811;
+
+  /* Info — warmer cyan, text lightened */
+  --color-info-1: #f3f9f9;
+  --color-info-2: #daecf0;
+  --color-info-3: #b2d9e0;
+  --color-info-4: #87c1cd;
+  --color-info-5: #5ea8b8;
+  --color-info-6: #478fa0;
+  --color-info-7: #387486;
+  --color-info-8: #2d5d6c;
+  --color-info-9: #234854;
+  --color-info-10: #1a353e;
+  --color-info-11: #12242b;
+  --color-info-12: #0a1519;
+}
+
+/* ── Light mode overrides ────────────────────────────────────────────────── */
+/* Applied when <html data-theme="light"> is set.
+   Strategy: invert the neutral scale (12↔1) so all Tailwind classes flip
+   naturally. Primary/secondary/accent are remapped so mid-range shades remain
+   readable accents on light backgrounds. */
+
+[data-theme="light"] {
+  font-weight: 465;
+
+  /* Neutral — inverted: dark text on light backgrounds */
+  --color-neutral-1:  #0f0e0d;
+  --color-neutral-2:  #1b1a18;
+  --color-neutral-3:  #272524;
+  --color-neutral-4:  #424040;
+  --color-neutral-5:  #555350;
+  --color-neutral-6:  #777571;
+  --color-neutral-7:  #c8c7c4;
+  --color-neutral-8:  #f0ede8;
+  --color-neutral-9:  #f5f3ee;
+  --color-neutral-10: #f8f6f2;
+  --color-neutral-11: #faf9f6;
+  --color-neutral-12: #fdfcfa;
+
+  /* Primary (amber/gold) — light tints as backgrounds, dark shades as text */
+  --color-primary-1:  #3a2c15;
+  --color-primary-2:  #5c4420;
+  --color-primary-3:  #7d5b2a;
+  --color-primary-4:  #9e7335;
+  --color-primary-5:  #b7884a;
+  --color-primary-6:  #cf9a2d;
+  --color-primary-7:  #c39538;
+  --color-primary-8:  #f0c56e;
+  --color-primary-9:  #f8dca0;
+  --color-primary-10: #fcedcc;
+  --color-primary-11: #fef3dc;
+  --color-primary-12: #fef8ec;
+
+  /* Secondary (terracotta) — inverted */
+  --color-secondary-1:  #321d14;
+  --color-secondary-2:  #4a2b1e;
+  --color-secondary-3:  #633a29;
+  --color-secondary-4:  #7f4b35;
+  --color-secondary-5:  #9c5d42;
+  --color-secondary-6:  #b8704f;
+  --color-secondary-7:  #d4896a;
+  --color-secondary-8:  #e8ab8d;
+  --color-secondary-9:  #f5cbb5;
+  --color-secondary-10: #fce6da;
+  --color-secondary-11: #fef0e8;
+  --color-secondary-12: #fef5f0;
+
+  /* Accent (teal-blue) — inverted */
+  --color-accent-1:  #07171a;
+  --color-accent-2:  #113c44;
+  --color-accent-3:  #17515c;
+  --color-accent-4:  #1d6876;
+  --color-accent-5:  #248192;
+  --color-accent-6:  #2d9bb0;
+  --color-accent-7:  #45b5c9;
+  --color-accent-8:  #74cbda;
+  --color-accent-9:  #a5e0ea;
+  --color-accent-10: #d0f0f5;
+  --color-accent-11: #e5f7fa;
+  --color-accent-12: #eef9fb;
+
+  /* Error — inverted */
+  --color-error-1:  #230a0a;
+  --color-error-2:  #631b1b;
+  --color-error-3:  #822323;
+  --color-error-4:  #a12c2c;
+  --color-error-5:  #c03636;
+  --color-error-6:  #d94444;
+  --color-error-7:  #e86060;
+  --color-error-8:  #f28a8a;
+  --color-error-9:  #f9b5b5;
+  --color-error-10: #fddcdc;
+  --color-error-11: #feeded;
+  --color-error-12: #fef2f2;
+
+  /* Warning — inverted */
+  --color-warning-1:  #1e1604;
+  --color-warning-2:  #56400a;
+  --color-warning-3:  #73560e;
+  --color-warning-4:  #906d12;
+  --color-warning-5:  #b08618;
+  --color-warning-6:  #d0a020;
+  --color-warning-7:  #e8b830;
+  --color-warning-8:  #f4ce5e;
+  --color-warning-9:  #fae295;
+  --color-warning-10: #fdf1c8;
+  --color-warning-11: #fef8e5;
+  --color-warning-12: #fefaec;
+
+  /* Success — inverted */
+  --color-success-1:  #07180e;
+  --color-success-2:  #114027;
+  --color-success-3:  #175634;
+  --color-success-4:  #1d6e43;
+  --color-success-5:  #248854;
+  --color-success-6:  #2da368;
+  --color-success-7:  #40bc80;
+  --color-success-8:  #6dd1a2;
+  --color-success-9:  #a0e4c4;
+  --color-success-10: #d0f2e2;
+  --color-success-11: #e5f8ef;
+  --color-success-12: #effaf5;
+
+  /* Info — inverted */
+  --color-info-1:  #07151a;
+  --color-info-2:  #113644;
+  --color-info-3:  #17495c;
+  --color-info-4:  #1d5e76;
+  --color-info-5:  #247592;
+  --color-info-6:  #2d8fb0;
+  --color-info-7:  #40a9c8;
+  --color-info-8:  #6dc2da;
+  --color-info-9:  #a0d9ea;
+  --color-info-10: #d0edf5;
+  --color-info-11: #e5f4fa;
+  --color-info-12: #eff8fb;
+}
+
+/* Light mode — component-specific background overrides */
+[data-theme="light"] .app-logo-circle {
+  background-color: rgba(255, 255, 255, 0.55);
+}
+
+[data-theme="dark"] .app-logo-circle {
+  background-color: var(--color-primary-2);
+}
+
+[data-theme="light"] .app-right-sidebar {
+  background-color: var(--color-neutral-7);
+}
+
+[data-theme="light"] .app-left-sidebar {
+  background-color: var(--color-neutral-9);
+}
+
+[data-theme="light"] .app-left-sidebar button:hover {
+  background-color: color-mix(in srgb, var(--color-neutral-5) 18%, transparent);
+}
+
+[data-theme="light"] .app-new-session-btn:hover {
+  background-color: color-mix(in srgb, var(--color-neutral-5) 18%, transparent);
+}
+
+[data-theme="light"] .app-session-tab:hover {
+  background-color: color-mix(in srgb, var(--color-neutral-5) 18%, transparent);
+}
+
+[data-theme="light"] .app-input-bar {
+  background-color: var(--color-neutral-10);
+}
+
+[data-theme="light"] .app-thinking-badge {
+  background-color: color-mix(in srgb, var(--color-neutral-7) 90%, transparent);
+}
+
+/* User message bubble — darker background in light mode */
+[data-theme="light"] .terminal-area .user-bubble {
+  background-color: color-mix(in srgb, var(--color-neutral-8) 80%, transparent);
+}
+
+/* Terminal area overrides in light mode */
+[data-theme="light"] .terminal-area {
+  --color-neutral-1:  #0f0e0d;
+  --color-neutral-2:  #1b1a18;
+  --color-neutral-3:  #333131;
+  --color-neutral-4:  #424040;
+  --color-neutral-5:  #777571;
+  --color-neutral-6:  #93918c;
+  --color-neutral-7:  #e4e2de;
+  --color-neutral-8:  #eeebe6;
+  --color-neutral-9:  #f3f1ec;
+  --color-neutral-10: #f7f5f0;
+  --color-neutral-11: #faf9f6;
+  --color-neutral-12: #fdf9f4;
+
+  --color-primary-1:  #382c1a;
+  --color-primary-2:  #584528;
+  --color-primary-3:  #775c35;
+  --color-primary-4:  #977443;
+  --color-primary-5:  #af8958;
+  --color-primary-6:  #cba557;
+  --color-primary-7:  #be9d5a;
+  --color-primary-8:  #eccc8e;
+  --color-primary-9:  #f5e1b6;
+  --color-primary-10: #faefd8;
+  --color-primary-11: #fdf5e8;
+  --color-primary-12: #fef9f1;
+
+  --color-accent-1:  #0c1918;
+  --color-accent-2:  #1e3c39;
+  --color-accent-3:  #29524d;
+  --color-accent-4:  #356b65;
+  --color-accent-5:  #42847d;
+  --color-accent-6:  #559f97;
+  --color-accent-7:  #6cb7af;
+  --color-accent-8:  #93ccc6;
+  --color-accent-9:  #bae1dc;
+  --color-accent-10: #ddf0ee;
+  --color-accent-11: #edf8f7;
+  --color-accent-12: #f4f9f8;
+
+  --color-error-1:  #1f0b0b;
+  --color-error-2:  #591f1f;
+  --color-error-3:  #752929;
+  --color-error-4:  #913333;
+  --color-error-5:  #ad3e3e;
+  --color-error-6:  #ca5f5f;
+  --color-error-7:  #d97777;
+  --color-error-8:  #e69b9b;
+  --color-error-9:  #f1c0c0;
+  --color-error-10: #f9e1e1;
+  --color-error-11: #fceeed;
+  --color-error-12: #fdf5f5;
+
+  --color-warning-1:  #1c1608;
+  --color-warning-2:  #524015;
+  --color-warning-3:  #6d561c;
+  --color-warning-4:  #896d24;
+  --color-warning-5:  #a8862e;
+  --color-warning-6:  #ccaa4e;
+  --color-warning-7:  #e2bf5d;
+  --color-warning-8:  #eed382;
+  --color-warning-9:  #f7e5ae;
+  --color-warning-10: #fbf2d6;
+  --color-warning-11: #fdf8e8;
+  --color-warning-12: #fefbf1;
+
+  --color-success-1:  #0b1811;
+  --color-success-2:  #1d3f2a;
+  --color-success-3:  #275438;
+  --color-success-4:  #326c48;
+  --color-success-5:  #3f8559;
+  --color-success-6:  #53a578;
+  --color-success-7:  #66bb8e;
+  --color-success-8:  #8ccfab;
+  --color-success-9:  #b5e2ca;
+  --color-success-10: #daf2e5;
+  --color-success-11: #ecf9f2;
+  --color-success-12: #f4faf5;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  font-family: 'Lato', sans-serif;
+}
+
+/* Chat scrollbar */
+.chat-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.chat-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-neutral-8), black 10%);
+  border-radius: 3px;
+}
+.chat-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--color-neutral-6);
+}
+
+/* Approvals scrollbar */
+.approvals-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+.approvals-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.approvals-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-neutral-8), black 10%);
+  border-radius: 3px;
+}
+.approvals-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--color-neutral-6);
+}
+
+/* Prose overrides — shared structural rules */
+.prose.prose-themed code {
+  font-family: 'Inconsolata', monospace;
+}
+
+.prose.prose-themed pre {
+  background: var(--color-neutral-11);
+  border: 1px solid var(--color-neutral-9);
+}
+
+.prose.prose-themed a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.prose.prose-themed p {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.prose.prose-themed h1,
+.prose.prose-themed h2,
+.prose.prose-themed h3,
+.prose.prose-themed h4 {
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+}
+
+.prose.prose-themed ul,
+.prose.prose-themed ol {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+}
+
+.prose.prose-themed table {
+  border-collapse: collapse;
+}
+
+.prose.prose-themed th,
+.prose.prose-themed td {
+  padding: 0.25em 0.75em;
+  border: 1px solid var(--color-neutral-9);
+}
+
+/* Dark mode prose tokens */
+[data-theme="dark"] .prose.prose-themed {
+  --tw-prose-body: var(--color-neutral-2);
+  --tw-prose-headings: var(--color-neutral-1);
+  --tw-prose-links: var(--color-accent-5);
+  --tw-prose-bold: var(--color-neutral-1);
+  --tw-prose-code: var(--color-accent-4);
+  --tw-prose-pre-bg: var(--color-neutral-11);
+  --tw-prose-pre-code: var(--color-neutral-2);
+  --tw-prose-quotes: var(--color-neutral-3);
+  --tw-prose-quote-borders: var(--color-neutral-8);
+  --tw-prose-hr: var(--color-neutral-9);
+  --tw-prose-th-borders: var(--color-neutral-8);
+  --tw-prose-td-borders: var(--color-neutral-9);
+  color: var(--color-neutral-2);
+}
+
+/* Light mode prose tokens */
+[data-theme="light"] .prose.prose-themed {
+  --tw-prose-body: var(--color-neutral-2);
+  --tw-prose-headings: var(--color-neutral-1);
+  --tw-prose-links: var(--color-accent-5);
+  --tw-prose-bold: var(--color-neutral-1);
+  --tw-prose-code: var(--color-accent-4);
+  --tw-prose-pre-bg: var(--color-neutral-9);
+  --tw-prose-pre-code: var(--color-neutral-2);
+  --tw-prose-quotes: var(--color-neutral-3);
+  --tw-prose-quote-borders: var(--color-neutral-7);
+  --tw-prose-hr: var(--color-neutral-8);
+  --tw-prose-th-borders: var(--color-neutral-7);
+  --tw-prose-td-borders: var(--color-neutral-8);
+  color: var(--color-neutral-2);
+}
+
+/* Keep prose-invert alias working (used elsewhere by Tailwind Typography) */
+.prose.prose-invert {
+  --tw-prose-body: var(--color-neutral-2);
+  --tw-prose-headings: var(--color-neutral-1);
+  --tw-prose-links: var(--color-accent-5);
+  --tw-prose-bold: var(--color-neutral-1);
+  --tw-prose-code: var(--color-accent-4);
+  --tw-prose-pre-bg: var(--color-neutral-11);
+  --tw-prose-pre-code: var(--color-neutral-2);
+  --tw-prose-quotes: var(--color-neutral-3);
+  --tw-prose-quote-borders: var(--color-neutral-8);
+  --tw-prose-hr: var(--color-neutral-9);
+  --tw-prose-th-borders: var(--color-neutral-8);
+  --tw-prose-td-borders: var(--color-neutral-9);
+}
+
+.prose.prose-invert code {
+  font-family: 'Inconsolata', monospace;
+}
+
+.prose.prose-invert pre {
+  background: var(--color-neutral-11);
+  border: 1px solid var(--color-neutral-9);
+}
+
+.prose.prose-invert a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.prose.prose-invert p {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.prose.prose-invert h1,
+.prose.prose-invert h2,
+.prose.prose-invert h3,
+.prose.prose-invert h4 {
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+}
+
+.prose.prose-invert ul,
+.prose.prose-invert ol {
+  margin-top: 0.25em;
+  margin-bottom: 0.25em;
+}
+
+.prose.prose-invert table {
+  border-collapse: collapse;
+}
+
+.prose.prose-invert th,
+.prose.prose-invert td {
+  padding: 0.25em 0.75em;
+  border: 1px solid var(--color-neutral-9);
+}

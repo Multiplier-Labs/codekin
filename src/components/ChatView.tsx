@@ -1,0 +1,441 @@
+/**
+ * Main chat display area for a Claude session.
+ *
+ * Renders a scrollable message feed with system banners, user bubbles,
+ * markdown-rendered assistant responses (with syntax highlighting),
+ * collapsible tool activity groups, and an activity indicator showing
+ * what Claude is currently doing.
+ *
+ * Auto-scrolls to the bottom on new messages when the user is near the
+ * bottom, with a manual "scroll to bottom" button when scrolled up.
+ */
+
+import { useEffect, useRef, useCallback, useState } from 'react'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { IconArrowDown } from '@tabler/icons-react'
+import type { ChatMessage } from '../types'
+import { formatModelName, formatUserText } from '../lib/chatFormatters'
+
+interface Props {
+  messages: ChatMessage[]
+  fontSize: number
+  theme?: 'dark' | 'light'
+  disabled?: boolean
+  planningMode?: boolean
+  activityLabel?: string
+}
+
+function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
+  const colorClass = msg.subtype === 'init'
+    ? 'text-success-5'
+    : msg.subtype === 'exit' || msg.subtype === 'stall'
+    ? 'text-warning-5'
+    : msg.subtype === 'restart'
+    ? 'text-warning-5'
+    : 'text-error-5'
+
+  const dotClass = msg.subtype === 'init'
+    ? 'bg-success-5'
+    : msg.subtype === 'exit' || msg.subtype === 'stall' || msg.subtype === 'restart'
+    ? 'bg-warning-5'
+    : 'bg-error-5'
+
+  const modelLabel = msg.model ? ` (${formatModelName(msg.model)})` : ''
+
+  return (
+    <div className={`px-4 py-1.5 text-[15px] ${colorClass} flex items-center gap-2`}>
+      <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotClass} flex-shrink-0`} />
+      {msg.text}{modelLabel}
+    </div>
+  )
+}
+
+function UserMessage({ msg, fontSize }: { msg: ChatMessage & { type: 'user' }; fontSize: number }) {
+  return (
+    <div className="px-4 py-2">
+      <div
+        className="user-bubble max-w-[80%] rounded-lg bg-neutral-10/60 px-3 py-2 text-neutral-3 whitespace-pre-wrap"
+        style={{ fontSize: `${fontSize}px` }}
+      >
+        {formatUserText(msg.text)}
+      </div>
+    </div>
+  )
+}
+
+function CodeCopyButton({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }, [code])
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="absolute top-2 right-2 rounded p-1 opacity-0 transition-opacity group-hover/codeblock:opacity-100 bg-neutral-8/80 hover:bg-neutral-7 text-neutral-4 hover:text-neutral-2 cursor-pointer"
+      title="Copy to clipboard"
+    >
+      {copied ? (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+      ) : (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" /></svg>
+      )}
+    </button>
+  )
+}
+
+function AssistantMessage({ msg, fontSize, theme }: { msg: ChatMessage & { type: 'assistant' }; fontSize: number; theme: 'dark' | 'light' }) {
+  const codeStyle = theme === 'light' ? vs : vscDarkPlus
+  return (
+    <div className="px-4 py-2">
+      <div
+        className="prose prose-themed max-w-none"
+        style={{ fontSize: `${fontSize}px` }}
+      >
+        <Markdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            code({ className, children, ...props }) {
+              const match = /language-(\w+)/.exec(className || '')
+              const codeString = String(children).replace(/\n$/, '')
+              if (match) {
+                return (
+                  <div className="group/codeblock relative">
+                    <SyntaxHighlighter
+                      style={codeStyle}
+                      language={match[1]}
+                      PreTag="div"
+                      customStyle={{
+                        margin: '0.5em 0',
+                        borderRadius: '6px',
+                        fontSize: `${fontSize - 1}px`,
+                      }}
+                    >
+                      {codeString}
+                    </SyntaxHighlighter>
+                    <CodeCopyButton code={codeString} />
+                  </div>
+                )
+              }
+              return (
+                <code className={`${className || ''} rounded bg-neutral-10 px-1.5 py-0.5`} {...props}>
+                  {children}
+                </code>
+              )
+            },
+          }}
+        >
+          {msg.text}
+        </Markdown>
+      </div>
+    </div>
+  )
+}
+
+function ToolGroupInline({ msg, fontSize }: { msg: ChatMessage & { type: 'tool_group' }; fontSize: number }) {
+  const smallSize = fontSize - 1
+  return (
+    <div
+      className="flex flex-wrap gap-x-4 gap-y-0.5 text-neutral-4"
+      style={{ fontSize: `${smallSize}px`, fontFamily: "'Inconsolata', monospace" }}
+    >
+      {msg.tools.map((tool, i) => (
+        <span key={i} className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
+          {tool.active ? (
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary-5 animate-pulse flex-shrink-0" />
+          ) : (
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-neutral-6 flex-shrink-0" />
+          )}
+          <span className="text-accent-6">{tool.name}</span>
+          {tool.summary && (
+            <span className="text-neutral-5 truncate max-w-[400px]">{tool.summary}</span>
+          )}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function ToolOutputInline({ msg, fontSize }: { msg: ChatMessage & { type: 'tool_output' }; fontSize: number }) {
+  const [expanded, setExpanded] = useState(false)
+  const smallSize = fontSize - 1
+  const colorClass = msg.isError ? 'text-error-5' : 'text-neutral-5'
+  const lines = msg.content.split('\n')
+  const collapsible = lines.length > 3
+  const displayContent = collapsible && !expanded
+    ? lines.slice(0, 3).join('\n')
+    : msg.content
+  return (
+    <div
+      className={`pl-4 py-0.5 ${colorClass}`}
+      style={{ fontSize: `${smallSize}px`, fontFamily: "'Inconsolata', monospace" }}
+    >
+      <div className="whitespace-pre-wrap break-all">{displayContent}</div>
+      {collapsible && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-neutral-6 hover:text-neutral-3 transition-colors mt-0.5"
+          style={{ fontSize: `${smallSize}px` }}
+        >
+          {expanded ? '▴ collapse' : `▾ ${lines.length - 3} more lines`}
+        </button>
+      )}
+    </div>
+  )
+}
+
+interface ToolRun {
+  groups: (ChatMessage & { type: 'tool_group' })[]
+  outputs: (ChatMessage & { type: 'tool_output' })[]
+}
+
+function ToolActivity({ run, fontSize }: { run: ToolRun; fontSize: number }) {
+  const hasActive = run.groups.some(g => g.tools.some(t => t.active))
+  const [expanded, setExpanded] = useState(false)
+  const isOpen = hasActive || expanded
+  const smallSize = fontSize - 1
+
+  // Collect all unique tool names for the summary
+  const allTools = run.groups.flatMap(g => g.tools)
+  const uniqueNames = [...new Set(allTools.map(t => t.name))]
+  const toolCount = allTools.length
+  const errorCount = run.outputs.filter(o => o.isError).length
+
+  return (
+    <div className="px-4 py-0.5">
+      <button
+        onClick={() => setExpanded(!isOpen)}
+        className="flex items-center gap-1.5 text-neutral-5 hover:text-neutral-3 transition-colors w-full text-left"
+        style={{ fontSize: `${smallSize}px`, fontFamily: "'Inconsolata', monospace" }}
+      >
+        {hasActive ? (
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary-5 animate-pulse flex-shrink-0" />
+        ) : (
+          <span className="text-neutral-6 flex-shrink-0">{isOpen ? '▾' : '▸'}</span>
+        )}
+        <span className="text-neutral-5">
+          {toolCount} tool{toolCount !== 1 ? ' calls' : ' call'}
+          {' — '}
+          <span className="text-accent-6">{uniqueNames.slice(0, 4).join(', ')}{uniqueNames.length > 4 ? ` +${uniqueNames.length - 4}` : ''}</span>
+          {errorCount > 0 && <span className="text-error-5 ml-1">({errorCount} error{errorCount !== 1 ? 's' : ''})</span>}
+        </span>
+      </button>
+      {isOpen && (
+        <div className="pl-3 mt-0.5 border-l border-neutral-9/50">
+          {run.groups.map((g, gi) => (
+            <div key={`g-${gi}`}>
+              <ToolGroupInline msg={g} fontSize={fontSize} />
+            </div>
+          ))}
+          {run.outputs.map((o, oi) => (
+            <ToolOutputInline key={`o-${oi}`} msg={o} fontSize={fontSize} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TentativeMessage({ msg, fontSize }: { msg: ChatMessage & { type: 'tentative' }; fontSize: number }) {
+  return (
+    <div className="px-4 py-2">
+      <div
+        className="max-w-[80%] rounded-lg border-l-2 border-warning-6 bg-warning-11/20 px-3 py-2 text-neutral-4 whitespace-pre-wrap"
+        style={{ fontSize: `${fontSize}px` }}
+      >
+        <div className="mb-1 text-[13px] text-warning-5 uppercase tracking-wider">queued</div>
+        {msg.text}
+      </div>
+    </div>
+  )
+}
+
+function PlanningModeMessage({ msg }: { msg: ChatMessage & { type: 'planning_mode' } }) {
+  return (
+    <div className="px-4 py-1.5 text-[15px] text-primary-5 flex items-center gap-2">
+      <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary-5 flex-shrink-0" />
+      {msg.active ? 'Entered plan mode' : 'Exited plan mode'}
+    </div>
+  )
+}
+
+function ActivityIndicator({ label }: { label: string }) {
+  const [elapsed, setElapsed] = useState(0)
+  const startRef = useRef(0)
+
+  // Reset timer when label changes
+  useEffect(() => {
+    startRef.current = Date.now()
+    setElapsed(0) // eslint-disable-line react-hooks/set-state-in-effect -- timer reset
+    const interval = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startRef.current) / 1000))
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [label])
+
+  return (
+    <div className="px-4 pt-4 pb-2">
+      <div className="app-thinking-badge inline-flex items-center gap-2 rounded-lg bg-neutral-9/80 px-3.5 py-2">
+        <svg
+          className="h-4 w-4 animate-[spin_3s_linear_infinite]"
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ color: 'var(--color-primary-7)' }}
+        >
+          <path d="M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0" />
+          <path d="M12 21l0 .01" />
+          <path d="M3 9l0 .01" />
+          <path d="M21 9l0 .01" />
+          <path d="M8 20.1a9 9 0 0 1 -5 -7.1" />
+          <path d="M16 20.1a9 9 0 0 0 5 -7.1" />
+          <path d="M6.2 5a9 9 0 0 1 11.4 0" />
+        </svg>
+        <span className="text-[13px] text-neutral-4 tracking-wide">{label}</span>
+        {elapsed >= 10 && (
+          <span className="text-[12px] text-neutral-5">{elapsed}s</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export function ChatView({ messages, fontSize, theme = 'dark', disabled, planningMode, activityLabel }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [showScrollButton, setShowScrollButton] = useState(false)
+  const isNearBottomRef = useRef(true)
+
+  const checkScroll = useCallback(() => {
+    const el = containerRef.current
+    if (!el) return
+    const threshold = 100
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
+    isNearBottomRef.current = nearBottom
+    setShowScrollButton(!nearBottom)
+  }, [])
+
+  // Auto-scroll on new messages if near bottom
+  useEffect(() => {
+    if (isNearBottomRef.current && containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight
+    }
+  }, [messages])
+
+  const scrollToBottom = useCallback(() => {
+    if (containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight
+      setShowScrollButton(false)
+      isNearBottomRef.current = true
+    }
+  }, [])
+
+  return (
+    <div className="relative flex flex-1 min-h-0 w-full flex-col">
+      {planningMode && (
+        <div className="z-10 flex items-center gap-2 border-b border-primary-9/50 bg-primary-11/80 px-4 py-1.5 text-[15px] text-primary-5 backdrop-blur-sm flex-shrink-0">
+          <span className="inline-block h-2 w-2 rounded-full bg-primary-5 animate-pulse" />
+          Plan Mode
+        </div>
+      )}
+      <div
+        ref={containerRef}
+        className="chat-scroll flex-1 overflow-y-auto min-h-0"
+        onScroll={checkScroll}
+      >
+        <div className="flex flex-col py-2">
+          {(() => {
+            let lastShownTs = 0
+            const nodes: React.ReactNode[] = []
+
+            // Group consecutive tool_group + tool_output messages into ToolRuns
+            let i = 0
+            while (i < messages.length) {
+              const msg = messages[i]
+
+              // Check for timestamps on user/assistant messages
+              const ts = (msg as ChatMessage & { ts?: number }).ts
+              if (ts && (msg.type === 'user' || msg.type === 'assistant') && ts - lastShownTs >= 60_000) {
+                lastShownTs = ts
+                const d = new Date(ts)
+                const hh = String(d.getHours()).padStart(2, '0')
+                const mm = String(d.getMinutes()).padStart(2, '0')
+                nodes.push(<div key={`ts-${msg.key || i}`} className="px-4 pt-3 pb-0.5 text-[13px] text-neutral-6">{hh}:{mm}</div>)
+              }
+
+              // Collect consecutive tool_group/tool_output into a single ToolActivity
+              if (msg.type === 'tool_group' || msg.type === 'tool_output') {
+                const run: ToolRun = { groups: [], outputs: [] }
+                const startIdx = i
+                while (i < messages.length && (messages[i].type === 'tool_group' || messages[i].type === 'tool_output')) {
+                  const m = messages[i]
+                  if (m.type === 'tool_group') run.groups.push(m as ChatMessage & { type: 'tool_group' })
+                  if (m.type === 'tool_output') run.outputs.push(m as ChatMessage & { type: 'tool_output' })
+                  i++
+                }
+                const taKey = run.groups[0]?.key || run.outputs[0]?.key || `ta-${startIdx}`
+                nodes.push(<ToolActivity key={taKey} run={run} fontSize={fontSize} />)
+                continue
+              }
+
+              let node: React.ReactNode
+              switch (msg.type) {
+                case 'system':
+                  if (msg.subtype === 'trim') {
+                    node = <div key={msg.key || i} className="px-4 py-1.5 text-[15px] text-neutral-6 flex items-center gap-2">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-neutral-6 flex-shrink-0" />
+                      Older messages trimmed
+                    </div>
+                    break
+                  }
+                  node = <SystemMessage key={msg.key || i} msg={msg} />; break
+                case 'user':
+                  node = <UserMessage key={msg.key || i} msg={msg} fontSize={fontSize} />; break
+                case 'assistant':
+                  node = <AssistantMessage key={msg.key || i} msg={msg} fontSize={fontSize} theme={theme} />; break
+                case 'planning_mode':
+                  node = <PlanningModeMessage key={msg.key || i} msg={msg} />; break
+                case 'todo_list':
+                  node = null; break
+                case 'tentative':
+                  node = <TentativeMessage key={msg.key || `tentative-${msg.index}`} msg={msg} fontSize={fontSize} />; break
+              }
+              nodes.push(node)
+              i++
+            }
+            return nodes
+          })()}
+          {activityLabel && <ActivityIndicator label={activityLabel} />}
+        </div>
+      </div>
+
+      {/* Scroll to bottom indicator */}
+      {showScrollButton && (
+        <button
+          onClick={scrollToBottom}
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-neutral-8/90 p-2 text-neutral-3 shadow-lg transition hover:bg-neutral-7 hover:text-neutral-1"
+          title="Scroll to bottom"
+        >
+          <IconArrowDown size={16} stroke={2} />
+        </button>
+      )}
+
+      {disabled && (
+        <div className="absolute inset-0 flex items-center justify-center bg-neutral-12/80">
+          <p className="text-[15px] text-neutral-3">Configure token in Settings to use chat</p>
+        </div>
+      )}
+
+    </div>
+  )
+}

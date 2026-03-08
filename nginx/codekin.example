@@ -1,0 +1,111 @@
+  # Codekin nginx example configuration
+  #
+  # Replace YOUR_DOMAIN with your actual domain (e.g., codekin.example.com)
+  # Replace /var/www/codekin with your frontend web root
+  # Adjust port 32352 if you changed the default
+  #
+  # This example uses Authelia for authentication. Remove or replace
+  # the auth_request blocks if using a different auth solution.
+
+  server {
+      server_name YOUR_DOMAIN;
+
+      # Authelia authorization endpoint (internal only)
+      location /authelia/authz {
+          internal;
+          proxy_pass http://127.0.0.1:9091/authelia/api/authz/auth-request;
+
+          proxy_set_header X-Original-Method $request_method;
+          proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
+          proxy_set_header X-Forwarded-For $remote_addr;
+          proxy_set_header Content-Length "";
+          proxy_set_header Connection "";
+          proxy_pass_request_body off;
+      }
+
+      # Authelia UI + static assets (all under /authelia/)
+      location ^~ /authelia/ {
+          proxy_pass http://127.0.0.1:9091;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+      }
+
+      # GitHub webhooks — no Authelia auth (validated by HMAC signature instead)
+      location = /cc/api/webhooks/github {
+          proxy_pass http://127.0.0.1:32352/api/webhooks/github;
+          proxy_http_version 1.1;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+      }
+
+      # Protected: cc-web backend (API + WebSocket, including uploads)
+      location /cc/ {
+          auth_request /authelia/authz;
+
+          auth_request_set $user $upstream_http_remote_user;
+          auth_request_set $groups $upstream_http_remote_groups;
+          auth_request_set $name $upstream_http_remote_name;
+          auth_request_set $email $upstream_http_remote_email;
+
+          proxy_set_header Remote-User $user;
+          proxy_set_header Remote-Groups $groups;
+          proxy_set_header Remote-Email $email;
+          proxy_set_header Remote-Name $name;
+
+          auth_request_set $redirection_url $upstream_http_location;
+          error_page 401 =302 $redirection_url;
+
+          # Strip /cc/ prefix and proxy to cc-web
+          proxy_pass http://127.0.0.1:32352/;
+          proxy_http_version 1.1;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection "upgrade";
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+          proxy_read_timeout 86400;
+          client_max_body_size 10m;
+      }
+
+      # Protected: Frontend UI (static files)
+      location / {
+          auth_request /authelia/authz;
+
+          auth_request_set $user $upstream_http_remote_user;
+          auth_request_set $groups $upstream_http_remote_groups;
+          auth_request_set $name $upstream_http_remote_name;
+          auth_request_set $email $upstream_http_remote_email;
+
+          proxy_set_header Remote-User $user;
+          proxy_set_header Remote-Groups $groups;
+          proxy_set_header Remote-Email $email;
+          proxy_set_header Remote-Name $name;
+
+          auth_request_set $redirection_url $upstream_http_location;
+          error_page 401 =302 $redirection_url;
+
+          root /var/www/codekin;
+          try_files $uri $uri/ /index.html;
+      }
+
+      listen 443 ssl;
+      ssl_certificate /etc/letsencrypt/live/YOUR_DOMAIN/fullchain.pem;
+      ssl_certificate_key /etc/letsencrypt/live/YOUR_DOMAIN/privkey.pem;
+      include /etc/letsencrypt/options-ssl-nginx.conf;
+      ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+  }
+
+  server {
+      if ($host = YOUR_DOMAIN) {
+          return 301 https://$host$request_uri;
+      }
+
+      listen 80;
+      server_name YOUR_DOMAIN;
+      return 404;
+  }

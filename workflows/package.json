@@ -1,0 +1,21 @@
+{
+  "name": "codekin-workflows",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone Stepflow-based workflow services for Codekin",
+  "type": "module",
+  "scripts": {
+    "coverage": "tsx coverage-assessment.ts",
+    "coverage:build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@multiplier-labs/stepflow": "latest",
+    "better-sqlite3": "^12.6.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

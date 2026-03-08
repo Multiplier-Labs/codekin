@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#e4ae42" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+  <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+  <!-- Center nucleus ring -->
+  <path d="M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0" />
+  <!-- Inner filled core -->
+  <circle cx="12" cy="12" r="0.75" fill="#e4ae42" stroke="none" />
+  <!-- Orbital arcs -->
+  <path d="M8 20.1a9 9 0 0 1 -5 -7.1" />
+  <path d="M16 20.1a9 9 0 0 0 5 -7.1" />
+  <path d="M6.2 5a9 9 0 0 1 11.4 0" />
+  <!-- Orbital endpoint dots -->
+  <circle cx="12" cy="21" r="1" fill="#e4ae42" stroke="none" />
+  <circle cx="3" cy="9" r="1" fill="#e4ae42" stroke="none" />
+  <circle cx="21" cy="9" r="1" fill="#e4ae42" stroke="none" />
+</svg>
