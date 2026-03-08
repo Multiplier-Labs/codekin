@@ -11,6 +11,7 @@ import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { IconPlus } from '@tabler/icons-react'
 import type { Repo } from '../types'
 import type { ApiRepo, RepoGroup } from '../hooks/useRepos'
+import { RepoList } from './RepoList'
 
 interface Props {
   groups: RepoGroup[]
@@ -125,45 +126,13 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
               className="w-full rounded border border-neutral-10 bg-neutral-11 px-2.5 py-1.5 text-[15px] text-neutral-2 placeholder-neutral-8 outline-none focus:border-primary-8/50"
             />
           </div>
-          <div className="max-h-72 overflow-y-auto px-1 pb-1">
-            {groups.map(group => (
-              <div key={group.owner}>
-                <div className="px-2.5 pb-1 pt-2 text-[12px] font-medium uppercase tracking-wider text-neutral-7">
-                  {group.owner}
-                </div>
-                {group.repos.map(repo => {
-                  const isCloning = cloning === repo.id
-                  return (
-                    <button
-                      key={`${group.owner}/${repo.id}`}
-                      onClick={() => handleSelect(repo)}
-                      disabled={!!cloning}
-                      className={`w-full rounded px-2.5 py-1.5 text-left transition ${
-                        cloning ? 'cursor-wait' : 'hover:bg-neutral-10/50'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <span className={`text-[15px] font-medium ${repo.cloned ? 'text-neutral-2' : 'text-neutral-5'}`}>
-                          {repo.name}
-                        </span>
-                        {isCloning && (
-                          <span className="rounded bg-primary-9/30 px-1.5 py-0.5 text-[12px] text-primary-4 animate-pulse">cloning...</span>
-                        )}
-                        {!repo.cloned && !isCloning && (
-                          <span className="rounded bg-neutral-10 px-1.5 py-0.5 text-[12px] text-neutral-7">remote</span>
-                        )}
-                      </div>
-                      {repo.description && (
-                        <div className="mt-0.5 text-[13px] text-neutral-7 truncate">{repo.description}</div>
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-            ))}
-            {groups.length === 0 && (
-              <p className="py-4 text-center text-[15px] text-neutral-5">No repos found</p>
-            )}
+          <div className="px-2 pb-2">
+            <RepoList
+              groups={groups}
+              onSelect={handleSelect}
+              cloningId={cloning}
+              maxHeight="240px"
+            />
           </div>
         </div>
       )}
