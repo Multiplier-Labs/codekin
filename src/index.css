@@ -654,20 +654,3 @@ html, body, #root {
   border: 1px solid var(--color-neutral-9);
 }
 
-/* Themed time input — dark/light color-scheme + icon contrast */
-[data-theme="dark"] .themed-time-input {
-  color-scheme: dark;
-}
-
-[data-theme="light"] .themed-time-input {
-  color-scheme: light;
-}
-
-.themed-time-input::-webkit-calendar-picker-indicator {
-  filter: var(--time-icon-filter, none);
-  cursor: pointer;
-}
-
-[data-theme="dark"] .themed-time-input::-webkit-calendar-picker-indicator {
-  filter: invert(0.8) sepia(0.1) saturate(0.5) hue-rotate(160deg);
-}

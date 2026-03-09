@@ -9,9 +9,9 @@ import type { ReviewRepoConfig } from '../lib/workflowApi'
 import {
   WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL, isBiweeklyDow,
   buildCron, parseCron, describeCron, kindLabel,
-  toTimeValue, fromTimeValue,
 } from '../lib/workflowHelpers'
 import { CategoryBadge } from './WorkflowBadges'
+import TimePicker from './TimePicker'
 
 const btnClass = (selected: boolean) =>
   `rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
@@ -116,15 +116,11 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
           {/* Schedule */}
           <div>
             <label className="block text-[13px] font-medium text-neutral-3 mb-2">Time</label>
-            <input
-              type="time"
-              step={900}
-              value={toTimeValue(form.cronHour, form.cronMinute)}
-              onChange={e => {
-                const { hour, minute } = fromTimeValue(e.target.value)
-                setForm(f => ({ ...f, cronHour: hour, cronMinute: minute }))
-              }}
-              className="rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-1 focus:border-accent-6 focus:outline-none w-40 mb-3 themed-time-input"
+            <TimePicker
+              hour={form.cronHour}
+              minute={form.cronMinute}
+              onChange={(h, m) => setForm(f => ({ ...f, cronHour: h, cronMinute: m }))}
+              className="mb-3"
             />
             <label className="block text-[13px] font-medium text-neutral-3 mb-2">Frequency</label>
             <div className="flex flex-wrap gap-1.5 mb-2">
