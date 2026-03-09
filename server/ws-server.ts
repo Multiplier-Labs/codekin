@@ -18,7 +18,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { execSync } from 'child_process'
-import { randomUUID } from 'crypto'
+import { randomUUID, timingSafeEqual } from 'crypto'
 import { SessionManager } from './session-manager.js'
 import type { WsClientMessage, WsServerMessage } from './types.js'
 import { loadWebhookConfig } from './webhook-config.js'
@@ -62,10 +62,15 @@ if (authToken) {
   console.warn('   Set AUTH_TOKEN or AUTH_TOKEN_FILE to secure the server.')
 }
 
-/** Check if a token matches the configured auth token (passes if no auth configured). */
+/** Check if a token matches the configured auth token. Fails closed when no token is configured. */
 function verifyToken(token: string | undefined): boolean {
-  if (!authToken) return true  // No auth configured
-  return token === authToken
+  if (!authToken) return false  // No auth configured — fail closed
+  if (!token) return false
+  // Timing-safe comparison to prevent timing attacks
+  const a = Buffer.from(authToken)
+  const b = Buffer.from(token)
+  if (a.length !== b.length) return false
+  return timingSafeEqual(a, b)
 }
 
 /** Extract auth token from query string, Authorization header, or request body. */
@@ -118,7 +123,8 @@ const webhookHandler = new WebhookHandler(webhookConfig, sessions)
 // Run gh health check asynchronously at startup
 if (webhookConfig.enabled) {
   if (!webhookConfig.secret) {
-    console.warn('[webhook] GITHUB_WEBHOOK_SECRET not set — webhook signature validation will fail')
+    console.error('[webhook] FATAL: GITHUB_WEBHOOK_ENABLED is set but GITHUB_WEBHOOK_SECRET is missing. Refusing to accept unsigned webhooks.')
+    process.exit(1)
   }
   webhookHandler.checkHealth().then(healthy => {
     if (healthy) {

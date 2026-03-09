@@ -38,9 +38,10 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
   const [retentionDays, setRetentionDays] = useState(7)
   const [supportProvider, setSupportProviderState] = useState<SupportProvider>('auto')
   const [availableProviders, setAvailableProviders] = useState<string[]>([])
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // Re-sync token input when settings change or modal reopens
-  useEffect(() => { setTokenInput(settings.token); setStatus('idle') }, [settings.token, open]) // eslint-disable-line react-hooks/set-state-in-effect -- sync on reopen
+  useEffect(() => { setTokenInput(settings.token); setStatus('idle'); setSaveError(null) }, [settings.token, open]) // eslint-disable-line react-hooks/set-state-in-effect -- sync on reopen
 
   // Fetch server-side settings when modal opens
   useEffect(() => {
@@ -112,7 +113,7 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
           onChange={e => {
             const provider = e.target.value as SupportProvider
             setSupportProviderState(provider)
-            setSupportProvider(settings.token, provider).catch(() => {})
+            setSupportProvider(settings.token, provider).catch(() => setSaveError('Failed to save provider setting'))
           }}
           className="rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
         >
@@ -143,7 +144,7 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
             onChange={e => {
               const days = Math.max(1, Math.min(365, Number(e.target.value)))
               setRetentionDays(days)
-              setRetentionDaysApi(settings.token, days).catch(() => {})
+              setRetentionDaysApi(settings.token, days).catch(() => setSaveError('Failed to save retention setting'))
             }}
             className="w-20 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
           />
@@ -174,6 +175,10 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
             Light
           </button>
         </div>
+
+        {saveError && (
+          <p className="mt-2 text-[13px] text-error-5">{saveError}</p>
+        )}
 
         {/* Footer */}
         <div className="mt-4 flex justify-end gap-2 flex-shrink-0">

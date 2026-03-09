@@ -433,10 +433,15 @@ export class StepflowHandler {
         !this.config.allowedCallbackHosts.includes(parsedUrl.hostname)) {
       throw new Error(`Callback host ${parsedUrl.hostname} not in allowlist`)
     }
-    // Block private/link-local IP ranges
+    // Block private/link-local IP ranges (IPv4 and IPv6)
     const ip = parsedUrl.hostname
-    if (/^(127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|0\.)/.test(ip) ||
-        ip === 'localhost' || ip === '[::1]') {
+    // Strip brackets from IPv6 addresses for matching
+    const bareIp = ip.startsWith('[') && ip.endsWith(']') ? ip.slice(1, -1) : ip
+    if (/^(127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|0\.)/.test(bareIp) ||
+        bareIp === 'localhost' || bareIp === '::1' ||
+        /^fe80:/i.test(bareIp) ||   // IPv6 link-local
+        /^f[cd]/i.test(bareIp) ||   // IPv6 unique-local (fc00::/7)
+        bareIp === '::' || bareIp === '::ffff:127.0.0.1') {
       throw new Error(`Callback to private/link-local address ${ip} is blocked`)
     }
 

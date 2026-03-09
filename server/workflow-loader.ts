@@ -28,9 +28,9 @@
  * Files with a new `kind` register as standalone workflows for that repo.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
-import { execSync, execFileSync } from 'child_process'
-import { dirname, join, resolve } from 'path'
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'fs'
+import { execFileSync } from 'child_process'
+import { dirname, join, sep } from 'path'
 import { REPOS_ROOT } from './config.js'
 import { fileURLToPath } from 'url'
 import type { WorkflowEngine, WorkflowRun } from './workflow-engine.js'
@@ -198,15 +198,15 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
         handler: async (input) => {
           const repoPath = input.repoPath as string
           if (!repoPath) throw new Error('Missing repoPath in workflow input')
-          const resolvedPath = resolve(repoPath)
-          if (!resolvedPath.startsWith(REPOS_ROOT)) {
+          if (!existsSync(repoPath)) throw new Error(`Repository path does not exist: ${repoPath}`)
+          const resolvedPath = realpathSync(repoPath)
+          if (!resolvedPath.startsWith(REPOS_ROOT + sep)) {
             throw new Error(`Repository path ${resolvedPath} is outside REPOS_ROOT`)
           }
-          if (!existsSync(resolvedPath)) throw new Error(`Repository path does not exist: ${resolvedPath}`)
 
           try {
-            const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: repoPath, timeout: 5000 }).toString().trim()
-            const lastCommit = execSync('git log -1 --oneline', { cwd: repoPath, timeout: 5000 }).toString().trim()
+            const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoPath, timeout: 5000 }).toString().trim()
+            const lastCommit = execFileSync('git', ['log', '-1', '--oneline'], { cwd: repoPath, timeout: 5000 }).toString().trim()
 
             const sinceTimestamp = input.sinceTimestamp as string | undefined
             if (sinceTimestamp) {

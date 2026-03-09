@@ -9,6 +9,7 @@ const mockMkdirSync = vi.hoisted(() => vi.fn())
 const mockReaddirSync = vi.hoisted(() => vi.fn(() => [] as string[]))
 const mockReadFileSync = vi.hoisted(() => vi.fn(() => ''))
 const mockWriteFileSync = vi.hoisted(() => vi.fn())
+const mockRealpathSync = vi.hoisted(() => vi.fn((p: string) => p))
 
 vi.mock('child_process', () => ({
   execSync: (...args: any[]) => mockExecSync(...args),
@@ -24,6 +25,7 @@ vi.mock('fs', async (importOriginal) => {
     readdirSync: (...args: any[]) => mockReaddirSync(...args),
     readFileSync: (...args: any[]) => mockReadFileSync(...args),
     writeFileSync: (...args: any[]) => mockWriteFileSync(...args),
+    realpathSync: (...args: any[]) => mockRealpathSync(...args),
   }
 })
 
@@ -223,7 +225,7 @@ Some prompt.
       })
 
       it('validates a valid git repo', async () => {
-        mockExecSync.mockReturnValue(Buffer.from('main\n'))
+        mockExecFileSync.mockReturnValue(Buffer.from('main\n'))
 
         const handler = registeredDef.steps[0].handler
         const result = await handler(
@@ -237,8 +239,10 @@ Some prompt.
       })
 
       it('skips when no code changes since last run', async () => {
-        mockExecSync.mockReturnValue(Buffer.from('main\n'))
-        mockExecFileSync.mockReturnValue(Buffer.from(''))
+        mockExecFileSync
+          .mockReturnValueOnce(Buffer.from('main\n'))   // git rev-parse
+          .mockReturnValueOnce(Buffer.from('abc\n'))    // git log -1
+          .mockReturnValueOnce(Buffer.from(''))         // git log --since (no commits)
 
         const handler = registeredDef.steps[0].handler
         await expect(handler(
@@ -248,8 +252,10 @@ Some prompt.
       })
 
       it('continues when there are code changes since last run', async () => {
-        mockExecSync.mockReturnValue(Buffer.from('main\n'))
-        mockExecFileSync.mockReturnValue(Buffer.from('abc123 some commit\n'))
+        mockExecFileSync
+          .mockReturnValueOnce(Buffer.from('main\n'))              // git rev-parse
+          .mockReturnValueOnce(Buffer.from('abc short\n'))         // git log -1
+          .mockReturnValueOnce(Buffer.from('abc123 some commit\n')) // git log --since
 
         const handler = registeredDef.steps[0].handler
         const result = await handler(
@@ -261,7 +267,7 @@ Some prompt.
       })
 
       it('throws for non-git directory', async () => {
-        mockExecSync.mockImplementation(() => { throw new Error('not a git repo') })
+        mockExecFileSync.mockImplementation(() => { throw new Error('not a git repo') })
 
         const handler = registeredDef.steps[0].handler
         await expect(handler(

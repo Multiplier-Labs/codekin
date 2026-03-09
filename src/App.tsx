@@ -367,10 +367,10 @@ export default function App() {
       sendInput(expanded, displayText)
       return
     }
-    if (activeSessionId) setSessionPendingFiles(prev => ({ ...prev, [activeSessionId]: [] }))
     setUploadStatus('Uploading files...')
     try {
       const paths = await Promise.all(files.map(f => uploadFile(settings.token, f)))
+      if (activeSessionId) setSessionPendingFiles(prev => ({ ...prev, [activeSessionId]: [] }))
       setUploadStatus(null)
       const fileLine = `[Attached files: ${paths.join(', ')}]`
       const message = text.trim() ? `${fileLine}\n${expanded}` : fileLine
