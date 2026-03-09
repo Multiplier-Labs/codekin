@@ -46,6 +46,7 @@ You are performing an automated analysis. Please do the following:
 | `outputDir` | yes | Directory inside the repo where report files are written (e.g. `review logs`) |
 | `filenameSuffix` | yes | Filename suffix appended to the date (e.g. `_code-review-daily.md` → `2026-03-07_code-review-daily.md`) |
 | `commitMessage` | yes | Git commit message prefix used when the report is committed (date is appended automatically) |
+| `model` | no | Claude model to use for this workflow (e.g. `claude-sonnet-4-6`). If omitted, the server default (Opus) is used. Shown as a badge in the workflow list UI. |
 
 ### Prompt Body
 

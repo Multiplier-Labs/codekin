@@ -319,6 +319,7 @@ Response to a `control_request`. The `request_id` must match.
 
 | Type | Fields | Description |
 |------|--------|-------------|
+| `auth` | `token` | Authenticate the WebSocket connection (must be sent as first message) |
 | `create_session` | `name`, `workingDir` | Create a new session (auto-starts Claude) |
 | `join_session` | `sessionId` | Join an existing session (receives history via `outputBuffer`) |
 | `leave_session` | — | Leave current session |

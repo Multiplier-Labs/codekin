@@ -12,7 +12,7 @@ import { statusBadge, formatDuration } from '../../lib/workflowHelpers'
 // StepIcon
 // ---------------------------------------------------------------------------
 
-export function StepIcon({ status }: { status: string }) {
+function StepIcon({ status }: { status: string }) {
   const cls = 'shrink-0'
   switch (status) {
     case 'succeeded': return <IconCheck size={14} stroke={2.5} className={`${cls} text-success-4`} />
