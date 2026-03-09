@@ -33,7 +33,7 @@ interface PromptButtonsProps {
 /** Sticky prompt bar for permission approvals, single/multi-select questions, and multi-question AskUserQuestion flows. */
 export function PromptButtons({ options, question, multiSelect, promptType, questions, approvePattern, onSelect, isMobile = false }: PromptButtonsProps) {
   const isPermission = promptType === 'permission'
-  const btnPad = isMobile ? 'px-5 py-3 text-[15px] min-h-[44px]' : 'px-3 py-0.5 text-[13px]'
+  const btnPad = isMobile ? 'px-4 py-2.5 text-[16px] min-h-[34px]' : 'px-3 py-0.5 text-[13px]'
 
   // Auto-allow countdown for permission prompts
   const [timeLeft, setTimeLeft] = useState(15)

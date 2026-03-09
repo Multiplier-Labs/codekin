@@ -546,7 +546,7 @@ export default function App() {
             <div className="relative flex-1 min-h-0 flex flex-col">
               <ChatView
                 messages={[...messages, ...tentativeMessages]}
-                fontSize={settings.fontSize}
+                fontSize={settings.fontSize + (isMobile ? 1 : 0)}
                 theme={settings.theme}
                 disabled={!settings.token}
                 planningMode={planningMode}

@@ -7,7 +7,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
-import { IconSend, IconPaperclip, IconX, IconTerminal2, IconChevronDown } from '@tabler/icons-react'
+import { IconSend, IconPaperclip, IconX, IconTerminal2, IconChevronDown, IconDots } from '@tabler/icons-react'
 import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { DropZone } from './DropZone'
 
@@ -54,6 +54,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const mobileMenuRef = useRef<HTMLDivElement>(null)
   const MOBILE_HEIGHT = 100
   const [height, setHeight] = useState(() => {
     if (isMobile) return MOBILE_HEIGHT
@@ -79,6 +81,18 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     }
     prevWaiting.current = isWaiting
   }, [isWaiting, isMobile])
+
+  // Close mobile context menu on outside click
+  useEffect(() => {
+    if (!mobileMenuOpen) return
+    const handler = (e: MouseEvent) => {
+      if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) {
+        setMobileMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [mobileMenuOpen])
 
   const onDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -133,6 +147,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     e.target.value = ''
   }, [onAddFiles])
 
+  const hasSkills = skillGroups && skillGroups.some(g => g.skills.length > 0)
+
   return (
     <div className="app-input-bar relative flex flex-col border-t border-l border-neutral-9 bg-neutral-10" style={isMobile ? { minHeight: MOBILE_HEIGHT } : { height }}>
       <DropZone onUpload={onAddFiles} disabled={disabled} />
@@ -176,7 +192,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           disabled={disabled}
           autoFocus
           placeholder={placeholder ?? (isWaiting ? 'Type response...' : 'What do you want to build?')}
-          className="flex-1 min-h-0 resize-none bg-transparent text-[15px] leading-snug text-neutral-1 placeholder:text-neutral-5 outline-none disabled:opacity-50 overflow-y-auto"
+          className={`flex-1 min-h-0 resize-none bg-transparent ${isMobile ? 'text-[16px]' : 'text-[15px]'} leading-snug text-neutral-1 placeholder:text-neutral-5 outline-none disabled:opacity-50 overflow-y-auto`}
         />
         <input
           ref={fileInputRef}
@@ -185,75 +201,157 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           onChange={handleFileChange}
           className="hidden"
         />
-        <div className={`flex flex-shrink-0 flex-row items-end ${isMobile ? 'gap-2' : 'gap-1'} pb-0.5`}>
-          {currentModel && onModelChange && (
-            <div className="relative">
-              <button
-                onClick={() => setModelMenuOpen(!modelMenuOpen)}
-                className="flex items-center gap-0.5 rounded px-1.5 pb-1 pt-0.5 text-[13px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
-                title="Change model"
-              >
-                {shortModelLabel(currentModel)}
-                <IconChevronDown size={12} stroke={2} />
-              </button>
-              {modelMenuOpen && (
-                <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[160px] rounded border border-neutral-6 bg-neutral-8 shadow-lg py-1">
-                  {MODELS.map(m => (
-                    <button
-                      key={m.id}
-                      onClick={() => { onModelChange(m.id); setModelMenuOpen(false) }}
-                      className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-neutral-7 transition-colors ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
-                    >
-                      {m.label}
-                    </button>
-                  ))}
+        <div className={`flex flex-shrink-0 flex-row items-end ${isMobile ? 'gap-1.5' : 'gap-1'} pb-0.5`}>
+          {/* Desktop: show all buttons inline */}
+          {!isMobile && (
+            <>
+              {currentModel && onModelChange && (
+                <div className="relative">
+                  <button
+                    onClick={() => setModelMenuOpen(!modelMenuOpen)}
+                    className="flex items-center gap-0.5 rounded px-1.5 pb-1 pt-0.5 text-[13px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
+                    title="Change model"
+                  >
+                    {shortModelLabel(currentModel)}
+                    <IconChevronDown size={12} stroke={2} />
+                  </button>
+                  {modelMenuOpen && (
+                    <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[160px] rounded border border-neutral-6 bg-neutral-8 shadow-lg py-1">
+                      {MODELS.map(m => (
+                        <button
+                          key={m.id}
+                          onClick={() => { onModelChange(m.id); setModelMenuOpen(false) }}
+                          className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-neutral-7 transition-colors ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-          )}
-          {skillGroups && skillGroups.some(g => g.skills.length > 0) && (
-            <div className="relative">
-              <button
-                onClick={() => setSkillMenuOpen(!skillMenuOpen)}
-                disabled={disabled}
-                className={`flex items-center justify-center rounded ${isMobile ? 'p-2.5 min-w-[44px] min-h-[44px]' : 'p-1'} text-neutral-3 hover:text-neutral-1 hover:bg-neutral-7 transition-colors disabled:opacity-30`}
-                title="Claude Skills"
-              >
-                <IconTerminal2 size={isMobile ? 24 : 20} stroke={2} />
-              </button>
-              {skillMenuOpen && (
-                <SkillMenu
-                  groups={skillGroups}
-                  onSelectSkill={(command) => {
-                    setValue(command + ' ')
-                    setSkillMenuOpen(false)
-                    setTimeout(() => textareaRef.current?.focus(), 0)
-                  }}
-                  onClose={() => setSkillMenuOpen(false)}
-                />
+              {hasSkills && (
+                <div className="relative">
+                  <button
+                    onClick={() => setSkillMenuOpen(!skillMenuOpen)}
+                    disabled={disabled}
+                    className="flex items-center justify-center rounded p-1 text-neutral-3 hover:text-neutral-1 hover:bg-neutral-7 transition-colors disabled:opacity-30"
+                    title="Claude Skills"
+                  >
+                    <IconTerminal2 size={20} stroke={2} />
+                  </button>
+                  {skillMenuOpen && (
+                    <SkillMenu
+                      groups={skillGroups!}
+                      onSelectSkill={(command) => {
+                        setValue(command + ' ')
+                        setSkillMenuOpen(false)
+                        setTimeout(() => textareaRef.current?.focus(), 0)
+                      }}
+                      onClose={() => setSkillMenuOpen(false)}
+                    />
+                  )}
+                </div>
               )}
-            </div>
+              <button
+                onClick={handleFileSelect}
+                disabled={disabled}
+                className="flex items-center justify-center rounded p-1 text-neutral-3 hover:text-neutral-1 hover:bg-neutral-7 transition-colors disabled:opacity-30"
+                title="Attach files"
+              >
+                <IconPaperclip size={20} stroke={2} />
+              </button>
+              <button
+                onClick={handleSend}
+                disabled={disabled || (!value.trim() && pendingFiles.length === 0)}
+                className={`flex items-center justify-center rounded p-1 transition-colors disabled:opacity-30 ${
+                  value.trim() || pendingFiles.length > 0
+                    ? 'bg-primary-8 text-neutral-1 hover:bg-primary-7'
+                    : 'text-neutral-5'
+                }`}
+                title="Send (Enter)"
+              >
+                <IconSend size={20} stroke={2} />
+              </button>
+            </>
           )}
-          <button
-            onClick={handleFileSelect}
-            disabled={disabled}
-            className={`flex items-center justify-center rounded ${isMobile ? 'p-2.5 min-w-[44px] min-h-[44px]' : 'p-1'} text-neutral-3 hover:text-neutral-1 hover:bg-neutral-7 transition-colors disabled:opacity-30`}
-            title="Attach files"
-          >
-            <IconPaperclip size={isMobile ? 24 : 20} stroke={2} />
-          </button>
-          <button
-            onClick={handleSend}
-            disabled={disabled || (!value.trim() && pendingFiles.length === 0)}
-            className={`flex items-center justify-center rounded ${isMobile ? 'p-2.5 min-w-[44px] min-h-[44px]' : 'p-1'} transition-colors disabled:opacity-30 ${
-              value.trim() || pendingFiles.length > 0
-                ? 'bg-primary-8 text-neutral-1 hover:bg-primary-7'
-                : 'text-neutral-5'
-            }`}
-            title="Send (Enter)"
-          >
-            <IconSend size={isMobile ? 24 : 20} stroke={2} />
-          </button>
+
+          {/* Mobile: context menu (...) + send button only */}
+          {isMobile && (
+            <>
+              <div className="relative" ref={mobileMenuRef}>
+                <button
+                  onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                  disabled={disabled}
+                  className="flex items-center justify-center rounded min-w-[34px] min-h-[34px] p-1.5 text-neutral-3 hover:text-neutral-1 hover:bg-neutral-7 transition-colors disabled:opacity-30"
+                  title="More options"
+                >
+                  <IconDots size={20} stroke={2} />
+                </button>
+                {mobileMenuOpen && (
+                  <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[180px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
+                    {/* Model selector */}
+                    {currentModel && onModelChange && (
+                      <>
+                        <div className="px-3 py-1.5 text-[12px] text-neutral-5 uppercase tracking-wider">Model</div>
+                        {MODELS.map(m => (
+                          <button
+                            key={m.id}
+                            onClick={() => { onModelChange(m.id); setMobileMenuOpen(false) }}
+                            className={`w-full text-left px-3 py-2 text-[14px] hover:bg-neutral-7 transition-colors ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                        <div className="my-1 border-t border-neutral-7" />
+                      </>
+                    )}
+                    {/* Skills */}
+                    {hasSkills && (
+                      <button
+                        onClick={() => { setMobileMenuOpen(false); setSkillMenuOpen(!skillMenuOpen) }}
+                        className="flex items-center gap-2 w-full text-left px-3 py-2 text-[14px] text-neutral-2 hover:bg-neutral-7 transition-colors"
+                      >
+                        <IconTerminal2 size={18} stroke={2} className="text-neutral-4" />
+                        Skills
+                      </button>
+                    )}
+                    {/* Attach files */}
+                    <button
+                      onClick={() => { setMobileMenuOpen(false); handleFileSelect() }}
+                      className="flex items-center gap-2 w-full text-left px-3 py-2 text-[14px] text-neutral-2 hover:bg-neutral-7 transition-colors"
+                    >
+                      <IconPaperclip size={18} stroke={2} className="text-neutral-4" />
+                      Attach files
+                    </button>
+                  </div>
+                )}
+                {skillMenuOpen && (
+                  <SkillMenu
+                    groups={skillGroups!}
+                    onSelectSkill={(command) => {
+                      setValue(command + ' ')
+                      setSkillMenuOpen(false)
+                      setTimeout(() => textareaRef.current?.focus(), 0)
+                    }}
+                    onClose={() => setSkillMenuOpen(false)}
+                  />
+                )}
+              </div>
+              <button
+                onClick={handleSend}
+                disabled={disabled || (!value.trim() && pendingFiles.length === 0)}
+                className={`flex items-center justify-center rounded min-w-[34px] min-h-[34px] p-1.5 transition-colors disabled:opacity-30 ${
+                  value.trim() || pendingFiles.length > 0
+                    ? 'bg-primary-8 text-neutral-1 hover:bg-primary-7'
+                    : 'text-neutral-5'
+                }`}
+                title="Send (Enter)"
+              >
+                <IconSend size={20} stroke={2} />
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
