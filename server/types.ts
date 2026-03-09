@@ -224,6 +224,7 @@ export type WsServerMessage =
 
 /** Messages sent from browser clients to the server over WebSocket. */
 export type WsClientMessage =
+  | { type: 'auth'; token: string }
   | { type: 'create_session'; name: string; workingDir: string; model?: string }
   | { type: 'join_session'; sessionId: string }
   | { type: 'leave_session' }
