@@ -15,9 +15,10 @@ import type { ReviewRepoConfig, WorkflowKindInfo } from '../lib/workflowApi'
 import {
   WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL,
   buildCron, describeCron, slugify, kindCategory,
-  toTimeValue, fromTimeValue, isBiweeklyDow,
+  isBiweeklyDow,
 } from '../lib/workflowHelpers'
 import { CategoryBadge } from './WorkflowBadges'
+import TimePicker from './TimePicker'
 import { RepoList } from './RepoList'
 
 type Step = 1 | 2 | 3
@@ -256,11 +257,6 @@ function StepSchedule({
   form: FormState
   onChange: (patch: Partial<FormState>) => void
 }) {
-  const handleTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { hour, minute } = fromTimeValue(e.target.value)
-    onChange({ cronHour: hour, cronMinute: minute })
-  }
-
   return (
     <div className="space-y-5">
       <div>
@@ -270,12 +266,10 @@ function StepSchedule({
 
         {/* Time picker */}
         <label className="block text-[13px] font-medium text-neutral-3 mb-2">Time</label>
-        <input
-          type="time"
-          step={900}
-          value={toTimeValue(form.cronHour, form.cronMinute)}
-          onChange={handleTimeChange}
-          className="rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-1 focus:border-accent-6 focus:outline-none w-40 themed-time-input"
+        <TimePicker
+          hour={form.cronHour}
+          minute={form.cronMinute}
+          onChange={(h, m) => onChange({ cronHour: h, cronMinute: m })}
         />
       </div>
 
