@@ -601,9 +601,9 @@ html, body, #root {
 /* Dark mode prose tokens */
 [data-theme="dark"] .prose.prose-themed {
   --tw-prose-body: var(--color-neutral-2);
-  --tw-prose-headings: var(--color-neutral-1);
+  --tw-prose-headings: var(--color-neutral-2);
   --tw-prose-links: var(--color-accent-5);
-  --tw-prose-bold: var(--color-neutral-1);
+  --tw-prose-bold: var(--color-neutral-2);
   --tw-prose-code: var(--color-accent-4);
   --tw-prose-pre-bg: var(--color-neutral-11);
   --tw-prose-pre-code: var(--color-neutral-2);
@@ -635,9 +635,9 @@ html, body, #root {
 /* Keep prose-invert alias working (used elsewhere by Tailwind Typography) */
 .prose.prose-invert {
   --tw-prose-body: var(--color-neutral-2);
-  --tw-prose-headings: var(--color-neutral-1);
+  --tw-prose-headings: var(--color-neutral-2);
   --tw-prose-links: var(--color-accent-5);
-  --tw-prose-bold: var(--color-neutral-1);
+  --tw-prose-bold: var(--color-neutral-2);
   --tw-prose-code: var(--color-accent-4);
   --tw-prose-pre-bg: var(--color-neutral-11);
   --tw-prose-pre-code: var(--color-neutral-2);
@@ -743,8 +743,8 @@ html, body, #root {
   line-height: 1.65;
 }
 
-.docs-prose h1 { font-size: 1.5em; font-weight: 700; color: var(--color-neutral-1); margin: 1.5em 0 0.5em; }
-.docs-prose h2 { font-size: 1.25em; font-weight: 600; color: var(--color-neutral-1); margin: 1.25em 0 0.5em; }
+.docs-prose h1 { font-size: 1.5em; font-weight: 700; color: var(--color-neutral-2); margin: 1.5em 0 0.5em; }
+.docs-prose h2 { font-size: 1.25em; font-weight: 600; color: var(--color-neutral-2); margin: 1.25em 0 0.5em; }
 .docs-prose h3 { font-size: 1.1em; font-weight: 600; color: var(--color-neutral-2); margin: 1em 0 0.5em; }
 .docs-prose h4 { font-size: 1em; font-weight: 600; color: var(--color-neutral-2); margin: 1em 0 0.5em; }
 .docs-prose h1:first-child,
