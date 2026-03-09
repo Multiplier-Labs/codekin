@@ -2,11 +2,11 @@
  * REST routes for the docs browser feature.
  *
  * Provides two endpoints:
- * - GET /api/repos/:repoId/docs — list markdown files in a repo
- * - GET /api/repos/:repoId/docs/:filePath — get raw content of a markdown file
+ * - GET /api/docs?repo=<path> — list markdown files in a repo
+ * - GET /api/docs/file?repo=<path>&file=<relPath> — get raw content of a markdown file
  *
- * The :repoId is the URL-encoded workingDir path of the repo.
- * The :filePath is a URL-encoded relative path (e.g. "docs%2Fprotocol.md").
+ * Repo path and file path are passed as query parameters to avoid
+ * Express routing issues with encoded slashes in path segments.
  */
 
 import { Router } from 'express'
@@ -77,7 +77,7 @@ export function createDocsRouter(
   const router = Router()
 
   // Auth middleware for all docs routes
-  router.use('/api/repos/:repoId/docs', (req, res, next) => {
+  router.use('/api/docs', (req, res, next) => {
     if (!verifyToken(extractToken(req))) {
       return res.status(401).json({ error: 'Unauthorized' })
     }
@@ -85,11 +85,14 @@ export function createDocsRouter(
   })
 
   /**
-   * GET /api/repos/:repoId/docs
+   * GET /api/docs?repo=<path>
    * List markdown files in the repo. Pinned files appear first.
    */
-  router.get('/api/repos/:repoId/docs', (req, res) => {
-    const repoPath = decodeURIComponent(req.params.repoId)
+  router.get('/api/docs', (req, res) => {
+    const repoPath = req.query.repo as string | undefined
+    if (!repoPath) {
+      return res.status(400).json({ error: 'Missing repo query parameter' })
+    }
 
     // Validate the repo path exists and is a directory
     try {
@@ -127,13 +130,16 @@ export function createDocsRouter(
   })
 
   /**
-   * GET /api/repos/:repoId/docs/:filePath
+   * GET /api/docs/file?repo=<path>&file=<relPath>
    * Get the raw content of a single markdown file.
-   * :filePath is URL-encoded relative path (e.g. "docs%2Fprotocol.md").
    */
-  router.get('/api/repos/:repoId/docs/:filePath', (req, res) => {
-    const repoPath = decodeURIComponent(req.params.repoId)
-    const filePath = decodeURIComponent(req.params.filePath)
+  router.get('/api/docs/file', (req, res) => {
+    const repoPath = req.query.repo as string | undefined
+    const filePath = req.query.file as string | undefined
+
+    if (!repoPath || !filePath) {
+      return res.status(400).json({ error: 'Missing repo or file query parameter' })
+    }
 
     // Validate file extension
     if (extname(filePath).toLowerCase() !== '.md') {
