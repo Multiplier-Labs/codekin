@@ -524,6 +524,20 @@ html, body, #root {
   font-family: 'Lato', sans-serif;
 }
 
+/* ── Safe area insets for notched devices ──────────────────────────────── */
+/* Applied via viewport-fit=cover in the HTML meta tag. */
+
+.app-input-bar {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Mobile top bar respects top safe area (e.g. status bar on iOS) */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .mobile-top-bar-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+}
+
 /* Chat scrollbar */
 .chat-scroll::-webkit-scrollbar {
   width: 6px;

@@ -38,6 +38,7 @@ interface Props {
   onClose: () => void
   settings: SettingsType
   onUpdate: (patch: Partial<SettingsType>) => void
+  isMobile?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +104,7 @@ function StatusBadge({ status }: { status: string }) {
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
-export function Settings({ open, onClose, settings, onUpdate }: Props) {
+export function Settings({ open, onClose, settings, onUpdate, isMobile = false }: Props) {
   const [tokenInput, setTokenInput] = useState(settings.token)
   const [verifying, setVerifying] = useState(false)
   const [status, setStatus] = useState<'idle' | 'valid' | 'invalid'>('idle')
@@ -160,8 +161,8 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-full max-w-2xl rounded-lg border border-neutral-10 bg-neutral-11 shadow-xl flex flex-col max-h-[85vh]">
+    <div className={`fixed inset-0 z-50 flex bg-black/60 ${isMobile ? 'items-end' : 'items-center justify-center'}`}>
+      <div className={`w-full bg-neutral-11 shadow-xl flex flex-col ${isMobile ? 'max-h-[95vh] rounded-t-xl' : 'max-w-2xl rounded-lg border border-neutral-10 max-h-[85vh]'}`}>
         {/* Header */}
         <div className="flex-shrink-0 px-6 pt-5 pb-4 border-b border-neutral-10">
           <h2 className="text-[19px] font-semibold text-neutral-2">Settings</h2>

@@ -46,13 +46,17 @@ interface InputBarProps {
   currentModel?: string | null
   onModelChange?: (model: string) => void
   placeholder?: string
+  /** When true, disables drag-to-resize and uses auto-height instead */
+  isMobile?: boolean
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, initialValue = '', onValueChange, currentModel, onModelChange, placeholder }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false }, ref) {
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  const MOBILE_HEIGHT = 80
   const [height, setHeight] = useState(() => {
+    if (isMobile) return MOBILE_HEIGHT
     const stored = localStorage.getItem(INPUT_HEIGHT_KEY)
     return stored ? Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, parseInt(stored, 10))) : DEFAULT_HEIGHT
   })
@@ -130,13 +134,15 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   }, [onAddFiles])
 
   return (
-    <div className="app-input-bar relative flex flex-col border-t border-l border-neutral-9 bg-neutral-10" style={{ height }}>
+    <div className="app-input-bar relative flex flex-col border-t border-l border-neutral-9 bg-neutral-10" style={isMobile ? { minHeight: MOBILE_HEIGHT } : { height }}>
       <DropZone onUpload={onAddFiles} disabled={disabled} />
-      {/* Drag handle */}
-      <div
-        className="h-1 flex-shrink-0 cursor-row-resize hover:bg-primary-7/40 active:bg-primary-7/60 transition-colors"
-        onMouseDown={onDragStart}
-      />
+      {/* Drag handle — desktop only */}
+      {!isMobile && (
+        <div
+          className="h-1 flex-shrink-0 cursor-row-resize hover:bg-primary-7/40 active:bg-primary-7/60 transition-colors"
+          onMouseDown={onDragStart}
+        />
+      )}
 
       {/* Pending file chips */}
       {pendingFiles.length > 0 && (

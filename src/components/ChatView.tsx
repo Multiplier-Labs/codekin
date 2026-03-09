@@ -26,6 +26,7 @@ interface Props {
   disabled?: boolean
   planningMode?: boolean
   activityLabel?: string
+  isMobile?: boolean
 }
 
 function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
@@ -53,11 +54,11 @@ function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
   )
 }
 
-function UserMessage({ msg, fontSize }: { msg: ChatMessage & { type: 'user' }; fontSize: number }) {
+function UserMessage({ msg, fontSize, isMobile }: { msg: ChatMessage & { type: 'user' }; fontSize: number; isMobile?: boolean }) {
   return (
     <div className="px-4 py-2">
       <div
-        className="user-bubble max-w-[80%] rounded-lg bg-neutral-10/60 px-3 py-2 text-neutral-3 whitespace-pre-wrap"
+        className={`user-bubble rounded-lg bg-neutral-10/60 px-3 py-2 text-neutral-3 whitespace-pre-wrap ${isMobile ? 'max-w-[95%]' : 'max-w-[80%]'}`}
         style={{ fontSize: `${fontSize}px` }}
       >
         {formatUserText(msg.text)}
@@ -311,7 +312,7 @@ function ActivityIndicator({ label }: { label: string }) {
   )
 }
 
-export function ChatView({ messages, fontSize, theme = 'dark', disabled, planningMode, activityLabel }: Props) {
+export function ChatView({ messages, fontSize, theme = 'dark', disabled, planningMode, activityLabel, isMobile }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
   const isNearBottomRef = useRef(true)
@@ -400,7 +401,7 @@ export function ChatView({ messages, fontSize, theme = 'dark', disabled, plannin
                   }
                   node = <SystemMessage key={msg.key || i} msg={msg} />; break
                 case 'user':
-                  node = <UserMessage key={msg.key || i} msg={msg} fontSize={fontSize} />; break
+                  node = <UserMessage key={msg.key || i} msg={msg} fontSize={fontSize} isMobile={isMobile} />; break
                 case 'assistant':
                   node = <AssistantMessage key={msg.key || i} msg={msg} fontSize={fontSize} theme={theme} />; break
                 case 'planning_mode':
