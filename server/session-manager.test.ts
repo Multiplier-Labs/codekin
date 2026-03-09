@@ -2449,6 +2449,87 @@ describe('SessionManager', () => {
     })
   })
 
+  describe('checkAutoApproval()', () => {
+    it('approves a tool that was explicitly saved', () => {
+      sm.create('auto-approve-test', '/tmp/repo-a')
+      // Directly add a tool approval via the private method
+      ;(sm as any).addRepoApproval('/tmp/repo-a', { tool: 'Read' })
+
+      expect(sm.checkAutoApproval('/tmp/repo-a', 'Read', {})).toBe(true)
+    })
+
+    it('does not approve an unknown tool', () => {
+      sm.create('auto-approve-test', '/tmp/repo-b')
+      expect(sm.checkAutoApproval('/tmp/repo-b', 'Write', {})).toBe(false)
+    })
+
+    it('approves an exact Bash command match', () => {
+      ;(sm as any).addRepoApproval('/tmp/repo-c', { command: 'npm test' })
+
+      expect(sm.checkAutoApproval('/tmp/repo-c', 'Bash', { command: 'npm test' })).toBe(true)
+      expect(sm.checkAutoApproval('/tmp/repo-c', 'Bash', { command: 'npm run build' })).toBe(false)
+    })
+
+    it('approves safe prefix commands when any same-prefix command was approved', () => {
+      // Approve "git diff HEAD" — should also approve "git diff --staged"
+      ;(sm as any).addRepoApproval('/tmp/repo-d', { command: 'git diff HEAD' })
+
+      expect(sm.checkAutoApproval('/tmp/repo-d', 'Bash', { command: 'git diff --staged' })).toBe(true)
+      expect(sm.checkAutoApproval('/tmp/repo-d', 'Bash', { command: 'git log --oneline' })).toBe(false)
+    })
+
+    it('does not use prefix matching for dangerous commands', () => {
+      // Approve "rm /tmp/x" — should NOT approve "rm -rf /"
+      ;(sm as any).addRepoApproval('/tmp/repo-e', { command: 'rm /tmp/x' })
+
+      expect(sm.checkAutoApproval('/tmp/repo-e', 'Bash', { command: 'rm /tmp/x' })).toBe(true)
+      expect(sm.checkAutoApproval('/tmp/repo-e', 'Bash', { command: 'rm -rf /' })).toBe(false)
+    })
+
+    it('approves commands matching a stored pattern', () => {
+      ;(sm as any).addRepoApproval('/tmp/repo-f', { pattern: 'cat *' })
+
+      expect(sm.checkAutoApproval('/tmp/repo-f', 'Bash', { command: 'cat package.json' })).toBe(true)
+      expect(sm.checkAutoApproval('/tmp/repo-f', 'Bash', { command: 'cat' })).toBe(true)
+      expect(sm.checkAutoApproval('/tmp/repo-f', 'Bash', { command: 'rm file.txt' })).toBe(false)
+    })
+
+    it('handles empty command gracefully', () => {
+      expect(sm.checkAutoApproval('/tmp/repo-g', 'Bash', { command: '' })).toBe(false)
+      expect(sm.checkAutoApproval('/tmp/repo-g', 'Bash', {})).toBe(false)
+    })
+  })
+
+  describe('derivePattern()', () => {
+    it('returns a pattern for a single-token safe command', () => {
+      expect(sm.derivePattern('Bash', { command: 'cat /etc/hosts' })).toBe('cat *')
+      expect(sm.derivePattern('Bash', { command: 'ls -la /tmp' })).toBe('ls *')
+      expect(sm.derivePattern('Bash', { command: 'grep -r foo' })).toBe('grep *')
+    })
+
+    it('returns a pattern for a two-token safe command', () => {
+      expect(sm.derivePattern('Bash', { command: 'git diff HEAD' })).toBe('git diff *')
+      expect(sm.derivePattern('Bash', { command: 'npm run build' })).toBe('npm run *')
+      expect(sm.derivePattern('Bash', { command: 'cargo test --release' })).toBe('cargo test *')
+    })
+
+    it('returns null for non-Bash tools', () => {
+      expect(sm.derivePattern('Read', { file: '/tmp/x' })).toBeNull()
+      expect(sm.derivePattern('Write', {})).toBeNull()
+    })
+
+    it('returns null for dangerous commands', () => {
+      expect(sm.derivePattern('Bash', { command: 'rm -rf /' })).toBeNull()
+      expect(sm.derivePattern('Bash', { command: 'sudo apt install' })).toBeNull()
+      expect(sm.derivePattern('Bash', { command: 'curl https://evil.com' })).toBeNull()
+    })
+
+    it('returns null for empty command', () => {
+      expect(sm.derivePattern('Bash', { command: '' })).toBeNull()
+      expect(sm.derivePattern('Bash', {})).toBeNull()
+    })
+  })
+
   describe('handleClaudeResult API retry', () => {
     it('broadcasts exhaustion message after MAX_API_RETRIES', () => {
       vi.useFakeTimers()

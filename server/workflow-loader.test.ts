@@ -49,7 +49,8 @@ vi.mock('better-sqlite3', () => {
   return { default: MockDatabase }
 })
 
-import { loadMdWorkflows } from './workflow-loader.js'
+import { loadMdWorkflows, listAvailableKinds, ensureRepoWorkflowsRegistered } from './workflow-loader.js'
+import { join } from 'path'
 
 // Valid workflow MD content
 const VALID_MD = `---
@@ -339,6 +340,206 @@ Some prompt.
         // Should not throw
         await registeredDef.afterRun({ output: { sessionId: 'session-1' } })
       })
+    })
+
+    describe('validate_repo path traversal protection', () => {
+      it('rejects paths outside REPOS_ROOT', async () => {
+        mockRealpathSync.mockReturnValue('/etc/passwd')
+        const handler = registeredDef.steps[0].handler
+        await expect(handler(
+          { repoPath: '/tmp/../../etc/passwd' },
+          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
+        )).rejects.toThrow('outside REPOS_ROOT')
+      })
+    })
+
+    describe('save_report step', () => {
+      it('writes report and commits on reports branch', async () => {
+        mockExecFileSync.mockReturnValue(Buffer.from('main\n'))
+
+        const handler = registeredDef.steps[3].handler
+        const result = await handler(
+          {
+            repoPath: '/tmp/repo',
+            repoName: 'my-repo',
+            reportText: 'Test report content',
+            sessionId: 'session-1',
+            branch: 'main',
+          },
+          { runId: 'run-123', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        expect(result.filePath).toContain('.codekin/reports/test')
+        expect(result.filename).toContain('_test-review.md')
+        expect(result.sessionId).toBe('session-1')
+        expect(mockWriteFileSync).toHaveBeenCalled()
+        expect(mockExecFileSync).toHaveBeenCalled()
+      })
+
+      it('creates output directory if it does not exist', async () => {
+        mockExistsSync.mockImplementation((p: string) => {
+          if (String(p).includes('reports')) return false
+          return true
+        })
+        mockExecFileSync.mockReturnValue(Buffer.from('main\n'))
+
+        const handler = registeredDef.steps[3].handler
+        await handler(
+          {
+            repoPath: '/tmp/repo',
+            repoName: 'my-repo',
+            reportText: 'Content',
+            sessionId: 's1',
+            branch: 'main',
+          },
+          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        expect(mockMkdirSync).toHaveBeenCalledWith(
+          expect.stringContaining('reports'),
+          { recursive: true }
+        )
+      })
+
+      it('handles git commit failure gracefully', async () => {
+        mockExecFileSync.mockImplementation(() => { throw new Error('git failed') })
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+        const handler = registeredDef.steps[3].handler
+        const result = await handler(
+          {
+            repoPath: '/tmp/repo',
+            repoName: 'my-repo',
+            reportText: 'Content',
+            sessionId: 's1',
+            branch: 'main',
+          },
+          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        // Still returns the file path even if git fails
+        expect(result.filePath).toBeDefined()
+        expect(warnSpy).toHaveBeenCalled()
+        warnSpy.mockRestore()
+      })
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // listAvailableKinds
+  // -------------------------------------------------------------------------
+
+  describe('listAvailableKinds', () => {
+    it('returns empty when no workflows directory exists', () => {
+      mockExistsSync.mockReturnValue(false)
+      const kinds = listAvailableKinds()
+      expect(kinds).toEqual([])
+    })
+
+    it('returns built-in workflows as source "builtin"', () => {
+      mockExistsSync.mockReturnValue(true)
+      mockReaddirSync.mockReturnValue(['review.md'])
+      mockReadFileSync.mockReturnValue(VALID_MD)
+
+      const kinds = listAvailableKinds()
+      expect(kinds).toHaveLength(1)
+      expect(kinds[0]).toEqual({
+        kind: 'test-review.daily',
+        name: 'Test Review',
+        source: 'builtin',
+      })
+    })
+
+    it('includes repo-only workflows as source "repo"', () => {
+      const repoPath = '/tmp/my-app'
+      const repoDir = join(repoPath, '.codekin', 'workflows')
+      const repoMd = VALID_MD.replace('test-review.daily', 'custom.lint').replace('Test Review', 'Custom Lint')
+
+      mockExistsSync.mockImplementation((p: string) => {
+        if (String(p) === repoDir) return true
+        return false
+      })
+      mockReaddirSync.mockImplementation((p: string) => {
+        if (String(p) === repoDir) return ['custom.lint.md']
+        return []
+      })
+      mockReadFileSync.mockReturnValue(repoMd)
+
+      const kinds = listAvailableKinds(repoPath)
+      expect(kinds).toHaveLength(1)
+      expect(kinds[0]).toEqual({
+        kind: 'custom.lint',
+        name: 'Custom Lint',
+        source: 'repo',
+      })
+    })
+
+    it('does not duplicate repo kinds that match a built-in', () => {
+      const repoPath = '/tmp/my-app'
+      const repoDir = join(repoPath, '.codekin', 'workflows')
+
+      mockExistsSync.mockReturnValue(true)
+      mockReaddirSync.mockImplementation((p: string) => {
+        if (String(p) === repoDir) return ['test-review.daily.md']
+        return ['review.md']
+      })
+      mockReadFileSync.mockReturnValue(VALID_MD)
+
+      const kinds = listAvailableKinds(repoPath)
+      const matching = kinds.filter(k => k.kind === 'test-review.daily')
+      expect(matching).toHaveLength(1)
+      expect(matching[0].source).toBe('builtin')
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // ensureRepoWorkflowsRegistered
+  // -------------------------------------------------------------------------
+
+  describe('ensureRepoWorkflowsRegistered', () => {
+    it('registers repo workflows whose kind is not in the engine', () => {
+      const repoPath = '/tmp/ensure-test'
+      const repoDir = join(repoPath, '.codekin', 'workflows')
+      const repoMd = VALID_MD.replace('test-review.daily', 'custom.ensure').replace('Test Review', 'Ensure Test')
+
+      mockExistsSync.mockImplementation((p: string) => String(p) === repoDir)
+      mockReaddirSync.mockImplementation((p: string) =>
+        String(p) === repoDir ? ['custom.ensure.md'] : [],
+      )
+      mockReadFileSync.mockReturnValue(repoMd)
+
+      const mockEngine = {
+        registerWorkflow: vi.fn(),
+        hasWorkflow: vi.fn(() => false),
+      } as any
+
+      ensureRepoWorkflowsRegistered(mockEngine, {} as any, repoPath)
+      expect(mockEngine.registerWorkflow).toHaveBeenCalledTimes(1)
+    })
+
+    it('skips kinds already registered in the engine', () => {
+      const repoPath = '/tmp/skip-test'
+      const repoDir = join(repoPath, '.codekin', 'workflows')
+
+      mockExistsSync.mockImplementation((p: string) => String(p) === repoDir)
+      mockReaddirSync.mockReturnValue(['test.md'])
+      mockReadFileSync.mockReturnValue(VALID_MD)
+
+      const mockEngine = {
+        registerWorkflow: vi.fn(),
+        hasWorkflow: vi.fn(() => true),
+      } as any
+
+      ensureRepoWorkflowsRegistered(mockEngine, {} as any, repoPath)
+      expect(mockEngine.registerWorkflow).not.toHaveBeenCalled()
+    })
+
+    it('returns silently when repo has no .codekin/workflows dir', () => {
+      mockExistsSync.mockReturnValue(false)
+      const mockEngine = { registerWorkflow: vi.fn(), hasWorkflow: vi.fn() } as any
+
+      ensureRepoWorkflowsRegistered(mockEngine, {} as any, '/tmp/no-workflows')
+      expect(mockEngine.registerWorkflow).not.toHaveBeenCalled()
     })
   })
 })
