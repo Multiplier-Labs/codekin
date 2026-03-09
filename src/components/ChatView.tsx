@@ -250,11 +250,11 @@ function ToolActivity({ run, fontSize }: { run: ToolRun; fontSize: number }) {
           {run.outputs.map((o, oi) => (
             <ToolOutputInline key={`o-${oi}`} msg={o} fontSize={fontSize} />
           ))}
-          {run.images.map((img, ii) => (
-            <ImageInline key={`img-${ii}`} msg={img} />
-          ))}
         </div>
       )}
+      {run.images.map((img, ii) => (
+        <ImageInline key={`img-${ii}`} msg={img} />
+      ))}
     </div>
   )
 }
