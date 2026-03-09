@@ -19,14 +19,26 @@ const defaults: Settings = {
 function load(): Settings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return defaults
-    const saved = JSON.parse(raw)
-    // Only restore token and theme; fontSize always uses the current default
-    return {
+    const saved = raw ? JSON.parse(raw) : null
+    const base: Settings = {
       ...defaults,
-      token: saved.token ?? defaults.token,
-      theme: saved.theme === 'light' ? 'light' : 'dark',
+      token: saved?.token ?? defaults.token,
+      theme: saved?.theme === 'light' ? 'light' : 'dark',
     }
+
+    // Check URL for ?token= parameter (e.g. shared invite links)
+    const url = new URL(window.location.href)
+    const urlToken = url.searchParams.get('token')
+    if (urlToken) {
+      base.token = urlToken
+      // Persist immediately so subsequent loads pick it up
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(base))
+      // Strip the token from the URL for security
+      url.searchParams.delete('token')
+      window.history.replaceState({}, '', url.pathname + url.search + url.hash)
+    }
+
+    return base
   } catch {
     return defaults
   }
