@@ -7,8 +7,9 @@ import { useState } from 'react'
 import { IconX, IconLoader2 } from '@tabler/icons-react'
 import type { ReviewRepoConfig } from '../lib/workflowApi'
 import {
-  WORKFLOW_KINDS, DAY_PATTERNS,
-  buildCron, parseCron, formatHour, describeCron, kindLabel,
+  WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL,
+  buildCron, parseCron, describeCron, kindLabel,
+  toTimeValue, fromTimeValue,
 } from '../lib/workflowHelpers'
 import { CategoryBadge } from './WorkflowBadges'
 
@@ -25,6 +26,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
   const [form, setForm] = useState({
     kind: repo.kind ?? 'coverage.daily',
     cronHour: parsed.hour,
+    cronMinute: parsed.minute,
     cronDow: parsed.dow,
     customPrompt: repo.customPrompt ?? '',
   })
@@ -38,7 +40,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
     try {
       await onSave(repo.id, {
         kind: form.kind,
-        cronExpression: buildCron(form.cronHour, form.cronDow),
+        cronExpression: buildCron(form.cronHour, form.cronDow, form.cronMinute),
         customPrompt: form.customPrompt.trim() || undefined,
       })
       onClose()
@@ -103,18 +105,36 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
 
           {/* Schedule */}
           <div>
-            <label className="block text-[13px] font-medium text-neutral-3 mb-2">Schedule</label>
-            <select
-              value={form.cronHour}
-              onChange={e => setForm(f => ({ ...f, cronHour: parseInt(e.target.value) }))}
+            <label className="block text-[13px] font-medium text-neutral-3 mb-2">Time</label>
+            <input
+              type="time"
+              step={900}
+              value={toTimeValue(form.cronHour, form.cronMinute)}
+              onChange={e => {
+                const { hour, minute } = fromTimeValue(e.target.value)
+                setForm(f => ({ ...f, cronHour: hour, cronMinute: minute }))
+              }}
               className="rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-1 focus:border-accent-6 focus:outline-none w-full mb-3"
-            >
-              {Array.from({ length: 24 }, (_, h) => (
-                <option key={h} value={h}>{formatHour(h)}</option>
+            />
+            <label className="block text-[13px] font-medium text-neutral-3 mb-2">Frequency</label>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {DAY_PRESETS.map(p => (
+                <button
+                  key={p.dow}
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, cronDow: p.dow }))}
+                  className={`rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
+                    form.cronDow === p.dow
+                      ? 'border-accent-6 bg-accent-9/40 text-accent-2'
+                      : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
+                  }`}
+                >
+                  {p.label}
+                </button>
               ))}
-            </select>
-            <div className="flex flex-wrap gap-1.5">
-              {DAY_PATTERNS.map(p => (
+            </div>
+            <div className="flex gap-1.5">
+              {DAY_INDIVIDUAL.map(p => (
                 <button
                   key={p.dow}
                   type="button"
@@ -130,7 +150,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
               ))}
             </div>
             <div className="mt-2 text-[13px] text-neutral-5">
-              {describeCron(buildCron(form.cronHour, form.cronDow))}
+              {describeCron(buildCron(form.cronHour, form.cronDow, form.cronMinute))}
             </div>
           </div>
 

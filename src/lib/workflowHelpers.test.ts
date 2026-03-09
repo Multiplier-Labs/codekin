@@ -11,6 +11,8 @@ import {
   formatTime,
   repoNameFromRun,
   statusBadge,
+  toTimeValue,
+  fromTimeValue,
 } from './workflowHelpers.js'
 import type { WorkflowRun } from './workflowApi'
 
@@ -21,21 +23,41 @@ describe('workflowHelpers', () => {
       expect(buildCron(14, '1-5')).toBe('0 14 * * 1-5')
       expect(buildCron(0, '0')).toBe('0 0 * * 0')
     })
+
+    it('builds a cron expression with minute', () => {
+      expect(buildCron(6, '*', 30)).toBe('30 6 * * *')
+      expect(buildCron(14, '1-5', 15)).toBe('15 14 * * 1-5')
+    })
+
+    it('builds a biweekly cron expression', () => {
+      expect(buildCron(6, 'biweekly')).toBe('0 6 */14 * *')
+      expect(buildCron(9, 'biweekly', 45)).toBe('45 9 */14 * *')
+    })
   })
 
   describe('parseCron', () => {
     it('parses a valid 5-field cron expression', () => {
-      expect(parseCron('0 6 * * *')).toEqual({ hour: 6, dow: '*' })
-      expect(parseCron('0 14 * * 1-5')).toEqual({ hour: 14, dow: '1-5' })
+      expect(parseCron('0 6 * * *')).toEqual({ hour: 6, minute: 0, dow: '*' })
+      expect(parseCron('0 14 * * 1-5')).toEqual({ hour: 14, minute: 0, dow: '1-5' })
+    })
+
+    it('parses minute field', () => {
+      expect(parseCron('30 6 * * *')).toEqual({ hour: 6, minute: 30, dow: '*' })
+      expect(parseCron('15 14 * * 1-5')).toEqual({ hour: 14, minute: 15, dow: '1-5' })
+    })
+
+    it('parses biweekly expression', () => {
+      expect(parseCron('0 6 */14 * *')).toEqual({ hour: 6, minute: 0, dow: 'biweekly' })
+      expect(parseCron('45 9 */14 * *')).toEqual({ hour: 9, minute: 45, dow: 'biweekly' })
     })
 
     it('returns defaults for invalid expression', () => {
-      expect(parseCron('invalid')).toEqual({ hour: 6, dow: '*' })
-      expect(parseCron('* *')).toEqual({ hour: 6, dow: '*' })
+      expect(parseCron('invalid')).toEqual({ hour: 6, minute: 0, dow: '*' })
+      expect(parseCron('* *')).toEqual({ hour: 6, minute: 0, dow: '*' })
     })
 
     it('handles non-numeric hour', () => {
-      expect(parseCron('0 abc * * *')).toEqual({ hour: 0, dow: '*' })
+      expect(parseCron('0 abc * * *')).toEqual({ hour: 0, minute: 0, dow: '*' })
     })
   })
 
@@ -59,6 +81,21 @@ describe('workflowHelpers', () => {
     })
   })
 
+  describe('toTimeValue', () => {
+    it('pads hour and minute', () => {
+      expect(toTimeValue(6, 0)).toBe('06:00')
+      expect(toTimeValue(14, 30)).toBe('14:30')
+      expect(toTimeValue(0, 15)).toBe('00:15')
+    })
+  })
+
+  describe('fromTimeValue', () => {
+    it('parses time string', () => {
+      expect(fromTimeValue('06:00')).toEqual({ hour: 6, minute: 0 })
+      expect(fromTimeValue('14:30')).toEqual({ hour: 14, minute: 30 })
+    })
+  })
+
   describe('describeCron', () => {
     it('describes daily cron', () => {
       expect(describeCron('0 6 * * *')).toBe('Daily at 06:00')
@@ -71,6 +108,11 @@ describe('workflowHelpers', () => {
     it('describes weekly cron with specific day', () => {
       expect(describeCron('0 9 * * 1')).toBe('Weekly Mon at 09:00')
       expect(describeCron('0 9 * * 0')).toBe('Weekly Sun at 09:00')
+    })
+
+    it('describes biweekly cron', () => {
+      expect(describeCron('0 6 */14 * *')).toBe('Bi-weekly at 06:00')
+      expect(describeCron('30 9 */14 * *')).toBe('Bi-weekly at 09:30')
     })
 
     it('returns raw expression for invalid format', () => {

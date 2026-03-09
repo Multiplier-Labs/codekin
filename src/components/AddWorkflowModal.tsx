@@ -13,8 +13,9 @@ import { useRepos } from '../hooks/useRepos'
 import { listKinds } from '../lib/workflowApi'
 import type { ReviewRepoConfig, WorkflowKindInfo } from '../lib/workflowApi'
 import {
-  WORKFLOW_KINDS, DAY_PATTERNS,
-  buildCron, formatHour, describeCron, slugify, kindCategory,
+  WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL,
+  buildCron, describeCron, slugify, kindCategory,
+  toTimeValue, fromTimeValue,
 } from '../lib/workflowHelpers'
 import { CategoryBadge } from './WorkflowBadges'
 import { RepoList } from './RepoList'
@@ -26,6 +27,7 @@ interface FormState {
   repoPath: string
   repoName: string
   cronHour: number
+  cronMinute: number
   cronDow: string
   customPrompt: string
 }
@@ -227,6 +229,26 @@ function StepKind({
 // Step 3: Schedule + custom prompt
 // ---------------------------------------------------------------------------
 
+function FrequencyButton({
+  label, dow, selected, onSelect,
+}: {
+  label: string; dow: string; selected: boolean; onSelect: (dow: string) => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(dow)}
+      className={`rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
+        selected
+          ? 'border-accent-6 bg-accent-9/40 text-accent-2'
+          : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
+      }`}
+    >
+      {label}
+    </button>
+  )
+}
+
 function StepSchedule({
   form,
   onChange,
@@ -234,6 +256,11 @@ function StepSchedule({
   form: FormState
   onChange: (patch: Partial<FormState>) => void
 }) {
+  const handleTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const { hour, minute } = fromTimeValue(e.target.value)
+    onChange({ cronHour: hour, cronMinute: minute })
+  }
+
   return (
     <div className="space-y-5">
       <div>
@@ -243,37 +270,41 @@ function StepSchedule({
 
         {/* Time picker */}
         <label className="block text-[13px] font-medium text-neutral-3 mb-2">Time</label>
-        <select
-          value={form.cronHour}
-          onChange={e => onChange({ cronHour: parseInt(e.target.value) })}
+        <input
+          type="time"
+          step={900}
+          value={toTimeValue(form.cronHour, form.cronMinute)}
+          onChange={handleTimeChange}
           className="rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-1 focus:border-accent-6 focus:outline-none w-full"
-        >
-          {Array.from({ length: 24 }, (_, h) => (
-            <option key={h} value={h}>{formatHour(h)}</option>
-          ))}
-        </select>
+        />
       </div>
 
       <div>
         <label className="block text-[13px] font-medium text-neutral-3 mb-2">Frequency</label>
-        <div className="flex flex-wrap gap-1.5">
-          {DAY_PATTERNS.map(p => (
-            <button
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {DAY_PRESETS.map(p => (
+            <FrequencyButton
               key={p.dow}
-              type="button"
-              onClick={() => onChange({ cronDow: p.dow })}
-              className={`rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
-                form.cronDow === p.dow
-                  ? 'border-accent-6 bg-accent-9/40 text-accent-2'
-                  : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
-              }`}
-            >
-              {p.label}
-            </button>
+              label={p.label}
+              dow={p.dow}
+              selected={form.cronDow === p.dow}
+              onSelect={dow => onChange({ cronDow: dow })}
+            />
+          ))}
+        </div>
+        <div className="flex gap-1.5">
+          {DAY_INDIVIDUAL.map(p => (
+            <FrequencyButton
+              key={p.dow}
+              label={p.label}
+              dow={p.dow}
+              selected={form.cronDow === p.dow}
+              onSelect={dow => onChange({ cronDow: dow })}
+            />
           ))}
         </div>
         <div className="mt-2 text-[13px] text-neutral-5">
-          {describeCron(buildCron(form.cronHour, form.cronDow))}
+          {describeCron(buildCron(form.cronHour, form.cronDow, form.cronMinute))}
         </div>
       </div>
 
@@ -306,6 +337,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
     repoPath: '',
     repoName: '',
     cronHour: 6,
+    cronMinute: 0,
     cronDow: '*',
     customPrompt: '',
   })
@@ -347,7 +379,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
         id: `${slugify(name)}-${slugify(form.kind)}`,
         name,
         repoPath: form.repoPath.trim(),
-        cronExpression: buildCron(form.cronHour, form.cronDow),
+        cronExpression: buildCron(form.cronHour, form.cronDow, form.cronMinute),
         kind: form.kind,
         enabled: true,
         customPrompt: form.customPrompt.trim() || undefined,

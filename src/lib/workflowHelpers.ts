@@ -15,9 +15,13 @@ export const WORKFLOW_KINDS = [
   { value: 'complexity.weekly', label: 'Complexity Report', category: 'assessment' as WorkflowCategory },
 ]
 
-export const DAY_PATTERNS = [
+export const DAY_PRESETS = [
   { label: 'Daily', dow: '*' },
   { label: 'Weekdays', dow: '1-5' },
+  { label: 'Bi-weekly', dow: 'biweekly' },
+]
+
+export const DAY_INDIVIDUAL = [
   { label: 'Mon', dow: '1' },
   { label: 'Tue', dow: '2' },
   { label: 'Wed', dow: '3' },
@@ -27,18 +31,26 @@ export const DAY_PATTERNS = [
   { label: 'Sun', dow: '0' },
 ]
 
-/** Build a cron expression from an hour (0–23) and day-of-week pattern (e.g. "*", "1-5", "3"). */
-export function buildCron(hour: number, dow: string): string {
-  return `0 ${hour} * * ${dow}`
+export const DAY_PATTERNS = [...DAY_PRESETS, ...DAY_INDIVIDUAL]
+
+/** Build a cron expression from hour (0–23), day-of-week pattern, and optional minute (0–59). */
+export function buildCron(hour: number, dow: string, minute = 0): string {
+  if (dow === 'biweekly') return `${minute} ${hour} */14 * *`
+  return `${minute} ${hour} * * ${dow}`
 }
 
-/** Parse a 5-field cron expression into hour and day-of-week components. Falls back to 6 AM daily. */
-export function parseCron(expr: string): { hour: number; dow: string } {
+/** Parse a 5-field cron expression into hour, minute, and day-of-week components. Falls back to 6:00 AM daily. */
+export function parseCron(expr: string): { hour: number; minute: number; dow: string } {
   const parts = expr.trim().split(/\s+/)
   if (parts.length === 5) {
-    return { hour: parseInt(parts[1]) || 0, dow: parts[4] }
+    const isBiweekly = parts[2] === '*/14'
+    return {
+      hour: parseInt(parts[1]) || 0,
+      minute: parseInt(parts[0]) || 0,
+      dow: isBiweekly ? 'biweekly' : parts[4],
+    }
   }
-  return { hour: 6, dow: '*' }
+  return { hour: 6, minute: 0, dow: '*' }
 }
 
 /** Format a 24-hour integer (0–23) as a 12-hour time string, e.g. `6` → `"6:00 AM"`. */
@@ -49,13 +61,25 @@ export function formatHour(h: number): string {
   return `${h - 12}:00 PM`
 }
 
+/** Convert hour + minute to an HTML time input value string, e.g. `(6, 30)` → `"06:30"`. */
+export function toTimeValue(h: number, m: number): string {
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+/** Parse an HTML time input value string to hour + minute, e.g. `"06:30"` → `{ hour: 6, minute: 30 }`. */
+export function fromTimeValue(v: string): { hour: number; minute: number } {
+  const [h, m] = v.split(':').map(Number)
+  return { hour: h || 0, minute: m || 0 }
+}
+
 /** Convert a 5-field cron expression into a human-readable description, e.g. `"Daily at 06:00"`. */
 export function describeCron(expr: string): string {
   const parts = expr.trim().split(/\s+/)
   if (parts.length !== 5) return expr
-  const [min, hour, , , dow] = parts
+  const [min, hour, dom, , dow] = parts
   const pad = (n: string) => n.length === 1 ? `0${n}` : n
   const time = `${pad(hour)}:${pad(min)}`
+  if (dom === '*/14') return `Bi-weekly at ${time}`
   if (dow === '*') return `Daily at ${time}`
   if (dow === '1-5') return `Weekdays at ${time}`
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
