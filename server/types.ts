@@ -212,6 +212,7 @@ export type WsServerMessage =
   | { type: 'tool_active'; toolName: string; toolInput?: string }
   | { type: 'tool_done'; toolName: string; summary?: string }
   | { type: 'tool_output'; content: string; isError?: boolean }
+  | { type: 'image'; base64: string; mediaType: string }
   | { type: 'system_message'; subtype: 'init' | 'exit' | 'error' | 'restart' | 'stall' | 'notification'; text: string; model?: string }
   | { type: 'user_echo'; text: string }
   | { type: 'result' }
