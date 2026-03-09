@@ -44,19 +44,19 @@
   --color-accent-11: #0c282e;
   --color-accent-12: #07171a;
 
-  /* Neutral — teal-tinted grays */
-  --color-neutral-1: #dce4e5;
-  --color-neutral-2: #c6d4d5;
-  --color-neutral-3: #b8ccce;
-  --color-neutral-4: #94aeb1;
-  --color-neutral-5: #748d91;
-  --color-neutral-6: #5c7377;
-  --color-neutral-7: #465c60;
-  --color-neutral-8: #354a4e;
-  --color-neutral-9: #263a3e;
-  --color-neutral-10: #1a2c30;
-  --color-neutral-11: #101e21;
-  --color-neutral-12: #090e0f;
+  /* Neutral — pure grayscale */
+  --color-neutral-1: #e0e0e0;
+  --color-neutral-2: #cccccc;
+  --color-neutral-3: #c0c0c0;
+  --color-neutral-4: #a3a3a3;
+  --color-neutral-5: #858585;
+  --color-neutral-6: #6b6b6b;
+  --color-neutral-7: #525252;
+  --color-neutral-8: #404040;
+  --color-neutral-9: #303030;
+  --color-neutral-10: #232323;
+  --color-neutral-11: #181818;
+  --color-neutral-12: #0d0d0d;
 
   /* Error — warm red */
   --color-error-1: #fef2f2;
