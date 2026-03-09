@@ -67,6 +67,7 @@ export interface Session {
  * Each variant maps to an action the user or UI can trigger.
  */
 export type WsClientMessage =
+  | { type: 'auth'; token: string }
   | { type: 'create_session'; name: string; workingDir: string; model?: string }
   | { type: 'join_session'; sessionId: string }
   | { type: 'leave_session' }

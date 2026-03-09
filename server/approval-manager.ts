@@ -211,7 +211,7 @@ export class ApprovalManager {
     try {
       mkdirSync(DATA_DIR, { recursive: true })
       const tmp = REPO_APPROVALS_FILE + '.tmp'
-      writeFileSync(tmp, JSON.stringify(data, null, 2))
+      writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 })
       renameSync(tmp, REPO_APPROVALS_FILE)
     } catch (err) {
       console.error('Failed to persist repo approvals:', err)

@@ -17,8 +17,18 @@ import { readFileSync, existsSync, realpathSync } from 'fs'
 /** Main server port (WebSocket + REST + uploads). */
 export const PORT = parseInt(process.env.PORT || '32352', 10)
 
-/** CORS allowed origin. Defaults to localhost dev server; set explicitly for production. */
+/** CORS allowed origin. Defaults to localhost dev server; must be set explicitly for production. */
 export const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173'
+
+// Warn at startup if production is using the default localhost CORS origin
+if (process.env.NODE_ENV === 'production' && !process.env.CORS_ORIGIN) {
+  console.error('[config] ERROR: CORS_ORIGIN is not set in production. Defaulting to localhost is insecure.')
+  console.error('[config] Set CORS_ORIGIN to the production frontend origin (e.g. https://example.com).')
+  process.exit(1)
+}
+if (process.env.NODE_ENV === 'production' && CORS_ORIGIN.includes('localhost')) {
+  console.warn('[config] WARNING: CORS_ORIGIN contains "localhost" in production mode. This is likely misconfigured.')
+}
 
 // ---------------------------------------------------------------------------
 // Authentication

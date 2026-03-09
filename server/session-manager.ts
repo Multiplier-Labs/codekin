@@ -26,6 +26,7 @@ import { PORT } from './config.js'
 import { ApprovalManager } from './approval-manager.js'
 import { SessionNaming } from './session-naming.js'
 import { SessionPersistence } from './session-persistence.js'
+import { deriveSessionToken } from './crypto-utils.js'
 
 /** Max messages retained in a session's output history buffer. */
 const MAX_HISTORY = 2000
@@ -368,11 +369,16 @@ export class SessionManager {
       session.claudeProcess.stop()
     }
 
+    // Derive a session-scoped token instead of forwarding the master auth token.
+    // This limits child process privileges to approve/deny for their own session only.
+    const sessionToken = this._authToken
+      ? deriveSessionToken(this._authToken, sessionId)
+      : ''
     const extraEnv: Record<string, string> = {
       CODEKIN_SESSION_ID: sessionId,
       CODEKIN_PORT: String(this._serverPort || PORT),
-      CODEKIN_TOKEN: this._authToken || '',
-      CODEKIN_AUTH_TOKEN: this._authToken || '',
+      CODEKIN_TOKEN: sessionToken,
+      CODEKIN_AUTH_TOKEN: sessionToken,
       CODEKIN_SESSION_TYPE: session.source || 'manual',
     }
     // Pass CLAUDE_PROJECT_DIR so hooks resolve correctly even when the session's

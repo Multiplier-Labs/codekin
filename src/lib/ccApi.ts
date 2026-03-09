@@ -290,8 +290,11 @@ export async function setSupportProvider(token: string, provider: SupportProvide
   if (!res.ok) throw new Error(`Failed to set support provider: ${res.status}`)
 }
 
-/** Build the WebSocket URL, auto-selecting wss: or ws: based on current page protocol. */
-export function wsUrl(token: string): string {
+/**
+ * Build the WebSocket URL, auto-selecting wss: or ws: based on current page protocol.
+ * Auth token is sent as a post-connect message (not in the URL) to avoid log exposure.
+ */
+export function wsUrl(): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${location.host}/cc/?token=${encodeURIComponent(token)}`
+  return `${proto}//${location.host}/cc/`
 }
