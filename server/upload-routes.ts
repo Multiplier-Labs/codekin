@@ -226,8 +226,9 @@ export function createUploadRouter(
       return
     }
 
-    // Sanitize
-    if (!/^[\w.-]+$/.test(owner) || !/^[\w.-]+$/.test(name)) {
+    // Sanitize: must start with a word character, reject names starting with '.'
+    // or consisting entirely of dots (e.g. '.git', '..') for defense-in-depth.
+    if (!/^[\w][\w.-]*$/.test(owner) || !/^[\w][\w.-]*$/.test(name)) {
       res.status(400).json({ error: 'Invalid owner or repo name' })
       return
     }

@@ -225,7 +225,7 @@ describe('wsUrl', () => {
       writable: true,
       configurable: true,
     })
-    expect(wsUrl('tok')).toBe('wss://example.com/cc/?token=tok')
+    expect(wsUrl()).toBe('wss://example.com/cc/')
   })
 
   it('returns ws: URL when protocol is http:', () => {
@@ -234,16 +234,16 @@ describe('wsUrl', () => {
       writable: true,
       configurable: true,
     })
-    expect(wsUrl('tok')).toBe('ws://localhost:3000/cc/?token=tok')
+    expect(wsUrl()).toBe('ws://localhost:3000/cc/')
   })
 
-  it('encodes the token in the URL', () => {
+  it('does not include token in the URL', () => {
     Object.defineProperty(globalThis, 'location', {
       value: { protocol: 'https:', host: 'example.com' },
       writable: true,
       configurable: true,
     })
-    expect(wsUrl('a b&c=d')).toBe('wss://example.com/cc/?token=a%20b%26c%3Dd')
+    expect(wsUrl()).not.toContain('token')
   })
 })
 

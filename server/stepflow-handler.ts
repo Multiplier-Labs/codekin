@@ -408,9 +408,9 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
     if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
       throw new Error(`Callback URL protocol ${parsedUrl.protocol} not allowed`)
     }
-    if (this.config.allowedCallbackHosts.length > 0 &&
+    if (this.config.allowedCallbackHosts.length === 0 ||
         !this.config.allowedCallbackHosts.includes(parsedUrl.hostname)) {
-      throw new Error(`Callback host ${parsedUrl.hostname} not in allowlist`)
+      throw new Error(`Callback host '${parsedUrl.hostname}' is not in the allowlist`)
     }
     // Block private/link-local IP ranges (IPv4 and IPv6)
     const ip = parsedUrl.hostname
@@ -497,6 +497,10 @@ export function loadStepflowConfig(): StepflowConfig {
 
   const allowedCallbackHosts = (process.env.STEPFLOW_CALLBACK_HOSTS || '')
     .split(',').map(s => s.trim()).filter(Boolean)
+
+  if (enabled && allowedCallbackHosts.length === 0) {
+    console.warn('[stepflow] WARNING: STEPFLOW_CALLBACK_HOSTS is not configured. All callback URLs will be rejected until an explicit allowlist is set.')
+  }
 
   return { enabled, secret, maxConcurrentSessions, allowedCallbackHosts }
 }
