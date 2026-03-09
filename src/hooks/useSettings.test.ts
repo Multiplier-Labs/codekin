@@ -2,7 +2,7 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createElement, act } from 'react'
 import { createRoot } from 'react-dom/client'
 
@@ -85,6 +85,13 @@ describe('useSettings', () => {
       expect(result.current.settings.token).toBe('')
       unmount()
     })
+
+    it('defaults theme to dark when saved theme is not light', () => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ token: '', theme: 'blue' }))
+      const { result, unmount } = renderHook(() => useSettings())
+      expect(result.current.settings.theme).toBe('dark')
+      unmount()
+    })
   })
 
   describe('updateSettings', () => {
@@ -126,6 +133,58 @@ describe('useSettings', () => {
       })
 
       expect(result.current.settings.token).toBe('abc') // preserved
+      unmount()
+    })
+
+    it('remounting reads updated values from localStorage (round-trip)', () => {
+      const { result: r1, unmount: u1 } = renderHook(() => useSettings())
+      act(() => {
+        r1.current.updateSettings({ token: 'round-trip-tok' })
+      })
+      u1()
+
+      const { result: r2, unmount: u2 } = renderHook(() => useSettings())
+      expect(r2.current.settings.token).toBe('round-trip-tok')
+      u2()
+    })
+  })
+
+  describe('URL token parameter', () => {
+    let originalReplaceState: typeof window.history.replaceState
+
+    beforeEach(() => {
+      originalReplaceState = window.history.replaceState
+      window.history.replaceState = vi.fn()
+    })
+
+    afterEach(() => {
+      window.history.replaceState = originalReplaceState
+    })
+
+    it('reads token from URL ?token= parameter and persists it', () => {
+      // Use the real replaceState to set the URL, then swap in mock
+      window.history.replaceState = originalReplaceState
+      window.history.replaceState({}, '', '/?token=url-tok-123')
+      window.history.replaceState = vi.fn()
+
+      const { result, unmount } = renderHook(() => useSettings())
+      expect(result.current.settings.token).toBe('url-tok-123')
+
+      const stored = JSON.parse(localStorage.getItem(STORAGE_KEY)!)
+      expect(stored.token).toBe('url-tok-123')
+      unmount()
+    })
+
+    it('strips token from URL after reading it', () => {
+      window.history.replaceState = originalReplaceState
+      window.history.replaceState({}, '', '/?token=strip-me')
+      window.history.replaceState = vi.fn()
+
+      const { unmount } = renderHook(() => useSettings())
+
+      expect(window.history.replaceState).toHaveBeenCalled()
+      const calledUrl = (window.history.replaceState as ReturnType<typeof vi.fn>).mock.calls[0][2] as string
+      expect(calledUrl).not.toContain('token=')
       unmount()
     })
   })

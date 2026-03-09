@@ -17,6 +17,10 @@ import {
   deleteArchivedSession,
   getRetentionDays,
   setRetentionDays,
+  getSupportProvider,
+  getWebhookConfig,
+  getWebhookEvents,
+  setSupportProvider,
 } from './ccApi'
 
 const mockFetch = vi.fn()
@@ -691,5 +695,98 @@ describe('setRetentionDays', () => {
   it('throws on non-ok response', async () => {
     mockFetch.mockResolvedValue(jsonResponse({}, 400))
     await expect(setRetentionDays('tok', 0)).rejects.toThrow('Failed to update retention settings: 400')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getSupportProvider
+// ---------------------------------------------------------------------------
+
+describe('getSupportProvider', () => {
+  it('returns preferred and available providers', async () => {
+    const data = { preferred: 'groq', available: ['groq', 'openai', 'anthropic'] }
+    mockFetch.mockResolvedValue(jsonResponse(data))
+    const result = await getSupportProvider('tok')
+    expect(result).toEqual(data)
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/settings/support-provider', {
+      headers: { Authorization: 'Bearer tok' },
+    })
+  })
+
+  it('throws on non-ok response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({}, 500))
+    await expect(getSupportProvider('tok')).rejects.toThrow('Failed to get support provider: 500')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getWebhookConfig
+// ---------------------------------------------------------------------------
+
+describe('getWebhookConfig', () => {
+  it('returns config from response', async () => {
+    const config = { enabled: true, maxConcurrentSessions: 3, logLinesToInclude: 50 }
+    mockFetch.mockResolvedValue(jsonResponse({ config }))
+    const result = await getWebhookConfig('tok')
+    expect(result).toEqual(config)
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/webhooks/config', {
+      headers: { Authorization: 'Bearer tok' },
+    })
+  })
+
+  it('throws on non-ok response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({}, 500))
+    await expect(getWebhookConfig('tok')).rejects.toThrow('Failed to get webhook config: 500')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getWebhookEvents
+// ---------------------------------------------------------------------------
+
+describe('getWebhookEvents', () => {
+  it('returns events array from response', async () => {
+    const events = [{ id: 'e1', repo: 'foo/bar', branch: 'main', workflow: 'ci', conclusion: 'success', status: 'completed', receivedAt: '2026-01-01' }]
+    mockFetch.mockResolvedValue(jsonResponse({ events }))
+    const result = await getWebhookEvents('tok')
+    expect(result).toEqual(events)
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/webhooks/events', {
+      headers: { Authorization: 'Bearer tok' },
+    })
+  })
+
+  it('returns empty array when events field is missing', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({}))
+    const result = await getWebhookEvents('tok')
+    expect(result).toEqual([])
+  })
+
+  it('throws on non-ok response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({}, 500))
+    await expect(getWebhookEvents('tok')).rejects.toThrow('Failed to get webhook events: 500')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// setSupportProvider
+// ---------------------------------------------------------------------------
+
+describe('setSupportProvider', () => {
+  it('sends PUT with provider and resolves', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({}, 200))
+    await expect(setSupportProvider('tok', 'groq')).resolves.toBeUndefined()
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/settings/support-provider', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer tok',
+      },
+      body: JSON.stringify({ provider: 'groq' }),
+    })
+  })
+
+  it('throws on non-ok response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({}, 400))
+    await expect(setSupportProvider('tok', 'openai')).rejects.toThrow('Failed to set support provider: 400')
   })
 })
