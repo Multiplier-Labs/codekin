@@ -43,9 +43,9 @@ export function RepoGroup({
   const repoName = repoPath.split('/').pop() || repoPath
 
   return (
-    <div className="rounded-xl border border-neutral-8/80 bg-neutral-11/50 overflow-hidden">
+    <div className="rounded-lg border border-neutral-9/60 bg-neutral-10/30 overflow-hidden">
       {/* Repo header */}
-      <div className="flex items-baseline gap-2 px-4 py-2.5 border-b border-neutral-8/50 bg-neutral-11/40">
+      <div className="flex items-baseline gap-2 px-4 py-2.5 border-b border-neutral-9/40 bg-neutral-10/20">
         <span className="text-[15px] font-semibold text-neutral-2">{repoName}</span>
         <span className="text-[13px] text-neutral-6">{workflows.length}</span>
       </div>
