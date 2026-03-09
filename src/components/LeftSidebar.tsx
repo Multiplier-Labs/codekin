@@ -97,6 +97,12 @@ interface Props {
   onSendModule: (mod: Module) => void
   onNavigateToWorkflows: () => void
   onBrowseDocs?: (workingDir: string) => void
+  docsPickerOpen?: boolean
+  docsPickerRepoDir?: string | null
+  docsPickerFiles?: { path: string; pinned: boolean }[]
+  docsPickerLoading?: boolean
+  onDocsPickerSelect?: (filePath: string) => void
+  onDocsPickerClose?: () => void
 }
 
 // --------------------------------------------------------------------------
@@ -132,6 +138,12 @@ export function LeftSidebar({
   onSendModule,
   onNavigateToWorkflows,
   onBrowseDocs,
+  docsPickerOpen,
+  docsPickerRepoDir,
+  docsPickerFiles,
+  docsPickerLoading,
+  onDocsPickerSelect,
+  onDocsPickerClose,
 }: Props) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('codekin-left-sidebar-collapsed') === 'true')
   const [width, setWidth] = useState(() => {
@@ -329,6 +341,12 @@ export function LeftSidebar({
             onDeleteRepo={onDeleteRepo}
             onViewArchivedSession={setArchiveViewSessionId}
             onBrowseDocs={onBrowseDocs}
+            docsPickerOpen={docsPickerOpen}
+            docsPickerRepoDir={docsPickerRepoDir}
+            docsPickerFiles={docsPickerFiles}
+            docsPickerLoading={docsPickerLoading}
+            onDocsPickerSelect={onDocsPickerSelect}
+            onDocsPickerClose={onDocsPickerClose}
           />
         ))}
 

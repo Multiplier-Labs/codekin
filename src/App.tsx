@@ -23,7 +23,6 @@ import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { Settings } from './components/Settings'
 import { ChatView } from './components/ChatView'
 import { DocsBrowser } from './components/DocsBrowser'
-import { DocsFilePicker } from './components/DocsFilePicker'
 import { TodoPanel } from './components/TodoPanel'
 import { LeftSidebar } from './components/LeftSidebar'
 import { TentativeBanner } from './components/TentativeBanner'
@@ -418,17 +417,13 @@ export default function App() {
         onSendModule={handleSendModule}
         onNavigateToWorkflows={() => navigate('/workflows')}
         onBrowseDocs={handleBrowseDocs}
+        docsPickerOpen={docsBrowser.pickerOpen}
+        docsPickerRepoDir={docsBrowser.pickerRepoDir}
+        docsPickerFiles={docsBrowser.pickerFiles}
+        docsPickerLoading={docsBrowser.pickerLoading}
+        onDocsPickerSelect={handleSelectDocFile}
+        onDocsPickerClose={docsBrowser.closePicker}
       />
-
-      {/* Docs file picker (floating, anchored to sidebar) */}
-      {docsBrowser.pickerOpen && (
-        <DocsFilePicker
-          files={docsBrowser.pickerFiles}
-          loading={docsBrowser.pickerLoading}
-          onSelect={handleSelectDocFile}
-          onClose={docsBrowser.closePicker}
-        />
-      )}
 
       {/* Main area */}
       <div className="terminal-area flex flex-1 flex-col overflow-hidden bg-neutral-12">

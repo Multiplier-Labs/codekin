@@ -13,6 +13,7 @@ import {
 import type { Session } from '../types'
 import { listArchivedSessions, type ArchivedSessionInfo } from '../lib/ccApi'
 import { ApprovalsPanel } from './ApprovalsPanel'
+import { DocsFilePicker } from './DocsFilePicker'
 
 const ARCHIVED_PREVIEW_LIMIT = 5
 
@@ -88,6 +89,12 @@ export interface RepoSectionProps {
   onDeleteRepo: (workingDir: string) => void
   onViewArchivedSession: (id: string) => void
   onBrowseDocs?: (workingDir: string) => void
+  docsPickerOpen?: boolean
+  docsPickerRepoDir?: string | null
+  docsPickerFiles?: { path: string; pinned: boolean }[]
+  docsPickerLoading?: boolean
+  onDocsPickerSelect?: (filePath: string) => void
+  onDocsPickerClose?: () => void
 }
 
 // --------------------------------------------------------------------------
@@ -110,6 +117,12 @@ export function RepoSection({
   onDeleteRepo,
   onViewArchivedSession,
   onBrowseDocs,
+  docsPickerOpen,
+  docsPickerRepoDir,
+  docsPickerFiles,
+  docsPickerLoading,
+  onDocsPickerSelect,
+  onDocsPickerClose,
 }: RepoSectionProps) {
   const [expanded, setExpanded] = useState(isActive)
   const [approvalsOpen, setApprovalsOpen] = useState(false)
@@ -172,13 +185,23 @@ export function RepoSection({
           )}
         </button>
         {onBrowseDocs && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onBrowseDocs(node.workingDir) }}
-            className="flex-shrink-0 rounded p-0.5 transition-colors opacity-0 group-hover:opacity-100 text-neutral-5 hover:text-neutral-2"
-            title="Browse docs"
-          >
-            <IconFileText size={14} stroke={2} />
-          </button>
+          <div className="relative flex-shrink-0">
+            <button
+              onClick={(e) => { e.stopPropagation(); onBrowseDocs(node.workingDir) }}
+              className="rounded p-0.5 transition-colors opacity-0 group-hover:opacity-100 text-neutral-5 hover:text-neutral-2"
+              title="Browse docs"
+            >
+              <IconFileText size={14} stroke={2} />
+            </button>
+            {docsPickerOpen && docsPickerRepoDir === node.workingDir && onDocsPickerSelect && onDocsPickerClose && (
+              <DocsFilePicker
+                files={docsPickerFiles ?? []}
+                loading={docsPickerLoading ?? false}
+                onSelect={onDocsPickerSelect}
+                onClose={onDocsPickerClose}
+              />
+            )}
+          </div>
         )}
         <button
           onClick={() => setApprovalsOpen(!approvalsOpen)}
