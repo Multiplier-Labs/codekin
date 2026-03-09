@@ -7,7 +7,7 @@
 
 import { useState, useEffect } from 'react'
 import {
-  IconPlus, IconShieldCheck, IconArchive,
+  IconPlus, IconShieldCheck, IconArchive, IconFileText,
   IconChevronDown, IconChevronRight, IconRobot, IconSparkles, IconPencil,
 } from '@tabler/icons-react'
 import type { Session } from '../types'
@@ -87,6 +87,7 @@ export interface RepoSectionProps {
   onSelectRepo: (workingDir: string) => void
   onDeleteRepo: (workingDir: string) => void
   onViewArchivedSession: (id: string) => void
+  onBrowseDocs?: (workingDir: string) => void
 }
 
 // --------------------------------------------------------------------------
@@ -108,6 +109,7 @@ export function RepoSection({
   onSelectRepo,
   onDeleteRepo,
   onViewArchivedSession,
+  onBrowseDocs,
 }: RepoSectionProps) {
   const [expanded, setExpanded] = useState(isActive)
   const [approvalsOpen, setApprovalsOpen] = useState(false)
@@ -169,6 +171,15 @@ export function RepoSection({
             <span className="text-[12px] text-neutral-6 flex-shrink-0">({node.sessions.length})</span>
           )}
         </button>
+        {onBrowseDocs && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onBrowseDocs(node.workingDir) }}
+            className="flex-shrink-0 rounded p-0.5 transition-colors opacity-0 group-hover:opacity-100 text-neutral-5 hover:text-neutral-2"
+            title="Browse docs"
+          >
+            <IconFileText size={14} stroke={2} />
+          </button>
+        )}
         <button
           onClick={() => setApprovalsOpen(!approvalsOpen)}
           className={`flex-shrink-0 rounded p-0.5 transition-colors opacity-0 group-hover:opacity-100 ${

@@ -654,3 +654,92 @@ html, body, #root {
   border: 1px solid var(--color-neutral-9);
 }
 
+/* ── Docs browser prose ────────────────────────────────────────────────── */
+/* Scoped styles for rendered markdown in the docs browser.
+   Uses Lato for body text (distinct from monospace chat) and
+   references CSS custom properties for automatic light/dark support. */
+
+.docs-prose {
+  font-family: 'Lato', sans-serif;
+  font-size: 15px;
+  color: var(--color-neutral-2);
+  line-height: 1.65;
+}
+
+.docs-prose h1 { font-size: 1.5em; font-weight: 700; color: var(--color-neutral-1); margin: 1.5em 0 0.5em; }
+.docs-prose h2 { font-size: 1.25em; font-weight: 600; color: var(--color-neutral-1); margin: 1.25em 0 0.5em; }
+.docs-prose h3 { font-size: 1.1em; font-weight: 600; color: var(--color-neutral-2); margin: 1em 0 0.5em; }
+.docs-prose h4 { font-size: 1em; font-weight: 600; color: var(--color-neutral-2); margin: 1em 0 0.5em; }
+.docs-prose h1:first-child,
+.docs-prose h2:first-child,
+.docs-prose h3:first-child { margin-top: 0; }
+
+.docs-prose p { margin: 0.5em 0; }
+
+.docs-prose pre {
+  background: var(--color-neutral-11);
+  border: 1px solid var(--color-neutral-9);
+  border-radius: 6px;
+  padding: 0.75em 1em;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  font-size: 14px;
+}
+.docs-prose code {
+  font-family: 'Inconsolata', monospace;
+}
+.docs-prose :not(pre) > code {
+  background: var(--color-neutral-10);
+  padding: 0.1em 0.4em;
+  border-radius: 3px;
+  color: var(--color-accent-4);
+}
+
+.docs-prose table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5em 0;
+  font-size: 14px;
+}
+.docs-prose th, .docs-prose td {
+  padding: 0.25em 0.75em;
+  border: 1px solid var(--color-neutral-9);
+  text-align: left;
+}
+.docs-prose th {
+  background: var(--color-neutral-11);
+  font-weight: 600;
+  color: var(--color-neutral-2);
+}
+
+.docs-prose a {
+  color: var(--color-accent-5);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.docs-prose a:hover {
+  color: var(--color-accent-4);
+}
+
+.docs-prose blockquote {
+  border-left: 3px solid var(--color-neutral-8);
+  padding-left: 1em;
+  color: var(--color-neutral-4);
+  margin: 0.5em 0;
+}
+
+.docs-prose ul { list-style: disc; padding-left: 1.5em; margin: 0.5em 0; }
+.docs-prose ol { list-style: decimal; padding-left: 1.5em; margin: 0.5em 0; }
+.docs-prose li { margin: 0.25em 0; }
+
+.docs-prose hr {
+  border: none;
+  border-top: 1px solid var(--color-neutral-9);
+  margin: 1.5em 0;
+}
+
+.docs-prose img {
+  max-width: 100%;
+  height: auto;
+}
+

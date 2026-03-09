@@ -45,9 +45,10 @@ interface InputBarProps {
   onValueChange?: (value: string) => void
   currentModel?: string | null
   onModelChange?: (model: string) => void
+  placeholder?: string
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, initialValue = '', onValueChange, currentModel, onModelChange }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, initialValue = '', onValueChange, currentModel, onModelChange, placeholder }, ref) {
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
@@ -168,7 +169,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           onKeyDown={handleKeyDown}
           disabled={disabled}
           autoFocus
-          placeholder={isWaiting ? 'Type response...' : 'What do you want to build?'}
+          placeholder={placeholder ?? (isWaiting ? 'Type response...' : 'What do you want to build?')}
           className="flex-1 min-h-0 resize-none bg-transparent text-[15px] leading-snug text-neutral-1 placeholder:text-neutral-5 outline-none disabled:opacity-50 overflow-y-auto"
         />
         <input

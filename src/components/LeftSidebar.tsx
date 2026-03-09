@@ -96,6 +96,7 @@ interface Props {
   onUpdateTheme: (theme: string) => void
   onSendModule: (mod: Module) => void
   onNavigateToWorkflows: () => void
+  onBrowseDocs?: (workingDir: string) => void
 }
 
 // --------------------------------------------------------------------------
@@ -130,6 +131,7 @@ export function LeftSidebar({
   onUpdateTheme,
   onSendModule,
   onNavigateToWorkflows,
+  onBrowseDocs,
 }: Props) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('codekin-left-sidebar-collapsed') === 'true')
   const [width, setWidth] = useState(() => {
@@ -326,6 +328,7 @@ export function LeftSidebar({
             onSelectRepo={onSelectRepo}
             onDeleteRepo={onDeleteRepo}
             onViewArchivedSession={setArchiveViewSessionId}
+            onBrowseDocs={onBrowseDocs}
           />
         ))}
 

@@ -2,7 +2,7 @@
  * Root application component — orchestrates the full Codekin UI.
  *
  * Wires together WebSocket chat, session management, repo selection,
- * file uploads, skill expansion, command palette, and settings.
+ * file uploads, skill expansion, command palette, docs browser, and settings.
  * Layout: top session tab bar, left icon sidebar, main chat area with
  * input bar and prompt buttons, right sidebar with sessions/tasks/approvals.
  */
@@ -17,10 +17,13 @@ import { usePageVisibility } from './hooks/usePageVisibility'
 import { useRouter } from './hooks/useRouter'
 import { useTentativeQueue } from './hooks/useTentativeQueue'
 import { useSessionOrchestration, groupKey } from './hooks/useSessionOrchestration'
+import { useDocsBrowser } from './hooks/useDocsBrowser'
 import { uploadFile } from './lib/ccApi'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { Settings } from './components/Settings'
 import { ChatView } from './components/ChatView'
+import { DocsBrowser } from './components/DocsBrowser'
+import { DocsFilePicker } from './components/DocsFilePicker'
 import { TodoPanel } from './components/TodoPanel'
 import { LeftSidebar } from './components/LeftSidebar'
 import { TentativeBanner } from './components/TentativeBanner'
@@ -36,6 +39,7 @@ export default function App() {
   const { sessions, rename: renameSession, remove: removeSession, refresh: refreshSessions } = useSessions(settings.token)
   const { queues: tentativeQueues, addToQueue, clearQueue } = useTentativeQueue()
   const { sessionId: urlSessionId, view, navigate } = useRouter()
+  const docsBrowser = useDocsBrowser()
 
   const [activeSessionId, setActiveSessionIdRaw] = useState<string | null>(() =>
     urlSessionId ?? localStorage.getItem('codekin-active-session')
@@ -210,6 +214,11 @@ export default function App() {
     if (!settings.token) setSettingsOpen(true) // eslint-disable-line react-hooks/set-state-in-effect -- initial setup
   }, [settings.token])
 
+  // Close docs browser when switching sessions
+  useEffect(() => {
+    if (docsBrowser.isOpen) docsBrowser.close() // eslint-disable-line react-hooks/set-state-in-effect -- sync with session change
+  }, [activeSessionId]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSendSkill = useCallback((command: string) => {
     inputBarRef.current?.insertText(command + ' ')
   }, [])
@@ -264,6 +273,11 @@ export default function App() {
     const expanded = expandSkill(text)
     const displayText = expanded !== text ? text : undefined
 
+    // Include docs context if viewing a doc
+    const docsContext = docsBrowser.isOpen && docsBrowser.selectedFile && docsBrowser.repoWorkingDir
+      ? `[Viewing doc: ${docsBrowser.selectedFile} in ${docsBrowser.repoWorkingDir}]\n\n`
+      : ''
+
     // Tentative mode: if another session for the same repo is currently processing,
     // or if this session already has queued messages (isAlreadyTentative), hold the
     // new message rather than sending it immediately.  This prevents two Claude
@@ -274,7 +288,7 @@ export default function App() {
     const hasConflict = !!activeWorkingDir &&
       sessions.some(s => groupKey(s) === activeWorkingDir && s.isProcessing && s.id !== activeSessionId)
     if (activeSessionId && (isAlreadyTentative || hasConflict)) {
-      addToQueue(activeSessionId, expanded)
+      addToQueue(activeSessionId, docsContext + expanded)
       return
     }
 
@@ -283,7 +297,7 @@ export default function App() {
       // displayText is the original slash command (e.g. "/commit") when `expanded`
       // is the full skill content — the server echoes displayText to the chat so
       // the user sees the compact command form rather than the raw skill markdown.
-      sendInput(expanded, displayText)
+      sendInput(docsContext + expanded, displayText)
       return
     }
     setUploadStatus('Uploading files...')
@@ -292,13 +306,13 @@ export default function App() {
       if (activeSessionId) setSessionPendingFiles(prev => ({ ...prev, [activeSessionId]: [] }))
       setUploadStatus(null)
       const fileLine = `[Attached files: ${paths.join(', ')}]`
-      const message = text.trim() ? `${fileLine}\n${expanded}` : fileLine
+      const message = text.trim() ? `${fileLine}\n${docsContext}${expanded}` : fileLine
       sendInput(message)
     } catch (err) {
       setUploadStatus(`Upload failed: ${err instanceof Error ? err.message : 'unknown error'}`)
       setTimeout(() => setUploadStatus(null), 3000)
     }
-  }, [settings.token, activeSessionId, activeWorkingDir, sessions, tentativeQueues, addToQueue, pendingFiles, expandSkill, sendInput])
+  }, [settings.token, activeSessionId, activeWorkingDir, sessions, tentativeQueues, addToQueue, pendingFiles, expandSkill, sendInput, docsBrowser.isOpen, docsBrowser.selectedFile, docsBrowser.repoWorkingDir])
 
   const handleExecuteTentative = useCallback((sessionId: string) => {
     const queue = tentativeQueues[sessionId] ?? []
@@ -349,6 +363,25 @@ export default function App() {
 
   const activityLabel = deriveActivityLabel(messages, isProcessing, thinkingSummary)
 
+  // Docs browser: derive the repo name for the currently viewed doc
+  const docsRepoName = useMemo(() => {
+    if (!docsBrowser.repoWorkingDir) return ''
+    const parts = docsBrowser.repoWorkingDir.replace(/\/+$/, '').split('/')
+    return parts[parts.length - 1] || docsBrowser.repoWorkingDir
+  }, [docsBrowser.repoWorkingDir])
+
+  // Docs browser: handle browse docs from sidebar
+  const handleBrowseDocs = useCallback((workingDir: string) => {
+    docsBrowser.openPicker(workingDir, settings.token)
+  }, [docsBrowser, settings.token])
+
+  // Docs browser: handle file selection from picker
+  const handleSelectDocFile = useCallback((filePath: string) => {
+    if (docsBrowser.pickerRepoDir) {
+      docsBrowser.openFile(docsBrowser.pickerRepoDir, filePath, settings.token)
+    }
+  }, [docsBrowser, settings.token])
+
   // Sync data-theme attribute on <html> whenever the setting changes
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme
@@ -372,7 +405,7 @@ export default function App() {
         connState={connState}
         view={view}
         archiveRefreshKey={archiveRefreshKey}
-        onSelectSession={handleSelectSession}
+        onSelectSession={(id) => { docsBrowser.close(); handleSelectSession(id) }}
         onDeleteSession={handleDeleteSession}
         onRenameSession={renameSession}
         onNewSession={handleNewSessionForRepo}
@@ -384,7 +417,18 @@ export default function App() {
         onUpdateTheme={(theme) => updateSettings({ theme: theme as 'dark' | 'light' })}
         onSendModule={handleSendModule}
         onNavigateToWorkflows={() => navigate('/workflows')}
+        onBrowseDocs={handleBrowseDocs}
       />
+
+      {/* Docs file picker (floating, anchored to sidebar) */}
+      {docsBrowser.pickerOpen && (
+        <DocsFilePicker
+          files={docsBrowser.pickerFiles}
+          loading={docsBrowser.pickerLoading}
+          onSelect={handleSelectDocFile}
+          onClose={docsBrowser.closePicker}
+        />
+      )}
 
       {/* Main area */}
       <div className="terminal-area flex flex-1 flex-col overflow-hidden bg-neutral-12">
@@ -402,7 +446,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Main content: workflows view or chat */}
+        {/* Main content: workflows view, docs browser, or chat */}
         {view === 'workflows' ? (
           <WorkflowsView
             token={settings.token}
@@ -413,6 +457,45 @@ export default function App() {
               navigate(`/s/${sessionId}`)
             }}
           />
+        ) : docsBrowser.isOpen ? (
+          <div className="flex flex-1 flex-col overflow-hidden min-h-0">
+            <DocsBrowser
+              repoName={docsRepoName}
+              filePath={docsBrowser.selectedFile!}
+              content={docsBrowser.content}
+              loading={docsBrowser.loading}
+              error={docsBrowser.error}
+              rawMode={docsBrowser.rawMode}
+              onToggleRaw={docsBrowser.toggleRawMode}
+              onClose={docsBrowser.close}
+            />
+            {/* Input bar in docs mode */}
+            {activeSessionId ? (
+              <InputBar
+                key={`docs-${activeSessionId}`}
+                ref={inputBarRef}
+                onSendInput={handleSendWithFiles}
+                isWaiting={!!promptOptions}
+                disabled={!settings.token}
+                onEscape={docsBrowser.close}
+                pendingFiles={pendingFiles}
+                onAddFiles={addFiles}
+                onRemoveFile={removeFile}
+                skillGroups={skillGroups}
+                placeholder="Ask Claude about this doc, or request changes..."
+                initialValue={activeSessionId ? (sessionInputs[activeSessionId] ?? '') : ''}
+                onValueChange={(v) => { if (activeSessionId) setSessionInputs(prev => ({ ...prev, [activeSessionId]: v })) }}
+                currentModel={currentModel}
+                onModelChange={setModel}
+              />
+            ) : (
+              <div className="px-4 py-3 border-t border-neutral-10">
+                <div className="rounded-lg bg-neutral-11 px-3 py-2 text-[15px] text-neutral-5 opacity-40">
+                  Start a session to edit this doc
+                </div>
+              </div>
+            )}
+          </div>
         ) : activeSessionId ? (
           <div className="flex flex-1 flex-col overflow-hidden min-h-0">
             <div className="relative flex-1 min-h-0 flex flex-col">
