@@ -45,7 +45,7 @@ interface Props {
 // ---------------------------------------------------------------------------
 function SectionCard({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-neutral-9/60 bg-neutral-10/30">
+    <section className="settings-section-card rounded-lg border border-neutral-9/60 bg-neutral-10/30">
       <div className="flex items-center gap-2 px-4 py-3 border-b border-neutral-9/40">
         <span className="text-neutral-5">{icon}</span>
         <h3 className="text-[13px] font-semibold uppercase tracking-wide text-neutral-5">{title}</h3>

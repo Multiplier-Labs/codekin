@@ -394,6 +394,16 @@
   background-color: color-mix(in srgb, var(--color-neutral-7) 90%, transparent);
 }
 
+/* Settings section cards — stronger contrast in light mode */
+[data-theme="light"] .settings-section-card {
+  background-color: var(--color-neutral-12);
+  border-color: var(--color-neutral-7);
+}
+
+[data-theme="light"] .settings-section-card > div:first-child {
+  border-color: var(--color-neutral-7);
+}
+
 /* User message bubble — darker background in light mode */
 [data-theme="light"] .terminal-area .user-bubble {
   background-color: color-mix(in srgb, var(--color-neutral-8) 80%, transparent);
