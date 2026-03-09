@@ -130,7 +130,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   }, [onAddFiles])
 
   return (
-    <div className="app-input-bar relative flex flex-col border-t border-l border-neutral-7 bg-neutral-9" style={{ height }}>
+    <div className="app-input-bar relative flex flex-col border-t border-l border-neutral-9 bg-neutral-10" style={{ height }}>
       <DropZone onUpload={onAddFiles} disabled={disabled} />
       {/* Drag handle */}
       <div
