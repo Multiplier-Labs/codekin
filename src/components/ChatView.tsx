@@ -131,6 +131,10 @@ function AssistantMessage({ msg, fontSize, theme }: { msg: ChatMessage & { type:
                 </code>
               )
             },
+            a({ href, children, ...props }) {
+              const safeHref = href && /^javascript:/i.test(href) ? '#' : href
+              return <a href={safeHref} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
+            },
             img({ src, alt, ...props }) {
               return (
                 <img

@@ -100,7 +100,9 @@ export async function verifyToken(token: string): Promise<boolean> {
 
 /** Fetch all sessions from the server. */
 export async function listSessions(token: string): Promise<Session[]> {
-  const res = await authFetch(`${BASE}/api/sessions/list?token=${encodeURIComponent(token)}`)
+  const res = await authFetch(`${BASE}/api/sessions/list`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
   if (!res.ok) throw new Error(`Failed to list sessions: ${res.status}`)
   const data = await res.json()
   return data.sessions ?? []
@@ -133,15 +135,18 @@ export async function renameSession(token: string, sessionId: string, name: stri
 
 /** Delete a session by ID. Kills any running Claude process. */
 export async function deleteSession(token: string, sessionId: string): Promise<void> {
-  const res = await authFetch(`${BASE}/api/sessions/${sessionId}?token=${encodeURIComponent(token)}`, {
+  const res = await authFetch(`${BASE}/api/sessions/${sessionId}`, {
     method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to delete session: ${res.status}`)
 }
 
 /** Server health check. Returns active/total session counts. */
 export async function getHealth(token: string): Promise<{ status: string; claudeSessions: number }> {
-  const res = await authFetch(`${BASE}/api/health?token=${encodeURIComponent(token)}`)
+  const res = await authFetch(`${BASE}/api/health`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
   if (!res.ok) throw new Error(`Health check failed: ${res.status}`)
   return res.json()
 }
@@ -150,8 +155,9 @@ export async function getHealth(token: string): Promise<{ status: string; claude
 export async function uploadFile(token: string, file: File): Promise<string> {
   const form = new FormData()
   form.append('file', file)
-  const res = await authFetch(`${BASE}/api/upload?token=${encodeURIComponent(token)}`, {
+  const res = await authFetch(`${BASE}/api/upload`, {
     method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
     body: form,
   })
   if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
@@ -168,8 +174,10 @@ export interface RepoApprovals {
 
 /** Fetch the auto-approval rules for a repo (by workingDir path). */
 export async function getRepoApprovals(token: string, workingDir: string): Promise<RepoApprovals> {
-  const params = new URLSearchParams({ token, path: workingDir })
-  const res = await authFetch(`${BASE}/api/approvals?${params}`)
+  const params = new URLSearchParams({ path: workingDir })
+  const res = await authFetch(`${BASE}/api/approvals?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
   if (!res.ok) throw new Error(`Failed to fetch approvals: ${res.status}`)
   return res.json()
 }
@@ -180,7 +188,7 @@ export async function removeRepoApproval(
   workingDir: string,
   opts: { tool?: string; command?: string },
 ): Promise<void> {
-  const params = new URLSearchParams({ token, path: workingDir })
+  const params = new URLSearchParams({ path: workingDir })
   const res = await authFetch(`${BASE}/api/approvals?${params}`, {
     method: 'DELETE',
     headers: headers(token),
@@ -195,7 +203,7 @@ export async function bulkRemoveRepoApprovals(
   workingDir: string,
   items: Array<{ tool?: string; command?: string }>,
 ): Promise<void> {
-  const params = new URLSearchParams({ token, path: workingDir })
+  const params = new URLSearchParams({ path: workingDir })
   const res = await authFetch(`${BASE}/api/approvals?${params}`, {
     method: 'DELETE',
     headers: headers(token),
@@ -227,9 +235,12 @@ export interface ArchivedSessionFull extends ArchivedSessionInfo {
 
 /** Fetch all archived sessions (metadata only). Optionally filtered by workingDir. */
 export async function listArchivedSessions(token: string, workingDir?: string): Promise<ArchivedSessionInfo[]> {
-  const params = new URLSearchParams({ token })
+  const params = new URLSearchParams()
   if (workingDir) params.set('workingDir', workingDir)
-  const res = await authFetch(`${BASE}/api/sessions/archived?${params}`)
+  const qs = params.toString()
+  const res = await authFetch(`${BASE}/api/sessions/archived${qs ? `?${qs}` : ''}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
   if (!res.ok) throw new Error(`Failed to list archived sessions: ${res.status}`)
   const data = await res.json()
   return data.sessions ?? []
@@ -237,22 +248,27 @@ export async function listArchivedSessions(token: string, workingDir?: string): 
 
 /** Fetch a single archived session with full chat history. */
 export async function getArchivedSession(token: string, sessionId: string): Promise<ArchivedSessionFull> {
-  const res = await authFetch(`${BASE}/api/sessions/archived/${sessionId}?token=${encodeURIComponent(token)}`)
+  const res = await authFetch(`${BASE}/api/sessions/archived/${sessionId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
   if (!res.ok) throw new Error(`Failed to get archived session: ${res.status}`)
   return res.json()
 }
 
 /** Delete an archived session permanently. */
 export async function deleteArchivedSession(token: string, sessionId: string): Promise<void> {
-  const res = await authFetch(`${BASE}/api/sessions/archived/${sessionId}?token=${encodeURIComponent(token)}`, {
+  const res = await authFetch(`${BASE}/api/sessions/archived/${sessionId}`, {
     method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to delete archived session: ${res.status}`)
 }
 
 /** Get the session retention period in days. */
 export async function getRetentionDays(token: string): Promise<number> {
-  const res = await authFetch(`${BASE}/api/settings/retention?token=${encodeURIComponent(token)}`)
+  const res = await authFetch(`${BASE}/api/settings/retention`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
   if (!res.ok) throw new Error(`Failed to get retention settings: ${res.status}`)
   const data = await res.json()
   return data.days
@@ -260,7 +276,7 @@ export async function getRetentionDays(token: string): Promise<number> {
 
 /** Set the session retention period in days. */
 export async function setRetentionDays(token: string, days: number): Promise<number> {
-  const res = await authFetch(`${BASE}/api/settings/retention?token=${encodeURIComponent(token)}`, {
+  const res = await authFetch(`${BASE}/api/settings/retention`, {
     method: 'PUT',
     headers: headers(token),
     body: JSON.stringify({ days }),
@@ -275,7 +291,9 @@ export type SupportProvider = 'auto' | 'groq' | 'openai' | 'gemini' | 'anthropic
 
 /** Get the preferred support provider and list of available providers. */
 export async function getSupportProvider(token: string): Promise<{ preferred: SupportProvider; available: string[] }> {
-  const res = await authFetch(`${BASE}/api/settings/support-provider?token=${encodeURIComponent(token)}`)
+  const res = await authFetch(`${BASE}/api/settings/support-provider`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
   if (!res.ok) throw new Error(`Failed to get support provider: ${res.status}`)
   return res.json()
 }
@@ -289,7 +307,9 @@ export interface WebhookConfigInfo {
 
 /** Fetch the webhook configuration from the server. */
 export async function getWebhookConfig(token: string): Promise<WebhookConfigInfo> {
-  const res = await authFetch(`${BASE}/api/webhooks/config?token=${encodeURIComponent(token)}`)
+  const res = await authFetch(`${BASE}/api/webhooks/config`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
   if (!res.ok) throw new Error(`Failed to get webhook config: ${res.status}`)
   const data = await res.json()
   return data.config
@@ -297,7 +317,9 @@ export async function getWebhookConfig(token: string): Promise<WebhookConfigInfo
 
 /** Fetch recent webhook events. */
 export async function getWebhookEvents(token: string): Promise<Array<{ id: string; repo: string; branch: string; workflow: string; conclusion: string; status: string; receivedAt: string }>> {
-  const res = await authFetch(`${BASE}/api/webhooks/events?token=${encodeURIComponent(token)}`)
+  const res = await authFetch(`${BASE}/api/webhooks/events`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
   if (!res.ok) throw new Error(`Failed to get webhook events: ${res.status}`)
   const data = await res.json()
   return data.events ?? []
@@ -305,7 +327,7 @@ export async function getWebhookEvents(token: string): Promise<Array<{ id: strin
 
 /** Set the preferred support provider. */
 export async function setSupportProvider(token: string, provider: SupportProvider): Promise<void> {
-  const res = await authFetch(`${BASE}/api/settings/support-provider?token=${encodeURIComponent(token)}`, {
+  const res = await authFetch(`${BASE}/api/settings/support-provider`, {
     method: 'PUT',
     headers: headers(token),
     body: JSON.stringify({ provider }),

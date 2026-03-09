@@ -152,11 +152,18 @@ export function createUploadRouter(
     destination: SCREENSHOTS_DIR,
     filename: (_req, file, cb) => {
       const ts = Date.now()
-      const safe = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
+      const safe = file.originalname.slice(0, 64).replace(/[^a-zA-Z0-9._-]/g, '_')
       cb(null, `${ts}-${safe}`)
     },
   })
-  const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } })
+  const ALLOWED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+  const upload = multer({
+    storage,
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      cb(null, ALLOWED_MIME_TYPES.includes(file.mimetype))
+    },
+  })
 
   // --- File upload ---
   router.post('/api/upload', (req, res, next) => {

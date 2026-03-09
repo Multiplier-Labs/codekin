@@ -86,7 +86,9 @@ describe('listSessions', () => {
     mockFetch.mockResolvedValue(jsonResponse({ sessions }))
     const result = await listSessions('tok')
     expect(result).toEqual(sessions)
-    expect(mockFetch).toHaveBeenCalledWith('/cc/api/sessions/list?token=tok')
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/sessions/list', {
+      headers: { Authorization: 'Bearer tok' },
+    })
   })
 
   it('returns empty array when response has no sessions field', async () => {
@@ -94,10 +96,12 @@ describe('listSessions', () => {
     expect(await listSessions('tok')).toEqual([])
   })
 
-  it('encodes token in query parameter', async () => {
+  it('sends token in Authorization header', async () => {
     mockFetch.mockResolvedValue(jsonResponse({ sessions: [] }))
     await listSessions('a b&c')
-    expect(mockFetch).toHaveBeenCalledWith('/cc/api/sessions/list?token=a%20b%26c')
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/sessions/list', {
+      headers: { Authorization: 'Bearer a b&c' },
+    })
   })
 
   it('throws on non-ok response', async () => {
@@ -145,16 +149,18 @@ describe('deleteSession', () => {
   it('resolves silently on success', async () => {
     mockFetch.mockResolvedValue(jsonResponse({}, 200))
     await expect(deleteSession('tok', 's1')).resolves.toBeUndefined()
-    expect(mockFetch).toHaveBeenCalledWith('/cc/api/sessions/s1?token=tok', {
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/sessions/s1', {
       method: 'DELETE',
+      headers: { Authorization: 'Bearer tok' },
     })
   })
 
-  it('encodes token in query parameter', async () => {
+  it('sends token in Authorization header', async () => {
     mockFetch.mockResolvedValue(jsonResponse({}, 200))
     await deleteSession('a=b', 's1')
-    expect(mockFetch).toHaveBeenCalledWith('/cc/api/sessions/s1?token=a%3Db', {
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/sessions/s1', {
       method: 'DELETE',
+      headers: { Authorization: 'Bearer a=b' },
     })
   })
 
@@ -170,7 +176,9 @@ describe('getHealth', () => {
     mockFetch.mockResolvedValue(jsonResponse(health))
     const result = await getHealth('tok')
     expect(result).toEqual(health)
-    expect(mockFetch).toHaveBeenCalledWith('/cc/api/health?token=tok')
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/health', {
+      headers: { Authorization: 'Bearer tok' },
+    })
   })
 
   it('throws on non-ok response', async () => {
@@ -187,18 +195,21 @@ describe('uploadFile', () => {
     expect(result).toBe('/uploads/file.txt')
 
     const [url, opts] = mockFetch.mock.calls[0]
-    expect(url).toBe('/cc/api/upload?token=tok')
+    expect(url).toBe('/cc/api/upload')
     expect(opts.method).toBe('POST')
+    expect(opts.headers.Authorization).toBe('Bearer tok')
     expect(opts.body).toBeInstanceOf(FormData)
     expect(opts.body.get('file')).toBeInstanceOf(File)
     expect(opts.body.get('file').name).toBe('file.txt')
   })
 
-  it('encodes token in query parameter', async () => {
+  it('sends token in Authorization header', async () => {
     mockFetch.mockResolvedValue(jsonResponse({ path: '/uploads/f.txt' }))
     const file = new File(['x'], 'f.txt')
     await uploadFile('my token', file)
-    expect(mockFetch.mock.calls[0][0]).toBe('/cc/api/upload?token=my%20token')
+    const [url, opts] = mockFetch.mock.calls[0]
+    expect(url).toBe('/cc/api/upload')
+    expect(opts.headers.Authorization).toBe('Bearer my token')
   })
 
   it('throws on non-ok response', async () => {
@@ -453,7 +464,8 @@ describe('getRepoApprovals', () => {
     const result = await getRepoApprovals('tok', '/home/dev/project')
     expect(result).toEqual(approvals)
     expect(mockFetch).toHaveBeenCalledWith(
-      '/cc/api/approvals?token=tok&path=%2Fhome%2Fdev%2Fproject',
+      '/cc/api/approvals?path=%2Fhome%2Fdev%2Fproject',
+      { headers: { Authorization: 'Bearer tok' } },
     )
   })
 
@@ -474,7 +486,7 @@ describe('removeRepoApproval', () => {
     mockFetch.mockResolvedValue(jsonResponse({}, 200))
     await removeRepoApproval('tok', '/home/project', { tool: 'Bash' })
     expect(mockFetch).toHaveBeenCalledWith(
-      '/cc/api/approvals?token=tok&path=%2Fhome%2Fproject',
+      '/cc/api/approvals?path=%2Fhome%2Fproject',
       {
         method: 'DELETE',
         headers: {
@@ -518,7 +530,7 @@ describe('bulkRemoveRepoApprovals', () => {
     const items = [{ tool: 'Bash' }, { command: 'npm test' }]
     await bulkRemoveRepoApprovals('tok', '/home/project', items)
     expect(mockFetch).toHaveBeenCalledWith(
-      '/cc/api/approvals?token=tok&path=%2Fhome%2Fproject',
+      '/cc/api/approvals?path=%2Fhome%2Fproject',
       {
         method: 'DELETE',
         headers: {
@@ -562,7 +574,9 @@ describe('listArchivedSessions', () => {
     mockFetch.mockResolvedValue(jsonResponse({ sessions }))
     const result = await listArchivedSessions('tok')
     expect(result).toEqual(sessions)
-    expect(mockFetch).toHaveBeenCalledWith('/cc/api/sessions/archived?token=tok')
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/sessions/archived', {
+      headers: { Authorization: 'Bearer tok' },
+    })
   })
 
   it('returns empty array when no sessions field in response', async () => {
@@ -574,7 +588,8 @@ describe('listArchivedSessions', () => {
     mockFetch.mockResolvedValue(jsonResponse({ sessions: [] }))
     await listArchivedSessions('tok', '/home/dev/project')
     expect(mockFetch).toHaveBeenCalledWith(
-      '/cc/api/sessions/archived?token=tok&workingDir=%2Fhome%2Fdev%2Fproject',
+      '/cc/api/sessions/archived?workingDir=%2Fhome%2Fdev%2Fproject',
+      { headers: { Authorization: 'Bearer tok' } },
     )
   })
 
@@ -594,7 +609,9 @@ describe('getArchivedSession', () => {
     mockFetch.mockResolvedValue(jsonResponse(session))
     const result = await getArchivedSession('tok', 'a1')
     expect(result).toEqual(session)
-    expect(mockFetch).toHaveBeenCalledWith('/cc/api/sessions/archived/a1?token=tok')
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/sessions/archived/a1', {
+      headers: { Authorization: 'Bearer tok' },
+    })
   })
 
   it('throws on non-ok response', async () => {
@@ -611,15 +628,19 @@ describe('deleteArchivedSession', () => {
   it('resolves silently on success', async () => {
     mockFetch.mockResolvedValue(jsonResponse({}, 200))
     await expect(deleteArchivedSession('tok', 'a1')).resolves.toBeUndefined()
-    expect(mockFetch).toHaveBeenCalledWith('/cc/api/sessions/archived/a1?token=tok', {
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/sessions/archived/a1', {
       method: 'DELETE',
+      headers: { Authorization: 'Bearer tok' },
     })
   })
 
-  it('encodes token in query parameter', async () => {
+  it('sends token in Authorization header', async () => {
     mockFetch.mockResolvedValue(jsonResponse({}, 200))
     await deleteArchivedSession('a=b', 'a1')
-    expect(mockFetch.mock.calls[0][0]).toBe('/cc/api/sessions/archived/a1?token=a%3Db')
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/sessions/archived/a1', {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer a=b' },
+    })
   })
 
   it('throws on non-ok response', async () => {
@@ -637,7 +658,9 @@ describe('getRetentionDays', () => {
     mockFetch.mockResolvedValue(jsonResponse({ days: 30 }))
     const result = await getRetentionDays('tok')
     expect(result).toBe(30)
-    expect(mockFetch).toHaveBeenCalledWith('/cc/api/settings/retention?token=tok')
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/settings/retention', {
+      headers: { Authorization: 'Bearer tok' },
+    })
   })
 
   it('throws on non-ok response', async () => {
@@ -655,7 +678,7 @@ describe('setRetentionDays', () => {
     mockFetch.mockResolvedValue(jsonResponse({ days: 14 }))
     const result = await setRetentionDays('tok', 14)
     expect(result).toBe(14)
-    expect(mockFetch).toHaveBeenCalledWith('/cc/api/settings/retention?token=tok', {
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/settings/retention', {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',

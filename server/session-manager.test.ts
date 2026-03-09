@@ -69,6 +69,7 @@ function fakeClaudeProcess(alive = true) {
     stop: vi.fn(),
     start: vi.fn(),
     on: vi.fn(),
+    removeAllListeners: vi.fn(),
     sendMessage: vi.fn(),
     sendControlResponse: vi.fn(),
     getSessionId: vi.fn(() => 'test-session-id'),

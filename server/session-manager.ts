@@ -491,6 +491,11 @@ export class SessionManager {
     })
 
     cp.on('control_request', (requestId, toolName, toolInput) => {
+      // Validate requestId format to prevent stdin stream corruption
+      if (typeof requestId !== 'string' || !/^[\w-]{1,64}$/.test(requestId)) {
+        console.warn(`[control_request] Rejected invalid requestId: ${JSON.stringify(requestId)}`)
+        return
+      }
       console.log(`[control_request] session=${sessionId} tool=${toolName} requestId=${requestId}`)
 
       // Check repo-level auto-approval registry before prompting UI
@@ -549,6 +554,8 @@ export class SessionManager {
     })
 
     cp.on('exit', (code, signal) => {
+      // Remove all listeners to prevent memory leaks from accumulated closures
+      cp.removeAllListeners()
       this.handleClaudeExit(session, sessionId, code, signal)
     })
   }
@@ -1007,6 +1014,7 @@ export class SessionManager {
       session._stoppedByUser = true
       this.clearStallTimer(session)
       if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
+      session.claudeProcess.removeAllListeners()
       session.claudeProcess.stop()
       session.claudeProcess = null
       this.broadcast(session, { type: 'claude_stopped' })

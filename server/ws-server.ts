@@ -86,18 +86,15 @@ function verifyTokenOrSessionToken(token: string | undefined, sessionId: string 
   return verifySessionToken(authToken, sessionId, token)
 }
 
-/** Extract auth token from query string, Authorization header, or request body. */
+/** Extract auth token from Authorization header or request body. */
 function extractToken(req: express.Request): string | undefined {
-  const qToken = req.query.token as string | undefined
-  if (qToken) return qToken
-
-  // Check Authorization header
+  // Check Authorization header (preferred — avoids token in URL/logs)
   const authHeader = req.headers.authorization
   if (authHeader?.startsWith('Bearer ')) {
     return authHeader.slice(7)
   }
 
-  // Check body
+  // Check body (used by auth-verify and legacy callers)
   if (req.body?.token) return req.body.token
 
   return undefined
@@ -307,6 +304,14 @@ const WS_AUTH_TIMEOUT_MS = 5000
 const wsConnections = new Map<string, { count: number; resetAt: number }>()
 const WS_RATE_WINDOW_MS = 60_000
 const WS_RATE_MAX_CONNECTIONS = 30
+
+// Periodically purge expired rate-limit entries to prevent unbounded memory growth
+setInterval(() => {
+  const now = Date.now()
+  for (const [ip, entry] of wsConnections) {
+    if (now >= entry.resetAt) wsConnections.delete(ip)
+  }
+}, WS_RATE_WINDOW_MS)
 
 function checkWsRateLimit(ip: string): boolean {
   const now = Date.now()

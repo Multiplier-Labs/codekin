@@ -509,6 +509,9 @@ export function useChatSocket({
             backoff.current = Math.min(backoff.current * 2, 30000)
             connectRef.current()
           }, backoff.current)
+        }).catch(() => {
+          // Network error during auth check — treat as transient, retry with backoff
+          reconnectTimer.current = setTimeout(connectRef.current, backoff.current)
         })
       }
     }
@@ -606,6 +609,9 @@ export function useChatSocket({
         reconnectTimer.current = null
       }
       connect()
+    }).catch(() => {
+      // Network error during auth check — treat as transient, retry with backoff
+      reconnectTimer.current = setTimeout(connectRef.current, backoff.current)
     })
   }, [send, connect])
 
