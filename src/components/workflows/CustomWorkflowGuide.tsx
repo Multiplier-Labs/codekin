@@ -13,7 +13,7 @@ export function CustomWorkflowGuide() {
   const [open, setOpen] = useState(false)
 
   return (
-    <div className="mt-6 rounded-xl border border-neutral-8/40 bg-neutral-11/20">
+    <div className="mt-6 rounded-lg border border-neutral-9/60 bg-neutral-10/30">
       <button
         onClick={() => setOpen(!open)}
         className="w-full flex items-center gap-2 px-4 py-3 text-left text-[15px] font-medium text-neutral-3 hover:text-neutral-1 transition-colors"
@@ -27,7 +27,7 @@ export function CustomWorkflowGuide() {
       </button>
 
       {open && (
-        <div className="px-4 pb-4 text-[14px] text-neutral-4 space-y-3 border-t border-neutral-8/30 pt-3">
+        <div className="px-4 pb-4 text-[14px] text-neutral-4 space-y-3 border-t border-neutral-9/40 pt-3">
           <p>
             You can define custom workflow types per-repo by adding <code className="text-accent-3 bg-neutral-10 px-1 rounded">.md</code> files to:
           </p>
