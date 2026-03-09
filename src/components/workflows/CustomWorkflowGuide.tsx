@@ -13,7 +13,7 @@ export function CustomWorkflowGuide() {
   const [open, setOpen] = useState(false)
 
   return (
-    <div className="mt-6 rounded-lg border border-neutral-9/60 bg-neutral-10/30">
+    <div className="workflow-card mt-6 rounded-lg border border-neutral-9/60 bg-neutral-10/30">
       <button
         onClick={() => setOpen(!open)}
         className="w-full flex items-center gap-2 px-4 py-3 text-left text-[15px] font-medium text-neutral-3 hover:text-neutral-1 transition-colors"

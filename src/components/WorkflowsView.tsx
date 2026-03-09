@@ -200,7 +200,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
             </button>
 
             {showActivity && (
-              <div className="rounded-lg border border-neutral-9/60 bg-neutral-10/30 py-1 divide-y divide-neutral-9/30">
+              <div className="workflow-card rounded-lg border border-neutral-9/60 bg-neutral-10/30 py-1 divide-y divide-neutral-9/30">
                 {runs.slice(0, 20).map(run => (
                   <ActivityRow
                     key={run.id}
