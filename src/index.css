@@ -504,6 +504,19 @@
   --color-success-12: #f4faf5;
 }
 
+/* Sidebar text — pure grayscale overrides so fonts render without teal tint.
+   Only the lower stops (used for text/icons) are overridden;
+   higher stops (backgrounds, borders) keep the teal-tinted palette. */
+.app-left-sidebar,
+.app-right-sidebar {
+  --color-neutral-1: #e0e0e0;
+  --color-neutral-2: #cccccc;
+  --color-neutral-3: #c0c0c0;
+  --color-neutral-4: #a3a3a3;
+  --color-neutral-5: #858585;
+  --color-neutral-6: #6b6b6b;
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;
