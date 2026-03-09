@@ -151,6 +151,34 @@ function nextCronMatch(expression: string, after: Date): Date {
 }
 
 // ---------------------------------------------------------------------------
+// Query builder helper
+// ---------------------------------------------------------------------------
+
+interface ListQueryOpts {
+  filters: Array<{ column: string; value: unknown }>
+  orderBy?: string
+  limit?: number
+  offset?: number
+}
+
+/** Build a parameterized SELECT query from typed filter objects. */
+function buildListQuery(table: string, opts: ListQueryOpts): { sql: string; params: unknown[] } {
+  const params: unknown[] = []
+  let sql = `SELECT * FROM ${table} WHERE 1=1`
+
+  for (const f of opts.filters) {
+    sql += ` AND ${f.column} = ?`
+    params.push(f.value)
+  }
+
+  if (opts.orderBy) sql += ` ORDER BY ${opts.orderBy}`
+  if (opts.limit) { sql += ` LIMIT ?`; params.push(opts.limit) }
+  if (opts.offset) { sql += ` OFFSET ?`; params.push(opts.offset) }
+
+  return { sql, params }
+}
+
+// ---------------------------------------------------------------------------
 // WorkflowEngine
 // ---------------------------------------------------------------------------
 
@@ -434,28 +462,15 @@ export class WorkflowEngine extends EventEmitter {
   }
 
   listRuns(opts?: { kind?: string; status?: RunStatus; limit?: number; offset?: number }): WorkflowRun[] {
-    let sql = `SELECT * FROM workflow_runs WHERE 1=1`
-    const params: unknown[] = []
-
-    if (opts?.kind) {
-      sql += ` AND kind = ?`
-      params.push(opts.kind)
-    }
-    if (opts?.status) {
-      sql += ` AND status = ?`
-      params.push(opts.status)
-    }
-
-    sql += ` ORDER BY created_at DESC`
-
-    if (opts?.limit) {
-      sql += ` LIMIT ?`
-      params.push(opts.limit)
-    }
-    if (opts?.offset) {
-      sql += ` OFFSET ?`
-      params.push(opts.offset)
-    }
+    const { sql, params } = buildListQuery('workflow_runs', {
+      filters: [
+        opts?.kind ? { column: 'kind', value: opts.kind } : null,
+        opts?.status ? { column: 'status', value: opts.status } : null,
+      ].filter(Boolean) as Array<{ column: string; value: unknown }>,
+      orderBy: 'created_at DESC',
+      limit: opts?.limit,
+      offset: opts?.offset,
+    })
 
     return (this.db.prepare(sql).all(...params) as Record<string, string>[]).map(row => ({
       id: row.id,

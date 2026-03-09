@@ -20,6 +20,7 @@ import { NewSessionButton } from './NewSessionButton'
 import { RepoSection, type RepoNode } from './RepoSection'
 import { ArchivedSessionsPanel } from './ArchivedSessionsPanel'
 import { ModuleBrowser } from './ModuleBrowser'
+import { groupKey } from '../hooks/useSessionOrchestration'
 
 const SIDEBAR_WIDTH_KEY = 'codekin-left-sidebar-width'
 const DEFAULT_WIDTH = 224
@@ -29,10 +30,6 @@ const MAX_WIDTH = 480
 // --------------------------------------------------------------------------
 // Helpers
 // --------------------------------------------------------------------------
-
-function groupKey(s: Session): string {
-  return s.groupDir ?? s.workingDir
-}
 
 function repoDisplayName(workingDir: string): string {
   const parts = workingDir.replace(/\/+$/, '').split('/')

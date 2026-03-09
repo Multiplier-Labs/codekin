@@ -19,7 +19,7 @@ import { useTentativeQueue } from './hooks/useTentativeQueue'
 import { useSessionOrchestration, groupKey } from './hooks/useSessionOrchestration'
 import { useDocsBrowser } from './hooks/useDocsBrowser'
 import { useIsMobile } from './hooks/useIsMobile'
-import { uploadFile } from './lib/ccApi'
+import { uploadAndBuildMessage } from './lib/ccApi'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { Settings } from './components/Settings'
 import { ChatView } from './components/ChatView'
@@ -308,11 +308,9 @@ export default function App() {
     }
     setUploadStatus('Uploading files...')
     try {
-      const paths = await Promise.all(files.map(f => uploadFile(settings.token, f)))
+      const message = await uploadAndBuildMessage(settings.token, files, docsContext + expanded)
       if (activeSessionId) setSessionPendingFiles(prev => ({ ...prev, [activeSessionId]: [] }))
       setUploadStatus(null)
-      const fileLine = `[Attached files: ${paths.join(', ')}]`
-      const message = text.trim() ? `${fileLine}\n${docsContext}${expanded}` : fileLine
       sendInput(message)
     } catch (err) {
       setUploadStatus(`Upload failed: ${err instanceof Error ? err.message : 'unknown error'}`)
@@ -328,9 +326,7 @@ export default function App() {
       if (i > 0) await new Promise(r => setTimeout(r, 100))
       if (entry.files.length > 0 && settings.token) {
         try {
-          const paths = await Promise.all(entry.files.map(f => uploadFile(settings.token, f)))
-          const fileLine = `[Attached files: ${paths.join(', ')}]`
-          const message = entry.text.trim() ? `${fileLine}\n${entry.text}` : fileLine
+          const message = await uploadAndBuildMessage(settings.token, entry.files, entry.text)
           sendInput(message)
         } catch {
           // Upload failed — send the text portion anyway

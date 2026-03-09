@@ -261,36 +261,41 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
 
       case 'content_block_stop':
         if (this.inThinkingBlock) {
-          // Emit summary if we didn't get enough text earlier
-          if (!this.thinkingSummaryEmitted && this.thinkingText.length > 0) {
-            const summary = this.extractThinkingSummary(this.thinkingText) || this.thinkingText.slice(0, 80).trim()
-            this.emit('thinking', summary)
-          }
-          this.inThinkingBlock = false
-          this.thinkingText = ''
-          this.thinkingSummaryEmitted = false
-          break
-        }
-        if (this.currentToolName) {
-          // Parse tool input and emit structured tool_done with summary
-          let summary: string | undefined
-          try {
-            const parsed = JSON.parse(this.currentToolInput)
-            summary = this.summarizeToolInput(this.currentToolName, parsed) || undefined
-            // Handle task tools
-            const isTask = this.currentToolName === 'TaskCreate' || this.currentToolName === 'TaskUpdate' || this.currentToolName === 'TodoWrite' || this.currentToolName === 'TodoRead'
-            if (isTask) console.log('[task-debug] tool:', this.currentToolName, 'input:', JSON.stringify(parsed).slice(0, 200))
-            if (this.handleTaskTool(this.currentToolName, parsed)) {
-              console.log('[task-debug] emitting todo_update, tasks:', this.tasks.size)
-              this.emit('todo_update', Array.from(this.tasks.values()))
-            }
-          } catch { /* ignore parse errors */ }
-          this.emit('tool_done', this.currentToolName, summary)
-          this.currentToolName = null
-          this.currentToolInput = ''
+          this.handleThinkingBlockStop()
+        } else if (this.currentToolName) {
+          this.handleToolBlockStop()
         }
         break
     }
+  }
+
+  /** Finalize a thinking block: emit summary if not already emitted, then reset state. */
+  private handleThinkingBlockStop(): void {
+    if (!this.thinkingSummaryEmitted && this.thinkingText.length > 0) {
+      const summary = this.extractThinkingSummary(this.thinkingText) || this.thinkingText.slice(0, 80).trim()
+      this.emit('thinking', summary)
+    }
+    this.inThinkingBlock = false
+    this.thinkingText = ''
+    this.thinkingSummaryEmitted = false
+  }
+
+  /** Finalize a tool block: parse input, handle task tools, emit tool_done, then reset state. */
+  private handleToolBlockStop(): void {
+    let summary: string | undefined
+    try {
+      const parsed = JSON.parse(this.currentToolInput)
+      summary = this.summarizeToolInput(this.currentToolName!, parsed) || undefined
+      const isTask = this.currentToolName === 'TaskCreate' || this.currentToolName === 'TaskUpdate' || this.currentToolName === 'TodoWrite' || this.currentToolName === 'TodoRead'
+      if (isTask) console.log('[task-debug] tool:', this.currentToolName, 'input:', JSON.stringify(parsed).slice(0, 200))
+      if (this.handleTaskTool(this.currentToolName!, parsed)) {
+        console.log('[task-debug] emitting todo_update, tasks:', this.tasks.size)
+        this.emit('todo_update', Array.from(this.tasks.values()))
+      }
+    } catch { /* ignore parse errors */ }
+    this.emit('tool_done', this.currentToolName!, summary)
+    this.currentToolName = null
+    this.currentToolInput = ''
   }
 
   /** No-op: assistant messages are handled via stream_event deltas instead. */

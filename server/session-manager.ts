@@ -406,158 +406,141 @@ export class SessionManager {
    * Extracted from startClaude() to keep that method focused on process setup.
    */
   private wireClaudeEvents(cp: ClaudeProcess, session: Session, sessionId: string): void {
-    cp.on('system_init', (model) => {
-      // Capture the actual Claude session ID for future restarts
-      session.claudeSessionId = cp.getSessionId()
-      const initMsg: WsServerMessage = { type: 'system_message', subtype: 'init', text: `Model: ${model}`, model }
-      this.addToHistory(session, initMsg)
-      this.broadcast(session, initMsg)
-    })
+    cp.on('system_init', (model) => this.onSystemInit(cp, session, model))
+    cp.on('text', (text) => this.onTextEvent(session, sessionId, text))
+    cp.on('thinking', (summary) => this.onThinkingEvent(session, summary))
+    cp.on('tool_output', (content, isError) => this.onToolOutputEvent(session, content, isError))
+    cp.on('image', (base64Data, mediaType) => this.onImageEvent(session, base64Data, mediaType))
+    cp.on('tool_active', (toolName, toolInput) => this.onToolActiveEvent(session, toolName, toolInput))
+    cp.on('tool_done', (toolName, summary) => this.onToolDoneEvent(session, toolName, summary))
+    cp.on('planning_mode', (active) => { this.broadcastAndHistory(session, { type: 'planning_mode', active }) })
+    cp.on('todo_update', (tasks) => { this.broadcastAndHistory(session, { type: 'todo_update', tasks }) })
+    cp.on('prompt', (...args) => this.onPromptEvent(session, ...args))
+    cp.on('control_request', (requestId, toolName, toolInput) => this.onControlRequestEvent(cp, session, sessionId, requestId, toolName, toolInput))
+    cp.on('result', (result, isError) => { this.resetStallTimer(session); this.handleClaudeResult(session, sessionId, result, isError) })
+    cp.on('error', (message) => this.broadcast(session, { type: 'error', message }))
+    cp.on('exit', (code, signal) => { cp.removeAllListeners(); this.handleClaudeExit(session, sessionId, code, signal) })
+  }
 
-    cp.on('text', (text) => {
-      this.resetStallTimer(session)
-      const msg: WsServerMessage = { type: 'output', data: text }
-      this.addToHistory(session, msg)
-      this.broadcast(session, msg)
-      // Start the naming timer on first text — we now have user msg + early response context
-      if (session.name.startsWith('hub:') && !session._namingTimer) {
-        this.scheduleSessionNaming(sessionId)
-      }
-    })
+  /** Broadcast a message and add it to the session's output history. */
+  private broadcastAndHistory(session: Session, msg: WsServerMessage): void {
+    this.addToHistory(session, msg)
+    this.broadcast(session, msg)
+  }
 
-    cp.on('thinking', (summary) => {
-      this.resetStallTimer(session)
-      const msg: WsServerMessage = { type: 'thinking', summary }
-      // Don't persist thinking to history — it's ephemeral status
-      this.broadcast(session, msg)
-    })
+  private onSystemInit(cp: ClaudeProcess, session: Session, model: string): void {
+    session.claudeSessionId = cp.getSessionId()
+    this.broadcastAndHistory(session, { type: 'system_message', subtype: 'init', text: `Model: ${model}`, model })
+  }
 
-    cp.on('tool_output', (content, isError) => {
-      this.resetStallTimer(session)
-      const msg: WsServerMessage = { type: 'tool_output', content, isError }
-      this.addToHistory(session, msg)
-      this.broadcast(session, msg)
-    })
+  private onTextEvent(session: Session, sessionId: string, text: string): void {
+    this.resetStallTimer(session)
+    this.broadcastAndHistory(session, { type: 'output', data: text })
+    if (session.name.startsWith('hub:') && !session._namingTimer) {
+      this.scheduleSessionNaming(sessionId)
+    }
+  }
 
-    cp.on('image', (base64Data: string, mediaType: string) => {
-      this.resetStallTimer(session)
-      const msg: WsServerMessage = { type: 'image', base64: base64Data, mediaType }
-      this.addToHistory(session, msg)
-      this.broadcast(session, msg)
-    })
+  private onThinkingEvent(session: Session, summary: string): void {
+    this.resetStallTimer(session)
+    this.broadcast(session, { type: 'thinking', summary })
+  }
 
-    cp.on('tool_active', (toolName, toolInput) => {
-      this.resetStallTimer(session)
-      const msg: WsServerMessage = { type: 'tool_active', toolName, toolInput }
-      this.addToHistory(session, msg)
-      this.broadcast(session, msg)
-    })
+  private onToolOutputEvent(session: Session, content: string, isError: boolean): void {
+    this.resetStallTimer(session)
+    this.broadcastAndHistory(session, { type: 'tool_output', content, isError })
+  }
 
-    cp.on('tool_done', (toolName, summary) => {
-      this.resetStallTimer(session)
-      const msg: WsServerMessage = { type: 'tool_done', toolName, summary }
-      this.addToHistory(session, msg)
-      this.broadcast(session, msg)
-    })
+  private onImageEvent(session: Session, base64: string, mediaType: string): void {
+    this.resetStallTimer(session)
+    this.broadcastAndHistory(session, { type: 'image', base64, mediaType })
+  }
 
-    cp.on('planning_mode', (active) => {
-      const msg: WsServerMessage = { type: 'planning_mode', active }
-      this.addToHistory(session, msg)
-      this.broadcast(session, msg)
-    })
+  private onToolActiveEvent(session: Session, toolName: string, toolInput: string | undefined): void {
+    this.resetStallTimer(session)
+    this.broadcastAndHistory(session, { type: 'tool_active', toolName, toolInput })
+  }
 
-    cp.on('todo_update', (tasks) => {
-      const msg: WsServerMessage = { type: 'todo_update', tasks }
-      this.addToHistory(session, msg)
-      this.broadcast(session, msg)
-    })
+  private onToolDoneEvent(session: Session, toolName: string, summary: string | undefined): void {
+    this.resetStallTimer(session)
+    this.broadcastAndHistory(session, { type: 'tool_done', toolName, summary })
+  }
 
-    cp.on('prompt', (promptType, question, options, multiSelect, toolName, toolInput, requestId, questions) => {
-      const promptMsg: WsServerMessage = {
-        type: 'prompt',
-        promptType,
-        question,
-        options,
-        multiSelect,
-        toolName,
-        toolInput,
-        requestId,
-        ...(questions ? { questions } : {}),
-      }
-      if (requestId) {
-        session.pendingControlRequests.set(requestId, { requestId, toolName: 'AskUserQuestion', toolInput: toolInput || {}, promptMsg })
-      }
+  private onPromptEvent(
+    session: Session,
+    promptType: string,
+    question: string,
+    options: Array<{ label: string; value: string; description?: string }>,
+    multiSelect: boolean | undefined,
+    toolName: string | undefined,
+    toolInput: Record<string, unknown> | undefined,
+    requestId: string | undefined,
+    questions: unknown[] | undefined,
+  ): void {
+    const promptMsg: WsServerMessage = {
+      type: 'prompt',
+      promptType,
+      question,
+      options,
+      multiSelect,
+      toolName,
+      toolInput,
+      requestId,
+      ...(questions ? { questions } : {}),
+    }
+    if (requestId) {
+      session.pendingControlRequests.set(requestId, { requestId, toolName: 'AskUserQuestion', toolInput: toolInput || {}, promptMsg })
+    }
+    this.broadcast(session, promptMsg)
+  }
+
+  private onControlRequestEvent(
+    cp: ClaudeProcess,
+    session: Session,
+    sessionId: string,
+    requestId: string,
+    toolName: string,
+    toolInput: Record<string, unknown>,
+  ): void {
+    if (typeof requestId !== 'string' || !/^[\w-]{1,64}$/.test(requestId)) {
+      console.warn(`[control_request] Rejected invalid requestId: ${JSON.stringify(requestId)}`)
+      return
+    }
+    console.log(`[control_request] session=${sessionId} tool=${toolName} requestId=${requestId}`)
+
+    if (this.resolveAutoApproval(session, toolName, toolInput) !== 'prompt') {
+      console.log(`[control_request] auto-approved: ${toolName}`)
+      cp.sendControlResponse(requestId, 'allow')
+      return
+    }
+
+    const question = this.summarizeToolPermission(toolName, toolInput)
+    const options = [
+      { label: 'Allow', value: 'allow' },
+      { label: 'Always Allow', value: 'always_allow' },
+      { label: 'Deny', value: 'deny' },
+    ]
+    const promptMsg: WsServerMessage = {
+      type: 'prompt',
+      promptType: 'permission',
+      question,
+      options,
+      toolName,
+      toolInput,
+      requestId,
+    }
+    session.pendingControlRequests.set(requestId, { requestId, toolName, toolInput, promptMsg })
+
+    if (session.clients.size > 0) {
       this.broadcast(session, promptMsg)
-    })
-
-    cp.on('control_request', (requestId, toolName, toolInput) => {
-      // Validate requestId format to prevent stdin stream corruption
-      if (typeof requestId !== 'string' || !/^[\w-]{1,64}$/.test(requestId)) {
-        console.warn(`[control_request] Rejected invalid requestId: ${JSON.stringify(requestId)}`)
-        return
-      }
-      console.log(`[control_request] session=${sessionId} tool=${toolName} requestId=${requestId}`)
-
-      // Check repo-level auto-approval registry before prompting UI
-      if (this.checkAutoApproval(session.workingDir, toolName, toolInput)) {
-        console.log(`[control_request] auto-approved: ${toolName}`)
-        cp.sendControlResponse(requestId, 'allow')
-        return
-      }
-
-      // Webhook/workflow sessions with no clients: auto-approve (headless, no human to prompt)
-      if (session.clients.size === 0 && (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow')) {
-        console.log(`[control_request] no clients connected (${session.source} session), auto-approving: ${toolName}`)
-        cp.sendControlResponse(requestId, 'allow')
-        return
-      }
-
-      // Store in pending map (supports concurrent requests)
-      const question = this.summarizeToolPermission(toolName, toolInput)
-      const options = [
-        { label: 'Allow', value: 'allow' },
-        { label: 'Always Allow', value: 'always_allow' },
-        { label: 'Deny', value: 'deny' },
-      ]
-      const promptMsg: WsServerMessage = {
-        type: 'prompt',
-        promptType: 'permission',
-        question,
-        options,
-        toolName,
-        toolInput,
-        requestId,
-      }
-      session.pendingControlRequests.set(requestId, { requestId, toolName, toolInput, promptMsg })
-
-      if (session.clients.size > 0) {
-        this.broadcast(session, promptMsg)
-      } else {
-        // No clients connected for manual session — broadcast globally so the
-        // user sees a waiting indicator. The prompt will be re-sent when they join.
-        console.log(`[control_request] no clients connected, waiting for client to join: ${toolName}`)
-        this._globalBroadcast?.({
-          ...promptMsg,
-          sessionId,
-          sessionName: session.name,
-        })
-      }
-    })
-
-    cp.on('result', (result, isError) => {
-      this.resetStallTimer(session)
-      this.handleClaudeResult(session, sessionId, result, isError)
-    })
-
-    cp.on('error', (message) => {
-      this.broadcast(session, { type: 'error', message })
-    })
-
-    cp.on('exit', (code, signal) => {
-      // Remove all listeners to prevent memory leaks from accumulated closures
-      cp.removeAllListeners()
-      this.handleClaudeExit(session, sessionId, code, signal)
-    })
+    } else {
+      console.log(`[control_request] no clients connected, waiting for client to join: ${toolName}`)
+      this._globalBroadcast?.({
+        ...promptMsg,
+        sessionId,
+        sessionName: session.name,
+      })
+    }
   }
 
   /**
@@ -899,15 +882,13 @@ export class SessionManager {
       return Promise.resolve({ allow: false, always: false })
     }
 
-    // Check repo-level auto-approval registry before prompting UI
-    if (this.checkAutoApproval(session.workingDir, toolName, toolInput)) {
-      console.log(`[tool-approval] auto-approved: ${toolName}`)
+    const autoResult = this.resolveAutoApproval(session, toolName, toolInput)
+    if (autoResult === 'registry') {
+      console.log(`[tool-approval] auto-approved (registry): ${toolName}`)
       return Promise.resolve({ allow: true, always: true })
     }
-
-    // Webhook/workflow sessions with no clients: auto-approve (headless)
-    if (session.clients.size === 0 && (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow')) {
-      console.log(`[tool-approval] no clients (${session.source} session), auto-approving: ${toolName}`)
+    if (autoResult === 'headless') {
+      console.log(`[tool-approval] auto-approved (headless ${session.source}): ${toolName}`)
       return Promise.resolve({ allow: true, always: false })
     }
 
@@ -970,6 +951,21 @@ export class SessionManager {
         })
       }
     })
+  }
+
+  /**
+   * Check if a tool invocation can be auto-approved without prompting the user.
+   * Returns 'registry' if matched by auto-approval rules, 'headless' if the session
+   * has no clients and is a non-interactive source, or 'prompt' if the user needs to decide.
+   */
+  private resolveAutoApproval(session: Session, toolName: string, toolInput: Record<string, unknown>): 'registry' | 'headless' | 'prompt' {
+    if (this.checkAutoApproval(session.workingDir, toolName, toolInput)) {
+      return 'registry'
+    }
+    if (session.clients.size === 0 && (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow')) {
+      return 'headless'
+    }
+    return 'prompt'
   }
 
   /** Build a human-readable prompt string for a tool permission dialog. */

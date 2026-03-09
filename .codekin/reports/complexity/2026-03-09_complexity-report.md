@@ -1,138 +1,154 @@
 # Complexity Report: codekin
 
-**Date**: 2026-03-09T06:47:36.401Z
-**Repository**: /home/dev/repos/codekin
-**Branch**: fix/code-review-security-fixes
-**Workflow Run**: dc7a4954-9d77-4d5e-aff4-e74f66d1102a
-**Session**: 9774d026-662d-4562-96ac-d5ce7bbf4d9d
+**Date**: 2026-03-09T19:06:14.712Z
+**Repository**: /srv/repos/codekin
+**Branch**: main
+**Workflow Run**: d9350d70-821a-458b-b405-e9ff41993485
+**Session**: 41ed2bb0-a4bf-4f0c-934f-0fa800239d6c
 
 ---
 
-Now let me read the largest files to assess internal complexity.Now let me read the session-manager.ts fully to assess its complexity, since it was truncated.Now I have enough data to produce the report.
+Now I have a thorough picture of the codebase. Let me produce the report.
 
 ## Summary
 
 **Overall Complexity Rating: Medium**
 
-| Metric | Value |
-|--------|-------|
-| Total source files | 100 |
-| Total lines of code | ~27,200 (including tests) |
-| Largest file (non-test) | `server/session-manager.ts` — 1,640 lines |
-| Deepest nesting | 4 levels (`session-manager.ts:wireClaudeEvents`, `useChatSocket.ts:ws.onmessage`) |
-| Most complex function | `SessionManager.wireClaudeEvents` — high event count, nested state machines |
-| Files over 300 lines | 13 (non-test) |
+The Codekin codebase is well-structured for its feature set — most modules are well-scoped with clean separation (approval, naming, persistence), typed WebSocket protocol, and test coverage. However, complexity concentrates heavily in a few coordinator files. The largest file (`session-manager.ts`, 1270 lines) is the central coordinator; while it delegates to sub-modules, its `wireClaudeEvents` and `handleClaudeExit`/`handleClaudeResult` methods are dense. The frontend's `App.tsx` (620 lines, 73 function definitions) acts as a mega-component that wires together all major UI concerns. The `ws-server.ts` message-handling switch contains inline business logic that would benefit from extraction.
 
-The codebase is moderately complex for its size. The server-side session manager is the primary complexity hotspot — it is a god object responsible for session lifecycle, process management, auto-approval logic, persistence, session naming, and prompt routing. The frontend hook `useChatSocket` mirrors this complexity as the client-side counterpart, managing 20+ state variables and a large message switch. Most other files are well-scoped.
+**Key metrics:**
+- Largest file: `server/session-manager.test.ts` at 2559 lines (test), `server/session-manager.ts` at 1270 lines (source)
+- Largest source component: `src/App.tsx` at 620 lines with 11 React hook calls (8 useState, 7 useCallback, 4 useEffect, 2 useMemo) and ~73 total function/arrow-function definitions
+- Most complex function: `useChatSocket` hook — single function body of ~520 lines with a 34-case switch
+- Deepest nesting: `handleUserEvent` in `claude-process.ts` (5 levels of block depth, lines 303–352), `handleSendWithFiles` in `App.tsx` (4 levels, lines 274–321), `wireClaudeEvents` in `session-manager.ts` (4 levels in nested callbacks, lines 408–561, deepest in `control_request` handler)
+
+---
 
 ## Largest Files
 
 | File | Lines | Primary Responsibility | Refactor Priority |
-|------|-------|----------------------|-------------------|
-| `server/session-manager.ts` | 1,640 | Session lifecycle, process mgmt, approvals, persistence, naming | **High** |
-| `src/hooks/useChatSocket.ts` | 735 | WebSocket connection, message processing, prompt state | **High** |
-| `src/components/WorkflowsView.tsx` | 758 | Workflow card layout, run history, activity feed | Medium |
-| `src/components/LeftSidebar.tsx` | 688 | Repo tree navigation, archived sessions, modules | Medium |
-| `server/workflow-engine.ts` | 654 | Workflow execution, SQLite persistence, cron scheduling | Low |
-| `src/App.tsx` | 569 | Root component, session/repo orchestration | Medium |
-| `server/claude-process.ts` | 566 | Claude CLI child process, stream-json parsing | Low |
-| `server/stepflow-handler.ts` | 553 | Stepflow webhook processing, workspace lifecycle | Low |
-| `server/ws-server.ts` | 520 | Express server, WebSocket handling, startup | Medium |
-| `server/workflow-loader.ts` | 489 | Workflow definition loading from markdown | Low |
-| `src/components/AddWorkflowModal.tsx` | 472 | Workflow creation form | Low |
-| `src/components/ChatView.tsx` | 441 | Chat message rendering | Low |
-| `server/webhook-handler.ts` | 434 | GitHub webhook event processing | Low |
-| `src/components/ApprovalsPanel.tsx` | 407 | Auto-approval management UI | Low |
-| `server/stepflow-types.ts` | 308 | Type definitions for stepflow | Low |
+|------|-------|------------------------|-------------------|
+| `server/session-manager.test.ts` | 2559 | Test suite for SessionManager | Low (tests) |
+| `server/claude-process.test.ts` | 1405 | Test suite for ClaudeProcess | Low (tests) |
+| `server/session-manager.ts` | 1270 | Session lifecycle, process wiring, tool approvals | **High** |
+| `src/hooks/useChatSocket.ts` | 677 | WebSocket connection + all message dispatch | **High** |
+| `server/workflow-engine.ts` | 654 | Workflow execution, SQLite persistence, cron | Medium |
+| `src/App.tsx` | 620 | Root component — UI orchestration, all state | **High** |
+| `server/claude-process.ts` | 586 | Claude CLI process + NDJSON parsing | Medium |
+| `server/ws-server.ts` | 579 | HTTP server, WS connection handling, routing | Medium |
+| `src/components/AddWorkflowModal.tsx` | 557 | Workflow creation/editing form | Medium |
+| `server/workflow-loader.test.ts` | 545 | Tests for workflow loader | Low (tests) |
+| `src/components/ChatView.tsx` | 477 | Chat message rendering (all message types) | Low |
+| `src/components/LeftSidebar.tsx` | 462 | Sidebar nav, repo tree, drag-resize | Medium |
+| `src/components/Settings.tsx` | 438 | Settings modal with multiple config sections | Low |
+| `server/stepflow-handler.ts` | 506 | Stepflow webhook integration, workspace mgmt | Medium |
+| `server/workflow-loader.ts` | 494 | Markdown workflow parsing, session orchestration | Medium |
+
+---
 
 ## Most Complex Functions
 
-| Location | Est. Complexity | Issue Description | Refactor Suggestion |
-|----------|----------------|-------------------|---------------------|
-| `session-manager.ts:wireClaudeEvents` (L639–778) | High (CC~18) | 140-line method with 12 event handler registrations, each containing conditional logic and state mutations. Acts as a routing hub between ClaudeProcess events and session state. | Extract each event handler into a named private method (`onText`, `onToolActive`, `onPrompt`, etc.) |
-| `useChatSocket.ts:ws.onmessage` (L345–548) | High (CC~20) | 200-line switch statement with 18 cases, inline state updates across 20+ useState hooks. Duplicates logic from `processMessage` in some branches. | Consolidate into a `useReducer` pattern; extract message-type handlers |
-| `session-manager.ts:sendPromptResponse` (L983–1019) | Medium-High (CC~10) | Routes through 3 distinct approval paths (tool approval, control request, fallback) with nested conditional logic and multiple Map lookups | Extract each path into its own method (already partially done) |
-| `session-manager.ts:requestToolApproval` (L1112–1190) | Medium-High (CC~8) | 80-line method mixing auto-approval checks, promise construction, timeout handling, and UI broadcasting. Complex nested callback structure. | Extract auto-approval check and prompt construction into helpers |
-| `session-manager.ts:handleClaudeResult` (L785–848) | Medium (CC~8) | Nested conditionals for API retry logic, session naming triggers, and result broadcasting | Extract retry logic into a separate `handleApiRetry` method |
-| `claude-process.ts:handleStreamEvent` (L215–293) | Medium (CC~10) | 3-level switch with nested tool tracking, thinking block state, and planning mode detection | Clean but could benefit from handler-per-block-type extraction |
-| `App.tsx:App` (L37–569) | Medium (CC~6) | 530-line component with 20+ hooks, callbacks, and effects. Not deeply nested but very wide — difficult to scan. | Extract session management logic into a custom hook (`useSessionManager`) |
-| `webhook-handler.ts:handleWebhook` (L109–269) | Medium (CC~10) | 160-line method with 8 sequential validation/filter stages, each with early return | Structure is actually good (guard clauses), but method is long |
-| `stepflow-handler.ts:handleWebhook` (L195–333) | Medium (CC~8) | Similar to webhook-handler — 8 sequential validation stages | Same pattern; could share validation pipeline with webhook-handler |
-| `LeftSidebar.tsx:RepoSection` (L453–687) | Medium (CC~6) | 235-line component with inline editing state, archive fetching, and approval panels. Renders deeply nested JSX. | Extract archive section and editing controls into sub-components |
+| File:Function | Est. Complexity | Issue Description | Refactor Suggestion |
+|---|---|---|---|
+| `src/hooks/useChatSocket.ts:useChatSocket` | Very High | Monolithic hook body (~520 lines). Contains WebSocket lifecycle, a 34-branch `switch` message handler, streaming flush logic, session restoration, auth checking, ping/pong, and model selection — all in one closure. | Extract `useWsConnection` (connect/reconnect/auth/ping), `useWsMessageHandler` (the switch), and `useSessionRestore` as separate hooks or helper functions. |
+| `server/session-manager.ts:wireClaudeEvents` | High | Registers 13 event handlers all as inline closures that directly reference `session`, `sessionId`, `cp`. Each handler has its own side effects, including nested conditionals for naming and retry logic. The `control_request` handler alone is ~50 lines. | Extract each event handler into a private named method: `handleTextEvent`, `handleToolActiveEvent`, `handleControlRequestEvent`, etc. `wireClaudeEvents` becomes a thin registration loop. |
+| `server/session-manager.ts:handleClaudeExit` | High | 70-line method with three nested branches (stopped-by-user → early return; within-cooldown → restart loop; exhausted → final exit), each duplicating `_exitListeners` notification logic. | Extract `shouldAutoRestart()` predicate and `notifyExitListeners(willRestart)` helper; flatten the branching. |
+| `server/session-manager.ts:requestToolApproval` | High | 80-line method that manually constructs a Promise with a timeout holder pattern, duplicates auto-approve logic already present in `control_request` handler, and has 3 levels of conditional nesting for client presence. | Extract `buildApprovalPromise(session, ...)` and `buildPermissionPromptMsg(...)` helpers; the auto-approve check (`checkAutoApproval` + headless guard) is literally copied from `wireClaudeEvents` — refactor into a shared `tryAutoApprove()` helper. |
+| `src/App.tsx:handleSendWithFiles` | High | 45-line `useCallback` with 4-level nesting: skill expansion → tentative mode check → file upload branch → docs context injection. Has two separate send paths (with/without files) with duplicated `fileLine` construction logic that's also in `handleExecuteTentative`. | Extract `buildMessageWithFiles(text, files, paths)` utility, and move tentative queue logic to `useTentativeQueue` or `useSessionOrchestration`. |
+| `server/claude-process.ts:handleUserEvent` | High | Iterates content blocks with 5-level nesting: method → blocks loop → `tool_result` check → `contentBlocks` branch → `image` type check. Inline image emission is hidden inside this nesting. | Extract `extractToolResultContent(block)` → `{ text, imageEmissions }` to flatten. |
+| `server/claude-process.ts:handleStreamEvent` | Medium-High | 75-line switch with three cases, where `content_block_stop` handles 5 different sub-scenarios (thinking end, tool end, ExitPlanMode, task tool, summary) with nested if/try/catch chains. | Extract `handleToolBlockStop()` and `handleThinkingBlockStop()` to replace the branchy `content_block_stop` case. |
+| `server/session-manager.ts:handleAskUserQuestion` | Medium | 30-line method parses JSON, handles three different value shapes (string JSON map, plain string, array), with nested try/catch and type coercion. | Extract `parseAskUserAnswers(value, questions)` → `Record<string, string>` as a standalone utility function; unit-testable in isolation. |
+| `server/session-manager.ts:sendInput` | Medium | 45-line method combines three responsibilities: auto-start logic, context rebuild (only when no `claudeSessionId`), and turn-count / naming-retry tracking. The `if (!session.claudeSessionId)` block is deeply nested inside the `if (!session.claudeProcess?.isAlive())` block. | Split into `maybeAutoStart(session)` and `maybeRebuildContext(session, data)` helpers. |
+| `server/workflow-engine.ts:executeRun` | Medium | 95-line `private async` method containing a nested `try/catch` inside a step loop, inside a try/catch for the overall run, inside a `finally` for `afterRun`. Error path has three sub-branches for `WorkflowSkipped`, `canceled`, and `failed`. | Extract `runStep(stepDef, run, lastOutput, abortSignal)` to lift the inner try/catch into its own method, reducing nesting depth by two levels. |
+
+---
 
 ## Coupling & Cohesion Issues
 
-### 1. `SessionManager` is a God Object
-**File:** `server/session-manager.ts`
-**Issue:** This 1,640-line class handles 8+ distinct responsibilities: session CRUD, Claude process lifecycle, auto-approval registry, persistence (sessions + approvals), session naming via AI, prompt routing (3 approval paths), stall detection, and API error retry logic. It has 14 imports and exposes internal state (`_serverPort`, `_authToken`, `_globalBroadcast`) as public fields.
-**Fix:** Extract into focused modules: `ApprovalManager` (approval logic + persistence), `SessionNaming` (AI-powered naming), `SessionPersistence` (disk read/write), keeping `SessionManager` as a thin coordinator.
+1. **`App.tsx` as God Component**
+   `App.tsx` holds 11 hooks, 8 state variables, 12+ callbacks, and renders 6 major sub-trees (chat, docs browser, workflows, mobile bar, settings modal, command palette). It directly calls `leaveSession`, `joinSession`, `clearMessages` from `useChatSocket` when navigating, acting as a manual state machine for session routing.
+   *Suggested fix:* The URL/session navigation state machine (auto-join on connect, browser back/forward sync, URL push on session change) is a self-contained concern — extract to `useSessionNavigation`. The docs browser interaction (3 `useCallback` handlers, 1 `useMemo`) should move into `useDocsBrowser` which already exists but lacks the App-side handler construction.
 
-### 2. `WebhookHandler` and `StepflowHandler` Structural Duplication
-**Files:** `server/webhook-handler.ts`, `server/stepflow-handler.ts`
-**Issue:** Both handlers implement nearly identical patterns: event ring buffer, processing watchdog, HMAC signature verification, concurrency cap, workspace creation, session spawning, and status tracking. The overall structure is copy-pasted with minor differences.
-**Fix:** Extract a shared `WebhookHandlerBase` class or composition utilities for event tracking, concurrency management, and workspace lifecycle.
+2. **Duplicated auto-approve guard in `SessionManager`**
+   The "check auto-approval, then check headless source" pattern appears verbatim in two places: `wireClaudeEvents` (in the `control_request` handler) and `requestToolApproval` (for the hook path). Both blocks check `checkAutoApproval(session.workingDir, toolName, toolInput)` and then check `session.source === 'webhook' || ...`. A logic change to either path must be manually mirrored in the other.
+   *Suggested fix:* Extract `resolveApprovalImmediately(session, toolName, toolInput): boolean | null` (returns `true` if auto-approved, `false` if headless-auto-approved, `null` if needs UI prompt) and call it from both sites.
 
-### 3. `useChatSocket` Hook Does Too Much
-**File:** `src/hooks/useChatSocket.ts`
-**Issue:** Manages WebSocket connection, reconnection with backoff, message processing, streaming text batching, 10+ prompt-related state variables, session restore, and auth checking. Returns 20+ values from a single hook.
-**Fix:** Split into `useWebSocketConnection` (connection lifecycle), `useChatMessages` (message processing/batching), and `usePromptState` (prompt-related state).
+3. **`ws-server.ts` inline WebSocket message handling**
+   The `wss.on('connection', ...)` callback (lines 327–499) contains a 12-case switch with direct calls to `sessions.*` methods. This is business logic (session routing, input dispatch) embedded in the server setup file, making it hard to test in isolation.
+   *Suggested fix:* Extract a `WsConnectionHandler` class or `handleWsMessage(msg, ws, sessions, send, clientSessions)` function to a dedicated `ws-message-handler.ts` module.
 
-### 4. `ws-server.ts` Orchestration Sprawl
-**File:** `server/ws-server.ts`
-**Issue:** 520-line top-level module that wires together 10+ services (SessionManager, WebhookHandler, StepflowHandler, WorkflowEngine, 5 route modules) with inline CLI arg parsing and WebSocket message routing. No test coverage possible for the wiring logic.
-**Fix:** Extract the WebSocket message handler into a `WsMessageRouter` class; move CLI arg parsing to a `config` module.
+4. **`useChatSocket` manages too many concerns**
+   The hook owns WebSocket lifecycle, all 30+ message type handlers, message buffering (`pendingTextRef` + RAF), auth check polling, session restore on visibility change, and model selection. It returns 17 properties. Consumers (`App.tsx`) then pass most of these through 2–3 component layers.
+   *Suggested fix:* Extract `useWsConnection(token)` → `{ ws, connState, send, reconnect, disconnect }` and keep `useChatSocket` focused on session-level state. Auth polling could move to a standalone `useAuthCheck(token)` hook.
 
-### 5. Duplicated Message Processing Logic
-**Files:** `src/hooks/useChatSocket.ts` (lines 40–113 and 129–200)
-**Issue:** `processMessage()` and `rebuildFromHistory()` implement the same message-type switch with the same logic — one immutably (for real-time) and one mutably (for bulk replay). Any new message type requires updating both.
-**Fix:** Unify into a single processing function parameterized by mutation strategy, or use a builder class that can operate in both modes.
+5. **`LeftSidebar` prop drilling depth**
+   `LeftSidebar` receives 30 props, including nested docs picker state (`docsPickerOpen`, `docsPickerRepoDir`, `docsPickerFiles`, `docsPickerLoading`, 2 callbacks) and archived session state — all of which are passed down again to `RepoSection`. This is classic prop drilling for state that `RepoSection` consumes directly.
+   *Suggested fix:* Group docs picker state into a `DocsPickerProps` interface (already partially done structurally), or create a `DocsPickerContext` so `RepoSection` can consume it directly without threading through `LeftSidebar`.
+
+6. **`groupKey` function defined twice**
+   `groupKey(session)` (returns `session.groupDir ?? session.workingDir`) is defined in both `src/App.tsx` (imported from `useSessionOrchestration`) and `src/components/LeftSidebar.tsx` (local inline definition), with the same logic. Any change must be applied to both.
+   *Suggested fix:* The version in `useSessionOrchestration` should be the canonical export; `LeftSidebar` should import it.
+
+---
 
 ## Refactoring Candidates
 
-1. **Split `SessionManager` into focused modules**
-   - **Location:** `server/session-manager.ts`
-   - **Problem:** 1,640-line god object with 8+ responsibilities, making it difficult to test, reason about, or modify safely.
-   - **Approach:** Extract `ApprovalManager` (~200 lines: checkAutoApproval, save/remove/persist approvals), `SessionNaming` (~150 lines: getNamingModel, executeSessionNaming, scheduling), `SessionPersistence` (~180 lines: persist/restore sessions and approvals). Keep SessionManager as coordinator.
-   - **Effort:** Large
+1. **Extract `useWsConnection` from `useChatSocket`**
+   *Location:* `src/hooks/useChatSocket.ts:154–677`
+   *Problem:* The hook is a 520-line function body responsible for WebSocket lifecycle (connect/disconnect/reconnect/auth timeout/ping), streaming flush buffering, and all 34 message-type handlers. It's difficult to test message handling without testing connection management.
+   *Approach:* Extract `useWsConnection(token)` covering `ws`, `connState`, `send`, `connect`, `disconnect`, `cleanup`, `reconnect`. The message switch becomes testable in isolation, and streaming performance logic (`pendingTextRef`/RAF) is cleanly separated from auth/ping concerns.
+   *Effort:* Medium
 
-2. **Extract `usePromptState` from `useChatSocket`**
-   - **Location:** `src/hooks/useChatSocket.ts`
-   - **Problem:** 10 prompt-related useState hooks (promptOptions, promptQuestion, multiSelect, promptRequestId, promptType, promptQuestions, approvePattern, plus clearPromptState) clutter the main hook.
-   - **Approach:** Create `usePromptState()` hook that returns `{ state, setFromMessage, clear }` and handles all prompt state transitions.
-   - **Effort:** Small
+2. **Break `wireClaudeEvents` into named handler methods**
+   *Location:* `server/session-manager.ts:408–561`
+   *Problem:* A 153-line method that registers 13 inline closures — each is effectively a private method hiding inside `wireClaudeEvents`. The `control_request` inline handler is 50+ lines. When reading a bug report, the developer must mentally parse all 13 closures to find the right one.
+   *Approach:* Convert each `cp.on('event_type', ...)` registration into `cp.on('event_type', this.onEventType.bind(this, session, sessionId))` with named private methods. This also makes the auto-approve duplication visible and easy to fix.
+   *Effort:* Medium
 
-3. **Unify `processMessage` and `rebuildFromHistory`**
-   - **Location:** `src/hooks/useChatSocket.ts` (lines 40–200)
-   - **Problem:** ~160 lines of duplicated switch logic that must be kept in sync.
-   - **Approach:** Create a `MessageReducer` class with `apply(msg)` that mutates internal state, then wrap with immutable/mutable strategies.
-   - **Effort:** Small
+3. **Reduce `App.tsx` to a thin orchestrator**
+   *Location:* `src/App.tsx`
+   *Problem:* The component has 11 hook calls, 8 `useState`, 7 `useCallback`, 4 `useEffect`, and 2 `useMemo` all at the top level. It is the single source of truth for session navigation, file uploads, tentative queue execution, skill expansion, docs browser state, and JSX for all 4 layout regions.
+   *Approach:* (a) Extract `useSessionNavigation` for URL sync + auto-join effects. (b) Move `handleSendWithFiles` + `expandSkill` + `handleExecuteTentative` + `handleDiscardTentative` into a `useSendMessage` hook. (c) The JSX for the main content area (docs/workflow/chat branches) could move to a `MainArea` component. These changes together would reduce `App.tsx` to under 300 lines.
+   *Effort:* Medium
 
-4. **Extract shared `WebhookHandlerBase`**
-   - **Location:** `server/webhook-handler.ts`, `server/stepflow-handler.ts`
-   - **Problem:** ~150 lines of duplicated infrastructure (event ring buffer, watchdog, status updates, concurrency cap).
-   - **Approach:** Create `BaseWebhookHandler` with event recording, watchdog timer, concurrency check, and workspace lifecycle. Subclasses implement only payload validation and prompt building.
-   - **Effort:** Medium
+4. **Deduplicate auto-approve logic in `SessionManager`**
+   *Location:* `server/session-manager.ts:502–513` and `server/session-manager.ts:902–912`
+   *Problem:* The "check auto-approval, then check headless source" guard is copy-pasted in `wireClaudeEvents`'s `control_request` handler and `requestToolApproval`. Adding a new headless source (e.g. a future `'scheduled'` source) requires updating both locations.
+   *Approach:* Add a private `resolveAutoApproval(session, toolName, toolInput): 'allow' | 'prompt'` method; replace both inline blocks with a call to it.
+   *Effort:* Small
 
-5. **Extract session orchestration from `App.tsx`**
-   - **Location:** `src/App.tsx`
-   - **Problem:** 530-line root component with 15+ useCallback handlers for session management (select, delete, open, repo switch), making it hard to follow the render tree.
-   - **Approach:** Extract `useSessionOrchestration(sessions, chatSocket)` custom hook that encapsulates all session switching/creation/deletion logic, returning only the handlers App needs.
-   - **Effort:** Medium
+5. **Extract `handleWsMessage` from `ws-server.ts`**
+   *Location:* `server/ws-server.ts:350–486`
+   *Problem:* The 12-case switch inside `ws.on('message', ...)` is deeply nested inside `wss.on('connection', ...)` and not unit-testable without a real WebSocket. It accesses `clientSessions`, `sessions`, `send`, `authenticated`, and `connectionId` from the enclosing closure.
+   *Approach:* Extract `handleWsMessage(msg, context: WsHandlerContext)` where `WsHandlerContext` is a typed struct of the closure state. Move to `ws-message-handler.ts`. The handler can be unit-tested with mock context objects.
+   *Effort:* Small
 
-6. **Extract `RepoSection` from `LeftSidebar`**
-   - **Location:** `src/components/LeftSidebar.tsx` (lines 453–687)
-   - **Problem:** 235-line inline component with its own state (editing, archive fetching, approvals panel). Defined inside the same file as the parent, creating a large single file.
-   - **Approach:** Move `RepoSection` to its own file `RepoSection.tsx`. Extract the archive preview section into `InlineArchive.tsx`.
-   - **Effort:** Small
+6. **Merge duplicated `groupKey` definitions**
+   *Location:* `src/App.tsx` (imported from `useSessionOrchestration`) and `src/components/LeftSidebar.tsx` (re-implemented locally at line 33)
+   *Problem:* Two implementations of the same 1-liner. If the grouping logic changes, only one will be updated.
+   *Approach:* Remove the local definition in `LeftSidebar.tsx` and import `groupKey` from `useSessionOrchestration`.
+   *Effort:* Small
 
-7. **Extract `WorkflowRow` and sub-components from `WorkflowsView`**
-   - **Location:** `src/components/WorkflowsView.tsx`
-   - **Problem:** 758-line file with 10 components defined inline. While individually simple, the file is hard to navigate.
-   - **Approach:** Move `MiniRunRow`, `RunDetail`, `StepCard`, `RepoGroup`, and `ActivityRow` into a `workflows/` subdirectory.
-   - **Effort:** Small
+7. **Flatten `handleStreamEvent`'s `content_block_stop` branch**
+   *Location:* `server/claude-process.ts:216–293`, specifically the `content_block_stop` case (~40 lines)
+   *Problem:* The case handles 5 different scenarios with nested if/try/catch: thinking block end, tool block end with task detection, ExitPlanMode deferral, summary emission, and tool input parse failure. Adding a new event sub-type requires understanding all 5 paths.
+   *Approach:* Extract `handleThinkingBlockStop()` and `handleToolBlockStop(toolName, rawInput)` private methods; `content_block_stop` becomes a 4-line routing switch.
+   *Effort:* Small
 
-8. **Reduce `ws-server.ts` to pure wiring**
-   - **Location:** `server/ws-server.ts`
-   - **Problem:** WebSocket message handling is inline (120-line switch), CLI args parsed inline, shutdown handlers duplicated.
-   - **Approach:** Extract `WsMessageRouter` class that takes `SessionManager` and handles the message switch. Merge duplicated SIGTERM/SIGINT handlers. Move CLI arg parsing into `config.ts`.
-   - **Effort:** Small
+8. **Extract `buildMessageWithFiles` utility to eliminate duplication**
+   *Location:* `src/App.tsx:309–319` (`handleSendWithFiles`) and `src/App.tsx:329–342` (`handleExecuteTentative`)
+   *Problem:* The pattern of `upload all files → build fileLine → prepend to text → call sendInput` is copy-pasted in both callbacks. A change to the attachment format (e.g. the `[Attached files: ...]` prefix) must be applied in two places.
+   *Approach:* Extract a standalone async utility `sendWithFiles(files, text, token, sendInput)` that encapsulates the upload + message construction, returning a promise.
+   *Effort:* Small
+
+9. **Reduce `LeftSidebar`'s 30-prop interface**
+   *Location:* `src/components/LeftSidebar.tsx:72–113`
+   *Problem:* The component receives 30 props, 6 of which relate to docs picker state, 5 to session callbacks, and 3 to mobile state. Downstream consumers (`RepoSection`) re-receive the same docs picker props. Adding new cross-cutting sidebar features will continue to inflate this interface.
+   *Approach:* Group into structured prop bags: `docsPickerProps?: DocsPickerProps`, `mobileProps?: MobileProps`. Or use React context for docs picker state since it's consumed by `RepoSection` children. This also removes the need to thread `docsPickerOpen/RepoDir/Files/Loading/Select/Close/StarredDocs` through `LeftSidebar` at all.
+   *Effort:* Medium
+
+10. **Lift `listRuns` SQL construction in `workflow-engine.ts` to a query builder**
+    *Location:* `server/workflow-engine.ts:436–471`
+    *Problem:* `listRuns` builds a SQL string by string concatenation with manual `params` array management — a maintainability risk — while currently parameterized, the manual string concatenation pattern is fragile and could introduce injection vulnerabilities if future filters include unparameterized user input. The pattern also prevents any sharing with future `countRuns` or `listSteps` queries.
+    *Approach:* Extract a small `buildListQuery(table, filters, opts)` helper that returns `{ sql, params }` from typed filter objects, or use a tagged template literal helper that ensures parameterization. This also makes the intent readable: today's `if (opts?.kind) { sql += ` AND kind = ?`; params.push(opts.kind) }` becomes a single typed filter object.
+    *Effort:* Small

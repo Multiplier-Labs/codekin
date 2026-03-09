@@ -165,6 +165,21 @@ export async function uploadFile(token: string, file: File): Promise<string> {
   return data.path
 }
 
+/**
+ * Upload files and build a message string with attached file paths.
+ * Shared by handleSendWithFiles and handleExecuteTentative to eliminate
+ * duplicated upload + fileLine construction logic.
+ */
+export async function uploadAndBuildMessage(
+  token: string,
+  files: File[],
+  text: string,
+): Promise<string> {
+  const paths = await Promise.all(files.map(f => uploadFile(token, f)))
+  const fileLine = `[Attached files: ${paths.join(', ')}]`
+  return text.trim() ? `${fileLine}\n${text}` : fileLine
+}
+
 /** Auto-approval rules for a repo. */
 export interface RepoApprovals {
   tools: string[]
