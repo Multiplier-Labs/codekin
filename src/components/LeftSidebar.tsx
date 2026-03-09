@@ -104,6 +104,12 @@ interface Props {
   onDocsPickerSelect?: (filePath: string) => void
   onDocsPickerClose?: () => void
   docsStarredDocs?: string[]
+  /** Mobile overlay mode — when true, sidebar renders as a slide-in drawer with backdrop */
+  isMobile?: boolean
+  /** Controls drawer visibility in mobile mode */
+  mobileOpen?: boolean
+  /** Called to close the mobile drawer */
+  onMobileClose?: () => void
 }
 
 // --------------------------------------------------------------------------
@@ -146,6 +152,9 @@ export function LeftSidebar({
   onDocsPickerSelect,
   onDocsPickerClose,
   docsStarredDocs,
+  isMobile = false,
+  mobileOpen = false,
+  onMobileClose,
 }: Props) {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('codekin-left-sidebar-collapsed') === 'true')
   const [width, setWidth] = useState(() => {
@@ -207,11 +216,17 @@ export function LeftSidebar({
 
   const hasModules = globalModules.length > 0 || (activeRepo && activeRepo.modules.length > 0)
 
+  // In mobile mode, auto-close the drawer when a session is selected
+  const handleSelectSessionMobile = useCallback((id: string) => {
+    onSelectSession(id)
+    if (isMobile) onMobileClose?.()
+  }, [onSelectSession, isMobile, onMobileClose])
+
   // --------------------------------------------------------------------------
-  // Collapsed strip
+  // Collapsed strip (desktop only — hidden on mobile)
   // --------------------------------------------------------------------------
 
-  if (collapsed) {
+  if (!isMobile && collapsed) {
     return (
       <div className="app-left-sidebar flex flex-col items-center w-12 flex-shrink-0 bg-neutral-12 py-3 gap-3 border-r border-neutral-8/30">
         <div className="app-logo-circle flex items-center justify-center rounded-full" style={{ width: 28, height: 28 }}>
@@ -241,19 +256,23 @@ export function LeftSidebar({
   }
 
   // --------------------------------------------------------------------------
-  // Full sidebar
+  // Full sidebar content (shared between desktop inline and mobile drawer)
   // --------------------------------------------------------------------------
 
-  return (
+  const sidebarContent = (
     <div
-      className="app-left-sidebar relative flex flex-col flex-shrink-0 bg-neutral-12 border-r border-neutral-8/30 min-h-0"
-      style={{ width }}
+      className={`app-left-sidebar relative flex flex-col bg-neutral-12 min-h-0 h-full ${
+        isMobile ? 'w-[280px] max-w-[85vw]' : 'flex-shrink-0 border-r border-neutral-8/30'
+      }`}
+      style={isMobile ? undefined : { width }}
     >
-      {/* Drag handle on right edge */}
-      <div
-        className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary-7/50 active:bg-primary-6/60 z-10"
-        onMouseDown={onDragStart}
-      />
+      {/* Drag handle on right edge — desktop only */}
+      {!isMobile && (
+        <div
+          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary-7/50 active:bg-primary-6/60 z-10"
+          onMouseDown={onDragStart}
+        />
+      )}
 
       {/* Header: logo + title + collapse + new session */}
       <div className="group/header flex items-center gap-2 px-3 py-2.5 border-b border-neutral-8/30 flex-shrink-0">
@@ -261,14 +280,16 @@ export function LeftSidebar({
           <AppIcon size={24} className="text-primary-7" />
         </div>
         <span className="flex-1 text-[17px] font-semibold text-neutral-2 truncate">Codekin</span>
-        <button
-          onClick={() => setCollapsed(true)}
-          className="rounded p-1 text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6 transition-colors flex-shrink-0 opacity-0 group-hover/header:opacity-100"
-          title="Collapse sidebar"
-        >
-          <IconChevronLeft size={16} stroke={2} />
-        </button>
-        <NewSessionButton groups={groups} token={token} onOpen={onOpenSession} />
+        {!isMobile && (
+          <button
+            onClick={() => setCollapsed(true)}
+            className="rounded p-1 text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6 transition-colors flex-shrink-0 opacity-0 group-hover/header:opacity-100"
+            title="Collapse sidebar"
+          >
+            <IconChevronLeft size={16} stroke={2} />
+          </button>
+        )}
+        <NewSessionButton groups={groups} token={token} onOpen={(repo) => { onOpenSession(repo); if (isMobile) onMobileClose?.() }} />
       </div>
 
       {/* Scrollable nav tree */}
@@ -277,8 +298,8 @@ export function LeftSidebar({
         {/* Menu items (Slack-style, above repo folders) */}
         <div className="px-2 py-1">
           <button
-            onClick={onNavigateToWorkflows}
-            className={`w-full flex items-center gap-2 px-2 py-1 rounded-md text-[15px] transition-colors ${
+            onClick={() => { onNavigateToWorkflows(); if (isMobile) onMobileClose?.() }}
+            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[15px] transition-colors ${
               view === 'workflows'
                 ? 'text-accent-3 bg-accent-11/20'
                 : 'text-neutral-4 hover:text-neutral-1 hover:bg-neutral-6'
@@ -291,7 +312,7 @@ export function LeftSidebar({
             <div ref={modulesRef} className="relative">
               <button
                 onClick={() => setModulesOpen(!modulesOpen)}
-                className={`w-full flex items-center gap-2 px-2 py-1 rounded-md text-[15px] transition-colors ${
+                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[15px] transition-colors ${
                   modulesOpen
                     ? 'text-accent-3 bg-accent-11/20'
                     : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6/50'
@@ -335,11 +356,11 @@ export function LeftSidebar({
             tentativeQueues={tentativeQueues}
             token={token}
             archiveRefreshKey={archiveRefreshKey}
-            onSelectSession={onSelectSession}
+            onSelectSession={handleSelectSessionMobile}
             onDeleteSession={onDeleteSession}
             onRenameSession={onRenameSession}
             onNewSession={node.workingDir === activeWorkingDir ? onNewSession : undefined}
-            onSelectRepo={onSelectRepo}
+            onSelectRepo={(wd) => { onSelectRepo(wd); if (isMobile) onMobileClose?.() }}
             onDeleteRepo={onDeleteRepo}
             onViewArchivedSession={setArchiveViewSessionId}
             onBrowseDocs={onBrowseDocs}
@@ -403,5 +424,31 @@ export function LeftSidebar({
       </div>
     </div>
   )
+
+  // --------------------------------------------------------------------------
+  // Mobile: render as overlay drawer
+  // --------------------------------------------------------------------------
+
+  if (isMobile) {
+    return (
+      <div
+        className={`fixed inset-0 z-40 transition-colors duration-200 ${mobileOpen ? 'bg-black/50' : 'bg-transparent pointer-events-none'}`}
+        onClick={onMobileClose}
+      >
+        <div
+          className={`h-full transition-transform duration-200 ease-out ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}
+          onClick={e => e.stopPropagation()}
+        >
+          {sidebarContent}
+        </div>
+      </div>
+    )
+  }
+
+  // --------------------------------------------------------------------------
+  // Desktop: render inline
+  // --------------------------------------------------------------------------
+
+  return sidebarContent
 }
 

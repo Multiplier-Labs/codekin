@@ -18,6 +18,7 @@ import { useRouter } from './hooks/useRouter'
 import { useTentativeQueue } from './hooks/useTentativeQueue'
 import { useSessionOrchestration, groupKey } from './hooks/useSessionOrchestration'
 import { useDocsBrowser } from './hooks/useDocsBrowser'
+import { useIsMobile } from './hooks/useIsMobile'
 import { uploadFile } from './lib/ccApi'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { Settings } from './components/Settings'
@@ -25,6 +26,7 @@ import { ChatView } from './components/ChatView'
 import { DocsBrowser } from './components/DocsBrowser'
 import { TodoPanel } from './components/TodoPanel'
 import { LeftSidebar } from './components/LeftSidebar'
+import { MobileTopBar } from './components/MobileTopBar'
 import { TentativeBanner } from './components/TentativeBanner'
 import { WorkflowsView } from './components/WorkflowsView'
 import { CommandPalette } from './components/CommandPalette'
@@ -39,6 +41,8 @@ export default function App() {
   const { queues: tentativeQueues, addToQueue, clearQueue } = useTentativeQueue()
   const { sessionId: urlSessionId, view, navigate } = useRouter()
   const docsBrowser = useDocsBrowser()
+  const isMobile = useIsMobile()
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const [activeSessionId, setActiveSessionIdRaw] = useState<string | null>(() =>
     urlSessionId ?? localStorage.getItem('codekin-active-session')
@@ -390,6 +394,11 @@ export default function App() {
     document.documentElement.dataset.theme = settings.theme
   }, [settings.theme])
 
+  // Derive session name for mobile top bar
+  const activeSession = sessions.find(s => s.id === activeSessionId)
+  const activeSessionName = activeSession?.name ?? null
+  const activeRepoName = activeRepo?.name ?? activeWorkingDir?.split('/').pop() ?? null
+
   return (
     <div className="flex h-full bg-neutral-7">
       {/* Left sidebar — repo/session tree + nav */}
@@ -428,10 +437,24 @@ export default function App() {
         onDocsPickerSelect={handleSelectDocFile}
         onDocsPickerClose={docsBrowser.closePicker}
         docsStarredDocs={docsBrowser.starredDocs}
+        isMobile={isMobile}
+        mobileOpen={mobileMenuOpen}
+        onMobileClose={() => setMobileMenuOpen(false)}
       />
 
       {/* Main area */}
       <div className="terminal-area flex flex-1 flex-col overflow-hidden bg-neutral-12">
+        {/* Mobile top bar */}
+        {isMobile && (
+          <MobileTopBar
+            repoName={activeRepoName}
+            sessionName={activeSessionName}
+            onMenuOpen={() => setMobileMenuOpen(true)}
+            onNewSession={handleNewSessionForRepo}
+            onSettingsOpen={() => setSettingsOpen(true)}
+            activeRepo={activeRepo}
+          />
+        )}
         {/* Error banner */}
         {error && (
           <div className="border-b border-error-9/50 bg-error-10/50 px-4 py-2 text-[15px] text-error-5">
@@ -489,6 +512,7 @@ export default function App() {
                 onValueChange={(v) => { if (activeSessionId) setSessionInputs(prev => ({ ...prev, [activeSessionId]: v })) }}
                 currentModel={currentModel}
                 onModelChange={setModel}
+                isMobile={isMobile}
               />
             ) : (
               <div className="px-4 py-3 border-t border-neutral-10">
@@ -508,6 +532,7 @@ export default function App() {
                 disabled={!settings.token}
                 planningMode={planningMode}
                 activityLabel={activityLabel}
+                isMobile={isMobile}
               />
               <TodoPanel tasks={tasks} />
             </div>
@@ -543,6 +568,7 @@ export default function App() {
               onValueChange={(v) => { if (activeSessionId) setSessionInputs(prev => ({ ...prev, [activeSessionId]: v })) }}
               currentModel={currentModel}
               onModelChange={setModel}
+              isMobile={isMobile}
             />
           </div>
         ) : (
@@ -556,6 +582,7 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         settings={settings}
         onUpdate={updateSettings}
+        isMobile={isMobile}
       />
       <CommandPalette
         open={paletteOpen}
@@ -567,6 +594,7 @@ export default function App() {
         onSendSkill={handleSendSkill}
         onSendModule={handleSendModule}
         onOpenSettings={() => setSettingsOpen(true)}
+        isMobile={isMobile}
       />
     </div>
   )

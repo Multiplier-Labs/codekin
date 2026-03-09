@@ -19,14 +19,15 @@ interface Props {
   onSendSkill: (command: string) => void
   onSendModule: (module: Module) => void
   onOpenSettings: () => void
+  isMobile?: boolean
 }
 
-export function CommandPalette({ open, onClose, repos, globalSkills = [], globalModules = [], onOpenRepo, onSendSkill, onSendModule, onOpenSettings }: Props) {
+export function CommandPalette({ open, onClose, repos, globalSkills = [], globalModules = [], onOpenRepo, onSendSkill, onSendModule, onOpenSettings, isMobile = false }: Props) {
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh] bg-black/60" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="w-full max-w-lg">
+    <div className={`fixed inset-0 z-50 flex bg-black/60 ${isMobile ? 'items-end' : 'items-start justify-center pt-[20vh]'}`} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className={`w-full ${isMobile ? '' : 'max-w-lg'}`}>
         <Command
           className="rounded-lg border border-neutral-10 bg-neutral-11 shadow-2xl"
           label="Command palette"

@@ -517,11 +517,36 @@
   --color-neutral-6: #6b6b6b;
 }
 
+/* Light mode sidebar text — dark text on light background */
+[data-theme="light"] .app-left-sidebar,
+[data-theme="light"] .app-right-sidebar {
+  --color-neutral-1: #1a1a1a;
+  --color-neutral-2: #2e2e2e;
+  --color-neutral-3: #3d3d3d;
+  --color-neutral-4: #555555;
+  --color-neutral-5: #707070;
+  --color-neutral-6: #8a8a8a;
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;
   overflow: hidden;
   font-family: 'Lato', sans-serif;
+}
+
+/* ── Safe area insets for notched devices ──────────────────────────────── */
+/* Applied via viewport-fit=cover in the HTML meta tag. */
+
+.app-input-bar {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Mobile top bar respects top safe area (e.g. status bar on iOS) */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .mobile-top-bar-safe {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
 }
 
 /* Chat scrollbar */
