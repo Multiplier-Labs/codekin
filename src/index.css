@@ -517,6 +517,17 @@
   --color-neutral-6: #6b6b6b;
 }
 
+/* Light mode sidebar text — dark text on light background */
+[data-theme="light"] .app-left-sidebar,
+[data-theme="light"] .app-right-sidebar {
+  --color-neutral-1: #1a1a1a;
+  --color-neutral-2: #2e2e2e;
+  --color-neutral-3: #3d3d3d;
+  --color-neutral-4: #555555;
+  --color-neutral-5: #707070;
+  --color-neutral-6: #8a8a8a;
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;
