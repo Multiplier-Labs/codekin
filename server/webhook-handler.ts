@@ -27,20 +27,20 @@ import { WebhookDedup, computeIdempotencyKey } from './webhook-dedup.js'
 import { checkGhHealth, fetchFailedLogs, fetchJobs, fetchAnnotations, fetchCommitMessage, fetchPRTitle } from './webhook-github.js'
 import { buildPrompt } from './webhook-prompt.js'
 import { createWorkspace, cleanupWorkspace } from './webhook-workspace.js'
+import { WebhookHandlerBase } from './webhook-handler-base.js'
 
-const MAX_EVENT_HISTORY = 100
 /** How long an event can stay in 'processing' before the watchdog marks it as error. */
 const PROCESSING_TIMEOUT_MS = 5 * 60 * 1000
 
-export class WebhookHandler {
+export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEventStatus> {
   private config: FullWebhookConfig
   private sessions: SessionManager
   private dedup: WebhookDedup
-  private events: WebhookEvent[] = []
   private ghHealthy = false
-  private _processingWatchdog: ReturnType<typeof setInterval> | null = null
 
   constructor(config: FullWebhookConfig, sessions: SessionManager) {
+    super('webhook', PROCESSING_TIMEOUT_MS)
+
     this.config = config
     this.sessions = sessions
     this.dedup = new WebhookDedup()
@@ -53,9 +53,9 @@ export class WebhookHandler {
 
       // Match any non-terminal status — covers both 'processing' (if Claude
       // exits before status reaches 'session_created') and 'session_created'.
-      const event = this.events.find(e => e.sessionId === sessionId && (e.status === 'session_created' || e.status === 'processing'))
+      const event = this.getEvents().find(e => e.sessionId === sessionId && (e.status === 'session_created' || e.status === 'processing'))
       if (event) {
-        const status = (code === 0) ? 'completed' : 'error'
+        const status: WebhookEventStatus = (code === 0) ? 'completed' : 'error'
         this.updateEventStatus(event.id, status, code !== 0 ? `Claude exited with code ${code}` : undefined)
         console.log(`[webhook] Event ${event.id} → ${status} (session ${sessionId}, code=${code})`)
 
@@ -63,19 +63,6 @@ export class WebhookHandler {
         cleanupWorkspace(sessionId)
       }
     })
-
-    // Watchdog: mark 'processing' events as 'error' if stuck for >5 minutes.
-    // Prevents permanently inflated concurrency counts from failed async processing.
-    this._processingWatchdog = setInterval(() => {
-      const cutoff = Date.now() - PROCESSING_TIMEOUT_MS
-      for (const event of this.events) {
-        if (event.status === 'processing' && new Date(event.receivedAt).getTime() < cutoff) {
-          console.warn(`[webhook] Watchdog: event ${event.id} stuck in 'processing' for >5min, marking error`)
-          this.updateEventStatus(event.id, 'error', 'Processing timed out (watchdog)')
-        }
-      }
-    }, 60_000)
-    if (this._processingWatchdog.unref) this._processingWatchdog.unref()
   }
 
   /**
@@ -213,7 +200,7 @@ export class WebhookHandler {
     // (session not yet created) to prevent concurrent webhooks from bypassing the
     // cap during the async setup window (gh API calls, workspace cloning, etc.).
     const activeWebhookSessions = this.sessions.list().filter(s => s.source === 'webhook' && s.active).length
-    const processingEvents = this.events.filter(e => e.status === 'processing').length
+    const processingEvents = this.countByStatus('processing')
     const effectiveConcurrency = activeWebhookSessions + processingEvents
     if (effectiveConcurrency >= this.config.maxConcurrentSessions) {
       this.recordEvent({
@@ -389,33 +376,6 @@ export class WebhookHandler {
     }
   }
 
-  // --- Event history management ---
-
-  /** Append an event to the in-memory ring buffer, trimming the oldest entry when full. */
-  private recordEvent(event: WebhookEvent): void {
-    this.events.push(event)
-    if (this.events.length > MAX_EVENT_HISTORY) {
-      this.events = this.events.slice(-MAX_EVENT_HISTORY)
-    }
-  }
-
-  /** Mutate an event's status in-place. Called from both the async path and the session-exit callback. */
-  private updateEventStatus(eventId: string, status: WebhookEventStatus, error?: string): void {
-    const event = this.events.find(e => e.id === eventId)
-    if (event) {
-      event.status = status
-      if (error) event.error = error
-    }
-  }
-
-  getEvents(): WebhookEvent[] {
-    return [...this.events]
-  }
-
-  getEvent(id: string): WebhookEvent | undefined {
-    return this.events.find(e => e.id === id)
-  }
-
   getConfig(): WebhookConfig {
     return {
       enabled: this.config.enabled,
@@ -425,10 +385,7 @@ export class WebhookHandler {
   }
 
   shutdown(): void {
-    if (this._processingWatchdog) {
-      clearInterval(this._processingWatchdog)
-      this._processingWatchdog = null
-    }
+    super.shutdown()
     this.dedup.shutdown()
   }
 }

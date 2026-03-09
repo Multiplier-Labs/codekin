@@ -10,8 +10,9 @@
  */
 
 import { useRef, useCallback, useEffect, useState } from 'react'
-import type { WsClientMessage, WsServerMessage, ConnectionState, PromptOption, PromptQuestion, ChatMessage, TaskItem } from '../types'
+import type { WsClientMessage, WsServerMessage, ConnectionState, ChatMessage, TaskItem } from '../types'
 import { wsUrl, checkAuthSession, redirectToLogin } from '../lib/ccApi'
+import { usePromptState } from './usePromptState'
 
 /** Max chat messages kept in the browser before trimming older entries. */
 const MAX_BROWSER_MESSAGES = 500
@@ -33,84 +34,95 @@ interface UseChatSocketOptions {
 }
 
 /**
- * Immutable reducer: applies a single WsServerMessage to the ChatMessage array.
- * Used for real-time message processing (one event at a time).
- * For bulk replay, use rebuildFromHistory() instead which is O(n) via mutation.
+ * Core message application logic — mutates `messages` array in place.
+ * Returns true if the array was modified (element added or existing element changed).
+ * Both processMessage (immutable wrapper) and rebuildFromHistory use this
+ * to eliminate the duplicated switch logic.
  */
-export function processMessage(messages: ChatMessage[], msg: WsServerMessage): ChatMessage[] {
-  switch (msg.type) {
-    case 'output': {
-      const last = messages[messages.length - 1]
-      if (last && last.type === 'assistant' && !last.complete) {
-        const updated = [...messages]
-        updated[updated.length - 1] = { ...last, text: last.text + msg.data }
-        return updated
-      }
-      return [...messages, { type: 'assistant', text: msg.data, complete: false, ts: Date.now(), key: nextKey() }]
-    }
+function applyMessageMut(messages: ChatMessage[], msg: WsServerMessage): boolean {
+  const last = messages.length > 0 ? messages[messages.length - 1] : undefined
 
-    case 'result': {
-      const last = messages[messages.length - 1]
+  switch (msg.type) {
+    case 'output':
       if (last && last.type === 'assistant' && !last.complete) {
-        const updated = [...messages]
-        updated[updated.length - 1] = { ...last, complete: true }
-        return updated
+        last.text += msg.data
+      } else {
+        messages.push({ type: 'assistant', text: msg.data, complete: false, ts: Date.now(), key: nextKey() })
       }
-      return messages
-    }
+      return true
+
+    case 'result':
+      if (last && last.type === 'assistant' && !last.complete) {
+        last.complete = true
+        return true
+      }
+      return false
 
     case 'system_message':
-      return [...messages, { type: 'system', subtype: msg.subtype, text: msg.text, model: msg.model, key: nextKey() }]
+      messages.push({ type: 'system', subtype: msg.subtype, text: msg.text, model: msg.model, key: nextKey() })
+      return true
 
     case 'user_echo':
-      return [...messages, { type: 'user', text: msg.text, ts: Date.now(), key: nextKey() }]
+      messages.push({ type: 'user', text: msg.text, ts: Date.now(), key: nextKey() })
+      return true
 
     case 'claude_started':
-      return [...messages, { type: 'system', subtype: 'init', text: 'Session started', key: nextKey() }]
+      messages.push({ type: 'system', subtype: 'init', text: 'Session started', key: nextKey() })
+      return true
 
-    case 'tool_active': {
-      const last = messages[messages.length - 1]
+    case 'tool_active':
       if (last && last.type === 'tool_group') {
-        const updated = [...messages]
-        updated[updated.length - 1] = {
-          ...last,
-          tools: [...last.tools, { name: msg.toolName, active: true }],
-        }
-        return updated
+        last.tools.push({ name: msg.toolName, active: true })
+      } else {
+        messages.push({ type: 'tool_group', tools: [{ name: msg.toolName, active: true }], key: nextKey() })
       }
-      return [...messages, { type: 'tool_group', tools: [{ name: msg.toolName, active: true }], key: nextKey() }]
-    }
+      return true
 
-    case 'tool_done': {
-      const last = messages[messages.length - 1]
+    case 'tool_done':
       if (last && last.type === 'tool_group') {
-        const updated = [...messages]
-        const tools = [...last.tools]
-        for (let i = tools.length - 1; i >= 0; i--) {
-          if (tools[i].name === msg.toolName && tools[i].active) {
-            tools[i] = { name: msg.toolName, summary: msg.summary, active: false }
+        for (let i = last.tools.length - 1; i >= 0; i--) {
+          if (last.tools[i].name === msg.toolName && last.tools[i].active) {
+            last.tools[i] = { name: msg.toolName, summary: msg.summary, active: false }
             break
           }
         }
-        updated[updated.length - 1] = { ...last, tools }
-        return updated
+        return true
       }
-      return messages
-    }
+      return false
 
     case 'tool_output':
-      return [...messages, { type: 'tool_output', content: msg.content, isError: msg.isError, key: nextKey() }]
+      messages.push({ type: 'tool_output', content: msg.content, isError: msg.isError, key: nextKey() })
+      return true
 
     case 'planning_mode':
-      return [...messages, { type: 'planning_mode', active: msg.active, key: nextKey() }]
-
-    case 'todo_update':
-      // Handled separately via setTasks, not in message list
-      return messages
+      messages.push({ type: 'planning_mode', active: msg.active, key: nextKey() })
+      return true
 
     default:
-      return messages
+      return false
   }
+}
+
+/**
+ * Immutable reducer: applies a single WsServerMessage to the ChatMessage array.
+ * Used for real-time message processing (one event at a time).
+ * Wraps applyMessageMut with defensive cloning to preserve React immutability.
+ */
+export function processMessage(messages: ChatMessage[], msg: WsServerMessage): ChatMessage[] {
+  // Clone the array; defensively clone the last element if it could be mutated in-place
+  const clone = [...messages]
+  const lastIdx = clone.length - 1
+  if (lastIdx >= 0) {
+    const last = clone[lastIdx]
+    if (last.type === 'assistant' && !last.complete) {
+      clone[lastIdx] = { ...last }
+    } else if (last.type === 'tool_group') {
+      clone[lastIdx] = { ...last, tools: [...last.tools] }
+    }
+  }
+
+  const modified = applyMessageMut(clone, msg)
+  return modified ? clone : messages
 }
 
 /** Cap message list to MAX_BROWSER_MESSAGES, prepending a trim notice if truncated. */
@@ -124,78 +136,14 @@ export function trimMessages(msgs: ChatMessage[]): ChatMessage[] {
 
 /**
  * O(n) rebuild from history buffer — avoids O(n²) array cloning of
- * calling processMessage() in a loop.
+ * calling processMessage() in a loop. Delegates to applyMessageMut
+ * which operates directly on the mutable array.
  */
 export function rebuildFromHistory(buffer: WsServerMessage[]): ChatMessage[] {
   const messages: ChatMessage[] = []
-
   for (const msg of buffer) {
-    const last = messages.length > 0 ? messages[messages.length - 1] : undefined
-
-    switch (msg.type) {
-      case 'output': {
-        if (last && last.type === 'assistant' && !last.complete) {
-          last.text += msg.data
-        } else {
-          messages.push({ type: 'assistant', text: msg.data, complete: false, ts: Date.now(), key: nextKey() })
-        }
-        break
-      }
-
-      case 'result': {
-        if (last && last.type === 'assistant' && !last.complete) {
-          last.complete = true
-        }
-        break
-      }
-
-      case 'system_message':
-        messages.push({ type: 'system', subtype: msg.subtype, text: msg.text, model: msg.model, key: nextKey() })
-        break
-
-      case 'user_echo':
-        messages.push({ type: 'user', text: msg.text, ts: Date.now(), key: nextKey() })
-        break
-
-      case 'claude_started':
-        messages.push({ type: 'system', subtype: 'init', text: 'Session started', key: nextKey() })
-        break
-
-      case 'tool_active': {
-        if (last && last.type === 'tool_group') {
-          last.tools.push({ name: msg.toolName, active: true })
-        } else {
-          messages.push({ type: 'tool_group', tools: [{ name: msg.toolName, active: true }], key: nextKey() })
-        }
-        break
-      }
-
-      case 'tool_done': {
-        if (last && last.type === 'tool_group') {
-          for (let i = last.tools.length - 1; i >= 0; i--) {
-            if (last.tools[i].name === msg.toolName && last.tools[i].active) {
-              last.tools[i] = { name: msg.toolName, summary: msg.summary, active: false }
-              break
-            }
-          }
-        }
-        break
-      }
-
-      case 'tool_output':
-        messages.push({ type: 'tool_output', content: msg.content, isError: msg.isError, key: nextKey() })
-        break
-
-      case 'planning_mode':
-        messages.push({ type: 'planning_mode', active: msg.active, key: nextKey() })
-        break
-
-      // `todo_update` handled separately
-      default:
-        break
-    }
+    applyMessageMut(messages, msg)
   }
-
   return messages
 }
 
@@ -223,13 +171,7 @@ export function useChatSocket({
 
   const [thinkingSummary, setThinkingSummary] = useState<string | null>(null)
   const [waitingSessions, setWaitingSessions] = useState<Record<string, boolean>>({})
-  const [promptOptions, setPromptOptions] = useState<PromptOption[] | null>(null)
-  const [promptQuestion, setPromptQuestion] = useState<string | null>(null)
-  const [multiSelect, setMultiSelect] = useState(false)
-  const [promptRequestId, setPromptRequestId] = useState<string | null>(null)
-  const [promptType, setPromptType] = useState<'permission' | 'question' | null>(null)
-  const [promptQuestions, setPromptQuestions] = useState<PromptQuestion[] | undefined>(undefined)
-  const [approvePattern, setApprovePattern] = useState<string | undefined>(undefined)
+  const { state: promptState, clear: clearPromptState, setFromMessage: setPromptFromMessage } = usePromptState()
   const currentSessionId = useRef<string | null>(null)
 
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -313,17 +255,6 @@ export function useChatSocket({
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg))
     }
-  }, [])
-
-  /** Helper to clear all prompt-related state. */
-  const clearPromptState = useCallback(() => {
-    setPromptOptions(null)
-    setPromptQuestion(null)
-    setMultiSelect(false)
-    setPromptRequestId(null)
-    setPromptType(null)
-    setPromptQuestions(undefined)
-    setApprovePattern(undefined)
   }, [])
 
   const connect = useCallback(() => {
@@ -430,13 +361,7 @@ export function useChatSocket({
           if (sid) {
             setWaitingSessions(prev => ({ ...prev, [sid]: true }))
           }
-          setPromptOptions(msg.options)
-          setPromptQuestion(msg.question || null)
-          setMultiSelect(msg.multiSelect ?? false)
-          setPromptRequestId(msg.requestId ?? null)
-          setPromptType(msg.promptType ?? null)
-          setPromptQuestions(msg.questions)
-          setApprovePattern(msg.approvePattern)
+          setPromptFromMessage(msg)
           break
         }
 
@@ -580,7 +505,7 @@ export function useChatSocket({
     ws.onerror = () => {
       // onclose will fire after this
     }
-  }, [token, cleanup, send, flushPendingText, flushBeforeStructuralMessage, clearPromptState])
+  }, [token, cleanup, send, flushPendingText, flushBeforeStructuralMessage, clearPromptState, setPromptFromMessage])
   useEffect(() => { connectRef.current = connect }, [connect])
 
   const disconnect = useCallback(() => {
@@ -610,14 +535,14 @@ export function useChatSocket({
   }, [send, clearPromptState])
 
   const sendPromptResponse = useCallback((value: string | string[]) => {
-    send({ type: 'prompt_response', value, requestId: promptRequestId ?? undefined })
+    send({ type: 'prompt_response', value, requestId: promptState.promptRequestId ?? undefined })
     setIsProcessing(true)
     const sid = currentSessionId.current
     if (sid) {
       setWaitingSessions(prev => prev[sid] ? { ...prev, [sid]: false } : prev)
     }
     clearPromptState()
-  }, [send, promptRequestId, clearPromptState])
+  }, [send, promptState.promptRequestId, clearPromptState])
 
   const leaveSession = useCallback(() => {
     send({ type: 'leave_session' })
@@ -713,12 +638,12 @@ export function useChatSocket({
     isProcessing,
     thinkingSummary,
     waitingSessions,
-    promptOptions,
-    promptQuestion,
-    promptType,
-    promptQuestions,
-    approvePattern,
-    multiSelect,
+    promptOptions: promptState.promptOptions,
+    promptQuestion: promptState.promptQuestion,
+    promptType: promptState.promptType,
+    promptQuestions: promptState.promptQuestions,
+    approvePattern: promptState.approvePattern,
+    multiSelect: promptState.multiSelect,
     currentModel,
     send,
     joinSession,

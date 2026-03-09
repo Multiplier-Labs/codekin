@@ -8,7 +8,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import type { Repo, Session, ChatMessage } from './types'
+import type { ChatMessage } from './types'
 import { useSettings } from './hooks/useSettings'
 import { useRepos } from './hooks/useRepos'
 import { useSessions } from './hooks/useSessions'
@@ -16,6 +16,7 @@ import { useChatSocket } from './hooks/useChatSocket'
 import { usePageVisibility } from './hooks/usePageVisibility'
 import { useRouter } from './hooks/useRouter'
 import { useTentativeQueue } from './hooks/useTentativeQueue'
+import { useSessionOrchestration, groupKey } from './hooks/useSessionOrchestration'
 import { uploadFile } from './lib/ccApi'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { Settings } from './components/Settings'
@@ -28,11 +29,6 @@ import { CommandPalette } from './components/CommandPalette'
 import { InputBar, type InputBarHandle } from './components/InputBar'
 import { PromptButtons } from './components/PromptButtons'
 import { RepoSelector } from './components/RepoSelector'
-
-/** Use groupDir (if set) for tab grouping, falling back to workingDir. */
-function groupKey(s: Session): string {
-  return s.groupDir ?? s.workingDir
-}
 
 export default function App() {
   const { settings, updateSettings } = useSettings()
@@ -122,6 +118,29 @@ export default function App() {
     },
   })
 
+  // Session orchestration: switching, creating, deleting sessions & repos
+  const {
+    activeWorkingDir,
+    handleOpenSession,
+    handleSelectSession,
+    handleDeleteSession,
+    handleSelectRepo,
+    handleDeleteRepo,
+    handleNewSessionForRepo,
+    handleNewSessionFromArchive,
+  } = useSessionOrchestration({
+    sessions,
+    repos,
+    activeSessionId,
+    setActiveSessionId,
+    joinSession,
+    leaveSession,
+    clearMessages,
+    wsCreateSession,
+    removeSession,
+    pendingContextRef,
+  })
+
   // Keep sendInputRef in sync so onSessionCreated can use it
   useEffect(() => { sendInputRef.current = sendInput }, [sendInput])
 
@@ -190,106 +209,6 @@ export default function App() {
   useEffect(() => {
     if (!settings.token) setSettingsOpen(true) // eslint-disable-line react-hooks/set-state-in-effect -- initial setup
   }, [settings.token])
-
-  const handleOpenSession = useCallback(async (repo: Repo) => {
-    // Check for existing sessions for this repo
-    const existing = sessions.filter(s => groupKey(s) === repo.workingDir)
-    if (existing.length > 0) {
-      // Join the most recent existing session
-      const latest = existing[existing.length - 1]
-      clearMessages()
-      leaveSession()
-      joinSession(latest.id)
-      return
-    }
-
-    // Create via WebSocket
-    clearMessages()
-    leaveSession()
-    wsCreateSession(`hub:${repo.id}`, repo.workingDir)
-  }, [sessions, joinSession, wsCreateSession, leaveSession, clearMessages])
-
-  const handleSelectSession = useCallback((sessionId: string) => {
-    if (sessionId === activeSessionId) return
-    clearMessages()
-    leaveSession()
-    joinSession(sessionId)
-  }, [activeSessionId, leaveSession, joinSession, clearMessages])
-
-  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- setActiveSessionId is stable
-  const handleDeleteSession = useCallback(async (sessionId: string) => {
-    if (sessionId === activeSessionId) {
-      clearMessages()
-      leaveSession()
-      // Switch to another available session instead of showing empty state
-      const deleted = sessions.find(s => s.id === sessionId)
-      const remaining = sessions.filter(s => s.id !== sessionId)
-      if (remaining.length > 0) {
-        // Prefer a session from the same repo, otherwise take the first available
-        const sameRepo = deleted ? remaining.filter(s => groupKey(s) === groupKey(deleted)) : []
-        const next = sameRepo.length > 0 ? sameRepo[0] : remaining[0]
-        joinSession(next.id)
-      } else {
-        setActiveSessionId(null)
-      }
-    }
-    await removeSession(sessionId)
-  }, [activeSessionId, sessions, clearMessages, leaveSession, joinSession, setActiveSessionId, removeSession])
-
-  // Derive active grouping key from the active session
-  const activeSession = activeSessionId ? sessions.find(s => s.id === activeSessionId) : null
-  const activeWorkingDir = activeSession ? groupKey(activeSession) : null
-
-  const handleSelectRepo = useCallback((workingDir: string) => {
-    // If already viewing this repo, do nothing
-    if (workingDir === activeWorkingDir) return
-    // Find the most recent session for this repo and switch to it
-    const repoSessions = sessions.filter(s => groupKey(s) === workingDir)
-    if (repoSessions.length > 0) {
-      const latest = repoSessions[repoSessions.length - 1]
-      clearMessages()
-      leaveSession()
-      joinSession(latest.id)
-    }
-  }, [activeWorkingDir, sessions, clearMessages, leaveSession, joinSession])
-
-  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- setActiveSessionId is stable
-  const handleDeleteRepo = useCallback(async (workingDir: string) => {
-    const repoSessions = sessions.filter(s => groupKey(s) === workingDir)
-    const isActiveRepo = repoSessions.some(s => s.id === activeSessionId)
-    if (isActiveRepo) {
-      clearMessages()
-      leaveSession()
-      // Switch to a session from another repo instead of showing empty state
-      const remaining = sessions.filter(s => groupKey(s) !== workingDir)
-      if (remaining.length > 0) {
-        joinSession(remaining[0].id)
-      } else {
-        setActiveSessionId(null)
-      }
-    }
-    for (const s of repoSessions) {
-      await removeSession(s.id)
-    }
-  }, [sessions, activeSessionId, clearMessages, leaveSession, joinSession, setActiveSessionId, removeSession])
-
-  const handleNewSessionForRepo = useCallback(() => {
-    if (!activeWorkingDir) return
-    const repo = repos.find(r => r.workingDir === activeWorkingDir)
-    const repoId = repo?.id ?? activeWorkingDir.split('/').pop() ?? 'session'
-    clearMessages()
-    leaveSession()
-    wsCreateSession(`hub:${repoId}`, activeWorkingDir)
-  }, [activeWorkingDir, repos, clearMessages, leaveSession, wsCreateSession])
-
-  const handleNewSessionFromArchive = useCallback((workingDir: string, context: string) => {
-    const repo = repos.find(r => r.workingDir === workingDir)
-    if (!repo) return
-    pendingContextRef.current = context
-    clearMessages()
-    leaveSession()
-    wsCreateSession(`hub:${repo.id}`, repo.workingDir)
-  }, [repos, clearMessages, leaveSession, wsCreateSession])
 
   const handleSendSkill = useCallback((command: string) => {
     inputBarRef.current?.insertText(command + ' ')

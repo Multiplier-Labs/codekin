@@ -10,25 +10,22 @@
  * on server startup. Active sessions are automatically restarted after a
  * server restart with staggered delays.
  *
- * Auto-approval rules (tools and Bash commands) are stored per-repo (keyed by
- * workingDir) in ~/.codekin/repo-approvals.json, so they persist across
- * sessions sharing the same repo.
+ * Delegates to focused modules:
+ * - ApprovalManager: repo-level auto-approval rules for tools/commands
+ * - SessionNaming: AI-powered session name generation with retry logic
+ * - SessionPersistence: disk I/O for session state
  */
 
 import { randomUUID } from 'crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
-import { join } from 'path'
 import type { WebSocket } from 'ws'
-import { generateText, type LanguageModel } from 'ai'
-import { createGroq } from '@ai-sdk/groq'
-import { createOpenAI } from '@ai-sdk/openai'
-import { createGoogleGenerativeAI } from '@ai-sdk/google'
-import { createAnthropic } from '@ai-sdk/anthropic'
 import { ClaudeProcess } from './claude-process.js'
 import { SessionArchive } from './session-archive.js'
 import type { Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
 import { cleanupWorkspace } from './webhook-workspace.js'
-import { DATA_DIR, PORT } from './config.js'
+import { PORT } from './config.js'
+import { ApprovalManager } from './approval-manager.js'
+import { SessionNaming } from './session-naming.js'
+import { SessionPersistence } from './session-persistence.js'
 
 /** Max messages retained in a session's output history buffer. */
 const MAX_HISTORY = 2000
@@ -56,24 +53,6 @@ const API_RETRY_PATTERNS = [
   /503/,
 ]
 
-const SESSIONS_FILE = join(DATA_DIR, 'sessions.json')
-const REPO_APPROVALS_FILE = join(DATA_DIR, 'repo-approvals.json')
-const PERSIST_DEBOUNCE_MS = 2000
-
-/** Shape of a session when serialized to disk (no process refs, Sets→arrays). */
-interface PersistedSession {
-  id: string
-  name: string
-  workingDir: string
-  groupDir?: string
-  created: string
-  source?: 'manual' | 'webhook' | 'workflow' | 'stepflow'
-  model?: string
-  claudeSessionId: string | null
-  wasActive?: boolean
-  outputHistory: WsServerMessage[]
-}
-
 export interface CreateSessionOptions {
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow'
   id?: string
@@ -83,10 +62,6 @@ export interface CreateSessionOptions {
 
 export class SessionManager {
   private sessions = new Map<string, Session>()
-  /** Repo-level auto-approval store, keyed by workingDir (repo path). */
-  private repoApprovals = new Map<string, { tools: Set<string>; commands: Set<string>; patterns: Set<string> }>()
-  private _persistTimer: ReturnType<typeof setTimeout> | null = null
-  private _approvalPersistTimer: ReturnType<typeof setTimeout> | null = null
   /** SQLite archive for closed sessions. */
   readonly archive: SessionArchive
   /** Exposed so ws-server can pass its port to child Claude processes. */
@@ -98,153 +73,90 @@ export class SessionManager {
   /** Registered listeners notified when a session's Claude process exits. */
   private _exitListeners: Array<(sessionId: string, code: number | null, signal: string | null, willRestart: boolean) => void> = []
 
+  /** Delegated approval logic. */
+  private approvalManager: ApprovalManager
+  /** Delegated naming logic. */
+  private sessionNaming: SessionNaming
+  /** Delegated persistence logic. */
+  private sessionPersistence: SessionPersistence
+
   constructor() {
     this.archive = new SessionArchive()
-    this.restoreFromDisk()
-    this.restoreRepoApprovalsFromDisk()
+    this.approvalManager = new ApprovalManager()
+    this.sessionPersistence = new SessionPersistence(this.sessions)
+    this.sessionNaming = new SessionNaming({
+      getSession: (id) => this.sessions.get(id),
+      hasSession: (id) => this.sessions.has(id),
+      getSetting: (key, fallback) => this.archive.getSetting(key, fallback),
+      rename: (sessionId, newName) => this.rename(sessionId, newName),
+    })
+    this.sessionPersistence.restoreFromDisk()
   }
 
-  /** Get or create the approval entry for a repo (workingDir). */
-  private getRepoApprovalEntry(workingDir: string): { tools: Set<string>; commands: Set<string>; patterns: Set<string> } {
-    let entry = this.repoApprovals.get(workingDir)
-    if (!entry) {
-      entry = { tools: new Set(), commands: new Set(), patterns: new Set() }
-      this.repoApprovals.set(workingDir, entry)
-    }
-    return entry
-  }
+  // ---------------------------------------------------------------------------
+  // Approval delegation (preserves public API)
+  // ---------------------------------------------------------------------------
 
-  /** Add an auto-approval rule for a repo and persist. */
-  private addRepoApproval(workingDir: string, opts: { tool?: string; command?: string; pattern?: string }): void {
-    const entry = this.getRepoApprovalEntry(workingDir)
-    if (opts.tool) entry.tools.add(opts.tool)
-    if (opts.command) entry.commands.add(opts.command)
-    if (opts.pattern) entry.patterns.add(opts.pattern)
-    this.persistRepoApprovalsDebounced()
-  }
-
-  /**
-   * Command prefixes where prefix-based auto-approval is safe.
-   * Only commands whose behavior is determined by later arguments (not by target)
-   * should be listed here. Dangerous commands like rm, sudo, curl, etc. require
-   * exact match to prevent escalation (e.g. approving `rm -rf /tmp/x` should NOT
-   * also approve `rm -rf /`).
-   */
-  private static readonly SAFE_PREFIX_COMMANDS = new Set([
-    'git add', 'git commit', 'git diff', 'git log', 'git show', 'git stash',
-    'git status', 'git branch', 'git checkout', 'git switch', 'git rebase',
-    'git fetch', 'git pull', 'git merge', 'git tag', 'git rev-parse',
-    'npm run', 'npm test', 'npm install', 'npm ci', 'npm exec',
-    'npx', 'node', 'bun', 'deno',
-    'cargo build', 'cargo test', 'cargo run', 'cargo check', 'cargo clippy',
-    'make', 'cmake',
-    'python', 'python3', 'pip install',
-    'go build', 'go test', 'go run', 'go vet',
-    'tsc', 'eslint', 'prettier',
-    'cat', 'head', 'tail', 'wc', 'sort', 'uniq', 'diff', 'less',
-    'ls', 'pwd', 'echo', 'date', 'which', 'whoami', 'env', 'printenv',
-    'find', 'grep', 'rg', 'ag', 'fd',
-    'mkdir', 'touch',
-  ])
-
-  /**
-   * Check if a tool/command is auto-approved for a repo.
-   * For Bash commands, uses prefix matching only for safe commands;
-   * dangerous commands require exact match to prevent escalation.
-   */
+  /** Check if a tool/command is auto-approved for a repo. */
   checkAutoApproval(workingDir: string, toolName: string, toolInput: Record<string, unknown>): boolean {
-    const approvals = this.getRepoApprovalEntry(workingDir)
-    if (approvals.tools.has(toolName)) return true
-    if (toolName === 'Bash') {
-      const cmd = String(toolInput.command || '').trim()
-      // Exact match always works
-      if (approvals.commands.has(cmd)) return true
-      // Pattern match (e.g. "cat *" matches any cat command)
-      for (const pattern of approvals.patterns) {
-        if (this.matchesPattern(pattern, cmd)) return true
-      }
-      // Prefix match only for safe commands
-      const cmdPrefix = this.commandPrefix(cmd)
-      if (cmdPrefix && SessionManager.SAFE_PREFIX_COMMANDS.has(cmdPrefix)) {
-        for (const approved of approvals.commands) {
-          if (this.commandPrefix(approved) === cmdPrefix) return true
-        }
-      }
-    }
-    return false
+    return this.approvalManager.checkAutoApproval(workingDir, toolName, toolInput)
   }
 
-  /** Extract the command prefix (first two tokens) for prefix-based matching. */
-  private commandPrefix(cmd: string): string {
-    const tokens = cmd.split(/\s+/).filter(Boolean)
-    if (tokens.length === 0) return ''
-    if (tokens.length === 1) return tokens[0]
-    return `${tokens[0]} ${tokens[1]}`
-  }
-
-  /**
-   * Derive a glob pattern from a tool invocation for "Approve Pattern".
-   * Returns a string like "cat *" or "git diff *", or null if no safe pattern applies.
-   * Patterns use the format "<prefix> *" meaning "this prefix followed by anything".
-   */
+  /** Derive a glob pattern from a tool invocation for "Approve Pattern". */
   derivePattern(toolName: string, toolInput: Record<string, unknown>): string | null {
-    if (toolName !== 'Bash') return null
-    const cmd = String(toolInput.command || '').trim()
-    const tokens = cmd.split(/\s+/).filter(Boolean)
-    if (tokens.length === 0) return null
-
-    // Check single-token safe commands (cat, grep, ls, etc.)
-    const first = tokens[0]
-    if (SessionManager.SAFE_PREFIX_COMMANDS.has(first)) {
-      return `${first} *`
-    }
-
-    // Check two-token safe commands (git diff, npm run, etc.)
-    if (tokens.length >= 2) {
-      const twoToken = `${tokens[0]} ${tokens[1]}`
-      if (SessionManager.SAFE_PREFIX_COMMANDS.has(twoToken)) {
-        return `${twoToken} *`
-      }
-    }
-
-    return null
+    return this.approvalManager.derivePattern(toolName, toolInput)
   }
 
-  /**
-   * Check if a bash command matches a stored pattern.
-   * Patterns of the form "<prefix> *" match any command starting with <prefix>.
-   */
-  private matchesPattern(pattern: string, cmd: string): boolean {
-    if (pattern.endsWith(' *')) {
-      const prefix = pattern.slice(0, -2)
-      return cmd === prefix || cmd.startsWith(prefix + ' ')
-    }
-    return cmd === pattern
+  /** Return the auto-approved tools, commands, and patterns for a repo (workingDir). */
+  getApprovals(workingDir: string): { tools: string[]; commands: string[]; patterns: string[] } {
+    return this.approvalManager.getApprovals(workingDir)
   }
 
-  /** Save an "Always Allow" approval for a tool/command. */
-  private saveAlwaysAllow(workingDir: string, toolName: string, toolInput: Record<string, unknown>): void {
-    if (toolName === 'Bash') {
-      const cmd = String(toolInput.command || '').trim()
-      this.addRepoApproval(workingDir, { command: cmd })
-      console.log(`[auto-approve] saved command for repo ${workingDir}: ${cmd.slice(0, 80)}`)
-    } else {
-      this.addRepoApproval(workingDir, { tool: toolName })
-      console.log(`[auto-approve] saved tool for repo ${workingDir}: ${toolName}`)
-    }
+  /** Remove an auto-approval rule for a repo (workingDir) and persist to disk. */
+  removeApproval(workingDir: string, opts: { tool?: string; command?: string; pattern?: string }, skipPersist = false): 'invalid' | boolean {
+    return this.approvalManager.removeApproval(workingDir, opts, skipPersist)
   }
 
-  /** Save a pattern-based approval (e.g. "cat *") for a tool/command. */
-  private savePatternApproval(workingDir: string, toolName: string, toolInput: Record<string, unknown>): void {
-    const pattern = this.derivePattern(toolName, toolInput)
-    if (pattern) {
-      this.addRepoApproval(workingDir, { pattern })
-      console.log(`[auto-approve] saved pattern for repo ${workingDir}: ${pattern}`)
-    } else {
-      // No pattern derivable — skip saving rather than silently escalating to always-allow
-      console.log(`[auto-approve] no pattern derivable for ${toolName}, skipping pattern save`)
-    }
+  /** Add an auto-approval rule for a repo and persist (used by tests via `as any`). */
+  private addRepoApproval(workingDir: string, opts: { tool?: string; command?: string; pattern?: string }): void {
+    this.approvalManager.addRepoApproval(workingDir, opts)
   }
+
+  /** Write repo-level approvals to disk. Exposed for shutdown. */
+  persistRepoApprovals(): void {
+    this.approvalManager.persistRepoApprovals()
+  }
+
+  // ---------------------------------------------------------------------------
+  // Naming delegation (preserves public API)
+  // ---------------------------------------------------------------------------
+
+  /** Schedule session naming via AI provider. */
+  scheduleSessionNaming(sessionId: string): void {
+    this.sessionNaming.scheduleSessionNaming(sessionId)
+  }
+
+  /** Re-trigger session naming on user interaction. */
+  retrySessionNamingOnInteraction(sessionId: string): void {
+    this.sessionNaming.retrySessionNamingOnInteraction(sessionId)
+  }
+
+  // ---------------------------------------------------------------------------
+  // Persistence delegation (preserves public API)
+  // ---------------------------------------------------------------------------
+
+  /** Write all sessions to disk as JSON (atomic rename to prevent corruption). */
+  persistToDisk(): void {
+    this.sessionPersistence.persistToDisk()
+  }
+
+  private persistToDiskDebounced(): void {
+    this.sessionPersistence.persistToDiskDebounced()
+  }
+
+  // ---------------------------------------------------------------------------
+  // Session CRUD
+  // ---------------------------------------------------------------------------
 
   /** Create a new session and persist to disk. */
   create(name: string, workingDir: string, options?: CreateSessionOptions): Session {
@@ -312,159 +224,6 @@ export class SessionManager {
     // Broadcast to all clients in this session
     this.broadcast(session, { type: 'session_name_update', sessionId, name: newName })
     return true
-  }
-
-  /** Max naming retry attempts before giving up. */
-  private static readonly MAX_NAMING_ATTEMPTS = 5
-  /** Back-off delays for naming retries: 20s, 60s, 120s, 240s, 240s */
-  private static readonly NAMING_DELAYS = [20_000, 60_000, 120_000, 240_000, 240_000]
-
-  /** Schedule session naming via the Anthropic API.
-   *  Used as a 20s fallback for long responses — fires immediately via result handler
-   *  for responses that finish sooner.
-   *  Automatically retries on failure with increasing delays. */
-  scheduleSessionNaming(sessionId: string): void {
-    const session = this.sessions.get(sessionId)
-    if (!session) return
-    if (!session.name.startsWith('hub:')) return
-    // Don't schedule if a naming timer is already pending
-    if (session._namingTimer) return
-    // Give up after max attempts
-    if (session._namingAttempts >= SessionManager.MAX_NAMING_ATTEMPTS) return
-
-    const delay = SessionManager.NAMING_DELAYS[
-      Math.min(session._namingAttempts, SessionManager.NAMING_DELAYS.length - 1)
-    ]
-
-    session._namingTimer = setTimeout(() => {
-      delete session._namingTimer
-      this.executeSessionNaming(sessionId)
-    }, delay)
-  }
-
-  /** Resolve the AI model to use for session naming based on available API keys.
-   *  Respects the user's preferred support provider setting.
-   *  Fallback priority: Groq (free/fast) → OpenAI → Gemini → Anthropic. */
-  private getNamingModel(): LanguageModel | null {
-    const preferred = this.archive.getSetting('support_provider', 'auto')
-
-    const providers: Record<string, () => LanguageModel | null> = {
-      groq: () => process.env.GROQ_API_KEY
-        ? createGroq({ apiKey: process.env.GROQ_API_KEY })('meta-llama/llama-4-scout-17b-16e-instruct')
-        : null,
-      openai: () => process.env.OPENAI_API_KEY
-        ? createOpenAI({ apiKey: process.env.OPENAI_API_KEY })('gpt-4o-mini')
-        : null,
-      gemini: () => process.env.GEMINI_API_KEY
-        ? createGoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY })('gemini-2.5-flash')
-        : null,
-      anthropic: () => process.env.ANTHROPIC_API_KEY
-        ? createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY })('claude-haiku-4-5-20251001')
-        : null,
-    }
-
-    // If a specific provider is preferred and available, use it
-    if (preferred !== 'auto' && providers[preferred]) {
-      const model = providers[preferred]()
-      if (model) return model
-    }
-
-    // Auto: try in priority order
-    for (const key of ['groq', 'openai', 'gemini', 'anthropic']) {
-      const model = providers[key]()
-      if (model) return model
-    }
-    return null
-  }
-
-  /** Execute the actual naming call. Called by the timer set in scheduleSessionNaming.
-   *  Uses the first available API provider for minimal cost and latency. */
-  private async executeSessionNaming(sessionId: string): Promise<void> {
-    const session = this.sessions.get(sessionId)
-    if (!session) return
-    if (!session.name.startsWith('hub:')) return
-
-    session._namingAttempts++
-
-    // Gather context from conversation history
-    const latestContext = session.outputHistory
-      .filter(m => m.type === 'output')
-      .map(m => (m as { data?: string }).data || '')
-      .join('')
-      .slice(0, 2000)
-
-    const userMsg = session._lastUserInput || ''
-    if (!userMsg && !latestContext) {
-      // No context yet — schedule a retry
-      this.scheduleSessionNaming(sessionId)
-      return
-    }
-
-    const model = this.getNamingModel()
-    if (!model) {
-      console.warn('[session-name] No API key set for naming (GROQ_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY), skipping')
-      return
-    }
-
-    try {
-      const { text } = await generateText({
-        model,
-        maxOutputTokens: 60,
-        prompt: [
-          'Generate a descriptive name (3-6 words, max 60 characters) for this coding session.',
-          'The name MUST be at least 3 words that clearly summarize what the user is working on.',
-          'Reply with ONLY the session name. No quotes, no punctuation, no explanation.',
-          'Example names: "Fix Login Page Styling", "Add User Auth Flow", "Refactor Database Query Performance"',
-          '',
-          `User message: ${userMsg.slice(0, 500)}`,
-          '',
-          `Assistant response (truncated): ${latestContext.slice(0, 1500)}`,
-        ].join('\n'),
-      })
-
-      if (!this.sessions.has(sessionId)) return
-      if (!session.name.startsWith('hub:')) return
-
-      const rawName = text
-        .trim()
-        .replace(/^["'`*_]+|["'`*_]+$/g, '')
-        .replace(/^(session\s*name\s*[:：]\s*)/i, '')
-        .trim()
-
-      const wordCount = rawName.split(/\s+/).filter(w => w.length > 0).length
-      if (rawName.length >= 2 && rawName.length <= 80 && wordCount >= 3) {
-        const finalName = rawName.length <= 60
-          ? rawName
-          : (rawName.slice(0, 60).replace(/\s+\S*$/, '') || rawName.slice(0, 60))
-        this.rename(sessionId, finalName)
-      } else {
-        console.warn(`[session-name] invalid name (${rawName.length} chars, ${wordCount} words): "${rawName.slice(0, 80)}"`)
-        this.scheduleSessionNaming(sessionId)
-      }
-    } catch (err: unknown) {
-      if (!this.sessions.has(sessionId)) return
-      const msg = err instanceof Error ? err.message : String(err)
-      console.warn(`[session-name] attempt ${session._namingAttempts} failed: ${msg}`)
-      this.scheduleSessionNaming(sessionId)
-    }
-  }
-
-  /** Re-trigger session naming when user interacts, if the session is still unnamed
-   *  and no naming timer is already pending. Uses a short delay (5s) since we already
-   *  have conversation context at this point. */
-  retrySessionNamingOnInteraction(sessionId: string): void {
-    const session = this.sessions.get(sessionId)
-    if (!session) return
-    if (!session.name.startsWith('hub:')) return
-    // Already have a timer pending or exhausted retries
-    if (session._namingTimer) return
-    if (session._namingAttempts >= SessionManager.MAX_NAMING_ATTEMPTS) return
-
-    // Short delay — context already available from prior turns
-    session._namingTimer = setTimeout(() => {
-      delete session._namingTimer
-      this.executeSessionNaming(sessionId)
-    }, 5_000)
   }
 
   /** Add a WebSocket client to a session. Returns the session or undefined if not found.
@@ -588,6 +347,10 @@ export class SessionManager {
       console.error('[session-manager] Failed to archive session:', err)
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Claude process lifecycle
+  // ---------------------------------------------------------------------------
 
   /**
    * Spawn (or re-spawn) a Claude CLI process for a session.
@@ -843,7 +606,7 @@ export class SessionManager {
         clearTimeout(session._namingTimer)
         delete session._namingTimer
       }
-      void this.executeSessionNaming(sessionId)
+      void this.sessionNaming.executeSessionNaming(sessionId)
     }
   }
 
@@ -1037,10 +800,10 @@ export class SessionManager {
     const { isDeny, isAlwaysAllow, isApprovePattern } = this.decodeApprovalValue(value)
 
     if (isAlwaysAllow && !isDeny) {
-      this.saveAlwaysAllow(session.workingDir, approval.toolName, approval.toolInput)
+      this.approvalManager.saveAlwaysAllow(session.workingDir, approval.toolName, approval.toolInput)
     }
     if (isApprovePattern && !isDeny) {
-      this.savePatternApproval(session.workingDir, approval.toolName, approval.toolInput)
+      this.approvalManager.savePatternApproval(session.workingDir, approval.toolName, approval.toolInput)
     }
 
     console.log(`[tool-approval] resolving: allow=${!isDeny} always=${isAlwaysAllow} pattern=${isApprovePattern} tool=${approval.toolName}`)
@@ -1095,10 +858,10 @@ export class SessionManager {
     const { isDeny, isAlwaysAllow, isApprovePattern } = this.decodeApprovalValue(value)
 
     if (isAlwaysAllow) {
-      this.saveAlwaysAllow(session.workingDir, pending.toolName, pending.toolInput)
+      this.approvalManager.saveAlwaysAllow(session.workingDir, pending.toolName, pending.toolInput)
     }
     if (isApprovePattern) {
-      this.savePatternApproval(session.workingDir, pending.toolName, pending.toolInput)
+      this.approvalManager.savePatternApproval(session.workingDir, pending.toolName, pending.toolInput)
     }
 
     const behavior = isDeny ? 'deny' : 'allow'
@@ -1237,17 +1000,21 @@ export class SessionManager {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  /** Check if an error result text matches a transient API error worth retrying. */
+  private isRetryableApiError(text: string): boolean {
+    return API_RETRY_PATTERNS.some((pattern) => pattern.test(text))
+  }
+
   /**
    * Build a condensed text summary of a session's conversation history.
    * Used as context when auto-starting Claude for sessions without a saved
    * Claude session ID (so the CLI can't resume from its own storage).
    * Caps output at ~4000 chars, keeping the most recent exchanges.
    */
-  /** Check if an error result text matches a transient API error worth retrying. */
-  private isRetryableApiError(text: string): boolean {
-    return API_RETRY_PATTERNS.some((pattern) => pattern.test(text))
-  }
-
   private buildSessionContext(session: Session): string | null {
     const history = session.outputHistory
     if (history.length === 0) return null
@@ -1429,164 +1196,6 @@ export class SessionManager {
         }
         break
       }
-    }
-  }
-
-  /** Return the auto-approved tools, commands, and patterns for a repo (workingDir). */
-  getApprovals(workingDir: string): { tools: string[]; commands: string[]; patterns: string[] } {
-    const entry = this.repoApprovals.get(workingDir)
-    if (!entry) return { tools: [], commands: [], patterns: [] }
-    return {
-      tools: Array.from(entry.tools).sort(),
-      commands: Array.from(entry.commands).sort(),
-      patterns: Array.from(entry.patterns).sort(),
-    }
-  }
-
-  /** Remove an auto-approval rule for a repo (workingDir) and persist to disk.
-   *  Returns 'invalid' if no tool/command provided, or boolean indicating if something was deleted.
-   *  Pass skipPersist=true for bulk operations (caller must call persistRepoApprovals after). */
-  removeApproval(workingDir: string, opts: { tool?: string; command?: string; pattern?: string }, skipPersist = false): 'invalid' | boolean {
-    const tool = typeof opts.tool === 'string' ? opts.tool.trim() : ''
-    const command = typeof opts.command === 'string' ? opts.command.trim() : ''
-    const pattern = typeof opts.pattern === 'string' ? opts.pattern.trim() : ''
-    if (!tool && !command && !pattern) return 'invalid'
-    const entry = this.repoApprovals.get(workingDir)
-    if (!entry) return false
-    let removed = false
-    if (tool) removed = entry.tools.delete(tool) || removed
-    if (command) removed = entry.commands.delete(command) || removed
-    if (pattern) removed = entry.patterns.delete(pattern) || removed
-    if (removed && !skipPersist) this.persistRepoApprovals()
-    return removed
-  }
-
-  /** Write all sessions to disk as JSON (atomic rename to prevent corruption). */
-  persistToDisk(): void {
-    const data: PersistedSession[] = Array.from(this.sessions.values()).map((s) => ({
-      id: s.id,
-      name: s.name,
-      workingDir: s.workingDir,
-      groupDir: s.groupDir,
-      created: s.created,
-      source: s.source,
-      model: s.model,
-      claudeSessionId: s.claudeSessionId,
-      wasActive: s.claudeProcess?.isAlive() ?? false,
-      outputHistory: s.outputHistory,
-    }))
-
-    try {
-      mkdirSync(DATA_DIR, { recursive: true })
-      const tmp = SESSIONS_FILE + '.tmp'
-      writeFileSync(tmp, JSON.stringify(data, null, 2))
-      renameSync(tmp, SESSIONS_FILE)
-    } catch (err) {
-      console.error('Failed to persist sessions:', err)
-    }
-  }
-
-  private persistToDiskDebounced(): void {
-    if (this._persistTimer) return
-    this._persistTimer = setTimeout(() => {
-      this._persistTimer = null
-      this.persistToDisk()
-    }, PERSIST_DEBOUNCE_MS)
-  }
-
-  /** Write repo-level approvals to disk (atomic rename). */
-  persistRepoApprovals(): void {
-    const data: Record<string, { tools: string[]; commands: string[]; patterns: string[] }> = {}
-    for (const [dir, entry] of this.repoApprovals) {
-      // Only persist non-empty entries
-      if (entry.tools.size > 0 || entry.commands.size > 0 || entry.patterns.size > 0) {
-        data[dir] = {
-          tools: Array.from(entry.tools).sort(),
-          commands: Array.from(entry.commands).sort(),
-          patterns: Array.from(entry.patterns).sort(),
-        }
-      }
-    }
-
-    try {
-      mkdirSync(DATA_DIR, { recursive: true })
-      const tmp = REPO_APPROVALS_FILE + '.tmp'
-      writeFileSync(tmp, JSON.stringify(data, null, 2))
-      renameSync(tmp, REPO_APPROVALS_FILE)
-    } catch (err) {
-      console.error('Failed to persist repo approvals:', err)
-    }
-  }
-
-  private persistRepoApprovalsDebounced(): void {
-    if (this._approvalPersistTimer) return
-    this._approvalPersistTimer = setTimeout(() => {
-      this._approvalPersistTimer = null
-      this.persistRepoApprovals()
-    }, PERSIST_DEBOUNCE_MS)
-  }
-
-  private restoreFromDisk(): void {
-    if (!existsSync(SESSIONS_FILE)) return
-
-    try {
-      const raw = readFileSync(SESSIONS_FILE, 'utf-8')
-      const data: PersistedSession[] = JSON.parse(raw)
-
-      for (const s of data) {
-        const session: Session = {
-          id: s.id,
-          name: s.name,
-          workingDir: s.workingDir,
-          groupDir: s.groupDir,
-          created: s.created,
-          source: s.source ?? 'manual',
-          model: s.model,
-          claudeProcess: null,
-          clients: new Set(),
-          outputHistory: s.outputHistory || [],
-          // Restore claudeSessionId so Claude CLI resumes with full conversation
-          // history from its own session storage (not just our 4000-char summary).
-          claudeSessionId: s.claudeSessionId ?? null,
-          restartCount: 0,
-          lastRestartAt: null,
-          _stoppedByUser: false,
-          _stallTimer: null,
-          _wasActiveBeforeRestart: s.wasActive ?? false,
-          _apiRetryCount: 0,
-          _turnCount: 99, // restored sessions already have a name
-          _namingAttempts: 0,
-          isProcessing: false,
-          pendingControlRequests: new Map(),
-          pendingToolApprovals: new Map(),
-        }
-        this.sessions.set(session.id, session)
-      }
-
-      console.log(`Restored ${data.length} session(s) from disk`)
-    } catch (err) {
-      console.error('Failed to restore sessions from disk:', err)
-    }
-  }
-
-  private restoreRepoApprovalsFromDisk(): void {
-    if (!existsSync(REPO_APPROVALS_FILE)) return
-
-    try {
-      const raw = readFileSync(REPO_APPROVALS_FILE, 'utf-8')
-      const data = JSON.parse(raw) as Record<string, { tools?: string[]; commands?: string[]; patterns?: string[] }>
-
-      for (const [dir, entry] of Object.entries(data)) {
-        this.repoApprovals.set(dir, {
-          tools: new Set(entry.tools || []),
-          commands: new Set(entry.commands || []),
-          patterns: new Set(entry.patterns || []),
-        })
-      }
-
-      console.log(`Restored repo approvals for ${Object.keys(data).length} repo(s) from disk`)
-    } catch (err) {
-      console.error('Failed to restore repo approvals from disk:', err)
     }
   }
 

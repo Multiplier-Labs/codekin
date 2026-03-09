@@ -72,9 +72,7 @@ import type {
 } from './stepflow-types.js'
 import { buildStepflowPrompt } from './stepflow-prompt.js'
 import { createWorkspace, cleanupWorkspace } from './webhook-workspace.js'
-
-/** Maximum events stored in the in-memory ring buffer for the management API. */
-const MAX_EVENT_HISTORY = 100
+import { WebhookHandlerBase } from './webhook-handler-base.js'
 
 /**
  * How long an event may remain in `'processing'` before the watchdog marks it
@@ -89,12 +87,9 @@ const SUPPORTED_EVENT_TYPE = 'claude.session.requested'
 /** TTL for deduplication entries — matches WebhookDedup's 1-hour window. */
 const DEDUP_TTL_MS = 60 * 60 * 1000
 
-export class StepflowHandler {
+export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowEventStatus> {
   private config: StepflowConfig
   private sessions: SessionManager
-
-  /** Ring buffer of processed events, capped at MAX_EVENT_HISTORY. */
-  private events: StepflowEvent[] = []
 
   /**
    * Map of webhookId → processedAt timestamp (ms) for deduplication.
@@ -115,9 +110,9 @@ export class StepflowHandler {
    */
   private sessionCallbackSecrets = new Map<string, string | undefined>()
 
-  private _processingWatchdog: ReturnType<typeof setInterval> | null = null
-
   constructor(config: StepflowConfig, sessions: SessionManager) {
+    super('stepflow', PROCESSING_TIMEOUT_MS)
+
     this.config = config
     this.sessions = sessions
 
@@ -128,7 +123,7 @@ export class StepflowHandler {
       // Don't report yet if Claude's auto-restart will retry the session
       if (willRestart) return
 
-      const event = this.events.find(
+      const event = this.getEvents().find(
         e => e.sessionId === sessionId &&
           (e.status === 'session_created' || e.status === 'processing'),
       )
@@ -159,22 +154,6 @@ export class StepflowHandler {
 
       cleanupWorkspace(sessionId)
     })
-
-    // -----------------------------------------------------------------------
-    // Watchdog: release concurrency cap from stuck 'processing' events
-    // -----------------------------------------------------------------------
-    this._processingWatchdog = setInterval(() => {
-      const cutoff = Date.now() - PROCESSING_TIMEOUT_MS
-      for (const event of this.events) {
-        if (event.status === 'processing' && new Date(event.receivedAt).getTime() < cutoff) {
-          console.warn(
-            `[stepflow] Watchdog: event ${event.id} stuck in 'processing' for >5min, marking error`,
-          )
-          this.updateEventStatus(event.id, 'error', 'Processing timed out (watchdog)')
-        }
-      }
-    }, 60_000)
-    if (this._processingWatchdog.unref) this._processingWatchdog.unref()
   }
 
   // ---------------------------------------------------------------------------
@@ -285,7 +264,7 @@ export class StepflowHandler {
     // being set up) so rapid concurrent deliveries can't bypass the cap during
     // the async window between accepting the webhook and creating the session.
     const activeCount = this.sessions.list().filter(s => s.source === 'stepflow' && s.active).length
-    const processingCount = this.events.filter(e => e.status === 'processing').length
+    const processingCount = this.countByStatus('processing')
     if (activeCount + processingCount >= this.config.maxConcurrentSessions) {
       return {
         statusCode: 429,
@@ -474,35 +453,8 @@ export class StepflowHandler {
   }
 
   // ---------------------------------------------------------------------------
-  // Private: event ring buffer
-  // ---------------------------------------------------------------------------
-
-  private recordEvent(event: StepflowEvent): void {
-    this.events.push(event)
-    if (this.events.length > MAX_EVENT_HISTORY) {
-      this.events = this.events.slice(-MAX_EVENT_HISTORY)
-    }
-  }
-
-  private updateEventStatus(eventId: string, status: StepflowEventStatus, error?: string): void {
-    const event = this.events.find(e => e.id === eventId)
-    if (event) {
-      event.status = status
-      if (error) event.error = error
-    }
-  }
-
-  // ---------------------------------------------------------------------------
   // Public: management API surface
   // ---------------------------------------------------------------------------
-
-  getEvents(): StepflowEvent[] {
-    return [...this.events]
-  }
-
-  getEvent(id: string): StepflowEvent | undefined {
-    return this.events.find(e => e.id === id)
-  }
 
   isEnabled(): boolean {
     return this.config.enabled
@@ -513,10 +465,7 @@ export class StepflowHandler {
   // ---------------------------------------------------------------------------
 
   shutdown(): void {
-    if (this._processingWatchdog) {
-      clearInterval(this._processingWatchdog)
-      this._processingWatchdog = null
-    }
+    super.shutdown()
   }
 }
 
