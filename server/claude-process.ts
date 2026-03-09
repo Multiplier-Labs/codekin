@@ -307,9 +307,28 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
     const blocks = Array.isArray(msg.content) ? msg.content : []
     for (const block of blocks as Array<{ type: string; tool_use_id?: string; content?: unknown; is_error?: boolean }>) {
       if (block.type === 'tool_result') {
-        const content = typeof block.content === 'string' ? block.content : JSON.stringify(block.content)
         const isError = block.is_error === true
-        console.log(`[tool-result] id=${block.tool_use_id} error=${isError} content=${content.slice(0, 300)}`)
+
+        // When content is an array of content blocks, extract images and stringify the rest
+        let content = ''
+        const contentBlocks = Array.isArray(block.content) ? block.content : null
+        if (contentBlocks) {
+          const textParts: string[] = []
+          for (const cb of contentBlocks as Array<{ type: string; text?: string; source?: { type: string; data: string; media_type: string } }>) {
+            if (cb.type === 'image' && cb.source?.type === 'base64') {
+              console.log(`[tool-result] id=${block.tool_use_id} image media_type=${cb.source.media_type} data_len=${cb.source.data.length}`)
+              this.emit('image', cb.source.data, cb.source.media_type)
+            } else {
+              textParts.push(typeof cb.text === 'string' ? cb.text : JSON.stringify(cb))
+            }
+          }
+          content = textParts.join('\n')
+        } else {
+          content = typeof block.content === 'string' ? block.content : ''
+        }
+        if (content) {
+          console.log(`[tool-result] id=${block.tool_use_id} error=${isError} content=${content.slice(0, 300)}`)
+        }
 
         // Deferred ExitPlanMode: emit planning_mode only after tool_result confirms success.
         // Match by tool_use_id, or use flag-based fallback when id wasn't available.
@@ -321,7 +340,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
           }
         }
 
-        // Emit non-empty tool results as dedicated tool_output events
+        // Emit non-empty text tool results as dedicated tool_output events
         if (content.trim()) {
           const truncated = content.length > 2000
             ? content.slice(0, 2000) + `\n… (truncated, ${content.length} chars total)`

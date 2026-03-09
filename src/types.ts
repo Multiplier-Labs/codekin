@@ -115,6 +115,7 @@ export type WsServerMessage =
   | { type: 'tool_active'; toolName: string; toolInput?: string }
   | { type: 'tool_done'; toolName: string; summary?: string }
   | { type: 'tool_output'; content: string; isError?: boolean }
+  | { type: 'image'; base64: string; mediaType: string }
   | { type: 'system_message'; subtype: 'init' | 'exit' | 'error' | 'restart' | 'stall' | 'notification'; text: string; model?: string }
   | { type: 'user_echo'; text: string }
   | { type: 'result' }
@@ -152,6 +153,7 @@ export type ChatMessage =
   | { type: 'system'; subtype: 'init' | 'exit' | 'error' | 'restart' | 'stall' | 'notification' | 'trim'; text: string; model?: string; ts?: number; key?: string }
   | { type: 'tool_group'; tools: Array<{ name: string; summary?: string; active: boolean }>; ts?: number; key?: string }
   | { type: 'tool_output'; content: string; isError?: boolean; ts?: number; key?: string }
+  | { type: 'image'; base64: string; mediaType: string; ts?: number; key?: string }
   | { type: 'planning_mode'; active: boolean; ts?: number; key?: string }
   | { type: 'todo_list'; tasks: TaskItem[]; ts?: number; key?: string }
   | { type: 'tentative'; text: string; index: number; ts?: number; key?: string }

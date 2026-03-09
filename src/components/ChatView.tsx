@@ -195,6 +195,7 @@ function ToolOutputInline({ msg, fontSize }: { msg: ChatMessage & { type: 'tool_
 interface ToolRun {
   groups: (ChatMessage & { type: 'tool_group' })[]
   outputs: (ChatMessage & { type: 'tool_output' })[]
+  images: (ChatMessage & { type: 'image' })[]
 }
 
 function ToolActivity({ run, fontSize }: { run: ToolRun; fontSize: number }) {
@@ -238,8 +239,26 @@ function ToolActivity({ run, fontSize }: { run: ToolRun; fontSize: number }) {
           {run.outputs.map((o, oi) => (
             <ToolOutputInline key={`o-${oi}`} msg={o} fontSize={fontSize} />
           ))}
+          {run.images.map((img, ii) => (
+            <ImageInline key={`img-${ii}`} msg={img} />
+          ))}
         </div>
       )}
+    </div>
+  )
+}
+
+function ImageInline({ msg }: { msg: ChatMessage & { type: 'image' } }) {
+  const [expanded, setExpanded] = useState(false)
+  const src = `data:${msg.mediaType};base64,${msg.base64}`
+  return (
+    <div className="pl-4 py-1">
+      <img
+        src={src}
+        alt="Tool output"
+        className={`rounded-lg border border-neutral-8 cursor-pointer transition-all ${expanded ? 'max-w-full' : 'max-w-xs max-h-48 object-contain'}`}
+        onClick={() => setExpanded(!expanded)}
+      />
     </div>
   )
 }
@@ -374,14 +393,15 @@ export function ChatView({ messages, fontSize, theme = 'dark', disabled, plannin
                 nodes.push(<div key={`ts-${msg.key || i}`} className="px-4 pt-3 pb-0.5 text-[13px] text-neutral-6">{hh}:{mm}</div>)
               }
 
-              // Collect consecutive tool_group/tool_output into a single ToolActivity
-              if (msg.type === 'tool_group' || msg.type === 'tool_output') {
-                const run: ToolRun = { groups: [], outputs: [] }
+              // Collect consecutive tool_group/tool_output/image into a single ToolActivity
+              if (msg.type === 'tool_group' || msg.type === 'tool_output' || msg.type === 'image') {
+                const run: ToolRun = { groups: [], outputs: [], images: [] }
                 const startIdx = i
-                while (i < messages.length && (messages[i].type === 'tool_group' || messages[i].type === 'tool_output')) {
+                while (i < messages.length && (messages[i].type === 'tool_group' || messages[i].type === 'tool_output' || messages[i].type === 'image')) {
                   const m = messages[i]
                   if (m.type === 'tool_group') run.groups.push(m as ChatMessage & { type: 'tool_group' })
                   if (m.type === 'tool_output') run.outputs.push(m as ChatMessage & { type: 'tool_output' })
+                  if (m.type === 'image') run.images.push(m as ChatMessage & { type: 'image' })
                   i++
                 }
                 const taKey = run.groups[0]?.key || run.outputs[0]?.key || `ta-${startIdx}`

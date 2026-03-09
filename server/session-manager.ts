@@ -439,6 +439,13 @@ export class SessionManager {
       this.broadcast(session, msg)
     })
 
+    cp.on('image', (base64Data: string, mediaType: string) => {
+      this.resetStallTimer(session)
+      const msg: WsServerMessage = { type: 'image', base64: base64Data, mediaType }
+      // Don't persist base64 images to history — they're too large and would bloat session storage
+      this.broadcast(session, msg)
+    })
+
     cp.on('tool_active', (toolName, toolInput) => {
       this.resetStallTimer(session)
       const msg: WsServerMessage = { type: 'tool_active', toolName, toolInput }
