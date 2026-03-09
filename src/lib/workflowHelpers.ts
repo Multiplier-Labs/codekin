@@ -13,6 +13,7 @@ export const WORKFLOW_KINDS = [
   { value: 'dependency-health.daily', label: 'Dependency Health', category: 'assessment' as WorkflowCategory },
   { value: 'security-audit.weekly', label: 'Security Audit', category: 'assessment' as WorkflowCategory },
   { value: 'complexity.weekly', label: 'Complexity Report', category: 'assessment' as WorkflowCategory },
+  { value: 'repo-health.weekly', label: 'Repository Health', category: 'assessment' as WorkflowCategory },
 ]
 
 export const MODEL_OPTIONS = [
