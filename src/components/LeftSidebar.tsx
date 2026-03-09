@@ -213,7 +213,7 @@ export function LeftSidebar({
 
   if (collapsed) {
     return (
-      <div className="app-left-sidebar flex flex-col items-center w-12 flex-shrink-0 bg-neutral-11 py-3 gap-3 border-r border-neutral-8/30">
+      <div className="app-left-sidebar flex flex-col items-center w-12 flex-shrink-0 bg-neutral-12 py-3 gap-3 border-r border-neutral-8/30">
         <div className="app-logo-circle flex items-center justify-center rounded-full" style={{ width: 28, height: 28 }}>
           <AppIcon size={26} className="text-primary-7" />
         </div>
@@ -246,7 +246,7 @@ export function LeftSidebar({
 
   return (
     <div
-      className="app-left-sidebar relative flex flex-col flex-shrink-0 bg-neutral-11 border-r border-neutral-8/30 min-h-0"
+      className="app-left-sidebar relative flex flex-col flex-shrink-0 bg-neutral-12 border-r border-neutral-8/30 min-h-0"
       style={{ width }}
     >
       {/* Drag handle on right edge */}
