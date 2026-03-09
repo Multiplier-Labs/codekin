@@ -262,10 +262,12 @@ export function useChatSocket({
     cleanup()
     setConnState('connecting')
 
-    const ws = new WebSocket(wsUrl(token))
+    const ws = new WebSocket(wsUrl())
     wsRef.current = ws
 
     ws.onopen = () => {
+      // Send auth token as first message (not in URL to avoid log exposure)
+      ws.send(JSON.stringify({ type: 'auth', token }))
       setConnState('connected')
       backoff.current = 1000
       pingTimer.current = setInterval(() => {

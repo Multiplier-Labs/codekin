@@ -57,7 +57,7 @@ export function saveWorkflowConfig(config: WorkflowConfig): void {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true })
   }
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8')
+  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), { encoding: 'utf-8', mode: 0o600 })
 }
 
 // ---------------------------------------------------------------------------

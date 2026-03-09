@@ -17,8 +17,9 @@ import { createServer } from 'http'
 import { WebSocketServer, WebSocket } from 'ws'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
-import { execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import { randomUUID, timingSafeEqual } from 'crypto'
+import { verifySessionToken } from './crypto-utils.js'
 import { SessionManager } from './session-manager.js'
 import type { WsClientMessage, WsServerMessage } from './types.js'
 import { loadWebhookConfig } from './webhook-config.js'
@@ -73,6 +74,17 @@ function verifyToken(token: string | undefined): boolean {
   return timingSafeEqual(a, b)
 }
 
+/**
+ * Verify a token that may be either the master auth token or a session-scoped
+ * token derived for a specific session. Used by hook endpoints where child
+ * processes authenticate with their session-scoped token.
+ */
+function verifyTokenOrSessionToken(token: string | undefined, sessionId: string | undefined): boolean {
+  if (verifyToken(token)) return true
+  if (!authToken || !token || !sessionId) return false
+  return verifySessionToken(authToken, sessionId, token)
+}
+
 /** Extract auth token from query string, Authorization header, or request body. */
 function extractToken(req: express.Request): string | undefined {
   const qToken = req.query.token as string | undefined
@@ -98,7 +110,7 @@ let claudeVersion = ''
 const apiKeySet = !!(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_API_KEY)
 
 try {
-  claudeVersion = execSync('claude --version', { timeout: 5000 }).toString().trim()
+  claudeVersion = execFileSync('claude', ['--version'], { timeout: 5000 }).toString().trim()
   claudeAvailable = true
   console.log(`Claude CLI found: ${claudeVersion}`)
 } catch {
@@ -218,9 +230,14 @@ app.use(express.json())
 // Security headers
 app.use((_req, res, next) => {
   res.header('X-Content-Type-Options', 'nosniff')
-  res.header('X-Frame-Options', 'SAMEORIGIN')
+  res.header('X-Frame-Options', 'DENY')
   res.header('X-XSS-Protection', '1; mode=block')
   res.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+  res.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+  res.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss: ws:; img-src 'self' data:; font-src 'self'")
+  if (process.env.NODE_ENV === 'production') {
+    res.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+  }
   next()
 })
 
@@ -241,7 +258,7 @@ if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
 
 // --- REST API routes (delegated to dedicated routers) ---
 app.use(createAuthRouter(verifyToken, extractToken, sessions, claudeAvailable, claudeVersion, apiKeySet))
-app.use(createSessionRouter(verifyToken, extractToken, sessions))
+app.use(createSessionRouter(verifyToken, extractToken, sessions, verifyTokenOrSessionToken))
 app.use(createWebhookRouter(verifyToken, extractToken, webhookHandler, stepflowHandler))
 app.use(createUploadRouter(verifyToken, extractToken))
 app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessions))
@@ -281,16 +298,33 @@ sessions._globalBroadcast = (msg) => {
 /** Maps each WebSocket connection to its current session ID. */
 const clientSessions = new Map<WebSocket, string>()
 
-wss.on('connection', (ws: WebSocket, req) => {
-  // Authenticate
-  const url = new URL(req.url || '/', `http://${req.headers.host}`)
-  const token = url.searchParams.get('token') || undefined
+/** Timeout (ms) for WebSocket clients to send an auth message after connecting. */
+const WS_AUTH_TIMEOUT_MS = 5000
 
-  if (!verifyToken(token)) {
-    ws.close(4001, 'Unauthorized')
+/** Per-IP WebSocket connection rate limiter. */
+const wsConnections = new Map<string, { count: number; resetAt: number }>()
+const WS_RATE_WINDOW_MS = 60_000
+const WS_RATE_MAX_CONNECTIONS = 30
+
+function checkWsRateLimit(ip: string): boolean {
+  const now = Date.now()
+  const entry = wsConnections.get(ip)
+  if (!entry || now >= entry.resetAt) {
+    wsConnections.set(ip, { count: 1, resetAt: now + WS_RATE_WINDOW_MS })
+    return true
+  }
+  entry.count++
+  return entry.count <= WS_RATE_MAX_CONNECTIONS
+}
+
+wss.on('connection', (ws: WebSocket, req) => {
+  // Rate-limit by IP before any processing
+  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown'
+  if (!checkWsRateLimit(ip)) {
+    ws.close(4029, 'Too many connections')
     return
   }
-
+  let authenticated = false
   const connectionId = randomUUID()
 
   const send = (msg: WsServerMessage) => {
@@ -299,13 +333,31 @@ wss.on('connection', (ws: WebSocket, req) => {
     }
   }
 
-  send({ type: 'connected', connectionId, claudeAvailable, claudeVersion, apiKeySet })
+  // Close unauthenticated connections after timeout
+  const authTimeout = setTimeout(() => {
+    if (!authenticated) {
+      ws.close(4001, 'Auth timeout')
+    }
+  }, WS_AUTH_TIMEOUT_MS)
 
   ws.on('message', (raw) => {
     let msg: WsClientMessage
     try {
       msg = JSON.parse(raw.toString())
     } catch {
+      return
+    }
+
+    // First message must be auth
+    if (!authenticated) {
+      if (msg.type !== 'auth' || !verifyToken(msg.token)) {
+        clearTimeout(authTimeout)
+        ws.close(4001, 'Unauthorized')
+        return
+      }
+      authenticated = true
+      clearTimeout(authTimeout)
+      send({ type: 'connected', connectionId, claudeAvailable, claudeVersion, apiKeySet })
       return
     }
 

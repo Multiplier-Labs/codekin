@@ -18,6 +18,7 @@ import { randomUUID } from 'crypto'
 import { homedir } from 'os'
 import type { ClaudeEvent, ClaudeSystemInit, ClaudeControlRequest, ClaudeResultEvent, ClaudeStreamEvent, TaskItem, PromptQuestion } from './types.js'
 import { SCREENSHOTS_DIR } from './config.js'
+import { redactSecrets } from './crypto-utils.js'
 
 /** Typed event map for ClaudeProcess. Each key maps to the listener argument tuple. */
 export interface ClaudeProcessEvents {
@@ -370,7 +371,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       this.emit('control_request', request_id, toolName, toolInput)
     } else if (toolName === 'Bash') {
       // Bash runs arbitrary commands — forward to session manager for registry check / UI prompt
-      console.log(`[control_request] forwarding Bash to session manager: ${String(toolInput.command || '').slice(0, 80)}`)
+      console.log(`[control_request] forwarding Bash to session manager: ${redactSecrets(String(toolInput.command || '').slice(0, 80))}`)
       this.emit('control_request', request_id, toolName, toolInput)
     } else {
       // All other tools (Write, Edit, Read, Glob, Grep, Task, TodoWrite,

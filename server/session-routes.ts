@@ -10,13 +10,18 @@ import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
 
 type VerifyFn = (token: string | undefined) => boolean
+type VerifySessionFn = (token: string | undefined, sessionId: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
 
 export function createSessionRouter(
   verifyToken: VerifyFn,
   extractToken: ExtractFn,
   sessions: SessionManager,
+  verifySessionTokenFn?: VerifySessionFn,
 ): Router {
+  /** Verify master token OR session-scoped token (for hook endpoints called by child processes). */
+  const verifyHookToken = (token: string | undefined, sessionId: string | undefined) =>
+    verifySessionTokenFn ? verifySessionTokenFn(token, sessionId) : verifyToken(token)
   const router = Router()
 
   // --- Session CRUD ---
@@ -199,9 +204,8 @@ export function createSessionRouter(
   // Tool approval endpoint (legacy PreToolUse hook path)
   router.post('/api/tool-approval', async (req, res) => {
     const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
-
     const { sessionId, toolName, toolInput } = req.body
+    if (!verifyHookToken(token, sessionId)) return res.status(401).json({ error: 'Unauthorized' })
     if (!sessionId || !toolName) {
       return res.status(400).json({ error: 'Missing sessionId or toolName' })
     }
@@ -220,9 +224,8 @@ export function createSessionRouter(
   // Hook decision endpoint (PermissionRequest hook via HttpTransport)
   router.post('/api/hook-decision', async (req, res) => {
     const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
-
     const { sessionId, toolName, toolInput } = req.body
+    if (!verifyHookToken(token, sessionId)) return res.status(401).json({ error: 'Unauthorized' })
     if (!sessionId || !toolName) {
       return res.status(400).json({ error: 'Missing sessionId or toolName' })
     }
@@ -248,11 +251,10 @@ export function createSessionRouter(
   // Hook notification endpoint (Notification hook via HttpTransport)
   router.post('/api/hook-notify', (req, res) => {
     const token = extractToken(req)
-    if (!verifyToken(token)) {
+    const { sessionId, notificationType, title, message } = req.body
+    if (!verifyHookToken(token, sessionId)) {
       return res.status(401).json({ error: 'Unauthorized' })
     }
-
-    const { sessionId, notificationType, title, message } = req.body
     if (!sessionId) {
       return res.status(400).json({ error: 'Missing sessionId' })
     }
@@ -271,7 +273,8 @@ export function createSessionRouter(
   // Auth validation endpoint (PermissionRequest hook for webhook sessions)
   router.post('/api/auth/validate', (req, res) => {
     const token = extractToken(req)
-    if (!verifyToken(token)) {
+    const { sessionId } = req.body || {}
+    if (!verifyHookToken(token, sessionId)) {
       return res.status(401).json({ valid: false, error: 'Invalid token' })
     }
     res.json({ valid: true })

@@ -53,7 +53,7 @@ export class SessionPersistence {
     try {
       mkdirSync(DATA_DIR, { recursive: true })
       const tmp = SESSIONS_FILE + '.tmp'
-      writeFileSync(tmp, JSON.stringify(data, null, 2))
+      writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 })
       renameSync(tmp, SESSIONS_FILE)
     } catch (err) {
       console.error('Failed to persist sessions:', err)

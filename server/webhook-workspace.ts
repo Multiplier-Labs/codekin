@@ -88,67 +88,82 @@ export async function createWorkspace(
   const workspacePath = join(WORKSPACES_DIR, sessionId)
   mkdirSync(workspacePath, { recursive: true })
 
-  // Clone from local mirror
-  console.log(`[webhook-workspace] Cloning workspace for session ${sessionId}...`)
-  await execFileAsync('git', ['clone', mirrorPath, workspacePath], {
-    timeout: GIT_TIMEOUT_MS,
-  })
+  let setupComplete = false
+  try {
+    // Clone from local mirror
+    console.log(`[webhook-workspace] Cloning workspace for session ${sessionId}...`)
+    await execFileAsync('git', ['clone', mirrorPath, workspacePath], {
+      timeout: GIT_TIMEOUT_MS,
+    })
 
-  // Validate cloneUrl — only allow HTTPS GitHub URLs
-  if (!/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(?:\.git)?$/.test(cloneUrl)) {
-    throw new Error(`Invalid clone URL: ${cloneUrl}`)
+    // Validate cloneUrl — only allow HTTPS GitHub URLs
+    if (!/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(?:\.git)?$/.test(cloneUrl)) {
+      throw new Error(`Invalid clone URL: ${cloneUrl}`)
+    }
+
+    // Validate branch name — only safe characters
+    if (!/^[a-zA-Z0-9/_.-]+$/.test(branch)) {
+      throw new Error(`Invalid branch name: ${branch}`)
+    }
+
+    // Set up remote to point to the real repo for pushes
+    await execFileAsync('git', ['remote', 'set-url', 'origin', cloneUrl], {
+      cwd: workspacePath,
+      timeout: GIT_TIMEOUT_MS,
+    })
+
+    // Fetch the specific branch
+    await execFileAsync(
+      'git',
+      ['fetch', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
+      { cwd: workspacePath, timeout: GIT_TIMEOUT_MS },
+    )
+
+    // Check out the branch (not detached HEAD) so Claude can commit and push fixes
+    console.log(`[webhook-workspace] Checking out branch ${branch}`)
+    await execFileAsync('git', ['checkout', '-B', branch, `origin/${branch}`], {
+      cwd: workspacePath,
+      timeout: GIT_TIMEOUT_MS,
+    })
+
+    // Pin to the exact commit that triggered the failure, so Claude works on the
+    // right code even if the branch has advanced since the webhook was sent.
+    console.log(`[webhook-workspace] Pinning to commit ${headSha.slice(0, 7)}`)
+    await execFileAsync('git', ['reset', '--hard', headSha], {
+      cwd: workspacePath,
+      timeout: GIT_TIMEOUT_MS,
+    })
+
+    // Set git author for webhook commits
+    await execFileAsync('git', ['config', 'user.name', 'Claude (Webhook)'], {
+      cwd: workspacePath,
+      timeout: GIT_TIMEOUT_MS,
+    })
+    await execFileAsync('git', ['config', 'user.email', 'claude-webhook@codekin.local'], {
+      cwd: workspacePath,
+      timeout: GIT_TIMEOUT_MS,
+    })
+
+    // Ensure gh credential helper is available for push
+    await execFileAsync('git', ['config', 'credential.helper', '!/usr/bin/gh auth git-credential'], {
+      cwd: workspacePath,
+      timeout: GIT_TIMEOUT_MS,
+    })
+
+    setupComplete = true
+    return workspacePath
+  } finally {
+    // Clean up partial workspace on setup failure to prevent disk exhaustion
+    // and exposure of cloned source code from private repositories.
+    if (!setupComplete && existsSync(workspacePath)) {
+      try {
+        rmSync(workspacePath, { recursive: true, force: true })
+        console.warn(`[webhook-workspace] Cleaned up partial workspace for session ${sessionId} after setup failure`)
+      } catch (cleanupErr) {
+        console.warn(`[webhook-workspace] Failed to clean up partial workspace ${workspacePath}:`, cleanupErr)
+      }
+    }
   }
-
-  // Validate branch name — only safe characters
-  if (!/^[a-zA-Z0-9/_.-]+$/.test(branch)) {
-    throw new Error(`Invalid branch name: ${branch}`)
-  }
-
-  // Set up remote to point to the real repo for pushes
-  await execFileAsync('git', ['remote', 'set-url', 'origin', cloneUrl], {
-    cwd: workspacePath,
-    timeout: GIT_TIMEOUT_MS,
-  })
-
-  // Fetch the specific branch
-  await execFileAsync(
-    'git',
-    ['fetch', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
-    { cwd: workspacePath, timeout: GIT_TIMEOUT_MS },
-  )
-
-  // Check out the branch (not detached HEAD) so Claude can commit and push fixes
-  console.log(`[webhook-workspace] Checking out branch ${branch}`)
-  await execFileAsync('git', ['checkout', '-B', branch, `origin/${branch}`], {
-    cwd: workspacePath,
-    timeout: GIT_TIMEOUT_MS,
-  })
-
-  // Pin to the exact commit that triggered the failure, so Claude works on the
-  // right code even if the branch has advanced since the webhook was sent.
-  console.log(`[webhook-workspace] Pinning to commit ${headSha.slice(0, 7)}`)
-  await execFileAsync('git', ['reset', '--hard', headSha], {
-    cwd: workspacePath,
-    timeout: GIT_TIMEOUT_MS,
-  })
-
-  // Set git author for webhook commits
-  await execFileAsync('git', ['config', 'user.name', 'Claude (Webhook)'], {
-    cwd: workspacePath,
-    timeout: GIT_TIMEOUT_MS,
-  })
-  await execFileAsync('git', ['config', 'user.email', 'claude-webhook@codekin.local'], {
-    cwd: workspacePath,
-    timeout: GIT_TIMEOUT_MS,
-  })
-
-  // Ensure gh credential helper is available for push
-  await execFileAsync('git', ['config', 'credential.helper', '!/usr/bin/gh auth git-credential'], {
-    cwd: workspacePath,
-    timeout: GIT_TIMEOUT_MS,
-  })
-
-  return workspacePath
 }
 
 /**

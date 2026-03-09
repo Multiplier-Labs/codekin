@@ -183,7 +183,7 @@ describe('useChatSocket hook', () => {
     it('connects on mount when token is provided', () => {
       const { unmount } = setup()
       expect(MockWebSocket.instances).toHaveLength(1)
-      expect(MockWebSocket.latest().url).toContain('token=test-token')
+      expect(MockWebSocket.latest().url).not.toContain('token=')  // token sent via message, not URL
       unmount()
     })
 
@@ -242,9 +242,10 @@ describe('useChatSocket hook', () => {
     it('starts ping interval on open', () => {
       const { unmount } = setupConnected()
       const ws = MockWebSocket.latest()
-      expect(ws.sent).toHaveLength(0)
+      // First message is the auth token sent on open
+      expect(sentMessages(ws)).toEqual([{ type: 'auth', token: 'test-token' }])
       act(() => { vi.advanceTimersByTime(30000) })
-      expect(sentMessages(ws)[0].type).toBe('ping')
+      expect(sentMessages(ws)[1].type).toBe('ping')
       unmount()
     })
 
