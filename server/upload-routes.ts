@@ -114,7 +114,9 @@ async function fetchGhRepos(owner: string) {
     '--json', 'name,url,description',
     '--limit', '100',
   ], { env: ghEnv })
-  return JSON.parse(stdout).map((r: { name: string; url: string; description?: string }) => {
+  const repos: Array<{ name: string; url: string; description?: string }> = JSON.parse(stdout)
+  repos.sort((a, b) => a.name.localeCompare(b.name))
+  return repos.map((r) => {
     const repoPath = `${REPOS_ROOT}/${r.name}`
     const cloned = existsSync(repoPath)
     return {
