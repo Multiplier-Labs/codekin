@@ -185,23 +185,15 @@ export function RepoSection({
           )}
         </button>
         {onBrowseDocs && (
-          <div className="relative flex-shrink-0">
-            <button
-              onClick={(e) => { e.stopPropagation(); onBrowseDocs(node.workingDir) }}
-              className="rounded p-0.5 transition-colors opacity-0 group-hover:opacity-100 text-neutral-5 hover:text-neutral-2"
-              title="Browse docs"
-            >
-              <IconFileText size={14} stroke={2} />
-            </button>
-            {docsPickerOpen && docsPickerRepoDir === node.workingDir && onDocsPickerSelect && onDocsPickerClose && (
-              <DocsFilePicker
-                files={docsPickerFiles ?? []}
-                loading={docsPickerLoading ?? false}
-                onSelect={onDocsPickerSelect}
-                onClose={onDocsPickerClose}
-              />
-            )}
-          </div>
+          <button
+            onClick={(e) => { e.stopPropagation(); onBrowseDocs(node.workingDir) }}
+            className={`flex-shrink-0 rounded p-0.5 transition-colors opacity-0 group-hover:opacity-100 ${
+              docsPickerOpen && docsPickerRepoDir === node.workingDir ? 'text-primary-5 opacity-100!' : 'text-neutral-5 hover:text-neutral-2'
+            }`}
+            title="Browse docs"
+          >
+            <IconFileText size={14} stroke={2} />
+          </button>
         )}
         <button
           onClick={() => setApprovalsOpen(!approvalsOpen)}
@@ -307,6 +299,16 @@ export function RepoSection({
                 <span>New session</span>
               </button>
             </div>
+          )}
+
+          {/* Inline docs picker */}
+          {docsPickerOpen && docsPickerRepoDir === node.workingDir && onDocsPickerSelect && onDocsPickerClose && (
+            <DocsFilePicker
+              files={docsPickerFiles ?? []}
+              loading={docsPickerLoading ?? false}
+              onSelect={onDocsPickerSelect}
+              onClose={onDocsPickerClose}
+            />
           )}
 
           {/* Inline approvals */}
