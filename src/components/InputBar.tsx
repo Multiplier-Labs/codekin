@@ -286,7 +286,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   className="flex items-center justify-center rounded min-w-[34px] min-h-[34px] p-1.5 text-neutral-3 hover:text-neutral-1 hover:bg-neutral-7 transition-colors disabled:opacity-30"
                   title="More options"
                 >
-                  <IconDots size={20} stroke={2} />
+                  <IconDots size={24} stroke={2} />
                 </button>
                 {mobileMenuOpen && (
                   <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[180px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
@@ -348,7 +348,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 }`}
                 title="Send (Enter)"
               >
-                <IconSend size={20} stroke={2} />
+                <IconSend size={24} stroke={2} />
               </button>
             </>
           )}

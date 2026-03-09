@@ -26,11 +26,11 @@ export function MobileTopBar({ repoName, sessionName, onMenuOpen, onNewSession, 
         className="flex items-center justify-center rounded-lg size-[34px] text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6 transition-colors"
         aria-label="Open menu"
       >
-        <IconMenu2 size={20} stroke={2} />
+        <IconMenu2 size={24} stroke={2} />
       </button>
 
       <div className="flex items-center gap-2 flex-1 min-w-0 px-1.5">
-        <AppIcon size={20} className="text-primary-7 flex-shrink-0" />
+        <AppIcon size={24} className="text-primary-7 flex-shrink-0" />
         <div className="flex-1 min-w-0 truncate text-[16px] text-neutral-2">
           {repoName ? (
             <>
@@ -51,7 +51,7 @@ export function MobileTopBar({ repoName, sessionName, onMenuOpen, onNewSession, 
           className="flex items-center justify-center rounded-lg size-[34px] text-neutral-4 hover:text-neutral-1 hover:bg-neutral-6 transition-colors"
           aria-label="Settings"
         >
-          <IconSettings size={20} stroke={2} />
+          <IconSettings size={24} stroke={2} />
         </button>
 
         <button
@@ -59,7 +59,7 @@ export function MobileTopBar({ repoName, sessionName, onMenuOpen, onNewSession, 
           className="flex items-center justify-center rounded-lg size-[34px] text-neutral-4 hover:text-neutral-1 hover:bg-neutral-6 transition-colors"
           aria-label="New session"
         >
-          <IconPlus size={20} stroke={2} />
+          <IconPlus size={24} stroke={2} />
         </button>
       </div>
     </div>
