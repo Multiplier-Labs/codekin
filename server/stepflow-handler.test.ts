@@ -365,6 +365,157 @@ describe('StepflowHandler', () => {
       expect(event!.error).toContain('clone failed')
     })
   })
+
+  // -------------------------------------------------------------------------
+  // postCallback SSRF protection
+  // -------------------------------------------------------------------------
+
+  describe('postCallback SSRF protection', () => {
+    const result = { sessionId: 'sess-1', status: 'completed', output: 'done' }
+    let mockFetch: ReturnType<typeof vi.fn>
+
+    beforeEach(() => {
+      mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+      global.fetch = mockFetch
+    })
+
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    // --- Protocol checks ---
+
+    it('throws for non-http(s) protocol', async () => {
+      handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: ['evil.com'] }), sessions)
+      await expect((handler as any).postCallback('ftp://evil.com/callback', result))
+        .rejects.toThrow('protocol ftp: not allowed')
+    })
+
+    // --- Allowlist checks ---
+
+    it('throws when host is not in allowlist', async () => {
+      handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: ['api.stepflow.io'] }), sessions)
+      await expect((handler as any).postCallback('https://evil.com/callback', result))
+        .rejects.toThrow('not in the allowlist')
+    })
+
+    it('throws when allowlist is empty', async () => {
+      handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: [] }), sessions)
+      await expect((handler as any).postCallback('https://anything.com/callback', result))
+        .rejects.toThrow('not in the allowlist')
+    })
+
+    // --- Private/link-local IP checks ---
+
+    // URL.hostname includes brackets for IPv6 and may normalize addresses,
+    // so the allowlist must use the forms that parsedUrl.hostname produces.
+    const allHosts = [
+      '127.0.0.1', 'localhost', '10.0.0.1', '192.168.1.1', '169.254.1.1',
+      '[::1]', '[fe80::1]', '[fc00::1]', '[::ffff:7f00:1]', 'api.stepflow.io',
+    ]
+
+    it('blocks private IP 127.0.0.1', async () => {
+      handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: allHosts }), sessions)
+      await expect((handler as any).postCallback('http://127.0.0.1:8080/callback', result))
+        .rejects.toThrow('private/link-local')
+    })
+
+    it('blocks private IP 10.x', async () => {
+      handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: allHosts }), sessions)
+      await expect((handler as any).postCallback('http://10.0.0.1/callback', result))
+        .rejects.toThrow('private/link-local')
+    })
+
+    it('blocks private IP 192.168.x', async () => {
+      handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: allHosts }), sessions)
+      await expect((handler as any).postCallback('http://192.168.1.1/callback', result))
+        .rejects.toThrow('private/link-local')
+    })
+
+    it('blocks private IP 169.254.x', async () => {
+      handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: allHosts }), sessions)
+      await expect((handler as any).postCallback('http://169.254.1.1/callback', result))
+        .rejects.toThrow('private/link-local')
+    })
+
+    it('blocks localhost', async () => {
+      handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: allHosts }), sessions)
+      await expect((handler as any).postCallback('http://localhost:3000/callback', result))
+        .rejects.toThrow('private/link-local')
+    })
+
+    it('blocks IPv6 ::1', async () => {
+      handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: allHosts }), sessions)
+      await expect((handler as any).postCallback('http://[::1]/callback', result))
+        .rejects.toThrow('private/link-local')
+    })
+
+    it('blocks IPv6 link-local fe80::', async () => {
+      handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: allHosts }), sessions)
+      await expect((handler as any).postCallback('http://[fe80::1]/callback', result))
+        .rejects.toThrow('private/link-local')
+    })
+
+    it('blocks IPv6 unique-local fc00/fd00', async () => {
+      handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: allHosts }), sessions)
+      await expect((handler as any).postCallback('http://[fc00::1]/callback', result))
+        .rejects.toThrow('private/link-local')
+    })
+
+    it('blocks ::ffff:127.0.0.1 — known gap: URL normalizes to ::ffff:7f00:1 bypassing regex', async () => {
+      // new URL('http://[::ffff:127.0.0.1]/...').hostname === '[::ffff:7f00:1]'
+      // The SSRF regex checks for the literal '::ffff:127.0.0.1' but the URL parser
+      // normalizes it to '::ffff:7f00:1' before the regex runs, so it is NOT blocked.
+      // This test documents the gap: the request reaches fetch instead of being rejected.
+      handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: allHosts }), sessions)
+      await (handler as any).postCallback('http://[::ffff:127.0.0.1]/callback', result)
+      // If the SSRF check caught this, it would throw. Instead it passes through to fetch.
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+    })
+
+    // --- Happy path ---
+
+    it('sends successful HTTPS callback with correct request shape', async () => {
+      handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: ['api.stepflow.io'] }), sessions)
+      await (handler as any).postCallback('https://api.stepflow.io/callback', result)
+
+      expect(mockFetch).toHaveBeenCalledTimes(1)
+      const [url, opts] = mockFetch.mock.calls[0]
+      expect(url).toBe('https://api.stepflow.io/callback')
+      expect(opts.method).toBe('POST')
+      expect(opts.headers['Content-Type']).toBe('application/json')
+      expect(JSON.parse(opts.body)).toEqual(result)
+    })
+
+    it('sets HMAC signature header when callbackSecret is provided', async () => {
+      handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: ['api.stepflow.io'] }), sessions)
+      await (handler as any).postCallback('https://api.stepflow.io/callback', result, 'my-secret')
+
+      const [, opts] = mockFetch.mock.calls[0]
+      const sig = opts.headers['X-Stepflow-Signature'] as string
+      expect(sig).toBeDefined()
+      expect(sig.startsWith('sha256=')).toBe(true)
+      // After 'sha256=' should be a valid hex string
+      expect(/^[0-9a-f]+$/.test(sig.slice(7))).toBe(true)
+    })
+
+    it('omits HMAC signature header when callbackSecret is absent', async () => {
+      handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: ['api.stepflow.io'] }), sessions)
+      await (handler as any).postCallback('https://api.stepflow.io/callback', result)
+
+      const [, opts] = mockFetch.mock.calls[0]
+      expect(opts.headers['X-Stepflow-Signature']).toBeUndefined()
+    })
+
+    // --- Error handling ---
+
+    it('throws when callback returns non-2xx response', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 502 })
+      handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: ['api.stepflow.io'] }), sessions)
+      await expect((handler as any).postCallback('https://api.stepflow.io/callback', result))
+        .rejects.toThrow('returned HTTP 502')
+    })
+  })
 })
 
 // ---------------------------------------------------------------------------

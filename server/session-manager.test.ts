@@ -2531,6 +2531,64 @@ describe('SessionManager', () => {
     })
   })
 
+  describe('setModel()', () => {
+    it('returns false for unknown sessionId', () => {
+      expect(sm.setModel('no-such-id', 'gpt-4')).toBe(false)
+    })
+
+    it('returns true and sets model on existing session', () => {
+      const s = sm.create('test', '/tmp')
+      const result = sm.setModel(s.id, 'opus')
+      expect(result).toBe(true)
+      expect(s.model).toBe('opus')
+    })
+
+    it('sets model to undefined when empty string passed', () => {
+      const s = sm.create('test', '/tmp')
+      s.model = 'opus'
+      sm.setModel(s.id, '')
+      expect(s.model).toBeUndefined()
+    })
+
+    it('restarts Claude when process is alive', () => {
+      vi.useFakeTimers()
+      const s = sm.create('test', '/tmp')
+      const cp = fakeClaudeProcess(true)
+      s.claudeProcess = cp
+
+      const stopSpy = vi.spyOn(sm, 'stopClaude')
+      const startSpy = vi.spyOn(sm, 'startClaude').mockReturnValue(true)
+
+      sm.setModel(s.id, 'sonnet')
+
+      expect(stopSpy).toHaveBeenCalledWith(s.id)
+
+      // startClaude should NOT have been called yet
+      expect(startSpy).not.toHaveBeenCalled()
+
+      // Advance past the 500ms delay
+      vi.advanceTimersByTime(500)
+      expect(startSpy).toHaveBeenCalledWith(s.id)
+
+      stopSpy.mockRestore()
+      startSpy.mockRestore()
+      vi.useRealTimers()
+    })
+
+    it('does NOT restart when process is not alive', () => {
+      const s = sm.create('test', '/tmp')
+      const cp = fakeClaudeProcess(false)
+      s.claudeProcess = cp
+
+      const stopSpy = vi.spyOn(sm, 'stopClaude')
+
+      sm.setModel(s.id, 'sonnet')
+
+      expect(stopSpy).not.toHaveBeenCalled()
+      stopSpy.mockRestore()
+    })
+  })
+
   describe('handleClaudeResult API retry', () => {
     it('broadcasts exhaustion message after MAX_API_RETRIES', () => {
       vi.useFakeTimers()
