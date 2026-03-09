@@ -94,6 +94,10 @@ function applyMessageMut(messages: ChatMessage[], msg: WsServerMessage): boolean
       messages.push({ type: 'tool_output', content: msg.content, isError: msg.isError, key: nextKey() })
       return true
 
+    case 'image':
+      messages.push({ type: 'image', base64: msg.base64, mediaType: msg.mediaType, key: nextKey() })
+      return true
+
     case 'planning_mode':
       messages.push({ type: 'planning_mode', active: msg.active, key: nextKey() })
       return true
@@ -334,6 +338,11 @@ export function useChatSocket({
           break
 
         case 'tool_output':
+          flushBeforeStructuralMessage()
+          setMessages(prev => trimMessages(processMessage(prev, msg)))
+          break
+
+        case 'image':
           flushBeforeStructuralMessage()
           setMessages(prev => trimMessages(processMessage(prev, msg)))
           break
