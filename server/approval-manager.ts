@@ -75,7 +75,7 @@ export class ApprovalManager {
     const approvals = this.getRepoApprovalEntry(workingDir)
     if (approvals.tools.has(toolName)) return true
     if (toolName === 'Bash') {
-      const cmd = String(toolInput.command || '').trim()
+      const cmd = (typeof toolInput.command === 'string' ? toolInput.command : '').trim()
       // Exact match always works
       if (approvals.commands.has(cmd)) return true
       // Pattern match (e.g. "cat *" matches any cat command)
@@ -108,7 +108,7 @@ export class ApprovalManager {
    */
   derivePattern(toolName: string, toolInput: Record<string, unknown>): string | null {
     if (toolName !== 'Bash') return null
-    const cmd = String(toolInput.command || '').trim()
+    const cmd = (typeof toolInput.command === 'string' ? toolInput.command : '').trim()
     const tokens = cmd.split(/\s+/).filter(Boolean)
     if (tokens.length === 0) return null
 
@@ -144,7 +144,7 @@ export class ApprovalManager {
   /** Save an "Always Allow" approval for a tool/command. */
   saveAlwaysAllow(workingDir: string, toolName: string, toolInput: Record<string, unknown>): void {
     if (toolName === 'Bash') {
-      const cmd = String(toolInput.command || '').trim()
+      const cmd = (typeof toolInput.command === 'string' ? toolInput.command : '').trim()
       this.addRepoApproval(workingDir, { command: cmd })
       console.log(`[auto-approve] saved command for repo ${workingDir}: ${cmd.slice(0, 80)}`)
     } else {
