@@ -236,10 +236,11 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
           const repoPath = input.repoPath as string
           const repoName = (input.repoName as string) || repoPath.split('/').pop() || 'unknown'
 
+          const model = (input.model as string | undefined) || def.model
           const session = sessions.create(`${def.sessionPrefix}:${repoName}`, repoPath, {
             source: 'workflow',
             groupDir: repoPath,
-            model: def.model,
+            model,
           })
 
           console.log(`[workflow:${def.kind}] Created session ${session.id} for ${repoName} (run ${ctx.runId})`)

@@ -66,6 +66,7 @@ export interface ReviewRepoConfig {
   enabled: boolean
   kind?: string
   customPrompt?: string
+  model?: string
 }
 
 export interface WorkflowConfig {

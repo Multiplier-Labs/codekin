@@ -7,7 +7,7 @@ import { useState } from 'react'
 import { IconX, IconLoader2 } from '@tabler/icons-react'
 import type { ReviewRepoConfig } from '../lib/workflowApi'
 import {
-  WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL, isBiweeklyDow,
+  WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL, MODEL_OPTIONS, isBiweeklyDow,
   buildCron, parseCron, describeCron, kindLabel,
 } from '../lib/workflowHelpers'
 import { CategoryBadge } from './WorkflowBadges'
@@ -36,6 +36,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
     cronMinute: parsed.minute,
     cronDow: parsed.dow,
     customPrompt: repo.customPrompt ?? '',
+    model: repo.model ?? '',
   })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -49,6 +50,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
         kind: form.kind,
         cronExpression: buildCron(form.cronHour, form.cronDow, form.cronMinute),
         customPrompt: form.customPrompt.trim() || undefined,
+        model: form.model || undefined,
       })
       onClose()
     } catch (err) {
@@ -159,6 +161,23 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
             )}
             <div className="mt-2 text-[13px] text-neutral-5">
               {describeCron(buildCron(form.cronHour, form.cronDow, form.cronMinute))}
+            </div>
+          </div>
+
+          {/* Model selection */}
+          <div>
+            <label className="block text-[13px] font-medium text-neutral-3 mb-2">Model</label>
+            <div className="flex gap-1.5">
+              {MODEL_OPTIONS.map(m => (
+                <button
+                  key={m.value}
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, model: m.value }))}
+                  className={btnClass(form.model === m.value)}
+                >
+                  {m.label}
+                </button>
+              ))}
             </div>
           </div>
 

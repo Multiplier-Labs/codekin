@@ -13,7 +13,7 @@ import { useRepos } from '../hooks/useRepos'
 import { listKinds } from '../lib/workflowApi'
 import type { ReviewRepoConfig, WorkflowKindInfo } from '../lib/workflowApi'
 import {
-  WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL,
+  WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL, MODEL_OPTIONS,
   buildCron, describeCron, slugify, kindCategory,
   isBiweeklyDow,
 } from '../lib/workflowHelpers'
@@ -31,6 +31,7 @@ interface FormState {
   cronMinute: number
   cronDow: string
   customPrompt: string
+  model: string
 }
 
 interface Props {
@@ -337,6 +338,27 @@ function StepSchedule({
         </div>
       </div>
 
+      {/* Model selection */}
+      <div>
+        <label className="block text-[13px] font-medium text-neutral-3 mb-2">Model</label>
+        <div className="flex gap-1.5">
+          {MODEL_OPTIONS.map(m => (
+            <button
+              key={m.value}
+              type="button"
+              onClick={() => onChange({ model: m.value })}
+              className={`rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
+                form.model === m.value
+                  ? 'border-accent-6 bg-accent-9/40 text-accent-2'
+                  : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div>
         <label className="block text-[13px] font-medium text-neutral-3 mb-1.5">
           Focus areas <span className="text-neutral-5 font-normal">(optional)</span>
@@ -369,6 +391,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
     cronMinute: 0,
     cronDow: '*',
     customPrompt: '',
+    model: '',
   })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -412,6 +435,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
         kind: form.kind,
         enabled: true,
         customPrompt: form.customPrompt.trim() || undefined,
+        model: form.model || undefined,
       })
       onClose()
     } catch (err) {

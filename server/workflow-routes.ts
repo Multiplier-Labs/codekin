@@ -69,7 +69,7 @@ export function syncSchedules(sessions?: SessionManager) {
       id: repo.id,
       kind: repo.kind ?? 'code-review.daily',
       cronExpression: repo.cronExpression,
-      input: { repoPath: repo.repoPath, repoName: repo.name, customPrompt: repo.customPrompt },
+      input: { repoPath: repo.repoPath, repoName: repo.name, customPrompt: repo.customPrompt, model: repo.model },
       enabled: repo.enabled,
     })
   }
@@ -248,7 +248,7 @@ export function createWorkflowRouter(verifyToken: VerifyFn, extractToken: Extrac
   })
 
   router.post('/config/repos', (req, res) => {
-    const { id, name, repoPath, cronExpression, enabled, customPrompt, kind } = req.body as Partial<ReviewRepoConfig>
+    const { id, name, repoPath, cronExpression, enabled, customPrompt, kind, model } = req.body as Partial<ReviewRepoConfig>
     if (!id || !name || !repoPath || !cronExpression) {
       return res.status(400).json({ error: 'Missing required fields: id, name, repoPath, cronExpression' })
     }
@@ -268,6 +268,7 @@ export function createWorkflowRouter(verifyToken: VerifyFn, extractToken: Extrac
       enabled: enabled !== false,
       kind,
       customPrompt,
+      model,
     })
 
     // Re-sync schedules with updated config

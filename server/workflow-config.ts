@@ -22,6 +22,8 @@ export interface ReviewRepoConfig {
   /** Workflow kind to run. Defaults to 'code-review.daily'. */
   kind?: string
   customPrompt?: string
+  /** Claude model to use for this workflow (e.g. 'claude-sonnet-4-6'). Omit for system default. */
+  model?: string
 }
 
 export interface WorkflowConfig {
