@@ -51,7 +51,11 @@ function buildRepoNodes(
     list.push(s)
     map.set(key, list)
   }
-  return Array.from(map.entries()).map(([key, repoSessions]) => ({
+  return Array.from(map.entries()).sort((a, b) => {
+    const nameA = a[0].replace(/\/+$/, '').split('/').pop() ?? a[0]
+    const nameB = b[0].replace(/\/+$/, '').split('/').pop() ?? b[0]
+    return nameA.localeCompare(nameB)
+  }).map(([key, repoSessions]) => ({
     workingDir: key,
     displayName: repoDisplayName(key),
     sessions: repoSessions,
