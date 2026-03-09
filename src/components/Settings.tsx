@@ -43,13 +43,17 @@ interface Props {
 // ---------------------------------------------------------------------------
 // Section header component
 // ---------------------------------------------------------------------------
-function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
+function SectionCard({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2 mb-3">
-      <span className="text-neutral-5">{icon}</span>
-      <h3 className="text-[13px] font-semibold uppercase tracking-wide text-neutral-5">{title}</h3>
-      <div className="flex-1 border-t border-neutral-9/60" />
-    </div>
+    <section className="rounded-lg border border-neutral-9/60 bg-neutral-10/30">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-neutral-9/40">
+        <span className="text-neutral-5">{icon}</span>
+        <h3 className="text-[13px] font-semibold uppercase tracking-wide text-neutral-5">{title}</h3>
+      </div>
+      <div className="px-4 py-4">
+        {children}
+      </div>
+    </section>
   )
 }
 
@@ -157,18 +161,17 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-full max-w-lg rounded-lg border border-neutral-10 bg-neutral-11 shadow-xl flex flex-col max-h-[85vh]">
+      <div className="w-full max-w-2xl rounded-lg border border-neutral-10 bg-neutral-11 shadow-xl flex flex-col max-h-[85vh]">
         {/* Header */}
         <div className="flex-shrink-0 px-6 pt-5 pb-4 border-b border-neutral-10">
           <h2 className="text-[19px] font-semibold text-neutral-2">Settings</h2>
         </div>
 
         {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
 
           {/* ── Authentication ── */}
-          <section>
-            <SectionHeader icon={<IconKey size={15} />} title="Authentication" />
+          <SectionCard icon={<IconKey size={15} />} title="Authentication">
             <label className="mb-1 block text-[15px] text-neutral-4">Claude Code Web Token</label>
             <div className="flex gap-2">
               <input
@@ -193,105 +196,103 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
             {status === 'invalid' && (
               <p className="mt-1 text-[13px] text-error-5">Invalid token</p>
             )}
-          </section>
+          </SectionCard>
 
           {/* ── Preferences ── */}
-          <section>
-            <SectionHeader icon={<IconPalette size={15} />} title="Preferences" />
-
-            {/* Theme */}
-            <div className="mb-4">
-              <label className="mb-1.5 block text-[15px] text-neutral-4">Theme</label>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => onUpdate({ theme: 'dark' })}
-                  className={`rounded px-4 py-1.5 text-[15px] font-medium transition-colors ${
-                    settings.theme !== 'light'
-                      ? 'bg-primary-8 text-neutral-1'
-                      : 'border border-neutral-9 bg-neutral-10 text-neutral-3 hover:bg-neutral-9'
-                  }`}
-                >
-                  Dark
-                </button>
-                <button
-                  onClick={() => onUpdate({ theme: 'light' })}
-                  className={`rounded px-4 py-1.5 text-[15px] font-medium transition-colors ${
-                    settings.theme === 'light'
-                      ? 'bg-primary-8 text-neutral-1'
-                      : 'border border-neutral-9 bg-neutral-10 text-neutral-3 hover:bg-neutral-9'
-                  }`}
-                >
-                  Light
-                </button>
-              </div>
-            </div>
-
-            {/* Support LLM Provider */}
-            <div className="mb-4">
-              <label className="mb-1.5 block text-[15px] text-neutral-4">
-                <span className="flex items-center gap-1.5">
-                  <IconBrain size={14} className="text-neutral-5" />
-                  Support LLM Provider
-                </span>
-              </label>
-              <select
-                value={supportProvider}
-                onChange={e => {
-                  const provider = e.target.value as SupportProvider
-                  setSupportProviderState(provider)
-                  setSupportProvider(settings.token, provider).catch(() => setSaveError('Failed to save provider setting'))
-                }}
-                className="w-full rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
-              >
-                {(Object.keys(PROVIDER_LABELS) as SupportProvider[]).map(key => {
-                  const isUnavailable = key !== 'auto' && !availableProviders.includes(key)
-                  return (
-                    <option key={key} value={key} disabled={isUnavailable}>
-                      {PROVIDER_LABELS[key]}{isUnavailable ? ' (no API key)' : ''}
-                    </option>
-                  )
-                })}
-              </select>
-              {supportProvider !== 'auto' && (
-                <div className="mt-1.5 rounded border border-neutral-9 bg-neutral-10/50 px-3 py-1.5">
-                  <span className="text-[13px] text-neutral-5">Model: </span>
-                  <span className="text-[13px] font-mono text-neutral-3">{PROVIDER_MODELS[supportProvider]}</span>
+          <SectionCard icon={<IconPalette size={15} />} title="Preferences">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+              {/* Theme */}
+              <div>
+                <label className="mb-1.5 block text-[15px] text-neutral-4">Theme</label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => onUpdate({ theme: 'dark' })}
+                    className={`rounded px-4 py-1.5 text-[15px] font-medium transition-colors ${
+                      settings.theme !== 'light'
+                        ? 'bg-primary-8 text-neutral-1'
+                        : 'border border-neutral-9 bg-neutral-10 text-neutral-3 hover:bg-neutral-9'
+                    }`}
+                  >
+                    Dark
+                  </button>
+                  <button
+                    onClick={() => onUpdate({ theme: 'light' })}
+                    className={`rounded px-4 py-1.5 text-[15px] font-medium transition-colors ${
+                      settings.theme === 'light'
+                        ? 'bg-primary-8 text-neutral-1'
+                        : 'border border-neutral-9 bg-neutral-10 text-neutral-3 hover:bg-neutral-9'
+                    }`}
+                  >
+                    Light
+                  </button>
                 </div>
-              )}
-              <p className="mt-1 text-[13px] text-neutral-6">Used for session naming and other background tasks</p>
-            </div>
-
-            {/* Archived Session Retention */}
-            <div>
-              <label className="mb-1.5 block text-[15px] text-neutral-4">
-                <span className="flex items-center gap-1.5">
-                  <IconArchive size={14} className="text-neutral-5" />
-                  Archived Session Retention
-                </span>
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={1}
-                  max={365}
-                  value={retentionDays}
-                  onChange={e => {
-                    const days = Math.max(1, Math.min(365, Number(e.target.value)))
-                    setRetentionDays(days)
-                    setRetentionDaysApi(settings.token, days).catch(() => setSaveError('Failed to save retention setting'))
-                  }}
-                  className="w-20 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
-                />
-                <span className="text-[15px] text-neutral-5">days</span>
               </div>
-              <p className="mt-1 text-[13px] text-neutral-6">Auto-delete archived sessions older than this</p>
+
+              {/* Archived Session Retention */}
+              <div>
+                <label className="mb-1.5 block text-[15px] text-neutral-4">
+                  <span className="flex items-center gap-1.5">
+                    <IconArchive size={14} className="text-neutral-5" />
+                    Archived Session Retention
+                  </span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={retentionDays}
+                    onChange={e => {
+                      const days = Math.max(1, Math.min(365, Number(e.target.value)))
+                      setRetentionDays(days)
+                      setRetentionDaysApi(settings.token, days).catch(() => setSaveError('Failed to save retention setting'))
+                    }}
+                    className="w-20 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
+                  />
+                  <span className="text-[15px] text-neutral-5">days</span>
+                </div>
+                <p className="mt-1 text-[13px] text-neutral-6">Auto-delete archived sessions older than this</p>
+              </div>
+
+              {/* Support LLM Provider — full width */}
+              <div className="col-span-2">
+                <label className="mb-1.5 block text-[15px] text-neutral-4">
+                  <span className="flex items-center gap-1.5">
+                    <IconBrain size={14} className="text-neutral-5" />
+                    Support LLM Provider
+                  </span>
+                </label>
+                <select
+                  value={supportProvider}
+                  onChange={e => {
+                    const provider = e.target.value as SupportProvider
+                    setSupportProviderState(provider)
+                    setSupportProvider(settings.token, provider).catch(() => setSaveError('Failed to save provider setting'))
+                  }}
+                  className="w-full rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
+                >
+                  {(Object.keys(PROVIDER_LABELS) as SupportProvider[]).map(key => {
+                    const isUnavailable = key !== 'auto' && !availableProviders.includes(key)
+                    return (
+                      <option key={key} value={key} disabled={isUnavailable}>
+                        {PROVIDER_LABELS[key]}{isUnavailable ? ' (no API key)' : ''}
+                      </option>
+                    )
+                  })}
+                </select>
+                {supportProvider !== 'auto' && (
+                  <div className="mt-1.5 rounded border border-neutral-9 bg-neutral-10/50 px-3 py-1.5">
+                    <span className="text-[13px] text-neutral-5">Model: </span>
+                    <span className="text-[13px] font-mono text-neutral-3">{PROVIDER_MODELS[supportProvider]}</span>
+                  </div>
+                )}
+                <p className="mt-1 text-[13px] text-neutral-6">Used for session naming and other background tasks</p>
+              </div>
             </div>
-          </section>
+          </SectionCard>
 
           {/* ── GitHub Webhooks ── */}
-          <section>
-            <SectionHeader icon={<IconBrandGithub size={15} />} title="GitHub Webhooks" />
-
+          <SectionCard icon={<IconBrandGithub size={15} />} title="GitHub Webhooks">
             {/* Status badge */}
             <div className="flex items-center gap-2 mb-3">
               {webhookConfig ? (
@@ -402,7 +403,7 @@ export function Settings({ open, onClose, settings, onUpdate }: Props) {
                 Set <code className="bg-neutral-9/50 px-1 rounded text-neutral-4">GITHUB_WEBHOOK_ENABLED=true</code> and <code className="bg-neutral-9/50 px-1 rounded text-neutral-4">GITHUB_WEBHOOK_SECRET</code> on the server to enable.
               </p>
             )}
-          </section>
+          </SectionCard>
         </div>
 
         {/* Footer */}
