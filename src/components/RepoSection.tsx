@@ -78,7 +78,7 @@ export interface RepoSectionProps {
   isActive: boolean
   activeSessionId: string | null
   waitingSessions: Record<string, boolean>
-  tentativeQueues: Record<string, string[]>
+  tentativeQueues: Record<string, { text: string; files: File[] }[]>
   token: string
   archiveRefreshKey: number
   onSelectSession: (id: string) => void

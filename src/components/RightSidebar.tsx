@@ -22,7 +22,7 @@ interface Props {
   sessions: Session[]
   activeSessionId: string | null
   waitingSessions: Record<string, boolean>
-  tentativeQueues?: Record<string, string[]>
+  tentativeQueues?: Record<string, { text: string; files: File[] }[]>
   token: string
   workingDir: string | null
   fontSize: number

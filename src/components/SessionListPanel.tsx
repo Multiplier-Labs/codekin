@@ -12,7 +12,7 @@ interface Props {
   sessions: Session[]
   activeSessionId: string | null
   waitingSessions: Record<string, boolean>
-  tentativeQueues?: Record<string, string[]>
+  tentativeQueues?: Record<string, { text: string; files: File[] }[]>
   onSelect: (sessionId: string) => void
   onDelete: (sessionId: string) => void
   onNew: () => void
@@ -38,7 +38,7 @@ function compactAge(created: string): string {
 function sessionStateClasses(
   s: Session,
   waitingSessions: Record<string, boolean>,
-  tentativeQueues?: Record<string, string[]>,
+  tentativeQueues?: Record<string, { text: string; files: File[] }[]>,
 ): [string, string] {
   if ((tentativeQueues?.[s.id]?.length ?? 0) > 0) return ['text-accent-6', 'animate-pulse']
   if (waitingSessions[s.id]) return ['text-warning-5', 'animate-pulse']
@@ -50,7 +50,7 @@ function sessionStateClasses(
 function sessionDotClasses(
   s: Session,
   waitingSessions: Record<string, boolean>,
-  tentativeQueues?: Record<string, string[]>,
+  tentativeQueues?: Record<string, { text: string; files: File[] }[]>,
 ): string {
   if ((tentativeQueues?.[s.id]?.length ?? 0) > 0) return 'bg-accent-6 animate-pulse'
   if (waitingSessions[s.id]) return 'bg-warning-5 animate-pulse'

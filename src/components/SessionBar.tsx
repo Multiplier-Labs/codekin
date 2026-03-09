@@ -12,7 +12,7 @@ import type { Session } from '../types'
 interface Props {
   sessions: Session[]
   waitingSessions: Record<string, boolean>
-  tentativeQueues?: Record<string, string[]>
+  tentativeQueues?: Record<string, { text: string; files: File[] }[]>
   onSelectRepo: (workingDir: string) => void
   onDeleteRepo: (workingDir: string) => void
   activeWorkingDir: string | null
@@ -39,7 +39,7 @@ function groupKey(s: Session): string {
   return s.groupDir ?? s.workingDir
 }
 
-function groupByRepo(sessions: Session[], waitingSessions: Record<string, boolean>, tentativeQueues: Record<string, string[]>): RepoGroup[] {
+function groupByRepo(sessions: Session[], waitingSessions: Record<string, boolean>, tentativeQueues: Record<string, { text: string; files: File[] }[]>): RepoGroup[] {
   const map = new Map<string, Session[]>()
   for (const s of sessions) {
     const key = groupKey(s)

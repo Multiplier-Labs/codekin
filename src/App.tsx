@@ -291,7 +291,10 @@ export default function App() {
     const hasConflict = !!activeWorkingDir &&
       sessions.some(s => groupKey(s) === activeWorkingDir && s.isProcessing && s.id !== activeSessionId)
     if (activeSessionId && (isAlreadyTentative || hasConflict)) {
-      addToQueue(activeSessionId, docsContext + expanded)
+      addToQueue(activeSessionId, docsContext + expanded, pendingFiles)
+      if (pendingFiles.length > 0) {
+        setSessionPendingFiles(prev => ({ ...prev, [activeSessionId]: [] }))
+      }
       return
     }
 
@@ -317,13 +320,27 @@ export default function App() {
     }
   }, [settings.token, activeSessionId, activeWorkingDir, sessions, tentativeQueues, addToQueue, pendingFiles, expandSkill, sendInput, docsBrowser.isOpen, docsBrowser.selectedFile, docsBrowser.repoWorkingDir])
 
-  const handleExecuteTentative = useCallback((sessionId: string) => {
+  const handleExecuteTentative = useCallback(async (sessionId: string) => {
     const queue = tentativeQueues[sessionId] ?? []
     clearQueue(sessionId)
-    queue.forEach((msg, i) => {
-      setTimeout(() => sendInput(msg), i * 100)
-    })
-  }, [tentativeQueues, clearQueue, sendInput])
+    for (let i = 0; i < queue.length; i++) {
+      const entry = queue[i]
+      if (i > 0) await new Promise(r => setTimeout(r, 100))
+      if (entry.files.length > 0 && settings.token) {
+        try {
+          const paths = await Promise.all(entry.files.map(f => uploadFile(settings.token, f)))
+          const fileLine = `[Attached files: ${paths.join(', ')}]`
+          const message = entry.text.trim() ? `${fileLine}\n${entry.text}` : fileLine
+          sendInput(message)
+        } catch {
+          // Upload failed — send the text portion anyway
+          sendInput(entry.text)
+        }
+      } else {
+        sendInput(entry.text)
+      }
+    }
+  }, [tentativeQueues, clearQueue, sendInput, settings.token])
 
   const handleDiscardTentative = useCallback((sessionId: string) => {
     clearQueue(sessionId)
@@ -349,9 +366,11 @@ export default function App() {
 
   // Tentative messages for the active session (rendered in ChatView after real messages)
   const tentativeMessages: ChatMessage[] = activeSessionId
-    ? (tentativeQueues[activeSessionId] ?? []).map((text, index) => ({
+    ? (tentativeQueues[activeSessionId] ?? []).map((entry, index) => ({
         type: 'tentative' as const,
-        text,
+        text: entry.files.length > 0
+          ? `${entry.text}\n📎 ${entry.files.length} file${entry.files.length > 1 ? 's' : ''} attached`
+          : entry.text,
         index,
         key: `tentative-${index}`,
       }))

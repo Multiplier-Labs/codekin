@@ -42,7 +42,7 @@ function repoDisplayName(workingDir: string): string {
 function buildRepoNodes(
   sessions: Session[],
   waitingSessions: Record<string, boolean>,
-  tentativeQueues: Record<string, string[]>,
+  tentativeQueues: Record<string, { text: string; files: File[] }[]>,
 ): RepoNode[] {
   const map = new Map<string, Session[]>()
   for (const s of sessions) {
@@ -74,7 +74,7 @@ interface Props {
   activeSessionId: string | null
   activeWorkingDir: string | null
   waitingSessions: Record<string, boolean>
-  tentativeQueues: Record<string, string[]>
+  tentativeQueues: Record<string, { text: string; files: File[] }[]>
   groups: RepoGroup[]
   globalModules: Module[]
   activeRepo: Repo | null
