@@ -8,7 +8,7 @@ import {
   IconPencil, IconTrash,
 } from '@tabler/icons-react'
 import type { WorkflowRun, WorkflowRunWithSteps, CronSchedule, ReviewRepoConfig } from '../../lib/workflowApi'
-import { kindLabel, describeCron } from '../../lib/workflowHelpers'
+import { kindLabel, describeCron, modelLabel } from '../../lib/workflowHelpers'
 import { StatusBadge } from '../WorkflowBadges'
 import { HealthDot } from './HealthDot'
 import { MiniRunRow } from './MiniRunRow'
@@ -64,6 +64,11 @@ export function WorkflowRow({
         <span className="text-[14px] text-neutral-5 whitespace-nowrap shrink-0">
           {schedule ? describeCron(schedule.cronExpression) : describeCron(repo.cronExpression)}
         </span>
+        {modelLabel(repo.model) && (
+          <span className="text-[12px] text-neutral-5 bg-neutral-9 rounded px-1.5 py-0.5 shrink-0">
+            {modelLabel(repo.model)}
+          </span>
+        )}
         {lastRun && (
           <>
             <StatusBadge status={lastRun.status} />

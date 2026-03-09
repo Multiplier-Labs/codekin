@@ -109,6 +109,12 @@ export function describeCron(expr: string): string {
   return `Weekly ${dayName} at ${time}`
 }
 
+/** Look up the display label for a model value, e.g. `"claude-sonnet-4-6"` → `"Sonnet 4.6"`. Returns `null` for empty/default. */
+export function modelLabel(model: string | undefined): string | null {
+  if (!model) return null
+  return MODEL_OPTIONS.find(m => m.value === model)?.label ?? model
+}
+
 /** Look up the display label for a workflow kind, e.g. `"coverage.daily"` → `"Coverage Assessment"`. */
 export function kindLabel(kind: string): string {
   return WORKFLOW_KINDS.find(k => k.value === kind)?.label ?? kind
