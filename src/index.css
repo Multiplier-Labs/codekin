@@ -404,6 +404,20 @@
   border-color: var(--color-neutral-7);
 }
 
+/* Workflow panel cards — match settings contrast in light mode */
+[data-theme="light"] .workflow-card {
+  background-color: var(--color-neutral-12);
+  border-color: var(--color-neutral-7);
+}
+
+[data-theme="light"] .workflow-card > div:first-child {
+  border-color: var(--color-neutral-7);
+}
+
+[data-theme="light"] .workflow-card .divide-neutral-9\/30 > :not(:first-child) {
+  border-color: var(--color-neutral-7);
+}
+
 /* User message bubble — darker background in light mode */
 [data-theme="light"] .terminal-area .user-bubble {
   background-color: color-mix(in srgb, var(--color-neutral-8) 80%, transparent);

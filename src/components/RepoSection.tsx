@@ -240,17 +240,17 @@ export function RepoSection({
               <div
                 key={s.id}
                 onClick={() => { if (!isEditing) onSelectSession(s.id) }}
-                className={`group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-[15px] transition-colors rounded-md cursor-pointer ${
+                className={`group w-full flex items-baseline gap-2 pl-10 pr-2 py-1 text-left text-[15px] transition-colors rounded-md cursor-pointer ${
                   isActiveSession
                     ? 'bg-accent-9/30 text-accent-2'
                     : 'text-neutral-3 hover:bg-neutral-6/50 hover:text-neutral-1'
                 }`}
               >
                 {s.source === 'workflow'
-                  ? <IconSparkles size={12} className={`flex-shrink-0 ${dotColor.replace(/bg-/g, 'text-')}`} />
+                  ? <IconSparkles size={12} className={`flex-shrink-0 self-center ${dotColor.replace(/bg-/g, 'text-')}`} />
                   : s.source === 'webhook'
-                  ? <IconRobot size={12} className={`flex-shrink-0 ${dotColor.replace(/bg-/g, 'text-')}`} />
-                  : <span className="inline-flex items-center justify-center w-[12px] flex-shrink-0"><span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} /></span>
+                  ? <IconRobot size={12} className={`flex-shrink-0 self-center ${dotColor.replace(/bg-/g, 'text-')}`} />
+                  : <span className="inline-flex items-center justify-center w-[12px] flex-shrink-0 self-center"><span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} /></span>
                 }
                 {isEditing ? (
                   <input
@@ -270,7 +270,7 @@ export function RepoSection({
                 )}
                 {!isEditing && (
                   <>
-                    <span className="text-[13px] leading-[15px] text-neutral-6 tabular-nums flex-shrink-0">{compactAge(s.created)}</span>
+                    <span className="text-[13px] text-neutral-6 tabular-nums flex-shrink-0">{compactAge(s.created)}</span>
                     <span
                       onClick={e => { e.stopPropagation(); startEditing(s) }}
                       className="cursor-pointer flex-shrink-0 text-transparent group-hover:text-neutral-5 hover:text-neutral-2! transition-colors"
@@ -336,11 +336,11 @@ export function RepoSection({
                     <button
                       key={s.id}
                       onClick={() => onViewArchivedSession(s.id)}
-                      className="group w-full flex items-center gap-2 pl-12 pr-2 py-0.5 text-left text-[15px] text-neutral-4 hover:bg-neutral-6/50 hover:text-neutral-2 transition-colors"
+                      className="group w-full flex items-baseline gap-2 pl-12 pr-2 py-0.5 text-left text-[15px] text-neutral-4 hover:bg-neutral-6/50 hover:text-neutral-2 transition-colors"
                     >
-                      <IconArchive size={12} className="flex-shrink-0 opacity-40" />
+                      <IconArchive size={12} className="flex-shrink-0 self-center opacity-40" />
                       <span className="flex-1 truncate">{archivedDisplayName(s)}</span>
-                      <span className="shrink-0 text-[13px] leading-[15px] text-neutral-6 tabular-nums">{archivedCompactAge(s.archivedAt)}</span>
+                      <span className="shrink-0 text-[13px] text-neutral-6 tabular-nums">{archivedCompactAge(s.archivedAt)}</span>
                     </button>
                   ))}
                   {hasMore && !archiveExpanded && (
