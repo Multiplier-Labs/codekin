@@ -234,7 +234,7 @@ export function LeftSidebar({
         </div>
         <button
           onClick={() => setCollapsed(false)}
-          className="rounded-lg p-1.5 text-neutral-4 hover:bg-neutral-6 hover:text-neutral-1"
+          className="rounded-lg p-1.5 text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1"
           title="Expand sidebar"
         >
           <IconChevronRight size={14} stroke={2} />
@@ -242,7 +242,7 @@ export function LeftSidebar({
         <div className="mt-auto flex flex-col items-center gap-2">
           <button
             onClick={() => onUpdateTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="rounded-lg p-1.5 text-neutral-4 hover:bg-neutral-6 hover:text-neutral-1"
+            className="rounded-lg p-1.5 text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1"
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           >
             {theme === 'dark' ? <IconSun size={14} stroke={2} /> : <IconMoon size={14} stroke={2} />}
@@ -283,7 +283,7 @@ export function LeftSidebar({
         {!isMobile && (
           <button
             onClick={() => setCollapsed(true)}
-            className="rounded p-1 text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6 transition-colors flex-shrink-0 opacity-0 group-hover/header:opacity-100"
+            className="rounded p-1 text-neutral-3 hover:text-neutral-2 hover:bg-neutral-6 transition-colors flex-shrink-0 opacity-0 group-hover/header:opacity-100"
             title="Collapse sidebar"
           >
             <IconChevronLeft size={16} stroke={2} />
@@ -302,7 +302,7 @@ export function LeftSidebar({
             className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[15px] transition-colors ${
               view === 'workflows'
                 ? 'text-accent-3 bg-accent-11/20'
-                : 'text-neutral-4 hover:text-neutral-1 hover:bg-neutral-6'
+                : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6'
             }`}
           >
             <IconSparkles size={16} stroke={2} className="flex-shrink-0" />
@@ -401,7 +401,7 @@ export function LeftSidebar({
         </div>
         <button
           onClick={onSettingsOpen}
-          className="flex items-center gap-1 rounded px-1.5 py-1 text-[13px] text-neutral-4 hover:text-neutral-1 hover:bg-neutral-6 transition-colors"
+          className="flex items-center gap-1 rounded px-1.5 py-1 text-[13px] text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6 transition-colors"
           title="Settings"
         >
           <IconSettingsGear size={20} stroke={2} />
@@ -409,14 +409,14 @@ export function LeftSidebar({
         <div className="flex-1" />
         <button
           onClick={() => onUpdateTheme(theme === 'dark' ? 'light' : 'dark')}
-          className="rounded px-1.5 py-1 text-neutral-4 hover:bg-neutral-6 hover:text-neutral-1 transition-colors"
+          className="rounded px-1.5 py-1 text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1 transition-colors"
           title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
         >
           {theme === 'dark' ? <IconSun size={20} stroke={2} /> : <IconMoon size={20} stroke={2} />}
         </button>
         <button
           onClick={() => { window.location.href = '/authelia/logout' }}
-          className="rounded px-1.5 py-1 text-neutral-4 hover:bg-neutral-6 hover:text-neutral-1 transition-colors"
+          className="rounded px-1.5 py-1 text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1 transition-colors"
           title="Logout"
         >
           <IconLogout size={20} stroke={2} />

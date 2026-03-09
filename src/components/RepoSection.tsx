@@ -174,7 +174,7 @@ export function RepoSection({
       <div className="group flex items-center gap-1.5 px-2 py-1">
         <button
           onClick={() => { setExpanded(!expanded); if (!isActive) onSelectRepo(node.workingDir) }}
-          className="flex flex-1 items-center gap-2 min-w-0 rounded px-2 py-0.5 text-left transition-colors text-neutral-4 hover:text-neutral-2"
+          className="flex flex-1 items-center gap-2 min-w-0 rounded px-2 py-0.5 text-left transition-colors text-neutral-3 hover:text-neutral-2"
         >
           {expanded
             ? <IconChevronDown size={14} stroke={2.5} className="flex-shrink-0 text-neutral-5 opacity-0 group-hover/repo:opacity-100 transition-opacity" />

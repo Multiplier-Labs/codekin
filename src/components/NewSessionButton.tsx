@@ -92,7 +92,7 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
     <div ref={containerRef} className="relative h-full flex items-center">
       <button
         onClick={() => setOpen(!open)}
-        className={`app-new-session-btn rounded p-1.5 transition ${open ? 'bg-neutral-6 text-neutral-1' : 'text-neutral-4 hover:bg-neutral-6 hover:text-neutral-1'}`}
+        className={`app-new-session-btn rounded p-1.5 transition ${open ? 'bg-neutral-6 text-neutral-1' : 'text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1'}`}
         title="New session"
       >
         <IconPlus size={16} stroke={2} />
