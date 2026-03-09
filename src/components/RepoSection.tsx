@@ -270,7 +270,7 @@ export function RepoSection({
                 )}
                 {!isEditing && (
                   <>
-                    <span className="text-[13px] text-neutral-6 tabular-nums flex-shrink-0">{compactAge(s.created)}</span>
+                    <span className="text-[13px] leading-[15px] text-neutral-6 tabular-nums flex-shrink-0">{compactAge(s.created)}</span>
                     <span
                       onClick={e => { e.stopPropagation(); startEditing(s) }}
                       className="cursor-pointer flex-shrink-0 text-transparent group-hover:text-neutral-5 hover:text-neutral-2! transition-colors"
@@ -340,7 +340,7 @@ export function RepoSection({
                     >
                       <IconArchive size={12} className="flex-shrink-0 opacity-40" />
                       <span className="flex-1 truncate">{archivedDisplayName(s)}</span>
-                      <span className="shrink-0 text-[13px] text-neutral-6 tabular-nums">{archivedCompactAge(s.archivedAt)}</span>
+                      <span className="shrink-0 text-[13px] leading-[15px] text-neutral-6 tabular-nums">{archivedCompactAge(s.archivedAt)}</span>
                     </button>
                   ))}
                   {hasMore && !archiveExpanded && (
