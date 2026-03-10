@@ -156,6 +156,23 @@ async function cmdSetup({ regenerate = false } = {}) {
     }
   }
 
+  // GitHub organizations — auto-detect from gh CLI
+  let detectedOrgs = ''
+  try {
+    detectedOrgs = execFileSync('gh', ['api', 'user/orgs', '--jq', '.[].login'], { encoding: 'utf-8', timeout: 10000 }).trim().split('\n').filter(Boolean).join(',')
+  } catch {
+    // gh not installed or not authenticated — skip detection
+  }
+  const currentOrgs = existing.GH_ORG || detectedOrgs
+  if (currentOrgs) {
+    console.log(`\nGitHub organizations detected: ${currentOrgs}`)
+    const orgAnswer = await prompt(`  Edit orgs (comma-separated) or press Enter to keep: `)
+    existing.GH_ORG = orgAnswer || currentOrgs
+  } else {
+    const orgAnswer = await prompt(`\n  GitHub orgs to list repos from (comma-separated, Enter to skip): `)
+    if (orgAnswer) existing.GH_ORG = orgAnswer
+  }
+
   // Write env file
   const frontendDist = findFrontendDist()
   const envVars = {
