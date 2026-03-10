@@ -543,7 +543,6 @@ export default function App() {
               <ChatView
                 messages={[...messages, ...tentativeMessages]}
                 fontSize={settings.fontSize + (isMobile ? 1 : 0)}
-                theme={settings.theme}
                 disabled={!settings.token}
                 planningMode={planningMode}
                 activityLabel={activityLabel}

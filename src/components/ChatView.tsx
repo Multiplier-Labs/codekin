@@ -13,8 +13,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import hljs from '../lib/hljs'
 import { IconArrowDown } from '@tabler/icons-react'
 import type { ChatMessage } from '../types'
 import { formatModelName, formatUserText } from '../lib/chatFormatters'
@@ -22,7 +21,6 @@ import { formatModelName, formatUserText } from '../lib/chatFormatters'
 interface Props {
   messages: ChatMessage[]
   fontSize: number
-  theme?: 'dark' | 'light'
   disabled?: boolean
   planningMode?: boolean
   activityLabel?: string
@@ -92,8 +90,14 @@ function CodeCopyButton({ code }: { code: string }) {
   )
 }
 
-function AssistantMessage({ msg, fontSize, theme }: { msg: ChatMessage & { type: 'assistant' }; fontSize: number; theme: 'dark' | 'light' }) {
-  const codeStyle = theme === 'light' ? vs : vscDarkPlus
+function highlightCode(code: string, lang: string): string {
+  if (hljs.getLanguage(lang)) {
+    return hljs.highlight(code, { language: lang }).value
+  }
+  return code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function AssistantMessage({ msg, fontSize }: { msg: ChatMessage & { type: 'assistant' }; fontSize: number }) {
   return (
     <div className="px-4 py-2">
       <div
@@ -109,18 +113,17 @@ function AssistantMessage({ msg, fontSize, theme }: { msg: ChatMessage & { type:
               if (match) {
                 return (
                   <div className="group/codeblock relative">
-                    <SyntaxHighlighter
-                      style={codeStyle}
-                      language={match[1]}
-                      PreTag="div"
-                      customStyle={{
+                    <div
+                      className="hljs"
+                      style={{
                         margin: '0.5em 0',
                         borderRadius: '6px',
                         fontSize: `${fontSize - 1}px`,
+                        padding: '1em',
+                        overflowX: 'auto',
                       }}
-                    >
-                      {codeString}
-                    </SyntaxHighlighter>
+                      dangerouslySetInnerHTML={{ __html: highlightCode(codeString, match[1]) }}
+                    />
                     <CodeCopyButton code={codeString} />
                   </div>
                 )
@@ -346,7 +349,7 @@ function ActivityIndicator({ label }: { label: string }) {
   )
 }
 
-export function ChatView({ messages, fontSize, theme = 'dark', disabled, planningMode, activityLabel, isMobile }: Props) {
+export function ChatView({ messages, fontSize, disabled, planningMode, activityLabel, isMobile }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
   const isNearBottomRef = useRef(true)
@@ -438,7 +441,7 @@ export function ChatView({ messages, fontSize, theme = 'dark', disabled, plannin
                 case 'user':
                   node = <UserMessage key={msg.key || i} msg={msg} fontSize={fontSize} isMobile={isMobile} />; break
                 case 'assistant':
-                  node = <AssistantMessage key={msg.key || i} msg={msg} fontSize={fontSize} theme={theme} />; break
+                  node = <AssistantMessage key={msg.key || i} msg={msg} fontSize={fontSize} />; break
                 case 'planning_mode':
                   node = <PlanningModeMessage key={msg.key || i} msg={msg} />; break
                 case 'todo_list':

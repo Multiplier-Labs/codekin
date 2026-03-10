@@ -716,6 +716,73 @@ html, body, #root {
   border: 1px solid var(--color-neutral-9);
 }
 
+/* ── highlight.js syntax token colors ──────────────────────────────────── */
+/* Replaces react-syntax-highlighter inline styles. Used by both ChatView
+   (react-markdown code blocks) and MarkdownRenderer (marked output).
+   Colors follow a VS Code Dark+ / Light inspired palette, keyed to
+   data-theme for automatic dark/light switching. */
+
+.hljs {
+  background: var(--color-neutral-11);
+  color: var(--color-neutral-2);
+  font-family: 'Inconsolata', monospace;
+}
+
+/* Dark theme tokens */
+[data-theme="dark"] .hljs-keyword,
+[data-theme="dark"] .hljs-tag { color: #569cd6; }
+[data-theme="dark"] .hljs-built_in { color: #4ec9b0; }
+[data-theme="dark"] .hljs-type,
+[data-theme="dark"] .hljs-title.class_ { color: #4ec9b0; }
+[data-theme="dark"] .hljs-title.function_ { color: #dcdcaa; }
+[data-theme="dark"] .hljs-string,
+[data-theme="dark"] .hljs-addition { color: #ce9178; }
+[data-theme="dark"] .hljs-number { color: #b5cea8; }
+[data-theme="dark"] .hljs-comment,
+[data-theme="dark"] .hljs-quote { color: #6a9955; }
+[data-theme="dark"] .hljs-variable,
+[data-theme="dark"] .hljs-template-variable { color: #9cdcfe; }
+[data-theme="dark"] .hljs-attr,
+[data-theme="dark"] .hljs-attribute { color: #9cdcfe; }
+[data-theme="dark"] .hljs-literal { color: #569cd6; }
+[data-theme="dark"] .hljs-regexp { color: #d16969; }
+[data-theme="dark"] .hljs-symbol { color: #b5cea8; }
+[data-theme="dark"] .hljs-meta { color: #c586c0; }
+[data-theme="dark"] .hljs-selector-tag,
+[data-theme="dark"] .hljs-selector-class,
+[data-theme="dark"] .hljs-selector-id { color: #d7ba7d; }
+[data-theme="dark"] .hljs-deletion { color: #ce9178; background: rgba(206,145,120,0.1); }
+[data-theme="dark"] .hljs-name { color: #569cd6; }
+[data-theme="dark"] .hljs-params { color: #9cdcfe; }
+
+/* Light theme tokens */
+[data-theme="light"] .hljs { background: var(--color-neutral-10); }
+[data-theme="light"] .hljs-keyword,
+[data-theme="light"] .hljs-tag { color: #0000ff; }
+[data-theme="light"] .hljs-built_in { color: #267f99; }
+[data-theme="light"] .hljs-type,
+[data-theme="light"] .hljs-title.class_ { color: #267f99; }
+[data-theme="light"] .hljs-title.function_ { color: #795e26; }
+[data-theme="light"] .hljs-string,
+[data-theme="light"] .hljs-addition { color: #a31515; }
+[data-theme="light"] .hljs-number { color: #098658; }
+[data-theme="light"] .hljs-comment,
+[data-theme="light"] .hljs-quote { color: #008000; }
+[data-theme="light"] .hljs-variable,
+[data-theme="light"] .hljs-template-variable { color: #001080; }
+[data-theme="light"] .hljs-attr,
+[data-theme="light"] .hljs-attribute { color: #001080; }
+[data-theme="light"] .hljs-literal { color: #0000ff; }
+[data-theme="light"] .hljs-regexp { color: #811f3f; }
+[data-theme="light"] .hljs-symbol { color: #098658; }
+[data-theme="light"] .hljs-meta { color: #af00db; }
+[data-theme="light"] .hljs-selector-tag,
+[data-theme="light"] .hljs-selector-class,
+[data-theme="light"] .hljs-selector-id { color: #800000; }
+[data-theme="light"] .hljs-deletion { color: #a31515; background: rgba(163,21,21,0.1); }
+[data-theme="light"] .hljs-name { color: #0000ff; }
+[data-theme="light"] .hljs-params { color: #001080; }
+
 /* ── Docs browser header (inverted) ────────────────────────────────────── */
 /* Inverted neutral colors so the header clearly signals "not terminal". */
 
