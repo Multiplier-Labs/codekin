@@ -1,6 +1,6 @@
 # Codekin Setup Guide
 
-Codekin is a web UI for managing multiple Claude Code terminal sessions. It connects to [cc-web](https://github.com/anthropics/claude-code-web) (Claude Code Web Terminal) via WebSocket and provides repo browsing, skill discovery, and screenshot uploads.
+Codekin is a web UI for managing multiple Claude Code terminal sessions. It connects via WebSocket and provides repo browsing, skill discovery, and screenshot uploads.
 
 ## Architecture
 
@@ -8,8 +8,8 @@ Codekin is a web UI for managing multiple Claude Code terminal sessions. It conn
 Internet (HTTPS)
   → nginx (port 443, YOUR_DOMAIN)
   ├── /                          → Authelia → Static files (React SPA)
-  ├── /cc/                       → Authelia → cc-web on port 32352 (WebSocket + REST + uploads)
-  ├── /cc/api/webhooks/github    → cc-web on port 32352 (no auth — HMAC validated)
+  ├── /cc/                       → Authelia → codekin on port 32352 (WebSocket + REST + uploads)
+  ├── /cc/api/webhooks/github    → codekin on port 32352 (no auth — HMAC validated)
   └── /authelia/                 → Authelia UI (port 9091)
 
 GitHub (webhook events)
@@ -23,15 +23,15 @@ GitHub (webhook events)
 | Service              | Port  | Description                          |
 |----------------------|-------|--------------------------------------|
 | nginx                | 443   | Reverse proxy + Authelia auth        |
-| cc-web               | 32352 | Claude Code Web Terminal backend     |
+| codekin              | 32352 | Codekin backend                      |
 | Authelia             | 9091  | Authentication (internal)            |
 
 ## Prerequisites
 
-- Node.js v18+ (cc-web requires v24 for its own process)
+- Node.js v18+ (codekin requires v24 for its own process)
 - nginx with SSL (Let's Encrypt)
 - Authelia for authentication
-- cc-web installed globally (`npm i -g @anthropic-ai/claude-code-web`)
+- codekin installed globally (`npm i -g codekin`)
 
 ## 1. Clone and Install
 
@@ -76,12 +76,12 @@ To add a new env var later:
 echo 'export NEW_VAR="value"' >> ~/.codekin/env
 source ~/.codekin/env
 # Then restart any services that need it:
-sudo systemctl restart claude-code-web
+sudo systemctl restart codekin
 ```
 
 > **Note**: You can override the env file location with `CODEKIN_ENV_FILE`. The systemd services run as your user with `WorkingDirectory=/home/YOUR_USER`, so they inherit env vars from the user's shell profile.
 
-## 3. Configure cc-web
+## 3. Configure codekin
 
 ### Generate a token
 
@@ -93,19 +93,19 @@ openssl rand -hex 32 > ~/.codekin/auth-token
 ### Create systemd service
 
 ```bash
-sudo nano /etc/systemd/system/claude-code-web.service
+sudo nano /etc/systemd/system/codekin.service
 ```
 
 ```ini
 [Unit]
-Description=Claude Code Web Terminal
+Description=Codekin Server
 After=network.target
 
 [Service]
 Type=simple
 User=YOUR_USER
 WorkingDirectory=/home/YOUR_USER
-ExecStart=/bin/bash -c '$(which cc-web) --port 32352 --no-open --auth "$(cat /home/YOUR_USER/.codekin/auth-token)"'
+ExecStart=/bin/bash -c '$(which codekin) --port 32352 --no-open --auth "$(cat /home/YOUR_USER/.codekin/auth-token)"'
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production
@@ -114,12 +114,12 @@ Environment=NODE_ENV=production
 WantedBy=multi-user.target
 ```
 
-> **Note**: Adjust the node path to match your nvm installation. Find it with `which cc-web`.
+> **Note**: Adjust the node path to match your nvm installation. Find it with `which codekin`.
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable claude-code-web
-sudo systemctl start claude-code-web
+sudo systemctl enable codekin
+sudo systemctl start codekin
 ```
 
 ## 4. Create Data Directory
@@ -130,7 +130,7 @@ File uploads and session data are stored under `~/.codekin/` by default (overrid
 mkdir -p ~/.codekin/screenshots
 ```
 
-> **Note**: The upload server is no longer a separate process. File upload, repository listing, and clone endpoints (`/api/upload`, `/api/repos`, `/api/clone`) are served by the main cc-web server on port 32352.
+> **Note**: The upload server is no longer a separate process. File upload, repository listing, and clone endpoints (`/api/upload`, `/api/repos`, `/api/clone`) are served by the main codekin server on port 32352.
 
 ## 5. Configure Repositories
 
@@ -174,9 +174,9 @@ Key fields in `settings.json`:
 |-------------|--------------------------------------------|----------------------|
 | `webRoot`   | Where the built frontend is deployed to    | `./dist-deploy`      |
 | `serverDir` | Runtime directory for the server           | `./server`           |
-| `port`      | cc-web server port                         | `32352`              |
+| `port`      | codekin server port                         | `32352`              |
 | `authFile`  | Path to the auth token file                | `~/.codekin/auth-token` |
-| `log`       | Server log file path                       | `/tmp/cc-web.log`    |
+| `log`       | Server log file path                       | `/tmp/codekin.log`    |
 
 > **Note**: `settings.json` is gitignored — your local config won't be overwritten by `git pull`.
 
@@ -227,7 +227,7 @@ sudo systemctl reload nginx
 
 1. Open `https://YOUR_DOMAIN` in a browser
 2. Authenticate via Authelia
-3. The Settings modal opens automatically — paste your cc-web token (from `~/.codekin/auth-token`)
+3. The Settings modal opens automatically — paste your codekin token (from `~/.codekin/auth-token`)
 4. Click a repo to open a terminal session
 
 ## 10. Configure GitHub Webhooks (Optional)
@@ -258,7 +258,7 @@ Reload and restart:
 
 ```bash
 source ~/.codekin/env
-sudo systemctl restart claude-code-web
+sudo systemctl restart codekin
 ```
 
 ### Authenticate the `gh` CLI
@@ -326,7 +326,7 @@ sudo systemctl reload nginx
 After adding the webhook, GitHub sends a `ping` event. Check the server logs:
 
 ```bash
-journalctl -u claude-code-web -f
+journalctl -u codekin -f
 # Look for: [webhook] Received ping event
 ```
 
@@ -353,7 +353,7 @@ npm run dev
 ```
 
 The dev server proxies:
-- `/cc` → `http://127.0.0.1:32352` (cc-web — WebSocket + REST + uploads)
+- `/cc` → `http://127.0.0.1:32352` (codekin — WebSocket + REST + uploads)
 
 ## Updating
 
@@ -372,13 +372,13 @@ cd server && npm install && cd ..
 ### Check service status
 
 ```bash
-sudo systemctl status claude-code-web
+sudo systemctl status codekin
 ```
 
 ### View logs
 
 ```bash
-journalctl -u claude-code-web -f
+journalctl -u codekin -f
 ```
 
 ### Port conflicts
@@ -433,8 +433,8 @@ codekin/
 |-----------------------------------------------|--------------------------------|
 | `~/.codekin/env` (or `CODEKIN_ENV_FILE`)      | API keys and secrets           |
 | Web root (set via `FRONTEND_WEB_ROOT` or `settings.json`) | Deployed frontend |
-| `~/.codekin/auth-token` (or `AUTH_FILE`)      | cc-web auth token              |
+| `~/.codekin/auth-token` (or `AUTH_FILE`)      | codekin auth token              |
 | `~/.codekin/repos.yml`                        | Optional repo list             |
 | `~/.codekin/screenshots/`                     | Uploaded screenshots           |
 | `/etc/nginx/sites-available/codekin`          | nginx config (production)      |
-| `/etc/systemd/system/claude-code-web.service` | cc-web systemd unit            |
+| `/etc/systemd/system/codekin.service` | codekin systemd unit            |

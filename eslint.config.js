@@ -39,7 +39,7 @@ export default defineConfig([
       '@typescript-eslint/no-unsafe-call': 'warn',
       '@typescript-eslint/no-unnecessary-type-assertion': 'warn',
       '@typescript-eslint/no-misused-promises': 'warn',
-      '@typescript-eslint/no-floating-promises': 'warn',
+      '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/use-unknown-in-catch-callback-variable': 'warn',
       '@typescript-eslint/require-await': 'warn',
       '@typescript-eslint/no-redundant-type-constituents': 'warn',

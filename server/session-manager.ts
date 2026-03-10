@@ -20,7 +20,7 @@ import { randomUUID } from 'crypto'
 import type { WebSocket } from 'ws'
 import { ClaudeProcess } from './claude-process.js'
 import { SessionArchive } from './session-archive.js'
-import type { Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
+import type { PromptQuestion, Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
 import { cleanupWorkspace } from './webhook-workspace.js'
 import { PORT } from './config.js'
 import { ApprovalManager } from './approval-manager.js'
@@ -468,14 +468,14 @@ export class SessionManager {
 
   private onPromptEvent(
     session: Session,
-    promptType: string,
+    promptType: 'permission' | 'question',
     question: string,
     options: Array<{ label: string; value: string; description?: string }>,
     multiSelect: boolean | undefined,
     toolName: string | undefined,
     toolInput: Record<string, unknown> | undefined,
     requestId: string | undefined,
-    questions: unknown[] | undefined,
+    questions: PromptQuestion[] | undefined,
   ): void {
     const promptMsg: WsServerMessage = {
       type: 'prompt',
