@@ -64,10 +64,10 @@ codekin service install
 ## Uninstall
 
 ```bash
-codekin service uninstall
-npm uninstall -g codekin
-rm -rf ~/.config/codekin ~/.codekin
+codekin uninstall
 ```
+
+This removes the background service, config files, and the npm package.
 
 ## Configuration
 
