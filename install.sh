@@ -60,7 +60,32 @@ check_claude() {
 }
 
 # ---------------------------------------------------------------------------
-# 3. Install / upgrade codekin
+# 3. Check GitHub CLI auth
+# ---------------------------------------------------------------------------
+
+check_github() {
+  if ! command -v gh &>/dev/null; then
+    warn "GitHub CLI (gh) not found."
+    info "The repo browser needs 'gh' to list and clone your repositories."
+    info "Install it: https://cli.github.com"
+    info "Then run: gh auth login"
+    echo ""
+    return
+  fi
+
+  if ! gh auth status &>/dev/null; then
+    warn "GitHub CLI is not authenticated."
+    info "The repo browser needs GitHub auth to list and clone your repositories."
+    info "Run this after installation: gh auth login"
+    echo ""
+    return
+  fi
+
+  info "GitHub CLI authenticated ($(gh auth status 2>&1 | grep -o 'Logged in to [^ ]*' | head -1 || echo 'ok'))."
+}
+
+# ---------------------------------------------------------------------------
+# 4. Install / upgrade codekin
 # ---------------------------------------------------------------------------
 
 install_codekin() {
@@ -75,7 +100,7 @@ install_codekin() {
 }
 
 # ---------------------------------------------------------------------------
-# 4. First-time setup (idempotent)
+# 5. First-time setup (idempotent)
 # ---------------------------------------------------------------------------
 
 run_setup() {
@@ -87,7 +112,7 @@ run_setup() {
 }
 
 # ---------------------------------------------------------------------------
-# 5. Install background service
+# 6. Install background service
 # ---------------------------------------------------------------------------
 
 install_service() {
@@ -106,6 +131,7 @@ echo ""
 
 ensure_node
 check_claude
+check_github
 install_codekin
 run_setup
 install_service
