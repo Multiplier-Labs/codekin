@@ -31,11 +31,13 @@ Open the printed URL in your browser, enter your Codekin Web token when prompted
 
 ```bash
 codekin token                   # Print your access URL at any time
+codekin config                  # Update API keys and settings
 codekin service status          # Check whether the service is running
 codekin service install         # (Re-)install the background service
 codekin service uninstall       # Remove the background service
 codekin start                   # Run in foreground (for debugging)
 codekin setup --regenerate      # Generate a new auth token
+codekin uninstall               # Remove Codekin entirely
 ```
 
 ## Features
@@ -64,10 +66,10 @@ codekin service install
 ## Uninstall
 
 ```bash
-codekin service uninstall
-npm uninstall -g codekin
-rm -rf ~/.config/codekin ~/.codekin
+codekin uninstall
 ```
+
+This removes the background service, config files, and the npm package.
 
 ## Configuration
 

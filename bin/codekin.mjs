@@ -8,11 +8,13 @@
  *   codekin service install        Install + start background service
  *   codekin service uninstall      Remove background service
  *   codekin service status         Show service status
+ *   codekin config                  Update API keys and settings
  *   codekin token                  Print access URL with auth token
+ *   codekin uninstall              Remove Codekin entirely
  */
 
 import { execSync, execFileSync, spawnSync } from 'child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, createReadStream } from 'fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, createReadStream, rmSync } from 'fs'
 import { homedir, platform } from 'os'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
@@ -373,6 +375,45 @@ function serviceDispatch(action) {
 }
 
 // ---------------------------------------------------------------------------
+// Uninstall
+// ---------------------------------------------------------------------------
+
+async function cmdUninstall() {
+  const answer = await prompt('This will remove Codekin entirely (service, config, npm package). Continue? [y/N] ')
+  if (answer.toLowerCase() !== 'y') {
+    console.log('Aborted.')
+    return
+  }
+
+  // 1. Stop and remove background service
+  console.log('\nRemoving background service...')
+  try {
+    serviceDispatch('uninstall')
+  } catch {
+    // Service may not be installed — that's fine
+  }
+
+  // 2. Remove config directories
+  const configDir = CONFIG_DIR
+  const codekinDir = join(homedir(), '.codekin')
+
+  if (existsSync(configDir)) {
+    rmSync(configDir, { recursive: true, force: true })
+    console.log(`Removed ${configDir}`)
+  }
+  if (existsSync(codekinDir)) {
+    rmSync(codekinDir, { recursive: true, force: true })
+    console.log(`Removed ${codekinDir}`)
+  }
+
+  // 3. Uninstall npm package
+  console.log('\nUninstalling codekin npm package...')
+  spawnSync('npm', ['uninstall', '-g', 'codekin'], { stdio: 'inherit' })
+
+  console.log('\nCodekin has been completely removed.')
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -383,8 +424,12 @@ if (cmd === 'start') {
   cmdStart()
 } else if (cmd === 'setup') {
   await cmdSetup({ regenerate: args.includes('--regenerate') })
+} else if (cmd === 'config') {
+  await cmdSetup()
 } else if (cmd === 'token') {
   cmdToken()
+} else if (cmd === 'uninstall') {
+  await cmdUninstall()
 } else if (cmd === 'service') {
   const action = args[1]
   if (!['install', 'uninstall', 'status'].includes(action)) {
@@ -399,9 +444,11 @@ Usage:
   codekin start                   Run server in foreground
   codekin setup                   First-time setup wizard
   codekin setup --regenerate      Regenerate auth token
+  codekin config                  Update API keys and settings
   codekin service install         Install + start background service
   codekin service uninstall       Remove background service
   codekin service status          Show service status
   codekin token                   Print access URL with auth token
+  codekin uninstall               Remove Codekin entirely
 `)
 }
