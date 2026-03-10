@@ -267,7 +267,7 @@ app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessio
 if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
   const indexPath = join(FRONTEND_DIST, 'index.html')
   if (existsSync(indexPath)) {
-    app.get('*', (req, res) => {
+    app.get('/{*splat}', (req, res) => {
       if (req.path.startsWith('/api/')) {
         res.status(404).json({ error: 'Not found' })
         return

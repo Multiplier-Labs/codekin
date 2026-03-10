@@ -39,7 +39,6 @@
   "dependencies": {
     "@tabler/icons-react": "^3.37.1",
     "@tailwindcss/vite": "^4.2.0",
-    "@types/dompurify": "^3.0.5",
     "cmdk": "^1.1.1",
     "dompurify": "^3.3.2",
     "highlight.js": "^11.11.1",
@@ -55,7 +54,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^24.10.1",
+    "@types/node": "^25.0.0",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/react-syntax-highlighter": "^15.5.13",
