@@ -91,10 +91,10 @@ check_github() {
 install_codekin() {
   if [[ "$CODEKIN_VERSION" == "latest" ]]; then
     info "Installing codekin (latest)..."
-    npm install -g codekin
+    npm install -g codekin --loglevel=error
   else
     info "Installing codekin@${CODEKIN_VERSION}..."
-    npm install -g "codekin@${CODEKIN_VERSION}"
+    npm install -g "codekin@${CODEKIN_VERSION}" --loglevel=error
   fi
   success "codekin $(codekin --version 2>/dev/null || echo 'installed')."
 }
