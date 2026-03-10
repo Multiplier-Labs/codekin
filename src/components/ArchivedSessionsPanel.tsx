@@ -89,7 +89,7 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
 
   // List mode: refresh when visible without initialViewId
   useEffect(() => {
-    if (visible && !initialViewId) refresh()
+    if (visible && !initialViewId) void refresh()
   }, [visible, initialViewId, refresh, refreshKey])
 
   // Direct view mode: auto-load the specified session

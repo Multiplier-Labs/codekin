@@ -98,7 +98,7 @@ export default function App() {
     token: settings.token,
     onSessionCreated: (sessionId) => {
       setActiveSessionId(sessionId)
-      refreshSessions()
+      void refreshSessions()
       if (pendingContextRef.current) {
         const ctx = pendingContextRef.current
         pendingContextRef.current = null
@@ -109,10 +109,10 @@ export default function App() {
       setActiveSessionId(sessionId)
     },
     onSessionRenamed: () => {
-      refreshSessions()
+      void refreshSessions()
     },
     onSessionsUpdated: () => {
-      refreshSessions()
+      void refreshSessions()
       setArchiveRefreshKey(k => k + 1)
     },
     onError: (msg) => {
@@ -351,7 +351,7 @@ export default function App() {
       const wDir = groupKey(session)
       const blocking = sessions.filter(s => groupKey(s) === wDir && s.isProcessing && s.id !== sessionId)
       if (blocking.length === 0 && sessionId === activeSessionId) {
-        handleExecuteTentative(sessionId)
+        void handleExecuteTentative(sessionId)
         setTimeout(() => {
           setUploadStatus('Session finished — starting queued session.')
           setTimeout(() => setUploadStatus(null), 3000)

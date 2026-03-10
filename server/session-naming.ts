@@ -52,7 +52,7 @@ export class SessionNaming {
 
     session._namingTimer = setTimeout(() => {
       delete session._namingTimer
-      this.executeSessionNaming(sessionId)
+      void this.executeSessionNaming(sessionId)
     }, delay)
   }
 
@@ -177,7 +177,7 @@ export class SessionNaming {
     // Short delay — context already available from prior turns
     session._namingTimer = setTimeout(() => {
       delete session._namingTimer
-      this.executeSessionNaming(sessionId)
+      void this.executeSessionNaming(sessionId)
     }, 5_000)
   }
 }

@@ -304,6 +304,7 @@ Response to a `control_request`. The `request_id` must match.
 | `tool_active` | `toolName`, `toolInput?` | Tool execution started |
 | `tool_done` | `toolName`, `summary?` | Tool execution completed (summary from `summarizeToolInput`) |
 | `tool_output` | `content`, `isError?` | Tool result content (max 2000 chars) |
+| `image` | `base64`, `mediaType` | Base64-encoded image from tool output (e.g. screenshots, diagrams) |
 | `thinking` | `summary` | Brief summary of Claude's thinking (ephemeral, not persisted) |
 | `planning_mode` | `active` | Entered/exited plan mode |
 | `todo_update` | `tasks` | Task list changed (array of `{id, subject, status, activeForm?}`) |

@@ -74,7 +74,7 @@ export function useWorkflows(token: string): UseWorkflowsResult {
   const intervalMs = hasActiveRuns ? POLL_FAST_MS : POLL_SLOW_MS
 
   useEffect(() => {
-    refresh()
+    void refresh()
     pollRef.current = setInterval(refresh, intervalMs)
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)

@@ -137,7 +137,7 @@ if (webhookConfig.enabled) {
     console.error('[webhook] FATAL: GITHUB_WEBHOOK_ENABLED is set but GITHUB_WEBHOOK_SECRET is missing. Refusing to accept unsigned webhooks.')
     process.exit(1)
   }
-  webhookHandler.checkHealth().then(healthy => {
+  void webhookHandler.checkHealth().then(healthy => {
     if (healthy) {
       console.log('[webhook] Webhook processing enabled')
     }
