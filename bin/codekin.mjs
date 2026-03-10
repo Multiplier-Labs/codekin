@@ -216,6 +216,9 @@ const LAUNCHD_PLIST = join(homedir(), 'Library', 'LaunchAgents', `${LAUNCHD_LABE
 function buildPlist() {
   const { script, runner } = findServerScript()
   const envVars = readEnvFile()
+  // Inject PATH and HOME so launchd service can find gh, node, etc.
+  if (!envVars.PATH && process.env.PATH) envVars.PATH = process.env.PATH
+  if (!envVars.HOME) envVars.HOME = homedir()
   const envEntries = Object.entries(envVars)
     .map(([k, v]) => `\t\t<key>${k}</key>\n\t\t<string>${v}</string>`)
     .join('\n')
