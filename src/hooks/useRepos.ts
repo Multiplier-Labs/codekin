@@ -29,6 +29,7 @@ export function useRepos(token?: string) {
   const [globalModules, setGlobalModules] = useState<Module[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [ghMissing, setGhMissing] = useState(false)
 
   // Flat list for compatibility (CommandPalette, etc.)
   const repos = groups.flatMap(g => g.repos)
@@ -39,17 +40,18 @@ export function useRepos(token?: string) {
     fetch('/cc/api/repos', { headers })
       .then(res => {
         if (!res.ok) throw new Error(`Failed to load repos: ${res.status}`)
-        return res.json() as Promise<{ groups: RepoGroup[]; globalSkills?: Skill[]; globalModules?: Module[] }>
+        return res.json() as Promise<{ groups: RepoGroup[]; globalSkills?: Skill[]; globalModules?: Module[]; ghMissing?: boolean }>
       })
       .then(data => {
         setGroups(data.groups)
         setGlobalSkills(data.globalSkills ?? [])
         setGlobalModules(data.globalModules ?? [])
+        setGhMissing(data.ghMissing ?? false)
         setError(null)
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false))
   }, [token])
 
-  return { groups, repos, globalSkills, globalModules, loading, error }
+  return { groups, repos, globalSkills, globalModules, loading, error, ghMissing }
 }

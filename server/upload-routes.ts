@@ -214,8 +214,12 @@ export function createUploadRouter(
       res.json({ groups, globalSkills, globalModules })
     } catch (err) {
       console.error('Failed to list repos from GitHub:', err)
+      const ghMissing = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT'
+      if (ghMissing) {
+        console.error('GitHub CLI (gh) not found. Install it: https://cli.github.com')
+      }
       // Return skills/modules even when GitHub is unavailable
-      res.json({ groups: [], globalSkills, globalModules })
+      res.json({ groups: [], globalSkills, globalModules, ghMissing })
     }
   })
 
