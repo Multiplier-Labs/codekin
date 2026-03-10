@@ -12,7 +12,7 @@
  */
 
 import { execSync, execFileSync, spawnSync } from 'child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, createReadStream } from 'fs'
 import { homedir, platform } from 'os'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
@@ -62,13 +62,29 @@ function getPort() {
   return parseInt(env.PORT || String(DEFAULT_PORT), 10)
 }
 
+function openTtyInput() {
+  // When piped (curl | bash), stdin is not a TTY — open /dev/tty directly
+  if (process.stdin.isTTY) return { input: process.stdin, cleanup: null }
+  try {
+    const tty = createReadStream('/dev/tty', { encoding: 'utf-8' })
+    return { input: tty, cleanup: () => tty.destroy() }
+  } catch {
+    // No TTY available (CI, headless) — fall back to stdin
+    return { input: process.stdin, cleanup: null }
+  }
+}
+
 function prompt(question) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout })
+  const { input, cleanup } = openTtyInput()
+  const rl = createInterface({ input, output: process.stdout })
   return new Promise(resolve => {
     rl.question(question, answer => {
       rl.close()
+      if (cleanup) cleanup()
       resolve(answer.trim())
     })
+    // If input closes without an answer (non-interactive), resolve empty
+    rl.on('close', () => resolve(''))
   })
 }
 
@@ -113,7 +129,7 @@ async function cmdSetup({ regenerate = false } = {}) {
   if (existingToken && !regenerate) {
     console.log('Auth token: (already exists, use --regenerate to replace)')
   } else {
-    const token = randomBytes(32).toString('hex')
+    const token = randomBytes(16).toString('base64url')
     writeFileSync(TOKEN_FILE, token + '\n', { mode: 0o600 })
     console.log('Auth token: generated')
   }

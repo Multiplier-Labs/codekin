@@ -82,7 +82,8 @@ run_setup() {
   mkdir -p "$HOME/.config/codekin"
 
   # Delegate to the CLI (token generation, env file write)
-  codekin setup
+  # Redirect stdin from /dev/tty so interactive prompts work when piped (curl | bash)
+  codekin setup </dev/tty
 }
 
 # ---------------------------------------------------------------------------
@@ -91,7 +92,7 @@ run_setup() {
 
 install_service() {
   info "Installing background service..."
-  codekin service install
+  codekin service install </dev/tty
 }
 
 # ---------------------------------------------------------------------------
