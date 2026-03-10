@@ -201,8 +201,17 @@ export function createUploadRouter(
 
       const groups: Array<{ owner: string; repos: Awaited<ReturnType<typeof fetchGhRepos>> }> = []
 
-      // Fetch org repos if configured
-      for (const org of GH_ORGS) {
+      // Fetch org repos — use configured GH_ORG or auto-detect from gh CLI
+      let orgs = GH_ORGS
+      if (orgs.length === 0) {
+        try {
+          const { stdout: orgsJson } = await execFileAsync('gh', ['api', 'user/orgs', '--jq', '.[].login'], { env: ghEnv })
+          orgs = orgsJson.trim().split('\n').filter(Boolean)
+        } catch {
+          // Auto-detection failed — continue without org repos
+        }
+      }
+      for (const org of orgs) {
         const orgRepos = await fetchGhRepos(org)
         groups.push({ owner: org, repos: orgRepos })
       }
