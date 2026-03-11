@@ -481,6 +481,19 @@ export function listAvailableKinds(repoPath?: string): WorkflowKindInfo[] {
 }
 
 // ---------------------------------------------------------------------------
+// Commit message prefixes (for cycle prevention)
+// ---------------------------------------------------------------------------
+
+/**
+ * Return the commitMessage prefixes from all built-in workflow definitions.
+ * Used by the commit event handler to detect and reject commits generated
+ * by workflows themselves (cycle prevention).
+ */
+export function getWorkflowCommitPrefixes(): string[] {
+  return loadBuiltinWorkflows().map(d => d.commitMessage)
+}
+
+// ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
 

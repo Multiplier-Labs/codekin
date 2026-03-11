@@ -16,6 +16,8 @@ import {
   type ReviewRepoConfig,
 } from './workflow-config.js'
 import { listAvailableKinds, ensureRepoWorkflowsRegistered } from './workflow-loader.js'
+import { syncCommitHooks } from './commit-event-hooks.js'
+import type { CommitEventHandler } from './commit-event-handler.js'
 import type { SessionManager } from './session-manager.js'
 
 type VerifyFn = (token: string | undefined) => boolean
@@ -51,6 +53,7 @@ function isValidCron(expr: string): boolean {
 /**
  * Sync cron schedules with the current workflow config.
  * When `sessions` is provided, also registers any standalone repo workflows.
+ * Event-driven repos (cronExpression === 'event') are skipped — they don't use cron.
  */
 export function syncSchedules(sessions?: SessionManager) {
   const engine = getWorkflowEngine()
@@ -63,6 +66,11 @@ export function syncSchedules(sessions?: SessionManager) {
     // Register any standalone repo workflows before scheduling
     if (sessions) {
       ensureRepoWorkflowsRegistered(engine, sessions, repo.repoPath)
+    }
+
+    // Skip event-driven repos — they are triggered by commit hooks, not cron
+    if (repo.cronExpression === 'event') {
+      continue
     }
 
     engine.upsertSchedule({
@@ -82,7 +90,12 @@ export function syncSchedules(sessions?: SessionManager) {
   }
 }
 
-export function createWorkflowRouter(verifyToken: VerifyFn, extractToken: ExtractFn, sessions?: SessionManager): Router {
+export function createWorkflowRouter(
+  verifyToken: VerifyFn,
+  extractToken: ExtractFn,
+  sessions?: SessionManager,
+  commitEventState?: { handler: CommitEventHandler | undefined },
+): Router {
   const router = Router()
 
   /** Auth middleware for all workflow routes. */
@@ -106,6 +119,32 @@ export function createWorkflowRouter(verifyToken: VerifyFn, extractToken: Extrac
       return null
     }
   }
+
+  // -------------------------------------------------------------------------
+  // Commit event (from git post-commit hook)
+  // -------------------------------------------------------------------------
+
+  router.post('/commit-event', async (req, res) => {
+    const handler = commitEventState?.handler
+    if (!handler) {
+      return res.status(503).json({ error: 'Commit event handler not available' })
+    }
+
+    const { repoPath, branch, commitHash, commitMessage, author } = req.body
+    if (!repoPath || !branch || !commitHash || !commitMessage) {
+      return res.status(400).json({ error: 'Missing required fields: repoPath, branch, commitHash, commitMessage' })
+    }
+
+    const result = await handler.handle({
+      repoPath,
+      branch,
+      commitHash,
+      commitMessage,
+      author: author || 'unknown',
+    })
+
+    res.status(result.accepted ? 202 : 200).json(result)
+  })
 
   // -------------------------------------------------------------------------
   // Kinds
@@ -271,9 +310,10 @@ export function createWorkflowRouter(verifyToken: VerifyFn, extractToken: Extrac
       model,
     })
 
-    // Re-sync schedules with updated config
+    // Re-sync schedules and commit hooks with updated config
     try {
       syncSchedules(sessions)
+      syncCommitHooks()
     } catch {
       // Engine might not be ready yet
     }
@@ -284,7 +324,10 @@ export function createWorkflowRouter(verifyToken: VerifyFn, extractToken: Extrac
   router.patch('/config/repos/:id', (req, res) => {
     try {
       const config = updateReviewRepo(req.params.id, req.body)
-      try { syncSchedules(sessions) } catch { /* engine may not be ready */ }
+      try {
+        syncSchedules(sessions)
+        syncCommitHooks()
+      } catch { /* engine may not be ready */ }
       res.json({ config })
     } catch (err) {
       res.status(404).json({ error: err instanceof Error ? err.message : 'Repo not found' })
@@ -294,9 +337,10 @@ export function createWorkflowRouter(verifyToken: VerifyFn, extractToken: Extrac
   router.delete('/config/repos/:id', (req, res) => {
     const config = removeReviewRepo(req.params.id)
 
-    // Re-sync schedules with updated config
+    // Re-sync schedules and commit hooks with updated config
     try {
       syncSchedules(sessions)
+      syncCommitHooks()
     } catch {
       // Engine might not be ready yet
     }

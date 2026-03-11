@@ -30,6 +30,8 @@ import { StepflowHandler, loadStepflowConfig } from './stepflow-handler.js'
 import { initWorkflowEngine, shutdownWorkflowEngine, type WorkflowEvent } from './workflow-engine.js'
 import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
+import { CommitEventHandler } from './commit-event-handler.js'
+import { ensureHookConfig, syncCommitHooks } from './commit-event-hooks.js'
 import { createAuthRouter } from './auth-routes.js'
 import { createSessionRouter } from './session-routes.js'
 import { createWebhookRouter } from './webhook-routes.js'
@@ -160,6 +162,10 @@ if (stepflowConfig.enabled) {
   console.log('[stepflow] Stepflow webhook integration disabled (STEPFLOW_WEBHOOK_ENABLED != true)')
 }
 
+// Commit event handler — instantiated after workflow engine init.
+// Wrapped in an object so the router closure captures a live reference.
+const commitEventState: { handler: CommitEventHandler | undefined } = { handler: undefined }
+
 // ---------------------------------------------------------------------------
 // Express app and REST API
 // ---------------------------------------------------------------------------
@@ -260,7 +266,10 @@ app.use(createSessionRouter(verifyToken, extractToken, sessions, verifyTokenOrSe
 app.use(createWebhookRouter(verifyToken, extractToken, webhookHandler, stepflowHandler))
 app.use(createUploadRouter(verifyToken, extractToken))
 app.use(createDocsRouter(verifyToken, extractToken))
-app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessions))
+
+// Workflow router — commitEventHandler is set after engine init, but the
+// router closure captures the variable reference so it will resolve correctly.
+app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessions, commitEventState))
 
 // --- SPA fallback: serve index.html for non-API routes (client-side routing) ---
 if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
@@ -452,6 +461,15 @@ server.listen(port, '0.0.0.0', () => {
     // Sync cron schedules with config and start scheduler
     syncSchedules(sessions)
     engine.startCronScheduler()
+
+    // Initialize commit event handler and sync git hooks
+    commitEventState.handler = new CommitEventHandler()
+    if (authToken) {
+      const serverUrl = `http://localhost:${port}`
+      ensureHookConfig(authToken, serverUrl)
+      syncCommitHooks()
+    }
+
     console.log('[workflow] Workflow engine ready')
   } catch (err) {
     console.error('[workflow] Failed to initialize workflow engine:', err)
@@ -463,6 +481,7 @@ server.listen(port, '0.0.0.0', () => {
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down...')
   shutdownWorkflowEngine()
+  commitEventState.handler?.shutdown()
   webhookHandler.shutdown()
   stepflowHandler.shutdown()
   sessions.shutdown()
@@ -474,6 +493,7 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => {
   console.log('SIGINT received, shutting down...')
   shutdownWorkflowEngine()
+  commitEventState.handler?.shutdown()
   webhookHandler.shutdown()
   stepflowHandler.shutdown()
   sessions.shutdown()
