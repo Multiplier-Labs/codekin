@@ -79,7 +79,6 @@ All configuration lives in `~/.config/codekin/env`. Edit this file to override d
 |---|---|---|
 | `PORT` | `32352` | Server port |
 | `REPOS_ROOT` | `~/repos` | Root directory scanned for local repositories |
-| `GH_ORG` | — | Comma-separated GitHub orgs for repo listing |
 | `GROQ_API_KEY` | — | Optional. Enables session auto-naming via Llama 4 Scout (free tier at [groq.com](https://groq.com)) |
 | `OPENAI_API_KEY` | — | Optional. Fallback for session auto-naming via GPT-4o Mini ([platform.openai.com](https://platform.openai.com)) |
 | `GEMINI_API_KEY` | — | Optional. Fallback for session auto-naming via Gemini 2.5 Flash ([aistudio.google.com](https://aistudio.google.com)) |
