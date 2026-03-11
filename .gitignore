@@ -39,3 +39,6 @@ coverage-reports/
 # Environment
 .env
 .env.*
+
+# PM2 ecosystem config (contains deployment-specific paths)
+ecosystem.config.cjs

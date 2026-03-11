@@ -4,7 +4,7 @@
     "webRoot": "/var/www/codekin",
     "serverDir": "./server",
     "port": 32352,
-    "log": "/tmp/cc-web.log",
+    "log": "/tmp/codekin.log",
     "authFile": "~/.codekin/auth-token"
   }
 }
