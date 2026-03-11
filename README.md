@@ -3,6 +3,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![npm version](https://img.shields.io/npm/v/codekin.svg)](https://www.npmjs.com/package/codekin)
 
+**[codekin.ai](https://codekin.ai)**
+
 Web UI for Claude Code sessions — multi-session support, WebSocket streaming, file uploads, and slash-command skills.
 
 ## Install
