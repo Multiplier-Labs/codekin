@@ -208,10 +208,13 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       }
 
       case 'rate_limit_event': {
+        console.log(`[rate_limit_event] raw=${JSON.stringify(event).slice(0, 500)}`)
         const info = (event as Record<string, unknown>).rate_limit_info as Record<string, unknown> | undefined
         if (info && typeof info.utilization === 'number') {
           const status = (info.status as string) || 'unknown'
           this.emit('rate_limit', info.utilization, status)
+        } else {
+          console.log(`[rate_limit_event] info missing or no utilization field. info=${JSON.stringify(info)}`)
         }
         break
       }
