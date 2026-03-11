@@ -33,7 +33,6 @@ export interface ClaudeProcessEvents {
   control_request: [requestId: string, toolName: string, toolInput: Record<string, unknown>]
   planning_mode: [active: boolean]
   todo_update: [tasks: TaskItem[]]
-  rate_limit: [utilization: number, status: string]
   result: [text: string, isError: boolean]
   error: [message: string]
   exit: [code: number | null, signal: string | null]
@@ -168,7 +167,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       console.log(`[event] type=${event.type} subtype=${subtype || '-'}`)
     }
     // Log all event types we DON'T handle to catch unknown protocol messages
-    if (!['system', 'stream_event', 'assistant', 'user', 'result', 'control_request', 'rate_limit_event'].includes(event.type)) {
+    if (!['system', 'stream_event', 'assistant', 'user', 'result', 'control_request'].includes(event.type)) {
       console.log(`[event-unhandled] type=${event.type} data=${JSON.stringify(event).slice(0, 300)}`)
     }
 
@@ -207,17 +206,6 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
         break
       }
 
-      case 'rate_limit_event': {
-        console.log(`[rate_limit_event] raw=${JSON.stringify(event).slice(0, 500)}`)
-        const info = (event as Record<string, unknown>).rate_limit_info as Record<string, unknown> | undefined
-        if (info && typeof info.utilization === 'number') {
-          const status = (info.status as string) || 'unknown'
-          this.emit('rate_limit', info.utilization, status)
-        } else {
-          console.log(`[rate_limit_event] info missing or no utilization field. info=${JSON.stringify(info)}`)
-        }
-        break
-      }
     }
   }
 

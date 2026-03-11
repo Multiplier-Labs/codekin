@@ -604,15 +604,13 @@ describe('useChatSocket hook', () => {
       unmount()
     })
 
-    it('info is a no-op and usage_update sets usagePercent', () => {
+    it('info is a no-op', () => {
       const { result, unmount } = setupConnected()
       const ws = MockWebSocket.latest()
       act(() => {
         ws.simulateMessage({ type: 'info', message: 'hi' } as WsServerMessage)
-        ws.simulateMessage({ type: 'usage_update', percentage: 42, raw: '42%' } as WsServerMessage)
       })
       expect(result.current.messages).toEqual([])
-      expect(result.current.usagePercent).toBe(42)
       unmount()
     })
   })

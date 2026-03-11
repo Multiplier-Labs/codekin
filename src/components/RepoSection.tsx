@@ -96,6 +96,7 @@ export interface RepoSectionProps {
   onDocsPickerSelect?: (filePath: string) => void
   onDocsPickerClose?: () => void
   docsStarredDocs?: string[]
+  isMobile?: boolean
 }
 
 // --------------------------------------------------------------------------
@@ -125,8 +126,9 @@ export function RepoSection({
   onDocsPickerSelect,
   onDocsPickerClose,
   docsStarredDocs,
+  isMobile,
 }: RepoSectionProps) {
-  const [expanded, setExpanded] = useState(isActive)
+  const [expanded, setExpanded] = useState(isActive || !!isMobile)
   const [approvalsOpen, setApprovalsOpen] = useState(false)
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [archiveExpanded, setArchiveExpanded] = useState(false)
@@ -181,7 +183,7 @@ export function RepoSection({
             : <IconChevronRight size={14} stroke={2.5} className="flex-shrink-0 text-neutral-5 opacity-0 group-hover/repo:opacity-100 transition-opacity" />
           }
           <span className={`inline-block h-1.5 w-1.5 rounded-full flex-shrink-0 ${statusDot}`} />
-          <span className="truncate text-[15px] font-semibold tracking-wide">{node.displayName}</span>
+          <span className={`truncate font-semibold tracking-wide ${isMobile ? 'text-[17px]' : 'text-[15px]'}`}>{node.displayName}</span>
           {!expanded && node.sessions.length > 1 && (
             <span className="text-[12px] text-neutral-6 flex-shrink-0">({node.sessions.length})</span>
           )}
@@ -240,7 +242,7 @@ export function RepoSection({
               <div
                 key={s.id}
                 onClick={() => { if (!isEditing) onSelectSession(s.id) }}
-                className={`group w-full flex items-baseline gap-2 pl-10 pr-2 py-1 text-left text-[15px] transition-colors rounded-md cursor-pointer ${
+                className={`group w-full flex items-baseline gap-2 pl-10 pr-2 py-1 text-left ${isMobile ? 'text-[17px]' : 'text-[15px]'} transition-colors rounded-md cursor-pointer ${
                   isActiveSession
                     ? 'bg-accent-9/30 text-accent-2'
                     : 'text-neutral-3 hover:bg-neutral-6/50 hover:text-neutral-1'

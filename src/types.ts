@@ -78,7 +78,6 @@ export type WsClientMessage =
   | { type: 'prompt_response'; value: string | string[]; requestId?: string }
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'ping' }
-  | { type: 'get_usage' }
 
 /** A tracked task item from Claude's TodoWrite tool. */
 export interface TaskItem {
@@ -108,7 +107,6 @@ export type WsServerMessage =
   | { type: 'error'; message: string }
   | { type: 'info'; message: string }
   | { type: 'pong' }
-  | { type: 'usage_update'; percentage: number; raw: string }
   | { type: 'prompt'; promptType: 'permission' | 'question'; question: string; options: PromptOption[]; multiSelect?: boolean; toolName?: string; toolInput?: Record<string, unknown>; requestId?: string; sessionId?: string; sessionName?: string; questions?: PromptQuestion[]; approvePattern?: string }
   | { type: 'prompt_dismiss'; requestId?: string }
   | { type: 'thinking'; summary: string }

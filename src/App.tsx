@@ -75,7 +75,6 @@ export default function App() {
     isProcessing,
     thinkingSummary,
     waitingSessions,
-    usagePercent,
     promptOptions,
     promptQuestion,
     promptType,
@@ -314,7 +313,6 @@ export default function App() {
         activeSessionId={activeSessionId}
         activeWorkingDir={activeWorkingDir}
         waitingSessions={waitingSessions}
-        usagePercent={usagePercent}
         tentativeQueues={tentativeQueues}
         groups={groups}
         globalModules={globalModules}

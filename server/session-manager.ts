@@ -74,9 +74,6 @@ export class SessionManager {
   _globalBroadcast: ((msg: WsServerMessage) => void) | null = null
   /** Registered listeners notified when a session's Claude process exits. */
   private _exitListeners: Array<(sessionId: string, code: number | null, signal: string | null, willRestart: boolean) => void> = []
-  /** Last usage percentage from rate_limit_event (0–100). */
-  _lastUsagePercent: number | null = null
-
   /** Delegated approval logic. */
   private approvalManager: ApprovalManager
   /** Delegated naming logic. */
@@ -418,7 +415,6 @@ export class SessionManager {
     cp.on('tool_done', (toolName, summary) => this.onToolDoneEvent(session, toolName, summary))
     cp.on('planning_mode', (active) => { this.broadcastAndHistory(session, { type: 'planning_mode', active }) })
     cp.on('todo_update', (tasks) => { this.broadcastAndHistory(session, { type: 'todo_update', tasks }) })
-    cp.on('rate_limit', (utilization, status) => this.onRateLimitEvent(utilization, status))
     cp.on('prompt', (...args) => this.onPromptEvent(session, ...args))
     cp.on('control_request', (requestId, toolName, toolInput) => this.onControlRequestEvent(cp, session, sessionId, requestId, toolName, toolInput))
     cp.on('result', (result, isError) => { this.resetStallTimer(session); this.handleClaudeResult(session, sessionId, result, isError) })
@@ -439,23 +435,6 @@ export class SessionManager {
       session._lastReportedModel = model
       this.broadcastAndHistory(session, { type: 'system_message', subtype: 'init', text: `Model: ${model}`, model })
     }
-    // Broadcast cached usage if available (new clients get it immediately)
-    if (this._lastUsagePercent !== null) {
-      this._globalBroadcast?.({ type: 'usage_update', percentage: this._lastUsagePercent, raw: `${this._lastUsagePercent}%` })
-    }
-  }
-
-  /**
-   * Handle a rate_limit_event from a Claude process.
-   * The utilization field (0–1) is converted to a percentage and broadcast.
-   */
-  onRateLimitEvent(utilization: number, status: string): void {
-    const percentage = Math.round(utilization * 100)
-    if (percentage !== this._lastUsagePercent) {
-      this._lastUsagePercent = percentage
-      console.log(`[usage] ${percentage}% (status: ${status})`)
-    }
-    this._globalBroadcast?.({ type: 'usage_update', percentage, raw: `${percentage}%` })
   }
 
   private onTextEvent(session: Session, sessionId: string, text: string): void {

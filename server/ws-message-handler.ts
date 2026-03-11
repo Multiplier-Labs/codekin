@@ -128,10 +128,5 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       send({ type: 'pong' })
       break
 
-    case 'get_usage':
-      if (sessions._lastUsagePercent !== null) {
-        send({ type: 'usage_update', percentage: sessions._lastUsagePercent, raw: `${sessions._lastUsagePercent}%` })
-      }
-      break
   }
 }
