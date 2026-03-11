@@ -59,7 +59,8 @@ export function syncSchedules(sessions?: SessionManager) {
   const engine = getWorkflowEngine()
   const config = loadWorkflowConfig()
   const existingSchedules = engine.listSchedules()
-  const configIds = new Set(config.reviewRepos.map(r => r.id))
+  // Build set of repo IDs that should have cron schedules (non-event repos only)
+  const scheduledIds = new Set<string>()
 
   // Create or update schedules for configured repos
   for (const repo of config.reviewRepos) {
@@ -73,6 +74,7 @@ export function syncSchedules(sessions?: SessionManager) {
       continue
     }
 
+    scheduledIds.add(repo.id)
     engine.upsertSchedule({
       id: repo.id,
       kind: repo.kind ?? 'code-review.daily',
@@ -82,9 +84,9 @@ export function syncSchedules(sessions?: SessionManager) {
     })
   }
 
-  // Remove schedules for repos no longer in config
+  // Remove schedules for repos no longer in config OR switched to event-driven
   for (const schedule of existingSchedules) {
-    if (!configIds.has(schedule.id)) {
+    if (!scheduledIds.has(schedule.id)) {
       engine.deleteSchedule(schedule.id)
     }
   }
@@ -98,7 +100,7 @@ export function createWorkflowRouter(
 ): Router {
   const router = Router()
 
-  /** Auth middleware for all workflow routes. */
+  /** Auth middleware for all workflow routes (except commit-event). */
   function auth(req: Request, res: Response, next: () => void) {
     const token = extractToken(req)
     if (!verifyToken(token)) {
@@ -108,23 +110,20 @@ export function createWorkflowRouter(
     next()
   }
 
-  router.use(auth)
-
-  /** Health check — returns 503 if engine not initialized. */
-  function getEngine(res: Response) {
-    try {
-      return getWorkflowEngine()
-    } catch {
-      res.status(503).json({ error: 'Workflow engine not available' })
-      return null
-    }
-  }
-
   // -------------------------------------------------------------------------
   // Commit event (from git post-commit hook)
+  // Mounted BEFORE router.use(auth) so it can use its own auth strategy.
+  // Currently accepts the master Bearer token (written to hook-config.json
+  // by ensureHookConfig). This can later be swapped for an HMAC signature
+  // without touching the other routes.
   // -------------------------------------------------------------------------
 
   router.post('/commit-event', async (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) {
+      return res.status(401).json({ error: 'Unauthorized' })
+    }
+
     const handler = commitEventState?.handler
     if (!handler) {
       return res.status(503).json({ error: 'Commit event handler not available' })
@@ -145,6 +144,19 @@ export function createWorkflowRouter(
 
     res.status(result.accepted ? 202 : 200).json(result)
   })
+
+  // Apply master auth to all remaining routes
+  router.use(auth)
+
+  /** Health check — returns 503 if engine not initialized. */
+  function getEngine(res: Response) {
+    try {
+      return getWorkflowEngine()
+    } catch {
+      res.status(503).json({ error: 'Workflow engine not available' })
+      return null
+    }
+  }
 
   // -------------------------------------------------------------------------
   // Kinds
