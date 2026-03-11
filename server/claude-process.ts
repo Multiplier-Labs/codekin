@@ -357,6 +357,17 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
   }
 
   /**
+   * Tools that are safe to auto-approve without user interaction.
+   * These are file operations and planning tools that acceptEdits mode already allows,
+   * plus harmless internal tools. Everything else is forwarded to the session manager
+   * for UI-based approval (or auto-approval registry check).
+   */
+  private static readonly AUTO_APPROVE_TOOLS = new Set([
+    'Read', 'Write', 'Edit', 'Glob', 'Grep', 'NotebookEdit',
+    'EnterPlanMode', 'TodoWrite', 'TodoRead', 'Task', 'TaskCreate', 'TaskUpdate',
+  ])
+
+  /**
    * Handle a control_request from the CLI.
    * With acceptEdits mode + PermissionRequest hook, most permissions go through hooks.
    * This handler remains as fallback and for AskUserQuestion (which uses control_request
@@ -393,15 +404,18 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       // ExitPlanMode needs user confirmation — forward to UI as a prompt
       console.log(`[control_request] forwarding ExitPlanMode to session manager for user approval`)
       this.emit('control_request', request_id, toolName, toolInput)
-    } else if (toolName === 'Bash') {
-      // Bash runs arbitrary commands — forward to session manager for registry check / UI prompt
-      console.log(`[control_request] forwarding Bash to session manager: ${redactSecrets(String(toolInput.command || '').slice(0, 80))}`)
-      this.emit('control_request', request_id, toolName, toolInput)
-    } else {
-      // All other tools (Write, Edit, Read, Glob, Grep, Task, TodoWrite,
-      // EnterPlanMode, etc.) are safe — auto-approve
-      console.log(`[control_request] auto-approving: ${toolName}`)
+    } else if (ClaudeProcess.AUTO_APPROVE_TOOLS.has(toolName)) {
+      // Known-safe tools: auto-approve without prompting
+      console.log(`[control_request] auto-approving safe tool: ${toolName}`)
       this.sendControlResponse(request_id, 'allow')
+    } else {
+      // All other tools (Bash, WebSearch, WebFetch, Agent, etc.)
+      // Forward to session manager for registry check / UI prompt
+      const logDetail = toolName === 'Bash'
+        ? `: ${redactSecrets(String(toolInput.command || '').slice(0, 80))}`
+        : ''
+      console.log(`[control_request] forwarding ${toolName} to session manager for approval${logDetail}`)
+      this.emit('control_request', request_id, toolName, toolInput)
     }
   }
 
