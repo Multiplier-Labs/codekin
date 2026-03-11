@@ -170,6 +170,7 @@ export function useChatSocket({
   const [currentModel, setCurrentModel] = useState<string | null>(() => localStorage.getItem('claude-model') ?? null)
   const [thinkingSummary, setThinkingSummary] = useState<string | null>(null)
   const [waitingSessions, setWaitingSessions] = useState<Record<string, boolean>>({})
+  const [usagePercent, setUsagePercent] = useState<number | null>(null)
   const { state: promptState, clear: clearPromptState, setFromMessage: setPromptFromMessage } = usePromptState()
   const currentSessionId = useRef<string | null>(null)
 
@@ -378,10 +379,13 @@ export function useChatSocket({
         break
 
       case 'info':
+        break
+
       case 'usage_update':
+        setUsagePercent(msg.percentage)
         break
     }
-  }, [flushPendingText, flushBeforeStructuralMessage, clearPromptState, setPromptFromMessage])
+  }, [flushPendingText, flushBeforeStructuralMessage, clearPromptState, setPromptFromMessage, setUsagePercent])
 
   const handleMessageRef = useRef(handleMessage)
   useEffect(() => { handleMessageRef.current = handleMessage }, [handleMessage])
@@ -466,6 +470,7 @@ export function useChatSocket({
     isProcessing,
     thinkingSummary,
     waitingSessions,
+    usagePercent,
     promptOptions: promptState.promptOptions,
     promptQuestion: promptState.promptQuestion,
     promptType: promptState.promptType,
