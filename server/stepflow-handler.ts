@@ -73,6 +73,7 @@ import type {
 import { buildStepflowPrompt } from './stepflow-prompt.js'
 import { createWorkspace, cleanupWorkspace } from './webhook-workspace.js'
 import { WebhookHandlerBase } from './webhook-handler-base.js'
+import { REPOS_ROOT } from './config.js'
 
 /**
  * How long an event may remain in `'processing'` before the watchdog marks it
@@ -349,8 +350,7 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
 
     // Group under the canonical repo path so the UI places this session
     // alongside manual sessions for the same repo.
-    const reposRoot = process.env.REPOS_ROOT || `${process.env.HOME}/repos`
-    const groupDir = `${reposRoot}/${repoName}`
+    const groupDir = `${REPOS_ROOT}/${repoName}`
     const sessionName = `stepflow/${repoName}/${req.branch}/${kind}`
     this.sessions.create(sessionName, workspacePath, {
       source: 'stepflow',
