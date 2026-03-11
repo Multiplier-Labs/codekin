@@ -129,7 +129,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
 
     case 'get_usage':
-      // Usage tracking not yet implemented — returns no data.
+      void sessions.checkUsage()
       break
   }
 }

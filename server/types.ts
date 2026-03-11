@@ -207,7 +207,7 @@ export type WsServerMessage =
   | { type: 'error'; message: string }
   | { type: 'info'; message: string }
   | { type: 'pong' }
-  | { type: 'usage_update'; [key: string]: unknown }
+  | { type: 'usage_update'; percentage: number; raw: string }
   | { type: 'prompt'; promptType: 'permission' | 'question'; question: string; options: PromptOption[]; multiSelect?: boolean; toolName?: string; toolInput?: Record<string, unknown>; requestId?: string; sessionId?: string; sessionName?: string; questions?: PromptQuestion[]; approvePattern?: string }
   | { type: 'prompt_dismiss'; requestId?: string }
   | { type: 'thinking'; summary: string }
