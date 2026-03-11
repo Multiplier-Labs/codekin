@@ -173,6 +173,14 @@ export function createSessionRouter(
     res.json(sessions.getApprovals(workingDir))
   })
 
+  /** Approvals effective globally via cross-repo inference (approved in 2+ repos). */
+  router.get('/api/approvals/global', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+
+    res.json(sessions.getGlobalApprovals())
+  })
+
   router.delete('/api/approvals', (req, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })

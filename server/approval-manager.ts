@@ -14,6 +14,12 @@ import { DATA_DIR } from './config.js'
 const REPO_APPROVALS_FILE = join(DATA_DIR, 'repo-approvals.json')
 const PERSIST_DEBOUNCE_MS = 2000
 
+/**
+ * Minimum number of repos that must have independently approved the same
+ * tool/command/pattern before it is auto-approved globally (cross-repo).
+ */
+const CROSS_REPO_THRESHOLD = 2
+
 export class ApprovalManager {
   /** Repo-level auto-approval store, keyed by workingDir (repo path). */
   private repoApprovals = new Map<string, { tools: Set<string>; commands: Set<string>; patterns: Set<string> }>()
@@ -70,9 +76,20 @@ export class ApprovalManager {
    * Check if a tool/command is auto-approved for a repo.
    * For Bash commands, uses prefix matching only for safe commands;
    * dangerous commands require exact match to prevent escalation.
+   *
+   * Falls back to cross-repo inference: if the same tool/command/pattern
+   * has been approved in CROSS_REPO_THRESHOLD or more other repos,
+   * it is auto-approved everywhere.
    */
   checkAutoApproval(workingDir: string, toolName: string, toolInput: Record<string, unknown>): boolean {
-    const approvals = this.getRepoApprovalEntry(workingDir)
+    if (this.checkRepoApproval(workingDir, toolName, toolInput)) return true
+    return this.checkCrossRepoApproval(workingDir, toolName, toolInput)
+  }
+
+  /** Check approvals for a single repo (no cross-repo fallback). */
+  private checkRepoApproval(workingDir: string, toolName: string, toolInput: Record<string, unknown>): boolean {
+    const approvals = this.repoApprovals.get(workingDir)
+    if (!approvals) return false
     if (approvals.tools.has(toolName)) return true
     if (toolName === 'Bash') {
       const cmd = (typeof toolInput.command === 'string' ? toolInput.command : '').trim()
@@ -88,6 +105,50 @@ export class ApprovalManager {
         for (const approved of approvals.commands) {
           if (this.commandPrefix(approved) === cmdPrefix) return true
         }
+      }
+    }
+    return false
+  }
+
+  /**
+   * Cross-repo inference: if enough other repos have approved the same
+   * tool/command/pattern, auto-approve it for this repo too.
+   */
+  private checkCrossRepoApproval(workingDir: string, toolName: string, toolInput: Record<string, unknown>): boolean {
+    let count = 0
+    for (const [dir, entry] of this.repoApprovals) {
+      if (dir === workingDir) continue
+      // Check tool approval
+      if (toolName !== 'Bash') {
+        if (entry.tools.has(toolName)) count++
+      } else {
+        const cmd = (typeof toolInput.command === 'string' ? toolInput.command : '').trim()
+        let matched = false
+        // Exact command match
+        if (entry.commands.has(cmd)) matched = true
+        // Pattern match
+        if (!matched) {
+          for (const pattern of entry.patterns) {
+            if (this.matchesPattern(pattern, cmd)) { matched = true; break }
+          }
+        }
+        // Prefix match for safe commands
+        if (!matched) {
+          const cmdPrefix = this.commandPrefix(cmd)
+          if (cmdPrefix && ApprovalManager.SAFE_PREFIX_COMMANDS.has(cmdPrefix)) {
+            for (const approved of entry.commands) {
+              if (this.commandPrefix(approved) === cmdPrefix) { matched = true; break }
+            }
+          }
+        }
+        if (matched) count++
+      }
+      if (count >= CROSS_REPO_THRESHOLD) {
+        const label = toolName === 'Bash'
+          ? `command: ${(typeof toolInput.command === 'string' ? toolInput.command : '').slice(0, 80)}`
+          : `tool: ${toolName}`
+        console.log(`[auto-approve] cross-repo inference (${count} repos) for ${workingDir}: ${label}`)
+        return true
       }
     }
     return false
@@ -173,6 +234,49 @@ export class ApprovalManager {
       tools: Array.from(entry.tools).sort(),
       commands: Array.from(entry.commands).sort(),
       patterns: Array.from(entry.patterns).sort(),
+    }
+  }
+
+  /**
+   * Return approvals that are effective globally via cross-repo inference
+   * (approved in CROSS_REPO_THRESHOLD+ repos). Each entry includes the
+   * repos that contributed to it.
+   */
+  getGlobalApprovals(): { tools: Record<string, string[]>; commands: Record<string, string[]>; patterns: Record<string, string[]> } {
+    const toolCounts = new Map<string, string[]>()
+    const commandCounts = new Map<string, string[]>()
+    const patternCounts = new Map<string, string[]>()
+
+    for (const [dir, entry] of this.repoApprovals) {
+      for (const tool of entry.tools) {
+        const dirs = toolCounts.get(tool) || []
+        dirs.push(dir)
+        toolCounts.set(tool, dirs)
+      }
+      for (const cmd of entry.commands) {
+        const dirs = commandCounts.get(cmd) || []
+        dirs.push(dir)
+        commandCounts.set(cmd, dirs)
+      }
+      for (const pattern of entry.patterns) {
+        const dirs = patternCounts.get(pattern) || []
+        dirs.push(dir)
+        patternCounts.set(pattern, dirs)
+      }
+    }
+
+    const filterAboveThreshold = (counts: Map<string, string[]>): Record<string, string[]> => {
+      const result: Record<string, string[]> = {}
+      for (const [key, dirs] of counts) {
+        if (dirs.length >= CROSS_REPO_THRESHOLD) result[key] = dirs.sort()
+      }
+      return result
+    }
+
+    return {
+      tools: filterAboveThreshold(toolCounts),
+      commands: filterAboveThreshold(commandCounts),
+      patterns: filterAboveThreshold(patternCounts),
     }
   }
 

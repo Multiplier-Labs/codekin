@@ -113,6 +113,11 @@ export class SessionManager {
     return this.approvalManager.getApprovals(workingDir)
   }
 
+  /** Return approvals effective globally via cross-repo inference. */
+  getGlobalApprovals(): { tools: Record<string, string[]>; commands: Record<string, string[]>; patterns: Record<string, string[]> } {
+    return this.approvalManager.getGlobalApprovals()
+  }
+
   /** Remove an auto-approval rule for a repo (workingDir) and persist to disk. */
   removeApproval(workingDir: string, opts: { tool?: string; command?: string; pattern?: string }, skipPersist = false): 'invalid' | boolean {
     return this.approvalManager.removeApproval(workingDir, opts, skipPersist)

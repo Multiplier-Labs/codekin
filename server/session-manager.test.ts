@@ -2499,6 +2499,59 @@ describe('SessionManager', () => {
       expect(sm.checkAutoApproval('/tmp/repo-g', 'Bash', { command: '' })).toBe(false)
       expect(sm.checkAutoApproval('/tmp/repo-g', 'Bash', {})).toBe(false)
     })
+
+    it('auto-approves a tool approved in 2+ other repos (cross-repo inference)', () => {
+      ;(sm as any).addRepoApproval('/tmp/xrepo-1', { tool: 'Write' })
+      ;(sm as any).addRepoApproval('/tmp/xrepo-2', { tool: 'Write' })
+
+      // Write was never approved for xrepo-3, but 2 other repos have it
+      expect(sm.checkAutoApproval('/tmp/xrepo-3', 'Write', {})).toBe(true)
+    })
+
+    it('does not cross-repo approve a tool approved in only 1 other repo', () => {
+      ;(sm as any).addRepoApproval('/tmp/xrepo-solo', { tool: 'NotebookEdit' })
+
+      expect(sm.checkAutoApproval('/tmp/xrepo-other', 'NotebookEdit', {})).toBe(false)
+    })
+
+    it('auto-approves a Bash command approved in 2+ other repos', () => {
+      ;(sm as any).addRepoApproval('/tmp/xrepo-a', { command: 'npm test' })
+      ;(sm as any).addRepoApproval('/tmp/xrepo-b', { command: 'npm test' })
+
+      expect(sm.checkAutoApproval('/tmp/xrepo-c', 'Bash', { command: 'npm test' })).toBe(true)
+    })
+
+    it('cross-repo inference works with prefix matching for safe commands', () => {
+      ;(sm as any).addRepoApproval('/tmp/xrepo-p1', { command: 'git diff HEAD' })
+      ;(sm as any).addRepoApproval('/tmp/xrepo-p2', { command: 'git diff --staged' })
+
+      // Different git diff variant, but prefix matches in 2 repos
+      expect(sm.checkAutoApproval('/tmp/xrepo-p3', 'Bash', { command: 'git diff main' })).toBe(true)
+    })
+
+    it('cross-repo inference works with pattern matching', () => {
+      ;(sm as any).addRepoApproval('/tmp/xrepo-pat1', { pattern: 'cat *' })
+      ;(sm as any).addRepoApproval('/tmp/xrepo-pat2', { pattern: 'cat *' })
+
+      expect(sm.checkAutoApproval('/tmp/xrepo-pat3', 'Bash', { command: 'cat README.md' })).toBe(true)
+    })
+
+    it('cross-repo inference does not apply for dangerous commands', () => {
+      ;(sm as any).addRepoApproval('/tmp/xrepo-d1', { command: 'rm /tmp/x' })
+      ;(sm as any).addRepoApproval('/tmp/xrepo-d2', { command: 'rm /tmp/x' })
+
+      // Exact match works cross-repo
+      expect(sm.checkAutoApproval('/tmp/xrepo-d3', 'Bash', { command: 'rm /tmp/x' })).toBe(true)
+      // But different rm command does NOT — dangerous prefix not expanded
+      expect(sm.checkAutoApproval('/tmp/xrepo-d3', 'Bash', { command: 'rm -rf /' })).toBe(false)
+    })
+
+    it('does not count the same repo in cross-repo threshold', () => {
+      ;(sm as any).addRepoApproval('/tmp/xrepo-self', { tool: 'Agent' })
+      // Only 1 repo has it — should not self-count as 2
+      expect(sm.checkAutoApproval('/tmp/xrepo-self', 'Agent', {})).toBe(true) // direct match
+      expect(sm.checkAutoApproval('/tmp/xrepo-new', 'Agent', {})).toBe(false) // only 1 other repo
+    })
   })
 
   describe('derivePattern()', () => {
