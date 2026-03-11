@@ -3,7 +3,7 @@
  * and AddWorkflowModal.
  */
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { IconGitBranch, IconCloud } from '@tabler/icons-react'
 import type { ApiRepo, RepoGroup } from '../hooks/useRepos'
 
@@ -21,6 +21,11 @@ interface Props {
 
 export function RepoList({ groups, selectedId, onSelect, cloningId, maxHeight = '240px', autoFocus }: Props) {
   const [search, setSearch] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (autoFocus) inputRef.current?.focus()
+  }, [autoFocus])
 
   const filteredGroups = search.trim()
     ? groups.map(g => ({
@@ -41,12 +46,12 @@ export function RepoList({ groups, selectedId, onSelect, cloningId, maxHeight = 
   return (
     <>
       <input
+        ref={inputRef}
         type="text"
         value={search}
         onChange={e => setSearch(e.target.value)}
         placeholder="Search repos…"
         className="mb-2 w-full rounded-lg border border-neutral-7 bg-neutral-11/50 px-3 py-2 text-[15px] text-neutral-2 placeholder-neutral-5 focus:border-accent-6 focus:outline-none"
-        autoFocus={autoFocus}
       />
       <div className="overflow-y-auto rounded-lg border border-neutral-7 bg-neutral-11/50" style={{ maxHeight }}>
         {filteredGroups.length === 0 ? (

@@ -91,8 +91,10 @@ export function useDocsBrowser(): UseDocsBrowserReturn {
     setPickerFiles([])
 
     try {
-      const params = new URLSearchParams({ repo: repoDir, token })
-      const res = await fetch(`${BASE}/api/docs?${params}`)
+      const params = new URLSearchParams({ repo: repoDir })
+      const res = await fetch(`${BASE}/api/docs?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
       if (!res.ok) throw new Error(`Failed to list docs: ${res.status}`)
       const data = await res.json()
       setPickerFiles(data.files ?? [])
@@ -117,8 +119,10 @@ export function useDocsBrowser(): UseDocsBrowserReturn {
     setPickerOpen(false)
 
     try {
-      const params = new URLSearchParams({ repo: repoDir, file: filePath, token })
-      const res = await fetch(`${BASE}/api/docs/file?${params}`)
+      const params = new URLSearchParams({ repo: repoDir, file: filePath })
+      const res = await fetch(`${BASE}/api/docs/file?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
       if (!res.ok) throw new Error(`Failed to load file: ${res.status}`)
       const data = await res.json()
       setContent(data.content)

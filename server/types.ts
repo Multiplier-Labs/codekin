@@ -53,6 +53,8 @@ export interface Session {
   _namingTimer?: ReturnType<typeof setTimeout>
   /** Number of naming attempts so far (for retry back-off). */
   _namingAttempts: number
+  /** The model reported by the last system init event, used to suppress duplicate init messages. */
+  _lastReportedModel?: string
   /** Last user input sent, stored for API error retry. */
   _lastUserInput?: string
   /** Number of consecutive API error retries for the current turn. */

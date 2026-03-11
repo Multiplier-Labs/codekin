@@ -110,6 +110,7 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
               onSelect={handleSelect}
               cloningId={cloning}
               maxHeight="240px"
+              autoFocus
             />
           </div>
         </div>

@@ -430,7 +430,11 @@ export class SessionManager {
 
   private onSystemInit(cp: ClaudeProcess, session: Session, model: string): void {
     session.claudeSessionId = cp.getSessionId()
-    this.broadcastAndHistory(session, { type: 'system_message', subtype: 'init', text: `Model: ${model}`, model })
+    // Only show model message on first init or when model actually changes
+    if (!session._lastReportedModel || session._lastReportedModel !== model) {
+      session._lastReportedModel = model
+      this.broadcastAndHistory(session, { type: 'system_message', subtype: 'init', text: `Model: ${model}`, model })
+    }
   }
 
   private onTextEvent(session: Session, sessionId: string, text: string): void {
