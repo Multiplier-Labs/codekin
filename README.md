@@ -7,6 +7,8 @@
 
 Web UI for Claude Code sessions — multi-session support, WebSocket streaming, file uploads, and slash-command skills.
 
+![Codekin screenshot](docs/screenshot.png)
+
 ## Install
 
 **Prerequisites:**
