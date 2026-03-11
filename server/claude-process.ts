@@ -33,6 +33,7 @@ export interface ClaudeProcessEvents {
   control_request: [requestId: string, toolName: string, toolInput: Record<string, unknown>]
   planning_mode: [active: boolean]
   todo_update: [tasks: TaskItem[]]
+  image: [base64: string, mediaType: string]
   result: [text: string, isError: boolean]
   error: [message: string]
   exit: [code: number | null, signal: string | null]
@@ -383,15 +384,20 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       // Each question has its own options and multiSelect flag; the frontend
       // walks the user through them one-by-one and returns all answers at once.
       const questions = toolInput?.questions as Array<{ question: string; options?: Array<{ label: string; description?: string }>; multiSelect?: boolean; header?: string }> | undefined
-      if (!Array.isArray(questions) || questions.length === 0) return
+      if (!Array.isArray(questions) || questions.length === 0) {
+        console.warn(`[control_request] AskUserQuestion with no/empty questions array, forwarding as generic control_request`)
+        this.emit('control_request', request_id, toolName, toolInput)
+        return
+      }
 
+      console.log(`[control_request] AskUserQuestion received with ${questions.length} question(s), requestId=${request_id}`)
       const structuredQuestions = questions.map(q => ({
         question: q.question,
         header: q.header,
         multiSelect: q.multiSelect ?? false,
-        options: (q.options || []).map((opt: { label: string; description?: string }) => ({
+        options: (q.options || []).map((opt: { label: string; value?: string; description?: string }) => ({
           label: opt.label,
-          value: opt.label,
+          value: opt.value ?? opt.label,
           description: opt.description,
         })),
       }))
