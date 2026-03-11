@@ -13,10 +13,29 @@ import {
   statusBadge,
   toTimeValue,
   fromTimeValue,
+  isEventDriven,
+  EVENT_CRON,
 } from './workflowHelpers.js'
 import type { WorkflowRun } from './workflowApi'
 
 describe('workflowHelpers', () => {
+  describe('isEventDriven', () => {
+    it('returns true for commit-review', () => {
+      expect(isEventDriven('commit-review')).toBe(true)
+    })
+
+    it('returns false for scheduled workflows', () => {
+      expect(isEventDriven('code-review.daily')).toBe(false)
+      expect(isEventDriven('coverage.daily')).toBe(false)
+    })
+  })
+
+  describe('EVENT_CRON', () => {
+    it('describeCron returns "On commit" for event cron', () => {
+      expect(describeCron(EVENT_CRON)).toBe('On commit')
+    })
+  })
+
   describe('buildCron', () => {
     it('builds a cron expression', () => {
       expect(buildCron(6, '*')).toBe('0 6 * * *')
@@ -143,6 +162,7 @@ describe('workflowHelpers', () => {
     it('returns label for known kinds', () => {
       expect(kindLabel('coverage.daily')).toBe('Coverage Assessment')
       expect(kindLabel('code-review.daily')).toBe('Code Review')
+      expect(kindLabel('commit-review')).toBe('Commit Review')
     })
 
     it('returns kind string for unknown kinds', () => {
@@ -153,6 +173,7 @@ describe('workflowHelpers', () => {
   describe('kindCategory', () => {
     it('returns category for known kinds', () => {
       expect(kindCategory('coverage.daily')).toBe('assessment')
+      expect(kindCategory('commit-review')).toBe('event')
     })
 
     it('returns assessment for unknown kinds', () => {

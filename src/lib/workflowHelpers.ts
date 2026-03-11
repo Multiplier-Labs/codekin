@@ -4,17 +4,26 @@
 
 import type { WorkflowRun } from './workflowApi'
 
-export type WorkflowCategory = 'assessment' | 'organizer' | 'executor'
+export type WorkflowCategory = 'assessment' | 'organizer' | 'executor' | 'event'
 
 export const WORKFLOW_KINDS = [
   { value: 'coverage.daily', label: 'Coverage Assessment', category: 'assessment' as WorkflowCategory },
   { value: 'code-review.daily', label: 'Code Review', category: 'assessment' as WorkflowCategory },
+  { value: 'commit-review', label: 'Commit Review', category: 'event' as WorkflowCategory },
   { value: 'comment-assessment.daily', label: 'Comment Assessment', category: 'assessment' as WorkflowCategory },
   { value: 'dependency-health.daily', label: 'Dependency Health', category: 'assessment' as WorkflowCategory },
   { value: 'security-audit.weekly', label: 'Security Audit', category: 'assessment' as WorkflowCategory },
   { value: 'complexity.weekly', label: 'Complexity Report', category: 'assessment' as WorkflowCategory },
   { value: 'repo-health.weekly', label: 'Repository Health', category: 'assessment' as WorkflowCategory },
 ]
+
+/** Event-driven workflow kinds that are triggered by hooks rather than cron schedules. */
+export const EVENT_DRIVEN_KINDS = new Set(['commit-review'])
+
+/** Check if a workflow kind is event-driven (triggered by hooks, not cron). */
+export function isEventDriven(kind: string): boolean {
+  return EVENT_DRIVEN_KINDS.has(kind)
+}
 
 export const MODEL_OPTIONS = [
   { value: '', label: 'Default (Opus)' },
@@ -92,8 +101,12 @@ export function fromTimeValue(v: string): { hour: number; minute: number } {
   return { hour: h || 0, minute: m || 0 }
 }
 
+/** Sentinel cron expression for event-driven workflows (no schedule). */
+export const EVENT_CRON = 'event'
+
 /** Convert a 5-field cron expression into a human-readable description, e.g. `"Daily at 06:00"`. */
 export function describeCron(expr: string): string {
+  if (expr === EVENT_CRON) return 'On commit'
   const parts = expr.trim().split(/\s+/)
   if (parts.length !== 5) return expr
   const [min, hour, dom, , dow] = parts

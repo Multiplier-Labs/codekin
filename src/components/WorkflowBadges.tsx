@@ -14,6 +14,7 @@ export function CategoryBadge({ kind }: { kind: string }) {
     assessment: 'border-accent-7/60 bg-accent-9/30 text-accent-4',
     organizer:  'border-success-7/60 bg-success-9/30 text-success-4',
     executor:   'border-warning-7/60 bg-warning-9/30 text-warning-4',
+    event:      'border-purple-700/60 bg-purple-900/30 text-purple-400',
   }
   return (
     <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[13px] font-medium capitalize ${styles[cat]}`}>

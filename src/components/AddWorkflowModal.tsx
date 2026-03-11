@@ -1,10 +1,10 @@
 /**
- * Multi-step wizard for creating a new scheduled workflow.
+ * Multi-step wizard for creating a new workflow.
  *
  * Steps:
  *   1. Select repository
  *   2. Select workflow type
- *   3. Configure schedule and optional focus areas
+ *   3. Configure schedule (or model/focus for event-driven workflows)
  */
 
 import { useState, useEffect } from 'react'
@@ -15,7 +15,7 @@ import type { ReviewRepoConfig, WorkflowKindInfo } from '../lib/workflowApi'
 import {
   WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL, MODEL_OPTIONS,
   buildCron, describeCron, slugify, kindCategory,
-  isBiweeklyDow,
+  isBiweeklyDow, isEventDriven, EVENT_CRON,
 } from '../lib/workflowHelpers'
 import { CategoryBadge } from './WorkflowBadges'
 import TimePicker from './TimePicker'
@@ -44,11 +44,11 @@ interface Props {
 // Step indicator
 // ---------------------------------------------------------------------------
 
-function StepIndicator({ current }: { current: Step }) {
+function StepIndicator({ current, eventDriven }: { current: Step; eventDriven: boolean }) {
   const steps = [
     { num: 1 as const, label: 'Repository' },
     { num: 2 as const, label: 'Workflow' },
-    { num: 3 as const, label: 'Schedule' },
+    { num: 3 as const, label: eventDriven ? 'Configure' : 'Schedule' },
   ]
 
   return (
@@ -251,92 +251,111 @@ function FrequencyButton({
   )
 }
 
-function StepSchedule({
+function StepConfigure({
   form,
   onChange,
 }: {
   form: FormState
   onChange: (patch: Partial<FormState>) => void
 }) {
+  const eventDriven = isEventDriven(form.kind)
+
   return (
     <div className="space-y-5">
-      <div>
-        <p className="text-[13px] text-neutral-4 mb-3">
-          Choose when this workflow should run automatically.
-        </p>
-
-        {/* Time picker */}
-        <label className="block text-[13px] font-medium text-neutral-3 mb-2">Time</label>
-        <TimePicker
-          hour={form.cronHour}
-          minute={form.cronMinute}
-          onChange={(h, m) => onChange({ cronHour: h, cronMinute: m })}
-        />
-      </div>
-
-      <div>
-        <label className="block text-[13px] font-medium text-neutral-3 mb-2">Frequency</label>
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {DAY_PRESETS.map(p => {
-            const selected = form.cronDow === p.dow
-            return (
-              <FrequencyButton
-                key={p.dow}
-                label={p.label}
-                dow={p.dow}
-                selected={selected}
-                onSelect={dow => onChange({ cronDow: dow })}
-              />
-            )
-          })}
+      {/* Schedule section — hidden for event-driven workflows */}
+      {eventDriven ? (
+        <div>
+          <p className="text-[13px] text-neutral-4 mb-3">
+            This workflow runs automatically on every commit via a post-commit hook.
+          </p>
+          <div className="rounded-lg border border-purple-700/40 bg-purple-900/20 px-4 py-3">
+            <span className="text-[14px] font-medium text-purple-400">Trigger: On commit</span>
+            <p className="text-[13px] text-neutral-4 mt-1">
+              Each commit will be reviewed automatically. No schedule needed.
+            </p>
+          </div>
         </div>
-        <div className="flex gap-1.5">
-          {DAY_INDIVIDUAL.map(p => {
-            const baseDow = isBiweeklyDow(form.cronDow)
-              ? form.cronDow.split('-').slice(1).join('-')
-              : form.cronDow
-            const selected = baseDow === p.dow
-            return (
-              <FrequencyButton
-                key={p.dow}
-                label={p.label}
-                dow={p.dow}
-                selected={selected}
-                onSelect={dow => {
-                  const biweekly = isBiweeklyDow(form.cronDow)
-                  onChange({ cronDow: biweekly ? `biweekly-${dow}` : dow })
-                }}
-              />
-            )
-          })}
-        </div>
-        {/* Weekly / Bi-weekly toggle — visible when a single day is selected */}
-        {(() => {
-          const isDay = DAY_INDIVIDUAL.some(d => d.dow === form.cronDow || form.cronDow === `biweekly-${d.dow}`)
-          if (!isDay) return null
-          const biweekly = isBiweeklyDow(form.cronDow)
-          const baseDow = biweekly ? form.cronDow.split('-').slice(1).join('-') : form.cronDow
-          return (
-            <div className="flex gap-1.5 mt-2">
-              <FrequencyButton
-                label="Every week"
-                dow={baseDow}
-                selected={!biweekly}
-                onSelect={dow => onChange({ cronDow: dow })}
-              />
-              <FrequencyButton
-                label="Every 2 weeks"
-                dow={`biweekly-${baseDow}`}
-                selected={biweekly}
-                onSelect={dow => onChange({ cronDow: dow })}
-              />
+      ) : (
+        <>
+          <div>
+            <p className="text-[13px] text-neutral-4 mb-3">
+              Choose when this workflow should run automatically.
+            </p>
+
+            {/* Time picker */}
+            <label className="block text-[13px] font-medium text-neutral-3 mb-2">Time</label>
+            <TimePicker
+              hour={form.cronHour}
+              minute={form.cronMinute}
+              onChange={(h, m) => onChange({ cronHour: h, cronMinute: m })}
+            />
+          </div>
+
+          <div>
+            <label className="block text-[13px] font-medium text-neutral-3 mb-2">Frequency</label>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {DAY_PRESETS.map(p => {
+                const selected = form.cronDow === p.dow
+                return (
+                  <FrequencyButton
+                    key={p.dow}
+                    label={p.label}
+                    dow={p.dow}
+                    selected={selected}
+                    onSelect={dow => onChange({ cronDow: dow })}
+                  />
+                )
+              })}
             </div>
-          )
-        })()}
-        <div className="mt-2 text-[13px] text-neutral-5">
-          {describeCron(buildCron(form.cronHour, form.cronDow, form.cronMinute))}
-        </div>
-      </div>
+            <div className="flex gap-1.5">
+              {DAY_INDIVIDUAL.map(p => {
+                const baseDow = isBiweeklyDow(form.cronDow)
+                  ? form.cronDow.split('-').slice(1).join('-')
+                  : form.cronDow
+                const selected = baseDow === p.dow
+                return (
+                  <FrequencyButton
+                    key={p.dow}
+                    label={p.label}
+                    dow={p.dow}
+                    selected={selected}
+                    onSelect={dow => {
+                      const biweekly = isBiweeklyDow(form.cronDow)
+                      onChange({ cronDow: biweekly ? `biweekly-${dow}` : dow })
+                    }}
+                  />
+                )
+              })}
+            </div>
+            {/* Weekly / Bi-weekly toggle — visible when a single day is selected */}
+            {(() => {
+              const isDay = DAY_INDIVIDUAL.some(d => d.dow === form.cronDow || form.cronDow === `biweekly-${d.dow}`)
+              if (!isDay) return null
+              const biweekly = isBiweeklyDow(form.cronDow)
+              const baseDow = biweekly ? form.cronDow.split('-').slice(1).join('-') : form.cronDow
+              return (
+                <div className="flex gap-1.5 mt-2">
+                  <FrequencyButton
+                    label="Every week"
+                    dow={baseDow}
+                    selected={!biweekly}
+                    onSelect={dow => onChange({ cronDow: dow })}
+                  />
+                  <FrequencyButton
+                    label="Every 2 weeks"
+                    dow={`biweekly-${baseDow}`}
+                    selected={biweekly}
+                    onSelect={dow => onChange({ cronDow: dow })}
+                  />
+                </div>
+              )
+            })()}
+            <div className="mt-2 text-[13px] text-neutral-5">
+              {describeCron(buildCron(form.cronHour, form.cronDow, form.cronMinute))}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Model selection */}
       <div>
@@ -379,7 +398,7 @@ function StepSchedule({
 // AddWorkflowModal (wizard)
 // ---------------------------------------------------------------------------
 
-/** Three-step wizard modal for creating a new scheduled workflow: select repo, choose type, configure schedule. */
+/** Three-step wizard modal for creating a new workflow: select repo, choose type, configure schedule/options. */
 export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
   const [step, setStep] = useState<Step>(1)
   const [selectedRepoId, setSelectedRepoId] = useState('')
@@ -396,6 +415,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
+  const eventDriven = isEventDriven(form.kind)
   const updateForm = (patch: Partial<FormState>) => setForm(f => ({ ...f, ...patch }))
 
   const canNext = (): boolean => {
@@ -427,11 +447,14 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
     setFormError(null)
     try {
       const name = form.repoName || form.repoPath.split('/').pop() || 'workflow'
+      const cronExpression = eventDriven
+        ? EVENT_CRON
+        : buildCron(form.cronHour, form.cronDow, form.cronMinute)
       await onAdd({
         id: `${slugify(name)}-${slugify(form.kind)}`,
         name,
         repoPath: form.repoPath.trim(),
-        cronExpression: buildCron(form.cronHour, form.cronDow, form.cronMinute),
+        cronExpression,
         kind: form.kind,
         enabled: true,
         customPrompt: form.customPrompt.trim() || undefined,
@@ -460,7 +483,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
         </div>
 
         {/* Step indicator */}
-        <StepIndicator current={step} />
+        <StepIndicator current={step} eventDriven={eventDriven} />
 
         {/* Step content */}
         <div className="min-h-[200px]">
@@ -485,7 +508,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
           )}
 
           {step === 3 && (
-            <StepSchedule
+            <StepConfigure
               form={form}
               onChange={updateForm}
             />

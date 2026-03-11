@@ -1,6 +1,6 @@
 /**
- * Modal dialog for editing an existing scheduled workflow.
- * Focused on editable fields only — schedule, workflow kind, and custom prompt.
+ * Modal dialog for editing an existing workflow.
+ * Adapts for event-driven workflows by hiding the schedule section.
  */
 
 import { useState } from 'react'
@@ -8,7 +8,7 @@ import { IconX, IconLoader2 } from '@tabler/icons-react'
 import type { ReviewRepoConfig } from '../lib/workflowApi'
 import {
   WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL, MODEL_OPTIONS, isBiweeklyDow,
-  buildCron, parseCron, describeCron, kindLabel,
+  buildCron, parseCron, describeCron, kindLabel, isEventDriven, EVENT_CRON,
 } from '../lib/workflowHelpers'
 import { CategoryBadge } from './WorkflowBadges'
 import TimePicker from './TimePicker'
@@ -41,14 +41,19 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
+  const eventDriven = isEventDriven(form.kind)
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
     setFormError(null)
     try {
+      const cronExpression = eventDriven
+        ? EVENT_CRON
+        : buildCron(form.cronHour, form.cronDow, form.cronMinute)
       await onSave(repo.id, {
         kind: form.kind,
-        cronExpression: buildCron(form.cronHour, form.cronDow, form.cronMinute),
+        cronExpression,
         customPrompt: form.customPrompt.trim() || undefined,
         model: form.model || undefined,
       })
@@ -115,54 +120,63 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
             </div>
           </div>
 
-          {/* Schedule */}
-          <div>
-            <label className="block text-[13px] font-medium text-neutral-3 mb-2">Time</label>
-            <TimePicker
-              hour={form.cronHour}
-              minute={form.cronMinute}
-              onChange={(h, m) => setForm(f => ({ ...f, cronHour: h, cronMinute: m }))}
-              className="mb-3"
-            />
-            <label className="block text-[13px] font-medium text-neutral-3 mb-2">Frequency</label>
-            <div className="flex flex-wrap gap-1.5 mb-2">
-              {DAY_PRESETS.map(p => (
-                <button
-                  key={p.dow}
-                  type="button"
-                  onClick={() => setForm(f => ({ ...f, cronDow: p.dow }))}
-                  className={btnClass(form.cronDow === p.dow)}
-                >
-                  {p.label}
-                </button>
-              ))}
+          {/* Schedule — hidden for event-driven workflows */}
+          {eventDriven ? (
+            <div className="rounded-lg border border-purple-700/40 bg-purple-900/20 px-4 py-3">
+              <span className="text-[14px] font-medium text-purple-400">Trigger: On commit</span>
+              <p className="text-[13px] text-neutral-4 mt-1">
+                Each commit will be reviewed automatically. No schedule needed.
+              </p>
             </div>
-            <div className="flex gap-1.5">
-              {DAY_INDIVIDUAL.map(p => (
-                <button
-                  key={p.dow}
-                  type="button"
-                  onClick={() => setForm(f => ({ ...f, cronDow: biweekly ? `biweekly-${p.dow}` : p.dow }))}
-                  className={btnClass(baseDow === p.dow)}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-            {isDay && (
-              <div className="flex gap-1.5 mt-2">
-                <button type="button" onClick={() => setForm(f => ({ ...f, cronDow: baseDow }))} className={btnClass(!biweekly)}>
-                  Every week
-                </button>
-                <button type="button" onClick={() => setForm(f => ({ ...f, cronDow: `biweekly-${baseDow}` }))} className={btnClass(biweekly)}>
-                  Every 2 weeks
-                </button>
+          ) : (
+            <div>
+              <label className="block text-[13px] font-medium text-neutral-3 mb-2">Time</label>
+              <TimePicker
+                hour={form.cronHour}
+                minute={form.cronMinute}
+                onChange={(h, m) => setForm(f => ({ ...f, cronHour: h, cronMinute: m }))}
+                className="mb-3"
+              />
+              <label className="block text-[13px] font-medium text-neutral-3 mb-2">Frequency</label>
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {DAY_PRESETS.map(p => (
+                  <button
+                    key={p.dow}
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, cronDow: p.dow }))}
+                    className={btnClass(form.cronDow === p.dow)}
+                  >
+                    {p.label}
+                  </button>
+                ))}
               </div>
-            )}
-            <div className="mt-2 text-[13px] text-neutral-5">
-              {describeCron(buildCron(form.cronHour, form.cronDow, form.cronMinute))}
+              <div className="flex gap-1.5">
+                {DAY_INDIVIDUAL.map(p => (
+                  <button
+                    key={p.dow}
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, cronDow: biweekly ? `biweekly-${p.dow}` : p.dow }))}
+                    className={btnClass(baseDow === p.dow)}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+              {isDay && (
+                <div className="flex gap-1.5 mt-2">
+                  <button type="button" onClick={() => setForm(f => ({ ...f, cronDow: baseDow }))} className={btnClass(!biweekly)}>
+                    Every week
+                  </button>
+                  <button type="button" onClick={() => setForm(f => ({ ...f, cronDow: `biweekly-${baseDow}` }))} className={btnClass(biweekly)}>
+                    Every 2 weeks
+                  </button>
+                </div>
+              )}
+              <div className="mt-2 text-[13px] text-neutral-5">
+                {describeCron(buildCron(form.cronHour, form.cronDow, form.cronMinute))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Model selection */}
           <div>
