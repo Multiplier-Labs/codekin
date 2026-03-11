@@ -119,6 +119,7 @@ export class SessionManager {
   }
 
   /** Add an auto-approval rule for a repo and persist (used by tests via `as any`). */
+  /* @ts-expect-error noUnusedLocals — accessed by tests via (sm as any).addRepoApproval */
   private addRepoApproval(workingDir: string, opts: { tool?: string; command?: string; pattern?: string }): void {
     this.approvalManager.addRepoApproval(workingDir, opts)
   }

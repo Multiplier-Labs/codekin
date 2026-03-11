@@ -51,7 +51,6 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
   // Tool tracking: accumulates partial_json input during streaming
   private currentToolName: string | null = null
   private currentToolInput = ''
-  private textBuffer = ''
 
   // Extended thinking: extract a short summary from the thinking block
   private inThinkingBlock = false

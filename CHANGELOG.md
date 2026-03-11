@@ -5,6 +5,69 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2026-03-10
+
+### Features
+- Auto-detect GitHub orgs from `gh` CLI when `GH_ORG` is not configured
+- Add GitHub org auto-detection to the setup/config wizard UI
+
+### Fixes
+- Remove GitHub org prompt from setup wizard (the org is now auto-detected)
+
+## [0.3.5] - 2026-03-10
+
+### Fixes
+- Inject `PATH` and `HOME` into launchd plist for macOS service (gh CLI access)
+
+## [0.3.4] - 2026-03-10
+
+### Fixes
+- Show helpful message when GitHub CLI (`gh`) is not installed
+
+### Chores
+- Add `codekin uninstall` command
+- Add `codekin config` command to update API keys
+- Add GitHub CLI auth check to installer
+- Suppress npm deprecation warnings during install
+- Add config and uninstall commands to README usage section
+
+## [0.3.3] - 2026-03-10
+
+### Chores
+- Replace `react-syntax-highlighter` with shared `highlight.js` instance (bundle size reduction)
+- Upgrade: express 4→5, multer 1→2, `@types/node` 24→25, drop `@types/dompurify`
+- Fix `no-floating-promises` ESLint violations across frontend and server
+- Add server `@types/*` to root devDependencies for CI build
+
+## [0.3.2] - 2026-03-10
+
+### Fixes
+- Fix installer breaking when piped through `curl | bash`
+- Shorten auth token from 64 to 22 characters
+- Add server runtime deps to root `package.json` for global install
+- Update install URL to `codekin.ai/install.sh` in README
+
+## [0.3.1] - 2026-03-09
+
+### Features
+- Add image display support for tool results in chat
+
+### Fixes
+- Fix external images not rendering due to CSP
+- Fix images hidden inside collapsed tool activity section
+- Fix queued messages losing attached files on execute
+- Persist images to session history for replay on session switch
+- Read auth token from URL query parameter on initial load
+- Add missing `image` variant to server `WsServerMessage` type
+- Add mobile-responsive layout with sidebar drawer, top bar, and adaptive modals
+- Improve mobile header alignment with fixed height and uniform button sizing
+- Fix mobile layout issues: scrollbar, input height, sidebar close
+- Fix mobile UX: prevent keyboard popup on approval dialogs, enlarge tap targets
+- Fix mobile menu not closing when tapping content area
+- Bump mobile icon sizes to 24px per Material Design standard
+- Darken sidebar background and text for repo names, icons, and AI Workflows button
+- Soften dark mode contrast: darker input bar, uniform text color
+
 ## [0.3.0] - 2026-03-09
 
 ### Features

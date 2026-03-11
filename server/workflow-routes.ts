@@ -172,7 +172,7 @@ export function createWorkflowRouter(verifyToken: VerifyFn, extractToken: Extrac
   // Schedules
   // -------------------------------------------------------------------------
 
-  router.get('/schedules', (req, res) => {
+  router.get('/schedules', (_req, res) => {
     const engine = getEngine(res)
     if (!engine) return
 
