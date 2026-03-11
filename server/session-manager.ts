@@ -17,8 +17,6 @@
  */
 
 import { randomUUID } from 'crypto'
-import { execFile } from 'child_process'
-import { homedir } from 'os'
 import type { WebSocket } from 'ws'
 import { ClaudeProcess } from './claude-process.js'
 import { SessionArchive } from './session-archive.js'
@@ -63,42 +61,6 @@ export interface CreateSessionOptions {
   model?: string
 }
 
-/** Minimum interval between usage checks (5 minutes). */
-const USAGE_CHECK_INTERVAL_MS = 5 * 60 * 1000
-
-/**
- * Spawn a short-lived `claude -p "/usage"` process and parse the weekly limit percentage.
- * Returns a number 0–100, or null if parsing fails.
- */
-function queryClaudeUsage(): Promise<{ percentage: number; raw: string } | null> {
-  return new Promise((resolve) => {
-    const home = homedir()
-    execFile('claude', ['-p', '/usage', '--output-format', 'text'], {
-      timeout: 30_000,
-      env: {
-        PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
-        HOME: home,
-        USER: process.env.USER || 'dev',
-        LANG: process.env.LANG || 'en_US.UTF-8',
-      },
-    }, (err: Error | null, stdout: string) => {
-      if (err) {
-        console.warn('[usage-check] Failed to query Claude usage:', err.message)
-        resolve(null)
-        return
-      }
-      const text = stdout.trim()
-      // Match patterns like "42%", "42.5%", "approximately 42%"
-      const match = text.match(/(\d+(?:\.\d+)?)\s*%/)
-      if (match) {
-        resolve({ percentage: parseFloat(match[1]), raw: text })
-      } else {
-        console.warn('[usage-check] Could not parse percentage from:', text.slice(0, 200))
-        resolve(null)
-      }
-    })
-  })
-}
 
 export class SessionManager {
   private sessions = new Map<string, Session>()
@@ -112,8 +74,8 @@ export class SessionManager {
   _globalBroadcast: ((msg: WsServerMessage) => void) | null = null
   /** Registered listeners notified when a session's Claude process exits. */
   private _exitListeners: Array<(sessionId: string, code: number | null, signal: string | null, willRestart: boolean) => void> = []
-  /** Cached usage percentage and timestamp of last check. */
-  private _usageCache: { percentage: number; raw: string; checkedAt: number } | null = null
+  /** Last usage percentage from rate_limit_event (0–100). */
+  _lastUsagePercent: number | null = null
 
   /** Delegated approval logic. */
   private approvalManager: ApprovalManager
@@ -456,6 +418,7 @@ export class SessionManager {
     cp.on('tool_done', (toolName, summary) => this.onToolDoneEvent(session, toolName, summary))
     cp.on('planning_mode', (active) => { this.broadcastAndHistory(session, { type: 'planning_mode', active }) })
     cp.on('todo_update', (tasks) => { this.broadcastAndHistory(session, { type: 'todo_update', tasks }) })
+    cp.on('rate_limit', (utilization, status) => this.onRateLimitEvent(utilization, status))
     cp.on('prompt', (...args) => this.onPromptEvent(session, ...args))
     cp.on('control_request', (requestId, toolName, toolInput) => this.onControlRequestEvent(cp, session, sessionId, requestId, toolName, toolInput))
     cp.on('result', (result, isError) => { this.resetStallTimer(session); this.handleClaudeResult(session, sessionId, result, isError) })
@@ -476,26 +439,23 @@ export class SessionManager {
       session._lastReportedModel = model
       this.broadcastAndHistory(session, { type: 'system_message', subtype: 'init', text: `Model: ${model}`, model })
     }
-    // Check usage on session init (throttled)
-    void this.checkUsage()
+    // Broadcast cached usage if available (new clients get it immediately)
+    if (this._lastUsagePercent !== null) {
+      this._globalBroadcast?.({ type: 'usage_update', percentage: this._lastUsagePercent, raw: `${this._lastUsagePercent}%` })
+    }
   }
 
   /**
-   * Query the Claude CLI for weekly usage limit percentage and broadcast to all clients.
-   * Throttled to at most once per USAGE_CHECK_INTERVAL_MS.
+   * Handle a rate_limit_event from a Claude process.
+   * The utilization field (0–1) is converted to a percentage and broadcast.
    */
-  async checkUsage(): Promise<void> {
-    if (this._usageCache && Date.now() - this._usageCache.checkedAt < USAGE_CHECK_INTERVAL_MS) {
-      // Broadcast cached value
-      this._globalBroadcast?.({ type: 'usage_update', percentage: this._usageCache.percentage, raw: this._usageCache.raw })
-      return
+  onRateLimitEvent(utilization: number, status: string): void {
+    const percentage = Math.round(utilization * 100)
+    if (percentage !== this._lastUsagePercent) {
+      this._lastUsagePercent = percentage
+      console.log(`[usage] ${percentage}% (status: ${status})`)
     }
-    const result = await queryClaudeUsage()
-    if (result) {
-      this._usageCache = { ...result, checkedAt: Date.now() }
-      console.log(`[usage-check] Weekly limit: ${result.percentage}%`)
-      this._globalBroadcast?.({ type: 'usage_update', percentage: result.percentage, raw: result.raw })
-    }
+    this._globalBroadcast?.({ type: 'usage_update', percentage, raw: `${percentage}%` })
   }
 
   private onTextEvent(session: Session, sessionId: string, text: string): void {

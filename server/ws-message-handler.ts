@@ -129,7 +129,9 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
 
     case 'get_usage':
-      void sessions.checkUsage()
+      if (sessions._lastUsagePercent !== null) {
+        send({ type: 'usage_update', percentage: sessions._lastUsagePercent, raw: `${sessions._lastUsagePercent}%` })
+      }
       break
   }
 }

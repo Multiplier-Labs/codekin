@@ -33,6 +33,7 @@ export interface ClaudeProcessEvents {
   control_request: [requestId: string, toolName: string, toolInput: Record<string, unknown>]
   planning_mode: [active: boolean]
   todo_update: [tasks: TaskItem[]]
+  rate_limit: [utilization: number, status: string]
   result: [text: string, isError: boolean]
   error: [message: string]
   exit: [code: number | null, signal: string | null]
@@ -203,6 +204,15 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
         const ctrlEvent = event as ClaudeControlRequest
         console.log(`[control_request] requestId=${ctrlEvent.request_id} tool=${ctrlEvent.request?.tool_name}`)
         this.handleControlRequest(ctrlEvent)
+        break
+      }
+
+      case 'rate_limit_event': {
+        const info = (event as Record<string, unknown>).rate_limit_info as Record<string, unknown> | undefined
+        if (info && typeof info.utilization === 'number') {
+          const status = (info.status as string) || 'unknown'
+          this.emit('rate_limit', info.utilization, status)
+        }
         break
       }
     }
