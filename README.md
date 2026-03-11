@@ -47,10 +47,17 @@ codekin uninstall               # Remove Codekin entirely
 ## Features
 
 - **Multi-session terminal** — Open and switch between multiple Claude Code sessions, one per repo
+- **Session archive** — Full retrieval and re-activation of archived sessions
 - **Repo browser** — Auto-discovers local repos and GitHub org repos
 - **Screenshot upload** — Drag-and-drop or paste images; the file path is sent to Claude so it can read them natively
 - **Skill browser** — Browse and invoke `/skills` defined in each repo's `.claude/skills/`
 - **Command palette** — `Ctrl+K` to quickly search repos, skills, and actions
+- **Approval management** — Persistent approval storage with detailed per-permission revoking
+- **Mobile-friendly** — Responsive layout that works on phones and tablets
+- **Markdown browser** — Browse and view `.md` files directly in the UI
+- **AI Workflows** — Scheduled code and repository audits and maintenance, with support for custom workflows defined as Markdown files
+- **GitHub webhooks** — Automated bugfixing on CI failures via webhook integration
+- **LLM-powered chores** — Optional API keys (Groq, OpenAI, Gemini, Anthropic) for background tasks like session auto-naming
 
 ## Upgrade
 
