@@ -175,6 +175,9 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
         {displayOptions.map((opt) => {
           const isAllow = isPermission && opt.value === 'allow'
           const isAlwaysAllow = isPermission && opt.value === 'always_allow'
+          const alwaysAllowTitle = isAlwaysAllow
+            ? (approvePattern ? `Auto-approve: ${approvePattern}` : 'Auto-approve this exact command')
+            : undefined
           const isDeny = isPermission && opt.value === 'deny'
           let btnClass = `rounded-full border ${btnPad} transition-colors `
           if (isAllow) {
@@ -190,22 +193,13 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
             <button
               key={opt.value}
               onClick={() => handleSingleAnswer(opt.value)}
-              title={opt.description}
+              title={alwaysAllowTitle ?? opt.description}
               className={btnClass}
             >
               {opt.label}{isAllow && ` (${timeLeft}s)`}
             </button>
           )
         })}
-        {isPermission && approvePattern && (
-          <button
-            onClick={() => handleSingleAnswer('approve_pattern')}
-            title={`Auto-approve all future: ${approvePattern}`}
-            className={`rounded-full border border-warning-7 bg-warning-10/50 ${btnPad} text-warning-4 hover:bg-warning-9/50 transition-colors`}
-          >
-            Approve Pattern: <code className="font-mono">{approvePattern}</code>
-          </button>
-        )}
       </div>
     </div>
   )

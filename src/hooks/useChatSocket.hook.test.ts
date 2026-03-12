@@ -634,10 +634,11 @@ describe('useChatSocket hook', () => {
         multiSelect: false,
         requestId: 'r1',
       } as WsServerMessage))
-      expect(result.current.promptOptions).toEqual([{ label: 'Yes', value: 'yes' }])
-      expect(result.current.promptQuestion).toBe('Allow Bash?')
-      expect(result.current.promptType).toBe('permission')
-      expect(result.current.multiSelect).toBe(false)
+      expect(result.current.activePrompt).not.toBeNull()
+      expect(result.current.activePrompt!.options).toEqual([{ label: 'Yes', value: 'yes' }])
+      expect(result.current.activePrompt!.question).toBe('Allow Bash?')
+      expect(result.current.activePrompt!.promptType).toBe('permission')
+      expect(result.current.activePrompt!.multiSelect).toBe(false)
       unmount()
     })
 
@@ -681,9 +682,7 @@ describe('useChatSocket hook', () => {
       expect(sent.type).toBe('prompt_response')
       expect(sent.value).toBe('yes')
       expect(sent.requestId).toBe('r1')
-      expect(result.current.promptOptions).toBeNull()
-      expect(result.current.promptQuestion).toBeNull()
-      expect(result.current.promptType).toBeNull()
+      expect(result.current.activePrompt).toBeNull()
       unmount()
     })
   })
@@ -725,7 +724,7 @@ describe('useChatSocket hook', () => {
       } as WsServerMessage))
       expect(result.current.waitingSessions).toEqual({ s1: true })
       act(() => result.current.sendInput('response'))
-      expect(result.current.promptOptions).toBeNull()
+      expect(result.current.activePrompt).toBeNull()
       expect(result.current.waitingSessions).toEqual({ s1: false })
       unmount()
     })
@@ -773,14 +772,12 @@ describe('useChatSocket hook', () => {
         question: 'Allow?',
         options: [{ label: 'Yes', value: 'yes' }],
       } as WsServerMessage))
-      expect(result.current.promptOptions).not.toBeNull()
+      expect(result.current.activePrompt).not.toBeNull()
       act(() => ws.simulateMessage({
         type: 'exit', code: 0, signal: null,
       } as WsServerMessage))
       expect(result.current.isProcessing).toBe(false)
-      expect(result.current.promptOptions).toBeNull()
-      expect(result.current.promptQuestion).toBeNull()
-      expect(result.current.promptType).toBeNull()
+      expect(result.current.activePrompt).toBeNull()
       unmount()
     })
   })

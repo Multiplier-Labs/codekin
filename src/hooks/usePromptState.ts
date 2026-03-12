@@ -1,52 +1,84 @@
 /**
- * Encapsulates all prompt-related state for a chat session.
+ * Prompt queue for a chat session.
  *
- * Manages promptOptions, promptQuestion, multiSelect, promptRequestId,
- * promptType, promptQuestions, and approvePattern — extracted from
- * useChatSocket to reduce its state variable count.
+ * Manages a Map<requestId, PromptEntry> of pending prompts, exposing the
+ * oldest entry as the "active" prompt. Replaces the previous single-slot
+ * PromptState that would lose prompts when two arrived before the user
+ * answered the first.
  */
 
 import { useState, useCallback } from 'react'
 import type { PromptOption, PromptQuestion, WsServerMessage } from '../types'
 
-export interface PromptState {
-  promptOptions: PromptOption[] | null
-  promptQuestion: string | null
+export interface PromptEntry {
+  requestId: string
+  options: PromptOption[]
+  question: string | null
   multiSelect: boolean
-  promptRequestId: string | null
   promptType: 'permission' | 'question' | null
-  promptQuestions: PromptQuestion[] | undefined
-  approvePattern: string | undefined
+  questions?: PromptQuestion[]
+  approvePattern?: string
 }
 
-const INITIAL_STATE: PromptState = {
-  promptOptions: null,
-  promptQuestion: null,
-  multiSelect: false,
-  promptRequestId: null,
-  promptType: null,
-  promptQuestions: undefined,
-  approvePattern: undefined,
+interface UsePromptStateReturn {
+  /** The prompt the user should see (oldest in queue, i.e. first-in-first-served). */
+  active: PromptEntry | null
+  /** Total number of pending prompts (for badge/indicator). */
+  queueSize: number
+  /** Add a prompt to the queue. */
+  enqueue: (msg: WsServerMessage & { type: 'prompt' }) => void
+  /** Remove a specific prompt by requestId. If undefined, removes the oldest entry. */
+  dismiss: (requestId?: string) => void
+  /** Remove all prompts (used on session leave/switch). */
+  clearAll: () => void
 }
 
-export function usePromptState() {
-  const [state, setState] = useState<PromptState>(INITIAL_STATE)
+export function usePromptState(): UsePromptStateReturn {
+  const [queue, setQueue] = useState<Map<string, PromptEntry>>(new Map())
 
-  const clear = useCallback(() => {
-    setState(INITIAL_STATE)
-  }, [])
-
-  const setFromMessage = useCallback((msg: WsServerMessage & { type: 'prompt' }) => {
-    setState({
-      promptOptions: msg.options,
-      promptQuestion: msg.question || null,
+  const enqueue = useCallback((msg: WsServerMessage & { type: 'prompt' }) => {
+    const requestId = msg.requestId
+      ?? crypto?.randomUUID?.()
+      ?? `local-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+    const entry: PromptEntry = {
+      requestId,
+      options: msg.options,
+      question: msg.question || null,
       multiSelect: msg.multiSelect ?? false,
-      promptRequestId: msg.requestId ?? null,
       promptType: msg.promptType ?? null,
-      promptQuestions: msg.questions,
+      questions: msg.questions,
       approvePattern: msg.approvePattern,
+    }
+    setQueue(prev => {
+      const next = new Map(prev)
+      next.set(requestId, entry)
+      return next
     })
   }, [])
 
-  return { state, clear, setFromMessage }
+  const dismiss = useCallback((requestId?: string) => {
+    setQueue(prev => {
+      if (requestId) {
+        if (!prev.has(requestId)) return prev
+        const next = new Map(prev)
+        next.delete(requestId)
+        return next
+      }
+      // No requestId — delete the oldest entry (first key)
+      if (prev.size === 0) return prev
+      const next = new Map(prev)
+      const firstKey = next.keys().next().value
+      if (firstKey !== undefined) next.delete(firstKey)
+      return next
+    })
+  }, [])
+
+  const clearAll = useCallback(() => {
+    setQueue(prev => prev.size === 0 ? prev : new Map())
+  }, [])
+
+  // Active prompt is the oldest entry (first in insertion order)
+  const active = queue.size > 0 ? queue.values().next().value ?? null : null
+
+  return { active, queueSize: queue.size, enqueue, dismiss, clearAll }
 }

@@ -173,7 +173,7 @@ export function useChatSocket({
   const [currentModel, setCurrentModel] = useState<string | null>(() => localStorage.getItem('claude-model') ?? null)
   const [thinkingSummary, setThinkingSummary] = useState<string | null>(null)
   const [waitingSessions, setWaitingSessions] = useState<Record<string, boolean>>({})
-  const { state: promptState, clear: clearPromptState, setFromMessage: setPromptFromMessage } = usePromptState()
+  const { active: activePrompt, queueSize: promptQueueSize, enqueue: enqueuePrompt, dismiss: dismissPrompt, clearAll: clearAllPrompts } = usePromptState()
   const currentSessionId = useRef<string | null>(null)
 
   // ---------------------------------------------------------------------------
@@ -295,12 +295,12 @@ export function useChatSocket({
         if (sid) {
           setWaitingSessions(prev => ({ ...prev, [sid]: true }))
         }
-        setPromptFromMessage(msg)
+        enqueuePrompt(msg)
         break
       }
 
       case 'prompt_dismiss':
-        clearPromptState()
+        dismissPrompt(msg.requestId)
         break
 
       case 'session_created':
@@ -349,7 +349,7 @@ export function useChatSocket({
         if (sid) {
           setWaitingSessions(prev => prev[sid] ? { ...prev, [sid]: false } : prev)
         }
-        clearPromptState()
+        clearAllPrompts()
         break
       }
 
@@ -385,7 +385,7 @@ export function useChatSocket({
         break
 
     }
-  }, [flushPendingText, flushBeforeStructuralMessage, clearPromptState, setPromptFromMessage])
+  }, [flushPendingText, flushBeforeStructuralMessage, enqueuePrompt, dismissPrompt, clearAllPrompts])
 
   const handleMessageRef = useRef(handleMessage)
   useEffect(() => { handleMessageRef.current = handleMessage }, [handleMessage])
@@ -432,18 +432,20 @@ export function useChatSocket({
     if (sid) {
       setWaitingSessions(prev => prev[sid] ? { ...prev, [sid]: false } : prev)
     }
-    clearPromptState()
-  }, [send, clearPromptState])
+    clearAllPrompts()
+  }, [send, clearAllPrompts])
 
   const sendPromptResponse = useCallback((value: string | string[]) => {
-    send({ type: 'prompt_response', value, requestId: promptState.promptRequestId ?? undefined } as WsClientMessage)
+    const requestId = activePrompt?.requestId
+    send({ type: 'prompt_response', value, requestId } as WsClientMessage)
+    // Remove answered prompt from queue — next one (if any) becomes active
+    if (requestId) dismissPrompt(requestId)
     setIsProcessing(true)
     const sid = currentSessionId.current
     if (sid) {
       setWaitingSessions(prev => prev[sid] ? { ...prev, [sid]: false } : prev)
     }
-    clearPromptState()
-  }, [send, promptState.promptRequestId, clearPromptState])
+  }, [send, activePrompt?.requestId, dismissPrompt])
 
   const leaveSession = useCallback(() => {
     send({ type: 'leave_session' })
@@ -475,12 +477,8 @@ export function useChatSocket({
     isProcessing,
     thinkingSummary,
     waitingSessions,
-    promptOptions: promptState.promptOptions,
-    promptQuestion: promptState.promptQuestion,
-    promptType: promptState.promptType,
-    promptQuestions: promptState.promptQuestions,
-    approvePattern: promptState.approvePattern,
-    multiSelect: promptState.multiSelect,
+    activePrompt,
+    promptQueueSize,
     currentModel,
     send,
     joinSession,

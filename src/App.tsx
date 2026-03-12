@@ -80,12 +80,8 @@ export default function App() {
     isProcessing,
     thinkingSummary,
     waitingSessions,
-    promptOptions,
-    promptQuestion,
-    promptType,
-    promptQuestions,
-    approvePattern,
-    multiSelect,
+    activePrompt,
+    promptQueueSize,
     joinSession,
     createSession: wsCreateSession,
     sendInput,
@@ -460,7 +456,7 @@ export default function App() {
                 key={`docs-${activeSessionId}`}
                 ref={inputBarRef}
                 onSendInput={handleSendWithFiles}
-                isWaiting={!!promptOptions}
+                isWaiting={!!activePrompt}
                 disabled={!settings.token}
                 onEscape={docsBrowser.close}
                 pendingFiles={pendingFiles}
@@ -498,8 +494,23 @@ export default function App() {
             </div>
 
             {/* Smart prompt buttons (conditional) */}
-            {promptOptions && (
-              <PromptButtons options={promptOptions} question={promptQuestion} multiSelect={multiSelect} promptType={promptType} questions={promptQuestions} approvePattern={approvePattern} onSelect={sendPromptResponse} isMobile={isMobile} />
+            {activePrompt && (
+              <PromptButtons
+                key={activePrompt.requestId}
+                options={activePrompt.options}
+                question={activePrompt.question}
+                multiSelect={activePrompt.multiSelect}
+                promptType={activePrompt.promptType}
+                questions={activePrompt.questions}
+                approvePattern={activePrompt.approvePattern}
+                onSelect={sendPromptResponse}
+                isMobile={isMobile}
+              />
+            )}
+            {promptQueueSize > 1 && (
+              <div className="px-3 py-1 text-[12px] text-neutral-5 bg-neutral-11 border-t border-neutral-10">
+                {promptQueueSize - 1} more pending
+              </div>
             )}
 
             {/* Tentative banner */}
@@ -517,7 +528,7 @@ export default function App() {
               key={activeSessionId ?? 'no-session'}
               ref={inputBarRef}
               onSendInput={handleSendWithFiles}
-              isWaiting={!!promptOptions}
+              isWaiting={!!activePrompt}
               disabled={!settings.token}
               onEscape={() => {}}
               pendingFiles={pendingFiles}

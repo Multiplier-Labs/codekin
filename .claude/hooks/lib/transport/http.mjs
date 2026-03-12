@@ -61,7 +61,10 @@ export class HttpTransport {
     try {
       await fetch(this.notifyUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.authToken ? { Authorization: `Bearer ${this.authToken}` } : {}),
+        },
         body: JSON.stringify(data),
         signal: AbortSignal.timeout(5000),
       });

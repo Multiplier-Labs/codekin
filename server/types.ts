@@ -61,6 +61,8 @@ export interface Session {
   _apiRetryCount: number
   /** Timer handle for scheduled API error retry. */
   _apiRetryTimer?: ReturnType<typeof setTimeout>
+  /** Grace period timer before auto-denying prompts after last client leaves. */
+  _leaveGraceTimer?: ReturnType<typeof setTimeout> | null
 }
 
 /** Serializable session info returned by the REST API (no process refs or Sets). */

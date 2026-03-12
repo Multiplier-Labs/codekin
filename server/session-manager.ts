@@ -263,6 +263,7 @@ export class SessionManager {
       isProcessing: false,
       pendingControlRequests: new Map(),
       pendingToolApprovals: new Map(),
+      _leaveGraceTimer: null,
     }
     this.sessions.set(id, session)
     this.persistToDisk()
@@ -311,6 +312,12 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return undefined
 
+    // Cancel pending auto-deny from leave grace period
+    if (session._leaveGraceTimer) {
+      clearTimeout(session._leaveGraceTimer)
+      session._leaveGraceTimer = null
+    }
+
     session.clients.add(ws)
 
     // Re-broadcast pending tool approval prompts (PreToolUse hook path)
@@ -332,29 +339,38 @@ export class SessionManager {
     return session
   }
 
-  /** Remove a WebSocket client from a session. Auto-denies pending prompts if last client leaves. */
+  /** Remove a WebSocket client from a session. Auto-denies pending prompts if last client leaves (after grace period). */
   leave(sessionId: string, ws: WebSocket): void {
     const session = this.sessions.get(sessionId)
     if (session) {
       session.clients.delete(ws)
 
-      // If no clients remain, auto-deny all pending prompts to prevent hangs
+      // If no clients remain, wait a grace period before auto-denying.
+      // This prevents false denials when the user is just refreshing the page.
       if (session.clients.size === 0) {
-        if (session.pendingControlRequests.size > 0) {
-          console.log(`[session] last client left, auto-denying ${session.pendingControlRequests.size} pending control requests`)
-          for (const [requestId] of session.pendingControlRequests) {
-            session.claudeProcess?.sendControlResponse(requestId, 'deny')
+        if (session._leaveGraceTimer) clearTimeout(session._leaveGraceTimer)
+
+        session._leaveGraceTimer = setTimeout(() => {
+          session._leaveGraceTimer = null
+          // Re-check: if still no clients after grace period, auto-deny
+          if (session.clients.size === 0) {
+            if (session.pendingControlRequests.size > 0) {
+              console.log(`[session] last client left, auto-denying ${session.pendingControlRequests.size} pending control requests`)
+              for (const [requestId] of session.pendingControlRequests) {
+                session.claudeProcess?.sendControlResponse(requestId, 'deny')
+              }
+              session.pendingControlRequests.clear()
+            }
+            if (session.pendingToolApprovals.size > 0) {
+              console.log(`[session] last client left, auto-denying ${session.pendingToolApprovals.size} pending tool approval(s)`)
+              for (const [reqId, pending] of session.pendingToolApprovals) {
+                pending.resolve({ allow: false, always: false })
+                this.broadcast(session, { type: 'prompt_dismiss', requestId: reqId })
+              }
+              session.pendingToolApprovals.clear()
+            }
           }
-          session.pendingControlRequests.clear()
-        }
-        if (session.pendingToolApprovals.size > 0) {
-          console.log(`[session] last client left, auto-denying ${session.pendingToolApprovals.size} pending tool approval(s)`)
-          for (const [reqId, pending] of session.pendingToolApprovals) {
-            pending.resolve({ allow: false, always: false })
-            this.broadcast(session, { type: 'prompt_dismiss', requestId: reqId })
-          }
-          session.pendingToolApprovals.clear()
-        }
+        }, 3000)
       }
     }
   }
@@ -369,6 +385,7 @@ export class SessionManager {
     this.clearStallTimer(session)
     if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
     if (session._namingTimer) clearTimeout(session._namingTimer)
+    if (session._leaveGraceTimer) clearTimeout(session._leaveGraceTimer)
 
     // Kill claude process if running
     if (session.claudeProcess) {
@@ -833,10 +850,38 @@ export class SessionManager {
     if (!session) return
 
     // Check for pending tool approval from PreToolUse hook
-    // Match by requestId if provided, otherwise fall back to oldest pending approval
-    const approval = requestId
-      ? session.pendingToolApprovals.get(requestId)
-      : session.pendingToolApprovals.values().next().value  // fallback: oldest
+    if (!requestId) {
+      const totalPending = session.pendingToolApprovals.size + session.pendingControlRequests.size
+      if (totalPending === 1) {
+        // Exactly one pending prompt — safe to infer the target
+        const soleApproval = session.pendingToolApprovals.size === 1
+          ? session.pendingToolApprovals.values().next().value
+          : undefined
+        if (soleApproval) {
+          console.warn(`[prompt_response] no requestId, routing to sole pending tool approval: ${soleApproval.toolName}`)
+          this.resolveToolApproval(session, soleApproval, value)
+          return
+        }
+        const soleControl = session.pendingControlRequests.size === 1
+          ? session.pendingControlRequests.values().next().value
+          : undefined
+        if (soleControl) {
+          console.warn(`[prompt_response] no requestId, routing to sole pending control request: ${soleControl.toolName}`)
+          requestId = soleControl.requestId
+        }
+      } else if (totalPending > 1) {
+        console.warn(`[prompt_response] no requestId with ${totalPending} pending prompts — rejecting to prevent misrouted response`)
+        this.broadcast(session, {
+          type: 'system_message',
+          subtype: 'error',
+          text: 'Prompt response could not be routed: multiple prompts pending. Please refresh and try again.',
+        })
+        return
+      } else {
+        console.warn(`[prompt_response] no requestId, no pending prompts — forwarding as user message`)
+      }
+    }
+    const approval = requestId ? session.pendingToolApprovals.get(requestId) : undefined
     if (approval) {
       this.resolveToolApproval(session, approval, value)
       return
@@ -845,9 +890,7 @@ export class SessionManager {
     if (!session.claudeProcess?.isAlive()) return
 
     // Find matching pending control request
-    const pending = requestId
-      ? session.pendingControlRequests.get(requestId)
-      : session.pendingControlRequests.values().next().value  // fallback: oldest
+    const pending = requestId ? session.pendingControlRequests.get(requestId) : undefined
 
     if (pending) {
       session.pendingControlRequests.delete(pending.requestId)

@@ -291,10 +291,20 @@ export function createSessionRouter(
     console.log(`[hook-notify] session=${sessionId} type=${notificationType} title=${title}`)
     const session = sessions.get(sessionId)
     if (session) {
-      const text = title ? `${title}: ${message}` : (message || 'Notification')
-      const msg: WsServerMessage = { type: 'system_message', subtype: 'notification', text }
-      sessions.addToHistory(session, msg)
-      sessions.broadcast(session, msg)
+      if (notificationType === 'hook_denial') {
+        const toolName = req.body.toolName || ''
+        const toolInput = req.body.toolInput || {}
+        const suggestion = buildAccessSuggestion(toolName, toolInput)
+        const text = `\u26A0 ${title}: ${message}${suggestion ? `\n${suggestion}` : ''}`
+        const msg: WsServerMessage = { type: 'system_message', subtype: 'error', text }
+        sessions.addToHistory(session, msg)
+        sessions.broadcast(session, msg)
+      } else {
+        const text = title ? `${title}: ${message}` : (message || 'Notification')
+        const msg: WsServerMessage = { type: 'system_message', subtype: 'notification', text }
+        sessions.addToHistory(session, msg)
+        sessions.broadcast(session, msg)
+      }
     }
     res.json({ ok: true })
   })
@@ -310,4 +320,28 @@ export function createSessionRouter(
   })
 
   return router
+}
+
+/** CLIs where the subcommand matters for pattern scoping (e.g. "git push *" not "git *"). */
+const KNOWN_TWO_TOKEN_CLIS = new Set(['git', 'gh', 'npm', 'npx', 'pnpm', 'yarn', 'bun', 'cargo', 'go', 'docker'])
+
+/** Generate an actionable suggestion for how to grant access after a hook denial. */
+function buildAccessSuggestion(toolName: string, toolInput: Record<string, unknown>): string {
+  if (toolName === 'Bash') {
+    const cmd = String(toolInput.command || '')
+    const tokens = cmd.split(/\s+/).filter(Boolean)
+    if (tokens.length === 0) return ''
+    const twoToken = tokens.length >= 2 ? `${tokens[0]} ${tokens[1]}` : ''
+    const prefix = KNOWN_TWO_TOKEN_CLIS.has(tokens[0]) && twoToken ? twoToken : tokens[0]
+    return [
+      `Use the Approvals panel to add "${prefix} *" as a pattern for this repo.`,
+      `If approvals aren't appearing, check that the Codekin server is reachable.`,
+    ].join('\n')
+  }
+
+  if (['Write', 'Edit', 'WebFetch', 'WebSearch', 'Agent'].includes(toolName)) {
+    return `To allow ${toolName} in future, run on your machine:\n\`claude config add allowedTools "${toolName}"\``
+  }
+
+  return ''
 }
