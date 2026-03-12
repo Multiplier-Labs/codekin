@@ -18,7 +18,7 @@ When Claude edits files during a session, the changes are visible only as tool a
 - **Keyboard shortcut**: `Ctrl+Shift+D` / `Cmd+Shift+D`.
 - The panel opens as a **right sidebar**, alongside the chat. It does NOT replace the chat — both are visible side by side.
 - On mobile, it opens as a **full-screen overlay** (slide-in from right) with a close button.
-- Panel header shows a **colored status indicator** (green dot when changes present, neutral when clean) alongside the title.
+- Panel header shows a **colored status indicator** (green dot when `summary.filesChanged > 0` for the current scope, neutral when zero) alongside the title.
 
 ### Layout
 
@@ -76,7 +76,7 @@ Each card header contains:
 - **Action buttons** (icon-only, right-aligned):
   - **Open file**: Opens the file for viewing (pencil/external-link icon).
   - **Copy path**: Copies the relative file path to clipboard.
-  - **Undo / Discard file**: Reverts changes for this single file (`git checkout -- <path>`). Requires confirmation.
+  - **Undo / Discard file**: Reverts changes for this single file using the active scope's discard behavior (see [Discard Behavior](#discard-behavior)). Requires confirmation.
   - **Expand / Collapse toggle**: Collapses the card to header-only.
 
 #### Card Body (Diff Content)
@@ -91,9 +91,9 @@ Each card header contains:
 
 The top of the panel contains controls and summary info:
 
-- **Branch indicator**: Shows the current branch name (read-only, informational).
+- **Branch indicator**: Shows the current branch name (read-only, informational). When in detached HEAD state (`git rev-parse --abbrev-ref HEAD` returns `"HEAD"`), display the short commit SHA instead (via `git rev-parse --short HEAD`) prefixed with "detached at".
 - **Scope selector**: Dropdown to switch between `Uncommitted changes` (default, `git diff HEAD`), `Staged`, and `Unstaged`. Changing scope re-fetches the diff. The dropdown label includes a file count badge (e.g. `Uncommitted changes (5)`).
-- **Discard all**: A destructive action button (red text, confirmation required) that runs `git checkout -- .` to revert all unstaged changes. Only shown when scope is `Uncommitted changes` or `Unstaged`.
+- **Discard all**: A destructive action button (red text, confirmation required) that reverts all changes visible in the current scope. Behavior varies by scope — see [Discard Behavior](#discard-behavior) below. Always shown (disabled when no changes).
 - **Summary line**: Total files changed, total insertions, total deletions. Example: `5 files changed  +87 −23`
 - **Refresh button**: Re-fetch the current diff state.
 
@@ -113,7 +113,7 @@ We do **not** try to reconstruct diffs from tool events (too fragile — Bash co
 
 ```typescript
 | { type: 'get_diff'; scope?: 'staged' | 'unstaged' | 'all' }
-| { type: 'discard_changes'; paths?: string[] }
+| { type: 'discard_changes'; scope: 'staged' | 'unstaged' | 'all'; paths?: string[] }
 ```
 
 **`get_diff`**:
@@ -124,15 +124,15 @@ We do **not** try to reconstruct diffs from tool events (too fragile — Bash co
 - Requests the current diff for the active session's working directory.
 
 **`discard_changes`**:
-- `paths` — optional array of relative file paths to discard. If omitted, discards all unstaged changes.
-- For tracked files: runs `git checkout -- <paths>`.
-- For untracked files in `paths`: runs `rm <path>` for each.
+- `scope` — required, determines which changes to discard. Must match the currently active scope in the UI.
+- `paths` — optional array of relative file paths to discard. If omitted, discards all changes in the given scope.
+- Behavior per scope — see [Discard Behavior](#discard-behavior).
 - Server sends a `diff_result` after discarding (auto-refresh).
 
 #### Server → Client
 
 ```typescript
-| { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary; branch: string; scope: 'staged' | 'unstaged' | 'all'; truncated?: boolean }
+| { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary; branch: string; scope: 'staged' | 'unstaged' | 'all' }
 | { type: 'diff_error'; message: string }
 ```
 
@@ -180,7 +180,7 @@ On receiving `get_diff`, the session manager:
 
 1. Validates the requesting client is joined to a session.
 2. Resolves the `workingDir` from the server-side session record (never from client input).
-3. Runs `git rev-parse --abbrev-ref HEAD` to get the current branch name (included in the response as `branch`).
+3. Runs `git rev-parse --abbrev-ref HEAD` to get the current branch name (included in the response as `branch`). If the result is `"HEAD"` (detached state), falls back to `git rev-parse --short HEAD` and prefixes with `"detached at "` (e.g. `"detached at a1b2c3d"`).
 4. Runs `git diff` (per scope, see above) with `--find-renames --no-color --unified=3` as a fixed argv array (no shell interpolation). Also runs `git ls-files --others --exclude-standard` to discover untracked files.
 5. For each untracked file, generates a synthetic "added" diff by diffing `/dev/null` against the file content (does **not** mutate the index with `git add -N`).
 6. Parses the combined output into `DiffFile[]`. If raw output exceeds **2 MB**, parsing stops, `truncated` is set to `true`, and files parsed so far are returned.
@@ -193,10 +193,38 @@ On receiving `discard_changes`, the session manager:
 1. Validates the requesting client is joined to a session.
 2. Resolves the `workingDir` from the server-side session record.
 3. Validates each path in `paths` (if provided) — must be relative, no `..` traversal, must exist within `workingDir`.
-4. For tracked files: runs `git checkout -- <paths>` (or `git checkout -- .` if `paths` is omitted).
-5. For untracked files in `paths`: deletes them with `fs.unlink`.
-6. After discard completes, automatically sends a fresh `diff_result` to the client.
-7. On error, sends `diff_error`.
+4. Executes discard per the scope and file status — see [Discard Behavior](#discard-behavior).
+5. After discard completes, automatically sends a fresh `diff_result` to the client.
+6. On error, sends `diff_error`.
+
+### Discard Behavior
+
+Discard uses `git restore` (requires Git 2.23+) with flags that match the active scope. The behavior also depends on the file's status.
+
+#### Commands by scope
+
+| Scope | Git command | Effect |
+|-------|------------|--------|
+| `unstaged` | `git restore --worktree -- <paths>` | Restores working tree from index |
+| `staged` | `git restore --staged -- <paths>` | Unstages changes (moves them back to working tree) |
+| `all` | `git restore --staged --worktree -- <paths>` | Fully reverts to HEAD |
+
+When `paths` is omitted, replace `<paths>` with `.` to affect all files.
+
+#### Per-status handling
+
+| Status | `unstaged` scope | `staged` scope | `all` scope |
+|--------|-----------------|----------------|-------------|
+| **Modified** | `git restore --worktree` | `git restore --staged` | `git restore --staged --worktree` |
+| **Deleted** | `git restore --worktree` (recreates file) | `git restore --staged` (unstages deletion) | `git restore --staged --worktree` (recreates file) |
+| **Added (untracked)** | Delete with `fs.unlink` | N/A (untracked files can't be staged without `git add`) | Delete with `fs.unlink` |
+| **Added (staged new file)** | N/A (file only in index) | `git rm --cached -- <path>` (unstages, leaves on disk) | `git rm --cached -- <path>` + `fs.unlink` (fully removes) |
+| **Renamed** | Treat as delete (new path) + add (old path): restore old path, remove new path | `git restore --staged` on both old and new paths | Restore old path, remove new path, unstage both |
+
+#### Safety
+
+- All file deletions use `fs.unlink` (no shell `rm`). Directories are never recursively deleted.
+- Paths are validated server-side before any operation — no `..` traversal, must resolve within `workingDir`.
 
 **Constraints:**
 - Git commands run with a **10-second timeout** and **2 MB stdout cap** (`maxBuffer`).
@@ -292,8 +320,10 @@ The `DiffHunkView` component wraps `react-diff-view`'s `<Diff>` and `<Hunk>` com
 - **Uncommitted new files**: Untracked files are discovered via `git ls-files --others --exclude-standard` and diffed as synthetic additions (compare `/dev/null` to file content). The server does **not** run `git add -N` or otherwise mutate the index.
 - **Renamed files**: Detected via `git diff --find-renames` and displayed in the file tree as `R old → new` with a blue badge.
 - **Session without active Claude process**: Diff is still available — it reads the filesystem, not the process.
-- **Discard confirmation**: Both "Discard all" and per-file discard require a confirmation dialog ("Are you sure? This cannot be undone.") before executing. The dialog uses destructive styling (red confirm button).
+- **Detached HEAD**: Branch indicator shows `"detached at <short-sha>"` instead of a branch name.
+- **Discard confirmation**: Both "Discard all" and per-file discard require a confirmation dialog ("Are you sure? This cannot be undone.") before executing. The dialog uses destructive styling (red confirm button). For "Discard all" when untracked files are present, the dialog explicitly warns that untracked files will be deleted.
 - **Discard while Claude is running**: Discard is allowed even when a Claude process is active — the user may want to revert a bad edit mid-session. The diff panel refreshes after discard completes.
+- **Git version requirement**: Discard requires Git 2.23+ for `git restore`. If `git restore` is not available, fall back to `git checkout --` for worktree restores and `git reset HEAD --` for unstaging, with a logged warning.
 
 ---
 
