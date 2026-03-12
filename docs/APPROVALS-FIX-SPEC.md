@@ -244,6 +244,137 @@ Already handled by the `dismiss(requestId)` method in the new `usePromptState` (
 
 ---
 
+## Fix 5: Surface silent hook denials in the UI
+
+**Problem:** When the PreToolUse hook denies a tool due to server error, timeout, or auth failure, the denial reason is returned to Claude CLI but **never appears in the Codekin UI**. The user sees Claude say something like "the tool was denied" or "I'm unable to run that command" with no context about *why*. This is the root cause of the "approval isn't going through" class of bugs — the user doesn't know the approval was never presented to them.
+
+**Files to change:**
+
+### `.claude/hooks/pre-tool-use.mjs` — Notify server on denial
+
+When the hook denies a tool (server error, invalid response, or explicit deny), fire a best-effort notification to the existing `/api/hook-notify` endpoint so the UI can display a system message. The `HttpTransport.notify()` method already exists and is fire-and-forget.
+
+```javascript
+// After the catch block (server error) and the invalid-response block:
+// Add a notify call before returning the deny decision
+
+async function denyWithNotification(transport, ctx, toolName, toolInput, reason) {
+  // Fire-and-forget notification to the UI
+  const hubSessionId = ctx.env.hubSessionId;
+  if (hubSessionId) {
+    transport.notify({
+      sessionId: hubSessionId,
+      notificationType: 'hook_denial',
+      title: `Permission denied: ${toolName}`,
+      message: reason,
+    });
+  }
+
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: reason,
+    },
+  };
+}
+```
+
+Replace the three deny return points in the handler:
+
+1. **Invalid auth (webhook sessions):** `return denyWithNotification(transport, ctx, input.tool_name, input.tool_input, auth.error)`
+2. **Invalid server response:** `return denyWithNotification(transport, ctx, input.tool_name, input.tool_input, 'Invalid server response')`
+3. **Server error / timeout (catch block):** `return denyWithNotification(transport, ctx, input.tool_name, input.tool_input, \`Server error: ${err.message}\`)`
+
+The existing `/api/hook-notify` endpoint in `server/session-routes.ts` already broadcasts system messages to the session — no server changes needed for the basic notification.
+
+### UI enhancement: Actionable denial messages
+
+When a denial notification arrives, the system message should include guidance on how to grant access. Update the `/api/hook-notify` handler to detect `notificationType: 'hook_denial'` and enrich the message:
+
+**File:** `server/session-routes.ts` — Enhance the hook-notify handler
+
+```typescript
+router.post('/api/hook-notify', (req, res) => {
+  // ... existing auth + validation ...
+
+  if (notificationType === 'hook_denial') {
+    const toolName = req.body.toolName || ''
+    const toolInput = req.body.toolInput || {}
+    const suggestion = buildAccessSuggestion(toolName, toolInput, session.workingDir)
+    const text = `⚠ ${title}: ${message}${suggestion ? `\n${suggestion}` : ''}`
+    const msg: WsServerMessage = { type: 'system_message', subtype: 'error', text }
+    sessions.addToHistory(session, msg)
+    sessions.broadcast(session, msg)
+  } else {
+    // ... existing notification logic ...
+  }
+
+  res.json({ ok: true })
+})
+```
+
+The `buildAccessSuggestion()` helper generates a CLI command the user can run on their machine to pre-approve the tool:
+
+```typescript
+function buildAccessSuggestion(toolName: string, toolInput: Record<string, unknown>, workingDir: string): string {
+  // Claude Code's native permission system uses exact-match or pattern rules
+  // stored in .claude/settings.local.json under permissions.allow[]
+  //
+  // Format: "ToolName" for non-Bash tools, "Bash(command)" for exact Bash commands
+  // Users can also add to ~/.claude/settings.local.json manually
+  //
+  // The claude CLI has a built-in way to manage permissions:
+  //   claude config add allowedTools "Bash(npm install*)"
+
+  if (toolName === 'Bash') {
+    const cmd = String(toolInput.command || '')
+    // Derive a safe pattern — use the first token(s) as a prefix
+    const firstToken = cmd.split(/\s+/)[0]
+    const pattern = `Bash(${firstToken} *)`
+    return `💡 To allow this in future, run on your machine:\n\`claude config add allowedTools "${pattern}"\``
+  }
+
+  if (['Write', 'Edit', 'WebFetch', 'WebSearch', 'Agent'].includes(toolName)) {
+    return `💡 To allow ${toolName} in future, run on your machine:\n\`claude config add allowedTools "${toolName}"\``
+  }
+
+  return ''
+}
+```
+
+### What the user sees
+
+**Before (current):** Claude says "I'm unable to run yarn install because it requires approval that isn't going through." No system message, no context.
+
+**After:** A system message appears in the chat:
+
+```
+⚠ Permission denied: Bash: Server error: fetch failed
+💡 To allow this in future, run on your machine:
+`claude config add allowedTools "Bash(yarn *)"`
+```
+
+This gives the user:
+1. **Visibility** — they know the approval was blocked, not lost
+2. **Actionability** — a copy-pasteable command to permanently allow the tool
+3. **Context** — the reason (server error, timeout, auth failure) helps debug
+
+### Note on `claude config` CLI
+
+The `claude config add allowedTools` command is the official Claude Code way to manage permissions. It writes to `.claude/settings.local.json` (user-local, not committed). Key patterns:
+
+| Command | What it allows |
+|---|---|
+| `claude config add allowedTools "Bash(npm *)"` | Any Bash command starting with `npm` |
+| `claude config add allowedTools "Bash(cd /srv/repos/* && *)"` | Commands that cd into any repo |
+| `claude config add allowedTools "Write"` | All Write tool calls |
+| `claude config add allowedTools "WebSearch"` | All web searches |
+
+For project-scoped permissions (only apply to one repo), add `--project` flag or edit `.claude/settings.local.json` in the project's `.claude/` directory.
+
+---
+
 ## Files Changed Summary
 
 | File | Change |
@@ -253,6 +384,8 @@ Already handled by the `dismiss(requestId)` method in the new `usePromptState` (
 | `src/App.tsx` | Consume `activePrompt` + `promptQueueSize` instead of 6 fields |
 | `src/components/PromptButtons.tsx` | No changes needed (receives same props, `key` prop handles remount) |
 | `server/session-manager.ts` | Remove requestId fallback, add leave grace period + timer field |
+| `.claude/hooks/pre-tool-use.mjs` | Add `denyWithNotification()` helper, notify server on all deny paths |
+| `server/session-routes.ts` | Enhance `/api/hook-notify` to detect `hook_denial` and append access suggestion |
 
 ## Test Plan
 
@@ -261,3 +394,5 @@ Already handled by the `dismiss(requestId)` method in the new `usePromptState` (
 3. **Page refresh:** Trigger a Bash approval, refresh the page mid-prompt. Verify the prompt re-appears after reconnect (not silently denied).
 4. **No requestId:** Send a `prompt_response` with no `requestId` via devtools WebSocket. Verify it falls through to plain message, not matched to a random approval.
 5. **Auto-allow countdown:** Verify the 15s countdown resets correctly when a new prompt becomes active after answering the previous one (guaranteed by `key` prop remount).
+6. **Silent denial visibility:** Stop the Codekin server, trigger a Bash command in an active session. Verify the hook denial appears as a system error message in the chat with a `claude config add allowedTools` suggestion.
+7. **Access suggestion accuracy:** Trigger denials for Bash, Write, and WebSearch tools. Verify each produces a correct, copy-pasteable `claude config` command.
