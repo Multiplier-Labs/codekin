@@ -124,9 +124,21 @@ export function useSendMessage({
     const hasConflict = !!activeWorkingDir &&
       sessions.some(s => groupKey(s) === activeWorkingDir && s.isProcessing && s.id !== activeSessionId)
     if (activeSessionId && (isAlreadyTentative || hasConflict)) {
-      addToQueue(activeSessionId, docsPrefix + expanded, pendingFiles)
       if (pendingFiles.length > 0) {
         setSessionPendingFiles(prev => ({ ...prev, [activeSessionId]: [] }))
+        setUploadStatus('Uploading files...')
+        try {
+          const message = await uploadAndBuildMessage(token, pendingFiles, docsPrefix + expanded)
+          addToQueue(activeSessionId, message)
+          setUploadStatus(null)
+        } catch (err) {
+          // Upload failed — queue text only so the message isn't lost
+          addToQueue(activeSessionId, docsPrefix + expanded)
+          setUploadStatus(`Upload failed: ${err instanceof Error ? err.message : 'unknown error'}`)
+          setTimeout(() => setUploadStatus(null), 3000)
+        }
+      } else {
+        addToQueue(activeSessionId, docsPrefix + expanded)
       }
       return
     }
