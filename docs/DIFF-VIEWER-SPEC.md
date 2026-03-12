@@ -18,19 +18,28 @@ When Claude edits files during a session, the changes are visible only as tool a
 - **Keyboard shortcut**: `Ctrl+Shift+D` / `Cmd+Shift+D`.
 - The panel opens as a **right sidebar**, alongside the chat. It does NOT replace the chat — both are visible side by side.
 - On mobile, it opens as a **full-screen overlay** (slide-in from right) with a close button.
+- Panel header shows a **colored status indicator** (green dot when changes present, neutral when clean) alongside the title.
 
 ### Layout
 
 ```
-┌────────────┐ ┌──────────────────────┐ ┌─────────────────┐
-│  Left      │ │   Chat Area          │ │  Diff Viewer    │
-│  Sidebar   │ │                      │ │                 │
-│            │ │                      │ │  file-tree      │
-│            │ │                      │ │  ────────────── │
-│            │ │                      │ │  unified diff   │
-│            │ │                      │ │  (scrollable)   │
-│            │ │                      │ │                 │
-└────────────┘ └──────────────────────┘ └─────────────────┘
+┌────────────┐ ┌──────────────────────┐ ┌─────────────────────┐
+│  Left      │ │   Chat Area          │ │  Diff Viewer        │
+│  Sidebar   │ │                      │ │                     │
+│            │ │                      │ │  [toolbar]          │
+│            │ │                      │ │  branch · scope ▾   │
+│            │ │                      │ │  5 files +87 −23    │
+│            │ │                      │ │  ─────────────────  │
+│            │ │                      │ │  file-tree          │
+│            │ │                      │ │  ─────────────────  │
+│            │ │                      │ │  ┌─ file card ────┐ │
+│            │ │                      │ │  │ path  +3 −1  ⟳│ │
+│            │ │                      │ │  │ diff hunks     │ │
+│            │ │                      │ │  └────────────────┘ │
+│            │ │                      │ │  ┌─ file card ────┐ │
+│            │ │                      │ │  │ ...            │ │
+│            │ │                      │ │  └────────────────┘ │
+└────────────┘ └──────────────────────┘ └─────────────────────┘
 ```
 
 - Default width: **400px**, resizable (drag left edge), min 280px, max 600px.
@@ -55,20 +64,38 @@ Each row shows:
 
 Click a file to scroll the diff section to that file. The active file is highlighted.
 
-### Diff Section (bottom / scrollable)
+### File Cards (scrollable section)
 
-- **Unified diff** format, one file after another, scrollable.
-- Syntax-highlighted with the same theme as code blocks in chat.
+Each changed file is rendered as a **distinct card** with a border and its own header. Cards are stacked vertically in the scrollable area.
+
+#### Card Header
+
+Each card header contains:
+- **File path** (relative to `workingDir`) — clicking the path opens the file in a new tab/panel.
+- **Change counts**: `+N −M` in green/red.
+- **Action buttons** (icon-only, right-aligned):
+  - **Open file**: Opens the file for viewing (pencil/external-link icon).
+  - **Copy path**: Copies the relative file path to clipboard.
+  - **Undo / Discard file**: Reverts changes for this single file (`git checkout -- <path>`). Requires confirmation.
+  - **Expand / Collapse toggle**: Collapses the card to header-only.
+
+#### Card Body (Diff Content)
+
+- **Unified diff** format, syntax-highlighted with the same theme as code blocks in chat.
 - **Two-gutter line numbers**: old line number on the left, new on the right. Added lines show a blank old gutter; deleted lines show a blank new gutter. Context lines show both.
 - Added lines highlighted green, removed lines highlighted red, context lines neutral.
-- **Collapsed by default** for files with >300 changed lines (additions + deletions), click to expand.
-- Each file section has a header bar with the file path and expand/collapse toggle.
+- **Collapsed by default** for files with >300 changed lines (additions + deletions), with a note: "Large diff (N lines) — click to expand."
+- Cards for binary files show a "Binary file" badge with no diff content.
 
-### Summary Bar (sticky top)
+### Toolbar (sticky top)
 
-- Total files changed, total insertions, total deletions.
-- Example: `5 files changed  +87 −23`
-- "Refresh" button to re-fetch the current diff state.
+The top of the panel contains controls and summary info:
+
+- **Branch indicator**: Shows the current branch name (read-only, informational).
+- **Scope selector**: Dropdown to switch between `Uncommitted changes` (default, `git diff HEAD`), `Staged`, and `Unstaged`. Changing scope re-fetches the diff. The dropdown label includes a file count badge (e.g. `Uncommitted changes (5)`).
+- **Discard all**: A destructive action button (red text, confirmation required) that runs `git checkout -- .` to revert all unstaged changes. Only shown when scope is `Uncommitted changes` or `Unstaged`.
+- **Summary line**: Total files changed, total insertions, total deletions. Example: `5 files changed  +87 −23`
+- **Refresh button**: Re-fetch the current diff state.
 
 ---
 
@@ -86,18 +113,26 @@ We do **not** try to reconstruct diffs from tool events (too fragile — Bash co
 
 ```typescript
 | { type: 'get_diff'; scope?: 'staged' | 'unstaged' | 'all' }
+| { type: 'discard_changes'; paths?: string[] }
 ```
 
+**`get_diff`**:
 - `scope` determines which git command runs:
   - `'unstaged'` → `git diff --no-color --unified=3` (working tree vs index)
   - `'staged'` → `git diff --cached --no-color --unified=3` (index vs HEAD)
   - `'all'` (default) → `git diff HEAD --no-color --unified=3` (working tree vs HEAD, combines staged + unstaged)
 - Requests the current diff for the active session's working directory.
 
+**`discard_changes`**:
+- `paths` — optional array of relative file paths to discard. If omitted, discards all unstaged changes.
+- For tracked files: runs `git checkout -- <paths>`.
+- For untracked files in `paths`: runs `rm <path>` for each.
+- Server sends a `diff_result` after discarding (auto-refresh).
+
 #### Server → Client
 
 ```typescript
-| { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary; truncated?: boolean }
+| { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary; branch: string; scope: 'staged' | 'unstaged' | 'all'; truncated?: boolean }
 | { type: 'diff_error'; message: string }
 ```
 
@@ -139,14 +174,29 @@ interface DiffSummary {
 
 ### Server Implementation
 
+#### `get_diff` handler
+
 On receiving `get_diff`, the session manager:
 
 1. Validates the requesting client is joined to a session.
 2. Resolves the `workingDir` from the server-side session record (never from client input).
-3. Runs `git diff` (per scope, see above) with `--find-renames --no-color --unified=3` as a fixed argv array (no shell interpolation). Also runs `git ls-files --others --exclude-standard` to discover untracked files.
-4. For each untracked file, generates a synthetic "added" diff by diffing `/dev/null` against the file content (does **not** mutate the index with `git add -N`).
-5. Parses the combined output into `DiffFile[]`. If raw output exceeds **2 MB**, parsing stops, `truncated` is set to `true`, and files parsed so far are returned.
-6. Sends `diff_result` back to the requesting client only (not broadcast). On error (e.g. not a git repo, git not found), sends `diff_error` instead.
+3. Runs `git rev-parse --abbrev-ref HEAD` to get the current branch name (included in the response as `branch`).
+4. Runs `git diff` (per scope, see above) with `--find-renames --no-color --unified=3` as a fixed argv array (no shell interpolation). Also runs `git ls-files --others --exclude-standard` to discover untracked files.
+5. For each untracked file, generates a synthetic "added" diff by diffing `/dev/null` against the file content (does **not** mutate the index with `git add -N`).
+6. Parses the combined output into `DiffFile[]`. If raw output exceeds **2 MB**, parsing stops, `truncated` is set to `true`, and files parsed so far are returned.
+7. Sends `diff_result` (including `branch` and `scope`) back to the requesting client only (not broadcast). On error (e.g. not a git repo, git not found), sends `diff_error` instead.
+
+#### `discard_changes` handler
+
+On receiving `discard_changes`, the session manager:
+
+1. Validates the requesting client is joined to a session.
+2. Resolves the `workingDir` from the server-side session record.
+3. Validates each path in `paths` (if provided) — must be relative, no `..` traversal, must exist within `workingDir`.
+4. For tracked files: runs `git checkout -- <paths>` (or `git checkout -- .` if `paths` is omitted).
+5. For untracked files in `paths`: deletes them with `fs.unlink`.
+6. After discard completes, automatically sends a fresh `diff_result` to the client.
+7. On error, sends `diff_error`.
 
 **Constraints:**
 - Git commands run with a **10-second timeout** and **2 MB stdout cap** (`maxBuffer`).
@@ -166,6 +216,35 @@ The panel does **not** poll on an interval. It refreshes reactively.
 
 ---
 
+## Dependencies
+
+### `react-diff-view`
+
+The diff rendering inside each file card uses [`react-diff-view`](https://github.com/nickodev/react-diff-view) — a React component library for rendering unified diffs with line number gutters, add/delete/context styling, and syntax highlighting support.
+
+- **What it handles**: Hunk rendering, line number gutters, line type styling (add/delete/context), widget insertion points.
+- **What we handle**: Panel layout, file tree, file cards, toolbar, scope/discard logic, auto-refresh, resize.
+- **Syntax highlighting**: Use `react-diff-view`'s `tokenize` utility with `refractor` (Prism-based) to syntax-highlight diff lines, matching the theme used for code blocks in chat.
+- **Styling**: Override `react-diff-view`'s default CSS with Codekin theme colors (see Styling section). Import the base stylesheet and layer custom styles on top.
+
+```
+npm install react-diff-view unidiff refractor
+```
+
+### Data pipeline
+
+```
+git diff (raw string)
+  → server/diff-parser.ts → DiffFile[] (our types)
+  → WebSocket → client
+  → convert DiffFile.hunks to react-diff-view Hunk[] format
+  → <Diff> / <Hunk> components render inside DiffFileCard
+```
+
+The `DiffHunkView` component wraps `react-diff-view`'s `<Diff>` and `<Hunk>` components, mapping our `DiffHunk[]` / `DiffLine[]` types to the library's expected format.
+
+---
+
 ## Frontend Components
 
 ### New Components
@@ -173,16 +252,16 @@ The panel does **not** poll on an interval. It refreshes reactively.
 | Component | File | Description |
 |-----------|------|-------------|
 | `DiffPanel` | `src/components/DiffPanel.tsx` | Top-level right sidebar container. Manages open/close state, width, resize handle. |
+| `DiffToolbar` | `src/components/diff/DiffToolbar.tsx` | Sticky top bar: branch indicator, scope dropdown, discard-all button, summary line, refresh button. |
 | `DiffFileTree` | `src/components/diff/DiffFileTree.tsx` | Compact file list with status badges and change counts. |
-| `DiffFileView` | `src/components/diff/DiffFileView.tsx` | Single file's diff display: header + hunks. |
-| `DiffHunkView` | `src/components/diff/DiffHunkView.tsx` | Renders one hunk with line numbers and syntax highlighting. |
-| `DiffSummaryBar` | `src/components/diff/DiffSummaryBar.tsx` | Sticky top bar with aggregate stats and refresh button. |
+| `DiffFileCard` | `src/components/diff/DiffFileCard.tsx` | Single file card: header (path, counts, action buttons) + collapsible diff body. |
+| `DiffHunkView` | `src/components/diff/DiffHunkView.tsx` | Renders one hunk within a file card with line numbers and syntax highlighting. |
 
 ### New Hook
 
 | Hook | File | Description |
 |------|------|-------------|
-| `useDiff` | `src/hooks/useDiff.ts` | Sends `get_diff`, receives `diff_result`, manages diff state. Exposes `refresh()`, `files`, `summary`, `loading`. Auto-refreshes on relevant `tool_done` events. |
+| `useDiff` | `src/hooks/useDiff.ts` | Sends `get_diff`/`discard_changes`, receives `diff_result`, manages diff state. Exposes `refresh()`, `discard(paths?)`, `setScope()`, `files`, `summary`, `branch`, `scope`, `loading`. Auto-refreshes on relevant `tool_done` events. |
 
 ### Integration Points
 
@@ -213,6 +292,8 @@ The panel does **not** poll on an interval. It refreshes reactively.
 - **Uncommitted new files**: Untracked files are discovered via `git ls-files --others --exclude-standard` and diffed as synthetic additions (compare `/dev/null` to file content). The server does **not** run `git add -N` or otherwise mutate the index.
 - **Renamed files**: Detected via `git diff --find-renames` and displayed in the file tree as `R old → new` with a blue badge.
 - **Session without active Claude process**: Diff is still available — it reads the filesystem, not the process.
+- **Discard confirmation**: Both "Discard all" and per-file discard require a confirmation dialog ("Are you sure? This cannot be undone.") before executing. The dialog uses destructive styling (red confirm button).
+- **Discard while Claude is running**: Discard is allowed even when a Claude process is active — the user may want to revert a bad edit mid-session. The diff panel refreshes after discard completes.
 
 ---
 
@@ -236,7 +317,7 @@ These are explicitly out of scope for the initial implementation:
 
 - **Side-by-side diff view** — unified only for v1.
 - **Inline commenting / review** — this is a viewer, not a review tool.
-- **Commit / stage from the UI** — the user does this through Claude or the terminal.
+- **Commit / stage from the UI** — the user does this through Claude or the terminal. (Discard/undo IS supported.)
 - **Diff between arbitrary commits** — always diffs working tree vs HEAD.
 - **File editing from the diff panel** — read-only.
 
@@ -244,9 +325,9 @@ These are explicitly out of scope for the initial implementation:
 
 ## Implementation Order
 
-1. **Server**: `diff-parser.ts` + `get_diff` message handler in session-manager.
+1. **Server**: `diff-parser.ts` + `get_diff` / `discard_changes` message handlers in session-manager.
 2. **Types**: Add new message types and interfaces to `src/types.ts` and `server/types.ts`.
-3. **Hook**: `useDiff.ts` — WebSocket integration + auto-refresh logic.
-4. **Components**: `DiffPanel` → `DiffSummaryBar` → `DiffFileTree` → `DiffFileView` → `DiffHunkView`.
+3. **Hook**: `useDiff.ts` — WebSocket integration, scope management, discard actions, auto-refresh logic.
+4. **Components**: `DiffPanel` → `DiffToolbar` → `DiffFileTree` → `DiffFileCard` → `DiffHunkView`.
 5. **App integration**: Layout changes in `App.tsx`, toggle button, keyboard shortcut.
-6. **Polish**: Resize persistence, mobile overlay, collapsed large files, syntax highlighting.
+6. **Polish**: Resize persistence, mobile overlay, collapsed large files, syntax highlighting, discard confirmation dialog.
