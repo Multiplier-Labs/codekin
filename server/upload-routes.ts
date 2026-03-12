@@ -9,7 +9,7 @@ import { Router } from 'express'
 import type { Request } from 'express'
 import multer from 'multer'
 import { mkdirSync, existsSync, readFileSync, readdirSync } from 'fs'
-import { join } from 'path'
+import { join, extname } from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { homedir } from 'os'
@@ -162,7 +162,7 @@ export function createUploadRouter(
     storage,
     limits: { fileSize: 20 * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
-      const ext = '.' + (file.originalname.split('.').pop()?.toLowerCase() ?? '')
+      const ext = extname(file.originalname).toLowerCase()
       const allowed = ALLOWED_MIME_TYPES.includes(file.mimetype) || ALLOWED_EXTENSIONS.includes(ext)
       if (!allowed) {
         cb(new Error(`File type not allowed: ${file.mimetype}`))
