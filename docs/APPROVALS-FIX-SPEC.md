@@ -267,6 +267,8 @@ async function denyWithNotification(transport, ctx, toolName, toolInput, reason)
       notificationType: 'hook_denial',
       title: `Permission denied: ${toolName}`,
       message: reason,
+      toolName,
+      toolInput,
     });
   }
 
@@ -334,10 +336,18 @@ function buildAccessSuggestion(toolName: string, toolInput: Record<string, unkno
     // Use two-token prefix for known CLIs (git push, npm run, gh pr, etc.)
     const twoToken = tokens.length >= 2 ? `${tokens[0]} ${tokens[1]}` : ''
     const prefix = KNOWN_TWO_TOKEN_CLIS.has(tokens[0]) && twoToken ? twoToken : tokens[0]
-    const pattern = `Bash(${prefix} *)`
-    return `To allow this in future, run on your machine:\n\`claude config add allowedTools "${pattern}"\``
+    // NOTE: For Bash, the PreToolUse hook intercepts before Claude Code
+    // checks its native settings.local.json, so `claude config add allowedTools`
+    // won't help when the hook is active. Point users to Codekin's own
+    // approval system and connectivity diagnostics instead.
+    return [
+      `Use the Approvals panel to add "${prefix} *" as a pattern for this repo.`,
+      `If approvals aren't appearing, check that the Codekin server is reachable.`,
+    ].join('\n')
   }
 
+  // Non-Bash tools (Write, WebSearch, etc.) have no PreToolUse hook registered,
+  // so Claude Code's native permission system applies and this suggestion works.
   if (['Write', 'Edit', 'WebFetch', 'WebSearch', 'Agent'].includes(toolName)) {
     return `To allow ${toolName} in future, run on your machine:\n\`claude config add allowedTools "${toolName}"\``
   }
@@ -354,13 +364,21 @@ function buildAccessSuggestion(toolName: string, toolInput: Record<string, unkno
 
 ```
 ⚠ Permission denied: Bash: Server error: fetch failed
+Use the Approvals panel to add "yarn install *" as a pattern for this repo.
+If approvals aren't appearing, check that the Codekin server is reachable.
+```
+
+For non-Bash tools (no PreToolUse hook), the suggestion references Claude Code's native settings:
+
+```
+⚠ Permission denied: WebSearch: Server error: fetch failed
 To allow this in future, run on your machine:
-`claude config add allowedTools "Bash(yarn *)"`
+`claude config add allowedTools "WebSearch"`
 ```
 
 This gives the user:
 1. **Visibility** — they know the approval was blocked, not lost
-2. **Actionability** — a copy-pasteable command to permanently allow the tool
+2. **Actionability** — a specific next step (Approvals panel for Bash, `claude config` for other tools)
 3. **Context** — the reason (server error, timeout, auth failure) helps debug
 
 ### Note on `claude config` CLI
@@ -544,10 +562,19 @@ private compactExactCommands(): void {
     const prefixGroups = new Map<string, string[]>()
     for (const cmd of entry.commands) {
       if (toRemove.has(cmd)) continue
-      const prefix = this.commandPrefix(cmd)
+      let prefix = this.commandPrefix(cmd)
       if (!prefix) continue
       if (ApprovalManager.NEVER_PATTERN_PREFIXES.has(prefix)) continue
-      if (!ApprovalManager.PATTERNABLE_PREFIXES.has(prefix)) continue
+      // Two-token prefix not patternable — try single-token fallback
+      // (e.g. "pnpm foo" → try "pnpm", which is in PATTERNABLE_PREFIXES)
+      if (!ApprovalManager.PATTERNABLE_PREFIXES.has(prefix)) {
+        const firstToken = cmd.split(/\s+/)[0]
+        if (firstToken && ApprovalManager.PATTERNABLE_PREFIXES.has(firstToken)) {
+          prefix = firstToken
+        } else {
+          continue
+        }
+      }
       // Skip commands with shell meta-characters (pipes, &&, subshells)
       if (/[|;&`$(){}]/.test(cmd) || cmd.includes('\n')) continue
       const group = prefixGroups.get(prefix) || []
