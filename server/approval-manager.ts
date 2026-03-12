@@ -26,7 +26,17 @@ export class ApprovalManager {
   private _approvalPersistTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor() {
+    this.validatePrefixSets()
     this.restoreRepoApprovalsFromDisk()
+  }
+
+  /** Warn at startup if any single-token prefix appears in both allow and deny lists. */
+  private validatePrefixSets(): void {
+    for (const prefix of ApprovalManager.PATTERNABLE_PREFIXES) {
+      if (ApprovalManager.NEVER_PATTERN_PREFIXES.has(prefix)) {
+        console.warn(`[approval-manager] WARNING: "${prefix}" is in both PATTERNABLE_PREFIXES and NEVER_PATTERN_PREFIXES — deny takes precedence for single-token; two-token allow overrides first-token deny`)
+      }
+    }
   }
 
   /** Get or create the approval entry for a repo (workingDir). */

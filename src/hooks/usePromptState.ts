@@ -38,7 +38,8 @@ export function usePromptState(): UsePromptStateReturn {
 
   const enqueue = useCallback((msg: WsServerMessage & { type: 'prompt' }) => {
     const requestId = msg.requestId
-      ?? (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `local-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`)
+      ?? crypto?.randomUUID?.()
+      ?? `local-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
     const entry: PromptEntry = {
       requestId,
       options: msg.options,
