@@ -219,7 +219,7 @@ When `paths` is omitted, replace `<paths>` with `.` to affect all files.
 | **Deleted** | `git restore --worktree` (recreates file) | `git restore --staged` (unstages deletion) | `git restore --staged --worktree` (recreates file) |
 | **Added (untracked)** | Delete with `fs.unlink` | N/A (untracked files can't be staged without `git add`) | Delete with `fs.unlink` |
 | **Added (staged new file)** | N/A (file only in index) | `git rm --cached -- <path>` (unstages, leaves on disk) | `git rm --cached -- <path>` + `fs.unlink` (fully removes) |
-| **Renamed** | Treat as delete (new path) + add (old path): restore old path, remove new path | `git restore --staged` on both old and new paths | Restore old path, remove new path, unstage both |
+| **Renamed** | Reverts the rename in the working directory, restoring the file's path and content to match the index | `git restore --staged` on both old and new paths (unstages the rename, leaves working tree as-is) | Fully reverts the rename, restoring the file to its original path and content from HEAD |
 
 #### Safety
 
