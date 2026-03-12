@@ -265,6 +265,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           ref={fileInputRef}
           type="file"
           multiple
+          accept="image/png,image/jpeg,image/gif,image/webp,text/markdown,.md"
           onChange={handleFileChange}
           className="hidden"
         />

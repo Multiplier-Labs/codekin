@@ -156,12 +156,19 @@ export function createUploadRouter(
       cb(null, `${ts}-${safe}`)
     },
   })
-  const ALLOWED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+  const ALLOWED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'text/markdown']
+  const ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.md']
   const upload = multer({
     storage,
-    limits: { fileSize: 10 * 1024 * 1024 },
+    limits: { fileSize: 20 * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
-      cb(null, ALLOWED_MIME_TYPES.includes(file.mimetype))
+      const ext = '.' + (file.originalname.split('.').pop()?.toLowerCase() ?? '')
+      const allowed = ALLOWED_MIME_TYPES.includes(file.mimetype) || ALLOWED_EXTENSIONS.includes(ext)
+      if (!allowed) {
+        cb(new Error(`File type not allowed: ${file.mimetype}`))
+        return
+      }
+      cb(null, true)
     },
   })
 
@@ -173,7 +180,16 @@ export function createUploadRouter(
       return
     }
     next()
-  }, upload.single('file'), (req, res) => {
+  }, (req, res, next) => {
+    upload.single('file')(req, res, (err) => {
+      if (err) {
+        const status = err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE' ? 413 : 400
+        res.status(status).json({ error: err.message })
+        return
+      }
+      next()
+    })
+  }, (req, res) => {
     if (!req.file) {
       res.status(400).json({ error: 'No file uploaded' })
       return
