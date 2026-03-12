@@ -33,6 +33,7 @@ import { CommandPalette } from './components/CommandPalette'
 import { InputBar, type InputBarHandle } from './components/InputBar'
 import { PromptButtons } from './components/PromptButtons'
 import { RepoSelector } from './components/RepoSelector'
+import { DiffPanel } from './components/DiffPanel'
 
 export default function App() {
   const { settings, updateSettings } = useSettings()
@@ -59,6 +60,9 @@ export default function App() {
 
   const [settingsOpen, setSettingsOpen] = useState(!settings.token)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [diffPanelOpen, setDiffPanelOpen] = useState(false)
+  const diffHandleMessageRef = useRef<(msg: import('./types').WsServerMessage) => void>(() => {})
+  const diffHandleToolDoneRef = useRef<(toolName: string, summary?: string) => void>(() => {})
   const [archiveRefreshKey, setArchiveRefreshKey] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -91,6 +95,7 @@ export default function App() {
     restoreSession,
     currentModel,
     setModel,
+    send: wsSend,
   } = useChatSocket({
     token: settings.token,
     onSessionCreated: (sessionId) => {
@@ -118,6 +123,13 @@ export default function App() {
       errorTimerRef.current = setTimeout(() => setError(null), 5000)
       if (msg.toLowerCase().includes('not found')) {
         setActiveSessionId(null)
+      }
+    },
+    onRawMessage: (msg) => {
+      if (msg.type === 'diff_result' || msg.type === 'diff_error') {
+        diffHandleMessageRef.current(msg)
+      } else if (msg.type === 'tool_done') {
+        diffHandleToolDoneRef.current(msg.toolName, msg.summary)
       }
     },
   })
@@ -220,12 +232,16 @@ export default function App() {
   // Keep sendInputRef in sync so onSessionCreated can use it
   useEffect(() => { sendInputRef.current = sendInput }, [sendInput])
 
-  // Cmd+K listener
+  // Cmd+K and Cmd+Shift+D listeners
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault()
         setPaletteOpen(prev => !prev)
+      }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'D') {
+        e.preventDefault()
+        setDiffPanelOpen(prev => !prev)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
@@ -520,6 +536,17 @@ export default function App() {
           <RepoSelector groups={groups} token={settings.token} ghMissing={ghMissing} onOpen={handleOpenSession} />
         )}
       </div>
+
+      {/* Diff viewer sidebar */}
+      {activeSessionId && (
+        <DiffPanel
+          isOpen={diffPanelOpen}
+          onClose={() => setDiffPanelOpen(false)}
+          send={wsSend}
+          onHandleMessage={(fn) => { diffHandleMessageRef.current = fn }}
+          onHandleToolDone={(fn) => { diffHandleToolDoneRef.current = fn }}
+        />
+      )}
 
       {/* Modals */}
       <Settings
