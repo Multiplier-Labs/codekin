@@ -452,6 +452,11 @@ export function useChatSocket({
     setMessages([])
   }, [])
 
+  /** Push a local-only system message (e.g. for built-in command feedback). */
+  const addSystemMessage = useCallback((text: string, subtype: 'notification' | 'init' | 'error' = 'notification') => {
+    setMessages(prev => trimMessages([...prev, { type: 'system', subtype, text, key: nextKey() }]))
+  }, [])
+
   const setModel = useCallback((model: string) => {
     send({ type: 'set_model', model })
     setCurrentModel(model)
@@ -480,6 +485,7 @@ export function useChatSocket({
     sendPromptResponse,
     leaveSession,
     clearMessages,
+    addSystemMessage,
     disconnect,
     reconnect,
     restoreSession,
