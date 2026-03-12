@@ -30,6 +30,8 @@ interface UseChatSocketOptions {
   onSessionRenamed?: (sessionId: string, name: string) => void
   onSessionsUpdated?: () => void
   onError?: (msg: string) => void
+  /** Called for every raw incoming WsServerMessage (for external consumers like useDiff). */
+  onRawMessage?: (msg: WsServerMessage) => void
 }
 
 /**
@@ -157,10 +159,11 @@ export function useChatSocket({
   onSessionRenamed,
   onSessionsUpdated,
   onError,
+  onRawMessage,
 }: UseChatSocketOptions) {
-  const callbacksRef = useRef({ onSessionCreated, onSessionJoined, onSessionRenamed, onSessionsUpdated, onError })
+  const callbacksRef = useRef({ onSessionCreated, onSessionJoined, onSessionRenamed, onSessionsUpdated, onError, onRawMessage })
   useEffect(() => {
-    callbacksRef.current = { onSessionCreated, onSessionJoined, onSessionRenamed, onSessionsUpdated, onError }
+    callbacksRef.current = { onSessionCreated, onSessionJoined, onSessionRenamed, onSessionsUpdated, onError, onRawMessage }
   })
 
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -211,6 +214,7 @@ export function useChatSocket({
   // Message handler — processes all WsServerMessage types from the connection
   // ---------------------------------------------------------------------------
   const handleMessage = useCallback((msg: WsServerMessage) => {
+    callbacksRef.current.onRawMessage?.(msg)
     switch (msg.type) {
       case 'thinking':
         setThinkingSummary(msg.summary)

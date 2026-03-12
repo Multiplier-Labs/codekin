@@ -78,6 +78,8 @@ export type WsClientMessage =
   | { type: 'prompt_response'; value: string | string[]; requestId?: string }
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'ping' }
+  | { type: 'get_diff'; scope?: DiffScope }
+  | { type: 'discard_changes'; scope: DiffScope; paths?: string[]; statuses?: Record<string, DiffFileStatus> }
 
 /** A tracked task item from Claude's TodoWrite tool. */
 export interface TaskItem {
@@ -123,6 +125,47 @@ export type WsServerMessage =
   | { type: 'webhook_event'; event: string; repo: string; branch: string; workflow: string; conclusion: string; status: string; sessionId?: string }
   | { type: 'workflow_event'; eventType: string; runId: string; kind: string; stepKey?: string; status?: string; payload?: unknown }
   | { type: 'sessions_updated' }
+  | { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary; branch: string; scope: DiffScope }
+  | { type: 'diff_error'; message: string }
+
+// --- Diff viewer types ---
+
+export type DiffScope = 'staged' | 'unstaged' | 'all'
+export type DiffFileStatus = 'modified' | 'added' | 'deleted' | 'renamed'
+
+export interface DiffFile {
+  path: string
+  status: DiffFileStatus
+  oldPath?: string
+  isBinary: boolean
+  additions: number
+  deletions: number
+  hunks: DiffHunk[]
+}
+
+export interface DiffHunk {
+  header: string
+  oldStart: number
+  oldLines: number
+  newStart: number
+  newLines: number
+  lines: DiffLine[]
+}
+
+export interface DiffLine {
+  type: 'add' | 'delete' | 'context'
+  content: string
+  oldLineNo?: number
+  newLineNo?: number
+}
+
+export interface DiffSummary {
+  filesChanged: number
+  insertions: number
+  deletions: number
+  truncated: boolean
+  truncationReason?: string
+}
 
 /** A selectable option in a permission or question prompt dialog. */
 export interface PromptOption {

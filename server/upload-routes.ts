@@ -108,7 +108,7 @@ function scanModules(modulesDir: string) {
 const ghEnv = { ...process.env }
 delete ghEnv.GITHUB_TOKEN
 
-async function fetchGhRepos(owner: string) {
+async function fetchGhRepos(owner: string, reposRoot: string) {
   const { stdout } = await execFileAsync('gh', [
     'repo', 'list', owner,
     '--json', 'name,url,description',
@@ -117,7 +117,7 @@ async function fetchGhRepos(owner: string) {
   const repos: Array<{ name: string; url: string; description?: string }> = JSON.parse(stdout)
   repos.sort((a, b) => a.name.localeCompare(b.name))
   return repos.map((r) => {
-    const repoPath = `${REPOS_ROOT}/${r.name}`
+    const repoPath = `${reposRoot}/${r.name}`
     const cloned = existsSync(repoPath)
     return {
       id: r.name,
@@ -142,8 +142,18 @@ async function fetchGhRepos(owner: string) {
 export function createUploadRouter(
   verifyToken: VerifyFn,
   extractToken: ExtractFn,
+  getReposPath?: () => string,
 ): Router {
   const router = Router()
+
+  /** Resolve the effective repos root: DB setting > REPOS_ROOT env/default. */
+  const resolveReposRoot = () => {
+    if (getReposPath) {
+      const custom = getReposPath()
+      if (custom) return custom
+    }
+    return REPOS_ROOT
+  }
 
   // Ensure upload directory exists
   if (!existsSync(SCREENSHOTS_DIR)) mkdirSync(SCREENSHOTS_DIR, { recursive: true })
@@ -207,6 +217,7 @@ export function createUploadRouter(
       return
     }
 
+    const reposRoot = resolveReposRoot()
     const globalSkills = scanSkills(GLOBAL_SKILLS_DIR)
     const globalModules = scanModules(GLOBAL_MODULES_DIR)
 
@@ -228,15 +239,15 @@ export function createUploadRouter(
         }
       }
       for (const org of orgs) {
-        const orgRepos = await fetchGhRepos(org)
+        const orgRepos = await fetchGhRepos(org, reposRoot)
         groups.push({ owner: org, repos: orgRepos })
       }
 
       // Fetch user repos
-      const userRepos = await fetchGhRepos(username)
+      const userRepos = await fetchGhRepos(username, reposRoot)
       groups.push({ owner: username, repos: userRepos })
 
-      res.json({ groups, globalSkills, globalModules })
+      res.json({ groups, globalSkills, globalModules, reposPath: reposRoot })
     } catch (err) {
       console.error('Failed to list repos from GitHub:', err)
       const ghMissing = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT'
@@ -244,7 +255,7 @@ export function createUploadRouter(
         console.error('GitHub CLI (gh) not found. Install it: https://cli.github.com')
       }
       // Return skills/modules even when GitHub is unavailable
-      res.json({ groups: [], globalSkills, globalModules, ghMissing })
+      res.json({ groups: [], globalSkills, globalModules, ghMissing, reposPath: reposRoot })
     }
   })
 
@@ -269,7 +280,8 @@ export function createUploadRouter(
       return
     }
 
-    const dest = join(REPOS_ROOT, name)
+    const reposRoot = resolveReposRoot()
+    const dest = join(reposRoot, name)
     if (existsSync(dest)) {
       res.json({ success: true, path: dest })
       return

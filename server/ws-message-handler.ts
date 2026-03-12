@@ -128,5 +128,25 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       send({ type: 'pong' })
       break
 
+    case 'get_diff': {
+      const sessionId = clientSessions.get(ws)
+      if (sessionId) {
+        void sessions.getDiff(sessionId, msg.scope).then(result => { send(result) })
+      } else {
+        send({ type: 'diff_error', message: 'Not in a session' })
+      }
+      break
+    }
+
+    case 'discard_changes': {
+      const sessionId = clientSessions.get(ws)
+      if (sessionId) {
+        void sessions.discardChanges(sessionId, msg.scope, msg.paths, msg.statuses).then(result => { send(result) })
+      } else {
+        send({ type: 'diff_error', message: 'Not in a session' })
+      }
+      break
+    }
+
   }
 }

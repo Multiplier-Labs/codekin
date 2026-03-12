@@ -264,7 +264,7 @@ if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
 app.use(createAuthRouter(verifyToken, extractToken, sessions, claudeAvailable, claudeVersion, apiKeySet))
 app.use(createSessionRouter(verifyToken, extractToken, sessions, verifyTokenOrSessionToken))
 app.use(createWebhookRouter(verifyToken, extractToken, webhookHandler, stepflowHandler))
-app.use(createUploadRouter(verifyToken, extractToken))
+app.use(createUploadRouter(verifyToken, extractToken, () => sessions.archive.getSetting('repos_path', '')))
 app.use(createDocsRouter(verifyToken, extractToken))
 
 // Workflow router — commitEventHandler is set after engine init, but the
