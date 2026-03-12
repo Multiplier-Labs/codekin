@@ -11,6 +11,10 @@ import type { ChatMessage, Session, Skill } from '../types'
 import type { QueueEntry } from './useTentativeQueue'
 import { groupKey } from './useSessionOrchestration'
 import { uploadAndBuildMessage } from '../lib/ccApi'
+import { resolveBuiltinAlias, BUNDLED_SKILLS } from '../lib/slashCommands'
+
+/** Set of bundled skill command names for fast lookup. */
+const BUNDLED_COMMANDS = new Set(BUNDLED_SKILLS.map(s => s.command))
 
 interface UseSendMessageOptions {
   token: string
@@ -19,6 +23,7 @@ interface UseSendMessageOptions {
   sessions: Session[]
   allSkills: Skill[]
   sendInput: (data: string, displayText?: string) => void
+  onBuiltinCommand: (command: string, args: string) => void
   tentativeQueues: Record<string, QueueEntry[]>
   addToQueue: (sessionId: string, text: string, files?: File[]) => void
   clearQueue: (sessionId: string) => void
@@ -32,6 +37,7 @@ export function useSendMessage({
   sessions,
   allSkills,
   sendInput,
+  onBuiltinCommand,
   tentativeQueues,
   addToQueue,
   clearQueue,
@@ -61,28 +67,51 @@ export function useSendMessage({
     }))
   }, [activeSessionId])
 
-  // Expand slash commands to skill content before sending
-  const expandSkill = useCallback((text: string): string => {
+  /**
+   * Expand a slash command to its full prompt content.
+   *
+   * Returns `{ expanded, displayText, handled }`:
+   * - `handled = true` means the command was a built-in (executed via
+   *   onBuiltinCommand) and nothing further should be sent.
+   * - Otherwise `expanded` is the text to send to Claude.
+   */
+  const processSlashCommand = useCallback((text: string): { expanded: string; displayText?: string; handled: boolean } => {
     const trimmed = text.trim()
-    if (!trimmed.startsWith('/')) return text
+    if (!trimmed.startsWith('/')) return { expanded: text, handled: false }
 
     const spaceIdx = trimmed.indexOf(' ')
     const command = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx)
     const args = spaceIdx === -1 ? '' : trimmed.slice(spaceIdx + 1).trim()
 
-    const skill = allSkills.find(s => s.command === command)
-    if (!skill?.content) return text
+    // 1. Built-in commands — handled locally by Codekin, not sent to Claude
+    const canonical = resolveBuiltinAlias(command)
+    if (canonical) {
+      onBuiltinCommand(canonical, args)
+      return { expanded: text, handled: true }
+    }
 
-    const content = skill.content.replace(/\$ARGUMENTS/g, args || '(no arguments provided)')
-    const parts = [`[Skill: ${skill.name}]`, '', content]
-    if (args) parts.push('', `User instructions: ${args}`)
-    return parts.join('\n')
-  }, [allSkills])
+    // 2. Filesystem skills — expand content client-side
+    const skill = allSkills.find(s => s.command === command)
+    if (skill?.content) {
+      const content = skill.content.replace(/\$ARGUMENTS/g, args || '(no arguments provided)')
+      const parts = [`[Skill: ${skill.name}]`, '', content]
+      if (args) parts.push('', `User instructions: ${args}`)
+      return { expanded: parts.join('\n'), displayText: text, handled: false }
+    }
+
+    // 3. Bundled skills — send as-is so Claude's Skill tool handles them
+    if (BUNDLED_COMMANDS.has(command)) {
+      return { expanded: text, displayText: text, handled: false }
+    }
+
+    // Unknown slash command — pass through as regular text
+    return { expanded: text, handled: false }
+  }, [allSkills, onBuiltinCommand])
 
   const handleSend = useCallback(async (text: string) => {
     if (!token) return
-    const expanded = expandSkill(text)
-    const displayText = expanded !== text ? text : undefined
+    const { expanded, displayText, handled } = processSlashCommand(text)
+    if (handled) return
 
     // Include docs context if viewing a doc
     const docsPrefix = docsContext.isOpen && docsContext.selectedFile && docsContext.repoWorkingDir
@@ -117,7 +146,7 @@ export function useSendMessage({
       setUploadStatus(`Upload failed: ${err instanceof Error ? err.message : 'unknown error'}`)
       setTimeout(() => setUploadStatus(null), 3000)
     }
-  }, [token, activeSessionId, activeWorkingDir, sessions, tentativeQueues, addToQueue, pendingFiles, expandSkill, sendInput, docsContext.isOpen, docsContext.selectedFile, docsContext.repoWorkingDir])
+  }, [token, activeSessionId, activeWorkingDir, sessions, tentativeQueues, addToQueue, pendingFiles, processSlashCommand, sendInput, docsContext.isOpen, docsContext.selectedFile, docsContext.repoWorkingDir])
 
   const handleExecuteTentative = useCallback(async (sessionId: string) => {
     const queue = tentativeQueues[sessionId] ?? []
