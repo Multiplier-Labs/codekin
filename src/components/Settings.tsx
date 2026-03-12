@@ -2,20 +2,21 @@
  * Modal settings dialog for general configuration.
  *
  * Organized into logical sections: Authentication, Preferences, Integrations.
- * Handles auth token, theme, retention, support provider, and webhook config.
+ * Handles auth token, theme, retention, support provider, repos path, and webhook config.
  */
 
 import { useState, useEffect, useCallback } from 'react'
 import {
   IconKey, IconPalette, IconBrandGithub, IconCopy, IconCheck,
   IconChevronDown, IconChevronRight, IconCircleCheckFilled, IconCircleXFilled,
-  IconRobot, IconArchive, IconBrain,
+  IconRobot, IconArchive, IconBrain, IconFolder,
 } from '@tabler/icons-react'
 import type { Settings as SettingsType } from '../types'
 import {
   verifyToken, getRetentionDays, setRetentionDays as setRetentionDaysApi,
   getSupportProvider, setSupportProvider, type SupportProvider,
   getWebhookConfig, getWebhookEvents, type WebhookConfigInfo,
+  getReposPath, setReposPath as setReposPathApi,
 } from '../lib/ccApi'
 
 const PROVIDER_LABELS: Record<SupportProvider, string> = {
@@ -111,6 +112,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false }
   const [retentionDays, setRetentionDays] = useState(7)
   const [supportProvider, setSupportProviderState] = useState<SupportProvider>('auto')
   const [availableProviders, setAvailableProviders] = useState<string[]>([])
+  const [reposPath, setReposPath] = useState('')
   const [saveError, setSaveError] = useState<string | null>(null)
 
   // Webhook state
@@ -130,6 +132,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false }
       setSupportProviderState(preferred)
       setAvailableProviders(available)
     }).catch(() => {})
+    getReposPath(settings.token).then(setReposPath).catch(() => {})
     getWebhookConfig(settings.token).then(setWebhookConfig).catch(() => {})
     getWebhookEvents(settings.token).then(setWebhookEvents).catch(() => {})
   }, [open, settings.token])
@@ -253,6 +256,34 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false }
                   <span className="text-[15px] text-neutral-5">days</span>
                 </div>
                 <p className="mt-1 text-[13px] text-neutral-6">Auto-delete archived sessions older than this</p>
+              </div>
+
+              {/* Repos Path — full width */}
+              <div className="col-span-2">
+                <label className="mb-1.5 block text-[15px] text-neutral-4">
+                  <span className="flex items-center gap-1.5">
+                    <IconFolder size={14} className="text-neutral-5" />
+                    Repositories Path
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  value={reposPath}
+                  onChange={e => setReposPath(e.target.value)}
+                  onBlur={() => {
+                    setReposPathApi(settings.token, reposPath).catch(() => setSaveError('Failed to save repos path'))
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      setReposPathApi(settings.token, reposPath).catch(() => setSaveError('Failed to save repos path'))
+                    }
+                  }}
+                  placeholder="~/repos (default)"
+                  className="w-full rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] font-mono text-neutral-2 outline-none focus:border-primary-7"
+                />
+                <p className="mt-1 text-[13px] text-neutral-6">
+                  Absolute path to your locally cloned repositories. Leave empty to use the server default.
+                </p>
               </div>
 
               {/* Support LLM Provider — full width */}

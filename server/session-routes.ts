@@ -133,6 +133,27 @@ export function createSessionRouter(
     res.json({ days: sessions.archive.getRetentionDays() })
   })
 
+  // --- Repos path settings ---
+
+  router.get('/api/settings/repos-path', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const path = sessions.archive.getSetting('repos_path', '')
+    res.json({ path })
+  })
+
+  router.put('/api/settings/repos-path', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const { path } = req.body
+    if (typeof path !== 'string') {
+      return res.status(400).json({ error: 'path must be a string' })
+    }
+    // Empty string means "use default REPOS_ROOT"
+    sessions.archive.setSetting('repos_path', path.trim())
+    res.json({ path: path.trim() })
+  })
+
   // --- Support provider settings ---
 
   router.get('/api/settings/support-provider', (req, res) => {

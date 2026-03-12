@@ -301,6 +301,28 @@ export async function setRetentionDays(token: string, days: number): Promise<num
   return data.days
 }
 
+/** Get the configured repos path (empty string means server default). */
+export async function getReposPath(token: string): Promise<string> {
+  const res = await authFetch(`${BASE}/api/settings/repos-path`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to get repos path: ${res.status}`)
+  const data = await res.json()
+  return data.path
+}
+
+/** Set the repos path. Empty string resets to server default. */
+export async function setReposPath(token: string, path: string): Promise<string> {
+  const res = await authFetch(`${BASE}/api/settings/repos-path`, {
+    method: 'PUT',
+    headers: headers(token),
+    body: JSON.stringify({ path }),
+  })
+  if (!res.ok) throw new Error(`Failed to set repos path: ${res.status}`)
+  const data = await res.json()
+  return data.path
+}
+
 /** Supported AI provider identifiers for support actions. */
 export type SupportProvider = 'auto' | 'groq' | 'openai' | 'gemini' | 'anthropic'
 
