@@ -107,7 +107,7 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
 
   return (
     <div
-      className="relative flex flex-col h-full bg-neutral-11 border-l border-neutral-9 overflow-hidden transition-[width] duration-150"
+      className="relative flex flex-col h-full bg-neutral-12 border-l border-neutral-9 overflow-hidden transition-[width] duration-150"
       style={{ width, minWidth: MIN_WIDTH, maxWidth: MAX_WIDTH }}
     >
       {/* Resize handle */}
@@ -152,44 +152,47 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
         </div>
       )}
 
-      {/* File tree */}
-      {diff.files.length > 0 && (
-        <div className="border-b border-neutral-9 shrink-0 max-h-[200px] overflow-y-auto">
-          <DiffFileTree
-            files={diff.files}
-            activeFile={activeFile}
-            onSelectFile={handleSelectFile}
-          />
+      {/* Scrollable content area (file tree + file cards) */}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        {/* File tree */}
+        {diff.files.length > 0 && (
+          <div className="border-b border-neutral-9">
+            <DiffFileTree
+              files={diff.files}
+              activeFile={activeFile}
+              onSelectFile={handleSelectFile}
+            />
+          </div>
+        )}
+
+        {/* File cards */}
+        <div className="px-2 py-2 flex flex-col gap-2">
+          {diff.files.length === 0 && !diff.loading && !diff.error && (
+            <div className="flex flex-col items-center justify-center py-8 text-neutral-6">
+              <IconFileCode size={32} className="mb-2 opacity-50" />
+              <span className="text-xs">No changes detected</span>
+            </div>
+          )}
+
+          {diff.summary.truncated && (
+            <div className="px-3 py-2 text-xs text-warning-5 bg-warning-950/20 rounded">
+              Diff truncated — showing partial results
+            </div>
+          )}
+
+          {diff.files.map(file => (
+            <DiffFileCard
+              key={file.path}
+              file={file}
+              isActive={file.path === activeFile}
+              onDiscard={handleDiscard}
+              onScrollRef={(el) => {
+                if (el) fileRefs.current.set(file.path, el)
+                else fileRefs.current.delete(file.path)
+              }}
+            />
+          ))}
         </div>
-      )}
-
-      {/* File cards (scrollable) */}
-      <div className="flex-1 overflow-y-auto px-2 py-2 flex flex-col gap-2">
-        {diff.files.length === 0 && !diff.loading && !diff.error && (
-          <div className="flex flex-col items-center justify-center py-8 text-neutral-6">
-            <IconFileCode size={32} className="mb-2 opacity-50" />
-            <span className="text-xs">No changes detected</span>
-          </div>
-        )}
-
-        {diff.summary.truncated && (
-          <div className="px-3 py-2 text-xs text-warning-5 bg-warning-950/20 rounded">
-            Diff truncated — showing partial results
-          </div>
-        )}
-
-        {diff.files.map(file => (
-          <DiffFileCard
-            key={file.path}
-            file={file}
-            isActive={file.path === activeFile}
-            onDiscard={handleDiscard}
-            onScrollRef={(el) => {
-              if (el) fileRefs.current.set(file.path, el)
-              else fileRefs.current.delete(file.path)
-            }}
-          />
-        ))}
       </div>
     </div>
   )

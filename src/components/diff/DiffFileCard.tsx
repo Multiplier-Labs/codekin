@@ -50,7 +50,7 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
     >
       {/* Card header */}
       <div
-        className="flex items-center gap-2 px-3 py-2 bg-neutral-10 cursor-pointer select-none"
+        className="flex items-center gap-2 px-3 py-2 bg-neutral-9 cursor-pointer select-none"
         onClick={() => setExpanded(!expanded)}
       >
         {expanded
