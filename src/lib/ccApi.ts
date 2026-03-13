@@ -142,15 +142,6 @@ export async function deleteSession(token: string, sessionId: string): Promise<v
   if (!res.ok) throw new Error(`Failed to delete session: ${res.status}`)
 }
 
-/** Server health check. Returns active/total session counts. */
-export async function getHealth(token: string): Promise<{ status: string; claudeSessions: number }> {
-  const res = await authFetch(`${BASE}/api/health`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) throw new Error(`Health check failed: ${res.status}`)
-  return res.json()
-}
-
 /** Upload a file via the server. Returns the server-side file path. */
 export async function uploadFile(token: string, file: File): Promise<string> {
   const form = new FormData()

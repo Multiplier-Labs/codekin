@@ -283,6 +283,9 @@ export function useChatSocket({
         setTasks(msg.tasks)
         break
 
+      // Prompt handling: permission requests and questions from Claude's control protocol.
+      // See server/types.ts:ClaudeControlRequest — prompt responses require a control_response
+      // wrapper sent via the 'prompt_response' WsClientMessage type, not a regular 'input' message.
       case 'prompt': {
         const promptSessionId = msg.sessionId
         if (promptSessionId && promptSessionId !== currentSessionId.current) {

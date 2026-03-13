@@ -108,6 +108,19 @@ export function useSendMessage({
     return { expanded: text, handled: false }
   }, [allSkills, onBuiltinCommand])
 
+  /**
+   * Main send handler — the critical user-input path.
+   *
+   * Phases (in order):
+   * 1. Slash-command expansion — resolves built-in, filesystem, and bundled skills.
+   * 2. Docs context injection — prepends the currently-viewed doc path if the docs browser is open.
+   * 3. Tentative queue check — if another session for the same repo is processing (or this
+   *    session already has queued messages), the message is held in the tentative queue
+   *    instead of being sent immediately.
+   * 4. File upload — if files are attached, uploads them via the API and wraps the
+   *    message with file references.
+   * 5. WebSocket send — delivers the final message text to the active Claude session.
+   */
   const handleSend = useCallback(async (text: string) => {
     if (!token) return
     const { expanded, displayText, handled } = processSlashCommand(text)
@@ -183,7 +196,11 @@ export function useSendMessage({
     clearQueue(sessionId)
   }, [clearQueue])
 
-  // Auto-execute tentative queue when the blocking session(s) finish
+  // Auto-execute tentative queue when the blocking session(s) finish.
+  // Fires when `sessions` changes (i.e. a session's `isProcessing` flips to false).
+  // Checks each queued session: if no other session in the same repo group is still
+  // processing AND this is the active session, auto-sends the queued messages.
+  // Intentionally omits other deps — we only want to react to session state changes.
   useEffect(() => {
     for (const [sessionId, queue] of Object.entries(tentativeQueues)) {
       if (queue.length === 0) continue

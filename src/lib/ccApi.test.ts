@@ -4,7 +4,6 @@ import {
   listSessions,
   createSession,
   deleteSession,
-  getHealth,
   uploadFile,
   wsUrl,
   redirectToLogin,
@@ -171,23 +170,6 @@ describe('deleteSession', () => {
   it('throws on non-ok response', async () => {
     mockFetch.mockResolvedValue(jsonResponse({}, 404))
     await expect(deleteSession('tok', 's1')).rejects.toThrow('Failed to delete session: 404')
-  })
-})
-
-describe('getHealth', () => {
-  it('returns health data', async () => {
-    const health = { status: 'ok', claudeSessions: 3 }
-    mockFetch.mockResolvedValue(jsonResponse(health))
-    const result = await getHealth('tok')
-    expect(result).toEqual(health)
-    expect(mockFetch).toHaveBeenCalledWith('/cc/api/health', {
-      headers: { Authorization: 'Bearer tok' },
-    })
-  })
-
-  it('throws on non-ok response', async () => {
-    mockFetch.mockResolvedValue(jsonResponse({}, 503))
-    await expect(getHealth('tok')).rejects.toThrow('Health check failed: 503')
   })
 })
 
@@ -396,12 +378,12 @@ describe('authFetch / checkAuthResponse (indirect)', () => {
 
   it('does NOT treat 503 as auth failure', async () => {
     mockFetch.mockResolvedValue(plainResponse(503))
-    await expect(getHealth('tok')).rejects.toThrow('Health check failed: 503')
+    await expect(listSessions('tok')).rejects.toThrow('Failed to list sessions: 503')
   })
 
   it('does NOT treat 504 as auth failure', async () => {
     mockFetch.mockResolvedValue(plainResponse(504))
-    await expect(getHealth('tok')).rejects.toThrow('Health check failed: 504')
+    await expect(listSessions('tok')).rejects.toThrow('Failed to list sessions: 504')
   })
 })
 

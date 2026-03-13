@@ -68,7 +68,9 @@ async function getFileStatuses(cwd: string, paths?: string[]): Promise<Record<st
   if (paths) args.push('--', ...paths)
   const raw = await execGit(args, cwd)
   const result: Record<string, DiffFileStatus> = {}
-  // Porcelain -z format: XY NUL path NUL
+  // git status --porcelain=v1 -z format: XY NUL path NUL
+  // XY is a two-character status code: X = index status, Y = worktree status.
+  // Examples: " M" = unstaged modification, "A " = staged addition, "??" = untracked.
   // For renames/copies: XY NUL oldpath NUL newpath NUL
   const parts = raw.split('\0')
   let i = 0
@@ -135,22 +137,23 @@ export interface CreateSessionOptions {
 
 
 export class SessionManager {
+  /** All active (non-archived) sessions, keyed by session UUID. */
   private sessions = new Map<string, Session>()
-  /** SQLite archive for closed sessions. */
+  /** SQLite archive for closed sessions (persists conversation summaries across restarts). */
   readonly archive: SessionArchive
   /** Exposed so ws-server can pass its port to child Claude processes. */
   _serverPort = PORT
   /** Exposed so ws-server can pass the auth token to child Claude processes. */
   _authToken = ''
-  /** Callback to broadcast a message to ALL connected WebSocket clients (set by ws-server). */
+  /** Callback to broadcast a message to ALL connected WebSocket clients (set by ws-server on startup). */
   _globalBroadcast: ((msg: WsServerMessage) => void) | null = null
-  /** Registered listeners notified when a session's Claude process exits. */
+  /** Registered listeners notified when a session's Claude process exits (used by webhook-handler for chained workflows). */
   private _exitListeners: Array<(sessionId: string, code: number | null, signal: string | null, willRestart: boolean) => void> = []
-  /** Delegated approval logic. */
+  /** Delegated approval logic (auto-approve patterns, deny-lists, pattern management). */
   private approvalManager: ApprovalManager
-  /** Delegated naming logic. */
+  /** Delegated auto-naming logic (generates session names from first user message via Claude API). */
   private sessionNaming: SessionNaming
-  /** Delegated persistence logic. */
+  /** Delegated persistence logic (saves/restores session metadata to disk across server restarts). */
   private sessionPersistence: SessionPersistence
 
   constructor() {

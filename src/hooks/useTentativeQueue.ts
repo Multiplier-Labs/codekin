@@ -20,7 +20,11 @@ export interface QueueEntry {
 
 const LS_PREFIX = 'codekin-tentative-'
 
-/** Persist only the text parts (File objects are not serialisable). */
+/**
+ * Persist only the text parts to localStorage (File objects are not serialisable).
+ * @param sessionId  Session UUID — used to build the localStorage key (`codekin-tentative-{id}`).
+ * @param entries    Current queue entries. If empty, the key is removed from storage.
+ */
 function saveTexts(sessionId: string, entries: QueueEntry[]) {
   const key = `${LS_PREFIX}${sessionId}`
   if (entries.length === 0) {
@@ -30,7 +34,11 @@ function saveTexts(sessionId: string, entries: QueueEntry[]) {
   }
 }
 
-/** Load persisted texts (files are lost across reloads). */
+/**
+ * Load persisted texts for a session (files are lost across reloads).
+ * @param sessionId  Session UUID whose queue to load.
+ * @returns Array of QueueEntry with text restored and empty files arrays.
+ */
 function loadEntries(sessionId: string): QueueEntry[] {
   try {
     const raw = localStorage.getItem(`${LS_PREFIX}${sessionId}`)
@@ -42,6 +50,11 @@ function loadEntries(sessionId: string): QueueEntry[] {
   return []
 }
 
+/**
+ * Load all persisted tentative queues from localStorage.
+ * Scans for all keys matching `codekin-tentative-*` and hydrates them.
+ * @returns Map of sessionId → QueueEntry[] for all sessions with non-empty queues.
+ */
 function loadAllQueues(): Record<string, QueueEntry[]> {
   const result: Record<string, QueueEntry[]> = {}
   try {

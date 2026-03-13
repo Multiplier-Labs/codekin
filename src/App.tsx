@@ -34,6 +34,7 @@ import { InputBar, type InputBarHandle } from './components/InputBar'
 import { PromptButtons } from './components/PromptButtons'
 import { RepoSelector } from './components/RepoSelector'
 import { DiffPanel } from './components/DiffPanel'
+import { IconEye } from '@tabler/icons-react'
 
 export default function App() {
   const { settings, updateSettings } = useSettings()
@@ -61,12 +62,18 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(!settings.token)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [diffPanelOpen, setDiffPanelOpen] = useState(false)
+  /** Callback ref for forwarding WsServerMessages to the diff panel (set by DiffPanel on mount). */
   const diffHandleMessageRef = useRef<(msg: import('./types').WsServerMessage) => void>(() => {})
+  /** Callback ref for notifying the diff panel when a tool finishes (triggers auto-refresh). */
   const diffHandleToolDoneRef = useRef<(toolName: string, summary?: string) => void>(() => {})
+  /** Tracks whether file-mutating tools have fired in this session (heuristic for "has diffs"). */
+  const [hasFileChanges, setHasFileChanges] = useState(false)
   const [archiveRefreshKey, setArchiveRefreshKey] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** Holds context text (e.g. from archive "Continue" action) to inject into the next session's first message. */
   const pendingContextRef = useRef<string | null>(null)
+  /** Stable ref to the current sendInput function, used by callbacks that close over stale state. */
   const sendInputRef = useRef<(data: string) => void>(() => {})
 
   const inputBarRef = useRef<InputBarHandle>(null)
@@ -126,9 +133,18 @@ export default function App() {
         diffHandleMessageRef.current(msg)
       } else if (msg.type === 'tool_done') {
         diffHandleToolDoneRef.current(msg.toolName, msg.summary)
+        // Track file-mutating tools to show Code Review button
+        if (msg.toolName === 'Edit' || msg.toolName === 'Write') {
+          setHasFileChanges(true)
+        }
       }
     },
   })
+
+  // Reset file-change tracking when switching sessions
+  useEffect(() => {
+    setHasFileChanges(false) // eslint-disable-line react-hooks/set-state-in-effect -- sync with session change
+  }, [activeSessionId])
 
   // Session orchestration: switching, creating, deleting sessions & repos
   const {
@@ -266,7 +282,13 @@ export default function App() {
     joinSession(activeSessionId)
   }, [activeSessionId, connState, joinSession])
 
-  // React to browser back/forward navigation
+  // React to browser back/forward navigation.
+  // This effect syncs app state when the user clicks the browser back/forward buttons.
+  // It tracks `urlSessionId` (from popstate) and intentionally OMITS `activeSessionId`,
+  // `clearMessages`, `leaveSession`, `joinSession`, and `setActiveSessionIdRaw` from the
+  // dependency array. Including `activeSessionId` would cause an infinite loop: this effect
+  // sets it, which would re-trigger the effect. The other callbacks are stable refs that
+  // don't change, but listing them would obscure the intentional `activeSessionId` omission.
   useEffect(() => {
     if (urlSessionId === activeSessionId) return
     if (urlSessionId) {
@@ -491,6 +513,18 @@ export default function App() {
                 isMobile={isMobile}
               />
               <TodoPanel tasks={tasks} />
+
+              {/* Code Review button — top-right corner, visible when files have been changed */}
+              {hasFileChanges && !diffPanelOpen && (
+                <button
+                  className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-lg bg-primary-9/90 px-3 py-1.5 text-[13px] font-medium text-white shadow-lg backdrop-blur-sm transition-colors hover:bg-primary-8"
+                  onClick={() => setDiffPanelOpen(true)}
+                  title="Review code changes (Ctrl+Shift+D)"
+                >
+                  <IconEye size={15} />
+                  Code Review
+                </button>
+              )}
             </div>
 
             {/* Smart prompt buttons (conditional) */}
