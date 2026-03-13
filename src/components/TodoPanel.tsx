@@ -68,7 +68,7 @@ export function TodoPanel({ tasks }: Props) {
   // Collapsed pill view
   if (!expanded) {
     return (
-      <div className="absolute top-3 right-3 z-20">
+      <div className="absolute top-14 right-3 z-20">
         <button
           onClick={() => setExpanded(true)}
           className="flex items-center gap-1.5 rounded-lg bg-neutral-9/90 backdrop-blur border border-neutral-8/60 px-2.5 py-1.5 shadow-lg hover:bg-neutral-8/90 transition-colors"
@@ -85,7 +85,7 @@ export function TodoPanel({ tasks }: Props) {
 
   // Expanded card view
   return (
-    <div className="absolute top-3 right-3 z-20 w-64 rounded-lg bg-neutral-9/90 backdrop-blur border border-neutral-8/60 shadow-lg">
+    <div className="absolute top-14 right-3 z-20 w-64 rounded-lg bg-neutral-9/90 backdrop-blur border border-neutral-8/60 shadow-lg">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-8/40">
         <span className="text-[13px] font-semibold text-neutral-1 uppercase tracking-wider flex items-center gap-1.5">
