@@ -1,7 +1,7 @@
 import { execFile } from 'child_process'
 import { existsSync, mkdirSync, rmSync } from 'fs'
 import { homedir } from 'os'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { promisify } from 'util'
 
 const execFileAsync = promisify(execFile)
@@ -36,7 +36,10 @@ async function ensureBareMirror(repo: string): Promise<string> {
 }
 
 async function ensureBareMirrorImpl(repo: string): Promise<string> {
-  const mirrorPath = join(REPOS_DIR, `${repo}.git`)
+  const mirrorPath = resolve(join(REPOS_DIR, `${repo}.git`))
+  if (!mirrorPath.startsWith(REPOS_DIR + '/')) {
+    throw new Error(`Path traversal detected: repo '${repo}' escapes REPOS_DIR`)
+  }
 
   if (existsSync(mirrorPath)) {
     // Update the mirror

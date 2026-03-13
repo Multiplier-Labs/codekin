@@ -11,11 +11,16 @@ import crypto from 'crypto'
  * URL-embedded passwords, and common API key formats.
  */
 const SECRET_PATTERNS: Array<[RegExp, string]> = [
-  [/Bearer\s+\S+/gi, 'Bearer [REDACTED]'],
-  [/Authorization:\s*\S+/gi, 'Authorization: [REDACTED]'],
-  [/(https?:\/\/[^:]+):([^@]+)@/gi, '$1:[REDACTED]@'],
-  [/\b(sk-|pk-|api[_-]?key[=:]\s*)\S+/gi, '$1[REDACTED]'],
-  [/(password|passwd|pwd|secret|token)[=:]\s*\S+/gi, '$1=[REDACTED]'],
+  // Bearer tokens — match across whitespace/special chars until end-of-line or quote
+  [/Bearer\s+[^\s"']+/gi, 'Bearer [REDACTED]'],
+  // Authorization header values (Basic, Bearer, Token, etc.)
+  [/Authorization:\s*[^\s"'\r\n]+/gi, 'Authorization: [REDACTED]'],
+  // URL-embedded credentials — handle percent-encoded and special chars in password
+  [/(https?:\/\/[^:@\s]+):([^@\s]+)@/gi, '$1:[REDACTED]@'],
+  // Common API key prefixes (Stripe sk_live_, GitHub ghp_/gho_/ghs_, etc.)
+  [/\b(sk-|pk-|sk_live_|sk_test_|ghp_|gho_|ghs_|glpat-|xox[bpsa]-|api[_-]?key[=:]\s*)\S+/gi, '$1[REDACTED]'],
+  // Key-value secrets in configs/logs
+  [/(password|passwd|pwd|secret|token|credential|auth_token|access_key|private_key)[=:]\s*\S+/gi, '$1=[REDACTED]'],
 ]
 
 export function redactSecrets(input: string): string {
