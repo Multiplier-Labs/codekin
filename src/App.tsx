@@ -517,7 +517,7 @@ export default function App() {
               {/* Code Review button — top-right corner, visible when files have been changed */}
               {hasFileChanges && !diffPanelOpen && (
                 <button
-                  className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-lg bg-primary-9/90 px-3 py-1.5 text-[13px] font-medium text-white shadow-lg backdrop-blur-sm transition-colors hover:bg-primary-8"
+                  className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-lg bg-primary-8 px-3 py-1.5 text-[13px] font-medium text-neutral-1 shadow-lg backdrop-blur-sm transition-colors hover:bg-primary-7"
                   onClick={() => setDiffPanelOpen(true)}
                   title="Review code changes (Ctrl+Shift+D)"
                 >
