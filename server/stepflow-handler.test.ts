@@ -462,15 +462,12 @@ describe('StepflowHandler', () => {
         .rejects.toThrow('private/link-local')
     })
 
-    it('blocks ::ffff:127.0.0.1 — known gap: URL normalizes to ::ffff:7f00:1 bypassing regex', async () => {
+    it('blocks ::ffff:127.0.0.1 (IPv4-mapped IPv6 loopback)', async () => {
       // new URL('http://[::ffff:127.0.0.1]/...').hostname === '[::ffff:7f00:1]'
-      // The SSRF regex checks for the literal '::ffff:127.0.0.1' but the URL parser
-      // normalizes it to '::ffff:7f00:1' before the regex runs, so it is NOT blocked.
-      // This test documents the gap: the request reaches fetch instead of being rejected.
+      // The SSRF check now decodes IPv4-mapped IPv6 hex form back to dotted IPv4.
       handler = new StepflowHandler(makeConfig({ allowedCallbackHosts: allHosts }), sessions)
-      await (handler as any).postCallback('http://[::ffff:127.0.0.1]/callback', result)
-      // If the SSRF check caught this, it would throw. Instead it passes through to fetch.
-      expect(mockFetch).toHaveBeenCalledTimes(1)
+      await expect((handler as any).postCallback('http://[::ffff:127.0.0.1]/callback', result))
+        .rejects.toThrow('private/link-local')
     })
 
     // --- Happy path ---
