@@ -65,6 +65,15 @@ export interface Session {
  * Messages sent from the browser client to the WebSocket server.
  *
  * Each variant maps to an action the user or UI can trigger.
+ *
+ * Typical message flow:
+ *   auth → create_session | join_session → start_claude → input* → stop
+ *
+ * - `auth` must be sent first; the server drops the connection on failure.
+ * - `create_session` and `join_session` are mutually exclusive session entry points.
+ * - `input` sends user text to Claude; `prompt_response` answers a permission/question prompt.
+ * - `ping` is a keepalive; the server replies with `pong`.
+ * - `get_diff` / `discard_changes` are REST-over-WebSocket for the diff viewer.
  */
 export type WsClientMessage =
   | { type: 'auth'; token: string }
@@ -95,6 +104,19 @@ export interface TaskItem {
  *
  * These drive the entire chat UI: streaming text, tool activity indicators,
  * prompt dialogs, session lifecycle events, and background webhook notifications.
+ *
+ * Canonical message sequence for a typical turn:
+ *   connected → session_joined → claude_started
+ *     → [output* → tool_active → tool_done]* → result → exit
+ *
+ * Paired messages:
+ * - `tool_active` / `tool_done` always bracket a single tool invocation.
+ * - `prompt` / `prompt_dismiss` bracket a permission or question dialog.
+ * - `planning_mode { active: true }` / `planning_mode { active: false }` bracket plan mode.
+ *
+ * Lifecycle events (`session_created`, `session_joined`, `session_left`, `session_deleted`,
+ * `claude_started`, `claude_stopped`, `sessions_updated`) can arrive at any point.
+ * `webhook_event` and `workflow_event` are broadcast to all clients, not session-scoped.
  */
 export type WsServerMessage =
   | { type: 'connected'; connectionId: string; claudeAvailable: boolean; claudeVersion: string; apiKeySet: boolean }

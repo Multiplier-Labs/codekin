@@ -69,6 +69,14 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
   /** Additional env vars passed to the child process (session ID, port, token). */
   private extraEnv: Record<string, string>
 
+  /**
+   * @param workingDir  Absolute path to the git repo where the Claude CLI runs.
+   * @param sessionId   Claude session UUID for `--session-id`. Defaults to a random UUID
+   *                    (new conversation). Pass an existing ID to resume a session.
+   * @param extraEnv    Additional environment variables merged into the child process env
+   *                    (e.g. `CC_WS_PORT`, `CC_AUTH_TOKEN` for port-forwarding and auth).
+   * @param model       Claude model ID override (e.g. 'claude-opus-4-6'). Omit to use the CLI default.
+   */
   constructor(private workingDir: string, sessionId?: string, extraEnv?: Record<string, string>, private model?: string) {
     super()
     this.sessionId = sessionId || randomUUID()

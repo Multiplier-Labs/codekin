@@ -61,12 +61,16 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(!settings.token)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [diffPanelOpen, setDiffPanelOpen] = useState(false)
+  /** Callback ref for forwarding WsServerMessages to the diff panel (set by DiffPanel on mount). */
   const diffHandleMessageRef = useRef<(msg: import('./types').WsServerMessage) => void>(() => {})
+  /** Callback ref for notifying the diff panel when a tool finishes (triggers auto-refresh). */
   const diffHandleToolDoneRef = useRef<(toolName: string, summary?: string) => void>(() => {})
   const [archiveRefreshKey, setArchiveRefreshKey] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** Holds context text (e.g. from archive "Continue" action) to inject into the next session's first message. */
   const pendingContextRef = useRef<string | null>(null)
+  /** Stable ref to the current sendInput function, used by callbacks that close over stale state. */
   const sendInputRef = useRef<(data: string) => void>(() => {})
 
   const inputBarRef = useRef<InputBarHandle>(null)
@@ -266,7 +270,13 @@ export default function App() {
     joinSession(activeSessionId)
   }, [activeSessionId, connState, joinSession])
 
-  // React to browser back/forward navigation
+  // React to browser back/forward navigation.
+  // This effect syncs app state when the user clicks the browser back/forward buttons.
+  // It tracks `urlSessionId` (from popstate) and intentionally OMITS `activeSessionId`,
+  // `clearMessages`, `leaveSession`, `joinSession`, and `setActiveSessionIdRaw` from the
+  // dependency array. Including `activeSessionId` would cause an infinite loop: this effect
+  // sets it, which would re-trigger the effect. The other callbacks are stable refs that
+  // don't change, but listing them would obscure the intentional `activeSessionId` omission.
   useEffect(() => {
     if (urlSessionId === activeSessionId) return
     if (urlSessionId) {

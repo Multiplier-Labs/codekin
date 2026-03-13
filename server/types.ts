@@ -110,7 +110,17 @@ export interface ClaudeAssistantMessage {
   parent_tool_use_id: string | null
 }
 
-/** Individual content blocks within an assistant message. */
+/**
+ * Individual content blocks within an assistant message.
+ *
+ * Which block types appear in which events:
+ * - `text`        → ClaudeAssistantMessage (final) and content_block_delta (streaming)
+ * - `tool_use`    → ClaudeAssistantMessage (final) and content_block_start (streaming)
+ * - `tool_result` → ClaudeToolResultEvent (sent by Claude after tool execution)
+ *
+ * Note: `thinking` blocks are not modelled here — they arrive as content_block_delta
+ * events with type 'thinking' and are handled separately in ClaudeProcess.
+ */
 export type ClaudeContentBlock =
   | { type: 'text'; text: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }

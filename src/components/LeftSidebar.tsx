@@ -67,34 +67,63 @@ function buildRepoNodes(
 // --------------------------------------------------------------------------
 
 interface Props {
+  /** All known sessions across all repos. */
   sessions: Session[]
+  /** Currently selected session (highlighted in the tree). */
   activeSessionId: string | null
+  /** Working directory of the currently selected session/repo. */
   activeWorkingDir: string | null
+  /** Session IDs that have a pending prompt awaiting user response. */
   waitingSessions: Record<string, boolean>
+  /** Per-session tentative message queues (held while another session is processing). */
   tentativeQueues: Record<string, { text: string; files: File[] }[]>
+  /** Repo groups from the API, used for the repo selector dropdown. */
   groups: RepoGroup[]
+  /** Global modules available across all repos (shown in module browser). */
   globalModules: Module[]
+  /** The Repo object for the currently active working directory. */
   activeRepo: Repo | null
+  /** Auth token for API requests (file uploads, repo fetches). */
   token: string
+  /** Current color theme ('dark' | 'light'). */
   theme: string
+  /** User-configured font size in pixels. */
   fontSize: number
+  /** WebSocket connection state ('disconnected' | 'connecting' | 'connected'). */
   connState: string
+  /** Current route view ('chat' | 'workflows'). */
   view: string
+  /** Incremented to force re-fetch of archived sessions. */
   archiveRefreshKey: number
+  /** Switch the active session to the given ID. */
   onSelectSession: (id: string) => void
+  /** Delete a session by ID (with confirmation). */
   onDeleteSession: (id: string) => void
+  /** Rename a session in the sidebar tree. */
   onRenameSession: (id: string, name: string) => void
+  /** Create a new session in the active repo. */
   onNewSession: () => void
+  /** Create a new session seeded with context from an archived session. */
   onNewSessionFromArchive: (workingDir: string, context: string) => void
+  /** Open (or create) a session for a specific repo, optionally with a name. */
   onOpenSession: (repo: Repo, name?: string) => void
+  /** Switch the active repo (expands its tree node). */
   onSelectRepo: (workingDir: string) => void
+  /** Remove a repo from the sidebar (does not delete the git repo). */
   onDeleteRepo: (workingDir: string) => void
+  /** Open the settings modal. */
   onSettingsOpen: () => void
+  /** Toggle or set the color theme. */
   onUpdateTheme: (theme: string) => void
+  /** Send a module's content to the active session as context. */
   onSendModule: (mod: Module) => void
+  /** Navigate to the workflows view. */
   onNavigateToWorkflows: () => void
+  /** Open the docs browser for a repo's documentation files. */
   onBrowseDocs?: (workingDir: string) => void
+  /** State and callbacks for the docs file picker overlay. */
   docsPicker?: DocsPickerProps
+  /** Mobile-specific layout props (drawer mode). */
   mobile?: MobileProps
 }
 
