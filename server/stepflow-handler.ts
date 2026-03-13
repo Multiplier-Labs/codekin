@@ -416,11 +416,26 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
     const ip = parsedUrl.hostname
     // Strip brackets from IPv6 addresses for matching
     const bareIp = ip.startsWith('[') && ip.endsWith(']') ? ip.slice(1, -1) : ip
-    if (/^(127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|0\.)/.test(bareIp) ||
-        bareIp === 'localhost' || bareIp === '::1' ||
+
+    // Resolve IPv4-mapped IPv6 addresses (::ffff:x.x.x.x) to their IPv4 equivalent.
+    // URL normalizes e.g. ::ffff:127.0.0.1 → ::ffff:7f00:1, so match both forms.
+    let ipToCheck = bareIp
+    const v4mappedDotted = bareIp.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i)
+    const v4mappedHex = bareIp.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i)
+    if (v4mappedDotted) {
+      ipToCheck = v4mappedDotted[1]
+    } else if (v4mappedHex) {
+      // Convert hex pairs back to dotted IPv4: ::ffff:7f00:1 → 127.0.0.1
+      const hi = parseInt(v4mappedHex[1], 16)
+      const lo = parseInt(v4mappedHex[2], 16)
+      ipToCheck = `${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`
+    }
+
+    if (/^(127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|0\.)/.test(ipToCheck) ||
+        ipToCheck === 'localhost' || bareIp === '::1' ||
         /^fe80:/i.test(bareIp) ||   // IPv6 link-local
         /^f[cd]/i.test(bareIp) ||   // IPv6 unique-local (fc00::/7)
-        bareIp === '::' || bareIp === '::ffff:127.0.0.1') {
+        bareIp === '::') {
       throw new Error(`Callback to private/link-local address ${ip} is blocked`)
     }
 
