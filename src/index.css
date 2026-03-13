@@ -962,20 +962,20 @@ html, body, #root {
 }
 
 [data-theme="light"] .diff-hunk-view .diff-code-insert {
-  background: color-mix(in srgb, var(--color-success-3) 40%, transparent);
-  color: var(--color-success-7);
+  background: color-mix(in srgb, var(--color-success-3) 20%, transparent);
+  color: var(--color-neutral-1);
 }
 
 [data-theme="light"] .diff-hunk-view .diff-code-delete {
-  background: color-mix(in srgb, var(--color-error-3) 40%, transparent);
-  color: var(--color-error-7);
+  background: color-mix(in srgb, var(--color-error-3) 20%, transparent);
+  color: var(--color-neutral-1);
 }
 
 [data-theme="light"] .diff-hunk-view .diff-gutter-insert {
-  background: color-mix(in srgb, var(--color-success-3) 25%, transparent);
+  background: color-mix(in srgb, var(--color-success-3) 15%, transparent);
 }
 
 [data-theme="light"] .diff-hunk-view .diff-gutter-delete {
-  background: color-mix(in srgb, var(--color-error-3) 25%, transparent);
+  background: color-mix(in srgb, var(--color-error-3) 15%, transparent);
 }
 
