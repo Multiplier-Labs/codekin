@@ -42,7 +42,7 @@ export function DiffToolbar({
   }
 
   return (
-    <div className="sticky top-0 z-10 bg-neutral-11 border-b border-neutral-9 px-3 py-2 flex flex-col gap-2">
+    <div className="sticky top-0 z-10 bg-neutral-10 border-b border-neutral-9 px-3 py-2 flex flex-col gap-2">
       {/* Row 1: Branch + scope + actions */}
       <div className="flex items-center gap-2">
         {/* Branch */}
