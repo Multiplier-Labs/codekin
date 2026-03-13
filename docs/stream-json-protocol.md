@@ -315,6 +315,12 @@ Response to a `control_request`. The `request_id` must match.
 | `error` | `message` | Error from Claude process |
 | `exit` | `code`, `signal` | Claude process exited (only when not auto-restarting) |
 | `pong` | — | Heartbeat response |
+| `diff_result` | `files`, `summary`, `branch`, `scope` | Diff viewer result (array of `DiffFile` objects with hunks/lines, a `DiffSummary`, current branch name, and scope) |
+| `diff_error` | `message` | Diff viewer error |
+| `sessions_updated` | — | Broadcast when the session list changes (creation, deletion, rename) |
+| `session_name_update` | `sessionId`, `name` | Session was renamed (e.g. by auto-naming) |
+| `webhook_event` | `event`, `repo`, `branch`, `workflow`, `conclusion`, `status`, `sessionId?` | GitHub webhook received (broadcast to all clients) |
+| `workflow_event` | `eventType`, `runId`, `kind`, `stepKey?`, `status?`, `payload?` | Workflow engine lifecycle event (broadcast to all clients) |
 
 ### Client → Server Messages
 
@@ -330,7 +336,52 @@ Response to a `control_request`. The `request_id` must match.
 | `prompt_response` | `value`, `requestId?` | Answer a permission/question prompt |
 | `resize` | `cols`, `rows` | Terminal resize (no-op in stream-json mode) |
 | `ping` | — | Heartbeat |
-| `get_usage` | — | Request usage stats (not yet implemented) |
+| `get_diff` | `scope?` | Request diff (scope: `staged`, `unstaged`, or `all`; defaults to `all`) |
+| `discard_changes` | `scope`, `paths?`, `statuses?` | Discard file changes by scope, optionally limited to specific paths |
+| `set_model` | `model` | Switch the Claude model for the current session |
+
+## Diff Viewer Types
+
+The diff viewer uses these types in `diff_result` messages (defined in `src/types.ts`):
+
+```typescript
+type DiffScope = 'staged' | 'unstaged' | 'all'
+type DiffFileStatus = 'modified' | 'added' | 'deleted' | 'renamed'
+
+interface DiffFile {
+  path: string
+  status: DiffFileStatus
+  oldPath?: string          // present when status is 'renamed'
+  isBinary: boolean
+  additions: number
+  deletions: number
+  hunks: DiffHunk[]
+}
+
+interface DiffHunk {
+  header: string            // e.g. "@@ -10,6 +10,8 @@"
+  oldStart: number
+  oldLines: number
+  newStart: number
+  newLines: number
+  lines: DiffLine[]
+}
+
+interface DiffLine {
+  type: 'add' | 'delete' | 'context'
+  content: string
+  oldLineNo?: number
+  newLineNo?: number
+}
+
+interface DiffSummary {
+  filesChanged: number
+  insertions: number
+  deletions: number
+  truncated: boolean
+  truncationReason?: string // present when truncated is true
+}
+```
 
 ## Event Processing Pipeline
 
