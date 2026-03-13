@@ -514,7 +514,7 @@ export default function App() {
               />
               <TodoPanel tasks={tasks} />
 
-              {/* Code Review button — top-right corner, visible when files have been changed */}
+              {/* Diff view button — top-right corner, visible when files have been changed */}
               {hasFileChanges && !diffPanelOpen && (
                 <button
                   className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-lg bg-primary-8 px-3 py-1.5 text-[13px] font-medium text-neutral-1 shadow-lg backdrop-blur-sm transition-colors hover:bg-primary-7"
@@ -522,7 +522,7 @@ export default function App() {
                   title="Review code changes (Ctrl+Shift+D)"
                 >
                   <IconEye size={15} />
-                  Code Review
+                  Diff view
                 </button>
               )}
             </div>
