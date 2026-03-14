@@ -174,6 +174,8 @@ export function useChatSocket({
   const [thinkingSummary, setThinkingSummary] = useState<string | null>(null)
   const [waitingSessions, setWaitingSessions] = useState<Record<string, boolean>>({})
   const { active: activePrompt, queueSize: promptQueueSize, enqueue: enqueuePrompt, dismiss: dismissPrompt, clearAll: clearAllPrompts } = usePromptState()
+  const promptQueueSizeRef = useRef(promptQueueSize)
+  useEffect(() => { promptQueueSizeRef.current = promptQueueSize }, [promptQueueSize])
   const currentSessionId = useRef<string | null>(null)
 
   // ---------------------------------------------------------------------------
@@ -302,9 +304,17 @@ export function useChatSocket({
         break
       }
 
-      case 'prompt_dismiss':
+      case 'prompt_dismiss': {
         dismissPrompt(msg.requestId)
+        // If this was the last prompt, clear waiting state for the sidebar indicator
+        if (promptQueueSizeRef.current <= 1) {
+          const sid = currentSessionId.current
+          if (sid) {
+            setWaitingSessions(prev => prev[sid] ? { ...prev, [sid]: false } : prev)
+          }
+        }
         break
+      }
 
       case 'session_created':
         currentSessionId.current = msg.sessionId
@@ -394,6 +404,18 @@ export function useChatSocket({
   useEffect(() => { handleMessageRef.current = handleMessage }, [handleMessage])
 
   // ---------------------------------------------------------------------------
+  // Safety net: keep waitingSessions in sync with the prompt queue.
+  // Handles edge cases where a prompt arrived before currentSessionId was set
+  // (e.g. server re-broadcasts pending prompts during join() before the
+  // session_joined message sets currentSessionId.current).
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const sid = currentSessionId.current
+    if (!sid || !activePrompt) return
+    setWaitingSessions(prev => prev[sid] ? prev : { ...prev, [sid]: true })
+  }, [activePrompt])
+
+  // ---------------------------------------------------------------------------
   // Connection layer — delegates transport to useWsConnection
   // ---------------------------------------------------------------------------
   const onDisconnect = useCallback(() => {
@@ -445,10 +467,11 @@ export function useChatSocket({
     if (requestId) dismissPrompt(requestId)
     setIsProcessing(true)
     const sid = currentSessionId.current
-    if (sid) {
+    // Only clear waiting state if this was the last prompt in the queue
+    if (sid && promptQueueSize <= 1) {
       setWaitingSessions(prev => prev[sid] ? { ...prev, [sid]: false } : prev)
     }
-  }, [send, activePrompt?.requestId, dismissPrompt])
+  }, [send, activePrompt?.requestId, dismissPrompt, promptQueueSize])
 
   const leaveSession = useCallback(() => {
     send({ type: 'leave_session' })
