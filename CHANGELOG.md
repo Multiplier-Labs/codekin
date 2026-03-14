@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Features
+- Add commit-review event dispatcher for event-driven workflow triggers
+- Add commit-review workflow definition and UI kind
+- Add cross-repo auto-approval inference
+- Implement diff viewer sidebar for browsing session file changes
+- Add inline slash command autocomplete and fix command routing
+- Add configurable repos path setting for locally cloned repositories
+- Add Code Review button to chat area when files are modified
+- Implement approval system fixes (prompt queue, requestId matching, pattern-first storage, hook denial surfacing)
+- Add repositories path setting to empty state view
+- Add folder picker with path validation for repos path setting
+
+### Fixes
+- Fix file uploads: add markdown support, increase size limit, improve errors
+- Use `path.extname()` for safer file extension extraction
+- Upload files immediately when message is withheld
+- Chunk git path args in discard to avoid E2BIG on large repos
+- Fix missing approval prompts for WebSearch, WebFetch, and other tools
+- Fix AskUserQuestion handling: fallback for malformed input, preserve option values
+- Fix stale cron schedules and decouple commit-event auth
+- Fix security issues from code review audit
+- Fix Code Review button contrast in light mode
+- Improve diff panel UX: global scroll, darker bg, lighter light-mode diffs
+- Fix task popup overlapping diff view button and rename to Diff view
+- Update DiffToolbar background color
+
+### Security
+- Fix security and correctness issues from GPT review
+- Implement repo health audit fixes
+
+### Documentation
+- Add documentation from code comment audit
+- Add approvals system fix spec
+
+### Chores
+- Remove obsolete `.codekin/outputs/` directory
+- Remove orphan components `SessionList.tsx` and `SessionListPanel.tsx`
+
+## [0.3.7] - 2026-03-11
+
+### Features
+- Add weekly Claude Code usage limit percentage to sidebar
+- Add codekin.ai website link to README
+- Add missing features to README and screenshot
+
+### Fixes
+- Fix webhook/stepflow sessions creating duplicate repo entries in sidebar
+- Fix docs browser auth, suppress duplicate model messages, and auto-focus repo search
+- Fix security and robustness issues from code review audit
+- Reduce frontend complexity per complexity report findings
+- Remove usage limit feature (`rate_limit_event` lacks usage percentage)
+- Adjust sidebar bottom toolbar for mobile responsiveness
+- Fix missing imports for `execFile` and `homedir` in session-manager
+
+### Chores
+- Implement repo health audit improvements
+- Remove `GH_ORG` from README config table
+- Gitignore PM2 ecosystem config and rename log path to codekin
+
 ## [0.3.6] - 2026-03-10
 
 ### Features
