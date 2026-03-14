@@ -38,7 +38,7 @@ import { IconEye } from '@tabler/icons-react'
 
 export default function App() {
   const { settings, updateSettings } = useSettings()
-  const { groups, repos, globalSkills, globalModules, ghMissing } = useRepos(settings.token)
+  const { groups, repos, globalSkills, globalModules, ghMissing, refresh: refreshRepos } = useRepos(settings.token)
   const { sessions, rename: renameSession, remove: removeSession, refresh: refreshSessions } = useSessions(settings.token)
   const { queues: tentativeQueues, addToQueue, clearQueue } = useTentativeQueue()
   const { sessionId: urlSessionId, view, navigate } = useRouter()
@@ -578,7 +578,7 @@ export default function App() {
             />
           </div>
         ) : (
-          <RepoSelector groups={groups} token={settings.token} ghMissing={ghMissing} onOpen={handleOpenSession} />
+          <RepoSelector groups={groups} token={settings.token} ghMissing={ghMissing} onOpen={handleOpenSession} onRefreshRepos={refreshRepos} />
         )}
       </div>
 

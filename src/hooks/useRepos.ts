@@ -7,7 +7,7 @@
  * clone status, description, and any repo-specific skills/modules.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import type { Repo, Skill, Module } from '../types'
 
 /** Extended repo data returned by the /cc/api/repos endpoint. */
@@ -34,6 +34,8 @@ export function useRepos(token?: string) {
   // Flat list for compatibility (CommandPalette, etc.)
   const repos = groups.flatMap(g => g.repos)
 
+  const [refreshCount, setRefreshCount] = useState(0)
+
   useEffect(() => {
     const headers: Record<string, string> = {}
     if (token) headers['Authorization'] = `Bearer ${token}`
@@ -51,7 +53,9 @@ export function useRepos(token?: string) {
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false))
-  }, [token])
+  }, [token, refreshCount])
 
-  return { groups, repos, globalSkills, globalModules, loading, error, ghMissing }
+  const refresh = useCallback(() => setRefreshCount(c => c + 1), [])
+
+  return { groups, repos, globalSkills, globalModules, loading, error, ghMissing, refresh }
 }

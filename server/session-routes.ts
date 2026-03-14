@@ -6,8 +6,21 @@
 
 import { Router } from 'express'
 import type { Request } from 'express'
+import {
+  existsSync as fsExistsSync,
+  statSync as fsStatSync,
+  readdirSync as fsReaddirSync,
+} from 'fs'
+import { resolve as pathResolve, join as pathJoin } from 'path'
+import { homedir as osHomedir } from 'os'
 import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
+
+/** Expand leading ~ to the user's home directory. */
+function expandTilde(p: string): string {
+  if (p.startsWith('~/') || p === '~') return pathJoin(osHomedir(), p.slice(1))
+  return p
+}
 
 type VerifyFn = (token: string | undefined) => boolean
 type VerifySessionFn = (token: string | undefined, sessionId: string | undefined) => boolean
@@ -145,13 +158,45 @@ export function createSessionRouter(
   router.put('/api/settings/repos-path', (req, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
-    const { path } = req.body
-    if (typeof path !== 'string') {
+    const { path: rawPath } = req.body
+    if (typeof rawPath !== 'string') {
       return res.status(400).json({ error: 'path must be a string' })
     }
+    const trimmed = rawPath.trim()
     // Empty string means "use default REPOS_ROOT"
-    sessions.archive.setSetting('repos_path', path.trim())
-    res.json({ path: path.trim() })
+    if (trimmed) {
+      const expanded = expandTilde(trimmed)
+      if (!fsExistsSync(expanded) || !fsStatSync(expanded).isDirectory()) {
+        return res.status(400).json({ error: 'Path does not exist or is not a directory' })
+      }
+    }
+    sessions.archive.setSetting('repos_path', trimmed)
+    res.json({ path: trimmed })
+  })
+
+  // --- Browse directories (for folder picker) ---
+
+  router.get('/api/browse-dirs', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const raw = (typeof req.query.path === 'string' ? req.query.path : '') || osHomedir()
+    const expanded = expandTilde(raw)
+    const base = expanded.startsWith('/') ? expanded : pathResolve(expanded)
+
+    if (!fsExistsSync(base) || !fsStatSync(base).isDirectory()) {
+      return res.status(400).json({ error: 'Path does not exist or is not a directory' })
+    }
+
+    try {
+      const entries = fsReaddirSync(base, { withFileTypes: true })
+        .filter(d => d.isDirectory() && !d.name.startsWith('.'))
+        .map(d => d.name)
+        .sort((a, b) => a.localeCompare(b))
+      res.json({ path: base, dirs: entries })
+    } catch {
+      res.status(400).json({ error: 'Cannot read directory' })
+    }
   })
 
   // --- Support provider settings ---

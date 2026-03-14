@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   IconKey, IconPalette, IconBrandGithub, IconCopy, IconCheck,
   IconChevronDown, IconChevronRight, IconCircleCheckFilled, IconCircleXFilled,
-  IconRobot, IconArchive, IconBrain, IconFolder,
+  IconRobot, IconArchive, IconBrain,
 } from '@tabler/icons-react'
 import type { Settings as SettingsType } from '../types'
 import {
@@ -18,6 +18,7 @@ import {
   getWebhookConfig, getWebhookEvents, type WebhookConfigInfo,
   getReposPath, setReposPath as setReposPathApi,
 } from '../lib/ccApi'
+import { FolderPicker } from './FolderPicker'
 
 const PROVIDER_LABELS: Record<SupportProvider, string> = {
   auto: 'Auto (first available)',
@@ -260,30 +261,17 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false }
 
               {/* Repos Path — full width */}
               <div className="col-span-2">
-                <label className="mb-1.5 block text-[15px] text-neutral-4">
-                  <span className="flex items-center gap-1.5">
-                    <IconFolder size={14} className="text-neutral-5" />
-                    Repositories Path
-                  </span>
-                </label>
-                <input
-                  type="text"
+                <FolderPicker
                   value={reposPath}
-                  onChange={e => setReposPath(e.target.value)}
-                  onBlur={() => {
-                    setReposPathApi(settings.token, reposPath).catch(() => setSaveError('Failed to save repos path'))
-                  }}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      setReposPathApi(settings.token, reposPath).catch(() => setSaveError('Failed to save repos path'))
-                    }
-                  }}
+                  token={settings.token}
                   placeholder="~/repos (default)"
-                  className="w-full rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] font-mono text-neutral-2 outline-none focus:border-primary-7"
+                  helpText="Absolute path to your locally cloned repositories. Leave empty to use the server default."
+                  inputClass="text-[15px]"
+                  onSave={async (p) => {
+                    await setReposPathApi(settings.token, p)
+                    setReposPath(p)
+                  }}
                 />
-                <p className="mt-1 text-[13px] text-neutral-6">
-                  Absolute path to your locally cloned repositories. Leave empty to use the server default.
-                </p>
               </div>
 
               {/* Support LLM Provider — full width */}

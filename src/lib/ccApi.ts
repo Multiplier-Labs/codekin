@@ -309,9 +309,25 @@ export async function setReposPath(token: string, path: string): Promise<string>
     headers: headers(token),
     body: JSON.stringify({ path }),
   })
-  if (!res.ok) throw new Error(`Failed to set repos path: ${res.status}`)
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'Failed to save repos path' }))
+    throw new Error(data.error || `Failed to set repos path: ${res.status}`)
+  }
   const data = await res.json()
   return data.path
+}
+
+/** Browse directories at a given path (for folder picker). */
+export async function browseDirs(token: string, path?: string): Promise<{ path: string; dirs: string[] }> {
+  const q = path ? `?path=${encodeURIComponent(path)}` : ''
+  const res = await authFetch(`${BASE}/api/browse-dirs${q}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'Failed to browse directory' }))
+    throw new Error(data.error || `Failed to browse: ${res.status}`)
+  }
+  return res.json()
 }
 
 /** Supported AI provider identifiers for support actions. */

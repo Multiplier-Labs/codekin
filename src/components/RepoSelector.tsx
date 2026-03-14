@@ -7,10 +7,11 @@
  */
 
 import { useState, useEffect } from 'react'
-import { IconGitBranch, IconFolder } from '@tabler/icons-react'
+import { IconGitBranch } from '@tabler/icons-react'
 import type { Repo } from '../types'
 import type { ApiRepo, RepoGroup } from '../hooks/useRepos'
 import { RepoList } from './RepoList'
+import { FolderPicker } from './FolderPicker'
 import { getReposPath, setReposPath as setReposPathApi } from '../lib/ccApi'
 
 interface Props {
@@ -18,31 +19,24 @@ interface Props {
   token?: string
   ghMissing?: boolean
   onOpen: (repo: Repo) => void
+  onRefreshRepos?: () => void
 }
 
-export function RepoSelector({ groups, token, ghMissing, onOpen }: Props) {
+export function RepoSelector({ groups, token, ghMissing, onOpen, onRefreshRepos }: Props) {
   const [cloning, setCloning] = useState<string | null>(null)
   const [reposPath, setReposPath] = useState('')
-  const [savedPath, setSavedPath] = useState('')
-  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (token) {
-      getReposPath(token).then(p => { setReposPath(p); setSavedPath(p) }).catch(() => {})
+      getReposPath(token).then(p => { setReposPath(p) }).catch(() => {})
     }
   }, [token])
 
-  function saveReposPath() {
-    if (!token || reposPath === savedPath) return
-    setSaving(true)
-    setReposPathApi(token, reposPath)
-      .then(() => {
-        setSavedPath(reposPath)
-        // Reload so the repo list refreshes with the new path
-        window.location.reload()
-      })
-      .catch(() => {})
-      .finally(() => setSaving(false))
+  async function handleSaveReposPath(path: string) {
+    if (!token) return
+    await setReposPathApi(token, path)
+    setReposPath(path)
+    onRefreshRepos?.()
   }
 
   async function handleSelect(repo: ApiRepo) {
@@ -112,25 +106,12 @@ export function RepoSelector({ groups, token, ghMissing, onOpen }: Props) {
 
         {/* Repos path setting */}
         <div className="mt-6 border-t border-neutral-8 pt-5">
-          <label className="mb-1.5 block text-[13px] text-neutral-5">
-            <span className="flex items-center gap-1.5">
-              <IconFolder size={13} className="text-neutral-6" />
-              Repositories Path
-            </span>
-          </label>
-          <input
-            type="text"
+          <FolderPicker
             value={reposPath}
-            onChange={e => setReposPath(e.target.value)}
-            onBlur={saveReposPath}
-            onKeyDown={e => { if (e.key === 'Enter') saveReposPath() }}
-            placeholder="~/repos (default)"
-            disabled={saving}
-            className="w-full rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[13px] font-mono text-neutral-3 outline-none focus:border-primary-7 disabled:opacity-50"
+            token={token}
+            helpText="Absolute path to your locally cloned repositories"
+            onSave={handleSaveReposPath}
           />
-          <p className="mt-1 text-[12px] text-neutral-6">
-            Absolute path to your locally cloned repositories
-          </p>
         </div>
       </div>
     </div>
