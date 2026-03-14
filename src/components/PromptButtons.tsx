@@ -13,7 +13,7 @@
  * Rendered as a sticky bar above the input area.
  */
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import type { PromptOption, PromptQuestion } from '../types'
 
 interface PromptButtonsProps {
@@ -71,24 +71,27 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
     }
   }, [isMultiQuestion, currentQ, answers, questionIndex, questions, onSelect])
 
+  // Ref to latest handleSingleAnswer so the interval closure always calls the current version
+  const handleSingleAnswerRef = useRef(handleSingleAnswer)
+  handleSingleAnswerRef.current = handleSingleAnswer
+
   // Auto-allow countdown: fires only for permission prompts
   useEffect(() => {
     if (!isPermission) return
     const allowOption = options.find(o => o.value === 'allow')
     if (!allowOption) return
 
+    let remaining = 15
     const interval = setInterval(() => {
-      setTimeLeft(t => {
-        if (t <= 1) {
-          clearInterval(interval)
-          handleSingleAnswer('allow')
-          return 0
-        }
-        return t - 1
-      })
+      remaining--
+      setTimeLeft(remaining) // eslint-disable-line react-hooks/set-state-in-effect -- async timer callback
+      if (remaining <= 0) {
+        clearInterval(interval)
+        handleSingleAnswerRef.current('allow')
+      }
     }, 1000)
     return () => clearInterval(interval)
-  }, [isPermission, options, handleSingleAnswer])
+  }, [isPermission, options])
 
   const handleMultiAnswer = useCallback((values: string[]) => {
     const joined = values.join(', ')
