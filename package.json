@@ -62,6 +62,9 @@
     "unidiff": "^1.0.4",
     "ws": "^8.18.0"
   },
+  "overrides": {
+    "undici": "^7.24.0"
+  },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@types/better-sqlite3": "^7.6.13",
