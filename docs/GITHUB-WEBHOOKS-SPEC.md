@@ -745,7 +745,7 @@ Last 100 webhook events stored in memory, accessible via:
 
 **Deliverable**: Webhooks trigger Claude sessions that diagnose and fix CI failures. Webhook sessions are visually distinct in the UI.
 
-### Phase 2 — Configuration & Modes [Roadmap]
+### Phase 2 — Configuration & Modes [Planned — Not Yet Implemented]
 
 **Scope**: Make behavior configurable, add operating modes.
 
@@ -759,7 +759,7 @@ Last 100 webhook events stored in memory, accessible via:
 
 **Deliverable**: Configurable, production-ready webhook processing.
 
-### Phase 3 — UI Integration [Roadmap]
+### Phase 3 — UI Integration [Planned — Not Yet Implemented]
 
 **Scope**: Surface webhook activity in the frontend.
 
@@ -772,7 +772,7 @@ Last 100 webhook events stored in memory, accessible via:
 
 **Deliverable**: Full visibility into webhook activity from the browser.
 
-### Phase 4 — Expanded Events [Roadmap]
+### Phase 4 — Expanded Events [Planned — Not Yet Implemented]
 
 **Scope**: Handle more GitHub event types.
 

@@ -29,14 +29,31 @@ npm run dev
 
 ### Environment Variables
 
-For full functionality, set these environment variables:
+The server reads its configuration from environment variables defined in `server/config.ts`. See also the conventions in [CLAUDE.md](CLAUDE.md).
 
-| Variable | Required | Description |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | Yes | Claude API key |
-| `GROQ_API_KEY` | No | Session auto-naming via Groq |
-| `GEMINI_API_KEY` | No | `/validate-gemini` skill |
-| `OPENAI_API_KEY` | No | `/validate-gpt` skill |
+#### Core Server Variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `PORT` | No | `32352` | Main server port (WebSocket + REST + uploads) |
+| `CORS_ORIGIN` | Yes (prod) | `http://localhost:5173` | Allowed CORS origin. Must be set explicitly in production. |
+| `AUTH_TOKEN` | Yes (prod) | — | Shared auth token for WebSocket and REST API |
+| `REPOS_ROOT` | No | `~/repos` | Root directory for cloned repositories |
+| `DATA_DIR` | No | `~/.codekin` | Codekin data directory (sessions, approvals, workflows) |
+| `SCREENSHOTS_DIR` | No | `$DATA_DIR/screenshots` | Directory for uploaded file attachments |
+| `GH_ORG` | No | — | GitHub organizations for repo listing (comma-separated) |
+| `FRONTEND_DIST` | No | — | Path to built frontend dist directory (for containerized deploys) |
+
+#### Optional LLM API Keys
+
+These keys enable optional background features and validation skills. They are **not required** for core development or running the server.
+
+| Variable | Description |
+|---|---|
+| `ANTHROPIC_API_KEY` | Session auto-naming fallback (Claude Code CLI uses its own auth) |
+| `GROQ_API_KEY` | Session auto-naming via Groq |
+| `GEMINI_API_KEY` | `/validate-gemini` skill |
+| `OPENAI_API_KEY` | `/validate-gpt` skill |
 
 ### Running Tests
 

@@ -25,6 +25,8 @@ Codekin is a web-based terminal UI for managing multiple Claude Code sessions. I
 - [Auto-Restart & Stall Detection](#auto-restart--stall-detection)
 - [Tool Approval Registry](#tool-approval-registry)
 - [Settings & Configuration](#settings--configuration)
+- [Diff Viewer](#diff-viewer)
+- [Docs Browser](#docs-browser)
 - [Keyboard Shortcuts](#keyboard-shortcuts)
 - [Authentication & Security](#authentication--security)
 - [Architecture Overview](#architecture-overview)
@@ -118,6 +120,8 @@ Codekin provides an interactive UI for responding to Claude's permission request
 - **Multi-select prompts** — Some questions support selecting multiple answers. Checkboxes appear next to each option, and a "Confirm" button sends all selections at once.
 - **Always Allow registry** — Clicking "Always Allow" saves the tool and command pattern to the session's auto-approval registry. Future identical requests are approved automatically without prompting.
 - **Auto-deny on disconnect** — When no clients are connected to a session and a pending tool approval times out, it is automatically denied to prevent hung processes.
+- **Approval countdown with auto-approve** — Permission prompts display a 15-second countdown timer. When the timer expires, the tool is automatically approved. This prevents sessions from stalling on routine approvals when the user is away.
+- **Prompt queue** — When multiple tool approvals arrive simultaneously, they are queued and presented one at a time (oldest first). A badge shows the number of pending prompts when more than one is queued.
 - **60-second timeout** — Pending tool approvals time out after 60 seconds to prevent indefinitely stuck processes.
 
 ---
@@ -172,6 +176,7 @@ Codekin can run scheduled Claude Code sessions against repositories to produce s
   - `coverage.daily` — Daily test coverage assessment with uncovered file list and test proposals
   - `comment-assessment.daily` — Daily audit of comment quality, documentation gaps, and outdated comments
   - `dependency-health.daily` — Daily check for outdated packages, CVEs, and abandoned dependencies
+  - `docs-audit.weekly` — Weekly audit of documentation accuracy, staleness, and coverage
 - **Per-repo overrides** — Any workflow's prompt can be customized for a specific repo by placing a `.codekin/workflows/{kind}.md` file in the repo. The override prompt replaces the global one at run time.
 - **MD-based definitions** — Workflow types are defined as Markdown files with YAML frontmatter in `server/workflows/`. New workflow types can be added by dropping a `.md` file there — no code changes needed.
 - **Staleness check** — Workflows accept a `sinceTimestamp` parameter; if no commits have been made since the last run, the workflow is skipped automatically.
@@ -275,15 +280,48 @@ A per-session registry that remembers which tools and commands have been approve
 
 ---
 
+## Diff Viewer
+
+A right-hand sidebar panel that shows all file changes made by Claude during the current session, with inline unified diffs and file-level navigation.
+
+- **Toggle** — Open/close via the toolbar button or `Ctrl+Shift+D` / `Cmd+Shift+D`.
+- **Side-by-side layout** — The diff panel opens alongside the chat (both visible). On mobile, it opens as a full-screen overlay.
+- **Scope selector** — Switch between `Uncommitted changes` (default), `Staged`, and `Unstaged` views.
+- **File tree** — A compact list of changed files grouped by status: Modified (yellow `M`), Added (green `A`), Deleted (red `D`), Renamed (blue `R`). Each row shows the relative path and `+N −M` change counts.
+- **Unified diffs** — Each file is rendered as a card with syntax-highlighted unified diff, dual-gutter line numbers, and color-coded add/delete/context lines.
+- **Discard changes** — Discard all changes or per-file via `git restore`. Requires confirmation. Supports all scopes (staged, unstaged, all).
+- **Auto-refresh** — The diff panel refreshes automatically after `Edit`, `Write`, or file-mutating `Bash` tool calls (debounced 500ms). No polling.
+- **Resizable** — Drag the left edge to resize (280px–600px). Width is persisted in `localStorage`.
+- **Large diff handling** — Files with >300 changed lines are collapsed by default. Diffs exceeding 2 MB are truncated with a banner.
+- **Branch indicator** — Shows the current branch name, or `detached at <sha>` in detached HEAD state.
+- **Summary line** — Total files changed, insertions, and deletions displayed in the toolbar.
+
+---
+
+## Docs Browser
+
+Browse and read Markdown files from any connected repository, rendered as rich text directly in the main content area.
+
+- **Entry point** — Hover over a repo in the sidebar to reveal a document icon. Click it to open the file picker.
+- **File picker** — A dropdown listing all `.md` files in the repo. `CLAUDE.md` and `README.md` are pinned to the top. Files nested more than 3 directories deep or in hidden directories are excluded.
+- **Rich rendering** — Markdown is rendered with full GFM support (tables, task lists, strikethrough, autolinks) using `marked` and sanitized with `DOMPurify`. Fenced code blocks are syntax-highlighted via `highlight.js`.
+- **Raw toggle** — Switch between rendered and raw source views via the `[Raw]` button in the nav bar.
+- **Inline editing** — The input bar remains visible while viewing a doc. With an active session, you can ask Claude to edit the currently viewed file. The view re-fetches automatically after edits.
+- **Nav bar** — Shows a `← Back` button, the file path (`repoName / path.md`), and the raw toggle. Clicking Back or pressing `Escape` returns to the previous view.
+- **REST API** — `GET /api/repos/:repoId/docs` lists markdown files; `GET /api/repos/:repoId/docs/:filePath` returns file content. Path traversal is guarded server-side.
+
+---
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
 |---|---|
 | `Ctrl+K` / `Cmd+K` | Open command palette |
+| `Ctrl+Shift+D` / `Cmd+Shift+D` | Toggle diff viewer panel |
 | `Enter` | Send message |
 | `Shift+Enter` | Insert newline in input |
 | `Ctrl+C` | Send interrupt signal (SIGINT) to Claude |
-| `Escape` | Close dropdowns, modals, and blur input |
+| `Escape` | Close dropdowns, modals, diff panel, docs browser |
 
 ---
 

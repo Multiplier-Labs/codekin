@@ -15,7 +15,7 @@ Both paths converge on the same client-side prompt UI, which currently stores on
 
 ---
 
-## Fix 1: Prompt Queue (replaces single-slot prompt state)
+## Fix 1: Prompt Queue (replaces single-slot prompt state) — Status: Shipped
 
 **Problem:** Client stores one prompt at a time. A second prompt overwrites the first, leaving it unanswered until the 60s server timeout.
 
@@ -131,7 +131,7 @@ Optional: show a small badge like `"2 pending"` next to the prompt bar when `pro
 
 ---
 
-## Fix 2: Remove requestId fallback on server (require explicit matching)
+## Fix 2: Remove requestId fallback on server (require explicit matching) — Status: Shipped
 
 **Problem:** When `requestId` is missing from `prompt_response`, the server matches it to the oldest pending approval, which may be wrong.
 
@@ -171,7 +171,7 @@ if (!requestId) {
 
 ---
 
-## Fix 3: Grace period on last-client-leave before auto-deny
+## Fix 3: Grace period on last-client-leave before auto-deny — Status: Shipped
 
 **Problem:** When a user refreshes the page, `leave()` fires immediately, auto-denies all pending prompts, and `join()` fires ~100ms later to an empty queue. Claude sees a denial the user never made.
 
@@ -234,7 +234,7 @@ if (session._leaveGraceTimer) clearTimeout(session._leaveGraceTimer)
 
 ---
 
-## Fix 4: Filter `prompt_dismiss` by requestId
+## Fix 4: Filter `prompt_dismiss` by requestId — Status: Shipped
 
 Already handled by the `dismiss(requestId)` method in the new `usePromptState` (Fix 1). Restating for clarity:
 
@@ -244,7 +244,7 @@ Already handled by the `dismiss(requestId)` method in the new `usePromptState` (
 
 ---
 
-## Fix 5: Surface silent hook denials in the UI
+## Fix 5: Surface silent hook denials in the UI — Status: Planned (Not Yet Implemented)
 
 **Problem:** When the PreToolUse hook denies a tool due to server error, timeout, or auth failure, the denial reason is returned to Claude CLI but **never appears in the Codekin UI**. The user sees Claude say something like "the tool was denied" or "I'm unable to run that command" with no context about *why*. This is the root cause of the "approval isn't going through" class of bugs — the user doesn't know the approval was never presented to them.
 
@@ -396,7 +396,7 @@ For project-scoped permissions (only apply to one repo), add `--project` flag or
 
 ---
 
-## Fix 6: Replace exact-command storage with pattern-first approvals
+## Fix 6: Replace exact-command storage with pattern-first approvals — Status: Planned (Not Yet Implemented)
 
 **Problem:** The `repo-approvals.json` file accumulates exact Bash command strings via the "Always Allow" button. Real-world data shows the scale of the problem:
 

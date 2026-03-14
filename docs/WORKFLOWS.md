@@ -1,6 +1,6 @@
 # Automated Workflows
 
-Codekin includes an automated workflow system that runs Claude Code sessions on a schedule to produce structured reports — code reviews, security audits, coverage assessments, and more. Workflows are defined as Markdown files with YAML frontmatter. Codekin ships with six built-in workflows, and you can define your own custom workflows per-repo.
+Codekin includes an automated workflow system that runs Claude Code sessions on a schedule to produce structured reports — code reviews, security audits, coverage assessments, and more. Workflows are defined as Markdown files with YAML frontmatter. Codekin ships with seven built-in workflows, and you can define your own custom workflows per-repo.
 
 ---
 
@@ -63,7 +63,7 @@ Everything after the closing `---` is the prompt sent to Claude. Write it as a p
 
 ## Built-in Workflows
 
-Codekin ships with six built-in workflow definitions in `server/workflows/`:
+Codekin ships with seven built-in workflow definitions in `server/workflows/`:
 
 | File | Kind | Schedule | Output Directory |
 |---|---|---|---|
@@ -73,6 +73,7 @@ Codekin ships with six built-in workflow definitions in `server/workflows/`:
 | `coverage.daily.md` | `coverage.daily` | Daily | `coverage-reports/` |
 | `comment-assessment.daily.md` | `comment-assessment.daily` | Daily | `comment-reports/` |
 | `dependency-health.daily.md` | `dependency-health.daily` | Daily | `dependency-reports/` |
+| `docs-audit.weekly.md` | `docs-audit.weekly` | Weekly | `.codekin/reports/docs-audit/` |
 
 All built-in workflows are loaded automatically at server start.
 
