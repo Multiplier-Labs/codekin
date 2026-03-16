@@ -14,102 +14,31 @@
  * - ApprovalManager: repo-level auto-approval rules for tools/commands
  * - SessionNaming: AI-powered session name generation with retry logic
  * - SessionPersistence: disk I/O for session state
+ * - DiffManager: stateless git-diff operations
+ * - evaluateRestart: pure restart-decision logic
  */
 
 import { randomUUID } from 'crypto'
 import { execFile } from 'child_process'
-import { promises as fs } from 'fs'
 import path from 'path'
 import { promisify } from 'util'
 import type { WebSocket } from 'ws'
 import { ClaudeProcess } from './claude-process.js'
 import { SessionArchive } from './session-archive.js'
-import type { DiffFileStatus, DiffScope, DiffSummary, PromptQuestion, Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
+import type { DiffFileStatus, DiffScope, PromptQuestion, Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
 import { cleanupWorkspace } from './webhook-workspace.js'
 import { PORT } from './config.js'
 import { ApprovalManager } from './approval-manager.js'
 import { SessionNaming } from './session-naming.js'
 import { SessionPersistence } from './session-persistence.js'
 import { deriveSessionToken } from './crypto-utils.js'
-import { parseDiff, createUntrackedFileDiff } from './diff-parser.js'
+import { getDiff as diffManagerGetDiff, discardChanges as diffManagerDiscardChanges } from './diff-manager.js'
+import { evaluateRestart } from './session-restart-scheduler.js'
 
 const execFileAsync = promisify(execFile)
 
-/** Max stdout for git commands (2 MB). */
-const GIT_MAX_BUFFER = 2 * 1024 * 1024
-/** Timeout for git commands (10 seconds). */
-const GIT_TIMEOUT_MS = 10_000
-/** Max paths per git command to stay under ARG_MAX (~128 KB on Linux). */
-const GIT_PATH_CHUNK_SIZE = 200
-
-/** Run a git command as a fixed argv array (no shell interpolation). */
-async function execGit(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
-    cwd,
-    maxBuffer: GIT_MAX_BUFFER,
-    timeout: GIT_TIMEOUT_MS,
-  })
-  return stdout
-}
-
-/** Run a git command with paths chunked to avoid E2BIG. Concatenates stdout. */
-async function execGitChunked(baseArgs: string[], paths: string[], cwd: string): Promise<string> {
-  let result = ''
-  for (let i = 0; i < paths.length; i += GIT_PATH_CHUNK_SIZE) {
-    const chunk = paths.slice(i, i + GIT_PATH_CHUNK_SIZE)
-    result += await execGit([...baseArgs, '--', ...chunk], cwd)
-  }
-  return result
-}
-
-/** Get file statuses from `git status --porcelain` for given paths (or all). */
-async function getFileStatuses(cwd: string, paths?: string[]): Promise<Record<string, DiffFileStatus>> {
-  const args = ['status', '--porcelain', '-z']
-  if (paths) args.push('--', ...paths)
-  const raw = await execGit(args, cwd)
-  const result: Record<string, DiffFileStatus> = {}
-  // git status --porcelain=v1 -z format: XY NUL path NUL
-  // XY is a two-character status code: X = index status, Y = worktree status.
-  // Examples: " M" = unstaged modification, "A " = staged addition, "??" = untracked.
-  // For renames/copies: XY NUL oldpath NUL newpath NUL
-  const parts = raw.split('\0')
-  let i = 0
-  while (i < parts.length) {
-    const entry = parts[i]
-    if (entry.length < 3) { i++; continue } // skip empty trailing entries
-    const x = entry[0] // index status
-    const y = entry[1] // worktree status
-    const filePath = entry.slice(3)
-    if (x === 'R' || x === 'C') {
-      // Rename/copy: next NUL-separated part is the new path
-      const newPath = parts[i + 1] ?? filePath
-      result[newPath] = 'renamed'
-      i += 2
-    } else if (x === 'D' || y === 'D') {
-      result[filePath] = 'deleted'
-      i++
-    } else if (x === '?' && y === '?') {
-      result[filePath] = 'added'
-      i++
-    } else if (x === 'A') {
-      result[filePath] = 'added'
-      i++
-    } else {
-      result[filePath] = 'modified'
-      i++
-    }
-  }
-  return result
-}
-
 /** Max messages retained in a session's output history buffer. */
 const MAX_HISTORY = 2000
-/** Max auto-restart attempts before requiring manual intervention. */
-const MAX_RESTARTS = 3
-/** Window after which the restart counter resets (5 minutes). */
-const RESTART_COOLDOWN_MS = 5 * 60 * 1000
-/** Delay between crash and auto-restart attempt. */
-const RESTART_DELAY_MS = 2000
 /** No-output duration before emitting a stall warning (5 minutes). */
 const STALL_TIMEOUT_MS = 5 * 60 * 1000
 /** Max API error retries per turn before giving up. */
@@ -156,7 +85,7 @@ export class SessionManager {
   /** Registered listeners notified when a session's Claude process exits (used by webhook-handler for chained workflows). */
   private _exitListeners: Array<(sessionId: string, code: number | null, signal: string | null, willRestart: boolean) => void> = []
   /** Delegated approval logic (auto-approve patterns, deny-lists, pattern management). */
-  private approvalManager: ApprovalManager
+  private _approvalManager: ApprovalManager
   /** Delegated auto-naming logic (generates session names from first user message via Claude API). */
   private sessionNaming: SessionNaming
   /** Delegated persistence logic (saves/restores session metadata to disk across server restarts). */
@@ -164,7 +93,7 @@ export class SessionManager {
 
   constructor() {
     this.archive = new SessionArchive()
-    this.approvalManager = new ApprovalManager()
+    this._approvalManager = new ApprovalManager()
     this.sessionPersistence = new SessionPersistence(this.sessions)
     this.sessionNaming = new SessionNaming({
       getSession: (id) => this.sessions.get(id),
@@ -175,43 +104,12 @@ export class SessionManager {
   }
 
   // ---------------------------------------------------------------------------
-  // Approval delegation (preserves public API)
+  // Approval — direct accessor (callers use sessions.approvalManager.xxx)
   // ---------------------------------------------------------------------------
 
-  /** Check if a tool/command is auto-approved for a repo. */
-  checkAutoApproval(workingDir: string, toolName: string, toolInput: Record<string, unknown>): boolean {
-    return this.approvalManager.checkAutoApproval(workingDir, toolName, toolInput)
-  }
-
-  /** Derive a glob pattern from a tool invocation for "Approve Pattern". */
-  derivePattern(toolName: string, toolInput: Record<string, unknown>): string | null {
-    return this.approvalManager.derivePattern(toolName, toolInput)
-  }
-
-  /** Return the auto-approved tools, commands, and patterns for a repo (workingDir). */
-  getApprovals(workingDir: string): { tools: string[]; commands: string[]; patterns: string[] } {
-    return this.approvalManager.getApprovals(workingDir)
-  }
-
-  /** Return approvals effective globally via cross-repo inference. */
-  getGlobalApprovals(): { tools: Record<string, string[]>; commands: Record<string, string[]>; patterns: Record<string, string[]> } {
-    return this.approvalManager.getGlobalApprovals()
-  }
-
-  /** Remove an auto-approval rule for a repo (workingDir) and persist to disk. */
-  removeApproval(workingDir: string, opts: { tool?: string; command?: string; pattern?: string }, skipPersist = false): 'invalid' | boolean {
-    return this.approvalManager.removeApproval(workingDir, opts, skipPersist)
-  }
-
-  /** Add an auto-approval rule for a repo and persist (used by tests via `as any`). */
-  /* @ts-expect-error noUnusedLocals — accessed by tests via (sm as any).addRepoApproval */
-  private addRepoApproval(workingDir: string, opts: { tool?: string; command?: string; pattern?: string }): void {
-    this.approvalManager.addRepoApproval(workingDir, opts)
-  }
-
-  /** Write repo-level approvals to disk. Exposed for shutdown. */
-  persistRepoApprovals(): void {
-    this.approvalManager.persistRepoApprovals()
+  /** Direct access to the approval manager for callers that need repo-level approval operations. */
+  get approvalManager(): ApprovalManager {
+    return this._approvalManager
   }
 
   // ---------------------------------------------------------------------------
@@ -774,6 +672,9 @@ export class SessionManager {
   /**
    * Handle a Claude process 'exit' event: clean up state, notify exit listeners,
    * and either auto-restart (within limits) or broadcast the final exit message.
+   *
+   * Uses evaluateRestart() for the restart decision, keeping this method focused
+   * on state updates, listener notification, and message broadcasting.
    */
   private handleClaudeExit(session: Session, sessionId: string, code: number | null, signal: string | null): void {
     session.claudeProcess = null
@@ -781,9 +682,13 @@ export class SessionManager {
     this.clearStallTimer(session)
     this._globalBroadcast?.({ type: 'sessions_updated' })
 
-    // If stopped by user (stop button or session deleted), don't auto-restart
-    if (session._stoppedByUser) {
-      // Notify exit listeners — no restart will occur
+    const action = evaluateRestart({
+      restartCount: session.restartCount,
+      lastRestartAt: session.lastRestartAt,
+      stoppedByUser: session._stoppedByUser,
+    })
+
+    if (action.kind === 'stopped_by_user') {
       for (const listener of this._exitListeners) {
         try { listener(sessionId, code, signal, false) } catch { /* listener error */ }
       }
@@ -794,19 +699,10 @@ export class SessionManager {
       return
     }
 
-    // Auto-restart logic
-    const now = Date.now()
-    if (session.lastRestartAt && (now - session.lastRestartAt) > RESTART_COOLDOWN_MS) {
-      session.restartCount = 0
-    }
+    if (action.kind === 'restart') {
+      session.restartCount = action.updatedCount
+      session.lastRestartAt = action.updatedLastRestartAt
 
-    if (session.restartCount < MAX_RESTARTS) {
-      session.restartCount++
-      session.lastRestartAt = now
-      const attempt = session.restartCount
-
-      // Notify exit listeners with willRestart=true so they don't treat
-      // this as a final exit (e.g. webhook handler won't mark event as error)
       for (const listener of this._exitListeners) {
         try { listener(sessionId, code, signal, true) } catch { /* listener error */ }
       }
@@ -815,14 +711,14 @@ export class SessionManager {
       // process may not have released its lock yet, and reusing the ID causes
       // "Session ID already in use" errors that burn through all retry attempts.
       if (session.claudeSessionId) {
-        console.log(`[restart] Clearing claudeSessionId for session ${sessionId} before retry (attempt ${attempt})`)
+        console.log(`[restart] Clearing claudeSessionId for session ${sessionId} before retry (attempt ${action.attempt})`)
         session.claudeSessionId = null
       }
 
       const msg: WsServerMessage = {
         type: 'system_message',
         subtype: 'restart',
-        text: `Claude process exited unexpectedly (code=${code}, signal=${signal}). Restarting (attempt ${attempt}/${MAX_RESTARTS})...`,
+        text: `Claude process exited unexpectedly (code=${code}, signal=${signal}). Restarting (attempt ${action.attempt}/${action.maxAttempts})...`,
       }
       this.addToHistory(session, msg)
       this.broadcast(session, msg)
@@ -831,21 +727,22 @@ export class SessionManager {
         // Verify session still exists and hasn't been stopped
         if (!this.sessions.has(sessionId) || session._stoppedByUser) return
         this.startClaude(sessionId)
-      }, RESTART_DELAY_MS)
-    } else {
-      // Final exit — all restart attempts exhausted
-      for (const listener of this._exitListeners) {
-        try { listener(sessionId, code, signal, false) } catch { /* listener error */ }
-      }
-      const msg: WsServerMessage = {
-        type: 'system_message',
-        subtype: 'error',
-        text: `Claude process exited unexpectedly (code=${code}, signal=${signal}). Auto-restart disabled after ${MAX_RESTARTS} attempts. Please restart manually.`,
-      }
-      this.addToHistory(session, msg)
-      this.broadcast(session, msg)
-      this.broadcast(session, { type: 'exit', code: code ?? -1, signal })
+      }, action.delayMs)
+      return
     }
+
+    // action.kind === 'exhausted'
+    for (const listener of this._exitListeners) {
+      try { listener(sessionId, code, signal, false) } catch { /* listener error */ }
+    }
+    const msg: WsServerMessage = {
+      type: 'system_message',
+      subtype: 'error',
+      text: `Claude process exited unexpectedly (code=${code}, signal=${signal}). Auto-restart disabled after ${action.maxAttempts} attempts. Please restart manually.`,
+    }
+    this.addToHistory(session, msg)
+    this.broadcast(session, msg)
+    this.broadcast(session, { type: 'exit', code: code ?? -1, signal })
   }
 
   /**
@@ -987,10 +884,10 @@ export class SessionManager {
     const { isDeny, isAlwaysAllow, isApprovePattern } = this.decodeApprovalValue(value)
 
     if (isAlwaysAllow && !isDeny) {
-      this.approvalManager.saveAlwaysAllow(session.workingDir, approval.toolName, approval.toolInput)
+      this._approvalManager.saveAlwaysAllow(session.workingDir, approval.toolName, approval.toolInput)
     }
     if (isApprovePattern && !isDeny) {
-      this.approvalManager.savePatternApproval(session.workingDir, approval.toolName, approval.toolInput)
+      this._approvalManager.savePatternApproval(session.workingDir, approval.toolName, approval.toolInput)
     }
 
     console.log(`[tool-approval] resolving: allow=${!isDeny} always=${isAlwaysAllow} pattern=${isApprovePattern} tool=${approval.toolName}`)
@@ -1045,10 +942,10 @@ export class SessionManager {
     const { isDeny, isAlwaysAllow, isApprovePattern } = this.decodeApprovalValue(value)
 
     if (isAlwaysAllow) {
-      this.approvalManager.saveAlwaysAllow(session.workingDir, pending.toolName, pending.toolInput)
+      this._approvalManager.saveAlwaysAllow(session.workingDir, pending.toolName, pending.toolInput)
     }
     if (isApprovePattern) {
-      this.approvalManager.savePatternApproval(session.workingDir, pending.toolName, pending.toolInput)
+      this._approvalManager.savePatternApproval(session.workingDir, pending.toolName, pending.toolInput)
     }
 
     const behavior = isDeny ? 'deny' : 'allow'
@@ -1102,7 +999,7 @@ export class SessionManager {
       }, 60_000)
 
       const question = this.summarizeToolPermission(toolName, toolInput)
-      const approvePattern = this.derivePattern(toolName, toolInput)
+      const approvePattern = this._approvalManager.derivePattern(toolName, toolInput)
       const options = [
         { label: 'Allow', value: 'allow' },
         { label: 'Always Allow', value: 'always_allow' },
@@ -1143,7 +1040,7 @@ export class SessionManager {
    * has no clients and is a non-interactive source, or 'prompt' if the user needs to decide.
    */
   private resolveAutoApproval(session: Session, toolName: string, toolInput: Record<string, unknown>): 'registry' | 'headless' | 'prompt' {
-    if (this.checkAutoApproval(session.workingDir, toolName, toolInput)) {
+    if (this._approvalManager.checkAutoApproval(session.workingDir, toolName, toolInput)) {
       return 'registry'
     }
     if (session.clients.size === 0 && (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow')) {
@@ -1388,109 +1285,17 @@ export class SessionManager {
   }
 
   // ---------------------------------------------------------------------------
-  // Diff viewer
+  // Diff viewer — delegates to DiffManager
   // ---------------------------------------------------------------------------
 
-  /**
-   * Run git diff in a session's workingDir and return structured results.
-   * Includes untracked file discovery for 'unstaged' and 'all' scopes.
-   */
+  /** Run git diff in a session's workingDir and return structured results. */
   async getDiff(sessionId: string, scope: DiffScope = 'all'): Promise<WsServerMessage> {
     const session = this.sessions.get(sessionId)
     if (!session) return { type: 'diff_error', message: 'Session not found' }
-
-    const cwd = session.workingDir
-    try {
-      // Get branch name
-      let branch: string
-      try {
-        const branchResult = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd)
-        branch = branchResult.trim()
-        if (branch === 'HEAD') {
-          const shaResult = await execGit(['rev-parse', '--short', 'HEAD'], cwd)
-          branch = `detached at ${shaResult.trim()}`
-        }
-      } catch {
-        branch = 'unknown'
-      }
-
-      // Build diff command based on scope
-      const diffArgs = ['diff', '--find-renames', '--no-color', '--unified=3']
-      if (scope === 'staged') {
-        diffArgs.push('--cached')
-      } else if (scope === 'all') {
-        diffArgs.push('HEAD')
-      }
-      // 'unstaged' uses bare `git diff` (working tree vs index)
-
-      let rawDiff: string
-      try {
-        rawDiff = await execGit(diffArgs, cwd)
-      } catch {
-        // git diff HEAD fails if no commits yet — fall back to staged + unstaged
-        if (scope === 'all') {
-          const [staged, unstaged] = await Promise.all([
-            execGit(['diff', '--cached', '--find-renames', '--no-color', '--unified=3'], cwd).catch(() => ''),
-            execGit(['diff', '--find-renames', '--no-color', '--unified=3'], cwd).catch(() => ''),
-          ])
-          rawDiff = staged + unstaged
-        } else {
-          rawDiff = ''
-        }
-      }
-
-      const { files, truncated, truncationReason } = parseDiff(rawDiff)
-
-      // Discover untracked files for 'unstaged' and 'all' scopes
-      if (scope !== 'staged') {
-        try {
-          const untrackedRaw = await execGit(
-            ['ls-files', '--others', '--exclude-standard'],
-            cwd,
-          )
-          const untrackedPaths = untrackedRaw.trim().split('\n').filter(Boolean)
-          for (const relPath of untrackedPaths) {
-            try {
-              const fullPath = path.join(cwd, relPath)
-              // Check if binary by attempting to read as utf-8
-              const content = await fs.readFile(fullPath, 'utf-8')
-              files.push(createUntrackedFileDiff(relPath, content))
-            } catch {
-              // Binary or unreadable — add as binary
-              files.push({
-                path: relPath,
-                status: 'added',
-                isBinary: true,
-                additions: 0,
-                deletions: 0,
-                hunks: [],
-              })
-            }
-          }
-        } catch {
-          // ls-files failed — skip untracked
-        }
-      }
-
-      const summary: DiffSummary = {
-        filesChanged: files.length,
-        insertions: files.reduce((sum, f) => sum + f.additions, 0),
-        deletions: files.reduce((sum, f) => sum + f.deletions, 0),
-        truncated,
-        truncationReason,
-      }
-
-      return { type: 'diff_result', files, summary, branch, scope }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to get diff'
-      return { type: 'diff_error', message }
-    }
+    return diffManagerGetDiff(session.workingDir, scope)
   }
 
-  /**
-   * Discard changes in a session's workingDir per the given scope and paths.
-   * Returns a fresh diff_result after discarding.
-   */
+  /** Discard changes in a session's workingDir per the given scope and paths. */
   async discardChanges(
     sessionId: string,
     scope: DiffScope,
@@ -1499,111 +1304,7 @@ export class SessionManager {
   ): Promise<WsServerMessage> {
     const session = this.sessions.get(sessionId)
     if (!session) return { type: 'diff_error', message: 'Session not found' }
-
-    const cwd = session.workingDir
-
-    try {
-      // Validate paths — enforce separator boundary to prevent /repoX matching /repo
-      if (paths) {
-        const root = path.join(path.resolve(cwd), path.sep)
-        for (const p of paths) {
-          if (p.includes('..') || path.isAbsolute(p)) {
-            return { type: 'diff_error', message: `Invalid path: ${p}` }
-          }
-          const resolved = path.resolve(cwd, p)
-          if (resolved !== path.resolve(cwd) && !resolved.startsWith(root)) {
-            return { type: 'diff_error', message: `Path escapes working directory: ${p}` }
-          }
-        }
-      }
-
-      // Determine file statuses if not provided
-      let fileStatuses = statuses ?? {}
-      if (!statuses && paths) {
-        fileStatuses = await getFileStatuses(cwd, paths)
-      } else if (!statuses && !paths) {
-        fileStatuses = await getFileStatuses(cwd)
-      }
-
-      const targetPaths = paths ?? Object.keys(fileStatuses)
-
-      // Separate files by status for different handling
-      const trackedPaths: string[] = []
-      const untrackedPaths: string[] = []
-      const stagedNewPaths: string[] = []
-
-      for (const p of targetPaths) {
-        const status = fileStatuses[p]
-        if (status === 'added') {
-          // Determine if untracked or staged-new by checking the index
-          try {
-            const indexEntry = (await execGit(['ls-files', '--stage', '--', p], cwd)).trim()
-            if (indexEntry) {
-              stagedNewPaths.push(p)
-            } else {
-              untrackedPaths.push(p)
-            }
-          } catch {
-            untrackedPaths.push(p)
-          }
-        } else {
-          trackedPaths.push(p)
-        }
-      }
-
-      // Handle tracked files (modified, deleted, renamed) with git restore
-      if (trackedPaths.length > 0) {
-        const restoreArgs = ['restore']
-        if (scope === 'staged') {
-          restoreArgs.push('--staged')
-        } else if (scope === 'all') {
-          restoreArgs.push('--staged', '--worktree')
-        } else {
-          restoreArgs.push('--worktree')
-        }
-
-        try {
-          await execGitChunked(restoreArgs, trackedPaths, cwd)
-        } catch (err) {
-          // Fallback for Git < 2.23
-          console.warn('[discard] git restore failed, trying fallback:', err)
-          if (scope === 'staged' || scope === 'all') {
-            await execGitChunked(['reset', 'HEAD'], trackedPaths, cwd)
-          }
-          if (scope === 'unstaged' || scope === 'all') {
-            await execGitChunked(['checkout'], trackedPaths, cwd)
-          }
-        }
-      }
-
-      // Handle staged new files
-      if (stagedNewPaths.length > 0) {
-        if (scope === 'staged') {
-          // Unstage only — leave on disk
-          await execGitChunked(['rm', '--cached'], stagedNewPaths, cwd)
-        } else if (scope === 'all') {
-          // Remove from index and disk
-          await execGitChunked(['rm', '--cached'], stagedNewPaths, cwd)
-          for (const p of stagedNewPaths) {
-            await fs.unlink(path.join(cwd, p)).catch(() => {})
-          }
-        }
-        // 'unstaged' scope: N/A for staged-new files
-      }
-
-      // Handle untracked files (delete from disk)
-      if (untrackedPaths.length > 0 && scope !== 'staged') {
-        for (const p of untrackedPaths) {
-          await fs.unlink(path.join(cwd, p)).catch(() => {})
-        }
-      }
-
-      // Return fresh diff
-      return await this.getDiff(sessionId, scope)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to discard changes'
-      return { type: 'diff_error', message }
-    }
+    return diffManagerDiscardChanges(session.workingDir, scope, paths, statuses)
   }
 
   /** Graceful shutdown: complete in-progress tasks, persist state, kill all processes.
@@ -1621,7 +1322,7 @@ export class SessionManager {
 
     // Persist BEFORE killing processes so wasActive flag captures which were running
     this.persistToDisk()
-    this.persistRepoApprovals()
+    this._approvalManager.persistRepoApprovals()
 
     // Kill all Claude child processes and wait for them to exit so their
     // session locks are released before the next server start.
