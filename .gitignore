@@ -27,6 +27,7 @@ dist-ssr
 # Local settings (not for distribution)
 .claude/settings.local.json
 .claude/CLAUDE.md
+.claude/worktrees/
 .codekin/settings.json
 .codekin/scripts/
 
