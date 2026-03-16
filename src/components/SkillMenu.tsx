@@ -46,14 +46,14 @@ export function SkillMenu({ groups, onSelectSkill, onClose }: Props) {
   return (
     <div
       ref={ref}
-      className="absolute bottom-full right-0 mb-2 w-56 rounded-md border border-neutral-10 bg-neutral-12 py-1 shadow-lg z-50"
+      className="absolute bottom-full left-0 mb-1 w-56 rounded-lg border border-neutral-6 bg-neutral-8 py-1 shadow-lg z-50"
     >
-      <div className="px-3 py-1.5 text-[13px] font-semibold text-neutral-3 border-b border-neutral-10 mb-1">
+      <div className="px-3 py-1.5 text-[13px] font-semibold text-neutral-3 border-b border-neutral-7 mb-1">
         Claude Skills
       </div>
       {nonEmpty.map((group, gi) => (
         <div key={group.label}>
-          {gi > 0 && <div className="my-1 border-t border-neutral-10" />}
+          {gi > 0 && <div className="my-1 border-t border-neutral-7" />}
           <div className="px-3 py-1 text-[12px] font-medium uppercase tracking-wider text-neutral-5">
             {group.label}
           </div>
@@ -61,7 +61,7 @@ export function SkillMenu({ groups, onSelectSkill, onClose }: Props) {
             <button
               key={skill.id}
               onClick={() => onSelectSkill(skill.command)}
-              className="flex w-full flex-col px-3 py-1.5 text-left hover:bg-neutral-10/50"
+              className="flex w-full flex-col px-3 py-1.5 text-left hover:bg-neutral-7 transition-colors"
             >
               <span className="text-[15px] font-medium text-accent-6">{skill.command}</span>
               {skill.description && (

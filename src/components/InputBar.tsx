@@ -80,9 +80,17 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const [permMenuOpen, setPermMenuOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [slashMenuOpen, setSlashMenuOpen] = useState(false)
+
+  /** Close all toolbar popups, optionally keeping one open. */
+  const closeAllPopups = useCallback((except?: 'skill' | 'model' | 'perm') => {
+    if (except !== 'skill') setSkillMenuOpen(false)
+    if (except !== 'model') setModelMenuOpen(false)
+    if (except !== 'perm') setPermMenuOpen(false)
+  }, [])
   const [slashFilter, setSlashFilter] = useState('')
   const mobileMenuRef = useRef<HTMLDivElement>(null)
   const permMenuRef = useRef<HTMLDivElement>(null)
+  const modelMenuRef = useRef<HTMLDivElement>(null)
   const MOBILE_HEIGHT = 100
   const [height, setHeight] = useState(() => {
     if (isMobile) return MOBILE_HEIGHT
@@ -132,6 +140,18 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [permMenuOpen])
+
+  // Close model menu on outside click
+  useEffect(() => {
+    if (!modelMenuOpen) return
+    const handler = (e: MouseEvent) => {
+      if (modelMenuRef.current && !modelMenuRef.current.contains(e.target as Node)) {
+        setModelMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [modelMenuOpen])
 
   const onDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -343,7 +363,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               {currentPermissionMode && onPermissionModeChange && (
                 <div className="relative" ref={permMenuRef}>
                   <button
-                    onClick={() => setPermMenuOpen(!permMenuOpen)}
+                    onClick={() => { closeAllPopups('perm'); setPermMenuOpen(!permMenuOpen) }}
                     className={`flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium transition-colors ${
                       currentPermissionMode === 'bypassPermissions'
                         ? 'text-error-5 hover:text-error-4 hover:bg-error-9/30'
@@ -396,9 +416,9 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 </div>
               )}
               {currentModel && onModelChange && (
-                <div className="relative">
+                <div className="relative" ref={modelMenuRef}>
                   <button
-                    onClick={() => setModelMenuOpen(!modelMenuOpen)}
+                    onClick={() => { closeAllPopups('model'); setModelMenuOpen(!modelMenuOpen) }}
                     className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
                     title="Change model"
                   >
@@ -423,7 +443,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               {hasSkills && (
                 <div className="relative">
                   <button
-                    onClick={() => setSkillMenuOpen(!skillMenuOpen)}
+                    onClick={() => { closeAllPopups('skill'); setSkillMenuOpen(!skillMenuOpen) }}
                     disabled={disabled}
                     className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors disabled:opacity-30"
                     title="Claude Skills"
