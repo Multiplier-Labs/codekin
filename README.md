@@ -56,6 +56,7 @@ codekin uninstall               # Remove Codekin entirely
 - **Diff viewer** — Side panel showing staged/unstaged file changes with per-file discard support
 - **Command palette** — `Ctrl+K` to quickly search repos, skills, and actions
 - **Approval management** — Persistent approval storage with per-permission revoking, permission mode selector, per-session tool pre-approvals, and `--dangerously-skip-permissions` mode for sandboxed environments
+- **Subscription & API key auth** — Works with both Claude subscription (OAuth) and API key authentication
 - **Mobile-friendly** — Responsive layout that works on phones and tablets
 - **Markdown browser** — Browse and view `.md` files directly in the UI
 - **AI Workflows** — Scheduled code and repository audits and maintenance, with support for custom workflows defined as Markdown files

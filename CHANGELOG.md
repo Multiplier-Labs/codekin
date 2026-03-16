@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-04-06
+
+### Features
+- Support subscription/OAuth auth in addition to API key auth (#283)
+
+### Fixes
+- Fall back to fresh session when `--resume` hangs with zero output (#292)
+- Stabilize Claude process lifecycle to prevent restart loops (#290)
+- Resolve restart loop caused by race condition in `startClaude()` (#288)
+- Exempt agent/orchestrator sessions from idle reaper and stale pruner
+- Unblock standalone CLI sessions when `CODEKIN_SESSION_ID` is missing (#283)
+- Remove dead export, fix docs drift, add logging to silent catches (#294)
+- Address code review findings and stale docs (April 5 audit)
+
+### Security
+- Address 3 security audit warnings (W-01, W-02, W-03)
+- Address 5 code review findings (W-02, W-03, W-04, W-09, I-09) (#282)
+
+### Documentation
+- Update API reference, orchestrator spec, and protocol docs
+
 ## [0.5.3] - 2026-04-03
 
 ### Fixes
