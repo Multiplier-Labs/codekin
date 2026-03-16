@@ -137,6 +137,7 @@ function fakeClaudeProcess(alive = true) {
     getSessionId: vi.fn(() => 'test-session-id'),
     hasSessionConflict: vi.fn(() => false),
     hadOutput: vi.fn(() => true),
+    waitForExit: vi.fn(() => Promise.resolve()),
     emit: vi.fn(),
   } as any
 }
@@ -461,7 +462,7 @@ describe('SessionManager', () => {
       expect(cp.stop).toHaveBeenCalledOnce()
     })
 
-    it('cleans up git worktree when session has worktreePath', () => {
+    it('cleans up git worktree when session has worktreePath', async () => {
       const s = sm.create('wt-test', '/repos/myproject')
       s.worktreePath = '/repos/myproject-wt-abc123'
       s.groupDir = '/repos/myproject'
@@ -477,9 +478,8 @@ describe('SessionManager', () => {
       // Session should be removed
       expect(sm.get(s.id)).toBeUndefined()
 
-      // execFile should have been called for worktree cleanup (git rev-parse, git worktree remove, etc.)
-      // It runs asynchronously so we just verify the calls were initiated
-      expect(mockExecFile).toHaveBeenCalled()
+      // Worktree cleanup is deferred behind a microtask (process exit promise)
+      await vi.waitFor(() => expect(mockExecFile).toHaveBeenCalled())
     })
 
     it('does not call worktree cleanup when session has no worktreePath', () => {
@@ -2507,13 +2507,14 @@ describe('SessionManager', () => {
 
       // Simulate that Claude was running and user stopped it
       ;(session as any)._stoppedByUser = true
-      ;(session as any).claudeProcess = fakeClaudeProcess()
+      const cp = fakeClaudeProcess()
+      ;(session as any).claudeProcess = cp
 
       const ws = fakeWs()
       sm.join(s.id, ws)
 
-      // Trigger exit via the private method by calling it directly
-      ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 1, null)
+      // Trigger exit with the SAME process ref (not a stale one)
+      ;(sm as any).handleClaudeExit(cp, session, s.id, 1, null)
 
       // Should broadcast exit, not restart
       const messages = ws.send.mock.calls.map((c: any) => JSON.parse(c[0]))
@@ -2774,29 +2775,25 @@ describe('SessionManager', () => {
       expect(s.model).toBeUndefined()
     })
 
-    it('restarts Claude when process is alive', () => {
-      vi.useFakeTimers()
+    it('restarts Claude when process is alive', async () => {
       const s = sm.create('test', '/tmp')
       const cp = fakeClaudeProcess(true)
       s.claudeProcess = cp
 
-      const stopSpy = vi.spyOn(sm, 'stopClaude')
+      const stopWaitSpy = vi.spyOn(sm, 'stopClaudeAndWait').mockResolvedValue()
       const startSpy = vi.spyOn(sm, 'startClaude').mockReturnValue(true)
 
       sm.setModel(s.id, 'sonnet')
 
-      expect(stopSpy).toHaveBeenCalledWith(s.id)
-
-      // startClaude should NOT have been called yet
+      // stopClaudeAndWait is called, but startClaude is deferred until the promise resolves
+      expect(stopWaitSpy).toHaveBeenCalledWith(s.id)
       expect(startSpy).not.toHaveBeenCalled()
 
-      // Advance past the 500ms delay
-      vi.advanceTimersByTime(500)
-      expect(startSpy).toHaveBeenCalledWith(s.id)
+      // Let the promise chain resolve
+      await vi.waitFor(() => expect(startSpy).toHaveBeenCalledWith(s.id))
 
-      stopSpy.mockRestore()
+      stopWaitSpy.mockRestore()
       startSpy.mockRestore()
-      vi.useRealTimers()
     })
 
     it('does NOT restart when process is not alive', () => {
@@ -2804,12 +2801,12 @@ describe('SessionManager', () => {
       const cp = fakeClaudeProcess(false)
       s.claudeProcess = cp
 
-      const stopSpy = vi.spyOn(sm, 'stopClaude')
+      const stopWaitSpy = vi.spyOn(sm, 'stopClaudeAndWait')
 
       sm.setModel(s.id, 'sonnet')
 
-      expect(stopSpy).not.toHaveBeenCalled()
-      stopSpy.mockRestore()
+      expect(stopWaitSpy).not.toHaveBeenCalled()
+      stopWaitSpy.mockRestore()
     })
   })
 
