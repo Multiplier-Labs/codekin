@@ -3258,6 +3258,315 @@ describe('SessionManager', () => {
     })
   })
 
+  describe('createWorktree() with targetBranch', () => {
+    afterEach(() => {
+      mockExecFile.mockReset()
+    })
+
+    it('uses targetBranch as branch name instead of generating wt/ prefix', async () => {
+      const s = sm.create('wt-target', '/repos/myproject')
+
+      const gitCalls: string[][] = []
+      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
+        gitCalls.push(args)
+        if (typeof cb === 'function') {
+          if (args[0] === 'rev-parse') {
+            cb(null, '/repos/myproject\n', '')
+          } else if (args[0] === 'show-ref') {
+            // Branch does not exist yet
+            cb(new Error('not found'), '', '')
+          } else {
+            cb(null, '', '')
+          }
+        }
+        return { on: vi.fn() }
+      })
+
+      const result = await sm.createWorktree(s.id, '/repos/myproject', 'fix/my-feature')
+
+      expect(result).not.toBeNull()
+      // Should use the targetBranch name, not wt/<shortId>
+      const worktreeAddCall = gitCalls.find(a => a[0] === 'worktree' && a[1] === 'add')
+      expect(worktreeAddCall).toBeDefined()
+      expect(worktreeAddCall).toContain('fix/my-feature')
+    })
+
+    it('does NOT force-delete caller-supplied branch (non-ephemeral)', async () => {
+      const s = sm.create('wt-no-delete', '/repos/myproject')
+
+      const gitCalls: string[][] = []
+      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
+        gitCalls.push(args)
+        if (typeof cb === 'function') {
+          if (args[0] === 'rev-parse') {
+            cb(null, '/repos/myproject\n', '')
+          } else if (args[0] === 'show-ref') {
+            // Branch already exists
+            cb(null, '', '')
+          } else {
+            cb(null, '', '')
+          }
+        }
+        return { on: vi.fn() }
+      })
+
+      const result = await sm.createWorktree(s.id, '/repos/myproject', 'fix/existing-branch')
+
+      expect(result).not.toBeNull()
+      // Should NOT have called `git branch -D` for caller-supplied branch
+      const branchDeleteCall = gitCalls.find(a => a[0] === 'branch' && a[1] === '-D')
+      expect(branchDeleteCall).toBeUndefined()
+    })
+
+    it('uses show-ref to detect existing branches', async () => {
+      const s = sm.create('wt-showref', '/repos/myproject')
+
+      const gitCalls: string[][] = []
+      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
+        gitCalls.push(args)
+        if (typeof cb === 'function') {
+          if (args[0] === 'rev-parse') {
+            cb(null, '/repos/myproject\n', '')
+          } else if (args[0] === 'show-ref') {
+            // Branch exists
+            cb(null, '', '')
+          } else {
+            cb(null, '', '')
+          }
+        }
+        return { on: vi.fn() }
+      })
+
+      await sm.createWorktree(s.id, '/repos/myproject', 'feat/test')
+
+      // Verify show-ref was called with refs/heads/ for the target branch
+      const showRefCall = gitCalls.find(a =>
+        a[0] === 'show-ref' && a[1] === '--verify' && a.some(arg => arg === 'refs/heads/feat/test')
+      )
+      expect(showRefCall).toBeDefined()
+    })
+
+    it('checks out existing branch without -b flag', async () => {
+      const s = sm.create('wt-existing', '/repos/myproject')
+
+      const gitCalls: string[][] = []
+      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
+        gitCalls.push(args)
+        if (typeof cb === 'function') {
+          if (args[0] === 'rev-parse') {
+            cb(null, '/repos/myproject\n', '')
+          } else if (args[0] === 'show-ref') {
+            cb(null, '', '') // branch exists
+          } else {
+            cb(null, '', '')
+          }
+        }
+        return { on: vi.fn() }
+      })
+
+      await sm.createWorktree(s.id, '/repos/myproject', 'feat/existing')
+
+      const worktreeAddCall = gitCalls.find(a => a[0] === 'worktree' && a[1] === 'add')
+      expect(worktreeAddCall).toBeDefined()
+      // Should NOT contain -b flag for existing branch
+      expect(worktreeAddCall).not.toContain('-b')
+      expect(worktreeAddCall).toContain('feat/existing')
+    })
+
+    it('creates new branch with -b flag when branch does not exist', async () => {
+      const s = sm.create('wt-new-branch', '/repos/myproject')
+
+      const gitCalls: string[][] = []
+      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
+        gitCalls.push(args)
+        if (typeof cb === 'function') {
+          if (args[0] === 'rev-parse') {
+            cb(null, '/repos/myproject\n', '')
+          } else if (args[0] === 'show-ref') {
+            cb(new Error('not found'), '', '') // branch doesn't exist
+          } else {
+            cb(null, '', '')
+          }
+        }
+        return { on: vi.fn() }
+      })
+
+      await sm.createWorktree(s.id, '/repos/myproject', 'feat/brand-new')
+
+      const worktreeAddCall = gitCalls.find(a => a[0] === 'worktree' && a[1] === 'add')
+      expect(worktreeAddCall).toBeDefined()
+      expect(worktreeAddCall).toContain('-b')
+      expect(worktreeAddCall).toContain('feat/brand-new')
+    })
+
+    it('force-deletes ephemeral wt/ branches when no targetBranch supplied', async () => {
+      const s = sm.create('wt-ephemeral', '/repos/myproject')
+      const shortId = s.id.slice(0, 8)
+
+      const gitCalls: string[][] = []
+      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
+        gitCalls.push(args)
+        if (typeof cb === 'function') {
+          if (args[0] === 'rev-parse') {
+            cb(null, '/repos/myproject\n', '')
+          } else if (args[0] === 'show-ref') {
+            cb(null, '', '') // branch exists
+          } else {
+            cb(null, '', '')
+          }
+        }
+        return { on: vi.fn() }
+      })
+
+      // No targetBranch — ephemeral
+      await sm.createWorktree(s.id, '/repos/myproject')
+
+      const branchDeleteCall = gitCalls.find(a => a[0] === 'branch' && a[1] === '-D')
+      expect(branchDeleteCall).toBeDefined()
+      // The deleted branch should contain the shortId (ephemeral wt/ pattern)
+      expect(branchDeleteCall![2]).toContain(shortId)
+    })
+  })
+
+  describe('handleClaudeExit — spawn failure preservation', () => {
+    it('preserves claudeSessionId when spawn failed (ENOENT)', () => {
+      vi.useFakeTimers()
+      const s = sm.create('spawn-fail-test', '/tmp')
+      const session = sm.get(s.id)!
+      ;(session as any).claudeSessionId = 'my-claude-session'
+      ;(session as any).restartCount = 0
+
+      const cp = fakeClaudeProcess(false)
+      cp.hadOutput.mockReturnValue(false)
+      cp.hasSpawnFailed.mockReturnValue(true)
+
+      ;(sm as any).handleClaudeExit(cp, session, s.id, 1, null)
+
+      // claudeSessionId should be preserved (not cleared) because spawn failed
+      expect(session.claudeSessionId).toBe('my-claude-session')
+      vi.useRealTimers()
+    })
+
+    it('clears claudeSessionId when process had no output but spawn succeeded', () => {
+      vi.useFakeTimers()
+      const s = sm.create('no-output-test', '/tmp')
+      const session = sm.get(s.id)!
+      ;(session as any).claudeSessionId = 'stale-session'
+      ;(session as any).restartCount = 0
+
+      const cp = fakeClaudeProcess(false)
+      cp.hadOutput.mockReturnValue(false)
+      cp.hasSpawnFailed.mockReturnValue(false)
+
+      ;(sm as any).handleClaudeExit(cp, session, s.id, 1, null)
+
+      // claudeSessionId should be cleared since process started but produced nothing
+      expect(session.claudeSessionId).toBeNull()
+      vi.useRealTimers()
+    })
+  })
+
+  describe('handleClaudeExit — missing workingDir fallback', () => {
+    it('falls back to groupDir when workingDir no longer exists', () => {
+      vi.useFakeTimers()
+      const mockedExistsSync = vi.mocked(existsSync)
+      const s = sm.create('wt-deleted', '/repos/project-wt-abc12345')
+      const session = sm.get(s.id)!
+      ;(session as any).groupDir = '/repos/project'
+      ;(session as any).worktreePath = '/repos/project-wt-abc12345'
+      ;(session as any).restartCount = 0
+
+      // workingDir doesn't exist, but groupDir does
+      mockedExistsSync.mockImplementation((p) => {
+        const ps = String(p)
+        if (ps === '/repos/project-wt-abc12345') return false
+        if (ps === '/repos/project') return true
+        if (ps.includes('sessions.json')) return false
+        return true
+      })
+
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 1, null)
+
+      // Should update workingDir to groupDir
+      expect(session.workingDir).toBe('/repos/project')
+      expect(session.worktreePath).toBeUndefined()
+
+      // Should broadcast notification about fallback
+      const messages = ws.send.mock.calls.map((c: any) => JSON.parse(c[0]))
+      const fallbackMsg = messages.find((m: any) =>
+        m.type === 'system_message' && m.subtype === 'notification' && m.text?.includes('was removed')
+      )
+      expect(fallbackMsg).toBeDefined()
+
+      // Reset mock
+      mockedExistsSync.mockImplementation((p) => String(p).includes('sessions.json') ? false : true)
+      vi.useRealTimers()
+    })
+
+    it('stops session when workingDir gone and no fallback groupDir', () => {
+      const mockedExistsSync = vi.mocked(existsSync)
+      const s = sm.create('wt-no-fallback', '/repos/project-wt-abc12345')
+      const session = sm.get(s.id)!
+      ;(session as any).groupDir = undefined
+      ;(session as any).restartCount = 0
+
+      // workingDir doesn't exist, no groupDir
+      mockedExistsSync.mockImplementation((p) => {
+        const ps = String(p)
+        if (ps === '/repos/project-wt-abc12345') return false
+        if (ps.includes('sessions.json')) return false
+        return true
+      })
+
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 1, null)
+
+      // Should mark as stopped
+      expect(session._stoppedByUser).toBe(true)
+
+      // Should broadcast error about no fallback
+      const messages = ws.send.mock.calls.map((c: any) => JSON.parse(c[0]))
+      const errorMsg = messages.find((m: any) =>
+        m.type === 'system_message' && m.subtype === 'error' && m.text?.includes('no fallback')
+      )
+      expect(errorMsg).toBeDefined()
+
+      // Reset mock
+      mockedExistsSync.mockImplementation((p) => String(p).includes('sessions.json') ? false : true)
+    })
+
+    it('stops session when both workingDir and groupDir are gone', () => {
+      const mockedExistsSync = vi.mocked(existsSync)
+      const s = sm.create('wt-both-gone', '/repos/project-wt-abc12345')
+      const session = sm.get(s.id)!
+      ;(session as any).groupDir = '/repos/also-gone'
+      ;(session as any).restartCount = 0
+
+      mockedExistsSync.mockImplementation((p) => {
+        const ps = String(p)
+        if (ps === '/repos/project-wt-abc12345') return false
+        if (ps === '/repos/also-gone') return false
+        if (ps.includes('sessions.json')) return false
+        return true
+      })
+
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 1, null)
+
+      expect(session._stoppedByUser).toBe(true)
+
+      // Reset mock
+      mockedExistsSync.mockImplementation((p) => String(p).includes('sessions.json') ? false : true)
+    })
+  })
+
   describe('discardChanges', () => {
     it('returns diff_error when session not found', async () => {
       const sm = new SessionManager()
