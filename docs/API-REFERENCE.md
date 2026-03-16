@@ -10,7 +10,7 @@ All endpoints (except raw webhook receivers) require a Bearer token in the `Auth
 Authorization: Bearer <token>
 ```
 
-The token is set via the `AUTH_TOKEN` environment variable or `--auth-file` CLI argument. Hook endpoints (`/api/tool-approval`, `/api/hook-decision`, `/api/hook-notify`) also accept session-scoped tokens.
+The token is set via the `AUTH_TOKEN` environment variable or `--auth-file` CLI argument. Hook endpoints (`/api/hook-decision`, `/api/hook-notify`) also accept session-scoped tokens.
 
 Unauthenticated requests return `401 Unauthorized`.
 
@@ -204,13 +204,6 @@ Remove one or more approval rules.
 ## Hook Endpoints
 
 These are called by Claude CLI hooks (PreToolUse / PermissionRequest) running inside session processes. They accept either the master Bearer token or a session-scoped token.
-
-### `POST /api/tool-approval`
-
-PreToolUse hook callback — check if a tool should be auto-approved or prompt the UI.
-
-**Request body:** `{ "sessionId": "...", "toolName": "Bash", "toolInput": { "command": "npm test" } }`
-**Response:** `{ "allow": true, "always": false }`
 
 ### `POST /api/hook-decision`
 

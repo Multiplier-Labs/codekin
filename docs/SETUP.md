@@ -1,4 +1,6 @@
-# Codekin Setup Guide
+# Codekin Setup Guide (Advanced / Self-Hosted)
+
+> **Standard users**: If you just want to install and run Codekin, see [INSTALL-DISTRIBUTION.md](./INSTALL-DISTRIBUTION.md). This guide is for advanced/self-hosted bare-metal deployments with nginx, Authelia, and systemd.
 
 Codekin is a web UI for managing multiple Claude Code terminal sessions. It connects via WebSocket and provides repo browsing, skill discovery, and screenshot uploads.
 
@@ -36,7 +38,7 @@ GitHub (webhook events)
 ## 1. Clone and Install
 
 ```bash
-git clone <repo-url> codekin
+git clone https://github.com/Multiplier-Labs/codekin.git codekin
 cd codekin
 npm install
 ```
@@ -48,13 +50,13 @@ Session naming uses the Claude CLI (`claude -p`), so no separate API keys are ne
 
 ```bash
 # Create the codekin config directory
-mkdir -p ~/.codekin
+mkdir -p ~/.config/codekin
 
 # Create the env file
-nano ~/.codekin/env
+nano ~/.config/codekin/env
 ```
 
-Contents of `~/.codekin/env`:
+Contents of `~/.config/codekin/env`:
 
 ```bash
 # Add environment variables here as needed.
@@ -64,28 +66,28 @@ Contents of `~/.codekin/env`:
 Source it from `~/.bashrc` so it's available to all shells and systemd user services:
 
 ```bash
-echo 'source ~/.codekin/env' >> ~/.bashrc
-source ~/.codekin/env
+echo 'source ~/.config/codekin/env' >> ~/.bashrc
+source ~/.config/codekin/env
 ```
 
 To add a new env var later:
 
 ```bash
-echo 'export NEW_VAR="value"' >> ~/.codekin/env
-source ~/.codekin/env
+echo 'export NEW_VAR="value"' >> ~/.config/codekin/env
+source ~/.config/codekin/env
 # Then restart any services that need it:
 sudo systemctl restart codekin
 ```
 
-> **Note**: You can override the env file location with `CODEKIN_ENV_FILE`. The systemd services run as your user with `WorkingDirectory=/home/YOUR_USER`, so they inherit env vars from the user's shell profile.
+> **Note**: The systemd services run as your user with `WorkingDirectory=/home/YOUR_USER`, so they inherit env vars from the user's shell profile.
 
 ## 3. Configure codekin
 
 ### Generate a token
 
 ```bash
-mkdir -p ~/.codekin
-openssl rand -hex 32 > ~/.codekin/auth-token
+mkdir -p ~/.config/codekin
+openssl rand -hex 32 > ~/.config/codekin/token
 ```
 
 ### Create systemd service
@@ -103,7 +105,8 @@ After=network.target
 Type=simple
 User=YOUR_USER
 WorkingDirectory=/home/YOUR_USER
-ExecStart=/bin/bash -c '$(which codekin) --port 32352 --no-open --auth "$(cat /home/YOUR_USER/.codekin/auth-token)"'
+EnvironmentFile=/home/YOUR_USER/.config/codekin/env
+ExecStart=codekin start
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production
@@ -112,7 +115,7 @@ Environment=NODE_ENV=production
 WantedBy=multi-user.target
 ```
 
-> **Note**: Adjust the node path to match your nvm installation. Find it with `which codekin`.
+> **Note**: Ensure `codekin` is on the system PATH (e.g. via `/usr/local/bin`). If using nvm, you may need to specify the full path — find it with `which codekin`.
 
 ```bash
 sudo systemctl daemon-reload
@@ -152,7 +155,9 @@ Key fields in `settings.json`:
 
 | Field       | Description                                | Default              |
 |-------------|--------------------------------------------|----------------------|
-| `webRoot`   | Where the built frontend is deployed to    | `./dist-deploy`      |
+| `webRoot`   | Where the built frontend is deployed to    | `/var/www/codekin`   |
+| `distDir`   | Path to the frontend build output          | `./dist`             |
+| `serverDir` | Path to the server source directory        | `./server`           |
 | `port`      | codekin server port                         | `32352`              |
 | `authFile`  | Path to the auth token file                | `~/.codekin/auth-token` |
 | `log`       | Server log file path                       | `/tmp/codekin.log`    |
@@ -206,7 +211,7 @@ sudo systemctl reload nginx
 
 1. Open `https://YOUR_DOMAIN` in a browser
 2. Authenticate via Authelia
-3. The Settings modal opens automatically — paste your codekin token (from `~/.codekin/auth-token`)
+3. The Settings modal opens automatically — paste your codekin token (from `~/.config/codekin/token`)
 4. Click a repo to open a terminal session
 
 ## 10. Configure GitHub Webhooks (Optional)
@@ -215,10 +220,10 @@ Codekin can receive GitHub webhook events and automatically create Claude sessio
 
 ### Server environment variables
 
-Add the webhook env vars to `~/.codekin/env` (see [step 2](#2-environment-variables)):
+Add the webhook env vars to `~/.config/codekin/env` (see [step 2](#2-environment-variables)):
 
 ```bash
-cat >> ~/.codekin/env << 'EOF'
+cat >> ~/.config/codekin/env << 'EOF'
 export GITHUB_WEBHOOK_SECRET="your-webhook-secret-here"
 export GITHUB_WEBHOOK_ENABLED=true
 # Optional overrides:
@@ -236,7 +241,7 @@ openssl rand -hex 32
 Reload and restart:
 
 ```bash
-source ~/.codekin/env
+source ~/.config/codekin/env
 sudo systemctl restart codekin
 ```
 
@@ -284,7 +289,7 @@ sudo systemctl reload nginx
    |-------|-------|
    | **Payload URL** | `https://YOUR_DOMAIN/cc/api/webhooks/github` |
    | **Content type** | `application/json` |
-   | **Secret** | Same value as `GITHUB_WEBHOOK_SECRET` in `~/.codekin/env` |
+   | **Secret** | Same value as `GITHUB_WEBHOOK_SECRET` in `~/.config/codekin/env` |
    | **SSL verification** | Enable SSL verification |
 
 3. Under **"Which events would you like to trigger this webhook?"**, select **"Let me select individual events"** and check:
@@ -318,7 +323,7 @@ To trigger a real test, push a commit that intentionally fails CI (e.g., a synta
 | Problem | Solution |
 |---------|----------|
 | GitHub shows "failed to deliver" | Check nginx is proxying `/cc/api/webhooks/github` — run `curl -X POST https://YOUR_DOMAIN/cc/api/webhooks/github` and verify you get a `401` (not `404` or `502`) |
-| `401 Unauthorized` on valid deliveries | Verify `GITHUB_WEBHOOK_SECRET` matches between GitHub and `~/.codekin/env`, then restart the service |
+| `401 Unauthorized` on valid deliveries | Verify `GITHUB_WEBHOOK_SECRET` matches between GitHub and `~/.config/codekin/env`, then restart the service |
 | Session not created after failure event | Check that `GITHUB_WEBHOOK_ENABLED=true` is set and `gh auth status` succeeds for your user |
 | `429 Too Many Requests` | Max concurrent webhook sessions reached — increase `GITHUB_WEBHOOK_MAX_SESSIONS` or wait for existing sessions to finish |
 | Webhook received but logs say "gh not found" | Ensure the `gh` CLI is on the PATH in the systemd service `Environment` line |
@@ -369,7 +374,7 @@ lsof -i :32352
 
 ### Token issues
 
-- Verify the token file exists: `cat ~/.codekin/auth-token`
+- Verify the token file exists: `cat ~/.config/codekin/token`
 - Test token verification: `curl -X POST http://127.0.0.1:32352/auth-verify -H 'Content-Type: application/json' -H 'Authorization: Bearer <token>' -d '{"token":"<token>"}'`
 
 ### Server health
@@ -407,9 +412,9 @@ codekin/
 
 | Path                                          | Purpose                        |
 |-----------------------------------------------|--------------------------------|
-| `~/.codekin/env` (or `CODEKIN_ENV_FILE`)      | Secrets and configuration      |
-| Web root (set via `FRONTEND_WEB_ROOT` or `settings.json`) | Deployed frontend |
-| `~/.codekin/auth-token` (or `AUTH_FILE`)      | codekin auth token              |
+| `~/.config/codekin/env`                       | Secrets and configuration      |
+| Web root (set via `FRONTEND_DIST` or `settings.json`) | Deployed frontend |
+| `~/.config/codekin/token` (or `AUTH_TOKEN_FILE`) | codekin auth token           |
 | `~/.codekin/screenshots/`                     | Uploaded screenshots           |
 | `/etc/nginx/sites-available/codekin`          | nginx config (production)      |
 | `/etc/systemd/system/codekin.service` | codekin systemd unit            |

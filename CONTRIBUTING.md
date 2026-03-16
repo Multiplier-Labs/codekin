@@ -43,6 +43,9 @@ The server reads its configuration from environment variables defined in `server
 | `SCREENSHOTS_DIR` | No | `$DATA_DIR/screenshots` | Directory for uploaded file attachments |
 | `GH_ORG` | No | — | GitHub organizations for repo listing (comma-separated) |
 | `FRONTEND_DIST` | No | — | Path to built frontend dist directory (for containerized deploys) |
+| `AUTH_TOKEN_FILE` | No | — | Path to file containing the auth token (legacy bare-metal deploy compat) |
+| `TRUST_PROXY` | No | `false` | Trust `X-Forwarded-For` headers (`true` or `1` to enable; set when behind a reverse proxy) |
+| `CODEKIN_AGENT_NAME` | No | `Joe` | Display name for the orchestrator agent |
 
 ### Running Tests
 
