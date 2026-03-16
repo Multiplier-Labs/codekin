@@ -16,6 +16,9 @@ import {
   deleteArchivedSession,
   getRetentionDays,
   setRetentionDays,
+  getReposPath,
+  setReposPath,
+  browseDirs,
   getSupportProvider,
   getWebhookConfig,
   getWebhookEvents,
@@ -770,5 +773,117 @@ describe('setSupportProvider', () => {
   it('throws on non-ok response', async () => {
     mockFetch.mockResolvedValue(jsonResponse({}, 400))
     await expect(setSupportProvider('tok', 'openai')).rejects.toThrow('Failed to set support provider: 400')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getReposPath
+// ---------------------------------------------------------------------------
+
+describe('getReposPath', () => {
+  it('returns the repos path from response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ path: '/home/dev/repos' }))
+    const result = await getReposPath('tok')
+    expect(result).toBe('/home/dev/repos')
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/settings/repos-path', {
+      headers: { Authorization: 'Bearer tok' },
+    })
+  })
+
+  it('returns empty string when path is empty', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ path: '' }))
+    const result = await getReposPath('tok')
+    expect(result).toBe('')
+  })
+
+  it('throws on non-ok response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({}, 500))
+    await expect(getReposPath('tok')).rejects.toThrow('Failed to get repos path: 500')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// setReposPath
+// ---------------------------------------------------------------------------
+
+describe('setReposPath', () => {
+  it('sends PUT and returns updated path', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ path: '/srv/repos' }))
+    const result = await setReposPath('tok', '/srv/repos')
+    expect(result).toBe('/srv/repos')
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/settings/repos-path', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer tok',
+      },
+      body: JSON.stringify({ path: '/srv/repos' }),
+    })
+  })
+
+  it('throws with error message from JSON error response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ error: 'Path does not exist' }, 400))
+    await expect(setReposPath('tok', '/bad/path')).rejects.toThrow('Path does not exist')
+  })
+
+  it('throws fallback message when error response is not JSON', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      redirected: false,
+      headers: new Headers({ 'content-type': 'text/plain' }),
+      json: () => Promise.reject(new Error('not json')),
+    } as Response)
+    await expect(setReposPath('tok', '/x')).rejects.toThrow('Failed to save repos path')
+  })
+
+  it('throws status-based message when error JSON has no error field', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({}, 422))
+    await expect(setReposPath('tok', '/x')).rejects.toThrow('Failed to set repos path: 422')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// browseDirs
+// ---------------------------------------------------------------------------
+
+describe('browseDirs', () => {
+  it('returns path and dirs from response', async () => {
+    const body = { path: '/home', dirs: ['dev', 'admin'] }
+    mockFetch.mockResolvedValue(jsonResponse(body))
+    const result = await browseDirs('tok', '/home')
+    expect(result).toEqual(body)
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/browse-dirs?path=%2Fhome', {
+      headers: { Authorization: 'Bearer tok' },
+    })
+  })
+
+  it('omits query param when path is not provided', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ path: '/', dirs: ['tmp'] }))
+    await browseDirs('tok')
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/browse-dirs', {
+      headers: { Authorization: 'Bearer tok' },
+    })
+  })
+
+  it('throws with error message from JSON error response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ error: 'Permission denied' }, 403))
+    await expect(browseDirs('tok', '/root')).rejects.toThrow('Permission denied')
+  })
+
+  it('throws fallback message when error response is not JSON', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      redirected: false,
+      headers: new Headers({ 'content-type': 'text/plain' }),
+      json: () => Promise.reject(new Error('not json')),
+    } as Response)
+    await expect(browseDirs('tok', '/x')).rejects.toThrow('Failed to browse directory')
+  })
+
+  it('throws status-based message when error JSON has no error field', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({}, 404))
+    await expect(browseDirs('tok', '/nonexistent')).rejects.toThrow('Failed to browse: 404')
   })
 })
