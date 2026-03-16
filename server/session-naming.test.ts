@@ -160,7 +160,7 @@ describe('SessionNaming', () => {
     expect(deps.rename).toHaveBeenCalledWith('s1', 'Fix Login Page Styling')
     expect(mockSpawn).toHaveBeenCalledWith(
       'claude',
-      ['-p', '--max-turns', '1', '--model', 'haiku'],
+      ['-p', '--max-turns', '2', '--model', 'haiku'],
       expect.objectContaining({ stdio: ['pipe', 'pipe', 'pipe'] }),
     )
   })
@@ -210,6 +210,20 @@ describe('SessionNaming', () => {
     expect(deps.rename).toHaveBeenCalled()
     const finalName = (deps.rename as any).mock.calls[0][1]
     expect(finalName.length).toBeLessThanOrEqual(60)
+  })
+
+  // 10b. executeSessionNaming — rejects error-like CLI output
+  it('rejects "Reached max turns" output and re-schedules', async () => {
+    const session = fakeSession()
+    const deps = makeDeps({ getSession: vi.fn(() => session) })
+    const naming = new SessionNaming(deps)
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mockSpawn.mockReturnValue(fakeProc('Error: Reached max turns (1)', 0))
+
+    await naming.executeSessionNaming('s1')
+
+    expect(deps.rename).not.toHaveBeenCalled()
+    expect(session._namingTimer).toBeDefined()
   })
 
   // 11. executeSessionNaming — CLI error triggers retry
