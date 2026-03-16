@@ -145,9 +145,11 @@ export class OrchestratorChildManager {
 
       // Create a git worktree for isolation if requested (default for Joe children).
       // This must happen BEFORE startClaude so Claude runs in the worktree directory.
+      let worktreeFailed = false
       if (request.useWorktree) {
         const wtPath = await this.sessions.createWorktree(sessionId, request.repo)
         if (!wtPath) {
+          worktreeFailed = true
           console.warn(`[orchestrator-child] Failed to create worktree for ${sessionId}, falling back to main directory`)
         }
       }
@@ -156,8 +158,8 @@ export class OrchestratorChildManager {
       this.sessions.startClaude(sessionId)
       child.status = 'running'
 
-      // Build and send the task prompt
-      const prompt = this.buildPrompt(request)
+      // Build and send the task prompt, including worktree failure context
+      const prompt = this.buildPrompt(request, worktreeFailed)
       this.sessions.sendInput(sessionId, prompt)
 
       // Monitor completion asynchronously
@@ -175,7 +177,7 @@ export class OrchestratorChildManager {
   /**
    * Build a focused task prompt for a child session.
    */
-  private buildPrompt(request: ChildSessionRequest): string {
+  private buildPrompt(request: ChildSessionRequest, worktreeFailed = false): string {
     const lines = [
       `# Task: ${request.task}`,
       '',
@@ -227,6 +229,17 @@ export class OrchestratorChildManager {
       '- If you encounter issues that block the task, explain what went wrong',
       '- When done, provide a brief summary of what you changed',
     )
+
+    if (worktreeFailed) {
+      lines.push(
+        '',
+        '## ⚠ Worktree Not Available',
+        '',
+        'A git worktree could not be created for isolation. You are working **directly in the main repository**.',
+        'Be extra careful with git operations — do NOT force-push, reset, or make destructive changes to existing branches.',
+        'Create your feature branch before making any changes.',
+      )
+    }
 
     return lines.join('\n')
   }

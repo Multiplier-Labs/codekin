@@ -757,12 +757,29 @@ export class SessionManager {
     if (!existsSync(session.workingDir) || (session.worktreePath && !existsSync(path.join(session.workingDir, '.git')))) {
       const fallback = session.groupDir ?? session.workingDir
       if (fallback !== session.workingDir && existsSync(fallback)) {
-        console.warn(`[startClaude] Working directory ${session.workingDir} missing or not a valid worktree — falling back to ${fallback}`)
+        const deadPath = session.workingDir
+        console.warn(`[startClaude] Working directory ${deadPath} missing or not a valid worktree — falling back to ${fallback}`)
         session.workingDir = fallback
         session.worktreePath = undefined
         this.persistToDisk()
+        this._globalBroadcast?.({ type: 'sessions_updated' })
+        const fallbackMsg: WsServerMessage = {
+          type: 'system_message',
+          subtype: 'notification',
+          text: `Worktree directory ${deadPath} no longer exists. Falling back to original repository: ${fallback}`,
+        }
+        this.addToHistory(session, fallbackMsg)
+        this.broadcast(session, fallbackMsg)
       } else if (!existsSync(session.workingDir)) {
         console.error(`[startClaude] Working directory ${session.workingDir} does not exist and no fallback available — cannot start`)
+        session._stoppedByUser = true  // prevent restart loop
+        const errMsg: WsServerMessage = {
+          type: 'system_message',
+          subtype: 'error',
+          text: `Working directory ${session.workingDir} no longer exists and no fallback is available. Session cannot start.`,
+        }
+        this.addToHistory(session, errMsg)
+        this.broadcast(session, errMsg)
         return false
       }
     }
@@ -1135,6 +1152,44 @@ export class SessionManager {
     }
     if (exitedProcess.hasSpawnFailed()) {
       console.warn(`[restart] Session ${sessionId} spawn failed (binary not found) — preserving claudeSessionId for retry`)
+    }
+
+    // Before evaluating restart, check if the working directory still exists.
+    // If a worktree was deleted mid-session, fall back to the original repo
+    // instead of entering a guaranteed restart death loop where every attempt
+    // fails with the same missing CWD.
+    if (!existsSync(session.workingDir)) {
+      const fallback = session.groupDir
+      if (fallback && existsSync(fallback)) {
+        const deadPath = session.workingDir
+        console.warn(`[restart] Working directory ${deadPath} no longer exists — falling back to ${fallback}`)
+        session.workingDir = fallback
+        session.worktreePath = undefined
+        this.persistToDisk()
+        const fallbackMsg: WsServerMessage = {
+          type: 'system_message',
+          subtype: 'notification',
+          text: `Worktree directory ${deadPath} was removed. Restarting in original repository: ${fallback}`,
+        }
+        this.addToHistory(session, fallbackMsg)
+        this.broadcast(session, fallbackMsg)
+      } else {
+        // No fallback available — don't waste restart attempts
+        console.error(`[restart] Working directory ${session.workingDir} does not exist and no fallback — stopping session`)
+        session._stoppedByUser = true
+        for (const listener of this._exitListeners) {
+          try { listener(sessionId, code, signal, false) } catch { /* listener error */ }
+        }
+        const msg: WsServerMessage = {
+          type: 'system_message',
+          subtype: 'error',
+          text: `Working directory ${session.workingDir} no longer exists and no fallback is available. Please delete this session and create a new one.`,
+        }
+        this.addToHistory(session, msg)
+        this.broadcast(session, msg)
+        this.broadcast(session, { type: 'exit', code: code ?? -1, signal })
+        return
+      }
     }
 
     const action = evaluateRestart({
