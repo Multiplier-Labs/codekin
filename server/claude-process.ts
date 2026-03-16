@@ -211,6 +211,10 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
         clearTimeout(this.startupTimer)
         this.startupTimer = null
       }
+      if (this.killTimer) {
+        clearTimeout(this.killTimer)
+        this.killTimer = null
+      }
       this.rl?.close()
       this.rl = null
       this.proc = null

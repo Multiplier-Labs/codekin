@@ -721,8 +721,11 @@ export class SessionManager {
     // Clear stopped flag on explicit start
     session._stoppedByUser = false
 
-    // Kill existing process if any
+    // Kill existing process if any — remove listeners first to prevent the
+    // old process's exit handler from clobbering the new process reference
+    // and triggering an unwanted auto-restart cycle.
     if (session.claudeProcess) {
+      session.claudeProcess.removeAllListeners()
       session.claudeProcess.stop()
     }
 
