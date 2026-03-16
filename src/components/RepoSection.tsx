@@ -281,7 +281,18 @@ export function RepoSection({
                     className="flex-1 min-w-0 bg-neutral-10 border border-neutral-7 rounded px-1 py-0 text-[15px] text-neutral-1 outline-none focus:border-primary-6"
                   />
                 ) : (
-                  <span className="flex-1 truncate font-normal flex items-center gap-1"><WorktreeIcon session={s} />{sessionDisplayName(s)}{s.provider === 'opencode' && <span className="text-[10px] px-1 py-0 rounded bg-neutral-7 text-neutral-4 font-medium leading-tight">OC</span>}</span>
+                  <span className="flex-1 truncate font-normal flex items-center gap-1">
+                    <WorktreeIcon session={s} />
+                    {s.provider === 'opencode' && (
+                      <span
+                        title="OpenCode session"
+                        className="text-[10px] px-1 py-0 rounded bg-neutral-7 text-neutral-4 font-medium leading-tight"
+                      >
+                        OC
+                      </span>
+                    )}
+                    {sessionDisplayName(s)}
+                  </span>
                 )}
                 {!isEditing && (
                   <>
