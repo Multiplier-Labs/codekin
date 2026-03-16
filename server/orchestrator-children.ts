@@ -145,9 +145,11 @@ export class OrchestratorChildManager {
 
       // Create a git worktree for isolation if requested (default for Joe children).
       // This must happen BEFORE startClaude so Claude runs in the worktree directory.
+      // Pass the target branch name so the worktree is created directly on the
+      // feature branch — no need for Claude to create a second branch.
       let worktreeFailed = false
       if (request.useWorktree) {
-        const wtPath = await this.sessions.createWorktree(sessionId, request.repo)
+        const wtPath = await this.sessions.createWorktree(sessionId, request.repo, request.branchName)
         if (!wtPath) {
           worktreeFailed = true
           console.warn(`[orchestrator-child] Failed to create worktree for ${sessionId}, falling back to main directory`)
@@ -178,6 +180,8 @@ export class OrchestratorChildManager {
    * Build a focused task prompt for a child session.
    */
   private buildPrompt(request: ChildSessionRequest, worktreeFailed = false): string {
+    const inWorktree = request.useWorktree && !worktreeFailed
+
     const lines = [
       `# Task: ${request.task}`,
       '',
@@ -186,21 +190,45 @@ export class OrchestratorChildManager {
       `You have been spawned by Agent ${getAgentDisplayName()} (the Codekin orchestrator) to implement a specific task in this repository.`,
       '',
       `**Task**: ${request.task}`,
-      `**Branch**: Create your changes on branch \`${request.branchName}\``,
+      `**Branch**: \`${request.branchName}\``,
       '',
     ]
 
-    if (request.completionPolicy === 'pr') {
+    if (inWorktree) {
       lines.push(
-        '## Completion',
+        '## Worktree Environment',
         '',
-        '1. Create a new branch with the name specified above',
-        '2. Make the necessary changes',
-        '3. Commit your changes with a clear commit message',
-        '4. Push the branch and create a Pull Request',
-        '5. Include a clear PR description explaining what was changed and why',
+        `You are running in an **isolated git worktree** already on branch \`${request.branchName}\`.`,
+        'You do NOT need to create or switch branches — just make your changes and commit directly.',
+        '',
+        '**IMPORTANT**: Do NOT use the `EnterWorktree` or `ExitWorktree` tools. This session is already managed in a worktree by Codekin. Using those tools will corrupt the worktree state and crash the session.',
         '',
       )
+    }
+
+    if (request.completionPolicy === 'pr') {
+      if (inWorktree) {
+        lines.push(
+          '## Completion',
+          '',
+          '1. Make the necessary changes',
+          '2. Commit your changes with a clear commit message',
+          '3. Push the branch and create a Pull Request',
+          '4. Include a clear PR description explaining what was changed and why',
+          '',
+        )
+      } else {
+        lines.push(
+          '## Completion',
+          '',
+          `1. Create and switch to branch \`${request.branchName}\``,
+          '2. Make the necessary changes',
+          '3. Commit your changes with a clear commit message',
+          '4. Push the branch and create a Pull Request',
+          '5. Include a clear PR description explaining what was changed and why',
+          '',
+        )
+      }
     } else if (request.completionPolicy === 'merge') {
       lines.push(
         '## Completion',
@@ -237,7 +265,9 @@ export class OrchestratorChildManager {
         '',
         'A git worktree could not be created for isolation. You are working **directly in the main repository**.',
         'Be extra careful with git operations — do NOT force-push, reset, or make destructive changes to existing branches.',
-        'Create your feature branch before making any changes.',
+        `Create branch \`${request.branchName}\` before making any changes.`,
+        '',
+        '**IMPORTANT**: Do NOT use the `EnterWorktree` or `ExitWorktree` tools — worktree creation already failed, and retrying will not help.',
       )
     }
 
