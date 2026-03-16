@@ -273,9 +273,12 @@ export function createUploadRouter(
       return
     }
 
-    // Sanitize: must start with a word character, reject names starting with '.'
-    // or consisting entirely of dots (e.g. '.git', '..') for defense-in-depth.
-    if (!/^[\w][\w.-]*$/.test(owner) || !/^[\w][\w.-]*$/.test(name)) {
+    // Sanitize: must start with a word character, no leading dots, and reject
+    // reserved names like '.git'. The regex requires a letter or digit first,
+    // followed by word chars, hyphens, or dots (but not leading dot).
+    const validName = /^[a-zA-Z0-9][\w.-]*$/
+    if (!validName.test(owner) || !validName.test(name) ||
+        owner.toLowerCase() === '.git' || name.toLowerCase() === '.git') {
       res.status(400).json({ error: 'Invalid owner or repo name' })
       return
     }

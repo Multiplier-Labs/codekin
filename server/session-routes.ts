@@ -15,6 +15,7 @@ import { resolve as pathResolve, join as pathJoin } from 'path'
 import { homedir as osHomedir } from 'os'
 import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
+import { REPOS_ROOT } from './config.js'
 
 /** Expand leading ~ to the user's home directory. */
 function expandTilde(p: string): string {
@@ -183,6 +184,14 @@ export function createSessionRouter(
     const raw = (typeof req.query.path === 'string' ? req.query.path : '') || osHomedir()
     const expanded = expandTilde(raw)
     const base = expanded.startsWith('/') ? expanded : pathResolve(expanded)
+
+    // Restrict browsing to home directory and repos root to prevent arbitrary filesystem traversal
+    const home = osHomedir()
+    const allowedRoots = [home, REPOS_ROOT]
+    const resolved = pathResolve(base)
+    if (!allowedRoots.some(root => resolved === root || resolved.startsWith(root + '/'))) {
+      return res.status(403).json({ error: 'Path is outside allowed directories' })
+    }
 
     if (!fsExistsSync(base) || !fsStatSync(base).isDirectory()) {
       return res.status(400).json({ error: 'Path does not exist or is not a directory' })
