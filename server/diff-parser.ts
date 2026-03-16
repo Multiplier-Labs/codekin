@@ -29,9 +29,14 @@ export function parseDiff(raw: string, maxBytes: number = DEFAULT_MAX_BYTES): Pa
   if (Buffer.byteLength(raw, 'utf-8') > maxBytes) {
     truncated = true
     truncationReason = `Diff output exceeded ${Math.round(maxBytes / (1024 * 1024))} MB limit`
-    // Truncate to roughly maxBytes — cut at last newline before limit
+    // Truncate to roughly maxBytes — walk back to a valid UTF-8 boundary
+    // to avoid splitting multibyte characters (emoji, CJK, etc.)
     const buf = Buffer.from(raw, 'utf-8')
-    const sliced = buf.subarray(0, maxBytes).toString('utf-8')
+    let end = maxBytes
+    // UTF-8 continuation bytes start with 0b10xxxxxx (0x80–0xBF).
+    // Walk back past any continuation bytes so we don't split a code point.
+    while (end > 0 && (buf[end] & 0xC0) === 0x80) end--
+    const sliced = buf.subarray(0, end).toString('utf-8')
     const lastNewline = sliced.lastIndexOf('\n')
     input = lastNewline > 0 ? sliced.slice(0, lastNewline) : sliced
   }

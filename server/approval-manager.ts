@@ -219,7 +219,7 @@ export class ApprovalManager {
 
     // Never pattern commands with shell meta-characters — the pattern
     // would be far broader than the specific command the user approved
-    if (/[|;&`$(){}]/.test(cmd) || cmd.includes('\n')) return null
+    if (/[|;&`$(){}*?[\]~]/.test(cmd) || cmd.includes('\n')) return null
 
     const first = tokens[0]
     const twoToken = tokens.length >= 2 ? `${tokens[0]} ${tokens[1]}` : ''
@@ -458,7 +458,7 @@ export class ApprovalManager {
           }
         }
         // Skip commands with shell meta-characters
-        if (/[|;&`$(){}]/.test(cmd) || cmd.includes('\n')) continue
+        if (/[|;&`$(){}*?[\]~]/.test(cmd) || cmd.includes('\n')) continue
         const group = prefixGroups.get(prefix) || []
         group.push(cmd)
         prefixGroups.set(prefix, group)

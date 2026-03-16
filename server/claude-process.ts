@@ -202,6 +202,13 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
 
       case 'result': {
         const resultEvent = event as ClaudeResultEvent
+        // If ExitPlanMode was pending but no matching tool_result arrived
+        // (e.g. ID mismatch or process terminated), clear planning mode now
+        // so the flag doesn't get stuck across turns.
+        if (this.pendingExitPlanModeId) {
+          this.pendingExitPlanModeId = null
+          this.emit('planning_mode', false)
+        }
         this.emit('result', resultEvent.result || '', resultEvent.is_error || false)
         // The result message signals end of turn, ready for next input
         break
