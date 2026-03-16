@@ -406,6 +406,11 @@ export function useChatSocket({
         callbacksRef.current.onSessionsUpdated?.()
         break
 
+      case 'worktree_created':
+        // Trigger a sessions refresh so sidebar picks up the new worktreePath
+        callbacksRef.current.onSessionsUpdated?.()
+        break
+
       case 'info':
         break
 
@@ -507,6 +512,10 @@ export function useChatSocket({
     localStorage.setItem('claude-model', model)
   }, [send])
 
+  const moveToWorktree = useCallback(() => {
+    send({ type: 'move_to_worktree' })
+  }, [send])
+
   const setPermissionMode = useCallback((mode: PermissionMode) => {
     send({ type: 'set_permission_mode', permissionMode: mode })
     setCurrentPermissionMode(mode)
@@ -538,5 +547,6 @@ export function useChatSocket({
     setModel,
     currentPermissionMode,
     setPermissionMode,
+    moveToWorktree,
   }
 }

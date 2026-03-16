@@ -71,9 +71,13 @@ interface InputBarProps {
   currentPermissionMode?: PermissionMode
   /** Callback when the permission mode is changed. */
   onPermissionModeChange?: (mode: PermissionMode) => void
+  /** Callback to move the current session into a worktree mid-session. */
+  onMoveToWorktree?: () => void
+  /** Whether the session already has a worktree. */
+  hasWorktree?: boolean
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, hasWorktree = false }, ref) {
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
@@ -439,6 +443,17 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                     </div>
                   )}
                 </div>
+              )}
+              {/* Mid-session worktree button — shown after first message when not already in a worktree */}
+              {!showWorktreeToggle && !hasWorktree && onMoveToWorktree && (
+                <button
+                  onClick={onMoveToWorktree}
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
+                  title="Move session to a git worktree"
+                >
+                  <IconGitBranch size={14} stroke={2} />
+                  <span className="hidden lg:inline">Worktree</span>
+                </button>
               )}
               {hasSkills && (
                 <div className="relative">

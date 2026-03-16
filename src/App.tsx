@@ -116,6 +116,7 @@ export default function App() {
     send: wsSend,
     currentPermissionMode,
     setPermissionMode,
+    moveToWorktree,
   } = useChatSocket({
     token: settings.token,
     onSessionCreated: (sessionId) => {
@@ -519,6 +520,8 @@ export default function App() {
                 isMobile={isMobile}
                 currentPermissionMode={currentPermissionMode}
                 onPermissionModeChange={handlePermissionModeChange}
+                onMoveToWorktree={moveToWorktree}
+                hasWorktree={!!activeSession?.worktreePath}
               />
             ) : (
               <div className="px-4 py-3 border-t border-neutral-10">
@@ -607,6 +610,8 @@ export default function App() {
               onWorktreeChange={setUseWorktree}
               currentPermissionMode={currentPermissionMode}
               onPermissionModeChange={handlePermissionModeChange}
+              onMoveToWorktree={moveToWorktree}
+              hasWorktree={!!activeSession?.worktreePath}
             />
           </div>
         ) : (

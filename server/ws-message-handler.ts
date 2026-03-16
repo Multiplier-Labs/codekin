@@ -182,6 +182,31 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    case 'move_to_worktree': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId) { send({ type: 'error', message: 'Not in a session' }); break }
+      const session = sessions.get(sessionId)
+      if (!session) { send({ type: 'error', message: 'Session not found' }); break }
+      if (session.worktreePath) { send({ type: 'error', message: 'Session is already in a worktree' }); break }
+
+      sessions.stopClaude(sessionId)
+      const originalDir = session.workingDir
+      void sessions.createWorktree(sessionId, originalDir).then((wtPath) => {
+        if (wtPath) {
+          const wtName = wtPath.split('/').pop() ?? wtPath
+          const createdMsg = { type: 'worktree_created' as const, worktreePath: wtPath, workingDir: wtPath }
+          sessions.broadcast(session, createdMsg)
+          const notifMsg = { type: 'system_message' as const, subtype: 'notification' as const, text: `Moved to worktree: ${wtName}` }
+          sessions.addToHistory(session, notifMsg)
+          sessions.broadcast(session, notifMsg)
+        } else {
+          send({ type: 'system_message', subtype: 'error', text: 'Failed to create worktree.' })
+        }
+        sessions.startClaude(sessionId)
+      })
+      break
+    }
+
     case 'discard_changes': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {

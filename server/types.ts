@@ -255,6 +255,7 @@ export type WsServerMessage =
   | { type: 'session_name_update'; sessionId: string; name: string }
   | { type: 'webhook_event'; event: string; repo: string; branch: string; workflow: string; conclusion: string; status: string; sessionId?: string }
   | { type: 'workflow_event'; eventType: string; runId: string; kind: string; stepKey?: string; status?: string; payload?: unknown }
+  | { type: 'worktree_created'; worktreePath: string; workingDir: string }
   | { type: 'sessions_updated' }
   | { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary; branch: string; scope: DiffScope }
   | { type: 'diff_error'; message: string }
@@ -275,6 +276,7 @@ export type WsClientMessage =
   | { type: 'ping' }
   | { type: 'get_diff'; scope?: DiffScope }
   | { type: 'discard_changes'; scope: DiffScope; paths?: string[]; statuses?: Record<string, DiffFileStatus> }
+  | { type: 'move_to_worktree' }
 
 // --- Diff viewer types ---
 
