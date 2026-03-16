@@ -1,6 +1,6 @@
 /** Tests for OrchestratorChildManager — verifies prompt generation for
  * worktree vs non-worktree scenarios and worktree failure context. */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('./config.js', () => ({
   getAgentDisplayName: () => 'TestAgent',
