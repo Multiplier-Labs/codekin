@@ -172,11 +172,18 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
     // Exclude ANTHROPIC_API_KEY / CLAUDE_CODE_API_KEY from inheritance —
     // stale or incorrect keys override the CLI's subscription/OAuth auth
     // and cause "Invalid API key" errors. Let the CLI use its own auth.
+    // Also strip GIT_* vars (except GIT_EDITOR) that the server may have
+    // inherited from the shell that launched it. In particular,
+    // GIT_INDEX_FILE=.git/index breaks worktrees where .git is a file,
+    // not a directory, causing all index-dependent git commands to fail.
     const API_KEY_VARS = new Set(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_API_KEY'])
     const env: Record<string, string> = {
       ...Object.fromEntries(
         Object.entries(process.env).filter(
-          (entry): entry is [string, string] => entry[1] != null && !API_KEY_VARS.has(entry[0])
+          (entry): entry is [string, string] =>
+            entry[1] != null &&
+            !API_KEY_VARS.has(entry[0]) &&
+            (!entry[0].startsWith('GIT_') || entry[0] === 'GIT_EDITOR')
         )
       ),
       ...this.extraEnv,
