@@ -124,19 +124,6 @@ Set the repos discovery path. Empty string resets to server default.
 **Request body:** `{ "path": "/home/user/repos" }`
 **Response:** `{ "path": "/home/user/repos" }`
 
-### `GET /api/settings/support-provider`
-
-Get the preferred AI provider for background tasks (auto-naming, etc.).
-
-**Response:** `{ "preferred": "auto", "available": ["groq", "openai", "gemini", "anthropic"] }`
-
-### `PUT /api/settings/support-provider`
-
-Set the preferred support provider.
-
-**Request body:** `{ "provider": "groq" }` (one of: `auto`, `groq`, `openai`, `gemini`, `anthropic`)
-**Response:** `{ "preferred": "groq" }`
-
 ---
 
 ## Approvals
