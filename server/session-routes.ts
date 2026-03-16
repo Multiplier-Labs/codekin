@@ -247,7 +247,7 @@ export function createSessionRouter(
     const workingDir = typeof req.query.path === 'string' ? req.query.path : ''
     if (!workingDir) return res.status(400).json({ error: 'Missing path query parameter' })
 
-    res.json(sessions.getApprovals(workingDir))
+    res.json(sessions.approvalManager.getApprovals(workingDir))
   })
 
   /** Approvals effective globally via cross-repo inference (approved in 2+ repos). */
@@ -255,7 +255,7 @@ export function createSessionRouter(
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
 
-    res.json(sessions.getGlobalApprovals())
+    res.json(sessions.approvalManager.getGlobalApprovals())
   })
 
   router.delete('/api/approvals', (req, res) => {
@@ -271,15 +271,15 @@ export function createSessionRouter(
     if (Array.isArray(items) && items.length > 0) {
       let removedCount = 0
       for (const item of items) {
-        const result = sessions.removeApproval(workingDir, item, true)
+        const result = sessions.approvalManager.removeApproval(workingDir, item, true)
         if (result === true) removedCount++
       }
-      if (removedCount > 0) sessions.persistRepoApprovals()
+      if (removedCount > 0) sessions.approvalManager.persistRepoApprovals()
       return res.json({ success: true, removed: removedCount })
     }
 
     // Single delete
-    const result = sessions.removeApproval(workingDir, { tool, command, pattern })
+    const result = sessions.approvalManager.removeApproval(workingDir, { tool, command, pattern })
     if (result === 'invalid') return res.status(400).json({ error: 'Provide a non-empty tool, command, or pattern' })
     res.json({ success: true, removed: result })
   })
