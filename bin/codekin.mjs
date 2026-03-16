@@ -10,6 +10,7 @@
  *   codekin service status         Show service status
  *   codekin config                  Update API keys and settings
  *   codekin token                  Print access URL with auth token
+ *   codekin upgrade                Upgrade to latest version
  *   codekin uninstall              Remove Codekin entirely
  */
 
@@ -419,6 +420,50 @@ async function cmdUninstall() {
   console.log('\nCodekin has been completely removed.')
 }
 
+async function cmdUpgrade() {
+  // Read current version
+  const pkg = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'package.json'), 'utf-8'))
+  const current = pkg.version
+
+  // Check latest version on npm
+  console.log('Checking for updates...')
+  let latest
+  try {
+    latest = execSync('npm view codekin version', { encoding: 'utf-8' }).trim()
+  } catch {
+    console.error('Failed to check npm registry. Check your network connection.')
+    process.exit(1)
+  }
+
+  if (latest === current) {
+    console.log(`Already on the latest version (v${current}).`)
+    return
+  }
+
+  console.log(`Current: v${current}`)
+  console.log(`Latest:  v${latest}\n`)
+  console.log('Upgrading...')
+
+  const result = spawnSync('npm', ['install', '-g', 'codekin'], { stdio: 'inherit' })
+  if (result.status !== 0) {
+    console.error('\nUpgrade failed. Try running with sudo or check npm permissions.')
+    process.exit(1)
+  }
+
+  // Restart service if running
+  try {
+    const status = execSync('codekin service status', { encoding: 'utf-8' })
+    if (status.includes('running')) {
+      console.log('\nRestarting background service...')
+      spawnSync('codekin', ['service', 'install'], { stdio: 'inherit' })
+    }
+  } catch {
+    // Service not installed — skip
+  }
+
+  console.log(`\nUpgraded to v${latest}.`)
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -434,6 +479,8 @@ if (cmd === 'start') {
   await cmdSetup()
 } else if (cmd === 'token') {
   cmdToken()
+} else if (cmd === 'upgrade') {
+  await cmdUpgrade()
 } else if (cmd === 'uninstall') {
   await cmdUninstall()
 } else if (cmd === 'service') {
@@ -455,6 +502,7 @@ Usage:
   codekin service uninstall       Remove background service
   codekin service status          Show service status
   codekin token                   Print access URL with auth token
+  codekin upgrade                 Upgrade to latest version
   codekin uninstall               Remove Codekin entirely
 `)
 }

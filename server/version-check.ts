@@ -94,7 +94,7 @@ export async function getUpdateNotification(): Promise<string | null> {
     await checkForUpdates()
   }
   if (state.updateAvailable && state.latestVersion) {
-    return `Codekin v${state.latestVersion} is available (current: v${state.currentVersion}). Run install.sh to upgrade.`
+    return `Codekin v${state.latestVersion} is available (current: v${state.currentVersion}). Run "codekin upgrade" to update.`
   }
   return null
 }

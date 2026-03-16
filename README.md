@@ -41,6 +41,7 @@ codekin service install         # (Re-)install the background service
 codekin service uninstall       # Remove the background service
 codekin start                   # Run in foreground (for debugging)
 codekin setup --regenerate      # Generate a new auth token
+codekin upgrade                 # Upgrade to latest version
 codekin uninstall               # Remove Codekin entirely
 ```
 
@@ -62,17 +63,16 @@ codekin uninstall               # Remove Codekin entirely
 
 ## Upgrade
 
-Re-run the install script — it's idempotent and will upgrade to the latest version:
+```bash
+codekin upgrade
+```
+
+This checks npm for the latest version, installs it, and restarts the background service if running.
+
+Alternatively, re-run the install script:
 
 ```bash
 curl -fsSL codekin.ai/install.sh | bash
-```
-
-Or upgrade manually:
-
-```bash
-npm install -g codekin
-codekin service install
 ```
 
 ## Uninstall
