@@ -29,7 +29,7 @@ Installed globally via npm, the `codekin` command manages the local server:
 | Command | Description |
 |---|---|
 | `codekin start` | Run server in foreground (for testing/debugging) |
-| `codekin setup` | First-time wizard: API key + auth token generation |
+| `codekin setup` | First-time wizard: auth token generation |
 | `codekin service install` | Install + start as a persistent user-level background service |
 | `codekin service uninstall` | Remove the background service |
 | `codekin service status` | Show whether the service is running |
@@ -47,7 +47,7 @@ The background service is installed at the user level — no root or sudo requir
   - Persists across reboots via `loginctl enable-linger`
 
 Both read configuration from:
-- `~/.config/codekin/env` — environment variables (`ANTHROPIC_API_KEY`, `PORT`, etc.)
+- `~/.config/codekin/env` — environment variables (`PORT`, `REPOS_ROOT`, etc.)
 - `~/.config/codekin/token` — auth token file
 
 ### Auth Token
@@ -65,7 +65,7 @@ The curl-pipe-bash script handles bootstrapping on a fresh machine:
 1. **Check Node.js ≥20** — installs via nvm if missing
 2. **Check Claude Code CLI** — warns and exits if not installed, since auth must be done interactively
 3. **`npm install -g codekin`**
-4. **`codekin setup`** — interactive prompts for `ANTHROPIC_API_KEY` if not already in env
+4. **`codekin setup`** — generates auth token and writes config
 5. **`codekin service install`** — installs and starts the background service
 6. **Print access URL** — `http://localhost:32352?token=<token>`
 
@@ -133,7 +133,6 @@ All configuration is via environment variables. Defaults suit a local install; o
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `32352` | Server port |
-| `ANTHROPIC_API_KEY` | — | Required. Claude API key |
 | `AUTH_TOKEN` | — | Auth token (inline). Prefer `AUTH_TOKEN_FILE` |
 | `AUTH_TOKEN_FILE` | `~/.config/codekin/token` | Path to auth token file |
 | `FRONTEND_DIST` | (set by CLI) | Path to built frontend `dist/` directory |
@@ -141,13 +140,12 @@ All configuration is via environment variables. Defaults suit a local install; o
 | `DATA_DIR` | `~/.codekin` | Codekin data directory (sessions, uploads, etc.) |
 | `CORS_ORIGIN` | `*` | Restrict CORS for remote access |
 | `GH_ORG` | — | Comma-separated GitHub orgs for repo listing |
-| `GROQ_API_KEY` | — | Optional. Enables session auto-naming |
 
 ## Directory Layout (after install)
 
 ```
 ~/.config/codekin/
-  env          # environment variables for the service
+  env          # environment variables for the service (PORT, REPOS_ROOT, etc.)
   token        # auth token
 
 ~/.codekin/
@@ -175,7 +173,6 @@ npm run build
 npx tsc -p server/tsconfig.json
 
 # Run with FRONTEND_DIST (no nginx needed)
-ANTHROPIC_API_KEY=sk-ant-... \
 AUTH_TOKEN=mytoken \
 FRONTEND_DIST=./dist \
 node server/dist/ws-server.js
