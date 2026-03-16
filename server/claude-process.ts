@@ -183,9 +183,11 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
     // Kill any orphaned Claude process still holding this session ID's lock.
     // This can happen when the server restarts and old children survive (SIGKILL'd
     // or reparented to init). Without this, --resume fails with "already in use".
+    // Uses the full binary path + exact session UUID to avoid matching unrelated processes.
     if (this.resume) {
       try {
-        execFileSync('pkill', ['-f', `--resume ${this.sessionId}`], { timeout: 2000, stdio: 'ignore' })
+        const pattern = `${CLAUDE_BINARY} .*--resume ${this.sessionId}\\b`
+        execFileSync('pkill', ['-f', pattern], { timeout: 2000, stdio: 'ignore' })
       } catch {
         // pkill exits 1 when no matching process is found — that's the happy path
       }
@@ -217,7 +219,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       const text = data.toString().trim()
       console.error('[claude stderr]', text)
       if (text) {
-        if (text.includes('is already in use')) {
+        if (/Session ID \S+ is already in use/.test(text)) {
           this._sessionConflict = true
         }
         this.emit('error', `[stderr] ${text.slice(0, 500)}`)
