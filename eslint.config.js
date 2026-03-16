@@ -17,7 +17,7 @@ export default defineConfig([
       reactRefresh.configs.vite,
     ],
     languageOptions: {
-      ecmaVersion: 2020,
+      ecmaVersion: 2022,
       globals: globals.browser,
       parserOptions: {
         projectService: true,
@@ -55,7 +55,7 @@ export default defineConfig([
       tseslint.configs.strictTypeChecked,
     ],
     languageOptions: {
-      ecmaVersion: 2020,
+      ecmaVersion: 2022,
       globals: globals.node,
       parserOptions: {
         projectService: true,
@@ -90,7 +90,7 @@ export default defineConfig([
       tseslint.configs.recommended,
     ],
     languageOptions: {
-      ecmaVersion: 2020,
+      ecmaVersion: 2022,
       globals: globals.browser,
     },
     rules: {

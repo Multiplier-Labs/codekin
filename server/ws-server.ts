@@ -371,6 +371,8 @@ const WS_AUTH_TIMEOUT_MS = 5000
 const wsConnections = new Map<string, { count: number; resetAt: number }>()
 const WS_RATE_WINDOW_MS = 60_000
 const WS_RATE_MAX_CONNECTIONS = 30
+/** Maximum number of tracked IPs in the rate-limiter map to prevent unbounded memory growth. */
+const WS_RATE_MAP_MAX_SIZE = 10_000
 
 // Periodically purge expired rate-limit entries to prevent unbounded memory growth
 setInterval(() => {
@@ -384,6 +386,10 @@ function checkWsRateLimit(ip: string): boolean {
   const now = Date.now()
   const entry = wsConnections.get(ip)
   if (!entry || now >= entry.resetAt) {
+    // Reject new IPs if the map has grown too large (DoS protection)
+    if (!entry && wsConnections.size >= WS_RATE_MAP_MAX_SIZE) {
+      return false
+    }
     wsConnections.set(ip, { count: 1, resetAt: now + WS_RATE_WINDOW_MS })
     return true
   }

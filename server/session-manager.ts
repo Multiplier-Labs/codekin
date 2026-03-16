@@ -403,8 +403,12 @@ export class SessionManager {
   /**
    * Clean up a git worktree and its branch. Runs asynchronously and logs errors
    * but never throws — session deletion must not be blocked by cleanup failures.
+   * Retries once on failure after a short delay.
    */
-  private cleanupWorktree(worktreePath: string, repoDir: string): void {
+  private cleanupWorktree(worktreePath: string, repoDir: string, attempt = 1): void {
+    const MAX_CLEANUP_ATTEMPTS = 2
+    const RETRY_DELAY_MS = 3000
+
     void (async () => {
       try {
         // Resolve the actual repo root (repoDir may itself be a worktree)
@@ -425,7 +429,13 @@ export class SessionManager {
         await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot, timeout: 5000 })
           .catch((e: unknown) => console.warn(`[worktree] prune after cleanup failed:`, e instanceof Error ? e.message : e))
       } catch (err) {
-        console.warn(`[worktree] Failed to clean up worktree ${worktreePath}:`, err instanceof Error ? err.message : err)
+        const errMsg = err instanceof Error ? err.message : String(err)
+        if (attempt < MAX_CLEANUP_ATTEMPTS) {
+          console.warn(`[worktree] Failed to clean up worktree ${worktreePath} (attempt ${attempt}/${MAX_CLEANUP_ATTEMPTS}): ${errMsg} — retrying in ${RETRY_DELAY_MS}ms`)
+          setTimeout(() => this.cleanupWorktree(worktreePath, repoDir, attempt + 1), RETRY_DELAY_MS)
+        } else {
+          console.error(`[worktree] Failed to clean up worktree ${worktreePath} after ${MAX_CLEANUP_ATTEMPTS} attempts: ${errMsg}`)
+        }
       }
     })()
   }
@@ -1055,6 +1065,7 @@ export class SessionManager {
   private handleApiRetry(session: Session, sessionId: string, result: string): boolean {
     if (!session._lastUserInput || !this.isRetryableApiError(result)) {
       session._apiRetryCount = 0
+      session._apiRetryScheduled = false
       return false
     }
 
@@ -1062,10 +1073,14 @@ export class SessionManager {
     if (session._lastUserInputAt && Date.now() - session._lastUserInputAt > 60_000) {
       console.log(`[api-retry] skipping stale retry for session=${sessionId} (input age=${Math.round((Date.now() - session._lastUserInputAt) / 1000)}s)`)
       session._apiRetryCount = 0
+      session._apiRetryScheduled = false
       return false
     }
 
     if (session._apiRetryCount < MAX_API_RETRIES) {
+      // Prevent duplicate scheduling from concurrent error paths
+      if (session._apiRetryScheduled) return true
+
       session._apiRetryCount++
       const attempt = session._apiRetryCount
       const delay = API_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
@@ -1081,8 +1096,10 @@ export class SessionManager {
       console.log(`[api-retry] session=${sessionId} attempt=${attempt}/${MAX_API_RETRIES} delay=${delay}ms error=${result.slice(0, 200)}`)
 
       if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
+      session._apiRetryScheduled = true
       session._apiRetryTimer = setTimeout(() => {
         session._apiRetryTimer = undefined
+        session._apiRetryScheduled = false
         if (!session.claudeProcess?.isAlive() || session._stoppedByUser) return
         console.log(`[api-retry] resending message for session=${sessionId} attempt=${attempt}`)
         session.claudeProcess.sendMessage(session._lastUserInput!)
@@ -1099,6 +1116,7 @@ export class SessionManager {
     this.addToHistory(session, exhaustedMsg)
     this.broadcast(session, exhaustedMsg)
     session._apiRetryCount = 0
+    session._apiRetryScheduled = false
     return false
   }
 
@@ -1108,6 +1126,7 @@ export class SessionManager {
    */
   private finalizeResult(session: Session, sessionId: string, result: string, isError: boolean): void {
     session._apiRetryCount = 0
+    session._apiRetryScheduled = false
     session._lastUserInput = undefined
     session._lastUserInputAt = undefined
 

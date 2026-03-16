@@ -88,6 +88,8 @@ export interface Session {
   _apiRetryCount: number
   /** Timer handle for scheduled API error retry. */
   _apiRetryTimer?: ReturnType<typeof setTimeout>
+  /** Guard flag: true while an API retry timer is pending, prevents duplicate scheduling. */
+  _apiRetryScheduled?: boolean
   /** Grace period timer before auto-denying prompts after last client leaves. */
   _leaveGraceTimer?: ReturnType<typeof setTimeout> | null
   /** Timestamp of last meaningful activity (input, prompt response, client join). Used by idle reaper. */
