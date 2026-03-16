@@ -308,7 +308,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         </label>
       )}
 
-      <div className="flex flex-1 min-h-0 gap-2 px-3 py-2">
+      {/* Textarea — full width */}
+      <div className="flex flex-1 min-h-0 gap-2 px-3 pt-2 pb-1">
         {isWaiting && (
           <span className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-primary-5 animate-pulse" />
         )}
@@ -330,16 +331,20 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           onChange={handleFileChange}
           className="hidden"
         />
-        <div className={`flex flex-shrink-0 flex-row items-end ${isMobile ? 'gap-1.5' : 'gap-1'} pb-0.5`}>
-          {/* Desktop: show all buttons inline */}
-          {!isMobile && (
-            <>
+      </div>
+
+      {/* Toolbar row — selectors left, action buttons right */}
+      <div className="flex flex-shrink-0 items-center justify-between px-3 pb-2 pt-0">
+        {/* Desktop: selectors + action buttons */}
+        {!isMobile && (
+          <>
+            <div className="flex items-center gap-1">
               {/* Permission mode selector */}
               {currentPermissionMode && onPermissionModeChange && (
                 <div className="relative" ref={permMenuRef}>
                   <button
                     onClick={() => setPermMenuOpen(!permMenuOpen)}
-                    className={`flex items-center gap-0.5 rounded px-1.5 pb-1 pt-0.5 text-[13px] font-medium transition-colors ${
+                    className={`flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium transition-colors ${
                       currentPermissionMode === 'bypassPermissions'
                         ? 'text-error-5 hover:text-error-4 hover:bg-error-9/30'
                         : 'text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7'
@@ -351,11 +356,11 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                       const ModeIcon = PERMISSION_MODE_ICONS[mode?.icon ?? 'shield']
                       return <ModeIcon size={14} stroke={2} />
                     })()}
-                    <span className="hidden lg:inline ml-0.5">{PERMISSION_MODES.find(m => m.id === currentPermissionMode)?.label ?? currentPermissionMode}</span>
+                    <span className="hidden lg:inline">{PERMISSION_MODES.find(m => m.id === currentPermissionMode)?.label ?? currentPermissionMode}</span>
                     <IconChevronDown size={12} stroke={2} />
                   </button>
                   {permMenuOpen && (
-                    <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[260px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
+                    <div className="absolute bottom-full mb-1 left-0 z-50 min-w-[260px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
                       {PERMISSION_MODES.map(m => {
                         const ModeIcon = PERMISSION_MODE_ICONS[m.icon]
                         const isActive = m.id === currentPermissionMode
@@ -394,14 +399,14 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 <div className="relative">
                   <button
                     onClick={() => setModelMenuOpen(!modelMenuOpen)}
-                    className="flex items-center gap-0.5 rounded px-1.5 pb-1 pt-0.5 text-[13px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
                     title="Change model"
                   >
                     {shortModelLabel(currentModel)}
                     <IconChevronDown size={12} stroke={2} />
                   </button>
                   {modelMenuOpen && (
-                    <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[160px] rounded border border-neutral-6 bg-neutral-8 shadow-lg py-1">
+                    <div className="absolute bottom-full mb-1 left-0 z-50 min-w-[160px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
                       {MODELS.map(m => (
                         <button
                           key={m.id}
@@ -420,10 +425,12 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   <button
                     onClick={() => setSkillMenuOpen(!skillMenuOpen)}
                     disabled={disabled}
-                    className="flex items-center justify-center rounded p-1 text-neutral-3 hover:text-neutral-1 hover:bg-neutral-7 transition-colors disabled:opacity-30"
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors disabled:opacity-30"
                     title="Claude Skills"
                   >
-                    <IconTerminal2 size={20} stroke={2} />
+                    <IconTerminal2 size={14} stroke={2} />
+                    <span className="hidden lg:inline">Skills</span>
+                    <IconChevronDown size={12} stroke={2} />
                   </button>
                   {skillMenuOpen && (
                     <SkillMenu
@@ -438,32 +445,37 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   )}
                 </div>
               )}
+            </div>
+            <div className="flex items-center gap-1">
               <button
                 onClick={handleFileSelect}
                 disabled={disabled}
-                className="flex items-center justify-center rounded p-1 text-neutral-3 hover:text-neutral-1 hover:bg-neutral-7 transition-colors disabled:opacity-30"
+                className="flex items-center justify-center rounded-md p-1 text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors disabled:opacity-30"
                 title="Attach files"
               >
-                <IconPaperclip size={20} stroke={2} />
+                <IconPaperclip size={16} stroke={2} />
               </button>
               <button
                 onClick={handleSend}
                 disabled={disabled || (!value.trim() && pendingFiles.length === 0)}
-                className={`flex items-center justify-center rounded p-1 transition-colors disabled:opacity-30 ${
+                className={`flex items-center justify-center rounded-md p-1 transition-colors disabled:opacity-30 ${
                   value.trim() || pendingFiles.length > 0
                     ? 'bg-primary-8 text-neutral-1 hover:bg-primary-7'
                     : 'text-neutral-5'
                 }`}
                 title="Send (Enter)"
               >
-                <IconSend size={20} stroke={2} />
+                <IconSend size={16} stroke={2} />
               </button>
-            </>
-          )}
+            </div>
+          </>
+        )}
 
-          {/* Mobile: context menu (...) + send button only */}
-          {isMobile && (
-            <>
+        {/* Mobile: context menu (...) + send button only */}
+        {isMobile && (
+          <>
+            <div className="flex-1" />
+            <div className="flex items-center gap-1.5">
               <div className="relative" ref={mobileMenuRef}>
                 <button
                   onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -565,9 +577,9 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               >
                 <IconSend size={24} stroke={2} />
               </button>
-            </>
-          )}
-        </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
