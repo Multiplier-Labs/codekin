@@ -22,10 +22,6 @@ const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
   warning: IconAlertTriangle,
 }
 
-function shortPermissionLabel(mode: PermissionMode): string {
-  return PERMISSION_MODES.find(m => m.id === mode)?.label ?? mode
-}
-
 const MODELS = [
   { id: 'claude-opus-4-6', label: 'Opus 4.6' },
   { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
@@ -355,7 +351,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                       const ModeIcon = PERMISSION_MODE_ICONS[mode?.icon ?? 'shield']
                       return <ModeIcon size={14} stroke={2} />
                     })()}
-                    <span className="hidden lg:inline ml-0.5">{shortPermissionLabel(currentPermissionMode)}</span>
+                    <span className="hidden lg:inline ml-0.5">{PERMISSION_MODES.find(m => m.id === currentPermissionMode)?.label ?? currentPermissionMode}</span>
                     <IconChevronDown size={12} stroke={2} />
                   </button>
                   {permMenuOpen && (

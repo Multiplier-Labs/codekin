@@ -46,6 +46,7 @@ export interface RepoManifest {
 /**
  * Permission modes supported by the Claude CLI `--permission-mode` flag.
  * Controls how tool permissions are handled during a session.
+ * Keep in sync with server/types.ts PermissionMode.
  */
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions'
 
@@ -53,7 +54,7 @@ export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermiss
 export const PERMISSION_MODES: { id: PermissionMode; label: string; description: string; icon: string; dangerous?: boolean }[] = [
   { id: 'default', label: 'Ask permissions', description: 'Always ask before making changes', icon: 'shield' },
   { id: 'acceptEdits', label: 'Auto accept edits', description: 'Automatically accept all file edits', icon: 'pencil' },
-  { id: 'plan', label: 'Plan mode', description: 'Create a plan before making changes', icon: 'map' },
+  { id: 'plan', label: 'Plan mode', description: 'Read-only: proposes changes without applying them', icon: 'map' },
   { id: 'bypassPermissions', label: 'Bypass permissions', description: 'Accepts all permissions without asking', icon: 'warning', dangerous: true },
 ]
 
@@ -138,7 +139,7 @@ export interface TaskItem {
 export type WsServerMessage =
   | { type: 'connected'; connectionId: string; claudeAvailable: boolean; claudeVersion: string; apiKeySet: boolean }
   | { type: 'session_created'; sessionId: string; sessionName: string; workingDir: string }
-  | { type: 'session_joined'; sessionId: string; sessionName: string; workingDir: string; active: boolean; outputBuffer: WsServerMessage[] }
+  | { type: 'session_joined'; sessionId: string; sessionName: string; workingDir: string; active: boolean; outputBuffer: WsServerMessage[]; model?: string; permissionMode?: PermissionMode }
   | { type: 'session_left' }
   | { type: 'session_deleted'; message: string }
   | { type: 'claude_started'; sessionId: string }
