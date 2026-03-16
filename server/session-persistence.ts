@@ -19,6 +19,8 @@ export interface PersistedSession {
   name: string
   workingDir: string
   groupDir?: string
+  /** Absolute path to the git worktree, if this session uses one. */
+  worktreePath?: string
   created: string
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow'
   model?: string
@@ -42,6 +44,7 @@ export class SessionPersistence {
       name: s.name,
       workingDir: s.workingDir,
       groupDir: s.groupDir,
+      worktreePath: s.worktreePath,
       created: s.created,
       source: s.source,
       model: s.model,
@@ -82,6 +85,7 @@ export class SessionPersistence {
           name: s.name,
           workingDir: s.workingDir,
           groupDir: s.groupDir,
+          worktreePath: s.worktreePath,
           created: s.created,
           source: s.source ?? 'manual',
           model: s.model,

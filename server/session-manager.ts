@@ -133,6 +133,8 @@ export interface CreateSessionOptions {
   id?: string
   groupDir?: string
   model?: string
+  /** When true, create a git worktree as a sibling of workingDir and run Claude there. */
+  useWorktree?: boolean
 }
 
 
@@ -275,6 +277,53 @@ export class SessionManager {
     return session
   }
 
+  /**
+   * Create a git worktree for a session. Creates a new branch and worktree
+   * as a sibling directory of the project root.
+   * Returns the worktree path on success, or null on failure.
+   */
+  async createWorktree(sessionId: string, workingDir: string): Promise<string | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+
+    try {
+      const prefix = this.getWorktreeBranchPrefix()
+      const shortId = sessionId.slice(0, 8)
+      const branchName = `${prefix}${shortId}`
+      const projectName = path.basename(workingDir)
+      const worktreePath = path.resolve(workingDir, '..', `${projectName}-wt-${shortId}`)
+
+      // Create the worktree with a new branch
+      await execFileAsync('git', ['worktree', 'add', '-b', branchName, worktreePath], {
+        cwd: workingDir,
+        timeout: 15000,
+      })
+
+      // Update session to use the worktree as its working directory
+      session.groupDir = workingDir  // Group under original repo in sidebar
+      session.workingDir = worktreePath
+      session.worktreePath = worktreePath
+      this.persistToDisk()
+      this._globalBroadcast?.({ type: 'sessions_updated' })
+
+      console.log(`[worktree] Created worktree for session ${sessionId}: ${worktreePath} (branch: ${branchName})`)
+      return worktreePath
+    } catch (err) {
+      console.error(`[worktree] Failed to create worktree for session ${sessionId}:`, err)
+      return null
+    }
+  }
+
+  /** Get the configured worktree branch prefix (defaults to 'wt/'). */
+  getWorktreeBranchPrefix(): string {
+    return this.archive.getSetting('worktree_branch_prefix', 'wt/')
+  }
+
+  /** Set the worktree branch prefix. */
+  setWorktreeBranchPrefix(prefix: string): void {
+    this.archive.setSetting('worktree_branch_prefix', prefix)
+  }
+
   /** Register a listener called when any session's Claude process exits.
    *  The `willRestart` flag indicates whether the session will be auto-restarted. */
   onSessionExit(listener: (sessionId: string, code: number | null, signal: string | null, willRestart: boolean) => void): void {
@@ -294,6 +343,7 @@ export class SessionManager {
       isProcessing: s.isProcessing,
       workingDir: s.workingDir,
       groupDir: s.groupDir,
+      worktreePath: s.worktreePath,
       connectedClients: s.clients.size,
       lastActivity: s.created,
       source: s.source,

@@ -8,7 +8,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
-import { IconSend, IconPaperclip, IconX, IconTerminal2, IconChevronDown, IconDots } from '@tabler/icons-react'
+import { IconSend, IconPaperclip, IconX, IconTerminal2, IconChevronDown, IconDots, IconGitBranch } from '@tabler/icons-react'
 import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
@@ -53,9 +53,15 @@ interface InputBarProps {
   placeholder?: string
   /** When true, disables drag-to-resize and uses auto-height instead */
   isMobile?: boolean
+  /** Show the worktree toggle (only before first message in a session). */
+  showWorktreeToggle?: boolean
+  /** Current worktree toggle state. */
+  useWorktree?: boolean
+  /** Callback when the worktree toggle is changed. */
+  onWorktreeChange?: (checked: boolean) => void
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange }, ref) {
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
@@ -245,6 +251,20 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
             </span>
           ))}
         </div>
+      )}
+
+      {/* Worktree toggle — only shown before first message */}
+      {showWorktreeToggle && (
+        <label className="flex items-center gap-1.5 px-3 pt-1 flex-shrink-0 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={useWorktree}
+            onChange={(e) => onWorktreeChange?.(e.target.checked)}
+            className="accent-primary-6 h-3.5 w-3.5 cursor-pointer"
+          />
+          <IconGitBranch size={14} stroke={2} className="text-neutral-5" />
+          <span className="text-[12px] text-neutral-5">Worktree</span>
+        </label>
       )}
 
       <div className="flex flex-1 min-h-0 gap-2 px-3 py-2">

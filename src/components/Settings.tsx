@@ -16,6 +16,7 @@ import {
   verifyToken, getRetentionDays, setRetentionDays as setRetentionDaysApi,
   getWebhookConfig, getWebhookEvents, type WebhookConfigInfo,
   getReposPath, setReposPath as setReposPathApi,
+  getWorktreePrefix, setWorktreePrefix as setWorktreePrefixApi,
 } from '../lib/ccApi'
 import { FolderPicker } from './FolderPicker'
 
@@ -97,6 +98,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false }
   const [status, setStatus] = useState<'idle' | 'valid' | 'invalid'>('idle')
   const [retentionDays, setRetentionDays] = useState(7)
   const [reposPath, setReposPath] = useState('')
+  const [worktreePrefix, setWorktreePrefix] = useState('wt/')
   const [saveError, setSaveError] = useState<string | null>(null)
 
   // Webhook state
@@ -113,6 +115,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false }
     if (!open || !settings.token) return
     getRetentionDays(settings.token).then(setRetentionDays).catch(() => {})
     getReposPath(settings.token).then(setReposPath).catch(() => {})
+    getWorktreePrefix(settings.token).then(setWorktreePrefix).catch(() => {})
     getWebhookConfig(settings.token).then(setWebhookConfig).catch(() => {})
     getWebhookEvents(settings.token).then(setWebhookEvents).catch(() => {})
   }, [open, settings.token])
@@ -251,6 +254,25 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false }
                     setReposPath(p)
                   }}
                 />
+              </div>
+
+              {/* Worktree Branch Prefix */}
+              <div className="col-span-2">
+                <label className="mb-1.5 block text-[15px] text-neutral-4">Worktree Branch Prefix</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={worktreePrefix}
+                    onChange={e => {
+                      const val = e.target.value
+                      setWorktreePrefix(val)
+                      setWorktreePrefixApi(settings.token, val).catch(() => setSaveError('Failed to save worktree prefix'))
+                    }}
+                    placeholder="wt/"
+                    className="w-40 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
+                  />
+                </div>
+                <p className="mt-1 text-[13px] text-neutral-6">Prefix for worktree branch names (e.g. wt/ → wt/abc12345)</p>
               </div>
 
             </div>

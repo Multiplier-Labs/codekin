@@ -26,13 +26,38 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       const session = sessions.create(msg.name, msg.workingDir, { model: msg.model })
       session.clients.add(ws)
       clientSessions.set(ws, session.id)
-      send({
-        type: 'session_created',
-        sessionId: session.id,
-        sessionName: session.name,
-        workingDir: session.workingDir,
-      })
-      sessions.startClaude(session.id)
+
+      if (msg.useWorktree) {
+        // Create worktree asynchronously, then start Claude in it
+        void sessions.createWorktree(session.id, msg.workingDir).then((wtPath) => {
+          if (wtPath) {
+            send({
+              type: 'session_created',
+              sessionId: session.id,
+              sessionName: session.name,
+              workingDir: session.workingDir,
+            })
+          } else {
+            // Worktree creation failed — fall back to main directory
+            send({ type: 'system_message', subtype: 'error', text: 'Failed to create git worktree. Using main project directory.' })
+            send({
+              type: 'session_created',
+              sessionId: session.id,
+              sessionName: session.name,
+              workingDir: session.workingDir,
+            })
+          }
+          sessions.startClaude(session.id)
+        })
+      } else {
+        send({
+          type: 'session_created',
+          sessionId: session.id,
+          sessionName: session.name,
+          workingDir: session.workingDir,
+        })
+        sessions.startClaude(session.id)
+      }
       break
     }
 

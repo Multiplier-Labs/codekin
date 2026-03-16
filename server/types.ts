@@ -20,6 +20,8 @@ export interface Session {
   /** Optional grouping key for the UI. When set, sessions are grouped by this
    *  instead of workingDir (e.g. webhook sessions group under the original repo). */
   groupDir?: string
+  /** Absolute path to the git worktree directory, if this session uses one. */
+  worktreePath?: string
   created: string
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow'
   /** The spawned Claude CLI process, or null if not running. */
@@ -75,6 +77,8 @@ export interface SessionInfo {
   isProcessing: boolean
   workingDir: string
   groupDir?: string
+  /** Absolute path to the git worktree directory, if this session uses one. */
+  worktreePath?: string
   connectedClients: number
   lastActivity: string
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow'
@@ -240,7 +244,7 @@ export type WsServerMessage =
 /** Messages sent from browser clients to the server over WebSocket. */
 export type WsClientMessage =
   | { type: 'auth'; token: string }
-  | { type: 'create_session'; name: string; workingDir: string; model?: string }
+  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean }
   | { type: 'join_session'; sessionId: string }
   | { type: 'leave_session' }
   | { type: 'start_claude'; options?: Record<string, unknown> }
