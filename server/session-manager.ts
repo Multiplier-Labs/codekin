@@ -165,7 +165,6 @@ export class SessionManager {
     this.sessionNaming = new SessionNaming({
       getSession: (id) => this.sessions.get(id),
       hasSession: (id) => this.sessions.has(id),
-      getSetting: (key, fallback) => this.archive.getSetting(key, fallback),
       rename: (sessionId, newName) => this.rename(sessionId, newName),
     })
     this.sessionPersistence.restoreFromDisk()
