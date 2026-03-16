@@ -571,9 +571,10 @@ export class SessionManager {
     }
 
     const question = this.summarizeToolPermission(toolName, toolInput)
+    const neverAutoApprove = ApprovalManager.NEVER_AUTO_APPROVE_TOOLS.has(toolName)
     const options = [
       { label: 'Allow', value: 'allow' },
-      { label: 'Always Allow', value: 'always_allow' },
+      ...(!neverAutoApprove ? [{ label: 'Always Allow', value: 'always_allow' }] : []),
       { label: 'Deny', value: 'deny' },
     ]
     const promptMsg: WsServerMessage = {
@@ -1000,9 +1001,10 @@ export class SessionManager {
 
       const question = this.summarizeToolPermission(toolName, toolInput)
       const approvePattern = this._approvalManager.derivePattern(toolName, toolInput)
+      const neverAutoApprove = ApprovalManager.NEVER_AUTO_APPROVE_TOOLS.has(toolName)
       const options = [
         { label: 'Allow', value: 'allow' },
-        { label: 'Always Allow', value: 'always_allow' },
+        ...(!neverAutoApprove ? [{ label: 'Always Allow', value: 'always_allow' }] : []),
         { label: 'Deny', value: 'deny' },
       ]
       const promptMsg: WsServerMessage = {

@@ -75,11 +75,14 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
   const handleSingleAnswerRef = useRef(handleSingleAnswer)
   handleSingleAnswerRef.current = handleSingleAnswer
 
-  // Auto-allow countdown: fires only for permission prompts
+  // Auto-allow countdown: fires only for permission prompts that support "Always Allow".
+  // Tools like ExitPlanMode deliberately omit "Always Allow" to require explicit confirmation.
   useEffect(() => {
     if (!isPermission) return
     const allowOption = options.find(o => o.value === 'allow')
     if (!allowOption) return
+    const hasAlwaysAllow = options.some(o => o.value === 'always_allow')
+    if (!hasAlwaysAllow) return // Requires explicit user decision — no auto-allow
 
     let remaining = 15
     const interval = setInterval(() => {
@@ -199,7 +202,7 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
               title={alwaysAllowTitle ?? opt.description}
               className={btnClass}
             >
-              {opt.label}{isAllow && ` (${timeLeft}s)`}
+              {opt.label}{isAllow && options.some(o => o.value === 'always_allow') && ` (${timeLeft}s)`}
             </button>
           )
         })}

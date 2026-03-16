@@ -21,6 +21,14 @@ const PERSIST_DEBOUNCE_MS = 2000
 const CROSS_REPO_THRESHOLD = 2
 
 export class ApprovalManager {
+  /**
+   * Tools that must NEVER be auto-approved — they always require explicit
+   * user confirmation regardless of saved registry rules.
+   */
+  static readonly NEVER_AUTO_APPROVE_TOOLS = new Set([
+    'ExitPlanMode', // Plan approval is a deliberate user decision
+  ])
+
   /** Repo-level auto-approval store, keyed by workingDir (repo path). */
   private repoApprovals = new Map<string, { tools: Set<string>; commands: Set<string>; patterns: Set<string> }>()
   private _approvalPersistTimer: ReturnType<typeof setTimeout> | null = null
@@ -132,6 +140,7 @@ export class ApprovalManager {
 
   /** Check approvals for a single repo (no cross-repo fallback). */
   private checkRepoApproval(workingDir: string, toolName: string, toolInput: Record<string, unknown>): boolean {
+    if (ApprovalManager.NEVER_AUTO_APPROVE_TOOLS.has(toolName)) return false
     const approvals = this.repoApprovals.get(workingDir)
     if (!approvals) return false
     if (approvals.tools.has(toolName)) return true
@@ -159,6 +168,7 @@ export class ApprovalManager {
    * tool/command/pattern, auto-approve it for this repo too.
    */
   private checkCrossRepoApproval(workingDir: string, toolName: string, toolInput: Record<string, unknown>): boolean {
+    if (ApprovalManager.NEVER_AUTO_APPROVE_TOOLS.has(toolName)) return false
     let count = 0
     for (const [dir, entry] of this.repoApprovals) {
       if (dir === workingDir) continue
@@ -258,6 +268,10 @@ export class ApprovalManager {
    * falling back to exact match only for commands without a safe pattern.
    */
   saveAlwaysAllow(workingDir: string, toolName: string, toolInput: Record<string, unknown>): void {
+    if (ApprovalManager.NEVER_AUTO_APPROVE_TOOLS.has(toolName)) {
+      console.log(`[auto-approve] skipping always-allow for ${toolName} (never auto-approve)`)
+      return
+    }
     if (toolName === 'Bash') {
       const cmd = (typeof toolInput.command === 'string' ? toolInput.command : '').trim()
 
@@ -402,8 +416,13 @@ export class ApprovalManager {
       const data = JSON.parse(raw) as Record<string, { tools?: string[]; commands?: string[]; patterns?: string[] }>
 
       for (const [dir, entry] of Object.entries(data)) {
+        const tools = new Set(entry.tools || [])
+        // Remove tools that must never be auto-approved (stale entries from before the blocklist)
+        for (const blocked of ApprovalManager.NEVER_AUTO_APPROVE_TOOLS) {
+          tools.delete(blocked)
+        }
         this.repoApprovals.set(dir, {
-          tools: new Set(entry.tools || []),
+          tools,
           commands: new Set(entry.commands || []),
           patterns: new Set(entry.patterns || []),
         })
