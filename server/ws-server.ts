@@ -486,27 +486,18 @@ server.listen(port, '0.0.0.0', () => {
   }
 })
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down...')
+// Graceful shutdown — wait for Claude processes to release session locks
+async function gracefulShutdown(signal: string): Promise<void> {
+  console.log(`${signal} received, shutting down...`)
   shutdownWorkflowEngine()
   commitEventState.handler?.shutdown()
   webhookHandler.shutdown()
   stepflowHandler.shutdown()
-  sessions.shutdown()
+  await sessions.shutdown()
   wss.close()
   server.close()
   process.exit(0)
-})
+}
 
-process.on('SIGINT', () => {
-  console.log('SIGINT received, shutting down...')
-  shutdownWorkflowEngine()
-  commitEventState.handler?.shutdown()
-  webhookHandler.shutdown()
-  stepflowHandler.shutdown()
-  sessions.shutdown()
-  wss.close()
-  server.close()
-  process.exit(0)
-})
+process.on('SIGTERM', () => { void gracefulShutdown('SIGTERM') })
+process.on('SIGINT', () => { void gracefulShutdown('SIGINT') })

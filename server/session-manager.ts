@@ -1516,8 +1516,9 @@ export class SessionManager {
     }
   }
 
-  /** Graceful shutdown: complete in-progress tasks, persist state, kill all processes. */
-  shutdown(): void {
+  /** Graceful shutdown: complete in-progress tasks, persist state, kill all processes.
+   *  Returns a promise that resolves once all Claude processes have exited. */
+  shutdown(): Promise<void> {
     // Complete in-progress tasks for active sessions before persisting.
     // This handles self-deploy: the commit/push task was the last step, and
     // the server restart means it succeeded. Without this, restored sessions
@@ -1532,15 +1533,28 @@ export class SessionManager {
     this.persistToDisk()
     this.persistRepoApprovals()
 
-    // Kill all Claude child processes on server shutdown
+    // Kill all Claude child processes and wait for them to exit so their
+    // session locks are released before the next server start.
+    const exitPromises: Promise<void>[] = []
     for (const session of this.sessions.values()) {
       if (session.claudeProcess?.isAlive()) {
-        session.claudeProcess.stop()
+        exitPromises.push(new Promise<void>((resolve) => {
+          session.claudeProcess!.once('exit', () => resolve())
+          session.claudeProcess!.stop()
+        }))
       }
       this.clearStallTimer(session)
     }
 
     this.archive.shutdown()
+
+    if (exitPromises.length === 0) return Promise.resolve()
+
+    // Wait for all processes to exit, but cap at 6s (stop() SIGKILL is at 5s)
+    return Promise.race([
+      Promise.all(exitPromises).then(() => {}),
+      new Promise<void>((resolve) => setTimeout(resolve, 6000)),
+    ])
   }
 
   /**
@@ -1588,7 +1602,15 @@ export class SessionManager {
       setTimeout(() => {
         if (session.claudeProcess?.isAlive()) return // already running
 
-        console.log(`[restore] Starting Claude for session ${session.id} (${session.name}) with claudeSessionId=${session.claudeSessionId}`)
+        // Clear the old claudeSessionId — after a server restart, the
+        // previous Claude process may not have released its session lock,
+        // causing "Session ID already in use" errors and a restart loop.
+        // Claude CLI will start a fresh session; Codekin's own
+        // outputHistory provides continuity for the user.
+        const oldId = session.claudeSessionId
+        session.claudeSessionId = null
+
+        console.log(`[restore] Starting Claude for session ${session.id} (${session.name}) (previous claudeSessionId=${oldId} cleared)`)
         this.startClaude(session.id)
 
         // Wait for Claude CLI to finish initializing before sending the
@@ -1596,7 +1618,11 @@ export class SessionManager {
         // the CLI to exit immediately with code=1.
         if (session.claudeProcess) {
           session.claudeProcess.once('system_init', () => {
-            const continueMsg = '[Session restored after server restart. Continue where you left off. If you were in the middle of a task, resume it.]'
+            // Since we cleared the claudeSessionId, Claude starts fresh —
+            // provide conversation context so it can resume meaningfully.
+            const context = this.buildSessionContext(session)
+            const continueMsg = (context ? context + '\n\n' : '')
+              + '[Session restored after server restart. Continue where you left off. If you were in the middle of a task, resume it.]'
             session.claudeProcess?.sendMessage(continueMsg)
           })
         }
