@@ -32,6 +32,7 @@ import { ApprovalManager } from './approval-manager.js'
 import { SessionNaming } from './session-naming.js'
 import { SessionPersistence } from './session-persistence.js'
 import { deriveSessionToken } from './crypto-utils.js'
+import { cleanGitEnv } from './diff-manager.js'
 import { getDiff as diffManagerGetDiff, discardChanges as diffManagerDiscardChanges } from './diff-manager.js'
 import { evaluateRestart } from './session-restart-scheduler.js'
 
@@ -189,8 +190,10 @@ export class SessionManager {
 
     try {
       // Resolve the actual git repo root — workingDir may be a subdirectory
+      const env = cleanGitEnv()
       const { stdout: repoRootRaw } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
         cwd: workingDir,
+        env,
         timeout: 5000,
       })
       const repoRoot = repoRootRaw.trim()
@@ -207,18 +210,19 @@ export class SessionManager {
 
       // Clean up stale state from previous failed attempts:
       // 1. Prune orphaned worktree entries (directory gone but git still tracks it)
-      await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot, timeout: 5000 })
+      await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot, env, timeout: 5000 })
         .catch((e: unknown) => console.warn(`[worktree] prune failed:`, e instanceof Error ? e.message : e))
       // 2. Remove existing worktree directory if leftover from a partial failure
-      await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot, timeout: 5000 })
+      await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot, env, timeout: 5000 })
         .catch(() => {}) // Expected to fail if no prior worktree exists
       // 3. Delete the branch if it exists (leftover from a failed worktree add)
-      await execFileAsync('git', ['branch', '-D', branchName], { cwd: repoRoot, timeout: 5000 })
+      await execFileAsync('git', ['branch', '-D', branchName], { cwd: repoRoot, env, timeout: 5000 })
         .catch((e: unknown) => console.debug(`[worktree] branch cleanup (expected if fresh):`, e instanceof Error ? e.message : e))
 
       // Create the worktree with a new branch
       await execFileAsync('git', ['worktree', 'add', '-b', branchName, worktreePath], {
         cwd: repoRoot,
+        env,
         timeout: 15000,
       })
 
