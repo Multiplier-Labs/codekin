@@ -193,6 +193,9 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       // Wait for the old process to fully exit before creating the worktree
       // and restarting, to avoid "Session ID already in use" errors.
       void sessions.stopClaudeAndWait(sessionId).then(() => {
+        // Clear the Claude session ID — the old process may not have released
+        // its lock cleanly, and reusing it causes "Session ID already in use".
+        session.claudeSessionId = null
         return sessions.createWorktree(sessionId, originalDir)
       }).then((wtPath) => {
         if (wtPath) {

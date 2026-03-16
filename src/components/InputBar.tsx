@@ -318,19 +318,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         </div>
       )}
 
-      {/* Worktree toggle — only shown before first message */}
-      {showWorktreeToggle && (
-        <label className="flex items-center gap-1.5 px-3 pt-1 flex-shrink-0 cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={useWorktree}
-            onChange={(e) => onWorktreeChange?.(e.target.checked)}
-            className="accent-primary-6 h-3.5 w-3.5 cursor-pointer"
-          />
-          <IconGitBranch size={14} stroke={2} className="text-neutral-5" />
-          <span className="text-[12px] text-neutral-5">Worktree</span>
-        </label>
-      )}
+      {/* Worktree checkbox removed — use the footer button instead */}
 
       {/* Textarea — full width */}
       <div className="flex flex-1 min-h-0 gap-2 px-3 pt-2 pb-1">
@@ -444,7 +432,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   )}
                 </div>
               )}
-              {/* Worktree: indicator when active, or "move to worktree" button mid-session */}
+              {/* Worktree: indicator when active, toggle before first message, or move button mid-session */}
               {worktreePath ? (
                 <span
                   className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-primary-5"
@@ -453,7 +441,20 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   <IconGitBranch size={14} stroke={2} />
                   <span className="hidden lg:inline max-w-[120px] truncate">{worktreePath.split('/').pop()}</span>
                 </span>
-              ) : !showWorktreeToggle && onMoveToWorktree ? (
+              ) : showWorktreeToggle && onWorktreeChange ? (
+                <button
+                  onClick={() => onWorktreeChange(!useWorktree)}
+                  className={`flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium transition-colors ${
+                    useWorktree
+                      ? 'text-primary-5 bg-primary-9/30 hover:bg-primary-9/50'
+                      : 'text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7'
+                  }`}
+                  title={useWorktree ? 'Worktree enabled — session will use a git worktree' : 'Enable git worktree for this session'}
+                >
+                  <IconGitBranch size={14} stroke={2} />
+                  <span className="hidden lg:inline">Worktree</span>
+                </button>
+              ) : onMoveToWorktree ? (
                 <button
                   onClick={onMoveToWorktree}
                   className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"

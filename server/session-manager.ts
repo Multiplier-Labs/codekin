@@ -194,6 +194,12 @@ export class SessionManager {
       const projectName = path.basename(workingDir)
       const worktreePath = path.resolve(workingDir, '..', `${projectName}-wt-${shortId}`)
 
+      // Clean up stale state from previous failed attempts:
+      // 1. Remove orphaned worktree entry (directory gone but git still tracks it)
+      await execFileAsync('git', ['worktree', 'prune'], { cwd: workingDir, timeout: 5000 }).catch(() => {})
+      // 2. Delete the branch if it exists (leftover from a failed worktree add)
+      await execFileAsync('git', ['branch', '-D', branchName], { cwd: workingDir, timeout: 5000 }).catch(() => {})
+
       // Create the worktree with a new branch
       await execFileAsync('git', ['worktree', 'add', '-b', branchName, worktreePath], {
         cwd: workingDir,
