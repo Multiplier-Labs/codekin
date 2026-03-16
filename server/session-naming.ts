@@ -9,6 +9,7 @@
 
 import { spawn } from 'node:child_process'
 import type { Session, WsServerMessage } from './types.js'
+import { CLAUDE_BINARY } from './config.js'
 
 /** Max naming retry attempts before giving up. */
 const MAX_NAMING_ATTEMPTS = 5
@@ -30,7 +31,7 @@ function generateNameViaCLI(prompt: string): Promise<string> {
   return new Promise((resolve, reject) => {
     // --max-turns 2: one turn to receive/process the prompt, one to reply with the name.
     // Using 1 would sometimes cause the CLI to exit before producing output.
-    const proc = spawn('claude', ['-p', '--max-turns', '2', '--model', 'haiku'], {
+    const proc = spawn(CLAUDE_BINARY, ['-p', '--max-turns', '2', '--model', 'haiku'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { PATH: process.env.PATH, HOME: process.env.HOME },
     })

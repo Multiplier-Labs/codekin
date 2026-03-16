@@ -9,6 +9,7 @@
 import { homedir } from 'os'
 import { join } from 'path'
 import { readFileSync, existsSync, realpathSync } from 'fs'
+import { execFileSync } from 'child_process'
 
 // ---------------------------------------------------------------------------
 // Network
@@ -66,6 +67,20 @@ export const DATA_DIR = process.env.DATA_DIR || join(homedir(), '.codekin')
 
 /** Directory for uploaded screenshots / file attachments. */
 export const SCREENSHOTS_DIR = process.env.SCREENSHOTS_DIR || join(DATA_DIR, 'screenshots')
+
+/**
+ * Absolute path to the `claude` CLI binary, resolved once at startup.
+ * Falls back to bare 'claude' (PATH lookup per-spawn) if resolution fails.
+ * Prevents "spawn claude ENOENT" when child processes inherit a different PATH.
+ */
+export const CLAUDE_BINARY = (() => {
+  try {
+    return execFileSync('which', ['claude'], { encoding: 'utf-8', timeout: 3000 }).trim()
+  } catch {
+    console.warn('[config] Could not resolve absolute path to claude binary, falling back to PATH lookup')
+    return 'claude'
+  }
+})()
 
 /**
  * Path to the built frontend dist directory.

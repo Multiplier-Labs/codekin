@@ -142,7 +142,7 @@ export class SessionManager {
     const now = Date.now()
     for (const session of this.sessions.values()) {
       // Skip headless sessions — they are managed by their own lifecycles
-      if (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow' || session.source === 'agent' || session.source === 'orchestrator') continue
+      if (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow') continue
       // Skip sessions with connected clients or no running process
       if (session.clients.size > 0 || !session.claudeProcess?.isAlive()) continue
       // Skip sessions that are actively processing
@@ -164,10 +164,8 @@ export class SessionManager {
     }
 
     // Prune stale sessions: no process, no clients, older than STALE_SESSION_AGE_MS
-    // Agent and orchestrator sessions are exempt — they are long-lived by design.
     const staleIds: string[] = []
     for (const session of this.sessions.values()) {
-      if (session.source === 'agent' || session.source === 'orchestrator') continue
       if (session.claudeProcess?.isAlive()) continue
       if (session.clients.size > 0) continue
       const ageMs = now - new Date(session.created).getTime()
@@ -839,7 +837,7 @@ export class SessionManager {
       this.handleClaudeResult(session, sessionId, result, isError)
     })
     cp.on('error', (message) => this.broadcast(session, { type: 'error', message }))
-    cp.on('exit', (code, signal) => { cp.removeAllListeners(); this.handleClaudeExit(session, sessionId, code, signal) })
+    cp.on('exit', (code, signal) => { cp.removeAllListeners(); this.handleClaudeExit(cp, session, sessionId, code, signal) })
   }
 
   /** Broadcast a message and add it to the session's output history. */
@@ -1151,23 +1149,31 @@ export class SessionManager {
    * Uses evaluateRestart() for the restart decision, keeping this method focused
    * on state updates, listener notification, and message broadcasting.
    */
-  private handleClaudeExit(session: Session, sessionId: string, code: number | null, signal: string | null): void {
+  private handleClaudeExit(exitedProcess: ClaudeProcess, session: Session, sessionId: string, code: number | null, signal: string | null): void {
     session.claudeProcess = null
     session.isProcessing = false
     session.planManager.reset()
     this._globalBroadcast?.({ type: 'sessions_updated' })
 
+    // "Session ID is already in use" means another process holds the lock.
+    // Retrying with the same session ID will fail every time, so treat this
+    // as a non-restartable exit (same as stopped-by-user).
+    const sessionConflict = exitedProcess.hasSessionConflict()
+
     const action = evaluateRestart({
       restartCount: session.restartCount,
       lastRestartAt: session.lastRestartAt,
-      stoppedByUser: session._stoppedByUser,
+      stoppedByUser: session._stoppedByUser || sessionConflict,
     })
 
     if (action.kind === 'stopped_by_user') {
       for (const listener of this._exitListeners) {
         try { listener(sessionId, code, signal, false) } catch { /* listener error */ }
       }
-      const msg: WsServerMessage = { type: 'system_message', subtype: 'exit', text: `Claude process exited: code=${code}, signal=${signal}` }
+      const text = sessionConflict
+        ? 'Claude process exited: session ID is already in use by another process. Please restart manually.'
+        : `Claude process exited: code=${code}, signal=${signal}`
+      const msg: WsServerMessage = { type: 'system_message', subtype: 'exit', text }
       this.addToHistory(session, msg)
       this.broadcast(session, msg)
       this.broadcast(session, { type: 'exit', code: code ?? -1, signal })
