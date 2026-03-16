@@ -76,6 +76,15 @@ export default function App() {
   /** Stable ref to the current sendInput function, used by callbacks that close over stale state. */
   const sendInputRef = useRef<(data: string) => void>(() => {})
 
+  /** Worktree toggle state, persisted to localStorage. */
+  const [useWorktree, setUseWorktreeRaw] = useState(() => localStorage.getItem('codekin-use-worktree') === 'true')
+  const useWorktreeRef = useRef(useWorktree)
+  useEffect(() => { useWorktreeRef.current = useWorktree }, [useWorktree])
+  const setUseWorktree = useCallback((v: boolean) => {
+    setUseWorktreeRaw(v)
+    localStorage.setItem('codekin-use-worktree', String(v))
+  }, [])
+
   const inputBarRef = useRef<InputBarHandle>(null)
   const [sessionInputs, setSessionInputs] = useState<Record<string, string>>({})
 
@@ -167,6 +176,7 @@ export default function App() {
     wsCreateSession,
     removeSession,
     pendingContextRef,
+    useWorktreeRef,
   })
 
   // Derive active repo from the active session
@@ -575,6 +585,9 @@ export default function App() {
               currentModel={currentModel}
               onModelChange={setModel}
               isMobile={isMobile}
+              showWorktreeToggle={messages.length === 0}
+              useWorktree={useWorktree}
+              onWorktreeChange={setUseWorktree}
             />
           </div>
         ) : (

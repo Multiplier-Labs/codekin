@@ -317,6 +317,31 @@ export async function setReposPath(token: string, path: string): Promise<string>
   return data.path
 }
 
+/** Get the worktree branch prefix setting. */
+export async function getWorktreePrefix(token: string): Promise<string> {
+  const res = await authFetch(`${BASE}/api/settings/worktree-prefix`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to get worktree prefix: ${res.status}`)
+  const data = await res.json()
+  return data.prefix
+}
+
+/** Set the worktree branch prefix. */
+export async function setWorktreePrefix(token: string, prefix: string): Promise<string> {
+  const res = await authFetch(`${BASE}/api/settings/worktree-prefix`, {
+    method: 'PUT',
+    headers: headers(token),
+    body: JSON.stringify({ prefix }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'Failed to save worktree prefix' }))
+    throw new Error(data.error || `Failed to set worktree prefix: ${res.status}`)
+  }
+  const data = await res.json()
+  return data.prefix
+}
+
 /** Browse directories at a given path (for folder picker). */
 export async function browseDirs(token: string, path?: string): Promise<{ path: string; dirs: string[] }> {
   const q = path ? `?path=${encodeURIComponent(path)}` : ''

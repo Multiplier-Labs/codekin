@@ -147,6 +147,28 @@ export function createSessionRouter(
     res.json({ days: sessions.archive.getRetentionDays() })
   })
 
+  // --- Worktree settings ---
+
+  router.get('/api/settings/worktree-prefix', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    res.json({ prefix: sessions.getWorktreeBranchPrefix() })
+  })
+
+  router.put('/api/settings/worktree-prefix', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const { prefix } = req.body
+    if (typeof prefix !== 'string') {
+      return res.status(400).json({ error: 'prefix must be a string' })
+    }
+    // Sanitize: strip invalid git ref characters, ensure trailing /
+    const cleaned = prefix.replace(/[^a-zA-Z0-9/_-]/g, '').replace(/\/+$/, '')
+    const final = cleaned ? cleaned + '/' : 'wt/'
+    sessions.setWorktreeBranchPrefix(final)
+    res.json({ prefix: final })
+  })
+
   // --- Repos path settings ---
 
   router.get('/api/settings/repos-path', (req, res) => {

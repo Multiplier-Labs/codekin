@@ -55,6 +55,8 @@ export interface Session {
   workingDir: string
   /** Optional grouping key for the UI (e.g. webhook sessions group under the original repo). */
   groupDir?: string
+  /** Absolute path to the git worktree, if this session uses one. */
+  worktreePath?: string
   connectedClients: number
   lastActivity: string
   /** How the session was created: manually by a user, by a GitHub webhook, or by a workflow. */
@@ -77,7 +79,7 @@ export interface Session {
  */
 export type WsClientMessage =
   | { type: 'auth'; token: string }
-  | { type: 'create_session'; name: string; workingDir: string; model?: string }
+  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean }
   | { type: 'join_session'; sessionId: string }
   | { type: 'leave_session' }
   | { type: 'start_claude'; options?: Record<string, unknown> }

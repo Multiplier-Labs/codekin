@@ -8,7 +8,7 @@
 import { useState, useEffect } from 'react'
 import {
   IconPlus, IconShieldCheck, IconArchive, IconFileText,
-  IconChevronDown, IconChevronRight, IconRobot, IconSparkles, IconPencil,
+  IconChevronDown, IconChevronRight, IconRobot, IconSparkles, IconPencil, IconGitBranch,
 } from '@tabler/icons-react'
 import type { Session } from '../types'
 import { listArchivedSessions, type ArchivedSessionInfo } from '../lib/ccApi'
@@ -20,6 +20,17 @@ const ARCHIVED_PREVIEW_LIMIT = 5
 // --------------------------------------------------------------------------
 // Helpers
 // --------------------------------------------------------------------------
+
+/** Small indicator for worktree sessions. */
+function WorktreeIcon({ session }: { session: Session }) {
+  if (!session.worktreePath) return null
+  const dir = session.worktreePath.split('/').pop() ?? session.worktreePath
+  return (
+    <span title={`Worktree: ${dir}`} className="flex-shrink-0 text-primary-6">
+      <IconGitBranch size={12} stroke={2} />
+    </span>
+  )
+}
 
 function sessionDisplayName(session: Session): string {
   const name = session.name || session.id.slice(0, 8)
@@ -268,7 +279,7 @@ export function RepoSection({
                     className="flex-1 min-w-0 bg-neutral-10 border border-neutral-7 rounded px-1 py-0 text-[15px] text-neutral-1 outline-none focus:border-primary-6"
                   />
                 ) : (
-                  <span className="flex-1 truncate font-normal">{sessionDisplayName(s)}</span>
+                  <span className="flex-1 truncate font-normal flex items-center gap-1"><WorktreeIcon session={s} />{sessionDisplayName(s)}</span>
                 )}
                 {!isEditing && (
                   <>
