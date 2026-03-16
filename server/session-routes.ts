@@ -199,41 +199,21 @@ export function createSessionRouter(
 
     try {
       const entries = fsReaddirSync(base, { withFileTypes: true })
-        .filter(d => d.isDirectory() && !d.name.startsWith('.'))
+        .filter(d => {
+          if (d.name.startsWith('.')) return false
+          if (d.isDirectory()) return true
+          // Follow symlinks to check if they point to a directory
+          if (d.isSymbolicLink()) {
+            try { return fsStatSync(pathJoin(base, d.name)).isDirectory() } catch { return false }
+          }
+          return false
+        })
         .map(d => d.name)
         .sort((a, b) => a.localeCompare(b))
       res.json({ path: base, dirs: entries })
     } catch {
       res.status(400).json({ error: 'Cannot read directory' })
     }
-  })
-
-  // --- Support provider settings ---
-
-  router.get('/api/settings/support-provider', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
-
-    const available: string[] = []
-    if (process.env.GROQ_API_KEY) available.push('groq')
-    if (process.env.OPENAI_API_KEY) available.push('openai')
-    if (process.env.GEMINI_API_KEY) available.push('gemini')
-    if (process.env.ANTHROPIC_API_KEY) available.push('anthropic')
-
-    const preferred = sessions.archive.getSetting('support_provider', 'auto')
-    res.json({ preferred, available })
-  })
-
-  router.put('/api/settings/support-provider', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
-    const { provider } = req.body
-    const valid = ['auto', 'groq', 'openai', 'gemini', 'anthropic']
-    if (!valid.includes(provider)) {
-      return res.status(400).json({ error: `provider must be one of: ${valid.join(', ')}` })
-    }
-    sessions.archive.setSetting('support_provider', provider)
-    res.json({ preferred: provider })
   })
 
   // --- Repo-level approval rules ---
