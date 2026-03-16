@@ -73,11 +73,11 @@ interface InputBarProps {
   onPermissionModeChange?: (mode: PermissionMode) => void
   /** Callback to move the current session into a worktree mid-session. */
   onMoveToWorktree?: () => void
-  /** Whether the session already has a worktree. */
-  hasWorktree?: boolean
+  /** Worktree path if the session is in a worktree (falsy = not in worktree). */
+  worktreePath?: string | null
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, hasWorktree = false }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath }, ref) {
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
@@ -444,8 +444,16 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   )}
                 </div>
               )}
-              {/* Mid-session worktree button — shown after first message when not already in a worktree */}
-              {!showWorktreeToggle && !hasWorktree && onMoveToWorktree && (
+              {/* Worktree: indicator when active, or "move to worktree" button mid-session */}
+              {worktreePath ? (
+                <span
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-primary-5"
+                  title={worktreePath}
+                >
+                  <IconGitBranch size={14} stroke={2} />
+                  <span className="hidden lg:inline max-w-[120px] truncate">{worktreePath.split('/').pop()}</span>
+                </span>
+              ) : !showWorktreeToggle && onMoveToWorktree ? (
                 <button
                   onClick={onMoveToWorktree}
                   className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
@@ -454,7 +462,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   <IconGitBranch size={14} stroke={2} />
                   <span className="hidden lg:inline">Worktree</span>
                 </button>
-              )}
+              ) : null}
               {hasSkills && (
                 <div className="relative">
                   <button

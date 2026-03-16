@@ -521,7 +521,7 @@ export default function App() {
                 currentPermissionMode={currentPermissionMode}
                 onPermissionModeChange={handlePermissionModeChange}
                 onMoveToWorktree={moveToWorktree}
-                hasWorktree={!!activeSession?.worktreePath}
+                worktreePath={activeSession?.worktreePath}
               />
             ) : (
               <div className="px-4 py-3 border-t border-neutral-10">
@@ -611,7 +611,7 @@ export default function App() {
               currentPermissionMode={currentPermissionMode}
               onPermissionModeChange={handlePermissionModeChange}
               onMoveToWorktree={moveToWorktree}
-              hasWorktree={!!activeSession?.worktreePath}
+              worktreePath={activeSession?.worktreePath}
             />
           </div>
         ) : (
