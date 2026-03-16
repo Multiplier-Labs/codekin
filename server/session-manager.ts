@@ -1137,6 +1137,28 @@ export class SessionManager {
     }
   }
 
+  /**
+   * Stop the Claude process and wait for it to fully exit before resolving.
+   * This prevents race conditions when restarting with the same session ID
+   * (e.g. during mid-session worktree migration).
+   */
+  async stopClaudeAndWait(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId)
+    if (!session?.claudeProcess) return
+
+    const cp = session.claudeProcess
+    session._stoppedByUser = true
+    this.clearStallTimer(session)
+    if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
+    cp.removeAllListeners()
+    cp.stop()
+    session.claudeProcess = null
+    this.broadcast(session, { type: 'claude_stopped' })
+
+    // Wait for the underlying OS process to fully exit
+    await cp.waitForExit()
+  }
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------

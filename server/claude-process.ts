@@ -615,6 +615,27 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
     }
   }
 
+  /** Returns a promise that resolves when the process exits. Resolves immediately if already dead. */
+  waitForExit(timeoutMs = 10000): Promise<void> {
+    if (!this.alive) return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        resolve()
+      }, timeoutMs)
+      // Listen on the underlying ChildProcess 'close' event (survives removeAllListeners on the EventEmitter)
+      const onClose = () => {
+        clearTimeout(timer)
+        resolve()
+      }
+      if (this.proc) {
+        this.proc.once('close', onClose)
+      } else {
+        clearTimeout(timer)
+        resolve()
+      }
+    })
+  }
+
   isAlive(): boolean {
     return this.alive
   }
