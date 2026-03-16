@@ -20,7 +20,7 @@
 
 import { randomUUID } from 'crypto'
 import { execFile } from 'child_process'
-import { existsSync, mkdirSync, copyFileSync, readdirSync, statSync } from 'fs'
+import { existsSync, mkdirSync, copyFileSync, readdirSync, statSync, rmSync } from 'fs'
 import { homedir } from 'os'
 import path from 'path'
 import { promisify } from 'util'
@@ -306,9 +306,22 @@ export class SessionManager {
       // 1. Prune orphaned worktree entries (directory gone but git still tracks it)
       await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot, env, timeout: 5000 })
         .catch((e: unknown) => console.warn(`[worktree] prune failed:`, e instanceof Error ? e.message : e))
-      // 2. Remove existing worktree directory if leftover from a partial failure
+      // 2. Remove existing worktree directory if leftover from a partial failure.
+      //    If git doesn't recognise it as a worktree, force-remove the directory
+      //    so that `git worktree add` below doesn't fail with "already exists".
       await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot, env, timeout: 5000 })
-        .catch((e: unknown) => console.debug(`[worktree] remove prior worktree (expected if fresh):`, e instanceof Error ? e.message : e))
+        .catch((e: unknown) => {
+          console.debug(`[worktree] remove prior worktree (expected if fresh):`, e instanceof Error ? e.message : e)
+          // Git doesn't know about it — nuke the stale directory if it still exists
+          if (existsSync(worktreePath)) {
+            try {
+              rmSync(worktreePath, { recursive: true, force: true })
+              console.log(`[worktree] Force-removed stale directory: ${worktreePath}`)
+            } catch (rmErr) {
+              console.warn(`[worktree] Failed to force-remove stale directory ${worktreePath}:`, rmErr instanceof Error ? rmErr.message : rmErr)
+            }
+          }
+        })
       // 3. Delete the branch if it exists (leftover from a failed worktree add)
       await execFileAsync('git', ['branch', '-D', branchName], { cwd: repoRoot, env, timeout: 5000 })
         .catch((e: unknown) => console.debug(`[worktree] branch cleanup (expected if fresh):`, e instanceof Error ? e.message : e))
@@ -448,6 +461,16 @@ export class SessionManager {
           setTimeout(() => this.cleanupWorktree(worktreePath, repoDir, attempt + 1), RETRY_DELAY_MS)
         } else {
           console.error(`[worktree] Failed to clean up worktree ${worktreePath} after ${MAX_CLEANUP_ATTEMPTS} attempts: ${errMsg}`)
+          // Last resort: force-remove the directory so it doesn't block future
+          // worktree creation or leave the session in a broken restart loop.
+          if (existsSync(worktreePath)) {
+            try {
+              rmSync(worktreePath, { recursive: true, force: true })
+              console.log(`[worktree] Force-removed stale worktree directory: ${worktreePath}`)
+            } catch (rmErr) {
+              console.error(`[worktree] Failed to force-remove ${worktreePath}:`, rmErr instanceof Error ? rmErr.message : rmErr)
+            }
+          }
         }
       }
     })()
@@ -726,6 +749,23 @@ export class SessionManager {
     // Clear stopped flag and any pending restart timer on explicit start
     session._stoppedByUser = false
     if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
+
+    // Validate that the working directory still exists.  Worktree directories
+    // can be removed externally (cleanup, manual deletion, failed creation that
+    // left a stale placeholder).  Fall back to groupDir (the original repo) so
+    // the session can still function instead of entering an infinite restart loop.
+    if (!existsSync(session.workingDir) || (session.worktreePath && !existsSync(path.join(session.workingDir, '.git')))) {
+      const fallback = session.groupDir ?? session.workingDir
+      if (fallback !== session.workingDir && existsSync(fallback)) {
+        console.warn(`[startClaude] Working directory ${session.workingDir} missing or not a valid worktree — falling back to ${fallback}`)
+        session.workingDir = fallback
+        session.worktreePath = undefined
+        this.persistToDisk()
+      } else if (!existsSync(session.workingDir)) {
+        console.error(`[startClaude] Working directory ${session.workingDir} does not exist and no fallback available — cannot start`)
+        return false
+      }
+    }
 
     // Kill existing process if any — remove listeners first to prevent the
     // old process's exit handler from clobbering the new process reference
