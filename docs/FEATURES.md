@@ -126,6 +126,7 @@ Codekin provides an interactive UI for responding to Claude's permission request
 - **Prompt queue** — When multiple tool approvals arrive simultaneously, they are queued and presented one at a time (oldest first). A badge shows the number of pending prompts when more than one is queued.
 - **60-second timeout** — Pending tool approvals time out after 60 seconds to prevent indefinitely stuck processes.
 - **Permission mode selector** — A dropdown in the input bar lets users choose between Claude's permission modes (e.g., default, `acceptEdits`) on a per-session basis.
+- **`--dangerously-skip-permissions` mode** — A permission mode that bypasses all tool approval prompts, allowing Claude to execute any tool without user confirmation. When selected, the Claude process is spawned with `--dangerously-skip-permissions` instead of `--permission-mode`. **Security warning**: This mode grants Claude unrestricted access to Bash, file writes, and all other tools. It should only be used in isolated/sandboxed environments or for fully trusted, automated workflows (e.g., CI-triggered sessions). Never use on sessions with access to production systems or sensitive data.
 - **Per-session allowed tools** — Specific CLI tools can be pre-approved for individual sessions, bypassing the normal approval flow.
 
 ---

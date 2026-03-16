@@ -338,6 +338,7 @@ interface WebhookEvent {
 | `GITHUB_WEBHOOK_MAX_SESSIONS` | No | `3` | 1 | Max concurrent auto-created sessions |
 | `GITHUB_WEBHOOK_MODE` | No | `supervised` | 2 | Default operating mode — **Phase 1 is always `supervised`**; this env var is ignored until Phase 2 |
 | `GITHUB_WEBHOOK_LOG_LINES` | No | `200` | 1 | Max lines of CI logs to include in prompt |
+| `GITHUB_WEBHOOK_ACTOR_ALLOWLIST` | No | `""` (all actors) | 1 | Comma-separated list of GitHub usernames allowed to trigger webhook processing. When non-empty, events from actors not in this list are filtered out with a `200 filtered` response. Comparison is case-insensitive. Overrides the `actorAllowlist` array in the config file. |
 
 ### Config File
 
@@ -349,6 +350,8 @@ interface WebhookEvent {
   "defaultMode": "supervised",
   "maxConcurrentSessions": 3,
   "logLinesToInclude": 200,
+
+  "actorAllowlist": ["alice", "bob"],
 
   "filters": {
     "workflows": { "include": ["*"], "exclude": ["deploy"] },
