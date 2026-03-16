@@ -295,7 +295,7 @@ export class SessionManager {
         .catch((e: unknown) => console.warn(`[worktree] prune failed:`, e instanceof Error ? e.message : e))
       // 2. Remove existing worktree directory if leftover from a partial failure
       await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot, env, timeout: 5000 })
-        .catch(() => {}) // Expected to fail if no prior worktree exists
+        .catch((e: unknown) => console.debug(`[worktree] remove prior worktree (expected if fresh):`, e instanceof Error ? e.message : e))
       // 3. Delete the branch if it exists (leftover from a failed worktree add)
       await execFileAsync('git', ['branch', '-D', branchName], { cwd: repoRoot, env, timeout: 5000 })
         .catch((e: unknown) => console.debug(`[worktree] branch cleanup (expected if fresh):`, e instanceof Error ? e.message : e))
@@ -423,7 +423,7 @@ export class SessionManager {
 
         // Prune any stale worktree references
         await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot, timeout: 5000 })
-          .catch(() => {})
+          .catch((e: unknown) => console.warn(`[worktree] prune after cleanup failed:`, e instanceof Error ? e.message : e))
       } catch (err) {
         console.warn(`[worktree] Failed to clean up worktree ${worktreePath}:`, err instanceof Error ? err.message : err)
       }

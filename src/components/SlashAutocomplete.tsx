@@ -28,10 +28,6 @@ const CATEGORY_ICON_CLASS: Record<SlashCommandCategory, string> = {
   builtin: 'text-neutral-5',
 }
 
-export interface SlashAutocompleteHandle {
-  handleKeyDown: (e: React.KeyboardEvent) => boolean
-}
-
 export function SlashAutocomplete({ commands, filter, onSelect, onClose }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)

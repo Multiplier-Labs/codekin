@@ -54,7 +54,7 @@ Codekin supports running multiple Claude Code sessions simultaneously, each boun
 The main content area is a chat view that renders messages from Claude, user input, system events, and tool activity.
 
 - **Markdown rendering** — Assistant messages are rendered as full GitHub Flavored Markdown using `react-markdown` with `remark-gfm`. This supports tables, task lists, strikethrough, autolinks, and more.
-- **Syntax highlighting** — Fenced code blocks are highlighted with language-specific coloring via `react-syntax-highlighter` using the VS Code Dark+ theme. The language is detected from the code fence (e.g., ` ```python `).
+- **Syntax highlighting** — Fenced code blocks are highlighted with language-specific coloring via `marked` + `marked-highlight` + `highlight.js`. The language is detected from the code fence (e.g., ` ```python `).
 - **Inline code** — Inline backtick code renders with a subtle background for visual distinction.
 - **User messages** — User input appears in a rounded bubble on the left, styled as a distinct message type.
 - **System messages** — Color-coded system events show session lifecycle (init, exit, restart, stall, error). Each includes a status dot and optional model name (e.g., "Opus 4.6").

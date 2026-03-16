@@ -400,7 +400,9 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
         if (TOOL_DEBUG) console.log('[task-debug] emitting todo_update, tasks:', this.tasks.size)
         this.emit('todo_update', Array.from(this.tasks.values()))
       }
-    } catch { /* ignore parse errors */ }
+    } catch (err) {
+      console.warn(`[claude] Failed to parse tool input for ${this.tool.name}:`, err instanceof Error ? err.message : err)
+    }
     this.emit('tool_done', this.tool.name!, summary)
     this.tool = { name: null, input: '' }
   }
