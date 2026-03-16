@@ -14,6 +14,19 @@ import { parseDiff, createUntrackedFileDiff } from './diff-parser.js'
 
 const execFileAsync = promisify(execFile)
 
+/**
+ * Return a copy of process.env with GIT_* vars removed that can interfere
+ * with child git processes (e.g. GIT_INDEX_FILE, GIT_DIR, GIT_PREFIX).
+ * The server may inherit these from the shell that launched pm2/node.
+ */
+export function cleanGitEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env }
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('GIT_') && key !== 'GIT_EDITOR') delete env[key]
+  }
+  return env
+}
+
 /** Max stdout for git commands (2 MB). */
 const GIT_MAX_BUFFER = 2 * 1024 * 1024
 /** Timeout for git commands (10 seconds). */
@@ -25,6 +38,7 @@ const GIT_PATH_CHUNK_SIZE = 200
 export async function execGit(args: string[], cwd: string): Promise<string> {
   const { stdout } = await execFileAsync('git', args, {
     cwd,
+    env: cleanGitEnv(),
     maxBuffer: GIT_MAX_BUFFER,
     timeout: GIT_TIMEOUT_MS,
   })
