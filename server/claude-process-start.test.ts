@@ -12,6 +12,7 @@ import { PassThrough } from 'stream'
 // Hoisted mock factory for child_process.spawn
 const mockSpawn = vi.hoisted(() => vi.fn())
 const mockExistsSync = vi.hoisted(() => vi.fn(() => true))
+const mockRealpathSync = vi.hoisted(() => vi.fn((p: string) => p))
 
 vi.mock('child_process', () => ({
   spawn: mockSpawn,
@@ -19,7 +20,7 @@ vi.mock('child_process', () => ({
 
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>()
-  return { ...actual, existsSync: mockExistsSync }
+  return { ...actual, existsSync: mockExistsSync, realpathSync: mockRealpathSync }
 })
 
 import { ClaudeProcess } from './claude-process.js'
