@@ -91,7 +91,7 @@ export class SessionPersistence {
         // prevent spawning Claude in a nonexistent CWD.
         let workingDir = s.workingDir
         let worktreePath = s.worktreePath
-        let groupDir = s.groupDir
+        const groupDir = s.groupDir
         if (worktreePath && !existsSync(worktreePath)) {
           const fallback = groupDir ?? workingDir
           if (fallback !== worktreePath && existsSync(fallback)) {
