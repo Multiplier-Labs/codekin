@@ -2,7 +2,7 @@
  * Modal settings dialog for general configuration.
  *
  * Organized into logical sections: Authentication, Preferences, Integrations.
- * Handles auth token, theme, retention, support provider, repos path, and webhook config.
+ * Handles auth token, theme, retention, repos path, and webhook config.
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -14,26 +14,11 @@ import {
 import type { Settings as SettingsType } from '../types'
 import {
   verifyToken, getRetentionDays, setRetentionDays as setRetentionDaysApi,
-  getSupportProvider, setSupportProvider, type SupportProvider,
   getWebhookConfig, getWebhookEvents, type WebhookConfigInfo,
   getReposPath, setReposPath as setReposPathApi,
 } from '../lib/ccApi'
 import { FolderPicker } from './FolderPicker'
 
-const PROVIDER_LABELS: Record<SupportProvider, string> = {
-  auto: 'Auto (first available)',
-  groq: 'Groq',
-  openai: 'OpenAI',
-  gemini: 'Google Gemini',
-  anthropic: 'Anthropic',
-}
-
-const PROVIDER_MODELS: Record<Exclude<SupportProvider, 'auto'>, string> = {
-  groq: 'meta-llama/llama-4-scout-17b-16e-instruct',
-  openai: 'gpt-5-nano',
-  gemini: 'gemini-2.5-flash',
-  anthropic: 'claude-haiku-4-5-20251001',
-}
 
 interface Props {
   open: boolean
@@ -111,8 +96,6 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false }
   const [verifying, setVerifying] = useState(false)
   const [status, setStatus] = useState<'idle' | 'valid' | 'invalid'>('idle')
   const [retentionDays, setRetentionDays] = useState(7)
-  const [supportProvider, setSupportProviderState] = useState<SupportProvider>('auto')
-  const [availableProviders, setAvailableProviders] = useState<string[]>([])
   const [reposPath, setReposPath] = useState('')
   const [saveError, setSaveError] = useState<string | null>(null)
 
