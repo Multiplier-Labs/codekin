@@ -1162,6 +1162,15 @@ export class SessionManager {
     // as a non-restartable exit (same as stopped-by-user).
     const sessionConflict = exitedProcess.hasSessionConflict()
 
+    // If the process exited without ever producing stdout output, --resume
+    // hung on a broken/stale session. Clear claudeSessionId so the next
+    // restart attempt uses a fresh session instead of retrying the same
+    // broken resume — which would just hang again.
+    if (!exitedProcess.hadOutput() && session.claudeSessionId) {
+      console.warn(`[restart] Session ${sessionId} produced no output before exit — clearing claudeSessionId to force fresh session`)
+      session.claudeSessionId = null
+    }
+
     const action = evaluateRestart({
       restartCount: session.restartCount,
       lastRestartAt: session.lastRestartAt,

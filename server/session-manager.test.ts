@@ -136,6 +136,7 @@ function fakeClaudeProcess(alive = true) {
     sendControlResponse: vi.fn(),
     getSessionId: vi.fn(() => 'test-session-id'),
     hasSessionConflict: vi.fn(() => false),
+    hadOutput: vi.fn(() => true),
     emit: vi.fn(),
   } as any
 }

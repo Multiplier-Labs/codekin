@@ -92,6 +92,13 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
    */
   private _sessionConflict = false
 
+  /**
+   * Set to true once the process emits at least one valid JSON event on stdout.
+   * When the process exits without ever producing output, --resume likely hung
+   * on a broken session — the caller should clear claudeSessionId and retry fresh.
+   */
+  private _receivedOutput = false
+
   // Grouped streaming state — reset per content block
   private thinking: ThinkingState = { active: false, text: '', summaryEmitted: false }
   private tool: ToolState = { name: null, input: '' }
@@ -263,6 +270,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
     // Cancel the startup timer regardless of event type — system_init may arrive
     // after other events (e.g. rate_limit_event) and the old timer would kill a
     // perfectly healthy process that just hasn't sent init yet.
+    this._receivedOutput = true
     if (this.startupTimer) {
       clearTimeout(this.startupTimer)
       this.startupTimer = null
@@ -271,12 +279,12 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
     this.emit('event', event)
 
     // Log non-streaming event types for diagnostics
-    if (TOOL_DEBUG && event.type !== 'stream_event') {
+    if (event.type !== 'stream_event') {
       const subtype = 'subtype' in event ? (event as Record<string, unknown>).subtype : '-'
       console.log(`[event] type=${event.type} subtype=${subtype || '-'}`)
     }
     // Log all event types we DON'T handle to catch unknown protocol messages
-    if (TOOL_DEBUG && !['system', 'stream_event', 'assistant', 'user', 'result', 'control_request'].includes(event.type)) {
+    if (!['system', 'stream_event', 'assistant', 'user', 'result', 'control_request'].includes(event.type)) {
       console.log(`[event-unhandled] type=${event.type} data=${JSON.stringify(event).slice(0, 300)}`)
     }
 
@@ -742,6 +750,11 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
   /** True if the process exited because the session ID was locked by another process. */
   hasSessionConflict(): boolean {
     return this._sessionConflict
+  }
+
+  /** True if the process produced at least one valid JSON event before exiting. */
+  hadOutput(): boolean {
+    return this._receivedOutput
   }
 
 }
