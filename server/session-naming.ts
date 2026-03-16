@@ -28,7 +28,7 @@ export interface SessionNamingDeps {
 /** Generate a session name by spawning `claude -p` in one-shot mode. */
 function generateNameViaCLI(prompt: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('claude', ['-p', '--max-turns', '1', '--model', 'haiku'], {
+    const proc = spawn('claude', ['-p', '--max-turns', '2', '--model', 'haiku'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { PATH: process.env.PATH, HOME: process.env.HOME },
     })
@@ -131,6 +131,13 @@ export class SessionNaming {
 
       if (!this.deps.hasSession(sessionId)) return
       if (!session.name.startsWith('hub:')) return
+
+      // Reject CLI error messages that leaked through stdout
+      if (/^error:/i.test(text) || /reached max turns/i.test(text)) {
+        console.warn(`[session-name] CLI returned error-like output: "${text.slice(0, 80)}"`)
+        this.scheduleSessionNaming(sessionId)
+        return
+      }
 
       const rawName = text
         .trim()

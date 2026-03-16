@@ -7,6 +7,7 @@
 
 import type { WebSocket } from 'ws'
 import type { SessionManager } from './session-manager.js'
+import { VALID_MODELS, VALID_PERMISSION_MODES } from './types.js'
 import type { WsClientMessage, WsServerMessage } from './types.js'
 
 /** Closure state passed to handleWsMessage from the ws.on('connection') scope. */
@@ -76,6 +77,8 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           workingDir: session.workingDir,
           active: session.claudeProcess?.isAlive() ?? false,
           outputBuffer: session.outputHistory.slice(-500),
+          model: session.model,
+          permissionMode: session.permissionMode,
         })
       } else {
         send({ type: 'error', message: 'Session not found' })
@@ -140,6 +143,10 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
     case 'set_model': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
+        if (!VALID_MODELS.has(msg.model)) {
+          send({ type: 'error', message: `Invalid model: ${msg.model}` })
+          break
+        }
         sessions.setModel(sessionId, msg.model)
       }
       break
@@ -148,6 +155,10 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
     case 'set_permission_mode': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
+        if (!VALID_PERMISSION_MODES.has(msg.permissionMode)) {
+          send({ type: 'error', message: `Invalid permission mode: ${msg.permissionMode}` })
+          break
+        }
         sessions.setPermissionMode(sessionId, msg.permissionMode)
       }
       break

@@ -11,8 +11,19 @@ import type { ClaudeProcess } from './claude-process.js'
 
 /**
  * Permission modes supported by the Claude CLI `--permission-mode` flag.
+ * Keep in sync with src/types.ts PermissionMode.
  */
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions'
+
+/** Allow-list for server-side validation of client-supplied permission modes. */
+export const VALID_PERMISSION_MODES = new Set<PermissionMode>(['default', 'acceptEdits', 'plan', 'bypassPermissions'])
+
+/** Allow-list for server-side validation of client-supplied model IDs. */
+export const VALID_MODELS = new Set([
+  'claude-opus-4-6',
+  'claude-sonnet-4-6',
+  'claude-haiku-4-5-20251001',
+])
 
 /**
  * Server-side session state. Holds the Claude child process, connected
@@ -219,7 +230,7 @@ export interface TaskItem {
 export type WsServerMessage =
   | { type: 'connected'; connectionId: string; claudeAvailable: boolean; claudeVersion: string; apiKeySet: boolean }
   | { type: 'session_created'; sessionId: string; sessionName: string; workingDir: string }
-  | { type: 'session_joined'; sessionId: string; sessionName: string; workingDir: string; active: boolean; outputBuffer: WsServerMessage[] }
+  | { type: 'session_joined'; sessionId: string; sessionName: string; workingDir: string; active: boolean; outputBuffer: WsServerMessage[]; model?: string; permissionMode?: PermissionMode }
   | { type: 'session_left' }
   | { type: 'session_deleted'; message: string }
   | { type: 'claude_started'; sessionId: string }

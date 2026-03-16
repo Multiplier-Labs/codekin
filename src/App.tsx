@@ -158,8 +158,11 @@ export default function App() {
     },
   })
 
-  // Keep permissionModeRef in sync so session orchestration reads the latest value
-  useEffect(() => { permissionModeRef.current = currentPermissionMode }, [currentPermissionMode])
+  // Wrap setPermissionMode to update the ref synchronously (avoids 1-render lag from useEffect)
+  const handlePermissionModeChange = useCallback((mode: PermissionMode) => {
+    permissionModeRef.current = mode
+    setPermissionMode(mode)
+  }, [setPermissionMode])
 
   // Reset file-change tracking when switching sessions
   useEffect(() => {
@@ -515,7 +518,7 @@ export default function App() {
                 onModelChange={setModel}
                 isMobile={isMobile}
                 currentPermissionMode={currentPermissionMode}
-                onPermissionModeChange={setPermissionMode}
+                onPermissionModeChange={handlePermissionModeChange}
               />
             ) : (
               <div className="px-4 py-3 border-t border-neutral-10">
@@ -599,11 +602,11 @@ export default function App() {
               currentModel={currentModel}
               onModelChange={setModel}
               isMobile={isMobile}
-              showWorktreeToggle={messages.length === 0}
+              showWorktreeToggle={!messages.some(m => m.type === 'user')}
               useWorktree={useWorktree}
               onWorktreeChange={setUseWorktree}
               currentPermissionMode={currentPermissionMode}
-              onPermissionModeChange={setPermissionMode}
+              onPermissionModeChange={handlePermissionModeChange}
             />
           </div>
         ) : (

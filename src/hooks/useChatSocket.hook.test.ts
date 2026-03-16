@@ -899,4 +899,61 @@ describe('useChatSocket hook', () => {
       unmount()
     })
   })
+
+  describe('permission mode', () => {
+    it('setPermissionMode sends message and updates local state', () => {
+      const { result, unmount } = setupConnected()
+      const ws = MockWebSocket.latest()
+      act(() => result.current.setPermissionMode('plan'))
+      expect(result.current.currentPermissionMode).toBe('plan')
+      expect(sentMessages(ws).pop()).toEqual({ type: 'set_permission_mode', permissionMode: 'plan' })
+      unmount()
+    })
+
+    it('setPermissionMode persists to localStorage', () => {
+      const { result, unmount } = setupConnected()
+      act(() => result.current.setPermissionMode('bypassPermissions'))
+      expect(localStorage.getItem('claude-permission-mode')).toBe('bypassPermissions')
+      unmount()
+    })
+
+    it('session_joined syncs permissionMode from server', () => {
+      const { result, unmount } = setupConnected()
+      act(() => MockWebSocket.latest().simulateMessage({
+        type: 'session_joined',
+        sessionId: 's1',
+        sessionName: 'Test',
+        workingDir: '/tmp',
+        active: true,
+        outputBuffer: [],
+        permissionMode: 'plan',
+      } as WsServerMessage))
+      expect(result.current.currentPermissionMode).toBe('plan')
+      expect(localStorage.getItem('claude-permission-mode')).toBe('plan')
+      unmount()
+    })
+
+    it('session_joined syncs model from server', () => {
+      const { result, unmount } = setupConnected()
+      act(() => MockWebSocket.latest().simulateMessage({
+        type: 'session_joined',
+        sessionId: 's1',
+        sessionName: 'Test',
+        workingDir: '/tmp',
+        active: true,
+        outputBuffer: [],
+        model: 'claude-opus-4-6',
+      } as WsServerMessage))
+      expect(result.current.currentModel).toBe('claude-opus-4-6')
+      expect(localStorage.getItem('claude-model')).toBe('claude-opus-4-6')
+      unmount()
+    })
+
+    it('defaults to acceptEdits when no localStorage value', () => {
+      localStorage.removeItem('claude-permission-mode')
+      const { result, unmount } = setupConnected()
+      expect(result.current.currentPermissionMode).toBe('acceptEdits')
+      unmount()
+    })
+  })
 })

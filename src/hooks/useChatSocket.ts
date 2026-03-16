@@ -171,6 +171,9 @@ export function useChatSocket({
   const [isProcessing, setIsProcessing] = useState(false)
   const [tasks, setTasks] = useState<TaskItem[]>([])
   const [currentModel, setCurrentModel] = useState<string | null>(() => localStorage.getItem('claude-model') ?? null)
+  const [currentPermissionMode, setCurrentPermissionMode] = useState<PermissionMode>(() =>
+    (localStorage.getItem('claude-permission-mode') as PermissionMode) || 'acceptEdits'
+  )
   const [thinkingSummary, setThinkingSummary] = useState<string | null>(null)
   const [waitingSessions, setWaitingSessions] = useState<Record<string, boolean>>({})
   const { active: activePrompt, queueSize: promptQueueSize, enqueue: enqueuePrompt, dismiss: dismissPrompt, clearAll: clearAllPrompts } = usePromptState()
@@ -329,6 +332,15 @@ export function useChatSocket({
         currentSessionId.current = msg.sessionId
         setIsProcessing(false)
         setThinkingSummary(null)
+        // Sync model and permission mode from server state
+        if (msg.model) {
+          setCurrentModel(msg.model)
+          localStorage.setItem('claude-model', msg.model)
+        }
+        if (msg.permissionMode) {
+          setCurrentPermissionMode(msg.permissionMode)
+          localStorage.setItem('claude-permission-mode', msg.permissionMode)
+        }
         let rebuilt: ChatMessage[] = []
         let restoredPlanMode = false
         let restoredTasks: TaskItem[] = []
@@ -494,10 +506,6 @@ export function useChatSocket({
     setCurrentModel(model)
     localStorage.setItem('claude-model', model)
   }, [send])
-
-  const [currentPermissionMode, setCurrentPermissionMode] = useState<PermissionMode>(() =>
-    (localStorage.getItem('claude-permission-mode') as PermissionMode) || 'acceptEdits'
-  )
 
   const setPermissionMode = useCallback((mode: PermissionMode) => {
     send({ type: 'set_permission_mode', permissionMode: mode })

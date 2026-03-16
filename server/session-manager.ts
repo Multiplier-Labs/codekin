@@ -1080,7 +1080,12 @@ export class SessionManager {
     // Restart Claude with the new model if it's running
     if (session.claudeProcess?.isAlive()) {
       this.stopClaude(sessionId)
-      setTimeout(() => this.startClaude(sessionId), 500)
+      session._stoppedByUser = false
+      setTimeout(() => {
+        if (this.sessions.has(sessionId) && !session._stoppedByUser) {
+          this.startClaude(sessionId)
+        }
+      }, 500)
     }
     return true
   }
@@ -1089,12 +1094,30 @@ export class SessionManager {
   setPermissionMode(sessionId: string, permissionMode: import('./types.js').PermissionMode): boolean {
     const session = this.sessions.get(sessionId)
     if (!session) return false
+    const previousMode = session.permissionMode
     session.permissionMode = permissionMode
     this.persistToDiskDebounced()
+
+    // Audit log for dangerous mode changes
+    if (permissionMode === 'bypassPermissions') {
+      console.warn(`[security] Session ${sessionId} ("${session.name}") activated bypassPermissions mode (was: ${previousMode ?? 'default'})`)
+    }
+
+    // Emit a visible system message so all clients see the mode change
+    const modeLabel = permissionMode === 'bypassPermissions' ? 'Bypass permissions (all tools auto-accepted)' : permissionMode
+    const sysMsg: WsServerMessage = { type: 'system_message', subtype: 'notification', text: `Permission mode changed to: ${modeLabel}` }
+    this.addToHistory(session, sysMsg)
+    this.broadcast(session, sysMsg)
+
     // Restart Claude with the new permission mode if it's running
     if (session.claudeProcess?.isAlive()) {
       this.stopClaude(sessionId)
-      setTimeout(() => this.startClaude(sessionId), 500)
+      session._stoppedByUser = false
+      setTimeout(() => {
+        if (this.sessions.has(sessionId) && !session._stoppedByUser) {
+          this.startClaude(sessionId)
+        }
+      }, 500)
     }
     return true
   }
