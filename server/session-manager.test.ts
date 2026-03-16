@@ -102,6 +102,7 @@ function fakeClaudeProcess(alive = true) {
     stop: vi.fn(),
     start: vi.fn(),
     on: vi.fn(),
+    once: vi.fn((_event: string, cb: () => void) => { cb() }),
     removeAllListeners: vi.fn(),
     sendMessage: vi.fn(),
     sendControlResponse: vi.fn(),
