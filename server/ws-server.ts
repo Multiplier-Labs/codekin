@@ -28,6 +28,7 @@ import { WebhookHandler } from './webhook-handler.js'
 import { createWebhookRateLimiter } from './webhook-rate-limiter.js'
 import { StepflowHandler, loadStepflowConfig } from './stepflow-handler.js'
 import { initWorkflowEngine, shutdownWorkflowEngine, type WorkflowEvent } from './workflow-engine.js'
+import { generate404Page, generate500Page } from './error-page.js'
 import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
 import { CommitEventHandler } from './commit-event-handler.js'
@@ -285,6 +286,30 @@ if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
     })
   }
 }
+
+// --- Error handling: API 404s and generic error handler ---
+// Unmatched API routes → JSON 404
+app.use('/api/{*splat}', (_req, res) => {
+  res.status(404).json({ error: 'Not found' })
+})
+
+// Fallback 404 for non-API routes when SPA fallback is not active
+app.use((_req, res) => {
+  res.status(404).type('html').send(generate404Page())
+})
+
+// Generic error handler — never leak stack traces
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const status = (err as { status?: number })?.status ?? 500
+  if (res.headersSent) return
+  if (status === 404) {
+    res.status(404).type('html').send(generate404Page())
+  } else {
+    console.error('Unhandled server error:', err)
+    res.status(status).type('html').send(generate500Page())
+  }
+})
 
 // ---------------------------------------------------------------------------
 // WebSocket server
