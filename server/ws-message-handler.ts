@@ -189,9 +189,12 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       if (!session) { send({ type: 'error', message: 'Session not found' }); break }
       if (session.worktreePath) { send({ type: 'error', message: 'Session is already in a worktree' }); break }
 
-      sessions.stopClaude(sessionId)
       const originalDir = session.workingDir
-      void sessions.createWorktree(sessionId, originalDir).then((wtPath) => {
+      // Wait for the old process to fully exit before creating the worktree
+      // and restarting, to avoid "Session ID already in use" errors.
+      void sessions.stopClaudeAndWait(sessionId).then(() => {
+        return sessions.createWorktree(sessionId, originalDir)
+      }).then((wtPath) => {
         if (wtPath) {
           const wtName = wtPath.split('/').pop() ?? wtPath
           const createdMsg = { type: 'worktree_created' as const, worktreePath: wtPath, workingDir: wtPath }
