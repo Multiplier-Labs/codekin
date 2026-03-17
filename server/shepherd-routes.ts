@@ -67,7 +67,7 @@ export function createShepherdRouter(
       res.json({ sessionId, status: 'active' })
     } catch (err) {
       console.error('[shepherd] Failed to start:', err)
-      res.status(500).json({ error: 'Failed to start Shepherd' })
+      res.status(500).json({ error: 'Failed to start Agent Joe' })
     }
   })
 

@@ -1,6 +1,6 @@
 /**
- * Shepherd child session manager — spawns, monitors, and reports on
- * implementation sessions created by the Shepherd orchestrator.
+ * Agent Joe child session manager — spawns, monitors, and reports on
+ * implementation sessions created by the Agent Joe orchestrator.
  *
  * Follows the same patterns as workflow-loader.ts for session creation
  * and result polling.
@@ -8,7 +8,7 @@
 
 import { randomUUID } from 'crypto'
 import type { SessionManager } from './session-manager.js'
-import type { WsServerMessage } from './types.js'
+import type { Session, WsServerMessage } from './types.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -92,7 +92,7 @@ export class ShepherdChildManager {
     }
 
     const sessionId = randomUUID()
-    const sessionName = `shepherd:${request.branchName}`
+    const sessionName = `joe:${request.branchName}`
     const now = new Date().toISOString()
 
     const child: ChildSession = {
@@ -109,7 +109,7 @@ export class ShepherdChildManager {
     try {
       // Create the session
       this.sessions.create(sessionName, request.repo, {
-        source: 'shepherd',
+        source: 'agent',
         id: sessionId,
         groupDir: request.repo,
         model: request.model,
@@ -146,7 +146,7 @@ export class ShepherdChildManager {
       '',
       '## Instructions',
       '',
-      `You have been spawned by Shepherd (the Codekin orchestrator) to implement a specific fix in this repository.`,
+      `You have been spawned by Agent Joe (the Codekin orchestrator) to implement a specific task in this repository.`,
       '',
       `**Task**: ${request.task}`,
       `**Branch**: Create your changes on branch \`${request.branchName}\``,
@@ -216,8 +216,12 @@ export class ShepherdChildManager {
       // Check for result message (Claude finished normally)
       const resultMsg = session.outputHistory.find(m => m.type === 'result')
       if (resultMsg) {
+        const text = this.extractText(session.outputHistory)
+        // Check if the final step was done; if not, nudge the session
+        const nudged = this.ensureFinalStep(child, session, text)
+        if (nudged) continue  // Keep monitoring after nudge
         child.status = 'completed'
-        child.result = this.extractText(session.outputHistory)
+        child.result = text
         child.completedAt = new Date().toISOString()
         return
       }
@@ -246,6 +250,49 @@ export class ShepherdChildManager {
     if (session?.claudeProcess?.isAlive()) {
       session.claudeProcess.stop()
     }
+  }
+
+  /**
+   * Check whether the session completed the expected final step (PR, push, deploy).
+   * If not, send a follow-up instruction and return true so monitoring continues.
+   * Only nudges once per child to avoid infinite loops.
+   */
+  private ensureFinalStep(child: ChildSession, session: Session, text: string): boolean {
+    // Only nudge once
+    if ((child as ChildSession & { _nudged?: boolean })._nudged) return false
+
+    const policy = child.request.completionPolicy
+    const lowerText = text.toLowerCase()
+
+    let missing = false
+    let instruction = ''
+
+    if (policy === 'pr') {
+      // Check if a PR was created
+      const prCreated = lowerText.includes('pull request') || lowerText.includes('created a pr') || lowerText.includes('gh pr create')
+      if (!prCreated) {
+        missing = true
+        instruction = 'You completed the code changes but did not create a Pull Request. Please push your branch and create a PR now with a clear description of what was changed and why.'
+      }
+    } else if (policy === 'merge') {
+      // Check if changes were pushed
+      const pushed = lowerText.includes('git push') || lowerText.includes('pushed')
+      if (!pushed) {
+        missing = true
+        instruction = 'You completed the code changes but did not push them. Please push your changes to the remote now.'
+      }
+    }
+
+    if (missing && instruction && session.claudeProcess?.isAlive()) {
+      (child as ChildSession & { _nudged?: boolean })._nudged = true
+      // Clear the result message from history so we can detect the next one
+      const resultIdx = session.outputHistory.findIndex(m => m.type === 'result')
+      if (resultIdx !== -1) session.outputHistory.splice(resultIdx, 1)
+      this.sessions.sendInput(child.id, instruction)
+      return true
+    }
+
+    return false
   }
 
   /**

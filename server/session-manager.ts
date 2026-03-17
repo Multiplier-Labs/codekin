@@ -20,6 +20,8 @@
 
 import { randomUUID } from 'crypto'
 import { execFile } from 'child_process'
+import { existsSync, mkdirSync, copyFileSync, readdirSync, statSync } from 'fs'
+import { homedir } from 'os'
 import path from 'path'
 import { promisify } from 'util'
 import type { WebSocket } from 'ws'
@@ -59,7 +61,7 @@ const API_RETRY_PATTERNS = [
 ]
 
 export interface CreateSessionOptions {
-  source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'shepherd'
+  source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'shepherd' | 'agent'
   id?: string
   groupDir?: string
   model?: string
@@ -230,6 +232,19 @@ export class SessionManager {
       session.groupDir = repoRoot  // Group under original repo in sidebar
       session.workingDir = worktreePath
       session.worktreePath = worktreePath
+
+      // Copy Claude CLI session data so the restarted process can resume
+      // conversation context.  The CLI derives its storage path from cwd,
+      // so the worktree gets a different project dir and won't find the
+      // original session unless we copy it across.
+      if (session.claudeSessionId) {
+        try {
+          this.copyClaudeSessionData(session.claudeSessionId, workingDir, worktreePath)
+        } catch (err) {
+          console.warn(`[worktree] Failed to copy session data:`, err instanceof Error ? err.message : err)
+        }
+      }
+
       this.persistToDisk()
       this._globalBroadcast?.({ type: 'sessions_updated' })
 
@@ -238,6 +253,58 @@ export class SessionManager {
     } catch (err) {
       console.error(`[worktree] Failed to create worktree for session ${sessionId}:`, err)
       return null
+    }
+  }
+
+  /**
+   * Resolve the Claude CLI project storage directory for a given working dir.
+   * Claude encodes the absolute path by replacing `/` with `-`.
+   */
+  private claudeProjectPath(cwd: string): string {
+    const encoded = cwd.replace(/\//g, '-')
+    return path.join(homedir(), '.claude', 'projects', encoded)
+  }
+
+  /**
+   * Copy Claude CLI session data (JSONL + optional subdirectory) from the
+   * original project storage to the worktree project storage so the CLI
+   * can resume conversation context after a worktree move.
+   */
+  private copyClaudeSessionData(claudeSessionId: string, originalDir: string, worktreeDir: string): void {
+    const srcDir = this.claudeProjectPath(originalDir)
+    const dstDir = this.claudeProjectPath(worktreeDir)
+
+    const jsonlFile = `${claudeSessionId}.jsonl`
+    const srcJsonl = path.join(srcDir, jsonlFile)
+
+    if (!existsSync(srcJsonl)) {
+      console.warn(`[worktree] No session JSONL at ${srcJsonl}, skipping copy`)
+      return
+    }
+
+    mkdirSync(dstDir, { recursive: true })
+    copyFileSync(srcJsonl, path.join(dstDir, jsonlFile))
+    console.log(`[worktree] Copied session JSONL to ${dstDir}`)
+
+    // Copy session subdirectory (subagents/, tool-results/) if it exists
+    const srcSessionDir = path.join(srcDir, claudeSessionId)
+    if (existsSync(srcSessionDir) && statSync(srcSessionDir).isDirectory()) {
+      this.copyDirRecursive(srcSessionDir, path.join(dstDir, claudeSessionId))
+      console.log(`[worktree] Copied session directory to ${dstDir}`)
+    }
+  }
+
+  /** Recursively copy a directory. */
+  private copyDirRecursive(src: string, dst: string): void {
+    mkdirSync(dst, { recursive: true })
+    for (const entry of readdirSync(src, { withFileTypes: true })) {
+      const srcPath = path.join(src, entry.name)
+      const dstPath = path.join(dst, entry.name)
+      if (entry.isDirectory()) {
+        this.copyDirRecursive(srcPath, dstPath)
+      } else {
+        copyFileSync(srcPath, dstPath)
+      }
     }
   }
 

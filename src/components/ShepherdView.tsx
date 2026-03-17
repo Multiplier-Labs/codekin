@@ -1,7 +1,7 @@
 /**
- * Shepherd orchestrator view — initialization + dashboard header.
+ * Agent Joe orchestrator view — initialization + dashboard header.
  *
- * On mount, fetches the Shepherd session ID from the server and notifies
+ * On mount, fetches the Agent Joe session ID from the server and notifies
  * the parent to join it. Displays a dashboard header with summary stats.
  * The actual chat rendering is handled by ChatView and InputBar in App.tsx.
  */
@@ -75,7 +75,7 @@ export function ShepherdView({ token, onShepherdSessionReady, sessionJoined }: P
         void refreshStats()
       } catch (err) {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Failed to start Shepherd')
+        setError(err instanceof Error ? err.message : 'Failed to start Agent Joe')
         setStatus('error')
       }
     }
@@ -96,7 +96,7 @@ export function ShepherdView({ token, onShepherdSessionReady, sessionJoined }: P
       <div className="flex flex-1 items-center justify-center">
         <div className="flex items-center gap-3 text-neutral-4">
           <IconShield size={20} stroke={2} />
-          <span className="text-[15px]">Starting Shepherd...</span>
+          <span className="text-[15px]">Starting Agent Joe...</span>
         </div>
       </div>
     )
@@ -108,7 +108,7 @@ export function ShepherdView({ token, onShepherdSessionReady, sessionJoined }: P
         <div className="text-center">
           <div className="flex items-center justify-center gap-2 text-error-5 mb-2">
             <IconShield size={20} stroke={2} />
-            <span className="text-[15px] font-medium">Failed to start Shepherd</span>
+            <span className="text-[15px] font-medium">Failed to start Agent Joe</span>
           </div>
           <p className="text-[14px] text-neutral-5">{error}</p>
         </div>
@@ -123,7 +123,7 @@ export function ShepherdView({ token, onShepherdSessionReady, sessionJoined }: P
     <div className="flex items-center gap-3 px-4 py-2.5 border-b border-neutral-10 bg-neutral-12">
       <div className="flex items-center gap-2 text-neutral-2">
         <IconShield size={18} stroke={2} className="text-accent-5" />
-        <span className="text-[15px] font-medium">Shepherd</span>
+        <span className="text-[15px] font-medium">Agent Joe</span>
       </div>
       {stats && (
         <div className="flex items-center gap-2 ml-auto">

@@ -75,7 +75,7 @@ export interface Session {
   connectedClients: number
   lastActivity: string
   /** How the session was created: manually by a user, by a GitHub webhook, or by a workflow. */
-  source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'shepherd'
+  source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'shepherd' | 'agent'
 }
 
 /**

@@ -335,7 +335,7 @@ export function LeftSidebar({
             }`}
           >
             <IconShield size={16} stroke={2} className="flex-shrink-0" />
-            <span className="flex-1 text-left">Shepherd</span>
+            <span className="flex-1 text-left">Agent Joe</span>
           </button>
           {hasModules && (
             <div ref={modulesRef} className="relative">

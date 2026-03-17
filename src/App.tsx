@@ -386,7 +386,7 @@ export default function App() {
   // Shepherd: navigate to the orchestrator view
   const shepherdSessionRef = useRef<string | null>(null)
   const handleNavigateToShepherd = useCallback(() => {
-    navigate('/shepherd')
+    navigate('/joe')
     // If we already know the shepherd session ID, join it immediately
     if (shepherdSessionRef.current) {
       clearMessages()
@@ -550,7 +550,7 @@ export default function App() {
                   onRemoveFile={removeFile}
                   skillGroups={skillGroups}
                   slashCommands={allCommands}
-                  placeholder="Talk to Shepherd..."
+                  placeholder="Talk to Joe..."
                   initialValue=""
                   onValueChange={() => {}}
                   currentModel={currentModel}

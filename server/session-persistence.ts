@@ -22,7 +22,7 @@ export interface PersistedSession {
   /** Absolute path to the git worktree, if this session uses one. */
   worktreePath?: string
   created: string
-  source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'shepherd'
+  source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'shepherd' | 'agent'
   model?: string
   permissionMode?: string
   claudeSessionId: string | null
