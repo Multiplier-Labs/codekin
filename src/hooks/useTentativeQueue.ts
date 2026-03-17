@@ -84,8 +84,9 @@ export function useTentativeQueue() {
   const clearQueue = useCallback((sessionId: string) => {
     setQueues(prev => {
       if (!prev[sessionId]) return prev
-      const next = { ...prev }
-      delete next[sessionId]
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([key]) => key !== sessionId)
+      )
       saveTexts(sessionId, [])
       return next
     })

@@ -71,7 +71,7 @@ export interface StepflowWebhookPayload {
      * Event payload.  For `claude.session.requested` events this must be a
      * `StepflowSessionRequest`.  Other event types may have any shape.
      */
-    payload?: StepflowSessionRequest | unknown
+    payload?: unknown
     /** ISO timestamp when the event was emitted. */
     timestamp: string
   }

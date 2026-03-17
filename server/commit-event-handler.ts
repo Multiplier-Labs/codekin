@@ -92,7 +92,7 @@ export class CommitEventHandler {
     const engine = getWorkflowEngine()
     const activeRuns = engine.listRuns({ kind: 'commit-review', status: 'running', limit: 100 })
     const hasActiveRun = activeRuns.some(
-      run => (run.input as Record<string, unknown>).repoPath === event.repoPath
+      run => run.input.repoPath === event.repoPath
     )
     if (hasActiveRun) {
       return { accepted: false, reason: 'Rejected: commit-review already running for this repo' }

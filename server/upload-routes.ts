@@ -267,7 +267,7 @@ export function createUploadRouter(
       return
     }
 
-    const { owner, name } = req.body
+    const { owner, name } = req.body as { owner?: string; name?: string }
     if (!owner || !name) {
       res.status(400).json({ error: 'Missing owner or name' })
       return

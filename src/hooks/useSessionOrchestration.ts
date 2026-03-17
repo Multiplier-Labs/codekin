@@ -23,11 +23,11 @@ export interface UseSessionOrchestrationParams {
   clearMessages: () => void
   wsCreateSession: (name: string, workingDir: string, useWorktree?: boolean, permissionMode?: PermissionMode) => void
   removeSession: (sessionId: string) => Promise<void>
-  pendingContextRef: React.MutableRefObject<string | null>
+  pendingContextRef: React.RefObject<string | null>
   /** Ref to the current worktree preference (read at session creation time). */
-  useWorktreeRef: React.MutableRefObject<boolean>
+  useWorktreeRef: React.RefObject<boolean>
   /** Ref to the current permission mode preference (read at session creation time). */
-  permissionModeRef: React.MutableRefObject<PermissionMode>
+  permissionModeRef: React.RefObject<PermissionMode>
 }
 
 export interface UseSessionOrchestrationReturn {

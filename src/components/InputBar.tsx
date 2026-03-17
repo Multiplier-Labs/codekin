@@ -480,7 +480,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   </button>
                   {skillMenuOpen && (
                     <SkillMenu
-                      groups={skillGroups!}
+                      groups={skillGroups ?? []}
                       onSelectSkill={(command) => {
                         setValue(command + ' ')
                         setSkillMenuOpen(false)
@@ -599,7 +599,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 )}
                 {skillMenuOpen && (
                   <SkillMenu
-                    groups={skillGroups!}
+                    groups={skillGroups ?? []}
                     onSelectSkill={(command) => {
                       setValue(command + ' ')
                       setSkillMenuOpen(false)

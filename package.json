@@ -2,7 +2,7 @@
   "name": "codekin",
   "version": "0.4.1",
   "license": "MIT",
-  "licenseNotes": "dompurify is dual-licensed (MPL-2.0 OR Apache-2.0); both are permissively compatible with MIT for library use",
+  "licenseNotes": "dompurify is dual-licensed (MPL-2.0 OR Apache-2.0); both are permissively compatible with MIT for library use. lightningcss (MPL-2.0) is a build-time-only dependency used by TailwindCSS and is not included in distributed artifacts.",
   "author": "multiplier-labs",
   "description": "Web UI for Claude Code sessions with multi-session support and WebSocket streaming",
   "repository": {
