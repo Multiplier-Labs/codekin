@@ -25,9 +25,8 @@ This will:
 1. Install Node.js 20+ if needed (via nvm)
 2. Install the `codekin` npm package globally
 3. Generate an auth token
-4. Prompt for optional LLM API keys (Groq, OpenAI, Gemini, Anthropic) for session auto-naming
-5. Install and start a persistent background service
-6. Print your access URL
+4. Install and start a persistent background service
+5. Print your access URL
 
 Open the printed URL in your browser, enter your Codekin Web token when prompted, and you're ready to go.
 
@@ -59,7 +58,7 @@ codekin uninstall               # Remove Codekin entirely
 - **Markdown browser** — Browse and view `.md` files directly in the UI
 - **AI Workflows** — Scheduled code and repository audits and maintenance, with support for custom workflows defined as Markdown files
 - **GitHub webhooks** — Automated bugfixing on CI failures via webhook integration
-- **LLM-powered chores** — Optional API keys (Groq, OpenAI, Gemini, Anthropic) for background tasks like session auto-naming
+- **Git worktrees** — Isolate sessions in dedicated worktree directories
 
 ## Upgrade
 
@@ -91,10 +90,6 @@ All configuration lives in `~/.config/codekin/env`. Edit this file to override d
 |---|---|---|
 | `PORT` | `32352` | Server port |
 | `REPOS_ROOT` | `~/repos` | Root directory scanned for local repositories |
-| `GROQ_API_KEY` | — | Optional. Enables session auto-naming via Llama 4 Scout (free tier at [groq.com](https://groq.com)) |
-| `OPENAI_API_KEY` | — | Optional. Fallback for session auto-naming via GPT-4o Mini ([platform.openai.com](https://platform.openai.com)) |
-| `GEMINI_API_KEY` | — | Optional. Fallback for session auto-naming via Gemini 2.5 Flash ([aistudio.google.com](https://aistudio.google.com)) |
-| `ANTHROPIC_API_KEY` | — | Optional. Fallback for session auto-naming via Claude Haiku ([console.anthropic.com](https://console.anthropic.com)) |
 
 ## Manual / Advanced Setup
 

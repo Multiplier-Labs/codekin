@@ -43,7 +43,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
 
   const eventDriven = isEventDriven(form.kind)
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault()
     setSaving(true)
     setFormError(null)

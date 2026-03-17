@@ -20,11 +20,11 @@ const execFileAsync = promisify(execFile)
  * The server may inherit these from the shell that launched pm2/node.
  */
 export function cleanGitEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env }
-  for (const key of Object.keys(env)) {
-    if (key.startsWith('GIT_') && key !== 'GIT_EDITOR') delete env[key]
-  }
-  return env
+  return Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key]) => !key.startsWith('GIT_') || key === 'GIT_EDITOR'
+    )
+  )
 }
 
 /** Max stdout for git commands (2 MB). */
