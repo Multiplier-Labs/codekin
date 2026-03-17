@@ -10,6 +10,7 @@ import {
   existsSync as fsExistsSync,
   statSync as fsStatSync,
   readdirSync as fsReaddirSync,
+  realpathSync as fsRealpathSync,
 } from 'fs'
 import { resolve as pathResolve, join as pathJoin } from 'path'
 import { homedir as osHomedir } from 'os'
@@ -227,10 +228,17 @@ export function createSessionRouter(
     const expanded = expandTilde(raw)
     const base = expanded.startsWith('/') ? expanded : pathResolve(expanded)
 
-    // Restrict browsing to home directory and repos root to prevent arbitrary filesystem traversal
+    // Restrict browsing to home directory and repos root to prevent arbitrary filesystem traversal.
+    // Use realpathSync to dereference symlinks, preventing symlink traversal attacks where a
+    // symlink within an allowed root points to a directory outside it (e.g. ~/link → /etc).
     const home = osHomedir()
     const allowedRoots = [home, REPOS_ROOT]
-    const resolved = pathResolve(base)
+    let resolved: string
+    try {
+      resolved = fsRealpathSync(base)
+    } catch {
+      resolved = pathResolve(base)
+    }
     if (!allowedRoots.some(root => resolved === root || resolved.startsWith(root + '/'))) {
       return res.status(403).json({ error: 'Path is outside allowed directories' })
     }
