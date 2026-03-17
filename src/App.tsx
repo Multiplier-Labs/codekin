@@ -646,6 +646,8 @@ export default function App() {
         settings={settings}
         onUpdate={updateSettings}
         isMobile={isMobile}
+        autoWorktree={useWorktree}
+        onAutoWorktreeChange={setUseWorktree}
       />
       <CommandPalette
         open={paletteOpen}

@@ -9,7 +9,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   IconKey, IconPalette, IconBrandGithub, IconCopy, IconCheck,
   IconChevronDown, IconChevronRight, IconCircleCheckFilled, IconCircleXFilled,
-  IconRobot, IconArchive,
+  IconRobot, IconArchive, IconGitBranch,
 } from '@tabler/icons-react'
 import type { Settings as SettingsType } from '../types'
 import {
@@ -28,6 +28,8 @@ interface Props {
   settings: SettingsType
   onUpdate: (patch: Partial<SettingsType>) => void
   isMobile?: boolean
+  autoWorktree?: boolean
+  onAutoWorktreeChange?: (enabled: boolean) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +95,7 @@ function StatusBadge({ status }: { status: string }) {
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
-export function Settings({ open, onClose, settings, onUpdate, isMobile = false }: Props) {
+export function Settings({ open, onClose, settings, onUpdate, isMobile = false, autoWorktree = false, onAutoWorktreeChange }: Props) {
   const [tokenInput, setTokenInput] = useState(settings.token)
   const [verifying, setVerifying] = useState(false)
   const [status, setStatus] = useState<'idle' | 'valid' | 'invalid'>('idle')
@@ -284,6 +286,23 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false }
                     setReposPath(p)
                   }}
                 />
+              </div>
+
+              {/* Auto-enable Worktrees */}
+              <div className="col-span-2">
+                <label className="flex items-center gap-2.5 cursor-pointer group">
+                  <input
+                    type="checkbox"
+                    checked={autoWorktree}
+                    onChange={e => onAutoWorktreeChange?.(e.target.checked)}
+                    className="h-4 w-4 rounded border-neutral-7 bg-neutral-10 text-primary-7 accent-primary-7 cursor-pointer"
+                  />
+                  <span className="flex items-center gap-1.5 text-[15px] text-neutral-4 group-hover:text-neutral-3 transition-colors">
+                    <IconGitBranch size={14} className="text-neutral-5" />
+                    Auto-enable worktrees for new sessions
+                  </span>
+                </label>
+                <p className="mt-1 ml-[26px] text-[13px] text-neutral-6">When enabled, new sessions will automatically start in a git worktree</p>
               </div>
 
               {/* Worktree Branch Prefix */}
