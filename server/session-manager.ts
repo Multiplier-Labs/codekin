@@ -496,9 +496,14 @@ export class SessionManager {
       CODEKIN_AUTH_TOKEN: sessionToken,
       CODEKIN_SESSION_TYPE: session.source || 'manual',
     }
-    // Pass CLAUDE_PROJECT_DIR so hooks resolve correctly even when the session's
-    // working directory differs from the project root (e.g. webhook workspaces).
-    if (process.env.CLAUDE_PROJECT_DIR) {
+    // Pass CLAUDE_PROJECT_DIR so hooks and session storage resolve correctly
+    // even when the session's working directory differs from the project root
+    // (e.g. worktrees, webhook workspaces).  For worktree sessions, use the
+    // original repo root (groupDir) so Claude CLI finds the existing session
+    // storage and can resume conversation context with --session-id.
+    if (session.groupDir) {
+      extraEnv.CLAUDE_PROJECT_DIR = session.groupDir
+    } else if (process.env.CLAUDE_PROJECT_DIR) {
       extraEnv.CLAUDE_PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR
     }
     const cp = new ClaudeProcess(session.workingDir, session.claudeSessionId || undefined, extraEnv, session.model, session.permissionMode)
