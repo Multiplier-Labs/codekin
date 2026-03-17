@@ -177,8 +177,9 @@ export function useChatSocket({
   const [thinkingSummary, setThinkingSummary] = useState<string | null>(null)
   const promptState = usePromptState()
   const currentSessionId = useRef<string | null>(null)
-  const activePrompt = promptState.getActive(currentSessionId.current)
-  const promptQueueSize = promptState.getQueueSize(currentSessionId.current)
+  const [renderSessionId, setRenderSessionId] = useState<string | null>(null)
+  const activePrompt = promptState.getActive(renderSessionId)
+  const promptQueueSize = promptState.getQueueSize(renderSessionId)
 
   // ---------------------------------------------------------------------------
   // Streaming performance: batch consecutive text deltas and flush once per
@@ -308,6 +309,7 @@ export function useChatSocket({
 
       case 'session_created':
         currentSessionId.current = msg.sessionId
+        setRenderSessionId(msg.sessionId)
         setMessages([])
         setTasks([])
         setIsProcessing(false)
@@ -317,6 +319,7 @@ export function useChatSocket({
 
       case 'session_joined': {
         currentSessionId.current = msg.sessionId
+        setRenderSessionId(msg.sessionId)
         setIsProcessing(false)
         setThinkingSummary(null)
         // Sync model and permission mode from server state
@@ -448,6 +451,7 @@ export function useChatSocket({
   const leaveSession = useCallback(() => {
     send({ type: 'leave_session' })
     currentSessionId.current = null
+    setRenderSessionId(null)
     setIsProcessing(false)
     setThinkingSummary(null)
     // No prompt clearing — prompts are session-scoped and persist for when user returns
