@@ -11,7 +11,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   IconBook, IconSettings as IconSettingsGear,
   IconLogout, IconSun, IconMoon,
-  IconChevronRight, IconChevronLeft, IconSparkles, IconShield, IconX,
+  IconChevronRight, IconChevronLeft, IconSparkles, IconAiAgent, IconX,
 } from '@tabler/icons-react'
 import type { Session, Module, Repo, DocsPickerProps, MobileProps } from '../types'
 import type { RepoGroup } from '../hooks/useRepos'
@@ -334,7 +334,7 @@ export function LeftSidebar({
                 : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6'
             }`}
           >
-            <IconShield size={16} stroke={2} className="flex-shrink-0" />
+            <IconAiAgent size={16} stroke={2} className="flex-shrink-0" />
             <span className="flex-1 text-left">Agent Joe</span>
           </button>
           {hasModules && (

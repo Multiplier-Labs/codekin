@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useState, useCallback } from 'react'
-import { IconShield, IconFolder, IconBell, IconTerminal2 } from '@tabler/icons-react'
+import { IconAiAgent, IconFolder, IconBell, IconTerminal2 } from '@tabler/icons-react'
 import * as api from '../lib/ccApi'
 
 interface DashboardStats {
@@ -95,7 +95,7 @@ export function ShepherdView({ token, onShepherdSessionReady, sessionJoined }: P
     return (
       <div className="flex flex-1 items-center justify-center">
         <div className="flex items-center gap-3 text-neutral-4">
-          <IconShield size={20} stroke={2} />
+          <IconAiAgent size={20} stroke={2} />
           <span className="text-[15px]">Starting Agent Joe...</span>
         </div>
       </div>
@@ -107,7 +107,7 @@ export function ShepherdView({ token, onShepherdSessionReady, sessionJoined }: P
       <div className="flex flex-1 items-center justify-center">
         <div className="text-center">
           <div className="flex items-center justify-center gap-2 text-error-5 mb-2">
-            <IconShield size={20} stroke={2} />
+            <IconAiAgent size={20} stroke={2} />
             <span className="text-[15px] font-medium">Failed to start Agent Joe</span>
           </div>
           <p className="text-[14px] text-neutral-5">{error}</p>
@@ -122,7 +122,7 @@ export function ShepherdView({ token, onShepherdSessionReady, sessionJoined }: P
   return (
     <div className="flex items-center gap-3 px-4 py-2.5 border-b border-neutral-10 bg-neutral-12">
       <div className="flex items-center gap-2 text-neutral-2">
-        <IconShield size={18} stroke={2} className="text-accent-5" />
+        <IconAiAgent size={18} stroke={2} className="text-accent-5" />
         <span className="text-[15px] font-medium">Agent Joe</span>
       </div>
       {stats && (

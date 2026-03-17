@@ -55,12 +55,14 @@ export default function App() {
 
   const setActiveSessionId = useCallback((id: string | null) => {
     setActiveSessionIdRaw(id)
+    // Don't navigate away from /joe when joining the shepherd session
+    if (view === 'shepherd') return
     if (id) {
       navigate(`/s/${id}`)
     } else {
       navigate('/', true)
     }
-  }, [navigate])
+  }, [navigate, view])
 
   const [settingsOpen, setSettingsOpen] = useState(!settings.token)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -426,7 +428,7 @@ export default function App() {
   // Derive session name for mobile top bar
   const activeSession = sessions.find(s => s.id === activeSessionId)
   const activeSessionName = activeSession?.name ?? null
-  const chatVariant = activeSession?.source === 'joe' ? 'joe' as const : 'default' as const
+  const chatVariant = (activeSession?.source === 'joe' || activeSession?.source === 'shepherd') ? 'joe' as const : 'default' as const
   const activeRepoName = activeRepo?.name ?? activeWorkingDir?.split('/').pop() ?? null
 
   return (
