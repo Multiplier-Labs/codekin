@@ -14,7 +14,7 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import hljs from '../lib/hljs'
-import { IconArrowDown } from '@tabler/icons-react'
+import { IconArrowDown, IconAiAgent } from '@tabler/icons-react'
 import type { ChatMessage } from '../types'
 import { formatModelName, formatUserText } from '../lib/chatFormatters'
 
@@ -312,6 +312,37 @@ function PlanningModeMessage({ msg }: { msg: ChatMessage & { type: 'planning_mod
   )
 }
 
+function JoeWelcome() {
+  return (
+    <div className="flex flex-1 items-center justify-center px-6">
+      <div className="max-w-md text-center">
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-9/40">
+          <IconAiAgent size={28} className="text-accent-5" />
+        </div>
+        <h2 className="mb-2 text-[18px] font-semibold text-neutral-2">Hey, I'm Joe</h2>
+        <p className="mb-5 text-[15px] leading-relaxed text-neutral-4">
+          Your AI assistant for general questions, brainstorming, and non-coding tasks.
+          Unlike the main chat, I won't run tools or edit files — just conversation.
+        </p>
+        <div className="mx-auto grid max-w-sm gap-2 text-left text-[14px]">
+          <div className="flex items-start gap-2.5 rounded-lg bg-neutral-10/60 px-3 py-2">
+            <span className="mt-0.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent-6" />
+            <span className="text-neutral-3">Ask questions about concepts, architecture, or design decisions</span>
+          </div>
+          <div className="flex items-start gap-2.5 rounded-lg bg-neutral-10/60 px-3 py-2">
+            <span className="mt-0.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent-6" />
+            <span className="text-neutral-3">Brainstorm ideas, draft plans, or think through tradeoffs</span>
+          </div>
+          <div className="flex items-start gap-2.5 rounded-lg bg-neutral-10/60 px-3 py-2">
+            <span className="mt-0.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent-6" />
+            <span className="text-neutral-3">Write or review prose — docs, emails, specs, messages</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ActivityIndicator({ label, variant = 'default' }: { label: string; variant?: ChatViewVariant }) {
   const [elapsed, setElapsed] = useState(0)
   const startRef = useRef(0)
@@ -399,6 +430,9 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
         className="chat-scroll flex-1 overflow-y-auto overflow-x-hidden min-h-0"
         onScroll={checkScroll}
       >
+        {variant === 'joe' && messages.length === 0 && !activityLabel ? (
+          <JoeWelcome />
+        ) : (
         <div className="flex flex-col py-2">
           {(() => {
             let lastShownTs = 0
@@ -464,6 +498,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
           })()}
           {activityLabel && <ActivityIndicator label={activityLabel} variant={variant} />}
         </div>
+        )}
       </div>
 
       {/* Scroll to bottom indicator */}
