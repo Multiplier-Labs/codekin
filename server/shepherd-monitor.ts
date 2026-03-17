@@ -257,8 +257,8 @@ export class ShepherdMonitor {
     const session = this.sessions.get(shepherdId)
     if (!session?.claudeProcess?.isAlive()) return
 
-    // Send as a system message that Shepherd will see and respond to
-    const message = `[Shepherd Notification — ${notification.severity.toUpperCase()}]\n${notification.title}\n${notification.body}`
+    // Send as a system message that Joe will see and respond to
+    const message = `[Agent Joe Notification — ${notification.severity.toUpperCase()}]\n${notification.title}\n${notification.body}`
     this.sessions.sendInput(shepherdId, message)
     notification.delivered = true
   }

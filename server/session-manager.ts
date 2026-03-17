@@ -61,7 +61,7 @@ const API_RETRY_PATTERNS = [
 ]
 
 export interface CreateSessionOptions {
-  source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'shepherd'
+  source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'shepherd' | 'agent'
   id?: string
   groupDir?: string
   model?: string

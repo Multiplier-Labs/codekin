@@ -261,7 +261,7 @@ export function RepoSection({
               >
                 {s.source === 'workflow'
                   ? <IconSparkles size={12} className={`flex-shrink-0 self-center ${dotColor.replace(/bg-/g, 'text-')}`} />
-                  : s.source === 'webhook'
+                  : s.source === 'webhook' || s.source === 'agent'
                   ? <IconRobot size={12} className={`flex-shrink-0 self-center ${dotColor.replace(/bg-/g, 'text-')}`} />
                   : s.source === 'joe'
                   ? <IconAiAgent size={12} className={`flex-shrink-0 self-center text-accent-5 ${dotColor.includes('animate-pulse') ? 'animate-pulse' : ''}`} />
