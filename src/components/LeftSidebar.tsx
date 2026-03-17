@@ -11,7 +11,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   IconBook, IconSettings as IconSettingsGear,
   IconLogout, IconSun, IconMoon,
-  IconChevronRight, IconChevronLeft, IconSparkles, IconX,
+  IconChevronRight, IconChevronLeft, IconSparkles, IconShield, IconX,
 } from '@tabler/icons-react'
 import type { Session, Module, Repo, DocsPickerProps, MobileProps } from '../types'
 import type { RepoGroup } from '../hooks/useRepos'
@@ -119,6 +119,8 @@ interface Props {
   onSendModule: (mod: Module) => void
   /** Navigate to the workflows view. */
   onNavigateToWorkflows: () => void
+  /** Navigate to the Shepherd orchestrator view. */
+  onNavigateToShepherd: () => void
   /** Open the docs browser for a repo's documentation files. */
   onBrowseDocs?: (workingDir: string) => void
   /** State and callbacks for the docs file picker overlay. */
@@ -159,6 +161,7 @@ export function LeftSidebar({
   onUpdateTheme,
   onSendModule,
   onNavigateToWorkflows,
+  onNavigateToShepherd,
   onBrowseDocs,
   docsPicker = {},
   mobile = {},
@@ -322,6 +325,17 @@ export function LeftSidebar({
           >
             <IconSparkles size={16} stroke={2} className="flex-shrink-0" />
             <span className="flex-1 text-left">AI Workflows</span>
+          </button>
+          <button
+            onClick={() => { onNavigateToShepherd(); if (isMobile) onMobileClose?.() }}
+            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[15px] transition-colors ${
+              view === 'shepherd'
+                ? 'text-accent-3 bg-accent-11/20'
+                : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6'
+            }`}
+          >
+            <IconShield size={16} stroke={2} className="flex-shrink-0" />
+            <span className="flex-1 text-left">Shepherd</span>
           </button>
           {hasModules && (
             <div ref={modulesRef} className="relative">

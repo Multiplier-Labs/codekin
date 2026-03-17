@@ -59,7 +59,7 @@ const API_RETRY_PATTERNS = [
 ]
 
 export interface CreateSessionOptions {
-  source?: 'manual' | 'webhook' | 'workflow' | 'stepflow'
+  source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'shepherd'
   id?: string
   groupDir?: string
   model?: string
@@ -292,19 +292,21 @@ export class SessionManager {
   }
 
   list(): SessionInfo[] {
-    return Array.from(this.sessions.values()).map((s) => ({
-      id: s.id,
-      name: s.name,
-      created: s.created,
-      active: s.claudeProcess?.isAlive() ?? false,
-      isProcessing: s.isProcessing,
-      workingDir: s.workingDir,
-      groupDir: s.groupDir,
-      worktreePath: s.worktreePath,
-      connectedClients: s.clients.size,
-      lastActivity: s.created,
-      source: s.source,
-    }))
+    return Array.from(this.sessions.values())
+      .filter((s) => s.source !== 'shepherd')
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        created: s.created,
+        active: s.claudeProcess?.isAlive() ?? false,
+        isProcessing: s.isProcessing,
+        workingDir: s.workingDir,
+        groupDir: s.groupDir,
+        worktreePath: s.worktreePath,
+        connectedClients: s.clients.size,
+        lastActivity: s.created,
+        source: s.source,
+      }))
   }
 
   rename(sessionId: string, newName: string): boolean {
