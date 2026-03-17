@@ -11,10 +11,13 @@ import { useState, useCallback, useEffect } from 'react'
 interface RouteState {
   path: string
   sessionId: string | null
-  view: 'chat' | 'workflows'
+  view: 'chat' | 'workflows' | 'shepherd'
 }
 
 export function parsePath(pathname: string): RouteState {
+  if (pathname === '/shepherd' || pathname === '/shepherd/') {
+    return { path: pathname, sessionId: null, view: 'shepherd' }
+  }
   if (pathname === '/workflows' || pathname === '/workflows/') {
     return { path: pathname, sessionId: null, view: 'workflows' }
   }

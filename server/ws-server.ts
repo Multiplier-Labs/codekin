@@ -39,6 +39,8 @@ import { createSessionRouter } from './session-routes.js'
 import { createWebhookRouter } from './webhook-routes.js'
 import { createUploadRouter } from './upload-routes.js'
 import { createDocsRouter } from './docs-routes.js'
+import { createShepherdRouter } from './shepherd-routes.js'
+import { ensureShepherdRunning } from './shepherd-manager.js'
 import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST } from './config.js'
 
 // ---------------------------------------------------------------------------
@@ -272,6 +274,7 @@ app.use(createDocsRouter(verifyToken, extractToken))
 // Workflow router — commitEventHandler is set after engine init, but the
 // router closure captures the variable reference so it will resolve correctly.
 app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessions, commitEventState))
+app.use(createShepherdRouter(verifyToken, extractToken, sessions))
 
 // --- SPA fallback: serve index.html for non-API routes (client-side routing) ---
 if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
@@ -465,6 +468,13 @@ server.listen(port, '0.0.0.0', () => {
 
   // Auto-restart sessions that were active before the server went down
   sessions.restoreActiveSessions()
+
+  // Start the Shepherd orchestrator session (always-on)
+  try {
+    ensureShepherdRunning(sessions)
+  } catch (err) {
+    console.error('[shepherd] Failed to start on boot:', err)
+  }
 
   // Initialize workflow engine
   try {

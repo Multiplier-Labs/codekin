@@ -142,6 +142,25 @@ export async function deleteSession(token: string, sessionId: string): Promise<v
   if (!res.ok) throw new Error(`Failed to delete session: ${res.status}`)
 }
 
+/** Get the Shepherd session status. */
+export async function getShepherdStatus(token: string): Promise<{ sessionId: string | null; status: string }> {
+  const res = await authFetch(`${BASE}/api/shepherd/status`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to get shepherd status: ${res.status}`)
+  return res.json()
+}
+
+/** Ensure the Shepherd session is running and return its session ID. */
+export async function startShepherd(token: string): Promise<{ sessionId: string; status: string }> {
+  const res = await authFetch(`${BASE}/api/shepherd/start`, {
+    method: 'POST',
+    headers: headers(token),
+  })
+  if (!res.ok) throw new Error(`Failed to start shepherd: ${res.status}`)
+  return res.json()
+}
+
 /** Upload a file via the server. Returns the server-side file path. */
 export async function uploadFile(token: string, file: File): Promise<string> {
   const form = new FormData()

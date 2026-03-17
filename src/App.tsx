@@ -30,6 +30,7 @@ import { LeftSidebar } from './components/LeftSidebar'
 import { MobileTopBar } from './components/MobileTopBar'
 import { TentativeBanner } from './components/TentativeBanner'
 import { WorkflowsView } from './components/WorkflowsView'
+import { ShepherdView } from './components/ShepherdView'
 import { CommandPalette } from './components/CommandPalette'
 import { InputBar, type InputBarHandle } from './components/InputBar'
 import { PromptButtons } from './components/PromptButtons'
@@ -382,6 +383,25 @@ export default function App() {
     return parts[parts.length - 1] || docsBrowser.repoWorkingDir
   }, [docsBrowser.repoWorkingDir])
 
+  // Shepherd: navigate to the orchestrator view
+  const shepherdSessionRef = useRef<string | null>(null)
+  const handleNavigateToShepherd = useCallback(() => {
+    navigate('/shepherd')
+    // If we already know the shepherd session ID, join it immediately
+    if (shepherdSessionRef.current) {
+      clearMessages()
+      leaveSession()
+      joinSession(shepherdSessionRef.current)
+    }
+  }, [navigate, clearMessages, leaveSession, joinSession])
+
+  const handleShepherdSessionReady = useCallback((sessionId: string) => {
+    shepherdSessionRef.current = sessionId
+    clearMessages()
+    leaveSession()
+    joinSession(sessionId)
+  }, [clearMessages, leaveSession, joinSession])
+
   // Docs browser: handle browse docs from sidebar
   const handleBrowseDocs = useCallback((workingDir: string) => {
     if (docsBrowser.pickerOpen && docsBrowser.pickerRepoDir === workingDir) {
@@ -438,6 +458,7 @@ export default function App() {
         onUpdateTheme={(theme) => updateSettings({ theme: theme as 'dark' | 'light' })}
         onSendModule={handleSendModule}
         onNavigateToWorkflows={() => navigate('/workflows')}
+        onNavigateToShepherd={() => handleNavigateToShepherd()}
         onBrowseDocs={handleBrowseDocs}
         docsPicker={{
           open: docsBrowser.pickerOpen,
@@ -482,8 +503,65 @@ export default function App() {
           </div>
         )}
 
-        {/* Main content: workflows view, docs browser, or chat */}
-        {view === 'workflows' ? (
+        {/* Main content: shepherd, workflows view, docs browser, or chat */}
+        {view === 'shepherd' ? (
+          <>
+            <ShepherdView
+              token={settings.token}
+              onShepherdSessionReady={handleShepherdSessionReady}
+            />
+            {/* Render chat UI once shepherd session is joined */}
+            {activeSessionId && (
+              <div className="flex flex-1 flex-col overflow-hidden min-h-0">
+                <div className="relative flex-1 min-h-0 flex flex-col">
+                  <ChatView
+                    messages={[...messages, ...tentativeMessages]}
+                    fontSize={settings.fontSize + (isMobile ? 1 : 0)}
+                    disabled={!settings.token}
+                    planningMode={planningMode}
+                    activityLabel={activityLabel}
+                    isMobile={isMobile}
+                  />
+                  <TodoPanel tasks={tasks} />
+                </div>
+                {activePrompt && (
+                  <PromptButtons
+                    key={activePrompt.requestId}
+                    options={activePrompt.options}
+                    question={activePrompt.question}
+                    multiSelect={activePrompt.multiSelect}
+                    promptType={activePrompt.promptType}
+                    questions={activePrompt.questions}
+                    approvePattern={activePrompt.approvePattern}
+                    onSelect={sendPromptResponse}
+                    isMobile={isMobile}
+                  />
+                )}
+                <InputBar
+                  key={`shepherd-${activeSessionId}`}
+                  ref={inputBarRef}
+                  onSendInput={handleSendWithFiles}
+                  isWaiting={!!activePrompt}
+                  disabled={!settings.token}
+                  onEscape={() => {}}
+                  pendingFiles={pendingFiles}
+                  onAddFiles={addFiles}
+                  onRemoveFile={removeFile}
+                  skillGroups={skillGroups}
+                  slashCommands={allCommands}
+                  placeholder="Talk to Shepherd..."
+                  initialValue=""
+                  onValueChange={() => {}}
+                  currentModel={currentModel}
+                  onModelChange={setModel}
+                  isMobile={isMobile}
+                  currentPermissionMode={currentPermissionMode}
+                  onPermissionModeChange={handlePermissionModeChange}
+                />
+              </div>
+            )}
+          </>
+        ) : view === 'workflows' ? (
           <WorkflowsView
             token={settings.token}
             onNavigateToSession={(sessionId) => {
