@@ -161,6 +161,63 @@ export async function startShepherd(token: string): Promise<{ sessionId: string;
   return res.json()
 }
 
+/** Get reports for a repo or since a date. */
+export async function getShepherdReports(token: string, opts: { repo?: string; since?: string }): Promise<{ reports: unknown[] }> {
+  const params = new URLSearchParams()
+  if (opts.repo) params.set('repo', opts.repo)
+  if (opts.since) params.set('since', opts.since)
+  const res = await authFetch(`${BASE}/api/shepherd/reports?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to get reports: ${res.status}`)
+  return res.json()
+}
+
+/** List Shepherd child sessions. */
+export async function getShepherdChildren(token: string): Promise<{ children: unknown[] }> {
+  const res = await authFetch(`${BASE}/api/shepherd/children`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to get children: ${res.status}`)
+  return res.json()
+}
+
+/** Spawn a Shepherd child session. */
+export async function spawnShepherdChild(token: string, request: {
+  repo: string; task: string; branchName: string;
+  completionPolicy?: string; deployAfter?: boolean; useWorktree?: boolean;
+}): Promise<{ child: unknown }> {
+  const res = await authFetch(`${BASE}/api/shepherd/children`, {
+    method: 'POST',
+    headers: headers(token),
+    body: JSON.stringify(request),
+  })
+  if (!res.ok) throw new Error(`Failed to spawn child: ${res.status}`)
+  return res.json()
+}
+
+/** Query Shepherd memory. */
+export async function queryShepherdMemory(token: string, opts?: { q?: string; type?: string; limit?: number }): Promise<{ items: unknown[] }> {
+  const params = new URLSearchParams()
+  if (opts?.q) params.set('q', opts.q)
+  if (opts?.type) params.set('type', opts.type)
+  if (opts?.limit) params.set('limit', String(opts.limit))
+  const res = await authFetch(`${BASE}/api/shepherd/memory?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to query memory: ${res.status}`)
+  return res.json()
+}
+
+/** Get Shepherd trust records. */
+export async function getShepherdTrust(token: string): Promise<{ records: unknown[] }> {
+  const res = await authFetch(`${BASE}/api/shepherd/trust`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to get trust records: ${res.status}`)
+  return res.json()
+}
+
 /** Upload a file via the server. Returns the server-side file path. */
 export async function uploadFile(token: string, file: File): Promise<string> {
   const form = new FormData()
