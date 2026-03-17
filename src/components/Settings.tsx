@@ -192,89 +192,92 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
 
           {/* ── Preferences ── */}
           <SectionCard icon={<IconPalette size={15} />} title="Preferences">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-              {/* Theme */}
-              <div>
-                <label className="mb-1.5 block text-[15px] text-neutral-4">Theme</label>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => onUpdate({ theme: 'dark' })}
-                    className={`rounded px-4 py-1.5 text-[15px] font-medium transition-colors ${
-                      settings.theme !== 'light'
-                        ? 'bg-primary-8 text-neutral-1'
-                        : 'border border-neutral-9 bg-neutral-10 text-neutral-3 hover:bg-neutral-9'
-                    }`}
-                  >
-                    Dark
-                  </button>
-                  <button
-                    onClick={() => onUpdate({ theme: 'light' })}
-                    className={`rounded px-4 py-1.5 text-[15px] font-medium transition-colors ${
-                      settings.theme === 'light'
-                        ? 'bg-primary-8 text-neutral-1'
-                        : 'border border-neutral-9 bg-neutral-10 text-neutral-3 hover:bg-neutral-9'
-                    }`}
-                  >
-                    Light
-                  </button>
+            <div className="space-y-5">
+
+              {/* ─ Appearance ─ */}
+              <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+                {/* Theme */}
+                <div>
+                  <label className="mb-1.5 block text-[15px] text-neutral-4">Theme</label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => onUpdate({ theme: 'dark' })}
+                      className={`rounded px-4 py-1.5 text-[15px] font-medium transition-colors ${
+                        settings.theme !== 'light'
+                          ? 'bg-primary-8 text-neutral-1'
+                          : 'border border-neutral-9 bg-neutral-10 text-neutral-3 hover:bg-neutral-9'
+                      }`}
+                    >
+                      Dark
+                    </button>
+                    <button
+                      onClick={() => onUpdate({ theme: 'light' })}
+                      className={`rounded px-4 py-1.5 text-[15px] font-medium transition-colors ${
+                        settings.theme === 'light'
+                          ? 'bg-primary-8 text-neutral-1'
+                          : 'border border-neutral-9 bg-neutral-10 text-neutral-3 hover:bg-neutral-9'
+                      }`}
+                    >
+                      Light
+                    </button>
+                  </div>
+                </div>
+
+                {/* Archived Session Retention */}
+                <div>
+                  <label className="mb-1.5 block text-[15px] text-neutral-4">
+                    <span className="flex items-center gap-1.5">
+                      <IconArchive size={14} className="text-neutral-5" />
+                      Archived Session Retention
+                    </span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={retentionDays}
+                      onChange={e => {
+                        const days = Math.max(1, Math.min(365, Number(e.target.value)))
+                        setRetentionDays(days)
+                        setRetentionDaysApi(settings.token, days).catch(() => setSaveError('Failed to save retention setting'))
+                      }}
+                      className="w-20 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
+                    />
+                    <span className="text-[15px] text-neutral-5">days</span>
+                  </div>
+                  <p className="mt-1 text-[13px] text-neutral-6">Auto-delete archived sessions older than this</p>
                 </div>
               </div>
 
-              {/* Archived Session Retention */}
+              <div className="border-t border-neutral-9/40" />
+
+              {/* ─ Sessions ─ */}
               <div>
-                <label className="mb-1.5 block text-[15px] text-neutral-4">
-                  <span className="flex items-center gap-1.5">
-                    <IconArchive size={14} className="text-neutral-5" />
-                    Archived Session Retention
-                  </span>
-                </label>
-                <div className="flex items-center gap-2">
+                <label className="flex items-center gap-2.5 cursor-pointer group">
                   <input
-                    type="number"
-                    min={1}
-                    max={365}
-                    value={retentionDays}
+                    type="checkbox"
+                    checked={queueMessages}
                     onChange={e => {
-                      const days = Math.max(1, Math.min(365, Number(e.target.value)))
-                      setRetentionDays(days)
-                      setRetentionDaysApi(settings.token, days).catch(() => setSaveError('Failed to save retention setting'))
-                    }}
-                    className="w-20 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
-                  />
-                  <span className="text-[15px] text-neutral-5">days</span>
-                </div>
-                <p className="mt-1 text-[13px] text-neutral-6">Auto-delete archived sessions older than this</p>
-              </div>
-
-              {/* Queue Messages */}
-              <div className="col-span-2">
-                <label className="mb-1.5 block text-[15px] text-neutral-4">Queue Messages</label>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => {
-                      const next = !queueMessages
+                      const next = e.target.checked
                       setQueueMessages(next)
                       setQueueMessagesApi(settings.token, next).catch(() => setSaveError('Failed to save queue messages setting'))
                     }}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
-                      queueMessages ? 'bg-primary-7' : 'bg-neutral-8'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${
-                        queueMessages ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                  <span className="text-[15px] text-neutral-4">{queueMessages ? 'On' : 'Off'}</span>
-                </div>
-                <p className="mt-1 text-[13px] text-neutral-6">
+                    className="h-4 w-4 rounded border-neutral-7 bg-neutral-10 text-primary-7 accent-primary-7 cursor-pointer"
+                  />
+                  <span className="text-[15px] text-neutral-4 group-hover:text-neutral-3 transition-colors">
+                    Queue messages across sessions
+                  </span>
+                </label>
+                <p className="mt-1 ml-[26px] text-[13px] text-neutral-6">
                   When enabled, messages sent while another session for the same repo is processing will be queued and sent automatically when it finishes.
                 </p>
               </div>
 
-              {/* Repos Path — full width */}
-              <div className="col-span-2">
+              <div className="border-t border-neutral-9/40" />
+
+              {/* ─ Repository ─ */}
+              <div className="space-y-4">
                 <FolderPicker
                   value={reposPath}
                   token={settings.token}
@@ -286,42 +289,40 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                     setReposPath(p)
                   }}
                 />
-              </div>
 
-              {/* Auto-enable Worktrees */}
-              <div className="col-span-2">
-                <label className="flex items-center gap-2.5 cursor-pointer group">
-                  <input
-                    type="checkbox"
-                    checked={autoWorktree}
-                    onChange={e => onAutoWorktreeChange?.(e.target.checked)}
-                    className="h-4 w-4 rounded border-neutral-7 bg-neutral-10 text-primary-7 accent-primary-7 cursor-pointer"
-                  />
-                  <span className="flex items-center gap-1.5 text-[15px] text-neutral-4 group-hover:text-neutral-3 transition-colors">
-                    <IconGitBranch size={14} className="text-neutral-5" />
-                    Auto-enable worktrees for new sessions
-                  </span>
-                </label>
-                <p className="mt-1 ml-[26px] text-[13px] text-neutral-6">When enabled, new sessions will automatically start in a git worktree</p>
-              </div>
-
-              {/* Worktree Branch Prefix */}
-              <div className="col-span-2">
-                <label className="mb-1.5 block text-[15px] text-neutral-4">Worktree Branch Prefix</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={worktreePrefix}
-                    onChange={e => {
-                      const val = e.target.value
-                      setWorktreePrefix(val)
-                      setWorktreePrefixApi(settings.token, val).catch(() => setSaveError('Failed to save worktree prefix'))
-                    }}
-                    placeholder="wt/"
-                    className="w-40 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
-                  />
+                <div>
+                  <label className="flex items-center gap-2.5 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={autoWorktree}
+                      onChange={e => onAutoWorktreeChange?.(e.target.checked)}
+                      className="h-4 w-4 rounded border-neutral-7 bg-neutral-10 text-primary-7 accent-primary-7 cursor-pointer"
+                    />
+                    <span className="flex items-center gap-1.5 text-[15px] text-neutral-4 group-hover:text-neutral-3 transition-colors">
+                      <IconGitBranch size={14} className="text-neutral-5" />
+                      Auto-enable worktrees for new sessions
+                    </span>
+                  </label>
+                  <p className="mt-1 ml-[26px] text-[13px] text-neutral-6">When enabled, new sessions will automatically start in a git worktree</p>
                 </div>
-                <p className="mt-1 text-[13px] text-neutral-6">Prefix for worktree branch names (e.g. wt/ → wt/abc12345)</p>
+
+                <div>
+                  <label className="mb-1.5 block text-[15px] text-neutral-4">Worktree Branch Prefix</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={worktreePrefix}
+                      onChange={e => {
+                        const val = e.target.value
+                        setWorktreePrefix(val)
+                        setWorktreePrefixApi(settings.token, val).catch(() => setSaveError('Failed to save worktree prefix'))
+                      }}
+                      placeholder="wt/"
+                      className="w-40 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
+                    />
+                  </div>
+                  <p className="mt-1 text-[13px] text-neutral-6">Prefix for worktree branch names (e.g. wt/ → wt/abc12345)</p>
+                </div>
               </div>
 
             </div>
