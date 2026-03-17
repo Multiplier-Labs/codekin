@@ -509,6 +509,7 @@ export default function App() {
             <ShepherdView
               token={settings.token}
               onShepherdSessionReady={handleShepherdSessionReady}
+              sessionJoined={!!activeSessionId}
             />
             {/* Render chat UI once shepherd session is joined */}
             {activeSessionId && (

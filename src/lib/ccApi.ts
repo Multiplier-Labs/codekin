@@ -218,6 +218,24 @@ export async function getShepherdTrust(token: string): Promise<{ records: unknow
   return res.json()
 }
 
+/** Get Shepherd dashboard stats. */
+export async function getShepherdDashboard(token: string): Promise<{ stats: Record<string, number> }> {
+  const res = await authFetch(`${BASE}/api/shepherd/dashboard`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to get dashboard: ${res.status}`)
+  return res.json()
+}
+
+/** Get Shepherd notifications. */
+export async function getShepherdNotifications(token: string, all = false): Promise<{ notifications: unknown[] }> {
+  const res = await authFetch(`${BASE}/api/shepherd/notifications?all=${all}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to get notifications: ${res.status}`)
+  return res.json()
+}
+
 /** Upload a file via the server. Returns the server-side file path. */
 export async function uploadFile(token: string, file: File): Promise<string> {
   const form = new FormData()

@@ -41,6 +41,7 @@ import { createUploadRouter } from './upload-routes.js'
 import { createDocsRouter } from './docs-routes.js'
 import { createShepherdRouter } from './shepherd-routes.js'
 import { ensureShepherdRunning } from './shepherd-manager.js'
+import { ShepherdMonitor } from './shepherd-monitor.js'
 import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST } from './config.js'
 
 // ---------------------------------------------------------------------------
@@ -274,7 +275,9 @@ app.use(createDocsRouter(verifyToken, extractToken))
 // Workflow router — commitEventHandler is set after engine init, but the
 // router closure captures the variable reference so it will resolve correctly.
 app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessions, commitEventState))
-app.use(createShepherdRouter(verifyToken, extractToken, sessions))
+// Shepherd router — monitorRef is populated after workflow engine init
+const shepherdMonitorRef: { current: ShepherdMonitor | null } = { current: null }
+app.use(createShepherdRouter(verifyToken, extractToken, sessions, shepherdMonitorRef))
 
 // --- SPA fallback: serve index.html for non-API routes (client-side routing) ---
 if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
@@ -513,6 +516,12 @@ server.listen(port, '0.0.0.0', () => {
       ensureHookConfig(authToken, serverUrl)
       syncCommitHooks()
     }
+
+    // Start Shepherd proactive monitor with workflow engine events
+    const monitor = new ShepherdMonitor(sessions)
+    monitor.setEngine(engine)
+    monitor.start()
+    shepherdMonitorRef.current = monitor
 
     console.log('[workflow] Workflow engine ready')
   } catch (err) {

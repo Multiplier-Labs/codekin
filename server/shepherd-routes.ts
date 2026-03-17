@@ -12,6 +12,7 @@ import { ensureShepherdRunning, getShepherdSessionId } from './shepherd-manager.
 import { scanRepoReports, readReport, getReportsSince } from './shepherd-reports.js'
 import { ShepherdMemory } from './shepherd-memory.js'
 import { ShepherdChildManager } from './shepherd-children.js'
+import type { ShepherdMonitor } from './shepherd-monitor.js'
 
 type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
@@ -20,6 +21,7 @@ export function createShepherdRouter(
   verifyToken: VerifyFn,
   extractToken: ExtractFn,
   sessions: SessionManager,
+  monitorRef?: { current: ShepherdMonitor | null },
 ): Router {
   const router = Router()
   const memory = new ShepherdMemory()
@@ -286,6 +288,63 @@ export function createShepherdRouter(
 
     memory.resetAllTrust()
     res.json({ ok: true })
+  })
+
+  // -------------------------------------------------------------------------
+  // Notifications
+  // -------------------------------------------------------------------------
+
+  /** Get pending notifications from the monitor. */
+  router.get('/api/shepherd/notifications', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const monitor = monitorRef?.current
+    if (!monitor) return res.json({ notifications: [] })
+
+    const all = req.query.all === 'true'
+    res.json({ notifications: all ? monitor.getAll() : monitor.getPending() })
+  })
+
+  /** Mark notifications as delivered. */
+  router.post('/api/shepherd/notifications/mark-delivered', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const monitor = monitorRef?.current
+    if (!monitor) return res.json({ ok: true })
+
+    const { ids } = req.body
+    if (Array.isArray(ids)) monitor.markDelivered(ids)
+    res.json({ ok: true })
+  })
+
+  // -------------------------------------------------------------------------
+  // Dashboard stats
+  // -------------------------------------------------------------------------
+
+  /** Get summary stats for the dashboard header. */
+  router.get('/api/shepherd/dashboard', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const repoItems = memory.list({ memoryType: 'repo_context' })
+    const pendingNotifications = monitorRef?.current?.getPending() ?? []
+    const activeChildren = children.activeCount()
+    const trustRecords = memory.listTrustRecords()
+    const autoApproved = trustRecords.filter(t => t.effectiveLevel !== 'ask').length
+
+    res.json({
+      stats: {
+        managedRepos: repoItems.length,
+        pendingNotifications: pendingNotifications.length,
+        activeChildSessions: activeChildren,
+        totalChildSessions: children.list().length,
+        trustRecords: trustRecords.length,
+        autoApprovedActions: autoApproved,
+        memoryItems: memory.list().length,
+      },
+    })
   })
 
   return router
