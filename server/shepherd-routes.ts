@@ -13,6 +13,13 @@ import { scanRepoReports, readReport, getReportsSince } from './shepherd-reports
 import { ShepherdMemory } from './shepherd-memory.js'
 import { ShepherdChildManager } from './shepherd-children.js'
 import type { ShepherdMonitor } from './shepherd-monitor.js'
+import {
+  extractMemoryCandidates, smartUpsert, runAgingCycle,
+  recordFindingOutcome, getTriageRecommendation,
+  loadSkillProfile, updateSkillLevel, getGuidanceStyle,
+  recordDecision, assessDecisionOutcome, getPendingOutcomeAssessments,
+  type FindingOutcome,
+} from './shepherd-learning.js'
 
 type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
@@ -345,6 +352,145 @@ export function createShepherdRouter(
         memoryItems: memory.list().length,
       },
     })
+  })
+
+  // -------------------------------------------------------------------------
+  // Memory extraction & learning (Phase 4)
+  // -------------------------------------------------------------------------
+
+  /** Extract memory candidates from a session interaction. */
+  router.post('/api/shepherd/memory/extract', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const { userMessage, assistantResponse, repo, sourceRef } = req.body
+    if (!userMessage || !assistantResponse) {
+      return res.status(400).json({ error: 'Missing required fields: userMessage, assistantResponse' })
+    }
+
+    const candidates = extractMemoryCandidates(userMessage, assistantResponse, repo ?? null)
+    const results = candidates.map(c => smartUpsert(memory, c, sourceRef ?? null))
+
+    res.json({ candidates: candidates.length, results })
+  })
+
+  /** Run the aging/decay cycle. */
+  router.post('/api/shepherd/memory/age', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const result = runAgingCycle(memory)
+    res.json(result)
+  })
+
+  // -------------------------------------------------------------------------
+  // Finding outcomes & triage recommendations
+  // -------------------------------------------------------------------------
+
+  /** Record a finding outcome. */
+  router.post('/api/shepherd/findings/outcome', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const { findingId, repo, category, severity, action, reason, sessionId, outcome } = req.body
+    if (!findingId || !repo || !category || !action) {
+      return res.status(400).json({ error: 'Missing required fields' })
+    }
+
+    const id = recordFindingOutcome(memory, {
+      findingId, repo, category,
+      severity: severity ?? 'medium',
+      action, reason: reason ?? '',
+      sessionId: sessionId ?? null,
+      outcome: outcome ?? null,
+      timestamp: new Date().toISOString(),
+    } as FindingOutcome)
+
+    res.json({ id })
+  })
+
+  /** Get triage recommendation based on historical patterns. */
+  router.get('/api/shepherd/findings/recommend', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const { category, severity, repo } = req.query as Record<string, string>
+    if (!category) return res.status(400).json({ error: 'Provide ?category=X' })
+
+    const recommendation = getTriageRecommendation(memory, category, severity ?? 'medium', repo ?? null)
+    res.json(recommendation)
+  })
+
+  // -------------------------------------------------------------------------
+  // User skill model
+  // -------------------------------------------------------------------------
+
+  /** Get the user's skill profile. */
+  router.get('/api/shepherd/skills', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+
+    res.json({
+      profile: loadSkillProfile(),
+      guidanceStyle: getGuidanceStyle(),
+    })
+  })
+
+  /** Update a skill level based on an observed signal. */
+  router.post('/api/shepherd/skills', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const { domain, signal, level } = req.body
+    if (!domain || !signal || !level) {
+      return res.status(400).json({ error: 'Missing required fields: domain, signal, level' })
+    }
+
+    const updated = updateSkillLevel(domain, signal, level)
+    res.json({ skill: updated, guidanceStyle: getGuidanceStyle() })
+  })
+
+  // -------------------------------------------------------------------------
+  // Decision history
+  // -------------------------------------------------------------------------
+
+  /** Record a decision. */
+  router.post('/api/shepherd/decisions', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const { decision, rationale, repo, relatedFinding, expectedOutcome } = req.body
+    if (!decision || !rationale) {
+      return res.status(400).json({ error: 'Missing required fields: decision, rationale' })
+    }
+
+    const id = recordDecision(memory, {
+      decision, rationale,
+      repo: repo ?? null,
+      relatedFinding: relatedFinding ?? null,
+      expectedOutcome: expectedOutcome ?? '',
+    })
+    res.json({ id })
+  })
+
+  /** Assess a decision's outcome. */
+  router.post('/api/shepherd/decisions/:id/assess', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const { actualOutcome } = req.body
+    if (!actualOutcome) return res.status(400).json({ error: 'Missing required field: actualOutcome' })
+
+    const updated = assessDecisionOutcome(memory, req.params.id, actualOutcome)
+    res.json({ updated })
+  })
+
+  /** Get decisions pending outcome assessment. */
+  router.get('/api/shepherd/decisions/pending', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+
+    res.json({ decisions: getPendingOutcomeAssessments(memory) })
   })
 
   return router

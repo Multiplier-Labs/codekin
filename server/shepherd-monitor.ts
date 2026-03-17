@@ -11,6 +11,8 @@ import { join } from 'path'
 import type { SessionManager } from './session-manager.js'
 import type { WorkflowEngine, WorkflowEvent } from './workflow-engine.js'
 import { scanRepoReports } from './shepherd-reports.js'
+import { ShepherdMemory } from './shepherd-memory.js'
+import { runAgingCycle, getPendingOutcomeAssessments } from './shepherd-learning.js'
 import { getShepherdSessionId } from './shepherd-manager.js'
 import { REPOS_ROOT } from './config.js'
 
@@ -37,8 +39,10 @@ const PASSIVE_THRESHOLD_DAYS = 30
 export class ShepherdMonitor {
   private sessions: SessionManager
   private pollTimer: ReturnType<typeof setInterval> | null = null
+  private agingTimer: ReturnType<typeof setInterval> | null = null
   private notifications: ShepherdNotification[] = []
   private seenReports = new Set<string>()
+  private memory: ShepherdMemory | null = null
 
   constructor(sessions: SessionManager) {
     this.sessions = sessions
@@ -49,6 +53,11 @@ export class ShepherdMonitor {
     engine.on('workflow_event', (event: WorkflowEvent) => {
       this.handleWorkflowEvent(event)
     })
+  }
+
+  /** Set the memory store for aging and decision tracking. */
+  setMemory(memory: ShepherdMemory): void {
+    this.memory = memory
   }
 
   /** Start the periodic poll. */
@@ -62,6 +71,11 @@ export class ShepherdMonitor {
     this.pollTimer = setInterval(() => {
       void this.poll()
     }, POLL_INTERVAL_MS)
+
+    // Run aging cycle daily (check every 6 hours)
+    this.agingTimer = setInterval(() => {
+      this.runAgingAndAssessments()
+    }, 6 * 60 * 60 * 1000)
   }
 
   /** Stop the monitor. */
@@ -69,6 +83,10 @@ export class ShepherdMonitor {
     if (this.pollTimer) {
       clearInterval(this.pollTimer)
       this.pollTimer = null
+    }
+    if (this.agingTimer) {
+      clearInterval(this.agingTimer)
+      this.agingTimer = null
     }
   }
 
@@ -92,6 +110,30 @@ export class ShepherdMonitor {
   // -------------------------------------------------------------------------
   // Internal
   // -------------------------------------------------------------------------
+
+  /** Run aging cycle and check for pending decision assessments. */
+  private runAgingAndAssessments(): void {
+    if (!this.memory) return
+
+    try {
+      const agingResult = runAgingCycle(this.memory)
+      if (agingResult.expired > 0 || agingResult.compacted > 0) {
+        console.log(`[shepherd-monitor] Aging cycle: ${agingResult.expired} expired, ${agingResult.compacted} compacted, ${agingResult.decayed} decayed`)
+      }
+
+      // Check for decisions that need outcome assessment
+      const pending = getPendingOutcomeAssessments(this.memory)
+      if (pending.length > 0) {
+        this.addNotification({
+          severity: 'info',
+          title: 'Decisions need review',
+          body: `${pending.length} decision(s) from over a week ago need outcome assessment. Ask me to review them.`,
+        })
+      }
+    } catch (err) {
+      console.error('[shepherd-monitor] Aging cycle error:', err)
+    }
+  }
 
   /** Initial scan — populate the set of already-seen reports. */
   private async initialScan(): Promise<void> {
