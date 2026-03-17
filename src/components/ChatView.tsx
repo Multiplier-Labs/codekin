@@ -18,6 +18,8 @@ import { IconArrowDown } from '@tabler/icons-react'
 import type { ChatMessage } from '../types'
 import { formatModelName, formatUserText } from '../lib/chatFormatters'
 
+export type ChatViewVariant = 'default' | 'joe'
+
 interface Props {
   messages: ChatMessage[]
   fontSize: number
@@ -25,6 +27,8 @@ interface Props {
   planningMode?: boolean
   activityLabel?: string
   isMobile?: boolean
+  /** Visual variant — 'joe' uses accent colors for assistant messages and indicators. */
+  variant?: ChatViewVariant
 }
 
 function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
@@ -99,9 +103,9 @@ function highlightCode(code: string, lang: string): string {
   return code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-function AssistantMessage({ msg, fontSize }: { msg: ChatMessage & { type: 'assistant' }; fontSize: number }) {
+function AssistantMessage({ msg, fontSize, variant = 'default' }: { msg: ChatMessage & { type: 'assistant' }; fontSize: number; variant?: ChatViewVariant }) {
   return (
-    <div className="px-4 py-2">
+    <div className={`px-4 py-2 ${variant === 'joe' ? 'joe-assistant-msg' : ''}`}>
       <div
         className="prose prose-themed max-w-none"
         style={{ fontSize: `${fontSize}px` }}
@@ -308,7 +312,7 @@ function PlanningModeMessage({ msg }: { msg: ChatMessage & { type: 'planning_mod
   )
 }
 
-function ActivityIndicator({ label }: { label: string }) {
+function ActivityIndicator({ label, variant = 'default' }: { label: string; variant?: ChatViewVariant }) {
   const [elapsed, setElapsed] = useState(0)
   const startRef = useRef(0)
 
@@ -334,7 +338,7 @@ function ActivityIndicator({ label }: { label: string }) {
           strokeWidth="2.2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          style={{ color: 'var(--color-primary-7)' }}
+          style={{ color: variant === 'joe' ? 'var(--color-accent-7)' : 'var(--color-primary-7)' }}
         >
           <path d="M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0" />
           <path d="M12 21l0 .01" />
@@ -353,7 +357,7 @@ function ActivityIndicator({ label }: { label: string }) {
   )
 }
 
-export function ChatView({ messages, fontSize, disabled, planningMode, activityLabel, isMobile }: Props) {
+export function ChatView({ messages, fontSize, disabled, planningMode, activityLabel, isMobile, variant = 'default' }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
   const isNearBottomRef = useRef(true)
@@ -445,7 +449,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                 case 'user':
                   node = <UserMessage key={msg.key || i} msg={msg} fontSize={fontSize} isMobile={isMobile} />; break
                 case 'assistant':
-                  node = <AssistantMessage key={msg.key || i} msg={msg} fontSize={fontSize} />; break
+                  node = <AssistantMessage key={msg.key || i} msg={msg} fontSize={fontSize} variant={variant} />; break
                 case 'planning_mode':
                   node = <PlanningModeMessage key={msg.key || i} msg={msg} />; break
                 case 'todo_list':
@@ -458,7 +462,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
             }
             return nodes
           })()}
-          {activityLabel && <ActivityIndicator label={activityLabel} />}
+          {activityLabel && <ActivityIndicator label={activityLabel} variant={variant} />}
         </div>
       </div>
 

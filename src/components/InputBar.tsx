@@ -42,6 +42,8 @@ export interface InputBarHandle {
   insertText: (text: string) => void
 }
 
+export type InputBarVariant = 'default' | 'joe'
+
 interface InputBarProps {
   onSendInput: (data: string) => void
   /** True when Claude is waiting for user input (prompt mode). */
@@ -75,9 +77,12 @@ interface InputBarProps {
   onMoveToWorktree?: () => void
   /** Worktree path if the session is in a worktree (falsy = not in worktree). */
   worktreePath?: string | null
+  /** Visual variant — 'joe' strips toolbar to attach+send only with accent theme. */
+  variant?: InputBarVariant
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
+  const isJoe = variant === 'joe'
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
@@ -96,8 +101,10 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const permMenuRef = useRef<HTMLDivElement>(null)
   const modelMenuRef = useRef<HTMLDivElement>(null)
   const MOBILE_HEIGHT = 100
+  const JOE_HEIGHT = 90
   const [height, setHeight] = useState(() => {
     if (isMobile) return MOBILE_HEIGHT
+    if (isJoe) return JOE_HEIGHT
     const stored = localStorage.getItem(INPUT_HEIGHT_KEY)
     return stored ? Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, parseInt(stored, 10))) : DEFAULT_HEIGHT
   })
@@ -273,11 +280,11 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     setPermMenuOpen(false)
   }, [onPermissionModeChange])
 
-  const hasSkills = skillGroups && skillGroups.some(g => g.skills.length > 0)
-  const hasSlashCommands = slashCommands && slashCommands.length > 0
+  const hasSkills = !isJoe && skillGroups && skillGroups.some(g => g.skills.length > 0)
+  const hasSlashCommands = !isJoe && slashCommands && slashCommands.length > 0
 
   return (
-    <div className="app-input-bar relative flex flex-col border-t border-l border-neutral-9 bg-neutral-10" style={isMobile ? { minHeight: MOBILE_HEIGHT } : { height }}>
+    <div className={`app-input-bar relative flex flex-col border-l bg-neutral-10 ${isJoe ? 'joe-input-bar border-t-2 border-accent-7' : 'border-t border-neutral-9'}`} style={isMobile ? { minHeight: MOBILE_HEIGHT } : { height }}>
       <DropZone onUpload={onAddFiles} disabled={disabled} />
 
       {/* Slash autocomplete popup */}
@@ -290,8 +297,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         />
       )}
 
-      {/* Drag handle — desktop only */}
-      {!isMobile && (
+      {/* Drag handle — desktop only, hidden for joe variant */}
+      {!isMobile && !isJoe && (
         <div
           className="h-1 flex-shrink-0 cursor-row-resize hover:bg-primary-7/40 active:bg-primary-7/60 transition-colors"
           onMouseDown={onDragStart}
@@ -323,7 +330,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       {/* Textarea — full width */}
       <div className="flex flex-1 min-h-0 gap-2 px-3 pt-2 pb-1">
         {isWaiting && (
-          <span className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-primary-5 animate-pulse" />
+          <span className={`mt-1 h-2 w-2 flex-shrink-0 rounded-full animate-pulse ${isJoe ? 'bg-accent-5' : 'bg-primary-5'}`} />
         )}
         <textarea
           ref={textareaRef}
@@ -332,7 +339,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           onKeyDown={handleKeyDown}
           disabled={disabled}
           autoFocus
-          placeholder={placeholder ?? (isWaiting ? 'Type response...' : 'What do you want to build?')}
+          placeholder={placeholder ?? (isJoe ? 'Ask Joe...' : isWaiting ? 'Type response...' : 'What do you want to build?')}
           className={`flex-1 min-h-0 resize-none bg-transparent ${isMobile ? 'text-[16px]' : 'text-[15px]'} leading-snug text-neutral-1 placeholder:text-neutral-5 outline-none disabled:opacity-50 overflow-y-auto`}
         />
         <input
@@ -348,7 +355,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       {/* Toolbar row — selectors left, action buttons right */}
       <div className="flex flex-shrink-0 items-center justify-between px-3 pb-2 pt-0">
         {/* Desktop: selectors + action buttons */}
-        {!isMobile && (
+        {!isMobile && !isJoe && (
           <>
             <div className="flex items-center gap-1">
               {/* Permission mode selector */}
@@ -515,8 +522,41 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           </>
         )}
 
+        {/* Joe variant: minimal toolbar — badge + attach + pill send */}
+        {!isMobile && isJoe && (
+          <>
+            <div className="flex items-center gap-1">
+              <span className="joe-badge flex items-center gap-1.5 rounded-full bg-accent-9/40 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-accent-5">
+                Joe
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={handleFileSelect}
+                disabled={disabled}
+                className="flex items-center justify-center rounded-full p-1.5 text-neutral-4 hover:text-accent-4 hover:bg-accent-9/30 transition-colors disabled:opacity-30"
+                title="Attach files"
+              >
+                <IconPaperclip size={16} stroke={2} />
+              </button>
+              <button
+                onClick={handleSend}
+                disabled={disabled || (!value.trim() && pendingFiles.length === 0)}
+                className={`flex items-center justify-center rounded-full px-3 py-1 transition-colors disabled:opacity-30 ${
+                  value.trim() || pendingFiles.length > 0
+                    ? 'bg-accent-7 text-neutral-1 hover:bg-accent-6'
+                    : 'text-neutral-5'
+                }`}
+                title="Send (Enter)"
+              >
+                <IconSend size={16} stroke={2} />
+              </button>
+            </div>
+          </>
+        )}
+
         {/* Mobile: context menu (...) + send button only */}
-        {isMobile && (
+        {isMobile && !isJoe && (
           <>
             <div className="flex-1" />
             <div className="flex items-center gap-1.5">
@@ -615,6 +655,37 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 className={`flex items-center justify-center rounded min-w-[34px] min-h-[34px] p-1.5 transition-colors disabled:opacity-30 ${
                   value.trim() || pendingFiles.length > 0
                     ? 'bg-primary-8 text-neutral-1 hover:bg-primary-7'
+                    : 'text-neutral-5'
+                }`}
+                title="Send (Enter)"
+              >
+                <IconSend size={24} stroke={2} />
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Mobile Joe: badge + attach + pill send */}
+        {isMobile && isJoe && (
+          <>
+            <span className="joe-badge flex items-center gap-1.5 rounded-full bg-accent-9/40 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-accent-5">
+              Joe
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={handleFileSelect}
+                disabled={disabled}
+                className="flex items-center justify-center rounded-full min-w-[34px] min-h-[34px] p-1.5 text-neutral-4 hover:text-accent-4 hover:bg-accent-9/30 transition-colors disabled:opacity-30"
+                title="Attach files"
+              >
+                <IconPaperclip size={24} stroke={2} />
+              </button>
+              <button
+                onClick={handleSend}
+                disabled={disabled || (!value.trim() && pendingFiles.length === 0)}
+                className={`flex items-center justify-center rounded-full min-w-[34px] min-h-[34px] p-1.5 transition-colors disabled:opacity-30 ${
+                  value.trim() || pendingFiles.length > 0
+                    ? 'bg-accent-7 text-neutral-1 hover:bg-accent-6'
                     : 'text-neutral-5'
                 }`}
                 title="Send (Enter)"

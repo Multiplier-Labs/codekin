@@ -535,6 +535,35 @@ html, body, #root {
   font-family: 'Lato', sans-serif;
 }
 
+/* ── Joe variant — accent-themed agent chat ────────────────────────────── */
+
+/* Input bar top border glow */
+.joe-input-bar {
+  border-top-color: var(--color-accent-7);
+  box-shadow: inset 0 2px 8px -4px color-mix(in srgb, var(--color-accent-7) 30%, transparent);
+}
+
+/* Joe badge pill */
+.joe-badge {
+  letter-spacing: 0.08em;
+}
+
+/* Assistant message — subtle left accent bar */
+.joe-assistant-msg {
+  border-left: 2px solid var(--color-accent-8);
+  padding-left: 1rem;
+  margin-left: 0.25rem;
+}
+
+/* Override prose link color inside joe assistant messages */
+.joe-assistant-msg .prose.prose-themed a {
+  color: var(--color-accent-5);
+}
+
+[data-theme="light"] .joe-input-bar {
+  box-shadow: inset 0 2px 8px -4px color-mix(in srgb, var(--color-accent-5) 20%, transparent);
+}
+
 /* ── Safe area insets for notched devices ──────────────────────────────── */
 /* Applied via viewport-fit=cover in the HTML meta tag. */
 
