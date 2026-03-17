@@ -46,7 +46,7 @@ export function SkillMenu({ groups, onSelectSkill, onClose }: Props) {
   return (
     <div
       ref={ref}
-      className="absolute bottom-full left-0 mb-1 w-56 rounded-lg border border-neutral-6 bg-neutral-8 py-1 shadow-lg z-50"
+      className="absolute bottom-full right-0 mb-1 w-56 rounded-lg border border-neutral-6 bg-neutral-8 py-1 shadow-lg z-50"
     >
       <div className="px-3 py-1.5 text-[13px] font-semibold text-neutral-3 border-b border-neutral-7 mb-1">
         Claude Skills
