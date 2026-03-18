@@ -194,7 +194,7 @@ export class WorkflowEngine extends EventEmitter {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
     const resolvedPath = dbPath ?? join(dir, 'workflows.db')
     this.db = new Database(resolvedPath, { fileMustExist: false })
-    chmodSync(resolvedPath, 0o600)
+    if (resolvedPath !== ':memory:' && existsSync(resolvedPath)) chmodSync(resolvedPath, 0o600)
     this.db.pragma('journal_mode = WAL')
     this.createTables()
   }

@@ -43,8 +43,9 @@ export class SessionArchive {
 
   constructor(dbPath?: string) {
     if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true })
-    this.db = new Database(dbPath ?? DB_PATH)
-    chmodSync(dbPath ?? DB_PATH, 0o600)
+    const resolvedPath = dbPath ?? DB_PATH
+    this.db = new Database(resolvedPath)
+    if (resolvedPath !== ':memory:' && existsSync(resolvedPath)) chmodSync(resolvedPath, 0o600)
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('foreign_keys = ON')
     this.initSchema()
