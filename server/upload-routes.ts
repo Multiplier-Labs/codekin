@@ -9,7 +9,7 @@ import { Router } from 'express'
 import type { Request } from 'express'
 import multer from 'multer'
 import { mkdirSync, existsSync, readFileSync, readdirSync } from 'fs'
-import { join, extname } from 'path'
+import { join, extname, resolve, sep } from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { homedir } from 'os'
@@ -285,6 +285,12 @@ export function createUploadRouter(
 
     const reposRoot = resolveReposRoot()
     const dest = join(reposRoot, name)
+    // Boundary check: ensure resolved dest stays within REPOS_ROOT
+    const resolvedDest = resolve(dest)
+    if (!resolvedDest.startsWith(reposRoot + sep) && resolvedDest !== reposRoot) {
+      res.status(400).json({ error: 'Path escapes allowed root' })
+      return
+    }
     if (existsSync(dest)) {
       res.json({ success: true, path: dest })
       return

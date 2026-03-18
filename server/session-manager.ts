@@ -239,7 +239,7 @@ export class SessionManager {
       // original session unless we copy it across.
       if (session.claudeSessionId) {
         try {
-          this.copyClaudeSessionData(session.claudeSessionId, workingDir, worktreePath)
+          this.copyClaudeSessionData(session.claudeSessionId, workingDir, worktreePath, session)
         } catch (err) {
           console.warn(`[worktree] Failed to copy session data:`, err instanceof Error ? err.message : err)
         }
@@ -270,7 +270,7 @@ export class SessionManager {
    * original project storage to the worktree project storage so the CLI
    * can resume conversation context after a worktree move.
    */
-  private copyClaudeSessionData(claudeSessionId: string, originalDir: string, worktreeDir: string): void {
+  private copyClaudeSessionData(claudeSessionId: string, originalDir: string, worktreeDir: string, session?: Session): void {
     const srcDir = this.claudeProjectPath(originalDir)
     const dstDir = this.claudeProjectPath(worktreeDir)
 
@@ -278,7 +278,16 @@ export class SessionManager {
     const srcJsonl = path.join(srcDir, jsonlFile)
 
     if (!existsSync(srcJsonl)) {
-      console.warn(`[worktree] No session JSONL at ${srcJsonl}, skipping copy`)
+      console.warn(`[worktree] No session JSONL at ${srcJsonl}, conversation history will not be preserved`)
+      if (session) {
+        const warningMsg: WsServerMessage = {
+          type: 'system_message',
+          subtype: 'notification',
+          text: 'Conversation history could not be preserved during worktree migration. The session will continue without prior context.',
+        }
+        this.addToHistory(session, warningMsg)
+        this.broadcast(session, warningMsg)
+      }
       return
     }
 
