@@ -233,18 +233,16 @@ export class SessionManager {
       session.workingDir = worktreePath
       session.worktreePath = worktreePath
 
-      // Migrate Claude CLI session data to a new session ID so the restarted
-      // process can resume conversation context without hitting a "Session ID
-      // already in use" lock conflict.  Claude CLI determines session storage
-      // from the CWD (not CLAUDE_PROJECT_DIR), so the JSONL must be copied
-      // into the worktree's project storage directory.
+      // Copy Claude CLI session data to the worktree's project storage dir.
+      // We keep the same session ID so the JSONL's internal sessionId fields
+      // match --session-id — using a new ID causes Claude to ignore the copied
+      // history because the internal IDs don't match the filename/flag.
+      // stopClaudeAndWait() releases the session lock before we get here,
+      // so there's no "Session ID already in use" conflict.
       if (session.claudeSessionId) {
         try {
-          const oldId = session.claudeSessionId
-          const newId = randomUUID()
-          this.migrateClaudeSession(oldId, newId, workingDir, worktreePath, session)
-          session.claudeSessionId = newId
-          console.log(`[worktree] Migrated Claude session ${oldId} → ${newId}`)
+          this.migrateClaudeSession(session.claudeSessionId, session.claudeSessionId, workingDir, worktreePath, session)
+          console.log(`[worktree] Copied Claude session ${session.claudeSessionId} to worktree project dir`)
         } catch (err) {
           console.warn(`[worktree] Failed to migrate session data:`, err instanceof Error ? err.message : err)
         }
@@ -271,8 +269,9 @@ export class SessionManager {
   }
 
   /**
-   * Migrate Claude CLI session data from the original project storage to
-   * the target directory's project storage under a new session ID.
+   * Copy Claude CLI session data from the original project storage to
+   * the target directory's project storage.  When oldId === newId the
+   * file is copied without renaming, preserving internal sessionId fields.
    * Claude CLI determines session storage from the CWD, so for worktree
    * migrations the JSONL must be placed in the worktree's project dir.
    */
