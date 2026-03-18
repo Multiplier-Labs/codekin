@@ -31,6 +31,25 @@ interface Props {
   variant?: ChatViewVariant
 }
 
+/** Try to parse an API error JSON from a system error message and return structured parts. */
+function parseApiError(text: string): { prefix: string; errorType: string; message: string; requestId?: string } | null {
+  // Match patterns like "Failed to authenticate. API Error: 401 {...}" or just "{...}" at the end
+  const jsonMatch = text.match(/^(.*?)\s*(\{.+\})\s*$/)
+  if (!jsonMatch) return null
+  try {
+    const parsed = JSON.parse(jsonMatch[2])
+    if (parsed?.error?.message) {
+      return {
+        prefix: jsonMatch[1].replace(/\s*$/, ''),
+        errorType: parsed.error.type || 'error',
+        message: parsed.error.message,
+        requestId: parsed.request_id,
+      }
+    }
+  } catch { /* not JSON */ }
+  return null
+}
+
 function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
   const colorClass = msg.subtype === 'init'
     ? 'text-success-5'
@@ -49,6 +68,26 @@ function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
     : 'bg-error-5'
 
   const modelLabel = msg.model ? ` (${formatModelName(msg.model)})` : ''
+
+  // Try to format API errors nicely
+  const apiError = msg.subtype === 'error' ? parseApiError(msg.text) : null
+
+  if (apiError) {
+    return (
+      <div className={`px-4 py-2 text-[15px] ${colorClass}`}>
+        <div className="flex items-center gap-2">
+          <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotClass} flex-shrink-0`} />
+          <span className="font-semibold">{apiError.prefix || 'API Error'}</span>
+        </div>
+        <div className="ml-3.5 mt-1 space-y-0.5 text-[14px] opacity-90">
+          <div>{apiError.message}</div>
+          {apiError.requestId && (
+            <div className="opacity-50 text-[12px] font-mono">Request ID: {apiError.requestId}</div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className={`px-4 py-1.5 text-[15px] ${colorClass} flex items-center gap-2`}>
