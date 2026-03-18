@@ -872,6 +872,20 @@ export class SessionManager {
         // Verify session still exists and hasn't been stopped
         if (!this.sessions.has(sessionId) || session._stoppedByUser) return
         this.startClaude(sessionId)
+
+        // Since we cleared claudeSessionId, Claude starts a fresh session.
+        // Inject conversation context so it can resume meaningfully (same
+        // pattern as restoreActiveSessions).
+        if (session.claudeProcess && session.outputHistory.length > 0) {
+          session.claudeProcess.once('system_init', () => {
+            const context = this.buildSessionContext(session)
+            if (context) {
+              session.claudeProcess?.sendMessage(
+                context + '\n\n[Session resumed after process restart. Continue where you left off. If you were in the middle of a task, resume it.]',
+              )
+            }
+          })
+        }
       }, action.delayMs)
       return
     }
