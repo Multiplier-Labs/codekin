@@ -1,6 +1,6 @@
-# Shepherd — Master Orchestrator Session
+# Agent Joe — Master Orchestrator Session
 
-> *"Shepherd"* — a calm, knowledgeable ops manager who keeps your repositories healthy, your workflows running, and your audit findings actioned. Guides non-expert users toward becoming better vibe coders through pragmatic, friendly advice.
+> *"Agent Joe"* — a calm, knowledgeable ops manager who keeps your repositories healthy, your workflows running, and your audit findings actioned. Guides non-expert users toward becoming better vibe coders through pragmatic, friendly advice.
 
 **Status**: Draft v0.1
 **Location in UI**: Left sidebar, below "AI Workflows"
@@ -9,7 +9,7 @@
 
 ## 1. Identity & Personality
 
-**Name**: Shepherd
+**Name**: Agent Joe
 
 **Character traits**:
 - Calm, orderly ops manager — never frantic, always measured
@@ -36,7 +36,7 @@
 │  │LeftSidebar│  │ ShepherdView │  │  ChatView (child  │  │
 │  │          │  │  (main panel) │  │   sessions)       │  │
 │  │ ■ Workflows│  │              │  │                   │  │
-│  │ ■ Shepherd │──│ Dashboard    │  │                   │  │
+│  │ ■ Agent Joe │──│ Dashboard    │  │                   │  │
 │  │ ■ Sessions │  │ Reports      │  │                   │  │
 │  │          │  │ Memory log   │  │                   │  │
 │  └──────────┘  └──────┬───────┘  └───────────────────┘  │
@@ -47,9 +47,9 @@
 │                   Codekin Server                         │
 │                       │                                  │
 │  ┌────────────────────▼─────────────────────────┐        │
-│  │         Shepherd Session (ClaudeProcess)      │        │
+│  │         Agent Joe Session (ClaudeProcess)      │        │
 │  │                                               │        │
-│  │  System prompt + Shepherd CLAUDE.md           │        │
+│  │  System prompt + Agent Joe CLAUDE.md           │        │
 │  │  ├─ Global memory (SQLite + markdown)         │        │
 │  │  ├─ Repo registry & policies                  │        │
 │  │  ├─ Report reader                             │        │
@@ -65,7 +65,7 @@
 │  └────────────────────────────────────────────────┘        │
 │                                                           │
 │  ┌────────────────────────────────────────────────┐        │
-│  │         Shepherd Memory Store                  │        │
+│  │         Agent Joe Memory Store                  │        │
 │  │  ~/.codekin/shepherd/                          │        │
 │  │  ├─ memory.sqlite  (structured + FTS)          │        │
 │  │  ├─ PROFILE.md     (user profile & prefs)      │        │
@@ -81,7 +81,7 @@
 
 ### 3.1 Always-On Session
 
-Shepherd runs as a **special session type** within the existing `SessionManager` infrastructure:
+Agent Joe runs as a **special session type** within the existing `SessionManager` infrastructure:
 
 ```typescript
 interface ShepherdSession {
@@ -102,8 +102,8 @@ interface ShepherdSession {
 
 ### 3.2 Reusing Existing Infrastructure
 
-Shepherd is a `ClaudeProcess` session with:
-- A dedicated `CLAUDE.md` (the Shepherd system prompt — see §8)
+Agent Joe is a `ClaudeProcess` session with:
+- A dedicated `CLAUDE.md` (the Agent Joe system prompt — see §8)
 - `source: 'shepherd'` in `CreateSessionOptions`
 - `permissionMode: 'acceptEdits'` (it needs to read reports, write memory, spawn sessions)
 - Working directory: `~/.codekin/shepherd/` (its own workspace)
@@ -122,7 +122,7 @@ spawnChildSession(repo: string, task: string, options: ChildSessionOptions): Pro
 
 ### 4.1 Repository Onboarding & Organization
 
-When a user starts working with a repo in Codekin, Shepherd can:
+When a user starts working with a repo in Codekin, Agent Joe can:
 
 - **Detect new repos** — notice when a repo appears in the session list for the first time
 - **Recommend AI Workflows** — suggest appropriate workflow schedules based on repo type (e.g., "This looks like a Node.js API — I'd recommend repo-health weekly + dependency audit monthly")
@@ -131,9 +131,9 @@ When a user starts working with a repo in Codekin, Shepherd can:
 
 ### 4.2 Audit Report Triage & Implementation
 
-Shepherd reads reports from `.codekin/reports/` across all managed repos and:
+Agent Joe reads reports from `.codekin/reports/` across all managed repos and:
 
-1. **Critically evaluates findings** — not everything in an audit needs fixing. Shepherd applies pragmatic judgment:
+1. **Critically evaluates findings** — not everything in an audit needs fixing. Agent Joe applies pragmatic judgment:
    - Is this finding actually impactful?
    - Is it relevant to the repo's current stage? (MVP vs. production)
    - Would fixing it now prevent a real problem, or is it cosmetic?
@@ -155,7 +155,7 @@ Shepherd reads reports from `.codekin/reports/` across all managed repos and:
 
 ### 4.3 Workflow Management
 
-Shepherd can manage AI Workflows on behalf of the user:
+Agent Joe can manage AI Workflows on behalf of the user:
 
 - **Create/modify schedules** — "Run security audit weekly on Mondays"
 - **Enable/disable workflows** — based on repo activity levels
@@ -164,7 +164,7 @@ Shepherd can manage AI Workflows on behalf of the user:
 
 ### 4.4 Proactive Monitoring
 
-Shepherd periodically (or on triggers) checks:
+Agent Joe periodically (or on triggers) checks:
 
 - New audit reports landing in `.codekin/reports/`
 - Repos with no recent workflow runs
@@ -178,7 +178,7 @@ When it finds something noteworthy, it surfaces it in its chat view:
 
 ## 5. Repo Registry & Policies
 
-Each repo managed by Shepherd has a policy configuration:
+Each repo managed by Agent Joe has a policy configuration:
 
 ```typescript
 interface RepoPolicy {
@@ -211,7 +211,7 @@ Stored in `~/.codekin/shepherd/REPOS.md` (human-readable) and `repos.json` (mach
 
 ## 6. Self-Improving Global Memory (Medium Tier)
 
-Inspired by the OpenClaw/Moltbot memory blueprint, Shepherd maintains a **dual memory system** — human-editable markdown files backed by a SQLite store with full-text search.
+Inspired by the OpenClaw/Moltbot memory blueprint, Agent Joe maintains a **dual memory system** — human-editable markdown files backed by a SQLite store with full-text search.
 
 ### 6.1 On-Disk Layout
 
@@ -273,7 +273,7 @@ CREATE TABLE memory_access_log (
 ### 6.4 Memory Lifecycle
 
 **Writing memories**:
-- After each significant interaction, Shepherd extracts memory candidates
+- After each significant interaction, Agent Joe extracts memory candidates
 - Deduplication: FTS similarity check before insert (update if >0.85 match)
 - User preferences are always pinned (no expiry)
 - Repo context updates when repo policies change
@@ -289,7 +289,7 @@ CREATE TABLE memory_access_log (
 
 ### 6.5 What Makes It "Self-Improving"
 
-Over time, Shepherd gets smarter because:
+Over time, Agent Joe gets smarter because:
 1. **Pattern learning** — remembers which audit findings were acted on vs. dismissed, learns to pre-filter
 2. **User model** — builds understanding of user's skill level, preferences, and priorities
 3. **Repo knowledge** — accumulates context about each repo's architecture, stack, and quirks
@@ -302,7 +302,7 @@ Over time, Shepherd gets smarter because:
 
 ### 7.1 Spawning
 
-When Shepherd decides (with user approval) to implement a fix:
+When Agent Joe decides (with user approval) to implement a fix:
 
 ```typescript
 interface ChildSessionOptions {
@@ -312,14 +312,14 @@ interface ChildSessionOptions {
   useWorktree: boolean            // typically true
   completionPolicy: 'pr' | 'merge' | 'commit-only'  // from repo policy
   deployAfter: boolean            // from repo policy
-  parentSessionId: string         // Shepherd's session ID
+  parentSessionId: string         // Agent Joe's session ID
   timeout?: number                // max duration in minutes
 }
 ```
 
 ### 7.2 Monitoring
 
-Shepherd tracks child sessions via:
+Agent Joe tracks child sessions via:
 - Polling session status from `SessionManager`
 - Reading session output for completion signals
 - Checking git state (branch created? PR opened? merged?)
@@ -327,23 +327,23 @@ Shepherd tracks child sessions via:
 ### 7.3 Post-Completion
 
 After a child session completes:
-1. Shepherd reads the outcome (success/failure, what was changed)
+1. Agent Joe reads the outcome (success/failure, what was changed)
 2. Stores a `session_summary` memory
 3. If `completionPolicy === 'pr'`: verifies PR was created
 4. If `deployAfter`: triggers deployment (with user confirmation)
 5. Updates the corresponding audit finding status
-6. Reports to the user in the Shepherd chat
+6. Reports to the user in the Agent Joe chat
 
 ---
 
-## 8. System Prompt (Shepherd CLAUDE.md)
+## 8. System Prompt (Agent Joe CLAUDE.md)
 
-The Shepherd session loads a dedicated CLAUDE.md that defines its behavior:
+The Agent Joe session loads a dedicated CLAUDE.md that defines its behavior:
 
 ```markdown
-# Shepherd — Codekin Orchestrator
+# Agent Joe — Codekin Orchestrator
 
-You are Shepherd, a calm and friendly ops manager inside Codekin.
+You are Agent Joe, a calm and friendly ops manager inside Codekin.
 You help users keep their repositories healthy, their workflows running
 smoothly, and their audit findings actioned pragmatically.
 
@@ -398,17 +398,17 @@ In `LeftSidebar.tsx`, add a new pinned menu item below "AI Workflows":
   }`}
 >
   <IconShield size={16} stroke={2} />
-  <span>Shepherd</span>
+  <span>Agent Joe</span>
 </button>
 ```
 
-### 9.2 Shepherd View
+### 9.2 Agent Joe View
 
-The Shepherd view is a **chat interface** (reusing `ChatView`) with an optional dashboard header:
+The Agent Joe view is a **chat interface** (reusing `ChatView`) with an optional dashboard header:
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  🛡 Shepherd                          [status]  │
+│  🛡 Agent Joe                          [status]  │
 ├─────────────────────────────────────────────────┤
 │  ┌─────────────┐ ┌──────────┐ ┌─────────────┐  │
 │  │ 5 repos     │ │ 3 pending│ │ 2 sessions  │  │
@@ -416,16 +416,16 @@ The Shepherd view is a **chat interface** (reusing `ChatView`) with an optional 
 │  └─────────────┘ └──────────┘ └─────────────┘  │
 ├─────────────────────────────────────────────────┤
 │                                                 │
-│  [Shepherd chat messages — standard ChatView]   │
+│  [Agent Joe chat messages — standard ChatView]   │
 │                                                 │
-│  Shepherd: Good morning. 2 new reports landed   │
+│  Agent Joe: Good morning. 2 new reports landed   │
 │  overnight. The security scan for api-gateway   │
 │  found 1 critical finding (outdated jsonwebtoken│
 │  package). Want me to open a fix session?        │
 │                                                 │
 │  User: yes, go ahead                            │
 │                                                 │
-│  Shepherd: On it. I've spawned a session in     │
+│  Agent Joe: On it. I've spawned a session in     │
 │  api-gateway on branch fix/update-jsonwebtoken. │
 │  It'll open a PR when done. I'll let you know.  │
 │                                                 │
@@ -451,7 +451,7 @@ if (pathname === '/shepherd') return { sessionId: null, view: 'shepherd' }
 
 ```
 GET    /cc/api/shepherd/status          — session status + summary stats
-POST   /cc/api/shepherd/start           — ensure Shepherd is running
+POST   /cc/api/shepherd/start           — ensure Agent Joe is running
 GET    /cc/api/shepherd/repos           — repo registry
 POST   /cc/api/shepherd/repos           — add repo to registry
 PATCH  /cc/api/shepherd/repos/:id       — update repo policy
@@ -486,14 +486,14 @@ type ShepherdChildUpdate = {
 ## 11. Implementation Phases
 
 ### Phase 1 — Foundation (MVP)
-- [ ] Shepherd session type in `SessionManager` (always-on, auto-restart)
+- [ ] Agent Joe session type in `SessionManager` (always-on, auto-restart)
 - [ ] Sidebar entry + route + basic `ShepherdView` (chat-only, no dashboard header)
-- [ ] Shepherd CLAUDE.md with personality and base capabilities
+- [ ] Agent Joe CLAUDE.md with personality and base capabilities
 - [ ] Markdown-based memory (PROFILE.md, REPOS.md, journal/)
-- [ ] Manual interaction only (user asks, Shepherd answers)
+- [ ] Manual interaction only (user asks, Agent Joe answers)
 
 ### Phase 2 — Report Triage & Child Sessions
-- [ ] Report reader — Shepherd can scan `.codekin/reports/` across repos
+- [ ] Report reader — Agent Joe can scan `.codekin/reports/` across repos
 - [ ] Child session spawning with task descriptions
 - [ ] Child session monitoring and completion reporting
 - [ ] Repo policies (PR vs merge, deploy flags)
@@ -501,7 +501,7 @@ type ShepherdChildUpdate = {
 - [ ] Trust records table + ASK-level approval flow
 
 ### Phase 3 — Workflow Management & Proactivity
-- [ ] Workflow CRUD from Shepherd (create/modify/disable schedules)
+- [ ] Workflow CRUD from Agent Joe (create/modify/disable schedules)
 - [ ] Proactive notifications (new reports, idle repos, failed workflows)
 - [ ] Auto-suggest workflow setup for new repos
 - [ ] Dashboard header with summary stats
@@ -521,11 +521,11 @@ type ShepherdChildUpdate = {
 
 ## 12. Learned Trust & Auto-Approval
 
-Shepherd doesn't start autonomous — it **earns autonomy** through repeated user approval of similar actions. This is a core part of the self-improving memory system.
+Agent Joe doesn't start autonomous — it **earns autonomy** through repeated user approval of similar actions. This is a core part of the self-improving memory system.
 
 ### 12.1 Trust Model
 
-Every action Shepherd can take has an **action signature** — a normalized description of what it does:
+Every action Agent Joe can take has an **action signature** — a normalized description of what it does:
 
 ```typescript
 interface ActionSignature {
@@ -573,7 +573,7 @@ interface TrustRecord {
 
 ### 12.3 Transparency
 
-Shepherd is always transparent about its trust level:
+Agent Joe is always transparent about its trust level:
 
 > "I'm auto-approving this dependency update — you've approved the same pattern 3 times before. Say 'stop' if you want me to ask first again."
 
@@ -590,7 +590,7 @@ The journal logs every auto-approved action with its trust justification:
 
 ### 12.4 User Override Commands
 
-Users can manage trust directly in the Shepherd chat:
+Users can manage trust directly in the Agent Joe chat:
 
 - *"Always auto-approve dependency updates"* → sets global trust for `dependency_update` to SILENT
 - *"Always ask before deploying"* → pins `deploy` actions to ASK level permanently
@@ -608,7 +608,7 @@ Trust is **per-repo by default** — approving "dependency update in api-gateway
 Trust can be **promoted to global** in two ways:
 
 1. **Explicit**: user says "always auto-approve dependency updates" (no repo qualifier) → stored as a global override
-2. **Nudged**: when Shepherd notices the user has approved the same action category in 4+ different repos, it suggests promotion:
+2. **Nudged**: when Agent Joe notices the user has approved the same action category in 4+ different repos, it suggests promotion:
    > "You've approved dependency updates in api-gateway, payments-service, frontend, and auth-service. Want me to just handle these everywhere?"
 
 Global overrides are stored as pinned `user_preference` memories and take precedence over per-repo trust records.
@@ -619,18 +619,18 @@ Global overrides are stored as pinned `user_preference` memories and take preced
 
 ### 13.1 Event-Driven with Fallback Poll
 
-Shepherd learns about new reports through two channels:
+Agent Joe learns about new reports through two channels:
 
-1. **Internal event hook** (primary): The workflow engine already generates reports and writes them to `.codekin/reports/`. When a workflow run completes, it emits an internal event that Shepherd subscribes to. No filesystem watcher needed — this is simpler and more reliable.
+1. **Internal event hook** (primary): The workflow engine already generates reports and writes them to `.codekin/reports/`. When a workflow run completes, it emits an internal event that Agent Joe subscribes to. No filesystem watcher needed — this is simpler and more reliable.
 
-2. **Fallback poll** (secondary): Every 15 minutes, Shepherd scans `.codekin/reports/` across managed repos for any reports it hasn't seen. This catches manually placed reports, reports from external tools, or anything that slipped through the event channel.
+2. **Fallback poll** (secondary): Every 15 minutes, Agent Joe scans `.codekin/reports/` across managed repos for any reports it hasn't seen. This catches manually placed reports, reports from external tools, or anything that slipped through the event channel.
 
 ### 13.2 Event Flow
 
 ```
 Workflow Engine completes run
   → emits 'workflow:run:complete' event with { repo, reportType, reportPath }
-  → Shepherd receives event
+  → Agent Joe receives event
   → reads report, evaluates findings
   → if actionable: surfaces in chat (respecting trust level)
 ```
@@ -660,7 +660,7 @@ No cron jobs, no filesystem watchers — just event subscription + a simple inte
 
 | Decision | Resolution |
 |----------|-----------|
-| Name | **Shepherd** — visible in sidebar and chat |
+| Name | **Agent Joe** — visible in sidebar and chat |
 | Notifications | **In-chat only** — no toasts or badges |
 | Child session limit | **3 concurrent** |
 | Trust escalation | **Learned trust** — 2 approvals → auto with notification, 5 → silent (§12) |
