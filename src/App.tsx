@@ -448,7 +448,7 @@ export default function App() {
         connState={connState}
         view={view}
         archiveRefreshKey={archiveRefreshKey}
-        onSelectSession={(id) => { docsBrowser.close(); handleSelectSession(id) }}
+        onSelectSession={(id) => { docsBrowser.close(); if (view === 'shepherd') navigate(`/s/${id}`); handleSelectSession(id) }}
         onDeleteSession={handleDeleteSession}
         onRenameSession={renameSession}
         onNewSession={handleNewSessionForRepo}
