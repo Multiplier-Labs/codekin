@@ -7,7 +7,7 @@
  */
 
 import Database from 'better-sqlite3'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, chmodSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
@@ -194,6 +194,7 @@ export class WorkflowEngine extends EventEmitter {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
     const resolvedPath = dbPath ?? join(dir, 'workflows.db')
     this.db = new Database(resolvedPath, { fileMustExist: false })
+    if (resolvedPath !== ':memory:' && existsSync(resolvedPath)) chmodSync(resolvedPath, 0o600)
     this.db.pragma('journal_mode = WAL')
     this.createTables()
   }

@@ -25,6 +25,7 @@ vi.mock('fs', async (importOriginal) => {
     ...actual,
     existsSync: vi.fn(() => true),
     mkdirSync: vi.fn(),
+    chmodSync: vi.fn(),
   }
 })
 

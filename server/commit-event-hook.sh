@@ -44,12 +44,20 @@ case "$COMMIT_MESSAGE" in
     ;;
 esac
 
+# JSON-escape the commit message properly (handles newlines, tabs, special chars)
+if command -v jq >/dev/null 2>&1; then
+  ESCAPED_MESSAGE=$(printf '%s' "$COMMIT_MESSAGE" | jq -Rs .)
+else
+  # Fallback: escape backslashes, double quotes, and control characters
+  ESCAPED_MESSAGE=$(printf '%s' "$COMMIT_MESSAGE" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e "s/$(printf '\t')/\\t/g" | { echo -n '"'; cat; echo -n '"'; })
+fi
+
 # Fire-and-forget POST to the server (5s timeout, backgrounded)
 curl -s -o /dev/null -m 5 \
   -X POST "${SERVER_URL}/api/workflows/commit-event" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "{\"repoPath\":\"${REPO_PATH}\",\"branch\":\"${BRANCH}\",\"commitHash\":\"${COMMIT_HASH}\",\"commitMessage\":$(printf '%s' "$COMMIT_MESSAGE" | sed 's/\\/\\\\/g; s/"/\\"/g; s/$//' | { echo -n '"'; cat; echo -n '"'; }),\"author\":\"${AUTHOR}\"}" \
+  -d "{\"repoPath\":\"${REPO_PATH}\",\"branch\":\"${BRANCH}\",\"commitHash\":\"${COMMIT_HASH}\",\"commitMessage\":${ESCAPED_MESSAGE},\"author\":\"${AUTHOR}\"}" \
   &
 
 exit 0

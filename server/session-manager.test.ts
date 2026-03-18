@@ -9,6 +9,7 @@ vi.mock('fs', async (importOriginal) => {
     mkdirSync: vi.fn(),
     writeFileSync: vi.fn(),
     renameSync: vi.fn(),
+    chmodSync: vi.fn(),
     readFileSync: vi.fn(() => '[]'),
   }
 })
