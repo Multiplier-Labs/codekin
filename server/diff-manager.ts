@@ -143,9 +143,23 @@ export async function getDiff(cwd: string, scope: DiffScope = 'all'): Promise<Ws
           cwd,
         )
         const untrackedPaths = untrackedRaw.trim().split('\n').filter(Boolean)
+        const MAX_UNTRACKED_FILE_SIZE = 1024 * 1024 // 1 MB
         for (const relPath of untrackedPaths) {
           try {
             const fullPath = path.join(cwd, relPath)
+            const stat = await fs.stat(fullPath)
+            if (stat.size > MAX_UNTRACKED_FILE_SIZE) {
+              console.log(`[diff] skipping large untracked file: ${relPath} (${(stat.size / 1024 / 1024).toFixed(1)} MB, limit ${MAX_UNTRACKED_FILE_SIZE / 1024 / 1024} MB)`)
+              files.push({
+                path: relPath,
+                status: 'added',
+                isBinary: true,
+                additions: 0,
+                deletions: 0,
+                hunks: [],
+              })
+              continue
+            }
             const content = await fs.readFile(fullPath, 'utf-8')
             files.push(createUntrackedFileDiff(relPath, content))
           } catch {

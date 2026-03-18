@@ -487,6 +487,7 @@ export class ApprovalManager {
           const pattern = `${prefix} *`
           if (!entry.patterns.has(pattern)) {
             entry.patterns.add(pattern)
+            console.log(`[auto-approve] compacting ${cmds.length} exact commands into pattern "${pattern}" — approval scope widened`)
           }
           for (const cmd of cmds) toRemove.add(cmd)
         }

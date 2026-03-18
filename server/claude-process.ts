@@ -49,6 +49,8 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
   private sessionId: string
   private alive = false
 
+  private killTimer: ReturnType<typeof setTimeout> | null = null
+
   // Tool tracking: accumulates partial_json input during streaming
   private currentToolName: string | null = null
   private currentToolInput = ''
@@ -616,10 +618,16 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
 
   /** Gracefully stop the process (SIGTERM, then SIGKILL after 5s timeout). */
   stop(): void {
+    // Clear any existing SIGKILL timer to prevent double-kill on restart
+    if (this.killTimer) {
+      clearTimeout(this.killTimer)
+      this.killTimer = null
+    }
     if (this.proc) {
       this.proc.kill('SIGTERM')
       // Force kill after 5 seconds
-      setTimeout(() => {
+      this.killTimer = setTimeout(() => {
+        this.killTimer = null
         if (this.proc) {
           this.proc.kill('SIGKILL')
         }
