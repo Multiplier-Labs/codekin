@@ -1,8 +1,12 @@
 /**
- * Stateless git-diff operations extracted from SessionManager.
+ * DiffManager — encapsulates stateless git-diff operations.
  *
- * All functions operate on a working directory path and have no dependency
- * on session state, making them independently testable.
+ * Extracted from SessionManager to reduce its complexity. All methods operate
+ * on a working directory path and have no dependency on session state, making
+ * them independently testable.
+ *
+ * The class is instantiated once by SessionManager and delegates are called
+ * with the relevant session's workingDir.
  */
 
 import { execFile } from 'child_process'
@@ -13,6 +17,13 @@ import type { DiffFileStatus, DiffScope, DiffSummary, WsServerMessage } from './
 import { parseDiff, createUntrackedFileDiff } from './diff-parser.js'
 
 const execFileAsync = promisify(execFile)
+
+/** Max stdout for git commands (2 MB). */
+const GIT_MAX_BUFFER = 2 * 1024 * 1024
+/** Timeout for git commands (10 seconds). */
+const GIT_TIMEOUT_MS = 10_000
+/** Max paths per git command to stay under ARG_MAX (~128 KB on Linux). */
+const GIT_PATH_CHUNK_SIZE = 200
 
 /**
  * Return a copy of process.env with GIT_* vars removed that can interfere
@@ -26,13 +37,6 @@ export function cleanGitEnv(): NodeJS.ProcessEnv {
     )
   )
 }
-
-/** Max stdout for git commands (2 MB). */
-const GIT_MAX_BUFFER = 2 * 1024 * 1024
-/** Timeout for git commands (10 seconds). */
-const GIT_TIMEOUT_MS = 10_000
-/** Max paths per git command to stay under ARG_MAX (~128 KB on Linux). */
-const GIT_PATH_CHUNK_SIZE = 200
 
 /** Run a git command as a fixed argv array (no shell interpolation). */
 export async function execGit(args: string[], cwd: string): Promise<string> {
@@ -92,64 +96,84 @@ export async function getFileStatuses(cwd: string, paths?: string[]): Promise<Re
 }
 
 /**
- * Run git diff in a working directory and return structured results.
- * Includes untracked file discovery for 'unstaged' and 'all' scopes.
+ * Encapsulates git-diff and discard operations for a working directory.
+ *
+ * Stateless — all methods take a `cwd` parameter and don't hold any mutable
+ * state, so a single instance can safely serve all sessions.
  */
-export async function getDiff(cwd: string, scope: DiffScope = 'all'): Promise<WsServerMessage> {
-  try {
-    // Get branch name
-    let branch: string
+export class DiffManager {
+  /**
+   * Run git diff in a working directory and return structured results.
+   * Includes untracked file discovery for 'unstaged' and 'all' scopes.
+   */
+  async getDiff(cwd: string, scope: DiffScope = 'all'): Promise<WsServerMessage> {
     try {
-      const branchResult = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd)
-      branch = branchResult.trim()
-      if (branch === 'HEAD') {
-        const shaResult = await execGit(['rev-parse', '--short', 'HEAD'], cwd)
-        branch = `detached at ${shaResult.trim()}`
-      }
-    } catch {
-      branch = 'unknown'
-    }
-
-    // Build diff command based on scope
-    const diffArgs = ['diff', '--find-renames', '--no-color', '--unified=3']
-    if (scope === 'staged') {
-      diffArgs.push('--cached')
-    } else if (scope === 'all') {
-      diffArgs.push('HEAD')
-    }
-
-    let rawDiff: string
-    try {
-      rawDiff = await execGit(diffArgs, cwd)
-    } catch {
-      if (scope === 'all') {
-        const [staged, unstaged] = await Promise.all([
-          execGit(['diff', '--cached', '--find-renames', '--no-color', '--unified=3'], cwd).catch(() => ''),
-          execGit(['diff', '--find-renames', '--no-color', '--unified=3'], cwd).catch(() => ''),
-        ])
-        rawDiff = staged + unstaged
-      } else {
-        rawDiff = ''
-      }
-    }
-
-    const { files, truncated, truncationReason } = parseDiff(rawDiff)
-
-    // Discover untracked files for 'unstaged' and 'all' scopes
-    if (scope !== 'staged') {
+      // Get branch name
+      let branch: string
       try {
-        const untrackedRaw = await execGit(
-          ['ls-files', '--others', '--exclude-standard'],
-          cwd,
-        )
-        const untrackedPaths = untrackedRaw.trim().split('\n').filter(Boolean)
-        const MAX_UNTRACKED_FILE_SIZE = 1024 * 1024 // 1 MB
-        for (const relPath of untrackedPaths) {
-          try {
-            const fullPath = path.join(cwd, relPath)
-            const stat = await fs.stat(fullPath)
-            if (stat.size > MAX_UNTRACKED_FILE_SIZE) {
-              console.log(`[diff] skipping large untracked file: ${relPath} (${(stat.size / 1024 / 1024).toFixed(1)} MB, limit ${MAX_UNTRACKED_FILE_SIZE / 1024 / 1024} MB)`)
+        const branchResult = await execGit(['rev-parse', '--abbrev-ref', 'HEAD'], cwd)
+        branch = branchResult.trim()
+        if (branch === 'HEAD') {
+          const shaResult = await execGit(['rev-parse', '--short', 'HEAD'], cwd)
+          branch = `detached at ${shaResult.trim()}`
+        }
+      } catch {
+        branch = 'unknown'
+      }
+
+      // Build diff command based on scope
+      const diffArgs = ['diff', '--find-renames', '--no-color', '--unified=3']
+      if (scope === 'staged') {
+        diffArgs.push('--cached')
+      } else if (scope === 'all') {
+        diffArgs.push('HEAD')
+      }
+
+      let rawDiff: string
+      try {
+        rawDiff = await execGit(diffArgs, cwd)
+      } catch {
+        if (scope === 'all') {
+          const [staged, unstaged] = await Promise.all([
+            execGit(['diff', '--cached', '--find-renames', '--no-color', '--unified=3'], cwd).catch(() => ''),
+            execGit(['diff', '--find-renames', '--no-color', '--unified=3'], cwd).catch(() => ''),
+          ])
+          rawDiff = staged + unstaged
+        } else {
+          rawDiff = ''
+        }
+      }
+
+      const { files, truncated, truncationReason } = parseDiff(rawDiff)
+
+      // Discover untracked files for 'unstaged' and 'all' scopes
+      if (scope !== 'staged') {
+        try {
+          const untrackedRaw = await execGit(
+            ['ls-files', '--others', '--exclude-standard'],
+            cwd,
+          )
+          const untrackedPaths = untrackedRaw.trim().split('\n').filter(Boolean)
+          const MAX_UNTRACKED_FILE_SIZE = 1024 * 1024 // 1 MB
+          for (const relPath of untrackedPaths) {
+            try {
+              const fullPath = path.join(cwd, relPath)
+              const stat = await fs.stat(fullPath)
+              if (stat.size > MAX_UNTRACKED_FILE_SIZE) {
+                console.log(`[diff] skipping large untracked file: ${relPath} (${(stat.size / 1024 / 1024).toFixed(1)} MB, limit ${MAX_UNTRACKED_FILE_SIZE / 1024 / 1024} MB)`)
+                files.push({
+                  path: relPath,
+                  status: 'added',
+                  isBinary: true,
+                  additions: 0,
+                  deletions: 0,
+                  hunks: [],
+                })
+                continue
+              }
+              const content = await fs.readFile(fullPath, 'utf-8')
+              files.push(createUntrackedFileDiff(relPath, content))
+            } catch {
               files.push({
                 path: relPath,
                 status: 'added',
@@ -158,146 +182,134 @@ export async function getDiff(cwd: string, scope: DiffScope = 'all'): Promise<Ws
                 deletions: 0,
                 hunks: [],
               })
-              continue
             }
-            const content = await fs.readFile(fullPath, 'utf-8')
-            files.push(createUntrackedFileDiff(relPath, content))
-          } catch {
-            files.push({
-              path: relPath,
-              status: 'added',
-              isBinary: true,
-              additions: 0,
-              deletions: 0,
-              hunks: [],
-            })
-          }
-        }
-      } catch {
-        // ls-files failed — skip untracked
-      }
-    }
-
-    const summary: DiffSummary = {
-      filesChanged: files.length,
-      insertions: files.reduce((sum, f) => sum + f.additions, 0),
-      deletions: files.reduce((sum, f) => sum + f.deletions, 0),
-      truncated,
-      truncationReason,
-    }
-
-    return { type: 'diff_result', files, summary, branch, scope }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to get diff'
-    return { type: 'diff_error', message }
-  }
-}
-
-/**
- * Discard changes in a working directory per the given scope and paths.
- * Returns a fresh diff_result after discarding.
- */
-export async function discardChanges(
-  cwd: string,
-  scope: DiffScope,
-  paths?: string[],
-  statuses?: Record<string, DiffFileStatus>,
-): Promise<WsServerMessage> {
-  try {
-    // Validate paths
-    if (paths) {
-      const root = path.join(path.resolve(cwd), path.sep)
-      for (const p of paths) {
-        if (p.includes('..') || path.isAbsolute(p)) {
-          return { type: 'diff_error', message: `Invalid path: ${p}` }
-        }
-        const resolved = path.resolve(cwd, p)
-        if (resolved !== path.resolve(cwd) && !resolved.startsWith(root)) {
-          return { type: 'diff_error', message: `Path escapes working directory: ${p}` }
-        }
-      }
-    }
-
-    // Determine file statuses if not provided
-    let fileStatuses = statuses ?? {}
-    if (!statuses && paths) {
-      fileStatuses = await getFileStatuses(cwd, paths)
-    } else if (!statuses && !paths) {
-      fileStatuses = await getFileStatuses(cwd)
-    }
-
-    const targetPaths = paths ?? Object.keys(fileStatuses)
-
-    // Separate files by status for different handling
-    const trackedPaths: string[] = []
-    const untrackedPaths: string[] = []
-    const stagedNewPaths: string[] = []
-
-    for (const p of targetPaths) {
-      const status = fileStatuses[p]
-      if (status === 'added') {
-        try {
-          const indexEntry = (await execGit(['ls-files', '--stage', '--', p], cwd)).trim()
-          if (indexEntry) {
-            stagedNewPaths.push(p)
-          } else {
-            untrackedPaths.push(p)
           }
         } catch {
-          untrackedPaths.push(p)
+          // ls-files failed — skip untracked
         }
-      } else {
-        trackedPaths.push(p)
       }
+
+      const summary: DiffSummary = {
+        filesChanged: files.length,
+        insertions: files.reduce((sum, f) => sum + f.additions, 0),
+        deletions: files.reduce((sum, f) => sum + f.deletions, 0),
+        truncated,
+        truncationReason,
+      }
+
+      return { type: 'diff_result', files, summary, branch, scope }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to get diff'
+      return { type: 'diff_error', message }
     }
+  }
 
-    // Handle tracked files (modified, deleted, renamed) with git restore
-    if (trackedPaths.length > 0) {
-      const restoreArgs = ['restore']
-      if (scope === 'staged') {
-        restoreArgs.push('--staged')
-      } else if (scope === 'all') {
-        restoreArgs.push('--staged', '--worktree')
-      } else {
-        restoreArgs.push('--worktree')
+  /**
+   * Discard changes in a working directory per the given scope and paths.
+   * Returns a fresh diff_result after discarding.
+   */
+  async discardChanges(
+    cwd: string,
+    scope: DiffScope,
+    paths?: string[],
+    statuses?: Record<string, DiffFileStatus>,
+  ): Promise<WsServerMessage> {
+    try {
+      // Validate paths
+      if (paths) {
+        const root = path.join(path.resolve(cwd), path.sep)
+        for (const p of paths) {
+          if (p.includes('..') || path.isAbsolute(p)) {
+            return { type: 'diff_error', message: `Invalid path: ${p}` }
+          }
+          const resolved = path.resolve(cwd, p)
+          if (resolved !== path.resolve(cwd) && !resolved.startsWith(root)) {
+            return { type: 'diff_error', message: `Path escapes working directory: ${p}` }
+          }
+        }
       }
 
-      try {
-        await execGitChunked(restoreArgs, trackedPaths, cwd)
-      } catch (err) {
-        console.warn('[discard] git restore failed, trying fallback:', err)
-        if (scope === 'staged' || scope === 'all') {
-          await execGitChunked(['reset', 'HEAD'], trackedPaths, cwd)
-        }
-        if (scope === 'unstaged' || scope === 'all') {
-          await execGitChunked(['checkout'], trackedPaths, cwd)
+      // Determine file statuses if not provided
+      let fileStatuses = statuses ?? {}
+      if (!statuses && paths) {
+        fileStatuses = await getFileStatuses(cwd, paths)
+      } else if (!statuses && !paths) {
+        fileStatuses = await getFileStatuses(cwd)
+      }
+
+      const targetPaths = paths ?? Object.keys(fileStatuses)
+
+      // Separate files by status for different handling
+      const trackedPaths: string[] = []
+      const untrackedPaths: string[] = []
+      const stagedNewPaths: string[] = []
+
+      for (const p of targetPaths) {
+        const status = fileStatuses[p]
+        if (status === 'added') {
+          try {
+            const indexEntry = (await execGit(['ls-files', '--stage', '--', p], cwd)).trim()
+            if (indexEntry) {
+              stagedNewPaths.push(p)
+            } else {
+              untrackedPaths.push(p)
+            }
+          } catch {
+            untrackedPaths.push(p)
+          }
+        } else {
+          trackedPaths.push(p)
         }
       }
-    }
 
-    // Handle staged new files
-    if (stagedNewPaths.length > 0) {
-      if (scope === 'staged') {
-        await execGitChunked(['rm', '--cached'], stagedNewPaths, cwd)
-      } else if (scope === 'all') {
-        await execGitChunked(['rm', '--cached'], stagedNewPaths, cwd)
-        for (const p of stagedNewPaths) {
+      // Handle tracked files (modified, deleted, renamed) with git restore
+      if (trackedPaths.length > 0) {
+        const restoreArgs = ['restore']
+        if (scope === 'staged') {
+          restoreArgs.push('--staged')
+        } else if (scope === 'all') {
+          restoreArgs.push('--staged', '--worktree')
+        } else {
+          restoreArgs.push('--worktree')
+        }
+
+        try {
+          await execGitChunked(restoreArgs, trackedPaths, cwd)
+        } catch (err) {
+          console.warn('[discard] git restore failed, trying fallback:', err)
+          if (scope === 'staged' || scope === 'all') {
+            await execGitChunked(['reset', 'HEAD'], trackedPaths, cwd)
+          }
+          if (scope === 'unstaged' || scope === 'all') {
+            await execGitChunked(['checkout'], trackedPaths, cwd)
+          }
+        }
+      }
+
+      // Handle staged new files
+      if (stagedNewPaths.length > 0) {
+        if (scope === 'staged') {
+          await execGitChunked(['rm', '--cached'], stagedNewPaths, cwd)
+        } else if (scope === 'all') {
+          await execGitChunked(['rm', '--cached'], stagedNewPaths, cwd)
+          for (const p of stagedNewPaths) {
+            await fs.unlink(path.join(cwd, p)).catch(() => {})
+          }
+        }
+      }
+
+      // Handle untracked files (delete from disk)
+      if (untrackedPaths.length > 0 && scope !== 'staged') {
+        for (const p of untrackedPaths) {
           await fs.unlink(path.join(cwd, p)).catch(() => {})
         }
       }
-    }
 
-    // Handle untracked files (delete from disk)
-    if (untrackedPaths.length > 0 && scope !== 'staged') {
-      for (const p of untrackedPaths) {
-        await fs.unlink(path.join(cwd, p)).catch(() => {})
-      }
+      // Return fresh diff
+      return await this.getDiff(cwd, scope)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to discard changes'
+      return { type: 'diff_error', message }
     }
-
-    // Return fresh diff
-    return await getDiff(cwd, scope)
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Failed to discard changes'
-    return { type: 'diff_error', message }
   }
 }

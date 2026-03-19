@@ -5,6 +5,11 @@
  * file uploads, skill expansion, command palette, docs browser, and settings.
  * Layout: top session tab bar, left icon sidebar, main chat area with
  * input bar and prompt buttons, right sidebar with sessions/tasks/approvals.
+ *
+ * Content views are extracted into focused components:
+ * - ShepherdContent: the orchestrator (Joe) chat view
+ * - DocsBrowserContent: the documentation browser with input bar
+ * - SessionContent: the active chat session with diff panel and prompts
  */
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
@@ -23,20 +28,16 @@ import { buildSlashCommandList } from './lib/slashCommands'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { getQueueMessages } from './lib/ccApi'
 import { Settings } from './components/Settings'
-import { ChatView } from './components/ChatView'
-import { DocsBrowser } from './components/DocsBrowser'
-import { TodoPanel } from './components/TodoPanel'
 import { LeftSidebar } from './components/LeftSidebar'
 import { MobileTopBar } from './components/MobileTopBar'
-import { TentativeBanner } from './components/TentativeBanner'
 import { WorkflowsView } from './components/WorkflowsView'
-import { ShepherdView } from './components/ShepherdView'
 import { CommandPalette } from './components/CommandPalette'
-import { InputBar, type InputBarHandle } from './components/InputBar'
-import { PromptButtons } from './components/PromptButtons'
+import type { InputBarHandle } from './components/InputBar'
 import { RepoSelector } from './components/RepoSelector'
 import { DiffPanel } from './components/DiffPanel'
-import { IconEye } from '@tabler/icons-react'
+import { ShepherdContent } from './components/ShepherdContent'
+import { DocsBrowserContent } from './components/DocsBrowserContent'
+import { SessionContent } from './components/SessionContent'
 import type { PermissionMode } from './types'
 
 export default function App() {
@@ -430,6 +431,11 @@ export default function App() {
   const activeSessionName = activeSession?.name ?? null
   const activeRepoName = activeRepo?.name ?? activeWorkingDir?.split('/').pop() ?? null
 
+  // Session input change handler for extracted components
+  const handleSessionInputChange = useCallback((sessionId: string, value: string) => {
+    setSessionInputs(prev => ({ ...prev, [sessionId]: value }))
+  }, [])
+
   return (
     <div className="flex h-full bg-neutral-7">
       {/* Left sidebar — repo/session tree + nav */}
@@ -507,65 +513,32 @@ export default function App() {
 
         {/* Main content: shepherd, workflows view, docs browser, or chat */}
         {view === 'shepherd' ? (
-          <>
-            <ShepherdView
-              token={settings.token}
-              onShepherdSessionReady={handleShepherdSessionReady}
-              sessionJoined={!!activeSessionId}
-            />
-            {/* Render chat UI once shepherd session is joined */}
-            {activeSessionId && (
-              <div className="flex flex-1 flex-col overflow-hidden min-h-0">
-                <div className="relative flex-1 min-h-0 flex flex-col">
-                  <ChatView
-                    messages={[...messages, ...tentativeMessages]}
-                    fontSize={settings.fontSize + (isMobile ? 1 : 0)}
-                    disabled={!settings.token}
-                    planningMode={planningMode}
-                    activityLabel={activityLabel}
-                    isMobile={isMobile}
-                    variant="joe"
-                  />
-                  <TodoPanel tasks={tasks} />
-                </div>
-                {activePrompt && (
-                  <PromptButtons
-                    key={activePrompt.requestId}
-                    options={activePrompt.options}
-                    question={activePrompt.question}
-                    multiSelect={activePrompt.multiSelect}
-                    promptType={activePrompt.promptType}
-                    questions={activePrompt.questions}
-                    approvePattern={activePrompt.approvePattern}
-                    onSelect={sendPromptResponse}
-                    isMobile={isMobile}
-                  />
-                )}
-                <InputBar
-                  key={`shepherd-${activeSessionId}`}
-                  variant="joe"
-                  ref={inputBarRef}
-                  onSendInput={handleSendWithFiles}
-                  isWaiting={!!activePrompt}
-                  disabled={!settings.token}
-                  onEscape={() => {}}
-                  pendingFiles={pendingFiles}
-                  onAddFiles={addFiles}
-                  onRemoveFile={removeFile}
-                  skillGroups={skillGroups}
-                  slashCommands={allCommands}
-                  placeholder="Talk to Joe..."
-                  initialValue=""
-                  onValueChange={() => {}}
-                  currentModel={currentModel}
-                  onModelChange={setModel}
-                  isMobile={isMobile}
-                  currentPermissionMode={currentPermissionMode}
-                  onPermissionModeChange={handlePermissionModeChange}
-                />
-              </div>
-            )}
-          </>
+          <ShepherdContent
+            token={settings.token}
+            onShepherdSessionReady={handleShepherdSessionReady}
+            sessionJoined={!!activeSessionId}
+            activeSessionId={activeSessionId}
+            messages={[...messages, ...tentativeMessages]}
+            fontSize={settings.fontSize + (isMobile ? 1 : 0)}
+            isMobile={isMobile}
+            planningMode={planningMode}
+            activityLabel={activityLabel}
+            tasks={tasks}
+            activePrompt={activePrompt}
+            sendPromptResponse={sendPromptResponse}
+            inputBarRef={inputBarRef}
+            onSendInput={handleSendWithFiles}
+            pendingFiles={pendingFiles}
+            onAddFiles={addFiles}
+            onRemoveFile={removeFile}
+            skillGroups={skillGroups}
+            slashCommands={allCommands}
+            currentModel={currentModel}
+            onModelChange={setModel}
+            currentPermissionMode={currentPermissionMode}
+            onPermissionModeChange={handlePermissionModeChange}
+            disabled={!settings.token}
+          />
         ) : view === 'workflows' ? (
           <WorkflowsView
             token={settings.token}
@@ -577,135 +550,76 @@ export default function App() {
             }}
           />
         ) : docsBrowser.isOpen ? (
-          <div className="flex flex-1 flex-col overflow-hidden min-h-0">
-            <DocsBrowser
-              repoName={docsRepoName}
-              filePath={docsBrowser.selectedFile!}
-              content={docsBrowser.content}
-              loading={docsBrowser.loading}
-              error={docsBrowser.error}
-              rawMode={docsBrowser.rawMode}
-              isStarred={docsBrowser.isCurrentFileStarred}
-              onToggleRaw={docsBrowser.toggleRawMode}
-              onToggleStar={docsBrowser.toggleStarCurrentFile}
-              onClose={docsBrowser.close}
-            />
-            {/* Input bar in docs mode */}
-            {activeSessionId ? (
-              <InputBar
-                key={`docs-${activeSessionId}`}
-                ref={inputBarRef}
-                onSendInput={handleSendWithFiles}
-                isWaiting={!!activePrompt}
-                disabled={!settings.token}
-                onEscape={docsBrowser.close}
-                pendingFiles={pendingFiles}
-                onAddFiles={addFiles}
-                onRemoveFile={removeFile}
-                skillGroups={skillGroups}
-                slashCommands={allCommands}
-                placeholder="Ask Claude about this doc, or request changes..."
-                initialValue={activeSessionId ? (sessionInputs[activeSessionId] ?? '') : ''}
-                onValueChange={(v) => { if (activeSessionId) setSessionInputs(prev => ({ ...prev, [activeSessionId]: v })) }}
-                currentModel={currentModel}
-                onModelChange={setModel}
-                isMobile={isMobile}
-                currentPermissionMode={currentPermissionMode}
-                onPermissionModeChange={handlePermissionModeChange}
-                onMoveToWorktree={moveToWorktree}
-                worktreePath={activeSession?.worktreePath}
-              />
-            ) : (
-              <div className="px-4 py-3 border-t border-neutral-10">
-                <div className="rounded-lg bg-neutral-11 px-3 py-2 text-[15px] text-neutral-5 opacity-40">
-                  Start a session to edit this doc
-                </div>
-              </div>
-            )}
-          </div>
+          <DocsBrowserContent
+            docsRepoName={docsRepoName}
+            filePath={docsBrowser.selectedFile!}
+            content={docsBrowser.content}
+            loading={docsBrowser.loading}
+            error={docsBrowser.error}
+            rawMode={docsBrowser.rawMode}
+            isStarred={docsBrowser.isCurrentFileStarred}
+            onToggleRaw={docsBrowser.toggleRawMode}
+            onToggleStar={docsBrowser.toggleStarCurrentFile}
+            onClose={docsBrowser.close}
+            activeSessionId={activeSessionId}
+            inputBarRef={inputBarRef}
+            onSendInput={handleSendWithFiles}
+            activePrompt={activePrompt}
+            disabled={!settings.token}
+            pendingFiles={pendingFiles}
+            onAddFiles={addFiles}
+            onRemoveFile={removeFile}
+            skillGroups={skillGroups}
+            slashCommands={allCommands}
+            sessionInputs={sessionInputs}
+            onSessionInputChange={handleSessionInputChange}
+            currentModel={currentModel}
+            onModelChange={setModel}
+            isMobile={isMobile}
+            currentPermissionMode={currentPermissionMode}
+            onPermissionModeChange={handlePermissionModeChange}
+            moveToWorktree={moveToWorktree}
+            worktreePath={activeSession?.worktreePath}
+          />
         ) : activeSessionId ? (
-          <div className="flex flex-1 flex-col overflow-hidden min-h-0">
-            <div className="relative flex-1 min-h-0 flex flex-col">
-              <ChatView
-                messages={[...messages, ...tentativeMessages]}
-                fontSize={settings.fontSize + (isMobile ? 1 : 0)}
-                disabled={!settings.token}
-                planningMode={planningMode}
-                activityLabel={activityLabel}
-                isMobile={isMobile}
-              />
-              <TodoPanel tasks={tasks} />
-
-              {/* Diff view button — top-right corner, visible when files have been changed */}
-              {hasFileChanges && !diffPanelOpen && (
-                <button
-                  className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-lg bg-primary-8 px-3 py-1.5 text-[13px] font-medium text-neutral-1 shadow-lg backdrop-blur-sm transition-colors hover:bg-primary-7"
-                  onClick={() => setDiffPanelOpen(true)}
-                  title="Review code changes (Ctrl+Shift+D)"
-                >
-                  <IconEye size={15} />
-                  Diff view
-                </button>
-              )}
-            </div>
-
-            {/* Smart prompt buttons (conditional) */}
-            {activePrompt && (
-              <PromptButtons
-                key={activePrompt.requestId}
-                options={activePrompt.options}
-                question={activePrompt.question}
-                multiSelect={activePrompt.multiSelect}
-                promptType={activePrompt.promptType}
-                questions={activePrompt.questions}
-                approvePattern={activePrompt.approvePattern}
-                onSelect={sendPromptResponse}
-                isMobile={isMobile}
-              />
-            )}
-            {promptQueueSize > 1 && (
-              <div className="px-3 py-1 text-[12px] text-neutral-5 bg-neutral-11 border-t border-neutral-10">
-                {promptQueueSize - 1} more pending
-              </div>
-            )}
-
-            {/* Tentative banner */}
-            {activeTentativeCount > 0 && (
-              <TentativeBanner
-                count={activeTentativeCount}
-                repoName={activeRepo?.name ?? activeWorkingDir?.split('/').pop() ?? 'this repo'}
-                onExecute={() => handleExecuteTentative(activeSessionId)}
-                onDiscard={() => handleDiscardTentative(activeSessionId)}
-              />
-            )}
-
-            {/* Input bar */}
-            <InputBar
-              key={activeSessionId ?? 'no-session'}
-              ref={inputBarRef}
-              onSendInput={handleSendWithFiles}
-              isWaiting={!!activePrompt}
-              disabled={!settings.token}
-              onEscape={() => {}}
-              pendingFiles={pendingFiles}
-              onAddFiles={addFiles}
-              onRemoveFile={removeFile}
-              skillGroups={skillGroups}
-              slashCommands={allCommands}
-              initialValue={activeSessionId ? (sessionInputs[activeSessionId] ?? '') : ''}
-              onValueChange={(v) => { if (activeSessionId) setSessionInputs(prev => ({ ...prev, [activeSessionId]: v })) }}
-              currentModel={currentModel}
-              onModelChange={setModel}
-              isMobile={isMobile}
-              showWorktreeToggle={!messages.some(m => m.type === 'user')}
-              useWorktree={useWorktree}
-              onWorktreeChange={setUseWorktree}
-              currentPermissionMode={currentPermissionMode}
-              onPermissionModeChange={handlePermissionModeChange}
-              onMoveToWorktree={moveToWorktree}
-              worktreePath={activeSession?.worktreePath}
-            />
-          </div>
+          <SessionContent
+            activeSessionId={activeSessionId}
+            messages={[...messages, ...tentativeMessages]}
+            fontSize={settings.fontSize + (isMobile ? 1 : 0)}
+            isMobile={isMobile}
+            planningMode={planningMode}
+            activityLabel={activityLabel}
+            tasks={tasks}
+            disabled={!settings.token}
+            hasFileChanges={hasFileChanges}
+            diffPanelOpen={diffPanelOpen}
+            onOpenDiffPanel={() => setDiffPanelOpen(true)}
+            activePrompt={activePrompt}
+            promptQueueSize={promptQueueSize}
+            sendPromptResponse={sendPromptResponse}
+            activeTentativeCount={activeTentativeCount}
+            activeRepoName={activeRepo?.name ?? activeWorkingDir?.split('/').pop() ?? 'this repo'}
+            onExecuteTentative={() => handleExecuteTentative(activeSessionId)}
+            onDiscardTentative={() => handleDiscardTentative(activeSessionId)}
+            inputBarRef={inputBarRef}
+            onSendInput={handleSendWithFiles}
+            pendingFiles={pendingFiles}
+            onAddFiles={addFiles}
+            onRemoveFile={removeFile}
+            skillGroups={skillGroups}
+            slashCommands={allCommands}
+            sessionInputs={sessionInputs}
+            onSessionInputChange={handleSessionInputChange}
+            currentModel={currentModel}
+            onModelChange={setModel}
+            hasUserMessages={messages.some(m => m.type === 'user')}
+            useWorktree={useWorktree}
+            onWorktreeChange={setUseWorktree}
+            currentPermissionMode={currentPermissionMode}
+            onPermissionModeChange={handlePermissionModeChange}
+            moveToWorktree={moveToWorktree}
+            worktreePath={activeSession?.worktreePath}
+          />
         ) : (
           <RepoSelector groups={groups} token={settings.token} ghMissing={ghMissing} onOpen={handleOpenSession} onRefreshRepos={refreshRepos} />
         )}
