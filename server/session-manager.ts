@@ -394,6 +394,24 @@ export class SessionManager {
       }))
   }
 
+  /** List ALL sessions including shepherd — used by shepherd cleanup endpoints. */
+  listAll(): SessionInfo[] {
+    return Array.from(this.sessions.values())
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        created: s.created,
+        active: s.claudeProcess?.isAlive() ?? false,
+        isProcessing: s.isProcessing,
+        workingDir: s.workingDir,
+        groupDir: s.groupDir,
+        worktreePath: s.worktreePath,
+        connectedClients: s.clients.size,
+        lastActivity: s.created,
+        source: s.source,
+      }))
+  }
+
   rename(sessionId: string, newName: string): boolean {
     const session = this.sessions.get(sessionId)
     if (!session) return false
