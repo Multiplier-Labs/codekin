@@ -483,5 +483,41 @@ export function createShepherdRouter(
     res.json({ decisions: getPendingOutcomeAssessments(memory) })
   })
 
+  // -------------------------------------------------------------------------
+  // Session cleanup
+  // -------------------------------------------------------------------------
+
+  /** List all sessions (unfiltered, includes source field). */
+  router.get('/api/shepherd/sessions', (req, res) => {
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+
+    res.json({ sessions: sessions.listAll() })
+  })
+
+  /** Delete all automated sessions (source: workflow, webhook, stepflow, agent). */
+  router.delete('/api/shepherd/sessions/cleanup', (req, res) => {
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const automatedSources = new Set(['workflow', 'webhook', 'stepflow', 'agent'])
+    const toDelete = sessions.listAll().filter((s) => automatedSources.has(s.source ?? ''))
+
+    let deleted = 0
+    for (const s of toDelete) {
+      if (sessions.delete(s.id)) deleted++
+    }
+
+    res.json({ deleted })
+  })
+
+  /** Delete a specific session by ID. */
+  router.delete('/api/shepherd/sessions/:id', (req, res) => {
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const success = sessions.delete(req.params.id)
+    if (!success) return res.status(404).json({ error: 'Session not found' })
+
+    res.json({ deleted: true })
+  })
+
   return router
 }
