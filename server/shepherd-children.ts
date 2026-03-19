@@ -49,7 +49,7 @@ export interface ChildSession {
 // Constants
 // ---------------------------------------------------------------------------
 
-const MAX_CONCURRENT = 3
+const MAX_CONCURRENT = 5
 const DEFAULT_TIMEOUT_MS = 600_000  // 10 minutes
 
 // ---------------------------------------------------------------------------
