@@ -1151,6 +1151,10 @@ export class SessionManager {
       console.log(`[tool-approval] auto-approved (registry): ${toolName}`)
       return Promise.resolve({ allow: true, always: true })
     }
+    if (autoResult === 'session') {
+      console.log(`[tool-approval] auto-approved (session allowedTools): ${toolName}`)
+      return Promise.resolve({ allow: true, always: false })
+    }
     if (autoResult === 'headless') {
       console.log(`[tool-approval] auto-approved (headless ${session.source}): ${toolName}`)
       return Promise.resolve({ allow: true, always: false })
@@ -1220,17 +1224,46 @@ export class SessionManager {
 
   /**
    * Check if a tool invocation can be auto-approved without prompting the user.
-   * Returns 'registry' if matched by auto-approval rules, 'headless' if the session
-   * has no clients and is a non-interactive source, or 'prompt' if the user needs to decide.
+   * Returns 'registry' if matched by auto-approval rules, 'session' if matched
+   * by the session's allowedTools list, 'headless' if the session has no clients
+   * and is a non-interactive source, or 'prompt' if the user needs to decide.
    */
-  private resolveAutoApproval(session: Session, toolName: string, toolInput: Record<string, unknown>): 'registry' | 'headless' | 'prompt' {
+  private resolveAutoApproval(session: Session, toolName: string, toolInput: Record<string, unknown>): 'registry' | 'session' | 'headless' | 'prompt' {
     if (this._approvalManager.checkAutoApproval(session.groupDir ?? session.workingDir, toolName, toolInput)) {
       return 'registry'
+    }
+    if (session.allowedTools && this.matchesAllowedTools(session.allowedTools, toolName, toolInput)) {
+      return 'session'
     }
     if (session.clients.size === 0 && (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow')) {
       return 'headless'
     }
     return 'prompt'
+  }
+
+  /**
+   * Check if a tool invocation matches any of the session's allowedTools patterns.
+   * Patterns follow Claude CLI format: 'ToolName' or 'ToolName(prefix:*)'.
+   * Examples: 'WebFetch', 'Bash(curl:*)', 'Bash(git:*)'.
+   */
+  private matchesAllowedTools(allowedTools: string[], toolName: string, toolInput: Record<string, unknown>): boolean {
+    for (const pattern of allowedTools) {
+      // Simple tool name match: 'WebFetch', 'Read', etc.
+      if (pattern === toolName) return true
+
+      // Parameterized match: 'Bash(curl:*)' → toolName=Bash, command starts with 'curl'
+      const match = pattern.match(/^(\w+)\(([^:]+):\*\)$/)
+      if (match) {
+        const [, patternTool, prefix] = match
+        if (patternTool !== toolName) continue
+        // For Bash, check command prefix
+        if (toolName === 'Bash') {
+          const cmd = String(toolInput.command || '').trimStart()
+          if (cmd.startsWith(prefix)) return true
+        }
+      }
+    }
+    return false
   }
 
   /** Build a human-readable prompt string for a tool permission dialog. */
