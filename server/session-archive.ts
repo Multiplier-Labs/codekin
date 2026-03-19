@@ -6,7 +6,7 @@
  */
 
 import Database from 'better-sqlite3'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, chmodSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import type { WsServerMessage } from './types.js'
@@ -43,7 +43,11 @@ export class SessionArchive {
 
   constructor(dbPath?: string) {
     if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true })
-    this.db = new Database(dbPath ?? DB_PATH)
+    const resolvedPath = dbPath ?? DB_PATH
+    this.db = new Database(resolvedPath)
+    if (resolvedPath !== ':memory:') {
+      try { chmodSync(resolvedPath, 0o600) } catch { /* file may not exist yet (e.g. mocked DB) */ }
+    }
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('foreign_keys = ON')
     this.initSchema()

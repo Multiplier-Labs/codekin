@@ -218,7 +218,7 @@ export function useSendMessage({
         }, 0)
       }
     }
-  }, [sessions]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessions, activeSessionId, tentativeQueues, handleExecuteTentative]) // react-hooks/exhaustive-deps
 
   // Tentative messages for display in ChatView
   const tentativeMessages: ChatMessage[] = activeSessionId

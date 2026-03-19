@@ -34,8 +34,7 @@ import { ApprovalManager } from './approval-manager.js'
 import { SessionNaming } from './session-naming.js'
 import { SessionPersistence } from './session-persistence.js'
 import { deriveSessionToken } from './crypto-utils.js'
-import { cleanGitEnv } from './diff-manager.js'
-import { getDiff as diffManagerGetDiff, discardChanges as diffManagerDiscardChanges } from './diff-manager.js'
+import { cleanGitEnv, DiffManager } from './diff-manager.js'
 import { evaluateRestart } from './session-restart-scheduler.js'
 
 const execFileAsync = promisify(execFile)
@@ -93,10 +92,13 @@ export class SessionManager {
   private sessionNaming: SessionNaming
   /** Delegated persistence logic (saves/restores session metadata to disk across server restarts). */
   private sessionPersistence: SessionPersistence
+  /** Delegated diff operations (git diff, discard changes). */
+  private diffManager: DiffManager
 
   constructor() {
     this.archive = new SessionArchive()
     this._approvalManager = new ApprovalManager()
+    this.diffManager = new DiffManager()
     this.sessionPersistence = new SessionPersistence(this.sessions)
     this.sessionNaming = new SessionNaming({
       getSession: (id) => this.sessions.get(id),
@@ -1475,7 +1477,7 @@ export class SessionManager {
   async getDiff(sessionId: string, scope: DiffScope = 'all'): Promise<WsServerMessage> {
     const session = this.sessions.get(sessionId)
     if (!session) return { type: 'diff_error', message: 'Session not found' }
-    return diffManagerGetDiff(session.workingDir, scope)
+    return this.diffManager.getDiff(session.workingDir, scope)
   }
 
   /** Discard changes in a session's workingDir per the given scope and paths. */
@@ -1487,7 +1489,7 @@ export class SessionManager {
   ): Promise<WsServerMessage> {
     const session = this.sessions.get(sessionId)
     if (!session) return { type: 'diff_error', message: 'Session not found' }
-    return diffManagerDiscardChanges(session.workingDir, scope, paths, statuses)
+    return this.diffManager.discardChanges(session.workingDir, scope, paths, statuses)
   }
 
   /** Graceful shutdown: complete in-progress tasks, persist state, kill all processes.
