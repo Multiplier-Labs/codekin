@@ -113,9 +113,17 @@ export class ShepherdChildManager {
         id: sessionId,
         groupDir: request.repo,
         model: request.model,
-        useWorktree: request.useWorktree,
         permissionMode: 'acceptEdits',
       })
+
+      // Create a git worktree for isolation if requested (default for Joe children).
+      // This must happen BEFORE startClaude so Claude runs in the worktree directory.
+      if (request.useWorktree) {
+        const wtPath = await this.sessions.createWorktree(sessionId, request.repo)
+        if (!wtPath) {
+          console.warn(`[shepherd-child] Failed to create worktree for ${sessionId}, falling back to main directory`)
+        }
+      }
 
       // Start Claude
       this.sessions.startClaude(sessionId)

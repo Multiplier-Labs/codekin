@@ -277,7 +277,7 @@ app.use(createDocsRouter(verifyToken, extractToken))
 app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessions, commitEventState))
 // Shepherd router — monitorRef is populated after workflow engine init
 const shepherdMonitorRef: { current: ShepherdMonitor | null } = { current: null }
-app.use(createShepherdRouter(verifyToken, extractToken, sessions, shepherdMonitorRef))
+app.use(createShepherdRouter(verifyToken, extractToken, sessions, shepherdMonitorRef, verifyTokenOrSessionToken))
 
 // --- SPA fallback: serve index.html for non-API routes (client-side routing) ---
 if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {

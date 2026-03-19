@@ -101,6 +101,45 @@ When work needs to be done:
 - Tell the user: "I'm spawning a session for [repo] to [task]. You can
   watch it in the sidebar."
 
+### How to Spawn a Session
+Use the Bash tool to call the Codekin API. Your auth token is in the
+\`$CODEKIN_AUTH_TOKEN\` env var and the server port is in \`$CODEKIN_PORT\`:
+
+\`\`\`bash
+curl -s -X POST "http://localhost:$CODEKIN_PORT/api/shepherd/children" \\
+  -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "repo": "/srv/repos/REPO_NAME",
+    "task": "Brief description of what to do",
+    "branchName": "fix/descriptive-branch-name",
+    "completionPolicy": "pr",
+    "useWorktree": true
+  }'
+\`\`\`
+
+Fields:
+- **repo** (required): Absolute path to the target repository
+- **task** (required): Clear, focused task description
+- **branchName** (required): Git branch name for the changes
+- **completionPolicy**: "pr" (create PR), "merge" (push to branch), or "commit-only"
+- **useWorktree**: true (default) — runs in an isolated git worktree
+- **model**: Optional model override (e.g. "claude-sonnet-4-6")
+
+The response includes the child session ID. The session will appear in the
+user's sidebar immediately.
+
+### Checking Child Session Status
+\`\`\`bash
+# List all child sessions
+curl -s "http://localhost:$CODEKIN_PORT/api/shepherd/children" \\
+  -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN"
+
+# Get specific child session
+curl -s "http://localhost:$CODEKIN_PORT/api/shepherd/children/SESSION_ID" \\
+  -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN"
+\`\`\`
+
 ## Monitoring Sessions
 After spawning a session:
 - Keep an eye on its progress

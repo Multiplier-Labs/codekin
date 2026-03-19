@@ -8,7 +8,7 @@
 import { Router } from 'express'
 import type { Request } from 'express'
 import type { SessionManager } from './session-manager.js'
-import { ensureShepherdRunning, getShepherdSessionId } from './shepherd-manager.js'
+import { ensureShepherdRunning, getShepherdSessionId, getOrCreateShepherdId } from './shepherd-manager.js'
 import { scanRepoReports, readReport, getReportsSince } from './shepherd-reports.js'
 import { ShepherdMemory } from './shepherd-memory.js'
 import { ShepherdChildManager } from './shepherd-children.js'
@@ -22,6 +22,7 @@ import {
 } from './shepherd-learning.js'
 
 type VerifyFn = (token: string | undefined) => boolean
+type VerifySessionFn = (token: string | undefined, sessionId: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
 
 export function createShepherdRouter(
@@ -29,10 +30,27 @@ export function createShepherdRouter(
   extractToken: ExtractFn,
   sessions: SessionManager,
   monitorRef?: { current: ShepherdMonitor | null },
+  verifyTokenOrSessionToken?: VerifySessionFn,
 ): Router {
   const router = Router()
   const memory = new ShepherdMemory()
   const children = new ShepherdChildManager(sessions)
+
+  /**
+   * Verify that the request is authorized — accepts either the master auth
+   * token OR the Shepherd session's scoped token.  This allows Agent Joe's
+   * Claude process (which only has a session-scoped token) to call its own
+   * management endpoints (spawn children, update memory, etc.).
+   */
+  function verifyShepherdAuth(req: Request): boolean {
+    const token = extractToken(req)
+    if (verifyToken(token)) return true
+    if (verifyTokenOrSessionToken) {
+      const shepherdId = getOrCreateShepherdId()
+      return verifyTokenOrSessionToken(token, shepherdId)
+    }
+    return false
+  }
 
   // -------------------------------------------------------------------------
   // Session lifecycle
@@ -40,8 +58,7 @@ export function createShepherdRouter(
 
   /** Get Shepherd session status. */
   router.get('/api/shepherd/status', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const sessionId = getShepherdSessionId(sessions)
     if (!sessionId) {
@@ -59,8 +76,7 @@ export function createShepherdRouter(
 
   /** Ensure Shepherd is running and return its session ID. */
   router.post('/api/shepherd/start', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     try {
       const sessionId = ensureShepherdRunning(sessions)
@@ -77,8 +93,7 @@ export function createShepherdRouter(
 
   /** Scan reports for a single repo. */
   router.get('/api/shepherd/reports', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const repoPath = req.query.repo as string | undefined
     const since = req.query.since as string | undefined
@@ -99,8 +114,7 @@ export function createShepherdRouter(
 
   /** Read a specific report's content. */
   router.get('/api/shepherd/reports/read', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const filePath = req.query.path as string | undefined
     if (!filePath) return res.status(400).json({ error: 'Provide ?path=<filePath>' })
@@ -117,16 +131,14 @@ export function createShepherdRouter(
 
   /** List child sessions. */
   router.get('/api/shepherd/children', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     res.json({ children: children.list() })
   })
 
   /** Spawn a child session. */
   router.post('/api/shepherd/children', async (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { repo, task, branchName, completionPolicy, deployAfter, useWorktree, model } = req.body
     if (!repo || !task || !branchName) {
@@ -151,8 +163,7 @@ export function createShepherdRouter(
 
   /** Get a specific child session. */
   router.get('/api/shepherd/children/:id', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const child = children.get(req.params.id)
     if (!child) return res.status(404).json({ error: 'Child session not found' })
@@ -166,8 +177,7 @@ export function createShepherdRouter(
 
   /** Search memory. */
   router.get('/api/shepherd/memory', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const query = req.query.q as string | undefined
     const type = req.query.type as string | undefined
@@ -187,8 +197,7 @@ export function createShepherdRouter(
 
   /** Add or update a memory item. */
   router.post('/api/shepherd/memory', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { id, memoryType, scope, title, content, sourceRef, confidence, expiresAt, isPinned, tags } = req.body
     if (!memoryType || !content) {
@@ -213,8 +222,7 @@ export function createShepherdRouter(
 
   /** Delete a memory item. */
   router.delete('/api/shepherd/memory/:id', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const deleted = memory.delete(req.params.id)
     res.json({ deleted })
@@ -226,16 +234,14 @@ export function createShepherdRouter(
 
   /** List all trust records. */
   router.get('/api/shepherd/trust', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     res.json({ records: memory.listTrustRecords() })
   })
 
   /** Compute trust level for an action. */
   router.get('/api/shepherd/trust/level', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { action, category, severity, repo } = req.query as Record<string, string>
     if (!action || !category) {
@@ -248,8 +254,7 @@ export function createShepherdRouter(
 
   /** Record an approval. */
   router.post('/api/shepherd/trust/approve', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { action, category, repo } = req.body
     if (!action || !category) {
@@ -262,8 +267,7 @@ export function createShepherdRouter(
 
   /** Record a rejection (resets trust to ASK). */
   router.post('/api/shepherd/trust/reject', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { action, category, repo } = req.body
     if (!action || !category) {
@@ -276,8 +280,7 @@ export function createShepherdRouter(
 
   /** Pin trust to a specific level (user override). */
   router.post('/api/shepherd/trust/pin', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { action, category, repo, level } = req.body
     if (!action || !category || !level) {
@@ -290,8 +293,7 @@ export function createShepherdRouter(
 
   /** Reset all trust records. */
   router.post('/api/shepherd/trust/reset', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     memory.resetAllTrust()
     res.json({ ok: true })
@@ -303,8 +305,7 @@ export function createShepherdRouter(
 
   /** Get pending notifications from the monitor. */
   router.get('/api/shepherd/notifications', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const monitor = monitorRef?.current
     if (!monitor) return res.json({ notifications: [] })
@@ -315,8 +316,7 @@ export function createShepherdRouter(
 
   /** Mark notifications as delivered. */
   router.post('/api/shepherd/notifications/mark-delivered', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const monitor = monitorRef?.current
     if (!monitor) return res.json({ ok: true })
@@ -332,8 +332,7 @@ export function createShepherdRouter(
 
   /** Get summary stats for the dashboard header. */
   router.get('/api/shepherd/dashboard', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const repoItems = memory.list({ memoryType: 'repo_context' })
     const pendingNotifications = monitorRef?.current?.getPending() ?? []
@@ -360,8 +359,7 @@ export function createShepherdRouter(
 
   /** Extract memory candidates from a session interaction. */
   router.post('/api/shepherd/memory/extract', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { userMessage, assistantResponse, repo, sourceRef } = req.body
     if (!userMessage || !assistantResponse) {
@@ -376,8 +374,7 @@ export function createShepherdRouter(
 
   /** Run the aging/decay cycle. */
   router.post('/api/shepherd/memory/age', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const result = runAgingCycle(memory)
     res.json(result)
@@ -389,8 +386,7 @@ export function createShepherdRouter(
 
   /** Record a finding outcome. */
   router.post('/api/shepherd/findings/outcome', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { findingId, repo, category, severity, action, reason, sessionId, outcome } = req.body
     if (!findingId || !repo || !category || !action) {
@@ -411,8 +407,7 @@ export function createShepherdRouter(
 
   /** Get triage recommendation based on historical patterns. */
   router.get('/api/shepherd/findings/recommend', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { category, severity, repo } = req.query as Record<string, string>
     if (!category) return res.status(400).json({ error: 'Provide ?category=X' })
@@ -427,8 +422,7 @@ export function createShepherdRouter(
 
   /** Get the user's skill profile. */
   router.get('/api/shepherd/skills', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     res.json({
       profile: loadSkillProfile(),
@@ -438,8 +432,7 @@ export function createShepherdRouter(
 
   /** Update a skill level based on an observed signal. */
   router.post('/api/shepherd/skills', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { domain, signal, level } = req.body
     if (!domain || !signal || !level) {
@@ -456,8 +449,7 @@ export function createShepherdRouter(
 
   /** Record a decision. */
   router.post('/api/shepherd/decisions', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { decision, rationale, repo, relatedFinding, expectedOutcome } = req.body
     if (!decision || !rationale) {
@@ -475,8 +467,7 @@ export function createShepherdRouter(
 
   /** Assess a decision's outcome. */
   router.post('/api/shepherd/decisions/:id/assess', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { actualOutcome } = req.body
     if (!actualOutcome) return res.status(400).json({ error: 'Missing required field: actualOutcome' })
@@ -487,8 +478,7 @@ export function createShepherdRouter(
 
   /** Get decisions pending outcome assessment. */
   router.get('/api/shepherd/decisions/pending', (req, res) => {
-    const token = extractToken(req)
-    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!verifyShepherdAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     res.json({ decisions: getPendingOutcomeAssessments(memory) })
   })
