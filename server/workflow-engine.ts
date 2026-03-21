@@ -17,6 +17,15 @@ import { EventEmitter } from 'events'
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * Lifecycle status of a workflow run.
+ * - `queued`    — created but not yet executing
+ * - `running`   — step execution in progress
+ * - `succeeded` — all steps completed without error
+ * - `failed`    — a step threw a non-skip error, or the run was aborted externally
+ * - `canceled`  — `cancelRun()` was called and the AbortSignal fired
+ * - `skipped`   — a step threw `WorkflowSkipped` (e.g. no code changes since last run)
+ */
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled' | 'skipped'
 
 /**
@@ -29,53 +38,103 @@ export class WorkflowSkipped extends Error {
     this.name = 'WorkflowSkipped'
   }
 }
+/**
+ * Lifecycle status of an individual workflow step.
+ * - `pending`   — not yet reached by the executor
+ * - `running`   — handler is currently executing
+ * - `succeeded` — handler returned without error
+ * - `failed`    — handler threw; remaining steps become `skipped`
+ * - `skipped`   — run was canceled/failed/skipped before this step executed
+ */
 export type StepStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped'
 
+/** A single execution instance of a workflow, persisted to SQLite as JSON. */
 export interface WorkflowRun {
+  /** UUID primary key. */
   id: string
+  /** Workflow kind identifier, e.g. `"code-review.daily"`. */
   kind: string
+  /** Current lifecycle status (see `RunStatus`). */
   status: RunStatus
+  /** Caller-provided input (e.g. `{ repoPath, sinceTimestamp }`). Stored as JSON text. */
   input: Record<string, unknown>
+  /** Merged output of all succeeded steps, or `null` if incomplete. */
   output: Record<string, unknown> | null
+  /** Error message from the failed/skipped step, or `null` on success. */
   error: string | null
+  /** ISO timestamp when the run was created (queued). */
   createdAt: string
+  /** ISO timestamp when execution began, or `null` if still queued. */
   startedAt: string | null
+  /** ISO timestamp when execution finished (success, failure, or skip). */
   completedAt: string | null
 }
 
+/** A single step within a workflow run. Insertion order (rowid) preserves definition order. */
 export interface WorkflowStep {
+  /** UUID primary key. */
   id: string
+  /** Foreign key to the parent `WorkflowRun`. */
   runId: string
+  /** Step identifier matching the `StepDefinition.key` from registration. */
   key: string
+  /** Current lifecycle status (see `StepStatus`). */
   status: StepStatus
+  /** Merged output of prior steps, passed as this step's input. */
   input: Record<string, unknown> | null
+  /** Handler return value on success. */
   output: Record<string, unknown> | null
+  /** Error message if the step failed. */
   error: string | null
+  /** ISO timestamp when the step began executing. */
   startedAt: string | null
+  /** ISO timestamp when the step finished. */
   completedAt: string | null
 }
 
+/** Persisted cron schedule — survives server restart. `nextRunAt` is pre-computed on upsert. */
 export interface CronSchedule {
+  /** Stable identifier (typically matches the ReviewRepoConfig id). */
   id: string
+  /** Workflow kind to trigger, e.g. `"security-audit.weekly"`. */
   kind: string
+  /** Standard 5-field cron expression (minute hour dom month dow). */
   cronExpression: string
+  /** Default input passed to the triggered run. */
   input: Record<string, unknown>
+  /** Whether the scheduler should fire this schedule. */
   enabled: boolean
+  /** ISO timestamp of the most recent cron-triggered run, or `null` if never fired. */
   lastRunAt: string | null
+  /** Pre-computed ISO timestamp of the next fire time (avoids re-parsing on every tick). */
   nextRunAt: string | null
 }
 
+/** Event emitted via the `workflow_event` EventEmitter channel for real-time UI updates. */
 export interface WorkflowEvent {
+  /** Event name, e.g. `"run_started"`, `"step_failed"`, `"run_succeeded"`. */
   eventType: string
+  /** UUID of the associated workflow run. */
   runId: string
+  /** Workflow kind identifier. */
   kind: string
+  /** Step key, present only for step-level events. */
   stepKey?: string
+  /** Run status at the time of emission. */
   status?: string
+  /** Optional extra data for the event consumer. */
   payload?: unknown
+  /** ISO timestamp when the event was emitted. */
   timestamp: string
 }
 
-/** Step handler function — receives step input + run context, returns step output. */
+/**
+ * Step handler function — receives step input + run context, returns step output.
+ * @param input  Merged output of all preceding steps (plus the run's original input).
+ * @param context.runId       UUID of the current run.
+ * @param context.run         Full WorkflowRun object (mutable — reflects current status).
+ * @param context.abortSignal Fires when `cancelRun()` is called; handlers should check or listen on it.
+ */
 export type StepHandler = (
   input: Record<string, unknown>,
   context: { runId: string; run: WorkflowRun; abortSignal: AbortSignal }
@@ -252,11 +311,13 @@ export class WorkflowEngine extends EventEmitter {
   // Workflow registration
   // -------------------------------------------------------------------------
 
+  /** Register a workflow kind with its step definitions. Must be called before `startRun()`. */
   registerWorkflow(definition: WorkflowDefinition) {
     this.workflows.set(definition.kind, definition)
     console.log(`[workflow] Registered workflow: ${definition.kind} (${definition.steps.length} steps)`)
   }
 
+  /** Check whether a workflow kind has been registered. */
   hasWorkflow(kind: string): boolean {
     return this.workflows.has(kind)
   }
@@ -386,6 +447,9 @@ export class WorkflowEngine extends EventEmitter {
       const msg = err instanceof Error ? err.message : String(err)
       run.completedAt = new Date().toISOString()
 
+      // A step threw WorkflowSkipped → mark run as 'skipped' (not 'failed').
+      // This is the intended exit path for assessment workflows that detect
+      // no code changes since the last run.
       if (err instanceof WorkflowSkipped) {
         run.status = 'skipped'
         run.error = msg
@@ -418,6 +482,7 @@ export class WorkflowEngine extends EventEmitter {
     }
   }
 
+  /** Signal an active run to abort. Returns true if the run was in-flight and the signal was sent. */
   cancelRun(runId: string): boolean {
     const controller = this.activeAbortControllers.get(runId)
     if (controller) {
@@ -431,6 +496,7 @@ export class WorkflowEngine extends EventEmitter {
   // Queries
   // -------------------------------------------------------------------------
 
+  /** Fetch a single run with all its steps (ordered by definition order). Returns `null` if not found. */
   getRun(runId: string): (WorkflowRun & { steps: WorkflowStep[] }) | null {
     const row = this.db.prepare(`SELECT * FROM workflow_runs WHERE id = ?`).get(runId) as Record<string, string> | undefined
     if (!row) return null
@@ -462,6 +528,7 @@ export class WorkflowEngine extends EventEmitter {
     }
   }
 
+  /** List runs with optional filtering by kind/status, ordered newest-first. */
   listRuns(opts?: { kind?: string; status?: RunStatus; limit?: number; offset?: number }): WorkflowRun[] {
     const { sql, params } = buildListQuery('workflow_runs', {
       filters: [
@@ -490,6 +557,7 @@ export class WorkflowEngine extends EventEmitter {
   // Cron scheduling
   // -------------------------------------------------------------------------
 
+  /** Create or update a cron schedule. Pre-computes `nextRunAt` from the expression. */
   upsertSchedule(schedule: Omit<CronSchedule, 'lastRunAt' | 'nextRunAt'>): CronSchedule {
     const nextRun = schedule.enabled ? nextCronMatch(schedule.cronExpression, new Date()).toISOString() : null
 
@@ -509,11 +577,13 @@ export class WorkflowEngine extends EventEmitter {
     return { ...schedule, lastRunAt: null, nextRunAt: nextRun }
   }
 
+  /** Delete a cron schedule by ID. Returns true if a row was deleted. */
   deleteSchedule(id: string): boolean {
     const result = this.db.prepare(`DELETE FROM cron_schedules WHERE id = ?`).run(id)
     return result.changes > 0
   }
 
+  /** List all cron schedules (enabled and disabled). */
   listSchedules(): CronSchedule[] {
     return (this.db.prepare(`SELECT * FROM cron_schedules`).all() as Record<string, unknown>[]).map(row => ({
       id: row.id as string,
@@ -526,6 +596,7 @@ export class WorkflowEngine extends EventEmitter {
     }))
   }
 
+  /** Fetch a single cron schedule by ID. Returns `null` if not found. */
   getSchedule(id: string): CronSchedule | null {
     const row = this.db.prepare(`SELECT * FROM cron_schedules WHERE id = ?`).get(id) as Record<string, unknown> | undefined
     if (!row) return null
@@ -581,6 +652,7 @@ export class WorkflowEngine extends EventEmitter {
     this.cronTimer = setInterval(tick, 60_000)
   }
 
+  /** Stop the cron polling loop. Safe to call multiple times. */
   stopCronScheduler() {
     if (this.cronTimer) {
       clearInterval(this.cronTimer)
@@ -632,6 +704,7 @@ export class WorkflowEngine extends EventEmitter {
   // Shutdown
   // -------------------------------------------------------------------------
 
+  /** Gracefully shut down: stop cron, cancel active runs, close the database. */
   shutdown() {
     this.stopCronScheduler()
     // Cancel all active runs
@@ -650,6 +723,7 @@ export class WorkflowEngine extends EventEmitter {
 
 let engineInstance: WorkflowEngine | null = null
 
+/** Initialize the singleton workflow engine (idempotent — returns existing instance if already created). */
 export function initWorkflowEngine(): WorkflowEngine {
   if (engineInstance) return engineInstance
   engineInstance = new WorkflowEngine()
@@ -657,11 +731,13 @@ export function initWorkflowEngine(): WorkflowEngine {
   return engineInstance
 }
 
+/** Get the singleton workflow engine. Throws if `initWorkflowEngine()` hasn't been called. */
 export function getWorkflowEngine(): WorkflowEngine {
   if (!engineInstance) throw new Error('Workflow engine not initialized — call initWorkflowEngine() first')
   return engineInstance
 }
 
+/** Shut down and discard the singleton engine. Safe to call when no engine exists. */
 export function shutdownWorkflowEngine() {
   if (engineInstance) {
     engineInstance.shutdown()

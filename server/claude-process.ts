@@ -324,11 +324,14 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
     this.currentToolInput = ''
   }
 
-  /** No-op: assistant messages are handled via stream_event deltas instead. */
-  private handleAssistantMessage(): void {
-    // assistant events with --include-partial-messages contain tool_use blocks
-    // but tool_results come in separate 'user' events — see handleUserEvent
-  }
+  /**
+   * No-op: assistant messages are handled via stream_event deltas instead.
+   * Kept as an explicit method (rather than an empty `break`) so the switch
+   * case self-documents that this message type is intentionally consumed.
+   * Note: assistant events with --include-partial-messages contain tool_use blocks,
+   * but tool_results come in separate 'user' events — see handleUserEvent.
+   */
+  private handleAssistantMessage(): void {}
 
   /** Extract tool_result blocks from 'user' events and emit as tool_output. */
   private handleUserEvent(event: ClaudeEvent): void {

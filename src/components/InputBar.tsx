@@ -45,23 +45,35 @@ export interface InputBarHandle {
 export type InputBarVariant = 'default' | 'joe'
 
 interface InputBarProps {
+  /** Called with the raw text when the user sends a message (Enter key or send button). */
   onSendInput: (data: string) => void
   /** True when Claude is waiting for user input (prompt mode). */
   isWaiting: boolean
+  /** When true, textarea and action buttons are disabled (e.g. no auth token). */
   disabled: boolean
+  /** Called when the user presses Escape — parent uses this to deselect the session. */
   onEscape: () => void
+  /** Files queued for upload alongside the next message. */
   pendingFiles: File[]
+  /** Append files to the pending upload queue. */
   onAddFiles: (files: File[]) => void
+  /** Remove a file from the pending queue by index. */
   onRemoveFile: (index: number) => void
+  /** Skill groups for the toolbar skill menu (omit or empty to hide the menu). */
   skillGroups?: SkillGroup[]
   /** Unified list of all slash commands (skills + bundled + built-in). */
   slashCommands?: SlashCommand[]
+  /** Pre-populate the textarea (e.g. when restoring a draft). */
   initialValue?: string
+  /** Controlled callback — fires on every keystroke so the parent can persist drafts. */
   onValueChange?: (value: string) => void
+  /** Currently selected Claude model ID, shown in the model picker. Omit to hide picker. */
   currentModel?: string | null
+  /** Called when the user selects a different model from the picker. */
   onModelChange?: (model: string) => void
+  /** Override the default placeholder text in the textarea. */
   placeholder?: string
-  /** When true, disables drag-to-resize and uses auto-height instead */
+  /** When true, disables drag-to-resize and uses auto-height instead. */
   isMobile?: boolean
   /** Show the worktree toggle (only before first message in a session). */
   showWorktreeToggle?: boolean

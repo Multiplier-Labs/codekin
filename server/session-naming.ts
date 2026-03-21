@@ -28,6 +28,8 @@ export interface SessionNamingDeps {
 /** Generate a session name by spawning `claude -p` in one-shot mode. */
 function generateNameViaCLI(prompt: string): Promise<string> {
   return new Promise((resolve, reject) => {
+    // --max-turns 2: one turn to receive/process the prompt, one to reply with the name.
+    // Using 1 would sometimes cause the CLI to exit before producing output.
     const proc = spawn('claude', ['-p', '--max-turns', '2', '--model', 'haiku'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { PATH: process.env.PATH, HOME: process.env.HOME },

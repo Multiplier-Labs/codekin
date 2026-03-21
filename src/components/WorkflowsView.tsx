@@ -25,7 +25,9 @@ import { CustomWorkflowGuide } from './workflows/CustomWorkflowGuide'
 // ---------------------------------------------------------------------------
 
 interface Props {
+  /** Auth token for REST API calls to the workflow/schedule endpoints. */
   token: string
+  /** Navigate the main app to a session (e.g. when the user clicks a run's linked session). */
   onNavigateToSession?: (sessionId: string) => void
 }
 

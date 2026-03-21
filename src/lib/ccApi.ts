@@ -12,6 +12,7 @@ const BASE = '/cc'
 /** Authelia login page — redirect here when session expires. */
 const LOGIN_URL = '/authelia/login'
 
+/** Build standard JSON + Bearer auth headers for REST calls. */
 function headers(token: string): HeadersInit {
   return {
     'Content-Type': 'application/json',

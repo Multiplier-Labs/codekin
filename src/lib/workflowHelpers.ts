@@ -4,8 +4,18 @@
 
 import type { WorkflowRun } from './workflowApi'
 
+/**
+ * UI grouping category for workflow kinds.
+ * - `assessment` — scheduled code-quality reports (coverage, review, security, etc.)
+ * - `organizer`  — repo-level housekeeping (unused currently, reserved)
+ * - `executor`   — task-execution workflows (unused currently, reserved)
+ * - `event`      — triggered by external events (e.g. git commit hooks) rather than cron
+ *
+ * The category drives filtering and section headers in WorkflowsView.
+ */
 export type WorkflowCategory = 'assessment' | 'organizer' | 'executor' | 'event'
 
+/** All known workflow kinds with their display labels and UI category. Used by AddWorkflowModal and kind lookups. */
 export const WORKFLOW_KINDS = [
   { value: 'coverage.daily', label: 'Coverage Assessment', category: 'assessment' as WorkflowCategory },
   { value: 'code-review.daily', label: 'Code Review', category: 'assessment' as WorkflowCategory },
@@ -26,12 +36,14 @@ export function isEventDriven(kind: string): boolean {
   return EVENT_DRIVEN_KINDS.has(kind)
 }
 
+/** Model options for the workflow config UI. Empty value means server default (Opus). */
 export const MODEL_OPTIONS = [
   { value: '', label: 'Default (Opus)' },
   { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
   { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
 ]
 
+/** Cron day-of-week presets (Daily, Weekdays) for the schedule picker. `dow` is the cron field value. */
 export const DAY_PRESETS = [
   { label: 'Daily', dow: '*' },
   { label: 'Weekdays', dow: '1-5' },
@@ -47,6 +59,7 @@ export const DAY_INDIVIDUAL = [
   { label: 'Sun', dow: '0' },
 ]
 
+/** Combined list of all day-of-week options (presets + individual days) for the schedule picker. */
 export const DAY_PATTERNS = [...DAY_PRESETS, ...DAY_INDIVIDUAL]
 
 /** Check if a dow value represents a bi-weekly schedule (e.g. `"biweekly"` or `"biweekly-1"`). */

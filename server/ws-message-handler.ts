@@ -23,6 +23,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
   const { ws, sessions, clientSessions, send } = ctx
 
   switch (msg.type) {
+    // Create a new session, optionally in a git worktree, then start Claude.
     case 'create_session': {
       const session = sessions.create(msg.name, msg.workingDir, { model: msg.model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools })
       session.clients.add(ws)
@@ -62,6 +63,8 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    // Join an existing session — leave the previous one first to avoid dual membership.
+    // Sends back the full output history so the client can rebuild the chat view.
     case 'join_session': {
       const currentId = clientSessions.get(ws)
       if (currentId) {
@@ -86,6 +89,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    // Cleanly leave the current session without destroying it (session stays alive for other clients).
     case 'leave_session': {
       const currentId = clientSessions.get(ws)
       if (currentId) {
@@ -96,6 +100,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    // (Re)start the Claude process for the current session (e.g. after a stop or crash).
     case 'start_claude': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
@@ -106,6 +111,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    // Kill the Claude process for the current session (user-initiated stop).
     case 'stop': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
@@ -114,6 +120,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    // Forward user input to the Claude stdin pipe and echo back to all connected clients.
     case 'input': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
@@ -129,6 +136,8 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    // Route a tool-approval or permission prompt response back to the Claude process.
+    // The requestId ties it to a specific pending approval.
     case 'prompt_response': {
       const sessionId = clientSessions.get(ws)
       console.log(`[prompt_response] sessionId=${sessionId} value=${JSON.stringify(msg.value)} requestId=${msg.requestId}`)
@@ -140,6 +149,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    // Change the model for the session. Validates against the server-side allowlist.
     case 'set_model': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
@@ -152,6 +162,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    // Change the permission mode for the session. Validated against the server-side allowlist.
     case 'set_permission_mode': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
@@ -164,14 +175,17 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    // No-op: stream-json mode doesn't use a PTY, so terminal resize has no effect.
+    // Kept as a recognized message type so the client doesn't need to guard against it.
     case 'resize':
-      // stream-json mode doesn't use PTY, so resize is a no-op
       break
 
+    // Health-check / keep-alive: client pings periodically and on visibility restore.
     case 'ping':
       send({ type: 'pong' })
       break
 
+    // Compute git diff for the session's working directory and return structured results.
     case 'get_diff': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
@@ -182,6 +196,9 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    // Move a running session into a git worktree mid-conversation.
+    // Stops the Claude process first, creates the worktree, then restarts Claude in it.
+    // Preserves the Claude session ID so the CLI resumes with full conversation context.
     case 'move_to_worktree': {
       const sessionId = clientSessions.get(ws)
       if (!sessionId) { send({ type: 'error', message: 'Not in a session' }); break }
@@ -218,6 +235,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    // Discard uncommitted changes (git checkout/clean) for specified paths in the session's repo.
     case 'discard_changes': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {

@@ -37,11 +37,22 @@ export function useWsConnection({
 
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pingTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+  /** Exponential backoff delay (ms) for reconnect attempts, doubling up to 30s. Reset on successful open. */
   const backoff = useRef(1000)
   const intentionalClose = useRef(false)
   const connectRef = useRef<() => void>(() => {})
 
-  // Session restore / health check refs
+  // Session restore / health check state machine:
+  //
+  //   Tab hidden → Tab visible
+  //     ├─ WS OPEN:  set awaitingHealthPong=true, send ping, start 2s timeout
+  //     │    ├─ pong received before timeout → call onHealthPong (rejoin session)
+  //     │    └─ timeout fires → close WS as zombie, reconnect via onclose
+  //     ├─ WS CONNECTING: no-op (onopen will complete the handshake)
+  //     └─ WS CLOSED: check auth → reconnect()
+  //
+  //   restoringRef gates the entire flow to prevent overlapping restore attempts
+  //   (held for 3s after each trigger).
   const restoringRef = useRef(false)
   const awaitingHealthPong = useRef(false)
   const healthPongTimer = useRef<ReturnType<typeof setTimeout> | null>(null)

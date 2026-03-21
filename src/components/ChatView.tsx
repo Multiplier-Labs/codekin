@@ -18,14 +18,21 @@ import { IconArrowDown, IconRobotFace } from '@tabler/icons-react'
 import type { ChatMessage } from '../types'
 import { formatModelName, formatUserText } from '../lib/chatFormatters'
 
+/** Visual theme variant — 'joe' uses accent colors for the non-coding assistant persona. */
 export type ChatViewVariant = 'default' | 'joe'
 
 interface Props {
+  /** Ordered array of chat messages to render (user, assistant, tool, system, etc.). */
   messages: ChatMessage[]
+  /** Base font size in pixels for message text. Code blocks use `fontSize - 1`. */
   fontSize: number
+  /** When true, shows a full-screen overlay prompting the user to configure their token. */
   disabled?: boolean
+  /** When true, displays a sticky "Plan Mode" banner at the top of the chat area. */
   planningMode?: boolean
+  /** Current activity label (e.g. "Reading file..."). Shows the spinning activity indicator when set. */
   activityLabel?: string
+  /** Adjusts layout for narrow viewports (wider user bubbles, larger touch targets). */
   isMobile?: boolean
   /** Visual variant — 'joe' uses accent colors for assistant messages and indicators. */
   variant?: ChatViewVariant
@@ -50,6 +57,7 @@ function parseApiError(text: string): { prefix: string; errorType: string; messa
   return null
 }
 
+/** Renders system banners (init, error, exit, notification) with color-coded dot and optional API error formatting. */
 function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
   const colorClass = msg.subtype === 'init'
     ? 'text-success-5'
@@ -432,6 +440,9 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
   const [showScrollButton, setShowScrollButton] = useState(false)
   const isNearBottomRef = useRef(true)
 
+  // Track whether the user is near the bottom of the scroll container.
+  // 100px threshold accounts for the activity indicator height so auto-scroll
+  // doesn't disengage when new tool output pushes content just past the viewport.
   const checkScroll = useCallback(() => {
     const el = containerRef.current
     if (!el) return
