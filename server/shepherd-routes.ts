@@ -7,6 +7,8 @@
 
 import { Router } from 'express'
 import type { Request } from 'express'
+import { resolve } from 'path'
+import { existsSync, statSync } from 'fs'
 import type { SessionManager } from './session-manager.js'
 import { ensureShepherdRunning, getShepherdSessionId, getOrCreateShepherdId } from './shepherd-manager.js'
 import { scanRepoReports, readReport, getReportsSince } from './shepherd-reports.js'
@@ -143,6 +145,15 @@ export function createShepherdRouter(
     const { repo, task, branchName, completionPolicy, deployAfter, useWorktree, model } = req.body
     if (!repo || !task || !branchName) {
       return res.status(400).json({ error: 'Missing required fields: repo, task, branchName' })
+    }
+
+    // Validate repo path: must resolve to /srv/repos/ and be an existing directory
+    const resolvedRepo = resolve(repo)
+    if (!resolvedRepo.startsWith('/srv/repos/')) {
+      return res.status(400).json({ error: 'Invalid repo path: must be under /srv/repos/' })
+    }
+    if (!existsSync(resolvedRepo) || !statSync(resolvedRepo).isDirectory()) {
+      return res.status(400).json({ error: 'Invalid repo path: directory does not exist' })
     }
 
     try {
