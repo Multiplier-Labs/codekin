@@ -6,7 +6,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
-import { join, basename } from 'path'
+import { join, basename, resolve } from 'path'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -111,9 +111,11 @@ export function scanAllReports(repoPaths: string[]): ReportMeta[] {
  * Read a report's full content.
  */
 export function readReport(filePath: string): ReportContent | null {
-  if (!existsSync(filePath)) return null
+  const resolved = resolve(filePath)
+  if (!resolved.includes('/.codekin/reports/')) return null
+  if (!existsSync(resolved)) return null
 
-  const content = readFileSync(filePath, 'utf-8')
+  const content = readFileSync(resolved, 'utf-8')
   const stat = statSync(filePath)
 
   // Extract metadata from path

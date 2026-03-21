@@ -2869,4 +2869,46 @@ describe('SessionManager', () => {
       vi.useRealTimers()
     })
   })
+
+  describe('matchesAllowedTools', () => {
+    let sm: SessionManager
+
+    beforeEach(() => {
+      sm = new SessionManager()
+    })
+
+    function match(allowedTools: string[], toolName: string, toolInput: Record<string, unknown>): boolean {
+      return (sm as any).matchesAllowedTools(allowedTools, toolName, toolInput)
+    }
+
+    it('matches simple tool names', () => {
+      expect(match(['WebFetch', 'Read'], 'WebFetch', {})).toBe(true)
+      expect(match(['WebFetch', 'Read'], 'Read', {})).toBe(true)
+      expect(match(['WebFetch', 'Read'], 'Write', {})).toBe(false)
+    })
+
+    it('matches Bash prefix patterns with word boundary', () => {
+      expect(match(['Bash(curl:*)'], 'Bash', { command: 'curl https://example.com' })).toBe(true)
+      expect(match(['Bash(curl:*)'], 'Bash', { command: 'curl' })).toBe(true)
+    })
+
+    it('rejects Bash commands that share a prefix but are different commands', () => {
+      // This was the critical bug: 'curl-malicious' should NOT match 'Bash(curl:*)'
+      expect(match(['Bash(curl:*)'], 'Bash', { command: 'curl-malicious-binary' })).toBe(false)
+      expect(match(['Bash(git:*)'], 'Bash', { command: 'gitevil --steal-tokens' })).toBe(false)
+    })
+
+    it('handles leading whitespace in commands', () => {
+      expect(match(['Bash(curl:*)'], 'Bash', { command: '  curl https://example.com' })).toBe(true)
+    })
+
+    it('rejects non-matching tool name in parameterized pattern', () => {
+      expect(match(['Bash(curl:*)'], 'Read', { command: 'curl foo' })).toBe(false)
+    })
+
+    it('handles empty/missing command', () => {
+      expect(match(['Bash(curl:*)'], 'Bash', {})).toBe(false)
+      expect(match(['Bash(curl:*)'], 'Bash', { command: '' })).toBe(false)
+    })
+  })
 })

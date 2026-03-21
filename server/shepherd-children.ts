@@ -51,6 +51,8 @@ export interface ChildSession {
 
 const MAX_CONCURRENT = 5
 const DEFAULT_TIMEOUT_MS = 600_000  // 10 minutes
+const CHILD_RETENTION_MS = 3_600_000  // keep completed/failed children for 1 hour
+const MAX_RETAINED_CHILDREN = 100    // hard cap on total entries
 
 // ---------------------------------------------------------------------------
 // Manager
@@ -66,6 +68,7 @@ export class ShepherdChildManager {
 
   /** Get all active/recent child sessions. */
   list(): ChildSession[] {
+    this.purgeStaleChildren()
     return Array.from(this.children.values())
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
   }
@@ -73,6 +76,27 @@ export class ShepherdChildManager {
   /** Get a child session by ID. */
   get(id: string): ChildSession | null {
     return this.children.get(id) ?? null
+  }
+
+  /** Purge completed/failed children older than the retention period. */
+  private purgeStaleChildren(): void {
+    const now = Date.now()
+    for (const [id, child] of this.children) {
+      if (child.status === 'starting' || child.status === 'running') continue
+      if (child.completedAt && now - new Date(child.completedAt).getTime() > CHILD_RETENTION_MS) {
+        this.children.delete(id)
+      }
+    }
+    // Hard cap: if still over limit, remove oldest completed entries
+    if (this.children.size > MAX_RETAINED_CHILDREN) {
+      const completed = Array.from(this.children.entries())
+        .filter(([, c]) => c.status !== 'starting' && c.status !== 'running')
+        .sort((a, b) => (a[1].completedAt ?? '').localeCompare(b[1].completedAt ?? ''))
+      while (this.children.size > MAX_RETAINED_CHILDREN && completed.length > 0) {
+        const [id] = completed.shift()!
+        this.children.delete(id)
+      }
+    }
   }
 
   /** Count currently active (non-terminal) child sessions. */
@@ -87,6 +111,7 @@ export class ShepherdChildManager {
    * Returns the child session info or throws if at capacity.
    */
   async spawn(request: ChildSessionRequest): Promise<ChildSession> {
+    this.purgeStaleChildren()
     if (this.activeCount() >= MAX_CONCURRENT) {
       throw new Error(`Cannot spawn child session: ${MAX_CONCURRENT} concurrent sessions already running`)
     }
@@ -222,8 +247,8 @@ export class ShepherdChildManager {
         return
       }
 
-      // Check for result message (Claude finished normally)
-      const resultMsg = session.outputHistory.find(m => m.type === 'result')
+      // Check for result message (Claude finished normally), skipping superseded ones
+      const resultMsg = session.outputHistory.find(m => m.type === 'result' && !(m as Record<string, unknown>)._superseded)
       if (resultMsg) {
         const text = this.extractText(session.outputHistory)
         // Check if the final step was done; if not, nudge the session
@@ -294,9 +319,10 @@ export class ShepherdChildManager {
 
     if (missing && instruction && session.claudeProcess?.isAlive()) {
       (child as ChildSession & { _nudged?: boolean })._nudged = true
-      // Clear the result message from history so we can detect the next one
-      const resultIdx = session.outputHistory.findIndex(m => m.type === 'result')
-      if (resultIdx !== -1) session.outputHistory.splice(resultIdx, 1)
+      // Mark the result message as superseded so monitoring can ignore it
+      // without mutating the outputHistory array (which would break replay)
+      const resultMsg = session.outputHistory.find(m => m.type === 'result')
+      if (resultMsg) (resultMsg as Record<string, unknown>)._superseded = true
       this.sessions.sendInput(child.id, instruction)
       return true
     }

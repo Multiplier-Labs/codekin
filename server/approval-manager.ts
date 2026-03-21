@@ -455,43 +455,10 @@ export class ApprovalManager {
         }
       }
 
-      // Phase 2: If 3+ exact commands share a patternable prefix,
-      // create a pattern and mark the exact commands for removal.
-      const prefixGroups = new Map<string, string[]>()
-      for (const cmd of entry.commands) {
-        if (toRemove.has(cmd)) continue
-        const tokens = cmd.split(/\s+/).filter(Boolean)
-        if (tokens.length === 0) continue
-        const firstToken = tokens[0]
-        let prefix = tokens.length >= 2 ? `${tokens[0]} ${tokens[1]}` : firstToken
-        // Two-token deny always wins
-        if (ApprovalManager.NEVER_PATTERN_PREFIXES.has(prefix)) continue
-        // Two-token allow takes priority over first-token deny (e.g. "bun run" safe, bare "bun" denied)
-        if (!ApprovalManager.PATTERNABLE_PREFIXES.has(prefix)) {
-          // First-token deny blocks remaining single-token patterns
-          if (ApprovalManager.NEVER_PATTERN_PREFIXES.has(firstToken)) continue
-          if (ApprovalManager.PATTERNABLE_PREFIXES.has(firstToken)) {
-            prefix = firstToken
-          } else {
-            continue
-          }
-        }
-        // Skip commands with shell meta-characters
-        if (/[|;&`$(){}*?[\]~]/.test(cmd) || cmd.includes('\n')) continue
-        const group = prefixGroups.get(prefix) || []
-        group.push(cmd)
-        prefixGroups.set(prefix, group)
-      }
-      for (const [prefix, cmds] of prefixGroups) {
-        if (cmds.length >= 3) {
-          const pattern = `${prefix} *`
-          if (!entry.patterns.has(pattern)) {
-            entry.patterns.add(pattern)
-            console.log(`[auto-approve] compacting ${cmds.length} exact commands into pattern "${pattern}" — approval scope widened`)
-          }
-          for (const cmd of cmds) toRemove.add(cmd)
-        }
-      }
+      // Phase 2 removed: auto-creating wildcard patterns from exact commands
+      // silently widened approval scope beyond what the user explicitly approved.
+      // Only Phase 1 deduplication (removing commands already covered by
+      // user-approved patterns) is safe.
 
       for (const cmd of toRemove) entry.commands.delete(cmd)
       totalRemoved += toRemove.size

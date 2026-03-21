@@ -108,8 +108,31 @@ describe('ApprovalManager', () => {
   // ─── 5. compactExactCommands via restoreRepoApprovalsFromDisk ──────
 
   describe('compactExactCommands', () => {
-    it('compacts 3+ commands sharing a prefix into a pattern', () => {
-      // Mock disk data with 3 cat commands for one repo
+    it('removes exact commands already covered by an existing pattern', () => {
+      // Mock disk data with commands and a pattern that already covers them
+      vi.mocked(existsSync).mockReturnValue(true)
+      vi.mocked(readFileSync).mockReturnValue(
+        JSON.stringify({
+          '/repo/x': {
+            tools: [],
+            commands: ['cat a.txt', 'cat b.txt', 'cat c.txt'],
+            patterns: ['cat *'],
+          },
+        }),
+      )
+
+      const freshMgr = new ApprovalManager()
+
+      // The 3 cat commands should have been removed since they're covered by "cat *"
+      const approvals = freshMgr.getApprovals('/repo/x')
+      expect(approvals.patterns).toContain('cat *')
+      expect(approvals.commands).not.toContain('cat a.txt')
+      expect(approvals.commands).not.toContain('cat b.txt')
+      expect(approvals.commands).not.toContain('cat c.txt')
+    })
+
+    it('does not auto-create wildcard patterns from exact commands', () => {
+      // Mock disk data with 3 cat commands but no existing pattern
       vi.mocked(existsSync).mockReturnValue(true)
       vi.mocked(readFileSync).mockReturnValue(
         JSON.stringify({
@@ -123,19 +146,13 @@ describe('ApprovalManager', () => {
 
       const freshMgr = new ApprovalManager()
 
-      // The 3 cat commands should have been compacted into "cat *"
-      // so a new cat command should be auto-approved
-      expect(
-        freshMgr.checkAutoApproval('/repo/x', 'Bash', { command: 'cat d.txt' }),
-      ).toBe(true)
-
-      // Verify the pattern was created
+      // Phase 2 was removed: no wildcard pattern should be auto-created
       const approvals = freshMgr.getApprovals('/repo/x')
-      expect(approvals.patterns).toContain('cat *')
-      // Original exact commands should have been removed
-      expect(approvals.commands).not.toContain('cat a.txt')
-      expect(approvals.commands).not.toContain('cat b.txt')
-      expect(approvals.commands).not.toContain('cat c.txt')
+      expect(approvals.patterns).not.toContain('cat *')
+      // Original exact commands should still be present
+      expect(approvals.commands).toContain('cat a.txt')
+      expect(approvals.commands).toContain('cat b.txt')
+      expect(approvals.commands).toContain('cat c.txt')
     })
   })
 
