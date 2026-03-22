@@ -55,6 +55,14 @@ createHook({
   transport,
   context: [new EnvContext()],
   handler: async (input, ctx) => {
+    // AskUserQuestion: pass through to control_request flow.
+    // The CLI emits a control_request for this tool, which lets the server
+    // collect answers via the UI. If the hook handles it, the control_request
+    // is never generated and the tool fails with is_error=true.
+    if (input.tool_name === 'AskUserQuestion') {
+      return;
+    }
+
     // File-read tools: auto-allow for in-project paths, prompt for outside
     if (input.tool_name === 'Read') {
       const filePath = input.tool_input?.file_path;
