@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { IconArchive, IconTrash, IconRobot, IconTimeline, IconX, IconLoader2, IconMessagePlus } from '@tabler/icons-react'
+import { IconArchive, IconTrash, IconRobot, IconRobotFace, IconTimeline, IconX, IconLoader2, IconMessagePlus } from '@tabler/icons-react'
 import { listArchivedSessions, getArchivedSession, deleteArchivedSession, getRetentionDays, setRetentionDays as setRetentionDaysApi, type ArchivedSessionInfo, type ArchivedSessionFull } from '../lib/ccApi'
 import { rebuildFromHistory } from '../hooks/useChatSocket'
 import { ChatView } from './ChatView'
@@ -243,6 +243,8 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
             >
               {s.source === 'workflow' ? (
                 <IconTimeline size={12} className="shrink-0 opacity-50" />
+              ) : s.source === 'joe' || s.source === 'agent' ? (
+                <IconRobotFace size={12} className="shrink-0 opacity-50" />
               ) : s.source === 'webhook' ? (
                 <IconRobot size={12} className="shrink-0 opacity-50" />
               ) : (
