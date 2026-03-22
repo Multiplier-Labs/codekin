@@ -225,19 +225,19 @@ export function LeftSidebar({
   const repoNodes = buildRepoNodes(sessions, waitingSessions, tentativeQueues)
   const connDotColor = connState === 'connected' ? 'bg-success-7' : connState === 'connecting' ? 'bg-warning-6' : 'bg-error-7'
 
-  // Derive Agent Joe status dot from its session state
+  // Derive Agent Joe icon style from its session state
   const joeSession = sessions.find(s => s.source === 'joe')
-  const joeDot = joeSession
+  const joeIconClass = joeSession
     ? (tentativeQueues[joeSession.id]?.length ?? 0) > 0
-      ? 'bg-accent-6 animate-pulse'
+      ? 'text-accent-5 animate-pulse'
       : waitingSessions[joeSession.id]
-      ? 'bg-warning-5 animate-pulse'
+      ? 'text-warning-5 animate-pulse'
       : joeSession.isProcessing
-      ? 'bg-success-6 animate-pulse'
+      ? 'text-success-6 animate-pulse'
       : joeSession.active
-      ? 'bg-neutral-5'
-      : 'bg-neutral-7'
-    : 'bg-neutral-7'
+      ? 'text-neutral-5'
+      : ''
+    : ''
   const hasModules = globalModules.length > 0 || (activeRepo && activeRepo.modules.length > 0)
 
   // In mobile mode, auto-close the drawer when a session is selected
@@ -348,9 +348,8 @@ export function LeftSidebar({
                 : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6'
             }`}
           >
-            <IconRobotFace size={16} stroke={2} className="flex-shrink-0" />
+            <IconRobotFace size={16} stroke={2} className={`flex-shrink-0 ${joeIconClass}`} />
             <span className="flex-1 text-left">Agent Joe</span>
-            <span className={`inline-block h-1.5 w-1.5 rounded-full flex-shrink-0 ${joeDot}`} />
           </button>
           {hasModules && (
             <div ref={modulesRef} className="relative">
