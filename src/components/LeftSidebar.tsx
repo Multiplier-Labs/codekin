@@ -229,13 +229,13 @@ export function LeftSidebar({
   const joeSession = sessions.find(s => s.source === 'joe')
   const joeIconClass = joeSession
     ? (tentativeQueues[joeSession.id]?.length ?? 0) > 0
-      ? 'text-accent-5 animate-pulse'
+      ? '!text-accent-5 animate-pulse'
       : waitingSessions[joeSession.id]
-      ? 'text-warning-5 animate-pulse'
+      ? '!text-warning-5 animate-pulse'
       : joeSession.isProcessing
-      ? 'text-success-6 animate-pulse'
+      ? '!text-success-6 animate-pulse'
       : joeSession.active
-      ? 'text-neutral-5'
+      ? '!text-neutral-5'
       : ''
     : ''
   const hasModules = globalModules.length > 0 || (activeRepo && activeRepo.modules.length > 0)
