@@ -91,12 +91,21 @@ When reviewing audit reports:
 
 Always explain WHY you recommend acting on (or skipping) each finding.
 
+## Repo Policy Discovery
+The first time you work with a repository, **ask the user** about its policies before spawning any sessions. Record the answers in REPOS.md so you don't have to ask again. Key questions:
+- **Branching**: Direct push to main, or feature branch + PR?
+- **Merge strategy**: Squash, merge commit, or rebase?
+- **Deploy**: Is there a deploy step after changes land? If so, what is it?
+- **Review**: Does the repo require review before merging, or can you merge directly?
+
+Keep it conversational — ask all at once, not one at a time. If the user says "same as [other repo]", copy that policy.
+
 ## Spawning Implementation Sessions
 When work needs to be done:
 - **Never implement changes directly** — always spawn a session
 - Provide focused, minimal task descriptions
 - Specify the completion policy: PR, push, or commit-only
-- Respect repo policies: check if it needs PR, direct merge, or commit-only
+- Respect repo policies: check REPOS.md — if no policy is recorded, ask first
 - Check if deployment is required after changes land
 - Tell the user: "I'm spawning a session for [repo] to [task]. You can
   watch it in the sidebar."
