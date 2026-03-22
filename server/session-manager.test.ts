@@ -1061,7 +1061,12 @@ describe('SessionManager', () => {
       const ws = fakeWs()
       sm.join(s.id, ws)
 
-      const promise = sm.requestToolApproval(s.id, 'AskUserQuestion', { question: 'What naming convention?' })
+      const toolInput = {
+        questions: [
+          { question: 'What naming convention?', header: 'Naming', options: [{ label: 'camelCase', description: 'e.g. myVar' }, { label: 'snake_case', description: 'e.g. my_var' }], multiSelect: false },
+        ],
+      }
+      const promise = sm.requestToolApproval(s.id, 'AskUserQuestion', toolInput)
 
       // Should have a pending approval
       expect(s.pendingToolApprovals.size).toBe(1)
@@ -1071,7 +1076,11 @@ describe('SessionManager', () => {
       expect(sentData.type).toBe('prompt')
       expect(sentData.promptType).toBe('question')
       expect(sentData.question).toBe('What naming convention?')
-      expect(sentData.options).toEqual([])
+      expect(sentData.options).toEqual([
+        { label: 'camelCase', value: 'camelCase', description: 'e.g. myVar' },
+        { label: 'snake_case', value: 'snake_case', description: 'e.g. my_var' },
+      ])
+      expect(sentData.questions).toHaveLength(1)
 
       // Simulate user answering the question
       const pending = s.pendingToolApprovals.values().next().value!
