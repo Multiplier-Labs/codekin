@@ -42,7 +42,7 @@ import { createDocsRouter } from './docs-routes.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
 import { ensureOrchestratorRunning } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
-import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST } from './config.js'
+import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, setAgentDisplayNameResolver } from './config.js'
 
 // ---------------------------------------------------------------------------
 // CLI args (legacy bare-metal compat) and auth setup
@@ -132,6 +132,11 @@ if (!apiKeySet) {
 const sessions = new SessionManager()
 sessions._serverPort = port
 sessions._authToken = authToken
+
+// Wire up dynamic agent name resolution from the DB (falls back to env var / default)
+setAgentDisplayNameResolver(() =>
+  sessions.archive.getSetting('agent_name', '') || AGENT_DISPLAY_NAME
+)
 
 // GitHub webhook handler
 const webhookConfig = loadWebhookConfig()

@@ -3,16 +3,16 @@
  *
  * Manages the always-on orchestrator session: directory setup, stable ID
  * persistence, and auto-start on server boot. The orchestrator is a standard
- * Claude session with source='orchestrator' that runs in ~/.codekin/shepherd/.
+ * Claude session with source='orchestrator' that runs in ~/.codekin/orchestrator/.
  */
 
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { randomUUID } from 'crypto'
-import { DATA_DIR, AGENT_DISPLAY_NAME } from './config.js'
+import { DATA_DIR, AGENT_DISPLAY_NAME, getAgentDisplayName } from './config.js'
 import type { SessionManager } from './session-manager.js'
 
-export const ORCHESTRATOR_DIR = join(DATA_DIR, 'shepherd')
+export const ORCHESTRATOR_DIR = join(DATA_DIR, 'orchestrator')
 const SESSION_ID_FILE = join(ORCHESTRATOR_DIR, '.session-id')
 
 const PROFILE_TEMPLATE = `# User Profile
@@ -73,7 +73,7 @@ Your job is to:
 - Learn from user approvals/rejections to become more autonomous over time
 
 ## Your Workspace
-You run in ~/.codekin/shepherd/. Your memory files are:
+You run in ~/.codekin/orchestrator/. Your memory files are:
 - PROFILE.md — what you know about the user
 - REPOS.md — registry of managed repositories and their policies
 - journal/ — daily activity notes
@@ -287,8 +287,9 @@ export function ensureOrchestratorRunning(sessions: SessionManager): string {
   }
 
   // Create the session
-  console.log(`[orchestrator] Creating Agent ${AGENT_DISPLAY_NAME} session`)
-  sessions.create(`Agent ${AGENT_DISPLAY_NAME}`, ORCHESTRATOR_DIR, {
+  const displayName = getAgentDisplayName()
+  console.log(`[orchestrator] Creating Agent ${displayName} session`)
+  sessions.create(`Agent ${displayName}`, ORCHESTRATOR_DIR, {
     source: 'orchestrator',
     id: stableId,
     permissionMode: 'acceptEdits',

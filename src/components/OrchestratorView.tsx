@@ -25,6 +25,8 @@ interface Props {
   onOrchestratorSessionReady: (sessionId: string) => void
   /** Whether the session has been joined and chat is rendering. */
   sessionJoined: boolean
+  /** Agent display name (from parent settings). */
+  agentName?: string
 }
 
 function StatCard({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
@@ -39,11 +41,12 @@ function StatCard({ label, value, icon }: { label: string; value: number; icon: 
   )
 }
 
-export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoined }: Props) {
+export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoined, agentName: agentNameProp }: Props) {
   const [status, setStatus] = useState<'loading' | 'active' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
   const [stats, setStats] = useState<DashboardStats | null>(null)
-  const [agentName, setAgentName] = useState('Joe')
+  const [agentNameLocal, setAgentNameLocal] = useState('Joe')
+  const agentName = agentNameProp ?? agentNameLocal
 
   // Fetch dashboard stats
   const refreshStats = useCallback(async () => {
@@ -71,7 +74,7 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
       try {
         const result = await api.startOrchestrator(token)
         if (cancelled) return
-        if (result.agentName) setAgentName(result.agentName)
+        if (result.agentName) setAgentNameLocal(result.agentName)
         setStatus('active')
         onOrchestratorSessionReady(result.sessionId)
         void refreshStats()

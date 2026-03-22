@@ -66,7 +66,7 @@
 │                                                           │
 │  ┌────────────────────────────────────────────────┐        │
 │  │         Agent Joe Memory Store                  │        │
-│  │  ~/.codekin/shepherd/                          │        │
+│  │  ~/.codekin/orchestrator/                          │        │
 │  │  ├─ memory.sqlite  (structured + FTS)          │        │
 │  │  ├─ PROFILE.md     (user profile & prefs)      │        │
 │  │  ├─ REPOS.md       (repo registry & policies)  │        │
@@ -106,13 +106,13 @@ Agent Joe is a `ClaudeProcess` session with:
 - A dedicated `CLAUDE.md` (the Agent Joe system prompt — see §8)
 - `source: 'orchestrator'` in `CreateSessionOptions`
 - `permissionMode: 'acceptEdits'` (it needs to read reports, write memory, spawn sessions)
-- Working directory: `~/.codekin/shepherd/` (its own workspace)
+- Working directory: `~/.codekin/orchestrator/` (its own workspace)
 
 New additions to `SessionManager`:
 ```typescript
 // In session-manager.ts
 getOrchestratorSession(): OrchestratorSession | null
-ensureShepherdRunning(): Promise<OrchestratorSession>
+ensureOrchestratorRunning(): Promise<OrchestratorSession>
 spawnChildSession(repo: string, task: string, options: ChildSessionOptions): Promise<string>
 ```
 
@@ -205,7 +205,7 @@ interface RepoPolicy {
 }
 ```
 
-Stored in `~/.codekin/shepherd/REPOS.md` (human-readable) and `repos.json` (machine-readable).
+Stored in `~/.codekin/orchestrator/REPOS.md` (human-readable) and `repos.json` (machine-readable).
 
 ---
 
@@ -216,7 +216,7 @@ Inspired by the OpenClaw/Moltbot memory blueprint, Agent Joe maintains a **dual 
 ### 6.1 On-Disk Layout
 
 ```
-~/.codekin/shepherd/
+~/.codekin/orchestrator/
 ├── PROFILE.md              # User profile, preferences, skill level
 ├── REPOS.md                # Repo registry with policies (human-readable)
 ├── DECISIONS.md            # Key decisions and their rationale
@@ -438,9 +438,9 @@ The Agent Joe view is a **chat interface** (reusing `ChatView`) with an optional
 
 ```typescript
 // useRouter.ts
-type ViewType = 'chat' | 'workflows' | 'shepherd'
+type ViewType = 'chat' | 'workflows' | 'orchestrator'
 
-if (pathname === '/orchestrator') return { sessionId: null, view: 'shepherd' }
+if (pathname === '/orchestrator') return { sessionId: null, view: 'orchestrator' }
 ```
 
 ---

@@ -14,7 +14,7 @@ import { scanRepoReports } from './orchestrator-reports.js'
 import { OrchestratorMemory } from './orchestrator-memory.js'
 import { runAgingCycle, getPendingOutcomeAssessments } from './orchestrator-learning.js'
 import { getOrchestratorSessionId } from './orchestrator-manager.js'
-import { REPOS_ROOT, AGENT_DISPLAY_NAME } from './config.js'
+import { REPOS_ROOT, getAgentDisplayName } from './config.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -258,7 +258,7 @@ export class OrchestratorMonitor {
     if (!session?.claudeProcess?.isAlive()) return
 
     // Send as a system message that the orchestrator will see and respond to
-    const message = `[Agent ${AGENT_DISPLAY_NAME} Notification — ${notification.severity.toUpperCase()}]\n${notification.title}\n${notification.body}`
+    const message = `[Agent ${getAgentDisplayName()} Notification — ${notification.severity.toUpperCase()}]\n${notification.title}\n${notification.body}`
     this.sessions.sendInput(orchestratorId, message)
     notification.delivered = true
   }

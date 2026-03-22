@@ -9,7 +9,7 @@
 import { randomUUID } from 'crypto'
 import type { SessionManager } from './session-manager.js'
 import type { Session, WsServerMessage } from './types.js'
-import { AGENT_DISPLAY_NAME } from './config.js'
+import { getAgentDisplayName } from './config.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -118,7 +118,7 @@ export class OrchestratorChildManager {
     }
 
     const sessionId = randomUUID()
-    const sessionName = `${AGENT_DISPLAY_NAME.toLowerCase()}:${request.branchName}`
+    const sessionName = `${getAgentDisplayName().toLowerCase()}:${request.branchName}`
     const now = new Date().toISOString()
 
     const child: ChildSession = {
@@ -181,7 +181,7 @@ export class OrchestratorChildManager {
       '',
       '## Instructions',
       '',
-      `You have been spawned by Agent ${AGENT_DISPLAY_NAME} (the Codekin orchestrator) to implement a specific task in this repository.`,
+      `You have been spawned by Agent ${getAgentDisplayName()} (the Codekin orchestrator) to implement a specific task in this repository.`,
       '',
       `**Task**: ${request.task}`,
       `**Branch**: Create your changes on branch \`${request.branchName}\``,

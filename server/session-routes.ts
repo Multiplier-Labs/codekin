@@ -17,7 +17,7 @@ import { toNativePermission } from './native-permissions.js'
 import { homedir as osHomedir } from 'os'
 import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
-import { REPOS_ROOT } from './config.js'
+import { REPOS_ROOT, getAgentDisplayName } from './config.js'
 
 /** Expand leading ~ to the user's home directory. */
 function expandTilde(p: string): string {
@@ -217,6 +217,26 @@ export function createSessionRouter(
     }
     sessions.archive.setSetting('repos_path', trimmed)
     res.json({ path: trimmed })
+  })
+
+  // --- Agent name setting ---
+
+  router.get('/api/settings/agent-name', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    res.json({ name: getAgentDisplayName() })
+  })
+
+  router.put('/api/settings/agent-name', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const { name } = req.body
+    if (typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'name must be a non-empty string' })
+    }
+    const trimmed = name.trim().slice(0, 30)
+    sessions.archive.setSetting('agent_name', trimmed)
+    res.json({ name: trimmed })
   })
 
   // --- Browse directories (for folder picker) ---

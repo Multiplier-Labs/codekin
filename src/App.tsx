@@ -26,7 +26,7 @@ import { useIsMobile } from './hooks/useIsMobile'
 import { useSendMessage } from './hooks/useSendMessage'
 import { buildSlashCommandList } from './lib/slashCommands'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
-import { getQueueMessages } from './lib/ccApi'
+import { getQueueMessages, getAgentName } from './lib/ccApi'
 import { Settings } from './components/Settings'
 import { LeftSidebar } from './components/LeftSidebar'
 import { MobileTopBar } from './components/MobileTopBar'
@@ -96,6 +96,13 @@ export default function App() {
   useEffect(() => {
     if (!settings.token) return
     getQueueMessages(settings.token).then(setQueueEnabled).catch(() => {})
+  }, [settings.token])
+
+  /** Agent display name — fetched from server. */
+  const [agentName, setAgentName] = useState('Joe')
+  useEffect(() => {
+    if (!settings.token) return
+    getAgentName(settings.token).then(setAgentName).catch(() => {})
   }, [settings.token])
 
   /** Permission mode ref for session orchestration (read at session creation time). */
@@ -465,6 +472,7 @@ export default function App() {
         onSettingsOpen={() => setSettingsOpen(true)}
         onUpdateTheme={(theme) => updateSettings({ theme: theme as 'dark' | 'light' })}
         onSendModule={handleSendModule}
+        agentName={agentName}
         onNavigateToWorkflows={() => navigate('/workflows')}
         onNavigateToOrchestrator={() => handleNavigateToOrchestrator()}
         onBrowseDocs={handleBrowseDocs}
@@ -538,6 +546,7 @@ export default function App() {
             currentPermissionMode={currentPermissionMode}
             onPermissionModeChange={handlePermissionModeChange}
             disabled={!settings.token}
+            agentName={agentName}
           />
         ) : view === 'workflows' ? (
           <WorkflowsView
@@ -645,6 +654,8 @@ export default function App() {
         isMobile={isMobile}
         autoWorktree={useWorktree}
         onAutoWorktreeChange={setUseWorktree}
+        agentName={agentName}
+        onAgentNameChange={setAgentName}
       />
       <CommandPalette
         open={paletteOpen}

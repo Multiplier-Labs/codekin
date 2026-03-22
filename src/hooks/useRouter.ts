@@ -15,7 +15,7 @@ interface RouteState {
 }
 
 export function parsePath(pathname: string): RouteState {
-  if (pathname === '/joe' || pathname === '/joe/' || pathname === '/shepherd' || pathname === '/shepherd/' || pathname === '/orchestrator' || pathname === '/orchestrator/') {
+  if (pathname === '/joe' || pathname === '/joe/' || pathname === '/orchestrator' || pathname === '/orchestrator/') {
     return { path: pathname, sessionId: null, view: 'orchestrator' }
   }
   if (pathname === '/workflows' || pathname === '/workflows/') {

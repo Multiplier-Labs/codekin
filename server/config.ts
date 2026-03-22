@@ -82,5 +82,20 @@ export const GH_ORGS: string[] = (process.env.GH_ORG || '').split(',').map(s => 
 // Orchestrator (Agent)
 // ---------------------------------------------------------------------------
 
-/** Display name for the orchestrator agent. Configurable via CODEKIN_AGENT_NAME env var. */
+/** Default display name for the orchestrator agent. Configurable via CODEKIN_AGENT_NAME env var. */
 export const AGENT_DISPLAY_NAME = process.env.CODEKIN_AGENT_NAME ?? 'Joe'
+
+/**
+ * Runtime-resolved agent display name. Checks the DB setting first,
+ * falling back to the AGENT_DISPLAY_NAME constant (env var / default).
+ * Set via `setAgentDisplayNameResolver` once the archive DB is available.
+ */
+let _agentNameResolver: (() => string) | null = null
+
+export function setAgentDisplayNameResolver(resolver: () => string): void {
+  _agentNameResolver = resolver
+}
+
+export function getAgentDisplayName(): string {
+  return _agentNameResolver?.() || AGENT_DISPLAY_NAME
+}

@@ -18,6 +18,7 @@ import {
   getReposPath, setReposPath as setReposPathApi,
   getWorktreePrefix, setWorktreePrefix as setWorktreePrefixApi,
   getQueueMessages, setQueueMessages as setQueueMessagesApi,
+  setAgentName as setAgentNameApi,
 } from '../lib/ccApi'
 import { FolderPicker } from './FolderPicker'
 
@@ -30,6 +31,8 @@ interface Props {
   isMobile?: boolean
   autoWorktree?: boolean
   onAutoWorktreeChange?: (enabled: boolean) => void
+  agentName?: string
+  onAgentNameChange?: (name: string) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -95,7 +98,7 @@ function StatusBadge({ status }: { status: string }) {
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
-export function Settings({ open, onClose, settings, onUpdate, isMobile = false, autoWorktree = false, onAutoWorktreeChange }: Props) {
+export function Settings({ open, onClose, settings, onUpdate, isMobile = false, autoWorktree = false, onAutoWorktreeChange, agentName = 'Joe', onAgentNameChange }: Props) {
   const [tokenInput, setTokenInput] = useState(settings.token)
   const [verifying, setVerifying] = useState(false)
   const [status, setStatus] = useState<'idle' | 'valid' | 'invalid'>('idle')
@@ -193,6 +196,46 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
           {/* ── Preferences ── */}
           <SectionCard icon={<IconPalette size={15} />} title="Preferences">
             <div className="space-y-5">
+
+              {/* ─ Agent Name ─ */}
+              <div>
+                <label className="mb-1.5 block text-[15px] text-neutral-4">
+                  <span className="flex items-center gap-1.5">
+                    <IconRobot size={14} className="text-neutral-5" />
+                    Agent Name
+                  </span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={agentName}
+                    onChange={e => {
+                      const val = e.target.value
+                      onAgentNameChange?.(val)
+                    }}
+                    onBlur={e => {
+                      const val = e.target.value.trim()
+                      if (val && val !== agentName) {
+                        setAgentNameApi(settings.token, val).then(saved => onAgentNameChange?.(saved)).catch(() => setSaveError('Failed to save agent name'))
+                      }
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        const val = (e.target as HTMLInputElement).value.trim()
+                        if (val) {
+                          setAgentNameApi(settings.token, val).then(saved => onAgentNameChange?.(saved)).catch(() => setSaveError('Failed to save agent name'))
+                        }
+                      }
+                    }}
+                    placeholder="Joe"
+                    maxLength={30}
+                    className="w-40 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
+                  />
+                </div>
+                <p className="mt-1 text-[13px] text-neutral-6">Display name for the orchestrator agent in the sidebar and chat</p>
+              </div>
+
+              <div className="border-t border-neutral-9/40" />
 
               {/* ─ Appearance ─ */}
               <div className="grid grid-cols-2 gap-x-6 gap-y-4">

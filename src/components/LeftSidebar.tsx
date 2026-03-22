@@ -94,6 +94,8 @@ interface Props {
   connState: string
   /** Current route view ('chat' | 'workflows'). */
   view: string
+  /** Agent display name for the orchestrator button. */
+  agentName?: string
   /** Incremented to force re-fetch of archived sessions. */
   archiveRefreshKey: number
   /** Switch the active session to the given ID. */
@@ -161,6 +163,7 @@ export function LeftSidebar({
   onSettingsOpen,
   onUpdateTheme,
   onSendModule,
+  agentName = 'Joe',
   onNavigateToWorkflows,
   onNavigateToOrchestrator,
   onBrowseDocs,
@@ -350,7 +353,7 @@ export function LeftSidebar({
             }`}
           >
             <IconRobotFace size={16} stroke={2} className={`flex-shrink-0 ${orchestratorIconClass}`} />
-            <span className="flex-1 text-left">Orchestrator</span>
+            <span className="flex-1 text-left">Agent {agentName}</span>
           </button>
           {hasModules && (
             <div ref={modulesRef} className="relative">

@@ -11,7 +11,7 @@ import { resolve } from 'path'
 import { existsSync, statSync } from 'fs'
 import type { SessionManager } from './session-manager.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, getOrCreateOrchestratorId } from './orchestrator-manager.js'
-import { AGENT_DISPLAY_NAME } from './config.js'
+import { getAgentDisplayName } from './config.js'
 import { scanRepoReports, readReport, getReportsSince } from './orchestrator-reports.js'
 import { OrchestratorMemory } from './orchestrator-memory.js'
 import { OrchestratorChildManager } from './orchestrator-children.js'
@@ -65,7 +65,7 @@ export function createOrchestratorRouter(
 
     const sessionId = getOrchestratorSessionId(sessions)
     if (!sessionId) {
-      return res.json({ sessionId: null, status: 'stopped', agentName: AGENT_DISPLAY_NAME })
+      return res.json({ sessionId: null, status: 'stopped', agentName: getAgentDisplayName() })
     }
 
     const session = sessions.get(sessionId)
@@ -74,7 +74,7 @@ export function createOrchestratorRouter(
       sessionId,
       status,
       childSessions: children.activeCount(),
-      agentName: AGENT_DISPLAY_NAME,
+      agentName: getAgentDisplayName(),
     })
   })
 
@@ -84,10 +84,10 @@ export function createOrchestratorRouter(
 
     try {
       const sessionId = ensureOrchestratorRunning(sessions)
-      res.json({ sessionId, status: 'active', agentName: AGENT_DISPLAY_NAME })
+      res.json({ sessionId, status: 'active', agentName: getAgentDisplayName() })
     } catch (err) {
       console.error('[orchestrator] Failed to start:', err)
-      res.status(500).json({ error: `Failed to start Agent ${AGENT_DISPLAY_NAME}` })
+      res.status(500).json({ error: `Failed to start Agent ${getAgentDisplayName()}` })
     }
   })
 

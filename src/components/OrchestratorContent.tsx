@@ -41,6 +41,7 @@ export interface OrchestratorContentProps {
   currentPermissionMode: PermissionMode
   onPermissionModeChange: (mode: PermissionMode) => void
   disabled: boolean
+  agentName?: string
 }
 
 export function OrchestratorContent({
@@ -68,6 +69,7 @@ export function OrchestratorContent({
   currentPermissionMode,
   onPermissionModeChange,
   disabled,
+  agentName,
 }: OrchestratorContentProps) {
   return (
     <>
@@ -75,6 +77,7 @@ export function OrchestratorContent({
         token={token}
         onOrchestratorSessionReady={onOrchestratorSessionReady}
         sessionJoined={sessionJoined}
+        agentName={agentName}
       />
       {/* Render chat UI once orchestrator session is joined */}
       {activeSessionId && (

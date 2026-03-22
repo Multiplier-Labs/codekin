@@ -459,6 +459,31 @@ export async function setWorktreePrefix(token: string, prefix: string): Promise<
   return data.prefix
 }
 
+/** Get the agent display name. */
+export async function getAgentName(token: string): Promise<string> {
+  const res = await authFetch(`${BASE}/api/settings/agent-name`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to get agent name: ${res.status}`)
+  const data = await res.json()
+  return data.name
+}
+
+/** Set the agent display name. */
+export async function setAgentName(token: string, name: string): Promise<string> {
+  const res = await authFetch(`${BASE}/api/settings/agent-name`, {
+    method: 'PUT',
+    headers: headers(token),
+    body: JSON.stringify({ name }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'Failed to save agent name' }))
+    throw new Error(data.error || `Failed to set agent name: ${res.status}`)
+  }
+  const data = await res.json()
+  return data.name
+}
+
 /** Browse directories at a given path (for folder picker). */
 export async function browseDirs(token: string, path?: string): Promise<{ path: string; dirs: string[] }> {
   const q = path ? `?path=${encodeURIComponent(path)}` : ''
