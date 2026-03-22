@@ -274,17 +274,17 @@ export class ApprovalManager {
       return
     }
     if (toolName === 'Bash') {
-      const cmd = (typeof toolInput.command === 'string' ? toolInput.command : '').trim()
-
-      // Try to derive a pattern first (e.g. "git diff *", "npm run *")
+      // Only store pattern-based approvals (e.g. "git *", "npm run *").
+      // Exact commands are NOT stored — they accumulate unboundedly and
+      // one-off commands (curl, python3, sed, etc.) should not be
+      // permanently auto-approved.
       const pattern = this.derivePattern(toolName, toolInput)
       if (pattern) {
         this.addRepoApproval(workingDir, { pattern })
         console.log(`[auto-approve] saved pattern for repo ${workingDir}: ${pattern}`)
       } else {
-        // For commands with no safe pattern, store exact match
-        this.addRepoApproval(workingDir, { command: cmd })
-        console.log(`[auto-approve] saved exact command for repo ${workingDir}: ${cmd.slice(0, 80)}`)
+        const cmd = (typeof toolInput.command === 'string' ? toolInput.command : '').trim()
+        console.log(`[auto-approve] no safe pattern for command, skipping: ${cmd.slice(0, 80)}`)
       }
     } else {
       this.addRepoApproval(workingDir, { tool: toolName })
@@ -437,49 +437,20 @@ export class ApprovalManager {
         }
         this.repoApprovals.set(dir, {
           tools,
-          commands: new Set(entry.commands || []),
+          commands: new Set<string>(),
           patterns: new Set(entry.patterns || []),
         })
       }
 
       console.log(`Restored repo approvals for ${Object.keys(data).length} repo(s) from disk`)
+
+      // Persist immediately to drop any exact commands from the file on disk
+      if (Object.values(data).some(e => e.commands && e.commands.length > 0)) {
+        console.log('[auto-approve] dropping legacy exact commands from registry')
+        this.persistRepoApprovals()
+      }
     } catch (err) {
       console.error('Failed to restore repo approvals from disk:', err)
-    }
-
-    this.compactExactCommands()
-  }
-
-  /** Compact exact commands that could be represented by existing patterns. */
-  private compactExactCommands(): void {
-    let totalRemoved = 0
-    for (const [, entry] of this.repoApprovals) {
-      if (entry.commands.size === 0) continue
-      const toRemove = new Set<string>()
-
-      // Phase 1: Remove exact commands already covered by existing patterns
-      if (entry.patterns.size > 0) {
-        for (const cmd of entry.commands) {
-          for (const pattern of entry.patterns) {
-            if (this.matchesPattern(pattern, cmd)) {
-              toRemove.add(cmd)
-              break
-            }
-          }
-        }
-      }
-
-      // Phase 2 removed: auto-creating wildcard patterns from exact commands
-      // silently widened approval scope beyond what the user explicitly approved.
-      // Only Phase 1 deduplication (removing commands already covered by
-      // user-approved patterns) is safe.
-
-      for (const cmd of toRemove) entry.commands.delete(cmd)
-      totalRemoved += toRemove.size
-    }
-    if (totalRemoved > 0) {
-      console.log(`[auto-approve] compacted ${totalRemoved} exact commands into patterns`)
-      this.persistRepoApprovals()
     }
   }
 }

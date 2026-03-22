@@ -147,9 +147,15 @@ function escapeForAllowedTools(s: string): string {
 /**
  * Convert Codekin's approval registry into `--allowedTools` patterns.
  *
+ * Only includes tool names and wildcard patterns — NOT exact commands.
+ * Exact commands accumulate over time (hundreds of multi-line scripts)
+ * and when included in `--allowedTools` they create an argument so large
+ * and complex that it breaks the CLI's parser (manifests as "A.split is
+ * not a function" errors on unrelated tools like Agent and TodoWrite).
+ * Exact commands are still auto-approved at runtime via the approval hook.
+ *
  * Translations:
  * - Pattern `"git diff *"` → `"Bash(git diff:*)"`
- * - Exact command `"npm run build"` → `"Bash(npm run build)"`
  * - Tool `"WebFetch"` → `"WebFetch"`
  */
 export function toAllowedToolsPatterns(approvals: { tools: string[]; commands: string[]; patterns: string[] }): string[] {
@@ -159,9 +165,8 @@ export function toAllowedToolsPatterns(approvals: { tools: string[]; commands: s
     result.push(tool)
   }
 
-  for (const cmd of approvals.commands) {
-    result.push(`Bash(${escapeForAllowedTools(cmd)})`)
-  }
+  // Exact commands are intentionally excluded from --allowedTools.
+  // They are handled by the auto-approval hook at prompt time instead.
 
   for (const pattern of approvals.patterns) {
     // Convert "prefix *" → "Bash(prefix:*)"

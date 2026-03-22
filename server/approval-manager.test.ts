@@ -131,28 +131,26 @@ describe('ApprovalManager', () => {
       expect(approvals.commands).not.toContain('cat c.txt')
     })
 
-    it('does not auto-create wildcard patterns from exact commands', () => {
-      // Mock disk data with 3 cat commands but no existing pattern
+    it('drops legacy exact commands on restore', () => {
+      // Mock disk data with exact commands from before they were removed
       vi.mocked(existsSync).mockReturnValue(true)
       vi.mocked(readFileSync).mockReturnValue(
         JSON.stringify({
           '/repo/x': {
             tools: [],
             commands: ['cat a.txt', 'cat b.txt', 'cat c.txt'],
-            patterns: [],
+            patterns: ['npm *'],
           },
         }),
       )
 
       const freshMgr = new ApprovalManager()
 
-      // Phase 2 was removed: no wildcard pattern should be auto-created
       const approvals = freshMgr.getApprovals('/repo/x')
-      expect(approvals.patterns).not.toContain('cat *')
-      // Original exact commands should still be present
-      expect(approvals.commands).toContain('cat a.txt')
-      expect(approvals.commands).toContain('cat b.txt')
-      expect(approvals.commands).toContain('cat c.txt')
+      // Exact commands are dropped on restore
+      expect(approvals.commands).toHaveLength(0)
+      // Patterns are preserved
+      expect(approvals.patterns).toContain('npm *')
     })
   })
 
@@ -166,10 +164,10 @@ describe('ApprovalManager', () => {
       expect(approvals.commands).toHaveLength(0)
     })
 
-    it('saves non-patternable commands as exact commands', () => {
+    it('skips non-patternable commands instead of storing them', () => {
       mgr.saveAlwaysAllow('/repo/a', 'Bash', { command: 'docker run myimage' })
       const approvals = mgr.getApprovals('/repo/a')
-      expect(approvals.commands).toContain('docker run myimage')
+      expect(approvals.commands).toHaveLength(0)
       expect(approvals.patterns).toHaveLength(0)
     })
 
