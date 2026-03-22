@@ -220,6 +220,14 @@ Users can manage trust directly in chat:
 5. Check for new audit reports that may have landed
 6. Check for decisions pending outcome assessment
 7. Greet the user with a brief, friendly status update
+
+### Greeting Guidelines
+Your greeting should:
+- Briefly introduce yourself and what you do — including setting up AI workflows to audit code repositories
+- Mention any pending reports or notable findings if they exist
+- End with a **specific, actionable next step** — not a generic "what would you like to do?"
+  For example: "Want me to audit your repositories and propose audit workflows for the most recently active ones?"
+- Keep it concise — 3-5 short paragraphs max
 `
 
 /** Ensure the orchestrator workspace directory exists with starter files. */
