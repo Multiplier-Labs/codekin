@@ -1055,6 +1055,48 @@ describe('SessionManager', () => {
       const sentData = JSON.parse(ws.send.mock.calls[0][0])
       expect(sentData.question).toBe('Allow CustomTool?')
     })
+
+    it('shows question prompt (not permission prompt) for AskUserQuestion', async () => {
+      const s = sm.create('test', '/tmp')
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      const promise = sm.requestToolApproval(s.id, 'AskUserQuestion', { question: 'What naming convention?' })
+
+      // Should have a pending approval
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      // The prompt sent to the client should be a question, not a permission prompt
+      const sentData = JSON.parse(ws.send.mock.calls[0][0])
+      expect(sentData.type).toBe('prompt')
+      expect(sentData.promptType).toBe('question')
+      expect(sentData.question).toBe('What naming convention?')
+      expect(sentData.options).toEqual([])
+
+      // Simulate user answering the question
+      const pending = s.pendingToolApprovals.values().next().value!
+      pending.resolve({ allow: true, always: false, answer: 'camelCase' })
+
+      const result = await promise
+      expect(result.allow).toBe(true)
+      expect(result.answer).toBe('camelCase')
+    })
+
+    it('resolves AskUserQuestion approval with answer text', async () => {
+      const s = sm.create('test', '/tmp')
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      const promise = sm.requestToolApproval(s.id, 'AskUserQuestion', { question: 'Pick a color' })
+
+      // Send the answer via sendPromptResponse
+      const requestId = s.pendingToolApprovals.keys().next().value!
+      sm.sendPromptResponse(s.id, 'blue', requestId)
+
+      const result = await promise
+      expect(result.allow).toBe(true)
+      expect(result.answer).toBe('blue')
+    })
   })
 
   describe('buildSessionContext()', () => {

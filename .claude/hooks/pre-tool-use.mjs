@@ -55,12 +55,37 @@ createHook({
   transport,
   context: [new EnvContext()],
   handler: async (input, ctx) => {
-    // AskUserQuestion: pass through to control_request flow.
-    // The CLI emits a control_request for this tool, which lets the server
-    // collect answers via the UI. If the hook handles it, the control_request
-    // is never generated and the tool fails with is_error=true.
+    // AskUserQuestion: forward to server to collect the user's answer via the UI.
+    // The server shows a question prompt, waits for the user's response, and
+    // returns the answer. We inject it as updatedInput so the CLI has the answer
+    // when the tool executes (the CLI does NOT generate a control_request for
+    // AskUserQuestion in stream-json mode).
     if (input.tool_name === 'AskUserQuestion') {
-      return;
+      const hubSessionId = ctx.env.hubSessionId;
+      if (!hubSessionId) return; // No hub session — let CLI handle natively
+
+      try {
+        const decision = await transport.requestDecision({
+          event: 'PreToolUse',
+          sessionId: hubSessionId,
+          toolName: 'AskUserQuestion',
+          toolInput: input.tool_input,
+        });
+
+        if (!decision?.allow) {
+          return denyWithNotification(ctx, 'AskUserQuestion', input.tool_input, 'User dismissed the question');
+        }
+
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'allow',
+            ...(decision.updatedInput ? { updatedInput: decision.updatedInput } : {}),
+          },
+        };
+      } catch (err) {
+        return denyWithNotification(ctx, 'AskUserQuestion', input.tool_input, `Server error: ${err.message}`);
+      }
     }
 
     // File-read tools: auto-allow for in-project paths, prompt for outside

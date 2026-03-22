@@ -349,8 +349,13 @@ export function createSessionRouter(
       const result = await sessions.requestToolApproval(sessionId, toolName, toolInput || {})
       console.log(`[hook-decision] resolved: allow=${result.allow} always=${result.always}`)
 
-      const response: { allow: boolean; message?: string; updatedPermissions?: Array<{ type: string; tool: string }> } = {
+      const response: { allow: boolean; message?: string; updatedPermissions?: Array<{ type: string; tool: string }>; updatedInput?: Record<string, unknown> } = {
         allow: result.allow,
+      }
+      // AskUserQuestion: return the user's answer as updatedInput so the
+      // PreToolUse hook can inject it into the tool input
+      if (toolName === 'AskUserQuestion' && result.allow && result.answer !== undefined) {
+        response.updatedInput = { ...(toolInput || {}), answer: result.answer }
       }
       if (result.always && result.allow) {
         const nativePerm = toNativePermission(toolName, toolInput || {})

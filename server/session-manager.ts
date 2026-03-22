@@ -1076,9 +1076,19 @@ export class SessionManager {
   /** Resolve a pending PreToolUse hook approval and update auto-approval registries. */
   private resolveToolApproval(
     session: Session,
-    approval: { resolve: (r: { allow: boolean; always: boolean }) => void; toolName: string; toolInput: Record<string, unknown>; requestId: string },
+    approval: { resolve: (r: { allow: boolean; always: boolean; answer?: string }) => void; toolName: string; toolInput: Record<string, unknown>; requestId: string },
     value: string | string[],
   ): void {
+    // AskUserQuestion: the value IS the user's answer, not a permission decision
+    if (approval.toolName === 'AskUserQuestion') {
+      const answer = Array.isArray(value) ? value.join(', ') : value
+      console.log(`[tool-approval] resolving AskUserQuestion: answer=${answer.slice(0, 100)}`)
+      approval.resolve({ allow: true, always: false, answer })
+      session.pendingToolApprovals.delete(approval.requestId)
+      this.broadcast(session, { type: 'prompt_dismiss', requestId: approval.requestId })
+      return
+    }
+
     const { isDeny, isAlwaysAllow, isApprovePattern } = this.decodeApprovalValue(value)
 
     if (isAlwaysAllow && !isDeny) {
@@ -1154,7 +1164,7 @@ export class SessionManager {
    * Called by the PermissionRequest hook HTTP endpoint. Sends a prompt to clients
    * and returns a Promise that resolves when the user approves/denies.
    */
-  requestToolApproval(sessionId: string, toolName: string, toolInput: Record<string, unknown>): Promise<{ allow: boolean; always: boolean }> {
+  requestToolApproval(sessionId: string, toolName: string, toolInput: Record<string, unknown>): Promise<{ allow: boolean; always: boolean; answer?: string }> {
     const session = this.sessions.get(sessionId)
     if (!session) {
       console.log(`[tool-approval] session not found: ${sessionId}`)
@@ -1177,11 +1187,15 @@ export class SessionManager {
 
     console.log(`[tool-approval] requesting approval: session=${sessionId} tool=${toolName} clients=${session.clients.size}`)
 
-    return new Promise<{ allow: boolean; always: boolean }>((resolve) => {
+    // AskUserQuestion: show a question prompt and collect the answer text,
+    // rather than a permission prompt with Allow/Deny buttons.
+    const isQuestion = toolName === 'AskUserQuestion'
+
+    return new Promise<{ allow: boolean; always: boolean; answer?: string }>((resolve) => {
       // Holder lets wrappedResolve reference the timeout before it's assigned
       const timer: { id: ReturnType<typeof setTimeout> | null } = { id: null }
 
-      const wrappedResolve = (result: { allow: boolean; always: boolean }) => {
+      const wrappedResolve = (result: { allow: boolean; always: boolean; answer?: string }) => {
         if (timer.id) clearTimeout(timer.id)
         resolve(result)
       }
@@ -1198,25 +1212,39 @@ export class SessionManager {
           this.broadcast(session, { type: 'prompt_dismiss', requestId: approvalRequestId })
           resolve({ allow: false, always: false })
         }
-      }, 60_000)
+      }, isQuestion ? 300_000 : 60_000) // 5 min for questions, 1 min for permissions
 
-      const question = this.summarizeToolPermission(toolName, toolInput)
-      const approvePattern = this._approvalManager.derivePattern(toolName, toolInput)
-      const neverAutoApprove = ApprovalManager.NEVER_AUTO_APPROVE_TOOLS.has(toolName)
-      const options = [
-        { label: 'Allow', value: 'allow' },
-        ...(!neverAutoApprove ? [{ label: 'Always Allow', value: 'always_allow' }] : []),
-        { label: 'Deny', value: 'deny' },
-      ]
-      const promptMsg: WsServerMessage = {
-        type: 'prompt',
-        promptType: 'permission',
-        question,
-        options,
-        toolName,
-        toolInput,
-        requestId: approvalRequestId,
-        ...(approvePattern ? { approvePattern } : {}),
+      let promptMsg: WsServerMessage
+      if (isQuestion) {
+        const questionText = String(toolInput.question || 'Answer the question')
+        promptMsg = {
+          type: 'prompt',
+          promptType: 'question',
+          question: questionText,
+          options: [],
+          toolName,
+          toolInput,
+          requestId: approvalRequestId,
+        }
+      } else {
+        const question = this.summarizeToolPermission(toolName, toolInput)
+        const approvePattern = this._approvalManager.derivePattern(toolName, toolInput)
+        const neverAutoApprove = ApprovalManager.NEVER_AUTO_APPROVE_TOOLS.has(toolName)
+        const options = [
+          { label: 'Allow', value: 'allow' },
+          ...(!neverAutoApprove ? [{ label: 'Always Allow', value: 'always_allow' }] : []),
+          { label: 'Deny', value: 'deny' },
+        ]
+        promptMsg = {
+          type: 'prompt',
+          promptType: 'permission',
+          question,
+          options,
+          toolName,
+          toolInput,
+          requestId: approvalRequestId,
+          ...(approvePattern ? { approvePattern } : {}),
+        }
       }
 
       session.pendingToolApprovals.set(approvalRequestId, { resolve: wrappedResolve, toolName, toolInput, requestId: approvalRequestId, promptMsg })

@@ -66,7 +66,7 @@ export interface Session {
   /** In-flight control_request prompts awaiting user response, keyed by requestId. */
   pendingControlRequests: Map<string, { requestId: string; toolName: string; toolInput: Record<string, unknown>; promptMsg?: WsServerMessage }>
   /** Pending PreToolUse hook approvals, keyed by requestId. */
-  pendingToolApprovals: Map<string, { resolve: (result: { allow: boolean; always: boolean }) => void; toolName: string; toolInput: Record<string, unknown>; requestId: string; promptMsg?: WsServerMessage }>
+  pendingToolApprovals: Map<string, { resolve: (result: { allow: boolean; always: boolean; answer?: string }) => void; toolName: string; toolInput: Record<string, unknown>; requestId: string; promptMsg?: WsServerMessage }>
   /** True while Claude is actively processing a user request (between input and result). */
   isProcessing: boolean
   /** Number of completed user turns (for triggering session naming on first message). */
