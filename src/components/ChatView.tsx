@@ -18,8 +18,8 @@ import { IconArrowDown, IconRobotFace } from '@tabler/icons-react'
 import type { ChatMessage } from '../types'
 import { formatModelName, formatUserText } from '../lib/chatFormatters'
 
-/** Visual theme variant — 'joe' uses accent colors for the non-coding assistant persona. */
-export type ChatViewVariant = 'default' | 'joe'
+/** Visual theme variant — 'orchestrator' uses accent colors for the non-coding assistant persona. */
+export type ChatViewVariant = 'default' | 'orchestrator'
 
 interface Props {
   /** Ordered array of chat messages to render (user, assistant, tool, system, etc.). */
@@ -34,7 +34,7 @@ interface Props {
   activityLabel?: string
   /** Adjusts layout for narrow viewports (wider user bubbles, larger touch targets). */
   isMobile?: boolean
-  /** Visual variant — 'joe' uses accent colors for assistant messages and indicators. */
+  /** Visual variant — 'orchestrator' uses accent colors for assistant messages and indicators. */
   variant?: ChatViewVariant
 }
 
@@ -152,7 +152,7 @@ function highlightCode(code: string, lang: string): string {
 
 function AssistantMessage({ msg, fontSize, variant = 'default' }: { msg: ChatMessage & { type: 'assistant' }; fontSize: number; variant?: ChatViewVariant }) {
   return (
-    <div className={`px-4 py-2 ${variant === 'joe' ? 'joe-assistant-msg' : ''}`}>
+    <div className={`px-4 py-2 ${variant === 'orchestrator' ? 'orchestrator-assistant-msg' : ''}`}>
       <div
         className="prose prose-themed max-w-none"
         style={{ fontSize: `${fontSize}px` }}
@@ -359,17 +359,17 @@ function PlanningModeMessage({ msg }: { msg: ChatMessage & { type: 'planning_mod
   )
 }
 
-function JoeWelcome() {
+function OrchestratorWelcome() {
   return (
     <div className="flex flex-1 items-center justify-center px-6">
       <div className="max-w-md text-center">
         <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-9/40">
           <IconRobotFace size={28} className="text-accent-5" />
         </div>
-        <h2 className="mb-2 text-[18px] font-semibold text-neutral-2">Hey, I'm Joe</h2>
+        <h2 className="mb-2 text-[18px] font-semibold text-neutral-2">Orchestrator</h2>
         <p className="mb-5 text-[15px] leading-relaxed text-neutral-4">
-          Your AI assistant for general questions, brainstorming, and non-coding tasks.
-          Unlike the main chat, I won't run tools or edit files — just conversation.
+          Your AI ops manager for triaging reports, spawning implementation sessions,
+          and keeping your repositories healthy.
         </p>
         <div className="mx-auto grid max-w-sm gap-2 text-left text-[14px]">
           <div className="flex items-start gap-2.5 rounded-lg bg-neutral-10/60 px-3 py-2">
@@ -416,7 +416,7 @@ function ActivityIndicator({ label, variant = 'default' }: { label: string; vari
           strokeWidth="2.2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          style={{ color: variant === 'joe' ? 'var(--color-accent-7)' : 'var(--color-primary-7)' }}
+          style={{ color: variant === 'orchestrator' ? 'var(--color-accent-7)' : 'var(--color-primary-7)' }}
         >
           <path d="M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0" />
           <path d="M12 21l0 .01" />
@@ -480,8 +480,8 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
         className="chat-scroll flex-1 overflow-y-auto overflow-x-hidden min-h-0"
         onScroll={checkScroll}
       >
-        {variant === 'joe' && messages.length === 0 && !activityLabel ? (
-          <JoeWelcome />
+        {variant === 'orchestrator' && messages.length === 0 && !activityLabel ? (
+          <OrchestratorWelcome />
         ) : (
         <div className="flex flex-col py-2">
           {(() => {

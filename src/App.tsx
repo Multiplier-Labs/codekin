@@ -7,7 +7,7 @@
  * input bar and prompt buttons, right sidebar with sessions/tasks/approvals.
  *
  * Content views are extracted into focused components:
- * - ShepherdContent: the orchestrator (Joe) chat view
+ * - OrchestratorContent: the orchestrator (Joe) chat view
  * - DocsBrowserContent: the documentation browser with input bar
  * - SessionContent: the active chat session with diff panel and prompts
  */
@@ -35,7 +35,7 @@ import { CommandPalette } from './components/CommandPalette'
 import type { InputBarHandle } from './components/InputBar'
 import { RepoSelector } from './components/RepoSelector'
 import { DiffPanel } from './components/DiffPanel'
-import { ShepherdContent } from './components/ShepherdContent'
+import { OrchestratorContent } from './components/OrchestratorContent'
 import { DocsBrowserContent } from './components/DocsBrowserContent'
 import { SessionContent } from './components/SessionContent'
 import type { PermissionMode } from './types'
@@ -56,8 +56,8 @@ export default function App() {
 
   const setActiveSessionId = useCallback((id: string | null) => {
     setActiveSessionIdRaw(id)
-    // Don't navigate away from /joe when joining the shepherd session
-    if (view === 'shepherd') return
+    // Don't navigate away from /orchestrator when joining the orchestrator session
+    if (view === 'orchestrator') return
     if (id) {
       navigate(`/s/${id}`)
     } else {
@@ -386,20 +386,20 @@ export default function App() {
     return parts[parts.length - 1] || docsBrowser.repoWorkingDir
   }, [docsBrowser.repoWorkingDir])
 
-  // Shepherd: navigate to the orchestrator view
-  const shepherdSessionRef = useRef<string | null>(null)
-  const handleNavigateToShepherd = useCallback(() => {
-    navigate('/joe')
-    // If we already know the shepherd session ID, join it immediately
-    if (shepherdSessionRef.current) {
+  // Navigate to the orchestrator view
+  const orchestratorSessionRef = useRef<string | null>(null)
+  const handleNavigateToOrchestrator = useCallback(() => {
+    navigate('/orchestrator')
+    // If we already know the orchestrator session ID, join it immediately
+    if (orchestratorSessionRef.current) {
       clearMessages()
       leaveSession()
-      joinSession(shepherdSessionRef.current)
+      joinSession(orchestratorSessionRef.current)
     }
   }, [navigate, clearMessages, leaveSession, joinSession])
 
-  const handleShepherdSessionReady = useCallback((sessionId: string) => {
-    shepherdSessionRef.current = sessionId
+  const handleOrchestratorSessionReady = useCallback((sessionId: string) => {
+    orchestratorSessionRef.current = sessionId
     clearMessages()
     leaveSession()
     joinSession(sessionId)
@@ -454,7 +454,7 @@ export default function App() {
         connState={connState}
         view={view}
         archiveRefreshKey={archiveRefreshKey}
-        onSelectSession={(id) => { docsBrowser.close(); if (view === 'shepherd') navigate(`/s/${id}`); handleSelectSession(id) }}
+        onSelectSession={(id) => { docsBrowser.close(); if (view === 'orchestrator') navigate(`/s/${id}`); handleSelectSession(id) }}
         onDeleteSession={handleDeleteSession}
         onRenameSession={renameSession}
         onNewSession={handleNewSessionForRepo}
@@ -466,7 +466,7 @@ export default function App() {
         onUpdateTheme={(theme) => updateSettings({ theme: theme as 'dark' | 'light' })}
         onSendModule={handleSendModule}
         onNavigateToWorkflows={() => navigate('/workflows')}
-        onNavigateToShepherd={() => handleNavigateToShepherd()}
+        onNavigateToOrchestrator={() => handleNavigateToOrchestrator()}
         onBrowseDocs={handleBrowseDocs}
         docsPicker={{
           open: docsBrowser.pickerOpen,
@@ -511,11 +511,11 @@ export default function App() {
           </div>
         )}
 
-        {/* Main content: shepherd, workflows view, docs browser, or chat */}
-        {view === 'shepherd' ? (
-          <ShepherdContent
+        {/* Main content: orchestrator, workflows view, docs browser, or chat */}
+        {view === 'orchestrator' ? (
+          <OrchestratorContent
             token={settings.token}
-            onShepherdSessionReady={handleShepherdSessionReady}
+            onOrchestratorSessionReady={handleOrchestratorSessionReady}
             sessionJoined={!!activeSessionId}
             activeSessionId={activeSessionId}
             messages={[...messages, ...tentativeMessages]}

@@ -1,8 +1,8 @@
 /**
- * Shepherd self-improving memory — extraction, deduplication, aging,
+ * Orchestrator self-improving memory — extraction, deduplication, aging,
  * pattern learning, and user skill modeling.
  *
- * This module adds the intelligence layer on top of ShepherdMemory:
+ * This module adds the intelligence layer on top of OrchestratorMemory:
  * - Extracts memory candidates from session interactions
  * - Deduplicates against existing memories using FTS similarity
  * - Ages and decays stale items on a schedule
@@ -13,8 +13,8 @@
 
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs'
 import { join } from 'path'
-import { ShepherdMemory, type MemoryType, type MemoryItem } from './shepherd-memory.js'
-import { SHEPHERD_DIR } from './shepherd-manager.js'
+import { OrchestratorMemory, type MemoryType, type MemoryItem } from './orchestrator-memory.js'
+import { ORCHESTRATOR_DIR } from './orchestrator-manager.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -210,7 +210,7 @@ export function extractMemoryCandidates(
  * Uses FTS search to find similar items, then compares content overlap.
  */
 export function findDuplicate(
-  memory: ShepherdMemory,
+  memory: OrchestratorMemory,
   candidate: MemoryCandidate,
   threshold = 0.85,
 ): MemoryItem | null {
@@ -262,7 +262,7 @@ function computeOverlap(a: string, b: string): number {
  * Returns the memory item ID and whether it was new or updated.
  */
 export function smartUpsert(
-  memory: ShepherdMemory,
+  memory: OrchestratorMemory,
   candidate: MemoryCandidate,
   sourceRef: string | null = null,
 ): { id: string; action: 'inserted' | 'updated' | 'skipped' } {
@@ -308,7 +308,7 @@ export function smartUpsert(
  * 2. Compact old journal entries into monthly summaries
  * 3. Decay confidence of items that haven't been accessed recently
  */
-export function runAgingCycle(memory: ShepherdMemory): {
+export function runAgingCycle(memory: OrchestratorMemory): {
   expired: number
   compacted: number
   decayed: number
@@ -353,7 +353,7 @@ export function runAgingCycle(memory: ShepherdMemory): {
 
 /** Compact journal entries older than 30 days into monthly summary files. */
 function compactOldJournals(): number {
-  const journalDir = join(SHEPHERD_DIR, 'journal')
+  const journalDir = join(ORCHESTRATOR_DIR, 'journal')
   if (!existsSync(journalDir)) return 0
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
@@ -399,7 +399,7 @@ function compactOldJournals(): number {
 
     writeFileSync(summaryFile, contents.join('\n'), 'utf-8')
     compacted += monthFiles.length
-    // Note: we don't delete originals — Shepherd can do that if it wants
+    // Note: we don't delete originals — the orchestrator can do that if it wants
   }
 
   return compacted
@@ -413,7 +413,7 @@ function compactOldJournals(): number {
  * Record the outcome of a finding triage decision.
  */
 export function recordFindingOutcome(
-  memory: ShepherdMemory,
+  memory: OrchestratorMemory,
   outcome: FindingOutcome,
 ): string {
   return memory.upsert({
@@ -434,7 +434,7 @@ export function recordFindingOutcome(
  * Returns the likely action and confidence based on historical patterns.
  */
 export function getTriageRecommendation(
-  memory: ShepherdMemory,
+  memory: OrchestratorMemory,
   category: string,
   severity: string,
   repo: string | null,
@@ -502,7 +502,7 @@ export function getTriageRecommendation(
 // User Skill Model
 // ---------------------------------------------------------------------------
 
-const SKILL_PROFILE_FILE = join(SHEPHERD_DIR, 'skill-profile.json')
+const SKILL_PROFILE_FILE = join(ORCHESTRATOR_DIR, 'skill-profile.json')
 
 /** Load the user's skill profile from disk. */
 export function loadSkillProfile(): SkillLevel[] {
@@ -627,7 +627,7 @@ export function getGuidanceStyle(): {
  * Record a decision with expected outcome.
  */
 export function recordDecision(
-  memory: ShepherdMemory,
+  memory: OrchestratorMemory,
   decision: Omit<DecisionRecord, 'id' | 'timestamp' | 'actualOutcome' | 'outcomeAssessedAt'>,
 ): string {
   const record: DecisionRecord = {
@@ -655,7 +655,7 @@ export function recordDecision(
  * Update a decision's actual outcome.
  */
 export function assessDecisionOutcome(
-  memory: ShepherdMemory,
+  memory: OrchestratorMemory,
   decisionId: string,
   actualOutcome: string,
 ): boolean {
@@ -688,7 +688,7 @@ export function assessDecisionOutcome(
 /**
  * Get decisions that need outcome assessment (older than 7 days, no outcome yet).
  */
-export function getPendingOutcomeAssessments(memory: ShepherdMemory): DecisionRecord[] {
+export function getPendingOutcomeAssessments(memory: OrchestratorMemory): DecisionRecord[] {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()
   const decisions = memory.list({ memoryType: 'decision', limit: 50 })
 

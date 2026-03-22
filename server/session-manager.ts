@@ -60,7 +60,7 @@ const API_RETRY_PATTERNS = [
 ]
 
 export interface CreateSessionOptions {
-  source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'shepherd' | 'agent'
+  source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   id?: string
   groupDir?: string
   model?: string
@@ -402,7 +402,7 @@ export class SessionManager {
       }))
   }
 
-  /** List ALL sessions including shepherd — used by shepherd cleanup endpoints. */
+  /** List ALL sessions including orchestrator — used by orchestrator cleanup endpoints. */
   listAll(): SessionInfo[] {
     return Array.from(this.sessions.values())
       .map((s) => ({

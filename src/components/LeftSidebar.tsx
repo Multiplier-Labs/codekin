@@ -43,7 +43,7 @@ function buildRepoNodes(
 ): RepoNode[] {
   const map = new Map<string, Session[]>()
   for (const s of sessions) {
-    if (s.source === 'shepherd') continue
+    if (s.source === 'orchestrator') continue
     const key = groupKey(s)
     const list = map.get(key) ?? []
     list.push(s)
@@ -120,8 +120,8 @@ interface Props {
   onSendModule: (mod: Module) => void
   /** Navigate to the workflows view. */
   onNavigateToWorkflows: () => void
-  /** Navigate to the Shepherd orchestrator view. */
-  onNavigateToShepherd: () => void
+  /** Navigate to the orchestrator view. */
+  onNavigateToOrchestrator: () => void
   /** Open the docs browser for a repo's documentation files. */
   onBrowseDocs?: (workingDir: string) => void
   /** State and callbacks for the docs file picker overlay. */
@@ -162,7 +162,7 @@ export function LeftSidebar({
   onUpdateTheme,
   onSendModule,
   onNavigateToWorkflows,
-  onNavigateToShepherd,
+  onNavigateToOrchestrator,
   onBrowseDocs,
   docsPicker = {},
   mobile = {},
@@ -226,16 +226,16 @@ export function LeftSidebar({
   const repoNodes = buildRepoNodes(sessions, waitingSessions, tentativeQueues)
   const connDotColor = connState === 'connected' ? 'bg-success-7' : connState === 'connecting' ? 'bg-warning-6' : 'bg-error-7'
 
-  // Derive Agent Joe icon style from its session state
-  const joeSession = sessions.find(s => s.source === 'shepherd')
-  const joeIconClass = joeSession
-    ? (tentativeQueues[joeSession.id]?.length ?? 0) > 0
+  // Derive orchestrator icon style from its session state
+  const orchestratorSession = sessions.find(s => s.source === 'orchestrator')
+  const orchestratorIconClass = orchestratorSession
+    ? (tentativeQueues[orchestratorSession.id]?.length ?? 0) > 0
       ? '!text-accent-5 animate-pulse'
-      : waitingSessions[joeSession.id]
+      : waitingSessions[orchestratorSession.id]
       ? '!text-warning-5 animate-pulse'
-      : joeSession.isProcessing
+      : orchestratorSession.isProcessing
       ? '!text-success-6 animate-pulse'
-      : joeSession.active
+      : orchestratorSession.active
       ? '!text-neutral-5'
       : ''
     : ''
@@ -342,15 +342,15 @@ export function LeftSidebar({
             <span className="flex-1 text-left">AI Workflows</span>
           </button>
           <button
-            onClick={() => { onNavigateToShepherd(); if (isMobile) onMobileClose?.() }}
+            onClick={() => { onNavigateToOrchestrator(); if (isMobile) onMobileClose?.() }}
             className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[15px] transition-colors ${
-              view === 'shepherd'
+              view === 'orchestrator'
                 ? 'bg-accent-9/30 text-accent-2'
                 : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6'
             }`}
           >
-            <IconRobotFace size={16} stroke={2} className={`flex-shrink-0 ${joeIconClass}`} />
-            <span className="flex-1 text-left">Agent Joe</span>
+            <IconRobotFace size={16} stroke={2} className={`flex-shrink-0 ${orchestratorIconClass}`} />
+            <span className="flex-1 text-left">Orchestrator</span>
           </button>
           {hasModules && (
             <div ref={modulesRef} className="relative">

@@ -263,7 +263,7 @@ export function RepoSection({
                   ? <IconSparkles size={12} className={`flex-shrink-0 self-center ${dotColor.replace(/bg-/g, 'text-')}`} title={dotTitle} />
                   : s.source === 'webhook'
                   ? <IconRobot size={12} className={`flex-shrink-0 self-center ${dotColor.replace(/bg-/g, 'text-')}`} title={dotTitle} />
-                  : s.source === 'joe' || s.source === 'agent'
+                  : s.source === 'orchestrator' || s.source === 'agent'
                   ? <IconRobotFace size={12} className={`flex-shrink-0 self-center text-accent-5 ${dotColor.includes('animate-pulse') ? 'animate-pulse' : ''}`} title={dotTitle} />
                   : <span className="inline-flex items-center justify-center w-[12px] flex-shrink-0 self-center" title={dotTitle}><span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} /></span>
                 }

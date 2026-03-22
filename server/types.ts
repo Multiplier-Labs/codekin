@@ -39,7 +39,7 @@ export interface Session {
   /** Absolute path to the git worktree directory, if this session uses one. */
   worktreePath?: string
   created: string
-  source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'shepherd' | 'agent'
+  source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   /** The spawned Claude CLI process, or null if not running. */
   claudeProcess: ClaudeProcess | null
   /** All browser clients currently viewing this session. */
@@ -101,7 +101,7 @@ export interface SessionInfo {
   worktreePath?: string
   connectedClients: number
   lastActivity: string
-  source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'shepherd' | 'agent'
+  source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
 }
 
 // ---------------------------------------------------------------------------

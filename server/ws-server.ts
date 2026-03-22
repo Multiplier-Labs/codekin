@@ -39,9 +39,9 @@ import { createSessionRouter } from './session-routes.js'
 import { createWebhookRouter } from './webhook-routes.js'
 import { createUploadRouter } from './upload-routes.js'
 import { createDocsRouter } from './docs-routes.js'
-import { createShepherdRouter } from './shepherd-routes.js'
-import { ensureShepherdRunning } from './shepherd-manager.js'
-import { ShepherdMonitor } from './shepherd-monitor.js'
+import { createOrchestratorRouter } from './orchestrator-routes.js'
+import { ensureOrchestratorRunning } from './orchestrator-manager.js'
+import { OrchestratorMonitor } from './orchestrator-monitor.js'
 import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST } from './config.js'
 
 // ---------------------------------------------------------------------------
@@ -275,9 +275,9 @@ app.use(createDocsRouter(verifyToken, extractToken))
 // Workflow router — commitEventHandler is set after engine init, but the
 // router closure captures the variable reference so it will resolve correctly.
 app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessions, commitEventState))
-// Shepherd router — monitorRef is populated after workflow engine init
-const shepherdMonitorRef: { current: ShepherdMonitor | null } = { current: null }
-app.use(createShepherdRouter(verifyToken, extractToken, sessions, shepherdMonitorRef, verifyTokenOrSessionToken))
+// Orchestrator router — monitorRef is populated after workflow engine init
+const orchestratorMonitorRef: { current: OrchestratorMonitor | null } = { current: null }
+app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken))
 
 // --- SPA fallback: serve index.html for non-API routes (client-side routing) ---
 if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
@@ -472,11 +472,11 @@ server.listen(port, '0.0.0.0', () => {
   // Auto-restart sessions that were active before the server went down
   sessions.restoreActiveSessions()
 
-  // Start the Shepherd orchestrator session (always-on)
+  // Start the orchestrator session (always-on)
   try {
-    ensureShepherdRunning(sessions)
+    ensureOrchestratorRunning(sessions)
   } catch (err) {
-    console.error('[shepherd] Failed to start on boot:', err)
+    console.error('[orchestrator] Failed to start on boot:', err)
   }
 
   // Initialize workflow engine
@@ -517,11 +517,11 @@ server.listen(port, '0.0.0.0', () => {
       syncCommitHooks()
     }
 
-    // Start Shepherd proactive monitor with workflow engine events
-    const monitor = new ShepherdMonitor(sessions)
+    // Start orchestrator proactive monitor with workflow engine events
+    const monitor = new OrchestratorMonitor(sessions)
     monitor.setEngine(engine)
     monitor.start()
-    shepherdMonitorRef.current = monitor
+    orchestratorMonitorRef.current = monitor
 
     console.log('[workflow] Workflow engine ready')
   } catch (err) {
