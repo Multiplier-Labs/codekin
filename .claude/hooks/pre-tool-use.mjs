@@ -55,11 +55,15 @@ createHook({
   transport,
   context: [new EnvContext()],
   handler: async (input, ctx) => {
-    // AskUserQuestion: forward to server to collect the user's answer via the UI.
-    // The server shows a question prompt, waits for the user's response, and
-    // returns the answer. We inject it as updatedInput so the CLI has the answer
-    // when the tool executes (the CLI does NOT generate a control_request for
-    // AskUserQuestion in stream-json mode).
+    // AskUserQuestion: The CLI marks this tool with requiresUserInteraction()===true,
+    // which short-circuits ALL permission paths (hooks, control_request, stream-json).
+    // Even when the hook returns permissionDecision:"allow" with updatedInput containing
+    // answers, the CLI's checkPermissions always returns behavior:"ask" and the
+    // requiresUserInteraction guard prevents any override.
+    //
+    // Workaround: collect answers from the user via the server UI, then DENY the tool
+    // with the answers formatted in the denial reason. Claude sees the "error" but the
+    // content contains the user's actual answers, which it can use to continue.
     if (input.tool_name === 'AskUserQuestion') {
       const hubSessionId = ctx.env.hubSessionId;
       if (!hubSessionId) return; // No hub session — let CLI handle natively
@@ -76,11 +80,22 @@ createHook({
           return denyWithNotification(ctx, 'AskUserQuestion', input.tool_input, 'User dismissed the question');
         }
 
+        // Format the answers as a structured denial message that Claude can parse.
+        // The answers were collected successfully via the UI — the "deny" is only
+        // because the CLI doesn't support AskUserQuestion in stream-json mode.
+        const answers = decision.updatedInput?.answers || {};
+        const questions = input.tool_input?.questions || [];
+        const parts = ['[AskUserQuestion] The user answered via the Codekin UI:\n'];
+        for (const q of questions) {
+          const answer = answers[q.question] || '(no answer)';
+          parts.push(`Q: ${q.question}\nA: ${answer}\n`);
+        }
+
         return {
           hookSpecificOutput: {
             hookEventName: 'PreToolUse',
-            permissionDecision: 'allow',
-            ...(decision.updatedInput ? { updatedInput: decision.updatedInput } : {}),
+            permissionDecision: 'deny',
+            permissionDecisionReason: parts.join('\n'),
           },
         };
       } catch (err) {
