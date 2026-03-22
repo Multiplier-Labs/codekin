@@ -927,7 +927,7 @@ describe('handleControlRequest', () => {
 })
 
 describe('sendControlResponse', () => {
-  it('should format correct JSON with type, request_id, behavior', () => {
+  it('should format allow response with nested structure', () => {
     const { cp, stdinData } = makeCPWithStdin()
 
     cp.sendControlResponse('req-42', 'allow')
@@ -935,10 +935,10 @@ describe('sendControlResponse', () => {
     expect(stdinData).toHaveLength(1)
     const parsed = JSON.parse(stdinData[0].replace(/\n$/, ''))
     expect(parsed.type).toBe('control_response')
-    expect(parsed.request_id).toBe('req-42')
-    expect(parsed.behavior).toBe('allow')
-    expect(parsed.updatedInput).toBeUndefined()
-    expect(parsed.message).toBeUndefined()
+    expect(parsed.response.subtype).toBe('success')
+    expect(parsed.response.request_id).toBe('req-42')
+    expect(parsed.response.response.behavior).toBe('allow')
+    expect(parsed.response.response.updatedInput).toEqual({})
   })
 
   it('should include updatedInput when provided', () => {
@@ -947,28 +947,39 @@ describe('sendControlResponse', () => {
     cp.sendControlResponse('req-43', 'allow', { command: 'echo safe' })
 
     const parsed = JSON.parse(stdinData[0].replace(/\n$/, ''))
-    expect(parsed.updatedInput).toEqual({ command: 'echo safe' })
+    expect(parsed.response.response.updatedInput).toEqual({ command: 'echo safe' })
   })
 
-  it('should include message when provided', () => {
+  it('should format deny response as error subtype', () => {
     const { cp, stdinData } = makeCPWithStdin()
 
     cp.sendControlResponse('req-44', 'deny', undefined, 'Not allowed')
 
     const parsed = JSON.parse(stdinData[0].replace(/\n$/, ''))
-    expect(parsed.behavior).toBe('deny')
-    expect(parsed.message).toBe('Not allowed')
-    expect(parsed.updatedInput).toBeUndefined()
+    expect(parsed.response.subtype).toBe('error')
+    expect(parsed.response.request_id).toBe('req-44')
+    expect(parsed.response.error).toBe('Not allowed')
+    expect(parsed.response.response).toBeUndefined()
   })
 
-  it('should include both updatedInput and message when provided', () => {
+  it('should include updatedInput in allow response when provided', () => {
     const { cp, stdinData } = makeCPWithStdin()
 
     cp.sendControlResponse('req-45', 'allow', { file_path: '/new' }, 'Modified input')
 
     const parsed = JSON.parse(stdinData[0].replace(/\n$/, ''))
-    expect(parsed.updatedInput).toEqual({ file_path: '/new' })
-    expect(parsed.message).toBe('Modified input')
+    expect(parsed.response.response.updatedInput).toEqual({ file_path: '/new' })
+    expect(parsed.response.response.behavior).toBe('allow')
+  })
+
+  it('should use default deny message when none provided', () => {
+    const { cp, stdinData } = makeCPWithStdin()
+
+    cp.sendControlResponse('req-46', 'deny')
+
+    const parsed = JSON.parse(stdinData[0].replace(/\n$/, ''))
+    expect(parsed.response.subtype).toBe('error')
+    expect(parsed.response.error).toBe('User denied permission')
   })
 })
 

@@ -480,13 +480,30 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
 
   /** Send a control_response back to the CLI to allow or deny a pending request. */
   sendControlResponse(requestId: string, behavior: 'allow' | 'deny', updatedInput?: Record<string, unknown>, message?: string): void {
-    const response: Record<string, unknown> = {
-      type: 'control_response',
-      request_id: requestId,
-      behavior,
-    }
-    if (updatedInput !== undefined) response.updatedInput = updatedInput
-    if (message !== undefined) response.message = message
+    // The CLI expects a nested format: { type, response: { subtype, request_id, response: { behavior, ... } } }
+    // Inner response schema:
+    //   allow: { behavior: "allow", updatedInput: Record<string, unknown> }  (updatedInput required)
+    //   deny:  { behavior: "deny", message: string }                        (message required)
+    const response = behavior === 'deny'
+      ? {
+        type: 'control_response' as const,
+        response: {
+          subtype: 'error' as const,
+          request_id: requestId,
+          error: message || 'User denied permission',
+        },
+      }
+      : {
+        type: 'control_response' as const,
+        response: {
+          subtype: 'success' as const,
+          request_id: requestId,
+          response: {
+            behavior: 'allow' as const,
+            updatedInput: updatedInput ?? {},
+          },
+        },
+      }
     this.sendRaw(JSON.stringify(response))
   }
 

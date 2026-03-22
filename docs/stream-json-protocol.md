@@ -257,32 +257,57 @@ All stdin messages are newline-delimited JSON.
 
 ### Control Response
 
-Response to a `control_request`. The `request_id` must match.
+Response to a `control_request`. Uses a nested format with a `response` wrapper.
 
+**Allow** (success):
 ```json
 {
   "type": "control_response",
-  "request_id": "req_01ABC...",
-  "behavior": "allow"
+  "response": {
+    "subtype": "success",
+    "request_id": "req_01ABC...",
+    "response": {
+      "behavior": "allow",
+      "updatedInput": {}
+    }
+  }
+}
+```
+
+**Deny** (error):
+```json
+{
+  "type": "control_response",
+  "response": {
+    "subtype": "error",
+    "request_id": "req_01ABC...",
+    "error": "User denied permission"
+  }
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `request_id` | string | Must match the `control_request.request_id` |
-| `behavior` | `"allow"` or `"deny"` | Whether to execute or reject the tool |
-| `updatedInput` | object (optional) | Modified tool input (used for AskUserQuestion answers) |
-| `message` | string (optional) | Message to pass back to Claude |
+| `response.request_id` | string | Must match the `control_request.request_id` |
+| `response.subtype` | `"success"` or `"error"` | Whether the tool is allowed or denied |
+| `response.response.behavior` | `"allow"` | Only present for success responses |
+| `response.response.updatedInput` | object | Modified tool input (required for allow; used for AskUserQuestion answers) |
+| `response.error` | string | Error message (required for error/deny responses) |
 
 **AskUserQuestion** uses `updatedInput` to pass answers back:
 ```json
 {
   "type": "control_response",
-  "request_id": "req_01ABC...",
-  "behavior": "allow",
-  "updatedInput": {
-    "questions": [...],
-    "answers": { "Which approach?": "Option A" }
+  "response": {
+    "subtype": "success",
+    "request_id": "req_01ABC...",
+    "response": {
+      "behavior": "allow",
+      "updatedInput": {
+        "questions": [...],
+        "answers": { "Which approach?": "Option A" }
+      }
+    }
   }
 }
 ```
