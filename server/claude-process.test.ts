@@ -352,7 +352,9 @@ describe('handleStreamEvent (via handleLine)', () => {
     expect(planEvents).toEqual([])
   })
 
-  it('ExitPlanMode with no tool_result clears flag on result without emitting', () => {
+  it('ExitPlanMode with no tool_result emits planning_mode false on result (control tool)', () => {
+    // ExitPlanMode is a control tool that may not produce a tool_result.
+    // If approved (no denial seen), the result handler should emit planning_mode:false.
     cp.handleLine(JSON.stringify({
       type: 'stream_event',
       event: {
@@ -362,15 +364,39 @@ describe('handleStreamEvent (via handleLine)', () => {
     }))
     expect(events).toEqual([])
 
-    // Result arrives without a matching tool_result (e.g. CLI crash or ID mismatch).
-    // Should clear the pending flag without emitting planning_mode:false.
+    // Result arrives without a matching tool_result — tool was approved but
+    // no tool_result was emitted (normal for control tools).
     cp.handleLine(JSON.stringify({
       type: 'result',
       result: '',
       is_error: false,
     }))
     const planEvents = events.filter(e => e[0] === 'planning_mode')
-    expect(planEvents).toEqual([])
+    expect(planEvents).toEqual([['planning_mode', false]])
+  })
+
+  it('ExitPlanMode via control_request emits planning_mode false', () => {
+    const { cp: cpWithStdin } = makeCPWithStdin()
+    const ctrlEvents: Array<[string, boolean]> = []
+    cpWithStdin.on('planning_mode', (active: boolean) => ctrlEvents.push(['planning_mode', active]))
+
+    // content_block_start sets pendingExitPlanModeId
+    cpWithStdin.handleLine(JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_start',
+        content_block: { type: 'tool_use', id: 'toolu_exit_ctrl', name: 'ExitPlanMode' },
+      },
+    }))
+
+    // control_request for ExitPlanMode should auto-approve AND emit planning_mode:false
+    cpWithStdin.handleLine(JSON.stringify({
+      type: 'control_request',
+      request_id: 'req_exit1',
+      request: { type: 'tool', tool_name: 'ExitPlanMode', input: {} },
+    }))
+
+    expect(ctrlEvents).toEqual([['planning_mode', false]])
   })
 
   it('malformed JSON in tool input emits graceful tool_done', () => {

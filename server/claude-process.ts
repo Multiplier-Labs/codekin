@@ -63,6 +63,10 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
   // Deferred ExitPlanMode: only emit planning_mode false after tool_result confirms success.
   // Stores the tool_use_id from content_block_start so we can match it in the tool_result.
   private pendingExitPlanModeId: string | null = null
+  // Set to true when ExitPlanMode is explicitly denied (tool_result with is_error=true).
+  // Lets the result handler distinguish "denied" from "approved but no tool_result arrived"
+  // (ExitPlanMode is a control tool that may not produce a tool_result).
+  private exitPlanModeDenied = false
 
   // Task/todo state: mirrors Claude's internal todo list for the UI
   private tasks = new Map<string, TaskItem>()
@@ -212,13 +216,16 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
 
       case 'result': {
         const resultEvent = event as ClaudeResultEvent
-        // If ExitPlanMode was pending but no successful tool_result arrived
-        // (e.g. tool denied with is_error, ID mismatch, or process terminated),
-        // clear the flag so it doesn't leak across turns. Do NOT emit
-        // planning_mode:false — the tool was denied or lost, so plan mode
-        // should remain active.
+        // Safety net: if ExitPlanMode was pending but no tool_result arrived.
+        // ExitPlanMode is a control tool that may not produce a tool_result at all.
+        // - If explicitly denied (exitPlanModeDenied): clear flag, don't emit (plan mode stays)
+        // - If NOT denied (approved but tool_result missing): emit planning_mode:false
         if (this.pendingExitPlanModeId) {
+          if (!this.exitPlanModeDenied) {
+            this.emit('planning_mode', false)
+          }
           this.pendingExitPlanModeId = null
+          this.exitPlanModeDenied = false
         }
         this.emit('result', resultEvent.result || '', resultEvent.is_error || false)
         // The result message signals end of turn, ready for next input
@@ -259,6 +266,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
             // NOT show "Exited plan mode". Use tool_use id for matching; fall back to
             // a sentinel so the flag-based check in handleUserEvent still works.
             this.pendingExitPlanModeId = inner.content_block.id || '__pending__'
+            this.exitPlanModeDenied = false
           } else {
             this.emit('tool_active', this.currentToolName!, undefined)
           }
@@ -371,12 +379,12 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
             (block.tool_use_id === this.pendingExitPlanModeId || this.pendingExitPlanModeId === '__pending__')) {
           if (!isError) {
             this.pendingExitPlanModeId = null
+            this.exitPlanModeDenied = false
             this.emit('planning_mode', false)
+          } else {
+            // Tool denied by hook — mark so the result handler knows not to emit
+            this.exitPlanModeDenied = true
           }
-          // When is_error=true (tool denied): leave pendingExitPlanModeId set so the
-          // result handler safety net clears it without emitting planning_mode:false.
-          // Previously, clearing the flag here prevented the safety net from firing,
-          // leaving plan mode permanently stuck after a denied ExitPlanMode.
         }
 
         // Emit non-empty text tool results as dedicated tool_output events
@@ -447,6 +455,14 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       // causing is_error=true and leaving plan mode stuck.
       console.log(`[control_request] auto-approving ExitPlanMode (user confirmation handled by PreToolUse hook)`)
       this.sendControlResponse(request_id, 'allow')
+      // Emit planning_mode:false now — the control_request arriving means the
+      // hook already allowed ExitPlanMode. This provides an immediate signal
+      // without relying on a tool_result that may never arrive.
+      if (this.pendingExitPlanModeId) {
+        this.pendingExitPlanModeId = null
+        this.exitPlanModeDenied = false
+        this.emit('planning_mode', false)
+      }
     } else if (ClaudeProcess.AUTO_APPROVE_TOOLS.has(toolName)) {
       // Known-safe tools: auto-approve without prompting
       console.log(`[control_request] auto-approving safe tool: ${toolName}`)
