@@ -43,6 +43,7 @@ function buildRepoNodes(
 ): RepoNode[] {
   const map = new Map<string, Session[]>()
   for (const s of sessions) {
+    if (s.source === 'shepherd') continue
     const key = groupKey(s)
     const list = map.get(key) ?? []
     list.push(s)
@@ -226,7 +227,7 @@ export function LeftSidebar({
   const connDotColor = connState === 'connected' ? 'bg-success-7' : connState === 'connecting' ? 'bg-warning-6' : 'bg-error-7'
 
   // Derive Agent Joe icon style from its session state
-  const joeSession = sessions.find(s => s.source === 'joe')
+  const joeSession = sessions.find(s => s.source === 'shepherd')
   const joeIconClass = joeSession
     ? (tentativeQueues[joeSession.id]?.length ?? 0) > 0
       ? '!text-accent-5 animate-pulse'
