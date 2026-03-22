@@ -158,13 +158,13 @@ export function RepoSection({
     listArchivedSessions(token, node.workingDir).then(setArchivedSessions).catch(() => {})
   }, [archiveOpen, token, node.workingDir, archiveRefreshKey])
 
-  const statusDot = node.hasTentative
-    ? 'bg-accent-6 animate-pulse'
+  const [statusDot, statusTitle] = node.hasTentative
+    ? ['bg-accent-6 animate-pulse', 'Queued']
     : node.hasWaiting
-    ? 'bg-warning-5 animate-pulse'
+    ? ['bg-warning-5 animate-pulse', 'Waiting for input']
     : node.hasActive
-    ? 'bg-success-6 animate-pulse'
-    : 'bg-neutral-6'
+    ? ['bg-success-6 animate-pulse', 'Processing']
+    : ['bg-neutral-6', 'Idle']
 
   const visibleArchived = archiveExpanded ? archivedSessions : archivedSessions.slice(0, ARCHIVED_PREVIEW_LIMIT)
   const hasMore = archivedSessions.length > ARCHIVED_PREVIEW_LIMIT
@@ -193,7 +193,7 @@ export function RepoSection({
             ? <IconChevronDown size={14} stroke={2.5} className="flex-shrink-0 text-neutral-5 opacity-0 group-hover/repo:opacity-100 transition-opacity" />
             : <IconChevronRight size={14} stroke={2.5} className="flex-shrink-0 text-neutral-5 opacity-0 group-hover/repo:opacity-100 transition-opacity" />
           }
-          <span className={`inline-block h-1.5 w-1.5 rounded-full flex-shrink-0 ${statusDot}`} />
+          <span className={`inline-block h-1.5 w-1.5 rounded-full flex-shrink-0 ${statusDot}`} title={statusTitle} />
           <span className={`truncate font-semibold tracking-wide ${isMobile ? 'text-[17px]' : 'text-[15px]'}`}>{node.displayName}</span>
           {!expanded && node.sessions.length > 1 && (
             <span className="text-[12px] text-neutral-6 flex-shrink-0">({node.sessions.length})</span>
@@ -242,11 +242,11 @@ export function RepoSection({
           {node.sessions.map(s => {
             const isActiveSession = s.id === activeSessionId
             const isTentative = (tentativeQueues[s.id]?.length ?? 0) > 0
-            const dotColor = isTentative
-              ? 'bg-accent-6 animate-pulse'
+            const [dotColor, dotTitle] = isTentative
+              ? ['bg-accent-6 animate-pulse', 'Queued']
               : waitingSessions[s.id]
-              ? 'bg-warning-5 animate-pulse'
-              : s.isProcessing ? 'bg-success-6 animate-pulse' : s.active ? 'bg-neutral-5' : 'bg-neutral-7'
+              ? ['bg-warning-5 animate-pulse', 'Waiting for input']
+              : s.isProcessing ? ['bg-success-6 animate-pulse', 'Processing'] : s.active ? ['bg-neutral-5', 'Idle'] : ['bg-neutral-7', 'Inactive']
             const isEditing = editingSessionId === s.id
 
             return (
@@ -260,12 +260,12 @@ export function RepoSection({
                 }`}
               >
                 {s.source === 'workflow'
-                  ? <IconSparkles size={12} className={`flex-shrink-0 self-center ${dotColor.replace(/bg-/g, 'text-')}`} />
+                  ? <IconSparkles size={12} className={`flex-shrink-0 self-center ${dotColor.replace(/bg-/g, 'text-')}`} title={dotTitle} />
                   : s.source === 'webhook'
-                  ? <IconRobot size={12} className={`flex-shrink-0 self-center ${dotColor.replace(/bg-/g, 'text-')}`} />
+                  ? <IconRobot size={12} className={`flex-shrink-0 self-center ${dotColor.replace(/bg-/g, 'text-')}`} title={dotTitle} />
                   : s.source === 'joe' || s.source === 'agent'
-                  ? <IconRobotFace size={12} className={`flex-shrink-0 self-center text-accent-5 ${dotColor.includes('animate-pulse') ? 'animate-pulse' : ''}`} />
-                  : <span className="inline-flex items-center justify-center w-[12px] flex-shrink-0 self-center"><span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} /></span>
+                  ? <IconRobotFace size={12} className={`flex-shrink-0 self-center text-accent-5 ${dotColor.includes('animate-pulse') ? 'animate-pulse' : ''}`} title={dotTitle} />
+                  : <span className="inline-flex items-center justify-center w-[12px] flex-shrink-0 self-center" title={dotTitle}><span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} /></span>
                 }
                 {isEditing ? (
                   <input
