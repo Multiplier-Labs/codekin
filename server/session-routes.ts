@@ -352,10 +352,27 @@ export function createSessionRouter(
       const response: { allow: boolean; message?: string; updatedPermissions?: Array<{ type: string; tool: string }>; updatedInput?: Record<string, unknown> } = {
         allow: result.allow,
       }
-      // AskUserQuestion: return the user's answer as updatedInput so the
-      // PreToolUse hook can inject it into the tool input
+      // AskUserQuestion: return the user's answers as updatedInput so the
+      // PreToolUse hook can inject them into the tool input.
+      // The tool expects `answers: Record<string, string>` keyed by question text.
+      // The UI sends either a JSON answers map (multi-question) or a plain string.
       if (toolName === 'AskUserQuestion' && result.allow && result.answer !== undefined) {
-        response.updatedInput = { ...(toolInput || {}), answer: result.answer }
+        const questions = (toolInput || {}).questions as Array<{ question: string }> | undefined
+        let answers: Record<string, string> = {}
+        try {
+          const parsed = JSON.parse(result.answer)
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            answers = parsed as Record<string, string>
+          } else if (Array.isArray(questions) && questions.length > 0) {
+            answers[questions[0].question] = result.answer
+          }
+        } catch {
+          // Plain string — map to first question
+          if (Array.isArray(questions) && questions.length > 0) {
+            answers[questions[0].question] = result.answer
+          }
+        }
+        response.updatedInput = { ...(toolInput || {}), answers }
       }
       if (result.always && result.allow) {
         const nativePerm = toNativePermission(toolName, toolInput || {})

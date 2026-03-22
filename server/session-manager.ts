@@ -1216,15 +1216,32 @@ export class SessionManager {
 
       let promptMsg: WsServerMessage
       if (isQuestion) {
-        const questionText = String(toolInput.question || 'Answer the question')
+        // AskUserQuestion: extract structured questions from toolInput.questions
+        // and pass them through so PromptButtons can render the multi-question flow.
+        const rawQuestions = toolInput.questions as Array<{ question: string; options?: Array<{ label: string; description?: string }>; multiSelect?: boolean; header?: string }> | undefined
+        const structuredQuestions = Array.isArray(rawQuestions)
+          ? rawQuestions.map(q => ({
+            question: q.question,
+            header: q.header,
+            multiSelect: q.multiSelect ?? false,
+            options: (q.options || []).map((opt: { label: string; value?: string; description?: string }) => ({
+              label: opt.label,
+              value: opt.value ?? opt.label,
+              description: opt.description,
+            })),
+          }))
+          : undefined
+        const firstQ = structuredQuestions?.[0]
         promptMsg = {
           type: 'prompt',
           promptType: 'question',
-          question: questionText,
-          options: [],
+          question: firstQ?.question || 'Answer the question',
+          options: firstQ?.options || [],
+          multiSelect: firstQ?.multiSelect,
           toolName,
           toolInput,
           requestId: approvalRequestId,
+          ...(structuredQuestions ? { questions: structuredQuestions } : {}),
         }
       } else {
         const question = this.summarizeToolPermission(toolName, toolInput)
