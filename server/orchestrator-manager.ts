@@ -1,43 +1,43 @@
 /**
- * Shepherd orchestrator lifecycle manager.
+ * Orchestrator lifecycle manager.
  *
- * Manages the always-on Shepherd session: directory setup, stable ID
- * persistence, and auto-start on server boot. Shepherd is a standard
- * Claude session with source='shepherd' that runs in ~/.codekin/shepherd/.
+ * Manages the always-on orchestrator session: directory setup, stable ID
+ * persistence, and auto-start on server boot. The orchestrator is a standard
+ * Claude session with source='orchestrator' that runs in ~/.codekin/shepherd/.
  */
 
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { randomUUID } from 'crypto'
-import { DATA_DIR } from './config.js'
+import { DATA_DIR, AGENT_DISPLAY_NAME } from './config.js'
 import type { SessionManager } from './session-manager.js'
 
-export const SHEPHERD_DIR = join(DATA_DIR, 'shepherd')
-const SESSION_ID_FILE = join(SHEPHERD_DIR, '.session-id')
+export const ORCHESTRATOR_DIR = join(DATA_DIR, 'shepherd')
+const SESSION_ID_FILE = join(ORCHESTRATOR_DIR, '.session-id')
 
 const PROFILE_TEMPLATE = `# User Profile
 
-Agent Joe will learn about you over time and update this file.
+Agent ${AGENT_DISPLAY_NAME} will learn about you over time and update this file.
 Feel free to edit it directly.
 
 ## Preferences
-- (Joe will fill this in as it learns your preferences)
+- (${AGENT_DISPLAY_NAME} will fill this in as it learns your preferences)
 
 ## Skill Level
-- (Joe will adapt its guidance to your experience)
+- (${AGENT_DISPLAY_NAME} will adapt its guidance to your experience)
 `
 
 const REPOS_TEMPLATE = `# Managed Repositories
 
-Agent Joe tracks repositories you work with in Codekin.
+Agent ${AGENT_DISPLAY_NAME} tracks repositories you work with in Codekin.
 
 ## Active Repos
-(none yet — Joe will populate this as you work)
+(none yet — ${AGENT_DISPLAY_NAME} will populate this as you work)
 `
 
-const CLAUDE_MD_TEMPLATE = `# Agent Joe — Codekin Orchestrator
+const CLAUDE_MD_TEMPLATE = `# Agent ${AGENT_DISPLAY_NAME} — Codekin Orchestrator
 
-You are Joe, a calm and friendly ops manager inside Codekin.
+You are ${AGENT_DISPLAY_NAME}, a calm and friendly ops manager inside Codekin.
 You help users keep their repositories healthy, their workflows running
 smoothly, and their audit findings actioned pragmatically.
 
@@ -106,7 +106,7 @@ Use the Bash tool to call the Codekin API. Your auth token is in the
 \`$CODEKIN_AUTH_TOKEN\` env var and the server port is in \`$CODEKIN_PORT\`:
 
 \`\`\`bash
-curl -s -X POST "http://localhost:$CODEKIN_PORT/api/shepherd/children" \\
+curl -s -X POST "http://localhost:$CODEKIN_PORT/api/orchestrator/children" \\
   -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -132,11 +132,11 @@ user's sidebar immediately.
 ### Checking Child Session Status
 \`\`\`bash
 # List all child sessions
-curl -s "http://localhost:$CODEKIN_PORT/api/shepherd/children" \\
+curl -s "http://localhost:$CODEKIN_PORT/api/orchestrator/children" \\
   -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN"
 
 # Get specific child session
-curl -s "http://localhost:$CODEKIN_PORT/api/shepherd/children/SESSION_ID" \\
+curl -s "http://localhost:$CODEKIN_PORT/api/orchestrator/children/SESSION_ID" \\
   -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN"
 \`\`\`
 
@@ -222,19 +222,19 @@ Users can manage trust directly in chat:
 7. Greet the user with a brief, friendly status update
 `
 
-/** Ensure the shepherd workspace directory exists with starter files. */
-export function ensureShepherdDir(): void {
+/** Ensure the orchestrator workspace directory exists with starter files. */
+export function ensureOrchestratorDir(): void {
   // Create directories
-  if (!existsSync(SHEPHERD_DIR)) mkdirSync(SHEPHERD_DIR, { recursive: true })
+  if (!existsSync(ORCHESTRATOR_DIR)) mkdirSync(ORCHESTRATOR_DIR, { recursive: true })
 
-  const journalDir = join(SHEPHERD_DIR, 'journal')
+  const journalDir = join(ORCHESTRATOR_DIR, 'journal')
   if (!existsSync(journalDir)) mkdirSync(journalDir, { recursive: true })
 
   // Seed files only if they don't exist (preserve user edits)
   const seeds: [string, string][] = [
-    [join(SHEPHERD_DIR, 'PROFILE.md'), PROFILE_TEMPLATE],
-    [join(SHEPHERD_DIR, 'REPOS.md'), REPOS_TEMPLATE],
-    [join(SHEPHERD_DIR, 'CLAUDE.md'), CLAUDE_MD_TEMPLATE],
+    [join(ORCHESTRATOR_DIR, 'PROFILE.md'), PROFILE_TEMPLATE],
+    [join(ORCHESTRATOR_DIR, 'REPOS.md'), REPOS_TEMPLATE],
+    [join(ORCHESTRATOR_DIR, 'CLAUDE.md'), CLAUDE_MD_TEMPLATE],
   ]
   for (const [path, content] of seeds) {
     if (!existsSync(path)) writeFileSync(path, content, 'utf-8')
@@ -242,7 +242,7 @@ export function ensureShepherdDir(): void {
 }
 
 /** Get or create a stable session UUID that persists across restarts. */
-export function getOrCreateShepherdId(): string {
+export function getOrCreateOrchestratorId(): string {
   if (existsSync(SESSION_ID_FILE)) {
     const id = readFileSync(SESSION_ID_FILE, 'utf-8').trim()
     if (id) return id
@@ -252,21 +252,21 @@ export function getOrCreateShepherdId(): string {
   return id
 }
 
-/** Check if a session is the Shepherd session. */
-export function isShepherdSession(source: string | undefined): boolean {
-  return source === 'shepherd'
+/** Check if a session is the orchestrator session. */
+export function isOrchestratorSession(source: string | undefined): boolean {
+  return source === 'orchestrator'
 }
 
 /**
- * Ensure the Shepherd session exists and is running.
+ * Ensure the orchestrator session exists and is running.
  * Creates it if missing, starts Claude if not alive.
- * Returns the shepherd session ID.
+ * Returns the orchestrator session ID.
  */
-export function ensureShepherdRunning(sessions: SessionManager): string {
-  ensureShepherdDir()
-  const stableId = getOrCreateShepherdId()
+export function ensureOrchestratorRunning(sessions: SessionManager): string {
+  ensureOrchestratorDir()
+  const stableId = getOrCreateOrchestratorId()
 
-  const SHEPHERD_ALLOWED_TOOLS = ['Bash(curl:*)', 'CronCreate', 'CronDelete', 'CronList']
+  const ORCHESTRATOR_ALLOWED_TOOLS = ['Bash(curl:*)', 'CronCreate', 'CronDelete', 'CronList']
 
   // Check if session already exists
   const existing = sessions.get(stableId)
@@ -275,24 +275,24 @@ export function ensureShepherdRunning(sessions: SessionManager): string {
     // created before CronCreate/Delete/List were added, or lost during
     // a persistence round-trip).
     if (!existing.allowedTools || existing.allowedTools.length === 0) {
-      existing.allowedTools = SHEPHERD_ALLOWED_TOOLS
+      existing.allowedTools = ORCHESTRATOR_ALLOWED_TOOLS
       sessions.persistToDisk()
     }
     // Session exists — start Claude if not alive
     if (!existing.claudeProcess?.isAlive()) {
-      console.log('[shepherd] Restarting Shepherd Claude process')
+      console.log('[orchestrator] Restarting orchestrator Claude process')
       sessions.startClaude(stableId)
     }
     return stableId
   }
 
   // Create the session
-  console.log('[shepherd] Creating Agent Joe session')
-  sessions.create('Agent Joe', SHEPHERD_DIR, {
-    source: 'shepherd',
+  console.log(`[orchestrator] Creating Agent ${AGENT_DISPLAY_NAME} session`)
+  sessions.create(`Agent ${AGENT_DISPLAY_NAME}`, ORCHESTRATOR_DIR, {
+    source: 'orchestrator',
     id: stableId,
     permissionMode: 'acceptEdits',
-    allowedTools: SHEPHERD_ALLOWED_TOOLS,
+    allowedTools: ORCHESTRATOR_ALLOWED_TOOLS,
   })
 
   // Start Claude
@@ -301,9 +301,9 @@ export function ensureShepherdRunning(sessions: SessionManager): string {
 }
 
 /**
- * Get the Shepherd session ID if it exists, or null.
+ * Get the orchestrator session ID if it exists, or null.
  */
-export function getShepherdSessionId(sessions: SessionManager): string | null {
+export function getOrchestratorSessionId(sessions: SessionManager): string | null {
   const stableId = existsSync(SESSION_ID_FILE)
     ? readFileSync(SESSION_ID_FILE, 'utf-8').trim()
     : null

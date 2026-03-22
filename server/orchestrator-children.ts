@@ -1,6 +1,6 @@
 /**
- * Agent Joe child session manager — spawns, monitors, and reports on
- * implementation sessions created by the Agent Joe orchestrator.
+ * Orchestrator child session manager — spawns, monitors, and reports on
+ * implementation sessions created by the orchestrator.
  *
  * Follows the same patterns as workflow-loader.ts for session creation
  * and result polling.
@@ -9,6 +9,7 @@
 import { randomUUID } from 'crypto'
 import type { SessionManager } from './session-manager.js'
 import type { Session, WsServerMessage } from './types.js'
+import { AGENT_DISPLAY_NAME } from './config.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -58,7 +59,7 @@ const MAX_RETAINED_CHILDREN = 100    // hard cap on total entries
 // Manager
 // ---------------------------------------------------------------------------
 
-export class ShepherdChildManager {
+export class OrchestratorChildManager {
   private children = new Map<string, ChildSession>()
   private sessions: SessionManager
 
@@ -117,7 +118,7 @@ export class ShepherdChildManager {
     }
 
     const sessionId = randomUUID()
-    const sessionName = `joe:${request.branchName}`
+    const sessionName = `${AGENT_DISPLAY_NAME.toLowerCase()}:${request.branchName}`
     const now = new Date().toISOString()
 
     const child: ChildSession = {
@@ -147,7 +148,7 @@ export class ShepherdChildManager {
       if (request.useWorktree) {
         const wtPath = await this.sessions.createWorktree(sessionId, request.repo)
         if (!wtPath) {
-          console.warn(`[shepherd-child] Failed to create worktree for ${sessionId}, falling back to main directory`)
+          console.warn(`[orchestrator-child] Failed to create worktree for ${sessionId}, falling back to main directory`)
         }
       }
 
@@ -180,7 +181,7 @@ export class ShepherdChildManager {
       '',
       '## Instructions',
       '',
-      `You have been spawned by Agent Joe (the Codekin orchestrator) to implement a specific task in this repository.`,
+      `You have been spawned by Agent ${AGENT_DISPLAY_NAME} (the Codekin orchestrator) to implement a specific task in this repository.`,
       '',
       `**Task**: ${request.task}`,
       `**Branch**: Create your changes on branch \`${request.branchName}\``,

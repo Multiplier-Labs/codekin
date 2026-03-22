@@ -33,7 +33,7 @@
 │                    Codekin Frontend                      │
 │                                                         │
 │  ┌──────────┐  ┌──────────────┐  ┌───────────────────┐  │
-│  │LeftSidebar│  │ ShepherdView │  │  ChatView (child  │  │
+│  │LeftSidebar│  │ OrchestratorView │  │  ChatView (child  │  │
 │  │          │  │  (main panel) │  │   sessions)       │  │
 │  │ ■ Workflows│  │              │  │                   │  │
 │  │ ■ Agent Joe │──│ Dashboard    │  │                   │  │
@@ -84,8 +84,8 @@
 Agent Joe runs as a **special session type** within the existing `SessionManager` infrastructure:
 
 ```typescript
-interface ShepherdSession {
-  type: 'shepherd'              // distinguishes from regular sessions
+interface OrchestratorSession {
+  type: 'orchestrator'              // distinguishes from regular sessions
   id: string                    // stable UUID, persisted across restarts
   status: 'active' | 'idle' | 'restarting'
   lastActivity: string          // ISO timestamp
@@ -104,15 +104,15 @@ interface ShepherdSession {
 
 Agent Joe is a `ClaudeProcess` session with:
 - A dedicated `CLAUDE.md` (the Agent Joe system prompt — see §8)
-- `source: 'shepherd'` in `CreateSessionOptions`
+- `source: 'orchestrator'` in `CreateSessionOptions`
 - `permissionMode: 'acceptEdits'` (it needs to read reports, write memory, spawn sessions)
 - Working directory: `~/.codekin/shepherd/` (its own workspace)
 
 New additions to `SessionManager`:
 ```typescript
 // In session-manager.ts
-getShepherdSession(): ShepherdSession | null
-ensureShepherdRunning(): Promise<ShepherdSession>
+getOrchestratorSession(): OrchestratorSession | null
+ensureShepherdRunning(): Promise<OrchestratorSession>
 spawnChildSession(repo: string, task: string, options: ChildSessionOptions): Promise<string>
 ```
 
@@ -390,9 +390,9 @@ In `LeftSidebar.tsx`, add a new pinned menu item below "AI Workflows":
 
 ```tsx
 <button
-  onClick={() => onNavigateToShepherd()}
+  onClick={() => onNavigateToOrchestrator()}
   className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[15px] ${
-    view === 'shepherd'
+    view === 'orchestrator'
       ? 'text-accent-3 bg-accent-11/20'
       : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6'
   }`}
@@ -440,41 +440,41 @@ The Agent Joe view is a **chat interface** (reusing `ChatView`) with an optional
 // useRouter.ts
 type ViewType = 'chat' | 'workflows' | 'shepherd'
 
-if (pathname === '/shepherd') return { sessionId: null, view: 'shepherd' }
+if (pathname === '/orchestrator') return { sessionId: null, view: 'shepherd' }
 ```
 
 ---
 
 ## 10. API Additions
 
-### 10.1 Server Routes (`server/shepherd-routes.ts`)
+### 10.1 Server Routes (`server/orchestrator-routes.ts`)
 
 ```
-GET    /cc/api/shepherd/status          — session status + summary stats
-POST   /cc/api/shepherd/start           — ensure Agent Joe is running
-GET    /cc/api/shepherd/repos           — repo registry
-POST   /cc/api/shepherd/repos           — add repo to registry
-PATCH  /cc/api/shepherd/repos/:id       — update repo policy
-DELETE /cc/api/shepherd/repos/:id       — remove repo from registry
-GET    /cc/api/shepherd/memory          — query memory store (FTS)
-GET    /cc/api/shepherd/children        — list child sessions
-GET    /cc/api/shepherd/journal         — recent journal entries
+GET    /cc/api/orchestrator/status          — session status + summary stats
+POST   /cc/api/orchestrator/start           — ensure Agent Joe is running
+GET    /cc/api/orchestrator/repos           — repo registry
+POST   /cc/api/orchestrator/repos           — add repo to registry
+PATCH  /cc/api/orchestrator/repos/:id       — update repo policy
+DELETE /cc/api/orchestrator/repos/:id       — remove repo from registry
+GET    /cc/api/orchestrator/memory          — query memory store (FTS)
+GET    /cc/api/orchestrator/children        — list child sessions
+GET    /cc/api/orchestrator/journal         — recent journal entries
 ```
 
 ### 10.2 WebSocket Messages
 
 ```typescript
 // New message types
-type ShepherdNotification = {
-  type: 'shepherd_notification'
+type OrchestratorNotification = {
+  type: 'orchestrator_notification'
   severity: 'info' | 'action' | 'alert'
   title: string
   body: string
   actions?: { label: string; action: string }[]
 }
 
-type ShepherdChildUpdate = {
-  type: 'shepherd_child_update'
+type OrchestratorChildUpdate = {
+  type: 'orchestrator_child_update'
   childSessionId: string
   status: 'started' | 'progress' | 'completed' | 'failed'
   summary?: string
@@ -487,7 +487,7 @@ type ShepherdChildUpdate = {
 
 ### Phase 1 — Foundation (MVP)
 - [ ] Agent Joe session type in `SessionManager` (always-on, auto-restart)
-- [ ] Sidebar entry + route + basic `ShepherdView` (chat-only, no dashboard header)
+- [ ] Sidebar entry + route + basic `OrchestratorView` (chat-only, no dashboard header)
 - [ ] Agent Joe CLAUDE.md with personality and base capabilities
 - [ ] Markdown-based memory (PROFILE.md, REPOS.md, journal/)
 - [ ] Manual interaction only (user asks, Agent Joe answers)
@@ -646,9 +646,9 @@ eventBus.emit('workflow:run:complete', {
   timestamp: new Date().toISOString(),
 })
 
-// In shepherd session — subscribe on startup
+// In orchestrator session — subscribe on startup
 eventBus.on('workflow:run:complete', (event) => {
-  shepherd.enqueueReportReview(event)
+  orchestrator.enqueueReportReview(event)
 })
 ```
 

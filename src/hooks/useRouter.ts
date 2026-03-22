@@ -11,12 +11,12 @@ import { useState, useCallback, useEffect } from 'react'
 interface RouteState {
   path: string
   sessionId: string | null
-  view: 'chat' | 'workflows' | 'shepherd'
+  view: 'chat' | 'workflows' | 'orchestrator'
 }
 
 export function parsePath(pathname: string): RouteState {
-  if (pathname === '/joe' || pathname === '/joe/' || pathname === '/shepherd' || pathname === '/shepherd/') {
-    return { path: pathname, sessionId: null, view: 'shepherd' }
+  if (pathname === '/joe' || pathname === '/joe/' || pathname === '/shepherd' || pathname === '/shepherd/' || pathname === '/orchestrator' || pathname === '/orchestrator/') {
+    return { path: pathname, sessionId: null, view: 'orchestrator' }
   }
   if (pathname === '/workflows' || pathname === '/workflows/') {
     return { path: pathname, sessionId: null, view: 'workflows' }

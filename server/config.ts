@@ -77,3 +77,10 @@ export const FRONTEND_DIST = process.env.FRONTEND_DIST || ''
 
 /** GitHub organizations for repo listing (comma-separated). Empty string disables org listing. */
 export const GH_ORGS: string[] = (process.env.GH_ORG || '').split(',').map(s => s.trim()).filter(Boolean)
+
+// ---------------------------------------------------------------------------
+// Orchestrator (Agent)
+// ---------------------------------------------------------------------------
+
+/** Display name for the orchestrator agent. Configurable via CODEKIN_AGENT_NAME env var. */
+export const AGENT_DISPLAY_NAME = process.env.CODEKIN_AGENT_NAME ?? 'Joe'

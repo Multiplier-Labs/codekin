@@ -16,7 +16,7 @@ Now let me read the remaining critical files:Now I have enough to write a compre
 
 ### 🔴 Critical (2 new issues)
 
-**1. Path traversal in `/api/shepherd/reports/read`** (`shepherd-routes.ts:116`, `shepherd-reports.ts:113`)  
+**1. Path traversal in `/api/orchestrator/reports/read`** (`orchestrator-routes.ts:116`, `orchestrator-reports.ts:113`)  
 The `?path=` query parameter goes directly to `readFileSync` with no containment check. Any holder of a valid auth token (including Agent Joe's session-scoped token) can read arbitrary files: `/home/dev/.codekin/sessions.json`, `/etc/passwd`, etc. Fix: require the resolved path to contain `/.codekin/reports/`.
 
 **2. `matchesAllowedTools` prefix bypass** (`session-manager.ts:1262`, introduced in `b5f6a9f`)  
@@ -26,11 +26,11 @@ The `?path=` query parameter goes directly to `readFileSync` with no containment
 
 ### 🟡 Warning (4 issues)
 
-**3. No `repo` path validation in shepherd child spawn** (`shepherd-routes.ts:143`) — Agent Joe can spawn a Claude session in any filesystem path.
+**3. No `repo` path validation in orchestrator child spawn** (`orchestrator-routes.ts:143`) — Agent Joe can spawn a Claude session in any filesystem path.
 
-**4. `ensureFinalStep` mutates `outputHistory` with `splice`** (`shepherd-children.ts:298`) — permanently removes a result message, breaking replay for other clients.
+**4. `ensureFinalStep` mutates `outputHistory` with `splice`** (`orchestrator-children.ts:298`) — permanently removes a result message, breaking replay for other clients.
 
-**5. `ShepherdChildManager.children` grows unbounded** — completed/failed entries never purged; memory leak with active Agent Joe usage.
+**5. `OrchestratorChildManager.children` grows unbounded** — completed/failed entries never purged; memory leak with active Agent Joe usage.
 
 **6. `compactExactCommands` silently escalates approval scope** (carry-over from 2026-03-17, still unaddressed).
 

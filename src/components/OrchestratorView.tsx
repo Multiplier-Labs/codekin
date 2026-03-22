@@ -1,7 +1,7 @@
 /**
- * Agent Joe orchestrator view — initialization + dashboard header.
+ * Orchestrator view — initialization + dashboard header.
  *
- * On mount, fetches the Agent Joe session ID from the server and notifies
+ * On mount, fetches the orchestrator session ID from the server and notifies
  * the parent to join it. Displays a dashboard header with summary stats.
  * The actual chat rendering is handled by ChatView and InputBar in App.tsx.
  */
@@ -22,7 +22,7 @@ interface DashboardStats {
 
 interface Props {
   token: string
-  onShepherdSessionReady: (sessionId: string) => void
+  onOrchestratorSessionReady: (sessionId: string) => void
   /** Whether the session has been joined and chat is rendering. */
   sessionJoined: boolean
 }
@@ -39,16 +39,17 @@ function StatCard({ label, value, icon }: { label: string; value: number; icon: 
   )
 }
 
-export function ShepherdView({ token, onShepherdSessionReady, sessionJoined }: Props) {
+export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoined }: Props) {
   const [status, setStatus] = useState<'loading' | 'active' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
   const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [agentName, setAgentName] = useState('Joe')
 
   // Fetch dashboard stats
   const refreshStats = useCallback(async () => {
     if (!token) return
     try {
-      const res = await fetch(`/cc/api/shepherd/dashboard`, {
+      const res = await fetch(`/cc/api/orchestrator/dashboard`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (res.ok) {
@@ -68,14 +69,15 @@ export function ShepherdView({ token, onShepherdSessionReady, sessionJoined }: P
 
     async function init() {
       try {
-        const result = await api.startShepherd(token)
+        const result = await api.startOrchestrator(token)
         if (cancelled) return
+        if (result.agentName) setAgentName(result.agentName)
         setStatus('active')
-        onShepherdSessionReady(result.sessionId)
+        onOrchestratorSessionReady(result.sessionId)
         void refreshStats()
       } catch (err) {
         if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Failed to start Agent Joe')
+        setError(err instanceof Error ? err.message : 'Failed to start orchestrator')
         setStatus('error')
       }
     }
@@ -96,7 +98,7 @@ export function ShepherdView({ token, onShepherdSessionReady, sessionJoined }: P
       <div className="flex flex-1 items-center justify-center">
         <div className="flex items-center gap-3 text-neutral-4">
           <IconRobotFace size={20} stroke={2} />
-          <span className="text-[15px]">Starting Agent Joe...</span>
+          <span className="text-[15px]">Starting Agent {agentName}...</span>
         </div>
       </div>
     )
@@ -108,7 +110,7 @@ export function ShepherdView({ token, onShepherdSessionReady, sessionJoined }: P
         <div className="text-center">
           <div className="flex items-center justify-center gap-2 text-error-5 mb-2">
             <IconRobotFace size={20} stroke={2} />
-            <span className="text-[15px] font-medium">Failed to start Agent Joe</span>
+            <span className="text-[15px] font-medium">Failed to start Agent {agentName}</span>
           </div>
           <p className="text-[14px] text-neutral-5">{error}</p>
         </div>
@@ -123,7 +125,7 @@ export function ShepherdView({ token, onShepherdSessionReady, sessionJoined }: P
     <div className="flex items-center gap-3 px-4 py-2.5 border-b border-neutral-10 bg-neutral-12">
       <div className="flex items-center gap-2 text-neutral-2">
         <IconRobotFace size={18} stroke={2} className="text-accent-5" />
-        <span className="text-[15px] font-medium">Agent Joe</span>
+        <span className="text-[15px] font-medium">Agent {agentName}</span>
       </div>
       {stats && (
         <div className="flex items-center gap-2 ml-auto">

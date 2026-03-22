@@ -72,7 +72,7 @@ Module doc explains the RAF-batching performance design. `applyMessageMut` is an
 | `server/workflow-engine.ts` | `WorkflowEngine` class methods (register, createRun, executeRun, startCronScheduler, resumeInterrupted) have no doc comments | Medium |
 | `src/lib/workflowHelpers.ts` | `WORKFLOW_KINDS`, `MODEL_OPTIONS`, `DAY_PRESETS`, `DAY_PATTERNS` arrays are undocumented constants — no explanation of how `category` is consumed by the UI | Medium |
 | `server/ws-message-handler.ts` | `handleWsMessage` switch cases (`join_session`, `prompt_response`, `move_to_worktree`, `get_diff`) have no inline rationale; validation logic for model/permissionMode is implicit | Medium |
-| `server/shepherd-routes.ts` | Not sampled in detail, but the shepherd HTTP API endpoints (spawn-child, cleanup, memory CRUD) are expected to lack endpoint-level doc given the pattern | Low |
+| `server/orchestrator-routes.ts` | Not sampled in detail, but the orchestrator HTTP API endpoints (spawn-child, cleanup, memory CRUD) are expected to lack endpoint-level doc given the pattern | Low |
 | `src/hooks/useWsConnection.ts` | `restoringRef` / `awaitingHealthPong` state machine undocumented; reconnect backoff doubling logic has no inline comment | Low |
 | `src/components/ApprovalsPanel.tsx` | `Props` fields undocumented; `handleRevokeMultiple` has no return type annotation or doc | Low |
 | `server/session-naming.ts` | `generateNameViaCLI` function uses `--max-turns 2` with no comment explaining why 2 turns (not 1) is needed | Low |

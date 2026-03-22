@@ -1,5 +1,5 @@
 /**
- * Shepherd memory store — SQLite + FTS5 for structured, searchable memory.
+ * Orchestrator memory store — SQLite + FTS5 for structured, searchable memory.
  *
  * Provides durable memory across restarts with full-text search retrieval,
  * trust record tracking, and automatic expiry/aging of stale items.
@@ -9,7 +9,7 @@ import Database from 'better-sqlite3'
 import { existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
-import { SHEPHERD_DIR } from './shepherd-manager.js'
+import { ORCHESTRATOR_DIR } from './orchestrator-manager.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,12 +57,12 @@ export interface TrustRecord {
 // Store
 // ---------------------------------------------------------------------------
 
-export class ShepherdMemory {
+export class OrchestratorMemory {
   private db: Database.Database
 
   constructor(dbPath?: string) {
-    if (!existsSync(SHEPHERD_DIR)) mkdirSync(SHEPHERD_DIR, { recursive: true })
-    const resolvedPath = dbPath ?? join(SHEPHERD_DIR, 'memory.sqlite')
+    if (!existsSync(ORCHESTRATOR_DIR)) mkdirSync(ORCHESTRATOR_DIR, { recursive: true })
+    const resolvedPath = dbPath ?? join(ORCHESTRATOR_DIR, 'memory.sqlite')
     this.db = new Database(resolvedPath, { fileMustExist: false })
     this.db.pragma('journal_mode = WAL')
     this.createTables()

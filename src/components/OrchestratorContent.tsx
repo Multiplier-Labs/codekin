@@ -1,12 +1,12 @@
 /**
- * ShepherdContent — the shepherd (Joe) view content area.
+ * OrchestratorContent — the orchestrator view content area.
  *
- * Extracted from App.tsx to reduce its complexity. Renders the ShepherdView
- * header and, once a shepherd session is joined, the chat UI with input bar.
+ * Extracted from App.tsx to reduce its complexity. Renders the OrchestratorView
+ * header and, once an orchestrator session is joined, the chat UI with input bar.
  */
 
 import type { RefObject } from 'react'
-import { ShepherdView } from './ShepherdView'
+import { OrchestratorView } from './OrchestratorView'
 import { ChatView } from './ChatView'
 import { TodoPanel } from './TodoPanel'
 import { PromptButtons } from './PromptButtons'
@@ -16,9 +16,9 @@ import type { SlashCommand } from '../lib/slashCommands'
 import type { ChatMessage, PermissionMode, TaskItem } from '../types'
 import type { PromptEntry } from '../hooks/usePromptState'
 
-export interface ShepherdContentProps {
+export interface OrchestratorContentProps {
   token: string
-  onShepherdSessionReady: (sessionId: string) => void
+  onOrchestratorSessionReady: (sessionId: string) => void
   sessionJoined: boolean
   activeSessionId: string | null
   messages: ChatMessage[]
@@ -43,9 +43,9 @@ export interface ShepherdContentProps {
   disabled: boolean
 }
 
-export function ShepherdContent({
+export function OrchestratorContent({
   token,
-  onShepherdSessionReady,
+  onOrchestratorSessionReady,
   sessionJoined,
   activeSessionId,
   messages,
@@ -68,15 +68,15 @@ export function ShepherdContent({
   currentPermissionMode,
   onPermissionModeChange,
   disabled,
-}: ShepherdContentProps) {
+}: OrchestratorContentProps) {
   return (
     <>
-      <ShepherdView
+      <OrchestratorView
         token={token}
-        onShepherdSessionReady={onShepherdSessionReady}
+        onOrchestratorSessionReady={onOrchestratorSessionReady}
         sessionJoined={sessionJoined}
       />
-      {/* Render chat UI once shepherd session is joined */}
+      {/* Render chat UI once orchestrator session is joined */}
       {activeSessionId && (
         <div className="flex flex-1 flex-col overflow-hidden min-h-0">
           <div className="relative flex-1 min-h-0 flex flex-col">
@@ -87,7 +87,7 @@ export function ShepherdContent({
               planningMode={planningMode}
               activityLabel={activityLabel}
               isMobile={isMobile}
-              variant="joe"
+              variant="orchestrator"
             />
             <TodoPanel tasks={tasks} />
           </div>
@@ -105,8 +105,8 @@ export function ShepherdContent({
             />
           )}
           <InputBar
-            key={`shepherd-${activeSessionId}`}
-            variant="joe"
+            key={`orchestrator-${activeSessionId}`}
+            variant="orchestrator"
             ref={inputBarRef}
             onSendInput={onSendInput}
             isWaiting={!!activePrompt}
@@ -117,7 +117,7 @@ export function ShepherdContent({
             onRemoveFile={onRemoveFile}
             skillGroups={skillGroups}
             slashCommands={slashCommands}
-            placeholder="Talk to Joe..."
+            placeholder="Talk to the orchestrator..."
             initialValue=""
             onValueChange={() => {}}
             currentModel={currentModel}

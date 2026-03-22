@@ -1,26 +1,26 @@
 /**
- * Shepherd proactive monitor — watches for new reports, idle repos,
- * and workflow events, then queues notifications for the Shepherd session.
+ * Orchestrator proactive monitor — watches for new reports, idle repos,
+ * and workflow events, then queues notifications for the orchestrator session.
  *
  * Runs a periodic poll and subscribes to workflow engine events.
- * Notifications are delivered in-chat via the Shepherd session.
+ * Notifications are delivered in-chat via the orchestrator session.
  */
 
 import { readdirSync, statSync, existsSync } from 'fs'
 import { join } from 'path'
 import type { SessionManager } from './session-manager.js'
 import type { WorkflowEngine, WorkflowEvent } from './workflow-engine.js'
-import { scanRepoReports } from './shepherd-reports.js'
-import { ShepherdMemory } from './shepherd-memory.js'
-import { runAgingCycle, getPendingOutcomeAssessments } from './shepherd-learning.js'
-import { getShepherdSessionId } from './shepherd-manager.js'
-import { REPOS_ROOT } from './config.js'
+import { scanRepoReports } from './orchestrator-reports.js'
+import { OrchestratorMemory } from './orchestrator-memory.js'
+import { runAgingCycle, getPendingOutcomeAssessments } from './orchestrator-learning.js'
+import { getOrchestratorSessionId } from './orchestrator-manager.js'
+import { REPOS_ROOT, AGENT_DISPLAY_NAME } from './config.js'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export interface ShepherdNotification {
+export interface OrchestratorNotification {
   id: string
   severity: 'info' | 'action' | 'alert'
   title: string
@@ -36,13 +36,13 @@ export interface ShepherdNotification {
 const POLL_INTERVAL_MS = 15 * 60 * 1000  // 15 minutes
 const PASSIVE_THRESHOLD_DAYS = 30
 
-export class ShepherdMonitor {
+export class OrchestratorMonitor {
   private sessions: SessionManager
   private pollTimer: ReturnType<typeof setInterval> | null = null
   private agingTimer: ReturnType<typeof setInterval> | null = null
-  private notifications: ShepherdNotification[] = []
+  private notifications: OrchestratorNotification[] = []
   private seenReports = new Set<string>()
-  private memory: ShepherdMemory | null = null
+  private memory: OrchestratorMemory | null = null
 
   constructor(sessions: SessionManager) {
     this.sessions = sessions
@@ -56,14 +56,14 @@ export class ShepherdMonitor {
   }
 
   /** Set the memory store for aging and decision tracking. */
-  setMemory(memory: ShepherdMemory): void {
+  setMemory(memory: OrchestratorMemory): void {
     this.memory = memory
   }
 
   /** Start the periodic poll. */
   start(): void {
     if (this.pollTimer) return
-    console.log('[shepherd-monitor] Starting proactive monitor (poll every 15m)')
+    console.log('[orchestrator-monitor] Starting proactive monitor (poll every 15m)')
 
     // Initial scan to populate seen reports
     void this.initialScan()
@@ -91,7 +91,7 @@ export class ShepherdMonitor {
   }
 
   /** Get pending (undelivered) notifications. */
-  getPending(): ShepherdNotification[] {
+  getPending(): OrchestratorNotification[] {
     return this.notifications.filter(n => !n.delivered)
   }
 
@@ -103,7 +103,7 @@ export class ShepherdMonitor {
   }
 
   /** Get all notifications (including delivered). */
-  getAll(): ShepherdNotification[] {
+  getAll(): OrchestratorNotification[] {
     return [...this.notifications].sort((a, b) => b.timestamp.localeCompare(a.timestamp))
   }
 
@@ -118,7 +118,7 @@ export class ShepherdMonitor {
     try {
       const agingResult = runAgingCycle(this.memory)
       if (agingResult.expired > 0 || agingResult.compacted > 0) {
-        console.log(`[shepherd-monitor] Aging cycle: ${agingResult.expired} expired, ${agingResult.compacted} compacted, ${agingResult.decayed} decayed`)
+        console.log(`[orchestrator-monitor] Aging cycle: ${agingResult.expired} expired, ${agingResult.compacted} compacted, ${agingResult.decayed} decayed`)
       }
 
       // Check for decisions that need outcome assessment
@@ -131,7 +131,7 @@ export class ShepherdMonitor {
         })
       }
     } catch (err) {
-      console.error('[shepherd-monitor] Aging cycle error:', err)
+      console.error('[orchestrator-monitor] Aging cycle error:', err)
     }
   }
 
@@ -231,8 +231,8 @@ export class ShepherdMonitor {
   }
 
   /** Add a notification. */
-  private addNotification(opts: Omit<ShepherdNotification, 'id' | 'timestamp' | 'delivered'>): void {
-    const notification: ShepherdNotification = {
+  private addNotification(opts: Omit<OrchestratorNotification, 'id' | 'timestamp' | 'delivered'>): void {
+    const notification: OrchestratorNotification = {
       id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       timestamp: new Date().toISOString(),
       delivered: false,
@@ -245,21 +245,21 @@ export class ShepherdMonitor {
       this.notifications = this.notifications.slice(-100)
     }
 
-    // Deliver to Shepherd session if active
-    this.deliverToShepherd(notification)
+    // Deliver to orchestrator session if active
+    this.deliverToOrchestrator(notification)
   }
 
-  /** Deliver a notification to the Shepherd chat session. */
-  private deliverToShepherd(notification: ShepherdNotification): void {
-    const shepherdId = getShepherdSessionId(this.sessions)
-    if (!shepherdId) return
+  /** Deliver a notification to the orchestrator chat session. */
+  private deliverToOrchestrator(notification: OrchestratorNotification): void {
+    const orchestratorId = getOrchestratorSessionId(this.sessions)
+    if (!orchestratorId) return
 
-    const session = this.sessions.get(shepherdId)
+    const session = this.sessions.get(orchestratorId)
     if (!session?.claudeProcess?.isAlive()) return
 
-    // Send as a system message that Joe will see and respond to
-    const message = `[Agent Joe Notification — ${notification.severity.toUpperCase()}]\n${notification.title}\n${notification.body}`
-    this.sessions.sendInput(shepherdId, message)
+    // Send as a system message that the orchestrator will see and respond to
+    const message = `[Agent ${AGENT_DISPLAY_NAME} Notification — ${notification.severity.toUpperCase()}]\n${notification.title}\n${notification.body}`
+    this.sessions.sendInput(orchestratorId, message)
     notification.delivered = true
   }
 

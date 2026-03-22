@@ -4,7 +4,7 @@
 
 **Overall Health: Good**
 
-The codebase is actively maintained with high commit velocity (255+ code commits in the last 30 days), zero production TODO/FIXME debt, and strong TypeScript strictness configuration across all targets. The main areas requiring attention are: 11 merged-but-not-deleted remote branches accumulating as clutter, one unmerged feature branch (`feat/joe-chat-variant`) with high merge-conflict risk due to 63 commits of divergence, the `docs/API-REFERENCE.md` not covering recently added shepherd/session endpoints, and one exported symbol (`DAY_PATTERNS`) that is unused.
+The codebase is actively maintained with high commit velocity (255+ code commits in the last 30 days), zero production TODO/FIXME debt, and strong TypeScript strictness configuration across all targets. The main areas requiring attention are: 11 merged-but-not-deleted remote branches accumulating as clutter, one unmerged feature branch (`feat/joe-chat-variant`) with high merge-conflict risk due to 63 commits of divergence, the `docs/API-REFERENCE.md` not covering recently added orchestrator/session endpoints, and one exported symbol (`DAY_PATTERNS`) that is unused.
 
 | Category | Finding |
 |---|---|
@@ -12,7 +12,7 @@ The codebase is actively maintained with high commit velocity (255+ code commits
 | Production TODO/FIXME | 0 |
 | Config issues | 2 (minor) |
 | License concerns | 3 packages flagged (all low risk) |
-| Doc drift items | 2 (API reference, shepherd endpoints undocumented) |
+| Doc drift items | 2 (API reference, orchestrator endpoints undocumented) |
 | Merged-but-undeleted branches | 11 |
 | Stale unmerged branches | 2 |
 | Open PRs | 0 |
@@ -29,7 +29,7 @@ The codebase is actively maintained with high commit velocity (255+ code commits
 
 ### Unreachable Functions
 
-No unreachable private/internal functions detected. The `shepherd-learning.ts` and `shepherd-reports.ts` modules were verified to be imported by `server/shepherd-monitor.ts` and `server/shepherd-routes.ts`.
+No unreachable private/internal functions detected. The `orchestrator-learning.ts` and `orchestrator-reports.ts` modules were verified to be imported by `server/orchestrator-monitor.ts` and `server/orchestrator-routes.ts`.
 
 ### Orphan Files
 
@@ -134,11 +134,11 @@ The project is MIT-licensed. Dependency license distribution across 611 packages
 | Feature | PR | New Endpoints | Status |
 |---|---|---|---|
 | Per-session `allowedTools` | #205 | Settings sent in session create payload | **Undocumented** |
-| Shepherd session cleanup API | #207 | `DELETE /api/shepherd/sessions/cleanup` | **Undocumented** |
-| Shepherd children API (multiple endpoints) | Earlier | `GET/POST /api/shepherd/children`, `GET /api/shepherd/children/:id` | **Undocumented** — shepherd section entirely absent from API reference |
-| Shepherd memory, trust, notifications, dashboard | Earlier | Multiple `/api/shepherd/*` routes | **Undocumented** |
+| Orchestrator session cleanup API | #207 | `DELETE /api/orchestrator/sessions/cleanup` | **Undocumented** |
+| Orchestrator children API (multiple endpoints) | Earlier | `GET/POST /api/orchestrator/children`, `GET /api/orchestrator/children/:id` | **Undocumented** — orchestrator section entirely absent from API reference |
+| Orchestrator memory, trust, notifications, dashboard | Earlier | Multiple `/api/orchestrator/*` routes | **Undocumented** |
 
-The `docs/API-REFERENCE.md` covers sessions, auth, uploads, webhooks, and workflows but has zero coverage of the entire `/api/shepherd/` namespace (~20 endpoints) and the newer `/api/settings/queue-messages`, `/api/settings/repos-path`, `/api/settings/worktree-prefix` settings endpoints.
+The `docs/API-REFERENCE.md` covers sessions, auth, uploads, webhooks, and workflows but has zero coverage of the entire `/api/orchestrator/` namespace (~20 endpoints) and the newer `/api/settings/queue-messages`, `/api/settings/repos-path`, `/api/settings/worktree-prefix` settings endpoints.
 
 ### README Drift
 
@@ -156,7 +156,7 @@ The `docs/API-REFERENCE.md` covers sessions, auth, uploads, webhooks, and workfl
 
 ### Spec Documents
 
-`docs/ORCHESTRATOR-SPEC.md` was last updated to rename "Shepherd" to "Agent Joe" (commit `a2e1727`). The spec and implementation appear aligned. No spec drift detected in recently touched documents (`APPROVALS-FIX-SPEC.md`, `CLAUDE-HOOKS-SPEC.md`, `FEATURES.md`).
+`docs/ORCHESTRATOR-SPEC.md` was last updated to rename "Orchestrator" to "Agent Joe" (commit `a2e1727`). The spec and implementation appear aligned. No spec drift detected in recently touched documents (`APPROVALS-FIX-SPEC.md`, `CLAUDE-HOOKS-SPEC.md`, `FEATURES.md`).
 
 ---
 
@@ -167,18 +167,18 @@ Changes since `v0.4.1` (current `HEAD` is 2 commits ahead on the report branch; 
 ### [Unreleased] — since v0.4.1
 
 #### Features
-- Add shepherd session cleanup API (`DELETE /api/shepherd/sessions/cleanup`) for purging orphaned Agent Joe child sessions
+- Add orchestrator session cleanup API (`DELETE /api/orchestrator/sessions/cleanup`) for purging orphaned Agent Joe child sessions
 - Add per-session `allowedTools` configuration for pre-approving specific CLI tools without global approval
 - Pre-approve `curl` for Agent Joe and child agent sessions by default
 
 #### Fixes
 - Auto-approve session `allowedTools` in the permission hook evaluation path, preventing bypass of pre-approved tools
 - Fix Agent Joe child sessions not appearing in the sidebar after spawn
-- Increase shepherd `MAX_CONCURRENT` limit from 3 to 5 to reduce queue contention
+- Increase orchestrator `MAX_CONCURRENT` limit from 3 to 5 to reduce queue contention
 
 #### Refactoring
 - Extract `DiffManager` class from inline stateless functions in `server/diff-manager.ts`
-- Decompose `App.tsx` (~749 lines → ~560 lines) by extracting `ShepherdContent`, `DocsBrowserContent`, and `SessionContent` sub-components
+- Decompose `App.tsx` (~749 lines → ~560 lines) by extracting `OrchestratorContent`, `DocsBrowserContent`, and `SessionContent` sub-components
 
 #### Tests
 - Raise `diff-parser.ts` test coverage from ~1% to 98% with comprehensive unit tests
@@ -211,10 +211,10 @@ Changes since `v0.4.1` (current `HEAD` is 2 commits ahead on the report branch; 
 | `origin/chore/dependency-updates-2026-03-18` | 2026-03-18 | Yes |
 | `origin/chore/docs-cleanup-2026-03-18` | 2026-03-18 | Yes |
 | `origin/feat/per-session-allowed-tools` | 2026-03-19 | Yes |
-| `origin/feat/shepherd-session-cleanup-api` | 2026-03-19 | Yes |
+| `origin/feat/orchestrator-session-cleanup-api` | 2026-03-19 | Yes |
 | `origin/fix/agent-joe-session-sidebar` | 2026-03-19 | Yes |
 | `origin/fix/bug-fixes-2026-03-18` | 2026-03-19 | Yes |
-| `origin/fix/increase-shepherd-concurrency` | 2026-03-19 | Yes |
+| `origin/fix/increase-orchestrator-concurrency` | 2026-03-19 | Yes |
 | `origin/fix/security-hardening-2026-03-18` | 2026-03-19 | Yes |
 | `origin/fix/session-allowedtools-hook-bypass` | 2026-03-19 | Yes |
 | `origin/refactor/reduce-complexity-2026-03-18` | 2026-03-18 | Yes |
@@ -226,10 +226,10 @@ git push origin --delete \
   chore/dependency-updates-2026-03-18 \
   chore/docs-cleanup-2026-03-18 \
   feat/per-session-allowed-tools \
-  feat/shepherd-session-cleanup-api \
+  feat/orchestrator-session-cleanup-api \
   fix/agent-joe-session-sidebar \
   fix/bug-fixes-2026-03-18 \
-  fix/increase-shepherd-concurrency \
+  fix/increase-orchestrator-concurrency \
   fix/security-hardening-2026-03-18 \
   fix/session-allowedtools-hook-bypass \
   refactor/reduce-complexity-2026-03-18 \
@@ -261,7 +261,7 @@ Active branches with recent commits or significant divergence from `main`:
 | `origin/chore/repo-health-report-2026-03-14` | 2 | 210 | `.codekin/reports/**` only | None | **LOW** — reports only |
 | `origin/chore/repo-health-report-2026-03-20` | 2 | 0 | `.codekin/reports/**` only | None | **LOW** — current branch, 0 behind main |
 
-The only branch with genuine conflict risk is `feat/joe-chat-variant`. The overlap on `src/components/ChatView.tsx` is particularly concerning given the 63-commit divergence on `main` that includes major structural changes (App.tsx decomposition, new session types, shepherd/Agent Joe integration). A merge or rebase would require careful manual resolution.
+The only branch with genuine conflict risk is `feat/joe-chat-variant`. The overlap on `src/components/ChatView.tsx` is particularly concerning given the 63-commit divergence on `main` that includes major structural changes (App.tsx decomposition, new session types, orchestrator/Agent Joe integration). A merge or rebase would require careful manual resolution.
 
 ---
 
@@ -269,7 +269,7 @@ The only branch with genuine conflict risk is `feat/joe-chat-variant`. The overl
 
 1. **Delete 11 merged remote branches** — Run the deletion command in the Stale Branches section. These branches add noise to `git branch -r`, slow down tab completion, and clutter GitHub's branch list. This is a 30-second cleanup with no risk.
 
-2. **Document the `/api/shepherd/` API surface in `docs/API-REFERENCE.md`** — The entire shepherd/Agent Joe namespace (~20 endpoints) is absent from the API reference. With the feature now stable, document the status, start, children, memory, trust, notifications, dashboard, and cleanup endpoints.
+2. **Document the `/api/orchestrator/` API surface in `docs/API-REFERENCE.md`** — The entire orchestrator/Agent Joe namespace (~20 endpoints) is absent from the API reference. With the feature now stable, document the status, start, children, memory, trust, notifications, dashboard, and cleanup endpoints.
 
 3. **Triage `feat/joe-chat-variant`** — This branch is 63 commits behind `main` and has only 1 commit of its own. Decide: rebase and revive, or close and delete. Leaving it will make a future merge increasingly painful as the conflict surface grows.
 

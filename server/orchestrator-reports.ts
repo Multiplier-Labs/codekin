@@ -1,8 +1,8 @@
 /**
- * Shepherd report reader — scans .codekin/reports/ across managed repos.
+ * Orchestrator report reader — scans .codekin/reports/ across managed repos.
  *
  * Discovers audit reports, parses their metadata, and provides them
- * to the Shepherd session for triage and action.
+ * to the orchestrator session for triage and action.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs'

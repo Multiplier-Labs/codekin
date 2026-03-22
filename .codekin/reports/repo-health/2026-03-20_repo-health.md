@@ -24,13 +24,13 @@ Report written. Here's the summary:
 | TODO/FIXME | 0 in project source (only 3 test string literals) |
 | Config issues | 2 minor: `noImplicitReturns` absent from tsconfigs; 8 ESLint `no-unsafe-*` rules still at `warn` |
 | License concerns | 3 low-severity: `argparse` (Python-2.0/PSF), `busboy`/`streamsearch` (MIT in practice, undeclared) |
-| Doc drift | 3 items: new shepherd session cleanup endpoints + `allowedTools` param not in API-REFERENCE.md |
+| Doc drift | 3 items: new orchestrator session cleanup endpoints + `allowedTools` param not in API-REFERENCE.md |
 | Stale branches | 0 by 30-day criterion, but 11 merged branches pending remote deletion |
 | Open PRs | 0 |
 | Merge conflict risk | `feat/joe-chat-variant` is HIGH risk (63 commits behind, touches ChatView.tsx which has 10+ main commits since divergence — likely superseded) |
 
 **Top recommendations:**
-1. Update `docs/API-REFERENCE.md` with the three shepherd session cleanup endpoints and `allowedTools` param
+1. Update `docs/API-REFERENCE.md` with the three orchestrator session cleanup endpoints and `allowedTools` param
 2. Close/delete `origin/feat/joe-chat-variant` — likely superseded by existing main commits
 3. Bulk-delete 11 merged remote branches
 4. Resolve the `codekin/reports` branch strategy (210 commits behind main)

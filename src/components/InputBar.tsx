@@ -42,7 +42,7 @@ export interface InputBarHandle {
   insertText: (text: string) => void
 }
 
-export type InputBarVariant = 'default' | 'joe'
+export type InputBarVariant = 'default' | 'orchestrator'
 
 interface InputBarProps {
   /** Called with the raw text when the user sends a message (Enter key or send button). */
@@ -89,12 +89,12 @@ interface InputBarProps {
   onMoveToWorktree?: () => void
   /** Worktree path if the session is in a worktree (falsy = not in worktree). */
   worktreePath?: string | null
-  /** Visual variant — 'joe' strips toolbar to attach+send only with accent theme. */
+  /** Visual variant — 'orchestrator' strips toolbar to attach+send only with accent theme. */
   variant?: InputBarVariant
 }
 
 export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
-  const isJoe = variant === 'joe'
+  const isOrchestrator = variant === 'orchestrator'
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
@@ -113,10 +113,10 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const permMenuRef = useRef<HTMLDivElement>(null)
   const modelMenuRef = useRef<HTMLDivElement>(null)
   const MOBILE_HEIGHT = 100
-  const JOE_HEIGHT = 90
+  const ORCHESTRATOR_HEIGHT = 90
   const [height, setHeight] = useState(() => {
     if (isMobile) return MOBILE_HEIGHT
-    if (isJoe) return JOE_HEIGHT
+    if (isOrchestrator) return ORCHESTRATOR_HEIGHT
     const stored = localStorage.getItem(INPUT_HEIGHT_KEY)
     return stored ? Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, parseInt(stored, 10))) : DEFAULT_HEIGHT
   })
@@ -292,11 +292,11 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     setPermMenuOpen(false)
   }, [onPermissionModeChange])
 
-  const hasSkills = !isJoe && skillGroups && skillGroups.some(g => g.skills.length > 0)
-  const hasSlashCommands = !isJoe && slashCommands && slashCommands.length > 0
+  const hasSkills = !isOrchestrator && skillGroups && skillGroups.some(g => g.skills.length > 0)
+  const hasSlashCommands = !isOrchestrator && slashCommands && slashCommands.length > 0
 
   return (
-    <div className={`app-input-bar relative flex flex-col border-l bg-neutral-10 ${isJoe ? 'joe-input-bar border-t-2 border-accent-7' : 'border-t border-neutral-9'}`} style={isMobile ? { minHeight: MOBILE_HEIGHT } : { height }}>
+    <div className={`app-input-bar relative flex flex-col border-l bg-neutral-10 ${isOrchestrator ? 'orchestrator-input-bar border-t-2 border-accent-7' : 'border-t border-neutral-9'}`} style={isMobile ? { minHeight: MOBILE_HEIGHT } : { height }}>
       <DropZone onUpload={onAddFiles} disabled={disabled} />
 
       {/* Slash autocomplete popup */}
@@ -309,8 +309,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         />
       )}
 
-      {/* Drag handle — desktop only, hidden for joe variant */}
-      {!isMobile && !isJoe && (
+      {/* Drag handle — desktop only, hidden for orchestrator variant */}
+      {!isMobile && !isOrchestrator && (
         <div
           className="h-1 flex-shrink-0 cursor-row-resize hover:bg-primary-7/40 active:bg-primary-7/60 transition-colors"
           onMouseDown={onDragStart}
@@ -342,7 +342,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       {/* Textarea — full width */}
       <div className="flex flex-1 min-h-0 gap-2 px-3 pt-2 pb-1">
         {isWaiting && (
-          <span className={`mt-1 h-2 w-2 flex-shrink-0 rounded-full animate-pulse ${isJoe ? 'bg-accent-5' : 'bg-primary-5'}`} />
+          <span className={`mt-1 h-2 w-2 flex-shrink-0 rounded-full animate-pulse ${isOrchestrator ? 'bg-accent-5' : 'bg-primary-5'}`} />
         )}
         <textarea
           ref={textareaRef}
@@ -351,7 +351,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           onKeyDown={handleKeyDown}
           disabled={disabled}
           autoFocus
-          placeholder={placeholder ?? (isJoe ? 'Ask Joe...' : isWaiting ? 'Type response...' : 'What do you want to build?')}
+          placeholder={placeholder ?? (isOrchestrator ? 'Ask the orchestrator...' : isWaiting ? 'Type response...' : 'What do you want to build?')}
           className={`flex-1 min-h-0 resize-none bg-transparent ${isMobile ? 'text-[16px]' : 'text-[15px]'} leading-snug text-neutral-1 placeholder:text-neutral-5 outline-none disabled:opacity-50 overflow-y-auto`}
         />
         <input
@@ -367,7 +367,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       {/* Toolbar row — selectors left, action buttons right */}
       <div className="flex flex-shrink-0 items-center justify-between px-3 pb-2 pt-0">
         {/* Desktop: selectors + action buttons */}
-        {!isMobile && !isJoe && (
+        {!isMobile && !isOrchestrator && (
           <>
             <div className="flex items-center gap-1">
               {/* Permission mode selector */}
@@ -534,8 +534,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           </>
         )}
 
-        {/* Joe variant: minimal toolbar — attach + send only */}
-        {!isMobile && isJoe && (
+        {/* Orchestrator variant: minimal toolbar — attach + send only */}
+        {!isMobile && isOrchestrator && (
           <>
             <div className="flex-1" />
             <div className="flex items-center gap-1.5">
@@ -564,7 +564,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         )}
 
         {/* Mobile: context menu (...) + send button only */}
-        {isMobile && !isJoe && (
+        {isMobile && !isOrchestrator && (
           <>
             <div className="flex-1" />
             <div className="flex items-center gap-1.5">
@@ -673,8 +673,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           </>
         )}
 
-        {/* Mobile Joe: attach + send only */}
-        {isMobile && isJoe && (
+        {/* Mobile orchestrator: attach + send only */}
+        {isMobile && isOrchestrator && (
           <>
             <div className="flex-1" />
             <div className="flex items-center gap-1.5">
