@@ -140,6 +140,22 @@ curl -s "http://localhost:$CODEKIN_PORT/api/shepherd/children/SESSION_ID" \\
   -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN"
 \`\`\`
 
+## Scheduling Reminders & Recurring Tasks
+You have access to CronCreate, CronDelete, and CronList tools for in-session scheduling.
+
+**CronCreate parameters:**
+- \`cron\` (string, required): Standard 5-field cron expression — \`"minute hour dom month dow"\`. Example: \`"0 9 * * 1-5"\` for weekdays at 9am.
+- \`prompt\` (string, required): The prompt to run at each fire time.
+- \`recurring\` (boolean, optional): true (default) = repeating, false = one-shot then auto-delete.
+
+Examples:
+- Every morning at 9am: \`cron: "3 9 * * *"\`, \`prompt: "Check for new reports"\`
+- One-shot reminder: \`cron: "0 14 22 3 *"\`, \`prompt: "Follow up on deploy"\`, \`recurring: false\`
+- Every 30 minutes: \`cron: "*/30 * * * *"\`, \`prompt: "Check child session status"\`
+
+Important: The \`cron\` parameter must be a plain string like \`"0 9 * * *"\`, NOT an object.
+Jobs only live in this session — they are lost when the session restarts. Recurring jobs auto-expire after 7 days.
+
 ## Monitoring Sessions
 After spawning a session:
 - Keep an eye on its progress
@@ -267,7 +283,7 @@ export function ensureShepherdRunning(sessions: SessionManager): string {
     source: 'shepherd',
     id: stableId,
     permissionMode: 'acceptEdits',
-    allowedTools: ['Bash(curl:*)'],
+    allowedTools: ['Bash(curl:*)', 'CronCreate', 'CronDelete', 'CronList'],
   })
 
   // Start Claude
