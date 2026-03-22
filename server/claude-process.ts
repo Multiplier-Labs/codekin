@@ -212,12 +212,13 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
 
       case 'result': {
         const resultEvent = event as ClaudeResultEvent
-        // If ExitPlanMode was pending but no matching tool_result arrived
-        // (e.g. ID mismatch or process terminated), clear planning mode now
-        // so the flag doesn't get stuck across turns.
+        // If ExitPlanMode was pending but no successful tool_result arrived
+        // (e.g. tool denied with is_error, ID mismatch, or process terminated),
+        // clear the flag so it doesn't leak across turns. Do NOT emit
+        // planning_mode:false — the tool was denied or lost, so plan mode
+        // should remain active.
         if (this.pendingExitPlanModeId) {
           this.pendingExitPlanModeId = null
-          this.emit('planning_mode', false)
         }
         this.emit('result', resultEvent.result || '', resultEvent.is_error || false)
         // The result message signals end of turn, ready for next input
@@ -368,10 +369,14 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
         // Match by tool_use_id, or use flag-based fallback when id wasn't available.
         if (this.pendingExitPlanModeId &&
             (block.tool_use_id === this.pendingExitPlanModeId || this.pendingExitPlanModeId === '__pending__')) {
-          this.pendingExitPlanModeId = null
           if (!isError) {
+            this.pendingExitPlanModeId = null
             this.emit('planning_mode', false)
           }
+          // When is_error=true (tool denied): leave pendingExitPlanModeId set so the
+          // result handler safety net clears it without emitting planning_mode:false.
+          // Previously, clearing the flag here prevented the safety net from firing,
+          // leaving plan mode permanently stuck after a denied ExitPlanMode.
         }
 
         // Emit non-empty text tool results as dedicated tool_output events

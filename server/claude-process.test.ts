@@ -340,6 +340,37 @@ describe('handleStreamEvent (via handleLine)', () => {
       },
     }))
     expect(events).toEqual([])
+
+    // Result event should clear the flag without emitting planning_mode:false
+    // (plan mode stays active because the exit was denied)
+    cp.handleLine(JSON.stringify({
+      type: 'result',
+      result: 'Plan mode exit was denied',
+      is_error: true,
+    }))
+    const planEvents = events.filter(e => e[0] === 'planning_mode')
+    expect(planEvents).toEqual([])
+  })
+
+  it('ExitPlanMode with no tool_result clears flag on result without emitting', () => {
+    cp.handleLine(JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_start',
+        content_block: { type: 'tool_use', id: 'toolu_exit3', name: 'ExitPlanMode' },
+      },
+    }))
+    expect(events).toEqual([])
+
+    // Result arrives without a matching tool_result (e.g. CLI crash or ID mismatch).
+    // Should clear the pending flag without emitting planning_mode:false.
+    cp.handleLine(JSON.stringify({
+      type: 'result',
+      result: '',
+      is_error: false,
+    }))
+    const planEvents = events.filter(e => e[0] === 'planning_mode')
+    expect(planEvents).toEqual([])
   })
 
   it('malformed JSON in tool input emits graceful tool_done', () => {
