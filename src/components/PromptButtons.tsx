@@ -33,7 +33,8 @@ interface PromptButtonsProps {
 /** Sticky prompt bar for permission approvals, single/multi-select questions, and multi-question AskUserQuestion flows. */
 export function PromptButtons({ options, question, multiSelect, promptType, questions, approvePattern, onSelect, isMobile = false }: PromptButtonsProps) {
   const isPermission = promptType === 'permission'
-  const btnPad = isMobile ? 'px-4 py-2.5 text-[16px] min-h-[34px]' : 'px-3 py-0.5 text-[13px]'
+  const isQuestion = promptType === 'question'
+  const btnPad = isMobile ? 'px-4 py-2.5 text-[16px] min-h-[34px]' : isQuestion ? 'px-4 py-1.5 text-[15px]' : 'px-3 py-0.5 text-[13px]'
 
   // Auto-allow countdown for permission prompts
   const [timeLeft, setTimeLeft] = useState(15)
@@ -133,14 +134,14 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
     }
 
     return (
-      <div className={`border-t px-3 py-2 ${isPermission ? 'border-warning-9/50 bg-warning-11/30' : 'border-neutral-10 bg-neutral-11'}`}>
+      <div className={`border-t ${isQuestion ? 'px-4 py-3' : 'px-3 py-2'} ${isPermission ? 'border-warning-9/50 bg-warning-11/30' : 'border-neutral-10 bg-neutral-11'}`}>
         {displayQuestion && (
-          <p className={`text-[13px] mb-1.5 ${isPermission ? 'text-warning-4' : 'text-neutral-3'}`}>
+          <p className={`${isQuestion ? 'text-[15px] mb-2' : 'text-[13px] mb-1.5'} ${isPermission ? 'text-warning-4' : 'text-neutral-3'}`}>
             {progressLabel && <span className="text-neutral-5 mr-1">{progressLabel}</span>}
             {displayQuestion}
           </p>
         )}
-        <div className={`flex flex-wrap items-center ${isMobile ? 'gap-2.5' : 'gap-1.5'}`}>
+        <div className={`flex flex-wrap items-center ${isMobile ? 'gap-2.5' : isQuestion ? 'gap-2' : 'gap-1.5'}`}>
           {displayOptions.map((opt) => (
             <button
               key={opt.value}
@@ -170,14 +171,14 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
 
   // Single-select: click sends immediately
   return (
-    <div className={`border-t px-3 py-2 ${isPermission ? 'border-warning-9/50 bg-warning-11/30' : 'border-neutral-10 bg-neutral-11'}`}>
+    <div className={`border-t ${isQuestion ? 'px-4 py-3' : 'px-3 py-2'} ${isPermission ? 'border-warning-9/50 bg-warning-11/30' : 'border-neutral-10 bg-neutral-11'}`}>
       {displayQuestion && (
-        <p className={`text-[13px] mb-1.5 ${isPermission ? 'text-warning-4' : 'text-neutral-3'}`}>
+        <p className={`${isQuestion ? 'text-[15px] mb-2' : 'text-[13px] mb-1.5'} ${isPermission ? 'text-warning-4' : 'text-neutral-3'}`}>
           {progressLabel && <span className="text-neutral-5 mr-1">{progressLabel}</span>}
           {displayQuestion}
         </p>
       )}
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className={`flex flex-wrap items-center ${isQuestion ? 'gap-2' : 'gap-1.5'}`}>
         {displayOptions.map((opt) => {
           const isAllow = isPermission && opt.value === 'allow'
           const isAlwaysAllow = isPermission && opt.value === 'always_allow'
