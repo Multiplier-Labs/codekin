@@ -238,51 +238,58 @@ export class ShepherdChildManager {
     const deadline = Date.now() + timeoutMs
     const pollMs = 3000
 
-    while (Date.now() < deadline) {
+    try {
+      while (Date.now() < deadline) {
+        const session = this.sessions.get(child.id)
+        if (!session) {
+          child.status = 'failed'
+          child.error = 'Session was deleted'
+          child.completedAt = new Date().toISOString()
+          return
+        }
+
+        // Check for result message (Claude finished normally), skipping superseded ones
+        const resultMsg = session.outputHistory.find(m => m.type === 'result' && !(m as Record<string, unknown>)._superseded)
+        if (resultMsg) {
+          const text = this.extractText(session.outputHistory)
+          // Check if the final step was done; if not, nudge the session
+          const nudged = this.ensureFinalStep(child, session, text)
+          if (nudged) continue  // Keep monitoring after nudge
+          child.status = 'completed'
+          child.result = text
+          child.completedAt = new Date().toISOString()
+          return
+        }
+
+        // Check for exit message (Claude process exited)
+        const exitMsg = session.outputHistory.find(m => m.type === 'exit')
+        if (exitMsg) {
+          const text = this.extractText(session.outputHistory)
+          child.status = text.length > 100 ? 'completed' : 'failed'
+          child.result = text || null
+          child.error = text.length <= 100 ? 'Claude exited without sufficient output' : null
+          child.completedAt = new Date().toISOString()
+          return
+        }
+
+        await new Promise(resolve => setTimeout(resolve, pollMs))
+      }
+
+      // Timeout
+      child.status = 'timed_out'
+      child.error = `Timed out after ${timeoutMs}ms`
+      child.completedAt = new Date().toISOString()
+
+      // Try to stop the session gracefully
       const session = this.sessions.get(child.id)
-      if (!session) {
-        child.status = 'failed'
-        child.error = 'Session was deleted'
-        child.completedAt = new Date().toISOString()
-        return
+      if (session?.claudeProcess?.isAlive()) {
+        session.claudeProcess.stop()
       }
-
-      // Check for result message (Claude finished normally), skipping superseded ones
-      const resultMsg = session.outputHistory.find(m => m.type === 'result' && !(m as Record<string, unknown>)._superseded)
-      if (resultMsg) {
-        const text = this.extractText(session.outputHistory)
-        // Check if the final step was done; if not, nudge the session
-        const nudged = this.ensureFinalStep(child, session, text)
-        if (nudged) continue  // Keep monitoring after nudge
-        child.status = 'completed'
-        child.result = text
-        child.completedAt = new Date().toISOString()
-        return
-      }
-
-      // Check for exit message (Claude process exited)
-      const exitMsg = session.outputHistory.find(m => m.type === 'exit')
-      if (exitMsg) {
-        const text = this.extractText(session.outputHistory)
-        child.status = text.length > 100 ? 'completed' : 'failed'
-        child.result = text || null
-        child.error = text.length <= 100 ? 'Claude exited without sufficient output' : null
-        child.completedAt = new Date().toISOString()
-        return
-      }
-
-      await new Promise(resolve => setTimeout(resolve, pollMs))
-    }
-
-    // Timeout
-    child.status = 'timed_out'
-    child.error = `Timed out after ${timeoutMs}ms`
-    child.completedAt = new Date().toISOString()
-
-    // Try to stop the session gracefully
-    const session = this.sessions.get(child.id)
-    if (session?.claudeProcess?.isAlive()) {
-      session.claudeProcess.stop()
+    } finally {
+      // Safety net: ensure isProcessing is cleared when monitoring ends.
+      // handleClaudeResult should have already done this, but edge cases
+      // (nudge race, missed result event) can leave the flag stuck.
+      this.sessions.clearProcessingFlag(child.id)
     }
   }
 

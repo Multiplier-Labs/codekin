@@ -376,9 +376,17 @@ export class SessionManager {
     return this.sessions.get(id)
   }
 
+  /** Clear the isProcessing flag for a session and broadcast the update. */
+  clearProcessingFlag(sessionId: string): void {
+    const session = this.sessions.get(sessionId)
+    if (session && session.isProcessing) {
+      session.isProcessing = false
+      this._globalBroadcast?.({ type: 'sessions_updated' })
+    }
+  }
+
   list(): SessionInfo[] {
     return Array.from(this.sessions.values())
-      .filter((s) => s.source !== 'shepherd')
       .map((s) => ({
         id: s.id,
         name: s.name,
