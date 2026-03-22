@@ -133,6 +133,18 @@ export function toNativePermission(toolName: string, toolInput: Record<string, u
 }
 
 /**
+ * Escape parentheses and backslashes in a string for use inside a
+ * `Bash(...)` allowedTools pattern.  The Claude CLI's `--allowedTools`
+ * parser splits on commas/spaces but tracks a single level of `(…)`.
+ * Unescaped `)` inside the command prematurely closes the pattern,
+ * corrupting the entire allowedTools list and breaking tool resolution
+ * (manifests as "A.split is not a function" errors on unrelated tools).
+ */
+function escapeForAllowedTools(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)')
+}
+
+/**
  * Convert Codekin's approval registry into `--allowedTools` patterns.
  *
  * Translations:
@@ -148,16 +160,16 @@ export function toAllowedToolsPatterns(approvals: { tools: string[]; commands: s
   }
 
   for (const cmd of approvals.commands) {
-    result.push(`Bash(${cmd})`)
+    result.push(`Bash(${escapeForAllowedTools(cmd)})`)
   }
 
   for (const pattern of approvals.patterns) {
     // Convert "prefix *" → "Bash(prefix:*)"
     if (pattern.endsWith(' *')) {
       const prefix = pattern.slice(0, -2)
-      result.push(`Bash(${prefix}:*)`)
+      result.push(`Bash(${escapeForAllowedTools(prefix)}:*)`)
     } else {
-      result.push(`Bash(${pattern})`)
+      result.push(`Bash(${escapeForAllowedTools(pattern)})`)
     }
   }
 

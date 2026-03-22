@@ -266,9 +266,18 @@ export function ensureShepherdRunning(sessions: SessionManager): string {
   ensureShepherdDir()
   const stableId = getOrCreateShepherdId()
 
+  const SHEPHERD_ALLOWED_TOOLS = ['Bash(curl:*)', 'CronCreate', 'CronDelete', 'CronList']
+
   // Check if session already exists
   const existing = sessions.get(stableId)
   if (existing) {
+    // Ensure allowedTools is up-to-date (may be missing if the session was
+    // created before CronCreate/Delete/List were added, or lost during
+    // a persistence round-trip).
+    if (!existing.allowedTools || existing.allowedTools.length === 0) {
+      existing.allowedTools = SHEPHERD_ALLOWED_TOOLS
+      sessions.persistToDisk()
+    }
     // Session exists — start Claude if not alive
     if (!existing.claudeProcess?.isAlive()) {
       console.log('[shepherd] Restarting Shepherd Claude process')
@@ -283,7 +292,7 @@ export function ensureShepherdRunning(sessions: SessionManager): string {
     source: 'shepherd',
     id: stableId,
     permissionMode: 'acceptEdits',
-    allowedTools: ['Bash(curl:*)', 'CronCreate', 'CronDelete', 'CronList'],
+    allowedTools: SHEPHERD_ALLOWED_TOOLS,
   })
 
   // Start Claude
