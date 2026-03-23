@@ -274,17 +274,19 @@ export class ApprovalManager {
       return
     }
     if (toolName === 'Bash') {
-      // Only store pattern-based approvals (e.g. "git *", "npm run *").
-      // Exact commands are NOT stored — they accumulate unboundedly and
-      // one-off commands (curl, python3, sed, etc.) should not be
-      // permanently auto-approved.
       const pattern = this.derivePattern(toolName, toolInput)
       if (pattern) {
         this.addRepoApproval(workingDir, { pattern })
         console.log(`[auto-approve] saved pattern for repo ${workingDir}: ${pattern}`)
       } else {
+        // No safe pattern derivable (command is in NEVER_PATTERN_PREFIXES or
+        // contains shell metacharacters) — save as exact command match so
+        // "Always Allow" actually works for these commands.
         const cmd = (typeof toolInput.command === 'string' ? toolInput.command : '').trim()
-        console.log(`[auto-approve] no safe pattern for command, skipping: ${cmd.slice(0, 80)}`)
+        if (cmd) {
+          this.addRepoApproval(workingDir, { command: cmd })
+          console.log(`[auto-approve] saved exact command for repo ${workingDir}: ${cmd.slice(0, 80)}`)
+        }
       }
     } else {
       this.addRepoApproval(workingDir, { tool: toolName })
@@ -437,18 +439,12 @@ export class ApprovalManager {
         }
         this.repoApprovals.set(dir, {
           tools,
-          commands: new Set<string>(),
+          commands: new Set(entry.commands || []),
           patterns: new Set(entry.patterns || []),
         })
       }
 
       console.log(`Restored repo approvals for ${Object.keys(data).length} repo(s) from disk`)
-
-      // Persist immediately to drop any exact commands from the file on disk
-      if (Object.values(data).some(e => e.commands && e.commands.length > 0)) {
-        console.log('[auto-approve] dropping legacy exact commands from registry')
-        this.persistRepoApprovals()
-      }
     } catch (err) {
       console.error('Failed to restore repo approvals from disk:', err)
     }
