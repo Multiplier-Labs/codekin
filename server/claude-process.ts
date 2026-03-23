@@ -136,6 +136,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
         'Bash commands may require user approval — the system handles this automatically via a UI prompt.',
         'Do not tell the user to click approve or grant permission. Just proceed with your work.',
         'If a tool call fails, read the error message carefully. Common causes: wrong file path, missing dependency, syntax error, or network issue.',
+        'When ExitPlanMode returns "Exit plan mode?" as an error, it means approval is pending in the UI — do NOT retry the call.',
       ].join(' '),
     ]
     console.log(`[claude-spawn] cwd=${this.workingDir} args=${JSON.stringify(args)}`)
