@@ -7,6 +7,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
 import { join, basename, resolve } from 'path'
+import { REPOS_ROOT, DATA_DIR } from './config.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -112,6 +113,8 @@ export function scanAllReports(repoPaths: string[]): ReportMeta[] {
  */
 export function readReport(filePath: string): ReportContent | null {
   const resolved = resolve(filePath)
+  const ALLOWED_ROOTS = [DATA_DIR, REPOS_ROOT]
+  if (!ALLOWED_ROOTS.some(root => resolved.startsWith(root + '/'))) return null
   if (!resolved.includes('/.codekin/reports/')) return null
   if (!existsSync(resolved)) return null
 
