@@ -534,7 +534,41 @@ export function createOrchestratorRouter(
       return res.status(409).json({ error: 'No pending prompt to respond to' })
     }
 
+    // Capture prompt details before responding (response clears them)
+    let promptToolName = 'unknown'
+    let promptType: 'permission' | 'question' = 'permission'
+    if (requestId) {
+      const toolApproval = session.pendingToolApprovals.get(requestId)
+      const controlReq = session.pendingControlRequests.get(requestId)
+      if (toolApproval) {
+        promptToolName = toolApproval.toolName
+        promptType = toolApproval.toolName === 'AskUserQuestion' ? 'question' : 'permission'
+      } else if (controlReq) {
+        promptToolName = controlReq.toolName
+        promptType = controlReq.toolName === 'AskUserQuestion' ? 'question' : 'permission'
+      }
+    }
+
     sessions.sendPromptResponse(sessionId, value, requestId)
+
+    // Broadcast a notification to the orchestrator channel so users can see
+    // what the orchestrator approved/denied/answered.
+    const orchestratorId = getOrCreateOrchestratorId()
+    const orchestratorSession = sessions.get(orchestratorId)
+    if (orchestratorSession && orchestratorSession.clients.size > 0) {
+      const actionLabel = promptType === 'question'
+        ? `answered question from ${promptToolName}`
+        : `responded "${value}" to ${promptToolName}`
+      const notifMsg = {
+        type: 'system_message' as const,
+        subtype: 'info' as const,
+        text: `[${getAgentDisplayName()}] ${actionLabel} in session "${session.name}"`,
+      }
+      for (const ws of orchestratorSession.clients) {
+        ws.send(JSON.stringify(notifMsg))
+      }
+    }
+
     res.json({ ok: true })
   })
 

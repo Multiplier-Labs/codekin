@@ -1282,7 +1282,7 @@ export class SessionManager {
           this.broadcast(session, { type: 'prompt_dismiss', requestId: approvalRequestId })
           resolve({ allow: false, always: false })
         }
-      }, isQuestion ? 300_000 : 60_000) // 5 min for questions, 1 min for permissions
+      }, isQuestion ? 300_000 : (session.source === 'agent' ? 300_000 : 60_000)) // 5 min for questions & agent children, 1 min for interactive
 
       let promptMsg: WsServerMessage
       if (isQuestion) {
