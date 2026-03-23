@@ -157,7 +157,7 @@ export type WsServerMessage =
   | { type: 'tool_done'; toolName: string; summary?: string }
   | { type: 'tool_output'; content: string; isError?: boolean }
   | { type: 'image'; base64: string; mediaType: string }
-  | { type: 'system_message'; subtype: 'init' | 'exit' | 'error' | 'restart' | 'stall' | 'notification'; text: string; model?: string }
+  | { type: 'system_message'; subtype: 'init' | 'exit' | 'error' | 'restart' | 'stall' | 'notification' | 'info'; text: string; model?: string }
   | { type: 'user_echo'; text: string }
   | { type: 'result' }
   | { type: 'planning_mode'; active: boolean }
@@ -233,7 +233,7 @@ export interface PromptQuestion {
 export type ChatMessage =
   | { type: 'assistant'; text: string; complete: boolean; ts?: number; key?: string }
   | { type: 'user'; text: string; ts?: number; key?: string }
-  | { type: 'system'; subtype: 'init' | 'exit' | 'error' | 'restart' | 'stall' | 'notification' | 'trim'; text: string; model?: string; ts?: number; key?: string }
+  | { type: 'system'; subtype: 'init' | 'exit' | 'error' | 'restart' | 'stall' | 'notification' | 'info' | 'trim'; text: string; model?: string; ts?: number; key?: string }
   | { type: 'tool_group'; tools: Array<{ name: string; summary?: string; active: boolean }>; ts?: number; key?: string }
   | { type: 'tool_output'; content: string; isError?: boolean; ts?: number; key?: string }
   | { type: 'image'; base64: string; mediaType: string; ts?: number; key?: string }

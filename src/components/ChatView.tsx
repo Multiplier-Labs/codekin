@@ -65,6 +65,8 @@ function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
     ? 'text-primary-5'
     : msg.subtype === 'exit' || msg.subtype === 'stall' || msg.subtype === 'restart'
     ? 'text-warning-5'
+    : msg.subtype === 'info'
+    ? 'text-neutral-5'
     : 'text-error-5'
 
   const dotClass = msg.subtype === 'init'
@@ -73,6 +75,8 @@ function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
     ? 'bg-primary-5'
     : msg.subtype === 'exit' || msg.subtype === 'stall' || msg.subtype === 'restart'
     ? 'bg-warning-5'
+    : msg.subtype === 'info'
+    ? 'bg-neutral-5'
     : 'bg-error-5'
 
   const modelLabel = msg.model ? ` (${formatModelName(msg.model)})` : ''
