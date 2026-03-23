@@ -662,7 +662,7 @@ No cron jobs, no filesystem watchers — just event subscription + a simple inte
 |----------|-----------|
 | Name | **Agent Joe** — visible in sidebar and chat |
 | Notifications | **In-chat only** — no toasts or badges |
-| Child session limit | **3 concurrent** |
+| Child session limit | **5 concurrent** |
 | Trust escalation | **Learned trust** — 2 approvals → auto with notification, 5 → silent (§12) |
 | Multi-user | **Single shared instance** — Codekin is single-user; scope to user_id later if needed |
 | Report monitoring | **Event-driven** from workflow engine + 15-min fallback poll (§13) |
