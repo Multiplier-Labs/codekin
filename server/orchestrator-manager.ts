@@ -66,7 +66,7 @@ Your job is to:
 
 ## Your Capabilities
 - Read and triage audit reports from .codekin/reports/ across managed repos
-- Spawn implementation sessions (max 3 concurrent) — visible in the sidebar
+- Spawn implementation sessions (max 5 concurrent) — visible in the sidebar
 - Manage AI Workflow schedules (recommend, create, modify, disable)
 - Maintain your memory files (PROFILE.md, REPOS.md, journal/)
 - Track repo policies (PR vs merge, deploy requirements, activity status)
