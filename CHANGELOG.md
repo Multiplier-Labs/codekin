@@ -5,6 +5,79 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-03-23
+
+### Features
+- **Agent Joe orchestrator** — AI agent that spawns and manages up to 5 concurrent child sessions, with dedicated chat UI, welcome screen, resizable input, color-coded sidebar status icons with tooltips, and configurable agent name
+- **Git worktree support** — isolate sessions in dedicated worktree directories with mid-session creation, worktree name indicator in input toolbar, auto-enable setting, and full session context preservation across migrations
+- **Permission mode selector** — dropdown in input bar to choose between permission modes
+- **Per-session allowed tools** — pre-approve specific CLI tools for individual sessions; curl pre-approved for Agent Joe and child sessions
+- **Upgrade notifications** — in-app banner when a newer npm version is available, plus `codekin upgrade` CLI command
+- **Configurable message queueing** — optional queued message system as a setting (off by default)
+- **Sidebar session status tooltips** — hover tooltips on session status indicators
+- **Settings view improvements** — reorganized layout with better consistency
+- **Session lifecycle hooks** — orchestrator approval endpoints for child session management
+- **Dual-write approvals** — approval rules written to both Codekin and native `settings.local.json` for Claude CLI compatibility
+
+### Fixes
+- Fix ExitPlanMode double-approval, timeout-denial, and stuck-state bugs
+- Fix AskUserQuestion handling: route through PreToolUse hook, properly extract questions/options, format answers correctly
+- Save exact commands when "Always Allow" clicked for non-patternable commands
+- Prevent restart cascade from stale session ID reuse
+- Prevent session restore restart loop after server restart
+- Fix Agent Joe child sessions not appearing in sidebar
+- Prevent double-gating race in orchestrator respond endpoint
+- Don't mark child session completed while tool approvals are pending
+- Use `--resume` instead of `--session-id` when restarting Claude sessions
+- Inject conversation context when Claude restarts after crash
+- Key approval rules by repo root, not worktree path
+- Clean up worktrees on session delete; prevent new sessions from inheriting worktree paths
+- Strip inherited `GIT_*` env vars from child git processes
+- Harden worktree creation against stale dirs and subdirectory cwd
+- Fix SPA fallback with styled 404/500 error pages
+- Fall back to control_request when permission hook can't reach server
+- Fix sidebar menu highlight contrast and consistency
+- Anchor skills popup to right edge to prevent viewport overflow
+- Prevent CLI error messages from becoming session names
+- Format API error messages instead of showing raw JSON
+- Use gray color for orchestrator approval/denial messages
+- Increase font size for AskUserQuestion prompts
+- Polish orchestrator chat view (resizable input, remove clutter)
+
+### Security
+- Harden SQLite file permissions and shell JSON escaping
+- Fix symlink traversal in browse-dirs path check
+- Harden orchestrator path guards and sanitize branchName input
+- Update flatted to resolve high-severity prototype pollution vulnerability
+- Address critical and major findings from code review audits
+- Fix SIGKILL timer leak, stale closure, silent approval escalation, unbounded file reads
+
+### Refactoring
+- Rename Shepherd to Agent Joe / orchestrator throughout codebase
+- Extract DiffManager class and break up App.tsx into focused components
+- Make prompt queue session-scoped
+- Replace AI SDK with `claude -p` for session naming (removes AI SDK dependency)
+- Extract DiffManager and RestartScheduler from SessionManager
+- Reorganize input bar footer layout
+
+### Documentation
+- Add Shepherd/orchestrator session spec
+- Implement comment audit improvements across 11 files
+- Remove stale AI SDK references from docs
+
+### Chores
+- Add comprehensive diff-parser tests (coverage from ~1% to 98%)
+- Fix code coverage gaps from March 16 coverage audit
+- Add automated repo health and code review reports
+
+## [0.4.1] - 2026-03-16
+
+### Fixes
+- Implement critical and warning findings from code review audit
+
+### Chores
+- Improve code coverage for diff-parser, approval-manager, usePromptState, ccApi
+
 ## [0.4.0] - 2026-03-14
 
 ### Features

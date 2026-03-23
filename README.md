@@ -47,18 +47,20 @@ codekin uninstall               # Remove Codekin entirely
 ## Features
 
 - **Multi-session terminal** — Open and switch between multiple Claude Code sessions, one per repo
+- **Agent Joe** — AI orchestrator agent that spawns and manages up to 5 concurrent child sessions, with a dedicated chat UI, welcome screen, and color-coded sidebar status indicators
+- **Git worktrees** — Isolate sessions in dedicated worktree directories, with mid-session creation, auto-enable setting, and session context preservation
 - **Session archive** — Full retrieval and re-activation of archived sessions
 - **Repo browser** — Auto-discovers local repos and GitHub org repos
 - **Screenshot upload** — Drag-and-drop or paste images; the file path is sent to Claude so it can read them natively
 - **Skill browser** — Browse and invoke `/skills` defined in each repo's `.claude/skills/`, with inline slash-command autocomplete
 - **Diff viewer** — Side panel showing staged/unstaged file changes with per-file discard support
 - **Command palette** — `Ctrl+K` to quickly search repos, skills, and actions
-- **Approval management** — Persistent approval storage with detailed per-permission revoking
+- **Approval management** — Persistent approval storage with per-permission revoking, permission mode selector, and per-session tool pre-approvals
 - **Mobile-friendly** — Responsive layout that works on phones and tablets
 - **Markdown browser** — Browse and view `.md` files directly in the UI
 - **AI Workflows** — Scheduled code and repository audits and maintenance, with support for custom workflows defined as Markdown files
 - **GitHub webhooks** — Automated bugfixing on CI failures via webhook integration
-- **Git worktrees** — Isolate sessions in dedicated worktree directories
+- **Upgrade notifications** — In-app banner when a newer version is available
 
 ## Upgrade
 
