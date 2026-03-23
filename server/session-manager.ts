@@ -88,6 +88,10 @@ export class SessionManager {
   _globalBroadcast: ((msg: WsServerMessage) => void) | null = null
   /** Registered listeners notified when a session's Claude process exits (used by webhook-handler for chained workflows). */
   private _exitListeners: Array<(sessionId: string, code: number | null, signal: string | null, willRestart: boolean) => void> = []
+  /** Registered listeners notified when a session emits a prompt (permission or question). */
+  private _promptListeners: Array<(sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void> = []
+  /** Registered listeners notified when a session completes a turn (result event). */
+  private _resultListeners: Array<(sessionId: string, isError: boolean) => void> = []
   /** Delegated approval logic (auto-approve patterns, deny-lists, pattern management). */
   private _approvalManager: ApprovalManager
   /** Delegated auto-naming logic (generates session names from first user message via Claude API). */
@@ -372,8 +376,59 @@ export class SessionManager {
     this._exitListeners.push(listener)
   }
 
+  /** Register a listener called when any session emits a prompt (permission request or question). */
+  onSessionPrompt(listener: (sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void): void {
+    this._promptListeners.push(listener)
+  }
+
+  /** Register a listener called when any session completes a turn (result event). */
+  onSessionResult(listener: (sessionId: string, isError: boolean) => void): void {
+    this._resultListeners.push(listener)
+  }
+
   get(id: string): Session | undefined {
     return this.sessions.get(id)
+  }
+
+  /** Get all sessions that have pending prompts (waiting for approval or answer). */
+  getPendingPrompts(): Array<{
+    sessionId: string
+    sessionName: string
+    source: string
+    prompts: Array<{ requestId: string; promptType: 'permission' | 'question'; toolName: string; toolInput: Record<string, unknown> }>
+  }> {
+    const results: Array<{
+      sessionId: string
+      sessionName: string
+      source: string
+      prompts: Array<{ requestId: string; promptType: 'permission' | 'question'; toolName: string; toolInput: Record<string, unknown> }>
+    }> = []
+
+    for (const session of this.sessions.values()) {
+      const prompts: Array<{ requestId: string; promptType: 'permission' | 'question'; toolName: string; toolInput: Record<string, unknown> }> = []
+
+      for (const [reqId, pending] of session.pendingToolApprovals) {
+        prompts.push({
+          requestId: reqId,
+          promptType: pending.toolName === 'AskUserQuestion' ? 'question' : 'permission',
+          toolName: pending.toolName,
+          toolInput: pending.toolInput,
+        })
+      }
+      for (const [reqId, pending] of session.pendingControlRequests) {
+        prompts.push({
+          requestId: reqId,
+          promptType: pending.toolName === 'AskUserQuestion' ? 'question' : 'permission',
+          toolName: pending.toolName,
+          toolInput: pending.toolInput,
+        })
+      }
+
+      if (prompts.length > 0) {
+        results.push({ sessionId: session.id, sessionName: session.name, source: session.source, prompts })
+      }
+    }
+    return results
   }
 
   /** Clear the isProcessing flag for a session and broadcast the update. */
@@ -737,6 +792,11 @@ export class SessionManager {
       session.pendingControlRequests.set(requestId, { requestId, toolName: 'AskUserQuestion', toolInput: toolInput || {}, promptMsg })
     }
     this.broadcast(session, promptMsg)
+
+    // Notify prompt listeners (orchestrator, child monitor, etc.)
+    for (const listener of this._promptListeners) {
+      try { listener(session.id, promptType, toolName, requestId) } catch { /* listener error */ }
+    }
   }
 
   private onControlRequestEvent(
@@ -786,6 +846,11 @@ export class SessionManager {
         sessionId,
         sessionName: session.name,
       })
+    }
+
+    // Notify prompt listeners (orchestrator, child monitor, etc.)
+    for (const listener of this._promptListeners) {
+      try { listener(sessionId, 'permission', toolName, requestId) } catch { /* listener error */ }
     }
   }
 
@@ -848,6 +913,11 @@ export class SessionManager {
     const resultMsg: WsServerMessage = { type: 'result' }
     this.addToHistory(session, resultMsg)
     this.broadcast(session, resultMsg)
+
+    // Notify result listeners (orchestrator, child monitor, etc.)
+    for (const listener of this._resultListeners) {
+      try { listener(sessionId, isError) } catch { /* listener error */ }
+    }
 
     // If session is still unnamed after first response, name it now — we have full context
     if (session.name.startsWith('hub:') && session._namingAttempts === 0) {
@@ -1278,6 +1348,11 @@ export class SessionManager {
           sessionId,
           sessionName: session.name,
         })
+      }
+
+      // Notify prompt listeners (orchestrator, child monitor, etc.)
+      for (const listener of this._promptListeners) {
+        try { listener(sessionId, isQuestion ? 'question' : 'permission', toolName, approvalRequestId) } catch { /* listener error */ }
       }
     })
   }

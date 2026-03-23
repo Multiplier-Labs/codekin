@@ -232,60 +232,75 @@ export class OrchestratorChildManager {
   }
 
   /**
-   * Monitor a child session until completion or timeout.
+   * Monitor a child session until completion or timeout using event hooks.
+   * Replaces the old polling loop with SessionManager's onSessionResult and
+   * onSessionExit hooks for lower latency and no wasted CPU.
    */
   private async monitorChild(child: ChildSession): Promise<void> {
     const timeoutMs = child.request.timeoutMs ?? DEFAULT_TIMEOUT_MS
-    const deadline = Date.now() + timeoutMs
-    const pollMs = 3000
 
     try {
-      while (Date.now() < deadline) {
-        const session = this.sessions.get(child.id)
-        if (!session) {
-          child.status = 'failed'
-          child.error = 'Session was deleted'
+      await new Promise<void>((resolve) => {
+        let settled = false
+        const settle = () => { if (!settled) { settled = true; resolve() } }
+
+        // Timeout handler
+        const timer = setTimeout(() => {
+          if (settled) return
+          child.status = 'timed_out'
+          child.error = `Timed out after ${timeoutMs}ms`
           child.completedAt = new Date().toISOString()
-          return
+
+          const session = this.sessions.get(child.id)
+          if (session?.claudeProcess?.isAlive()) {
+            session.claudeProcess.stop()
+          }
+          settle()
+        }, timeoutMs)
+
+        // Result hook: Claude completed a turn
+        const onResult = (sessionId: string, isError: boolean) => {
+          if (sessionId !== child.id || settled) return
+          const session = this.sessions.get(child.id)
+          if (!session) {
+            child.status = 'failed'
+            child.error = 'Session was deleted'
+            child.completedAt = new Date().toISOString()
+            clearTimeout(timer)
+            settle()
+            return
+          }
+
+          const text = this.extractText(session.outputHistory)
+          // Check if the final step was done; if not, nudge (keep listening)
+          if (this.ensureFinalStep(child, session, text)) return
+
+          child.status = isError ? 'failed' : 'completed'
+          child.result = text || null
+          child.error = isError ? 'Claude returned an error' : null
+          child.completedAt = new Date().toISOString()
+          clearTimeout(timer)
+          settle()
         }
 
-        // Check for result message (Claude finished normally), skipping superseded ones
-        const resultMsg = session.outputHistory.find(m => m.type === 'result' && !(m as Record<string, unknown>)._superseded)
-        if (resultMsg) {
-          const text = this.extractText(session.outputHistory)
-          // Check if the final step was done; if not, nudge the session
-          const nudged = this.ensureFinalStep(child, session, text)
-          if (nudged) continue  // Keep monitoring after nudge
-          child.status = 'completed'
-          child.result = text
-          child.completedAt = new Date().toISOString()
-          return
-        }
+        // Exit hook: Claude process exited
+        const onExit = (sessionId: string, _code: number | null, _signal: string | null, willRestart: boolean) => {
+          if (sessionId !== child.id || settled) return
+          if (willRestart) return  // Will auto-restart, keep monitoring
 
-        // Check for exit message (Claude process exited)
-        const exitMsg = session.outputHistory.find(m => m.type === 'exit')
-        if (exitMsg) {
-          const text = this.extractText(session.outputHistory)
+          const session = this.sessions.get(child.id)
+          const text = session ? this.extractText(session.outputHistory) : ''
           child.status = text.length > 100 ? 'completed' : 'failed'
           child.result = text || null
           child.error = text.length <= 100 ? 'Claude exited without sufficient output' : null
           child.completedAt = new Date().toISOString()
-          return
+          clearTimeout(timer)
+          settle()
         }
 
-        await new Promise(resolve => setTimeout(resolve, pollMs))
-      }
-
-      // Timeout
-      child.status = 'timed_out'
-      child.error = `Timed out after ${timeoutMs}ms`
-      child.completedAt = new Date().toISOString()
-
-      // Try to stop the session gracefully
-      const session = this.sessions.get(child.id)
-      if (session?.claudeProcess?.isAlive()) {
-        session.claudeProcess.stop()
-      }
+        this.sessions.onSessionResult(onResult)
+        this.sessions.onSessionExit(onExit)
+      })
     } finally {
       // Safety net: ensure isProcessing is cleared when monitoring ends.
       // handleClaudeResult should have already done this, but edge cases
