@@ -113,9 +113,11 @@ export function scanAllReports(repoPaths: string[]): ReportMeta[] {
  */
 export function readReport(filePath: string): ReportContent | null {
   const resolved = resolve(filePath)
-  const ALLOWED_ROOTS = [DATA_DIR, REPOS_ROOT]
-  if (!ALLOWED_ROOTS.some(root => resolved.startsWith(root + '/'))) return null
-  if (!resolved.includes('/.codekin/reports/')) return null
+  // Verify the path is within a known reports directory (anchored startsWith, not includes)
+  const isDataReport = resolved.startsWith(DATA_DIR + '/reports/')
+  const isRepoReport = resolved.startsWith(REPOS_ROOT + '/') &&
+    /^[^/]+\/\.codekin\/reports\//.test(resolved.slice(REPOS_ROOT.length + 1))
+  if (!isDataReport && !isRepoReport) return null
   if (!existsSync(resolved)) return null
 
   const content = readFileSync(resolved, 'utf-8')
