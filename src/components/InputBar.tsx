@@ -113,12 +113,14 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const permMenuRef = useRef<HTMLDivElement>(null)
   const modelMenuRef = useRef<HTMLDivElement>(null)
   const MOBILE_HEIGHT = 100
-  const ORCHESTRATOR_HEIGHT = 90
+  const ORCH_HEIGHT_KEY = 'orchestratorInputBarHeight'
+  const ORCHESTRATOR_DEFAULT_HEIGHT = 90
   const [height, setHeight] = useState(() => {
     if (isMobile) return MOBILE_HEIGHT
-    if (isOrchestrator) return ORCHESTRATOR_HEIGHT
-    const stored = localStorage.getItem(INPUT_HEIGHT_KEY)
-    return stored ? Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, parseInt(stored, 10))) : DEFAULT_HEIGHT
+    const key = isOrchestrator ? ORCH_HEIGHT_KEY : INPUT_HEIGHT_KEY
+    const defaultH = isOrchestrator ? ORCHESTRATOR_DEFAULT_HEIGHT : DEFAULT_HEIGHT
+    const stored = localStorage.getItem(key)
+    return stored ? Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, parseInt(stored, 10))) : defaultH
   })
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -185,7 +187,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       const newHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, startHeight + (startY - ev.clientY)))
       heightRef.current = newHeight
       setHeight(newHeight)
-      localStorage.setItem(INPUT_HEIGHT_KEY, String(newHeight))
+      localStorage.setItem(isOrchestrator ? ORCH_HEIGHT_KEY : INPUT_HEIGHT_KEY, String(newHeight))
     }
     const onMouseUp = () => {
       document.removeEventListener('mousemove', onMouseMove)
@@ -296,7 +298,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const hasSlashCommands = !isOrchestrator && slashCommands && slashCommands.length > 0
 
   return (
-    <div className={`app-input-bar relative flex flex-col border-l bg-neutral-10 ${isOrchestrator ? 'orchestrator-input-bar border-t-2 border-accent-7' : 'border-t border-neutral-9'}`} style={isMobile ? { minHeight: MOBILE_HEIGHT } : { height }}>
+    <div className={`app-input-bar relative flex flex-col border-l bg-neutral-10 ${isOrchestrator ? 'orchestrator-input-bar border-t border-neutral-9' : 'border-t border-neutral-9'}`} style={isMobile ? { minHeight: MOBILE_HEIGHT } : { height }}>
       <DropZone onUpload={onAddFiles} disabled={disabled} />
 
       {/* Slash autocomplete popup */}
@@ -309,8 +311,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
         />
       )}
 
-      {/* Drag handle — desktop only, hidden for orchestrator variant */}
-      {!isMobile && !isOrchestrator && (
+      {/* Drag handle — desktop only */}
+      {!isMobile && (
         <div
           className="h-1 flex-shrink-0 cursor-row-resize hover:bg-primary-7/40 active:bg-primary-7/60 transition-colors"
           onMouseDown={onDragStart}

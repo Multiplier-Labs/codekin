@@ -132,7 +132,9 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
       </div>
       {stats && (
         <div className="flex items-center gap-2 ml-auto">
-          <StatCard label="repos" value={stats.managedRepos} icon={<IconFolder size={15} />} />
+          {stats.managedRepos > 0 && (
+            <StatCard label="repos" value={stats.managedRepos} icon={<IconFolder size={15} />} />
+          )}
           {stats.pendingNotifications > 0 && (
             <StatCard label="pending" value={stats.pendingNotifications} icon={<IconBell size={15} />} />
           )}
