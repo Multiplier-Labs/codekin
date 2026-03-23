@@ -154,7 +154,7 @@ function highlightCode(code: string, lang: string): string {
   return code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-function AssistantMessage({ msg, fontSize, variant = 'default' }: { msg: ChatMessage & { type: 'assistant' }; fontSize: number; variant?: ChatViewVariant }) {
+function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: { msg: ChatMessage & { type: 'assistant' }; fontSize: number; variant?: ChatViewVariant; repeatCount?: number }) {
   return (
     <div className={`px-4 py-2 ${variant === 'orchestrator' ? 'orchestrator-assistant-msg' : ''}`}>
       <div
@@ -210,6 +210,11 @@ function AssistantMessage({ msg, fontSize, variant = 'default' }: { msg: ChatMes
         >
           {msg.text}
         </Markdown>
+        {repeatCount && repeatCount > 1 && (
+          <span className="inline-block ml-1 text-[12px] text-neutral-5 bg-neutral-10 rounded-full px-2 py-0.5 align-middle">
+            ×{repeatCount}
+          </span>
+        )}
       </div>
     </div>
   )
@@ -520,6 +525,24 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                 }
                 const taKey = run.groups[0]?.key || run.outputs[0]?.key || `ta-${startIdx}`
                 nodes.push(<ToolActivity key={taKey} run={run} fontSize={fontSize} />)
+                continue
+              }
+
+              // Collapse consecutive identical completed assistant messages into one with a ×N badge
+              if (msg.type === 'assistant' && msg.complete) {
+                let repeatCount = 1
+                const text = msg.text.trim()
+                while (i + 1 < messages.length) {
+                  const next = messages[i + 1]
+                  if (next.type === 'assistant' && next.complete && next.text.trim() === text) {
+                    repeatCount++
+                    i++
+                  } else {
+                    break
+                  }
+                }
+                nodes.push(<AssistantMessage key={msg.key || i} msg={msg} fontSize={fontSize} variant={variant} repeatCount={repeatCount} />)
+                i++
                 continue
               }
 

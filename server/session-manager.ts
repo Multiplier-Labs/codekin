@@ -923,6 +923,17 @@ export class SessionManager {
       }
     }
 
+    // Suppress noise from orchestrator/agent sessions: if the entire turn's
+    // text output is a short, low-value phrase, strip it from history so it
+    // doesn't pollute the chat or replay on rejoin.
+    if ((session.source === 'orchestrator' || session.source === 'agent') && !isError) {
+      const turnText = this.extractCurrentTurnText(session)
+      if (turnText && turnText.length < 80 && /^(no response requested|please approve|nothing to do|no action needed|acknowledged)[.!]?$/i.test(turnText.trim())) {
+        this.stripCurrentTurnOutput(session)
+        console.log(`[noise-filter] suppressed orchestrator noise: "${turnText.trim().slice(0, 60)}"`)
+      }
+    }
+
     const resultMsg: WsServerMessage = { type: 'result' }
     this.addToHistory(session, resultMsg)
     this.broadcast(session, resultMsg)
@@ -1550,6 +1561,31 @@ export class SessionManager {
   /** Check if an error result text matches a transient API error worth retrying. */
   private isRetryableApiError(text: string): boolean {
     return API_RETRY_PATTERNS.some((pattern) => pattern.test(text))
+  }
+
+  /** Extract the concatenated text output from the current turn (after the last 'result' in history). */
+  private extractCurrentTurnText(session: Session): string {
+    let text = ''
+    for (let i = session.outputHistory.length - 1; i >= 0; i--) {
+      const msg = session.outputHistory[i]
+      if (msg.type === 'result') break
+      if (msg.type === 'output') text = msg.data + text
+    }
+    return text
+  }
+
+  /** Remove output messages from the current turn in history (after the last 'result'). */
+  private stripCurrentTurnOutput(session: Session): void {
+    let cutIndex = session.outputHistory.length
+    for (let i = session.outputHistory.length - 1; i >= 0; i--) {
+      const msg = session.outputHistory[i]
+      if (msg.type === 'result') break
+      if (msg.type === 'output') {
+        cutIndex = i
+      }
+    }
+    // Remove output entries from cutIndex onwards (keep non-output entries like tool events)
+    session.outputHistory = session.outputHistory.filter((msg, idx) => idx < cutIndex || msg.type !== 'output')
   }
 
   /**
