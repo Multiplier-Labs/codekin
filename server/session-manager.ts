@@ -1185,6 +1185,13 @@ export class SessionManager {
     approval.resolve({ allow: !isDeny, always: isAlwaysAllow || isApprovePattern })
     session.pendingToolApprovals.delete(approval.requestId)
     this.broadcast(session, { type: 'prompt_dismiss', requestId: approval.requestId })
+
+    // When ExitPlanMode is approved via the PreToolUse hook, immediately clear
+    // pending state and emit planning_mode:false. The control_request path may
+    // never arrive (or arrive as is_error=true), so this ensures plan mode exits.
+    if (approval.toolName === 'ExitPlanMode' && !isDeny) {
+      session.claudeProcess?.clearPendingExitPlanMode()
+    }
   }
 
   /**

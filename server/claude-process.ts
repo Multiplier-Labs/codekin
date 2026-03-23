@@ -478,6 +478,15 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
     }
   }
 
+  /** Called by session-manager when PreToolUse hook approves ExitPlanMode. */
+  clearPendingExitPlanMode(): void {
+    if (this.pendingExitPlanModeId) {
+      this.pendingExitPlanModeId = null
+      this.exitPlanModeDenied = false
+      this.emit('planning_mode', false)
+    }
+  }
+
   /** Send a control_response back to the CLI to allow or deny a pending request. */
   sendControlResponse(requestId: string, behavior: 'allow' | 'deny', updatedInput?: Record<string, unknown>, message?: string): void {
     // The CLI expects a nested format: { type, response: { subtype, request_id, response: { behavior, ... } } }
