@@ -1,3 +1,13 @@
+# Repository Health: codekin
+
+**Date**: 2026-03-23T04:23:20.085Z
+**Repository**: /srv/repos/codekin
+**Branch**: main
+**Workflow Run**: b47a5858-14e3-4ab3-9bd3-a751a5883f13
+**Session**: 3c93ef23-490e-4039-9251-282930437f29
+
+---
+
 # Codekin Repository Health Report — 2026-03-23
 
 > Generated: 2026-03-23 | Branch: `main` | Commit: `f5debe3`
@@ -157,8 +167,8 @@ No confirmed dead exports or orphan source files were found. All checked compone
 - Add `codekin upgrade` CLI command and in-UI update notification (#141, #142)
 - Add Shepherd orchestrator: phases 1–4 (session management, reports, monitoring, memory) (#179)
 - Add shepherd/orchestrator session cleanup API endpoints (#207)
-- Add diff viewer sidebar for session file changes (#feat/diff-panel)
-- Add inline slash-command autocomplete (#155+)
+- Add diff viewer sidebar for session file changes
+- Add inline slash-command autocomplete
 
 #### Fixes
 - Workaround CLI `requiresUserInteraction` for AskUserQuestion in stream-json mode (#231)
@@ -169,7 +179,6 @@ No confirmed dead exports or orphan source files were found. All checked compone
 - Prevent plan mode from getting stuck after denied ExitPlanMode (#221)
 - Clear `isProcessing` flag when child session monitoring ends (#220)
 - Rename shepherd to orchestrator; make agent name configurable in settings (#224, #225)
-- Remove shepherd references from UI (#225)
 - Stop storing exact commands in approval registry; exclude from `--allowedTools` to prevent CLI parser crash (#217)
 - Escape parentheses in `--allowedTools` to prevent tool execution errors (#216)
 - Use Joe's `IconRobotFace` for agent-spawned sessions (#214)
@@ -179,11 +188,10 @@ No confirmed dead exports or orphan source files were found. All checked compone
 - Prevent restart cascade from stale session ID reuse (#152)
 - Use `--resume` flag instead of `--session-id` for session restart (#197)
 - Resolve symlinks in `browse-dirs` path check to prevent traversal (#175)
-- Fix Joe agent icon, menu selection, and chat variant styling (#186)
 - Fix Agent Joe child sessions not appearing in sidebar (#203, #204)
 - Update `flatted` to resolve high-severity prototype pollution vulnerability (#209)
-- Update `dompurify` 3.3.2 → 3.3.3 (security patch) (#chore)
-- Harden SQLite file permissions and shell JSON escaping (#security)
+- Update `dompurify` 3.3.2 → 3.3.3 (security patch)
+- Harden SQLite file permissions and shell JSON escaping
 
 #### Refactoring
 - Rename shepherd → orchestrator throughout codebase (#224)
@@ -195,13 +203,12 @@ No confirmed dead exports or orphan source files were found. All checked compone
 #### Documentation
 - Implement comment audit improvements across 11 files (#210)
 - Remove stale AI SDK references from docs (#201)
-- Add orchestrator spec; rename Shepherd to Agent Joe in spec (#179, #188)
+- Add orchestrator spec; rename Shepherd to Agent Joe in spec
 
 #### Chores
-- Add automated code review and repo health reports (#chore)
+- Add automated code review and repo health reports
 - Add diff-parser test coverage from ~1% to 98% (#202)
 - Remove AI SDK dependencies and API key prompts (#147)
-- Add dependency health reports
 
 ---
 
@@ -305,4 +312,4 @@ Only branches with commits ahead of `main` are analyzed.
 
 9. **Review and close `feat/joe-chat-variant`** — This branch is 1 commit ahead but ~35 commits behind `main`. The Joe chat variant work has since been substantially implemented through many subsequent PRs. Evaluate whether any remaining changes are still relevant or if the branch should be closed.
 
-10. **Add orchestrator-specific integration tests** — The orchestrator subsystem (`orchestrator-manager.ts`, `orchestrator-routes.ts`, `orchestrator-children.ts`, etc.) handles significant business logic (child session spawning, memory, trust, notifications) but does not appear to have dedicated test files. Given the complexity, adding integration tests here would meaningfully increase confidence in the system.
+10. **Add orchestrator-specific integration tests** — The orchestrator subsystem (`orchestrator-manager.ts`, `orchestrator-routes.ts`, `orchestrator-children.ts`, etc.) handles significant business logic (child session spawning, memory, trust, notifications) but does not appear to have dedicated test files. Given the complexity, adding integration tests here would meaningfully increase confidence in the system.Committed and pushed `2026-03-23_repo-health.md` to `main` (commit `9fa5dce`).
