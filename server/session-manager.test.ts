@@ -2177,7 +2177,7 @@ describe('SessionManager', () => {
 
       const approvalsA = sm2.approvalManager.getApprovals('/tmp/repo-a')
       expect(approvalsA.tools).toEqual(['Edit', 'Write'])
-      expect(approvalsA.commands).toEqual([])
+      expect(approvalsA.commands).toEqual(['git status', 'npm test'])
 
       const approvalsB = sm2.approvalManager.getApprovals('/tmp/repo-b')
       expect(approvalsB.tools).toEqual(['Bash'])

@@ -107,9 +107,8 @@ describe('ApprovalManager', () => {
 
   // ─── 5. compactExactCommands via restoreRepoApprovalsFromDisk ──────
 
-  describe('compactExactCommands', () => {
-    it('removes exact commands already covered by an existing pattern', () => {
-      // Mock disk data with commands and a pattern that already covers them
+  describe('restoreRepoApprovalsFromDisk', () => {
+    it('restores commands and patterns from disk', () => {
       vi.mocked(existsSync).mockReturnValue(true)
       vi.mocked(readFileSync).mockReturnValue(
         JSON.stringify({
@@ -123,22 +122,21 @@ describe('ApprovalManager', () => {
 
       const freshMgr = new ApprovalManager()
 
-      // The 3 cat commands should have been removed since they're covered by "cat *"
       const approvals = freshMgr.getApprovals('/repo/x')
       expect(approvals.patterns).toContain('cat *')
-      expect(approvals.commands).not.toContain('cat a.txt')
-      expect(approvals.commands).not.toContain('cat b.txt')
-      expect(approvals.commands).not.toContain('cat c.txt')
+      // Exact commands are preserved (may be redundant with pattern, but harmless)
+      expect(approvals.commands).toContain('cat a.txt')
+      expect(approvals.commands).toContain('cat b.txt')
+      expect(approvals.commands).toContain('cat c.txt')
     })
 
-    it('drops legacy exact commands on restore', () => {
-      // Mock disk data with exact commands from before they were removed
+    it('restores exact commands from disk', () => {
       vi.mocked(existsSync).mockReturnValue(true)
       vi.mocked(readFileSync).mockReturnValue(
         JSON.stringify({
           '/repo/x': {
             tools: [],
-            commands: ['cat a.txt', 'cat b.txt', 'cat c.txt'],
+            commands: ['docker run myimage', 'git push origin main'],
             patterns: ['npm *'],
           },
         }),
@@ -147,9 +145,8 @@ describe('ApprovalManager', () => {
       const freshMgr = new ApprovalManager()
 
       const approvals = freshMgr.getApprovals('/repo/x')
-      // Exact commands are dropped on restore
-      expect(approvals.commands).toHaveLength(0)
-      // Patterns are preserved
+      expect(approvals.commands).toContain('docker run myimage')
+      expect(approvals.commands).toContain('git push origin main')
       expect(approvals.patterns).toContain('npm *')
     })
   })
@@ -164,10 +161,10 @@ describe('ApprovalManager', () => {
       expect(approvals.commands).toHaveLength(0)
     })
 
-    it('skips non-patternable commands instead of storing them', () => {
+    it('saves non-patternable commands as exact commands', () => {
       mgr.saveAlwaysAllow('/repo/a', 'Bash', { command: 'docker run myimage' })
       const approvals = mgr.getApprovals('/repo/a')
-      expect(approvals.commands).toHaveLength(0)
+      expect(approvals.commands).toContain('docker run myimage')
       expect(approvals.patterns).toHaveLength(0)
     })
 
