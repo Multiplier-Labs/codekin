@@ -21,6 +21,7 @@ function mockSession(overrides: Partial<Session> = {}): Session {
     lastRestartAt: null,
     _stoppedByUser: false,
     _stallTimer: null,
+    _stallFired: false,
     _wasActiveBeforeRestart: false,
     pendingControlRequests: new Map(),
     pendingToolApprovals: new Map(),

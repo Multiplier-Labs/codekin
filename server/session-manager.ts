@@ -175,6 +175,7 @@ export class SessionManager {
       lastRestartAt: null,
       _stoppedByUser: false,
       _stallTimer: null,
+      _stallFired: false,
       _wasActiveBeforeRestart: false,
       _apiRetryCount: 0,
       _turnCount: 0,
@@ -1045,6 +1046,9 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return
 
+    // New user input clears the stall-fired flag so the timer can warn again
+    session._stallFired = false
+
     if (!session.claudeProcess?.isAlive()) {
       // Claude not running (e.g. after server restart) — auto-start first.
       // Claude CLI in -p mode waits for first input before emitting init,
@@ -1658,9 +1662,12 @@ export class SessionManager {
 
   private resetStallTimer(session: Session): void {
     this.clearStallTimer(session)
+    // Don't re-arm after we've already warned — wait for new user input
+    if (session._stallFired) return
     session._stallTimer = setTimeout(() => {
       session._stallTimer = null
       if (!session.claudeProcess?.isAlive()) return
+      session._stallFired = true
       const msg: WsServerMessage = {
         type: 'system_message',
         subtype: 'stall',

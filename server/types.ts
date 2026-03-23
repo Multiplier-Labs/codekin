@@ -61,6 +61,8 @@ export interface Session {
   _stoppedByUser: boolean
   /** Timer that fires a 'stall' warning after 5 min of no output. */
   _stallTimer: ReturnType<typeof setTimeout> | null
+  /** True after a stall warning has been sent; prevents repeated warnings until new user input. */
+  _stallFired: boolean
   /** Flag used during server restart to remember which sessions need auto-resume. */
   _wasActiveBeforeRestart: boolean
   /** In-flight control_request prompts awaiting user response, keyed by requestId. */
