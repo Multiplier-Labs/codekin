@@ -40,9 +40,9 @@ import { createWebhookRouter } from './webhook-routes.js'
 import { createUploadRouter } from './upload-routes.js'
 import { createDocsRouter } from './docs-routes.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
-import { ensureOrchestratorRunning } from './orchestrator-manager.js'
+import { ensureOrchestratorRunning, getOrchestratorSessionId, isOrchestratorSession } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
-import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, setAgentDisplayNameResolver } from './config.js'
+import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver } from './config.js'
 
 // ---------------------------------------------------------------------------
 // CLI args (legacy bare-metal compat) and auth setup
@@ -483,6 +483,33 @@ server.listen(port, '0.0.0.0', () => {
   } catch (err) {
     console.error('[orchestrator] Failed to start on boot:', err)
   }
+
+  // Wire up prompt listener: notify the orchestrator session when any child
+  // session has a pending approval so it can respond via the REST API.
+  sessions.onSessionPrompt((sessionId, promptType, toolName, requestId) => {
+    const orchestratorId = getOrchestratorSessionId(sessions)
+    if (!orchestratorId) return
+    // Don't notify the orchestrator about its own prompts
+    const session = sessions.get(sessionId)
+    if (!session || isOrchestratorSession(session.source)) return
+
+    const displayName = getAgentDisplayName()
+    const actionDesc = toolName ? `Tool: ${toolName}` : 'Unknown tool'
+    const message = [
+      `[Agent ${displayName} — Child Session Needs ${promptType === 'question' ? 'Answer' : 'Approval'}]`,
+      `Session: ${session.name} (${sessionId})`,
+      `${actionDesc}`,
+      `Request ID: ${requestId ?? 'unknown'}`,
+      '',
+      `Use the pending-prompts endpoint to see details and respond:`,
+      `curl -s "http://localhost:$CODEKIN_PORT/api/orchestrator/sessions/pending-prompts" -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN"`,
+    ].join('\n')
+
+    const orchestrator = sessions.get(orchestratorId)
+    if (orchestrator?.claudeProcess?.isAlive()) {
+      sessions.sendInput(orchestratorId, message)
+    }
+  })
 
   // Initialize workflow engine
   try {
