@@ -120,7 +120,7 @@ export function OrchestratorContent({
             onRemoveFile={onRemoveFile}
             skillGroups={skillGroups}
             slashCommands={slashCommands}
-            placeholder="Talk to the orchestrator..."
+            placeholder={`Ask Agent ${agentName ?? 'Joe'} to work on your code...`}
             initialValue=""
             onValueChange={() => {}}
             currentModel={currentModel}
