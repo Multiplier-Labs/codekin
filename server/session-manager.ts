@@ -819,6 +819,19 @@ export class SessionManager {
       return
     }
 
+    // Prevent double-gating: if a PreToolUse hook is already handling approval
+    // for this tool, auto-approve the control_request to avoid duplicate entries.
+    // Without this, both pendingToolApprovals and pendingControlRequests contain
+    // entries for the same tool invocation, causing stale-entry races when the
+    // orchestrator tries to respond via the REST API.
+    for (const pending of session.pendingToolApprovals.values()) {
+      if (pending.toolName === toolName) {
+        console.log(`[control_request] auto-approving ${toolName} (PreToolUse hook already handling approval)`)
+        cp.sendControlResponse(requestId, 'allow')
+        return
+      }
+    }
+
     const question = this.summarizeToolPermission(toolName, toolInput)
     const neverAutoApprove = ApprovalManager.NEVER_AUTO_APPROVE_TOOLS.has(toolName)
     const options = [
@@ -1256,6 +1269,20 @@ export class SessionManager {
     }
 
     console.log(`[tool-approval] requesting approval: session=${sessionId} tool=${toolName} clients=${session.clients.size}`)
+
+    // Prevent double-gating: if a control_request already created a pending
+    // entry for this tool, auto-approve the control_request and let the hook
+    // take over as the sole approval gate.  This is the reverse of the check
+    // in onControlRequestEvent (which handles hook-first ordering).
+    for (const [reqId, pending] of session.pendingControlRequests) {
+      if (pending.toolName === toolName) {
+        console.log(`[tool-approval] auto-approving control_request for ${toolName} (PreToolUse hook taking over)`)
+        session.claudeProcess?.sendControlResponse(reqId, 'allow')
+        session.pendingControlRequests.delete(reqId)
+        this.broadcast(session, { type: 'prompt_dismiss', requestId: reqId })
+        break
+      }
+    }
 
     // AskUserQuestion: show a question prompt and collect the answer text,
     // rather than a permission prompt with Allow/Deny buttons.
