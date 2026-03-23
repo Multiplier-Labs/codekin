@@ -150,7 +150,7 @@ export function createOrchestratorRouter(
     }
 
     // Validate branchName to prevent prompt injection
-    if (!/^[a-zA-Z0-9/_.-]+$/.test(branchName)) {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$/.test(branchName)) {
       return res.status(400).json({ error: 'Invalid branchName: only alphanumeric, /, _, ., and - are allowed' })
     }
 
