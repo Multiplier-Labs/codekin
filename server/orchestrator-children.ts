@@ -275,6 +275,12 @@ export class OrchestratorChildManager {
           // Check if the final step was done; if not, nudge (keep listening)
           if (this.ensureFinalStep(child, session, text)) return
 
+          // Don't mark as completed while the session still has pending
+          // tool approvals or control requests — the Claude process may
+          // still be alive and blocked on an approval (e.g. git push).
+          // Keep monitoring; the next result/exit event will re-evaluate.
+          if (session.pendingToolApprovals.size > 0 || session.pendingControlRequests.size > 0) return
+
           child.status = isError ? 'failed' : 'completed'
           child.result = text || null
           child.error = isError ? 'Claude returned an error' : null
