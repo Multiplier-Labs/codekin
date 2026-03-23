@@ -195,7 +195,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     }
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [])
+  }, [isOrchestrator])
 
   const handleSend = useCallback(() => {
     if (!value.trim() && pendingFiles.length === 0) return
