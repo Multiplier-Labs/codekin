@@ -2962,4 +2962,48 @@ describe('SessionManager', () => {
       expect(match(['Bash(curl:*)'], 'Bash', { command: '' })).toBe(false)
     })
   })
+
+  describe('getDiff', () => {
+    it('returns diff_error when session not found', async () => {
+      const sm = new SessionManager()
+      const result = await sm.getDiff('nonexistent-session')
+      expect(result).toEqual({ type: 'diff_error', message: 'Session not found' })
+    })
+
+    it('delegates to diffManager.getDiff with session workingDir', async () => {
+      const sm = new SessionManager()
+      const s = sm.create('test-session', '/tmp/test-repo')
+      const diffManager = (sm as any).diffManager
+      const mockResult = { type: 'diff_result' as const, files: [] }
+      const spy = vi.spyOn(diffManager, 'getDiff').mockResolvedValue(mockResult)
+
+      const result = await sm.getDiff(s.id, 'all')
+
+      expect(spy).toHaveBeenCalledWith('/tmp/test-repo', 'all')
+      expect(result).toEqual(mockResult)
+    })
+  })
+
+  describe('discardChanges', () => {
+    it('returns diff_error when session not found', async () => {
+      const sm = new SessionManager()
+      const result = await sm.discardChanges('nonexistent-session', 'all')
+      expect(result).toEqual({ type: 'diff_error', message: 'Session not found' })
+    })
+
+    it('delegates to diffManager.discardChanges with session workingDir and all params', async () => {
+      const sm = new SessionManager()
+      const s = sm.create('test-session', '/tmp/test-repo')
+      const diffManager = (sm as any).diffManager
+      const mockResult = { type: 'discard_result' as const }
+      const spy = vi.spyOn(diffManager, 'discardChanges').mockResolvedValue(mockResult)
+      const paths = ['file1.ts', 'file2.ts']
+      const statuses: Record<string, string> = { 'file1.ts': 'modified', 'file2.ts': 'added' }
+
+      const result = await sm.discardChanges(s.id, 'staged', paths, statuses as any)
+
+      expect(spy).toHaveBeenCalledWith('/tmp/test-repo', 'staged', paths, statuses)
+      expect(result).toEqual(mockResult)
+    })
+  })
 })

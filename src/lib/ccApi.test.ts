@@ -21,6 +21,13 @@ import {
   browseDirs,
   getWebhookConfig,
   getWebhookEvents,
+  uploadAndBuildMessage,
+  getQueueMessages,
+  setQueueMessages,
+  getWorktreePrefix,
+  setWorktreePrefix,
+  getAgentName,
+  setAgentName,
 } from './ccApi'
 
 const mockFetch = vi.fn()
@@ -838,5 +845,185 @@ describe('browseDirs', () => {
   it('throws status-based message when error JSON has no error field', async () => {
     mockFetch.mockResolvedValue(jsonResponse({}, 404))
     await expect(browseDirs('tok', '/nonexistent')).rejects.toThrow('Failed to browse: 404')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// uploadAndBuildMessage
+// ---------------------------------------------------------------------------
+
+describe('uploadAndBuildMessage', () => {
+  it('uploads files and prepends file paths to text', async () => {
+    mockFetch
+      .mockResolvedValueOnce(jsonResponse({ path: '/uploads/a.txt' }))
+      .mockResolvedValueOnce(jsonResponse({ path: '/uploads/b.png' }))
+    const file1 = new File(['a'], 'a.txt', { type: 'text/plain' })
+    const file2 = new File(['b'], 'b.png', { type: 'image/png' })
+    const result = await uploadAndBuildMessage('tok', [file1, file2], 'hello world')
+    expect(result).toBe('[Attached files: /uploads/a.txt, /uploads/b.png]\nhello world')
+  })
+
+  it('returns only file line when text is empty', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ path: '/uploads/c.txt' }))
+    const file = new File(['c'], 'c.txt')
+    const result = await uploadAndBuildMessage('tok', [file], '  ')
+    expect(result).toBe('[Attached files: /uploads/c.txt]')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getQueueMessages
+// ---------------------------------------------------------------------------
+
+describe('getQueueMessages', () => {
+  it('returns boolean from response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ enabled: true }))
+    const result = await getQueueMessages('tok')
+    expect(result).toBe(true)
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/settings/queue-messages', {
+      headers: { Authorization: 'Bearer tok' },
+    })
+  })
+
+  it('throws on non-ok response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({}, 500))
+    await expect(getQueueMessages('tok')).rejects.toThrow('Failed to get queue messages setting: 500')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// setQueueMessages
+// ---------------------------------------------------------------------------
+
+describe('setQueueMessages', () => {
+  it('sends PUT and returns boolean', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ enabled: false }))
+    const result = await setQueueMessages('tok', false)
+    expect(result).toBe(false)
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/settings/queue-messages', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer tok',
+      },
+      body: JSON.stringify({ enabled: false }),
+    })
+  })
+
+  it('throws on non-ok response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({}, 400))
+    await expect(setQueueMessages('tok', true)).rejects.toThrow('Failed to update queue messages setting: 400')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getWorktreePrefix
+// ---------------------------------------------------------------------------
+
+describe('getWorktreePrefix', () => {
+  it('returns prefix string from response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ prefix: 'wt/' }))
+    const result = await getWorktreePrefix('tok')
+    expect(result).toBe('wt/')
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/settings/worktree-prefix', {
+      headers: { Authorization: 'Bearer tok' },
+    })
+  })
+
+  it('throws on non-ok response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({}, 500))
+    await expect(getWorktreePrefix('tok')).rejects.toThrow('Failed to get worktree prefix: 500')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// setWorktreePrefix
+// ---------------------------------------------------------------------------
+
+describe('setWorktreePrefix', () => {
+  it('sends PUT and returns updated prefix', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ prefix: 'feat/' }))
+    const result = await setWorktreePrefix('tok', 'feat/')
+    expect(result).toBe('feat/')
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/settings/worktree-prefix', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer tok',
+      },
+      body: JSON.stringify({ prefix: 'feat/' }),
+    })
+  })
+
+  it('throws with error message from JSON error response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ error: 'Invalid prefix' }, 400))
+    await expect(setWorktreePrefix('tok', '!!!')).rejects.toThrow('Invalid prefix')
+  })
+
+  it('throws fallback message when error response is not JSON', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      redirected: false,
+      headers: new Headers({ 'content-type': 'text/plain' }),
+      json: () => Promise.reject(new Error('not json')),
+    } as Response)
+    await expect(setWorktreePrefix('tok', '/x')).rejects.toThrow('Failed to save worktree prefix')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getAgentName
+// ---------------------------------------------------------------------------
+
+describe('getAgentName', () => {
+  it('returns name string from response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ name: 'Claude' }))
+    const result = await getAgentName('tok')
+    expect(result).toBe('Claude')
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/settings/agent-name', {
+      headers: { Authorization: 'Bearer tok' },
+    })
+  })
+
+  it('throws on non-ok response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({}, 500))
+    await expect(getAgentName('tok')).rejects.toThrow('Failed to get agent name: 500')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// setAgentName
+// ---------------------------------------------------------------------------
+
+describe('setAgentName', () => {
+  it('sends PUT and returns updated name', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ name: 'Cody' }))
+    const result = await setAgentName('tok', 'Cody')
+    expect(result).toBe('Cody')
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/settings/agent-name', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer tok',
+      },
+      body: JSON.stringify({ name: 'Cody' }),
+    })
+  })
+
+  it('throws with error message from JSON error response', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ error: 'Name too long' }, 400))
+    await expect(setAgentName('tok', 'x'.repeat(200))).rejects.toThrow('Name too long')
+  })
+
+  it('throws fallback message when error response is not JSON', async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      redirected: false,
+      headers: new Headers({ 'content-type': 'text/plain' }),
+      json: () => Promise.reject(new Error('not json')),
+    } as Response)
+    await expect(setAgentName('tok', 'x')).rejects.toThrow('Failed to save agent name')
   })
 })

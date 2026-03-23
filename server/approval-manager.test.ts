@@ -217,5 +217,103 @@ describe('ApprovalManager', () => {
     it('returns "invalid" when no tool/command/pattern is provided', () => {
       expect(mgr.removeApproval('/repo/a', {})).toBe('invalid')
     })
+
+    it('removes a pattern approval and confirms it is gone', () => {
+      mgr.addRepoApproval('/repo/a', { pattern: 'git diff *' })
+      expect(mgr.getApprovals('/repo/a').patterns).toContain('git diff *')
+
+      const result = mgr.removeApproval('/repo/a', { pattern: 'git diff *' })
+      expect(result).toBe(true)
+      expect(mgr.getApprovals('/repo/a').patterns).not.toContain('git diff *')
+    })
+
+    it('does not call persistRepoApprovals when skipPersist is true', () => {
+      mgr.addRepoApproval('/repo/a', { tool: 'Write' })
+      const persistSpy = vi.spyOn(mgr, 'persistRepoApprovals')
+
+      mgr.removeApproval('/repo/a', { tool: 'Write' }, true)
+      expect(persistSpy).not.toHaveBeenCalled()
+    })
+  })
+
+  // ─── 9. getGlobalApprovals ──────────────────────────────────────────
+
+  describe('getGlobalApprovals', () => {
+    it('returns tools/commands/patterns approved in 2+ repos', () => {
+      mgr.addRepoApproval('/repo/a', { tool: 'Read' })
+      mgr.addRepoApproval('/repo/b', { tool: 'Read' })
+      mgr.addRepoApproval('/repo/a', { pattern: 'cat *' })
+      mgr.addRepoApproval('/repo/b', { pattern: 'cat *' })
+
+      const global = mgr.getGlobalApprovals()
+      expect(global.tools).toHaveProperty('Read')
+      expect(global.tools['Read']).toHaveLength(2)
+      expect(global.patterns).toHaveProperty('cat *')
+      expect(global.patterns['cat *']).toHaveLength(2)
+    })
+
+    it('excludes tools/patterns approved in only 1 repo', () => {
+      mgr.addRepoApproval('/repo/a', { tool: 'Read' })
+      mgr.addRepoApproval('/repo/a', { pattern: 'cat *' })
+
+      const global = mgr.getGlobalApprovals()
+      expect(global.tools).not.toHaveProperty('Read')
+      expect(global.patterns).not.toHaveProperty('cat *')
+    })
+  })
+
+  // ─── 10. savePatternApproval ────────────────────────────────────────
+
+  describe('savePatternApproval', () => {
+    it('saves a pattern-based approval for a patternable command', () => {
+      mgr.savePatternApproval('/repo/a', 'Bash', { command: 'cat foo.txt' })
+      const approvals = mgr.getApprovals('/repo/a')
+      expect(approvals.patterns).toContain('cat *')
+    })
+
+    it('does not save when no pattern is derivable', () => {
+      mgr.savePatternApproval('/repo/a', 'Bash', { command: 'docker run myimage' })
+      const approvals = mgr.getApprovals('/repo/a')
+      expect(approvals.patterns).toHaveLength(0)
+      expect(approvals.commands).toHaveLength(0)
+    })
+  })
+
+  // ─── 11. NEVER_AUTO_APPROVE_TOOLS ───────────────────────────────────
+
+  describe('NEVER_AUTO_APPROVE_TOOLS', () => {
+    it('saveAlwaysAllow skips tools in the never-auto-approve list', () => {
+      mgr.saveAlwaysAllow('/repo/a', 'ExitPlanMode', {})
+      const approvals = mgr.getApprovals('/repo/a')
+      expect(approvals.tools).not.toContain('ExitPlanMode')
+      expect(approvals.tools).toHaveLength(0)
+    })
+  })
+
+  // ─── 12. Cross-repo Bash prefix match ───────────────────────────────
+
+  describe('checkAutoApproval - cross-repo Bash prefix match', () => {
+    it('auto-approves via prefix match across repos for safe commands', () => {
+      // "git diff HEAD" approved in 2 repos
+      mgr.addRepoApproval('/repo/a', { command: 'git diff HEAD' })
+      mgr.addRepoApproval('/repo/b', { command: 'git diff HEAD' })
+
+      // "git diff main" should be auto-approved in a third repo via prefix match
+      expect(
+        mgr.checkAutoApproval('/repo/c', 'Bash', { command: 'git diff main' }),
+      ).toBe(true)
+    })
+  })
+
+  // ─── 13. derivePattern edge cases ───────────────────────────────────
+
+  describe('derivePattern - edge cases', () => {
+    it('returns null for non-Bash tools', () => {
+      expect(mgr.derivePattern('Read', { file_path: '/tmp/foo' })).toBeNull()
+    })
+
+    it('returns null for empty command', () => {
+      expect(mgr.derivePattern('Bash', { command: '' })).toBeNull()
+    })
   })
 })

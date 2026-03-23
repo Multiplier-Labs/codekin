@@ -29,7 +29,7 @@ vi.mock('fs', async (importOriginal) => {
   }
 })
 
-import { WorkflowEngine, WorkflowSkipped } from './workflow-engine.js'
+import { WorkflowEngine, WorkflowSkipped, initWorkflowEngine, getWorkflowEngine, shutdownWorkflowEngine } from './workflow-engine.js'
 import type { StepHandler } from './workflow-engine.js'
 
 describe('WorkflowEngine', () => {
@@ -527,6 +527,80 @@ describe('WorkflowEngine', () => {
       engine.shutdown()
       // Should not throw on double shutdown
     })
+
+    it('cancels all active runs via abort controllers', async () => {
+      let resolveStep!: () => void
+      const handler: StepHandler = async (_input, { abortSignal }) => {
+        await new Promise<void>(r => { resolveStep = r })
+        if (abortSignal.aborted) throw new Error('Run canceled')
+        return {}
+      }
+
+      engine.registerWorkflow({
+        kind: 'shutdown-cancel',
+        steps: [{ key: 'blocking', handler }],
+      })
+
+      mockGet.mockReturnValue({ id: 'sc-step-1' })
+
+      const run = await engine.startRun('shutdown-cancel')
+      // Wait a tick for execution to start
+      await new Promise(r => setTimeout(r, 10))
+
+      expect(run.status).toBe('running')
+
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+      // Shutdown should abort the active run's controller
+      engine.shutdown()
+
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Canceling active run'))
+      expect(consoleSpy).toHaveBeenCalledWith('[workflow] Engine shut down')
+      consoleSpy.mockRestore()
+
+      // Resolve the step so the async handler finishes cleanly
+      resolveStep()
+      await new Promise(r => setTimeout(r, 50))
+    })
+  })
+})
+
+describe('singleton lifecycle', () => {
+  afterEach(() => {
+    shutdownWorkflowEngine()
+  })
+
+  it('getWorkflowEngine throws before init', () => {
+    expect(() => getWorkflowEngine()).toThrow('Workflow engine not initialized — call initWorkflowEngine() first')
+  })
+
+  it('initWorkflowEngine creates an instance', () => {
+    const engine = initWorkflowEngine()
+    expect(engine).toBeInstanceOf(WorkflowEngine)
+  })
+
+  it('initWorkflowEngine returns same instance on second call', () => {
+    const first = initWorkflowEngine()
+    const second = initWorkflowEngine()
+    expect(second).toBe(first)
+  })
+
+  it('getWorkflowEngine returns the instance after init', () => {
+    const created = initWorkflowEngine()
+    const retrieved = getWorkflowEngine()
+    expect(retrieved).toBe(created)
+  })
+
+  it('shutdownWorkflowEngine shuts it down', () => {
+    initWorkflowEngine()
+    shutdownWorkflowEngine()
+    // After shutdown, getWorkflowEngine should throw again
+    expect(() => getWorkflowEngine()).toThrow('Workflow engine not initialized')
+  })
+
+  it('shutdownWorkflowEngine is a no-op when already shut down', () => {
+    // No engine initialized — should not throw
+    expect(() => shutdownWorkflowEngine()).not.toThrow()
   })
 })
 

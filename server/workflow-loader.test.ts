@@ -49,7 +49,7 @@ vi.mock('better-sqlite3', () => {
   return { default: MockDatabase }
 })
 
-import { loadMdWorkflows, listAvailableKinds, ensureRepoWorkflowsRegistered } from './workflow-loader.js'
+import { loadMdWorkflows, listAvailableKinds, ensureRepoWorkflowsRegistered, getWorkflowCommitPrefixes } from './workflow-loader.js'
 import { join } from 'path'
 
 // Valid workflow MD content
@@ -540,6 +540,111 @@ Some prompt.
 
       ensureRepoWorkflowsRegistered(mockEngine, {} as any, '/tmp/no-workflows')
       expect(mockEngine.registerWorkflow).not.toHaveBeenCalled()
+    })
+
+    it('only registers once per repo+kind (registeredRepoKinds guard)', () => {
+      // Use a unique repoPath so the module-level registeredRepoKinds Set
+      // does not collide with other tests.
+      const repoPath = '/tmp/idempotency-test'
+      const repoDir = join(repoPath, '.codekin', 'workflows')
+      const repoMd = VALID_MD.replace('test-review.daily', 'idempotent.kind').replace('Test Review', 'Idempotent')
+
+      mockExistsSync.mockImplementation((p: string) => String(p) === repoDir)
+      mockReaddirSync.mockImplementation((p: string) =>
+        String(p) === repoDir ? ['idempotent.kind.md'] : [],
+      )
+      mockReadFileSync.mockReturnValue(repoMd)
+
+      const mockEngine = {
+        registerWorkflow: vi.fn(),
+        hasWorkflow: vi.fn(() => false),
+      } as any
+
+      // First call — should register
+      ensureRepoWorkflowsRegistered(mockEngine, {} as any, repoPath)
+      expect(mockEngine.registerWorkflow).toHaveBeenCalledTimes(1)
+
+      mockEngine.registerWorkflow.mockClear()
+
+      // Second call with same repo+kind — registeredRepoKinds guard skips it
+      // (hasWorkflow still returns false, so the ONLY guard is registeredRepoKinds)
+      ensureRepoWorkflowsRegistered(mockEngine, {} as any, repoPath)
+      expect(mockEngine.registerWorkflow).not.toHaveBeenCalled()
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // getWorkflowCommitPrefixes
+  // -------------------------------------------------------------------------
+
+  describe('getWorkflowCommitPrefixes', () => {
+    it('returns an array of commit message strings from built-in workflows', () => {
+      mockExistsSync.mockReturnValue(true)
+      mockReaddirSync.mockReturnValue(['review.md', 'coverage.md'])
+      mockReadFileSync.mockImplementation((path: string) => {
+        if (String(path).includes('review')) return VALID_MD
+        if (String(path).includes('coverage')) return VALID_MD_2
+        return ''
+      })
+
+      const prefixes = getWorkflowCommitPrefixes()
+
+      expect(Array.isArray(prefixes)).toBe(true)
+      expect(prefixes.length).toBeGreaterThan(0)
+      prefixes.forEach(prefix => {
+        expect(typeof prefix).toBe('string')
+        expect(prefix.length).toBeGreaterThan(0)
+      })
+    })
+
+    it('returns empty array when no workflows directory exists', () => {
+      mockExistsSync.mockReturnValue(false)
+
+      const prefixes = getWorkflowCommitPrefixes()
+      expect(prefixes).toEqual([])
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // discoverRepoWorkflows edge cases (via ensureRepoWorkflowsRegistered)
+  // -------------------------------------------------------------------------
+
+  describe('discoverRepoWorkflows invalid file handling', () => {
+    it('logs a warning and skips an invalid MD file in repo workflows dir', () => {
+      const repoPath = '/tmp/invalid-md-test'
+      const repoDir = join(repoPath, '.codekin', 'workflows')
+
+      mockExistsSync.mockImplementation((p: string) => String(p) === repoDir)
+      mockReaddirSync.mockImplementation((p: string) =>
+        String(p) === repoDir ? ['bad-workflow.md', 'good-workflow.md'] : [],
+      )
+      mockReadFileSync.mockImplementation((path: string) => {
+        if (String(path).includes('bad-workflow')) return 'no frontmatter here at all'
+        if (String(path).includes('good-workflow')) {
+          return VALID_MD.replace('test-review.daily', 'discover.valid').replace('Test Review', 'Discover Valid')
+        }
+        return ''
+      })
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      const mockEngine = {
+        registerWorkflow: vi.fn(),
+        hasWorkflow: vi.fn(() => false),
+      } as any
+
+      ensureRepoWorkflowsRegistered(mockEngine, {} as any, repoPath)
+
+      // The bad file triggers a console.warn (line 426 in workflow-loader.ts)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[workflow-loader] Failed to parse repo workflow'),
+        expect.anything(),
+      )
+
+      // The good file is still registered
+      expect(mockEngine.registerWorkflow).toHaveBeenCalledTimes(1)
+
+      warnSpy.mockRestore()
     })
   })
 })
