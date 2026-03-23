@@ -498,7 +498,7 @@ server.listen(port, '0.0.0.0', () => {
     const message = [
       `[Agent ${displayName} — Child Session Needs ${promptType === 'question' ? 'Answer' : 'Approval'}]`,
       `Session: ${session.name} (${sessionId})`,
-      `${actionDesc}`,
+      actionDesc,
       `Request ID: ${requestId ?? 'unknown'}`,
       '',
       `Use the pending-prompts endpoint to see details and respond:`,
