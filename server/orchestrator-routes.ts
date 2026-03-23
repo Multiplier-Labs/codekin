@@ -502,6 +502,43 @@ export function createOrchestratorRouter(
   })
 
   // -------------------------------------------------------------------------
+  // Session prompts & approvals
+  // -------------------------------------------------------------------------
+
+  /** Get all sessions with pending prompts (waiting for approval or answer). */
+  router.get('/api/orchestrator/sessions/pending-prompts', (req, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+
+    res.json({ sessions: sessions.getPendingPrompts() })
+  })
+
+  /** Approve or deny a pending prompt in any session. */
+  router.post('/api/orchestrator/sessions/:id/respond', (req, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const sessionId = req.params.id
+    const { requestId, value } = req.body
+    if (!value) {
+      return res.status(400).json({ error: 'Missing required field: value (e.g. "allow", "deny", or answer text)' })
+    }
+
+    const session = sessions.get(sessionId)
+    if (!session) return res.status(404).json({ error: 'Session not found' })
+
+    // Verify there's actually a pending prompt (optionally for the specific requestId)
+    const hasPending = requestId
+      ? (session.pendingToolApprovals.has(requestId) || session.pendingControlRequests.has(requestId))
+      : (session.pendingToolApprovals.size > 0 || session.pendingControlRequests.size > 0)
+
+    if (!hasPending) {
+      return res.status(409).json({ error: 'No pending prompt to respond to' })
+    }
+
+    sessions.sendPromptResponse(sessionId, value, requestId)
+    res.json({ ok: true })
+  })
+
+  // -------------------------------------------------------------------------
   // Session cleanup
   // -------------------------------------------------------------------------
 

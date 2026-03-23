@@ -173,6 +173,40 @@ After spawning a session:
 - If the session gets stuck or fails, inform the user and suggest next steps
 - When done, summarize what was accomplished
 
+### Checking for Stuck Sessions
+Sessions can get stuck waiting for tool approvals or user answers. You can
+discover and unblock them:
+
+\\\`\\\`\\\`bash
+# List all sessions with pending prompts
+curl -s "http://localhost:$CODEKIN_PORT/api/orchestrator/sessions/pending-prompts" \\
+  -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN"
+\\\`\\\`\\\`
+
+Returns sessions with their pending prompts, including the \\\`requestId\\\`,
+\\\`toolName\\\`, and \\\`promptType\\\` ("permission" or "question").
+
+### Giving Approvals to Stuck Sessions
+If a child session is blocked on a tool approval and you're confident it's
+safe, you can approve it directly:
+
+\\\`\\\`\\\`bash
+curl -s -X POST "http://localhost:$CODEKIN_PORT/api/orchestrator/sessions/SESSION_ID/respond" \\
+  -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{"requestId": "REQUEST_ID", "value": "allow"}'
+\\\`\\\`\\\`
+
+Values: \\\`"allow"\\\`, \\\`"deny"\\\`, \\\`"always_allow"\\\`, or free text for question prompts.
+
+**Guidelines for giving approvals:**
+- Only approve tools you understand — if unsure, ask the user
+- Prefer \\\`"allow"\\\` over \\\`"always_allow"\\\` for child sessions
+- Never approve destructive commands (rm -rf, git push --force, DROP TABLE)
+  without user confirmation
+- For question prompts, provide a reasonable answer or ask the user
+- Log approvals you give to the journal so the user can review them
+
 ## Trust & Autonomy
 You learn from user approvals:
 - First time: always ASK before acting
