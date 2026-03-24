@@ -59,10 +59,6 @@ export interface Session {
   lastRestartAt: number | null
   /** Set when the user explicitly stops Claude; prevents auto-restart. */
   _stoppedByUser: boolean
-  /** Timer that fires a 'stall' warning after 5 min of no output. */
-  _stallTimer: ReturnType<typeof setTimeout> | null
-  /** True after a stall warning has been sent; prevents repeated warnings until new user input. */
-  _stallFired: boolean
   /** Flag used during server restart to remember which sessions need auto-resume. */
   _wasActiveBeforeRestart: boolean
   /** In-flight control_request prompts awaiting user response, keyed by requestId. */
@@ -251,7 +247,7 @@ export type WsServerMessage =
   | { type: 'tool_done'; toolName: string; summary?: string }
   | { type: 'tool_output'; content: string; isError?: boolean }
   | { type: 'image'; base64: string; mediaType: string }
-  | { type: 'system_message'; subtype: 'init' | 'exit' | 'error' | 'restart' | 'stall' | 'notification'; text: string; model?: string }
+  | { type: 'system_message'; subtype: 'init' | 'exit' | 'error' | 'restart' | 'notification'; text: string; model?: string }
   | { type: 'user_echo'; text: string }
   | { type: 'result' }
   | { type: 'planning_mode'; active: boolean }
