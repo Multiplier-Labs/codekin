@@ -1336,7 +1336,7 @@ describe('SessionManager', () => {
   })
 
   describe('shutdown()', () => {
-    it('stops all alive claude processes and clears stall timers', () => {
+    it('stops all alive claude processes', () => {
       const s1 = sm.create('a', '/tmp/a')
       const s2 = sm.create('b', '/tmp/b')
       const cp1 = fakeClaudeProcess(true)
@@ -1359,93 +1359,6 @@ describe('SessionManager', () => {
       sm.shutdown()
       // persistToDisk should have been called (writeFileSync invoked)
       expect(mockedWriteFileSync.mock.calls.length).toBeGreaterThan(callsBefore)
-    })
-  })
-
-  describe('stall timer', () => {
-    beforeEach(() => {
-      vi.useFakeTimers()
-    })
-
-    afterEach(() => {
-      vi.useRealTimers()
-    })
-
-    it('resetStallTimer fires stall message after 5 minutes', () => {
-      const s = sm.create('test', '/tmp')
-      const cp = fakeClaudeProcess(true)
-      s.claudeProcess = cp
-
-      const ws = fakeWs()
-      sm.join(s.id, ws)
-
-      // Call private resetStallTimer
-      ;(sm as any).resetStallTimer(s)
-
-      // Advance time to just before 5 minutes — no message yet
-      vi.advanceTimersByTime(4 * 60 * 1000)
-      expect(ws.send).not.toHaveBeenCalled()
-
-      // Advance past 5 minutes
-      vi.advanceTimersByTime(2 * 60 * 1000)
-
-      expect(ws.send).toHaveBeenCalled()
-      const sentData = JSON.parse(ws.send.mock.calls[0][0])
-      expect(sentData.type).toBe('system_message')
-      expect(sentData.subtype).toBe('stall')
-      expect(sentData.text).toContain('No output for 5 minutes')
-    })
-
-    it('resetStallTimer does not fire if claude is not alive', () => {
-      const s = sm.create('test', '/tmp')
-      const cp = fakeClaudeProcess(false) // not alive
-      s.claudeProcess = cp
-
-      const ws = fakeWs()
-      sm.join(s.id, ws)
-
-      ;(sm as any).resetStallTimer(s)
-
-      vi.advanceTimersByTime(6 * 60 * 1000)
-
-      // Should not broadcast because isAlive() returns false
-      expect(ws.send).not.toHaveBeenCalled()
-    })
-
-    it('clearStallTimer prevents stall message', () => {
-      const s = sm.create('test', '/tmp')
-      const cp = fakeClaudeProcess(true)
-      s.claudeProcess = cp
-
-      const ws = fakeWs()
-      sm.join(s.id, ws)
-
-      ;(sm as any).resetStallTimer(s)
-      ;(sm as any).clearStallTimer(s)
-
-      vi.advanceTimersByTime(10 * 60 * 1000)
-
-      expect(ws.send).not.toHaveBeenCalled()
-      expect(s._stallTimer).toBeNull()
-    })
-
-    it('resetStallTimer replaces existing timer', () => {
-      const s = sm.create('test', '/tmp')
-      const cp = fakeClaudeProcess(true)
-      s.claudeProcess = cp
-
-      const ws = fakeWs()
-      sm.join(s.id, ws)
-
-      ;(sm as any).resetStallTimer(s)
-      // Reset again — should clear previous timer
-      ;(sm as any).resetStallTimer(s)
-
-      // Advance 5 minutes — only one stall message, not two
-      vi.advanceTimersByTime(6 * 60 * 1000)
-
-      // Only one call, not two
-      expect(ws.send).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -1549,17 +1462,6 @@ describe('SessionManager', () => {
       expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow')
     })
 
-    it('stopClaude clears stall timer', () => {
-      const s = sm.create('test', '/tmp')
-      const cp = fakeClaudeProcess(true)
-      s.claudeProcess = cp
-      // Set a fake stall timer
-      s._stallTimer = setTimeout(() => {}, 10000)
-
-      sm.stopClaude(s.id)
-
-      expect(s._stallTimer).toBeNull()
-    })
   })
 
   describe('rename()', () => {

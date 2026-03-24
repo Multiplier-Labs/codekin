@@ -41,8 +41,6 @@ const execFileAsync = promisify(execFile)
 
 /** Max messages retained in a session's output history buffer. */
 const MAX_HISTORY = 2000
-/** No-output duration before emitting a stall warning (5 minutes). */
-const STALL_TIMEOUT_MS = 5 * 60 * 1000
 /** Max API error retries per turn before giving up. */
 const MAX_API_RETRIES = 3
 /** Base delay for API error retry (doubles each attempt: 3s, 6s, 12s). */
@@ -174,8 +172,6 @@ export class SessionManager {
       restartCount: 0,
       lastRestartAt: null,
       _stoppedByUser: false,
-      _stallTimer: null,
-      _stallFired: false,
       _wasActiveBeforeRestart: false,
       _apiRetryCount: 0,
       _turnCount: 0,
@@ -572,7 +568,6 @@ export class SessionManager {
 
     // Prevent auto-restart when deleting
     session._stoppedByUser = true
-    this.clearStallTimer(session)
     if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
     if (session._namingTimer) clearTimeout(session._namingTimer)
     if (session._leaveGraceTimer) clearTimeout(session._leaveGraceTimer)
@@ -697,7 +692,6 @@ export class SessionManager {
 
     cp.start()
     session.claudeProcess = cp
-    this.resetStallTimer(session)
     this._globalBroadcast?.({ type: 'sessions_updated' })
 
     const startMsg: WsServerMessage = { type: 'claude_started', sessionId }
@@ -722,7 +716,7 @@ export class SessionManager {
     cp.on('todo_update', (tasks) => { this.broadcastAndHistory(session, { type: 'todo_update', tasks }) })
     cp.on('prompt', (...args) => this.onPromptEvent(session, ...args))
     cp.on('control_request', (requestId, toolName, toolInput) => this.onControlRequestEvent(cp, session, sessionId, requestId, toolName, toolInput))
-    cp.on('result', (result, isError) => { this.resetStallTimer(session); this.handleClaudeResult(session, sessionId, result, isError) })
+    cp.on('result', (result, isError) => { this.handleClaudeResult(session, sessionId, result, isError) })
     cp.on('error', (message) => this.broadcast(session, { type: 'error', message }))
     cp.on('exit', (code, signal) => { cp.removeAllListeners(); this.handleClaudeExit(session, sessionId, code, signal) })
   }
@@ -743,7 +737,6 @@ export class SessionManager {
   }
 
   private onTextEvent(session: Session, sessionId: string, text: string): void {
-    this.resetStallTimer(session)
     this.broadcastAndHistory(session, { type: 'output', data: text })
     if (session.name.startsWith('hub:') && !session._namingTimer) {
       this.scheduleSessionNaming(sessionId)
@@ -751,27 +744,22 @@ export class SessionManager {
   }
 
   private onThinkingEvent(session: Session, summary: string): void {
-    this.resetStallTimer(session)
     this.broadcast(session, { type: 'thinking', summary })
   }
 
   private onToolOutputEvent(session: Session, content: string, isError: boolean): void {
-    this.resetStallTimer(session)
     this.broadcastAndHistory(session, { type: 'tool_output', content, isError })
   }
 
   private onImageEvent(session: Session, base64: string, mediaType: string): void {
-    this.resetStallTimer(session)
     this.broadcastAndHistory(session, { type: 'image', base64, mediaType })
   }
 
   private onToolActiveEvent(session: Session, toolName: string, toolInput: string | undefined): void {
-    this.resetStallTimer(session)
     this.broadcastAndHistory(session, { type: 'tool_active', toolName, toolInput })
   }
 
   private onToolDoneEvent(session: Session, toolName: string, summary: string | undefined): void {
-    this.resetStallTimer(session)
     this.broadcastAndHistory(session, { type: 'tool_done', toolName, summary })
   }
 
@@ -972,7 +960,6 @@ export class SessionManager {
   private handleClaudeExit(session: Session, sessionId: string, code: number | null, signal: string | null): void {
     session.claudeProcess = null
     session.isProcessing = false
-    this.clearStallTimer(session)
     this._globalBroadcast?.({ type: 'sessions_updated' })
 
     const action = evaluateRestart({
@@ -1053,9 +1040,6 @@ export class SessionManager {
   sendInput(sessionId: string, data: string): void {
     const session = this.sessions.get(sessionId)
     if (!session) return
-
-    // New user input clears the stall-fired flag so the timer can warn again
-    session._stallFired = false
 
     if (!session.claudeProcess?.isAlive()) {
       // Claude not running (e.g. after server restart) — auto-start first.
@@ -1535,7 +1519,6 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (session?.claudeProcess) {
       session._stoppedByUser = true
-      this.clearStallTimer(session)
       if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
       session.claudeProcess.removeAllListeners()
       session.claudeProcess.stop()
@@ -1555,7 +1538,6 @@ export class SessionManager {
 
     const cp = session.claudeProcess
     session._stoppedByUser = true
-    this.clearStallTimer(session)
     if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
     cp.removeAllListeners()
     cp.stop()
@@ -1668,31 +1650,6 @@ export class SessionManager {
     return `[This session was interrupted by a server restart. Here is the previous conversation for context:]\n${context}\n[End of previous context. The user's new message follows.]`
   }
 
-  private resetStallTimer(session: Session): void {
-    this.clearStallTimer(session)
-    // Don't re-arm after we've already warned — wait for new user input
-    if (session._stallFired) return
-    session._stallTimer = setTimeout(() => {
-      session._stallTimer = null
-      if (!session.claudeProcess?.isAlive()) return
-      session._stallFired = true
-      const msg: WsServerMessage = {
-        type: 'system_message',
-        subtype: 'stall',
-        text: 'No output for 5 minutes. The process may be stalled.',
-      }
-      this.addToHistory(session, msg)
-      this.broadcast(session, msg)
-    }, STALL_TIMEOUT_MS)
-  }
-
-  private clearStallTimer(session: Session): void {
-    if (session._stallTimer) {
-      clearTimeout(session._stallTimer)
-      session._stallTimer = null
-    }
-  }
-
   /**
    * Append a message to a session's output history for replay.
    * Merges consecutive 'output' chunks into a single entry to save space.
@@ -1795,7 +1752,6 @@ export class SessionManager {
           session.claudeProcess!.stop()
         }))
       }
-      this.clearStallTimer(session)
     }
 
     this.archive.shutdown()
