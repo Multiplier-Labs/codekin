@@ -36,6 +36,8 @@ interface Props {
   isMobile?: boolean
   /** Visual variant — 'orchestrator' uses accent colors for assistant messages and indicators. */
   variant?: ChatViewVariant
+  /** Agent display name for the orchestrator welcome screen. */
+  agentName?: string
 }
 
 /** Try to parse an API error JSON from a system error message and return structured parts. */
@@ -368,31 +370,31 @@ function PlanningModeMessage({ msg }: { msg: ChatMessage & { type: 'planning_mod
   )
 }
 
-function OrchestratorWelcome() {
+function OrchestratorWelcome({ agentName }: { agentName?: string }) {
+  const name = agentName ?? 'Joe'
   return (
-    <div className="flex flex-1 items-center justify-center px-6">
-      <div className="max-w-md text-center">
-        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent-9/40">
-          <IconRobotFace size={28} className="text-accent-5" />
+    <div className="flex flex-1 flex-col items-center justify-end pb-8 px-6">
+      <div className="max-w-lg w-full">
+        <div className="mb-6 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent-9/40">
+            <IconRobotFace size={22} className="text-accent-5" />
+          </div>
+          <div>
+            <h2 className="text-[17px] font-semibold text-neutral-2 leading-tight">Agent {name}</h2>
+            <p className="text-[13px] text-neutral-5">Your AI ops manager</p>
+          </div>
         </div>
-        <h2 className="mb-2 text-[18px] font-semibold text-neutral-2">Orchestrator</h2>
-        <p className="mb-5 text-[15px] leading-relaxed text-neutral-4">
-          Your AI ops manager for triaging reports, spawning implementation sessions,
-          and keeping your repositories healthy.
-        </p>
-        <div className="mx-auto grid max-w-sm gap-2 text-left text-[14px]">
-          <div className="flex items-start gap-2.5 rounded-lg bg-neutral-10/60 px-3 py-2">
-            <span className="mt-0.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent-6" />
-            <span className="text-neutral-3">Ask questions about concepts, architecture, or design decisions</span>
-          </div>
-          <div className="flex items-start gap-2.5 rounded-lg bg-neutral-10/60 px-3 py-2">
-            <span className="mt-0.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent-6" />
-            <span className="text-neutral-3">Brainstorm ideas, draft plans, or think through tradeoffs</span>
-          </div>
-          <div className="flex items-start gap-2.5 rounded-lg bg-neutral-10/60 px-3 py-2">
-            <span className="mt-0.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent-6" />
-            <span className="text-neutral-3">Write or review prose — docs, emails, specs, messages</span>
-          </div>
+        <div className="grid gap-2 text-[14px]">
+          {[
+            'Triage repo health reports and prioritize fixes',
+            'Spawn implementation sessions for issues or tasks',
+            'Review code, plan refactors, or investigate bugs',
+          ].map((text) => (
+            <div key={text} className="flex items-center gap-3 rounded-lg border border-neutral-10 px-3.5 py-2.5 text-neutral-4 transition-colors hover:border-neutral-8 hover:text-neutral-3">
+              <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent-6" />
+              <span>{text}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -444,7 +446,7 @@ function ActivityIndicator({ label, variant = 'default' }: { label: string; vari
   )
 }
 
-export function ChatView({ messages, fontSize, disabled, planningMode, activityLabel, isMobile, variant = 'default' }: Props) {
+export function ChatView({ messages, fontSize, disabled, planningMode, activityLabel, isMobile, variant = 'default', agentName }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
   const isNearBottomRef = useRef(true)
@@ -490,7 +492,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
         onScroll={checkScroll}
       >
         {variant === 'orchestrator' && messages.length === 0 && !activityLabel ? (
-          <OrchestratorWelcome />
+          <OrchestratorWelcome agentName={agentName} />
         ) : (
         <div className="flex flex-col py-2">
           {(() => {
