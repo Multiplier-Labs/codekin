@@ -322,6 +322,27 @@ describe('handleStreamEvent (via handleLine)', () => {
     expect(events).toEqual([['planning_mode', false]])
   })
 
+  it('ExitPlanMode deny-with-approval-message emits planning_mode false', () => {
+    // The hook uses deny-with-message pattern: is_error=true but content signals approval
+    cp.handleLine(JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_start',
+        content_block: { type: 'tool_use', id: 'toolu_exit_deny_approve', name: 'ExitPlanMode' },
+      },
+    }))
+    expect(events).toEqual([])
+
+    // Deny-with-message: is_error=true but content contains "[ExitPlanMode]" + "approved"
+    cp.handleLine(JSON.stringify({
+      type: 'user',
+      message: {
+        content: [{ type: 'tool_result', tool_use_id: 'toolu_exit_deny_approve', content: '[ExitPlanMode] The user approved exiting plan mode via the UI. Plan mode has been exited successfully. Proceed with implementation.', is_error: true }],
+      },
+    }))
+    expect(events).toEqual([['planning_mode', false]])
+  })
+
   it('ExitPlanMode denied does not emit planning_mode false', () => {
     cp.handleLine(JSON.stringify({
       type: 'stream_event',

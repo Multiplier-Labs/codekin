@@ -103,6 +103,41 @@ createHook({
       }
     }
 
+    // ExitPlanMode: same requiresUserInteraction() issue as AskUserQuestion —
+    // the CLI ignores the hook's permissionDecision:'allow' and always returns
+    // "Exit plan mode?" as an error. Use the deny-with-message workaround:
+    // prompt the user via UI, then DENY with a message that tells Claude the
+    // plan was approved, so it can proceed with implementation.
+    if (input.tool_name === 'ExitPlanMode') {
+      const hubSessionId = ctx.env.hubSessionId;
+      if (!hubSessionId) return; // No hub session — let CLI handle natively
+
+      try {
+        const decision = await transport.requestDecision({
+          event: 'PreToolUse',
+          sessionId: hubSessionId,
+          toolName: 'ExitPlanMode',
+          toolInput: input.tool_input,
+        });
+
+        if (!decision?.allow) {
+          return denyWithNotification(ctx, 'ExitPlanMode', input.tool_input, 'User denied exiting plan mode');
+        }
+
+        // User approved — deny with a formatted message so Claude knows to proceed.
+        // The "deny" is only because the CLI ignores hook 'allow' for this tool.
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: '[ExitPlanMode] The user approved exiting plan mode via the UI. Plan mode has been exited successfully. Proceed with implementation.',
+          },
+        };
+      } catch (err) {
+        return denyWithNotification(ctx, 'ExitPlanMode', input.tool_input, `Server error: ${err.message}`);
+      }
+    }
+
     // File-read tools: auto-allow for in-project paths, prompt for outside
     if (input.tool_name === 'Read') {
       const filePath = input.tool_input?.file_path;
