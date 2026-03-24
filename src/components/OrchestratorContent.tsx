@@ -91,6 +91,7 @@ export function OrchestratorContent({
               activityLabel={activityLabel}
               isMobile={isMobile}
               variant="orchestrator"
+              agentName={agentName}
             />
             <TodoPanel tasks={tasks} />
           </div>
