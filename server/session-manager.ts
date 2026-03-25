@@ -26,6 +26,7 @@ import path from 'path'
 import { promisify } from 'util'
 import type { WebSocket } from 'ws'
 import { ClaudeProcess } from './claude-process.js'
+import { PlanManager } from './plan-manager.js'
 import { SessionArchive } from './session-archive.js'
 import type { DiffFileStatus, DiffScope, PromptQuestion, Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
 import { cleanupWorkspace } from './webhook-workspace.js'
@@ -110,6 +111,10 @@ export class SessionManager {
       rename: (sessionId, newName) => this.rename(sessionId, newName),
     })
     this.sessionPersistence.restoreFromDisk()
+    // Wire PlanManager events for restored sessions
+    for (const session of this.sessions.values()) {
+      this.wirePlanManager(session)
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -180,7 +185,9 @@ export class SessionManager {
       pendingControlRequests: new Map(),
       pendingToolApprovals: new Map(),
       _leaveGraceTimer: null,
+      planManager: new PlanManager(),
     }
+    this.wirePlanManager(session)
     this.sessions.set(id, session)
     this.persistToDisk()
     this._globalBroadcast?.({ type: 'sessions_updated' })
@@ -712,11 +719,24 @@ export class SessionManager {
     cp.on('image', (base64Data, mediaType) => this.onImageEvent(session, base64Data, mediaType))
     cp.on('tool_active', (toolName, toolInput) => this.onToolActiveEvent(session, toolName, toolInput))
     cp.on('tool_done', (toolName, summary) => this.onToolDoneEvent(session, toolName, summary))
-    cp.on('planning_mode', (active) => { this.broadcastAndHistory(session, { type: 'planning_mode', active }) })
+    cp.on('planning_mode', (active) => {
+      // Route through PlanManager state machine instead of broadcasting directly.
+      // EnterPlanMode (active=true) → PlanManager emits planning_mode:true
+      // ExitPlanMode (active=false) → PlanManager transitions to 'reviewing' and
+      //   shows an approval prompt; planning_mode:false is emitted only after user approves.
+      if (active) {
+        session.planManager.onEnterPlanMode()
+      } else {
+        session.planManager.onExitPlanModeRequested()
+      }
+    })
     cp.on('todo_update', (tasks) => { this.broadcastAndHistory(session, { type: 'todo_update', tasks }) })
     cp.on('prompt', (...args) => this.onPromptEvent(session, ...args))
     cp.on('control_request', (requestId, toolName, toolInput) => this.onControlRequestEvent(cp, session, sessionId, requestId, toolName, toolInput))
-    cp.on('result', (result, isError) => { this.handleClaudeResult(session, sessionId, result, isError) })
+    cp.on('result', (result, isError) => {
+      session.planManager.onTurnEnd()
+      this.handleClaudeResult(session, sessionId, result, isError)
+    })
     cp.on('error', (message) => this.broadcast(session, { type: 'error', message }))
     cp.on('exit', (code, signal) => { cp.removeAllListeners(); this.handleClaudeExit(session, sessionId, code, signal) })
   }
@@ -725,6 +745,39 @@ export class SessionManager {
   private broadcastAndHistory(session: Session, msg: WsServerMessage): void {
     this.addToHistory(session, msg)
     this.broadcast(session, msg)
+  }
+
+  /**
+   * Wire PlanManager events for a session.
+   * Called once at session creation (not per-process, since PlanManager outlives restarts).
+   */
+  private wirePlanManager(session: Session): void {
+    const pm = session.planManager
+
+    pm.on('planning_mode', (active) => {
+      this.broadcastAndHistory(session, { type: 'planning_mode', active })
+    })
+
+    pm.on('plan_review', () => {
+      // Show approval prompt to the user.
+      // Uses the prompt system with a dedicated requestId prefix so
+      // sendPromptResponse can route it back to the PlanManager.
+      const requestId = `plan_review_${session.id}`
+      this.broadcast(session, {
+        type: 'prompt',
+        promptType: 'permission',
+        question: 'Approve plan and start implementation?',
+        options: [
+          { label: 'Approve', value: 'allow' },
+          { label: 'Reject', value: 'deny' },
+        ],
+        requestId,
+      })
+    })
+
+    pm.on('send_message', (message) => {
+      session.claudeProcess?.sendMessage(message)
+    })
   }
 
   private onSystemInit(cp: ClaudeProcess, session: Session, model: string): void {
@@ -960,6 +1013,7 @@ export class SessionManager {
   private handleClaudeExit(session: Session, sessionId: string, code: number | null, signal: string | null): void {
     session.claudeProcess = null
     session.isProcessing = false
+    session.planManager.reset()
     this._globalBroadcast?.({ type: 'sessions_updated' })
 
     const action = evaluateRestart({
@@ -1093,6 +1147,18 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return
 
+    // Plan review responses are routed to PlanManager (not the hook/control_request system)
+    if (requestId?.startsWith('plan_review_')) {
+      this.broadcast(session, { type: 'prompt_dismiss', requestId })
+      const first = Array.isArray(value) ? value[0] : value
+      if (first === 'deny') {
+        session.planManager.deny()
+      } else {
+        session.planManager.approve()
+      }
+      return
+    }
+
     // Check for pending tool approval from PreToolUse hook
     if (!requestId) {
       const totalPending = session.pendingToolApprovals.size + session.pendingControlRequests.size
@@ -1192,13 +1258,6 @@ export class SessionManager {
     approval.resolve({ allow: !isDeny, always: isAlwaysAllow || isApprovePattern })
     session.pendingToolApprovals.delete(approval.requestId)
     this.broadcast(session, { type: 'prompt_dismiss', requestId: approval.requestId })
-
-    // When ExitPlanMode is approved via the PreToolUse hook, immediately clear
-    // pending state and emit planning_mode:false. The control_request path may
-    // never arrive (or arrive as is_error=true), so this ensures plan mode exits.
-    if (approval.toolName === 'ExitPlanMode' && !isDeny) {
-      session.claudeProcess?.clearPendingExitPlanMode()
-    }
   }
 
   /**
@@ -1323,7 +1382,7 @@ export class SessionManager {
           this.broadcast(session, { type: 'prompt_dismiss', requestId: approvalRequestId })
           resolve({ allow: false, always: false })
         }
-      }, isQuestion || toolName === 'ExitPlanMode' ? 300_000 : (session.source === 'agent' ? 300_000 : 60_000)) // 5 min for questions, plan exit & agent children, 1 min for interactive
+      }, isQuestion ? 300_000 : (session.source === 'agent' ? 300_000 : 60_000)) // 5 min for questions & agent children, 1 min for interactive
 
       let promptMsg: WsServerMessage
       if (isQuestion) {
@@ -1457,8 +1516,6 @@ export class SessionManager {
         const filePath = String(toolInput.file_path || '')
         return `Allow Read? \`${filePath}\``
       }
-      case 'ExitPlanMode':
-        return 'Approve plan and start implementation?'
       default:
         return `Allow ${toolName}?`
     }

@@ -301,8 +301,9 @@ describe('handleStreamEvent (via handleLine)', () => {
     expect(events).toEqual([['planning_mode', true]])
   })
 
-  it('ExitPlanMode defers planning_mode false until tool_result', () => {
-    // content_block_start should NOT immediately emit planning_mode false
+  it('ExitPlanMode emits planning_mode false immediately on content_block_start', () => {
+    // With PlanManager architecture, ClaudeProcess emits planning_mode:false
+    // immediately — PlanManager handles the approval gate.
     cp.handleLine(JSON.stringify({
       type: 'stream_event',
       event: {
@@ -310,98 +311,15 @@ describe('handleStreamEvent (via handleLine)', () => {
         content_block: { type: 'tool_use', id: 'toolu_exit1', name: 'ExitPlanMode' },
       },
     }))
-    expect(events).toEqual([])
-
-    // Successful tool_result should emit planning_mode false
-    cp.handleLine(JSON.stringify({
-      type: 'user',
-      message: {
-        content: [{ type: 'tool_result', tool_use_id: 'toolu_exit1', content: '', is_error: false }],
-      },
-    }))
     expect(events).toEqual([['planning_mode', false]])
   })
 
-  it('ExitPlanMode deny-with-approval-message emits planning_mode false', () => {
-    // The hook uses deny-with-message pattern: is_error=true but content signals approval
-    cp.handleLine(JSON.stringify({
-      type: 'stream_event',
-      event: {
-        type: 'content_block_start',
-        content_block: { type: 'tool_use', id: 'toolu_exit_deny_approve', name: 'ExitPlanMode' },
-      },
-    }))
-    expect(events).toEqual([])
-
-    // Deny-with-message: is_error=true but content contains "[ExitPlanMode]" + "approved"
-    cp.handleLine(JSON.stringify({
-      type: 'user',
-      message: {
-        content: [{ type: 'tool_result', tool_use_id: 'toolu_exit_deny_approve', content: '[ExitPlanMode] The user approved exiting plan mode via the UI. Plan mode has been exited successfully. Proceed with implementation.', is_error: true }],
-      },
-    }))
-    expect(events).toEqual([['planning_mode', false]])
-  })
-
-  it('ExitPlanMode denied does not emit planning_mode false', () => {
-    cp.handleLine(JSON.stringify({
-      type: 'stream_event',
-      event: {
-        type: 'content_block_start',
-        content_block: { type: 'tool_use', id: 'toolu_exit2', name: 'ExitPlanMode' },
-      },
-    }))
-    expect(events).toEqual([])
-
-    // Error tool_result (denied by hook) should NOT emit planning_mode false
-    cp.handleLine(JSON.stringify({
-      type: 'user',
-      message: {
-        content: [{ type: 'tool_result', tool_use_id: 'toolu_exit2', content: 'Denied by user', is_error: true }],
-      },
-    }))
-    expect(events).toEqual([])
-
-    // Result event should clear the flag without emitting planning_mode:false
-    // (plan mode stays active because the exit was denied)
-    cp.handleLine(JSON.stringify({
-      type: 'result',
-      result: 'Plan mode exit was denied',
-      is_error: true,
-    }))
-    const planEvents = events.filter(e => e[0] === 'planning_mode')
-    expect(planEvents).toEqual([])
-  })
-
-  it('ExitPlanMode with no tool_result emits planning_mode false on result (control tool)', () => {
-    // ExitPlanMode is a control tool that may not produce a tool_result.
-    // If approved (no denial seen), the result handler should emit planning_mode:false.
-    cp.handleLine(JSON.stringify({
-      type: 'stream_event',
-      event: {
-        type: 'content_block_start',
-        content_block: { type: 'tool_use', id: 'toolu_exit3', name: 'ExitPlanMode' },
-      },
-    }))
-    expect(events).toEqual([])
-
-    // Result arrives without a matching tool_result — tool was approved but
-    // no tool_result was emitted (normal for control tools).
-    cp.handleLine(JSON.stringify({
-      type: 'result',
-      result: '',
-      is_error: false,
-    }))
-    const planEvents = events.filter(e => e[0] === 'planning_mode')
-    expect(planEvents).toEqual([['planning_mode', false]])
-  })
-
-  it('ExitPlanMode via control_request emits planning_mode false', () => {
-    const { cp: cpWithStdin } = makeCPWithStdin()
+  it('ExitPlanMode via control_request auto-approves', () => {
+    const { cp: cpWithStdin, stdinData } = makeCPWithStdin()
     const ctrlEvents: Array<[string, boolean]> = []
     cpWithStdin.on('planning_mode', (active: boolean) => ctrlEvents.push(['planning_mode', active]))
 
-    // content_block_start sets pendingExitPlanModeId
+    // content_block_start emits planning_mode:false immediately
     cpWithStdin.handleLine(JSON.stringify({
       type: 'stream_event',
       event: {
@@ -409,63 +327,20 @@ describe('handleStreamEvent (via handleLine)', () => {
         content_block: { type: 'tool_use', id: 'toolu_exit_ctrl', name: 'ExitPlanMode' },
       },
     }))
+    expect(ctrlEvents).toEqual([['planning_mode', false]])
 
-    // control_request for ExitPlanMode should auto-approve AND emit planning_mode:false
+    // control_request for ExitPlanMode should be auto-approved
     cpWithStdin.handleLine(JSON.stringify({
       type: 'control_request',
       request_id: 'req_exit1',
       request: { type: 'tool', tool_name: 'ExitPlanMode', input: {} },
     }))
 
-    expect(ctrlEvents).toEqual([['planning_mode', false]])
-  })
-
-  it('clearPendingExitPlanMode() emits planning_mode false and prevents stale state', () => {
-    const { cp: cpWithStdin } = makeCPWithStdin()
-    const planEvents: Array<[string, boolean]> = []
-    cpWithStdin.on('planning_mode', (active: boolean) => planEvents.push(['planning_mode', active]))
-
-    // content_block_start sets pendingExitPlanModeId
-    cpWithStdin.handleLine(JSON.stringify({
-      type: 'stream_event',
-      event: {
-        type: 'content_block_start',
-        content_block: { type: 'tool_use', id: 'toolu_exit_clear', name: 'ExitPlanMode' },
-      },
-    }))
-
-    // Simulate PreToolUse hook approval calling clearPendingExitPlanMode
-    cpWithStdin.clearPendingExitPlanMode()
-    expect(planEvents).toEqual([['planning_mode', false]])
-
-    // Second call is a no-op (idempotent)
-    cpWithStdin.clearPendingExitPlanMode()
-    expect(planEvents).toEqual([['planning_mode', false]])
-
-    // Subsequent tool_result with is_error should not re-emit or break state
-    cpWithStdin.handleLine(JSON.stringify({
-      type: 'stream_event',
-      event: {
-        type: 'content_block_delta',
-        delta: { type: 'input_json_delta', partial_json: '{}' },
-      },
-    }))
-    cpWithStdin.handleLine(JSON.stringify({
-      type: 'stream_event',
-      event: { type: 'content_block_stop' },
-    }))
-    cpWithStdin.handleLine(JSON.stringify({
-      type: 'stream_event',
-      event: {
-        type: 'tool_result',
-        tool_use_id: 'toolu_exit_clear',
-        content: 'Exit plan mode?',
-        is_error: true,
-      },
-    }))
-
-    // No additional planning_mode events emitted
-    expect(planEvents).toEqual([['planning_mode', false]])
+    // Should have sent an allow control_response
+    expect(stdinData.length).toBe(1)
+    const response = JSON.parse(stdinData[0])
+    expect(response.type).toBe('control_response')
+    expect(response.response.response.behavior).toBe('allow')
   })
 
   it('malformed JSON in tool input emits graceful tool_done', () => {

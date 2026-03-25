@@ -25,9 +25,12 @@ export class ApprovalManager {
   /**
    * Tools that must NEVER be auto-approved — they always require explicit
    * user confirmation regardless of saved registry rules.
+   * Note: ExitPlanMode was previously here but is now handled by PlanManager
+   * at the Codekin layer (conversational approval), not the permission layer.
    */
-  static readonly NEVER_AUTO_APPROVE_TOOLS = new Set([
-    'ExitPlanMode', // Plan approval is a deliberate user decision
+  static readonly NEVER_AUTO_APPROVE_TOOLS = new Set<string>([
+    // Currently empty — all plan mode gating is in PlanManager.
+    // Kept as a set for future use (e.g. destructive tools).
   ])
 
   /** Repo-level auto-approval store, keyed by workingDir (repo path). */

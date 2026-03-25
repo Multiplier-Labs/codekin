@@ -279,11 +279,10 @@ describe('ApprovalManager', () => {
   // ─── 11. NEVER_AUTO_APPROVE_TOOLS ───────────────────────────────────
 
   describe('NEVER_AUTO_APPROVE_TOOLS', () => {
-    it('saveAlwaysAllow skips tools in the never-auto-approve list', () => {
-      mgr.saveAlwaysAllow('/repo/a', 'ExitPlanMode', {})
-      const approvals = mgr.getApprovals('/repo/a')
-      expect(approvals.tools).not.toContain('ExitPlanMode')
-      expect(approvals.tools).toHaveLength(0)
+    it('set is empty (plan mode gating moved to PlanManager)', () => {
+      // NEVER_AUTO_APPROVE_TOOLS was historically used for ExitPlanMode.
+      // Now empty — plan approval is handled by PlanManager at the Codekin layer.
+      expect(ApprovalManager.NEVER_AUTO_APPROVE_TOOLS.size).toBe(0)
     })
   })
 

@@ -8,6 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { DATA_DIR } from './config.js'
+import { PlanManager } from './plan-manager.js'
 import type { Session, WsServerMessage } from './types.js'
 
 const SESSIONS_FILE = join(DATA_DIR, 'sessions.json')
@@ -112,6 +113,7 @@ export class SessionPersistence {
           isProcessing: false,
           pendingControlRequests: new Map(),
           pendingToolApprovals: new Map(),
+          planManager: new PlanManager(),
         }
         this.sessions.set(session.id, session)
       }

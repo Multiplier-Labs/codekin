@@ -8,6 +8,7 @@
 
 import type { WebSocket } from 'ws'
 import type { ClaudeProcess } from './claude-process.js'
+import type { PlanManager } from './plan-manager.js'
 
 /**
  * Permission modes supported by the Claude CLI `--permission-mode` flag.
@@ -83,6 +84,8 @@ export interface Session {
   _apiRetryTimer?: ReturnType<typeof setTimeout>
   /** Grace period timer before auto-denying prompts after last client leaves. */
   _leaveGraceTimer?: ReturnType<typeof setTimeout> | null
+  /** Plan mode state machine — owns the enter/review/approve lifecycle. */
+  planManager: PlanManager
 }
 
 /** Serializable session info returned by the REST API (no process refs or Sets). */
