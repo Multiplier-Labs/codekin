@@ -409,12 +409,6 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       // plus the full questions array for the multi-question flow
       const first = structuredQuestions[0]
       this.emit('prompt', 'question', first.question, first.options, first.multiSelect, undefined, toolInput, request_id, structuredQuestions)
-    } else if (toolName === 'ExitPlanMode') {
-      // Auto-approve the control_request — plan approval is now handled
-      // at the Codekin layer (PlanManager) via conversational messages,
-      // not at the CLI permission layer.
-      console.log(`[control_request] auto-approving ExitPlanMode (PlanManager handles approval)`)
-      this.sendControlResponse(request_id, 'allow')
     } else if (ClaudeProcess.AUTO_APPROVE_TOOLS.has(toolName)) {
       // Known-safe tools: auto-approve without prompting
       console.log(`[control_request] auto-approving safe tool: ${toolName}`)

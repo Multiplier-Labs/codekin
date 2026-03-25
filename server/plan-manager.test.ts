@@ -10,6 +10,7 @@ describe('PlanManager', () => {
 
   it('starts in idle state', () => {
     expect(pm.state).toBe('idle')
+    expect(pm.pendingReviewId).toBeNull()
   })
 
   describe('onEnterPlanMode', () => {
@@ -36,97 +37,119 @@ describe('PlanManager', () => {
   })
 
   describe('onExitPlanModeRequested', () => {
-    it('transitions planning → reviewing and emits plan_review', () => {
+    it('transitions planning → reviewing and returns a review ID', () => {
       pm.onEnterPlanMode()
-      const reviewEvents: unknown[] = []
-      pm.on('plan_review', () => reviewEvents.push('review'))
 
-      pm.onExitPlanModeRequested()
+      const reviewId = pm.onExitPlanModeRequested()
 
       expect(pm.state).toBe('reviewing')
-      expect(reviewEvents).toEqual(['review'])
+      expect(reviewId).toBeTruthy()
+      expect(pm.pendingReviewId).toBe(reviewId)
     })
 
-    it('does nothing when idle (no prior EnterPlanMode)', () => {
-      const reviewEvents: unknown[] = []
-      pm.on('plan_review', () => reviewEvents.push('review'))
-
-      pm.onExitPlanModeRequested()
+    it('returns null when idle (no prior EnterPlanMode)', () => {
+      const reviewId = pm.onExitPlanModeRequested()
 
       expect(pm.state).toBe('idle')
-      expect(reviewEvents).toEqual([])
+      expect(reviewId).toBeNull()
+    })
+
+    it('generates unique review IDs per request', () => {
+      pm.onEnterPlanMode()
+      const id1 = pm.onExitPlanModeRequested()
+      pm.deny(id1!) // back to planning
+
+      const id2 = pm.onExitPlanModeRequested()
+      expect(id1).not.toBe(id2)
     })
   })
 
   describe('approve', () => {
-    it('transitions reviewing → idle, emits planning_mode:false and send_message', () => {
+    it('transitions reviewing → idle and emits planning_mode:false', () => {
       pm.onEnterPlanMode()
-      pm.onExitPlanModeRequested()
+      const reviewId = pm.onExitPlanModeRequested()
 
       const modeEvents: boolean[] = []
-      const messages: string[] = []
       pm.on('planning_mode', (active) => modeEvents.push(active))
-      pm.on('send_message', (msg) => messages.push(msg))
 
-      pm.approve()
+      const result = pm.approve(reviewId!)
 
+      expect(result).toBe(true)
       expect(pm.state).toBe('idle')
+      expect(pm.pendingReviewId).toBeNull()
       expect(modeEvents).toEqual([false])
-      expect(messages).toEqual(['Plan approved. Proceed with implementation.'])
+    })
+
+    it('rejects stale review IDs', () => {
+      pm.onEnterPlanMode()
+      const id1 = pm.onExitPlanModeRequested()
+      pm.deny(id1!) // back to planning
+      const id2 = pm.onExitPlanModeRequested()
+
+      // Try to approve with the old ID
+      const result = pm.approve(id1!)
+      expect(result).toBe(false)
+      expect(pm.state).toBe('reviewing') // unchanged
+
+      // Approve with the correct ID
+      expect(pm.approve(id2!)).toBe(true)
+      expect(pm.state).toBe('idle')
     })
 
     it('does nothing when not reviewing', () => {
       const modeEvents: boolean[] = []
       pm.on('planning_mode', (active) => modeEvents.push(active))
 
-      pm.approve()
+      const result = pm.approve()
 
+      expect(result).toBe(false)
       expect(pm.state).toBe('idle')
       expect(modeEvents).toEqual([])
     })
   })
 
   describe('deny', () => {
-    it('transitions reviewing → planning and emits send_message', () => {
+    it('transitions reviewing → planning and returns rejection message', () => {
       pm.onEnterPlanMode()
-      pm.onExitPlanModeRequested()
+      const reviewId = pm.onExitPlanModeRequested()
 
-      const messages: string[] = []
-      pm.on('send_message', (msg) => messages.push(msg))
-
-      pm.deny()
+      const msg = pm.deny(reviewId!)
 
       expect(pm.state).toBe('planning')
-      expect(messages).toEqual(['Plan rejected. Please revise the plan and try again.'])
+      expect(pm.pendingReviewId).toBeNull()
+      expect(msg).toBe('Plan rejected. Please revise the plan and try again.')
     })
 
     it('includes user feedback in rejection message', () => {
       pm.onEnterPlanMode()
-      pm.onExitPlanModeRequested()
+      const reviewId = pm.onExitPlanModeRequested()
 
-      const messages: string[] = []
-      pm.on('send_message', (msg) => messages.push(msg))
+      const msg = pm.deny(reviewId!, 'Need more error handling')
 
-      pm.deny('Need more error handling')
-
-      expect(messages).toEqual(['Plan rejected. Please revise: Need more error handling'])
+      expect(msg).toBe('Plan rejected. Please revise: Need more error handling')
     })
 
-    it('does nothing when not reviewing', () => {
+    it('returns null when not reviewing', () => {
       pm.onEnterPlanMode()
 
-      const messages: string[] = []
-      pm.on('send_message', (msg) => messages.push(msg))
-
-      pm.deny()
+      const msg = pm.deny()
 
       expect(pm.state).toBe('planning')
-      expect(messages).toEqual([])
+      expect(msg).toBeNull()
+    })
+
+    it('rejects stale review IDs', () => {
+      pm.onEnterPlanMode()
+      pm.onExitPlanModeRequested()
+
+      const msg = pm.deny('wrong-id')
+      expect(msg).toBeNull()
+      expect(pm.state).toBe('reviewing') // unchanged
     })
   })
 
   describe('onTurnEnd', () => {
-    it('resets reviewing → idle with planning_mode:false (safety net)', () => {
+    it('auto-denies reviewing → planning (never auto-approves)', () => {
       pm.onEnterPlanMode()
       pm.onExitPlanModeRequested()
 
@@ -135,8 +158,10 @@ describe('PlanManager', () => {
 
       pm.onTurnEnd()
 
-      expect(pm.state).toBe('idle')
-      expect(modeEvents).toEqual([false])
+      // Should return to planning, NOT idle — never silently approve
+      expect(pm.state).toBe('planning')
+      expect(pm.pendingReviewId).toBeNull()
+      expect(modeEvents).toEqual([]) // no planning_mode:false — still in plan mode
     })
 
     it('does not change planning state on turn end', () => {
@@ -185,6 +210,7 @@ describe('PlanManager', () => {
       pm.reset()
 
       expect(pm.state).toBe('idle')
+      expect(pm.pendingReviewId).toBeNull()
       expect(modeEvents).toEqual([false])
     })
 
@@ -202,21 +228,18 @@ describe('PlanManager', () => {
   describe('full lifecycle', () => {
     it('enter → exit request → approve → back to idle', () => {
       const allModeEvents: boolean[] = []
-      const allMessages: string[] = []
       pm.on('planning_mode', (active) => allModeEvents.push(active))
-      pm.on('send_message', (msg) => allMessages.push(msg))
 
       pm.onEnterPlanMode()
       expect(pm.state).toBe('planning')
 
-      pm.onExitPlanModeRequested()
+      const reviewId = pm.onExitPlanModeRequested()
       expect(pm.state).toBe('reviewing')
 
-      pm.approve()
+      pm.approve(reviewId!)
       expect(pm.state).toBe('idle')
 
       expect(allModeEvents).toEqual([true, false])
-      expect(allMessages).toEqual(['Plan approved. Proceed with implementation.'])
     })
 
     it('enter → exit request → deny → still planning → exit request → approve', () => {
@@ -224,12 +247,12 @@ describe('PlanManager', () => {
       pm.on('planning_mode', (active) => allModeEvents.push(active))
 
       pm.onEnterPlanMode()
-      pm.onExitPlanModeRequested()
-      pm.deny()
+      const id1 = pm.onExitPlanModeRequested()
+      pm.deny(id1!)
       expect(pm.state).toBe('planning')
 
-      pm.onExitPlanModeRequested()
-      pm.approve()
+      const id2 = pm.onExitPlanModeRequested()
+      pm.approve(id2!)
       expect(pm.state).toBe('idle')
 
       expect(allModeEvents).toEqual([true, false])

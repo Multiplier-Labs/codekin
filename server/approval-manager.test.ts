@@ -279,10 +279,10 @@ describe('ApprovalManager', () => {
   // ─── 11. NEVER_AUTO_APPROVE_TOOLS ───────────────────────────────────
 
   describe('NEVER_AUTO_APPROVE_TOOLS', () => {
-    it('set is empty (plan mode gating moved to PlanManager)', () => {
-      // NEVER_AUTO_APPROVE_TOOLS was historically used for ExitPlanMode.
-      // Now empty — plan approval is handled by PlanManager at the Codekin layer.
-      expect(ApprovalManager.NEVER_AUTO_APPROVE_TOOLS.size).toBe(0)
+    it('does not contain ExitPlanMode (gated via PlanManager + hook)', () => {
+      // ExitPlanMode approval is handled by PlanManager via the PreToolUse hook,
+      // not by the auto-approval blocklist.
+      expect(ApprovalManager.NEVER_AUTO_APPROVE_TOOLS.has('ExitPlanMode')).toBe(false)
     })
   })
 
