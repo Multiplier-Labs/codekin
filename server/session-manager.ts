@@ -720,15 +720,14 @@ export class SessionManager {
     cp.on('tool_active', (toolName, toolInput) => this.onToolActiveEvent(session, toolName, toolInput))
     cp.on('tool_done', (toolName, summary) => this.onToolDoneEvent(session, toolName, summary))
     cp.on('planning_mode', (active) => {
-      // Route through PlanManager state machine instead of broadcasting directly.
-      // EnterPlanMode (active=true) → PlanManager emits planning_mode:true
-      // ExitPlanMode (active=false) → PlanManager transitions to 'reviewing' and
-      //   shows an approval prompt; planning_mode:false is emitted only after user approves.
+      // Route EnterPlanMode through PlanManager for UI state tracking.
+      // ExitPlanMode (active=false) is ignored here — the PreToolUse hook
+      // is the enforcement gate, and it calls handleExitPlanModeApproval()
+      // which transitions PlanManager to 'reviewing'.
       if (active) {
         session.planManager.onEnterPlanMode()
-      } else {
-        session.planManager.onExitPlanModeRequested()
       }
+      // ExitPlanMode stream event intentionally ignored — hook handles it.
     })
     cp.on('todo_update', (tasks) => { this.broadcastAndHistory(session, { type: 'todo_update', tasks }) })
     cp.on('prompt', (...args) => this.onPromptEvent(session, ...args))
@@ -750,33 +749,16 @@ export class SessionManager {
   /**
    * Wire PlanManager events for a session.
    * Called once at session creation (not per-process, since PlanManager outlives restarts).
+   * Idempotent — guards against double-wiring on restore + restart.
    */
   private wirePlanManager(session: Session): void {
+    if (session._planManagerWired) return
+    session._planManagerWired = true
+
     const pm = session.planManager
 
     pm.on('planning_mode', (active) => {
       this.broadcastAndHistory(session, { type: 'planning_mode', active })
-    })
-
-    pm.on('plan_review', () => {
-      // Show approval prompt to the user.
-      // Uses the prompt system with a dedicated requestId prefix so
-      // sendPromptResponse can route it back to the PlanManager.
-      const requestId = `plan_review_${session.id}`
-      this.broadcast(session, {
-        type: 'prompt',
-        promptType: 'permission',
-        question: 'Approve plan and start implementation?',
-        options: [
-          { label: 'Approve', value: 'allow' },
-          { label: 'Reject', value: 'deny' },
-        ],
-        requestId,
-      })
-    })
-
-    pm.on('send_message', (message) => {
-      session.claudeProcess?.sendMessage(message)
     })
   }
 
@@ -1147,17 +1129,8 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return
 
-    // Plan review responses are routed to PlanManager (not the hook/control_request system)
-    if (requestId?.startsWith('plan_review_')) {
-      this.broadcast(session, { type: 'prompt_dismiss', requestId })
-      const first = Array.isArray(value) ? value[0] : value
-      if (first === 'deny') {
-        session.planManager.deny()
-      } else {
-        session.planManager.approve()
-      }
-      return
-    }
+    // ExitPlanMode approvals are handled through the normal pendingToolApprovals
+    // path (routed via the PreToolUse hook). No special plan_review_ prefix needed.
 
     // Check for pending tool approval from PreToolUse hook
     if (!requestId) {
@@ -1240,6 +1213,27 @@ export class SessionManager {
       const answer = Array.isArray(value) ? value.join(', ') : value
       console.log(`[tool-approval] resolving AskUserQuestion: answer=${answer.slice(0, 100)}`)
       approval.resolve({ allow: true, always: false, answer })
+      session.pendingToolApprovals.delete(approval.requestId)
+      this.broadcast(session, { type: 'prompt_dismiss', requestId: approval.requestId })
+      return
+    }
+
+    // ExitPlanMode: route through PlanManager for state tracking.
+    // The hook will convert allow→deny-with-approval-message (CLI workaround).
+    if (approval.toolName === 'ExitPlanMode') {
+      const first = Array.isArray(value) ? value[0] : value
+      const isDeny = first === 'deny'
+      if (isDeny) {
+        // Extract feedback text if present (value may be ['deny', 'feedback text'])
+        const feedback = Array.isArray(value) && value.length > 1 ? value[1] : undefined
+        const reason = session.planManager.deny(approval.requestId, feedback)
+        console.log(`[plan-approval] denied: ${reason}`)
+        approval.resolve({ allow: false, always: false })
+      } else {
+        session.planManager.approve(approval.requestId)
+        console.log(`[plan-approval] approved`)
+        approval.resolve({ allow: true, always: false })
+      }
       session.pendingToolApprovals.delete(approval.requestId)
       this.broadcast(session, { type: 'prompt_dismiss', requestId: approval.requestId })
       return
@@ -1342,6 +1336,12 @@ export class SessionManager {
     }
 
     console.log(`[tool-approval] requesting approval: session=${sessionId} tool=${toolName} clients=${session.clients.size}`)
+
+    // ExitPlanMode: route through PlanManager state machine for plan-specific
+    // approval UI. The hook blocks until we resolve the promise.
+    if (toolName === 'ExitPlanMode') {
+      return this.handleExitPlanModeApproval(session, sessionId)
+    }
 
     // Prevent double-gating: if a control_request already created a pending
     // entry for this tool, auto-approve the control_request and let the hook
@@ -1453,6 +1453,71 @@ export class SessionManager {
       // Notify prompt listeners (orchestrator, child monitor, etc.)
       for (const listener of this._promptListeners) {
         try { listener(sessionId, isQuestion ? 'question' : 'permission', toolName, approvalRequestId) } catch { /* listener error */ }
+      }
+    })
+  }
+
+  /**
+   * Handle ExitPlanMode approval through PlanManager.
+   * Shows a plan-specific approval prompt (Approve/Reject) and blocks the hook
+   * until the user responds. On approve, returns allow:true (the hook will use
+   * the deny-with-approval-message workaround). On deny, returns allow:false.
+   */
+  private handleExitPlanModeApproval(session: Session, sessionId: string): Promise<{ allow: boolean; always: boolean; answer?: string }> {
+    const reviewId = session.planManager.onExitPlanModeRequested()
+    if (!reviewId) {
+      // Not in planning state — fall through to allow (CLI handles natively)
+      console.log(`[plan-approval] ExitPlanMode but PlanManager not in planning state, allowing`)
+      return Promise.resolve({ allow: true, always: false })
+    }
+
+    return new Promise<{ allow: boolean; always: boolean; answer?: string }>((resolve) => {
+      const timer: { id: ReturnType<typeof setTimeout> | null } = { id: null }
+
+      const wrappedResolve = (result: { allow: boolean; always: boolean; answer?: string }) => {
+        if (timer.id) clearTimeout(timer.id)
+        resolve(result)
+      }
+
+      // Timeout: auto-deny after 5 minutes to prevent leaked promises
+      timer.id = setTimeout(() => {
+        if (session.pendingToolApprovals.has(reviewId)) {
+          console.log(`[plan-approval] timed out, auto-denying`)
+          session.pendingToolApprovals.delete(reviewId)
+          session.planManager.deny(reviewId)
+          this.broadcast(session, { type: 'prompt_dismiss', requestId: reviewId })
+          resolve({ allow: false, always: false })
+        }
+      }, 300_000)
+
+      const promptMsg: WsServerMessage = {
+        type: 'prompt',
+        promptType: 'permission',
+        question: 'Approve plan and start implementation?',
+        options: [
+          { label: 'Approve', value: 'allow' },
+          { label: 'Reject', value: 'deny' },
+        ],
+        toolName: 'ExitPlanMode',
+        requestId: reviewId,
+      }
+
+      session.pendingToolApprovals.set(reviewId, {
+        resolve: wrappedResolve,
+        toolName: 'ExitPlanMode',
+        toolInput: {},
+        requestId: reviewId,
+        promptMsg,
+      })
+
+      this.broadcast(session, promptMsg)
+
+      if (session.clients.size === 0) {
+        this._globalBroadcast?.({ ...promptMsg, sessionId, sessionName: session.name })
+      }
+
+      for (const listener of this._promptListeners) {
+        try { listener(sessionId, 'permission', 'ExitPlanMode', reviewId) } catch { /* listener error */ }
       }
     })
   }

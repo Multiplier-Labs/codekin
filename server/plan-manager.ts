@@ -9,16 +9,23 @@
  *
  * State transitions:
  *   idle ──EnterPlanMode──► planning
- *   planning ──ExitPlanMode──► reviewing  (user sees approval prompt)
- *   reviewing ──approve──► idle           (sends "plan approved" message)
- *   reviewing ──deny──► planning          (sends "plan rejected" message)
- *   planning ──result (turn end)──► idle  (safety reset if Claude leaves plan mode)
+ *   planning ──ExitPlanMode hook──► reviewing  (user sees approval prompt)
+ *   reviewing ──approve──► idle               (hook returns deny-with-approval-message)
+ *   reviewing ──deny──► planning              (hook returns deny-with-rejection-message)
+ *   planning ──result (turn end)──► idle      (safety reset if plan mode ends naturally)
  *
- * The key insight: approval is gated at the Codekin layer as a conversational
- * turn (user message), not at the CLI permission layer (hook workaround).
- * This avoids fighting the CLI's requiresUserInteraction() guard on ExitPlanMode.
+ * Enforcement architecture:
+ *   The PreToolUse hook is the real gate — it intercepts ExitPlanMode before
+ *   the CLI can execute it. The hook calls requestToolApproval() on the server,
+ *   which delegates to PlanManager. PlanManager transitions to 'reviewing' and
+ *   the server shows an approval prompt. The hook blocks until the user responds.
+ *   On approve: hook returns deny-with-approval-message (CLI workaround for
+ *   requiresUserInteraction). On deny: hook returns deny-with-rejection-message.
+ *   PlanManager never auto-approves — if the turn ends while reviewing, it
+ *   auto-denies and returns to planning state.
  */
 
+import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
 
 export type PlanState = 'idle' | 'planning' | 'reviewing'
@@ -26,17 +33,19 @@ export type PlanState = 'idle' | 'planning' | 'reviewing'
 export interface PlanManagerEvents {
   /** Emitted when plan mode state changes. The UI should show/hide the plan mode indicator. */
   planning_mode: [active: boolean]
-  /** Emitted when the user needs to approve/reject the plan exit. */
-  plan_review: []
-  /** Emitted when a message should be sent to Claude (approve/deny feedback). */
-  send_message: [message: string]
 }
 
 export class PlanManager extends EventEmitter<PlanManagerEvents> {
   private _state: PlanState = 'idle'
+  /** Current pending review request ID (unique per ExitPlanMode attempt). */
+  private _pendingReviewId: string | null = null
 
   get state(): PlanState {
     return this._state
+  }
+
+  get pendingReviewId(): string | null {
+    return this._pendingReviewId
   }
 
   /**
@@ -53,61 +62,60 @@ export class PlanManager extends EventEmitter<PlanManagerEvents> {
   }
 
   /**
-   * Called when Claude invokes ExitPlanMode (content_block_start detected).
-   * Transitions planning → reviewing.
-   * The caller should show an approval prompt to the user.
+   * Called when the ExitPlanMode hook request arrives at the server.
+   * Transitions planning → reviewing and returns the review request ID.
+   * Returns null if not in planning state (caller should fall through).
    */
-  onExitPlanModeRequested(): void {
+  onExitPlanModeRequested(): string | null {
     if (this._state !== 'planning') {
-      // Not in planning mode — nothing to review.
-      // Could happen if ExitPlanMode fires without a prior EnterPlanMode.
-      return
+      return null
     }
     this._state = 'reviewing'
-    this.emit('plan_review')
+    this._pendingReviewId = randomUUID()
+    return this._pendingReviewId
   }
 
   /**
    * Called when the user approves the plan.
-   * Transitions reviewing → idle, emits planning_mode:false,
-   * and sends an approval message to Claude.
+   * Transitions reviewing → idle and emits planning_mode:false.
+   * Returns true if the approval was valid (state was reviewing with matching ID).
    */
-  approve(): void {
-    if (this._state !== 'reviewing') return
+  approve(reviewId?: string): boolean {
+    if (this._state !== 'reviewing') return false
+    if (reviewId && reviewId !== this._pendingReviewId) return false
     this._state = 'idle'
+    this._pendingReviewId = null
     this.emit('planning_mode', false)
-    this.emit('send_message', 'Plan approved. Proceed with implementation.')
+    return true
   }
 
   /**
    * Called when the user denies (rejects) the plan.
-   * Transitions reviewing → planning and sends a rejection message to Claude.
+   * Transitions reviewing → planning.
+   * Returns the rejection message to send back via the hook.
    */
-  deny(feedback?: string): void {
-    if (this._state !== 'reviewing') return
+  deny(reviewId?: string, feedback?: string): string | null {
+    if (this._state !== 'reviewing') return null
+    if (reviewId && reviewId !== this._pendingReviewId) return null
     this._state = 'planning'
-    const msg = feedback
+    this._pendingReviewId = null
+    return feedback
       ? `Plan rejected. Please revise: ${feedback}`
       : 'Plan rejected. Please revise the plan and try again.'
-    this.emit('send_message', msg)
   }
 
   /**
    * Called when a turn ends (result event).
-   * Safety reset: if we're still in 'reviewing' at turn end, it means
-   * the ExitPlanMode tool completed without our gate catching it properly.
-   * Reset to idle.
-   *
-   * If we're in 'planning' at turn end, stay in planning — Claude may
-   * still be iterating on the plan across multiple turns.
+   * If we're still in 'reviewing' at turn end, auto-deny — never auto-approve.
+   * The hook may have timed out or the CLI may have handled ExitPlanMode
+   * through a non-hook path. Stay safe: return to planning.
    */
   onTurnEnd(): void {
     if (this._state === 'reviewing') {
-      // ExitPlanMode completed but we never got user approval through our gate.
-      // This can happen if the CLI auto-handled ExitPlanMode.
-      // Reset to idle — the CLI has already exited plan mode.
-      this._state = 'idle'
-      this.emit('planning_mode', false)
+      // Auto-deny: return to planning, don't silently approve
+      this._state = 'planning'
+      this._pendingReviewId = null
+      // Don't emit planning_mode:false — we're still in plan mode
     }
   }
 
@@ -118,6 +126,7 @@ export class PlanManager extends EventEmitter<PlanManagerEvents> {
   reset(): void {
     if (this._state !== 'idle') {
       this._state = 'idle'
+      this._pendingReviewId = null
       this.emit('planning_mode', false)
     }
   }

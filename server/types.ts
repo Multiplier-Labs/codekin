@@ -86,6 +86,8 @@ export interface Session {
   _leaveGraceTimer?: ReturnType<typeof setTimeout> | null
   /** Plan mode state machine — owns the enter/review/approve lifecycle. */
   planManager: PlanManager
+  /** Guard to prevent double-wiring PlanManager event listeners. */
+  _planManagerWired?: boolean
 }
 
 /** Serializable session info returned by the REST API (no process refs or Sets). */

@@ -301,9 +301,9 @@ describe('handleStreamEvent (via handleLine)', () => {
     expect(events).toEqual([['planning_mode', true]])
   })
 
-  it('ExitPlanMode emits planning_mode false immediately on content_block_start', () => {
-    // With PlanManager architecture, ClaudeProcess emits planning_mode:false
-    // immediately — PlanManager handles the approval gate.
+  it('ExitPlanMode emits planning_mode false on content_block_start', () => {
+    // ClaudeProcess emits planning_mode:false — SessionManager's PlanManager
+    // intercepts this and transitions to 'reviewing' instead of broadcasting directly.
     cp.handleLine(JSON.stringify({
       type: 'stream_event',
       event: {
@@ -314,33 +314,23 @@ describe('handleStreamEvent (via handleLine)', () => {
     expect(events).toEqual([['planning_mode', false]])
   })
 
-  it('ExitPlanMode via control_request auto-approves', () => {
+  it('ExitPlanMode via control_request is forwarded (not auto-approved)', () => {
     const { cp: cpWithStdin, stdinData } = makeCPWithStdin()
-    const ctrlEvents: Array<[string, boolean]> = []
-    cpWithStdin.on('planning_mode', (active: boolean) => ctrlEvents.push(['planning_mode', active]))
+    const ctrlEvents: Array<[string, string, Record<string, unknown>]> = []
+    cpWithStdin.on('control_request', (reqId: string, tool: string, input: Record<string, unknown>) =>
+      ctrlEvents.push([reqId, tool, input]))
 
-    // content_block_start emits planning_mode:false immediately
-    cpWithStdin.handleLine(JSON.stringify({
-      type: 'stream_event',
-      event: {
-        type: 'content_block_start',
-        content_block: { type: 'tool_use', id: 'toolu_exit_ctrl', name: 'ExitPlanMode' },
-      },
-    }))
-    expect(ctrlEvents).toEqual([['planning_mode', false]])
-
-    // control_request for ExitPlanMode should be auto-approved
+    // control_request for ExitPlanMode should be forwarded to session manager
     cpWithStdin.handleLine(JSON.stringify({
       type: 'control_request',
       request_id: 'req_exit1',
       request: { type: 'tool', tool_name: 'ExitPlanMode', input: {} },
     }))
 
-    // Should have sent an allow control_response
-    expect(stdinData.length).toBe(1)
-    const response = JSON.parse(stdinData[0])
-    expect(response.type).toBe('control_response')
-    expect(response.response.response.behavior).toBe('allow')
+    // Should NOT have auto-approved (no stdin response)
+    expect(stdinData.length).toBe(0)
+    // Should have emitted control_request for session manager to handle
+    expect(ctrlEvents).toEqual([['req_exit1', 'ExitPlanMode', {}]])
   })
 
   it('malformed JSON in tool input emits graceful tool_done', () => {
