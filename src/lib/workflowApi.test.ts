@@ -1,3 +1,4 @@
+/** Tests for workflowApi — verifies workflow run and schedule REST client functions with mocked global fetch. */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 const mockFetch = vi.fn()

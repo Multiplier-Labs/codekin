@@ -1,3 +1,4 @@
+/** Tests for deriveActivityLabel — verifies activity status label derivation from chat message state with no mocks. */
 import { describe, it, expect } from 'vitest'
 import { deriveActivityLabel } from './deriveActivityLabel'
 import type { ChatMessage } from '../types'

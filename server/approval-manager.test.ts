@@ -1,3 +1,4 @@
+/** Tests for ApprovalManager — verifies cross-repo inference, per-repo approval tracking, and Bash pattern matching; mocks fs to avoid disk I/O. */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 vi.mock('fs', async (importOriginal) => {

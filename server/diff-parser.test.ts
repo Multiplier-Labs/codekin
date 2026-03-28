@@ -1,3 +1,4 @@
+/** Tests for diff-parser — verifies parsing of unified git diffs into structured file/hunk objects, including added, deleted, renamed, and truncated cases. */
 import { describe, it, expect } from 'vitest'
 import { parseDiff, createUntrackedFileDiff } from './diff-parser.js'
 

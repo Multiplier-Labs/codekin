@@ -81,16 +81,17 @@ export function buildCron(hour: number, dow: string, minute = 0): string {
 
 /** Parse a 5-field cron expression into hour, minute, and day-of-week components. Falls back to 6:00 AM daily. */
 export function parseCron(expr: string): { hour: number; minute: number; dow: string } {
+  // Standard 5-field cron: minute hour dom month dow
   const parts = expr.trim().split(/\s+/)
   if (parts.length === 5) {
-    const biweekly = parts[2] === '*/14'
-    const dow = biweekly
-      ? (parts[4] === '*' ? 'biweekly' : `biweekly-${parts[4]}`)
-      : parts[4]
+    const [min, hour, dom, , dow] = parts
+    const biweekly = dom === '*/14'
     return {
-      hour: parseInt(parts[1]) || 0,
-      minute: parseInt(parts[0]) || 0,
-      dow,
+      hour: parseInt(hour) || 0,
+      minute: parseInt(min) || 0,
+      dow: biweekly
+        ? (dow === '*' ? 'biweekly' : `biweekly-${dow}`)
+        : dow,
     }
   }
   return { hour: 6, minute: 0, dow: '*' }
@@ -186,12 +187,12 @@ export function repoNameFromRun(run: WorkflowRun): string {
 /** Return Tailwind CSS classes for a status badge background and text color. */
 export function statusBadge(status: string): string {
   switch (status) {
-    case 'succeeded': return 'bg-success-7 text-success-2'
-    case 'failed':    return 'bg-error-8 text-error-2'
-    case 'running':   return 'bg-accent-8 text-accent-2 animate-pulse'
-    case 'queued':    return 'bg-neutral-8 text-neutral-3'
-    case 'canceled':  return 'bg-warning-8 text-warning-2'
-    case 'skipped':   return 'bg-neutral-8 text-neutral-5'
+    case 'succeeded': return 'bg-success-7 text-success-2'    // green — completed OK
+    case 'failed':    return 'bg-error-8 text-error-2'        // red — errored out
+    case 'running':   return 'bg-accent-8 text-accent-2 animate-pulse' // blue pulsing — in progress
+    case 'queued':    return 'bg-neutral-8 text-neutral-3'    // grey — waiting to start
+    case 'canceled':  return 'bg-warning-8 text-warning-2'    // yellow — user-canceled
+    case 'skipped':   return 'bg-neutral-8 text-neutral-5'    // dim grey — skipped (e.g. duplicate)
     default:          return 'bg-neutral-8 text-neutral-3'
   }
 }

@@ -1,3 +1,4 @@
+/** Tests for buildPrompt (webhook-prompt) — verifies that FailureContext fields are rendered into the correct prompt sections. */
 import { describe, it, expect } from 'vitest'
 import { buildPrompt } from './webhook-prompt.js'
 import type { FailureContext } from './webhook-types.js'

@@ -1,3 +1,4 @@
+/** Tests for crypto-utils — verifies HMAC session-token derivation/verification and secret-redaction logic; no mocks (pure crypto operations). */
 import { describe, it, expect } from 'vitest'
 import {
   redactSecrets,

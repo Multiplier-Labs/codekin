@@ -1,3 +1,4 @@
+/** Tests for workflowHelpers — verifies cron building/parsing, label formatting, and scheduling utilities with no mocks. */
 import { describe, it, expect } from 'vitest'
 import {
   buildCron,

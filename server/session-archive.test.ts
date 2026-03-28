@@ -1,3 +1,4 @@
+/** Tests for SessionArchive — verifies SQLite-backed session persistence, retrieval, listing, and pruning using an in-memory ':memory:' database. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { SessionArchive } from './session-archive.js'
 

@@ -1,3 +1,4 @@
+/** Tests for workflow-loader — verifies skill discovery, validation, and loading from disk; mocks child_process, fs, config, and better-sqlite3. */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 

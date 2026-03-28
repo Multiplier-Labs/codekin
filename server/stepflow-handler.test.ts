@@ -1,3 +1,4 @@
+/** Tests for StepflowHandler — verifies webhook ingestion, HMAC validation, session lifecycle, and config loading; mocks crypto-utils, stepflow-prompt, and webhook-workspace. */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 

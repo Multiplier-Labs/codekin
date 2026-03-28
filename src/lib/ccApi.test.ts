@@ -1,3 +1,4 @@
+/** Tests for ccApi — verifies all REST API client functions with mocked global fetch. */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   verifyToken,

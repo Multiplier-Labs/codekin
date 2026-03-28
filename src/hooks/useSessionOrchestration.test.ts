@@ -1,3 +1,4 @@
+/** Tests for useSessionOrchestration — verifies the groupKey helper for session grouping by repo directory with no mocks. */
 import { describe, it, expect } from 'vitest'
 import { groupKey } from './useSessionOrchestration'
 import type { Session } from '../types'

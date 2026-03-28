@@ -83,6 +83,7 @@ export interface WorkflowKindInfo {
 // Kinds
 // ---------------------------------------------------------------------------
 
+/** List available workflow kinds. Optionally filter by repo to include repo-specific kinds. */
 export async function listKinds(
   token: string,
   repoPath?: string,
@@ -100,6 +101,7 @@ export async function listKinds(
 // Runs
 // ---------------------------------------------------------------------------
 
+/** Fetch workflow runs, optionally filtered by kind/status with pagination. */
 export async function listRuns(
   token: string,
   opts?: { kind?: string; status?: RunStatus; limit?: number; offset?: number }
@@ -117,6 +119,7 @@ export async function listRuns(
   return data.runs
 }
 
+/** Fetch a single run with its step details. */
 export async function getRun(token: string, runId: string): Promise<WorkflowRunWithSteps> {
   const res = await fetch(`${BASE}/runs/${runId}`, { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to get run: ${res.status}`)
@@ -124,6 +127,7 @@ export async function getRun(token: string, runId: string): Promise<WorkflowRunW
   return data.run
 }
 
+/** Manually trigger a new workflow run. Returns the created run. */
 export async function triggerRun(
   token: string,
   kind: string,
@@ -139,6 +143,7 @@ export async function triggerRun(
   return data.run
 }
 
+/** Cancel a running or queued workflow run. */
 export async function cancelRun(token: string, runId: string): Promise<void> {
   const res = await fetch(`${BASE}/runs/${runId}/cancel`, {
     method: 'POST',
@@ -151,6 +156,7 @@ export async function cancelRun(token: string, runId: string): Promise<void> {
 // Schedules
 // ---------------------------------------------------------------------------
 
+/** Fetch all cron schedules. */
 export async function listSchedules(token: string): Promise<CronSchedule[]> {
   const res = await fetch(`${BASE}/schedules`, { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to list schedules: ${res.status}`)
@@ -158,6 +164,7 @@ export async function listSchedules(token: string): Promise<CronSchedule[]> {
   return data.schedules
 }
 
+/** Manually trigger a scheduled workflow, creating a new run. */
 export async function triggerSchedule(token: string, id: string): Promise<WorkflowRun> {
   const res = await fetch(`${BASE}/schedules/${id}/trigger`, {
     method: 'POST',
@@ -172,6 +179,7 @@ export async function triggerSchedule(token: string, id: string): Promise<Workfl
 // Config
 // ---------------------------------------------------------------------------
 
+/** Fetch the current workflow configuration (repo list and settings). */
 export async function getConfig(token: string): Promise<WorkflowConfig> {
   const res = await fetch(`${BASE}/config`, { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to get config: ${res.status}`)
@@ -179,6 +187,7 @@ export async function getConfig(token: string): Promise<WorkflowConfig> {
   return data.config
 }
 
+/** Add a new repo to the workflow configuration. Returns the updated config. */
 export async function addRepoConfig(
   token: string,
   repo: ReviewRepoConfig
@@ -193,6 +202,7 @@ export async function addRepoConfig(
   return data.config
 }
 
+/** Remove a repo from the workflow configuration. Returns the updated config. */
 export async function removeRepoConfig(token: string, id: string): Promise<WorkflowConfig> {
   const res = await fetch(`${BASE}/config/repos/${id}`, {
     method: 'DELETE',
@@ -203,6 +213,7 @@ export async function removeRepoConfig(token: string, id: string): Promise<Workf
   return data.config
 }
 
+/** Partially update a repo's workflow configuration. Returns the updated config. */
 export async function patchRepoConfig(
   token: string,
   id: string,

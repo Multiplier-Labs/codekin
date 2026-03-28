@@ -1,6 +1,7 @@
+/** Tests for WorkflowEngine — verifies step registration, execution, skipping, and singleton lifecycle; mocks better-sqlite3 and fs. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-// Mock better-sqlite3 with a functional in-memory mock
+// Mock better-sqlite3 to avoid filesystem side-effects and allow tests to run without a real SQLite database.
 const mockRun = vi.fn(() => ({ changes: 1 }))
 const mockGet = vi.fn()
 const mockAll = vi.fn(() => [])

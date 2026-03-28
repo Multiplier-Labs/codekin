@@ -8,6 +8,8 @@ import { IconChevronDown, IconChevronRight, IconCopy, IconTrash, IconFile } from
 import type { DiffFile, DiffFileStatus } from '../../types'
 import { DiffHunkView } from './DiffHunkView'
 
+// Diffs exceeding this many total changed lines start collapsed to keep initial
+// render fast and avoid overwhelming the user with a wall of changes.
 const LARGE_DIFF_THRESHOLD = 300
 
 interface DiffFileCardProps {

@@ -1,3 +1,4 @@
+/** Tests for server config loading — verifies env-var precedence, file-based auth tokens, and defaults; mocks fs and os to control filesystem and home-directory lookups. */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const mockExistsSync = vi.hoisted(() => vi.fn(() => false))

@@ -1,3 +1,4 @@
+/** Tests for ClaudeProcess — verifies tool-input summarization, stdin message queuing, and process lifecycle management. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { ClaudeProcess } from './claude-process.js'
 

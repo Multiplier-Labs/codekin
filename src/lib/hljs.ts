@@ -1,6 +1,12 @@
 /**
  * Shared highlight.js instance with a curated set of language grammars.
  * Used by both ChatView (react-markdown code blocks) and MarkdownRenderer (marked).
+ *
+ * Languages are imported individually (not via highlight.js/lib/common) to keep
+ * the bundle small (~60 KB vs ~300 KB for the full set). The list covers the
+ * languages most frequently seen in Claude responses and user code blocks.
+ * To add a language: import it, register both its canonical name and common
+ * aliases below, and verify the bundle-size delta with `npm run build`.
  */
 
 import hljs from 'highlight.js/lib/core'

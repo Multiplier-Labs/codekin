@@ -1,3 +1,4 @@
+/** Tests for usePromptState — verifies permission prompt queue management and answer dispatch with no mocks. */
 // @vitest-environment jsdom
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
