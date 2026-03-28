@@ -1,3 +1,4 @@
+/** Tests for SessionManager — verifies session creation, listing, termination, and worktree handling; mocks fs, better-sqlite3, and node:child_process to avoid real disk and process side-effects. */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 

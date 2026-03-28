@@ -1,3 +1,4 @@
+/** Tests for useSessions — verifies session list management and CRUD operations with mocked ccApi (listSessions, createSession, deleteSession, renameSession). */
 // @vitest-environment jsdom
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true

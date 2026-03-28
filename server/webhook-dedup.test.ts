@@ -1,3 +1,4 @@
+/** Tests for WebhookDedup and computeIdempotencyKey — verifies SHA-256 key derivation and duplicate detection; mocks fs. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 vi.mock('fs', async (importOriginal) => {

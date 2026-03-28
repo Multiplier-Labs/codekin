@@ -1,3 +1,4 @@
+/** Tests for webhook-github — verifies gh CLI health checks and data-fetching helpers (logs, jobs, annotations, commit message, PR title) via an injectable gh runner mock. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   checkGhHealth,

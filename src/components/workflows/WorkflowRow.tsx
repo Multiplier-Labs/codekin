@@ -1,5 +1,12 @@
 /**
  * WorkflowRow — compact row for a single workflow within a repo group.
+ *
+ * Renders a workflow's kind label, schedule, model badge, last-run status, and
+ * a clickable run-history strip. Action buttons (run, pause/resume, edit, delete)
+ * appear on hover. Expanding the run-history strip shows MiniRunRow details.
+ *
+ * Event-driven workflows (e.g. commit-review) hide the run/pause controls since
+ * they are triggered by hooks rather than cron schedules.
  */
 
 import { useState } from 'react'

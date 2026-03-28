@@ -1,3 +1,4 @@
+/** Tests for workflow-config — verifies load, save, add, remove, and update operations for ReviewRepoConfig; mocks fs. */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 vi.mock('fs', async (importOriginal) => {

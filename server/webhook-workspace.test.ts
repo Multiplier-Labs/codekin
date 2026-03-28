@@ -1,3 +1,4 @@
+/** Tests for createWorkspace and cleanupWorkspace (webhook-workspace) — verifies git clone/checkout logic and directory lifecycle; mocks child_process, fs, and os. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 type ExecFileCallback = (error: Error | null, stdout: string, stderr: string) => void

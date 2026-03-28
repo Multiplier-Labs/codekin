@@ -1,3 +1,4 @@
+/** Tests for WebhookRateLimiter — verifies per-repo request throttling, limit enforcement, and window reset behaviour. */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createWebhookRateLimiter } from './webhook-rate-limiter.js'
 

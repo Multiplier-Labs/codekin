@@ -1,3 +1,4 @@
+/** Tests for useRouter — verifies parsePath URL parsing and hook-based navigation state with mocked window.location and history. */
 // @vitest-environment jsdom
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true

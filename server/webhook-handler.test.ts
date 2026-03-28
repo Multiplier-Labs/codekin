@@ -1,3 +1,4 @@
+/** Tests for WebhookHandler — verifies event routing, signature validation, and session dispatch; mocks webhook-dedup, webhook-github, webhook-prompt, and webhook-workspace. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import crypto from 'crypto'
 

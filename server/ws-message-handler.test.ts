@@ -1,3 +1,4 @@
+/** Tests for handleWsMessage (ws-message-handler) — verifies WebSocket client message routing, session interactions, and server response payloads. */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { handleWsMessage, type WsHandlerContext } from './ws-message-handler.js'
 import type { WsClientMessage, WsServerMessage, Session } from './types.js'

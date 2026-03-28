@@ -8,7 +8,13 @@ export function formatModelName(modelId: string): string {
   return modelId
 }
 
-/** Replace [Attached files: ...] markers with emoji-prefixed file names. */
+/**
+ * Replace [Attached files: ...] markers with emoji-prefixed file names.
+ * Claude CLI emits these markers when files are attached to a prompt.
+ * The regex matches both singular and plural forms, extracts the comma-
+ * separated paths, strips directories to show only basenames, and
+ * prepends a paperclip emoji for a cleaner display in the chat UI.
+ */
 export function formatUserText(text: string): string {
   return text.replace(
     /\[Attached files?: ([^\]]+)\]/g,

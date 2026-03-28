@@ -1,3 +1,4 @@
+/** Tests for PlanManager — verifies the plan-mode state machine transitions (idle → planning → reviewing → idle) and event emissions; no mocks. */
 import { describe, it, expect, beforeEach } from 'vitest'
 import { PlanManager } from './plan-manager.js'
 

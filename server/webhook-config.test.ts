@@ -1,3 +1,4 @@
+/** Tests for loadWebhookConfig — verifies default values, environment variable overrides, and file-based configuration; mocks fs. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 vi.mock('fs', async (importOriginal) => {

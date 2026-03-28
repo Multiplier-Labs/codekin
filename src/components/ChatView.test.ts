@@ -1,3 +1,4 @@
+/** Tests for chatFormatters (ChatView helpers) — verifies formatModelName and formatUserText with no mocks. */
 import { describe, it, expect } from 'vitest'
 import { formatModelName, formatUserText } from '../lib/chatFormatters'
 

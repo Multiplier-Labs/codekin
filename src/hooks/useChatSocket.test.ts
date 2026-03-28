@@ -1,3 +1,4 @@
+/** Tests for useChatSocket — verifies processMessage, rebuildFromHistory, and trimMessages pure functions with no mocks. */
 import { describe, it, expect } from 'vitest'
 import { processMessage, rebuildFromHistory, trimMessages } from './useChatSocket'
 import type { ChatMessage, WsServerMessage } from '../types'
