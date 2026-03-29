@@ -13,6 +13,33 @@ if (!API_KEY) {
 const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-pro";
 const USER_QUERY = process.argv.slice(2).join(" ").trim() || "Validate this change.";
 
+// --- Size management ---
+// ~4 chars per token; 200K chars ≈ 50K tokens, safe for large-context models
+const MAX_PROMPT_CHARS = 200_000;
+const MAX_FILE_CHARS = 30_000; // per-file cap (~500 lines)
+const SKIP_PATTERNS = [
+  /package-lock\.json$/,
+  /yarn\.lock$/,
+  /pnpm-lock\.yaml$/,
+  /\.min\.(js|css)$/,
+  /\/dist\//,
+  /\/node_modules\//,
+  /\.map$/,
+  /\.snap$/,
+];
+
+function shouldSkipFile(filePath) {
+  return SKIP_PATTERNS.some((p) => p.test(filePath));
+}
+
+function truncateContent(content, label) {
+  if (content.length <= MAX_FILE_CHARS) return content;
+  return (
+    content.slice(0, MAX_FILE_CHARS) +
+    `\n... [${label} truncated at ${MAX_FILE_CHARS} chars] ...`
+  );
+}
+
 async function runGit(args) {
   const { spawn } = await import("node:child_process");
   return await new Promise((resolve, reject) => {
@@ -41,6 +68,9 @@ try {
 } catch {
   // ignore
 }
+
+// Truncate diff itself if massive
+diff = truncateContent(diff, "diff");
 
 // Collect changed files
 let changedFiles = [];
@@ -75,12 +105,25 @@ async function readFileContents(filePath) {
   }
 }
 
+// Track cumulative prompt size — start with estimated overhead for template + diff
+let budgetUsed = diff.length + 1000;
+const skippedFiles = [];
+
 let fileContentsSections = "";
 for (const f of changedFiles) {
-  const content = await readFileContents(f);
-  if (content !== null) {
-    fileContentsSections += `\n=== FILE: ${f} ===\n${content}\n=== END: ${f} ===\n`;
+  if (shouldSkipFile(f)) {
+    skippedFiles.push(f);
+    continue;
   }
+  const content = await readFileContents(f);
+  if (content === null) continue;
+  const section = `\n=== FILE: ${f} ===\n${truncateContent(content, f)}\n=== END: ${f} ===\n`;
+  if (budgetUsed + section.length > MAX_PROMPT_CHARS) {
+    skippedFiles.push(f);
+    continue;
+  }
+  budgetUsed += section.length;
+  fileContentsSections += section;
 }
 
 // --- Collect related/imported files for context ---
@@ -110,6 +153,7 @@ const seenRelated = new Set(changedFiles);
 let relatedFilesSections = "";
 
 for (const f of changedFiles) {
+  if (budgetUsed >= MAX_PROMPT_CHARS) break;
   const content = await readFileContents(f);
   if (!content) continue;
   const dir = dirname(resolve(root, f));
@@ -119,12 +163,23 @@ for (const f of changedFiles) {
     const resolved = resolveImport(dir, imp);
     if (!resolved || seenRelated.has(resolved)) continue;
     seenRelated.add(resolved);
+    if (shouldSkipFile(resolved)) continue;
     const relContent = await readFileContents(resolved);
-    if (relContent !== null) {
-      relatedFilesSections += `\n=== RELATED FILE: ${resolved} ===\n${relContent}\n=== END: ${resolved} ===\n`;
+    if (relContent === null) continue;
+    const section = `\n=== RELATED FILE: ${resolved} ===\n${truncateContent(relContent, resolved)}\n=== END: ${resolved} ===\n`;
+    if (budgetUsed + section.length > MAX_PROMPT_CHARS) {
+      skippedFiles.push(resolved);
+      continue;
     }
+    budgetUsed += section.length;
+    relatedFilesSections += section;
   }
 }
+
+const skippedNote =
+  skippedFiles.length > 0
+    ? `\n(${skippedFiles.length} file(s) skipped to stay within context limits: ${skippedFiles.join(", ")})\n`
+    : "";
 
 const prompt = `You are a strict senior engineer reviewing a change.
 Return ONLY valid JSON (no markdown, no code fences).
@@ -135,7 +190,7 @@ ${USER_QUERY}
 Repo context:
 - branch: ${branch}
 - changed_files: ${changedFiles.join(", ")}
-
+${skippedNote}
 == DIFF (summary of what changed) ==
 ${diff}
 
