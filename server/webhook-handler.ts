@@ -165,6 +165,19 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       }
     }
 
+    // --- Actor allowlist filter ---
+    if (this.config.actorAllowlist.length > 0 && !this.config.actorAllowlist.includes(wr.actor.login)) {
+      return {
+        statusCode: 200,
+        body: {
+          accepted: false,
+          eventId,
+          status: 'filtered',
+          filterReason: `Actor '${wr.actor.login}' not in allowlist`,
+        },
+      }
+    }
+
     // --- Deduplication ---
     const idempotencyKey = computeIdempotencyKey(
       payload.repository.full_name,
@@ -381,6 +394,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       enabled: this.config.enabled,
       maxConcurrentSessions: this.config.maxConcurrentSessions,
       logLinesToInclude: this.config.logLinesToInclude,
+      actorAllowlist: this.config.actorAllowlist,
     }
   }
 

@@ -23,6 +23,7 @@ describe('loadWebhookConfig', () => {
     delete process.env.GITHUB_WEBHOOK_MAX_SESSIONS
     delete process.env.GITHUB_WEBHOOK_LOG_LINES
     delete process.env.GITHUB_WEBHOOK_SECRET
+    delete process.env.GITHUB_WEBHOOK_ACTOR_ALLOWLIST
   })
 
   afterEach(() => {
@@ -38,6 +39,7 @@ describe('loadWebhookConfig', () => {
         maxConcurrentSessions: 3,
         logLinesToInclude: 200,
         secret: '',
+        actorAllowlist: [],
       })
     })
   })
@@ -137,6 +139,61 @@ describe('loadWebhookConfig', () => {
     it('GITHUB_WEBHOOK_SECRET is returned', () => {
       process.env.GITHUB_WEBHOOK_SECRET = 'mysecret123'
       expect(loadWebhookConfig().secret).toBe('mysecret123')
+    })
+
+    it('GITHUB_WEBHOOK_ACTOR_ALLOWLIST parses comma-separated usernames', () => {
+      process.env.GITHUB_WEBHOOK_ACTOR_ALLOWLIST = 'alice, bob, charlie'
+      const config = loadWebhookConfig()
+      expect(config.actorAllowlist).toEqual(['alice', 'bob', 'charlie'])
+    })
+
+    it('GITHUB_WEBHOOK_ACTOR_ALLOWLIST handles single user', () => {
+      process.env.GITHUB_WEBHOOK_ACTOR_ALLOWLIST = 'alice'
+      expect(loadWebhookConfig().actorAllowlist).toEqual(['alice'])
+    })
+
+    it('GITHUB_WEBHOOK_ACTOR_ALLOWLIST empty string results in empty array', () => {
+      process.env.GITHUB_WEBHOOK_ACTOR_ALLOWLIST = ''
+      expect(loadWebhookConfig().actorAllowlist).toEqual([])
+    })
+  })
+
+  describe('actorAllowlist from config file', () => {
+    it('loads actorAllowlist from config file', () => {
+      vi.mocked(existsSync).mockReturnValue(true)
+      vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
+        actorAllowlist: ['alice', 'bob'],
+      }))
+
+      expect(loadWebhookConfig().actorAllowlist).toEqual(['alice', 'bob'])
+    })
+
+    it('ignores non-array actorAllowlist', () => {
+      vi.mocked(existsSync).mockReturnValue(true)
+      vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
+        actorAllowlist: 'alice',
+      }))
+
+      expect(loadWebhookConfig().actorAllowlist).toEqual([])
+    })
+
+    it('ignores actorAllowlist with non-string entries', () => {
+      vi.mocked(existsSync).mockReturnValue(true)
+      vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
+        actorAllowlist: ['alice', 123],
+      }))
+
+      expect(loadWebhookConfig().actorAllowlist).toEqual([])
+    })
+
+    it('env var overrides config file actorAllowlist', () => {
+      vi.mocked(existsSync).mockReturnValue(true)
+      vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
+        actorAllowlist: ['alice'],
+      }))
+      process.env.GITHUB_WEBHOOK_ACTOR_ALLOWLIST = 'bob,charlie'
+
+      expect(loadWebhookConfig().actorAllowlist).toEqual(['bob', 'charlie'])
     })
   })
 })

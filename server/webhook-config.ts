@@ -18,6 +18,7 @@ export function loadWebhookConfig(): FullWebhookConfig {
   let enabled = false
   let maxConcurrentSessions = 3
   let logLinesToInclude = 200
+  let actorAllowlist: string[] = []
 
   // Try loading config file
   if (existsSync(CONFIG_FILE)) {
@@ -27,6 +28,9 @@ export function loadWebhookConfig(): FullWebhookConfig {
       if (typeof file.enabled === 'boolean') enabled = file.enabled
       if (typeof file.maxConcurrentSessions === 'number') maxConcurrentSessions = file.maxConcurrentSessions
       if (typeof file.logLinesToInclude === 'number') logLinesToInclude = file.logLinesToInclude
+      if (Array.isArray(file.actorAllowlist) && file.actorAllowlist.every(v => typeof v === 'string')) {
+        actorAllowlist = file.actorAllowlist
+      }
     } catch (err) {
       console.warn('[webhook] Failed to parse config file:', err)
     }
@@ -50,6 +54,11 @@ export function loadWebhookConfig(): FullWebhookConfig {
     if (!isNaN(n) && n > 0) logLinesToInclude = n
   }
 
+  const envActorAllowlist = process.env.GITHUB_WEBHOOK_ACTOR_ALLOWLIST
+  if (envActorAllowlist !== undefined) {
+    actorAllowlist = envActorAllowlist.split(',').map(s => s.trim()).filter(Boolean)
+  }
+
   const secret = process.env.GITHUB_WEBHOOK_SECRET || ''
 
   return {
@@ -57,5 +66,6 @@ export function loadWebhookConfig(): FullWebhookConfig {
     secret,
     maxConcurrentSessions,
     logLinesToInclude,
+    actorAllowlist,
   }
 }

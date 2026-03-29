@@ -107,4 +107,5 @@ export interface WebhookConfig {
   enabled: boolean
   maxConcurrentSessions: number
   logLinesToInclude: number
+  actorAllowlist: string[]
 }

@@ -49,6 +49,7 @@ function makeConfig(overrides: Partial<FullWebhookConfig> = {}): FullWebhookConf
     secret: SECRET,
     maxConcurrentSessions: 3,
     logLinesToInclude: 200,
+    actorAllowlist: [],
     ...overrides,
   }
 }
@@ -226,6 +227,38 @@ describe('WebhookHandler', () => {
       const result = await handler.handleWebhook(body, makeHeaders(body))
       expect(result.statusCode).toBe(200)
       expect(result.body.status).toBe('filtered')
+    })
+
+    it('returns filtered when actor is not in allowlist', async () => {
+      handler.shutdown()
+      handler = new WebhookHandler(makeConfig({ actorAllowlist: ['allowed-user'] }), sessions)
+      await handler.checkHealth()
+      // makePayload default actor is 'user1', which is not in the allowlist
+      const payload = makePayload()
+      const body = Buffer.from(JSON.stringify(payload))
+      const result = await handler.handleWebhook(body, makeHeaders(body))
+      expect(result.statusCode).toBe(200)
+      expect(result.body.status).toBe('filtered')
+      expect(result.body.filterReason).toContain('not in allowlist')
+    })
+
+    it('accepts webhook when actor is in allowlist', async () => {
+      handler.shutdown()
+      handler = new WebhookHandler(makeConfig({ actorAllowlist: ['user1'] }), sessions)
+      await handler.checkHealth()
+      const payload = makePayload()
+      const body = Buffer.from(JSON.stringify(payload))
+      const result = await handler.handleWebhook(body, makeHeaders(body))
+      expect(result.statusCode).toBe(202)
+      expect(result.body.accepted).toBe(true)
+    })
+
+    it('accepts all actors when allowlist is empty', async () => {
+      await handler.checkHealth()
+      const payload = makePayload()
+      const body = Buffer.from(JSON.stringify(payload))
+      const result = await handler.handleWebhook(body, makeHeaders(body))
+      expect(result.statusCode).toBe(202)
     })
 
     it('returns duplicate when dedup detects it', async () => {
@@ -415,6 +448,7 @@ describe('WebhookHandler', () => {
         enabled: true,
         maxConcurrentSessions: 3,
         logLinesToInclude: 200,
+        actorAllowlist: [],
       })
       expect('secret' in config).toBe(false)
     })
