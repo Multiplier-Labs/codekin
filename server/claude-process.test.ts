@@ -287,8 +287,8 @@ describe('handleStreamEvent (via handleLine)', () => {
       type: 'stream_event',
       event: { type: 'content_block_stop' },
     }))
-    expect(cp.currentToolName).toBeNull()
-    expect(cp.currentToolInput).toBe('')
+    expect(cp.tool.name).toBeNull()
+    expect(cp.tool.input).toBe('')
   })
 
   it('EnterPlanMode emits planning_mode true', () => {

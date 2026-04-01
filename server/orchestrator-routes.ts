@@ -34,10 +34,12 @@ export function createOrchestratorRouter(
   sessions: SessionManager,
   monitorRef?: { current: OrchestratorMonitor | null },
   verifyTokenOrSessionToken?: VerifySessionFn,
+  injectedMemory?: OrchestratorMemory,
+  injectedChildren?: OrchestratorChildManager,
 ): Router {
   const router = Router()
-  const memory = new OrchestratorMemory()
-  const children = new OrchestratorChildManager(sessions)
+  const memory = injectedMemory ?? new OrchestratorMemory()
+  const children = injectedChildren ?? new OrchestratorChildManager(sessions)
 
   /**
    * Verify that the request is authorized — accepts either the master auth
