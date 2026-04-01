@@ -224,7 +224,7 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
             return { branch, lastCommit, repoPath, repoName: input.repoName }
           } catch (err) {
             if (err instanceof Error && err.name === 'WorkflowSkipped') throw err
-            throw new Error(`Not a valid git repository: ${repoPath}`)
+            throw new Error(`Not a valid git repository: ${repoPath}`, { cause: err })
           }
         },
       },

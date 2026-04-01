@@ -359,8 +359,8 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
         const isError = block.is_error === true
 
         // When content is an array of content blocks, extract images and stringify the rest
-        let content = ''
         const contentBlocks = Array.isArray(block.content) ? block.content : null
+        let content: string
         if (contentBlocks) {
           const textParts: string[] = []
           for (const cb of contentBlocks as Array<{ type: string; text?: string; source?: { type: string; data: string; media_type: string } }>) {
