@@ -8,6 +8,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
+import { useOutsideClick } from '../hooks/useOutsideClick'
 import { IconSend, IconPaperclip, IconX, IconTerminal2, IconChevronDown, IconDots, IconGitBranch, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck } from '@tabler/icons-react'
 import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
@@ -30,6 +31,143 @@ const MODELS = [
 
 function shortModelLabel(modelId: string): string {
   return MODELS.find(m => m.id === modelId)?.label ?? modelId.replace(/^claude-/, '')
+}
+
+// ---------------------------------------------------------------------------
+// Shared toolbar atoms — extracted to eliminate duplication across variants
+// ---------------------------------------------------------------------------
+
+/** Attach-files button with configurable size and rounding. */
+function AttachButton({ onClick, disabled, size = 16, rounded = 'rounded-md', className = '' }: {
+  onClick: () => void; disabled: boolean; size?: number; rounded?: string; className?: string
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex items-center justify-center ${rounded} p-1.5 text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors disabled:opacity-30 ${className}`}
+      title="Attach files"
+    >
+      <IconPaperclip size={size} stroke={2} />
+    </button>
+  )
+}
+
+/** Send button with configurable accent theme and size. */
+function SendButton({ onClick, disabled, hasContent, size = 16, rounded = 'rounded-md', accent = false, className = '' }: {
+  onClick: () => void; disabled: boolean; hasContent: boolean; size?: number; rounded?: string; accent?: boolean; className?: string
+}) {
+  const activeClass = accent
+    ? 'bg-accent-7 text-neutral-1 hover:bg-accent-6'
+    : 'bg-primary-8 text-neutral-1 hover:bg-primary-7'
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled || !hasContent}
+      className={`flex items-center justify-center ${rounded} p-1.5 transition-colors disabled:opacity-30 ${
+        hasContent ? activeClass : 'text-neutral-5'
+      } ${className}`}
+      title="Send (Enter)"
+    >
+      <IconSend size={size} stroke={2} />
+    </button>
+  )
+}
+
+/** Desktop permission mode dropdown with full descriptions. */
+function PermissionModeDropdown({ currentMode, isOpen, menuRef, onToggle, onSelect }: {
+  currentMode: PermissionMode; isOpen: boolean
+  menuRef: React.RefObject<HTMLDivElement | null>
+  onToggle: () => void; onSelect: (mode: PermissionMode) => void
+}) {
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        onClick={onToggle}
+        className={`flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium transition-colors ${
+          currentMode === 'bypassPermissions'
+            ? 'text-error-5 hover:text-error-4 hover:bg-error-9/30'
+            : 'text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7'
+        }`}
+        title="Permission mode"
+      >
+        {(() => {
+          const mode = PERMISSION_MODES.find(m => m.id === currentMode)
+          const ModeIcon = PERMISSION_MODE_ICONS[mode?.icon ?? 'shield']
+          return <ModeIcon size={14} stroke={2} />
+        })()}
+        <span className="hidden lg:inline">{PERMISSION_MODES.find(m => m.id === currentMode)?.label ?? currentMode}</span>
+        <IconChevronDown size={12} stroke={2} />
+      </button>
+      {isOpen && (
+        <div className="absolute bottom-full mb-1 left-0 z-50 min-w-[260px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
+          {PERMISSION_MODES.map(m => {
+            const ModeIcon = PERMISSION_MODE_ICONS[m.icon]
+            const isActive = m.id === currentMode
+            return (
+              <button
+                key={m.id}
+                onClick={() => onSelect(m.id)}
+                className={`w-full text-left px-3 py-2 hover:bg-neutral-7 transition-colors flex items-start gap-2.5 ${
+                  m.dangerous ? 'hover:bg-error-9/20' : ''
+                }`}
+              >
+                <ModeIcon
+                  size={16}
+                  stroke={2}
+                  className={`mt-0.5 flex-shrink-0 ${m.dangerous ? 'text-error-5' : isActive ? 'text-primary-4' : 'text-neutral-4'}`}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className={`text-[13px] font-medium ${m.dangerous ? 'text-error-5' : isActive ? 'text-primary-4' : 'text-neutral-2'}`}>
+                    {m.label}
+                  </div>
+                  <div className={`text-[12px] ${m.dangerous ? 'text-error-6' : 'text-neutral-5'}`}>
+                    {m.description}
+                  </div>
+                </div>
+                {isActive && (
+                  <IconCheck size={14} stroke={2.5} className="mt-0.5 flex-shrink-0 text-primary-4" />
+                )}
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Model selector dropdown. */
+function ModelDropdown({ currentModel, isOpen, menuRef, onToggle, onChange }: {
+  currentModel: string; isOpen: boolean
+  menuRef: React.RefObject<HTMLDivElement | null>
+  onToggle: () => void; onChange: (model: string) => void
+}) {
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
+        title="Change model"
+      >
+        {shortModelLabel(currentModel)}
+        <IconChevronDown size={12} stroke={2} />
+      </button>
+      {isOpen && (
+        <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[160px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
+          {MODELS.map(m => (
+            <button
+              key={m.id}
+              onClick={() => onChange(m.id)}
+              className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-neutral-7 transition-colors ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 const INPUT_HEIGHT_KEY = 'inputBarHeight'
@@ -142,41 +280,10 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     prevWaiting.current = isWaiting
   }, [isWaiting, isMobile])
 
-  // Close mobile context menu on outside click
-  useEffect(() => {
-    if (!mobileMenuOpen) return
-    const handler = (e: MouseEvent) => {
-      if (mobileMenuRef.current && !mobileMenuRef.current.contains(e.target as Node)) {
-        setMobileMenuOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [mobileMenuOpen])
-
-  // Close permission mode menu on outside click
-  useEffect(() => {
-    if (!permMenuOpen) return
-    const handler = (e: MouseEvent) => {
-      if (permMenuRef.current && !permMenuRef.current.contains(e.target as Node)) {
-        setPermMenuOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [permMenuOpen])
-
-  // Close model menu on outside click
-  useEffect(() => {
-    if (!modelMenuOpen) return
-    const handler = (e: MouseEvent) => {
-      if (modelMenuRef.current && !modelMenuRef.current.contains(e.target as Node)) {
-        setModelMenuOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [modelMenuOpen])
+  // Close dropdown menus on outside click
+  useOutsideClick(mobileMenuRef, mobileMenuOpen, useCallback(() => setMobileMenuOpen(false), []))
+  useOutsideClick(permMenuRef, permMenuOpen, useCallback(() => setPermMenuOpen(false), []))
+  useOutsideClick(modelMenuRef, modelMenuOpen, useCallback(() => setModelMenuOpen(false), []))
 
   const onDragStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -368,65 +475,18 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
 
       {/* Toolbar row — selectors left, action buttons right */}
       <div className="flex flex-shrink-0 items-center justify-between px-3 pb-2 pt-0">
-        {/* Desktop: selectors + action buttons */}
+        {/* Desktop default: permission + worktree | model + skills + attach + send */}
         {!isMobile && !isOrchestrator && (
           <>
             <div className="flex items-center gap-1">
-              {/* Permission mode selector */}
               {currentPermissionMode && onPermissionModeChange && (
-                <div className="relative" ref={permMenuRef}>
-                  <button
-                    onClick={() => { closeAllPopups('perm'); setPermMenuOpen(!permMenuOpen) }}
-                    className={`flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium transition-colors ${
-                      currentPermissionMode === 'bypassPermissions'
-                        ? 'text-error-5 hover:text-error-4 hover:bg-error-9/30'
-                        : 'text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7'
-                    }`}
-                    title="Permission mode"
-                  >
-                    {(() => {
-                      const mode = PERMISSION_MODES.find(m => m.id === currentPermissionMode)
-                      const ModeIcon = PERMISSION_MODE_ICONS[mode?.icon ?? 'shield']
-                      return <ModeIcon size={14} stroke={2} />
-                    })()}
-                    <span className="hidden lg:inline">{PERMISSION_MODES.find(m => m.id === currentPermissionMode)?.label ?? currentPermissionMode}</span>
-                    <IconChevronDown size={12} stroke={2} />
-                  </button>
-                  {permMenuOpen && (
-                    <div className="absolute bottom-full mb-1 left-0 z-50 min-w-[260px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
-                      {PERMISSION_MODES.map(m => {
-                        const ModeIcon = PERMISSION_MODE_ICONS[m.icon]
-                        const isActive = m.id === currentPermissionMode
-                        return (
-                          <button
-                            key={m.id}
-                            onClick={() => handlePermissionModeSelect(m.id)}
-                            className={`w-full text-left px-3 py-2 hover:bg-neutral-7 transition-colors flex items-start gap-2.5 ${
-                              m.dangerous ? 'hover:bg-error-9/20' : ''
-                            }`}
-                          >
-                            <ModeIcon
-                              size={16}
-                              stroke={2}
-                              className={`mt-0.5 flex-shrink-0 ${m.dangerous ? 'text-error-5' : isActive ? 'text-primary-4' : 'text-neutral-4'}`}
-                            />
-                            <div className="flex-1 min-w-0">
-                              <div className={`text-[13px] font-medium ${m.dangerous ? 'text-error-5' : isActive ? 'text-primary-4' : 'text-neutral-2'}`}>
-                                {m.label}
-                              </div>
-                              <div className={`text-[12px] ${m.dangerous ? 'text-error-6' : 'text-neutral-5'}`}>
-                                {m.description}
-                              </div>
-                            </div>
-                            {isActive && (
-                              <IconCheck size={14} stroke={2.5} className="mt-0.5 flex-shrink-0 text-primary-4" />
-                            )}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
+                <PermissionModeDropdown
+                  currentMode={currentPermissionMode}
+                  isOpen={permMenuOpen}
+                  menuRef={permMenuRef}
+                  onToggle={() => { closeAllPopups('perm'); setPermMenuOpen(!permMenuOpen) }}
+                  onSelect={handlePermissionModeSelect}
+                />
               )}
               {/* Worktree: indicator when active, toggle before first message, or move button mid-session */}
               {worktreePath ? (
@@ -463,29 +523,13 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
             </div>
             <div className="flex items-center gap-1">
               {currentModel && onModelChange && (
-                <div className="relative" ref={modelMenuRef}>
-                  <button
-                    onClick={() => { closeAllPopups('model'); setModelMenuOpen(!modelMenuOpen) }}
-                    className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
-                    title="Change model"
-                  >
-                    {shortModelLabel(currentModel)}
-                    <IconChevronDown size={12} stroke={2} />
-                  </button>
-                  {modelMenuOpen && (
-                    <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[160px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
-                      {MODELS.map(m => (
-                        <button
-                          key={m.id}
-                          onClick={() => { onModelChange(m.id); setModelMenuOpen(false) }}
-                          className={`w-full text-left px-3 py-1.5 text-[13px] hover:bg-neutral-7 transition-colors ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <ModelDropdown
+                  currentModel={currentModel}
+                  isOpen={modelMenuOpen}
+                  menuRef={modelMenuRef}
+                  onToggle={() => { closeAllPopups('model'); setModelMenuOpen(!modelMenuOpen) }}
+                  onChange={(id) => { onModelChange(id); setModelMenuOpen(false) }}
+                />
               )}
               {hasSkills && (
                 <div className="relative">
@@ -512,60 +556,24 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   )}
                 </div>
               )}
-              <button
-                onClick={handleFileSelect}
-                disabled={disabled}
-                className="flex items-center justify-center rounded-md p-1 text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors disabled:opacity-30"
-                title="Attach files"
-              >
-                <IconPaperclip size={16} stroke={2} />
-              </button>
-              <button
-                onClick={handleSend}
-                disabled={disabled || (!value.trim() && pendingFiles.length === 0)}
-                className={`flex items-center justify-center rounded-md p-1 transition-colors disabled:opacity-30 ${
-                  value.trim() || pendingFiles.length > 0
-                    ? 'bg-primary-8 text-neutral-1 hover:bg-primary-7'
-                    : 'text-neutral-5'
-                }`}
-                title="Send (Enter)"
-              >
-                <IconSend size={16} stroke={2} />
-              </button>
+              <AttachButton onClick={handleFileSelect} disabled={disabled} size={16} rounded="rounded-md" />
+              <SendButton onClick={handleSend} disabled={disabled} hasContent={!!(value.trim() || pendingFiles.length > 0)} size={16} rounded="rounded-md" />
             </div>
           </>
         )}
 
-        {/* Orchestrator variant: minimal toolbar — attach + send only */}
+        {/* Desktop orchestrator: attach + send only (accent theme) */}
         {!isMobile && isOrchestrator && (
           <>
             <div className="flex-1" />
             <div className="flex items-center gap-1.5">
-              <button
-                onClick={handleFileSelect}
-                disabled={disabled}
-                className="flex items-center justify-center rounded-full p-1.5 text-neutral-4 hover:text-accent-4 hover:bg-accent-9/30 transition-colors disabled:opacity-30"
-                title="Attach files"
-              >
-                <IconPaperclip size={16} stroke={2} />
-              </button>
-              <button
-                onClick={handleSend}
-                disabled={disabled || (!value.trim() && pendingFiles.length === 0)}
-                className={`flex items-center justify-center rounded-full px-3 py-1 transition-colors disabled:opacity-30 ${
-                  value.trim() || pendingFiles.length > 0
-                    ? 'bg-accent-7 text-neutral-1 hover:bg-accent-6'
-                    : 'text-neutral-5'
-                }`}
-                title="Send (Enter)"
-              >
-                <IconSend size={16} stroke={2} />
-              </button>
+              <AttachButton onClick={handleFileSelect} disabled={disabled} size={16} rounded="rounded-full" className="hover:text-accent-4 hover:bg-accent-9/30" />
+              <SendButton onClick={handleSend} disabled={disabled} hasContent={!!(value.trim() || pendingFiles.length > 0)} size={16} rounded="rounded-full" accent className="px-3 py-1" />
             </div>
           </>
         )}
 
-        {/* Mobile: context menu (...) + send button only */}
+        {/* Mobile default: context menu (...) + send */}
         {isMobile && !isOrchestrator && (
           <>
             <div className="flex-1" />
@@ -581,7 +589,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 </button>
                 {mobileMenuOpen && (
                   <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[220px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
-                    {/* Permission mode selector */}
                     {currentPermissionMode && onPermissionModeChange && (
                       <>
                         <div className="px-3 py-1.5 text-[12px] text-neutral-5 uppercase tracking-wider">Permissions</div>
@@ -611,7 +618,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                         <div className="my-1 border-t border-neutral-7" />
                       </>
                     )}
-                    {/* Model selector */}
                     {currentModel && onModelChange && (
                       <>
                         <div className="px-3 py-1.5 text-[12px] text-neutral-5 uppercase tracking-wider">Model</div>
@@ -627,7 +633,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                         <div className="my-1 border-t border-neutral-7" />
                       </>
                     )}
-                    {/* Skills */}
                     {hasSkills && (
                       <button
                         onClick={() => { setMobileMenuOpen(false); setSkillMenuOpen(!skillMenuOpen) }}
@@ -637,7 +642,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                         Skills
                       </button>
                     )}
-                    {/* Attach files */}
                     <button
                       onClick={() => { setMobileMenuOpen(false); handleFileSelect() }}
                       className="flex items-center gap-2 w-full text-left px-3 py-2 text-[14px] text-neutral-2 hover:bg-neutral-7 transition-colors"
@@ -659,47 +663,18 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   />
                 )}
               </div>
-              <button
-                onClick={handleSend}
-                disabled={disabled || (!value.trim() && pendingFiles.length === 0)}
-                className={`flex items-center justify-center rounded min-w-[34px] min-h-[34px] p-1.5 transition-colors disabled:opacity-30 ${
-                  value.trim() || pendingFiles.length > 0
-                    ? 'bg-primary-8 text-neutral-1 hover:bg-primary-7'
-                    : 'text-neutral-5'
-                }`}
-                title="Send (Enter)"
-              >
-                <IconSend size={24} stroke={2} />
-              </button>
+              <SendButton onClick={handleSend} disabled={disabled} hasContent={!!(value.trim() || pendingFiles.length > 0)} size={24} rounded="rounded" className="min-w-[34px] min-h-[34px]" />
             </div>
           </>
         )}
 
-        {/* Mobile orchestrator: attach + send only */}
+        {/* Mobile orchestrator: attach + send only (accent theme) */}
         {isMobile && isOrchestrator && (
           <>
             <div className="flex-1" />
             <div className="flex items-center gap-1.5">
-              <button
-                onClick={handleFileSelect}
-                disabled={disabled}
-                className="flex items-center justify-center rounded-full min-w-[34px] min-h-[34px] p-1.5 text-neutral-4 hover:text-accent-4 hover:bg-accent-9/30 transition-colors disabled:opacity-30"
-                title="Attach files"
-              >
-                <IconPaperclip size={24} stroke={2} />
-              </button>
-              <button
-                onClick={handleSend}
-                disabled={disabled || (!value.trim() && pendingFiles.length === 0)}
-                className={`flex items-center justify-center rounded-full min-w-[34px] min-h-[34px] p-1.5 transition-colors disabled:opacity-30 ${
-                  value.trim() || pendingFiles.length > 0
-                    ? 'bg-accent-7 text-neutral-1 hover:bg-accent-6'
-                    : 'text-neutral-5'
-                }`}
-                title="Send (Enter)"
-              >
-                <IconSend size={24} stroke={2} />
-              </button>
+              <AttachButton onClick={handleFileSelect} disabled={disabled} size={24} rounded="rounded-full" className="min-w-[34px] min-h-[34px] hover:text-accent-4 hover:bg-accent-9/30" />
+              <SendButton onClick={handleSend} disabled={disabled} hasContent={!!(value.trim() || pendingFiles.length > 0)} size={24} rounded="rounded-full" accent className="min-w-[34px] min-h-[34px]" />
             </div>
           </>
         )}

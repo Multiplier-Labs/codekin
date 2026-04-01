@@ -693,7 +693,14 @@ export class SessionManager {
     const repoDir = session.groupDir ?? session.workingDir
     const registryPatterns = this._approvalManager.getAllowedToolsForRepo(repoDir)
     const mergedAllowedTools = [...new Set([...(session.allowedTools || []), ...registryPatterns])]
-    const cp = new ClaudeProcess(session.workingDir, session.claudeSessionId || undefined, extraEnv, session.model, session.permissionMode, resume, mergedAllowedTools)
+    const cp = new ClaudeProcess(session.workingDir, {
+      sessionId: session.claudeSessionId || undefined,
+      extraEnv,
+      model: session.model,
+      permissionMode: session.permissionMode,
+      resume,
+      allowedTools: mergedAllowedTools,
+    })
 
     this.wireClaudeEvents(cp, session, sessionId)
 
@@ -908,56 +915,75 @@ export class SessionManager {
     session.isProcessing = false
     this._globalBroadcast?.({ type: 'sessions_updated' })
 
-    // Detect transient API errors and auto-retry the last user message
-    if (isError && session._lastUserInput && this.isRetryableApiError(result)) {
-      if (session._apiRetryCount < MAX_API_RETRIES) {
-        session._apiRetryCount++
-        const attempt = session._apiRetryCount
-        const delay = API_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
-
-        const retryMsg: WsServerMessage = {
-          type: 'system_message',
-          subtype: 'restart',
-          text: `API error (transient). Retrying automatically in ${delay / 1000}s (attempt ${attempt}/${MAX_API_RETRIES})...`,
-        }
-        this.addToHistory(session, retryMsg)
-        this.broadcast(session, retryMsg)
-
-        console.log(`[api-retry] session=${sessionId} attempt=${attempt}/${MAX_API_RETRIES} delay=${delay}ms error=${result.slice(0, 200)}`)
-
-        // Clear any previous retry timer
-        if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
-        session._apiRetryTimer = setTimeout(() => {
-          session._apiRetryTimer = undefined
-          if (!session.claudeProcess?.isAlive() || session._stoppedByUser) return
-          console.log(`[api-retry] resending message for session=${sessionId} attempt=${attempt}`)
-          session.claudeProcess.sendMessage(session._lastUserInput!)
-        }, delay)
-        return // Don't broadcast result — we're retrying
-      }
-
-      // All retries exhausted
-      const exhaustedMsg: WsServerMessage = {
-        type: 'system_message',
-        subtype: 'error',
-        text: `API error persisted after ${MAX_API_RETRIES} retries. ${result}`,
-      }
-      this.addToHistory(session, exhaustedMsg)
-      this.broadcast(session, exhaustedMsg)
-      session._apiRetryCount = 0
-    } else {
-      // Non-retryable error or successful result — reset retry counter
-      session._apiRetryCount = 0
-      if (isError) {
-        const msg: WsServerMessage = { type: 'system_message', subtype: 'error', text: result }
-        this.addToHistory(session, msg)
-        this.broadcast(session, msg)
-      }
+    // Attempt API retry for transient errors — returns true if a retry was scheduled
+    if (isError && this.handleApiRetry(session, sessionId, result)) {
+      return
     }
 
-    // Suppress noise from orchestrator/agent sessions: if the entire turn's
-    // text output is a short, low-value phrase, strip it from history so it
-    // doesn't pollute the chat or replay on rejoin.
+    this.finalizeResult(session, sessionId, result, isError)
+  }
+
+  /**
+   * Detect transient API errors and schedule an automatic retry.
+   * Returns true if a retry was scheduled (caller should skip result broadcast).
+   */
+  private handleApiRetry(session: Session, sessionId: string, result: string): boolean {
+    if (!session._lastUserInput || !this.isRetryableApiError(result)) {
+      session._apiRetryCount = 0
+      return false
+    }
+
+    if (session._apiRetryCount < MAX_API_RETRIES) {
+      session._apiRetryCount++
+      const attempt = session._apiRetryCount
+      const delay = API_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
+
+      const retryMsg: WsServerMessage = {
+        type: 'system_message',
+        subtype: 'restart',
+        text: `API error (transient). Retrying automatically in ${delay / 1000}s (attempt ${attempt}/${MAX_API_RETRIES})...`,
+      }
+      this.addToHistory(session, retryMsg)
+      this.broadcast(session, retryMsg)
+
+      console.log(`[api-retry] session=${sessionId} attempt=${attempt}/${MAX_API_RETRIES} delay=${delay}ms error=${result.slice(0, 200)}`)
+
+      if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
+      session._apiRetryTimer = setTimeout(() => {
+        session._apiRetryTimer = undefined
+        if (!session.claudeProcess?.isAlive() || session._stoppedByUser) return
+        console.log(`[api-retry] resending message for session=${sessionId} attempt=${attempt}`)
+        session.claudeProcess.sendMessage(session._lastUserInput!)
+      }, delay)
+      return true
+    }
+
+    // All retries exhausted
+    const exhaustedMsg: WsServerMessage = {
+      type: 'system_message',
+      subtype: 'error',
+      text: `API error persisted after ${MAX_API_RETRIES} retries. ${result}`,
+    }
+    this.addToHistory(session, exhaustedMsg)
+    this.broadcast(session, exhaustedMsg)
+    session._apiRetryCount = 0
+    return false
+  }
+
+  /**
+   * Broadcast the turn result, suppress orchestrator noise, notify listeners,
+   * and trigger session naming if needed.
+   */
+  private finalizeResult(session: Session, sessionId: string, result: string, isError: boolean): void {
+    session._apiRetryCount = 0
+
+    if (isError) {
+      const msg: WsServerMessage = { type: 'system_message', subtype: 'error', text: result }
+      this.addToHistory(session, msg)
+      this.broadcast(session, msg)
+    }
+
+    // Suppress noise from orchestrator/agent sessions
     if ((session.source === 'orchestrator' || session.source === 'agent') && !isError) {
       const turnText = this.extractCurrentTurnText(session)
       if (turnText && turnText.length < 80 && /^(no response requested|please approve|nothing to do|no action needed|acknowledged)[.!]?$/i.test(turnText.trim())) {
@@ -970,12 +996,11 @@ export class SessionManager {
     this.addToHistory(session, resultMsg)
     this.broadcast(session, resultMsg)
 
-    // Notify result listeners (orchestrator, child monitor, etc.)
     for (const listener of this._resultListeners) {
       try { listener(sessionId, isError) } catch { /* listener error */ }
     }
 
-    // If session is still unnamed after first response, name it now — we have full context
+    // If session is still unnamed after first response, name it now
     if (session.name.startsWith('hub:') && session._namingAttempts === 0) {
       if (session._namingTimer) {
         clearTimeout(session._namingTimer)

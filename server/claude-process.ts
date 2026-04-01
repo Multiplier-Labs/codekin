@@ -20,6 +20,37 @@ import type { ClaudeEvent, ClaudeSystemInit, ClaudeControlRequest, ClaudeResultE
 import { SCREENSHOTS_DIR } from './config.js'
 import { redactSecrets } from './crypto-utils.js'
 
+/** Options for constructing a ClaudeProcess. Replaces positional constructor parameters. */
+export interface ClaudeProcessOptions {
+  /** Absolute path to the git repo where the Claude CLI runs. */
+  workingDir: string
+  /** Claude session UUID. Defaults to a random UUID (new conversation). Pass an existing ID to resume. */
+  sessionId?: string
+  /** Additional environment variables merged into the child process env. */
+  extraEnv?: Record<string, string>
+  /** Claude model ID override (e.g. 'claude-opus-4-6'). Omit to use the CLI default. */
+  model?: string
+  /** Permission mode for the Claude CLI process. */
+  permissionMode?: PermissionMode
+  /** When true and sessionId is provided, use `--resume` instead of `--session-id`. */
+  resume?: boolean
+  /** Additional tools to pre-approve via --allowedTools. */
+  allowedTools?: string[]
+}
+
+/** Accumulated state for an in-progress extended thinking block. */
+interface ThinkingState {
+  active: boolean
+  text: string
+  summaryEmitted: boolean
+}
+
+/** Accumulated state for an in-progress tool_use content block. */
+interface ToolState {
+  name: string | null
+  input: string
+}
+
 /** Typed event map for ClaudeProcess. Each key maps to the listener argument tuple. */
 export interface ClaudeProcessEvents {
   event: [ClaudeEvent]
@@ -51,15 +82,9 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
 
   private killTimer: ReturnType<typeof setTimeout> | null = null
 
-  // Tool tracking: accumulates partial_json input during streaming
-  private currentToolName: string | null = null
-  private currentToolInput = ''
-
-  // Extended thinking: extract a short summary from the thinking block
-  private inThinkingBlock = false
-  private thinkingText = ''
-  private thinkingSummaryEmitted = false
-
+  // Grouped streaming state — reset per content block
+  private thinking: ThinkingState = { active: false, text: '', summaryEmitted: false }
+  private tool: ToolState = { name: null, input: '' }
 
   // Task/todo state: mirrors Claude's internal todo list for the UI
   private tasks = new Map<string, TaskItem>()
@@ -71,23 +96,34 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
   /** When true, use `--resume` instead of `--session-id` to resume an existing session. */
   private resume: boolean
 
-  /**
-   * @param workingDir  Absolute path to the git repo where the Claude CLI runs.
-   * @param sessionId   Claude session UUID for `--session-id`. Defaults to a random UUID
-   *                    (new conversation). Pass an existing ID to resume a session.
-   * @param extraEnv    Additional environment variables merged into the child process env
-   *                    (e.g. `CC_WS_PORT`, `CC_AUTH_TOKEN` for port-forwarding and auth).
-   * @param model       Claude model ID override (e.g. 'claude-opus-4-6'). Omit to use the CLI default.
-   * @param resume      When true and sessionId is provided, use `--resume <id>` instead
-   *                    of `--session-id <id>`. `--session-id` creates a new session and
-   *                    fails with "already in use" if a JSONL already exists for that ID.
-   *                    `--resume` is designed to continue an existing session.
-   */
-  constructor(private workingDir: string, sessionId?: string, extraEnv?: Record<string, string>, private model?: string, private permissionMode?: PermissionMode, resume?: boolean, private allowedTools?: string[]) {
+  private workingDir: string
+  private model?: string
+  private permissionMode?: PermissionMode
+  private allowedTools?: string[]
+
+  constructor(workingDir: string, opts?: Partial<ClaudeProcessOptions>)
+  /** @deprecated Use the options-object form: `new ClaudeProcess(workingDir, { sessionId, ... })` */
+  constructor(workingDir: string, sessionId?: string, extraEnv?: Record<string, string>, model?: string, permissionMode?: PermissionMode, resume?: boolean, allowedTools?: string[])
+  constructor(wd: string, sessionIdOrOpts?: string | Partial<ClaudeProcessOptions>, extraEnv?: Record<string, string>, model?: string, permissionMode?: PermissionMode, resume?: boolean, allowedTools?: string[]) {
     super()
-    this.sessionId = sessionId || randomUUID()
-    this.resume = !!(resume && sessionId)
-    this.extraEnv = extraEnv || {}
+    this.workingDir = wd
+    // Normalise both call forms into the same fields
+    if (typeof sessionIdOrOpts === 'object' && sessionIdOrOpts !== null) {
+      const o = sessionIdOrOpts
+      this.sessionId = o.sessionId || randomUUID()
+      this.extraEnv = o.extraEnv || {}
+      this.model = o.model
+      this.permissionMode = o.permissionMode
+      this.resume = !!(o.resume && o.sessionId)
+      this.allowedTools = o.allowedTools
+    } else {
+      this.sessionId = sessionIdOrOpts || randomUUID()
+      this.extraEnv = extraEnv || {}
+      this.model = model
+      this.permissionMode = permissionMode
+      this.resume = !!(resume && sessionIdOrOpts)
+      this.allowedTools = allowedTools
+    }
   }
 
   /** Spawn the Claude CLI process with stream-json I/O and acceptEdits mode. */
@@ -235,21 +271,18 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
     switch (inner.type) {
       case 'content_block_start':
         if (inner.content_block?.type === 'tool_use') {
-          this.currentToolName = inner.content_block.name || null
-          this.currentToolInput = ''
-          console.log('[tool-debug] tool_start:', this.currentToolName)
+          this.tool = { name: inner.content_block.name || null, input: '' }
+          console.log('[tool-debug] tool_start:', this.tool.name)
           // Detect planning mode tools — emit immediately, PlanManager handles gating
-          if (this.currentToolName === 'EnterPlanMode') {
+          if (this.tool.name === 'EnterPlanMode') {
             this.emit('planning_mode', true)
-          } else if (this.currentToolName === 'ExitPlanMode') {
+          } else if (this.tool.name === 'ExitPlanMode') {
             this.emit('planning_mode', false)
           } else {
-            this.emit('tool_active', this.currentToolName!, undefined)
+            this.emit('tool_active', this.tool.name!, undefined)
           }
         } else if (inner.content_block?.type === 'thinking') {
-          this.inThinkingBlock = true
-          this.thinkingText = ''
-          this.thinkingSummaryEmitted = false
+          this.thinking = { active: true, text: '', summaryEmitted: false }
         }
         break
 
@@ -257,13 +290,13 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
         if (inner.delta?.type === 'text_delta' && inner.delta.text) {
           this.emit('text', inner.delta.text)
         } else if (inner.delta?.type === 'input_json_delta' && inner.delta.partial_json) {
-          this.currentToolInput += inner.delta.partial_json
-        } else if (inner.delta?.type === 'thinking_delta' && (inner.delta as Record<string, unknown>).thinking && this.inThinkingBlock) {
-          this.thinkingText += (inner.delta as Record<string, unknown>).thinking as string
-          if (!this.thinkingSummaryEmitted) {
-            const summary = this.extractThinkingSummary(this.thinkingText)
+          this.tool.input += inner.delta.partial_json
+        } else if (inner.delta?.type === 'thinking_delta' && (inner.delta as Record<string, unknown>).thinking && this.thinking.active) {
+          this.thinking.text += (inner.delta as Record<string, unknown>).thinking as string
+          if (!this.thinking.summaryEmitted) {
+            const summary = this.extractThinkingSummary(this.thinking.text)
             if (summary) {
-              this.thinkingSummaryEmitted = true
+              this.thinking.summaryEmitted = true
               this.emit('thinking', summary)
             }
           }
@@ -271,9 +304,9 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
         break
 
       case 'content_block_stop':
-        if (this.inThinkingBlock) {
+        if (this.thinking.active) {
           this.handleThinkingBlockStop()
-        } else if (this.currentToolName) {
+        } else if (this.tool.name) {
           this.handleToolBlockStop()
         }
         break
@@ -282,31 +315,28 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
 
   /** Finalize a thinking block: emit summary if not already emitted, then reset state. */
   private handleThinkingBlockStop(): void {
-    if (!this.thinkingSummaryEmitted && this.thinkingText.length > 0) {
-      const summary = this.extractThinkingSummary(this.thinkingText) || this.thinkingText.slice(0, 80).trim()
+    if (!this.thinking.summaryEmitted && this.thinking.text.length > 0) {
+      const summary = this.extractThinkingSummary(this.thinking.text) || this.thinking.text.slice(0, 80).trim()
       this.emit('thinking', summary)
     }
-    this.inThinkingBlock = false
-    this.thinkingText = ''
-    this.thinkingSummaryEmitted = false
+    this.thinking = { active: false, text: '', summaryEmitted: false }
   }
 
   /** Finalize a tool block: parse input, handle task tools, emit tool_done, then reset state. */
   private handleToolBlockStop(): void {
     let summary: string | undefined
     try {
-      const parsed = JSON.parse(this.currentToolInput)
-      summary = this.summarizeToolInput(this.currentToolName!, parsed) || undefined
-      const isTask = this.currentToolName === 'TaskCreate' || this.currentToolName === 'TaskUpdate' || this.currentToolName === 'TodoWrite' || this.currentToolName === 'TodoRead'
-      if (isTask) console.log('[task-debug] tool:', this.currentToolName, 'input:', JSON.stringify(parsed).slice(0, 200))
-      if (this.handleTaskTool(this.currentToolName!, parsed)) {
+      const parsed = JSON.parse(this.tool.input)
+      summary = this.summarizeToolInput(this.tool.name!, parsed) || undefined
+      const isTask = this.tool.name === 'TaskCreate' || this.tool.name === 'TaskUpdate' || this.tool.name === 'TodoWrite' || this.tool.name === 'TodoRead'
+      if (isTask) console.log('[task-debug] tool:', this.tool.name, 'input:', JSON.stringify(parsed).slice(0, 200))
+      if (this.handleTaskTool(this.tool.name!, parsed)) {
         console.log('[task-debug] emitting todo_update, tasks:', this.tasks.size)
         this.emit('todo_update', Array.from(this.tasks.values()))
       }
     } catch { /* ignore parse errors */ }
-    this.emit('tool_done', this.currentToolName!, summary)
-    this.currentToolName = null
-    this.currentToolInput = ''
+    this.emit('tool_done', this.tool.name!, summary)
+    this.tool = { name: null, input: '' }
   }
 
   /**
