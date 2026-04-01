@@ -114,9 +114,9 @@ export class SessionArchive {
           SELECT id, name, working_dir, group_dir, source, created, archived_at,
                  json_array_length(output_history) as message_count
           FROM archived_sessions
-          WHERE working_dir = ?
+          WHERE working_dir = ? OR group_dir = ?
           ORDER BY archived_at DESC
-        `).all(workingDir)
+        `).all(workingDir, workingDir)
       : this.db.prepare(`
       SELECT id, name, working_dir, group_dir, source, created, archived_at,
              json_array_length(output_history) as message_count

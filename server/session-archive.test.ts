@@ -133,6 +133,18 @@ describe('SessionArchive', () => {
       expect(archive.list('/no-match')).toEqual([])
     })
 
+    it('matches sessions by groupDir when filtering by workingDir', () => {
+      // Worktree sessions have workingDir = worktree path, groupDir = repo root
+      archive.archive({ ...baseSession, id: 'wt-1', workingDir: '/srv/repos/project-wt-abc', groupDir: '/srv/repos/project' })
+      archive.archive({ ...baseSession, id: 'wt-2', workingDir: '/srv/repos/project-wt-def', groupDir: '/srv/repos/project' })
+      // Non-worktree session with workingDir = repo root
+      archive.archive({ ...baseSession, id: 'direct-1', workingDir: '/srv/repos/project' })
+
+      const result = archive.list('/srv/repos/project')
+      expect(result).toHaveLength(3)
+      expect(result.map(r => r.id).sort()).toEqual(['direct-1', 'wt-1', 'wt-2'])
+    })
+
     it('includes all ArchivedSessionInfo fields', () => {
       archive.archive(baseSession)
       const item = archive.list()[0]
