@@ -195,7 +195,7 @@ function StepKind({
                 <button
                   key={k.kind}
                   type="button"
-                  onClick={() => onSelect(k.kind)}
+                  onClick={() => { onSelect(k.kind); }}
                   className={`rounded-lg border px-3 py-2.5 text-left transition-colors ${
                     selectedKind === k.kind
                       ? 'border-accent-6 bg-accent-9/30 ring-1 ring-accent-6/30'
@@ -239,7 +239,7 @@ function FrequencyButton({
   return (
     <button
       type="button"
-      onClick={() => onSelect(dow)}
+      onClick={() => { onSelect(dow); }}
       className={`rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
         selected
           ? 'border-accent-6 bg-accent-9/40 text-accent-2'
@@ -287,7 +287,7 @@ function StepConfigure({
             <TimePicker
               hour={form.cronHour}
               minute={form.cronMinute}
-              onChange={(h, m) => onChange({ cronHour: h, cronMinute: m })}
+              onChange={(h, m) => { onChange({ cronHour: h, cronMinute: m }); }}
             />
           </div>
 
@@ -302,7 +302,7 @@ function StepConfigure({
                     label={p.label}
                     dow={p.dow}
                     selected={selected}
-                    onSelect={dow => onChange({ cronDow: dow })}
+                    onSelect={dow => { onChange({ cronDow: dow }); }}
                   />
                 )
               })}
@@ -339,13 +339,13 @@ function StepConfigure({
                     label="Every week"
                     dow={baseDow}
                     selected={!biweekly}
-                    onSelect={dow => onChange({ cronDow: dow })}
+                    onSelect={dow => { onChange({ cronDow: dow }); }}
                   />
                   <FrequencyButton
                     label="Every 2 weeks"
                     dow={`biweekly-${baseDow}`}
                     selected={biweekly}
-                    onSelect={dow => onChange({ cronDow: dow })}
+                    onSelect={dow => { onChange({ cronDow: dow }); }}
                   />
                 </div>
               )
@@ -365,7 +365,7 @@ function StepConfigure({
             <button
               key={m.value}
               type="button"
-              onClick={() => onChange({ model: m.value })}
+              onClick={() => { onChange({ model: m.value }); }}
               className={`rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
                 form.model === m.value
                   ? 'border-accent-6 bg-accent-9/40 text-accent-2'
@@ -384,7 +384,7 @@ function StepConfigure({
         </label>
         <textarea
           value={form.customPrompt}
-          onChange={e => onChange({ customPrompt: e.target.value })}
+          onChange={e => { onChange({ customPrompt: e.target.value }); }}
           rows={3}
           placeholder="e.g. Focus on the auth module and payment flows"
           className="w-full rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-1 placeholder-neutral-5 focus:border-accent-6 focus:outline-none resize-none"
@@ -402,7 +402,7 @@ function StepConfigure({
 export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
   const [step, setStep] = useState<Step>(1)
   const [selectedRepoId, setSelectedRepoId] = useState('')
-  const [form, setForm] = useState<FormState>({
+  const [form, setForm] = useState({
     kind: '',
     repoPath: '',
     repoName: '',
@@ -416,7 +416,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
   const [formError, setFormError] = useState<string | null>(null)
 
   const eventDriven = isEventDriven(form.kind)
-  const updateForm = (patch: Partial<FormState>) => setForm(f => ({ ...f, ...patch }))
+  const updateForm = (patch: Partial<FormState>) => { setForm(f => ({ ...f, ...patch })); }
 
   const canNext = (): boolean => {
     if (step === 1) return !!form.repoPath
@@ -472,7 +472,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
         className="w-[520px] max-h-[90vh] overflow-y-auto rounded-xl border border-neutral-7 bg-neutral-11 p-6 shadow-2xl"
-        onClick={e => e.stopPropagation()}
+        onClick={e => { e.stopPropagation(); }}
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-1">
@@ -503,7 +503,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
               token={token}
               repoPath={form.repoPath}
               selectedKind={form.kind}
-              onSelect={kind => updateForm({ kind })}
+              onSelect={kind => { updateForm({ kind }); }}
             />
           )}
 

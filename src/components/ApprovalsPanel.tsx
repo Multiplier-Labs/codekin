@@ -24,7 +24,7 @@ export function ApprovalsPanel({ token, workingDir, visible }: Props) {
     if (!visible || !workingDir || !token) return
     let cancelled = false
     setLoading(true) // eslint-disable-line react-hooks/set-state-in-effect -- data fetching
-    setError(false) // eslint-disable-line react-hooks/set-state-in-effect -- data fetching
+    setError(false)  
     getRepoApprovals(token, workingDir)
       .then(data => { if (!cancelled) setApprovals(data) })
       .catch(() => { if (!cancelled) { setApprovals(null); setError(true) } })
@@ -112,7 +112,7 @@ function ApprovalsContent({ approvals, onRemove, onRevokeMultiple }: {
   onRemove: (opts: { tool?: string; command?: string; pattern?: string }) => void
   onRevokeMultiple: (items: Array<{ tool?: string; command?: string; pattern?: string }>) => void
 }) {
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set(['__tools__', '__commands__', '__patterns__']))
+  const [collapsedGroups, setCollapsedGroups] = useState(new Set(['__tools__', '__commands__', '__patterns__']))
 
   const totalCount = approvals.tools.length + approvals.commands.length + approvals.patterns.length
   const empty = totalCount === 0
@@ -187,7 +187,7 @@ function ApprovalsContent({ approvals, onRemove, onRevokeMultiple }: {
               title="Patterns"
               count={filteredPatterns.length}
               collapsed={collapsedGroups.has('__patterns__')}
-              onToggle={() => toggleGroup('__patterns__')}
+              onToggle={() => { toggleGroup('__patterns__'); }}
               onRevokeAll={() => {
                 if (confirm(`Revoke all ${filteredPatterns.length} pattern approvals?`)) {
                   onRevokeMultiple(filteredPatterns.map(p => ({ pattern: p })))
@@ -199,7 +199,7 @@ function ApprovalsContent({ approvals, onRemove, onRevokeMultiple }: {
                   <li key={pattern} className="group flex items-center justify-between rounded-md px-2 py-1 text-[13px] text-neutral-3 hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors">
                     <code className="truncate font-mono">{pattern}</code>
                     <button
-                      onClick={() => onRemove({ pattern })}
+                      onClick={() => { onRemove({ pattern }); }}
                       className="ml-2 flex-shrink-0 text-neutral-5 opacity-0 group-hover:opacity-100 hover:text-error-5 transition-all"
                     >
                       ×
@@ -215,7 +215,7 @@ function ApprovalsContent({ approvals, onRemove, onRevokeMultiple }: {
               title="Tools"
               count={filteredTools.length}
               collapsed={collapsedGroups.has('__tools__')}
-              onToggle={() => toggleGroup('__tools__')}
+              onToggle={() => { toggleGroup('__tools__'); }}
               onRevokeAll={() => {
                 if (confirm(`Revoke all ${filteredTools.length} tool approvals?`)) {
                   onRevokeMultiple(filteredTools.map(t => ({ tool: t })))
@@ -227,7 +227,7 @@ function ApprovalsContent({ approvals, onRemove, onRevokeMultiple }: {
                   <li key={tool} className="group flex items-center justify-between rounded-md px-2 py-1 text-[13px] text-neutral-3 hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors">
                     <span className="truncate">{tool}</span>
                     <button
-                      onClick={() => onRemove({ tool })}
+                      onClick={() => { onRemove({ tool }); }}
                       className="ml-2 flex-shrink-0 text-neutral-5 opacity-0 group-hover:opacity-100 hover:text-error-5 transition-all"
                     >
                       ×
@@ -243,7 +243,7 @@ function ApprovalsContent({ approvals, onRemove, onRevokeMultiple }: {
               title="Commands"
               count={approvals.commands.length}
               collapsed={collapsedGroups.has('__commands__')}
-              onToggle={() => toggleGroup('__commands__')}
+              onToggle={() => { toggleGroup('__commands__'); }}
               onRevokeAll={() => {
                 const all = approvals.commands
                 if (confirm(`Revoke all ${all.length} command approvals?`)) {
@@ -258,8 +258,8 @@ function ApprovalsContent({ approvals, onRemove, onRevokeMultiple }: {
                     prefix={prefix}
                     commands={cmds}
                     collapsed={collapsedGroups.has(`cmd:${prefix}`)}
-                    onToggle={() => toggleGroup(`cmd:${prefix}`)}
-                    onRemove={cmd => onRemove({ command: cmd })}
+                    onToggle={() => { toggleGroup(`cmd:${prefix}`); }}
+                    onRemove={cmd => { onRemove({ command: cmd }); }}
                     onRevokeAll={() => {
                       if (confirm(`Revoke all ${cmds.length} "${prefix}" approvals?`)) {
                         onRevokeMultiple(cmds.map(c => ({ command: c })))
@@ -348,7 +348,7 @@ function CommandGroup({ prefix, commands, collapsed, onToggle, onRemove, onRevok
           $ {commands[0]}
         </code>
         <button
-          onClick={() => onRemove(commands[0])}
+          onClick={() => { onRemove(commands[0]); }}
           className="ml-2 flex-shrink-0 text-neutral-5 opacity-0 group-hover:opacity-100 hover:text-error-5 transition-all"
         >
           ×
@@ -393,7 +393,7 @@ function CommandGroup({ prefix, commands, collapsed, onToggle, onRemove, onRevok
                 $ {cmd}
               </code>
               <button
-                onClick={() => onRemove(cmd)}
+                onClick={() => { onRemove(cmd); }}
                 className="ml-2 flex-shrink-0 text-neutral-5 opacity-0 group-hover:opacity-100 hover:text-error-5 transition-all"
               >
                 ×

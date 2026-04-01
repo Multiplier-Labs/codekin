@@ -43,6 +43,7 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
   const isMultiQuestion = questions && questions.length > 1
   const [questionIndex, setQuestionIndex] = useState(0)
   const [answers, setAnswers] = useState<Record<string, string>>({})
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-arguments -- Set() defaults to Set<unknown>, explicit type needed
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
   // Determine the current question to display
@@ -88,13 +89,13 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
     let remaining = 15
     const interval = setInterval(() => {
       remaining--
-      setTimeLeft(remaining) // eslint-disable-line react-hooks/set-state-in-effect -- async timer callback
+      setTimeLeft(remaining)  
       if (remaining <= 0) {
         clearInterval(interval)
         handleSingleAnswerRef.current('allow')
       }
     }, 1000)
-    return () => clearInterval(interval)
+    return () => { clearInterval(interval); }
   }, [isPermission, options])
 
   const handleMultiAnswer = useCallback((values: string[]) => {
@@ -145,7 +146,7 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
           {displayOptions.map((opt) => (
             <button
               key={opt.value}
-              onClick={() => toggle(opt.value)}
+              onClick={() => { toggle(opt.value); }}
               title={opt.description}
               className={`rounded-full border ${btnPad} transition-colors ${
                 selected.has(opt.value)
@@ -199,7 +200,7 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
           return (
             <button
               key={opt.value}
-              onClick={() => handleSingleAnswer(opt.value)}
+              onClick={() => { handleSingleAnswer(opt.value); }}
               title={alwaysAllowTitle ?? opt.description}
               className={btnClass}
             >

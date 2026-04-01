@@ -20,6 +20,7 @@ export function TodoPanel({ tasks }: Props) {
   const prevCountRef = useRef(0)
   const hadActiveTaskRef = useRef(false)
   const prevCompletedRef = useRef(0)
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-arguments -- new Map() infers Map<any,any>
   const taskRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
   const completed = tasks.filter(t => t.status === 'completed').length
@@ -29,7 +30,7 @@ export function TodoPanel({ tasks }: Props) {
   useEffect(() => {
     if (tasks.length > prevCountRef.current) {
       setExpanded(true) // eslint-disable-line react-hooks/set-state-in-effect -- auto-expand on new tasks
-      setDismissed(false) // eslint-disable-line react-hooks/set-state-in-effect -- un-dismiss on new tasks
+      setDismissed(false)  
     }
     prevCountRef.current = tasks.length
   }, [tasks.length])
@@ -45,8 +46,8 @@ export function TodoPanel({ tasks }: Props) {
   useEffect(() => {
     if (allDone) {
       const delay = hadActiveTaskRef.current ? 10000 : 0
-      const timer = setTimeout(() => setDismissed(true), delay)
-      return () => clearTimeout(timer)
+      const timer = setTimeout(() => { setDismissed(true); }, delay)
+      return () => { clearTimeout(timer); }
     }
     setDismissed(false) // eslint-disable-line react-hooks/set-state-in-effect -- reset dismissed when tasks become active
   }, [allDone])
@@ -70,7 +71,7 @@ export function TodoPanel({ tasks }: Props) {
     return (
       <div className="absolute top-14 right-3 z-20">
         <button
-          onClick={() => setExpanded(true)}
+          onClick={() => { setExpanded(true); }}
           className="flex items-center gap-1.5 rounded-lg bg-neutral-9/90 backdrop-blur border border-neutral-8/60 px-2.5 py-1.5 shadow-lg hover:bg-neutral-8/90 transition-colors"
         >
           {!allDone && <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary-5 animate-pulse" />}
@@ -97,14 +98,14 @@ export function TodoPanel({ tasks }: Props) {
         </span>
         <div className="flex items-center gap-0.5">
           <button
-            onClick={() => setExpanded(false)}
+            onClick={() => { setExpanded(false); }}
             className="rounded p-0.5 text-neutral-4 hover:text-neutral-2 hover:bg-neutral-8/60 transition-colors"
             title="Collapse"
           >
             <IconChevronUp size={14} />
           </button>
           <button
-            onClick={() => setDismissed(true)}
+            onClick={() => { setDismissed(true); }}
             className="rounded p-0.5 text-neutral-4 hover:text-neutral-2 hover:bg-neutral-8/60 transition-colors"
             title="Dismiss"
           >

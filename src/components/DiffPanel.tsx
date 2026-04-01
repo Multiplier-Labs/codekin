@@ -33,6 +33,7 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
   })
 
   const diff = useDiff({ send, isOpen })
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-arguments -- new Map() infers Map<any,any>
   const fileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const [activeFile, setActiveFile] = useState<string | null>(null)
   const dragging = useRef(false)
@@ -98,7 +99,7 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
       if (e.key === 'Escape') onClose()
     }
     document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
+    return () => { document.removeEventListener('keydown', handler); }
   }, [isOpen, onClose])
 
   if (!isOpen) return null

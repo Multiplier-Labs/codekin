@@ -38,6 +38,7 @@ export interface UsePromptStateReturn {
 }
 
 export function usePromptState(): UsePromptStateReturn {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-arguments -- new Map() infers Map<any,any>
   const [queues, setQueues] = useState<Map<string, Map<string, PromptEntry>>>(new Map())
 
   const enqueue = useCallback((msg: WsServerMessage & { type: 'prompt' }, sessionId: string) => {
