@@ -34,12 +34,27 @@ vi.mock('better-sqlite3', () => {
 // and execFile for worktree operations
 const mockSpawn = vi.hoisted(() => vi.fn())
 const mockExecFile = vi.hoisted(() => vi.fn())
+const makeExecFileWrapper = vi.hoisted(() => (mockFn: any) => {
+  const wrapper = (...args: any[]) => mockFn(...args)
+  // Add custom promisify so that promisify(execFile) returns {stdout, stderr}
+  const sym = Symbol.for('nodejs.util.promisify.custom')
+  ;(wrapper as any)[sym] = (...args: any[]) => {
+    return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      mockFn(...args, (err: Error | null, stdout: string, stderr: string) => {
+        if (err) reject(err)
+        else resolve({ stdout, stderr })
+      })
+    })
+  }
+  return wrapper
+})
+
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>()
   return {
     ...actual,
     spawn: (...args: any[]) => mockSpawn(...args),
-    execFile: (...args: any[]) => mockExecFile(...args),
+    execFile: makeExecFileWrapper(mockExecFile),
   }
 })
 vi.mock('child_process', async (importOriginal) => {
@@ -47,7 +62,7 @@ vi.mock('child_process', async (importOriginal) => {
   return {
     ...actual,
     spawn: (...args: any[]) => mockSpawn(...args),
-    execFile: (...args: any[]) => mockExecFile(...args),
+    execFile: makeExecFileWrapper(mockExecFile),
   }
 })
 
@@ -2884,6 +2899,364 @@ describe('SessionManager', () => {
 
       expect(spy).toHaveBeenCalledWith('/tmp/test-repo', 'all')
       expect(result).toEqual(mockResult)
+    })
+  })
+
+  // =====================================================================
+  // Coverage expansion: worktree, client lifecycle, tool approval timeout
+  // =====================================================================
+
+  describe('createWorktree()', () => {
+    afterEach(() => {
+      mockExecFile.mockReset()
+    })
+
+    it('returns worktree path on success', async () => {
+      const s = sm.create('wt-test', '/repos/myproject')
+
+      // Mock execFile: callback style (cmd, args, opts, cb)
+      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
+        if (typeof cb === 'function') {
+          if (args[0] === 'rev-parse') {
+            cb(null, '/repos/myproject\n', '')
+          } else {
+            cb(null, '', '')
+          }
+        }
+        return { on: vi.fn() }
+      })
+
+      const result = await sm.createWorktree(s.id, '/repos/myproject')
+
+      expect(result).not.toBeNull()
+      expect(result).toContain('-wt-')
+      expect(result).toContain(s.id.slice(0, 8))
+    })
+
+    it('returns null on git failure', async () => {
+      const s = sm.create('wt-fail', '/repos/myproject')
+
+      // Mock execFile to fail on worktree add
+      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
+        if (typeof cb === 'function') {
+          if (args[0] === 'rev-parse') {
+            cb(null, '/repos/myproject\n', '')
+          } else if (args[0] === 'worktree' && args[1] === 'add') {
+            cb(new Error('fatal: worktree add failed'), '', 'fatal: worktree add failed')
+          } else {
+            cb(null, '', '')
+          }
+        }
+        return { on: vi.fn() }
+      })
+
+      const result = await sm.createWorktree(s.id, '/repos/myproject')
+
+      expect(result).toBeNull()
+    })
+
+    it('returns null for unknown session', async () => {
+      const result = await sm.createWorktree('nonexistent', '/repos/myproject')
+      expect(result).toBeNull()
+    })
+
+    it('updates session.workingDir and session.groupDir on success', async () => {
+      const s = sm.create('wt-update', '/repos/myproject')
+
+      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
+        if (typeof cb === 'function') {
+          if (args[0] === 'rev-parse') {
+            cb(null, '/repos/myproject\n', '')
+          } else {
+            cb(null, '', '')
+          }
+        }
+        return { on: vi.fn() }
+      })
+
+      const worktreePath = await sm.createWorktree(s.id, '/repos/myproject')
+
+      expect(worktreePath).not.toBeNull()
+      expect(s.workingDir).toBe(worktreePath)
+      expect(s.groupDir).toBe('/repos/myproject')
+      expect(s.worktreePath).toBe(worktreePath)
+    })
+
+    it('returns null when rev-parse returns invalid path', async () => {
+      const s = sm.create('wt-invalid-root', '/repos/myproject')
+
+      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
+        if (typeof cb === 'function') {
+          if (args[0] === 'rev-parse') {
+            // Return a relative path (invalid)
+            cb(null, 'relative/path\n', '')
+          } else {
+            cb(null, '', '')
+          }
+        }
+        return { on: vi.fn() }
+      })
+
+      const result = await sm.createWorktree(s.id, '/repos/myproject')
+      expect(result).toBeNull()
+    })
+  })
+
+  describe('client lifecycle: join/leave grace timer', () => {
+    it('join re-broadcasts pending tool approval prompts', () => {
+      const s = sm.create('rejoin-test', '/tmp')
+      const promptMsg = { type: 'prompt', promptType: 'permission', question: 'Allow Bash?', toolName: 'Bash', requestId: 'r1' }
+      s.pendingToolApprovals.set('r1', {
+        resolve: vi.fn(),
+        toolName: 'Bash',
+        toolInput: { command: 'ls' },
+        requestId: 'r1',
+        promptMsg: promptMsg as any,
+      })
+
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      // The pending prompt should have been re-broadcast to the joining client
+      expect(ws.send).toHaveBeenCalled()
+      const sent = JSON.parse(ws.send.mock.calls[0][0])
+      expect(sent.type).toBe('prompt')
+      expect(sent.toolName).toBe('Bash')
+    })
+
+    it('join re-broadcasts pending control request prompts', () => {
+      const s = sm.create('rejoin-ctrl', '/tmp')
+      const promptMsg = { type: 'prompt', promptType: 'permission', question: 'Allow Write?', toolName: 'Write', requestId: 'c1' }
+      s.pendingControlRequests.set('c1', {
+        requestId: 'c1',
+        toolName: 'Write',
+        toolInput: { file_path: '/tmp/x' },
+        promptMsg: promptMsg as any,
+      })
+
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      expect(ws.send).toHaveBeenCalled()
+      const sent = JSON.parse(ws.send.mock.calls[0][0])
+      expect(sent.type).toBe('prompt')
+      expect(sent.toolName).toBe('Write')
+    })
+
+    it('join cancels leave grace timer', () => {
+      vi.useFakeTimers()
+      const s = sm.create('grace-cancel', '/tmp')
+      const ws1 = fakeWs()
+      sm.join(s.id, ws1)
+
+      const resolve = vi.fn()
+      s.pendingToolApprovals.set('r1', { resolve, toolName: 'Bash', toolInput: { command: 'ls' }, requestId: 'r1' })
+
+      // Last client leaves — starts grace timer
+      sm.leave(s.id, ws1)
+      expect(s._leaveGraceTimer).not.toBeNull()
+
+      // New client joins before grace period expires — timer should be cancelled
+      const ws2 = fakeWs()
+      sm.join(s.id, ws2)
+      expect(s._leaveGraceTimer).toBeNull()
+
+      // Advance past the grace period — should NOT auto-deny since timer was cancelled
+      vi.advanceTimersByTime(5000)
+      expect(resolve).not.toHaveBeenCalled()
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      vi.useRealTimers()
+    })
+
+    it('leave starts grace timer only when last client leaves', () => {
+      vi.useFakeTimers()
+      const s = sm.create('grace-multi', '/tmp')
+      const ws1 = fakeWs()
+      const ws2 = fakeWs()
+      sm.join(s.id, ws1)
+      sm.join(s.id, ws2)
+
+      // Remove first client — not the last, so no grace timer started
+      sm.leave(s.id, ws1)
+      expect(s._leaveGraceTimer).toBeNull()
+      expect(s.clients.size).toBe(1)
+
+      // Remove last client — grace timer should start
+      sm.leave(s.id, ws2)
+      expect(s._leaveGraceTimer).not.toBeNull()
+      expect(s.clients.size).toBe(0)
+
+      vi.useRealTimers()
+    })
+  })
+
+  describe('tool approval timeout (60s)', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('auto-denies tool approval after 60 seconds for interactive sessions', async () => {
+      const s = sm.create('timeout-test', '/tmp')
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      const approvalPromise = sm.requestToolApproval(s.id, 'Bash', { command: 'rm -rf /' })
+
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      // Advance 59 seconds — not timed out yet
+      vi.advanceTimersByTime(59_000)
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      // Advance past 60 seconds — should auto-deny
+      vi.advanceTimersByTime(2_000)
+
+      const result = await approvalPromise
+      expect(result).toEqual({ allow: false, always: false })
+      expect(s.pendingToolApprovals.size).toBe(0)
+
+      // Should have sent prompt_dismiss to clients
+      const dismissMsgs = ws.send.mock.calls
+        .map((c: any) => JSON.parse(c[0]))
+        .filter((m: any) => m.type === 'prompt_dismiss')
+      expect(dismissMsgs.length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('uses 5-minute timeout for agent-source sessions', async () => {
+      const s = sm.create('agent-timeout', '/tmp')
+      s.source = 'agent'
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      const approvalPromise = sm.requestToolApproval(s.id, 'Bash', { command: 'ls' })
+
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      // Advance 60 seconds — should NOT time out for agent sessions
+      vi.advanceTimersByTime(60_000)
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      // Advance to 5 minutes — should time out
+      vi.advanceTimersByTime(240_000)
+
+      const result = await approvalPromise
+      expect(result).toEqual({ allow: false, always: false })
+      expect(s.pendingToolApprovals.size).toBe(0)
+    })
+
+    it('uses 5-minute timeout for AskUserQuestion', async () => {
+      const s = sm.create('question-timeout', '/tmp')
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      const approvalPromise = sm.requestToolApproval(s.id, 'AskUserQuestion', {
+        questions: [{ question: 'Pick a color' }],
+      })
+
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      // Advance 60 seconds — should NOT time out for questions
+      vi.advanceTimersByTime(60_000)
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      // Advance to 5 minutes — should time out
+      vi.advanceTimersByTime(240_000)
+
+      const result = await approvalPromise
+      expect(result).toEqual({ allow: false, always: false })
+      expect(s.pendingToolApprovals.size).toBe(0)
+    })
+
+    it('clears timeout when approval is resolved before timeout', async () => {
+      const s = sm.create('early-resolve', '/tmp')
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      const approvalPromise = sm.requestToolApproval(s.id, 'Bash', { command: 'echo hi' })
+
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      // Resolve the approval before timeout
+      const pending = s.pendingToolApprovals.values().next().value!
+      pending.resolve({ allow: true, always: false })
+
+      const result = await approvalPromise
+      expect(result).toEqual({ allow: true, always: false })
+
+      // Advance past timeout — should not cause issues (timer was cleared)
+      vi.advanceTimersByTime(70_000)
+      // No error, no double-resolve
+    })
+  })
+
+  describe('resolveAutoApproval() via allowedTools', () => {
+    it('auto-approves when tool matches session allowedTools (simple name)', async () => {
+      const s = sm.create('allowed-tools', '/tmp', { allowedTools: ['WebFetch', 'Read'] })
+
+      const result = await sm.requestToolApproval(s.id, 'WebFetch', {})
+      expect(result).toEqual({ allow: true, always: false })
+      expect(s.pendingToolApprovals.size).toBe(0)
+    })
+
+    it('auto-approves Bash with parameterized pattern in allowedTools', async () => {
+      const s = sm.create('bash-pattern', '/tmp', { allowedTools: ['Bash(curl:*)'] })
+
+      const result = await sm.requestToolApproval(s.id, 'Bash', { command: 'curl https://example.com' })
+      expect(result).toEqual({ allow: true, always: false })
+      expect(s.pendingToolApprovals.size).toBe(0)
+    })
+
+    it('does not auto-approve Bash when command does not match pattern', async () => {
+      const s = sm.create('bash-no-match', '/tmp', { allowedTools: ['Bash(curl:*)'] })
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      const promise = sm.requestToolApproval(s.id, 'Bash', { command: 'wget https://example.com' })
+
+      // Should prompt — not auto-approved
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      // Resolve to avoid leaked promise
+      s.pendingToolApprovals.values().next().value!.resolve({ allow: false, always: false })
+      await promise
+    })
+
+    it('does not auto-approve tool not in allowedTools list', async () => {
+      const s = sm.create('not-allowed', '/tmp', { allowedTools: ['Read'] })
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      const promise = sm.requestToolApproval(s.id, 'Write', { file_path: '/tmp/x' })
+
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      s.pendingToolApprovals.values().next().value!.resolve({ allow: false, always: false })
+      await promise
+    })
+
+    it('auto-approves Bash with exact prefix match in allowedTools', async () => {
+      const s = sm.create('bash-exact', '/tmp', { allowedTools: ['Bash(git:*)'] })
+
+      const result = await sm.requestToolApproval(s.id, 'Bash', { command: 'git status' })
+      expect(result).toEqual({ allow: true, always: false })
+    })
+
+    it('does not match parameterized pattern for wrong tool name', async () => {
+      const s = sm.create('wrong-tool', '/tmp', { allowedTools: ['Bash(curl:*)'] })
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      const promise = sm.requestToolApproval(s.id, 'Write', { command: 'curl something' })
+
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      s.pendingToolApprovals.values().next().value!.resolve({ allow: false, always: false })
+      await promise
     })
   })
 

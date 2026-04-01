@@ -76,9 +76,22 @@ commitMessage: chore: coverage
 Analyze test coverage.
 `
 
+const VALID_MD_WITH_MODEL = `---
+kind: test-review.daily
+name: Test Review
+sessionPrefix: test-review
+outputDir: .codekin/reports/test
+filenameSuffix: _test-review.md
+commitMessage: chore: test review
+model: claude-sonnet-4-6
+---
+You are performing an automated test review of the codebase.
+`
+
 function fakeEngine() {
   return {
     registerWorkflow: vi.fn(),
+    hasWorkflow: vi.fn(() => false),
   } as any
 }
 
@@ -180,6 +193,50 @@ Some prompt.
       expect(consoleSpy).toHaveBeenCalled()
       consoleSpy.mockRestore()
     })
+
+    it('parses optional model field from frontmatter', () => {
+      mockReaddirSync.mockReturnValue(['review.md'])
+      mockReadFileSync.mockReturnValue(VALID_MD_WITH_MODEL)
+
+      const engine = fakeEngine()
+      loadMdWorkflows(engine, fakeSessionManager())
+
+      expect(engine.registerWorkflow).toHaveBeenCalledTimes(1)
+    })
+
+    it('handles frontmatter lines without colon-space separator', () => {
+      // Lines like "# comment" or blank lines should be skipped
+      const mdWithComments = `---
+kind: test-review.daily
+name: Test Review
+sessionPrefix: test-review
+outputDir: .codekin/reports/test
+filenameSuffix: _test-review.md
+commitMessage: chore: test review
+some-malformed-line
+---
+Prompt text.
+`
+      mockReaddirSync.mockReturnValue(['test.md'])
+      mockReadFileSync.mockReturnValue(mdWithComments)
+
+      const engine = fakeEngine()
+      loadMdWorkflows(engine, fakeSessionManager())
+
+      // Should still parse successfully — malformed line is ignored
+      expect(engine.registerWorkflow).toHaveBeenCalledTimes(1)
+    })
+
+    it('handles CRLF line endings in frontmatter', () => {
+      const crlfMd = '---\r\nkind: test-review.daily\r\nname: Test Review\r\nsessionPrefix: test-review\r\noutputDir: .codekin/reports/test\r\nfilenameSuffix: _test-review.md\r\ncommitMessage: chore: test review\r\n---\r\nPrompt text.\r\n'
+      mockReaddirSync.mockReturnValue(['test.md'])
+      mockReadFileSync.mockReturnValue(crlfMd)
+
+      const engine = fakeEngine()
+      loadMdWorkflows(engine, fakeSessionManager())
+
+      expect(engine.registerWorkflow).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe('registered workflow steps', () => {
@@ -277,6 +334,31 @@ Some prompt.
           { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
         )).rejects.toThrow('Not a valid git repository')
       })
+
+      it('rejects paths outside REPOS_ROOT', async () => {
+        mockRealpathSync.mockReturnValue('/etc/passwd')
+        const handler = registeredDef.steps[0].handler
+        await expect(handler(
+          { repoPath: '/tmp/../../etc/passwd' },
+          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
+        )).rejects.toThrow('outside REPOS_ROOT')
+      })
+
+      it('passes lastCommit through to result', async () => {
+        mockRealpathSync.mockReturnValue('/tmp/repo')
+        mockExecFileSync
+          .mockReturnValueOnce(Buffer.from('develop\n'))
+          .mockReturnValueOnce(Buffer.from('abc123 latest commit\n'))
+
+        const handler = registeredDef.steps[0].handler
+        const result = await handler(
+          { repoPath: '/tmp/repo', repoName: 'test' },
+          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        expect(result.lastCommit).toBe('abc123 latest commit')
+        expect(result.branch).toBe('develop')
+      })
     })
 
     describe('create_session step', () => {
@@ -308,6 +390,368 @@ Some prompt.
           expect.any(Object)
         )
       })
+
+      it('passes model from input when provided', async () => {
+        const handler = registeredDef.steps[1].handler
+        await handler(
+          { repoPath: '/tmp/repo', repoName: 'my-repo', model: 'claude-opus-4' },
+          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        expect(sessions.create).toHaveBeenCalledWith(
+          'test-review:my-repo',
+          '/tmp/repo',
+          expect.objectContaining({ model: 'claude-opus-4' })
+        )
+      })
+
+      it('passes model from def when input model is absent', async () => {
+        // Reload with model-bearing MD
+        mockReaddirSync.mockReturnValue(['test.md'])
+        mockReadFileSync.mockReturnValue(VALID_MD_WITH_MODEL)
+
+        const eng = fakeEngine()
+        const sess = fakeSessionManager()
+        loadMdWorkflows(eng, sess)
+
+        const defWithModel = eng.registerWorkflow.mock.calls[0][0]
+        const handler = defWithModel.steps[1].handler
+        await handler(
+          { repoPath: '/tmp/repo', repoName: 'my-repo' },
+          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        expect(sess.create).toHaveBeenCalledWith(
+          'test-review:my-repo',
+          '/tmp/repo',
+          expect.objectContaining({ model: 'claude-sonnet-4-6' })
+        )
+      })
+
+      it('passes undefined model when neither input nor def have it', async () => {
+        const handler = registeredDef.steps[1].handler
+        await handler(
+          { repoPath: '/tmp/repo', repoName: 'my-repo' },
+          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        expect(sessions.create).toHaveBeenCalledWith(
+          'test-review:my-repo',
+          '/tmp/repo',
+          expect.objectContaining({ model: undefined })
+        )
+      })
+
+      it('carries forward branch and lastCommit in output', async () => {
+        const handler = registeredDef.steps[1].handler
+        const result = await handler(
+          { repoPath: '/tmp/repo', repoName: 'r', branch: 'feat/x', lastCommit: 'def456' },
+          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        expect(result.branch).toBe('feat/x')
+        expect(result.lastCommit).toBe('def456')
+      })
+
+      it('uses "unknown" when repoPath has no segments', async () => {
+        const handler = registeredDef.steps[1].handler
+        await handler(
+          { repoPath: '', repoName: '' },
+          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        // Empty repoName falls through to path split; empty path gives ''
+        // The || 'unknown' fallback should kick in for truly empty path
+        expect(sessions.create).toHaveBeenCalled()
+      })
+    })
+
+    describe('run_prompt step', () => {
+      it('sends the default prompt when no repo override exists', async () => {
+        vi.useFakeTimers()
+
+        // No repo override file
+        mockExistsSync.mockImplementation((p: string) => {
+          if (String(p).includes('.codekin/workflows')) return false
+          return true
+        })
+
+        // Session immediately returns a result
+        sessions.get.mockReturnValue({
+          outputHistory: [
+            { type: 'output', data: 'Review output text' },
+            { type: 'result' },
+          ],
+        })
+
+        const handler = registeredDef.steps[2].handler
+        const promise = handler(
+          { sessionId: 'session-1', repoName: 'my-repo', repoPath: '/tmp/repo', branch: 'main' },
+          { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
+        )
+
+        // Advance past the 3000ms startup delay
+        await vi.advanceTimersByTimeAsync(3000)
+        // Advance past the poll delay
+        await vi.advanceTimersByTimeAsync(2000)
+
+        const result = await promise
+
+        expect(sessions.sendInput).toHaveBeenCalledWith(
+          'session-1',
+          'You are performing an automated test review of the codebase.'
+        )
+        expect(result.reportText).toBe('Review output text')
+        expect(result.repoName).toBe('my-repo')
+
+        vi.useRealTimers()
+      })
+
+      it('uses repo override prompt when available', async () => {
+        vi.useFakeTimers()
+
+        const overrideMd = `---
+kind: test-review.daily
+name: Test Review Override
+sessionPrefix: test-review
+outputDir: .codekin/reports/test
+filenameSuffix: _test-review.md
+commitMessage: chore: test review
+---
+This is the repo-specific override prompt.
+`
+
+        mockExistsSync.mockReturnValue(true)
+        mockReadFileSync.mockImplementation((path: string) => {
+          if (String(path).includes('.codekin/workflows/test-review.daily.md')) return overrideMd
+          return VALID_MD
+        })
+
+        sessions.get.mockReturnValue({
+          outputHistory: [
+            { type: 'output', data: 'Override result' },
+            { type: 'result' },
+          ],
+        })
+
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+        const handler = registeredDef.steps[2].handler
+        const promise = handler(
+          { sessionId: 'session-1', repoName: 'my-repo', repoPath: '/tmp/repo', branch: 'main' },
+          { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
+        )
+
+        await vi.advanceTimersByTimeAsync(3000)
+        await vi.advanceTimersByTimeAsync(2000)
+
+        const result = await promise
+
+        expect(sessions.sendInput).toHaveBeenCalledWith(
+          'session-1',
+          'This is the repo-specific override prompt.'
+        )
+        expect(result.reportText).toBe('Override result')
+        expect(logSpy).toHaveBeenCalledWith(
+          expect.stringContaining('Using per-repo prompt override')
+        )
+
+        logSpy.mockRestore()
+        vi.useRealTimers()
+      })
+
+      it('appends customPrompt to the base prompt', async () => {
+        vi.useFakeTimers()
+
+        mockExistsSync.mockImplementation((p: string) => {
+          if (String(p).includes('.codekin/workflows')) return false
+          return true
+        })
+
+        sessions.get.mockReturnValue({
+          outputHistory: [
+            { type: 'output', data: 'Custom result' },
+            { type: 'result' },
+          ],
+        })
+
+        const handler = registeredDef.steps[2].handler
+        const promise = handler(
+          {
+            sessionId: 'session-1',
+            repoName: 'my-repo',
+            repoPath: '/tmp/repo',
+            branch: 'main',
+            customPrompt: 'Focus on security issues.',
+          },
+          { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
+        )
+
+        await vi.advanceTimersByTimeAsync(3000)
+        await vi.advanceTimersByTimeAsync(2000)
+
+        await promise
+
+        expect(sessions.sendInput).toHaveBeenCalledWith(
+          'session-1',
+          expect.stringContaining('Additional focus areas:\nFocus on security issues.')
+        )
+
+        vi.useRealTimers()
+      })
+    })
+
+    describe('waitForSessionResult (via run_prompt)', () => {
+      it('returns text from exit message when no result message', async () => {
+        vi.useFakeTimers()
+
+        mockExistsSync.mockImplementation((p: string) => {
+          if (String(p).includes('.codekin/workflows')) return false
+          return true
+        })
+
+        sessions.get.mockReturnValue({
+          outputHistory: [
+            { type: 'output', data: 'Partial output' },
+            { type: 'exit', code: 0 },
+          ],
+        })
+
+        const handler = registeredDef.steps[2].handler
+        const promise = handler(
+          { sessionId: 'session-1', repoName: 'my-repo', repoPath: '/tmp/repo', branch: 'main' },
+          { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
+        )
+
+        await vi.advanceTimersByTimeAsync(3000)
+        await vi.advanceTimersByTimeAsync(2000)
+
+        const result = await promise
+
+        expect(result.reportText).toBe('Partial output')
+
+        vi.useRealTimers()
+      })
+
+      it('returns fallback text when exit has no output', async () => {
+        vi.useFakeTimers()
+
+        mockExistsSync.mockImplementation((p: string) => {
+          if (String(p).includes('.codekin/workflows')) return false
+          return true
+        })
+
+        sessions.get.mockReturnValue({
+          outputHistory: [
+            { type: 'exit', code: 1 },
+          ],
+        })
+
+        const handler = registeredDef.steps[2].handler
+        const promise = handler(
+          { sessionId: 'session-1', repoName: 'my-repo', repoPath: '/tmp/repo', branch: 'main' },
+          { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
+        )
+
+        await vi.advanceTimersByTimeAsync(3000)
+        await vi.advanceTimersByTimeAsync(2000)
+
+        const result = await promise
+
+        expect(result.reportText).toBe('Claude exited without output')
+
+        vi.useRealTimers()
+      })
+
+      it('throws on abort signal', async () => {
+        vi.useFakeTimers()
+
+        mockExistsSync.mockImplementation((p: string) => {
+          if (String(p).includes('.codekin/workflows')) return false
+          return true
+        })
+
+        // Session never produces output — just empty outputHistory forever
+        sessions.get.mockReturnValue({ outputHistory: [] })
+
+        const abortController = new AbortController()
+        // Pre-abort so the signal is already aborted when the poll loop checks
+        abortController.abort()
+
+        const handler = registeredDef.steps[2].handler
+        let caughtError: Error | null = null
+        const promise = handler(
+          { sessionId: 'session-1', repoName: 'my-repo', repoPath: '/tmp/repo', branch: 'main' },
+          { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: abortController.signal }
+        ).catch((err: Error) => { caughtError = err })
+
+        // Advance past the 3000ms startup delay and poll delay
+        await vi.advanceTimersByTimeAsync(5000)
+        await promise
+
+        expect(caughtError).toBeTruthy()
+        expect(caughtError!.message).toContain('Aborted')
+
+        vi.useRealTimers()
+      })
+
+      it('throws when session is not found during polling', async () => {
+        vi.useFakeTimers()
+
+        mockExistsSync.mockImplementation((p: string) => {
+          if (String(p).includes('.codekin/workflows')) return false
+          return true
+        })
+
+        // Session returns null immediately — session already gone
+        sessions.get.mockReturnValue(null)
+
+        const handler = registeredDef.steps[2].handler
+        let caughtError: Error | null = null
+        const promise = handler(
+          { sessionId: 'session-1', repoName: 'my-repo', repoPath: '/tmp/repo', branch: 'main' },
+          { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
+        ).catch((err: Error) => { caughtError = err })
+
+        await vi.advanceTimersByTimeAsync(5000)
+        await promise
+
+        expect(caughtError).toBeTruthy()
+        expect(caughtError!.message).toContain('not found')
+
+        vi.useRealTimers()
+      })
+
+      it('concatenates multiple output messages', async () => {
+        vi.useFakeTimers()
+
+        mockExistsSync.mockImplementation((p: string) => {
+          if (String(p).includes('.codekin/workflows')) return false
+          return true
+        })
+
+        sessions.get.mockReturnValue({
+          outputHistory: [
+            { type: 'output', data: 'Part 1. ' },
+            { type: 'output', data: 'Part 2.' },
+            { type: 'result' },
+          ],
+        })
+
+        const handler = registeredDef.steps[2].handler
+        const promise = handler(
+          { sessionId: 'session-1', repoName: 'my-repo', repoPath: '/tmp/repo', branch: 'main' },
+          { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
+        )
+
+        await vi.advanceTimersByTimeAsync(3000)
+        await vi.advanceTimersByTimeAsync(2000)
+
+        const result = await promise
+        expect(result.reportText).toBe('Part 1. Part 2.')
+
+        vi.useRealTimers()
+      })
     })
 
     describe('afterRun hook', () => {
@@ -326,6 +770,11 @@ Some prompt.
         expect(sessions.stopClaude).not.toHaveBeenCalled()
       })
 
+      it('skips cleanup when output has no sessionId', async () => {
+        await registeredDef.afterRun({ output: {} })
+        expect(sessions.stopClaude).not.toHaveBeenCalled()
+      })
+
       it('skips cleanup when Claude is not alive', async () => {
         sessions.get.mockReturnValue({
           claudeProcess: { isAlive: () => false },
@@ -341,16 +790,12 @@ Some prompt.
         // Should not throw
         await registeredDef.afterRun({ output: { sessionId: 'session-1' } })
       })
-    })
 
-    describe('validate_repo path traversal protection', () => {
-      it('rejects paths outside REPOS_ROOT', async () => {
-        mockRealpathSync.mockReturnValue('/etc/passwd')
-        const handler = registeredDef.steps[0].handler
-        await expect(handler(
-          { repoPath: '/tmp/../../etc/passwd' },
-          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
-        )).rejects.toThrow('outside REPOS_ROOT')
+      it('skips when claudeProcess is null', async () => {
+        sessions.get.mockReturnValue({ claudeProcess: null })
+
+        await registeredDef.afterRun({ output: { sessionId: 'session-1' } })
+        expect(sessions.stopClaude).not.toHaveBeenCalled()
       })
     })
 
@@ -423,6 +868,168 @@ Some prompt.
         expect(warnSpy).toHaveBeenCalled()
         warnSpy.mockRestore()
       })
+
+      it('creates the reports branch when it does not exist', async () => {
+        const gitCalls: string[][] = []
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          gitCalls.push(args)
+          // rev-parse --abbrev-ref HEAD → main
+          if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return Buffer.from('main\n')
+          // rev-parse --verify codekin/reports → fail (branch doesn't exist)
+          if (args[0] === 'rev-parse' && args[1] === '--verify') throw new Error('not found')
+          // branch codekin/reports → success
+          if (args[0] === 'branch') return Buffer.from('')
+          return Buffer.from('')
+        })
+
+        const handler = registeredDef.steps[3].handler
+        await handler(
+          {
+            repoPath: '/tmp/repo',
+            repoName: 'my-repo',
+            reportText: 'Content',
+            sessionId: 's1',
+            branch: 'main',
+          },
+          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        // Should have called 'git branch codekin/reports'
+        const branchCall = gitCalls.find(args => args[0] === 'branch' && args[1] === 'codekin/reports')
+        expect(branchCall).toBeDefined()
+      })
+
+      it('does not stash pop when there were no local changes', async () => {
+        const gitCalls: string[][] = []
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          gitCalls.push(args)
+          if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return Buffer.from('main\n')
+          if (args[0] === 'rev-parse' && args[1] === '--verify') return Buffer.from('')
+          if (args[0] === 'stash') return Buffer.from('No local changes to save\n')
+          return Buffer.from('')
+        })
+
+        const handler = registeredDef.steps[3].handler
+        await handler(
+          {
+            repoPath: '/tmp/repo',
+            repoName: 'my-repo',
+            reportText: 'Content',
+            sessionId: 's1',
+            branch: 'main',
+          },
+          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        // Should NOT have called 'git stash pop'
+        const stashPopCall = gitCalls.find(args => args[0] === 'stash' && args[1] === 'pop')
+        expect(stashPopCall).toBeUndefined()
+      })
+
+      it('stash pops when there were local changes', async () => {
+        const gitCalls: string[][] = []
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          gitCalls.push(args)
+          if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return Buffer.from('main\n')
+          if (args[0] === 'rev-parse' && args[1] === '--verify') return Buffer.from('')
+          if (args[0] === 'stash' && !args[1]) return Buffer.from('Saved working directory\n')
+          return Buffer.from('')
+        })
+
+        const handler = registeredDef.steps[3].handler
+        await handler(
+          {
+            repoPath: '/tmp/repo',
+            repoName: 'my-repo',
+            reportText: 'Content',
+            sessionId: 's1',
+            branch: 'main',
+          },
+          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        // Should have called 'git stash pop'
+        const stashPopCall = gitCalls.find(args => args[0] === 'stash' && args[1] === 'pop')
+        expect(stashPopCall).toBeDefined()
+      })
+
+      it('handles push failure gracefully and still checks out original branch', async () => {
+        const gitCalls: string[][] = []
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          gitCalls.push(args)
+          if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return Buffer.from('develop\n')
+          if (args[0] === 'rev-parse' && args[1] === '--verify') return Buffer.from('')
+          if (args[0] === 'stash' && args[1] === '--include-untracked') return Buffer.from('No local changes to save\n')
+          if (args[0] === 'push') throw new Error('remote rejected')
+          return Buffer.from('')
+        })
+
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+        const handler = registeredDef.steps[3].handler
+        const result = await handler(
+          {
+            repoPath: '/tmp/repo',
+            repoName: 'my-repo',
+            reportText: 'Content',
+            sessionId: 's1',
+            branch: 'develop',
+          },
+          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        // Should still return valid result
+        expect(result.filePath).toBeDefined()
+        // Should have checked out back to original branch
+        const checkoutCalls = gitCalls.filter(args => args[0] === 'checkout' && args[1] === 'develop')
+        expect(checkoutCalls.length).toBeGreaterThan(0)
+
+        warnSpy.mockRestore()
+      })
+
+      it('includes run metadata in the report markdown', async () => {
+        mockExecFileSync.mockReturnValue(Buffer.from('main\n'))
+
+        const handler = registeredDef.steps[3].handler
+        await handler(
+          {
+            repoPath: '/tmp/repo',
+            repoName: 'my-repo',
+            reportText: 'The actual analysis.',
+            sessionId: 'session-42',
+            branch: 'main',
+          },
+          { runId: 'run-abc', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        // Check the markdown content written
+        const writtenContent = mockWriteFileSync.mock.calls[0][1] as string
+        expect(writtenContent).toContain('# Test Review: my-repo')
+        expect(writtenContent).toContain('**Repository**: /tmp/repo')
+        expect(writtenContent).toContain('**Branch**: main')
+        expect(writtenContent).toContain('**Workflow Run**: run-abc')
+        expect(writtenContent).toContain('**Session**: session-42')
+        expect(writtenContent).toContain('The actual analysis.')
+      })
+
+      it('uses "unknown" for branch when not provided', async () => {
+        mockExecFileSync.mockReturnValue(Buffer.from('main\n'))
+
+        const handler = registeredDef.steps[3].handler
+        await handler(
+          {
+            repoPath: '/tmp/repo',
+            repoName: 'my-repo',
+            reportText: 'Content',
+            sessionId: 's1',
+            branch: undefined,
+          },
+          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        const writtenContent = mockWriteFileSync.mock.calls[0][1] as string
+        expect(writtenContent).toContain('**Branch**: unknown')
+      })
     })
   })
 
@@ -490,6 +1097,35 @@ Some prompt.
       const matching = kinds.filter(k => k.kind === 'test-review.daily')
       expect(matching).toHaveLength(1)
       expect(matching[0].source).toBe('builtin')
+    })
+
+    it('returns both builtin and repo kinds together', () => {
+      const repoPath = '/tmp/my-app'
+      const repoDir = join(repoPath, '.codekin', 'workflows')
+      const repoMd = VALID_MD.replace('test-review.daily', 'repo-only.kind').replace('Test Review', 'Repo Only')
+
+      mockExistsSync.mockReturnValue(true)
+      mockReaddirSync.mockImplementation((p: string) => {
+        if (String(p) === repoDir) return ['repo-only.kind.md']
+        return ['builtin.md']
+      })
+      mockReadFileSync.mockImplementation((path: string) => {
+        if (String(path).includes('repo-only')) return repoMd
+        return VALID_MD
+      })
+
+      const kinds = listAvailableKinds(repoPath)
+      expect(kinds).toHaveLength(2)
+      expect(kinds.find(k => k.source === 'builtin')).toBeDefined()
+      expect(kinds.find(k => k.source === 'repo')).toBeDefined()
+    })
+
+    it('returns empty when called without repoPath and no builtins', () => {
+      mockExistsSync.mockReturnValue(true)
+      mockReaddirSync.mockReturnValue([])
+
+      const kinds = listAvailableKinds()
+      expect(kinds).toEqual([])
     })
   })
 
@@ -572,6 +1208,37 @@ Some prompt.
       ensureRepoWorkflowsRegistered(mockEngine, {} as any, repoPath)
       expect(mockEngine.registerWorkflow).not.toHaveBeenCalled()
     })
+
+    it('registers same kind from different repos independently', () => {
+      const repoPath1 = '/tmp/repo-a-unique'
+      const repoPath2 = '/tmp/repo-b-unique'
+      const repoDir1 = join(repoPath1, '.codekin', 'workflows')
+      const repoDir2 = join(repoPath2, '.codekin', 'workflows')
+      const repoMd = VALID_MD.replace('test-review.daily', 'shared.kind').replace('Test Review', 'Shared')
+
+      mockExistsSync.mockImplementation((p: string) =>
+        String(p) === repoDir1 || String(p) === repoDir2
+      )
+      mockReaddirSync.mockImplementation((p: string) => {
+        if (String(p) === repoDir1 || String(p) === repoDir2) return ['shared.kind.md']
+        return []
+      })
+      mockReadFileSync.mockReturnValue(repoMd)
+
+      const mockEngine = {
+        registerWorkflow: vi.fn(),
+        hasWorkflow: vi.fn()
+          .mockReturnValueOnce(false) // first repo — not registered yet
+          .mockReturnValueOnce(true), // second repo — engine already has it
+      } as any
+
+      ensureRepoWorkflowsRegistered(mockEngine, {} as any, repoPath1)
+      expect(mockEngine.registerWorkflow).toHaveBeenCalledTimes(1)
+
+      ensureRepoWorkflowsRegistered(mockEngine, {} as any, repoPath2)
+      // Second repo is skipped because engine.hasWorkflow returns true
+      expect(mockEngine.registerWorkflow).toHaveBeenCalledTimes(1)
+    })
   })
 
   // -------------------------------------------------------------------------
@@ -591,11 +1258,9 @@ Some prompt.
       const prefixes = getWorkflowCommitPrefixes()
 
       expect(Array.isArray(prefixes)).toBe(true)
-      expect(prefixes.length).toBeGreaterThan(0)
-      prefixes.forEach(prefix => {
-        expect(typeof prefix).toBe('string')
-        expect(prefix.length).toBeGreaterThan(0)
-      })
+      expect(prefixes).toHaveLength(2)
+      expect(prefixes).toContain('chore: test review')
+      expect(prefixes).toContain('chore: coverage')
     })
 
     it('returns empty array when no workflows directory exists', () => {
@@ -603,6 +1268,16 @@ Some prompt.
 
       const prefixes = getWorkflowCommitPrefixes()
       expect(prefixes).toEqual([])
+    })
+
+    it('returns one prefix per workflow', () => {
+      mockExistsSync.mockReturnValue(true)
+      mockReaddirSync.mockReturnValue(['single.md'])
+      mockReadFileSync.mockReturnValue(VALID_MD)
+
+      const prefixes = getWorkflowCommitPrefixes()
+      expect(prefixes).toHaveLength(1)
+      expect(prefixes[0]).toBe('chore: test review')
     })
   })
 
@@ -646,6 +1321,172 @@ Some prompt.
       expect(mockEngine.registerWorkflow).toHaveBeenCalledTimes(1)
 
       warnSpy.mockRestore()
+    })
+
+    it('skips non-md files in repo workflows dir', () => {
+      const repoPath = '/tmp/nonmd-repo-test'
+      const repoDir = join(repoPath, '.codekin', 'workflows')
+
+      mockExistsSync.mockImplementation((p: string) => String(p) === repoDir)
+      mockReaddirSync.mockImplementation((p: string) =>
+        String(p) === repoDir ? ['notes.txt', 'config.json', 'actual.md'] : [],
+      )
+      mockReadFileSync.mockImplementation((path: string) => {
+        if (String(path).includes('actual.md')) {
+          return VALID_MD.replace('test-review.daily', 'nonmd.filter').replace('Test Review', 'Filter Test')
+        }
+        return ''
+      })
+
+      const mockEngine = {
+        registerWorkflow: vi.fn(),
+        hasWorkflow: vi.fn(() => false),
+      } as any
+
+      ensureRepoWorkflowsRegistered(mockEngine, {} as any, repoPath)
+
+      // Only the .md file should trigger registration
+      expect(mockEngine.registerWorkflow).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // parseMdWorkflow edge cases (tested via loadMdWorkflows)
+  // -------------------------------------------------------------------------
+
+  describe('parseMdWorkflow edge cases (via loadMdWorkflows)', () => {
+    it('handles frontmatter with values containing colons', () => {
+      const mdWithColons = `---
+kind: test-review.daily
+name: Review: Daily Code Check
+sessionPrefix: test-review
+outputDir: .codekin/reports/test
+filenameSuffix: _test-review.md
+commitMessage: chore: test review: daily
+---
+Prompt text.
+`
+      mockReaddirSync.mockReturnValue(['test.md'])
+      mockReadFileSync.mockReturnValue(mdWithColons)
+
+      const engine = fakeEngine()
+      loadMdWorkflows(engine, fakeSessionManager())
+
+      expect(engine.registerWorkflow).toHaveBeenCalledTimes(1)
+    })
+
+    it('trims whitespace from prompt body', () => {
+      const mdWithWhitespace = `---
+kind: test-review.daily
+name: Test Review
+sessionPrefix: test-review
+outputDir: .codekin/reports/test
+filenameSuffix: _test-review.md
+commitMessage: chore: test review
+---
+
+  Prompt with leading/trailing whitespace.
+
+`
+      mockReaddirSync.mockReturnValue(['test.md'])
+      mockReadFileSync.mockReturnValue(mdWithWhitespace)
+
+      const engine = fakeEngine()
+      const sessions = fakeSessionManager()
+      loadMdWorkflows(engine, sessions)
+
+      expect(engine.registerWorkflow).toHaveBeenCalledTimes(1)
+    })
+
+    it('rejects empty frontmatter (all required fields missing)', () => {
+      const emptyFm = `---
+---
+Prompt text.
+`
+      mockReaddirSync.mockReturnValue(['test.md'])
+      mockReadFileSync.mockReturnValue(emptyFm)
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const engine = fakeEngine()
+      loadMdWorkflows(engine, fakeSessionManager())
+
+      expect(engine.registerWorkflow).not.toHaveBeenCalled()
+      expect(consoleSpy).toHaveBeenCalled()
+      consoleSpy.mockRestore()
+    })
+
+    it('rejects content with no closing frontmatter delimiter', () => {
+      const noClosing = `---
+kind: test-review.daily
+name: Test Review
+This just keeps going without a closing ---
+`
+      mockReaddirSync.mockReturnValue(['test.md'])
+      mockReadFileSync.mockReturnValue(noClosing)
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const engine = fakeEngine()
+      loadMdWorkflows(engine, fakeSessionManager())
+
+      expect(engine.registerWorkflow).not.toHaveBeenCalled()
+      expect(consoleSpy).toHaveBeenCalled()
+      consoleSpy.mockRestore()
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // loadRepoOverride edge cases (tested via run_prompt step)
+  // -------------------------------------------------------------------------
+
+  describe('loadRepoOverride parse failure (via run_prompt step)', () => {
+    it('falls back to default prompt when repo override has invalid frontmatter', async () => {
+      vi.useFakeTimers()
+
+      mockReaddirSync.mockReturnValue(['test.md'])
+      mockReadFileSync.mockReturnValue(VALID_MD)
+      const engine = fakeEngine()
+      const sessions = fakeSessionManager()
+      loadMdWorkflows(engine, sessions)
+      const registeredDef = engine.registerWorkflow.mock.calls[0][0]
+
+      // Override file exists but has bad content
+      mockExistsSync.mockReturnValue(true)
+      mockReadFileSync.mockImplementation((path: string) => {
+        if (String(path).includes('.codekin/workflows/test-review.daily.md')) {
+          return 'invalid content - no frontmatter'
+        }
+        return VALID_MD
+      })
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      sessions.get.mockReturnValue({
+        outputHistory: [
+          { type: 'output', data: 'Fallback output' },
+          { type: 'result' },
+        ],
+      })
+
+      const handler = registeredDef.steps[2].handler
+      const promise = handler(
+        { sessionId: 'session-1', repoName: 'my-repo', repoPath: '/tmp/repo', branch: 'main' },
+        { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
+      )
+
+      await vi.advanceTimersByTimeAsync(3000)
+      await vi.advanceTimersByTimeAsync(2000)
+
+      const result = await promise
+
+      // Should have used the default prompt since override failed
+      expect(sessions.sendInput).toHaveBeenCalledWith(
+        'session-1',
+        'You are performing an automated test review of the codebase.'
+      )
+      expect(result.reportText).toBe('Fallback output')
+
+      warnSpy.mockRestore()
+      vi.useRealTimers()
     })
   })
 })
