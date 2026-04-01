@@ -88,7 +88,7 @@ export async function removeNativePermission(repoDir: string, permission: string
     const filePath = settingsPath(repoDir)
     if (!existsSync(filePath)) return
 
-    let settings: SettingsLocal = {}
+    let settings: SettingsLocal
     try {
       settings = JSON.parse(readFileSync(filePath, 'utf-8')) as SettingsLocal
     } catch {
