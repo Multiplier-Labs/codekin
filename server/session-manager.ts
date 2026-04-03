@@ -1560,7 +1560,7 @@ export class SessionManager {
     if (session.allowedTools && this.matchesAllowedTools(session.allowedTools, toolName, toolInput)) {
       return 'session'
     }
-    if (session.clients.size === 0 && (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow')) {
+    if (session.clients.size === 0 && (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow' || session.source === 'orchestrator')) {
       return 'headless'
     }
     return 'prompt'
