@@ -372,7 +372,11 @@ function checkWsRateLimit(ip: string): boolean {
 
 wss.on('connection', (ws: WebSocket, req) => {
   // Rate-limit by IP before any processing
-  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown'
+  const remoteAddr = req.socket.remoteAddress || ''
+  const isFromProxy = remoteAddr === '127.0.0.1' || remoteAddr === '::1' || remoteAddr === '::ffff:127.0.0.1'
+  const ip = (isFromProxy && req.headers['x-forwarded-for'])
+    ? (req.headers['x-forwarded-for'] as string).split(',')[0].trim()
+    : remoteAddr || 'unknown'
   if (!checkWsRateLimit(ip)) {
     ws.close(4029, 'Too many connections')
     return

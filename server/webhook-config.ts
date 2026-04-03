@@ -56,7 +56,7 @@ export function loadWebhookConfig(): FullWebhookConfig {
 
   const envActorAllowlist = process.env.GITHUB_WEBHOOK_ACTOR_ALLOWLIST
   if (envActorAllowlist !== undefined) {
-    actorAllowlist = envActorAllowlist.split(',').map(s => s.trim()).filter(Boolean)
+    actorAllowlist = envActorAllowlist.split(',').map(s => s.trim().toLowerCase()).filter(Boolean)
   }
 
   const secret = process.env.GITHUB_WEBHOOK_SECRET || ''

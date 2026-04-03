@@ -57,6 +57,12 @@ export function createSessionRouter(
       return res.status(400).json({ error: 'Missing name or workingDir' })
     }
 
+    // Validate workingDir falls under REPOS_ROOT to prevent arbitrary directory access
+    const resolvedDir = pathResolve(workingDir)
+    if (!resolvedDir.startsWith(REPOS_ROOT + '/') && resolvedDir !== REPOS_ROOT) {
+      return res.status(400).json({ error: 'Invalid workingDir: must be under configured repos root' })
+    }
+
     const session = sessions.create(name, workingDir)
     res.json({
       sessionId: session.id,

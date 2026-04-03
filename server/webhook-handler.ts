@@ -166,7 +166,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     }
 
     // --- Actor allowlist filter ---
-    if (this.config.actorAllowlist.length > 0 && !this.config.actorAllowlist.includes(wr.actor.login)) {
+    if (this.config.actorAllowlist.length > 0 && !this.config.actorAllowlist.includes(wr.actor.login.toLowerCase())) {
       return {
         statusCode: 200,
         body: {
