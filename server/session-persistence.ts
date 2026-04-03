@@ -109,10 +109,12 @@ export class SessionPersistence {
           _wasActiveBeforeRestart: s.wasActive ?? false,
           _apiRetryCount: 0,
           _turnCount: 99, // restored sessions already have a name
+          _claudeTurnCount: 0,
           _namingAttempts: 0,
           isProcessing: false,
           pendingControlRequests: new Map(),
           pendingToolApprovals: new Map(),
+          _lastActivityAt: Date.now(),
           planManager: new PlanManager(),
         }
         this.sessions.set(session.id, session)
