@@ -105,6 +105,7 @@ function fakeSessionManager() {
     startClaude: vi.fn(),
     stopClaude: vi.fn(),
     sendInput: vi.fn(),
+    waitForReady: vi.fn(() => Promise.resolve()),
   } as any
 }
 
@@ -490,8 +491,6 @@ Prompt text.
           { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
         )
 
-        // Advance past the 3000ms startup delay
-        await vi.advanceTimersByTimeAsync(3000)
         // Advance past the poll delay
         await vi.advanceTimersByTimeAsync(2000)
 
@@ -542,7 +541,6 @@ This is the repo-specific override prompt.
           { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
         )
 
-        await vi.advanceTimersByTimeAsync(3000)
         await vi.advanceTimersByTimeAsync(2000)
 
         const result = await promise
@@ -587,7 +585,6 @@ This is the repo-specific override prompt.
           { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
         )
 
-        await vi.advanceTimersByTimeAsync(3000)
         await vi.advanceTimersByTimeAsync(2000)
 
         await promise
@@ -623,7 +620,6 @@ This is the repo-specific override prompt.
           { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
         )
 
-        await vi.advanceTimersByTimeAsync(3000)
         await vi.advanceTimersByTimeAsync(2000)
 
         const result = await promise
@@ -653,7 +649,6 @@ This is the repo-specific override prompt.
           { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
         )
 
-        await vi.advanceTimersByTimeAsync(3000)
         await vi.advanceTimersByTimeAsync(2000)
 
         const result = await promise
@@ -685,8 +680,8 @@ This is the repo-specific override prompt.
           { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: abortController.signal }
         ).catch((err: Error) => { caughtError = err })
 
-        // Advance past the 3000ms startup delay and poll delay
-        await vi.advanceTimersByTimeAsync(5000)
+        // Advance past the poll delay
+        await vi.advanceTimersByTimeAsync(2000)
         await promise
 
         expect(caughtError).toBeTruthy()
@@ -744,7 +739,6 @@ This is the repo-specific override prompt.
           { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
         )
 
-        await vi.advanceTimersByTimeAsync(3000)
         await vi.advanceTimersByTimeAsync(2000)
 
         const result = await promise
@@ -899,13 +893,11 @@ This is the repo-specific override prompt.
         expect(branchCall).toBeDefined()
       })
 
-      it('does not stash pop when there were no local changes', async () => {
+      it('uses git worktree instead of stash/checkout', async () => {
         const gitCalls: string[][] = []
         mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
           gitCalls.push(args)
-          if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return Buffer.from('main\n')
           if (args[0] === 'rev-parse' && args[1] === '--verify') return Buffer.from('')
-          if (args[0] === 'stash') return Buffer.from('No local changes to save\n')
           return Buffer.from('')
         })
 
@@ -921,18 +913,20 @@ This is the repo-specific override prompt.
           { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
         )
 
-        // Should NOT have called 'git stash pop'
-        const stashPopCall = gitCalls.find(args => args[0] === 'stash' && args[1] === 'pop')
-        expect(stashPopCall).toBeUndefined()
+        // Should use worktree add, not stash/checkout
+        const worktreeAddCall = gitCalls.find(args => args[0] === 'worktree' && args[1] === 'add')
+        expect(worktreeAddCall).toBeDefined()
+        const stashCall = gitCalls.find(args => args[0] === 'stash')
+        expect(stashCall).toBeUndefined()
+        const checkoutCall = gitCalls.find(args => args[0] === 'checkout')
+        expect(checkoutCall).toBeUndefined()
       })
 
-      it('stash pops when there were local changes', async () => {
+      it('cleans up worktree after commit', async () => {
         const gitCalls: string[][] = []
         mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
           gitCalls.push(args)
-          if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return Buffer.from('main\n')
           if (args[0] === 'rev-parse' && args[1] === '--verify') return Buffer.from('')
-          if (args[0] === 'stash' && !args[1]) return Buffer.from('Saved working directory\n')
           return Buffer.from('')
         })
 
@@ -948,18 +942,16 @@ This is the repo-specific override prompt.
           { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
         )
 
-        // Should have called 'git stash pop'
-        const stashPopCall = gitCalls.find(args => args[0] === 'stash' && args[1] === 'pop')
-        expect(stashPopCall).toBeDefined()
+        // Should clean up the worktree
+        const worktreeRemoveCall = gitCalls.find(args => args[0] === 'worktree' && args[1] === 'remove')
+        expect(worktreeRemoveCall).toBeDefined()
       })
 
-      it('handles push failure gracefully and still checks out original branch', async () => {
+      it('handles push failure gracefully and still cleans up worktree', async () => {
         const gitCalls: string[][] = []
         mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
           gitCalls.push(args)
-          if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return Buffer.from('develop\n')
           if (args[0] === 'rev-parse' && args[1] === '--verify') return Buffer.from('')
-          if (args[0] === 'stash' && args[1] === '--include-untracked') return Buffer.from('No local changes to save\n')
           if (args[0] === 'push') throw new Error('remote rejected')
           return Buffer.from('')
         })
@@ -980,9 +972,9 @@ This is the repo-specific override prompt.
 
         // Should still return valid result
         expect(result.filePath).toBeDefined()
-        // Should have checked out back to original branch
-        const checkoutCalls = gitCalls.filter(args => args[0] === 'checkout' && args[1] === 'develop')
-        expect(checkoutCalls.length).toBeGreaterThan(0)
+        // Should still clean up worktree despite push failure
+        const worktreeRemoveCall = gitCalls.find(args => args[0] === 'worktree' && args[1] === 'remove')
+        expect(worktreeRemoveCall).toBeDefined()
 
         warnSpy.mockRestore()
       })
@@ -1473,7 +1465,6 @@ This just keeps going without a closing ---
         { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
       )
 
-      await vi.advanceTimersByTimeAsync(3000)
       await vi.advanceTimersByTimeAsync(2000)
 
       const result = await promise

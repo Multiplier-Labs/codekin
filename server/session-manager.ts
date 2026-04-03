@@ -780,6 +780,30 @@ export class SessionManager {
   }
 
   /**
+   * Wait for a session's Claude process to emit its system_init event,
+   * indicating it is ready to accept input. Resolves immediately if the
+   * session already has a claudeSessionId (process previously initialized).
+   * Times out after `timeoutMs` (default 30s) to avoid hanging indefinitely.
+   */
+  waitForReady(sessionId: string, timeoutMs = 30_000): Promise<void> {
+    const session = this.sessions.get(sessionId)
+    if (!session?.claudeProcess) return Promise.resolve()
+    // If the process already completed init in a prior turn, resolve immediately
+    if (session.claudeSessionId) return Promise.resolve()
+
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        console.warn(`[waitForReady] Timed out waiting for system_init on ${sessionId} after ${timeoutMs}ms`)
+        resolve()
+      }, timeoutMs)
+      session.claudeProcess!.once('system_init', () => {
+        clearTimeout(timer)
+        resolve()
+      })
+    })
+  }
+
+  /**
    * Attach all ClaudeProcess event listeners for a session.
    * Extracted from startClaude() to keep that method focused on process setup.
    */

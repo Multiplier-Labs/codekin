@@ -258,7 +258,7 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
           const customPrompt = input.customPrompt as string | undefined
 
           sessions.startClaude(sessionId)
-          await new Promise(resolve => setTimeout(resolve, 3000))
+          await sessions.waitForReady(sessionId)
 
           // Per-repo override: check {repoPath}/.codekin/workflows/{kind}.md
           const repoOverride = loadRepoOverride(repoPath, ctx.run.kind)
@@ -330,13 +330,14 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
 
           console.log(`[workflow:${def.kind}] Saved report to ${filePath}`)
 
-          // Commit on a dedicated branch so reports don't pollute the working branch
+          // Commit on a dedicated branch so reports don't pollute the working branch.
+          // Use a temporary git worktree to avoid stash/checkout races when
+          // multiple workflow runs target the same repo concurrently.
           const REPORTS_BRANCH = 'codekin/reports'
           try {
             const relativePath = `${def.outputDir}/${filename}`
-            const originalBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoPath, timeout: 5_000 }).toString().trim()
 
-            // Ensure the reports branch exists (create as orphan if needed)
+            // Ensure the reports branch exists (create if needed)
             try {
               execFileSync('git', ['rev-parse', '--verify', REPORTS_BRANCH], { cwd: repoPath, timeout: 5_000, stdio: 'pipe' })
             } catch {
@@ -345,40 +346,37 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
               console.log(`[workflow:${def.kind}] Created branch ${REPORTS_BRANCH}`)
             }
 
-            // Stash any uncommitted changes on the working branch
-            const stashResult = execFileSync('git', ['stash', '--include-untracked'], { cwd: repoPath, timeout: 10_000 }).toString().trim()
-            const didStash = !stashResult.includes('No local changes')
-
+            // Create a temporary worktree on the reports branch
+            const wtDir = join(repoPath, '..', `.codekin-wt-report-${ctx.runId}`)
             try {
-              execFileSync('git', ['checkout', REPORTS_BRANCH], { cwd: repoPath, timeout: 10_000 })
+              execFileSync('git', ['worktree', 'add', wtDir, REPORTS_BRANCH], { cwd: repoPath, timeout: 10_000 })
 
-              // Re-create the report file on this branch (the file was written while on the original branch)
-              const reportsDirOnBranch = join(repoPath, def.outputDir)
-              if (!existsSync(reportsDirOnBranch)) {
-                mkdirSync(reportsDirOnBranch, { recursive: true })
+              // Write the report file in the worktree
+              const reportsDirInWt = join(wtDir, def.outputDir)
+              if (!existsSync(reportsDirInWt)) {
+                mkdirSync(reportsDirInWt, { recursive: true })
               }
-              writeFileSync(join(reportsDirOnBranch, filename), markdown, 'utf-8')
+              writeFileSync(join(reportsDirInWt, filename), markdown, 'utf-8')
 
-              execFileSync('git', ['add', relativePath], { cwd: repoPath, timeout: 10_000 })
+              execFileSync('git', ['add', relativePath], { cwd: wtDir, timeout: 10_000 })
               execFileSync(
                 'git', ['commit', '-m', `${def.commitMessage} ${dateStr}`],
-                { cwd: repoPath, timeout: 15_000 }
+                { cwd: wtDir, timeout: 15_000 }
               )
               console.log(`[workflow:${def.kind}] Committed ${relativePath} on ${REPORTS_BRANCH}`)
 
               // Push to remote
               try {
-                execFileSync('git', ['push', 'origin', REPORTS_BRANCH], { cwd: repoPath, timeout: 30_000, stdio: 'pipe' })
+                execFileSync('git', ['push', 'origin', REPORTS_BRANCH], { cwd: wtDir, timeout: 30_000, stdio: 'pipe' })
                 console.log(`[workflow:${def.kind}] Pushed ${REPORTS_BRANCH} to origin`)
               } catch (pushErr) {
                 console.warn(`[workflow:${def.kind}] Could not push ${REPORTS_BRANCH}: ${pushErr}`)
               }
             } finally {
-              // Always switch back to the original branch
-              execFileSync('git', ['checkout', originalBranch], { cwd: repoPath, timeout: 10_000 })
-              if (didStash) {
-                execFileSync('git', ['stash', 'pop'], { cwd: repoPath, timeout: 10_000 })
-              }
+              // Always clean up the temporary worktree
+              try {
+                execFileSync('git', ['worktree', 'remove', '--force', wtDir], { cwd: repoPath, timeout: 10_000 })
+              } catch { /* worktree cleanup is best-effort */ }
             }
           } catch (err) {
             console.warn(`[workflow:${def.kind}] Could not commit report: ${err}`)

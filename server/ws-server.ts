@@ -68,6 +68,10 @@ for (let i = 0; i < args.length; i++) {
 if (authToken) {
   console.log('Auth token configured')
 } else {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('FATAL: No auth token configured in production. Set AUTH_TOKEN or AUTH_TOKEN_FILE.')
+    process.exit(1)
+  }
   console.warn('⚠️  WARNING: No auth token configured. All endpoints are unauthenticated!')
   console.warn('   Set AUTH_TOKEN or AUTH_TOKEN_FILE to secure the server.')
 }

@@ -8,7 +8,7 @@
 import { Router } from 'express'
 import type { Request } from 'express'
 import multer from 'multer'
-import { mkdirSync, existsSync, readFileSync, readdirSync } from 'fs'
+import { mkdirSync, existsSync, readFileSync, readdirSync, realpathSync } from 'fs'
 import { join, extname, resolve, sep } from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
@@ -283,9 +283,10 @@ export function createUploadRouter(
       return
     }
 
-    const reposRoot = resolveReposRoot()
+    const reposRoot = realpathSync(resolveReposRoot())
     const dest = join(reposRoot, name)
     // Boundary check: ensure resolved dest stays within REPOS_ROOT
+    // Use realpathSync on reposRoot to prevent symlink bypass
     const resolvedDest = resolve(dest)
     if (!resolvedDest.startsWith(reposRoot + sep) && resolvedDest !== reposRoot) {
       res.status(400).json({ error: 'Path escapes allowed root' })

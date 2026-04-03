@@ -70,6 +70,9 @@ export interface ClaudeProcessEvents {
   exit: [code: number | null, signal: string | null]
 }
 
+/** Whether to log tool I/O details (tool names, input params, result content). Disabled in production. */
+const TOOL_DEBUG = process.env.NODE_ENV !== 'production'
+
 /**
  * Wraps a Claude CLI child process. Parses stream-json NDJSON output from
  * stdout and emits structured events consumed by SessionManager.
@@ -251,7 +254,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
 
       case 'control_request': {
         const ctrlEvent = event as ClaudeControlRequest
-        console.log(`[control_request] requestId=${ctrlEvent.request_id} tool=${ctrlEvent.request?.tool_name}`)
+        if (TOOL_DEBUG) console.log(`[control_request] requestId=${ctrlEvent.request_id} tool=${ctrlEvent.request?.tool_name}`)
         this.handleControlRequest(ctrlEvent)
         break
       }
@@ -272,7 +275,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       case 'content_block_start':
         if (inner.content_block?.type === 'tool_use') {
           this.tool = { name: inner.content_block.name || null, input: '' }
-          console.log('[tool-debug] tool_start:', this.tool.name)
+          if (TOOL_DEBUG) console.log('[tool-debug] tool_start:', this.tool.name)
           // Detect planning mode tools — emit immediately, PlanManager handles gating
           if (this.tool.name === 'EnterPlanMode') {
             this.emit('planning_mode', true)
@@ -329,9 +332,9 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       const parsed = JSON.parse(this.tool.input)
       summary = this.summarizeToolInput(this.tool.name!, parsed) || undefined
       const isTask = this.tool.name === 'TaskCreate' || this.tool.name === 'TaskUpdate' || this.tool.name === 'TodoWrite' || this.tool.name === 'TodoRead'
-      if (isTask) console.log('[task-debug] tool:', this.tool.name, 'input:', JSON.stringify(parsed).slice(0, 200))
+      if (isTask && TOOL_DEBUG) console.log('[task-debug] tool:', this.tool.name, 'input:', JSON.stringify(parsed).slice(0, 200))
       if (this.handleTaskTool(this.tool.name!, parsed)) {
-        console.log('[task-debug] emitting todo_update, tasks:', this.tasks.size)
+        if (TOOL_DEBUG) console.log('[task-debug] emitting todo_update, tasks:', this.tasks.size)
         this.emit('todo_update', Array.from(this.tasks.values()))
       }
     } catch { /* ignore parse errors */ }
@@ -365,7 +368,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
           const textParts: string[] = []
           for (const cb of contentBlocks as Array<{ type: string; text?: string; source?: { type: string; data: string; media_type: string } }>) {
             if (cb.type === 'image' && cb.source?.type === 'base64') {
-              console.log(`[tool-result] id=${block.tool_use_id} image media_type=${cb.source.media_type} data_len=${cb.source.data.length}`)
+              if (TOOL_DEBUG) console.log(`[tool-result] id=${block.tool_use_id} image media_type=${cb.source.media_type} data_len=${cb.source.data.length}`)
               this.emit('image', cb.source.data, cb.source.media_type)
             } else {
               textParts.push(typeof cb.text === 'string' ? cb.text : JSON.stringify(cb))
@@ -376,7 +379,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
           content = typeof block.content === 'string' ? block.content : ''
         }
         if (content) {
-          console.log(`[tool-result] id=${block.tool_use_id} error=${isError} content=${content.slice(0, 300)}`)
+          if (TOOL_DEBUG) console.log(`[tool-result] id=${block.tool_use_id} error=${isError} content=${content.slice(0, 300)}`)
         }
 
         // Emit non-empty text tool results as dedicated tool_output events
@@ -423,7 +426,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
         return
       }
 
-      console.log(`[control_request] AskUserQuestion received with ${questions.length} question(s), requestId=${request_id}`)
+      if (TOOL_DEBUG) console.log(`[control_request] AskUserQuestion received with ${questions.length} question(s), requestId=${request_id}`)
       const structuredQuestions = questions.map(q => ({
         question: q.question,
         header: q.header,
@@ -441,7 +444,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       this.emit('prompt', 'question', first.question, first.options, first.multiSelect, undefined, toolInput, request_id, structuredQuestions)
     } else if (ClaudeProcess.AUTO_APPROVE_TOOLS.has(toolName)) {
       // Known-safe tools: auto-approve without prompting
-      console.log(`[control_request] auto-approving safe tool: ${toolName}`)
+      if (TOOL_DEBUG) console.log(`[control_request] auto-approving safe tool: ${toolName}`)
       this.sendControlResponse(request_id, 'allow')
     } else {
       // All other tools (Bash, WebSearch, WebFetch, Agent, etc.)
@@ -449,7 +452,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       const logDetail = toolName === 'Bash'
         ? `: ${redactSecrets(String(toolInput.command || '').slice(0, 80))}`
         : ''
-      console.log(`[control_request] forwarding ${toolName} to session manager for approval${logDetail}`)
+      if (TOOL_DEBUG) console.log(`[control_request] forwarding ${toolName} to session manager for approval${logDetail}`)
       this.emit('control_request', request_id, toolName, toolInput)
     }
   }
