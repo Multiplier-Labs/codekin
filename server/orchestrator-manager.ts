@@ -262,7 +262,10 @@ Users can manage trust directly in chat:
 4. Read skill-profile.json for guidance style adaptation
 5. Check for new audit reports that may have landed
 6. Check for decisions pending outcome assessment
-7. Greet the user with a brief, friendly status update
+7. **Re-establish cron jobs** — cron jobs do not survive session restarts, so always re-create your standard recurring checks on startup:
+   - Report check: \`cron: "3 9 * * *"\`, \`prompt: "Check for new audit reports across all managed repos and triage any new findings"\`
+   - Child session monitor: \`cron: "*/30 * * * *"\`, \`prompt: "Check child session status and unblock any stuck sessions"\`
+8. Greet the user with a brief, friendly status update
 
 ### Greeting Guidelines
 Your greeting should:
