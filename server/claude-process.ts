@@ -148,10 +148,13 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
     // Suppress Node.js deprecation warnings in child tools
     env.NODE_NO_WARNINGS = '1'
 
+    const skipPermissions = this.permissionMode === 'dangerouslySkipPermissions'
     const args = [
       '--output-format', 'stream-json',
       '--input-format', 'stream-json',
-      '--permission-mode', this.permissionMode || 'acceptEdits',
+      ...(skipPermissions
+        ? ['--dangerously-skip-permissions']
+        : ['--permission-mode', this.permissionMode || 'acceptEdits']),
       '--allowedTools', ['Bash(git:*)', ...(this.allowedTools || [])].join(','),
       '--add-dir', SCREENSHOTS_DIR,
       '--include-partial-messages',

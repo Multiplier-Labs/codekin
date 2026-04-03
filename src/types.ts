@@ -48,7 +48,7 @@ export interface RepoManifest {
  * Controls how tool permissions are handled during a session.
  * Keep in sync with server/types.ts PermissionMode.
  */
-export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions'
+export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | 'dangerouslySkipPermissions'
 
 /** Permission mode metadata for the UI selector. */
 export const PERMISSION_MODES: { id: PermissionMode; label: string; description: string; icon: string; dangerous?: boolean }[] = [
@@ -56,6 +56,7 @@ export const PERMISSION_MODES: { id: PermissionMode; label: string; description:
   { id: 'acceptEdits', label: 'Auto accept edits', description: 'Automatically accept all file edits', icon: 'pencil' },
   { id: 'plan', label: 'Plan mode', description: 'Read-only: proposes changes without applying them', icon: 'map' },
   { id: 'bypassPermissions', label: 'Bypass permissions', description: 'Accepts all permissions without asking', icon: 'warning', dangerous: true },
+  { id: 'dangerouslySkipPermissions', label: 'Skip permissions', description: 'Skips all permission checks entirely — use only in sandboxed environments', icon: 'warning', dangerous: true },
 ]
 
 /** Client-side session info (subset of server Session, safe to serialize). */

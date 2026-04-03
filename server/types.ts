@@ -14,10 +14,10 @@ import type { PlanManager } from './plan-manager.js'
  * Permission modes supported by the Claude CLI `--permission-mode` flag.
  * Keep in sync with src/types.ts PermissionMode.
  */
-export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions'
+export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | 'dangerouslySkipPermissions'
 
 /** Allow-list for server-side validation of client-supplied permission modes. */
-export const VALID_PERMISSION_MODES = new Set<PermissionMode>(['default', 'acceptEdits', 'plan', 'bypassPermissions'])
+export const VALID_PERMISSION_MODES = new Set<PermissionMode>(['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dangerouslySkipPermissions'])
 
 /** Allow-list for server-side validation of client-supplied model IDs. */
 export const VALID_MODELS = new Set([
