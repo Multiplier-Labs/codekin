@@ -123,6 +123,7 @@ export class ApprovalManager {
     'ssh', 'docker', 'docker-compose',
     'rm', 'sudo', 'curl', 'wget',
     'git reset', 'git clean',
+    'git push',  // cross-remote escalation risk — no stored pattern, but prefix-match at runtime is allowed (see PATTERNABLE_PREFIXES)
     'gh api',  // can perform DELETE/PUT — too broad to pattern
     // Code executors — "node *" / "python *" would match arbitrary code execution
     'node', 'npx', 'python', 'python3', 'deno', 'bun', 'pm2',

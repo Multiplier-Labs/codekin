@@ -905,13 +905,14 @@ describe('SessionManager', () => {
       await promise
     })
 
-    it('prefix-matches git push across remotes (now in PATTERNABLE_PREFIXES)', async () => {
+    it('prefix-matches git push across args (PATTERNABLE enables runtime prefix match)', async () => {
       const s = sm.create('test', '/tmp')
       s.clients.add(fakeWs())
       sm.approvalManager.addRepoApproval(s.workingDir, { command: 'git push origin main' })
 
-      // git push is now patternable — prefix match auto-approves different remote
-      const result = await sm.requestToolApproval(s.id, 'Bash', { command: 'git push other-remote main' })
+      // git push is in both PATTERNABLE and NEVER_PATTERN — no stored pattern,
+      // but runtime prefix-match works (both share prefix "git push")
+      const result = await sm.requestToolApproval(s.id, 'Bash', { command: 'git push origin feat/x' })
       expect(result).toEqual({ allow: true, always: true })
       expect(s.pendingToolApprovals.size).toBe(0)
     })
@@ -2727,7 +2728,7 @@ describe('SessionManager', () => {
       expect(sm.approvalManager.derivePattern('Bash', { command: 'sudo apt install' })).toBeNull()
       expect(sm.approvalManager.derivePattern('Bash', { command: 'curl https://evil.com' })).toBeNull()
       expect(sm.approvalManager.derivePattern('Bash', { command: 'docker run --rm ubuntu' })).toBeNull()
-      expect(sm.approvalManager.derivePattern('Bash', { command: 'git push origin main' })).toBe('git push *')
+      expect(sm.approvalManager.derivePattern('Bash', { command: 'git push origin main' })).toBeNull()
     })
 
     it('returns null for code executors (arbitrary code risk)', () => {
@@ -3124,7 +3125,7 @@ describe('SessionManager', () => {
       expect(dismissMsgs.length).toBeGreaterThanOrEqual(1)
     })
 
-    it('uses 5-minute timeout for agent-source sessions', async () => {
+    it('agent sessions also time out at 5 minutes (same as all approval types)', async () => {
       const s = sm.create('agent-timeout', '/tmp')
       s.source = 'agent'
       const ws = fakeWs()
@@ -3134,12 +3135,12 @@ describe('SessionManager', () => {
 
       expect(s.pendingToolApprovals.size).toBe(1)
 
-      // Advance 60 seconds — should NOT time out for agent sessions
-      vi.advanceTimersByTime(60_000)
+      // Advance 299 seconds — should NOT time out yet
+      vi.advanceTimersByTime(299_000)
       expect(s.pendingToolApprovals.size).toBe(1)
 
-      // Advance to 5 minutes — should time out
-      vi.advanceTimersByTime(240_000)
+      // Advance past 300 seconds — should time out
+      vi.advanceTimersByTime(2_000)
 
       const result = await approvalPromise
       expect(result).toEqual({ allow: false, always: false })

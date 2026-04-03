@@ -1602,7 +1602,7 @@ export class SessionManager {
         // No clients connected — DON'T auto-deny. Instead, wait for a client
         // to join this session (the prompt will be re-broadcast in join()).
         // Send a global notification so the user sees a waiting indicator.
-        console.log(`[tool-approval] no clients connected, waiting for client to join (timeout 60s): ${toolName}`)
+        console.log(`[tool-approval] no clients connected, waiting for client to join (timeout 300s): ${toolName}`)
         this._globalBroadcast?.({
           ...promptMsg,
           sessionId,
