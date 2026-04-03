@@ -70,6 +70,10 @@ export interface Session {
   isProcessing: boolean
   /** Number of completed user turns (for triggering session naming on first message). */
   _turnCount: number
+  /** Number of Claude result turns in this session (for context compression warnings). */
+  _claudeTurnCount: number
+  /** Whether a context compression warning has already been shown. */
+  _contextWarningShown?: boolean
   /** Timer for the delayed one-shot naming process. */
   _namingTimer?: ReturnType<typeof setTimeout>
   /** Number of naming attempts so far (for retry back-off). */
@@ -78,12 +82,16 @@ export interface Session {
   _lastReportedModel?: string
   /** Last user input sent, stored for API error retry. */
   _lastUserInput?: string
+  /** Timestamp of last user input, used to detect stale retries. */
+  _lastUserInputAt?: number
   /** Number of consecutive API error retries for the current turn. */
   _apiRetryCount: number
   /** Timer handle for scheduled API error retry. */
   _apiRetryTimer?: ReturnType<typeof setTimeout>
   /** Grace period timer before auto-denying prompts after last client leaves. */
   _leaveGraceTimer?: ReturnType<typeof setTimeout> | null
+  /** Timestamp of last meaningful activity (input, prompt response, client join). Used by idle reaper. */
+  _lastActivityAt: number
   /** Plan mode state machine — owns the enter/review/approve lifecycle. */
   planManager: PlanManager
   /** Guard to prevent double-wiring PlanManager event listeners. */
