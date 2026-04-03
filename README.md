@@ -55,7 +55,7 @@ codekin uninstall               # Remove Codekin entirely
 - **Skill browser** — Browse and invoke `/skills` defined in each repo's `.claude/skills/`, with inline slash-command autocomplete
 - **Diff viewer** — Side panel showing staged/unstaged file changes with per-file discard support
 - **Command palette** — `Ctrl+K` to quickly search repos, skills, and actions
-- **Approval management** — Persistent approval storage with per-permission revoking, permission mode selector, and per-session tool pre-approvals
+- **Approval management** — Persistent approval storage with per-permission revoking, permission mode selector, per-session tool pre-approvals, and `--dangerously-skip-permissions` mode for sandboxed environments
 - **Mobile-friendly** — Responsive layout that works on phones and tablets
 - **Markdown browser** — Browse and view `.md` files directly in the UI
 - **AI Workflows** — Scheduled code and repository audits and maintenance, with support for custom workflows defined as Markdown files
