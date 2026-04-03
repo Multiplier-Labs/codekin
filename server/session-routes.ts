@@ -374,6 +374,11 @@ export function createSessionRouter(
         }
         response.updatedInput = { ...(toolInput || {}), answers }
       }
+      // For denied tools (e.g. ExitPlanMode rejection), pass the reason back
+      // so the hook can include it as permissionDecisionReason for Claude.
+      if (!result.allow && result.answer && toolName !== 'AskUserQuestion') {
+        response.message = result.answer
+      }
       if (result.always && result.allow) {
         const nativePerm = toNativePermission(toolName, toolInput || {})
         if (nativePerm) {

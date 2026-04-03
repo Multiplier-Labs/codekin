@@ -85,7 +85,7 @@ describe('ApprovalManager', () => {
       expect(mgr.derivePattern('Bash', { command: 'cat foo.txt' })).toBe('cat *')
     })
 
-    it('returns null for "git push origin main" (NEVER_PATTERN_PREFIXES)', () => {
+    it('returns null for "git push origin main" (NEVER_PATTERN_PREFIXES wins over PATTERNABLE)', () => {
       expect(mgr.derivePattern('Bash', { command: 'git push origin main' })).toBeNull()
     })
 
