@@ -739,6 +739,7 @@ export class SessionManager {
       CODEKIN_TOKEN: sessionToken,
       CODEKIN_AUTH_TOKEN: sessionToken,
       CODEKIN_SESSION_TYPE: session.source || 'manual',
+      ...(session.permissionMode === 'dangerouslySkipPermissions' ? { CODEKIN_SKIP_PERMISSIONS: '1' } : {}),
     }
     // Pass CLAUDE_PROJECT_DIR so hooks and CLAUDE.md resolve correctly
     // even when the session's working directory differs from the project root

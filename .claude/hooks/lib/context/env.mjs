@@ -12,6 +12,7 @@ export class EnvContext {
       permissionMode: input.permission_mode,
       isRemote: process.env.CLAUDE_CODE_REMOTE === 'true',
       isWebhookSession: process.env.CODEKIN_SESSION_TYPE === 'webhook',
+      skipPermissions: process.env.CODEKIN_SKIP_PERMISSIONS === '1',
       projectDir: process.env.CLAUDE_PROJECT_DIR || input.cwd,
     };
   }

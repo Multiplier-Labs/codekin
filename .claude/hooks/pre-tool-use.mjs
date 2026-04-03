@@ -144,6 +144,16 @@ createHook({
       };
     }
 
+    // Skip all permission checks when dangerouslySkipPermissions is active
+    if (ctx.env.skipPermissions) {
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'allow',
+        },
+      };
+    }
+
     // Manual sessions: forward to server for UI-based approval
     try {
       const hubSessionId = ctx.env.hubSessionId;
