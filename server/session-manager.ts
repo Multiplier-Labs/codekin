@@ -1388,7 +1388,7 @@ export class SessionManager {
         const feedback = Array.isArray(value) && value.length > 1 ? value[1] : undefined
         const reason = session.planManager.deny(approval.requestId, feedback)
         console.log(`[plan-approval] denied: ${reason}`)
-        approval.resolve({ allow: false, always: false })
+        approval.resolve({ allow: false, always: false, answer: reason || undefined })
       } else {
         session.planManager.approve(approval.requestId)
         console.log(`[plan-approval] approved`)
@@ -1542,7 +1542,7 @@ export class SessionManager {
           this.broadcast(session, { type: 'prompt_dismiss', requestId: approvalRequestId })
           resolve({ allow: false, always: false })
         }
-      }, isQuestion ? 300_000 : (session.source === 'agent' ? 300_000 : 60_000)) // 5 min for questions & agent children, 1 min for interactive
+      }, 300_000) // 5 min for all approval types — prevents premature auto-deny when user is reading or tabbed away
 
       let promptMsg: WsServerMessage
       if (isQuestion) {

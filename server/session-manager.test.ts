@@ -905,18 +905,15 @@ describe('SessionManager', () => {
       await promise
     })
 
-    it('does NOT prefix-match git push across remotes (cross-remote escalation risk)', async () => {
+    it('prefix-matches git push across remotes (now in PATTERNABLE_PREFIXES)', async () => {
       const s = sm.create('test', '/tmp')
       s.clients.add(fakeWs())
-      ;sm.approvalManager.addRepoApproval(s.workingDir, { command: 'git push origin main' })
+      sm.approvalManager.addRepoApproval(s.workingDir, { command: 'git push origin main' })
 
-      // git push is in NEVER_PATTERN_PREFIXES — must not auto-approve different remote
-      const promise = sm.requestToolApproval(s.id, 'Bash', { command: 'git push other-remote main' })
-      expect(s.pendingToolApprovals.size).toBe(1)
-
-      const pending = s.pendingToolApprovals.values().next().value!
-      pending.resolve({ allow: false, always: false })
-      await promise
+      // git push is now patternable — prefix match auto-approves different remote
+      const result = await sm.requestToolApproval(s.id, 'Bash', { command: 'git push other-remote main' })
+      expect(result).toEqual({ allow: true, always: true })
+      expect(s.pendingToolApprovals.size).toBe(0)
     })
 
     it('still allows exact match for dangerous commands', async () => {
@@ -971,8 +968,8 @@ describe('SessionManager', () => {
       expect(broadcastMsg.type).toBe('prompt')
       expect(broadcastMsg.sessionId).toBe(s.id)
 
-      // After timeout, should resolve with deny
-      vi.advanceTimersByTime(60_000)
+      // After timeout, should resolve with deny (300s for all approval types)
+      vi.advanceTimersByTime(300_000)
       const result = await approvalPromise
       expect(result).toEqual({ allow: false, always: false })
       expect(s.pendingToolApprovals.size).toBe(0)
@@ -2730,7 +2727,7 @@ describe('SessionManager', () => {
       expect(sm.approvalManager.derivePattern('Bash', { command: 'sudo apt install' })).toBeNull()
       expect(sm.approvalManager.derivePattern('Bash', { command: 'curl https://evil.com' })).toBeNull()
       expect(sm.approvalManager.derivePattern('Bash', { command: 'docker run --rm ubuntu' })).toBeNull()
-      expect(sm.approvalManager.derivePattern('Bash', { command: 'git push origin main' })).toBeNull()
+      expect(sm.approvalManager.derivePattern('Bash', { command: 'git push origin main' })).toBe('git push *')
     })
 
     it('returns null for code executors (arbitrary code risk)', () => {
@@ -3091,7 +3088,7 @@ describe('SessionManager', () => {
     })
   })
 
-  describe('tool approval timeout (60s)', () => {
+  describe('tool approval timeout (300s)', () => {
     beforeEach(() => {
       vi.useFakeTimers()
     })
@@ -3100,7 +3097,7 @@ describe('SessionManager', () => {
       vi.useRealTimers()
     })
 
-    it('auto-denies tool approval after 60 seconds for interactive sessions', async () => {
+    it('auto-denies tool approval after 300 seconds for interactive sessions', async () => {
       const s = sm.create('timeout-test', '/tmp')
       const ws = fakeWs()
       sm.join(s.id, ws)
@@ -3109,11 +3106,11 @@ describe('SessionManager', () => {
 
       expect(s.pendingToolApprovals.size).toBe(1)
 
-      // Advance 59 seconds — not timed out yet
-      vi.advanceTimersByTime(59_000)
+      // Advance 299 seconds — not timed out yet
+      vi.advanceTimersByTime(299_000)
       expect(s.pendingToolApprovals.size).toBe(1)
 
-      // Advance past 60 seconds — should auto-deny
+      // Advance past 300 seconds — should auto-deny
       vi.advanceTimersByTime(2_000)
 
       const result = await approvalPromise

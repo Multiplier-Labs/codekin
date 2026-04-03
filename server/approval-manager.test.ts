@@ -85,8 +85,8 @@ describe('ApprovalManager', () => {
       expect(mgr.derivePattern('Bash', { command: 'cat foo.txt' })).toBe('cat *')
     })
 
-    it('returns null for "git push origin main" (NEVER_PATTERN_PREFIXES)', () => {
-      expect(mgr.derivePattern('Bash', { command: 'git push origin main' })).toBeNull()
+    it('returns pattern for "git push origin main" (now in PATTERNABLE_PREFIXES)', () => {
+      expect(mgr.derivePattern('Bash', { command: 'git push origin main' })).toBe('git push *')
     })
 
     it('returns null for "rm -rf /tmp/foo" (NEVER_PATTERN_PREFIXES)', () => {

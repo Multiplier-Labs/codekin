@@ -103,16 +103,32 @@ createHook({
       }
     }
 
-    // ExitPlanMode: auto-allow in the hook. Plan approval is now handled at the
-    // Codekin layer (PlanManager) via conversational messages after the tool completes,
-    // not at the CLI permission layer.
+    // ExitPlanMode: route through the server for plan approval via PlanManager.
+    // The hook blocks until the user approves/rejects the plan in the UI.
+    // On approve → allow (CLI executes ExitPlanMode normally).
+    // On deny → deny with rejection reason (Claude revises the plan).
     if (input.tool_name === 'ExitPlanMode') {
-      return {
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          permissionDecision: 'allow',
-        },
-      };
+      const hubSessionId = ctx.env.hubSessionId;
+      if (!hubSessionId) return; // No hub session — let CLI handle natively
+
+      try {
+        const decision = await transport.requestDecision({
+          event: 'PreToolUse',
+          sessionId: hubSessionId,
+          toolName: 'ExitPlanMode',
+          toolInput: input.tool_input,
+        });
+
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: decision?.allow ? 'allow' : 'deny',
+            ...(decision?.message ? { permissionDecisionReason: decision.message } : {}),
+          },
+        };
+      } catch (err) {
+        return denyWithNotification(ctx, 'ExitPlanMode', input.tool_input, `Server error: ${err.message}`);
+      }
     }
 
     // File-read tools: auto-allow for in-project paths, prompt for outside
@@ -129,7 +145,10 @@ createHook({
       // Out-of-project Read — fall through to approval flow below
     }
 
-    // Webhook sessions: auto-allow after auth validation
+    // Webhook sessions: auto-allow after auth validation.
+    // IMPORTANT: This check must remain BEFORE the skipPermissions check below.
+    // Webhook sessions must always validate auth regardless of skip flags,
+    // because webhook auth is a security boundary, not a UX convenience.
     if (ctx.env.isWebhookSession) {
       const auth = await validateAuthToken(ctx.env.hubSessionId || ctx.env.sessionId);
       if (!auth.valid) {
@@ -144,8 +163,10 @@ createHook({
       };
     }
 
-    // Skip all permission checks when dangerouslySkipPermissions is active
-    if (ctx.env.skipPermissions) {
+    // Skip all permission checks when dangerouslySkipPermissions is active.
+    // Check both the env flag and the permission mode as a fallback to guard
+    // against desynchronization if the env var mapping changes.
+    if (ctx.env.skipPermissions || ctx.env.permissionMode === 'dangerouslySkipPermissions') {
       return {
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
@@ -158,8 +179,11 @@ createHook({
     try {
       const hubSessionId = ctx.env.hubSessionId;
       if (!hubSessionId) {
-        // No hub session ID — let Claude Code handle it normally (don't block)
-        return;
+        // No hub session ID — deny with clear error instead of silently
+        // falling through to CLI-native handling (which doesn't work in
+        // stream-json mode and leads to tools hanging or being blocked).
+        return denyWithNotification(ctx, input.tool_name, input.tool_input,
+          'Missing CODEKIN_SESSION_ID — cannot route approval. Check session environment.');
       }
 
       const decision = await transport.requestDecision({
