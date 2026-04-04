@@ -26,8 +26,8 @@ GitHub sends `pull_request` webhook events to Codekin. The handler filters by ac
 
 When a PR is closed (`closed` action), the handler runs synchronously — no workspace or Claude session is needed:
 
-1. Kill any active review sessions for the PR via `supersedePrSessions`
-2. Record the event in the event ring buffer for observability
+1. Record the event in the event ring buffer for observability
+2. Kill any active review sessions for the PR via `supersedePrSessions`
 3. If **merged**: move cache file to `~/.codekin/pr-cache/{owner}/{repo}/archived/pr-{number}.json`
 4. If **closed** (not merged): delete the cache file
 
