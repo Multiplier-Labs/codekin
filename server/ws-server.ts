@@ -42,7 +42,7 @@ import { createDocsRouter } from './docs-routes.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, isOrchestratorSession } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
-import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver } from './config.js'
+import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY } from './config.js'
 
 // ---------------------------------------------------------------------------
 // CLI args (legacy bare-metal compat) and auth setup
@@ -376,7 +376,7 @@ function checkWsRateLimit(ip: string): boolean {
 
 wss.on('connection', (ws: WebSocket, req) => {
   // Rate-limit by IP before any processing
-  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown'
+  const ip = (TRUST_PROXY && (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()) || req.socket.remoteAddress || 'unknown'
   if (!checkWsRateLimit(ip)) {
     ws.close(4029, 'Too many connections')
     return
@@ -438,7 +438,8 @@ wss.on('connection', (ws: WebSocket, req) => {
       msgWindowStart = now
     }
     if (++msgCount > MSG_RATE_LIMIT) {
-      return // silently drop excess messages
+      send({ type: 'system_message', subtype: 'error', text: 'Rate limit exceeded (60 messages/second). Message dropped.' })
+      return
     }
 
     handleWsMessage(msg, handlerCtx)

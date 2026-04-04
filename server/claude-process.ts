@@ -84,6 +84,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
   private alive = false
 
   private killTimer: ReturnType<typeof setTimeout> | null = null
+  private startupTimer: ReturnType<typeof setTimeout> | null = null
 
   // Grouped streaming state — reset per content block
   private thinking: ThinkingState = { active: false, text: '', summaryEmitted: false }
@@ -182,6 +183,15 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
 
     this.alive = true
 
+    // Startup timeout: if system_init is not received within 30s, kill and report error
+    this.startupTimer = setTimeout(() => {
+      this.startupTimer = null
+      if (this.alive) {
+        this.emit('error', 'Claude process failed to initialize within 30 seconds')
+        this.stop()
+      }
+    }, 30_000)
+
     this.rl = createInterface({ input: this.proc.stdout! })
     this.rl.on('line', (line) => this.handleLine(line))
 
@@ -198,6 +208,10 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
 
     this.proc.on('close', (code, signal) => {
       this.alive = false
+      if (this.startupTimer) {
+        clearTimeout(this.startupTimer)
+        this.startupTimer = null
+      }
       this.rl?.close()
       this.rl = null
       this.proc = null
@@ -231,6 +245,10 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
     switch (event.type) {
       case 'system':
         if (event.subtype === 'init') {
+          if (this.startupTimer) {
+            clearTimeout(this.startupTimer)
+            this.startupTimer = null
+          }
           this.sessionId = (event as ClaudeSystemInit).session_id || this.sessionId
           const model = ('model' in event ? (event as Record<string, unknown>).model : 'unknown') as string
           this.emit('system_init', model)

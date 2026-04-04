@@ -57,6 +57,19 @@ export function createSessionRouter(
       return res.status(400).json({ error: 'Missing name or workingDir' })
     }
 
+    // Bounds-check: workingDir must be under home or REPOS_ROOT (same as browse-dirs)
+    const home = osHomedir()
+    const allowedRoots = [home, REPOS_ROOT]
+    let resolvedDir: string
+    try {
+      resolvedDir = fsRealpathSync(pathResolve(workingDir))
+    } catch {
+      resolvedDir = pathResolve(workingDir)
+    }
+    if (!allowedRoots.some(root => resolvedDir === root || resolvedDir.startsWith(root + '/'))) {
+      return res.status(403).json({ error: 'workingDir is outside allowed directories' })
+    }
+
     const session = sessions.create(name, workingDir)
     res.json({
       sessionId: session.id,
