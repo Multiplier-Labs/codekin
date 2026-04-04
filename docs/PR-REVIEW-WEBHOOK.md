@@ -11,6 +11,7 @@ GitHub sends `pull_request` webhook events to Codekin. The handler filters by ac
 ### Event Flow
 
 1. GitHub sends `pull_request` event (actions: `opened`, `synchronize`, `reopened`, `closed`)
+   _(For `closed` events, steps 2–11 are skipped — see [Closed/Merged Flow](#closedmerged-flow) below)_
 2. `webhook-handler.ts` validates signature, filters by action/draft/allowlist
 3. Dedup check (`webhook-dedup.ts`) — rejects already-processed events
 4. Supersede any active session for the same PR (new push kills old review)
