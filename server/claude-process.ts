@@ -15,7 +15,6 @@ import { spawn, type ChildProcess } from 'child_process'
 import { createInterface, type Interface } from 'readline'
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
-import { homedir } from 'os'
 import type { ClaudeEvent, ClaudeSystemInit, ClaudeControlRequest, ClaudeResultEvent, ClaudeStreamEvent, TaskItem, PromptQuestion, PermissionMode } from './types.js'
 import { SCREENSHOTS_DIR } from './config.js'
 import { redactSecrets } from './crypto-utils.js'
@@ -134,19 +133,19 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
   start(): void {
     if (this.proc) return
 
+    // Pass through the full parent environment so the Claude CLI inherits
+    // XDG paths, TERM, SHELL, and any other vars it needs.
+    // Exclude ANTHROPIC_API_KEY / CLAUDE_CODE_API_KEY from inheritance —
+    // stale or incorrect keys override the CLI's subscription/OAuth auth
+    // and cause "Invalid API key" errors. Let the CLI use its own auth.
+    const API_KEY_VARS = new Set(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_API_KEY'])
     const env: Record<string, string> = {
-      PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
-      HOME: process.env.HOME || homedir(),
-      USER: process.env.USER || 'dev',
-      LANG: process.env.LANG || 'en_US.UTF-8',
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(
+          (entry): entry is [string, string] => entry[1] != null && !API_KEY_VARS.has(entry[0])
+        )
+      ),
       ...this.extraEnv,
-    }
-
-    // Pass through third-party API keys for skills (validate-gemini, validate-gpt).
-    // Do NOT pass ANTHROPIC_API_KEY / CLAUDE_CODE_API_KEY — let the CLI use the
-    // user's authenticated Max plan instead of billing via API.
-    for (const key of ['GEMINI_API_KEY', 'OPENAI_API_KEY', 'OPENAI_MODEL', 'GEMINI_MODEL']) {
-      if (process.env[key]) env[key] = process.env[key]
     }
 
     // Suppress Node.js deprecation warnings in child tools
@@ -187,10 +186,10 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
     this.startupTimer = setTimeout(() => {
       this.startupTimer = null
       if (this.alive) {
-        this.emit('error', 'Claude process failed to initialize within 30 seconds')
+        this.emit('error', 'Claude process failed to initialize within 60 seconds')
         this.stop()
       }
-    }, 30_000)
+    }, 60_000)
 
     this.rl = createInterface({ input: this.proc.stdout! })
     this.rl.on('line', (line) => this.handleLine(line))

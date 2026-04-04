@@ -116,7 +116,7 @@ function extractToken(req: express.Request): string | undefined {
 // ---------------------------------------------------------------------------
 let claudeAvailable = false
 let claudeVersion = ''
-const apiKeySet = !!(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_API_KEY)
+const apiKeyEnvSet = !!(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_API_KEY)
 
 try {
   claudeVersion = execFileSync('claude', ['--version'], { timeout: 5000 }).toString().trim()
@@ -126,8 +126,24 @@ try {
   console.warn('Claude CLI not found or not working')
 }
 
+// Detect whether the Claude CLI has valid auth (API key OR subscription/OAuth).
+// Subscription users won't have ANTHROPIC_API_KEY set but can still use the CLI.
+let apiKeySet = apiKeyEnvSet
+if (claudeAvailable && !apiKeyEnvSet) {
+  try {
+    const authJson = execFileSync('claude', ['auth', 'status'], { timeout: 5000 }).toString()
+    const auth = JSON.parse(authJson)
+    if (auth.loggedIn) {
+      apiKeySet = true
+      console.log(`Claude CLI authenticated via ${auth.authMethod || 'unknown method'}`)
+    }
+  } catch {
+    // auth status check failed — fall through to warning
+  }
+}
+
 if (!apiKeySet) {
-  console.warn('No API key configured (ANTHROPIC_API_KEY or CLAUDE_CODE_API_KEY)')
+  console.warn('No API key or subscription auth detected (ANTHROPIC_API_KEY, CLAUDE_CODE_API_KEY, or Claude subscription)')
 }
 
 // ---------------------------------------------------------------------------

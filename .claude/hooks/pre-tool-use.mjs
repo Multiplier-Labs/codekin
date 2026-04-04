@@ -179,11 +179,11 @@ createHook({
     try {
       const hubSessionId = ctx.env.hubSessionId;
       if (!hubSessionId) {
-        // No hub session ID — deny with clear error instead of silently
-        // falling through to CLI-native handling (which doesn't work in
-        // stream-json mode and leads to tools hanging or being blocked).
-        return denyWithNotification(ctx, input.tool_name, input.tool_input,
-          'Missing CODEKIN_SESSION_ID — cannot route approval. Check session environment.');
+        // No hub session ID — pass through to CLI-native handling.
+        // This happens in standalone Claude Code sessions (not managed by Codekin).
+        // Codekin-managed sessions always have CODEKIN_SESSION_ID set via extraEnv
+        // in session-manager.ts, so this branch only fires for direct CLI usage.
+        return;
       }
 
       const decision = await transport.requestDecision({
