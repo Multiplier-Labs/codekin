@@ -16,6 +16,8 @@ const mockFetchExistingReviewComment = vi.hoisted(() => vi.fn(async () => undefi
 const mockBuildPrReviewPrompt = vi.hoisted(() => vi.fn(() => 'mock pr review prompt'))
 const mockLoadPrCache = vi.hoisted(() => vi.fn(() => undefined))
 const mockEnsureCacheDir = vi.hoisted(() => vi.fn(() => '/home/user/.codekin/pr-cache/owner/repo/pr-42.json'))
+const mockArchivePrCache = vi.hoisted(() => vi.fn())
+const mockDeletePrCache = vi.hoisted(() => vi.fn())
 
 // Mock all webhook sub-modules before importing the handler
 vi.mock('./webhook-dedup.js', () => {
@@ -63,6 +65,8 @@ vi.mock('./webhook-pr-github.js', () => ({
 vi.mock('./webhook-pr-cache.js', () => ({
   loadPrCache: mockLoadPrCache,
   ensureCacheDir: mockEnsureCacheDir,
+  archivePrCache: mockArchivePrCache,
+  deletePrCache: mockDeletePrCache,
 }))
 
 vi.mock('./webhook-pr-prompt.js', () => ({
@@ -510,6 +514,8 @@ describe('WebhookHandler', () => {
       mockBuildPrReviewPrompt.mockImplementation(() => 'mock pr review prompt')
       mockLoadPrCache.mockImplementation(() => undefined)
       mockEnsureCacheDir.mockImplementation(() => '/home/user/.codekin/pr-cache/owner/repo/pr-42.json')
+      mockArchivePrCache.mockClear()
+      mockDeletePrCache.mockClear()
       vi.mocked(createWorkspace).mockImplementation(async () => '/tmp/workspace')
     })
 
@@ -523,6 +529,7 @@ describe('WebhookHandler', () => {
           body: 'Fixes the login issue',
           state: 'open',
           draft: false,
+          merged: false,
           user: { login: 'user1' },
           head: {
             ref: 'fix/auth',
@@ -569,12 +576,12 @@ describe('WebhookHandler', () => {
 
     it('returns filtered for unsupported PR action', async () => {
       await handler.checkHealth()
-      const payload = makePrPayload({ action: 'closed' })
+      const payload = makePrPayload({ action: 'edited' })
       const body = Buffer.from(JSON.stringify(payload))
       const result = await handler.handleWebhook(body, makePrHeaders(body))
       expect(result.statusCode).toBe(200)
       expect(result.body.status).toBe('filtered')
-      expect(result.body.filterReason).toContain('closed')
+      expect(result.body.filterReason).toContain('edited')
     })
 
     it('returns filtered for draft PRs', async () => {
@@ -920,6 +927,76 @@ describe('WebhookHandler', () => {
             existingCommentId: undefined,
           }),
         )
+      })
+    })
+
+    describe('PR closed/merged cleanup', () => {
+      function makeClosedPrPayload(merged: boolean) {
+        const payload = makePrPayload({ action: 'closed' })
+        payload.pull_request.merged = merged
+        payload.pull_request.state = 'closed'
+        return payload
+      }
+
+      it('returns 200 for closed action with merged: true and archives cache', async () => {
+        await handler.checkHealth()
+        const payload = makeClosedPrPayload(true)
+        const body = Buffer.from(JSON.stringify(payload))
+        const result = await handler.handleWebhook(body, makePrHeaders(body))
+
+        expect(result.statusCode).toBe(200)
+        expect(result.body.accepted).toBe(true)
+        expect(result.body.action).toBe('merged')
+        expect(mockArchivePrCache).toHaveBeenCalledWith('owner/repo', 42)
+        expect(mockDeletePrCache).not.toHaveBeenCalled()
+      })
+
+      it('returns 200 for closed action with merged: false and deletes cache', async () => {
+        await handler.checkHealth()
+        const payload = makeClosedPrPayload(false)
+        const body = Buffer.from(JSON.stringify(payload))
+        const result = await handler.handleWebhook(body, makePrHeaders(body))
+
+        expect(result.statusCode).toBe(200)
+        expect(result.body.accepted).toBe(true)
+        expect(result.body.action).toBe('closed')
+        expect(mockDeletePrCache).toHaveBeenCalledWith('owner/repo', 42)
+        expect(mockArchivePrCache).not.toHaveBeenCalled()
+      })
+
+      it('does not create a workspace or session for closed action', async () => {
+        await handler.checkHealth()
+        vi.mocked(createWorkspace).mockClear()
+        sessions.create.mockClear()
+        const payload = makeClosedPrPayload(true)
+        const body = Buffer.from(JSON.stringify(payload))
+        await handler.handleWebhook(body, makePrHeaders(body))
+        await vi.advanceTimersByTimeAsync(100)
+
+        expect(vi.mocked(createWorkspace)).not.toHaveBeenCalled()
+        expect(sessions.create).not.toHaveBeenCalled()
+      })
+
+      it('kills active sessions for the same PR on close', async () => {
+        await handler.checkHealth()
+
+        // First: open a PR review session
+        const openPayload = makePrPayload({ action: 'opened' })
+        const openBody = Buffer.from(JSON.stringify(openPayload))
+        const openResult = await handler.handleWebhook(openBody, makePrHeaders(openBody, { delivery: 'pr-open' }))
+        await vi.advanceTimersByTimeAsync(100)
+        const openEvent = handler.getEvent(openResult.body.eventId as string)
+        expect(openEvent?.status).toBe('session_created')
+
+        // Then: close the PR
+        const closePayload = makeClosedPrPayload(false)
+        const closeBody = Buffer.from(JSON.stringify(closePayload))
+        await handler.handleWebhook(closeBody, makePrHeaders(closeBody, { delivery: 'pr-close' }))
+
+        // The open session should be superseded
+        const openEventAfter = handler.getEvent(openResult.body.eventId as string)
+        expect(openEventAfter?.status).toBe('superseded')
+        expect(sessions.delete).toHaveBeenCalledWith(openEvent?.sessionId)
       })
     })
   })

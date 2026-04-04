@@ -10,11 +10,13 @@ vi.mock('fs', async (importOriginal) => {
     existsSync: vi.fn(() => false),
     readFileSync: vi.fn(() => ''),
     mkdirSync: vi.fn(),
+    renameSync: vi.fn(),
+    unlinkSync: vi.fn(),
   }
 })
 
-import { loadPrCache, getCachePath, ensureCacheDir } from './webhook-pr-cache.js'
-import { existsSync, readFileSync, mkdirSync } from 'fs'
+import { loadPrCache, getCachePath, ensureCacheDir, archivePrCache, deletePrCache } from './webhook-pr-cache.js'
+import { existsSync, readFileSync, mkdirSync, renameSync, unlinkSync } from 'fs'
 
 function validCacheJson() {
   return JSON.stringify({
@@ -122,5 +124,70 @@ describe('loadPrCache', () => {
       join(homedir(), '.codekin', 'pr-cache', 'my-org', 'project', 'pr-99.json'),
       'utf-8',
     )
+  })
+})
+
+describe('archivePrCache', () => {
+  beforeEach(() => {
+    vi.mocked(existsSync).mockReturnValue(false)
+    vi.mocked(renameSync).mockClear()
+    vi.mocked(mkdirSync).mockClear()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('moves cache file to archived directory', () => {
+    vi.mocked(existsSync).mockReturnValue(true)
+    archivePrCache('owner/repo', 42)
+    expect(mkdirSync).toHaveBeenCalledWith(
+      join(homedir(), '.codekin', 'pr-cache', 'owner', 'repo', 'archived'),
+      { recursive: true },
+    )
+    expect(renameSync).toHaveBeenCalledWith(
+      join(homedir(), '.codekin', 'pr-cache', 'owner', 'repo', 'pr-42.json'),
+      join(homedir(), '.codekin', 'pr-cache', 'owner', 'repo', 'archived', 'pr-42.json'),
+    )
+  })
+
+  it('creates archived directory if missing', () => {
+    vi.mocked(existsSync).mockReturnValue(true)
+    archivePrCache('owner/repo', 42)
+    expect(mkdirSync).toHaveBeenCalledWith(
+      expect.stringContaining('archived'),
+      { recursive: true },
+    )
+  })
+
+  it('is a no-op when cache file does not exist', () => {
+    vi.mocked(existsSync).mockReturnValue(false)
+    archivePrCache('owner/repo', 42)
+    expect(renameSync).not.toHaveBeenCalled()
+  })
+})
+
+describe('deletePrCache', () => {
+  beforeEach(() => {
+    vi.mocked(existsSync).mockReturnValue(false)
+    vi.mocked(unlinkSync).mockClear()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('removes the cache file', () => {
+    vi.mocked(existsSync).mockReturnValue(true)
+    deletePrCache('owner/repo', 42)
+    expect(unlinkSync).toHaveBeenCalledWith(
+      join(homedir(), '.codekin', 'pr-cache', 'owner', 'repo', 'pr-42.json'),
+    )
+  })
+
+  it('is a no-op when cache file does not exist', () => {
+    vi.mocked(existsSync).mockReturnValue(false)
+    deletePrCache('owner/repo', 42)
+    expect(unlinkSync).not.toHaveBeenCalled()
   })
 })

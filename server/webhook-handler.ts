@@ -28,7 +28,7 @@ import { checkGhHealth, fetchFailedLogs, fetchJobs, fetchAnnotations, fetchCommi
 import { fetchPrDiff, fetchPrFiles, fetchPrCommits, fetchPrReviewComments, fetchPrReviews, fetchExistingReviewComment } from './webhook-pr-github.js'
 import { buildPrompt } from './webhook-prompt.js'
 import { buildPrReviewPrompt } from './webhook-pr-prompt.js'
-import { loadPrCache, ensureCacheDir } from './webhook-pr-cache.js'
+import { loadPrCache, ensureCacheDir, archivePrCache, deletePrCache } from './webhook-pr-cache.js'
 import { createWorkspace, cleanupWorkspace } from './webhook-workspace.js'
 import { WebhookHandlerBase } from './webhook-handler-base.js'
 import { REPOS_ROOT } from './config.js'
@@ -296,6 +296,11 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     const pr = payload.pull_request
     if (!pr) {
       return { statusCode: 400, body: { error: 'Missing pull_request in payload' } }
+    }
+
+    // --- Closed/merged handling (cleanup, no review) ---
+    if (payload.action === 'closed') {
+      return this.handlePrClosed(payload, eventId)
     }
 
     // --- Action filter ---
@@ -568,6 +573,40 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   // ---------------------------------------------------------------------------
   // Shared helpers
   // ---------------------------------------------------------------------------
+
+  /**
+   * Handle a PR being closed or merged: kill active sessions and archive/delete cache.
+   */
+  private handlePrClosed(
+    payload: PullRequestPayload,
+    eventId: string,
+  ): { statusCode: number; body: Record<string, unknown> } {
+    const pr = payload.pull_request
+    const repo = payload.repository.full_name
+    const merged = pr.merged
+
+    console.log(`[webhook] PR ${repo}#${pr.number} ${merged ? 'merged' : 'closed'}, cleaning up`)
+
+    // Kill any active review sessions for this PR
+    this.supersedePrSessions(repo, pr.number)
+
+    // Archive or delete the cache file
+    if (merged) {
+      archivePrCache(repo, pr.number)
+    } else {
+      deletePrCache(repo, pr.number)
+    }
+
+    return {
+      statusCode: 200,
+      body: {
+        accepted: true,
+        eventId,
+        status: 'processed',
+        action: merged ? 'merged' : 'closed',
+      },
+    }
+  }
 
   /**
    * Find and terminate any active sessions for the same PR.

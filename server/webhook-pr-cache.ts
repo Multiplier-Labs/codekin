@@ -7,7 +7,7 @@
  * Cache location: ~/.codekin/pr-cache/{owner}/{repo}/pr-{number}.json
  */
 
-import { existsSync, mkdirSync, readFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 
@@ -72,5 +72,41 @@ export function loadPrCache(repo: string, prNumber: number): PrCacheData | undef
   } catch (err) {
     console.warn(`[pr-cache] Failed to load cache for ${repo} PR #${prNumber}:`, err)
     return undefined
+  }
+}
+
+/**
+ * Archive a PR's cache file (move to archived/ subdirectory).
+ * Used when a PR is merged. No-op if cache doesn't exist.
+ */
+export function archivePrCache(repo: string, prNumber: number): void {
+  const source = getCachePath(repo, prNumber)
+  if (!existsSync(source)) return
+
+  try {
+    const [owner, name] = repo.split('/')
+    const archivedDir = join(homedir(), '.codekin', 'pr-cache', owner, name, 'archived')
+    mkdirSync(archivedDir, { recursive: true })
+    const dest = join(archivedDir, `pr-${prNumber}.json`)
+    renameSync(source, dest)
+    console.log(`[pr-cache] Archived cache for ${repo} PR #${prNumber}`)
+  } catch (err) {
+    console.warn(`[pr-cache] Failed to archive cache for ${repo} PR #${prNumber}:`, err)
+  }
+}
+
+/**
+ * Delete a PR's cache file.
+ * Used when a PR is closed without merging. No-op if cache doesn't exist.
+ */
+export function deletePrCache(repo: string, prNumber: number): void {
+  const path = getCachePath(repo, prNumber)
+  if (!existsSync(path)) return
+
+  try {
+    unlinkSync(path)
+    console.log(`[pr-cache] Deleted cache for ${repo} PR #${prNumber}`)
+  } catch (err) {
+    console.warn(`[pr-cache] Failed to delete cache for ${repo} PR #${prNumber}:`, err)
   }
 }

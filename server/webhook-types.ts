@@ -128,6 +128,7 @@ export interface PullRequestPayload {
     body: string | null
     state: string                 // "open" | "closed"
     draft: boolean
+    merged: boolean
     user: { login: string }
     head: {
       ref: string
