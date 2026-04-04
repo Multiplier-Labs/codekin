@@ -42,6 +42,15 @@ npm run lint         # eslint
 - All changes go through PRs with review and passing CI.
 - Releases are tagged with semver: `v0.2.0`, `v1.0.0`, etc.
 
+## Bash Tool Conventions (Skills & Subagents)
+
+When executing skills or subagent tasks that use the Bash tool:
+
+- **One command per Bash call** — do NOT chain commands with `;`, `&&`, `||`, or pipes after the main command
+- **Do NOT use `echo` to inspect exit codes** (e.g. `echo "exit: $?"`) — the Bash tool already returns exit codes and stdout automatically
+- **Do NOT use `cat` to read files** — use the Read tool instead. This applies to temp files, output files, review files, etc.
+- These rules prevent multi-operation approval prompts in the Codekin terminal UI
+
 ## Output Conventions
 
 - When sharing code snippets, configuration files, or file contents with the user, always use fenced code blocks (```language) so they render properly in the terminal UI
