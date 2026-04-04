@@ -5,8 +5,39 @@
  */
 
 import { Router } from 'express'
-import type { Request } from 'express'
+import type { Request, RequestHandler } from 'express'
 import type { SessionManager } from './session-manager.js'
+
+/** Simple per-IP rate limiter for auth endpoints. */
+function createIpRateLimiter(maxPerMinute: number): RequestHandler {
+  const ipTimestamps = new Map<string, number[]>()
+
+  // Periodic cleanup to prevent unbounded memory growth
+  const cleanup = setInterval(() => {
+    const now = Date.now()
+    for (const [ip, timestamps] of ipTimestamps) {
+      const recent = timestamps.filter(t => now - t < 60_000)
+      if (recent.length === 0) ipTimestamps.delete(ip)
+      else ipTimestamps.set(ip, recent)
+    }
+  }, 5 * 60_000)
+  if (cleanup.unref) cleanup.unref()
+
+  return (req, res, next) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown'
+    const now = Date.now()
+    const timestamps = (ipTimestamps.get(ip) ?? []).filter(t => now - t < 60_000)
+
+    if (timestamps.length >= maxPerMinute) {
+      ipTimestamps.set(ip, timestamps)
+      return res.status(429).json({ error: 'Too Many Requests', retryAfter: 60 })
+    }
+
+    timestamps.push(now)
+    ipTimestamps.set(ip, timestamps)
+    next()
+  }
+}
 
 type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
@@ -31,8 +62,9 @@ export function createAuthRouter(
   apiKeySet: boolean,
 ): Router {
   const router = Router()
+  const authVerifyLimiter = createIpRateLimiter(10)
 
-  router.post('/auth-verify', (req, res) => {
+  router.post('/auth-verify', authVerifyLimiter, (req, res) => {
     const token = extractToken(req)
     res.json({ valid: verifyToken(token) })
   })

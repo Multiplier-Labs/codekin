@@ -75,6 +75,9 @@ export const SCREENSHOTS_DIR = process.env.SCREENSHOTS_DIR || join(DATA_DIR, 'sc
  */
 export const FRONTEND_DIST = process.env.FRONTEND_DIST || ''
 
+/** Whether to trust X-Forwarded-For headers (set when behind a reverse proxy). */
+export const TRUST_PROXY = process.env.TRUST_PROXY === 'true' || process.env.TRUST_PROXY === '1'
+
 /** GitHub organizations for repo listing (comma-separated). Empty string disables org listing. */
 export const GH_ORGS: string[] = (process.env.GH_ORG || '').split(',').map(s => s.trim()).filter(Boolean)
 
