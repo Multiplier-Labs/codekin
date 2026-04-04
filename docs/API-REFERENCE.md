@@ -124,6 +124,56 @@ Set the repos discovery path. Empty string resets to server default.
 **Request body:** `{ "path": "/home/user/repos" }`
 **Response:** `{ "path": "/home/user/repos" }`
 
+### `GET /api/settings/worktree-prefix`
+
+Get the worktree directory prefix.
+
+**Response:** `{ "prefix": "wt" }`
+
+### `PUT /api/settings/worktree-prefix`
+
+Set the worktree directory prefix.
+
+**Request body:** `{ "prefix": "wt" }`
+**Response:** `{ "prefix": "wt" }`
+
+### `GET /api/settings/queue-messages`
+
+Get the message queueing setting.
+
+**Response:** `{ "enabled": false }`
+
+### `PUT /api/settings/queue-messages`
+
+Enable or disable message queueing.
+
+**Request body:** `{ "enabled": true }`
+**Response:** `{ "enabled": true }`
+
+### `GET /api/settings/agent-name`
+
+Get the orchestrator agent display name.
+
+**Response:** `{ "name": "Agent Joe" }`
+
+### `PUT /api/settings/agent-name`
+
+Set the orchestrator agent display name.
+
+**Request body:** `{ "name": "Agent Joe" }`
+**Response:** `{ "name": "Agent Joe" }`
+
+---
+
+## Directory Browsing
+
+### `GET /api/browse-dirs`
+
+Browse directories on the server filesystem (for folder picker UI).
+
+**Query params:** `path` (optional) — directory to list; defaults to home directory
+**Response:** `{ "dirs": [{ "name": "repos", "path": "/home/user/repos" }] }`
+
 ---
 
 ## Approvals
@@ -383,3 +433,259 @@ Update a repo workflow configuration.
 Remove a repo workflow configuration.
 
 **Response:** `{ "config": WorkflowConfig }`
+
+---
+
+## Orchestrator (Agent Joe)
+
+All orchestrator routes are mounted at the `/api/orchestrator/` prefix.
+
+### Status & Lifecycle
+
+#### `GET /api/orchestrator/status`
+
+Get orchestrator session status and summary stats.
+
+**Response:** `{ "status": "active" | "idle" | "restarting", "sessionId": "...", ... }`
+
+#### `POST /api/orchestrator/start`
+
+Ensure the orchestrator session is running. Starts it if not already active.
+
+**Response:** `{ "sessionId": "...", "status": "active" }`
+
+### Reports
+
+#### `GET /api/orchestrator/reports`
+
+List available audit reports across managed repos.
+
+**Query params:** `repo` (optional), `category` (optional), `since` (optional — ISO timestamp)
+**Response:** `{ "reports": Report[] }`
+
+#### `GET /api/orchestrator/reports/read`
+
+Read the contents of a specific report file.
+
+**Query params:** `path` (required) — report file path
+**Response:** `{ "content": "...", "path": "..." }`
+
+### Child Sessions
+
+#### `GET /api/orchestrator/children`
+
+List child sessions spawned by the orchestrator.
+
+**Response:** `{ "children": ChildSession[] }`
+
+#### `POST /api/orchestrator/children`
+
+Spawn a new child session for a task.
+
+**Request body:** `{ "repo": "...", "task": "...", "branchName": "...", "useWorktree": true, "completionPolicy": "pr" | "merge" | "commit-only" }`
+**Response:** `{ "childId": "...", "sessionId": "..." }`
+
+#### `GET /api/orchestrator/children/:id`
+
+Get details for a specific child session.
+
+**Response:** `{ "child": ChildSession }` or `404`
+
+### Session Management
+
+#### `GET /api/orchestrator/sessions`
+
+List all sessions visible to the orchestrator.
+
+**Response:** `{ "sessions": Session[] }`
+
+#### `GET /api/orchestrator/sessions/pending-prompts`
+
+Get sessions that have pending approval prompts.
+
+**Response:** `{ "sessions": [{ "sessionId": "...", "prompts": Prompt[] }] }`
+
+#### `POST /api/orchestrator/sessions/:id/respond`
+
+Respond to a pending prompt in a session.
+
+**Request body:** `{ "requestId": "...", "value": "..." }`
+**Response:** `{ "success": true }`
+
+#### `DELETE /api/orchestrator/sessions/cleanup`
+
+Clean up stale or completed child sessions.
+
+**Response:** `{ "cleaned": number }`
+
+#### `DELETE /api/orchestrator/sessions/:id`
+
+Delete a specific orchestrator-managed session.
+
+**Response:** `{ "success": true }` or `404`
+
+### Memory
+
+#### `GET /api/orchestrator/memory`
+
+Query the orchestrator's SQLite memory store (supports full-text search).
+
+**Query params:** `q` (optional — FTS query), `type` (optional), `scope` (optional), `limit` (optional)
+**Response:** `{ "items": MemoryItem[] }`
+
+#### `POST /api/orchestrator/memory`
+
+Create or update a memory item.
+
+**Request body:** `{ "memory_type": "...", "title": "...", "content": "...", "scope": "...", "tags": [...] }`
+**Response:** `{ "item": MemoryItem }`
+
+#### `DELETE /api/orchestrator/memory/:id`
+
+Delete a memory item.
+
+**Response:** `{ "success": true }` or `404`
+
+#### `POST /api/orchestrator/memory/extract`
+
+Extract memory candidates from an interaction.
+
+**Request body:** `{ "userMessage": "...", "assistantResponse": "...", "repo": "..." }`
+**Response:** `{ "candidates": MemoryCandidate[] }`
+
+#### `POST /api/orchestrator/memory/age`
+
+Run the memory aging/decay cycle (expire TTLs, compact journals, decay confidence).
+
+**Response:** `{ "expired": number, "compacted": number, "decayed": number }`
+
+### Trust System
+
+#### `GET /api/orchestrator/trust`
+
+List all trust records.
+
+**Response:** `{ "records": TrustRecord[] }`
+
+#### `GET /api/orchestrator/trust/level`
+
+Compute trust level for a specific action signature.
+
+**Query params:** `action`, `category`, `severity`, `repo` (optional)
+**Response:** `{ "level": "ask" | "notify_do" | "silent", "approvalCount": number }`
+
+#### `POST /api/orchestrator/trust/approve`
+
+Record a user approval for an action.
+
+**Request body:** `{ "action": "...", "category": "...", "severity": "...", "repo": "..." }`
+**Response:** `{ "record": TrustRecord }`
+
+#### `POST /api/orchestrator/trust/reject`
+
+Record a user rejection for an action (resets trust to ASK).
+
+**Request body:** `{ "action": "...", "category": "...", "severity": "...", "repo": "..." }`
+**Response:** `{ "record": TrustRecord }`
+
+#### `POST /api/orchestrator/trust/pin`
+
+Pin an action to a specific trust level (user override).
+
+**Request body:** `{ "action": "...", "category": "...", "level": "ask" | "notify_do" | "silent" }`
+**Response:** `{ "record": TrustRecord }`
+
+#### `POST /api/orchestrator/trust/reset`
+
+Reset all learned trust records back to ASK.
+
+**Response:** `{ "success": true, "cleared": number }`
+
+### Notifications
+
+#### `GET /api/orchestrator/notifications`
+
+Get pending orchestrator notifications.
+
+**Response:** `{ "notifications": Notification[] }`
+
+#### `POST /api/orchestrator/notifications/mark-delivered`
+
+Mark notifications as delivered.
+
+**Request body:** `{ "ids": ["..."] }`
+**Response:** `{ "success": true }`
+
+### Dashboard
+
+#### `GET /api/orchestrator/dashboard`
+
+Get summary statistics for the orchestrator dashboard.
+
+**Response:**
+```json
+{
+  "stats": {
+    "managedRepos": 5,
+    "pendingNotifications": 3,
+    "activeChildren": 2,
+    "totalChildren": 8,
+    "trustRecords": 12,
+    "autoApproved": 6,
+    "memoryItems": 42
+  }
+}
+```
+
+### Findings & Learning
+
+#### `POST /api/orchestrator/findings/outcome`
+
+Record the outcome of an audit finding (implemented, skipped, false positive, etc.).
+
+**Request body:** `{ "action": "...", "category": "...", "severity": "...", "outcome": "implemented" | "skipped" | "false_positive", "repo": "..." }`
+**Response:** `{ "success": true }`
+
+#### `GET /api/orchestrator/findings/recommend`
+
+Get triage recommendations based on historical finding outcomes.
+
+**Query params:** `category`, `severity`
+**Response:** `{ "recommendation": "implement" | "skip" | "review", "confidence": 0.85, "stats": {...} }`
+
+### Skills & User Model
+
+#### `GET /api/orchestrator/skills`
+
+Get the user skill profile.
+
+**Response:** `{ "skills": { "typescript": { "level": "advanced", ... }, ... } }`
+
+#### `POST /api/orchestrator/skills`
+
+Record a skill signal observation.
+
+**Request body:** `{ "domain": "typescript", "signal": "Used advanced generics", "level": "advanced" }`
+**Response:** `{ "skill": SkillLevel }`
+
+### Decisions
+
+#### `POST /api/orchestrator/decisions`
+
+Record a decision with rationale and expected outcome.
+
+**Request body:** `{ "title": "...", "rationale": "...", "expectedOutcome": "...", "scope": "..." }`
+**Response:** `{ "decision": DecisionRecord }`
+
+#### `POST /api/orchestrator/decisions/:id/assess`
+
+Assess the actual outcome of a past decision.
+
+**Request body:** `{ "actualOutcome": "...", "success": true }`
+**Response:** `{ "decision": DecisionRecord }`
+
+#### `GET /api/orchestrator/decisions/pending`
+
+Get decisions older than 7 days that haven't been assessed yet.
+
+**Response:** `{ "decisions": DecisionRecord[] }`

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-04-03
+
+### Fixes
+- Overhaul approvals architecture for parity with native CLI (#280)
+- Route ExitPlanMode through server's `requestToolApproval()` for correct PlanManager state transitions
+- Make git push patternable so "Always Allow" creates a `git push *` pattern
+- Unify approval timeout to 300s (5 min) for all session types
+- Deny with clear error when `CODEKIN_SESSION_ID` is missing instead of silently hanging
+- Pass ExitPlanMode rejection reason through to hook response
+
 ## [0.5.2] - 2026-04-03
 
 ### Features
@@ -286,7 +296,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 - Add JSDoc and inline comments per comment audit
-- Add docs/DOCS-BROWSER-SPEC.md
+- Add docs browser implementation spec
 
 ### Chores
 - Add 50 new tests from coverage audit

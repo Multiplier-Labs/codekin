@@ -2,7 +2,7 @@
 
 > *"Agent Joe"* — a calm, knowledgeable ops manager who keeps your repositories healthy, your workflows running, and your audit findings actioned. Guides non-expert users toward becoming better vibe coders through pragmatic, friendly advice.
 
-**Status**: v1.0 — Phase 1 shipped (v0.5.0). Phases 2–4 remain roadmap.
+**Status**: v1.0 — Phase 1 shipped (v0.5.0). Phases 2–4 shipped (v0.5.2). One Phase 3 item (auto-suggest workflow setup) remains roadmap.
 **Location in UI**: Left sidebar, below "AI Workflows"
 
 ---
@@ -492,30 +492,30 @@ type OrchestratorChildUpdate = {
 - [x] Markdown-based memory (PROFILE.md, REPOS.md, journal/)
 - [x] Manual interaction only (user asks, Agent Joe answers)
 
-### Phase 2 — Report Triage & Child Sessions
-- [ ] Report reader — Agent Joe can scan `.codekin/reports/` across repos
-- [ ] Child session spawning with task descriptions
-- [ ] Child session monitoring and completion reporting
-- [ ] Repo policies (PR vs merge, deploy flags)
-- [ ] SQLite memory store with FTS
-- [ ] Trust records table + ASK-level approval flow
+### Phase 2 — Report Triage & Child Sessions ✓
+- [x] Report reader — Agent Joe can scan `.codekin/reports/` across repos
+- [x] Child session spawning with task descriptions
+- [x] Child session monitoring and completion reporting
+- [x] Repo policies (PR vs merge, deploy flags)
+- [x] SQLite memory store with FTS
+- [x] Trust records table + ASK-level approval flow
 
-### Phase 3 — Workflow Management & Proactivity
-- [ ] Workflow CRUD from Agent Joe (create/modify/disable schedules)
-- [ ] Proactive notifications (new reports, idle repos, failed workflows)
+### Phase 3 — Workflow Management & Proactivity ✓
+- [x] Workflow CRUD from Agent Joe (create/modify/disable schedules)
+- [x] Proactive notifications (new reports, idle repos, failed workflows)
 - [ ] Auto-suggest workflow setup for new repos
-- [ ] Dashboard header with summary stats
-- [ ] De-scheduling passive repos
-- [ ] NOTIFY+DO trust escalation (2-approval threshold)
+- [x] Dashboard header with summary stats
+- [x] De-scheduling passive repos
+- [x] NOTIFY+DO trust escalation (2-approval threshold)
 
-### Phase 4 — Self-Improving Memory & Autonomy
-- [ ] Memory candidate extraction after interactions
-- [ ] Deduplication and aging/decay
-- [ ] Pattern learning (finding outcomes → better triage)
-- [ ] User skill model (adapt guidance to experience level)
-- [ ] Decision history with outcome tracking
-- [ ] SILENT trust level (5-approval threshold)
-- [ ] User trust override commands ("always do X", "never auto-approve Y")
+### Phase 4 — Self-Improving Memory & Autonomy ✓
+- [x] Memory candidate extraction after interactions
+- [x] Deduplication and aging/decay
+- [x] Pattern learning (finding outcomes → better triage)
+- [x] User skill model (adapt guidance to experience level)
+- [x] Decision history with outcome tracking
+- [x] SILENT trust level (5-approval threshold)
+- [x] User trust override commands ("always do X", "never auto-approve Y")
 
 ---
 

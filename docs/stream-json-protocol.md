@@ -52,7 +52,7 @@ The spawned process receives these env vars for hook communication:
 | `acceptEdits` | Auto-approved | Generates `control_request` | Auto-approved |
 | `bypassPermissions` | Auto-approved | Auto-approved | Auto-approved |
 | `plan` | Planning tools only | — | — |
-| `dontAsk` | Denied | Denied | Denied |
+| `dangerouslySkipPermissions` | Auto-approved (no hooks) | Auto-approved (no hooks) | Auto-approved (no hooks) |
 
 **Current mode:** `acceptEdits` — Write/Edit are auto-approved, Bash commands trigger the `PermissionRequest` hook (configured in `.claude/settings.local.json`). The hook routes to the server's `/api/hook-decision` endpoint, which prompts the UI for manual sessions or auto-approves for webhook sessions. Git commands are pre-approved via `--allowedTools 'Bash(git:*)'`.
 
