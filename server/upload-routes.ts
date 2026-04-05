@@ -173,7 +173,9 @@ export function createUploadRouter(
     limits: { fileSize: 20 * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
       const ext = extname(file.originalname).toLowerCase()
-      const allowed = ALLOWED_MIME_TYPES.includes(file.mimetype) || ALLOWED_EXTENSIONS.includes(ext)
+      const extAllowed = ALLOWED_EXTENSIONS.includes(ext)
+      const mimeAllowed = ALLOWED_MIME_TYPES.includes(file.mimetype)
+      const allowed = extAllowed && mimeAllowed
       if (!allowed) {
         cb(new Error(`File type not allowed: ${file.mimetype}`))
         return

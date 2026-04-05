@@ -185,7 +185,8 @@ const stepflowHandler = new StepflowHandler(stepflowConfig, sessions)
 
 if (stepflowConfig.enabled) {
   if (!stepflowConfig.secret) {
-    console.warn('[stepflow] STEPFLOW_WEBHOOK_SECRET not set — signature validation will fail')
+    console.error('[stepflow] FATAL: STEPFLOW_WEBHOOK_SECRET not set — refusing to start without webhook secret')
+    process.exit(1)
   }
   console.log('[stepflow] Stepflow webhook integration enabled')
 } else {
