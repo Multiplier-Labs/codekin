@@ -142,7 +142,7 @@ export class SessionManager {
     const now = Date.now()
     for (const session of this.sessions.values()) {
       // Skip headless sessions — they are managed by their own lifecycles
-      if (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow') continue
+      if (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow' || session.source === 'agent' || session.source === 'orchestrator') continue
       // Skip sessions with connected clients or no running process
       if (session.clients.size > 0 || !session.claudeProcess?.isAlive()) continue
       // Skip sessions that are actively processing
@@ -164,8 +164,10 @@ export class SessionManager {
     }
 
     // Prune stale sessions: no process, no clients, older than STALE_SESSION_AGE_MS
+    // Agent and orchestrator sessions are exempt — they are long-lived by design.
     const staleIds: string[] = []
     for (const session of this.sessions.values()) {
+      if (session.source === 'agent' || session.source === 'orchestrator') continue
       if (session.claudeProcess?.isAlive()) continue
       if (session.clients.size > 0) continue
       const ageMs = now - new Date(session.created).getTime()
