@@ -19,6 +19,7 @@ import { listAvailableKinds, ensureRepoWorkflowsRegistered } from './workflow-lo
 import { syncCommitHooks } from './commit-event-hooks.js'
 import type { CommitEventHandler } from './commit-event-handler.js'
 import type { SessionManager } from './session-manager.js'
+import { VALID_PROVIDERS } from './types.js'
 
 type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
@@ -303,6 +304,9 @@ export function createWorkflowRouter(
     if (!id || !name || !repoPath || !cronExpression) {
       return res.status(400).json({ error: 'Missing required fields: id, name, repoPath, cronExpression' })
     }
+    if (provider && !VALID_PROVIDERS.has(provider)) {
+      return res.status(400).json({ error: `Invalid provider: ${provider}` })
+    }
 
     // Register any standalone repo workflows before saving config
     if (sessions) {
@@ -335,6 +339,9 @@ export function createWorkflowRouter(
   })
 
   router.patch('/config/repos/:id', (req, res) => {
+    if (req.body.provider && !VALID_PROVIDERS.has(req.body.provider)) {
+      return res.status(400).json({ error: `Invalid provider: ${req.body.provider}` })
+    }
     try {
       const config = updateReviewRepo(req.params.id, req.body)
       try {

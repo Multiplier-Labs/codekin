@@ -134,6 +134,11 @@ async function startOpenCodeServer(workingDir: string): Promise<void> {
     }
   }
 
+  // Kill orphaned process that never became healthy
+  if (serverState.process) {
+    serverState.process.kill('SIGTERM')
+    serverState.process = null
+  }
   throw new Error(`OpenCode server failed to start within ${maxAttempts}s`)
 }
 
