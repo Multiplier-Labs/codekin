@@ -120,6 +120,7 @@ export interface SessionInfo {
   connectedClients: number
   lastActivity: string
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
+  provider?: CodingProvider
 }
 
 // ---------------------------------------------------------------------------

@@ -538,6 +538,7 @@ export class SessionManager {
         connectedClients: s.clients.size,
         lastActivity: new Date(s._lastActivityAt).toISOString(),
         source: s.source,
+        provider: s.provider,
       }))
   }
 
@@ -556,6 +557,7 @@ export class SessionManager {
         connectedClients: s.clients.size,
         lastActivity: new Date(s._lastActivityAt).toISOString(),
         source: s.source,
+        provider: s.provider,
       }))
   }
 
