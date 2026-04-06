@@ -14,7 +14,7 @@ import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
 import type { SlashCommand } from '../lib/slashCommands'
-import { PERMISSION_MODES, PROVIDERS, type PermissionMode, type CodingProvider } from '../types'
+import { PERMISSION_MODES, PROVIDERS, PROVIDER_MODELS, type PermissionMode, type CodingProvider } from '../types'
 
 const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
   shield: IconShieldCheck,
@@ -23,14 +23,9 @@ const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
   warning: IconAlertTriangle,
 }
 
-const MODELS = [
-  { id: 'claude-opus-4-6', label: 'Opus 4.6' },
-  { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
-  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
-]
-
-function shortModelLabel(modelId: string): string {
-  return MODELS.find(m => m.id === modelId)?.label ?? modelId.replace(/^claude-/, '')
+function shortModelLabel(modelId: string, provider?: CodingProvider): string {
+  const models = PROVIDER_MODELS[provider ?? 'claude']
+  return models.find(m => m.id === modelId)?.label ?? modelId.replace(/^claude-/, '')
 }
 
 // ---------------------------------------------------------------------------
@@ -138,11 +133,12 @@ function PermissionModeDropdown({ currentMode, isOpen, menuRef, onToggle, onSele
 }
 
 /** Model selector dropdown. */
-function ModelDropdown({ currentModel, isOpen, menuRef, onToggle, onChange }: {
-  currentModel: string; isOpen: boolean
+function ModelDropdown({ currentModel, provider, isOpen, menuRef, onToggle, onChange }: {
+  currentModel: string; provider?: CodingProvider; isOpen: boolean
   menuRef: React.RefObject<HTMLDivElement | null>
   onToggle: () => void; onChange: (model: string) => void
 }) {
+  const models = PROVIDER_MODELS[provider ?? 'claude']
   return (
     <div className="relative" ref={menuRef}>
       <button
@@ -150,12 +146,12 @@ function ModelDropdown({ currentModel, isOpen, menuRef, onToggle, onChange }: {
         className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
         title="Change model"
       >
-        {shortModelLabel(currentModel)}
+        {shortModelLabel(currentModel, provider)}
         <IconChevronDown size={12} stroke={2} />
       </button>
       {isOpen && (
         <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[160px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
-          {MODELS.map(m => (
+          {models.map(m => (
             <button
               key={m.id}
               onClick={() => onChange(m.id)}
@@ -576,6 +572,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               {currentModel && onModelChange && (
                 <ModelDropdown
                   currentModel={currentModel}
+                  provider={currentProvider}
                   isOpen={modelMenuOpen}
                   menuRef={modelMenuRef}
                   onToggle={() => { closeAllPopups('model'); setModelMenuOpen(!modelMenuOpen) }}
@@ -672,7 +669,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                     {currentModel && onModelChange && (
                       <>
                         <div className="px-3 py-1.5 text-[12px] text-neutral-5 uppercase tracking-wider">Model</div>
-                        {MODELS.map(m => (
+                        {PROVIDER_MODELS[currentProvider ?? 'claude'].map(m => (
                           <button
                             key={m.id}
                             onClick={() => { onModelChange(m.id); setMobileMenuOpen(false) }}

@@ -24,9 +24,14 @@ export const VALID_PROVIDERS = new Set<CodingProvider>(['claude', 'opencode'])
 
 /** Allow-list for server-side validation of client-supplied model IDs. */
 export const VALID_MODELS = new Set([
+  // Claude Code CLI models
   'claude-opus-4-6',
   'claude-sonnet-4-6',
   'claude-haiku-4-5-20251001',
+  // OpenCode models (Vercel AI SDK)
+  'gpt-4o',
+  'o3',
+  'gemini-2.5-pro',
 ])
 
 /**

@@ -39,6 +39,7 @@ import { OrchestratorContent } from './components/OrchestratorContent'
 import { DocsBrowserContent } from './components/DocsBrowserContent'
 import { SessionContent } from './components/SessionContent'
 import type { PermissionMode, CodingProvider } from './types'
+import { PROVIDER_DEFAULT_MODEL, PROVIDER_MODELS } from './types'
 
 export default function App() {
   const { settings, updateSettings } = useSettings()
@@ -197,7 +198,12 @@ export default function App() {
     providerRef.current = p
     setCurrentProviderRaw(p)
     localStorage.setItem('codekin-provider', p)
-  }, [])
+    // Switch model to provider's default if current model isn't in the new provider's list
+    const providerModels = PROVIDER_MODELS[p]
+    if (currentModel && !providerModels.some(m => m.id === currentModel)) {
+      setModel(PROVIDER_DEFAULT_MODEL[p])
+    }
+  }, [currentModel, setModel])
 
   // Reset file-change tracking when switching sessions
   useEffect(() => {
