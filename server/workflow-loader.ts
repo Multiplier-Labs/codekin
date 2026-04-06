@@ -243,6 +243,12 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
             groupDir: repoPath,
             model,
             provider,
+            allowedTools: [
+              'Bash(git checkout:*)', 'Bash(git switch:*)', 'Bash(git branch:*)',
+              'Bash(git add:*)', 'Bash(git commit:*)', 'Bash(git push:*)',
+              'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git status:*)',
+              'Bash(gh pr:*)', 'Bash(gh repo:*)',
+            ],
           })
 
           console.log(`[workflow:${def.kind}] Created session ${session.id} for ${repoName} (run ${ctx.runId})`)
