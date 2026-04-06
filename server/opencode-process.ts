@@ -559,6 +559,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
 
   /** Stop the OpenCode session (disconnect SSE, optionally delete session). */
   stop(): void {
+    if (!this.alive) return
     this.alive = false
     if (this.startupTimer) {
       clearTimeout(this.startupTimer)

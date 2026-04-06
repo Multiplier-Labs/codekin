@@ -1262,6 +1262,8 @@ export class SessionManager {
       // Claude not running (e.g. after server restart or idle reap) — auto-start first.
       // Claude CLI in -p mode waits for first input before emitting init,
       // so we write directly to the stdin pipe buffer (no waiting for init).
+      // OpenCode requires waiting for system_init before sending because it uses
+      // HTTP (no pipe buffer), so we await waitForReady() for OpenCode sessions.
       this.startClaude(sessionId)
 
       // If we have a saved claudeSessionId, Claude CLI resumes with full
@@ -1279,9 +1281,26 @@ export class SessionManager {
             session.isProcessing = true
             this._globalBroadcast?.({ type: 'sessions_updated' })
           }
-          session.claudeProcess?.sendMessage(combined)
+          if (session.provider === 'opencode') {
+            void this.waitForReady(sessionId).then(() => session.claudeProcess?.sendMessage(combined))
+          } else {
+            session.claudeProcess?.sendMessage(combined)
+          }
           return
         }
+      }
+
+      // For OpenCode: wait for init before sending the message
+      if (session.provider === 'opencode') {
+        session._lastUserInput = data
+        session._lastUserInputAt = Date.now()
+        session._apiRetryCount = 0
+        if (!session.isProcessing) {
+          session.isProcessing = true
+          this._globalBroadcast?.({ type: 'sessions_updated' })
+        }
+        void this.waitForReady(sessionId).then(() => session.claudeProcess?.sendMessage(data))
+        return
       }
     }
 
