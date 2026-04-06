@@ -18,7 +18,6 @@ npm run lint         # eslint
 - **NEVER commit or push directly to `main`.** Always create a feature/fix branch and open a PR.
 - Branch naming: `feat/description` or `fix/description`.
 - All changes go through PRs with review and passing CI.
-- Releases are tagged with semver: `v0.2.0`, `v1.0.0`, etc.
 
 ## Bash Tool Conventions (Skills & Subagents)
 
@@ -29,18 +28,19 @@ npm run lint         # eslint
 
 ## Output Conventions
 
-- Always use fenced code blocks (` ```language `) for code/config snippets — they render properly in the terminal UI
+- Always use fenced code blocks (` ```language `) for code/config snippets
 - Never rely on tool output alone to show file contents — paste in a code block if the user needs to see it
 
 ## Key Conventions
 
 - TypeScript strict mode for server code
-- WebSocket message types defined in `src/types.ts` (shared between client and server)
-- Monospace font: Inconsolata; Sans font: Lato
+- WebSocket message types defined in `src/types.ts` and `server/types.ts`
 
 ## References
 
-- See `docs/architecture.md` for module map, data flow, and key abstractions.
-- See `docs/conventions.md` for coding patterns and file organization.
-- See `docs/WORKFLOWS.md` for automated workflow system.
-- See `docs/API-REFERENCE.md` for REST and WebSocket API.
+- `docs/architecture.md` — module map, data flow, key abstractions
+- `docs/conventions.md` — coding patterns and file organization
+- `docs/WORKFLOWS.md` — automated workflow system
+- `docs/API-REFERENCE.md` — REST and WebSocket API
+- `docs/stream-json-protocol.md` — Claude CLI integration protocol
+- `docs/FEATURES.md` — comprehensive feature reference
