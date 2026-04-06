@@ -26,6 +26,8 @@ import path from 'path'
 import { promisify } from 'util'
 import type { WebSocket } from 'ws'
 import { ClaudeProcess } from './claude-process.js'
+import { OpenCodeProcess } from './opencode-process.js'
+import type { CodingProcess } from './coding-process.js'
 import { PlanManager } from './plan-manager.js'
 import { SessionArchive } from './session-archive.js'
 import type { DiffFileStatus, DiffScope, PromptQuestion, Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
@@ -81,6 +83,8 @@ export interface CreateSessionOptions {
   allowedTools?: string[]
   /** Extra directories to grant Claude access to via --add-dir. */
   addDirs?: string[]
+  /** AI provider to use for this session. Defaults to 'claude'. */
+  provider?: import('./coding-process.js').CodingProvider
 }
 
 
@@ -231,6 +235,7 @@ export class SessionManager {
       groupDir: options?.groupDir,
       created: new Date().toISOString(),
       source: options?.source ?? 'manual',
+      provider: options?.provider ?? 'claude',
       model: options?.model,
       permissionMode: options?.permissionMode,
       allowedTools: options?.allowedTools,
@@ -762,15 +767,26 @@ export class SessionManager {
     const repoDir = session.groupDir ?? session.workingDir
     const registryPatterns = this._approvalManager.getAllowedToolsForRepo(repoDir)
     const mergedAllowedTools = [...new Set([...(session.allowedTools || []), ...registryPatterns])]
-    const cp = new ClaudeProcess(session.workingDir, {
-      sessionId: session.claudeSessionId || undefined,
-      extraEnv,
-      model: session.model,
-      permissionMode: session.permissionMode,
-      resume,
-      allowedTools: mergedAllowedTools,
-      addDirs: session.addDirs,
-    })
+
+    let cp: CodingProcess
+    if (session.provider === 'opencode') {
+      cp = new OpenCodeProcess(session.workingDir, {
+        sessionId: session.claudeSessionId || undefined,
+        model: session.model,
+        extraEnv,
+        permissionMode: session.permissionMode,
+      })
+    } else {
+      cp = new ClaudeProcess(session.workingDir, {
+        sessionId: session.claudeSessionId || undefined,
+        extraEnv,
+        model: session.model,
+        permissionMode: session.permissionMode,
+        resume,
+        allowedTools: mergedAllowedTools,
+        addDirs: session.addDirs,
+      })
+    }
 
     this.wireClaudeEvents(cp, session, sessionId)
 
@@ -812,7 +828,7 @@ export class SessionManager {
    * Attach all ClaudeProcess event listeners for a session.
    * Extracted from startClaude() to keep that method focused on process setup.
    */
-  private wireClaudeEvents(cp: ClaudeProcess, session: Session, sessionId: string): void {
+  private wireClaudeEvents(cp: CodingProcess, session: Session, sessionId: string): void {
     cp.on('system_init', (model) => this.onSystemInit(cp, session, model))
     cp.on('text', (text) => this.onTextEvent(session, sessionId, text))
     cp.on('thinking', (summary) => this.onThinkingEvent(session, summary))
@@ -863,7 +879,7 @@ export class SessionManager {
     })
   }
 
-  private onSystemInit(cp: ClaudeProcess, session: Session, model: string): void {
+  private onSystemInit(cp: CodingProcess, session: Session, model: string): void {
     session.claudeSessionId = cp.getSessionId()
     // Only show model message on first init or when model actually changes
     if (!session._lastReportedModel || session._lastReportedModel !== model) {
@@ -933,7 +949,7 @@ export class SessionManager {
   }
 
   private onControlRequestEvent(
-    cp: ClaudeProcess,
+    cp: CodingProcess,
     session: Session,
     sessionId: string,
     requestId: string,

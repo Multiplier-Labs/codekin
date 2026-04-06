@@ -8,6 +8,7 @@
 
 import type { WebSocket } from 'ws'
 import type { ClaudeProcess } from './claude-process.js'
+import type { CodingProcess, CodingProvider } from './coding-process.js'
 import type { PlanManager } from './plan-manager.js'
 
 /**
@@ -41,8 +42,10 @@ export interface Session {
   worktreePath?: string
   created: string
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
-  /** The spawned Claude CLI process, or null if not running. */
-  claudeProcess: ClaudeProcess | null
+  /** Which AI coding assistant provider powers this session. Defaults to 'claude'. */
+  provider: CodingProvider
+  /** The spawned AI process (Claude CLI or OpenCode), or null if not running. */
+  claudeProcess: CodingProcess | null
   /** All browser clients currently viewing this session. */
   clients: Set<WebSocket>
   /** Rolling buffer of messages for replay when a new client joins. */
@@ -278,7 +281,7 @@ export type WsServerMessage =
 /** Messages sent from browser clients to the server over WebSocket. */
 export type WsClientMessage =
   | { type: 'auth'; token: string }
-  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean; permissionMode?: PermissionMode; allowedTools?: string[] }
+  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean; permissionMode?: PermissionMode; allowedTools?: string[]; provider?: CodingProvider }
   | { type: 'join_session'; sessionId: string }
   | { type: 'leave_session' }
   | { type: 'start_claude'; options?: Record<string, unknown> }

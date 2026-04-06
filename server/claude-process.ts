@@ -18,6 +18,7 @@ import { randomUUID } from 'crypto'
 import type { ClaudeEvent, ClaudeSystemInit, ClaudeControlRequest, ClaudeResultEvent, ClaudeStreamEvent, TaskItem, PromptQuestion, PermissionMode } from './types.js'
 import { SCREENSHOTS_DIR } from './config.js'
 import { redactSecrets } from './crypto-utils.js'
+import { CLAUDE_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
 
 /** Options for constructing a ClaudeProcess. Replaces positional constructor parameters. */
 export interface ClaudeProcessOptions {
@@ -78,7 +79,10 @@ const TOOL_DEBUG = process.env.NODE_ENV !== 'production'
  * Wraps a Claude CLI child process. Parses stream-json NDJSON output from
  * stdout and emits structured events consumed by SessionManager.
  */
-export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
+export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements CodingProcess {
+  readonly provider: CodingProvider = 'claude'
+  readonly capabilities: ProviderCapabilities = CLAUDE_CAPABILITIES
+
   private proc: ChildProcess | null = null
   private rl: Interface | null = null
   private sessionId: string

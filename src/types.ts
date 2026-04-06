@@ -50,6 +50,13 @@ export interface RepoManifest {
  */
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | 'dangerouslySkipPermissions'
 
+/**
+ * Supported AI coding assistant providers.
+ * - 'claude': Claude Code CLI (subprocess, NDJSON on stdin/stdout)
+ * - 'opencode': OpenCode server (HTTP REST + SSE)
+ */
+export type CodingProvider = 'claude' | 'opencode'
+
 /** Permission mode metadata for the UI selector. */
 export const PERMISSION_MODES: { id: PermissionMode; label: string; description: string; icon: string; dangerous?: boolean }[] = [
   { id: 'default', label: 'Ask permissions', description: 'Always ask before making changes', icon: 'shield' },
@@ -77,6 +84,8 @@ export interface Session {
   lastActivity: string
   /** How the session was created: manually by a user, by a GitHub webhook, or by a workflow. */
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
+  /** Which AI provider powers this session. Defaults to 'claude'. */
+  provider?: CodingProvider
 }
 
 /**
@@ -95,7 +104,7 @@ export interface Session {
  */
 export type WsClientMessage =
   | { type: 'auth'; token: string }
-  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean; permissionMode?: PermissionMode; allowedTools?: string[] }
+  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean; permissionMode?: PermissionMode; allowedTools?: string[]; provider?: CodingProvider }
   | { type: 'join_session'; sessionId: string }
   | { type: 'leave_session' }
   | { type: 'start_claude'; options?: Record<string, unknown> }

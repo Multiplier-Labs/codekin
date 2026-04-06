@@ -70,7 +70,8 @@ export function createSessionRouter(
       return res.status(403).json({ error: 'workingDir is outside allowed directories' })
     }
 
-    const session = sessions.create(name, workingDir)
+    const { provider, model, permissionMode } = req.body
+    const session = sessions.create(name, workingDir, { provider, model, permissionMode })
     res.json({
       sessionId: session.id,
       session: {
@@ -82,6 +83,7 @@ export function createSessionRouter(
         connectedClients: 0,
         lastActivity: session.created,
         source: session.source,
+        provider: session.provider,
       },
     })
   })

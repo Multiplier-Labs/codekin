@@ -43,7 +43,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
         break
       }
 
-      const session = sessions.create(msg.name, msg.workingDir, { model: msg.model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools })
+      const session = sessions.create(msg.name, msg.workingDir, { model: msg.model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider })
       session.clients.add(ws)
       clientSessions.set(ws, session.id)
 
