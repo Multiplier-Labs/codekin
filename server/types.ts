@@ -7,7 +7,6 @@
  */
 
 import type { WebSocket } from 'ws'
-import type { ClaudeProcess } from './claude-process.js'
 import type { CodingProcess, CodingProvider } from './coding-process.js'
 import type { PlanManager } from './plan-manager.js'
 

@@ -21,7 +21,7 @@ import { spawn, type ChildProcess } from 'child_process'
 import { randomUUID } from 'crypto'
 import type { ClaudeProcessEvents } from './claude-process.js'
 import { OPENCODE_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
-import type { PermissionMode, TaskItem } from './types.js'
+import type { PermissionMode } from './types.js'
 
 // ---------------------------------------------------------------------------
 // OpenCode SSE event types (subset — only what we need to map)
@@ -189,7 +189,6 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private opencodeSessionId: string | null = null
   private workingDir: string
   private model?: string
-  private extraEnv: Record<string, string>
   private alive = false
   private abortController: AbortController | null = null
   private startupTimer: ReturnType<typeof setTimeout> | null = null
@@ -204,7 +203,6 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     this.sessionId = opts?.sessionId || randomUUID()
     this.opencodeSessionId = opts?.opencodeSessionId || null
     this.model = opts?.model
-    this.extraEnv = opts?.extraEnv || {}
     this.permissionMode = opts?.permissionMode
   }
 

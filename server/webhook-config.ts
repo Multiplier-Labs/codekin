@@ -16,7 +16,7 @@ export interface FullWebhookConfig extends WebhookConfig {
 export function loadWebhookConfig(): FullWebhookConfig {
   // Defaults
   let enabled = false
-  let maxConcurrentSessions = 3
+  let maxConcurrentSessions = 15
   let logLinesToInclude = 200
   let actorAllowlist: string[] = []
 

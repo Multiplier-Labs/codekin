@@ -36,7 +36,7 @@ describe('loadWebhookConfig', () => {
       const config = loadWebhookConfig()
       expect(config).toEqual({
         enabled: false,
-        maxConcurrentSessions: 3,
+        maxConcurrentSessions: 15,
         logLinesToInclude: 200,
         secret: '',
         actorAllowlist: [],
@@ -65,7 +65,7 @@ describe('loadWebhookConfig', () => {
 
       const config = loadWebhookConfig()
       expect(config.enabled).toBe(true)
-      expect(config.maxConcurrentSessions).toBe(3)  // default
+      expect(config.maxConcurrentSessions).toBe(15)  // default
       expect(config.logLinesToInclude).toBe(200)     // default
     })
 
@@ -78,7 +78,7 @@ describe('loadWebhookConfig', () => {
 
       const config = loadWebhookConfig()
       expect(config.enabled).toBe(false)           // default
-      expect(config.maxConcurrentSessions).toBe(3) // default
+      expect(config.maxConcurrentSessions).toBe(15) // default
     })
 
     it('handles missing config file gracefully', () => {
@@ -93,7 +93,7 @@ describe('loadWebhookConfig', () => {
 
       const config = loadWebhookConfig()
       expect(config.enabled).toBe(false)
-      expect(config.maxConcurrentSessions).toBe(3)
+      expect(config.maxConcurrentSessions).toBe(15)
     })
   })
 
@@ -123,12 +123,12 @@ describe('loadWebhookConfig', () => {
 
     it('GITHUB_WEBHOOK_MAX_SESSIONS=0 is ignored', () => {
       process.env.GITHUB_WEBHOOK_MAX_SESSIONS = '0'
-      expect(loadWebhookConfig().maxConcurrentSessions).toBe(3)
+      expect(loadWebhookConfig().maxConcurrentSessions).toBe(15)
     })
 
     it('GITHUB_WEBHOOK_MAX_SESSIONS=abc is ignored', () => {
       process.env.GITHUB_WEBHOOK_MAX_SESSIONS = 'abc'
-      expect(loadWebhookConfig().maxConcurrentSessions).toBe(3)
+      expect(loadWebhookConfig().maxConcurrentSessions).toBe(15)
     })
 
     it('GITHUB_WEBHOOK_LOG_LINES overrides default', () => {
