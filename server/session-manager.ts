@@ -867,7 +867,18 @@ export class SessionManager {
       this.handleClaudeResult(session, sessionId, result, isError)
     })
     cp.on('error', (message) => this.broadcast(session, { type: 'error', message }))
-    cp.on('exit', (code, signal) => { cp.removeAllListeners(); this.handleClaudeExit(cp, session, sessionId, code, signal) })
+    cp.on('exit', (code, signal) => {
+      // Capture process diagnostics before removing listeners — these are
+      // ClaudeProcess-specific; OpenCodeProcess always returns false/true.
+      const sessionConflict = 'hasSessionConflict' in cp && typeof (cp as any).hasSessionConflict === 'function'
+        ? (cp as any).hasSessionConflict() as boolean
+        : false
+      const producedOutput = 'hadOutput' in cp && typeof (cp as any).hadOutput === 'function'
+        ? (cp as any).hadOutput() as boolean
+        : true
+      cp.removeAllListeners()
+      this.handleClaudeExit(session, sessionId, code, signal, sessionConflict, producedOutput)
+    })
   }
 
   /** Broadcast a message and add it to the session's output history. */
@@ -1179,22 +1190,17 @@ export class SessionManager {
    * Uses evaluateRestart() for the restart decision, keeping this method focused
    * on state updates, listener notification, and message broadcasting.
    */
-  private handleClaudeExit(exitedProcess: ClaudeProcess, session: Session, sessionId: string, code: number | null, signal: string | null): void {
+  private handleClaudeExit(session: Session, sessionId: string, code: number | null, signal: string | null, sessionConflict: boolean, producedOutput: boolean): void {
     session.claudeProcess = null
     session.isProcessing = false
     session.planManager.reset()
     this._globalBroadcast?.({ type: 'sessions_updated' })
 
-    // "Session ID is already in use" means another process holds the lock.
-    // Retrying with the same session ID will fail every time, so treat this
-    // as a non-restartable exit (same as stopped-by-user).
-    const sessionConflict = exitedProcess.hasSessionConflict()
-
     // If the process exited without ever producing stdout output, --resume
     // hung on a broken/stale session. Clear claudeSessionId so the next
     // restart attempt uses a fresh session instead of retrying the same
     // broken resume — which would just hang again.
-    if (!exitedProcess.hadOutput() && session.claudeSessionId) {
+    if (!producedOutput && session.claudeSessionId) {
       console.warn(`[restart] Session ${sessionId} produced no output before exit — clearing claudeSessionId to force fresh session`)
       session.claudeSessionId = null
     }

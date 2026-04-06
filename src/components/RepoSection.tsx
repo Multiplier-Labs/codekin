@@ -307,7 +307,7 @@ export function RepoSection({
 
           {/* New session for this repo (visible on hover) */}
           {onNewSession && (
-            <div className="pl-10 flex gap-1 opacity-0 group-hover/repo:opacity-100">
+            <div className={`pl-10 flex gap-1 ${isMobile ? 'opacity-100' : 'opacity-0 group-hover/repo:opacity-100'}`}>
               <button
                 onClick={() => onNewSession('claude')}
                 className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[13px] text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6/50 transition-colors"

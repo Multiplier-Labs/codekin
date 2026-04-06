@@ -243,6 +243,7 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
             groupDir: repoPath,
             model,
             provider,
+            allowedTools: ['Bash(gh pr:*)'],
           })
 
           console.log(`[workflow:${def.kind}] Created session ${session.id} for ${repoName} (run ${ctx.runId})`)
