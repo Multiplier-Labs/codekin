@@ -85,6 +85,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
       this.updateEventStatus(event.id, 'completed')
       console.log(`[webhook] Session ${sessionId} completed review, scheduling cleanup`)
 
+      this.sessions.stopClaude(sessionId) // suppress auto-restart
       setTimeout(() => {
         this.sessions.delete(sessionId)
       }, 2000)

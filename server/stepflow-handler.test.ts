@@ -45,6 +45,7 @@ function makeSessions() {
     list: vi.fn(() => []),
     get: vi.fn(),
     delete: vi.fn(),
+    stopClaude: vi.fn(),
     startClaude: vi.fn(),
     sendInput: vi.fn(),
     onSessionExit: vi.fn((listener: any) => { exitListeners.push(listener) }),

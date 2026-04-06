@@ -170,6 +170,7 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
       this.updateEventStatus(event.id, status)
       console.log(`[stepflow] Session ${sessionId} completed, scheduling cleanup`)
 
+      this.sessions.stopClaude(sessionId) // suppress auto-restart
       const callbackSecret = this.sessionCallbackSecrets.get(sessionId)
       this.sessionCallbackSecrets.delete(sessionId)
       if (event.callbackUrl) {

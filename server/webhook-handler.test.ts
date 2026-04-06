@@ -101,6 +101,7 @@ function fakeSessionManager(): any {
     create: vi.fn(() => ({ id: 'session-1' })),
     get: vi.fn(() => null),
     delete: vi.fn(),
+    stopClaude: vi.fn(),
     broadcast: vi.fn(),
     sendInput: vi.fn(),
     onSessionExit: vi.fn((cb: ExitCallback) => { exitCallbacks.push(cb) }),
