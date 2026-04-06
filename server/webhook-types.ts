@@ -165,7 +165,7 @@ export interface PullRequestContext {
   headSha: string
   baseSha: string
   beforeSha?: string              // previous head SHA (on synchronize)
-  action: 'opened' | 'synchronize' | 'reopened'
+  action: 'opened' | 'synchronize' | 'reopened' | 'ready_for_review'
   changedFiles: number
   additions: number
   deletions: number

@@ -658,9 +658,9 @@ describe('WebhookHandler', () => {
       expect(event?.event).toBe('pull_request')
     })
 
-    it('accepts opened, synchronize, and reopened actions', async () => {
+    it('accepts opened, synchronize, reopened, and ready_for_review actions', async () => {
       await handler.checkHealth()
-      for (const action of ['opened', 'synchronize', 'reopened']) {
+      for (const action of ['opened', 'synchronize', 'reopened', 'ready_for_review']) {
         const payload = makePrPayload({ action })
         const body = Buffer.from(JSON.stringify(payload))
         const result = await handler.handleWebhook(body, makePrHeaders(body, { delivery: `d-${action}` }))

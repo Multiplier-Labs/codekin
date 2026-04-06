@@ -3,7 +3,7 @@
  *
  * Processes incoming webhook events:
  *   - `workflow_run` (completed+failed) → spawns Claude session for CI diagnosis
- *   - `pull_request` (opened/synchronize/reopened) → spawns Claude session for code review
+ *   - `pull_request` (opened/synchronize/reopened/ready_for_review) → spawns Claude session for code review
  *
  * Event lifecycle / state machine:
  *   received → (filtered/duplicate/capped)
@@ -38,7 +38,7 @@ import { REPOS_ROOT } from './config.js'
 const PROCESSING_TIMEOUT_MS = 5 * 60 * 1000
 
 /** Supported pull_request actions for code review. */
-const PR_REVIEW_ACTIONS = ['opened', 'synchronize', 'reopened'] as const
+const PR_REVIEW_ACTIONS = ['opened', 'synchronize', 'reopened', 'ready_for_review'] as const
 
 export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEventStatus> {
   private config: FullWebhookConfig
