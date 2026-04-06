@@ -104,18 +104,19 @@ describe('OpenCodeProcess', () => {
   // SSE event mapping
   // ---------------------------------------------------------------------------
 
-  describe('SSE event mapping', () => {
-    // Access the private handleSSEEvent method for testing event mapping
-    const callHandleSSE = (ocp: OpenCodeProcess, event: Record<string, unknown>) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(ocp as any).handleSSEEvent(event)
-    }
+  // Access the private handleSSEEvent method for testing event mapping
+  const callHandleSSE = (ocp: OpenCodeProcess, event: Record<string, unknown>) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(ocp as any).handleSSEEvent(event)
+  }
 
-    // Set the opencodeSessionId so session filtering works
-    const setSessionId = (ocp: OpenCodeProcess, id: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(ocp as any).opencodeSessionId = id
-    }
+  // Set the opencodeSessionId so session filtering works
+  const setSessionId = (ocp: OpenCodeProcess, id: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(ocp as any).opencodeSessionId = id
+  }
+
+  describe('SSE event mapping', () => {
 
     it('maps text delta events to text events', () => {
       const textHandler = vi.fn()
@@ -482,6 +483,66 @@ describe('OpenCodeProcess', () => {
 
     it('returns empty string for unknown tools', () => {
       expect(summarize('unknown_tool', {})).toBe('')
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Task/Todo support
+  // ---------------------------------------------------------------------------
+
+  describe('task tracking', () => {
+    it('emits todo_update for TodoWrite tool calls', () => {
+      const todoHandler = vi.fn()
+      ocp.on('todo_update', todoHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          part: {
+            type: 'tool',
+            tool: 'TodoWrite',
+            state: {
+              status: 'running',
+              input: {
+                todos: [
+                  { content: 'Fix bug', status: 'in_progress', activeForm: 'Fixing bug' },
+                  { content: 'Write tests', status: 'pending', activeForm: 'Writing tests' },
+                ],
+              },
+            },
+          },
+        },
+      })
+
+      expect(todoHandler).toHaveBeenCalledTimes(1)
+      const tasks = todoHandler.mock.calls[0][0]
+      expect(tasks).toHaveLength(2)
+      expect(tasks[0].subject).toBe('Fix bug')
+      expect(tasks[0].status).toBe('in_progress')
+      expect(tasks[1].subject).toBe('Write tests')
+      expect(tasks[1].status).toBe('pending')
+    })
+
+    it('does not emit todo_update for non-task tools', () => {
+      const todoHandler = vi.fn()
+      ocp.on('todo_update', todoHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          part: {
+            type: 'tool',
+            tool: 'bash',
+            state: { status: 'running', input: { command: 'ls' } },
+          },
+        },
+      })
+
+      expect(todoHandler).not.toHaveBeenCalled()
     })
   })
 })

@@ -21,7 +21,7 @@ import { spawn, type ChildProcess } from 'child_process'
 import { randomUUID } from 'crypto'
 import type { ClaudeProcessEvents } from './claude-process.js'
 import { OPENCODE_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
-import type { PermissionMode } from './types.js'
+import type { PermissionMode, TaskItem } from './types.js'
 
 // ---------------------------------------------------------------------------
 // OpenCode SSE event types (subset — only what we need to map)
@@ -248,6 +248,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private abortController: AbortController | null = null
   private startupTimer: ReturnType<typeof setTimeout> | null = null
   private permissionMode?: PermissionMode
+  private tasks = new Map<string, TaskItem>()
+  private taskSeq = 0
 
   constructor(workingDir: string, opts?: Partial<OpenCodeProcessOptions>) {
     super()
@@ -484,6 +486,10 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
             if (status === 'running') {
               const inputStr = part.state?.input ? this.summarizeToolInput(toolName, part.state.input) : undefined
               this.emit('tool_active', toolName, inputStr)
+              // Detect task/todo tool calls and emit todo_update
+              if (part.state?.input && this.handleTaskTool(toolName, part.state.input)) {
+                this.emit('todo_update', Array.from(this.tasks.values()))
+              }
             } else if (status === 'completed') {
               const output = part.state?.output
               const summary = output ? output.slice(0, 200) : undefined
@@ -589,6 +595,58 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     }
   }
 
+  /**
+   * Detect TodoWrite/TaskCreate/TaskUpdate tool calls and emit todo_update events.
+   * Mirrors the task-tracking logic in ClaudeProcess.handleTaskTool().
+   */
+  private handleTaskTool(toolName: string, input: Record<string, unknown>): boolean {
+    if (toolName === 'TodoWrite') {
+      const todos = input.todos as Array<Record<string, unknown>> | undefined
+      if (!Array.isArray(todos)) return false
+      this.tasks.clear()
+      this.taskSeq = 0
+      for (const item of todos) {
+        const id = String(item.id || ++this.taskSeq)
+        const status = item.status as string
+        if (status !== 'pending' && status !== 'in_progress' && status !== 'completed') continue
+        this.tasks.set(id, {
+          id,
+          subject: String(item.content || item.subject || ''),
+          status,
+          activeForm: item.activeForm ? String(item.activeForm) : undefined,
+        })
+      }
+      return true
+    }
+    if (toolName === 'TaskCreate') {
+      const id = String(++this.taskSeq)
+      this.tasks.set(id, {
+        id,
+        subject: String(input.subject || ''),
+        status: 'pending',
+        activeForm: input.activeForm ? String(input.activeForm) : undefined,
+      })
+      return true
+    }
+    if (toolName === 'TaskUpdate') {
+      const id = String(input.taskId || '')
+      const task = this.tasks.get(id)
+      if (!task) return false
+      const status = input.status as string | undefined
+      if (status === 'deleted') {
+        this.tasks.delete(id)
+        return true
+      }
+      if (status === 'pending' || status === 'in_progress' || status === 'completed') {
+        task.status = status
+      }
+      if (input.subject) task.subject = String(input.subject)
+      if (input.activeForm !== undefined) task.activeForm = input.activeForm ? String(input.activeForm) : undefined
+      return true
+    }
+    return false
+  }
+
   /** Send a user message to the OpenCode session. */
   sendMessage(content: string): void {
     if (!this.alive || !this.opencodeSessionId) {
@@ -615,6 +673,10 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         'x-opencode-directory': this.workingDir,
       },
       body: JSON.stringify(body),
+    }).then((res) => {
+      if (!res.ok) {
+        this.emit('error', `Failed to send message: HTTP ${res.status}`)
+      }
     }).catch((err) => {
       this.emit('error', `Failed to send message: ${err instanceof Error ? err.message : String(err)}`)
     })

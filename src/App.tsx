@@ -212,12 +212,16 @@ export default function App() {
         label: `${m.name} (${m.providerName})`,
       }))
       setOpenCodeModels(models)
-      // Set model to the provider default — defaults map providerID → modelID
-      const [defaultProvider, defaultModelId] = Object.entries(result.defaults)[0] ?? []
-      if (defaultProvider && defaultModelId) setModel(`${defaultProvider}/${defaultModelId}`)
-      else if (models.length > 0) setModel(models[0].id)
+      // Only set the model if the user doesn't already have an OpenCode model selected.
+      // This prevents overwriting the user's active model choice when switching sessions.
+      const currentIsOpenCode = currentModel && models.some(m => m.id === currentModel)
+      if (!currentIsOpenCode) {
+        const [defaultProvider, defaultModelId] = Object.entries(result.defaults)[0] ?? []
+        if (defaultProvider && defaultModelId) setModel(`${defaultProvider}/${defaultModelId}`)
+        else if (models.length > 0) setModel(models[0].id)
+      }
     }).catch(() => { /* OpenCode server not available */ })
-  }, [activeSessionProvider, settings.token, openCodeModels.length, setModel])
+  }, [activeSessionProvider, settings.token, openCodeModels.length, setModel, currentModel, activeSessionId, sessions])
 
   // Reset file-change tracking when switching sessions
   useEffect(() => {
