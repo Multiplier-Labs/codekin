@@ -117,65 +117,70 @@ describe('OpenCodeProcess', () => {
       ;(ocp as any).opencodeSessionId = id
     }
 
-    it('maps text part updates to text events', () => {
+    it('maps text delta events to text events', () => {
       const textHandler = vi.fn()
       ocp.on('text', textHandler)
       setSessionId(ocp, 'oc-session-1')
 
-      // First text delta
       callHandleSSE(ocp, {
-        type: 'message.part.updated',
+        type: 'message.part.delta',
         properties: {
           sessionID: 'oc-session-1',
-          part: { type: 'text', content: 'Hello' },
+          field: 'text',
+          delta: 'Hello',
         },
       })
       expect(textHandler).toHaveBeenCalledWith('Hello')
 
-      // Incremental update — should only emit the delta
       callHandleSSE(ocp, {
-        type: 'message.part.updated',
+        type: 'message.part.delta',
         properties: {
           sessionID: 'oc-session-1',
-          part: { type: 'text', content: 'Hello world' },
+          field: 'text',
+          delta: ' world',
         },
       })
       expect(textHandler).toHaveBeenCalledWith(' world')
       expect(textHandler).toHaveBeenCalledTimes(2)
     })
 
-    it('resets text accumulator on time.start (new turn, shorter content)', () => {
+    it('ignores non-text delta events', () => {
       const textHandler = vi.fn()
       ocp.on('text', textHandler)
       setSessionId(ocp, 'oc-session-1')
 
-      // First turn: long content without time.end (simulating missed end event)
       callHandleSSE(ocp, {
-        type: 'message.part.updated',
+        type: 'message.part.delta',
         properties: {
           sessionID: 'oc-session-1',
-          part: { type: 'text', content: 'A long response from the first turn that is quite verbose' },
+          field: 'reasoning',
+          delta: 'some reasoning',
         },
       })
-
-      // Second turn starts with shorter content and time.start
-      callHandleSSE(ocp, {
-        type: 'message.part.updated',
-        properties: {
-          sessionID: 'oc-session-1',
-          part: { type: 'text', content: 'Short reply', time: { start: 999 } },
-        },
-      })
-      // Should have reset and emitted the new content
-      expect(textHandler).toHaveBeenCalledWith('Short reply')
+      expect(textHandler).not.toHaveBeenCalled()
     })
 
-    it('resets text accumulator on time.start (new turn, longer content)', () => {
+    it('ignores delta events from other sessions', () => {
       const textHandler = vi.fn()
       ocp.on('text', textHandler)
       setSessionId(ocp, 'oc-session-1')
 
-      // First turn: short content without time.end
+      callHandleSSE(ocp, {
+        type: 'message.part.delta',
+        properties: {
+          sessionID: 'other-session',
+          field: 'text',
+          delta: 'Hello',
+        },
+      })
+      expect(textHandler).not.toHaveBeenCalled()
+    })
+
+    it('ignores text part updates (content arrives via deltas)', () => {
+      const textHandler = vi.fn()
+      ocp.on('text', textHandler)
+      setSessionId(ocp, 'oc-session-1')
+
       callHandleSSE(ocp, {
         type: 'message.part.updated',
         properties: {
@@ -183,41 +188,7 @@ describe('OpenCodeProcess', () => {
           part: { type: 'text', content: 'Hello' },
         },
       })
-      expect(textHandler).toHaveBeenCalledWith('Hello')
-
-      // Second turn: longer content with time.start — must emit full content, not slice
-      callHandleSSE(ocp, {
-        type: 'message.part.updated',
-        properties: {
-          sessionID: 'oc-session-1',
-          part: { type: 'text', content: 'I will help you with that', time: { start: 999 } },
-        },
-      })
-      expect(textHandler).toHaveBeenCalledWith('I will help you with that')
-    })
-
-    it('resets text accumulator when time.end is set', () => {
-      const textHandler = vi.fn()
-      ocp.on('text', textHandler)
-      setSessionId(ocp, 'oc-session-1')
-
-      callHandleSSE(ocp, {
-        type: 'message.part.updated',
-        properties: {
-          sessionID: 'oc-session-1',
-          part: { type: 'text', content: 'First block', time: { end: 123 } },
-        },
-      })
-
-      // New text block starts fresh after time.end reset
-      callHandleSSE(ocp, {
-        type: 'message.part.updated',
-        properties: {
-          sessionID: 'oc-session-1',
-          part: { type: 'text', content: 'Second block' },
-        },
-      })
-      expect(textHandler).toHaveBeenCalledWith('Second block')
+      expect(textHandler).not.toHaveBeenCalled()
     })
 
     it('maps reasoning parts to thinking events', () => {

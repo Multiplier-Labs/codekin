@@ -240,9 +240,6 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private startupTimer: ReturnType<typeof setTimeout> | null = null
   private permissionMode?: PermissionMode
 
-  // Track accumulated text for tool parts (to detect completion)
-  private lastTextContent = ''
-
   constructor(workingDir: string, opts?: Partial<OpenCodeProcessOptions>) {
     super()
     this.workingDir = workingDir
@@ -422,6 +419,17 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     const { type, properties } = event
 
     switch (type) {
+      // Delta events carry the actual streaming text content
+      case 'message.part.delta': {
+        if (!this.isOwnSession(properties)) break
+        const field = properties.field as string | undefined
+        const delta = properties.delta as string | undefined
+        if (field === 'text' && delta) {
+          this.emit('text', delta)
+        }
+        break
+      }
+
       case 'message.part.updated': {
         const part = properties.part as OpenCodeMessagePart | undefined
         if (!part) break
@@ -431,24 +439,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
 
         switch (part.type) {
           case 'text': {
-            const content = part.content || ''
-            // Reset accumulator when a new text block starts (time.start
-            // unambiguously marks a new block). This handles multi-turn
-            // sessions where the previous turn's time.end may have been
-            // missed (e.g. SSE reconnect).
-            if (part.time?.start) {
-              this.lastTextContent = ''
-            }
-            // Emit only the new delta (OpenCode sends accumulated content)
-            if (content.length > this.lastTextContent.length) {
-              const delta = content.slice(this.lastTextContent.length)
-              this.lastTextContent = content
-              this.emit('text', delta)
-            }
-            // If time.end is set, the text block is complete — reset accumulator
-            if (part.time?.end) {
-              this.lastTextContent = ''
-            }
+            // Text content arrives via message.part.delta events, not here.
             break
           }
 
