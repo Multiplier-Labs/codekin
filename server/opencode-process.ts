@@ -533,7 +533,11 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       case 'permission.asked': {
         if (!this.isOwnSession(properties)) break
 
-        const requestId = properties.id as string || randomUUID()
+        const requestId = properties.id as string | undefined
+        if (!requestId) {
+          console.error('[opencode] permission.asked event missing required id field')
+          break
+        }
         // Real format: properties.permission is the type (e.g. "external_directory"),
         // properties.metadata has details (filepath, parentDir), properties.patterns
         // has the glob patterns being requested. No direct tool name — use permission type.
@@ -565,7 +569,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private async replyToPermission(requestId: string, type: 'once' | 'always' | 'reject'): Promise<void> {
     try {
       const baseUrl = `http://localhost:${serverState.port}`
-      await fetch(`${baseUrl}/permission/${requestId}/reply`, {
+      const res = await fetch(`${baseUrl}/permission/${requestId}/reply`, {
         method: 'POST',
         headers: {
           ...authHeaders(),
@@ -574,6 +578,9 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         },
         body: JSON.stringify({ type }),
       })
+      if (!res.ok) {
+        console.error(`[opencode] Permission reply failed: HTTP ${res.status} for ${requestId}`)
+      }
     } catch (err) {
       console.error(`[opencode] Failed to reply to permission ${requestId}:`, err)
     }

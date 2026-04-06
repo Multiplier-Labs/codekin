@@ -201,7 +201,11 @@ export default function App() {
   const activeSessionProvider = sessions.find(s => s.id === activeSessionId)?.provider ?? currentProvider
   const availableModels = activeSessionProvider === 'opencode' ? openCodeModels : CLAUDE_MODELS
 
-  // Fetch OpenCode models when the active session is an OpenCode session
+  // Fetch OpenCode models when the active session is an OpenCode session.
+  // Use a ref for currentModel to avoid re-triggering the effect when the model changes.
+  const currentModelRef = useRef(currentModel)
+  useEffect(() => { currentModelRef.current = currentModel }, [currentModel])
+
   useEffect(() => {
     if (activeSessionProvider !== 'opencode' || !settings.token) return
     if (openCodeModels.length > 0) return // already fetched
@@ -213,15 +217,14 @@ export default function App() {
       }))
       setOpenCodeModels(models)
       // Only set the model if the user doesn't already have an OpenCode model selected.
-      // This prevents overwriting the user's active model choice when switching sessions.
-      const currentIsOpenCode = currentModel && models.some(m => m.id === currentModel)
+      const currentIsOpenCode = currentModelRef.current && models.some(m => m.id === currentModelRef.current)
       if (!currentIsOpenCode) {
         const [defaultProvider, defaultModelId] = Object.entries(result.defaults)[0] ?? []
         if (defaultProvider && defaultModelId) setModel(`${defaultProvider}/${defaultModelId}`)
         else if (models.length > 0) setModel(models[0].id)
       }
     }).catch(() => { /* OpenCode server not available */ })
-  }, [activeSessionProvider, settings.token, openCodeModels.length, setModel, currentModel, activeSessionId, sessions])
+  }, [activeSessionProvider, settings.token, openCodeModels.length, setModel]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset file-change tracking when switching sessions
   useEffect(() => {
