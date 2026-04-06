@@ -491,6 +491,11 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
                 this.emit('todo_update', Array.from(this.tasks.values()))
               }
             } else if (status === 'completed') {
+              // Also check for task tools at completion (some providers only
+              // populate input at this stage, not during 'running')
+              if (part.state?.input && this.handleTaskTool(toolName, part.state.input)) {
+                this.emit('todo_update', Array.from(this.tasks.values()))
+              }
               const output = part.state?.output
               const summary = output ? output.slice(0, 200) : undefined
               this.emit('tool_done', toolName, summary)
@@ -516,8 +521,10 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
 
       case 'session.status': {
         if (!this.isOwnSession(properties)) break
-        const status = properties.status as { type: string } | undefined
-        if (status?.type === 'idle') {
+        // Status may be a string ('idle') or object ({ type: 'idle' }) depending on OpenCode version
+        const status = properties.status
+        const statusType = typeof status === 'string' ? status : (status as { type?: string } | undefined)?.type
+        if (statusType === 'idle') {
           this.emit('result', '', false)
         }
         break
@@ -607,7 +614,9 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
    * Mirrors the task-tracking logic in ClaudeProcess.handleTaskTool().
    */
   private handleTaskTool(toolName: string, input: Record<string, unknown>): boolean {
-    if (toolName === 'TodoWrite') {
+    // Normalize tool name — OpenCode may report as 'todowrite', 'TodoWrite', 'todo_write', etc.
+    const normalized = toolName.toLowerCase().replace(/_/g, '')
+    if (normalized === 'todowrite') {
       const todos = input.todos as Array<Record<string, unknown>> | undefined
       if (!Array.isArray(todos)) return false
       this.tasks.clear()
@@ -625,7 +634,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       }
       return true
     }
-    if (toolName === 'TaskCreate') {
+    if (normalized === 'taskcreate') {
       const id = String(++this.taskSeq)
       this.tasks.set(id, {
         id,
@@ -635,7 +644,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       })
       return true
     }
-    if (toolName === 'TaskUpdate') {
+    if (normalized === 'taskupdate') {
       const id = String(input.taskId || '')
       const task = this.tasks.get(id)
       if (!task) return false
