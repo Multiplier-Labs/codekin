@@ -373,6 +373,9 @@ Prompt text.
         expect(sessions.create).toHaveBeenCalledWith('test-review:my-repo', '/tmp/repo', {
           source: 'workflow',
           groupDir: '/tmp/repo',
+          model: undefined,
+          provider: undefined,
+          allowedTools: ['Bash(gh pr:*)'],
         })
         expect(result.sessionId).toBe('session-1')
         expect(result.repoName).toBe('my-repo')
