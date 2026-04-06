@@ -320,8 +320,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       this.startupTimer = null
     }
 
-    // Model is stored as "providerID/modelID" — show just the modelID part
-    const modelName = this.model?.includes('/') ? this.model.split('/')[1] : (this.model || 'opencode (default)')
+    // Model is stored as "providerID/modelID" — show everything after the first slash
+    const modelName = this.model?.includes('/') ? this.model.slice(this.model.indexOf('/') + 1) : (this.model || 'opencode (default)')
     this.emit('system_init', modelName)
   }
 
@@ -666,9 +666,12 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     const body: Record<string, unknown> = {
       parts: [{ type: 'text', text: content }],
     }
-    // Model is stored as "providerID/modelID" — pass as model override to prompt
+    // Model is stored as "providerID/modelID" — split only at first slash so
+    // OpenRouter-style IDs like "openrouter/meta-llama/llama-3.1-8b" stay intact.
     if (this.model && this.model.includes('/')) {
-      const [providerID, modelID] = this.model.split('/', 2)
+      const slashIdx = this.model.indexOf('/')
+      const providerID = this.model.slice(0, slashIdx)
+      const modelID = this.model.slice(slashIdx + 1)
       body.model = { providerID, modelID }
     }
     // Use prompt_async for fire-and-forget (events come via SSE)

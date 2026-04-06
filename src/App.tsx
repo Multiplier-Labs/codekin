@@ -195,8 +195,9 @@ export default function App() {
   const [currentProvider] = useState<CodingProvider>(
     (localStorage.getItem('codekin-provider') as CodingProvider) || 'claude'
   )
-  // Dynamic model list for OpenCode (fetched from server on demand)
+  // Dynamic model list for OpenCode (fetched from server on demand, keyed by workingDir)
   const [openCodeModels, setOpenCodeModels] = useState<ModelOption[]>([])
+  const openCodeModelsDirRef = useRef<string | undefined>(undefined)
   // Derive the active session's provider (falls back to the default for new sessions)
   const activeSessionProvider = sessions.find(s => s.id === activeSessionId)?.provider ?? currentProvider
   const availableModels = activeSessionProvider === 'opencode' ? openCodeModels : CLAUDE_MODELS
@@ -206,9 +207,19 @@ export default function App() {
   const currentModelRef = useRef(currentModel)
   useEffect(() => { currentModelRef.current = currentModel }, [currentModel])
 
+  // Clear cached models when switching to an OpenCode session with a different workingDir
+  const activeOpenCodeWd = activeSessionProvider === 'opencode'
+    ? sessions.find(s => s.id === activeSessionId)?.workingDir
+    : undefined
+  useEffect(() => {
+    if (activeOpenCodeWd && activeOpenCodeWd !== openCodeModelsDirRef.current) {
+      setOpenCodeModels([]) // force re-fetch for new repo
+    }
+  }, [activeOpenCodeWd])
+
   useEffect(() => {
     if (activeSessionProvider !== 'opencode' || !settings.token) return
-    if (openCodeModels.length > 0) return // already fetched
+    if (openCodeModels.length > 0) return // already fetched for this repo
     const activeWd = sessions.find(s => s.id === activeSessionId)?.workingDir
     fetchOpenCodeModels(settings.token, activeWd).then(result => {
       const models: ModelOption[] = result.models.map(m => ({
@@ -216,6 +227,7 @@ export default function App() {
         label: `${m.name} (${m.providerName})`,
       }))
       setOpenCodeModels(models)
+      openCodeModelsDirRef.current = activeWd
       // Only set the model if the user doesn't already have an OpenCode model selected.
       const currentIsOpenCode = currentModelRef.current && models.some(m => m.id === currentModelRef.current)
       if (!currentIsOpenCode) {
