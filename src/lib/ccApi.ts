@@ -99,6 +99,19 @@ export async function verifyToken(token: string): Promise<boolean> {
   return data.valid === true
 }
 
+/** Fetch available OpenCode models from the server. */
+export async function fetchOpenCodeModels(token: string, workingDir?: string): Promise<{
+  models: Array<{ id: string; name: string; providerID: string; providerName: string }>
+  defaults: Record<string, string>
+}> {
+  const qs = workingDir ? `?workingDir=${encodeURIComponent(workingDir)}` : ''
+  const res = await authFetch(`${BASE}/api/opencode/models${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) return { models: [], defaults: {} }
+  return res.json()
+}
+
 /** Fetch all sessions from the server. */
 export async function listSessions(token: string): Promise<Session[]> {
   const res = await authFetch(`${BASE}/api/sessions/list`, {

@@ -38,8 +38,9 @@ import { DiffPanel } from './components/DiffPanel'
 import { OrchestratorContent } from './components/OrchestratorContent'
 import { DocsBrowserContent } from './components/DocsBrowserContent'
 import { SessionContent } from './components/SessionContent'
-import type { PermissionMode, CodingProvider } from './types'
-import { PROVIDER_DEFAULT_MODEL, PROVIDER_MODELS } from './types'
+import type { PermissionMode, CodingProvider, ModelOption } from './types'
+import { CLAUDE_MODELS } from './types'
+import { fetchOpenCodeModels } from './lib/ccApi'
 
 export default function App() {
   const { settings, updateSettings } = useSettings()
@@ -194,16 +195,32 @@ export default function App() {
   const [currentProvider, setCurrentProviderRaw] = useState<CodingProvider>(
     (localStorage.getItem('codekin-provider') as CodingProvider) || 'claude'
   )
-  const handleProviderChange = useCallback((p: CodingProvider) => {
+  // Dynamic model list for OpenCode (fetched from server)
+  const [openCodeModels, setOpenCodeModels] = useState<ModelOption[]>([])
+  const availableModels = currentProvider === 'opencode' ? openCodeModels : CLAUDE_MODELS
+
+  const handleProviderChange = useCallback(async (p: CodingProvider) => {
     providerRef.current = p
     setCurrentProviderRaw(p)
     localStorage.setItem('codekin-provider', p)
-    // Switch model to provider's default if current model isn't in the new provider's list
-    const providerModels = PROVIDER_MODELS[p]
-    if (currentModel && !providerModels.some(m => m.id === currentModel)) {
-      setModel(PROVIDER_DEFAULT_MODEL[p])
+    if (p === 'opencode' && settings.token) {
+      // Fetch models from OpenCode server, then switch to its default
+      const result = await fetchOpenCodeModels(settings.token)
+      const models: ModelOption[] = result.models.map(m => ({
+        id: m.id,
+        label: `${m.name} (${m.providerName})`,
+      }))
+      setOpenCodeModels(models)
+      const defaultModel = Object.values(result.defaults)[0]
+      if (defaultModel) setModel(defaultModel)
+      else if (models.length > 0) setModel(models[0].id)
+    } else {
+      // Switch back to Claude default if current model isn't a Claude model
+      if (currentModel && !CLAUDE_MODELS.some(m => m.id === currentModel)) {
+        setModel('claude-sonnet-4-6')
+      }
     }
-  }, [currentModel, setModel])
+  }, [currentModel, setModel, settings.token])
 
   // Reset file-change tracking when switching sessions
   useEffect(() => {
@@ -643,6 +660,7 @@ export default function App() {
             onSessionInputChange={handleSessionInputChange}
             currentModel={currentModel}
             onModelChange={setModel}
+            availableModels={availableModels}
             hasUserMessages={messages.some(m => m.type === 'user')}
             useWorktree={useWorktree}
             onWorktreeChange={setUseWorktree}

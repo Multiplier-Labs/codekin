@@ -14,7 +14,7 @@ import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
 import type { SlashCommand } from '../lib/slashCommands'
-import { PERMISSION_MODES, PROVIDERS, PROVIDER_MODELS, type PermissionMode, type CodingProvider } from '../types'
+import { PERMISSION_MODES, PROVIDERS, type PermissionMode, type CodingProvider, type ModelOption } from '../types'
 
 const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
   shield: IconShieldCheck,
@@ -23,8 +23,7 @@ const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
   warning: IconAlertTriangle,
 }
 
-function shortModelLabel(modelId: string, provider?: CodingProvider): string {
-  const models = PROVIDER_MODELS[provider ?? 'claude']
+function shortModelLabel(modelId: string, models: ModelOption[]): string {
   return models.find(m => m.id === modelId)?.label ?? modelId.replace(/^claude-/, '')
 }
 
@@ -133,12 +132,11 @@ function PermissionModeDropdown({ currentMode, isOpen, menuRef, onToggle, onSele
 }
 
 /** Model selector dropdown. */
-function ModelDropdown({ currentModel, provider, isOpen, menuRef, onToggle, onChange }: {
-  currentModel: string; provider?: CodingProvider; isOpen: boolean
+function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChange }: {
+  currentModel: string; models: ModelOption[]; isOpen: boolean
   menuRef: React.RefObject<HTMLDivElement | null>
   onToggle: () => void; onChange: (model: string) => void
 }) {
-  const models = PROVIDER_MODELS[provider ?? 'claude']
   return (
     <div className="relative" ref={menuRef}>
       <button
@@ -146,7 +144,7 @@ function ModelDropdown({ currentModel, provider, isOpen, menuRef, onToggle, onCh
         className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
         title="Change model"
       >
-        {shortModelLabel(currentModel, provider)}
+        {shortModelLabel(currentModel, models)}
         <IconChevronDown size={12} stroke={2} />
       </button>
       {isOpen && (
@@ -235,10 +233,12 @@ interface InputBarProps {
   initialValue?: string
   /** Controlled callback — fires on every keystroke so the parent can persist drafts. */
   onValueChange?: (value: string) => void
-  /** Currently selected Claude model ID, shown in the model picker. Omit to hide picker. */
+  /** Currently selected model ID, shown in the model picker. Omit to hide picker. */
   currentModel?: string | null
   /** Called when the user selects a different model from the picker. */
   onModelChange?: (model: string) => void
+  /** Available models for the current provider. */
+  availableModels?: ModelOption[]
   /** Override the default placeholder text in the textarea. */
   placeholder?: string
   /** When true, disables drag-to-resize and uses auto-height instead. */
@@ -265,7 +265,7 @@ interface InputBarProps {
   variant?: InputBarVariant
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, currentProvider, onProviderChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, availableModels = [], placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, currentProvider, onProviderChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
   const isOrchestrator = variant === 'orchestrator'
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
@@ -572,7 +572,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               {currentModel && onModelChange && (
                 <ModelDropdown
                   currentModel={currentModel}
-                  provider={currentProvider}
+                  models={availableModels}
                   isOpen={modelMenuOpen}
                   menuRef={modelMenuRef}
                   onToggle={() => { closeAllPopups('model'); setModelMenuOpen(!modelMenuOpen) }}
@@ -669,7 +669,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                     {currentModel && onModelChange && (
                       <>
                         <div className="px-3 py-1.5 text-[12px] text-neutral-5 uppercase tracking-wider">Model</div>
-                        {PROVIDER_MODELS[currentProvider ?? 'claude'].map(m => (
+                        {availableModels.map(m => (
                           <button
                             key={m.id}
                             onClick={() => { onModelChange(m.id); setMobileMenuOpen(false) }}

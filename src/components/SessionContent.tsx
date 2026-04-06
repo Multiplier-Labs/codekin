@@ -15,7 +15,7 @@ import { InputBar, type InputBarHandle } from './InputBar'
 import { IconEye } from '@tabler/icons-react'
 import type { SkillGroup } from './SkillMenu'
 import type { SlashCommand } from '../lib/slashCommands'
-import type { ChatMessage, PermissionMode, CodingProvider, TaskItem } from '../types'
+import type { ChatMessage, PermissionMode, CodingProvider, ModelOption, TaskItem } from '../types'
 import type { PromptEntry } from '../hooks/usePromptState'
 
 export interface SessionContentProps {
@@ -48,6 +48,7 @@ export interface SessionContentProps {
   onSessionInputChange: (sessionId: string, value: string) => void
   currentModel: string | null
   onModelChange: (model: string) => void
+  availableModels: ModelOption[]
   hasUserMessages: boolean
   useWorktree: boolean
   onWorktreeChange: (v: boolean) => void
@@ -89,6 +90,7 @@ export function SessionContent({
   onSessionInputChange,
   currentModel,
   onModelChange,
+  availableModels,
   hasUserMessages,
   useWorktree,
   onWorktreeChange,
@@ -172,6 +174,7 @@ export function SessionContent({
         onValueChange={(v) => { onSessionInputChange(activeSessionId, v) }}
         currentModel={currentModel}
         onModelChange={onModelChange}
+        availableModels={availableModels}
         isMobile={isMobile}
         showWorktreeToggle={!hasUserMessages}
         useWorktree={useWorktree}

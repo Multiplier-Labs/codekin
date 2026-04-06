@@ -1801,6 +1801,10 @@ export class SessionManager {
   }
 
   /** Update the model for a session and restart Claude with the new model. */
+  getSessionProvider(sessionId: string): string {
+    return this.sessions.get(sessionId)?.provider ?? 'claude'
+  }
+
   setModel(sessionId: string, model: string): boolean {
     const session = this.sessions.get(sessionId)
     if (!session) return false

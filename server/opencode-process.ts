@@ -149,6 +149,53 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Basic ${encoded}` }
 }
 
+/** OpenCode model info returned from /config/providers. */
+export interface OpenCodeModelInfo {
+  id: string
+  name: string
+  providerID: string
+  providerName: string
+}
+
+/**
+ * Fetch the list of configured models from the running OpenCode server.
+ * Returns an empty array if the server is not running.
+ */
+export async function fetchOpenCodeModels(workingDir: string): Promise<{
+  models: OpenCodeModelInfo[]
+  defaults: Record<string, string>
+}> {
+  if (!serverState.ready) return { models: [], defaults: {} }
+  const baseUrl = `http://127.0.0.1:${serverState.port}`
+  try {
+    const res = await fetch(`${baseUrl}/config/providers`, {
+      headers: {
+        ...authHeaders(),
+        'x-opencode-directory': workingDir,
+      },
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) return { models: [], defaults: {} }
+    const data = await res.json() as {
+      providers: Array<{
+        id: string
+        name: string
+        models: Record<string, { id: string; name: string }>
+      }>
+      default?: Record<string, string>
+    }
+    const models: OpenCodeModelInfo[] = []
+    for (const p of data.providers) {
+      for (const m of Object.values(p.models)) {
+        models.push({ id: m.id, name: m.name, providerID: p.id, providerName: p.name })
+      }
+    }
+    return { models, defaults: data.default ?? {} }
+  } catch {
+    return { models: [], defaults: {} }
+  }
+}
+
 /** Stop the shared OpenCode server. */
 export function stopOpenCodeServer(): void {
   if (serverState.process) {

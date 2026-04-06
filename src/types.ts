@@ -66,27 +66,12 @@ export const PROVIDERS: { id: CodingProvider; label: string; description: string
 /** Model option for UI selectors. */
 export interface ModelOption { id: string; label: string }
 
-/** Available models per provider. */
-export const PROVIDER_MODELS: Record<CodingProvider, ModelOption[]> = {
-  claude: [
-    { id: 'claude-opus-4-6', label: 'Opus 4.6' },
-    { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
-    { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
-  ],
-  opencode: [
-    { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
-    { id: 'claude-opus-4-6', label: 'Opus 4.6' },
-    { id: 'gpt-4o', label: 'GPT-4o' },
-    { id: 'o3', label: 'o3' },
-    { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-  ],
-}
-
-/** Default model for each provider. */
-export const PROVIDER_DEFAULT_MODEL: Record<CodingProvider, string> = {
-  claude: 'claude-sonnet-4-6',
-  opencode: 'claude-sonnet-4-6',
-}
+/** Static models for Claude Code CLI. */
+export const CLAUDE_MODELS: ModelOption[] = [
+  { id: 'claude-opus-4-6', label: 'Opus 4.6' },
+  { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
+]
 
 /** Permission mode metadata for the UI selector. */
 export const PERMISSION_MODES: { id: PermissionMode; label: string; description: string; icon: string; dangerous?: boolean }[] = [

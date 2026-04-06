@@ -19,6 +19,7 @@ import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
 import { REPOS_ROOT, getAgentDisplayName } from './config.js'
 import { VALID_PROVIDERS } from './types.js'
+import { fetchOpenCodeModels } from './opencode-process.js'
 
 /** Expand leading ~ to the user's home directory. */
 function expandTilde(p: string): string {
@@ -47,6 +48,14 @@ export function createSessionRouter(
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
     res.json({ sessions: sessions.list() })
+  })
+
+  router.get('/api/opencode/models', async (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const workingDir = (req.query.workingDir as string) || osHomedir()
+    const result = await fetchOpenCodeModels(workingDir)
+    res.json(result)
   })
 
   router.post('/api/sessions/create', (req, res) => {

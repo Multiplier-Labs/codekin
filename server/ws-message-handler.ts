@@ -175,7 +175,10 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
     case 'set_model': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
-        if (!VALID_MODELS.has(msg.model)) {
+        // For OpenCode sessions, accept any model string (models are dynamic).
+        // For Claude sessions, validate against the static allowlist.
+        const sessionProvider = sessions.getSessionProvider(sessionId)
+        if (sessionProvider !== 'opencode' && !VALID_MODELS.has(msg.model)) {
           send({ type: 'error', message: `Invalid model: ${msg.model}` })
           break
         }
