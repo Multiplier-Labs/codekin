@@ -2,12 +2,6 @@
 
 Web-based terminal UI for Claude Code sessions with multi-session support, WebSocket streaming, and slash-command skills.
 
-## Architecture
-
-- **Frontend**: React + Vite + TailwindCSS 4
-- **WebSocket server**: Node.js + Express + ws, runs on port 32352 (configurable)
-- **Claude CLI**: Spawned per-session with `--output-format stream-json --input-format stream-json`
-
 ## Development
 
 ```bash
@@ -19,39 +13,34 @@ npm run test:watch   # watch mode
 npm run lint         # eslint
 ```
 
-## Key Directories
-
-- `src/` — React frontend source
-- `src/components/` — UI components (ChatView, InputBar, RepoSelector, etc.)
-- `src/hooks/` — WebSocket and session hooks
-- `server/` — WebSocket server, Claude process manager, session manager
-- `docs/` — Protocol and setup documentation
-
-## Coding Conventions
-
-- TypeScript strict mode for server code
-- Frontend uses TailwindCSS utility classes with custom color theme defined in `src/index.css`
-- WebSocket message types defined in `src/types.ts` (shared between client and server)
-- Monospace font: Inconsolata; Sans font: Lato
-
 ## Branching & Release Policy
 
 - **NEVER commit or push directly to `main`.** Always create a feature/fix branch and open a PR.
-- When committing changes, first create a branch using `feat/description` or `fix/description` naming.
-- When asked to push, push the feature branch and create a PR — do NOT push to `main`.
+- Branch naming: `feat/description` or `fix/description`.
 - All changes go through PRs with review and passing CI.
 - Releases are tagged with semver: `v0.2.0`, `v1.0.0`, etc.
 
 ## Bash Tool Conventions (Skills & Subagents)
 
-When executing skills or subagent tasks that use the Bash tool:
-
-- **One command per Bash call** — do NOT chain commands with `;`, `&&`, `||`, or pipes after the main command
-- **Do NOT use `echo` to inspect exit codes** (e.g. `echo "exit: $?"`) — the Bash tool already returns exit codes and stdout automatically
-- **Do NOT use `cat` to read files** — use the Read tool instead. This applies to temp files, output files, review files, etc.
+- **One command per Bash call** — do NOT chain with `;`, `&&`, `||`, or pipes
+- **Do NOT use `echo` to inspect exit codes** — the Bash tool returns them automatically
+- **Do NOT use `cat` to read files** — use the Read tool instead
 - These rules prevent multi-operation approval prompts in the Codekin terminal UI
 
 ## Output Conventions
 
-- When sharing code snippets, configuration files, or file contents with the user, always use fenced code blocks (```language) so they render properly in the terminal UI
-- Never rely on tool output alone to show file contents — if the user needs to see it, paste it in a code block in your response
+- Always use fenced code blocks (` ```language `) for code/config snippets — they render properly in the terminal UI
+- Never rely on tool output alone to show file contents — paste in a code block if the user needs to see it
+
+## Key Conventions
+
+- TypeScript strict mode for server code
+- WebSocket message types defined in `src/types.ts` (shared between client and server)
+- Monospace font: Inconsolata; Sans font: Lato
+
+## References
+
+- See `docs/architecture.md` for module map, data flow, and key abstractions.
+- See `docs/conventions.md` for coding patterns and file organization.
+- See `docs/WORKFLOWS.md` for automated workflow system.
+- See `docs/API-REFERENCE.md` for REST and WebSocket API.

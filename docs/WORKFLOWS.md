@@ -63,7 +63,7 @@ Everything after the closing `---` is the prompt sent to Claude. Write it as a p
 
 ## Built-in Workflows
 
-Codekin ships with nine built-in workflow definitions in `server/workflows/`:
+Codekin ships with ten built-in workflow definitions in `server/workflows/`:
 
 | File | Kind | Schedule | Output Directory |
 |---|---|---|---|
@@ -76,6 +76,7 @@ Codekin ships with nine built-in workflow definitions in `server/workflows/`:
 | `docs-audit.weekly.md` | `docs-audit.weekly` | Weekly | `.codekin/reports/docs-audit/` |
 | `commit-review.md` | `commit-review` | Event-driven | `.codekin/reports/commit-review/` |
 | `repo-health.weekly.md` | `repo-health.weekly` | Weekly | `.codekin/reports/repo-health/` |
+| `docs-optimize.weekly.md` | `docs-optimize.weekly` | Weekly | `.codekin/reports/docs-optimize/` |
 
 > **Note**: `commit-review` is event-driven (triggered by commit events) rather than scheduled, so it does not follow the `<topic>.<frequency>` naming convention.
 
