@@ -1,6 +1,6 @@
 # PR Review Webhook
 
-Automated pull request code review via GitHub webhooks. When a PR is opened, updated, or reopened, Codekin spawns a Claude session that reviews the changes and posts findings directly to GitHub. When a PR is closed or merged, Codekin cleans up active sessions and manages the review cache.
+Automated pull request code review via GitHub webhooks. When a PR is opened, updated, reopened, or marked ready for review, Codekin spawns a Claude session that reviews the changes and posts findings directly to GitHub. When a PR is closed or merged, Codekin cleans up active sessions and manages the review cache.
 
 ## Overview
 
@@ -10,7 +10,7 @@ GitHub sends `pull_request` webhook events to Codekin. The handler filters by ac
 
 ### Event Flow
 
-1. GitHub sends `pull_request` event (actions: `opened`, `synchronize`, `reopened`, `closed`)
+1. GitHub sends `pull_request` event (actions: `opened`, `synchronize`, `reopened`, `ready_for_review`, `closed`)
    _(For `closed` events, steps 2–11 are skipped — see [Closed/Merged Flow](#closedmerged-flow) below)_
 2. `webhook-handler.ts` validates signature, filters by action/draft/allowlist
 3. Dedup check (`webhook-dedup.ts`) — rejects already-processed events
