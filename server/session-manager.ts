@@ -771,7 +771,8 @@ export class SessionManager {
     let cp: CodingProcess
     if (session.provider === 'opencode') {
       cp = new OpenCodeProcess(session.workingDir, {
-        sessionId: session.claudeSessionId || undefined,
+        sessionId: sessionId,
+        opencodeSessionId: session.claudeSessionId || undefined,
         model: session.model,
         extraEnv,
         permissionMode: session.permissionMode,

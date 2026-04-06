@@ -33,6 +33,7 @@ import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
 import { CommitEventHandler } from './commit-event-handler.js'
 import { checkForUpdates, getUpdateNotification } from './version-check.js'
+import { stopOpenCodeServer } from './opencode-process.js'
 import { ensureHookConfig, syncCommitHooks } from './commit-event-hooks.js'
 import { createAuthRouter } from './auth-routes.js'
 import { createSessionRouter } from './session-routes.js'
@@ -591,6 +592,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   webhookHandler.shutdown()
   stepflowHandler.shutdown()
   await sessions.shutdown()
+  stopOpenCodeServer()
   wss.close()
   server.close()
   process.exit(0)

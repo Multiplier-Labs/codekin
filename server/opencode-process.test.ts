@@ -61,14 +61,32 @@ describe('OpenCodeProcess', () => {
       expect(ocp.isAlive()).toBe(false)
     })
 
-    it('returns the session ID', () => {
+    it('returns codekin session ID when no opencode session exists', () => {
       expect(ocp.getSessionId()).toBe('test-session-id')
+    })
+
+    it('returns opencode session ID when available (for resume)', () => {
+      const ocp2 = new OpenCodeProcess('/tmp/test-repo', {
+        sessionId: 'codekin-id',
+        opencodeSessionId: 'opencode-abc-123',
+      })
+      expect(ocp2.getSessionId()).toBe('opencode-abc-123')
+      ocp2.stop()
     })
 
     it('generates a session ID if not provided', () => {
       const ocp2 = new OpenCodeProcess('/tmp/test-repo')
       expect(ocp2.getSessionId()).toBeTruthy()
       expect(ocp2.getSessionId()).toHaveLength(36) // UUID format
+      ocp2.stop()
+    })
+
+    it('accepts opencodeSessionId for resume via constructor', () => {
+      const ocp2 = new OpenCodeProcess('/tmp/test-repo', {
+        opencodeSessionId: 'oc-resume-id',
+      })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((ocp2 as any).opencodeSessionId).toBe('oc-resume-id')
       ocp2.stop()
     })
 
@@ -266,12 +284,25 @@ describe('OpenCodeProcess', () => {
     it('maps session.error to error event', () => {
       const errorHandler = vi.fn()
       ocp.on('error', errorHandler)
+      setSessionId(ocp, 'oc-session-1')
 
       callHandleSSE(ocp, {
         type: 'session.error',
-        properties: { error: { message: 'Rate limit exceeded' } },
+        properties: { sessionID: 'oc-session-1', error: { message: 'Rate limit exceeded' } },
       })
       expect(errorHandler).toHaveBeenCalledWith('Rate limit exceeded')
+    })
+
+    it('filters session.error from other sessions', () => {
+      const errorHandler = vi.fn()
+      ocp.on('error', errorHandler)
+      setSessionId(ocp, 'my-session')
+
+      callHandleSSE(ocp, {
+        type: 'session.error',
+        properties: { sessionID: 'other-session', error: { message: 'Should be ignored' } },
+      })
+      expect(errorHandler).not.toHaveBeenCalled()
     })
 
     it('maps permission.asked to control_request event', () => {

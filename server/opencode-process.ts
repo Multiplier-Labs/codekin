@@ -157,8 +157,10 @@ export function stopOpenCodeServer(): void {
 export interface OpenCodeProcessOptions {
   /** Absolute path to the project directory. */
   workingDir: string
-  /** OpenCode session ID to resume (omit for new session). */
+  /** Codekin session ID (used for internal tracking). */
   sessionId?: string
+  /** OpenCode's own session ID (used for resume — returned by getSessionId()). */
+  opencodeSessionId?: string
   /** Model in provider/model format (e.g. 'anthropic/claude-sonnet-4'). */
   model?: string
   /** Additional environment variables (CODEKIN_SESSION_ID, etc.). */
@@ -192,6 +194,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     super()
     this.workingDir = workingDir
     this.sessionId = opts?.sessionId || randomUUID()
+    this.opencodeSessionId = opts?.opencodeSessionId || null
     this.model = opts?.model
     this.extraEnv = opts?.extraEnv || {}
     this.permissionMode = opts?.permissionMode
@@ -261,6 +264,11 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   /** Subscribe to the OpenCode SSE event stream and map events to CodingProcess events. */
   private subscribeToEvents(baseUrl: string): void {
     this.abortController = new AbortController()
+    let reconnectDelay = 1000
+    const MAX_RECONNECT_DELAY = 30_000
+    const MAX_RECONNECT_ATTEMPTS = 20
+
+    let reconnectAttempts = 0
 
     const connectSSE = () => {
       if (!this.alive) return
@@ -277,6 +285,10 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
           this.emit('error', `SSE connection failed: ${res.status}`)
           return
         }
+
+        // Reset backoff on successful connection
+        reconnectDelay = 1000
+        reconnectAttempts = 0
 
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
@@ -308,8 +320,14 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       }).catch((err) => {
         if (err instanceof Error && err.name === 'AbortError') return
         if (this.alive) {
-          console.warn('[opencode-sse] Connection lost, reconnecting in 2s...', err)
-          setTimeout(connectSSE, 2000)
+          reconnectAttempts++
+          if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+            this.emit('error', `SSE reconnect failed after ${MAX_RECONNECT_ATTEMPTS} attempts`)
+            return
+          }
+          console.warn(`[opencode-sse] Connection lost, reconnecting in ${reconnectDelay / 1000}s (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`, err)
+          setTimeout(connectSSE, reconnectDelay)
+          reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY)
         }
       })
     }
@@ -400,6 +418,9 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       }
 
       case 'session.error': {
+        // Filter by session ID to prevent cross-session error leakage on the shared SSE stream
+        const sessionID = properties.sessionID as string | undefined
+        if (sessionID && this.opencodeSessionId && sessionID !== this.opencodeSessionId) break
         const error = properties.error as { message?: string } | undefined
         this.emit('error', error?.message || 'Unknown OpenCode error')
         break
@@ -409,7 +430,6 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         const requestId = properties.id as string || randomUUID()
         const toolName = properties.name as string || 'unknown'
         const input = properties.input as Record<string, unknown> || {}
-        const description = properties.description as string || `Allow ${toolName}?`
 
         // Auto-approve for headless sessions (webhook/workflow)
         if (this.permissionMode === 'bypassPermissions' || this.permissionMode === 'dangerouslySkipPermissions') {
@@ -517,7 +537,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   }
 
   getSessionId(): string {
-    return this.sessionId
+    return this.opencodeSessionId ?? this.sessionId
   }
 
   waitForExit(timeoutMs = 10000): Promise<void> {
