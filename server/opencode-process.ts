@@ -568,7 +568,33 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         break
       }
 
-      // Ignore heartbeat, server.connected, and other internal events
+      // message.completed signals that the model has finished its response
+      case 'message.completed': {
+        if (!this.isOwnSession(properties)) break
+        this.emit('result', '', false)
+        break
+      }
+
+      // session.updated may carry idle status in some OpenCode versions
+      case 'session.updated': {
+        if (!this.isOwnSession(properties)) break
+        const session = properties.session as Record<string, unknown> | undefined
+        const sessionStatus = session?.status
+        const sType = typeof sessionStatus === 'string' ? sessionStatus : (sessionStatus as { type?: string } | undefined)?.type
+        if (sType === 'idle') {
+          this.emit('result', '', false)
+        }
+        break
+      }
+
+      default:
+        // Log unhandled session-scoped events for debugging (skip noisy ones)
+        if (type !== 'heartbeat' && type !== 'server.connected' && type !== 'message.part.added') {
+          if (this.isOwnSession(properties)) {
+            console.log(`[opencode-sse] Unhandled event: ${type}`, JSON.stringify(properties).slice(0, 200))
+          }
+        }
+        break
     }
   }
 
