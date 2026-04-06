@@ -1577,6 +1577,13 @@ export class SessionManager {
       return Promise.resolve({ allow: true, always: false })
     }
 
+    // Agent child sessions with no browser client: fast-deny tools not in
+    // allowedTools rather than hanging 5 minutes on a prompt nobody will see.
+    if (session.clients.size === 0 && session.source === 'agent') {
+      console.log(`[tool-approval] fast-deny headless agent (tool not in allowedTools): ${toolName}`)
+      return Promise.resolve({ allow: false, always: false })
+    }
+
     console.log(`[tool-approval] requesting approval: session=${sessionId} tool=${toolName} clients=${session.clients.size}`)
 
     // ExitPlanMode: route through PlanManager state machine for plan-specific

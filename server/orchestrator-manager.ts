@@ -142,7 +142,7 @@ Child sessions have a broad set of pre-approved tools for standard dev work:
 - **Git & GitHub**: git (all subcommands), gh (PRs, issues, runs)
 - **Package managers**: npm, npx, yarn, pnpm, bun
 - **Build tools**: node, tsc, eslint, prettier, cargo, go, make, pip
-- **Filesystem**: ls, cat, find, head, tail, mkdir, tree, etc.
+- **Filesystem** (read-only): ls, cat, head, tail, sort, diff, tree, wc, which, file
 
 They do NOT have access to destructive commands (rm, sudo, docker,
 git reset --hard, git push --force). Those will block and require

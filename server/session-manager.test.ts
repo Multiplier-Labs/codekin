@@ -3280,21 +3280,19 @@ describe('SessionManager', () => {
       expect(gitResult).toEqual({ allow: true, always: false })
     })
 
-    it('agent sessions block on tools NOT in allowedTools even when headless', async () => {
+    it('agent sessions fast-deny tools NOT in allowedTools when headless', async () => {
       const s = sm.create('agent-blocked', '/tmp', {
         source: 'agent',
         allowedTools: ['Read'],
       })
       // No ws.join — headless
 
-      // Tool NOT in allowedTools → should prompt (not auto-approve via headless)
-      const promise = sm.requestToolApproval(s.id, 'Bash', { command: 'rm -rf /' })
+      // Tool NOT in allowedTools → fast-deny (no 5-min hang)
+      const result = await sm.requestToolApproval(s.id, 'Bash', { command: 'rm -rf /' })
 
-      expect(s.pendingToolApprovals.size).toBe(1)
-
-      // Resolve to avoid leaked promise
-      s.pendingToolApprovals.values().next().value!.resolve({ allow: false, always: false })
-      await promise
+      expect(result).toEqual({ allow: false, always: false })
+      // Should NOT create a pending approval — denied immediately
+      expect(s.pendingToolApprovals.size).toBe(0)
     })
 
     it('non-agent headless sources still get blanket auto-approval', async () => {
