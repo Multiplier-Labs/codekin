@@ -557,7 +557,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     void this.replyToPermission(requestId, type)
   }
 
-  /** Stop the OpenCode session (disconnect SSE, optionally delete session). */
+  /** Stop the OpenCode session and disconnect the SSE stream. */
   stop(): void {
     if (!this.alive) return
     this.alive = false

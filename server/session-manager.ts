@@ -813,8 +813,10 @@ export class SessionManager {
   waitForReady(sessionId: string, timeoutMs = 30_000): Promise<void> {
     const session = this.sessions.get(sessionId)
     if (!session?.claudeProcess) return Promise.resolve()
-    // If the process already completed init in a prior turn, resolve immediately
-    if (session.claudeSessionId) return Promise.resolve()
+    // If the process already completed init in a prior turn, resolve immediately.
+    // For OpenCode, system_init is only emitted after ensureOpenCodeServer() completes,
+    // so skip early-return for OpenCode even on resume — the server may need to (re)start.
+    if (session.claudeSessionId && session.provider !== 'opencode') return Promise.resolve()
 
     return new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
@@ -1319,7 +1321,13 @@ export class SessionManager {
       session.isProcessing = true
       this._globalBroadcast?.({ type: 'sessions_updated' })
     }
-    session.claudeProcess?.sendMessage(data)
+    // For OpenCode: if the process is alive but still initializing (e.g. rapid
+    // back-to-back sends), route through waitForReady to avoid ECONNREFUSED.
+    if (session.provider === 'opencode') {
+      void this.waitForReady(sessionId).then(() => session.claudeProcess?.sendMessage(data))
+    } else {
+      session.claudeProcess?.sendMessage(data)
+    }
   }
 
   /**
