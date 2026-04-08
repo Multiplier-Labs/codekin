@@ -737,7 +737,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   }
 
   /** No-op for OpenCode — raw protocol data is Claude-specific. */
-  sendRaw(_data: string): void {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  sendRaw(_: string): void {
     // OpenCode uses HTTP endpoints, not raw stdin
   }
 
@@ -745,7 +746,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
    * Respond to a permission/control request.
    * Maps Codekin's allow/deny to OpenCode's once/always/reject.
    */
-  sendControlResponse(requestId: string, behavior: 'allow' | 'deny', _updatedInput?: Record<string, unknown>, _message?: string): void {
+  sendControlResponse(requestId: string, behavior: 'allow' | 'deny'): void {
     const type = behavior === 'deny' ? 'reject' : 'once'
     void this.replyToPermission(requestId, type)
   }

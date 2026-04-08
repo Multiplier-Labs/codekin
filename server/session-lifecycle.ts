@@ -263,16 +263,12 @@ export class SessionLifecycle {
     // "Session ID is already in use" means another process holds the lock.
     // Retrying with the same session ID will fail every time, so treat this
     // as a non-restartable exit (same as stopped-by-user).
-    // Duck-type these checks — ClaudeProcess has them but OpenCodeProcess does not.
-    const sessionConflict = typeof (exitedProcess as any).hasSessionConflict === 'function'
-      ? (exitedProcess as any).hasSessionConflict() as boolean
-      : false
-    const producedOutput = typeof (exitedProcess as any).hadOutput === 'function'
-      ? (exitedProcess as any).hadOutput() as boolean
-      : true
-    const spawnFailed = typeof (exitedProcess as any).hasSpawnFailed === 'function'
-      ? (exitedProcess as any).hasSpawnFailed() as boolean
-      : false
+    // ClaudeProcess has diagnostic methods (hasSessionConflict, hadOutput, hasSpawnFailed)
+    // that OpenCodeProcess does not. Duck-type check via property existence.
+    const proc = exitedProcess as CodingProcess & Partial<Pick<ClaudeProcess, 'hasSessionConflict' | 'hadOutput' | 'hasSpawnFailed'>>
+    const sessionConflict = proc.hasSessionConflict ? proc.hasSessionConflict() : false
+    const producedOutput = proc.hadOutput ? proc.hadOutput() : true
+    const spawnFailed = proc.hasSpawnFailed ? proc.hasSpawnFailed() : false
 
     // If the process exited without ever producing stdout output, --resume
     // hung on a broken/stale session. Clear claudeSessionId so the next

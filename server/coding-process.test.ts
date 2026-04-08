@@ -1,7 +1,7 @@
 /** Tests for the CodingProcess abstraction layer and provider dispatch. */
 import { describe, it, expect } from 'vitest'
 import { CLAUDE_CAPABILITIES, OPENCODE_CAPABILITIES } from './coding-process.js'
-import type { CodingProcess, CodingProvider, ProviderCapabilities } from './coding-process.js'
+import type { CodingProvider } from './coding-process.js'
 
 describe('CodingProvider type', () => {
   it('accepts claude and opencode as valid values', () => {
@@ -51,9 +51,9 @@ describe('CodingProcess interface', () => {
       capabilities: CLAUDE_CAPABILITIES,
       start: () => {},
       stop: () => {},
-      sendMessage: (_content: string) => {},
-      sendRaw: (_data: string) => {},
-      sendControlResponse: (_requestId: string, _behavior: 'allow' | 'deny') => {},
+      sendMessage: () => {},
+      sendRaw: () => {},
+      sendControlResponse: () => {},
       isAlive: () => true,
       getSessionId: () => 'test-id',
       waitForExit: () => Promise.resolve(),

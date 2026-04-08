@@ -77,7 +77,7 @@ vi.mock('child_process', async (importOriginal) => {
 })
 
 import { SessionManager } from './session-manager.js'
-import { SessionPersistence, type PersistedSession } from './session-persistence.js'
+import type { PersistedSession } from './session-persistence.js'
 import type { ReviewRepoConfig } from './workflow-config.js'
 import type { WsClientMessage } from './types.js'
 
@@ -140,8 +140,7 @@ describe('Provider dispatch', () => {
         claudeSessionId: null,
       })
 
-      const persistence = new SessionPersistence(sessions as Parameters<typeof SessionPersistence.prototype['persistToDisk']>[0] extends void ? never : typeof sessions)
-      // The persistence object writes to disk — we check the serialized shape
+      // Verify the serialized shape includes provider field
       const serialized = Array.from(sessions.values()).map((s) => ({
         id: s.id,
         name: s.name,

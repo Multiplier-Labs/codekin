@@ -1,5 +1,5 @@
 /** Tests for PR-specific GitHub API helpers — verifies diff/files/commits fetching and graceful degradation. */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { fetchPrDiff, fetchPrFiles, fetchPrCommits, fetchPrReviewComments, fetchPrReviews, fetchExistingReviewComment, REVIEW_COMMENT_MARKER, _setGhRunner, _resetGhRunner } from './webhook-pr-github.js'
 
 describe('fetchPrDiff', () => {

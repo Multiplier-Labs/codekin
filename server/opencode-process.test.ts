@@ -11,6 +11,7 @@ vi.mock('child_process', async (importOriginal) => {
   return {
     ...actual,
     spawn: vi.fn(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const EventEmitter = require('events').EventEmitter
       const proc = Object.assign(new EventEmitter(), {
         stdin: { write: vi.fn(), end: vi.fn() },

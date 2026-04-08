@@ -207,20 +207,16 @@ export default function App() {
   const currentModelRef = useRef(currentModel)
   useEffect(() => { currentModelRef.current = currentModel }, [currentModel])
 
-  // Clear cached models when switching to an OpenCode session with a different workingDir
+  // Fetch OpenCode models when switching to an OpenCode session (or a different workingDir)
   const activeOpenCodeWd = activeSessionProvider === 'opencode'
     ? sessions.find(s => s.id === activeSessionId)?.workingDir
     : undefined
   useEffect(() => {
-    if (activeOpenCodeWd && activeOpenCodeWd !== openCodeModelsDirRef.current) {
-      setOpenCodeModels([]) // force re-fetch for new repo
-    }
-  }, [activeOpenCodeWd])
-
-  useEffect(() => {
     if (activeSessionProvider !== 'opencode' || !settings.token) return
-    if (openCodeModels.length > 0) return // already fetched for this repo
-    const activeWd = sessions.find(s => s.id === activeSessionId)?.workingDir
+    // Re-fetch if the working directory changed
+    const wdChanged = activeOpenCodeWd && activeOpenCodeWd !== openCodeModelsDirRef.current
+    if (!wdChanged && openCodeModels.length > 0) return // already fetched for this repo
+    const activeWd = activeOpenCodeWd
     fetchOpenCodeModels(settings.token, activeWd).then(result => {
       const models: ModelOption[] = result.models.map(m => ({
         id: `${m.providerID}/${m.id}`,

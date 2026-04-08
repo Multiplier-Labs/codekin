@@ -251,7 +251,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     }
 
     // --- Session cap check ---
-    if (this.isAtSessionCap(eventId)) {
+    if (this.isAtSessionCap()) {
       this.recordEvent({
         id: eventId,
         idempotencyKey,
@@ -312,6 +312,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   private async handlePullRequestEvent(
     payload: PullRequestPayload,
     eventId: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _headers: { event: string; delivery: string; signature: string },
   ): Promise<{ statusCode: number; body: Record<string, unknown> }> {
     const pr = payload.pull_request
@@ -400,7 +401,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     this.supersedePrSessions(payload.repository.full_name, pr.number)
 
     // --- Session cap check ---
-    if (this.isAtSessionCap(eventId)) {
+    if (this.isAtSessionCap()) {
       this.recordEvent({
         id: eventId,
         idempotencyKey,
@@ -676,7 +677,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   /**
    * Check if the webhook session concurrency cap has been reached.
    */
-  private isAtSessionCap(_eventId: string): boolean {
+  private isAtSessionCap(): boolean {
     const activeWebhookSessions = this.sessions.list().filter(s => s.source === 'webhook' && s.active).length
     const processingEvents = this.countByStatus('processing')
     const effectiveConcurrency = activeWebhookSessions + processingEvents
