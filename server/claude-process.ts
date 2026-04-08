@@ -93,6 +93,14 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
   private _sessionConflict = false
 
   /**
+   * Set to true when spawn() itself fails (ENOENT, EACCES, etc.).
+   * Distinguished from "process started but produced no output" — the latter
+   * implies a broken resume, while a spawn failure is transient and the
+   * session's claudeSessionId should be preserved for retry.
+   */
+  private _spawnFailed = false
+
+  /**
    * Set to true once the process emits at least one valid JSON event on stdout.
    * When the process exits without ever producing output, --resume likely hung
    * on a broken session — the caller should clear claudeSessionId and retry fresh.
@@ -234,7 +242,11 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
     })
 
     this.proc.on('error', (err) => {
-      console.error('[claude process error]', err.message)
+      const errno = (err as NodeJS.ErrnoException).code
+      console.error(`[claude process error] session=${this.sessionId} cwd=${this.workingDir} errno=${errno} ${err.message}`)
+      if (errno === 'ENOENT' || errno === 'EACCES') {
+        this._spawnFailed = true
+      }
       this.emit('error', err.message)
     })
 
@@ -757,6 +769,11 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
   /** True if the process produced at least one valid JSON event before exiting. */
   hadOutput(): boolean {
     return this._receivedOutput
+  }
+
+  /** True if spawn() itself failed (ENOENT, EACCES) — process never started. */
+  hasSpawnFailed(): boolean {
+    return this._spawnFailed
   }
 
 }

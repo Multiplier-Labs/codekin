@@ -1206,9 +1206,14 @@ export class SessionManager {
     // hung on a broken/stale session. Clear claudeSessionId so the next
     // restart attempt uses a fresh session instead of retrying the same
     // broken resume — which would just hang again.
-    if (!exitedProcess.hadOutput() && session.claudeSessionId) {
+    // Exception: if spawn() itself failed (ENOENT/EACCES), the process never
+    // started — the session data on disk is fine, so preserve the ID for retry.
+    if (!exitedProcess.hadOutput() && session.claudeSessionId && !exitedProcess.hasSpawnFailed()) {
       console.warn(`[restart] Session ${sessionId} produced no output before exit — clearing claudeSessionId to force fresh session`)
       session.claudeSessionId = null
+    }
+    if (exitedProcess.hasSpawnFailed()) {
+      console.warn(`[restart] Session ${sessionId} spawn failed (binary not found) — preserving claudeSessionId for retry`)
     }
 
     const action = evaluateRestart({

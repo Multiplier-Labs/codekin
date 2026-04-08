@@ -86,7 +86,7 @@ describe('ClaudeProcess.start() — process event handlers', () => {
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       fakeProc.emit('error', new Error('spawn error'))
 
-      expect(consoleSpy).toHaveBeenCalledWith('[claude process error]', 'spawn error')
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('spawn error'))
       consoleSpy.mockRestore()
     })
   })
