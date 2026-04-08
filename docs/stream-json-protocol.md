@@ -8,7 +8,7 @@ How Codekin spawns and communicates with Claude Code CLI sessions over the strea
 claude \
   --output-format stream-json \
   --input-format stream-json \
-  --permission-mode bypassPermissions \
+  --permission-mode acceptEdits \
   --allowedTools "Bash(git:*)" \
   --include-partial-messages \
   --verbose \
@@ -24,7 +24,7 @@ claude \
 |------|---------|
 | `--output-format stream-json` | Emit events as newline-delimited JSON on stdout |
 | `--input-format stream-json` | Accept structured JSON messages on stdin |
-| `--permission-mode bypassPermissions` | Auto-approve all tools (Write, Edit, Bash, etc.) |
+| `--permission-mode acceptEdits` | Auto-approve Write/Edit; Bash triggers permission hook |
 | `--allowedTools "Bash(git:*)"` | Whitelist specific tool patterns (here: git commands in Bash) |
 | `--include-partial-messages` | Emit streaming deltas for real-time UI |
 | `--verbose` | Enable diagnostic output |
@@ -546,26 +546,6 @@ Sessions are saved to disk (debounced at 2 seconds) on:
 - Server shutdown
 
 History is capped at 2000 entries.
-
-## Tool Approval via HTTP (PreToolUse Hook)
-
-The server exposes `POST /api/tool-approval` for external hook integration:
-
-```json
-POST /api/tool-approval
-{
-  "sessionId": "...",
-  "toolName": "Bash",
-  "toolInput": { "command": "rm -rf /" }
-}
-```
-
-Response:
-```json
-{ "allow": true, "always": false }
-```
-
-This enables a PreToolUse hook script to call the Hub server and surface permission prompts in the web UI, even when the CLI itself uses `bypassPermissions`.
 
 ## Lessons Learned
 
