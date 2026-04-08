@@ -277,8 +277,16 @@ export class SessionManager {
    * Create a git worktree for a session. Creates a new branch and worktree
    * as a sibling directory of the project root.
    * Returns the worktree path on success, or null on failure.
+   *
+   * @param targetBranch — use this as the worktree branch name instead of
+   *   the default `wt/{shortId}`. The orchestrator uses this to create the
+   *   worktree directly on the desired feature branch so Claude doesn't
+   *   need to create a second branch.
+   * @param baseBranch — create the worktree branch from this ref (e.g.
+   *   'main'). Defaults to auto-detecting the default branch. Prevents
+   *   worktrees from accidentally branching off a random HEAD.
    */
-  async createWorktree(sessionId: string, workingDir: string): Promise<string | null> {
+  async createWorktree(sessionId: string, workingDir: string, targetBranch?: string, baseBranch?: string): Promise<string | null> {
     const session = this.sessions.get(sessionId)
     if (!session) return null
 
@@ -296,11 +304,17 @@ export class SessionManager {
         return null
       }
 
-      const prefix = this.getWorktreeBranchPrefix()
       const shortId = sessionId.slice(0, 8)
-      const branchName = `${prefix}${shortId}`
+      const branchName = targetBranch ?? `${this.getWorktreeBranchPrefix()}${shortId}`
       const projectName = path.basename(repoRoot)
       const worktreePath = path.resolve(repoRoot, '..', `${projectName}-wt-${shortId}`)
+
+      // Auto-detect the default branch if baseBranch not specified.
+      // Tries origin/HEAD, then falls back to common names.
+      let resolvedBase: string | undefined = baseBranch
+      if (!resolvedBase) {
+        resolvedBase = await this.detectDefaultBranch(repoRoot, env) ?? undefined
+      }
 
       // Clean up stale state from previous failed attempts:
       // 1. Prune orphaned worktree entries (directory gone but git still tracks it)
@@ -326,8 +340,12 @@ export class SessionManager {
       await execFileAsync('git', ['branch', '-D', branchName], { cwd: repoRoot, env, timeout: 5000 })
         .catch((e: unknown) => console.debug(`[worktree] branch cleanup (expected if fresh):`, e instanceof Error ? e.message : e))
 
-      // Create the worktree with a new branch
-      await execFileAsync('git', ['worktree', 'add', '-b', branchName, worktreePath], {
+      // Create the worktree with a new branch, branching from the resolved base.
+      // Using an explicit base prevents worktrees from inheriting whatever
+      // branch/commit the main repo happens to be on.
+      const worktreeArgs = ['worktree', 'add', '-b', branchName, worktreePath]
+      if (resolvedBase) worktreeArgs.push(resolvedBase)
+      await execFileAsync('git', worktreeArgs, {
         cwd: repoRoot,
         env,
         timeout: 15000,
@@ -474,6 +492,43 @@ export class SessionManager {
         }
       }
     })()
+  }
+
+  /**
+   * Detect the default branch of a repository (main, master, etc.).
+   * Tries `git symbolic-ref refs/remotes/origin/HEAD` first, then checks
+   * for common branch names. Returns null if detection fails.
+   */
+  private async detectDefaultBranch(repoRoot: string, env: NodeJS.ProcessEnv): Promise<string | null> {
+    // Try origin/HEAD (set by git clone or git remote set-head)
+    try {
+      const { stdout } = await execFileAsync(
+        'git', ['symbolic-ref', 'refs/remotes/origin/HEAD'],
+        { cwd: repoRoot, env, timeout: 5000 },
+      )
+      const ref = stdout.trim() // e.g. "refs/remotes/origin/main"
+      if (ref) {
+        const branch = ref.replace('refs/remotes/origin/', '')
+        console.log(`[worktree] Detected default branch from origin/HEAD: ${branch}`)
+        return branch
+      }
+    } catch {
+      // origin/HEAD not set — fall through to heuristics
+    }
+
+    // Check for common default branch names
+    for (const candidate of ['main', 'master']) {
+      try {
+        await execFileAsync('git', ['rev-parse', '--verify', candidate], { cwd: repoRoot, env, timeout: 3000 })
+        console.log(`[worktree] Detected default branch by name: ${candidate}`)
+        return candidate
+      } catch {
+        // branch doesn't exist, try next
+      }
+    }
+
+    console.warn(`[worktree] Could not detect default branch for ${repoRoot} — worktree will branch from HEAD`)
+    return null
   }
 
   /** Get the configured worktree branch prefix (defaults to 'wt/'). */
@@ -757,12 +812,29 @@ export class SessionManager {
     if (!existsSync(session.workingDir) || (session.worktreePath && !existsSync(path.join(session.workingDir, '.git')))) {
       const fallback = session.groupDir ?? session.workingDir
       if (fallback !== session.workingDir && existsSync(fallback)) {
-        console.warn(`[startClaude] Working directory ${session.workingDir} missing or not a valid worktree — falling back to ${fallback}`)
+        const deadPath = session.workingDir
+        console.warn(`[startClaude] Working directory ${deadPath} missing or not a valid worktree — falling back to ${fallback}`)
         session.workingDir = fallback
         session.worktreePath = undefined
         this.persistToDisk()
+        this._globalBroadcast?.({ type: 'sessions_updated' })
+        const fallbackMsg: WsServerMessage = {
+          type: 'system_message',
+          subtype: 'notification',
+          text: `Worktree directory ${deadPath} no longer exists. Falling back to original repository: ${fallback}`,
+        }
+        this.addToHistory(session, fallbackMsg)
+        this.broadcast(session, fallbackMsg)
       } else if (!existsSync(session.workingDir)) {
         console.error(`[startClaude] Working directory ${session.workingDir} does not exist and no fallback available — cannot start`)
+        session._stoppedByUser = true  // prevent restart loop
+        const errMsg: WsServerMessage = {
+          type: 'system_message',
+          subtype: 'error',
+          text: `Working directory ${session.workingDir} no longer exists and no fallback is available. Session cannot start.`,
+        }
+        this.addToHistory(session, errMsg)
+        this.broadcast(session, errMsg)
         return false
       }
     }
@@ -1135,6 +1207,44 @@ export class SessionManager {
     }
     if (exitedProcess.hasSpawnFailed()) {
       console.warn(`[restart] Session ${sessionId} spawn failed (binary not found) — preserving claudeSessionId for retry`)
+    }
+
+    // Before evaluating restart, check if the working directory still exists.
+    // If a worktree was deleted mid-session, fall back to the original repo
+    // instead of entering a guaranteed restart death loop where every attempt
+    // fails with the same missing CWD.
+    if (!existsSync(session.workingDir)) {
+      const fallback = session.groupDir
+      if (fallback && existsSync(fallback)) {
+        const deadPath = session.workingDir
+        console.warn(`[restart] Working directory ${deadPath} no longer exists — falling back to ${fallback}`)
+        session.workingDir = fallback
+        session.worktreePath = undefined
+        this.persistToDisk()
+        const fallbackMsg: WsServerMessage = {
+          type: 'system_message',
+          subtype: 'notification',
+          text: `Worktree directory ${deadPath} was removed. Restarting in original repository: ${fallback}`,
+        }
+        this.addToHistory(session, fallbackMsg)
+        this.broadcast(session, fallbackMsg)
+      } else {
+        // No fallback available — don't waste restart attempts
+        console.error(`[restart] Working directory ${session.workingDir} does not exist and no fallback — stopping session`)
+        session._stoppedByUser = true
+        for (const listener of this._exitListeners) {
+          try { listener(sessionId, code, signal, false) } catch { /* listener error */ }
+        }
+        const msg: WsServerMessage = {
+          type: 'system_message',
+          subtype: 'error',
+          text: `Working directory ${session.workingDir} no longer exists and no fallback is available. Please delete this session and create a new one.`,
+        }
+        this.addToHistory(session, msg)
+        this.broadcast(session, msg)
+        this.broadcast(session, { type: 'exit', code: code ?? -1, signal })
+        return
+      }
     }
 
     const action = evaluateRestart({

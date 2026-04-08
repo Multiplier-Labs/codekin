@@ -13,6 +13,7 @@
 
 import { spawn, execFileSync, type ChildProcess } from 'child_process'
 import { createInterface, type Interface } from 'readline'
+import { existsSync } from 'fs'
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import type { ClaudeEvent, ClaudeSystemInit, ClaudeControlRequest, ClaudeResultEvent, ClaudeStreamEvent, TaskItem, PromptQuestion, PermissionMode } from './types.js'
@@ -154,6 +155,17 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
   /** Spawn the Claude CLI process with stream-json I/O and acceptEdits mode. */
   start(): void {
     if (this.proc) return
+
+    // Safety net: verify the working directory exists before spawning.
+    // spawn() with a nonexistent cwd emits an ENOENT error event and exits
+    // immediately, which wastes a restart attempt. Fail fast with a clear message.
+    if (!existsSync(this.workingDir)) {
+      this._spawnFailed = true
+      this.emit('error', `Working directory does not exist: ${this.workingDir}`)
+      // Emit exit asynchronously so the caller can wire up listeners first
+      process.nextTick(() => this.emit('exit', 1, null))
+      return
+    }
 
     // Pass through the full parent environment so the Claude CLI inherits
     // XDG paths, TERM, SHELL, and any other vars it needs.

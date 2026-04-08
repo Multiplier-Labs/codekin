@@ -86,12 +86,30 @@ export class SessionPersistence {
       const data: PersistedSession[] = JSON.parse(raw)
 
       for (const s of data) {
+        // Validate worktree paths on restore: if the worktree directory was
+        // removed while the server was down, reset to the original repo to
+        // prevent spawning Claude in a nonexistent CWD.
+        let workingDir = s.workingDir
+        let worktreePath = s.worktreePath
+        const groupDir = s.groupDir
+        if (worktreePath && !existsSync(worktreePath)) {
+          const fallback = groupDir ?? workingDir
+          if (fallback !== worktreePath && existsSync(fallback)) {
+            console.warn(`[restore] Worktree ${worktreePath} no longer exists — resetting session ${s.id} to ${fallback}`)
+            workingDir = fallback
+            worktreePath = undefined
+          } else {
+            console.warn(`[restore] Worktree ${worktreePath} and fallback both missing for session ${s.id}`)
+            worktreePath = undefined
+          }
+        }
+
         const session: Session = {
           id: s.id,
           name: s.name,
-          workingDir: s.workingDir,
-          groupDir: s.groupDir,
-          worktreePath: s.worktreePath,
+          workingDir,
+          groupDir,
+          worktreePath,
           created: s.created,
           source: s.source ?? 'manual',
           model: s.model,
