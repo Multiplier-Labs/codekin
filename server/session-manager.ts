@@ -152,6 +152,7 @@ export class SessionManager {
       if (idleMs > IDLE_SESSION_TIMEOUT_MS) {
         console.log(`[idle-reaper] stopping idle session=${session.id} name="${session.name}" idle=${Math.round(idleMs / 60_000)}min`)
         session._stoppedByUser = true // prevent auto-restart
+        if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
         session.claudeProcess.removeAllListeners()
         session.claudeProcess.stop()
         session.claudeProcess = null
@@ -655,18 +656,29 @@ export class SessionManager {
     if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
     if (session._namingTimer) clearTimeout(session._namingTimer)
     if (session._leaveGraceTimer) clearTimeout(session._leaveGraceTimer)
+    if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
 
-    // Kill claude process if running
-    if (session.claudeProcess) {
-      session.claudeProcess.stop()
-      session.claudeProcess = null
-    }
+    // Kill claude process if running — remove listeners first to prevent the
+    // exit handler from triggering an auto-restart on a deleted session.
+    // Wait for the process to fully exit before worktree cleanup so we don't
+    // run `git worktree remove` while Claude is still performing git operations.
+    const exitPromise = session.claudeProcess
+      ? (() => {
+          const cp = session.claudeProcess
+          cp.removeAllListeners()
+          cp.stop()
+          session.claudeProcess = null
+          return cp.waitForExit()
+        })()
+      : Promise.resolve()
 
     this.archiveSessionIfWorthSaving(session)
 
-    // Clean up git worktree if this session used one
+    // Clean up git worktree if this session used one — deferred until process exits
     if (session.worktreePath) {
-      this.cleanupWorktree(session.worktreePath, session.groupDir ?? session.workingDir)
+      const wtPath = session.worktreePath
+      const repoDir = session.groupDir ?? session.workingDir
+      void exitPromise.then(() => this.cleanupWorktree(wtPath, repoDir))
     }
 
     // Clean up webhook workspace directory if applicable
@@ -730,8 +742,9 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return false
 
-    // Clear stopped flag on explicit start
+    // Clear stopped flag and any pending restart timer on explicit start
     session._stoppedByUser = false
+    if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
 
     // Kill existing process if any — remove listeners first to prevent the
     // old process's exit handler from clobbering the new process reference
@@ -1171,6 +1184,14 @@ export class SessionManager {
    * on state updates, listener notification, and message broadcasting.
    */
   private handleClaudeExit(exitedProcess: ClaudeProcess, session: Session, sessionId: string, code: number | null, signal: string | null): void {
+    // Guard: ignore exit events from stale processes that were replaced by a
+    // new startClaude() call.  Without this, the old process's exit handler
+    // would null out session.claudeProcess (which now points to the NEW
+    // process), orphaning it and triggering an unwanted auto-restart cycle.
+    if (session.claudeProcess && session.claudeProcess !== exitedProcess) {
+      console.log(`[restart] Ignoring exit from stale process for session ${sessionId}`)
+      return
+    }
     session.claudeProcess = null
     session.isProcessing = false
     session.planManager.reset()
@@ -1226,7 +1247,10 @@ export class SessionManager {
       this.addToHistory(session, msg)
       this.broadcast(session, msg)
 
-      setTimeout(() => {
+      // Clear any previously scheduled restart to prevent duplicate spawns
+      if (session._restartTimer) clearTimeout(session._restartTimer)
+      session._restartTimer = setTimeout(() => {
+        session._restartTimer = undefined
         // Verify session still exists and hasn't been stopped
         if (!this.sessions.has(sessionId) || session._stoppedByUser) return
         // startClaude uses --resume when claudeSessionId exists, so the CLI
@@ -1793,15 +1817,16 @@ export class SessionManager {
     if (!session) return false
     session.model = model || undefined
     this.persistToDiskDebounced()
-    // Restart Claude with the new model if it's running
+    // Restart Claude with the new model if it's running.
+    // Use stopClaudeAndWait to ensure the old process fully exits before
+    // spawning a new one — avoids concurrent processes in the same worktree.
     if (session.claudeProcess?.isAlive()) {
-      this.stopClaude(sessionId)
-      session._stoppedByUser = false
-      setTimeout(() => {
-        if (this.sessions.has(sessionId) && !session._stoppedByUser) {
+      void this.stopClaudeAndWait(sessionId).then(() => {
+        if (this.sessions.has(sessionId)) {
+          session._stoppedByUser = false
           this.startClaude(sessionId)
         }
-      }, 500)
+      })
     }
     return true
   }
@@ -1825,15 +1850,16 @@ export class SessionManager {
     this.addToHistory(session, sysMsg)
     this.broadcast(session, sysMsg)
 
-    // Restart Claude with the new permission mode if it's running
+    // Restart Claude with the new permission mode if it's running.
+    // Use stopClaudeAndWait to ensure the old process fully exits before
+    // spawning a new one — avoids concurrent processes in the same worktree.
     if (session.claudeProcess?.isAlive()) {
-      this.stopClaude(sessionId)
-      session._stoppedByUser = false
-      setTimeout(() => {
-        if (this.sessions.has(sessionId) && !session._stoppedByUser) {
+      void this.stopClaudeAndWait(sessionId).then(() => {
+        if (this.sessions.has(sessionId)) {
+          session._stoppedByUser = false
           this.startClaude(sessionId)
         }
-      }, 500)
+      })
     }
     return true
   }
@@ -1843,6 +1869,7 @@ export class SessionManager {
     if (session?.claudeProcess) {
       session._stoppedByUser = true
       if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
+      if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
       session.claudeProcess.removeAllListeners()
       session.claudeProcess.stop()
       session.claudeProcess = null
@@ -1862,13 +1889,18 @@ export class SessionManager {
     const cp = session.claudeProcess
     session._stoppedByUser = true
     if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
+    if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
     cp.removeAllListeners()
     cp.stop()
-    session.claudeProcess = null
     this.broadcast(session, { type: 'claude_stopped' })
 
-    // Wait for the underlying OS process to fully exit
+    // Wait for the underlying OS process to fully exit BEFORE nulling the
+    // reference.  Previously this was set to null before the await, which
+    // allowed another caller (e.g. move_to_worktree) to call startClaude()
+    // while the old process was still alive — causing concurrent git access
+    // and index corruption.
     await cp.waitForExit()
+    session.claudeProcess = null
   }
 
   // ---------------------------------------------------------------------------
