@@ -2845,7 +2845,7 @@ describe('SessionManager', () => {
     })
 
     function match(allowedTools: string[], toolName: string, toolInput: Record<string, unknown>): boolean {
-      return (sm as any).matchesAllowedTools(allowedTools, toolName, toolInput)
+      return (sm as any).promptRouter.matchesAllowedTools(allowedTools, toolName, toolInput)
     }
 
     it('matches simple tool names', () => {
