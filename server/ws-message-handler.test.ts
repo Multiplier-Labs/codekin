@@ -4,6 +4,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // Mock config so REPOS_ROOT covers test paths
 vi.mock('./config.js', () => ({ REPOS_ROOT: '/projects' }))
 
+// Mock fs.realpathSync to return paths as-is in tests (no real filesystem)
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>()
+  return { ...actual, realpathSync: (p: string) => p }
+})
+
 import { handleWsMessage, type WsHandlerContext } from './ws-message-handler.js'
 import type { WsClientMessage, WsServerMessage, Session } from './types.js'
 

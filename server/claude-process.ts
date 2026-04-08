@@ -13,6 +13,7 @@
 
 import { spawn, execFileSync, type ChildProcess } from 'child_process'
 import { createInterface, type Interface } from 'readline'
+import { existsSync } from 'fs'
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import type { ClaudeEvent, ClaudeSystemInit, ClaudeControlRequest, ClaudeResultEvent, ClaudeStreamEvent, TaskItem, PromptQuestion, PermissionMode } from './types.js'
@@ -99,6 +100,14 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   private _sessionConflict = false
 
   /**
+   * Set to true when spawn() itself fails (ENOENT, EACCES, etc.).
+   * Distinguished from "process started but produced no output" — the latter
+   * implies a broken resume, while a spawn failure is transient and the
+   * session's claudeSessionId should be preserved for retry.
+   */
+  private _spawnFailed = false
+
+  /**
    * Set to true once the process emits at least one valid JSON event on stdout.
    * When the process exits without ever producing output, --resume likely hung
    * on a broken session — the caller should clear claudeSessionId and retry fresh.
@@ -155,16 +164,34 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   start(): void {
     if (this.proc) return
 
+    // Safety net: verify the working directory exists before spawning.
+    // spawn() with a nonexistent cwd emits an ENOENT error event and exits
+    // immediately, which wastes a restart attempt. Fail fast with a clear message.
+    if (!existsSync(this.workingDir)) {
+      this._spawnFailed = true
+      this.emit('error', `Working directory does not exist: ${this.workingDir}`)
+      // Emit exit asynchronously so the caller can wire up listeners first
+      process.nextTick(() => this.emit('exit', 1, null))
+      return
+    }
+
     // Pass through the full parent environment so the Claude CLI inherits
     // XDG paths, TERM, SHELL, and any other vars it needs.
     // Exclude ANTHROPIC_API_KEY / CLAUDE_CODE_API_KEY from inheritance —
     // stale or incorrect keys override the CLI's subscription/OAuth auth
     // and cause "Invalid API key" errors. Let the CLI use its own auth.
+    // Also strip GIT_* vars (except GIT_EDITOR) that the server may have
+    // inherited from the shell that launched it. In particular,
+    // GIT_INDEX_FILE=.git/index breaks worktrees where .git is a file,
+    // not a directory, causing all index-dependent git commands to fail.
     const API_KEY_VARS = new Set(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_API_KEY'])
     const env: Record<string, string> = {
       ...Object.fromEntries(
         Object.entries(process.env).filter(
-          (entry): entry is [string, string] => entry[1] != null && !API_KEY_VARS.has(entry[0])
+          (entry): entry is [string, string] =>
+            entry[1] != null &&
+            !API_KEY_VARS.has(entry[0]) &&
+            (!entry[0].startsWith('GIT_') || entry[0] === 'GIT_EDITOR')
         )
       ),
       ...this.extraEnv,
@@ -243,7 +270,11 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     })
 
     this.proc.on('error', (err) => {
-      console.error('[claude process error]', err.message)
+      const errno = (err as NodeJS.ErrnoException).code
+      console.error(`[claude process error] session=${this.sessionId} cwd=${this.workingDir} errno=${errno} ${err.message}`)
+      if (errno === 'ENOENT' || errno === 'EACCES') {
+        this._spawnFailed = true
+      }
       this.emit('error', err.message)
     })
 
@@ -771,6 +802,11 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   /** True if the process produced at least one valid JSON event before exiting. */
   hadOutput(): boolean {
     return this._receivedOutput
+  }
+
+  /** True if spawn() itself failed (ENOENT, EACCES) — process never started. */
+  hasSpawnFailed(): boolean {
+    return this._spawnFailed
   }
 
 }

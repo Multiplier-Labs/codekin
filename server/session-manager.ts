@@ -15,30 +15,29 @@
  * - SessionNaming: AI-powered session name generation with retry logic
  * - SessionPersistence: disk I/O for session state
  * - DiffManager: stateless git-diff operations
- * - evaluateRestart: pure restart-decision logic
+ * - SessionLifecycle: Claude process start/stop/restart and event wiring
+ * - evaluateRestart: pure restart-decision logic (used by SessionLifecycle)
  */
 
 import { randomUUID } from 'crypto'
 import { execFile } from 'child_process'
-import { existsSync, mkdirSync, copyFileSync, readdirSync, statSync } from 'fs'
+import { existsSync, mkdirSync, copyFileSync, readdirSync, statSync, rmSync } from 'fs'
 import { homedir } from 'os'
 import path from 'path'
 import { promisify } from 'util'
 import type { WebSocket } from 'ws'
-import { ClaudeProcess } from './claude-process.js'
-import { OpenCodeProcess } from './opencode-process.js'
 import type { CodingProcess, CodingProvider } from './coding-process.js'
 import { PlanManager } from './plan-manager.js'
 import { SessionArchive } from './session-archive.js'
-import type { DiffFileStatus, DiffScope, PromptQuestion, Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
+import type { DiffFileStatus, DiffScope, Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
 import { cleanupWorkspace } from './webhook-workspace.js'
 import { PORT } from './config.js'
 import { ApprovalManager } from './approval-manager.js'
+import { PromptRouter } from './prompt-router.js'
+import { SessionLifecycle } from './session-lifecycle.js'
 import { SessionNaming } from './session-naming.js'
 import { SessionPersistence } from './session-persistence.js'
-import { deriveSessionToken } from './crypto-utils.js'
 import { cleanGitEnv, DiffManager } from './diff-manager.js'
-import { evaluateRestart } from './session-restart-scheduler.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -115,6 +114,10 @@ export class SessionManager {
   private sessionPersistence: SessionPersistence
   /** Delegated diff operations (git diff, discard changes). */
   private diffManager: DiffManager
+  /** Delegated prompt routing and tool approval logic. */
+  private promptRouter: PromptRouter
+  /** Delegated Claude process lifecycle (start, stop, restart, event wiring). */
+  private sessionLifecycle: SessionLifecycle
   /** Interval handle for the idle session reaper. */
   private _idleReaperInterval: ReturnType<typeof setInterval> | null = null
 
@@ -122,6 +125,41 @@ export class SessionManager {
     this.archive = new SessionArchive()
     this._approvalManager = new ApprovalManager()
     this.diffManager = new DiffManager()
+    this.promptRouter = new PromptRouter({
+      getSession: (id) => this.sessions.get(id),
+      allSessions: () => this.sessions.values(),
+      broadcast: (session, msg) => this.broadcast(session, msg),
+      addToHistory: (session, msg) => this.addToHistory(session, msg),
+      globalBroadcast: (msg) => this._globalBroadcast?.(msg),
+      approvalManager: this._approvalManager,
+      promptListeners: this._promptListeners,
+    })
+    // Use a local ref so the getter closures capture `this` (the SessionManager instance)
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
+    const self = this
+    this.sessionLifecycle = new SessionLifecycle({
+      getSession: (id) => this.sessions.get(id),
+      hasSession: (id) => this.sessions.has(id),
+      broadcast: (session, msg) => this.broadcast(session, msg),
+      addToHistory: (session, msg) => this.addToHistory(session, msg),
+      broadcastAndHistory: (session, msg) => this.broadcastAndHistory(session, msg),
+      persistToDisk: () => this.persistToDisk(),
+      get globalBroadcast() { return self._globalBroadcast },
+      get authToken() { return self._authToken },
+      get serverPort() { return self._serverPort },
+      approvalManager: this._approvalManager,
+      promptRouter: this.promptRouter,
+      exitListeners: this._exitListeners,
+      onSystemInit: (cp, session, model) => this.onSystemInit(cp, session, model),
+      onTextEvent: (session, sessionId, text) => this.onTextEvent(session, sessionId, text),
+      onThinkingEvent: (session, summary) => this.onThinkingEvent(session, summary),
+      onToolOutputEvent: (session, content, isError) => this.onToolOutputEvent(session, content, isError),
+      onImageEvent: (session, base64, mediaType) => this.onImageEvent(session, base64, mediaType),
+      onToolActiveEvent: (session, toolName, toolInput) => this.onToolActiveEvent(session, toolName, toolInput),
+      onToolDoneEvent: (session, toolName, summary) => this.onToolDoneEvent(session, toolName, summary),
+      handleClaudeResult: (session, sessionId, result, isError) => this.handleClaudeResult(session, sessionId, result, isError),
+      buildSessionContext: (session) => this.buildSessionContext(session),
+    })
     this.sessionPersistence = new SessionPersistence(this.sessions)
     this.sessionNaming = new SessionNaming({
       getSession: (id) => this.sessions.get(id),
@@ -158,6 +196,7 @@ export class SessionManager {
       if (idleMs > IDLE_SESSION_TIMEOUT_MS) {
         console.log(`[idle-reaper] stopping idle session=${session.id} name="${session.name}" idle=${Math.round(idleMs / 60_000)}min`)
         session._stoppedByUser = true // prevent auto-restart
+        if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
         session.claudeProcess.removeAllListeners()
         session.claudeProcess.stop()
         session.claudeProcess = null
@@ -272,8 +311,16 @@ export class SessionManager {
    * Create a git worktree for a session. Creates a new branch and worktree
    * as a sibling directory of the project root.
    * Returns the worktree path on success, or null on failure.
+   *
+   * @param targetBranch — use this as the worktree branch name instead of
+   *   the default `wt/{shortId}`. The orchestrator uses this to create the
+   *   worktree directly on the desired feature branch so Claude doesn't
+   *   need to create a second branch.
+   * @param baseBranch — create the worktree branch from this ref (e.g.
+   *   'main'). Defaults to auto-detecting the default branch. Prevents
+   *   worktrees from accidentally branching off a random HEAD.
    */
-  async createWorktree(sessionId: string, workingDir: string): Promise<string | null> {
+  async createWorktree(sessionId: string, workingDir: string, targetBranch?: string, baseBranch?: string): Promise<string | null> {
     const session = this.sessions.get(sessionId)
     if (!session) return null
 
@@ -291,25 +338,73 @@ export class SessionManager {
         return null
       }
 
-      const prefix = this.getWorktreeBranchPrefix()
       const shortId = sessionId.slice(0, 8)
-      const branchName = `${prefix}${shortId}`
+      const branchName = targetBranch ?? `${this.getWorktreeBranchPrefix()}${shortId}`
       const projectName = path.basename(repoRoot)
       const worktreePath = path.resolve(repoRoot, '..', `${projectName}-wt-${shortId}`)
+
+      // Auto-detect the default branch if baseBranch not specified.
+      // Tries origin/HEAD, then falls back to common names.
+      let resolvedBase: string | undefined = baseBranch
+      if (!resolvedBase) {
+        resolvedBase = await this.detectDefaultBranch(repoRoot, env) ?? undefined
+      }
+
+      // Determine if this is an ephemeral branch (wt/ prefix, generated by us)
+      // vs a caller-supplied branch name (e.g. fix/feature-xyz from orchestrator).
+      // Caller-supplied branches must NEVER be force-deleted — they may contain
+      // unique commits from a previous session or manual work.
+      const isEphemeralBranch = !targetBranch
+
+      // Check if the target branch already exists as a local branch
+      let branchExists = false
+      try {
+        await execFileAsync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branchName}`], { cwd: repoRoot, env, timeout: 3000 })
+        branchExists = true
+      } catch {
+        // Branch doesn't exist — will be created
+      }
 
       // Clean up stale state from previous failed attempts:
       // 1. Prune orphaned worktree entries (directory gone but git still tracks it)
       await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot, env, timeout: 5000 })
         .catch((e: unknown) => console.warn(`[worktree] prune failed:`, e instanceof Error ? e.message : e))
-      // 2. Remove existing worktree directory if leftover from a partial failure
+      // 2. Remove existing worktree directory if leftover from a partial failure.
+      //    If git doesn't recognise it as a worktree, force-remove the directory
+      //    so that `git worktree add` below doesn't fail with "already exists".
       await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot, env, timeout: 5000 })
-        .catch((e: unknown) => console.debug(`[worktree] remove prior worktree (expected if fresh):`, e instanceof Error ? e.message : e))
-      // 3. Delete the branch if it exists (leftover from a failed worktree add)
-      await execFileAsync('git', ['branch', '-D', branchName], { cwd: repoRoot, env, timeout: 5000 })
-        .catch((e: unknown) => console.debug(`[worktree] branch cleanup (expected if fresh):`, e instanceof Error ? e.message : e))
+        .catch((e: unknown) => {
+          console.debug(`[worktree] remove prior worktree (expected if fresh):`, e instanceof Error ? e.message : e)
+          // Git doesn't know about it — nuke the stale directory if it still exists
+          if (existsSync(worktreePath)) {
+            try {
+              rmSync(worktreePath, { recursive: true, force: true })
+              console.log(`[worktree] Force-removed stale directory: ${worktreePath}`)
+            } catch (rmErr) {
+              console.warn(`[worktree] Failed to force-remove stale directory ${worktreePath}:`, rmErr instanceof Error ? rmErr.message : rmErr)
+            }
+          }
+        })
+      // 3. Only delete ephemeral branches (wt/*) during cleanup — never caller-supplied ones
+      if (isEphemeralBranch && branchExists) {
+        await execFileAsync('git', ['branch', '-D', branchName], { cwd: repoRoot, env, timeout: 5000 })
+          .catch((e: unknown) => console.debug(`[worktree] ephemeral branch cleanup:`, e instanceof Error ? e.message : e))
+        branchExists = false
+      }
 
-      // Create the worktree with a new branch
-      await execFileAsync('git', ['worktree', 'add', '-b', branchName, worktreePath], {
+      // Create the worktree:
+      // - Existing branch: check it out in the worktree (no -b)
+      // - New branch: create with -b, branching from the resolved base
+      let worktreeArgs: string[]
+      if (branchExists) {
+        worktreeArgs = ['worktree', 'add', worktreePath, branchName]
+        console.log(`[worktree] Using existing branch ${branchName}`)
+      } else {
+        worktreeArgs = ['worktree', 'add', '-b', branchName, worktreePath]
+        if (resolvedBase) worktreeArgs.push(resolvedBase)
+        console.log(`[worktree] Creating new branch ${branchName}${resolvedBase ? ` from ${resolvedBase}` : ''}`)
+      }
+      await execFileAsync('git', worktreeArgs, {
         cwd: repoRoot,
         env,
         timeout: 15000,
@@ -411,8 +506,12 @@ export class SessionManager {
   /**
    * Clean up a git worktree and its branch. Runs asynchronously and logs errors
    * but never throws — session deletion must not be blocked by cleanup failures.
+   * Retries once on failure after a short delay.
    */
-  private cleanupWorktree(worktreePath: string, repoDir: string): void {
+  private cleanupWorktree(worktreePath: string, repoDir: string, attempt = 1): void {
+    const MAX_CLEANUP_ATTEMPTS = 2
+    const RETRY_DELAY_MS = 3000
+
     void (async () => {
       try {
         // Resolve the actual repo root (repoDir may itself be a worktree)
@@ -433,9 +532,63 @@ export class SessionManager {
         await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot, timeout: 5000 })
           .catch((e: unknown) => console.warn(`[worktree] prune after cleanup failed:`, e instanceof Error ? e.message : e))
       } catch (err) {
-        console.warn(`[worktree] Failed to clean up worktree ${worktreePath}:`, err instanceof Error ? err.message : err)
+        const errMsg = err instanceof Error ? err.message : String(err)
+        if (attempt < MAX_CLEANUP_ATTEMPTS) {
+          console.warn(`[worktree] Failed to clean up worktree ${worktreePath} (attempt ${attempt}/${MAX_CLEANUP_ATTEMPTS}): ${errMsg} — retrying in ${RETRY_DELAY_MS}ms`)
+          setTimeout(() => this.cleanupWorktree(worktreePath, repoDir, attempt + 1), RETRY_DELAY_MS)
+        } else {
+          console.error(`[worktree] Failed to clean up worktree ${worktreePath} after ${MAX_CLEANUP_ATTEMPTS} attempts: ${errMsg}`)
+          // Last resort: force-remove the directory so it doesn't block future
+          // worktree creation or leave the session in a broken restart loop.
+          if (existsSync(worktreePath)) {
+            try {
+              rmSync(worktreePath, { recursive: true, force: true })
+              console.log(`[worktree] Force-removed stale worktree directory: ${worktreePath}`)
+            } catch (rmErr) {
+              console.error(`[worktree] Failed to force-remove ${worktreePath}:`, rmErr instanceof Error ? rmErr.message : rmErr)
+            }
+          }
+        }
       }
     })()
+  }
+
+  /**
+   * Detect the default branch of a repository (main, master, etc.).
+   * Tries `git symbolic-ref refs/remotes/origin/HEAD` first, then checks
+   * for common branch names. Returns null if detection fails.
+   */
+  private async detectDefaultBranch(repoRoot: string, env: NodeJS.ProcessEnv): Promise<string | null> {
+    // Try origin/HEAD (set by git clone or git remote set-head)
+    try {
+      const { stdout } = await execFileAsync(
+        'git', ['symbolic-ref', 'refs/remotes/origin/HEAD'],
+        { cwd: repoRoot, env, timeout: 5000 },
+      )
+      const ref = stdout.trim() // e.g. "refs/remotes/origin/main"
+      if (ref) {
+        const branch = ref.replace('refs/remotes/origin/', '')
+        console.log(`[worktree] Detected default branch from origin/HEAD: ${branch}`)
+        return branch
+      }
+    } catch {
+      // origin/HEAD not set — fall through to heuristics
+    }
+
+    // Check for common default branch names — use show-ref to verify
+    // these are actual local branches, not tags or other refs
+    for (const candidate of ['main', 'master']) {
+      try {
+        await execFileAsync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${candidate}`], { cwd: repoRoot, env, timeout: 3000 })
+        console.log(`[worktree] Detected default branch by name: ${candidate}`)
+        return candidate
+      } catch {
+        // branch doesn't exist, try next
+      }
+    }
+
+    console.warn(`[worktree] Could not detect default branch for ${repoRoot} — worktree will branch from HEAD`)
+    return null
   }
 
   /** Get the configured worktree branch prefix (defaults to 'wt/'). */
@@ -483,38 +636,7 @@ export class SessionManager {
     source: string
     prompts: Array<{ requestId: string; promptType: 'permission' | 'question'; toolName: string; toolInput: Record<string, unknown> }>
   }> {
-    const results: Array<{
-      sessionId: string
-      sessionName: string
-      source: string
-      prompts: Array<{ requestId: string; promptType: 'permission' | 'question'; toolName: string; toolInput: Record<string, unknown> }>
-    }> = []
-
-    for (const session of this.sessions.values()) {
-      const prompts: Array<{ requestId: string; promptType: 'permission' | 'question'; toolName: string; toolInput: Record<string, unknown> }> = []
-
-      for (const [reqId, pending] of session.pendingToolApprovals) {
-        prompts.push({
-          requestId: reqId,
-          promptType: pending.toolName === 'AskUserQuestion' ? 'question' : 'permission',
-          toolName: pending.toolName,
-          toolInput: pending.toolInput,
-        })
-      }
-      for (const [reqId, pending] of session.pendingControlRequests) {
-        prompts.push({
-          requestId: reqId,
-          promptType: pending.toolName === 'AskUserQuestion' ? 'question' : 'permission',
-          toolName: pending.toolName,
-          toolInput: pending.toolInput,
-        })
-      }
-
-      if (prompts.length > 0) {
-        results.push({ sessionId: session.id, sessionName: session.name, source: session.source, prompts })
-      }
-    }
-    return results
+    return this.promptRouter.getPendingPrompts()
   }
 
   /** Clear the isProcessing flag for a session and broadcast the update. */
@@ -655,18 +777,29 @@ export class SessionManager {
     if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
     if (session._namingTimer) clearTimeout(session._namingTimer)
     if (session._leaveGraceTimer) clearTimeout(session._leaveGraceTimer)
+    if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
 
-    // Kill claude process if running
-    if (session.claudeProcess) {
-      session.claudeProcess.stop()
-      session.claudeProcess = null
-    }
+    // Kill claude process if running — remove listeners first to prevent the
+    // exit handler from triggering an auto-restart on a deleted session.
+    // Wait for the process to fully exit before worktree cleanup so we don't
+    // run `git worktree remove` while Claude is still performing git operations.
+    const exitPromise = session.claudeProcess
+      ? (() => {
+          const cp = session.claudeProcess
+          cp.removeAllListeners()
+          cp.stop()
+          session.claudeProcess = null
+          return cp.waitForExit()
+        })()
+      : Promise.resolve()
 
     this.archiveSessionIfWorthSaving(session)
 
-    // Clean up git worktree if this session used one
+    // Clean up git worktree if this session used one — deferred until process exits
     if (session.worktreePath) {
-      this.cleanupWorktree(session.worktreePath, session.groupDir ?? session.workingDir)
+      const wtPath = session.worktreePath
+      const repoDir = session.groupDir ?? session.workingDir
+      void exitPromise.then(() => this.cleanupWorktree(wtPath, repoDir))
     }
 
     // Clean up webhook workspace directory if applicable
@@ -724,161 +857,18 @@ export class SessionManager {
 
   /**
    * Spawn (or re-spawn) a Claude CLI process for a session.
-   * Wires up all event handlers for streaming text, tools, prompts, and auto-restart.
+   * Delegates to SessionLifecycle.
    */
   startClaude(sessionId: string): boolean {
-    const session = this.sessions.get(sessionId)
-    if (!session) return false
-
-    // Clear stopped flag on explicit start
-    session._stoppedByUser = false
-
-    // Kill existing process if any — remove listeners first to prevent the
-    // old process's exit handler from clobbering the new process reference
-    // and triggering an unwanted auto-restart cycle.
-    if (session.claudeProcess) {
-      session.claudeProcess.removeAllListeners()
-      session.claudeProcess.stop()
-    }
-
-    // Derive a session-scoped token instead of forwarding the master auth token.
-    // This limits child process privileges to approve/deny for their own session only.
-    const sessionToken = this._authToken
-      ? deriveSessionToken(this._authToken, sessionId)
-      : ''
-    // Both CODEKIN_TOKEN (legacy name, used by older hooks) and CODEKIN_AUTH_TOKEN
-    // (current canonical name) are set to the same derived value for backward compatibility.
-    const extraEnv: Record<string, string> = {
-      CODEKIN_SESSION_ID: sessionId,
-      CODEKIN_PORT: String(this._serverPort || PORT),
-      CODEKIN_TOKEN: sessionToken,
-      CODEKIN_AUTH_TOKEN: sessionToken,
-      CODEKIN_SESSION_TYPE: session.source || 'manual',
-      ...(session.permissionMode === 'dangerouslySkipPermissions' ? { CODEKIN_SKIP_PERMISSIONS: '1' } : {}),
-    }
-    // Pass CLAUDE_PROJECT_DIR so hooks and CLAUDE.md resolve correctly
-    // even when the session's working directory differs from the project root
-    // (e.g. worktrees, webhook workspaces).  Note: this does NOT control
-    // session storage path — Claude CLI uses the CWD for that.
-    if (session.groupDir) {
-      extraEnv.CLAUDE_PROJECT_DIR = session.groupDir
-    } else if (process.env.CLAUDE_PROJECT_DIR) {
-      extraEnv.CLAUDE_PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR
-    }
-    // When claudeSessionId exists, the session has run before and a JSONL file
-    // exists on disk.  Use --resume (not --session-id) to continue it — --session-id
-    // creates a *new* session and fails with "already in use" if the JSONL exists.
-    const resume = !!session.claudeSessionId
-
-    // Build comprehensive allowedTools from session-level overrides + registry approvals
-    const repoDir = session.groupDir ?? session.workingDir
-    const registryPatterns = this._approvalManager.getAllowedToolsForRepo(repoDir)
-    const mergedAllowedTools = [...new Set([...(session.allowedTools || []), ...registryPatterns])]
-
-    let cp: CodingProcess
-    if (session.provider === 'opencode') {
-      // Note: addDirs and allowedTools are not passed to OpenCode — it uses
-      // its own permission config in .opencode/config.jsonc. The x-opencode-directory
-      // header handles per-session working directory routing on the shared server.
-      cp = new OpenCodeProcess(session.workingDir, {
-        sessionId: sessionId,
-        opencodeSessionId: session.claudeSessionId || undefined,
-        model: session.model,
-        extraEnv,
-        permissionMode: session.permissionMode,
-      })
-    } else {
-      cp = new ClaudeProcess(session.workingDir, {
-        sessionId: session.claudeSessionId || undefined,
-        extraEnv,
-        model: session.model,
-        permissionMode: session.permissionMode,
-        resume,
-        allowedTools: mergedAllowedTools,
-        addDirs: session.addDirs,
-      })
-    }
-
-    this.wireClaudeEvents(cp, session, sessionId)
-
-    cp.start()
-    session.claudeProcess = cp
-    this._globalBroadcast?.({ type: 'sessions_updated' })
-
-    const startMsg: WsServerMessage = { type: 'claude_started', sessionId }
-    this.addToHistory(session, startMsg)
-    this.broadcast(session, startMsg)
-    return true
+    return this.sessionLifecycle.startClaude(sessionId)
   }
 
   /**
-   * Wait for a session's Claude process to emit its system_init event,
-   * indicating it is ready to accept input. Resolves immediately if the
-   * session already has a claudeSessionId (process previously initialized).
-   * Times out after `timeoutMs` (default 30s) to avoid hanging indefinitely.
+   * Wait for a session's Claude process to emit its system_init event.
+   * Delegates to SessionLifecycle.
    */
   waitForReady(sessionId: string, timeoutMs = 30_000): Promise<void> {
-    const session = this.sessions.get(sessionId)
-    if (!session?.claudeProcess) return Promise.resolve()
-    // If the process is already fully initialized, resolve immediately.
-    // Uses isReady() which accounts for provider differences: Claude is ready
-    // as soon as alive (stdin buffered), OpenCode needs alive + opencodeSessionId.
-    if (session.claudeProcess.isReady()) return Promise.resolve()
-
-    return new Promise<void>((resolve) => {
-      const done = () => { clearTimeout(timer); resolve() }
-      const timer = setTimeout(() => {
-        console.warn(`[waitForReady] Timed out waiting for system_init on ${sessionId} after ${timeoutMs}ms`)
-        session.claudeProcess?.removeListener('exit', done)
-        resolve()
-      }, timeoutMs)
-      session.claudeProcess!.once('system_init', done)
-      session.claudeProcess!.once('exit', done) // fail-fast if process dies during init
-    })
-  }
-
-  /**
-   * Attach all ClaudeProcess event listeners for a session.
-   * Extracted from startClaude() to keep that method focused on process setup.
-   */
-  private wireClaudeEvents(cp: CodingProcess, session: Session, sessionId: string): void {
-    cp.on('system_init', (model) => this.onSystemInit(cp, session, model))
-    cp.on('text', (text) => this.onTextEvent(session, sessionId, text))
-    cp.on('thinking', (summary) => this.onThinkingEvent(session, summary))
-    cp.on('tool_output', (content, isError) => this.onToolOutputEvent(session, content, isError))
-    cp.on('image', (base64Data, mediaType) => this.onImageEvent(session, base64Data, mediaType))
-    cp.on('tool_active', (toolName, toolInput) => this.onToolActiveEvent(session, toolName, toolInput))
-    cp.on('tool_done', (toolName, summary) => this.onToolDoneEvent(session, toolName, summary))
-    cp.on('planning_mode', (active) => {
-      // Route EnterPlanMode through PlanManager for UI state tracking.
-      // ExitPlanMode (active=false) is ignored here — the PreToolUse hook
-      // is the enforcement gate, and it calls handleExitPlanModeApproval()
-      // which transitions PlanManager to 'reviewing'.
-      if (active) {
-        session.planManager.onEnterPlanMode()
-      }
-      // ExitPlanMode stream event intentionally ignored — hook handles it.
-    })
-    cp.on('todo_update', (tasks) => { this.broadcastAndHistory(session, { type: 'todo_update', tasks }) })
-    cp.on('prompt', (...args) => this.onPromptEvent(session, ...args))
-    cp.on('control_request', (requestId, toolName, toolInput) => this.onControlRequestEvent(cp, session, sessionId, requestId, toolName, toolInput))
-    cp.on('result', (result, isError) => {
-      session.planManager.onTurnEnd()
-      this.handleClaudeResult(session, sessionId, result, isError)
-    })
-    cp.on('error', (message) => this.broadcast(session, { type: 'error', message }))
-    cp.on('exit', (code, signal) => {
-      // Capture process diagnostics before removing listeners — these are
-      // ClaudeProcess-specific; OpenCodeProcess always returns false/true.
-      const sessionConflict = 'hasSessionConflict' in cp && typeof (cp as any).hasSessionConflict === 'function'
-        ? (cp as any).hasSessionConflict() as boolean
-        : false
-      const producedOutput = 'hadOutput' in cp && typeof (cp as any).hadOutput === 'function'
-        ? (cp as any).hadOutput() as boolean
-        : true
-      cp.removeAllListeners()
-      this.handleClaudeExit(session, sessionId, code, signal, sessionConflict, producedOutput)
-    })
+    return this.sessionLifecycle.waitForReady(sessionId, timeoutMs)
   }
 
   /** Broadcast a message and add it to the session's output history. */
@@ -939,106 +929,6 @@ export class SessionManager {
     this.broadcastAndHistory(session, { type: 'tool_done', toolName, summary })
   }
 
-  private onPromptEvent(
-    session: Session,
-    promptType: 'permission' | 'question',
-    question: string,
-    options: Array<{ label: string; value: string; description?: string }>,
-    multiSelect: boolean | undefined,
-    toolName: string | undefined,
-    toolInput: Record<string, unknown> | undefined,
-    requestId: string | undefined,
-    questions: PromptQuestion[] | undefined,
-  ): void {
-    const promptMsg: WsServerMessage = {
-      type: 'prompt',
-      promptType,
-      question,
-      options,
-      multiSelect,
-      toolName,
-      toolInput,
-      requestId,
-      ...(questions ? { questions } : {}),
-    }
-    if (requestId) {
-      session.pendingControlRequests.set(requestId, { requestId, toolName: 'AskUserQuestion', toolInput: toolInput || {}, promptMsg })
-    }
-    this.broadcast(session, promptMsg)
-
-    // Notify prompt listeners (orchestrator, child monitor, etc.)
-    for (const listener of this._promptListeners) {
-      try { listener(session.id, promptType, toolName, requestId) } catch { /* listener error */ }
-    }
-  }
-
-  private onControlRequestEvent(
-    cp: CodingProcess,
-    session: Session,
-    sessionId: string,
-    requestId: string,
-    toolName: string,
-    toolInput: Record<string, unknown>,
-  ): void {
-    if (typeof requestId !== 'string' || !/^[\w-]{1,64}$/.test(requestId)) {
-      console.warn(`[control_request] Rejected invalid requestId: ${JSON.stringify(requestId)}`)
-      return
-    }
-    console.log(`[control_request] session=${sessionId} tool=${toolName} requestId=${requestId}`)
-
-    if (this.resolveAutoApproval(session, toolName, toolInput) !== 'prompt') {
-      console.log(`[control_request] auto-approved: ${toolName}`)
-      cp.sendControlResponse(requestId, 'allow')
-      return
-    }
-
-    // Prevent double-gating: if a PreToolUse hook is already handling approval
-    // for this tool, auto-approve the control_request to avoid duplicate entries.
-    // Without this, both pendingToolApprovals and pendingControlRequests contain
-    // entries for the same tool invocation, causing stale-entry races when the
-    // orchestrator tries to respond via the REST API.
-    for (const pending of session.pendingToolApprovals.values()) {
-      if (pending.toolName === toolName) {
-        console.log(`[control_request] auto-approving ${toolName} (PreToolUse hook already handling approval)`)
-        cp.sendControlResponse(requestId, 'allow')
-        return
-      }
-    }
-
-    const question = this.summarizeToolPermission(toolName, toolInput)
-    const neverAutoApprove = ApprovalManager.NEVER_AUTO_APPROVE_TOOLS.has(toolName)
-    const options = [
-      { label: 'Allow', value: 'allow' },
-      ...(!neverAutoApprove ? [{ label: 'Always Allow', value: 'always_allow' }] : []),
-      { label: 'Deny', value: 'deny' },
-    ]
-    const promptMsg: WsServerMessage = {
-      type: 'prompt',
-      promptType: 'permission',
-      question,
-      options,
-      toolName,
-      toolInput,
-      requestId,
-    }
-    session.pendingControlRequests.set(requestId, { requestId, toolName, toolInput, promptMsg })
-
-    if (session.clients.size > 0) {
-      this.broadcast(session, promptMsg)
-    } else {
-      console.log(`[control_request] no clients connected, waiting for client to join: ${toolName}`)
-      this._globalBroadcast?.({
-        ...promptMsg,
-        sessionId,
-        sessionName: session.name,
-      })
-    }
-
-    // Notify prompt listeners (orchestrator, child monitor, etc.)
-    for (const listener of this._promptListeners) {
-      try { listener(sessionId, 'permission', toolName, requestId) } catch { /* listener error */ }
-    }
-  }
 
   /**
    * Handle a Claude process 'result' event: update session state, apply API
@@ -1094,6 +984,7 @@ export class SessionManager {
   private handleApiRetry(session: Session, sessionId: string, result: string): boolean {
     if (!session._lastUserInput || !this.isRetryableApiError(result)) {
       session._apiRetryCount = 0
+      session._apiRetryScheduled = false
       return false
     }
 
@@ -1101,10 +992,14 @@ export class SessionManager {
     if (session._lastUserInputAt && Date.now() - session._lastUserInputAt > 60_000) {
       console.log(`[api-retry] skipping stale retry for session=${sessionId} (input age=${Math.round((Date.now() - session._lastUserInputAt) / 1000)}s)`)
       session._apiRetryCount = 0
+      session._apiRetryScheduled = false
       return false
     }
 
     if (session._apiRetryCount < MAX_API_RETRIES) {
+      // Prevent duplicate scheduling from concurrent error paths
+      if (session._apiRetryScheduled) return true
+
       session._apiRetryCount++
       const attempt = session._apiRetryCount
       const delay = API_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
@@ -1120,8 +1015,10 @@ export class SessionManager {
       console.log(`[api-retry] session=${sessionId} attempt=${attempt}/${MAX_API_RETRIES} delay=${delay}ms error=${result.slice(0, 200)}`)
 
       if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
+      session._apiRetryScheduled = true
       session._apiRetryTimer = setTimeout(() => {
         session._apiRetryTimer = undefined
+        session._apiRetryScheduled = false
         if (!session.claudeProcess?.isAlive() || session._stoppedByUser) return
         console.log(`[api-retry] resending message for session=${sessionId} attempt=${attempt}`)
         session.claudeProcess.sendMessage(session._lastUserInput!)
@@ -1138,6 +1035,7 @@ export class SessionManager {
     this.addToHistory(session, exhaustedMsg)
     this.broadcast(session, exhaustedMsg)
     session._apiRetryCount = 0
+    session._apiRetryScheduled = false
     return false
   }
 
@@ -1147,6 +1045,7 @@ export class SessionManager {
    */
   private finalizeResult(session: Session, sessionId: string, result: string, isError: boolean): void {
     session._apiRetryCount = 0
+    session._apiRetryScheduled = false
     session._lastUserInput = undefined
     session._lastUserInputAt = undefined
 
@@ -1183,100 +1082,9 @@ export class SessionManager {
     }
   }
 
-  /**
-   * Handle a Claude process 'exit' event: clean up state, notify exit listeners,
-   * and either auto-restart (within limits) or broadcast the final exit message.
-   *
-   * Uses evaluateRestart() for the restart decision, keeping this method focused
-   * on state updates, listener notification, and message broadcasting.
-   */
-  private handleClaudeExit(session: Session, sessionId: string, code: number | null, signal: string | null, sessionConflict: boolean, producedOutput: boolean): void {
-    session.claudeProcess = null
-    session.isProcessing = false
-    session.planManager.reset()
-    this._globalBroadcast?.({ type: 'sessions_updated' })
-
-    // If the process exited without ever producing stdout output, --resume
-    // hung on a broken/stale session. Clear claudeSessionId so the next
-    // restart attempt uses a fresh session instead of retrying the same
-    // broken resume — which would just hang again.
-    if (!producedOutput && session.claudeSessionId) {
-      console.warn(`[restart] Session ${sessionId} produced no output before exit — clearing claudeSessionId to force fresh session`)
-      session.claudeSessionId = null
-    }
-
-    const action = evaluateRestart({
-      restartCount: session.restartCount,
-      lastRestartAt: session.lastRestartAt,
-      stoppedByUser: session._stoppedByUser || sessionConflict,
-    })
-
-    if (action.kind === 'stopped_by_user') {
-      for (const listener of this._exitListeners) {
-        try { listener(sessionId, code, signal, false) } catch { /* listener error */ }
-      }
-      const text = sessionConflict
-        ? 'Claude process exited: session ID is already in use by another process. Please restart manually.'
-        : `Claude process exited: code=${code}, signal=${signal}`
-      const msg: WsServerMessage = { type: 'system_message', subtype: 'exit', text }
-      this.addToHistory(session, msg)
-      this.broadcast(session, msg)
-      this.broadcast(session, { type: 'exit', code: code ?? -1, signal })
-      return
-    }
-
-    if (action.kind === 'restart') {
-      session.restartCount = action.updatedCount
-      session.lastRestartAt = action.updatedLastRestartAt
-
-      for (const listener of this._exitListeners) {
-        try { listener(sessionId, code, signal, true) } catch { /* listener error */ }
-      }
-
-      const msg: WsServerMessage = {
-        type: 'system_message',
-        subtype: 'restart',
-        text: `Claude process exited unexpectedly (code=${code}, signal=${signal}). Restarting (attempt ${action.attempt}/${action.maxAttempts})...`,
-      }
-      this.addToHistory(session, msg)
-      this.broadcast(session, msg)
-
-      setTimeout(() => {
-        // Verify session still exists and hasn't been stopped
-        if (!this.sessions.has(sessionId) || session._stoppedByUser) return
-        // startClaude uses --resume when claudeSessionId exists, so the CLI
-        // picks up the full conversation history from the JSONL automatically.
-        this.startClaude(sessionId)
-
-        // Fallback: if claudeSessionId was already null (fresh session that
-        // crashed before system_init), inject a context summary so the new
-        // session has some awareness of prior conversation.
-        if (!session.claudeSessionId && session.claudeProcess && session.outputHistory.length > 0) {
-          session.claudeProcess.once('system_init', () => {
-            const context = this.buildSessionContext(session)
-            if (context) {
-              session.claudeProcess?.sendMessage(
-                context + '\n\n[Session resumed after process restart. Continue where you left off. If you were in the middle of a task, resume it.]',
-              )
-            }
-          })
-        }
-      }, action.delayMs)
-      return
-    }
-
-    // action.kind === 'exhausted'
-    for (const listener of this._exitListeners) {
-      try { listener(sessionId, code, signal, false) } catch { /* listener error */ }
-    }
-    const msg: WsServerMessage = {
-      type: 'system_message',
-      subtype: 'error',
-      text: `Claude process exited unexpectedly (code=${code}, signal=${signal}). Auto-restart disabled after ${action.maxAttempts} attempts. Please restart manually.`,
-    }
-    this.addToHistory(session, msg)
-    this.broadcast(session, msg)
-    this.broadcast(session, { type: 'exit', code: code ?? -1, signal })
+  /** Handle Claude process exit. Delegates to SessionLifecycle. @internal — used by tests. */
+  handleClaudeExit(...args: Parameters<SessionLifecycle['handleClaudeExit']>): void {
+    this.sessionLifecycle.handleClaudeExit(...args)
   }
 
   /**
@@ -1362,483 +1170,20 @@ export class SessionManager {
   }
 
   /**
-   * Route a user's prompt response to the correct handler: pending tool approval
-   * (from PermissionRequest hook), pending control request (from control_request
-   * fallback path), or plain message fallback.
+   * Route a user's prompt response to the correct handler.
+   * Delegates to PromptRouter.
    */
   sendPromptResponse(sessionId: string, value: string | string[], requestId?: string): void {
-    const session = this.sessions.get(sessionId)
-    if (!session) return
-    session._lastActivityAt = Date.now()
-
-    // ExitPlanMode approvals are handled through the normal pendingToolApprovals
-    // path (routed via the PreToolUse hook). No special plan_review_ prefix needed.
-
-    // Check for pending tool approval from PreToolUse hook
-    if (!requestId) {
-      const totalPending = session.pendingToolApprovals.size + session.pendingControlRequests.size
-      if (totalPending === 1) {
-        // Exactly one pending prompt — safe to infer the target
-        const soleApproval = session.pendingToolApprovals.size === 1
-          ? session.pendingToolApprovals.values().next().value
-          : undefined
-        if (soleApproval) {
-          console.warn(`[prompt_response] no requestId, routing to sole pending tool approval: ${soleApproval.toolName}`)
-          this.resolveToolApproval(session, soleApproval, value)
-          return
-        }
-        const soleControl = session.pendingControlRequests.size === 1
-          ? session.pendingControlRequests.values().next().value
-          : undefined
-        if (soleControl) {
-          console.warn(`[prompt_response] no requestId, routing to sole pending control request: ${soleControl.toolName}`)
-          requestId = soleControl.requestId
-        }
-      } else if (totalPending > 1) {
-        console.warn(`[prompt_response] no requestId with ${totalPending} pending prompts — rejecting to prevent misrouted response`)
-        this.broadcast(session, {
-          type: 'system_message',
-          subtype: 'error',
-          text: 'Prompt response could not be routed: multiple prompts pending. Please refresh and try again.',
-        })
-        return
-      } else {
-        console.warn(`[prompt_response] no requestId, no pending prompts — forwarding as user message`)
-      }
-    }
-    const approval = requestId ? session.pendingToolApprovals.get(requestId) : undefined
-    if (approval) {
-      this.resolveToolApproval(session, approval, value)
-      return
-    }
-
-    if (!session.claudeProcess?.isAlive()) return
-
-    // Find matching pending control request
-    const pending = requestId ? session.pendingControlRequests.get(requestId) : undefined
-
-    if (pending) {
-      session.pendingControlRequests.delete(pending.requestId)
-      // Dismiss prompt on all other clients viewing this session
-      this.broadcast(session, { type: 'prompt_dismiss', requestId: pending.requestId })
-
-      if (pending.toolName === 'AskUserQuestion') {
-        this.handleAskUserQuestion(session, pending, value)
-      } else {
-        this.sendControlResponseForRequest(session, pending, value)
-      }
-    } else {
-      // Fallback: no pending control request, send as plain user message
-      const answer = Array.isArray(value) ? value.join(', ') : value
-      session.claudeProcess.sendMessage(answer)
-    }
-  }
-
-  /** Decode the allow/deny/always/pattern intent from a prompt response value. */
-  private decodeApprovalValue(value: string | string[]): { isDeny: boolean; isAlwaysAllow: boolean; isApprovePattern: boolean } {
-    const first = Array.isArray(value) ? value[0] : value
-    return {
-      isDeny: first === 'deny',
-      isAlwaysAllow: first === 'always_allow',
-      isApprovePattern: first === 'approve_pattern',
-    }
-  }
-
-  /** Resolve a pending PreToolUse hook approval and update auto-approval registries. */
-  private resolveToolApproval(
-    session: Session,
-    approval: { resolve: (r: { allow: boolean; always: boolean; answer?: string }) => void; toolName: string; toolInput: Record<string, unknown>; requestId: string },
-    value: string | string[],
-  ): void {
-    // AskUserQuestion: the value IS the user's answer, not a permission decision
-    if (approval.toolName === 'AskUserQuestion') {
-      const answer = Array.isArray(value) ? value.join(', ') : value
-      console.log(`[tool-approval] resolving AskUserQuestion: answer=${answer.slice(0, 100)}`)
-      approval.resolve({ allow: true, always: false, answer })
-      session.pendingToolApprovals.delete(approval.requestId)
-      this.broadcast(session, { type: 'prompt_dismiss', requestId: approval.requestId })
-      return
-    }
-
-    // ExitPlanMode: route through PlanManager for state tracking.
-    // The hook will convert allow→deny-with-approval-message (CLI workaround).
-    if (approval.toolName === 'ExitPlanMode') {
-      const first = Array.isArray(value) ? value[0] : value
-      const isDeny = first === 'deny'
-      if (isDeny) {
-        // Extract feedback text if present (value may be ['deny', 'feedback text'])
-        const feedback = Array.isArray(value) && value.length > 1 ? value[1] : undefined
-        const reason = session.planManager.deny(approval.requestId, feedback)
-        console.log(`[plan-approval] denied: ${reason}`)
-        approval.resolve({ allow: false, always: false, answer: reason || undefined })
-      } else {
-        session.planManager.approve(approval.requestId)
-        console.log(`[plan-approval] approved`)
-        approval.resolve({ allow: true, always: false })
-      }
-      session.pendingToolApprovals.delete(approval.requestId)
-      this.broadcast(session, { type: 'prompt_dismiss', requestId: approval.requestId })
-      return
-    }
-
-    const { isDeny, isAlwaysAllow, isApprovePattern } = this.decodeApprovalValue(value)
-
-    if (isAlwaysAllow && !isDeny) {
-      this._approvalManager.saveAlwaysAllow(session.groupDir ?? session.workingDir, approval.toolName, approval.toolInput)
-    }
-    if (isApprovePattern && !isDeny) {
-      this._approvalManager.savePatternApproval(session.groupDir ?? session.workingDir, approval.toolName, approval.toolInput)
-    }
-
-    console.log(`[tool-approval] resolving: allow=${!isDeny} always=${isAlwaysAllow} pattern=${isApprovePattern} tool=${approval.toolName}`)
-    approval.resolve({ allow: !isDeny, always: isAlwaysAllow || isApprovePattern })
-    session.pendingToolApprovals.delete(approval.requestId)
-    this.broadcast(session, { type: 'prompt_dismiss', requestId: approval.requestId })
-  }
-
-  /**
-   * Send an AskUserQuestion control response, mapping the user's answer(s) into
-   * the structured answers map the tool expects.
-   */
-  private handleAskUserQuestion(
-    session: Session,
-    pending: { requestId: string; toolInput: Record<string, unknown> },
-    value: string | string[],
-  ): void {
-    const questions = pending.toolInput?.questions as Array<{ question: string }> | undefined
-    const updatedInput: Record<string, unknown> = { ...pending.toolInput }
-
-    let answers: Record<string, string> = {}
-    if (typeof value === 'string') {
-      // Try parsing as JSON answers map (multi-question flow)
-      try {
-        const parsed = JSON.parse(value)
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          answers = parsed as Record<string, string>
-        } else if (Array.isArray(questions) && questions.length > 0) {
-          answers[questions[0].question] = value
-        }
-      } catch {
-        // Plain string answer — map to first question
-        if (Array.isArray(questions) && questions.length > 0) {
-          answers[questions[0].question] = value
-        }
-      }
-    } else if (Array.isArray(value) && Array.isArray(questions) && questions.length > 0) {
-      // Array of answers — map to first question (multi-select single question)
-      answers[questions[0].question] = value.join(', ')
-    }
-
-    updatedInput.answers = answers
-    session.claudeProcess!.sendControlResponse(pending.requestId, 'allow', updatedInput)
-  }
-
-  /** Send a permission control response (allow/always_allow/approve_pattern/deny). */
-  private sendControlResponseForRequest(
-    session: Session,
-    pending: { requestId: string; toolName: string; toolInput: Record<string, unknown> },
-    value: string | string[],
-  ): void {
-    const { isDeny, isAlwaysAllow, isApprovePattern } = this.decodeApprovalValue(value)
-
-    if (isAlwaysAllow) {
-      this._approvalManager.saveAlwaysAllow(session.groupDir ?? session.workingDir, pending.toolName, pending.toolInput)
-    }
-    if (isApprovePattern) {
-      this._approvalManager.savePatternApproval(session.groupDir ?? session.workingDir, pending.toolName, pending.toolInput)
-    }
-
-    const behavior = isDeny ? 'deny' : 'allow'
-    session.claudeProcess!.sendControlResponse(pending.requestId, behavior)
+    this.promptRouter.sendPromptResponse(sessionId, value, requestId)
   }
 
   /**
    * Called by the PermissionRequest hook HTTP endpoint. Sends a prompt to clients
    * and returns a Promise that resolves when the user approves/denies.
+   * Delegates to PromptRouter.
    */
   requestToolApproval(sessionId: string, toolName: string, toolInput: Record<string, unknown>): Promise<{ allow: boolean; always: boolean; answer?: string }> {
-    const session = this.sessions.get(sessionId)
-    if (!session) {
-      console.log(`[tool-approval] session not found: ${sessionId}`)
-      return Promise.resolve({ allow: false, always: false })
-    }
-
-    const autoResult = this.resolveAutoApproval(session, toolName, toolInput)
-    if (autoResult === 'registry') {
-      console.log(`[tool-approval] auto-approved (registry): ${toolName}`)
-      return Promise.resolve({ allow: true, always: true })
-    }
-    if (autoResult === 'session') {
-      console.log(`[tool-approval] auto-approved (session allowedTools): ${toolName}`)
-      return Promise.resolve({ allow: true, always: false })
-    }
-    if (autoResult === 'headless') {
-      console.log(`[tool-approval] auto-approved (headless ${session.source}): ${toolName}`)
-      return Promise.resolve({ allow: true, always: false })
-    }
-
-    // Agent child sessions with no browser client: fast-deny tools not in
-    // allowedTools rather than hanging 5 minutes on a prompt nobody will see.
-    if (session.clients.size === 0 && session.source === 'agent') {
-      console.log(`[tool-approval] fast-deny headless agent (tool not in allowedTools): ${toolName}`)
-      return Promise.resolve({ allow: false, always: false })
-    }
-
-    console.log(`[tool-approval] requesting approval: session=${sessionId} tool=${toolName} clients=${session.clients.size}`)
-
-    // ExitPlanMode: route through PlanManager state machine for plan-specific
-    // approval UI. The hook blocks until we resolve the promise.
-    if (toolName === 'ExitPlanMode') {
-      return this.handleExitPlanModeApproval(session, sessionId)
-    }
-
-    // Prevent double-gating: if a control_request already created a pending
-    // entry for this tool, auto-approve the control_request and let the hook
-    // take over as the sole approval gate.  This is the reverse of the check
-    // in onControlRequestEvent (which handles hook-first ordering).
-    for (const [reqId, pending] of session.pendingControlRequests) {
-      if (pending.toolName === toolName) {
-        console.log(`[tool-approval] auto-approving control_request for ${toolName} (PreToolUse hook taking over)`)
-        session.claudeProcess?.sendControlResponse(reqId, 'allow')
-        session.pendingControlRequests.delete(reqId)
-        this.broadcast(session, { type: 'prompt_dismiss', requestId: reqId })
-        break
-      }
-    }
-
-    // AskUserQuestion: show a question prompt and collect the answer text,
-    // rather than a permission prompt with Allow/Deny buttons.
-    const isQuestion = toolName === 'AskUserQuestion'
-
-    return new Promise<{ allow: boolean; always: boolean; answer?: string }>((resolve) => {
-      // Holder lets wrappedResolve reference the timeout before it's assigned
-      const timer: { id: ReturnType<typeof setTimeout> | null } = { id: null }
-
-      const wrappedResolve = (result: { allow: boolean; always: boolean; answer?: string }) => {
-        if (timer.id) clearTimeout(timer.id)
-        resolve(result)
-      }
-
-      const approvalRequestId = randomUUID()
-
-      // Timeout to prevent leaked promises if client disconnects after prompt is sent
-      timer.id = setTimeout(() => {
-        if (session.pendingToolApprovals.has(approvalRequestId)) {
-          console.log(`[tool-approval] timed out for ${toolName}`)
-          session.pendingToolApprovals.delete(approvalRequestId)
-          // Dismiss the stale prompt in all clients so they don't inject
-          // "allow"/"deny" as plain text after the timeout
-          this.broadcast(session, { type: 'prompt_dismiss', requestId: approvalRequestId })
-          resolve({ allow: false, always: false })
-        }
-      }, 300_000) // 5 min for all approval types — prevents premature auto-deny when user is reading or tabbed away
-
-      let promptMsg: WsServerMessage
-      if (isQuestion) {
-        // AskUserQuestion: extract structured questions from toolInput.questions
-        // and pass them through so PromptButtons can render the multi-question flow.
-        const rawQuestions = toolInput.questions as Array<{ question: string; options?: Array<{ label: string; description?: string }>; multiSelect?: boolean; header?: string }> | undefined
-        const structuredQuestions = Array.isArray(rawQuestions)
-          ? rawQuestions.map(q => ({
-            question: q.question,
-            header: q.header,
-            multiSelect: q.multiSelect ?? false,
-            options: (q.options || []).map((opt: { label: string; value?: string; description?: string }) => ({
-              label: opt.label,
-              value: opt.value ?? opt.label,
-              description: opt.description,
-            })),
-          }))
-          : undefined
-        const firstQ = structuredQuestions?.[0]
-        promptMsg = {
-          type: 'prompt',
-          promptType: 'question',
-          question: firstQ?.question || 'Answer the question',
-          options: firstQ?.options || [],
-          multiSelect: firstQ?.multiSelect,
-          toolName,
-          toolInput,
-          requestId: approvalRequestId,
-          ...(structuredQuestions ? { questions: structuredQuestions } : {}),
-        }
-      } else {
-        const question = this.summarizeToolPermission(toolName, toolInput)
-        const approvePattern = this._approvalManager.derivePattern(toolName, toolInput)
-        const neverAutoApprove = ApprovalManager.NEVER_AUTO_APPROVE_TOOLS.has(toolName)
-        const options = [
-          { label: 'Allow', value: 'allow' },
-          ...(!neverAutoApprove ? [{ label: 'Always Allow', value: 'always_allow' }] : []),
-          { label: 'Deny', value: 'deny' },
-        ]
-        promptMsg = {
-          type: 'prompt',
-          promptType: 'permission',
-          question,
-          options,
-          toolName,
-          toolInput,
-          requestId: approvalRequestId,
-          ...(approvePattern ? { approvePattern } : {}),
-        }
-      }
-
-      session.pendingToolApprovals.set(approvalRequestId, { resolve: wrappedResolve, toolName, toolInput, requestId: approvalRequestId, promptMsg })
-
-      if (session.clients.size > 0) {
-        this.broadcast(session, promptMsg)
-      } else {
-        // No clients connected — DON'T auto-deny. Instead, wait for a client
-        // to join this session (the prompt will be re-broadcast in join()).
-        // Send a global notification so the user sees a waiting indicator.
-        console.log(`[tool-approval] no clients connected, waiting for client to join (timeout 300s): ${toolName}`)
-        this._globalBroadcast?.({
-          ...promptMsg,
-          sessionId,
-          sessionName: session.name,
-        })
-      }
-
-      // Notify prompt listeners (orchestrator, child monitor, etc.)
-      for (const listener of this._promptListeners) {
-        try { listener(sessionId, isQuestion ? 'question' : 'permission', toolName, approvalRequestId) } catch { /* listener error */ }
-      }
-    })
-  }
-
-  /**
-   * Handle ExitPlanMode approval through PlanManager.
-   * Shows a plan-specific approval prompt (Approve/Reject) and blocks the hook
-   * until the user responds. On approve, returns allow:true (the hook will use
-   * the deny-with-approval-message workaround). On deny, returns allow:false.
-   */
-  private handleExitPlanModeApproval(session: Session, sessionId: string): Promise<{ allow: boolean; always: boolean; answer?: string }> {
-    const reviewId = session.planManager.onExitPlanModeRequested()
-    if (!reviewId) {
-      // Not in planning state — fall through to allow (CLI handles natively)
-      console.log(`[plan-approval] ExitPlanMode but PlanManager not in planning state, allowing`)
-      return Promise.resolve({ allow: true, always: false })
-    }
-
-    return new Promise<{ allow: boolean; always: boolean; answer?: string }>((resolve) => {
-      const timer: { id: ReturnType<typeof setTimeout> | null } = { id: null }
-
-      const wrappedResolve = (result: { allow: boolean; always: boolean; answer?: string }) => {
-        if (timer.id) clearTimeout(timer.id)
-        resolve(result)
-      }
-
-      // Timeout: auto-deny after 5 minutes to prevent leaked promises
-      timer.id = setTimeout(() => {
-        if (session.pendingToolApprovals.has(reviewId)) {
-          console.log(`[plan-approval] timed out, auto-denying`)
-          session.pendingToolApprovals.delete(reviewId)
-          session.planManager.deny(reviewId)
-          this.broadcast(session, { type: 'prompt_dismiss', requestId: reviewId })
-          resolve({ allow: false, always: false })
-        }
-      }, 300_000)
-
-      const promptMsg: WsServerMessage = {
-        type: 'prompt',
-        promptType: 'permission',
-        question: 'Approve plan and start implementation?',
-        options: [
-          { label: 'Approve', value: 'allow' },
-          { label: 'Reject', value: 'deny' },
-        ],
-        toolName: 'ExitPlanMode',
-        requestId: reviewId,
-      }
-
-      session.pendingToolApprovals.set(reviewId, {
-        resolve: wrappedResolve,
-        toolName: 'ExitPlanMode',
-        toolInput: {},
-        requestId: reviewId,
-        promptMsg,
-      })
-
-      this.broadcast(session, promptMsg)
-
-      if (session.clients.size === 0) {
-        this._globalBroadcast?.({ ...promptMsg, sessionId, sessionName: session.name })
-      }
-
-      for (const listener of this._promptListeners) {
-        try { listener(sessionId, 'permission', 'ExitPlanMode', reviewId) } catch { /* listener error */ }
-      }
-    })
-  }
-
-  /**
-   * Check if a tool invocation can be auto-approved without prompting the user.
-   * Returns 'registry' if matched by auto-approval rules, 'session' if matched
-   * by the session's allowedTools list, 'headless' if the session has no clients
-   * and is a non-interactive source, or 'prompt' if the user needs to decide.
-   */
-  private resolveAutoApproval(session: Session, toolName: string, toolInput: Record<string, unknown>): 'registry' | 'session' | 'headless' | 'prompt' {
-    if (this._approvalManager.checkAutoApproval(session.groupDir ?? session.workingDir, toolName, toolInput)) {
-      return 'registry'
-    }
-    if (session.allowedTools && this.matchesAllowedTools(session.allowedTools, toolName, toolInput)) {
-      return 'session'
-    }
-    // Agent child sessions: only auto-approve tools in their allowedTools list,
-    // never blanket headless. This ensures AGENT_CHILD_ALLOWED_TOOLS is the
-    // actual permission boundary, not just a hint for when a browser is open.
-    if (session.clients.size === 0 && session.source === 'agent') {
-      return 'prompt'
-    }
-    if (session.clients.size === 0 && (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow' || session.source === 'orchestrator')) {
-      return 'headless'
-    }
-    return 'prompt'
-  }
-
-  /**
-   * Check if a tool invocation matches any of the session's allowedTools patterns.
-   * Patterns follow Claude CLI format: 'ToolName' or 'ToolName(prefix:*)'.
-   * Examples: 'WebFetch', 'Bash(curl:*)', 'Bash(git:*)'.
-   */
-  private matchesAllowedTools(allowedTools: string[], toolName: string, toolInput: Record<string, unknown>): boolean {
-    for (const pattern of allowedTools) {
-      // Simple tool name match: 'WebFetch', 'Read', etc.
-      if (pattern === toolName) return true
-
-      // Parameterized match: 'Bash(curl:*)' → toolName=Bash, command starts with 'curl'
-      const match = pattern.match(/^(\w+)\(([^:]+):\*\)$/)
-      if (match) {
-        const [, patternTool, prefix] = match
-        if (patternTool !== toolName) continue
-        // For Bash, check command prefix
-        if (toolName === 'Bash') {
-          const cmd = String(toolInput.command || '').trimStart()
-          if (cmd === prefix || cmd.startsWith(prefix + ' ')) return true
-        }
-      }
-    }
-    return false
-  }
-
-  /** Build a human-readable prompt string for a tool permission dialog. */
-  private summarizeToolPermission(toolName: string, toolInput: Record<string, unknown>): string {
-    switch (toolName) {
-      case 'Bash': {
-        const cmd = String(toolInput.command || '')
-        const firstLine = cmd.split('\n')[0]
-        const display = firstLine.length < cmd.length ? `${firstLine}...` : cmd
-        return `Allow Bash? \`$ ${display}\``
-      }
-      case 'Task':
-        return `Allow Task? ${String(toolInput.description || toolName)}`
-      case 'Read': {
-        const filePath = String(toolInput.file_path || '')
-        return `Allow Read? \`${filePath}\``
-      }
-      default:
-        return `Allow ${toolName}?`
-    }
+    return this.promptRouter.requestToolApproval(sessionId, toolName, toolInput)
   }
 
   /** Update the model for a session and restart Claude with the new model. */
@@ -1873,15 +1218,16 @@ export class SessionManager {
     if (!session) return false
     session.model = model || undefined
     this.persistToDiskDebounced()
-    // Restart Claude with the new model if it's running
+    // Restart Claude with the new model if it's running.
+    // Use stopClaudeAndWait to ensure the old process fully exits before
+    // spawning a new one — avoids concurrent processes in the same worktree.
     if (session.claudeProcess?.isAlive()) {
-      this.stopClaude(sessionId)
-      session._stoppedByUser = false
-      setTimeout(() => {
-        if (this.sessions.has(sessionId) && !session._stoppedByUser) {
+      void this.stopClaudeAndWait(sessionId).then(() => {
+        if (this.sessions.has(sessionId)) {
+          session._stoppedByUser = false
           this.startClaude(sessionId)
         }
-      }, 500)
+      })
     }
     return true
   }
@@ -1905,50 +1251,31 @@ export class SessionManager {
     this.addToHistory(session, sysMsg)
     this.broadcast(session, sysMsg)
 
-    // Restart Claude with the new permission mode if it's running
+    // Restart Claude with the new permission mode if it's running.
+    // Use stopClaudeAndWait to ensure the old process fully exits before
+    // spawning a new one — avoids concurrent processes in the same worktree.
     if (session.claudeProcess?.isAlive()) {
-      this.stopClaude(sessionId)
-      session._stoppedByUser = false
-      setTimeout(() => {
-        if (this.sessions.has(sessionId) && !session._stoppedByUser) {
+      void this.stopClaudeAndWait(sessionId).then(() => {
+        if (this.sessions.has(sessionId)) {
+          session._stoppedByUser = false
           this.startClaude(sessionId)
         }
-      }, 500)
+      })
     }
     return true
   }
 
+  /** Stop the Claude process for a session. Delegates to SessionLifecycle. */
   stopClaude(sessionId: string): void {
-    const session = this.sessions.get(sessionId)
-    if (session?.claudeProcess) {
-      session._stoppedByUser = true
-      if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
-      session.claudeProcess.removeAllListeners()
-      session.claudeProcess.stop()
-      session.claudeProcess = null
-      this.broadcast(session, { type: 'claude_stopped' })
-    }
+    this.sessionLifecycle.stopClaude(sessionId)
   }
 
   /**
    * Stop the Claude process and wait for it to fully exit before resolving.
-   * This prevents race conditions when restarting with the same session ID
-   * (e.g. during mid-session worktree migration).
+   * Delegates to SessionLifecycle.
    */
   async stopClaudeAndWait(sessionId: string): Promise<void> {
-    const session = this.sessions.get(sessionId)
-    if (!session?.claudeProcess) return
-
-    const cp = session.claudeProcess
-    session._stoppedByUser = true
-    if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
-    cp.removeAllListeners()
-    cp.stop()
-    session.claudeProcess = null
-    this.broadcast(session, { type: 'claude_stopped' })
-
-    // Wait for the underlying OS process to fully exit
-    await cp.waitForExit()
+    return this.sessionLifecycle.stopClaudeAndWait(sessionId)
   }
 
   // ---------------------------------------------------------------------------

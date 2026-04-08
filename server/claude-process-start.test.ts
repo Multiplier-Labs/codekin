@@ -11,10 +11,17 @@ import { PassThrough } from 'stream'
 
 // Hoisted mock factory for child_process.spawn
 const mockSpawn = vi.hoisted(() => vi.fn())
+const mockExistsSync = vi.hoisted(() => vi.fn(() => true))
+const mockRealpathSync = vi.hoisted(() => vi.fn((p: string) => p))
 
 vi.mock('child_process', () => ({
   spawn: mockSpawn,
 }))
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>()
+  return { ...actual, existsSync: mockExistsSync, realpathSync: mockRealpathSync }
+})
 
 import { ClaudeProcess } from './claude-process.js'
 
@@ -86,7 +93,7 @@ describe('ClaudeProcess.start() — process event handlers', () => {
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       fakeProc.emit('error', new Error('spawn error'))
 
-      expect(consoleSpy).toHaveBeenCalledWith('[claude process error]', 'spawn error')
+      expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('spawn error'))
       consoleSpy.mockRestore()
     })
   })
@@ -175,6 +182,91 @@ describe('ClaudeProcess.start() — process event handlers', () => {
       fakeProc.stderr.emit('data', Buffer.from('   '))
 
       expect(errors).toHaveLength(0)
+    })
+  })
+
+  describe('start() with missing working directory', () => {
+    it('emits error and exit without spawning when workingDir does not exist', async () => {
+      mockExistsSync.mockReturnValue(false)
+      const cp = new ClaudeProcess('/nonexistent/path') as CP
+
+      const errors: string[] = []
+      const exits: Array<[number | null, string | null]> = []
+      cp.on('error', (msg: string) => errors.push(msg))
+      cp.on('exit', (code: number | null, signal: string | null) => exits.push([code, signal]))
+
+      cp.start()
+
+      expect(mockSpawn).not.toHaveBeenCalled()
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toContain('Working directory does not exist')
+      expect(errors[0]).toContain('/nonexistent/path')
+
+      // exit is emitted via process.nextTick
+      await new Promise(r => process.nextTick(r))
+      expect(exits).toHaveLength(1)
+      expect(exits[0]).toEqual([1, null])
+    })
+
+    it('sets hasSpawnFailed() to true when workingDir missing', () => {
+      mockExistsSync.mockReturnValue(false)
+      const cp = new ClaudeProcess('/nonexistent/path') as CP
+      cp.on('error', () => {}) // prevent unhandled error
+
+      cp.start()
+
+      expect(cp.hasSpawnFailed()).toBe(true)
+    })
+
+    it('does not set alive when workingDir missing', () => {
+      mockExistsSync.mockReturnValue(false)
+      const cp = new ClaudeProcess('/nonexistent/path') as CP
+      cp.on('error', () => {})
+
+      cp.start()
+
+      expect(cp.isAlive()).toBe(false)
+    })
+  })
+
+  describe('process "error" event with ENOENT/EACCES', () => {
+    it('sets hasSpawnFailed() on ENOENT error', () => {
+      mockExistsSync.mockReturnValue(true)
+      const cp = new ClaudeProcess('/tmp') as CP
+      cp.start()
+      cp.on('error', () => {})
+
+      const err = new Error('spawn claude ENOENT') as NodeJS.ErrnoException
+      err.code = 'ENOENT'
+      fakeProc.emit('error', err)
+
+      expect(cp.hasSpawnFailed()).toBe(true)
+    })
+
+    it('sets hasSpawnFailed() on EACCES error', () => {
+      mockExistsSync.mockReturnValue(true)
+      const cp = new ClaudeProcess('/tmp') as CP
+      cp.start()
+      cp.on('error', () => {})
+
+      const err = new Error('spawn claude EACCES') as NodeJS.ErrnoException
+      err.code = 'EACCES'
+      fakeProc.emit('error', err)
+
+      expect(cp.hasSpawnFailed()).toBe(true)
+    })
+
+    it('does not set hasSpawnFailed() for other error codes', () => {
+      mockExistsSync.mockReturnValue(true)
+      const cp = new ClaudeProcess('/tmp') as CP
+      cp.start()
+      cp.on('error', () => {})
+
+      const err = new Error('some other error') as NodeJS.ErrnoException
+      err.code = 'EPIPE'
+      fakeProc.emit('error', err)
+
+      expect(cp.hasSpawnFailed()).toBe(false)
     })
   })
 })

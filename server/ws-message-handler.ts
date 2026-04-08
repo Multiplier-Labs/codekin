@@ -36,7 +36,8 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       try {
         resolvedDir = fsRealpathSync(pathResolve(msg.workingDir))
       } catch {
-        resolvedDir = pathResolve(msg.workingDir)
+        send({ type: 'error', message: 'workingDir could not be resolved (path does not exist or is inaccessible)' })
+        break
       }
       if (!allowedRoots.some(root => resolvedDir === root || resolvedDir.startsWith(root + '/'))) {
         send({ type: 'error', message: 'workingDir is outside allowed directories' })
