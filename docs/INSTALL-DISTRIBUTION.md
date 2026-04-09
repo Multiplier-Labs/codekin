@@ -138,7 +138,7 @@ All configuration is via environment variables. Defaults suit a local install; o
 | `FRONTEND_DIST` | (set by CLI) | Path to built frontend `dist/` directory |
 | `REPOS_ROOT` | `~/repos` | Root directory scanned for local repositories |
 | `DATA_DIR` | `~/.codekin` | Codekin data directory (sessions, uploads, etc.) |
-| `CORS_ORIGIN` | `*` | Restrict CORS for remote access |
+| `CORS_ORIGIN` | `http://localhost:5173` | Restrict CORS for remote access |
 | `GH_ORG` | — | Comma-separated GitHub orgs for repo listing |
 | `SCREENSHOTS_DIR` | `~/.codekin/screenshots` | Directory for uploaded file storage |
 
