@@ -28,7 +28,8 @@ if (process.env.NODE_ENV === 'production' && !process.env.CORS_ORIGIN) {
   process.exit(1)
 }
 if (process.env.NODE_ENV === 'production' && CORS_ORIGIN.includes('localhost')) {
-  console.warn('[config] WARNING: CORS_ORIGIN contains "localhost" in production mode. This is likely misconfigured.')
+  console.error('[config] ERROR: CORS_ORIGIN contains "localhost" in production mode. This is likely misconfigured.')
+  process.exit(1)
 }
 
 // ---------------------------------------------------------------------------

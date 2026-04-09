@@ -176,7 +176,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
     // inherited from the shell that launched it. In particular,
     // GIT_INDEX_FILE=.git/index breaks worktrees where .git is a file,
     // not a directory, causing all index-dependent git commands to fail.
-    const API_KEY_VARS = new Set(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_API_KEY'])
+    const API_KEY_VARS = new Set(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_API_KEY', 'AUTH_TOKEN', 'AUTH_TOKEN_FILE'])
     const env: Record<string, string> = {
       ...Object.fromEntries(
         Object.entries(process.env).filter(

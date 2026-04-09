@@ -13,6 +13,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import DOMPurify from 'dompurify'
 import hljs from '../lib/hljs'
 import { IconArrowDown, IconRobotFace } from '@tabler/icons-react'
 import type { ChatMessage } from '../types'
@@ -181,7 +182,7 @@ function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: {
                         padding: '1em',
                         overflowX: 'auto',
                       }}
-                      dangerouslySetInnerHTML={{ __html: highlightCode(codeString, match[1]) }}
+                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlightCode(codeString, match[1])) }}
                     />
                     <CodeCopyButton code={codeString} />
                   </div>
