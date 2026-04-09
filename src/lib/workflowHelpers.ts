@@ -59,9 +59,6 @@ export const DAY_INDIVIDUAL = [
   { label: 'Sun', dow: '0' },
 ]
 
-/** Combined list of all day-of-week options (presets + individual days) for the schedule picker. */
-export const DAY_PATTERNS = [...DAY_PRESETS, ...DAY_INDIVIDUAL]
-
 /** Check if a dow value represents a bi-weekly schedule (e.g. `"biweekly"` or `"biweekly-1"`). */
 export function isBiweeklyDow(dow: string): boolean {
   return dow.startsWith('biweekly')

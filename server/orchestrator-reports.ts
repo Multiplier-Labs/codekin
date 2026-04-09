@@ -97,18 +97,6 @@ export function scanRepoReports(repoPath: string): ReportMeta[] {
 }
 
 /**
- * Scan multiple repos for reports.
- */
-export function scanAllReports(repoPaths: string[]): ReportMeta[] {
-  const all: ReportMeta[] = []
-  for (const repoPath of repoPaths) {
-    all.push(...scanRepoReports(repoPath))
-  }
-  all.sort((a, b) => b.date.localeCompare(a.date))
-  return all
-}
-
-/**
  * Read a report's full content.
  */
 export function readReport(filePath: string): ReportContent | null {
@@ -158,5 +146,10 @@ export function getLatestReport(repoPath: string, category: string): ReportMeta 
  * Get reports that are newer than a given date.
  */
 export function getReportsSince(repoPaths: string[], sinceDate: string): ReportMeta[] {
-  return scanAllReports(repoPaths).filter(r => r.date >= sinceDate)
+  const all: ReportMeta[] = []
+  for (const repoPath of repoPaths) {
+    all.push(...scanRepoReports(repoPath))
+  }
+  all.sort((a, b) => b.date.localeCompare(a.date))
+  return all.filter(r => r.date >= sinceDate)
 }
