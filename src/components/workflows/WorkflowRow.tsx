@@ -70,7 +70,7 @@ export function WorkflowRow({
         )}
         <span className={`text-[14px] whitespace-nowrap shrink-0 ${eventDriven ? 'text-purple-400' : 'text-neutral-5'}`}>
           {eventDriven
-            ? 'On commit'
+            ? (repo.kind === 'pr-review' ? 'On pull request' : 'On commit')
             : schedule ? describeCron(schedule.cronExpression) : describeCron(repo.cronExpression)}
         </span>
         {modelLabel(repo.model) && (

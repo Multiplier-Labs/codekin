@@ -266,12 +266,18 @@ function StepConfigure({
       {eventDriven ? (
         <div>
           <p className="text-[13px] text-neutral-4 mb-3">
-            This workflow runs automatically on every commit via a post-commit hook.
+            {form.kind === 'pr-review'
+              ? 'This workflow runs automatically when a pull request is opened or updated via GitHub webhooks.'
+              : 'This workflow runs automatically on every commit via a post-commit hook.'}
           </p>
           <div className="rounded-lg border border-purple-700/40 bg-purple-900/20 px-4 py-3">
-            <span className="text-[14px] font-medium text-purple-400">Trigger: On commit</span>
+            <span className="text-[14px] font-medium text-purple-400">
+              {form.kind === 'pr-review' ? 'Trigger: On pull request' : 'Trigger: On commit'}
+            </span>
             <p className="text-[13px] text-neutral-4 mt-1">
-              Each commit will be reviewed automatically. No schedule needed.
+              {form.kind === 'pr-review'
+                ? 'Each PR will be reviewed automatically when opened, updated, or reopened. No schedule needed.'
+                : 'Each commit will be reviewed automatically. No schedule needed.'}
             </p>
           </div>
         </div>

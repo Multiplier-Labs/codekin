@@ -20,6 +20,7 @@ export const WORKFLOW_KINDS = [
   { value: 'coverage.daily', label: 'Coverage Assessment', category: 'assessment' as WorkflowCategory },
   { value: 'code-review.daily', label: 'Code Review', category: 'assessment' as WorkflowCategory },
   { value: 'commit-review', label: 'Commit Review', category: 'event' as WorkflowCategory },
+  { value: 'pr-review', label: 'PR Review', category: 'event' as WorkflowCategory },
   { value: 'comment-assessment.daily', label: 'Comment Assessment', category: 'assessment' as WorkflowCategory },
   { value: 'dependency-health.daily', label: 'Dependency Health', category: 'assessment' as WorkflowCategory },
   { value: 'security-audit.weekly', label: 'Security Audit', category: 'assessment' as WorkflowCategory },
@@ -29,7 +30,7 @@ export const WORKFLOW_KINDS = [
 ]
 
 /** Event-driven workflow kinds that are triggered by hooks rather than cron schedules. */
-export const EVENT_DRIVEN_KINDS = new Set(['commit-review'])
+export const EVENT_DRIVEN_KINDS = new Set(['commit-review', 'pr-review'])
 
 /** Check if a workflow kind is event-driven (triggered by hooks, not cron). */
 export function isEventDriven(kind: string): boolean {
@@ -118,7 +119,7 @@ export const EVENT_CRON = 'event'
 
 /** Convert a 5-field cron expression into a human-readable description, e.g. `"Daily at 06:00"`. */
 export function describeCron(expr: string): string {
-  if (expr === EVENT_CRON) return 'On commit'
+  if (expr === EVENT_CRON) return 'On event'
   const parts = expr.trim().split(/\s+/)
   if (parts.length !== 5) return expr
   const [min, hour, dom, , dow] = parts
