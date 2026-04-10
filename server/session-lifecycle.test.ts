@@ -12,8 +12,8 @@ vi.mock('fs', async (importOriginal) => {
 })
 
 // Mock ClaudeProcess — we don't want real CLI spawns
-vi.mock('./claude-process.js', () => {
-  const { EventEmitter } = require('node:events')
+vi.mock('./claude-process.js', async () => {
+  const { EventEmitter } = await import('node:events')
   class MockClaudeProcess extends EventEmitter {
     start = vi.fn()
     stop = vi.fn()
@@ -41,7 +41,7 @@ vi.mock('./session-restart-scheduler.js', () => ({
 
 import { SessionLifecycle, type SessionLifecycleDeps } from './session-lifecycle.js'
 import { existsSync } from 'fs'
-import type { Session, WsServerMessage } from './types.js'
+import type { Session } from './types.js'
 import { EventEmitter } from 'node:events'
 
 // ---------------------------------------------------------------------------

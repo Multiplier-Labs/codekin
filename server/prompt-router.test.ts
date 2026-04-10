@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { PromptRouter, type PromptRouterDeps } from './prompt-router.js'
-import type { Session, WsServerMessage } from './types.js'
+import type { Session } from './types.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
