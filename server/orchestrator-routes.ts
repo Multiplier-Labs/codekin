@@ -146,7 +146,7 @@ export function createOrchestratorRouter(
   router.post('/api/orchestrator/children', async (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { repo, task, branchName, completionPolicy, deployAfter, useWorktree, model } = req.body
+    const { repo, task, branchName, completionPolicy, deployAfter, useWorktree, model, allowedTools } = req.body
     if (!repo || !task || !branchName) {
       return res.status(400).json({ error: 'Missing required fields: repo, task, branchName' })
     }
@@ -154,6 +154,13 @@ export function createOrchestratorRouter(
     // Validate branchName to prevent prompt injection
     if (!/^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$/.test(branchName)) {
       return res.status(400).json({ error: 'Invalid branchName: only alphanumeric, /, _, ., and - are allowed' })
+    }
+
+    // Validate allowedTools if provided: must be an array of strings
+    if (allowedTools !== undefined) {
+      if (!Array.isArray(allowedTools) || !allowedTools.every((t: unknown) => typeof t === 'string')) {
+        return res.status(400).json({ error: 'Invalid allowedTools: must be an array of strings' })
+      }
     }
 
     // Validate repo path: must resolve under REPOS_ROOT and be an existing directory
@@ -174,6 +181,7 @@ export function createOrchestratorRouter(
         deployAfter: deployAfter ?? false,
         useWorktree: useWorktree ?? true,
         model,
+        allowedTools,
       })
       res.json({ child })
     } catch (err) {

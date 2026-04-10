@@ -32,6 +32,8 @@ export interface ChildSessionRequest {
   timeoutMs?: number
   /** Optional model override. */
   model?: string
+  /** Optional allowedTools override. When omitted, uses AGENT_CHILD_ALLOWED_TOOLS. */
+  allowedTools?: string[]
 }
 
 export type ChildStatus = 'starting' | 'running' | 'completed' | 'failed' | 'timed_out'
@@ -54,6 +56,34 @@ const MAX_CONCURRENT = 5
 const DEFAULT_TIMEOUT_MS = 600_000  // 10 minutes
 const CHILD_RETENTION_MS = 3_600_000  // keep completed/failed children for 1 hour
 const MAX_RETAINED_CHILDREN = 100    // hard cap on total entries
+
+/**
+ * Default allowed tools for agent child sessions. Covers standard dev
+ * operations without granting arbitrary shell access. Destructive commands
+ * (rm, sudo, docker, git reset/clean, git push --force) are intentionally
+ * excluded — they fall through to manual approval.
+ */
+export const AGENT_CHILD_ALLOWED_TOOLS = [
+  // File operations (scoped to working dir by acceptEdits mode)
+  'Read', 'Glob', 'Grep', 'Write', 'Edit',
+  // Git operations (branch, commit, push, PR workflow)
+  'Bash(git:*)',
+  // GitHub CLI (create PRs, check runs, etc.)
+  'Bash(gh:*)',
+  // API calls (status reporting back to orchestrator)
+  'Bash(curl:*)',
+  // Package managers
+  'Bash(npm:*)', 'Bash(npx:*)', 'Bash(yarn:*)', 'Bash(pnpm:*)', 'Bash(bun:*)',
+  // Build / lint / test tools
+  'Bash(node:*)', 'Bash(tsc:*)', 'Bash(eslint:*)', 'Bash(prettier:*)',
+  'Bash(cargo:*)', 'Bash(go:*)', 'Bash(make:*)', 'Bash(pip:*)',
+  // Safe filesystem inspection (read-only)
+  'Bash(ls:*)', 'Bash(cat:*)', 'Bash(wc:*)',
+  'Bash(head:*)', 'Bash(tail:*)', 'Bash(sort:*)', 'Bash(diff:*)',
+  'Bash(basename:*)', 'Bash(dirname:*)',
+  'Bash(realpath:*)', 'Bash(tree:*)', 'Bash(pwd:*)',
+  'Bash(which:*)', 'Bash(file:*)',
+]
 
 // ---------------------------------------------------------------------------
 // Manager
@@ -140,7 +170,7 @@ export class OrchestratorChildManager {
         groupDir: request.repo,
         model: request.model,
         permissionMode: 'acceptEdits',
-        allowedTools: ['Bash(curl:*)'],
+        allowedTools: request.allowedTools ?? AGENT_CHILD_ALLOWED_TOOLS,
       })
 
       // Create a git worktree for isolation if requested (default for Joe children).
