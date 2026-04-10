@@ -29,30 +29,39 @@ describe('ApprovalManager', () => {
   // ─── 1. Cross-repo inference (non-Bash tool) ───────────────────────
 
   describe('checkAutoApproval - cross-repo inference', () => {
-    it('returns true when 2 repos have approved the same tool', () => {
+    it('returns true when 5 repos have approved the same tool', () => {
       mgr.addRepoApproval('/repo/a', { tool: 'Read' })
       mgr.addRepoApproval('/repo/b', { tool: 'Read' })
+      mgr.addRepoApproval('/repo/c', { tool: 'Read' })
+      mgr.addRepoApproval('/repo/d', { tool: 'Read' })
+      mgr.addRepoApproval('/repo/e', { tool: 'Read' })
 
-      // Third repo should auto-approve via cross-repo inference
-      expect(mgr.checkAutoApproval('/repo/c', 'Read', {})).toBe(true)
+      // Sixth repo should auto-approve via cross-repo inference
+      expect(mgr.checkAutoApproval('/repo/f', 'Read', {})).toBe(true)
     })
 
-    it('returns false when only 1 repo has approved the tool', () => {
+    it('returns false when fewer than 5 repos have approved the tool', () => {
       mgr.addRepoApproval('/repo/a', { tool: 'Read' })
+      mgr.addRepoApproval('/repo/b', { tool: 'Read' })
+      mgr.addRepoApproval('/repo/c', { tool: 'Read' })
+      mgr.addRepoApproval('/repo/d', { tool: 'Read' })
 
-      expect(mgr.checkAutoApproval('/repo/c', 'Read', {})).toBe(false)
+      expect(mgr.checkAutoApproval('/repo/f', 'Read', {})).toBe(false)
     })
   })
 
   // ─── 2. Cross-repo Bash command ────────────────────────────────────
 
   describe('checkAutoApproval - cross-repo Bash command', () => {
-    it('auto-approves a Bash command approved in 2 other repos', () => {
+    it('auto-approves a Bash command approved in 5 other repos', () => {
       mgr.addRepoApproval('/repo/a', { command: 'git status' })
       mgr.addRepoApproval('/repo/b', { command: 'git status' })
+      mgr.addRepoApproval('/repo/c', { command: 'git status' })
+      mgr.addRepoApproval('/repo/d', { command: 'git status' })
+      mgr.addRepoApproval('/repo/e', { command: 'git status' })
 
       expect(
-        mgr.checkAutoApproval('/repo/c', 'Bash', { command: 'git status' }),
+        mgr.checkAutoApproval('/repo/f', 'Bash', { command: 'git status' }),
       ).toBe(true)
     })
   })
@@ -63,9 +72,12 @@ describe('ApprovalManager', () => {
     it('auto-approves via pattern match across repos', () => {
       mgr.addRepoApproval('/repo/a', { pattern: 'git diff *' })
       mgr.addRepoApproval('/repo/b', { pattern: 'git diff *' })
+      mgr.addRepoApproval('/repo/c', { pattern: 'git diff *' })
+      mgr.addRepoApproval('/repo/d', { pattern: 'git diff *' })
+      mgr.addRepoApproval('/repo/e', { pattern: 'git diff *' })
 
       expect(
-        mgr.checkAutoApproval('/repo/c', 'Bash', { command: 'git diff HEAD' }),
+        mgr.checkAutoApproval('/repo/f', 'Bash', { command: 'git diff HEAD' }),
       ).toBe(true)
     })
   })
@@ -237,17 +249,23 @@ describe('ApprovalManager', () => {
   // ─── 9. getGlobalApprovals ──────────────────────────────────────────
 
   describe('getGlobalApprovals', () => {
-    it('returns tools/commands/patterns approved in 2+ repos', () => {
+    it('returns tools/commands/patterns approved in 5+ repos', () => {
       mgr.addRepoApproval('/repo/a', { tool: 'Read' })
       mgr.addRepoApproval('/repo/b', { tool: 'Read' })
+      mgr.addRepoApproval('/repo/c', { tool: 'Read' })
+      mgr.addRepoApproval('/repo/d', { tool: 'Read' })
+      mgr.addRepoApproval('/repo/e', { tool: 'Read' })
       mgr.addRepoApproval('/repo/a', { pattern: 'cat *' })
       mgr.addRepoApproval('/repo/b', { pattern: 'cat *' })
+      mgr.addRepoApproval('/repo/c', { pattern: 'cat *' })
+      mgr.addRepoApproval('/repo/d', { pattern: 'cat *' })
+      mgr.addRepoApproval('/repo/e', { pattern: 'cat *' })
 
       const global = mgr.getGlobalApprovals()
       expect(global.tools).toHaveProperty('Read')
-      expect(global.tools['Read']).toHaveLength(2)
+      expect(global.tools['Read']).toHaveLength(5)
       expect(global.patterns).toHaveProperty('cat *')
-      expect(global.patterns['cat *']).toHaveLength(2)
+      expect(global.patterns['cat *']).toHaveLength(5)
     })
 
     it('excludes tools/patterns approved in only 1 repo', () => {
@@ -291,13 +309,16 @@ describe('ApprovalManager', () => {
 
   describe('checkAutoApproval - cross-repo Bash prefix match', () => {
     it('auto-approves via prefix match across repos for safe commands', () => {
-      // "git diff HEAD" approved in 2 repos
+      // "git diff HEAD" approved in 5 repos
       mgr.addRepoApproval('/repo/a', { command: 'git diff HEAD' })
       mgr.addRepoApproval('/repo/b', { command: 'git diff HEAD' })
+      mgr.addRepoApproval('/repo/c', { command: 'git diff HEAD' })
+      mgr.addRepoApproval('/repo/d', { command: 'git diff HEAD' })
+      mgr.addRepoApproval('/repo/e', { command: 'git diff HEAD' })
 
-      // "git diff main" should be auto-approved in a third repo via prefix match
+      // "git diff main" should be auto-approved in a sixth repo via prefix match
       expect(
-        mgr.checkAutoApproval('/repo/c', 'Bash', { command: 'git diff main' }),
+        mgr.checkAutoApproval('/repo/f', 'Bash', { command: 'git diff main' }),
       ).toBe(true)
     })
   })

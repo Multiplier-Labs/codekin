@@ -46,7 +46,8 @@ export function readNativePermissions(repoDir: string): string[] {
   try {
     const data = JSON.parse(readFileSync(filePath, 'utf-8')) as SettingsLocal
     return data.permissions?.allow ?? []
-  } catch {
+  } catch (err) {
+    console.warn(`[native-permissions] Failed to read settings from ${filePath}:`, err)
     return []
   }
 }

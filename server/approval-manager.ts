@@ -19,7 +19,7 @@ const PERSIST_DEBOUNCE_MS = 2000
  * Minimum number of repos that must have independently approved the same
  * tool/command/pattern before it is auto-approved globally (cross-repo).
  */
-const CROSS_REPO_THRESHOLD = 2
+const CROSS_REPO_THRESHOLD = 5
 
 export class ApprovalManager {
   /**

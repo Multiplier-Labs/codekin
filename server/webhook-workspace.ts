@@ -131,6 +131,9 @@ export async function createWorkspace(
 
     // Pin to the exact commit that triggered the failure, so Claude works on the
     // right code even if the branch has advanced since the webhook was sent.
+    if (!/^[0-9a-f]{40,64}$/.test(headSha)) {
+      throw new Error(`Invalid headSha format: ${headSha}`)
+    }
     console.log(`[webhook-workspace] Pinning to commit ${headSha.slice(0, 7)}`)
     await execFileAsync('git', ['reset', '--hard', headSha], {
       cwd: workspacePath,
