@@ -2,12 +2,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-// Mock fs.existsSync so we can control working-directory checks
+// Mock fs so we can control working-directory checks and avoid realpathSync failures in CI
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>()
   return {
     ...actual,
     existsSync: vi.fn(() => true),
+    realpathSync: vi.fn((p: string) => p),
   }
 })
 
