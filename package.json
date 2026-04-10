@@ -37,6 +37,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@multiplier-labs/stepflow": "^0.3.0",
     "better-sqlite3": "^12.6.2",
     "express": "^5.1.0",
     "multer": "^2.0.0",

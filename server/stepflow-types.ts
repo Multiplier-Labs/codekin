@@ -27,12 +27,14 @@
  *   stepflow-handler.ts — handles the full request/response lifecycle
  */
 
+import type { WebhookPayload } from '@multiplier-labs/stepflow'
+
 // ---------------------------------------------------------------------------
 // Inbound payload (what Stepflow POSTs to us)
 // ---------------------------------------------------------------------------
 
 /**
- * Raw webhook payload sent by Stepflow's `WebhookEventTransport`.
+ * Re-export the official Stepflow `WebhookPayload` type.
  *
  * Register Codekin as an endpoint in your Stepflow setup:
  *
@@ -45,45 +47,13 @@
  *     url: 'https://your-codekin/api/webhooks/stepflow',
  *     secret: process.env.STEPFLOW_WEBHOOK_SECRET,
  *     eventTypes: ['claude.session.requested'],
- *     // optionally filter to specific workflow kinds:
- *     // workflowKinds: ['code.fix', 'code.review'],
  *   }],
  * })
  * ```
  *
  * Stepflow signs each POST with HMAC-SHA256 in the `X-Webhook-Signature` header.
  */
-export interface StepflowWebhookPayload {
-  /** The Stepflow event that triggered this delivery. */
-  event: {
-    /** Stepflow workflow run ID — used for deduplication and callback correlation. */
-    runId: string
-    /** Workflow kind (e.g. `'code.fix'`, `'code.review'`). */
-    kind: string
-    /**
-     * Event type string.
-     * Only `'claude.session.requested'` is processed; all others are filtered.
-     */
-    eventType: string
-    /** Step key within the workflow that emitted this event, if applicable. */
-    stepKey?: string
-    /**
-     * Event payload.  For `claude.session.requested` events this must be a
-     * `StepflowSessionRequest`.  Other event types may have any shape.
-     */
-    payload?: unknown
-    /** ISO timestamp when the event was emitted. */
-    timestamp: string
-  }
-  /** ISO timestamp when Stepflow delivered this webhook. */
-  deliveredAt: string
-  /**
-   * Unique delivery ID assigned by Stepflow — used as the primary dedup key.
-   * Stepflow retries deliveries on non-2xx responses, so the same webhookId
-   * may arrive multiple times.
-   */
-  webhookId: string
-}
+export type StepflowWebhookPayload = WebhookPayload
 
 /**
  * Structured data the Stepflow workflow puts in `event.payload` when it needs
