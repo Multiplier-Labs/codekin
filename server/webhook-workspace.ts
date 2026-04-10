@@ -7,6 +7,21 @@ import { promisify } from 'util'
 const execFileAsync = promisify(execFile)
 const GIT_TIMEOUT_MS = 120_000
 
+/**
+ * Environment override that injects the gh credential helper for git HTTPS auth.
+ * Applied only to webhook workspace git commands — does not modify global git config.
+ *
+ * This is needed because `gh repo clone` handles auth internally, but subsequent
+ * `git fetch` / `git push` commands use plain git which has no credential helper
+ * configured by default.
+ */
+const GIT_AUTH_ENV = {
+  ...process.env,
+  GIT_CONFIG_COUNT: '1',
+  GIT_CONFIG_KEY_0: 'credential.https://github.com.helper',
+  GIT_CONFIG_VALUE_0: '!/usr/bin/gh auth git-credential',
+}
+
 const BASE_DIR = join(homedir(), '.codekin')
 const REPOS_DIR = join(BASE_DIR, 'repos')
 const WORKSPACES_DIR = join(BASE_DIR, 'workspaces')
@@ -47,6 +62,7 @@ async function ensureBareMirrorImpl(repo: string): Promise<string> {
       await execFileAsync('git', ['fetch', '--all', '--prune'], {
         cwd: mirrorPath,
         timeout: GIT_TIMEOUT_MS,
+        env: GIT_AUTH_ENV,
       })
     } catch (err) {
       console.warn(`[webhook-workspace] Failed to update mirror for ${repo}:`, err)
@@ -115,11 +131,16 @@ export async function createWorkspace(
       timeout: GIT_TIMEOUT_MS,
     })
 
+    // Validate headSha — must be a 40-char hex string (full SHA-1)
+    if (!/^[0-9a-f]{40}$/i.test(headSha)) {
+      throw new Error(`Invalid head SHA: ${headSha}`)
+    }
+
     // Fetch the specific branch
     await execFileAsync(
       'git',
       ['fetch', 'origin', `+refs/heads/${branch}:refs/remotes/origin/${branch}`],
-      { cwd: workspacePath, timeout: GIT_TIMEOUT_MS },
+      { cwd: workspacePath, timeout: GIT_TIMEOUT_MS, env: GIT_AUTH_ENV },
     )
 
     // Check out the branch (not detached HEAD) so Claude can commit and push fixes

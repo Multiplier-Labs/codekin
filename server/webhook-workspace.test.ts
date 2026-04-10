@@ -55,7 +55,7 @@ describe('webhook-workspace', () => {
         'owner/repo',
         'https://github.com/owner/repo.git',
         'fix-branch',
-        'abc1234567890',
+        'abc1234567890abcdef1234567890abcdef12345',
       )
 
       expect(result).toBe('/mock-home/.codekin/workspaces/session-1')
@@ -89,7 +89,7 @@ describe('webhook-workspace', () => {
 
       // 6. reset --hard to headSha
       expect(calls[5].cmd).toBe('git')
-      expect(calls[5].args).toEqual(['reset', '--hard', 'abc1234567890'])
+      expect(calls[5].args).toEqual(['reset', '--hard', 'abc1234567890abcdef1234567890abcdef12345'])
 
       // 7. git config user.name
       expect(calls[6].cmd).toBe('git')
@@ -118,7 +118,7 @@ describe('webhook-workspace', () => {
         'owner/repo',
         'https://github.com/owner/repo.git',
         'main',
-        'def456',
+        'def4567890abcdef1234567890abcdef12345678',
       )
 
       expect(result).toBe('/mock-home/.codekin/workspaces/session-2')
@@ -167,7 +167,7 @@ describe('webhook-workspace', () => {
         'owner/repo',
         'https://github.com/owner/repo.git',
         'main',
-        'aaa111',
+        'aaa111aaa111aaa111aaa111aaa111aaa111aa11',
       )
 
       expect(result).toBe('/mock-home/.codekin/workspaces/session-3')
@@ -210,14 +210,14 @@ describe('webhook-workspace', () => {
         'owner/repo',
         'https://github.com/owner/repo.git',
         'main',
-        'sha1',
+        'cccccccccccccccccccccccccccccccccccccccc',
       )
       const promise2 = createWorkspace(
         'session-b',
         'owner/repo',
         'https://github.com/owner/repo.git',
         'main',
-        'sha2',
+        'dddddddddddddddddddddddddddddddddddddddd',
       )
 
       // Let the first mirror clone complete
