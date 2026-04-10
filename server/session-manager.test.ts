@@ -908,16 +908,20 @@ describe('SessionManager', () => {
       await promise
     })
 
-    it('prefix-matches git push across args (PATTERNABLE enables runtime prefix match)', async () => {
+    it('does not prefix-match git push (NEVER_PATTERN only, exact match required)', async () => {
       const s = sm.create('test', '/tmp')
       s.clients.add(fakeWs())
       sm.approvalManager.addRepoApproval(s.workingDir, { command: 'git push origin main' })
 
-      // git push is in both PATTERNABLE and NEVER_PATTERN — no stored pattern,
-      // but runtime prefix-match works (both share prefix "git push")
-      const result = await sm.requestToolApproval(s.id, 'Bash', { command: 'git push origin feat/x' })
-      expect(result).toEqual({ allow: true, always: true })
-      expect(s.pendingToolApprovals.size).toBe(0)
+      // git push is only in NEVER_PATTERN_PREFIXES — no prefix match,
+      // different args require separate approval
+      const promise = sm.requestToolApproval(s.id, 'Bash', { command: 'git push origin feat/x' })
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      // Resolve the pending approval manually
+      const pending = s.pendingToolApprovals.values().next().value!
+      pending.resolve({ allow: false, always: false })
+      await promise
     })
 
     it('still allows exact match for dangerous commands', async () => {

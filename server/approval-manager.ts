@@ -86,7 +86,6 @@ export class ApprovalManager {
     'git fetch', 'git pull', 'git merge', 'git tag', 'git rev-parse',
     'git remote', 'git cherry-pick',
     'git worktree', 'git archive',
-    'git push',  // user explicitly clicks "Always Allow" — safe to pattern
 
     // GitHub CLI
     'gh pr', 'gh repo', 'gh run', 'gh search',
@@ -123,7 +122,7 @@ export class ApprovalManager {
     'ssh', 'docker', 'docker-compose',
     'rm', 'sudo', 'curl', 'wget',
     'git reset', 'git clean',
-    'git push',  // cross-remote escalation risk — no stored pattern, but prefix-match at runtime is allowed (see PATTERNABLE_PREFIXES)
+    'git push',  // cross-remote escalation risk — always stored as exact match only
     'gh api',  // can perform DELETE/PUT — too broad to pattern
     // Code executors — "node *" / "python *" would match arbitrary code execution
     'node', 'npx', 'python', 'python3', 'deno', 'bun', 'pm2',
