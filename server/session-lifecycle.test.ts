@@ -8,6 +8,7 @@ vi.mock('fs', async (importOriginal) => {
   return {
     ...actual,
     existsSync: vi.fn(() => true),
+    realpathSync: vi.fn((p: string) => p),
   }
 })
 
