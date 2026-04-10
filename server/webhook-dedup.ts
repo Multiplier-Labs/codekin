@@ -26,6 +26,20 @@ export function computeIdempotencyKey(
   return crypto.createHash('sha256').update(parts.join('|')).digest('hex')
 }
 
+/**
+ * Computes the idempotency key for a pull_request webhook event.
+ * sha256(repo + 'pull_request' + pr_number + action + head_sha)
+ */
+export function computePrIdempotencyKey(
+  repo: string,
+  prNumber: number,
+  action: string,
+  headSha: string,
+): string {
+  const parts = [repo, 'pull_request', String(prNumber), action, headSha]
+  return crypto.createHash('sha256').update(parts.join('|')).digest('hex')
+}
+
 export class WebhookDedup {
   // Two lookup maps for the same data — either key can match
   private byDeliveryId = new Map<string, DedupEntry>()
@@ -61,6 +75,21 @@ export class WebhookDedup {
     this.enforceMaxEntries()
 
     return false
+  }
+
+  /**
+   * Record an event as processed without the isDuplicate check.
+   * Used when the event has already passed dedup but we want to mark
+   * its idempotency key as seen (e.g. after async processing starts).
+   */
+  recordProcessed(deliveryId: string, idempotencyKey: string): void {
+    const entry: DedupEntry = {
+      processedAt: new Date().toISOString(),
+      eventId: deliveryId || idempotencyKey.slice(0, 12),
+    }
+    if (deliveryId) this.byDeliveryId.set(deliveryId, entry)
+    this.byIdempotencyKey.set(idempotencyKey, entry)
+    this.enforceMaxEntries()
   }
 
   private evictExpired(): void {
