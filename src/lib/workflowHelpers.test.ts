@@ -32,8 +32,8 @@ describe('workflowHelpers', () => {
   })
 
   describe('EVENT_CRON', () => {
-    it('describeCron returns "On commit" for event cron', () => {
-      expect(describeCron(EVENT_CRON)).toBe('On commit')
+    it('describeCron returns "On event" for event cron', () => {
+      expect(describeCron(EVENT_CRON)).toBe('On event')
     })
   })
 
