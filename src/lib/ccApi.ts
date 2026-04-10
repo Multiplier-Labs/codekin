@@ -448,3 +448,19 @@ export function wsUrl(): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${proto}//${location.host}/cc/`
 }
+
+/** Fetch available models from the OpenCode server. */
+export async function fetchOpenCodeModels(
+  token: string,
+  workingDir?: string,
+): Promise<{
+  models: Array<{ id: string; name: string; providerID: string; providerName: string }>
+  defaults: Record<string, string>
+}> {
+  const params = workingDir ? `?workingDir=${encodeURIComponent(workingDir)}` : ''
+  const res = await fetch(`${BASE}/api/opencode/models${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) return { models: [], defaults: {} }
+  return res.json()
+}

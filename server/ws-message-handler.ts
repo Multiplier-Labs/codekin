@@ -11,7 +11,7 @@ import { resolve as pathResolve } from 'path'
 import type { WebSocket } from 'ws'
 import { REPOS_ROOT } from './config.js'
 import type { SessionManager } from './session-manager.js'
-import { VALID_MODELS, VALID_PERMISSION_MODES } from './types.js'
+import { VALID_MODELS, VALID_PERMISSION_MODES, VALID_PROVIDERS } from './types.js'
 import type { WsClientMessage, WsServerMessage } from './types.js'
 
 /** Closure state passed to handleWsMessage from the ws.on('connection') scope. */
@@ -44,7 +44,11 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
         break
       }
 
-      const session = sessions.create(msg.name, msg.workingDir, { model: msg.model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools })
+      if (msg.provider && !VALID_PROVIDERS.has(msg.provider)) {
+        send({ type: 'error', message: `Invalid provider: ${msg.provider}` })
+        break
+      }
+      const session = sessions.create(msg.name, msg.workingDir, { model: msg.model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider })
       session.clients.add(ws)
       clientSessions.set(ws, session.id)
 
@@ -172,11 +176,27 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
     case 'set_model': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
-        if (!VALID_MODELS.has(msg.model)) {
+        // For OpenCode sessions, accept any model string (models are dynamic).
+        // For Claude sessions, validate against the static allowlist.
+        const sessionProvider = sessions.getSessionProvider(sessionId)
+        if (sessionProvider !== 'opencode' && !VALID_MODELS.has(msg.model)) {
           send({ type: 'error', message: `Invalid model: ${msg.model}` })
           break
         }
         sessions.setModel(sessionId, msg.model)
+      }
+      break
+    }
+
+    // Change the AI provider for the session. Stops old process and restarts with new provider.
+    case 'set_provider': {
+      const sessionId = clientSessions.get(ws)
+      if (sessionId) {
+        if (!VALID_PROVIDERS.has(msg.provider)) {
+          send({ type: 'error', message: `Invalid provider: ${msg.provider}` })
+          break
+        }
+        sessions.setProvider(sessionId, msg.provider)
       }
       break
     }

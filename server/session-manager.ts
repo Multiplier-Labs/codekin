@@ -26,7 +26,7 @@ import { homedir } from 'os'
 import path from 'path'
 import { promisify } from 'util'
 import type { WebSocket } from 'ws'
-import { ClaudeProcess } from './claude-process.js'
+import type { CodingProcess, CodingProvider } from './coding-process.js'
 import { PlanManager } from './plan-manager.js'
 import { SessionArchive } from './session-archive.js'
 import type { DiffFileStatus, DiffScope, Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
@@ -80,6 +80,10 @@ export interface CreateSessionOptions {
   permissionMode?: import('./types.js').PermissionMode
   /** Additional tools to pre-approve via --allowedTools (e.g. 'Bash(curl:*)', 'WebFetch'). */
   allowedTools?: string[]
+  /** Extra directories to grant Claude access to via --add-dir. */
+  addDirs?: string[]
+  /** AI provider to use for this session. Defaults to 'claude'. */
+  provider?: import('./coding-process.js').CodingProvider
 }
 
 
@@ -272,9 +276,11 @@ export class SessionManager {
       groupDir: options?.groupDir,
       created: new Date().toISOString(),
       source: options?.source ?? 'manual',
+      provider: options?.provider ?? 'claude',
       model: options?.model,
       permissionMode: options?.permissionMode,
       allowedTools: options?.allowedTools,
+      addDirs: options?.addDirs,
       claudeProcess: null,
       clients: new Set(),
       outputHistory: [],
@@ -885,7 +891,7 @@ export class SessionManager {
     })
   }
 
-  private onSystemInit(cp: ClaudeProcess, session: Session, model: string): void {
+  private onSystemInit(cp: CodingProcess, session: Session, model: string): void {
     session.claudeSessionId = cp.getSessionId()
     // Only show model message on first init or when model actually changes
     if (!session._lastReportedModel || session._lastReportedModel !== model) {
@@ -1111,9 +1117,27 @@ export class SessionManager {
             session.isProcessing = true
             this._globalBroadcast?.({ type: 'sessions_updated' })
           }
-          session.claudeProcess?.sendMessage(combined)
+          if (session.claudeProcess && !session.claudeProcess.isReady()) {
+            void this.waitForReady(sessionId).then(() => session.claudeProcess?.sendMessage(combined))
+          } else {
+            session.claudeProcess?.sendMessage(combined)
+          }
           return
         }
+      }
+
+      // Process just started — if not ready yet (OpenCode needs server init),
+      // queue the message via waitForReady.
+      if (session.claudeProcess && !session.claudeProcess.isReady()) {
+        session._lastUserInput = data
+        session._lastUserInputAt = Date.now()
+        session._apiRetryCount = 0
+        if (!session.isProcessing) {
+          session.isProcessing = true
+          this._globalBroadcast?.({ type: 'sessions_updated' })
+        }
+        void this.waitForReady(sessionId).then(() => session.claudeProcess?.sendMessage(data))
+        return
       }
     }
 
@@ -1150,6 +1174,30 @@ export class SessionManager {
    */
   requestToolApproval(sessionId: string, toolName: string, toolInput: Record<string, unknown>): Promise<{ allow: boolean; always: boolean; answer?: string }> {
     return this.promptRouter.requestToolApproval(sessionId, toolName, toolInput)
+  }
+
+  getSessionProvider(sessionId: string): string {
+    return this.sessions.get(sessionId)?.provider ?? 'claude'
+  }
+
+  /** Update the provider for a session and restart with the new provider process. */
+  setProvider(sessionId: string, provider: CodingProvider): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session) return false
+    if (session.provider === provider) return true
+    session.provider = provider
+    session.claudeSessionId = null
+    this.persistToDiskDebounced()
+    if (session.claudeProcess?.isAlive()) {
+      this.stopClaude(sessionId)
+      session._stoppedByUser = false
+      setTimeout(() => {
+        if (this.sessions.has(sessionId) && !session._stoppedByUser) {
+          this.startClaude(sessionId)
+        }
+      }, 500)
+    }
+    return true
   }
 
   /** Update the model for a session and restart Claude with the new model. */
@@ -1486,7 +1534,7 @@ export class SessionManager {
   restoreActiveSessions(): void {
     const toRestore: Session[] = []
     for (const session of this.sessions.values()) {
-      if (session._wasActiveBeforeRestart && session.claudeSessionId) {
+      if (session._wasActiveBeforeRestart && session.claudeSessionId && session.source !== 'webhook') {
         toRestore.push(session)
       }
     }

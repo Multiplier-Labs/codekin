@@ -48,6 +48,7 @@ export interface SessionContentProps {
   onSessionInputChange: (sessionId: string, value: string) => void
   currentModel: string | null
   onModelChange: (model: string) => void
+  availableModels?: import('../types').ModelOption[]
   hasUserMessages: boolean
   useWorktree: boolean
   onWorktreeChange: (v: boolean) => void
@@ -87,6 +88,7 @@ export function SessionContent({
   onSessionInputChange,
   currentModel,
   onModelChange,
+  availableModels,
   hasUserMessages,
   useWorktree,
   onWorktreeChange,
@@ -168,6 +170,7 @@ export function SessionContent({
         onValueChange={(v) => { onSessionInputChange(activeSessionId, v) }}
         currentModel={currentModel}
         onModelChange={onModelChange}
+        availableModels={availableModels}
         isMobile={isMobile}
         showWorktreeToggle={!hasUserMessages}
         useWorktree={useWorktree}

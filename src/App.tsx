@@ -38,7 +38,9 @@ import { DiffPanel } from './components/DiffPanel'
 import { OrchestratorContent } from './components/OrchestratorContent'
 import { DocsBrowserContent } from './components/DocsBrowserContent'
 import { SessionContent } from './components/SessionContent'
-import type { PermissionMode } from './types'
+import type { PermissionMode, CodingProvider, ModelOption } from './types'
+import { CLAUDE_MODELS } from './types'
+import { fetchOpenCodeModels } from './lib/ccApi'
 
 export default function App() {
   const { settings, updateSettings } = useSettings()
@@ -108,6 +110,11 @@ export default function App() {
   /** Permission mode ref for session orchestration (read at session creation time). */
   const permissionModeRef = useRef<PermissionMode>(
     (localStorage.getItem('claude-permission-mode') as PermissionMode) || 'acceptEdits'
+  )
+
+  /** Provider ref for session orchestration (read at session creation time). */
+  const providerRef = useRef<CodingProvider>(
+    (localStorage.getItem('codekin-provider') as CodingProvider) || 'claude'
   )
 
   const inputBarRef = useRef<InputBarHandle>(null)
@@ -184,6 +191,45 @@ export default function App() {
     setPermissionMode(mode)
   }, [setPermissionMode])
 
+  // Provider is per-session; default for new sessions is persisted to localStorage
+  const [currentProvider] = useState<CodingProvider>(
+    (localStorage.getItem('codekin-provider') as CodingProvider) || 'claude'
+  )
+  // Dynamic model list for OpenCode (fetched from server on demand)
+  const [openCodeModels, setOpenCodeModels] = useState<ModelOption[]>([])
+  const openCodeModelsDirRef = useRef<string | undefined>(undefined)
+  // Derive the active session's provider (falls back to the default for new sessions)
+  const activeSessionProvider = sessions.find(s => s.id === activeSessionId)?.provider ?? currentProvider
+  const availableModels = activeSessionProvider === 'opencode' ? openCodeModels : CLAUDE_MODELS
+
+  // Fetch OpenCode models when switching to an OpenCode session
+  const currentModelRef = useRef(currentModel)
+  useEffect(() => { currentModelRef.current = currentModel }, [currentModel])
+
+  const activeOpenCodeWd = activeSessionProvider === 'opencode'
+    ? sessions.find(s => s.id === activeSessionId)?.workingDir
+    : undefined
+  useEffect(() => {
+    if (activeSessionProvider !== 'opencode' || !settings.token) return
+    const wdChanged = activeOpenCodeWd && activeOpenCodeWd !== openCodeModelsDirRef.current
+    if (!wdChanged && openCodeModels.length > 0) return
+    const activeWd = activeOpenCodeWd
+    fetchOpenCodeModels(settings.token, activeWd).then(result => {
+      const models: ModelOption[] = result.models.map(m => ({
+        id: `${m.providerID}/${m.id}`,
+        label: `${m.name} (${m.providerName})`,
+      }))
+      setOpenCodeModels(models)
+      openCodeModelsDirRef.current = activeWd
+      const currentIsOpenCode = currentModelRef.current && models.some(m => m.id === currentModelRef.current)
+      if (!currentIsOpenCode) {
+        const [defaultProvider, defaultModelId] = Object.entries(result.defaults)[0] ?? []
+        if (defaultProvider && defaultModelId) setModel(`${defaultProvider}/${defaultModelId}`)
+        else if (models.length > 0) setModel(models[0].id)
+      }
+    }).catch(() => { /* OpenCode server not available */ })
+  }, [activeSessionProvider, settings.token, openCodeModels.length, setModel, activeOpenCodeWd])
+
   // Reset file-change tracking when switching sessions
   useEffect(() => {
     setHasFileChanges(false) // eslint-disable-line react-hooks/set-state-in-effect -- sync with session change
@@ -212,6 +258,7 @@ export default function App() {
     pendingContextRef,
     useWorktreeRef,
     permissionModeRef,
+    providerRef,
   })
 
   // Derive active repo from the active session
@@ -621,6 +668,7 @@ export default function App() {
             onSessionInputChange={handleSessionInputChange}
             currentModel={currentModel}
             onModelChange={setModel}
+            availableModels={availableModels}
             hasUserMessages={messages.some(m => m.type === 'user')}
             useWorktree={useWorktree}
             onWorktreeChange={setUseWorktree}

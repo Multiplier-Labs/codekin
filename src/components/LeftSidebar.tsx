@@ -105,7 +105,7 @@ interface Props {
   /** Rename a session in the sidebar tree. */
   onRenameSession: (id: string, name: string) => void
   /** Create a new session in the active repo. */
-  onNewSession: () => void
+  onNewSession: (provider?: import('../types').CodingProvider) => void
   /** Create a new session seeded with context from an archived session. */
   onNewSessionFromArchive: (workingDir: string, context: string) => void
   /** Open (or create) a session for a specific repo, optionally with a name. */
