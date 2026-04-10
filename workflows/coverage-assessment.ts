@@ -38,6 +38,7 @@ import {
   SQLiteStorageAdapter,
   WebhookEventTransport,
   CronScheduler,
+  type WorkflowContext,
 } from '@multiplier-labs/stepflow'
 
 // ---------------------------------------------------------------------------
@@ -87,7 +88,7 @@ engine.registerWorkflow({
     {
       key: 'dispatch_claude',
       name: 'Dispatch Claude session',
-      handler: async (ctx) => {
+      handler: async (ctx: WorkflowContext) => {
         const cloneUrl = `https://github.com/${TARGET_REPO}.git`
 
         // Resolve the current HEAD SHA without a local clone
@@ -104,7 +105,6 @@ engine.registerWorkflow({
         }
 
         const today = new Date().toISOString().slice(0, 10)
-        const runId = (ctx as { runId?: string }).runId ?? 'unknown'
 
         const request = {
           repo: TARGET_REPO!,
@@ -132,15 +132,11 @@ engine.registerWorkflow({
             `Your job is analysis and reporting only — do not fix bugs or add tests.`,
             `Keep proposals concrete: file path, function/class, scenario to test, and rationale.`,
           ].join('\n'),
-          callbackUrl: `${CODEKIN_URL}/api/stepflow/callback/${runId}`,
+          callbackUrl: `${CODEKIN_URL}/api/stepflow/callback/${ctx.runId}`,
           callbackSecret: CALLBACK_SECRET,
         }
 
-        // ctx.emit is fire-and-forget — Codekin receives and processes async
-        ;(ctx as { emit?: (type: string, payload: unknown) => void }).emit?.(
-          'claude.session.requested',
-          request
-        )
+        ctx.emit('claude.session.requested', request)
 
         console.log(`[coverage-assessment] Dispatched Claude for ${TARGET_REPO}@${headSha.slice(0, 7)}`)
         return { headSha, today, repo: TARGET_REPO }
