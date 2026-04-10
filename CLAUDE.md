@@ -42,6 +42,16 @@ npm run lint         # eslint
 - All changes go through PRs with review and passing CI.
 - Releases are tagged with semver: `v0.2.0`, `v1.0.0`, etc.
 
+## Audit & Report Output
+
+When generating audit reports, health checks, or any recurring assessment:
+
+1. **Always write the report to a file** — never just print it as conversation text.
+2. **Location**: `.codekin/reports/<category>/YYYY-MM-DD_<type>.md` (e.g., `.codekin/reports/security/2026-04-10_security-audit.md`).
+3. **Existing categories**: `code-review`, `comments`, `complexity`, `dependencies`, `docs-audit`, `repo-health`, `security`, `test-coverage`. Create new subdirectories if needed.
+4. **Clean output only** — do not include internal reasoning, chain-of-thought, or status messages (e.g., "Now I have the data...") in the report file. The file should contain only the finished report.
+5. **Commit the report** on a branch and open a PR so it is visible in the repo history.
+
 ## Output Conventions
 
 - When sharing code snippets, configuration files, or file contents with the user, always use fenced code blocks (```language) so they render properly in the terminal UI
