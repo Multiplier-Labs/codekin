@@ -401,7 +401,7 @@ export class SessionLifecycle {
     const session = this.deps.getSession(sessionId)
     if (session?.claudeProcess) {
       session._stoppedByUser = true
-      if (session._apiRetry.timer) clearTimeout(session._apiRetry.timer)
+      if (session._apiRetry?.timer) clearTimeout(session._apiRetry.timer)
       if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
       session.claudeProcess.removeAllListeners()
       session.claudeProcess.stop()
@@ -421,7 +421,7 @@ export class SessionLifecycle {
 
     const cp = session.claudeProcess
     session._stoppedByUser = true
-    if (session._apiRetry.timer) clearTimeout(session._apiRetry.timer)
+    if (session._apiRetry?.timer) clearTimeout(session._apiRetry.timer)
     if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
     cp.removeAllListeners()
     cp.stop()
