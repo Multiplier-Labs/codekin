@@ -2,7 +2,7 @@
  * Stepflow → Codekin webhook handler.
  *
  * Receives signed webhook deliveries from a Stepflow `WebhookEventTransport`,
- * creates an isolated git workspace, spawns a Claude session, and POSTs the
+ * creates an isolated git workspace, spawns a coding session, and POSTs the
  * result back to the workflow via a callback URL.
  *
  * ┌──────────────────────────────────────────────────────────────────────────┐
@@ -19,7 +19,7 @@
  * │                                                                          │
  * │  Async (processAsync):                                                   │
  * │    8. createWorkspace()       — bare mirror + session-specific clone    │
- * │    9. sessions.create()       — spawn Claude with source='stepflow'     │
+ * │    9. sessions.create()       — spawn a session with source='stepflow'     │
  * │   10. sessions.sendInput()    — deliver the built prompt                │
  * │                                                                          │
  * │  On session exit (onSessionExit callback):                              │
@@ -121,7 +121,7 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
     // Session exit: update event status, fire callback, clean up workspace
     // -----------------------------------------------------------------------
     sessions.onSessionExit((sessionId, code, _signal, willRestart) => {
-      // Don't report yet if Claude's auto-restart will retry the session
+      // Don't report yet if auto-restart will retry the session
       if (willRestart) return
 
       const event = this.getEvents().find(
@@ -131,7 +131,7 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
       if (!event) return
 
       const status: StepflowEventStatus = code === 0 ? 'completed' : 'error'
-      const error = code !== 0 ? `Claude exited with code ${code}` : undefined
+      const error = code !== 0 ? `Session exited with code ${code}` : undefined
       this.updateEventStatus(event.id, status, error)
       console.log(`[stepflow] Event ${event.id} → ${status} (session ${sessionId}, code=${code})`)
 

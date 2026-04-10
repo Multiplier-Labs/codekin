@@ -60,6 +60,8 @@ function createContext(): WsHandlerContext & { sent: WsServerMessage[] } {
       sendInput: vi.fn(),
       sendPromptResponse: vi.fn(),
       setModel: vi.fn().mockReturnValue(true),
+      getSessionProvider: vi.fn().mockReturnValue('claude'),
+      setProvider: vi.fn().mockReturnValue(true),
       setPermissionMode: vi.fn().mockReturnValue(true),
       addToHistory: vi.fn(),
       broadcast: vi.fn(),

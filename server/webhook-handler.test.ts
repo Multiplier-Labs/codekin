@@ -12,10 +12,12 @@ vi.mock('./webhook-dedup.js', () => {
     isDuplicate = mockIsDuplicate
     shutdown = mockDedupShutdown
     flushToDisk = vi.fn()
+    recordProcessed = vi.fn()
   }
   return {
     WebhookDedup: MockWebhookDedup,
     computeIdempotencyKey: vi.fn(() => 'mock-idempotency-key'),
+    computePrIdempotencyKey: vi.fn(() => 'mock-pr-idempotency-key'),
   }
 })
 
@@ -30,6 +32,26 @@ vi.mock('./webhook-github.js', () => ({
 
 vi.mock('./webhook-prompt.js', () => ({
   buildPrompt: vi.fn(() => 'test prompt'),
+}))
+
+vi.mock('./webhook-pr-github.js', () => ({
+  fetchPrDiff: vi.fn(async () => ({ diff: 'diff content', truncated: false })),
+  fetchPrFiles: vi.fn(async () => 'file1.ts'),
+  fetchPrCommits: vi.fn(async () => 'commit 1'),
+  fetchPrReviewComments: vi.fn(async () => ''),
+  fetchPrReviews: vi.fn(async () => ''),
+  fetchExistingReviewComment: vi.fn(async () => undefined),
+}))
+
+vi.mock('./webhook-pr-prompt.js', () => ({
+  buildPrReviewPrompt: vi.fn(() => 'test pr review prompt'),
+}))
+
+vi.mock('./webhook-pr-cache.js', () => ({
+  loadPrCache: vi.fn(async () => null),
+  ensureCacheDir: vi.fn(async () => {}),
+  archivePrCache: vi.fn(async () => {}),
+  deletePrCache: vi.fn(async () => {}),
 }))
 
 vi.mock('./webhook-workspace.js', () => ({
@@ -65,6 +87,9 @@ function fakeSessionManager() {
     broadcast: vi.fn(),
     sendInput: vi.fn(),
     onSessionExit: vi.fn((cb: ExitCallback) => { exitCallbacks.push(cb) }),
+    onSessionResult: vi.fn(() => () => {}),
+    stopClaude: vi.fn(),
+    delete: vi.fn(),
     _exitCallbacks: exitCallbacks,
   } as unknown as ReturnType<typeof fakeSessionManager>
 }

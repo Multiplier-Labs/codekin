@@ -127,6 +127,7 @@ function fakeWs(open = true) {
 function fakeClaudeProcess(alive = true) {
   return {
     isAlive: vi.fn(() => alive),
+    isReady: vi.fn(() => alive),
     stop: vi.fn(),
     start: vi.fn(),
     on: vi.fn(),

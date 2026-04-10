@@ -134,6 +134,23 @@ Fields:
 - **completionPolicy**: "pr" (create PR), "merge" (push to branch), or "commit-only"
 - **useWorktree**: true (default) — runs in an isolated git worktree
 - **model**: Optional model override (e.g. "claude-sonnet-4-6")
+- **allowedTools**: Optional array of tool patterns to override defaults (advanced)
+
+### What Child Sessions Can Do Automatically
+Child sessions have a broad set of pre-approved tools for standard dev work:
+- **File operations**: Read, Write, Edit, Glob, Grep
+- **Git & GitHub**: git (all subcommands), gh (PRs, issues, runs)
+- **Package managers**: npm, npx, yarn, pnpm, bun
+- **Build tools**: node, tsc, eslint, prettier, cargo, go, make, pip
+- **Filesystem** (read-only): ls, cat, head, tail, sort, diff, tree, wc, which, file
+
+They do NOT have access to destructive commands (rm, sudo, docker,
+git reset --hard, git push --force). Those will block and require
+your approval or the user's.
+
+You can override the default tool set per-spawn using the \`allowedTools\`
+field if a repo needs a different set (e.g. a Python-only repo that
+doesn't need npm).
 
 The response includes the child session ID. The session will appear in the
 user's sidebar immediately.

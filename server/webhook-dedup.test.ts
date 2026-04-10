@@ -13,7 +13,7 @@ vi.mock('fs', async (importOriginal) => {
   }
 })
 
-import { WebhookDedup, computeIdempotencyKey } from './webhook-dedup.js'
+import { WebhookDedup, computeIdempotencyKey, computePrIdempotencyKey } from './webhook-dedup.js'
 import { existsSync, writeFileSync, readFileSync } from 'fs'
 
 describe('computeIdempotencyKey', () => {
@@ -217,5 +217,41 @@ describe('WebhookDedup', () => {
       expect(clearSpy).toHaveBeenCalled()
       clearSpy.mockRestore()
     })
+  })
+})
+
+describe('computePrIdempotencyKey', () => {
+  it('returns a deterministic hash', () => {
+    const a = computePrIdempotencyKey('owner/repo', 42, 'opened', 'abc123')
+    const b = computePrIdempotencyKey('owner/repo', 42, 'opened', 'abc123')
+    expect(a).toBe(b)
+    expect(a).toHaveLength(64) // sha256 hex
+  })
+
+  it('differs when any field changes', () => {
+    const base = computePrIdempotencyKey('owner/repo', 42, 'opened', 'abc123')
+    expect(computePrIdempotencyKey('other/repo', 42, 'opened', 'abc123')).not.toBe(base)
+    expect(computePrIdempotencyKey('owner/repo', 99, 'opened', 'abc123')).not.toBe(base)
+    expect(computePrIdempotencyKey('owner/repo', 42, 'synchronize', 'abc123')).not.toBe(base)
+    expect(computePrIdempotencyKey('owner/repo', 42, 'opened', 'def456')).not.toBe(base)
+  })
+})
+
+describe('WebhookDedup.recordProcessed', () => {
+  it('marks an event as seen without isDuplicate check', () => {
+    const dedup = new WebhookDedup()
+    dedup.recordProcessed('delivery-1', 'key-1')
+    expect(dedup.isDuplicate('delivery-1', 'key-1')).toBe(true)
+    dedup.shutdown()
+  })
+
+  it('does not conflict with isDuplicate flow', () => {
+    const dedup = new WebhookDedup()
+    // First call records via isDuplicate
+    expect(dedup.isDuplicate('d1', 'k1')).toBe(false)
+    // recordProcessed for a different event
+    dedup.recordProcessed('d2', 'k2')
+    expect(dedup.isDuplicate('d2', 'k2')).toBe(true)
+    dedup.shutdown()
   })
 })

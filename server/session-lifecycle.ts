@@ -11,6 +11,8 @@
 import { existsSync } from 'fs'
 import path from 'path'
 import { ClaudeProcess } from './claude-process.js'
+import { OpenCodeProcess } from './opencode-process.js'
+import type { CodingProcess } from './coding-process.js'
 import { ApprovalManager } from './approval-manager.js'
 import type { PromptRouter } from './prompt-router.js'
 import type { Session, WsServerMessage } from './types.js'
@@ -33,7 +35,7 @@ export interface SessionLifecycleDeps {
   promptRouter: PromptRouter
   exitListeners: Array<(sessionId: string, code: number | null, signal: string | null, willRestart: boolean) => void>
   // Event handler callbacks that remain in SessionManager
-  onSystemInit(cp: ClaudeProcess, session: Session, model: string): void
+  onSystemInit(cp: CodingProcess, session: Session, model: string): void
   onTextEvent(session: Session, sessionId: string, text: string): void
   onThinkingEvent(session: Session, summary: string): void
   onToolOutputEvent(session: Session, content: string, isError: boolean): void
@@ -142,14 +144,26 @@ export class SessionLifecycle {
     const repoDir = session.groupDir ?? session.workingDir
     const registryPatterns = this.deps.approvalManager.getAllowedToolsForRepo(repoDir)
     const mergedAllowedTools = [...new Set([...(session.allowedTools || []), ...registryPatterns])]
-    const cp = new ClaudeProcess(session.workingDir, {
-      sessionId: session.claudeSessionId || undefined,
-      extraEnv,
-      model: session.model,
-      permissionMode: session.permissionMode,
-      resume,
-      allowedTools: mergedAllowedTools,
-    })
+    let cp: CodingProcess
+    if (session.provider === 'opencode') {
+      cp = new OpenCodeProcess(session.workingDir, {
+        sessionId: sessionId,
+        opencodeSessionId: session.claudeSessionId || undefined,
+        model: session.model,
+        extraEnv,
+        permissionMode: session.permissionMode,
+      })
+    } else {
+      cp = new ClaudeProcess(session.workingDir, {
+        sessionId: session.claudeSessionId || undefined,
+        extraEnv,
+        model: session.model,
+        permissionMode: session.permissionMode,
+        resume,
+        allowedTools: mergedAllowedTools,
+        addDirs: session.addDirs,
+      })
+    }
 
     this.wireClaudeEvents(cp, session, sessionId)
 
@@ -172,18 +186,20 @@ export class SessionLifecycle {
   waitForReady(sessionId: string, timeoutMs = 30_000): Promise<void> {
     const session = this.deps.getSession(sessionId)
     if (!session?.claudeProcess) return Promise.resolve()
-    // If the process already completed init in a prior turn, resolve immediately
-    if (session.claudeSessionId) return Promise.resolve()
+    // If the process is already fully initialized, resolve immediately.
+    // Uses isReady() which accounts for provider differences: Claude is ready
+    // as soon as alive (stdin buffered), OpenCode needs alive + opencodeSessionId.
+    if (session.claudeProcess.isReady()) return Promise.resolve()
 
     return new Promise<void>((resolve) => {
+      const done = () => { clearTimeout(timer); resolve() }
       const timer = setTimeout(() => {
         console.warn(`[waitForReady] Timed out waiting for system_init on ${sessionId} after ${timeoutMs}ms`)
+        session.claudeProcess?.removeListener('exit', done)
         resolve()
       }, timeoutMs)
-      session.claudeProcess!.once('system_init', () => {
-        clearTimeout(timer)
-        resolve()
-      })
+      session.claudeProcess!.once('system_init', done)
+      session.claudeProcess!.once('exit', done) // fail-fast if process dies during init
     })
   }
 
@@ -191,7 +207,7 @@ export class SessionLifecycle {
    * Attach all ClaudeProcess event listeners for a session.
    * Called by startClaude() to keep that method focused on process setup.
    */
-  wireClaudeEvents(cp: ClaudeProcess, session: Session, sessionId: string): void {
+  wireClaudeEvents(cp: CodingProcess, session: Session, sessionId: string): void {
     cp.on('system_init', (model) => this.deps.onSystemInit(cp, session, model))
     cp.on('text', (text) => this.deps.onTextEvent(session, sessionId, text))
     cp.on('thinking', (summary) => this.deps.onThinkingEvent(session, summary))
@@ -227,7 +243,7 @@ export class SessionLifecycle {
    * Uses evaluateRestart() for the restart decision, keeping this method focused
    * on state updates, listener notification, and message broadcasting.
    */
-  handleClaudeExit(exitedProcess: ClaudeProcess, session: Session, sessionId: string, code: number | null, signal: string | null): void {
+  handleClaudeExit(exitedProcess: CodingProcess, session: Session, sessionId: string, code: number | null, signal: string | null): void {
     // Guard: ignore exit events from stale processes that were replaced by a
     // new startClaude() call.  Without this, the old process's exit handler
     // would null out session.claudeProcess (which now points to the NEW
@@ -244,7 +260,12 @@ export class SessionLifecycle {
     // "Session ID is already in use" means another process holds the lock.
     // Retrying with the same session ID will fail every time, so treat this
     // as a non-restartable exit (same as stopped-by-user).
-    const sessionConflict = exitedProcess.hasSessionConflict()
+    // ClaudeProcess has diagnostic methods (hasSessionConflict, hadOutput, hasSpawnFailed)
+    // that OpenCodeProcess does not. Duck-type check via property existence.
+    const proc = exitedProcess as CodingProcess & Partial<Pick<ClaudeProcess, 'hasSessionConflict' | 'hadOutput' | 'hasSpawnFailed'>>
+    const sessionConflict = proc.hasSessionConflict ? proc.hasSessionConflict() : false
+    const producedOutput = proc.hadOutput ? proc.hadOutput() : true
+    const spawnFailed = proc.hasSpawnFailed ? proc.hasSpawnFailed() : false
 
     // If the process exited without ever producing stdout output, --resume
     // hung on a broken/stale session. Clear claudeSessionId so the next
@@ -252,11 +273,11 @@ export class SessionLifecycle {
     // broken resume — which would just hang again.
     // Exception: if spawn() itself failed (ENOENT/EACCES), the process never
     // started — the session data on disk is fine, so preserve the ID for retry.
-    if (!exitedProcess.hadOutput() && session.claudeSessionId && !exitedProcess.hasSpawnFailed()) {
+    if (!producedOutput && session.claudeSessionId && !spawnFailed) {
       console.warn(`[restart] Session ${sessionId} produced no output before exit — clearing claudeSessionId to force fresh session`)
       session.claudeSessionId = null
     }
-    if (exitedProcess.hasSpawnFailed()) {
+    if (spawnFailed) {
       console.warn(`[restart] Session ${sessionId} spawn failed (binary not found) — preserving claudeSessionId for retry`)
     }
 

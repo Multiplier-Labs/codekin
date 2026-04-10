@@ -430,8 +430,8 @@ export function useChatSocket({
     send({ type: 'join_session', sessionId })
   }, [send])
 
-  const createSession = useCallback((name: string, workingDir: string, useWorktree?: boolean, permissionMode?: PermissionMode) => {
-    send({ type: 'create_session', name, workingDir, useWorktree, permissionMode })
+  const createSession = useCallback((name: string, workingDir: string, useWorktree?: boolean, permissionMode?: PermissionMode, provider?: import('../types').CodingProvider) => {
+    send({ type: 'create_session', name, workingDir, useWorktree, permissionMode, provider })
   }, [send])
 
   const sendInput = useCallback((data: string, displayText?: string) => {

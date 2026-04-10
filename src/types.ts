@@ -50,6 +50,29 @@ export interface RepoManifest {
  */
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | 'dangerouslySkipPermissions'
 
+/**
+ * Supported AI coding assistant providers.
+ * - 'claude': Claude Code CLI (subprocess, NDJSON on stdin/stdout)
+ * - 'opencode': OpenCode server (HTTP REST + SSE)
+ */
+export type CodingProvider = 'claude' | 'opencode'
+
+/** Provider metadata for the UI selector. */
+export const PROVIDERS: { id: CodingProvider; label: string; description: string }[] = [
+  { id: 'claude', label: 'Claude Code', description: 'Anthropic Claude Code CLI' },
+  { id: 'opencode', label: 'OpenCode', description: 'OpenCode server (multi-provider)' },
+]
+
+/** Model option for UI selectors. */
+export interface ModelOption { id: string; label: string }
+
+/** Static models for Claude Code CLI. */
+export const CLAUDE_MODELS: ModelOption[] = [
+  { id: 'claude-opus-4-6', label: 'Opus 4.6' },
+  { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
+]
+
 /** Permission mode metadata for the UI selector. */
 export const PERMISSION_MODES: { id: PermissionMode; label: string; description: string; icon: string; dangerous?: boolean }[] = [
   { id: 'default', label: 'Ask permissions', description: 'Always ask before making changes', icon: 'shield' },
@@ -77,6 +100,8 @@ export interface Session {
   lastActivity: string
   /** How the session was created: manually by a user, by a GitHub webhook, or by a workflow. */
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
+  /** Which AI provider powers this session. Defaults to 'claude'. */
+  provider?: CodingProvider
 }
 
 /**
@@ -95,11 +120,12 @@ export interface Session {
  */
 export type WsClientMessage =
   | { type: 'auth'; token: string }
-  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean; permissionMode?: PermissionMode; allowedTools?: string[] }
+  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean; permissionMode?: PermissionMode; allowedTools?: string[]; provider?: CodingProvider }
   | { type: 'join_session'; sessionId: string }
   | { type: 'leave_session' }
   | { type: 'start_claude'; options?: Record<string, unknown> }
   | { type: 'set_model'; model: string }
+  | { type: 'set_provider'; provider: CodingProvider }
   | { type: 'set_permission_mode'; permissionMode: PermissionMode }
   | { type: 'stop' }
   | { type: 'input'; data: string; displayText?: string }

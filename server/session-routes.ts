@@ -18,6 +18,8 @@ import { homedir as osHomedir } from 'os'
 import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
 import { REPOS_ROOT, getAgentDisplayName } from './config.js'
+import { VALID_PROVIDERS } from './types.js'
+import { fetchOpenCodeModels } from './opencode-process.js'
 
 /** Expand leading ~ to the user's home directory. */
 function expandTilde(p: string): string {
@@ -48,6 +50,14 @@ export function createSessionRouter(
     res.json({ sessions: sessions.list() })
   })
 
+  router.get('/api/opencode/models', async (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const workingDir = (req.query.workingDir as string) || osHomedir()
+    const result = await fetchOpenCodeModels(workingDir)
+    res.json(result)
+  })
+
   router.post('/api/sessions/create', (req, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
@@ -70,7 +80,11 @@ export function createSessionRouter(
       return res.status(403).json({ error: 'workingDir is outside allowed directories' })
     }
 
-    const session = sessions.create(name, workingDir)
+    const { provider, model, permissionMode } = req.body
+    if (provider && !VALID_PROVIDERS.has(provider)) {
+      return res.status(400).json({ error: `Invalid provider: ${provider}. Must be one of: ${[...VALID_PROVIDERS].join(', ')}` })
+    }
+    const session = sessions.create(name, workingDir, { provider, model, permissionMode })
     res.json({
       sessionId: session.id,
       session: {
