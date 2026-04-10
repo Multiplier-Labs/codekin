@@ -2839,7 +2839,7 @@ describe('SessionManager', () => {
       vi.useFakeTimers()
       const s = sm.create('retry-exhaust', '/tmp')
       const session = sm.get(s.id)!
-      ;(session as any)._apiRetryCount = 3 // MAX_API_RETRIES is 3
+      ;(session as any)._apiRetry.count = 3 // MAX_API_RETRIES is 3
       ;(session as any)._lastUserInput = 'test input'
       ;(session as any).claudeProcess = fakeClaudeProcess()
 
@@ -2855,7 +2855,7 @@ describe('SessionManager', () => {
       expect(errorMsg.text).toContain('3 retries')
 
       // Retry counter should be reset
-      expect((session as any)._apiRetryCount).toBe(0)
+      expect((session as any)._apiRetry.count).toBe(0)
       vi.useRealTimers()
     })
   })

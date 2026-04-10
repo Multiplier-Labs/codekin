@@ -69,6 +69,14 @@ const API_RETRY_PATTERNS = [
   /503/,
 ]
 
+/** Sources that represent headless (non-interactive) sessions managed by their own lifecycles. */
+const HEADLESS_SOURCES = new Set(['webhook', 'workflow', 'stepflow', 'agent', 'orchestrator'])
+
+/** Check whether a session is headless (webhook, workflow, stepflow, agent, orchestrator). */
+function isHeadlessSession(session: { source?: string }): boolean {
+  return HEADLESS_SOURCES.has(session.source ?? '')
+}
+
 export interface CreateSessionOptions {
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   id?: string
@@ -186,7 +194,7 @@ export class SessionManager {
     const now = Date.now()
     for (const session of this.sessions.values()) {
       // Skip headless sessions — they are managed by their own lifecycles
-      if (session.source === 'webhook' || session.source === 'workflow' || session.source === 'stepflow' || session.source === 'agent' || session.source === 'orchestrator') continue
+      if (isHeadlessSession(session)) continue
       // Skip sessions with connected clients or no running process
       if (session.clients.size > 0 || !session.claudeProcess?.isAlive()) continue
       // Skip sessions that are actively processing
@@ -209,10 +217,10 @@ export class SessionManager {
     }
 
     // Prune stale sessions: no process, no clients, older than STALE_SESSION_AGE_MS
-    // Agent and orchestrator sessions are exempt — they are long-lived by design.
+    // Headless sessions are exempt from stale pruning — they are long-lived by design.
     const staleIds: string[] = []
     for (const session of this.sessions.values()) {
-      if (session.source === 'agent' || session.source === 'orchestrator') continue
+      if (isHeadlessSession(session)) continue
       if (session.claudeProcess?.isAlive()) continue
       if (session.clients.size > 0) continue
       const ageMs = now - new Date(session.created).getTime()
@@ -289,7 +297,7 @@ export class SessionManager {
       lastRestartAt: null,
       _stoppedByUser: false,
       _wasActiveBeforeRestart: false,
-      _apiRetryCount: 0,
+      _apiRetry: { count: 0 },
       _turnCount: 0,
       _claudeTurnCount: 0,
       _namingAttempts: 0,
@@ -648,39 +656,32 @@ export class SessionManager {
     }
   }
 
+  private serializeSession(s: Session): SessionInfo {
+    return {
+      id: s.id,
+      name: s.name,
+      created: s.created,
+      active: s.claudeProcess?.isAlive() ?? false,
+      isProcessing: s.isProcessing,
+      workingDir: s.workingDir,
+      groupDir: s.groupDir,
+      worktreePath: s.worktreePath,
+      connectedClients: s.clients.size,
+      lastActivity: new Date(s._lastActivityAt).toISOString(),
+      source: s.source,
+    }
+  }
+
   list(): SessionInfo[] {
     return Array.from(this.sessions.values())
-      .map((s) => ({
-        id: s.id,
-        name: s.name,
-        created: s.created,
-        active: s.claudeProcess?.isAlive() ?? false,
-        isProcessing: s.isProcessing,
-        workingDir: s.workingDir,
-        groupDir: s.groupDir,
-        worktreePath: s.worktreePath,
-        connectedClients: s.clients.size,
-        lastActivity: new Date(s._lastActivityAt).toISOString(),
-        source: s.source,
-      }))
+      .filter((s) => s.source !== 'orchestrator')
+      .map((s) => this.serializeSession(s))
   }
 
   /** List ALL sessions including orchestrator — used by orchestrator cleanup endpoints. */
   listAll(): SessionInfo[] {
     return Array.from(this.sessions.values())
-      .map((s) => ({
-        id: s.id,
-        name: s.name,
-        created: s.created,
-        active: s.claudeProcess?.isAlive() ?? false,
-        isProcessing: s.isProcessing,
-        workingDir: s.workingDir,
-        groupDir: s.groupDir,
-        worktreePath: s.worktreePath,
-        connectedClients: s.clients.size,
-        lastActivity: new Date(s._lastActivityAt).toISOString(),
-        source: s.source,
-      }))
+      .map((s) => this.serializeSession(s))
   }
 
   rename(sessionId: string, newName: string): boolean {
@@ -772,7 +773,7 @@ export class SessionManager {
 
     // Prevent auto-restart when deleting
     session._stoppedByUser = true
-    if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
+    if (session._apiRetry.timer) clearTimeout(session._apiRetry.timer)
     if (session._namingTimer) clearTimeout(session._namingTimer)
     if (session._leaveGraceTimer) clearTimeout(session._leaveGraceTimer)
     if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
@@ -981,25 +982,25 @@ export class SessionManager {
    */
   private handleApiRetry(session: Session, sessionId: string, result: string): boolean {
     if (!session._lastUserInput || !this.isRetryableApiError(result)) {
-      session._apiRetryCount = 0
-      session._apiRetryScheduled = false
+      session._apiRetry.count = 0
+      session._apiRetry.scheduled = false
       return false
     }
 
     // Skip retry if the original input is older than 60 seconds — context has likely moved on
     if (session._lastUserInputAt && Date.now() - session._lastUserInputAt > 60_000) {
       console.log(`[api-retry] skipping stale retry for session=${sessionId} (input age=${Math.round((Date.now() - session._lastUserInputAt) / 1000)}s)`)
-      session._apiRetryCount = 0
-      session._apiRetryScheduled = false
+      session._apiRetry.count = 0
+      session._apiRetry.scheduled = false
       return false
     }
 
-    if (session._apiRetryCount < MAX_API_RETRIES) {
+    if (session._apiRetry.count < MAX_API_RETRIES) {
       // Prevent duplicate scheduling from concurrent error paths
-      if (session._apiRetryScheduled) return true
+      if (session._apiRetry.scheduled) return true
 
-      session._apiRetryCount++
-      const attempt = session._apiRetryCount
+      session._apiRetry.count++
+      const attempt = session._apiRetry.count
       const delay = API_RETRY_BASE_DELAY_MS * Math.pow(2, attempt - 1)
 
       const retryMsg: WsServerMessage = {
@@ -1012,11 +1013,11 @@ export class SessionManager {
 
       console.log(`[api-retry] session=${sessionId} attempt=${attempt}/${MAX_API_RETRIES} delay=${delay}ms error=${result.slice(0, 200)}`)
 
-      if (session._apiRetryTimer) clearTimeout(session._apiRetryTimer)
-      session._apiRetryScheduled = true
-      session._apiRetryTimer = setTimeout(() => {
-        session._apiRetryTimer = undefined
-        session._apiRetryScheduled = false
+      if (session._apiRetry.timer) clearTimeout(session._apiRetry.timer)
+      session._apiRetry.scheduled = true
+      session._apiRetry.timer = setTimeout(() => {
+        session._apiRetry.timer = undefined
+        session._apiRetry.scheduled = false
         if (!session.claudeProcess?.isAlive() || session._stoppedByUser) return
         console.log(`[api-retry] resending message for session=${sessionId} attempt=${attempt}`)
         session.claudeProcess.sendMessage(session._lastUserInput!)
@@ -1032,8 +1033,8 @@ export class SessionManager {
     }
     this.addToHistory(session, exhaustedMsg)
     this.broadcast(session, exhaustedMsg)
-    session._apiRetryCount = 0
-    session._apiRetryScheduled = false
+    session._apiRetry.count = 0
+    session._apiRetry.scheduled = false
     return false
   }
 
@@ -1042,8 +1043,8 @@ export class SessionManager {
    * and trigger session naming if needed.
    */
   private finalizeResult(session: Session, sessionId: string, result: string, isError: boolean): void {
-    session._apiRetryCount = 0
-    session._apiRetryScheduled = false
+    session._apiRetry.count = 0
+    session._apiRetry.scheduled = false
     session._lastUserInput = undefined
     session._lastUserInputAt = undefined
 
@@ -1112,7 +1113,7 @@ export class SessionManager {
           const combined = context + '\n\n' + data
           session._lastUserInput = combined
           session._lastUserInputAt = Date.now()
-          session._apiRetryCount = 0
+          session._apiRetry.count = 0
           if (!session.isProcessing) {
             session.isProcessing = true
             this._globalBroadcast?.({ type: 'sessions_updated' })
@@ -1131,7 +1132,7 @@ export class SessionManager {
       if (session.claudeProcess && !session.claudeProcess.isReady()) {
         session._lastUserInput = data
         session._lastUserInputAt = Date.now()
-        session._apiRetryCount = 0
+        session._apiRetry.count = 0
         if (!session.isProcessing) {
           session.isProcessing = true
           this._globalBroadcast?.({ type: 'sessions_updated' })
@@ -1151,7 +1152,7 @@ export class SessionManager {
 
     session._lastUserInput = data
     session._lastUserInputAt = Date.now()
-    session._apiRetryCount = 0
+    session._apiRetry.count = 0
     if (!session.isProcessing) {
       session.isProcessing = true
       this._globalBroadcast?.({ type: 'sessions_updated' })

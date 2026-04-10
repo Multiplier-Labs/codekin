@@ -128,7 +128,7 @@ export class SessionPersistence {
           lastRestartAt: null,
           _stoppedByUser: false,
           _wasActiveBeforeRestart: s.wasActive ?? false,
-          _apiRetryCount: 0,
+          _apiRetry: { count: 0 },
           _turnCount: 99, // restored sessions already have a name
           _claudeTurnCount: 0,
           _namingAttempts: 0,

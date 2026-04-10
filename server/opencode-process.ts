@@ -22,6 +22,7 @@ import { randomUUID } from 'crypto'
 import type { ClaudeProcessEvents } from './claude-process.js'
 import { OPENCODE_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
 import type { PermissionMode, TaskItem } from './types.js'
+import { summarizeToolInput } from './tool-labels.js'
 
 // ---------------------------------------------------------------------------
 // OpenCode SSE event types (subset — only what we need to map)
@@ -485,7 +486,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
             const toolName = part.tool || 'unknown'
             const status = part.state?.status
             if (status === 'running') {
-              const inputStr = part.state?.input ? this.summarizeToolInput(toolName, part.state.input) : undefined
+              const inputStr = part.state?.input ? summarizeToolInput(toolName, part.state.input) : undefined
               this.emit('tool_active', toolName, inputStr)
               // Detect task/todo tool calls and emit todo_update
               if (part.state?.input && this.handleTaskTool(toolName, part.state.input)) {
@@ -623,22 +624,6 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       }
     } catch (err) {
       console.error(`[opencode] Failed to reply to permission ${requestId}:`, err)
-    }
-  }
-
-  /** Generate a short summary for tool input (mirrors ClaudeProcess.summarizeToolInput). */
-  private summarizeToolInput(toolName: string, input: Record<string, unknown>): string {
-    switch (toolName) {
-      case 'bash': return `$ ${String(input.command || '').split('\n')[0]}`
-      case 'read':
-      case 'view': return String(input.file_path || input.filePath || '')
-      case 'write':
-      case 'edit':
-      case 'multiedit': return String(input.file_path || input.filePath || '')
-      case 'glob': return String(input.pattern || '')
-      case 'grep': return String(input.pattern || '')
-      case 'task': return String(input.description || '')
-      default: return ''
     }
   }
 

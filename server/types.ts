@@ -92,12 +92,15 @@ export interface Session {
   _lastUserInput?: string
   /** Timestamp of last user input, used to detect stale retries. */
   _lastUserInputAt?: number
-  /** Number of consecutive API error retries for the current turn. */
-  _apiRetryCount: number
-  /** Timer handle for scheduled API error retry. */
-  _apiRetryTimer?: ReturnType<typeof setTimeout>
-  /** Guard flag: true while an API retry timer is pending, prevents duplicate scheduling. */
-  _apiRetryScheduled?: boolean
+  /** Transient API error retry state for the current turn. */
+  _apiRetry: {
+    /** Number of consecutive retries so far. */
+    count: number
+    /** Timer handle for the scheduled retry. */
+    timer?: ReturnType<typeof setTimeout>
+    /** Guard flag: true while a retry timer is pending, prevents duplicate scheduling. */
+    scheduled?: boolean
+  }
   /** Timer handle for scheduled auto-restart, stored to prevent duplicate restarts. */
   _restartTimer?: ReturnType<typeof setTimeout>
   /** Grace period timer before auto-denying prompts after last client leaves. */

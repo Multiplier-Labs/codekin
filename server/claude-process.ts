@@ -18,6 +18,7 @@ import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import type { ClaudeEvent, ClaudeSystemInit, ClaudeControlRequest, ClaudeResultEvent, ClaudeStreamEvent, TaskItem, PromptQuestion, PermissionMode } from './types.js'
 import { SCREENSHOTS_DIR, CLAUDE_BINARY } from './config.js'
+import { summarizeToolInput } from './tool-labels.js'
 import { redactSecrets } from './crypto-utils.js'
 import { CLAUDE_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
 
@@ -134,30 +135,17 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   private allowedTools?: string[]
   private addDirs?: string[]
 
-  constructor(workingDir: string, opts?: Partial<ClaudeProcessOptions>)
-  /** @deprecated Use the options-object form: `new ClaudeProcess(workingDir, { sessionId, ... })` */
-  constructor(workingDir: string, sessionId?: string, extraEnv?: Record<string, string>, model?: string, permissionMode?: PermissionMode, resume?: boolean, allowedTools?: string[])
-  constructor(wd: string, sessionIdOrOpts?: string | Partial<ClaudeProcessOptions>, extraEnv?: Record<string, string>, model?: string, permissionMode?: PermissionMode, resume?: boolean, allowedTools?: string[]) {
+  constructor(workingDir: string, opts?: Partial<ClaudeProcessOptions>) {
     super()
-    this.workingDir = wd
-    // Normalise both call forms into the same fields
-    if (typeof sessionIdOrOpts === 'object' && sessionIdOrOpts !== null) {
-      const o = sessionIdOrOpts
-      this.sessionId = o.sessionId || randomUUID()
-      this.extraEnv = o.extraEnv || {}
-      this.model = o.model
-      this.permissionMode = o.permissionMode
-      this.resume = !!(o.resume && o.sessionId)
-      this.allowedTools = o.allowedTools
-      this.addDirs = o.addDirs
-    } else {
-      this.sessionId = sessionIdOrOpts || randomUUID()
-      this.extraEnv = extraEnv || {}
-      this.model = model
-      this.permissionMode = permissionMode
-      this.resume = !!(resume && sessionIdOrOpts)
-      this.allowedTools = allowedTools
-    }
+    this.workingDir = workingDir
+    const o = opts ?? {}
+    this.sessionId = o.sessionId || randomUUID()
+    this.extraEnv = o.extraEnv || {}
+    this.model = o.model
+    this.permissionMode = o.permissionMode
+    this.resume = !!(o.resume && o.sessionId)
+    this.allowedTools = o.allowedTools
+    this.addDirs = o.addDirs
   }
 
   /** Spawn the Claude CLI process with stream-json I/O and acceptEdits mode. */
@@ -433,7 +421,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     let summary: string | undefined
     try {
       const parsed = JSON.parse(this.tool.input)
-      summary = this.summarizeToolInput(this.tool.name!, parsed) || undefined
+      summary = summarizeToolInput(this.tool.name!, parsed) || undefined
       const isTask = this.tool.name === 'TaskCreate' || this.tool.name === 'TaskUpdate' || this.tool.name === 'TodoWrite' || this.tool.name === 'TodoRead'
       if (isTask && TOOL_DEBUG) console.log('[task-debug] tool:', this.tool.name, 'input:', JSON.stringify(parsed).slice(0, 200))
       if (this.handleTaskTool(this.tool.name!, parsed)) {
@@ -667,49 +655,6 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     }
 
     return null
-  }
-
-  /** Generate a short human-readable summary of a tool invocation for the UI chip. */
-  private summarizeToolInput(toolName: string, input: Record<string, unknown>): string {
-    switch (toolName) {
-      case 'Bash': {
-        const cmd = String(input.command || '')
-        // Truncate long commands to first line
-        const firstLine = cmd.split('\n')[0]
-        return firstLine.length < cmd.length ? `$ ${firstLine}...` : `$ ${cmd}`
-      }
-      case 'Read':
-        return String(input.file_path || '')
-      case 'Write':
-      case 'Edit':
-        return String(input.file_path || '')
-      case 'Glob':
-        return String(input.pattern || '')
-      case 'Grep':
-        return String(input.pattern || '')
-      case 'Task':
-        return String(input.description || '')
-      case 'EnterPlanMode':
-        return 'Entering plan mode'
-      case 'ExitPlanMode':
-        return 'Exiting plan mode'
-      case 'TaskCreate':
-        return String(input.subject || '')
-      case 'TaskUpdate':
-        return `#${input.taskId || ''} → ${input.status || ''}`
-      case 'TaskList':
-        return 'Listing tasks'
-      case 'TaskGet':
-        return `#${input.taskId || ''}`
-      case 'TodoWrite': {
-        const todos = input.todos as Array<Record<string, unknown>> | undefined
-        return todos ? `${todos.length} tasks` : ''
-      }
-      case 'TodoRead':
-        return 'Reading tasks'
-      default:
-        return ''
-    }
   }
 
   /** Send a user message to the Claude CLI via stdin (stream-json format). */

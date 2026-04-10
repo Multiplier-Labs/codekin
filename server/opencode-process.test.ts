@@ -1,5 +1,6 @@
 /** Tests for OpenCodeProcess — verifies SSE event mapping, lifecycle, and provider interface compliance. */
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
+import { summarizeToolInput } from './tool-labels.js'
 
 // Mock fetch globally for HTTP calls
 const mockFetch = vi.fn()
@@ -461,29 +462,26 @@ describe('OpenCodeProcess', () => {
   // ---------------------------------------------------------------------------
 
   describe('summarizeToolInput', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const summarize = (tool: string, input: Record<string, unknown>) => (ocp as any).summarizeToolInput(tool, input)
-
     it('summarizes bash commands', () => {
-      expect(summarize('bash', { command: 'npm install' })).toBe('$ npm install')
+      expect(summarizeToolInput('bash', { command: 'npm install' })).toBe('$ npm install')
     })
 
     it('summarizes read/view with file path', () => {
-      expect(summarize('read', { file_path: '/src/index.ts' })).toBe('/src/index.ts')
-      expect(summarize('view', { filePath: '/src/main.ts' })).toBe('/src/main.ts')
+      expect(summarizeToolInput('read', { file_path: '/src/index.ts' })).toBe('/src/index.ts')
+      expect(summarizeToolInput('view', { filePath: '/src/main.ts' })).toBe('/src/main.ts')
     })
 
     it('summarizes edit/write with file path', () => {
-      expect(summarize('edit', { file_path: '/README.md' })).toBe('/README.md')
+      expect(summarizeToolInput('edit', { file_path: '/README.md' })).toBe('/README.md')
     })
 
     it('summarizes glob/grep with pattern', () => {
-      expect(summarize('glob', { pattern: '**/*.ts' })).toBe('**/*.ts')
-      expect(summarize('grep', { pattern: 'TODO' })).toBe('TODO')
+      expect(summarizeToolInput('glob', { pattern: '**/*.ts' })).toBe('**/*.ts')
+      expect(summarizeToolInput('grep', { pattern: 'TODO' })).toBe('TODO')
     })
 
     it('returns empty string for unknown tools', () => {
-      expect(summarize('unknown_tool', {})).toBe('')
+      expect(summarizeToolInput('unknown_tool', {})).toBe('')
     })
   })
 

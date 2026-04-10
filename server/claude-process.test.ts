@@ -1,6 +1,7 @@
 /** Tests for ClaudeProcess — verifies tool-input summarization, stdin message queuing, and process lifecycle management. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { ClaudeProcess } from './claude-process.js'
+import { summarizeToolInput } from './tool-labels.js'
 
 // Access private methods/fields for testing via any-cast
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -25,60 +26,58 @@ function makeCPWithStdin() {
 }
 
 describe('summarizeToolInput', () => {
-  const cp = makeCP()
-
   it('Bash: prepends $ and truncates multiline', () => {
-    expect(cp.summarizeToolInput('Bash', { command: 'echo hello\necho world' }))
+    expect(summarizeToolInput('Bash', { command: 'echo hello\necho world' }))
       .toBe('$ echo hello...')
   })
 
   it('Bash: single-line stays as-is', () => {
-    expect(cp.summarizeToolInput('Bash', { command: 'ls -la' }))
+    expect(summarizeToolInput('Bash', { command: 'ls -la' }))
       .toBe('$ ls -la')
   })
 
   it('Read: returns file_path', () => {
-    expect(cp.summarizeToolInput('Read', { file_path: '/src/foo.ts' }))
+    expect(summarizeToolInput('Read', { file_path: '/src/foo.ts' }))
       .toBe('/src/foo.ts')
   })
 
   it('Write: returns file_path', () => {
-    expect(cp.summarizeToolInput('Write', { file_path: '/src/bar.ts' }))
+    expect(summarizeToolInput('Write', { file_path: '/src/bar.ts' }))
       .toBe('/src/bar.ts')
   })
 
   it('Edit: returns file_path', () => {
-    expect(cp.summarizeToolInput('Edit', { file_path: '/src/baz.ts' }))
+    expect(summarizeToolInput('Edit', { file_path: '/src/baz.ts' }))
       .toBe('/src/baz.ts')
   })
 
   it('Glob: returns pattern', () => {
-    expect(cp.summarizeToolInput('Glob', { pattern: '**/*.ts' }))
+    expect(summarizeToolInput('Glob', { pattern: '**/*.ts' }))
       .toBe('**/*.ts')
   })
 
   it('Grep: returns pattern', () => {
-    expect(cp.summarizeToolInput('Grep', { pattern: 'TODO' }))
+    expect(summarizeToolInput('Grep', { pattern: 'TODO' }))
       .toBe('TODO')
   })
 
   it('TaskCreate: returns subject', () => {
-    expect(cp.summarizeToolInput('TaskCreate', { subject: 'Fix bug' }))
+    expect(summarizeToolInput('TaskCreate', { subject: 'Fix bug' }))
       .toBe('Fix bug')
   })
 
   it('TaskUpdate: returns #id → status', () => {
-    expect(cp.summarizeToolInput('TaskUpdate', { taskId: '3', status: 'completed' }))
+    expect(summarizeToolInput('TaskUpdate', { taskId: '3', status: 'completed' }))
       .toBe('#3 → completed')
   })
 
   it('TodoWrite: returns N tasks', () => {
-    expect(cp.summarizeToolInput('TodoWrite', { todos: [{}, {}, {}] }))
+    expect(summarizeToolInput('TodoWrite', { todos: [{}, {}, {}] }))
       .toBe('3 tasks')
   })
 
   it('unknown tool: returns empty string', () => {
-    expect(cp.summarizeToolInput('SomeFutureTool', {}))
+    expect(summarizeToolInput('SomeFutureTool', {}))
       .toBe('')
   })
 })
@@ -1031,50 +1030,48 @@ describe('sendRaw', () => {
 })
 
 describe('summarizeToolInput — additional tool cases', () => {
-  const cp = makeCP()
-
   it('Task: returns description', () => {
-    expect(cp.summarizeToolInput('Task', { description: 'Investigate the bug' }))
+    expect(summarizeToolInput('Task', { description: 'Investigate the bug' }))
       .toBe('Investigate the bug')
   })
 
   it('Task: returns empty string when no description', () => {
-    expect(cp.summarizeToolInput('Task', {}))
+    expect(summarizeToolInput('Task', {}))
       .toBe('')
   })
 
   it('EnterPlanMode: returns "Entering plan mode"', () => {
-    expect(cp.summarizeToolInput('EnterPlanMode', {}))
+    expect(summarizeToolInput('EnterPlanMode', {}))
       .toBe('Entering plan mode')
   })
 
   it('ExitPlanMode: returns "Exiting plan mode"', () => {
-    expect(cp.summarizeToolInput('ExitPlanMode', {}))
+    expect(summarizeToolInput('ExitPlanMode', {}))
       .toBe('Exiting plan mode')
   })
 
   it('TaskList: returns "Listing tasks"', () => {
-    expect(cp.summarizeToolInput('TaskList', {}))
+    expect(summarizeToolInput('TaskList', {}))
       .toBe('Listing tasks')
   })
 
   it('TaskGet: returns #taskId', () => {
-    expect(cp.summarizeToolInput('TaskGet', { taskId: '7' }))
+    expect(summarizeToolInput('TaskGet', { taskId: '7' }))
       .toBe('#7')
   })
 
   it('TaskGet: returns # when taskId is missing', () => {
-    expect(cp.summarizeToolInput('TaskGet', {}))
+    expect(summarizeToolInput('TaskGet', {}))
       .toBe('#')
   })
 
   it('TodoRead: returns "Reading tasks"', () => {
-    expect(cp.summarizeToolInput('TodoRead', {}))
+    expect(summarizeToolInput('TodoRead', {}))
       .toBe('Reading tasks')
   })
 
   it('TodoWrite: returns empty string when todos is undefined', () => {
-    expect(cp.summarizeToolInput('TodoWrite', {}))
+    expect(summarizeToolInput('TodoWrite', {}))
       .toBe('')
   })
 })
@@ -1265,7 +1262,7 @@ describe('isAlive and getSessionId', () => {
   })
 
   it('getSessionId returns the session ID', () => {
-    const cp = new ClaudeProcess('/tmp', 'my-session-id') as CP
+    const cp = new ClaudeProcess('/tmp', { sessionId: 'my-session-id' }) as CP
     expect(cp.getSessionId()).toBe('my-session-id')
   })
 
@@ -1279,7 +1276,7 @@ describe('isAlive and getSessionId', () => {
 
 describe('constructor extraEnv', () => {
   it('stores extraEnv when provided', () => {
-    const cp = new ClaudeProcess('/tmp', undefined, { CUSTOM_VAR: 'value' }) as CP
+    const cp = new ClaudeProcess('/tmp', { extraEnv: { CUSTOM_VAR: 'value' } }) as CP
     expect(cp.extraEnv).toEqual({ CUSTOM_VAR: 'value' })
   })
 
