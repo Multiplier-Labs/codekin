@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.5] - 2026-04-10
+
+### Fixes
+- Enforce report file output in CLAUDE.md instructions (#317)
+- Respect permission mode for file tool auto-approval in hook (#316)
+- Strip uninformative agent noise lines from chat display (#313)
+- Address three security audit findings (M1, M2, W-2/L4) (#311)
+- Strip GIT_* env vars when spawning Claude CLI processes (#307)
+- Prevent branch deletion on caller-supplied names, use show-ref for detection
+- Prevent worktree restart death loops with CWD validation (#305)
+- Prevent broken worktree directories from causing infinite restart loops (#304)
+- Preserve claudeSessionId on spawn failures (ENOENT) (#302)
+- Resolve session restart race conditions and worktree index corruption (#301)
+- Security, reliability, and housekeeping fixes (#298)
+
+### Refactoring
+- Extract session lifecycle into session-lifecycle.ts (#308)
+- Extract PromptRouter from SessionManager (#303)
+
+### Tests
+- Add unit tests for session restart and worktree fixes (#306)
+
+### Chores
+- Housekeeping — fix contradictory comments, prune stale branches (#315)
+- Remove dead orchestrator API functions and fix CORS_ORIGIN doc (#312)
+
+### Documentation
+- Fix stale paths, env vars, and remove non-existent endpoints (#300)
+
 ## [0.5.4] - 2026-04-06
 
 ### Features
