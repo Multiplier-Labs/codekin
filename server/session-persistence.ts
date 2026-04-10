@@ -24,6 +24,7 @@ export interface PersistedSession {
   worktreePath?: string
   created: string
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
+  provider?: import('./coding-process.js').CodingProvider
   model?: string
   permissionMode?: string
   /** Additional tools to pre-approve via --allowedTools. */
@@ -51,6 +52,7 @@ export class SessionPersistence {
       worktreePath: s.worktreePath,
       created: s.created,
       source: s.source,
+    provider: s.provider,
       model: s.model,
       permissionMode: s.permissionMode,
       allowedTools: s.allowedTools,
@@ -112,6 +114,7 @@ export class SessionPersistence {
           worktreePath,
           created: s.created,
           source: s.source ?? 'manual',
+          provider: s.provider ?? 'claude',
           model: s.model,
           permissionMode: s.permissionMode as Session['permissionMode'],
           allowedTools: s.allowedTools,

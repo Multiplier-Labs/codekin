@@ -11,7 +11,7 @@
 
 import { randomUUID } from 'crypto'
 import { ApprovalManager } from './approval-manager.js'
-import type { ClaudeProcess } from './claude-process.js'
+import type { CodingProcess } from './coding-process.js'
 import type { PromptQuestion, Session, WsServerMessage } from './types.js'
 
 /** Dependencies injected by SessionManager so PromptRouter can interact with session state. */
@@ -117,7 +117,7 @@ export class PromptRouter {
 
   /** Handle a Claude process 'control_request' event. */
   onControlRequestEvent(
-    cp: ClaudeProcess,
+    cp: CodingProcess,
     session: Session,
     sessionId: string,
     requestId: string,

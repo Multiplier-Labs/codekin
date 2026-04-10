@@ -7,7 +7,7 @@
  */
 
 import type { WebSocket } from 'ws'
-import type { ClaudeProcess } from './claude-process.js'
+import type { CodingProcess, CodingProvider } from './coding-process.js'
 import type { PlanManager } from './plan-manager.js'
 
 /**
@@ -17,9 +17,13 @@ import type { PlanManager } from './plan-manager.js'
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | 'dangerouslySkipPermissions'
 
 /** Allow-list for server-side validation of client-supplied permission modes. */
+/** Allow-list for server-side validation of client-supplied provider names. */
+export const VALID_PROVIDERS = new Set<CodingProvider>(['claude', 'opencode'])
+
 export const VALID_PERMISSION_MODES = new Set<PermissionMode>(['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dangerouslySkipPermissions'])
 
-/** Allow-list for server-side validation of client-supplied model IDs. */
+/** Allow-list for server-side validation of client-supplied model IDs.
+ *  Only Claude models — OpenCode sessions bypass this (models are dynamic). */
 export const VALID_MODELS = new Set([
   'claude-opus-4-6',
   'claude-sonnet-4-6',
@@ -41,8 +45,10 @@ export interface Session {
   worktreePath?: string
   created: string
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
-  /** The spawned Claude CLI process, or null if not running. */
-  claudeProcess: ClaudeProcess | null
+  /** Which AI coding assistant provider powers this session. Defaults to 'claude'. */
+  provider: CodingProvider
+  /** The spawned AI process (Claude CLI or OpenCode), or null if not running. */
+  claudeProcess: CodingProcess | null
   /** All browser clients currently viewing this session. */
   clients: Set<WebSocket>
   /** Rolling buffer of messages for replay when a new client joins. */
@@ -55,6 +61,8 @@ export interface Session {
   permissionMode?: PermissionMode
   /** Additional tools to pre-approve via --allowedTools (e.g. 'Bash(curl:*)', 'WebFetch'). */
   allowedTools?: string[]
+  /** Extra directories to grant Claude access to via --add-dir. */
+  addDirs?: string[]
   /** Number of auto-restarts since last cooldown reset. */
   restartCount: number
   lastRestartAt: number | null
@@ -117,6 +125,7 @@ export interface SessionInfo {
   connectedClients: number
   lastActivity: string
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
+  provider?: CodingProvider
 }
 
 // ---------------------------------------------------------------------------
@@ -280,11 +289,12 @@ export type WsServerMessage =
 /** Messages sent from browser clients to the server over WebSocket. */
 export type WsClientMessage =
   | { type: 'auth'; token: string }
-  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean; permissionMode?: PermissionMode; allowedTools?: string[] }
+  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean; permissionMode?: PermissionMode; allowedTools?: string[]; provider?: CodingProvider }
   | { type: 'join_session'; sessionId: string }
   | { type: 'leave_session' }
   | { type: 'start_claude'; options?: Record<string, unknown> }
   | { type: 'set_model'; model: string }
+  | { type: 'set_provider'; provider: CodingProvider }
   | { type: 'set_permission_mode'; permissionMode: PermissionMode }
   | { type: 'stop' }
   | { type: 'input'; data: string; displayText?: string }

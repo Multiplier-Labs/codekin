@@ -19,6 +19,7 @@ import { randomUUID } from 'crypto'
 import type { ClaudeEvent, ClaudeSystemInit, ClaudeControlRequest, ClaudeResultEvent, ClaudeStreamEvent, TaskItem, PromptQuestion, PermissionMode } from './types.js'
 import { SCREENSHOTS_DIR, CLAUDE_BINARY } from './config.js'
 import { redactSecrets } from './crypto-utils.js'
+import { CLAUDE_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
 
 /** Options for constructing a ClaudeProcess. Replaces positional constructor parameters. */
 export interface ClaudeProcessOptions {
@@ -36,6 +37,8 @@ export interface ClaudeProcessOptions {
   resume?: boolean
   /** Additional tools to pre-approve via --allowedTools. */
   allowedTools?: string[]
+  /** Extra directories to grant Claude access to via --add-dir. */
+  addDirs?: string[]
 }
 
 /** Accumulated state for an in-progress extended thinking block. */
@@ -77,7 +80,10 @@ const TOOL_DEBUG = process.env.NODE_ENV !== 'production'
  * Wraps a Claude CLI child process. Parses stream-json NDJSON output from
  * stdout and emits structured events consumed by SessionManager.
  */
-export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
+export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements CodingProcess {
+  readonly provider: CodingProvider = 'claude'
+  readonly capabilities: ProviderCapabilities = CLAUDE_CAPABILITIES
+
   private proc: ChildProcess | null = null
   private rl: Interface | null = null
   private sessionId: string
@@ -126,6 +132,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
   private model?: string
   private permissionMode?: PermissionMode
   private allowedTools?: string[]
+  private addDirs?: string[]
 
   constructor(workingDir: string, opts?: Partial<ClaudeProcessOptions>)
   /** @deprecated Use the options-object form: `new ClaudeProcess(workingDir, { sessionId, ... })` */
@@ -142,6 +149,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
       this.permissionMode = o.permissionMode
       this.resume = !!(o.resume && o.sessionId)
       this.allowedTools = o.allowedTools
+      this.addDirs = o.addDirs
     } else {
       this.sessionId = sessionIdOrOpts || randomUUID()
       this.extraEnv = extraEnv || {}
@@ -201,6 +209,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
         : ['--permission-mode', this.permissionMode || 'acceptEdits']),
       '--allowedTools', ['Bash(git:*)', ...(this.allowedTools || [])].join(','),
       '--add-dir', SCREENSHOTS_DIR,
+      ...(this.addDirs || []).flatMap(d => ['--add-dir', d]),
       '--include-partial-messages',
       '--verbose',
       ...(this.resume ? ['--resume', this.sessionId] : ['--session-id', this.sessionId]),
@@ -773,6 +782,11 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> {
   }
 
   isAlive(): boolean {
+    return this.alive
+  }
+
+  isReady(): boolean {
+    // Claude CLI stdin is always buffered — ready as soon as alive
     return this.alive
   }
 
