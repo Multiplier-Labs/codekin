@@ -119,7 +119,7 @@ export async function removeNativePermission(repoDir: string, permission: string
  * - Read (file tool, pre-approved) → `null`
  */
 export function toNativePermission(toolName: string, toolInput: Record<string, unknown>): string | null {
-  // File tools are pre-approved by permission mode — no need to persist
+  // File tools are handled by permission mode in PromptRouter — no need to persist
   const preApproved = new Set(['Read', 'Write', 'Edit', 'Glob', 'Grep', 'NotebookEdit'])
   if (preApproved.has(toolName)) return null
 

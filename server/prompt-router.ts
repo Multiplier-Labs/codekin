@@ -271,6 +271,10 @@ export class PromptRouter {
     }
 
     const autoResult = this.resolveAutoApproval(session, toolName, toolInput)
+    if (autoResult === 'permissionMode') {
+      console.log(`[tool-approval] auto-approved (permissionMode=${session.permissionMode}): ${toolName}`)
+      return Promise.resolve({ allow: true, always: false })
+    }
     if (autoResult === 'registry') {
       console.log(`[tool-approval] auto-approved (registry): ${toolName}`)
       return Promise.resolve({ allow: true, always: true })
@@ -590,7 +594,19 @@ export class PromptRouter {
    * by the session's allowedTools list, 'headless' if the session has no clients
    * and is a non-interactive source, or 'prompt' if the user needs to decide.
    */
-  resolveAutoApproval(session: Session, toolName: string, toolInput: Record<string, unknown>): 'registry' | 'session' | 'headless' | 'prompt' {
+  /** Tools that are controlled by permission mode rather than per-tool approval. */
+  private static readonly FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'Glob', 'Grep', 'NotebookEdit'])
+
+  /** Permission modes that auto-approve file-editing tools. */
+  private static readonly EDIT_MODES = new Set(['acceptEdits', 'bypassPermissions', 'dangerouslySkipPermissions'])
+
+  resolveAutoApproval(session: Session, toolName: string, toolInput: Record<string, unknown>): 'registry' | 'session' | 'headless' | 'permissionMode' | 'prompt' {
+    // File tools are governed by permission mode, not per-tool approval.
+    // The PreToolUse hook intercepts them before Claude's native permission
+    // logic runs, so we must enforce permission mode here.
+    if (PromptRouter.FILE_TOOLS.has(toolName) && PromptRouter.EDIT_MODES.has(session.permissionMode ?? '')) {
+      return 'permissionMode'
+    }
     if (this.deps.approvalManager.checkAutoApproval(session.groupDir ?? session.workingDir, toolName, toolInput)) {
       return 'registry'
     }

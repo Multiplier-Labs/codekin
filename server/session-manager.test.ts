@@ -3262,6 +3262,49 @@ describe('SessionManager', () => {
     })
   })
 
+  describe('resolveAutoApproval() via permissionMode', () => {
+    it('auto-approves file tools when permissionMode is acceptEdits', async () => {
+      const s = sm.create('perm-edits', '/tmp', { permissionMode: 'acceptEdits' })
+
+      for (const tool of ['Write', 'Edit', 'Read', 'Glob', 'Grep', 'NotebookEdit']) {
+        const result = await sm.requestToolApproval(s.id, tool, { file_path: '/tmp/x' })
+        expect(result).toEqual({ allow: true, always: false })
+      }
+      expect(s.pendingToolApprovals.size).toBe(0)
+    })
+
+    it('auto-approves file tools when permissionMode is bypassPermissions', async () => {
+      const s = sm.create('perm-bypass', '/tmp', { permissionMode: 'bypassPermissions' })
+
+      const result = await sm.requestToolApproval(s.id, 'Write', { file_path: '/tmp/x' })
+      expect(result).toEqual({ allow: true, always: false })
+    })
+
+    it('does not auto-approve file tools when permissionMode is default', async () => {
+      const s = sm.create('perm-default', '/tmp', { permissionMode: 'default' })
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      const promise = sm.requestToolApproval(s.id, 'Write', { file_path: '/tmp/x' })
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      s.pendingToolApprovals.values().next().value!.resolve({ allow: false, always: false })
+      await promise
+    })
+
+    it('does not auto-approve non-file tools via permissionMode', async () => {
+      const s = sm.create('perm-bash', '/tmp', { permissionMode: 'acceptEdits' })
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      const promise = sm.requestToolApproval(s.id, 'Bash', { command: 'ls' })
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      s.pendingToolApprovals.values().next().value!.resolve({ allow: false, always: false })
+      await promise
+    })
+  })
+
   describe('createWorktree() with targetBranch', () => {
     afterEach(() => {
       mockExecFile.mockReset()
