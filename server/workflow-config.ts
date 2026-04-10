@@ -24,6 +24,8 @@ export interface ReviewRepoConfig {
   customPrompt?: string
   /** Claude model to use for this workflow (e.g. 'claude-sonnet-4-6'). Omit for system default. */
   model?: string
+  /** AI provider to use for this workflow ('claude' or 'opencode'). Defaults to 'claude'. */
+  provider?: 'claude' | 'opencode'
 }
 
 export interface WorkflowConfig {

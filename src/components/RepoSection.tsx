@@ -95,7 +95,7 @@ export interface RepoSectionProps {
   onSelectSession: (id: string) => void
   onDeleteSession: (id: string) => void
   onRenameSession: (id: string, name: string) => void
-  onNewSession?: () => void
+  onNewSession?: (provider?: import('../types').CodingProvider) => void
   onSelectRepo: (workingDir: string) => void
   onDeleteRepo: (workingDir: string) => void
   onViewArchivedSession: (id: string) => void
@@ -281,7 +281,7 @@ export function RepoSection({
                     className="flex-1 min-w-0 bg-neutral-10 border border-neutral-7 rounded px-1 py-0 text-[15px] text-neutral-1 outline-none focus:border-primary-6"
                   />
                 ) : (
-                  <span className="flex-1 truncate font-normal flex items-center gap-1"><WorktreeIcon session={s} />{sessionDisplayName(s)}</span>
+                  <span className="flex-1 truncate font-normal flex items-center gap-1"><WorktreeIcon session={s} />{sessionDisplayName(s)}{s.provider === 'opencode' && <span className="text-[10px] px-1 py-0 rounded bg-neutral-7 text-neutral-4 font-medium leading-tight">OC</span>}</span>
                 )}
                 {!isEditing && (
                   <>
@@ -307,13 +307,20 @@ export function RepoSection({
 
           {/* New session for this repo (visible on hover) */}
           {onNewSession && (
-            <div className="pl-10 opacity-0 group-hover/repo:opacity-100">
+            <div className={`pl-10 flex gap-1 ${isMobile ? 'opacity-100' : 'opacity-0 group-hover/repo:opacity-100'}`}>
               <button
-                onClick={onNewSession}
+                onClick={() => onNewSession('claude')}
                 className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[13px] text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6/50 transition-colors"
               >
                 <IconPlus size={12} stroke={2} className="flex-shrink-0" />
-                <span>New session</span>
+                <span>Claude</span>
+              </button>
+              <button
+                onClick={() => onNewSession('opencode')}
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[13px] text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6/50 transition-colors"
+              >
+                <IconPlus size={12} stroke={2} className="flex-shrink-0" />
+                <span>OpenCode</span>
               </button>
             </div>
           )}

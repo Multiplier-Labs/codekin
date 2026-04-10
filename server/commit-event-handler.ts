@@ -106,6 +106,7 @@ export class CommitEventHandler {
         commitHash: event.commitHash,
         customPrompt: repoConfig.customPrompt,
         model: repoConfig.model,
+        provider: repoConfig.provider,
       })
 
       console.log(`[commit-event] Dispatched commit-review run ${run.id} for ${event.repoPath} (${event.commitHash.slice(0, 8)})`)
