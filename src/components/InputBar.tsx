@@ -139,8 +139,16 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
 }) {
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen)
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
   const RECENTS_KEY = 'codekin.recentModels'
+
+  // Reset active index when isOpen prop changes (React-recommended
+  // "adjusting state based on props" pattern — no useEffect needed)
+  if (isOpen !== prevIsOpen) {
+    setPrevIsOpen(isOpen)
+    setActiveIndex(0)
+  }
 
   const getRecents = (): string[] => {
     try { return JSON.parse(localStorage.getItem(RECENTS_KEY) || '[]') } catch { return [] }
@@ -164,10 +172,6 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
   const visibleList = (!query && recents.length > 0
     ? [...recents.map(id => models.find(m => m.id === id)).filter(Boolean) as ModelOption[], ...filtered]
     : filtered)
-
-  useEffect(() => {
-    setActiveIndex(0)
-  }, [query, isOpen])
 
   useEffect(() => {
     const el = itemRefs.current[activeIndex]
@@ -205,7 +209,7 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
             <input
               autoFocus
               value={query}
-              onChange={e => setQuery(e.target.value)}
+              onChange={e => { setQuery(e.target.value); setActiveIndex(0) }}
               onKeyDown={handleKeyDown}
               placeholder="Search models..."
               className="w-full bg-neutral-7 text-[13px] px-2 py-1.5 rounded-md outline-none text-neutral-2 placeholder:text-neutral-5"
