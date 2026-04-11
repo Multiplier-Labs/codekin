@@ -5,7 +5,7 @@
 
 **[codekin.ai](https://codekin.ai)**
 
-Web UI for Claude Code sessions — multi-session support, WebSocket streaming, file uploads, and slash-command skills.
+Web UI for [Claude Code](https://github.com/anthropics/claude-code) and [OpenCode](https://github.com/nicepkg/opencode) sessions — multi-provider AI coding with multi-session support, WebSocket streaming, file uploads, and slash-command skills.
 
 ![Codekin screenshot](docs/screenshot.png)
 
@@ -14,6 +14,7 @@ Web UI for Claude Code sessions — multi-session support, WebSocket streaming, 
 **Prerequisites:**
 - macOS or Linux
 - [Claude Code CLI](https://github.com/anthropics/claude-code) installed and authenticated (`claude` must be in your PATH)
+- *(Optional)* [OpenCode](https://github.com/nicepkg/opencode) installed for multi-provider LLM support
 
 **One-liner:**
 
@@ -46,21 +47,23 @@ codekin uninstall               # Remove Codekin entirely
 
 ## Features
 
-- **Multi-session terminal** — Open and switch between multiple Claude Code sessions, one per repo
+- **Multi-provider AI** — Use Claude Code or [OpenCode](https://github.com/nicepkg/opencode) as the backend per session. OpenCode enables any LLM provider (OpenAI, Gemini, etc.) through a single interface, with full streaming, tool events, plan mode, and permission control
+- **Multi-session terminal** — Open and switch between multiple coding sessions, one per repo
 - **Agent Joe** — AI orchestrator agent that spawns and manages up to 5 concurrent child sessions, with a dedicated chat UI, welcome screen, and color-coded sidebar status indicators
 - **Git worktrees** — Isolate sessions in dedicated worktree directories, with mid-session creation, auto-enable setting, and session context preservation
 - **Session archive** — Full retrieval and re-activation of archived sessions
 - **Repo browser** — Auto-discovers local repos and GitHub org repos
-- **Screenshot upload** — Drag-and-drop or paste images; the file path is sent to Claude so it can read them natively
+- **Screenshot upload** — Drag-and-drop or paste images; the file path is sent to the AI so it can read them natively
 - **Skill browser** — Browse and invoke `/skills` defined in each repo's `.claude/skills/`, with inline slash-command autocomplete
 - **Diff viewer** — Side panel showing staged/unstaged file changes with per-file discard support
 - **Command palette** — `Ctrl+K` to quickly search repos, skills, and actions
 - **Approval management** — Persistent approval storage with per-permission revoking, permission mode selector, per-session tool pre-approvals, and `--dangerously-skip-permissions` mode for sandboxed environments
+- **Connection status** — Real-time provider health indicators with disable/enable toggles for each backend
 - **Subscription & API key auth** — Works with both Claude subscription (OAuth) and API key authentication
 - **Mobile-friendly** — Responsive layout that works on phones and tablets
 - **Markdown browser** — Browse and view `.md` files directly in the UI
 - **AI Workflows** — Scheduled code and repository audits and maintenance, with support for custom workflows defined as Markdown files
-- **GitHub webhooks** — Automated bugfixing on CI failures via webhook integration
+- **GitHub webhooks** — Automated bugfixing on CI failures and PR code review via webhook integration
 - **Upgrade notifications** — In-app banner when a newer version is available
 
 ## Upgrade
