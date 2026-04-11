@@ -140,6 +140,8 @@ export default function App() {
     currentModel,
     setModel,
     send: wsSend,
+    disconnect: wsDisconnect,
+    reconnect: wsReconnect,
     currentPermissionMode,
     setPermissionMode,
     moveToWorktree,
@@ -198,6 +200,8 @@ export default function App() {
   // Dynamic model list for OpenCode (fetched from server on demand)
   const [openCodeModels, setOpenCodeModels] = useState<ModelOption[]>([])
   const [openCodeConnected, setOpenCodeConnected] = useState<boolean | null>(null) // null = unknown
+  const [claudeDisabled, setClaudeDisabled] = useState(false)
+  const [openCodeDisabled, setOpenCodeDisabled] = useState(false)
   const openCodeModelsDirRef = useRef<string | undefined>(undefined)
   // Derive the active session's provider (falls back to the default for new sessions)
   const activeSessionProvider = sessions.find(s => s.id === activeSessionId)?.provider ?? currentProvider
@@ -483,6 +487,37 @@ export default function App() {
   }, [settings.theme])
 
   // Derive session name for mobile top bar
+  // Connection toggle handlers
+  const handleToggleClaude = useCallback(() => {
+    if (claudeDisabled) {
+      setClaudeDisabled(false)
+      wsReconnect()
+    } else {
+      setClaudeDisabled(true)
+      wsDisconnect()
+    }
+  }, [claudeDisabled, wsDisconnect, wsReconnect])
+
+  const handleToggleOpenCode = useCallback(() => {
+    if (openCodeDisabled) {
+      setOpenCodeDisabled(false)
+      // Re-fetch models to check connection
+      if (settings.token) {
+        fetchOpenCodeModels(settings.token).then(result => {
+          const models: ModelOption[] = result.models.map(m => ({
+            id: `${m.providerID}/${m.id}`,
+            label: `${m.name} (${m.providerName})`,
+          }))
+          setOpenCodeModels(models)
+          setOpenCodeConnected(models.length > 0)
+        }).catch(() => { setOpenCodeConnected(false) })
+      }
+    } else {
+      setOpenCodeDisabled(true)
+      setOpenCodeConnected(null)
+    }
+  }, [openCodeDisabled, settings.token])
+
   const activeSession = sessions.find(s => s.id === activeSessionId)
   const activeSessionName = activeSession?.name ?? null
   const activeRepoName = activeRepo?.name ?? activeWorkingDir?.split('/').pop() ?? null
@@ -508,6 +543,11 @@ export default function App() {
         theme={settings.theme}
         fontSize={settings.fontSize}
         connState={connState}
+        claudeDisabled={claudeDisabled}
+        openCodeConnected={openCodeConnected}
+        openCodeDisabled={openCodeDisabled}
+        onToggleClaude={handleToggleClaude}
+        onToggleOpenCode={handleToggleOpenCode}
         view={view}
         archiveRefreshKey={archiveRefreshKey}
         onSelectSession={(id) => { docsBrowser.close(); if (view === 'orchestrator') navigate(`/s/${id}`); handleSelectSession(id) }}
