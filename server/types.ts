@@ -16,7 +16,6 @@ import type { PlanManager } from './plan-manager.js'
  */
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | 'dangerouslySkipPermissions'
 
-/** Allow-list for server-side validation of client-supplied permission modes. */
 /** Allow-list for server-side validation of client-supplied provider names. */
 export const VALID_PROVIDERS = new Set<CodingProvider>(['claude', 'opencode'])
 

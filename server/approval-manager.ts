@@ -38,6 +38,9 @@ export class ApprovalManager {
   private _approvalPersistTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor() {
+    // Note: "git push" intentionally appears in both PATTERNABLE (via JSDoc/design)
+    // and NEVER_PATTERN_PREFIXES. It is prefix-matched at runtime but blocked from
+    // wildcard persistence. The overlap warning below is expected for such entries.
     this.validatePrefixSets()
     this.restoreRepoApprovalsFromDisk()
   }
@@ -76,8 +79,13 @@ export class ApprovalManager {
    *
    * IMPORTANT: Inclusion here does NOT auto-approve anything — the user
    * still explicitly approves the pattern. It only means "we can group
-   * `git push origin feat/x` and `git push origin feat/y` into one
-   * `git push *` pattern" instead of storing each as an exact match.
+   * `git commit -m foo` and `git commit -m bar` into one `git commit *`
+   * pattern" instead of storing each as an exact match.
+   *
+   * NOTE: Some prefixes (e.g. "git push") intentionally appear in
+   * NEVER_PATTERN_PREFIXES as well. At runtime, the two-token deny check
+   * runs first, so they are matched by prefix but never persisted as a
+   * wildcard pattern. See NEVER_PATTERN_PREFIXES for details.
    */
   private static readonly PATTERNABLE_PREFIXES = new Set([
     // Git operations — safe to group by subcommand
@@ -122,7 +130,7 @@ export class ApprovalManager {
     'ssh', 'docker', 'docker-compose',
     'rm', 'sudo', 'curl', 'wget',
     'git reset', 'git clean',
-    'git push',  // cross-remote escalation risk — always stored as exact match only
+    'git push',  // Prefix-matched at runtime (two-token match) but never persisted as a wildcard pattern — cross-remote escalation risk
     'gh api',  // can perform DELETE/PUT — too broad to pattern
     // Code executors — "node *" / "python *" would match arbitrary code execution
     'node', 'npx', 'python', 'python3', 'deno', 'bun', 'pm2',

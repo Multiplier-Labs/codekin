@@ -284,6 +284,14 @@ export function createUploadRouter(
       res.status(400).json({ error: 'Invalid owner or repo name' })
       return
     }
+    if (owner.includes('..') || name.includes('..')) {
+      res.status(400).json({ error: 'Invalid owner or repo name' })
+      return
+    }
+    if (owner.length > 100 || name.length > 100) {
+      res.status(400).json({ error: 'Owner or repo name too long' })
+      return
+    }
 
     const reposRoot = realpathSync(resolveReposRoot())
     const dest = join(reposRoot, name)

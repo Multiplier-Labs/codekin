@@ -832,7 +832,7 @@ export class SessionManager {
     const totalOutputLength = session.outputHistory
       .filter((m): m is { type: 'output'; data: string } => m.type === 'output')
       .reduce((sum, m) => sum + m.data.length, 0)
-    if (totalOutputLength < 150) return
+    if (totalOutputLength < 150) return // Too short to be meaningful session output
 
     // If session was never named (still has hub: prefix), derive a name from the
     // first user message or fall back to a short ID-based placeholder.
@@ -1063,6 +1063,7 @@ export class SessionManager {
     // Suppress noise from orchestrator/agent sessions
     if ((session.source === 'orchestrator' || session.source === 'agent') && !isError) {
       const turnText = this.extractCurrentTurnText(session)
+      // Short canned responses like "no response requested" — skip archiving
       if (turnText && turnText.length < 80 && /^(no response requested|please approve|nothing to do|no action needed|acknowledged)[.!]?$/i.test(turnText.trim())) {
         this.stripCurrentTurnOutput(session)
         console.log(`[noise-filter] suppressed orchestrator noise: "${turnText.trim().slice(0, 60)}"`)
@@ -1104,7 +1105,8 @@ export class SessionManager {
     session._stoppedByUser = false
 
     if (!session.claudeProcess?.isAlive()) {
-      // Prevent two rapid sendInput calls from racing into two startClaude calls
+      // Race guard: prevent concurrent startClaude calls when multiple sendInput
+      // requests arrive for an inactive session
       if (session._isStarting) return
       session._isStarting = true
       // Claude not running (e.g. after server restart or idle reap) — auto-start first.
@@ -1368,7 +1370,7 @@ export class SessionManager {
 
     // Cap total context size
     let context = lines.join('\n')
-    if (context.length > 4000) {
+    if (context.length > 4000) { // Truncate to keep context injection reasonable
       // Keep the most recent exchanges
       while (context.length > 4000 && lines.length > 2) {
         lines.shift()
