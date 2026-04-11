@@ -74,7 +74,7 @@ export function createSessionRouter(
     try {
       resolvedDir = fsRealpathSync(pathResolve(workingDir))
     } catch {
-      resolvedDir = pathResolve(workingDir)
+      return res.status(400).json({ error: 'workingDir could not be resolved (path does not exist or is inaccessible)' })
     }
     if (!allowedRoots.some(root => resolvedDir === root || resolvedDir.startsWith(root + '/'))) {
       return res.status(403).json({ error: 'workingDir is outside allowed directories' })
@@ -285,7 +285,7 @@ export function createSessionRouter(
     try {
       resolved = fsRealpathSync(base)
     } catch {
-      resolved = pathResolve(base)
+      return res.status(400).json({ error: 'Path could not be resolved (does not exist or is inaccessible)' })
     }
     if (!allowedRoots.some(root => resolved === root || resolved.startsWith(root + '/'))) {
       return res.status(403).json({ error: 'Path is outside allowed directories' })
