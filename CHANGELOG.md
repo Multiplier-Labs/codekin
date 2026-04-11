@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Features
+- **Connection status popup** — Real-time provider health indicators with disable/enable toggles (#346)
+- **PR Review workflow** — Add PR Review as event-driven workflow kind in Workflows UI (#334)
+
+### Fixes
+- Restore `wss:`/`ws:` in CSP connect-src to unbreak WebSocket connections (#356)
+- Harden server security: auth token in headers only, rate limiting, CSP, WebSocket origin validation (#355)
+- Strip GIT_* env vars from OpenCode server to fix worktree git operations (#353)
+- Prevent stdio buffer deadlock in OpenCode server spawn (#352)
+- Harden session restart logic to reduce spurious restarts and context loss (#351)
+- Suppress spurious restart message during graceful shutdown (#350)
+- Prevent false session resets from aggressive zombie detection and leave grace period (#349)
+- Provider disabled overlay and input bar UX improvements (#348)
+- Disable input and show message when provider is disabled (#347)
+- Show disconnected message for OpenCode sessions (#345)
+- Use FilePartInput format for image attachments in OpenCode sessions (#343)
+- Strip user echo, handle reasoning deltas, and support text file attachments in OpenCode (#342)
+- Make model dropdown scrollable with max 10 visible items (#341)
+- Include provider field in serialized session info (#340)
+- Prevent duplicate OpenCode messages and support image attachments (#339)
+- Remove realpathSync fallback to prevent symlink path traversal (#337)
+
+### Refactoring
+- Migrate to open-source @multiplier-labs/stepflow (#333)
+
+## [0.6.0] - 2026-04-10
+
+### Features
+- **OpenCode multi-provider support** — Use any LLM provider (Claude, OpenAI, etc.) via [OpenCode](https://github.com/nicepkg/opencode) as an alternative backend, with full streaming, tool events, plan mode, and permission control (#322)
+- **Provider selector** — Choose between Claude Code and OpenCode per session, with dynamic model list fetching from configured providers
+- **Pull request webhook handler** — Automated PR code review via GitHub webhook integration (#321)
+- **Expanded agent permissions** — Curated tool allowlist for Agent Joe child sessions (#320)
+
+### Fixes
+- Wire provider through REST endpoints, workflows, and sidebar UI (#323)
+- Address Apr 10 security and code review findings (#327)
+- Resolve lint errors failing CI (#330)
+
+### Refactoring
+- Complexity quick wins — remove deprecated constructor, deduplicate methods, extract helpers (#331)
+
+### Tests
+- Add coverage for session-lifecycle, orchestrator-children, and prompt-router (#328)
+
 ## [0.5.5] - 2026-04-10
 
 ### Fixes
