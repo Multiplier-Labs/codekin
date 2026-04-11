@@ -19,6 +19,8 @@
 import { EventEmitter } from 'events'
 import { spawn, type ChildProcess } from 'child_process'
 import { randomUUID } from 'crypto'
+import { readFileSync, existsSync } from 'fs'
+import { extname } from 'path'
 import type { ClaudeProcessEvents } from './claude-process.js'
 import { OPENCODE_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
 import type { PermissionMode, TaskItem } from './types.js'
@@ -251,6 +253,10 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private tasks = new Map<string, TaskItem>()
   private turnComplete = false
   private taskSeq = 0
+  /** Whether we've received streaming delta events this turn (to avoid double-emitting text). */
+  private receivedDeltas = false
+  /** Whether we've already emitted text via message.part.updated (to avoid re-emitting from message.updated). */
+  private emittedPartText = false
 
   constructor(workingDir: string, opts?: Partial<OpenCodeProcessOptions>) {
     super()
@@ -448,6 +454,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         const field = properties.field as string | undefined
         const delta = properties.delta as string | undefined
         if (field === 'text' && delta) {
+          this.receivedDeltas = true
           this.emit('text', delta)
         }
         break
@@ -462,7 +469,14 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
 
         switch (part.type) {
           case 'text': {
-            // Text content arrives via message.part.delta events, not here.
+            // Text may arrive via message.part.delta (streaming) or as full
+            // content here (OpenCode >=1.4 message.updated). Only emit if we
+            // haven't already streamed it via delta events or emitted it from
+            // an earlier message.part.updated event.
+            if (part.text && !this.receivedDeltas && !this.emittedPartText) {
+              this.emittedPartText = true
+              this.emit('text', part.text)
+            }
             break
           }
 
@@ -594,6 +608,30 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         break
       }
 
+      // OpenCode >=1.4 sends session.idle as a standalone event (not nested in session.status)
+      case 'session.idle': {
+        if (!this.isOwnSession(properties)) break
+        if (this.turnComplete) break
+        this.turnComplete = true
+        this.emit('result', '', false)
+        break
+      }
+
+      // OpenCode >=1.4 sends message.updated with full message info including parts.
+      // Extract parts and process them like message.part.updated events.
+      case 'message.updated': {
+        if (!this.isOwnSession(properties)) break
+        const info = properties.info as {
+          role?: string
+          parts?: OpenCodeMessagePart[]
+        } | undefined
+        if (!info || info.role !== 'assistant' || !info.parts) break
+        for (const part of info.parts) {
+          this.handleSSEEvent({ type: 'message.part.updated', properties: { ...properties, part } })
+        }
+        break
+      }
+
       default:
         // Log unhandled session-scoped events for debugging (skip noisy ones)
         if (type !== 'heartbeat' && type !== 'server.connected' && type !== 'message.part.added') {
@@ -704,12 +742,37 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     }
 
     this.turnComplete = false // reset completion latch for new turn
+    this.receivedDeltas = false
+    this.emittedPartText = false
 
     const baseUrl = `http://localhost:${serverState.port}`
-    // Build request body with optional model override
-    const body: Record<string, unknown> = {
-      parts: [{ type: 'text', text: content }],
+    // Parse [Attached files: ...] prefix and convert image paths to proper parts.
+    // The frontend uploads images to the screenshots dir and wraps them as:
+    //   [Attached files: /path/to/img1, /path/to/img2]\nuser text
+    const parts: Array<Record<string, unknown>> = []
+    let textContent = content
+    const attachMatch = content.match(/^\[Attached files: ([^\]]+)\]\n?/)
+    if (attachMatch) {
+      textContent = content.slice(attachMatch[0].length)
+      const filePaths = attachMatch[1].split(',').map(p => p.trim())
+      for (const filePath of filePaths) {
+        const ext = extname(filePath).toLowerCase()
+        const mimeMap: Record<string, string> = {
+          '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+          '.gif': 'image/gif', '.webp': 'image/webp',
+        }
+        const mime = mimeMap[ext]
+        if (mime && existsSync(filePath)) {
+          const base64 = readFileSync(filePath).toString('base64')
+          parts.push({ type: 'image', image: base64, mime })
+        }
+      }
     }
+    if (textContent.trim()) {
+      parts.push({ type: 'text', text: textContent })
+    }
+    // Build request body with optional model override
+    const body: Record<string, unknown> = { parts }
     // Model is stored as "providerID/modelID" — split only at first slash so
     // OpenRouter-style IDs like "openrouter/meta-llama/llama-3.1-8b" stay intact.
     if (this.model && this.model.includes('/')) {

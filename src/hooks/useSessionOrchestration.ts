@@ -39,7 +39,7 @@ export interface UseSessionOrchestrationReturn {
   handleDeleteSession: (sessionId: string) => Promise<void>
   handleSelectRepo: (workingDir: string) => void
   handleDeleteRepo: (workingDir: string) => Promise<void>
-  handleNewSessionForRepo: () => void
+  handleNewSessionForRepo: (provider?: import('../types').CodingProvider) => void
   handleNewSessionFromArchive: (workingDir: string, context: string) => void
 }
 
@@ -129,7 +129,7 @@ export function useSessionOrchestration({
     }
   }, [sessions, activeSessionId, clearMessages, leaveSession, joinSession, setActiveSessionId, removeSession])
 
-  const handleNewSessionForRepo = useCallback(() => {
+  const handleNewSessionForRepo = useCallback((provider?: import('../types').CodingProvider) => {
     if (!activeWorkingDir) return
     const repo = repos.find(r => r.workingDir === activeWorkingDir)
     // Always use the repo root for new sessions — never a worktree path.
@@ -139,7 +139,7 @@ export function useSessionOrchestration({
     const repoId = repo?.id ?? workingDir.split('/').pop() ?? 'session'
     clearMessages()
     leaveSession()
-    wsCreateSession(`hub:${repoId}`, workingDir, useWorktreeRef.current, permissionModeRef.current, providerRef?.current)
+    wsCreateSession(`hub:${repoId}`, workingDir, useWorktreeRef.current, permissionModeRef.current, provider ?? providerRef?.current)
   }, [activeWorkingDir, repos, clearMessages, leaveSession, wsCreateSession, permissionModeRef, useWorktreeRef, providerRef])
 
   const handleNewSessionFromArchive = useCallback((workingDir: string, context: string) => {
