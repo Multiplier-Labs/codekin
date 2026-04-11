@@ -739,6 +739,8 @@ export class SessionManager {
 
       // If no clients remain, wait a grace period before auto-denying.
       // This prevents false denials when the user is just refreshing the page.
+      // The grace period must be long enough for the client to complete its
+      // reconnect flow: zombie retry pings (up to 6s) + auth check + WS handshake.
       if (session.clients.size === 0) {
         if (session._leaveGraceTimer) clearTimeout(session._leaveGraceTimer)
 
@@ -762,7 +764,7 @@ export class SessionManager {
               session.pendingToolApprovals.clear()
             }
           }
-        }, 3000)
+        }, 10_000)
       }
     }
   }

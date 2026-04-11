@@ -45,9 +45,9 @@ export function useWsConnection({
   // Session restore / health check state machine:
   //
   //   Tab hidden → Tab visible
-  //     ├─ WS OPEN:  set awaitingHealthPong=true, send ping, start 2s timeout
-  //     │    ├─ pong received before timeout → call onHealthPong (rejoin session)
-  //     │    └─ timeout fires → close WS as zombie, reconnect via onclose
+  //     ├─ WS OPEN:  set awaitingHealthPong=true, send ping, start retry loop
+  //     │    ├─ pong received before deadline → call onHealthPong (rejoin session)
+  //     │    └─ all retries exhausted (3 pings over 6s) → close WS as zombie, reconnect
   //     ├─ WS CONNECTING: no-op (onopen will complete the handshake)
   //     └─ WS CLOSED: check auth → reconnect()
   //
@@ -56,6 +56,8 @@ export function useWsConnection({
   const restoringRef = useRef(false)
   const awaitingHealthPong = useRef(false)
   const healthPongTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** How many health pings have been sent in the current restore attempt. */
+  const healthPingCount = useRef(0)
 
   // Stable refs for callbacks that may change
   const onDisconnectRef = useRef(onDisconnect)
@@ -148,26 +150,41 @@ export function useWsConnection({
 
   /**
    * Restore the connection after a visibility change (tab focus return).
-   * Case 1: WS open — health ping, rejoin on pong, zombie timeout at 2s.
+   * Case 1: WS open — health ping with retries (3 attempts over 6s), rejoin on pong.
    * Case 2: WS connecting — let existing onopen handle it.
    * Case 3: WS closed — check auth, then reconnect.
    */
   const restoreSession = useCallback(() => {
     if (restoringRef.current) return
     restoringRef.current = true
-    setTimeout(() => { restoringRef.current = false }, 3000)
+    setTimeout(() => { restoringRef.current = false }, 8000)
 
     const ws = wsRef.current
 
     if (ws && ws.readyState === WebSocket.OPEN) {
       awaitingHealthPong.current = true
-      healthPongTimer.current = setTimeout(() => {
-        awaitingHealthPong.current = false
-        healthPongTimer.current = null
-        backoff.current = 1000
-        ws.close()
-      }, 2000)
+      healthPingCount.current = 1
+
+      const scheduleRetryOrClose = () => {
+        healthPongTimer.current = setTimeout(() => {
+          healthPongTimer.current = null
+          if (!awaitingHealthPong.current) return // pong arrived
+          if (healthPingCount.current < 3) {
+            // Retry: send another ping
+            healthPingCount.current += 1
+            send({ type: 'ping' })
+            scheduleRetryOrClose()
+          } else {
+            // All retries exhausted — connection is dead
+            awaitingHealthPong.current = false
+            backoff.current = 1000
+            ws.close()
+          }
+        }, 2000)
+      }
+
       send({ type: 'ping' })
+      scheduleRetryOrClose()
       return
     }
 
