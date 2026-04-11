@@ -398,12 +398,13 @@ const WS_RATE_MAX_CONNECTIONS = 30
 const WS_RATE_MAP_MAX_SIZE = 10_000
 
 // Periodically purge expired rate-limit entries to prevent unbounded memory growth
-setInterval(() => {
+const wsRateCleanup = setInterval(() => {
   const now = Date.now()
   for (const [ip, entry] of wsConnections) {
     if (now >= entry.resetAt) wsConnections.delete(ip)
   }
 }, WS_RATE_WINDOW_MS)
+if (wsRateCleanup.unref) wsRateCleanup.unref()
 
 function checkWsRateLimit(ip: string): boolean {
   const now = Date.now()

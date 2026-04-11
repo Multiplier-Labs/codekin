@@ -573,7 +573,8 @@ export class PromptRouter {
     }
 
     updatedInput.answers = answers
-    session.claudeProcess!.sendControlResponse(pending.requestId, 'allow', updatedInput)
+    if (!session.claudeProcess?.isAlive()) return
+    session.claudeProcess.sendControlResponse(pending.requestId, 'allow', updatedInput)
   }
 
   /** Send a permission control response (allow/always_allow/approve_pattern/deny). */
@@ -592,7 +593,8 @@ export class PromptRouter {
     }
 
     const behavior = isDeny ? 'deny' : 'allow'
-    session.claudeProcess!.sendControlResponse(pending.requestId, behavior)
+    if (!session.claudeProcess?.isAlive()) return
+    session.claudeProcess.sendControlResponse(pending.requestId, behavior)
   }
 
   /**
