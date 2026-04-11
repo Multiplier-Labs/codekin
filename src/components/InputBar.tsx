@@ -148,7 +148,7 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
         <IconChevronDown size={12} stroke={2} />
       </button>
       {isOpen && (
-        <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[160px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
+        <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[160px] max-h-[320px] overflow-y-auto rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
           {models.map(m => (
             <button
               key={m.id}
