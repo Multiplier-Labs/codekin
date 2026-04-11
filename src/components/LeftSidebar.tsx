@@ -13,13 +13,14 @@ import {
   IconLogout, IconSun, IconMoon,
   IconChevronRight, IconChevronLeft, IconSparkles, IconX, IconRobotFace,
 } from '@tabler/icons-react'
-import type { Session, Module, Repo, DocsPickerProps, MobileProps } from '../types'
+import type { Session, Module, Repo, DocsPickerProps, MobileProps, ConnectionState } from '../types'
 import type { RepoGroup } from '../hooks/useRepos'
 import AppIcon from './AppIcon'
 import { NewSessionButton } from './NewSessionButton'
 import { RepoSection, type RepoNode } from './RepoSection'
 import { ArchivedSessionsPanel } from './ArchivedSessionsPanel'
 import { ModuleBrowser } from './ModuleBrowser'
+import { ConnectionPopup } from './ConnectionPopup'
 import { groupKey } from '../hooks/useSessionOrchestration'
 
 const SIDEBAR_WIDTH_KEY = 'codekin-left-sidebar-width'
@@ -92,6 +93,16 @@ interface Props {
   fontSize: number
   /** WebSocket connection state ('disconnected' | 'connecting' | 'connected'). */
   connState: string
+  /** Whether Claude Code connection is disabled by the user. */
+  claudeDisabled: boolean
+  /** OpenCode connection state: true=connected, false=disconnected, null=unknown. */
+  openCodeConnected: boolean | null
+  /** Whether OpenCode connection is disabled by the user. */
+  openCodeDisabled: boolean
+  /** Toggle Claude Code connection on/off. */
+  onToggleClaude: () => void
+  /** Toggle OpenCode connection on/off. */
+  onToggleOpenCode: () => void
   /** Current route view ('chat' | 'workflows'). */
   view: string
   /** Agent display name for the orchestrator button. */
@@ -150,6 +161,11 @@ export function LeftSidebar({
   theme,
   fontSize,
   connState,
+  claudeDisabled,
+  openCodeConnected,
+  openCodeDisabled,
+  onToggleClaude,
+  onToggleOpenCode,
   view,
   archiveRefreshKey,
   onSelectSession,
@@ -177,6 +193,7 @@ export function LeftSidebar({
     return stored ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Number(stored))) : DEFAULT_WIDTH
   })
   const [modulesOpen, setModulesOpen] = useState(false)
+  const [connPopupOpen, setConnPopupOpen] = useState(false)
   const [archiveViewSessionId, setArchiveViewSessionId] = useState<string | null>(null)
   const modulesRef = useRef<HTMLDivElement>(null)
   const dragging = useRef(false)
@@ -275,8 +292,25 @@ export function LeftSidebar({
           >
             {theme === 'dark' ? <IconSun size={14} stroke={2} /> : <IconMoon size={14} stroke={2} />}
           </button>
-          <div title={connState.charAt(0).toUpperCase() + connState.slice(1)}>
-            <span className={`inline-block h-2 w-2 rounded-full ${connDotColor}`} />
+          <div className="relative">
+            <button
+              onClick={() => setConnPopupOpen(o => !o)}
+              className="flex items-center justify-center rounded p-1 hover:bg-neutral-6 transition-colors"
+              title="Connection status"
+            >
+              <span className={`inline-block h-2 w-2 rounded-full ${connDotColor}`} />
+            </button>
+            {connPopupOpen && (
+              <ConnectionPopup
+                claudeState={connState as ConnectionState}
+                claudeDisabled={claudeDisabled}
+                onToggleClaude={onToggleClaude}
+                openCodeConnected={openCodeConnected}
+                openCodeDisabled={openCodeDisabled}
+                onToggleOpenCode={onToggleOpenCode}
+                onClose={() => setConnPopupOpen(false)}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -445,8 +479,25 @@ export function LeftSidebar({
       {/* Bottom toolbar */}
       <div className="flex flex-col border-t border-neutral-8/30 flex-shrink-0">
         <div className={`flex items-center gap-0.5 px-2 ${isMobile ? 'gap-1 py-3' : 'py-2'}`}>
-          <div className="flex items-center justify-center px-1 py-1" title={connState.charAt(0).toUpperCase() + connState.slice(1)}>
-            <span className={`inline-block h-2 w-2 rounded-full ${connDotColor}`} />
+          <div className="relative">
+            <button
+              onClick={() => setConnPopupOpen(o => !o)}
+              className="flex items-center justify-center px-1 py-1 rounded hover:bg-neutral-6 transition-colors"
+              title="Connection status"
+            >
+              <span className={`inline-block h-2 w-2 rounded-full ${connDotColor}`} />
+            </button>
+            {connPopupOpen && (
+              <ConnectionPopup
+                claudeState={connState as ConnectionState}
+                claudeDisabled={claudeDisabled}
+                onToggleClaude={onToggleClaude}
+                openCodeConnected={openCodeConnected}
+                openCodeDisabled={openCodeDisabled}
+                onToggleOpenCode={onToggleOpenCode}
+                onClose={() => setConnPopupOpen(false)}
+              />
+            )}
           </div>
           <button
             onClick={onSettingsOpen}
