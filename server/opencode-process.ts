@@ -822,7 +822,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         const imageMime = imageMimeMap[ext]
         if (imageMime) {
           const base64 = readFileSync(filePath).toString('base64')
-          parts.push({ type: 'image', image: base64, mime: imageMime })
+          parts.push({ type: 'file', mime: imageMime, filename: filePath.split('/').pop(), url: `data:${imageMime};base64,${base64}` })
         } else if (textExtensions.has(ext)) {
           // Send text-based files as inline text content
           const fileContent = readFileSync(filePath, 'utf-8')
