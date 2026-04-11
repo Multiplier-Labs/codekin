@@ -116,7 +116,7 @@ async function startOpenCodeServer(workingDir: string): Promise<void> {
 
   const proc = spawn('opencode', ['serve', '--port', String(serverState.port)], {
     cwd: workingDir,
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: 'ignore', // prevents buffer deadlock — pipes were never drained
     env,
   })
   serverState.process = proc
