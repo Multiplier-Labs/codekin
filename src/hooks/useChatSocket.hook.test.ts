@@ -818,9 +818,13 @@ describe('useChatSocket hook', () => {
         workingDir: '/tmp',
       } as WsServerMessage))
       act(() => result.current.restoreSession())
-      // Wait 2s without pong — should force close
+      // First ping sent immediately; retries at 2s and 4s; zombie close at 6s
       act(() => { vi.advanceTimersByTime(2000) })
-      expect(ws.readyState).toBe(MockWebSocket.CLOSED)
+      expect(ws.readyState).toBe(MockWebSocket.OPEN) // still alive after first timeout
+      act(() => { vi.advanceTimersByTime(2000) })
+      expect(ws.readyState).toBe(MockWebSocket.OPEN) // still alive after second timeout
+      act(() => { vi.advanceTimersByTime(2000) })
+      expect(ws.readyState).toBe(MockWebSocket.CLOSED) // closed after all 3 retries exhausted
       unmount()
     })
 

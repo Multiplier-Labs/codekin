@@ -317,7 +317,7 @@ describe('SessionManager', () => {
       // Not denied yet — grace period active
       expect(cp.sendControlResponse).not.toHaveBeenCalled()
 
-      vi.advanceTimersByTime(3000)
+      vi.advanceTimersByTime(10_000)
 
       expect(cp.sendControlResponse).toHaveBeenCalledTimes(2)
       expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'deny')
@@ -358,7 +358,7 @@ describe('SessionManager', () => {
       // Not denied yet — grace period active
       expect(resolve).not.toHaveBeenCalled()
 
-      vi.advanceTimersByTime(3000)
+      vi.advanceTimersByTime(10_000)
 
       expect(resolve).toHaveBeenCalledWith({ allow: false, always: false })
       expect(s.pendingToolApprovals.size).toBe(0)
@@ -418,7 +418,7 @@ describe('SessionManager', () => {
 
       sm.leave(s.id, ws)
 
-      vi.advanceTimersByTime(3000)
+      vi.advanceTimersByTime(10_000)
 
       expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'deny')
       expect(s.pendingControlRequests.size).toBe(0)
