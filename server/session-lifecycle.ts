@@ -68,6 +68,9 @@ export class SessionLifecycle {
     // Clear stopped flag and any pending restart timer on explicit start
     session._stoppedByUser = false
     if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
+    // Bump generation so any in-flight restart timers from a previous process
+    // become stale and no-op when they fire.
+    session._processGeneration = (session._processGeneration ?? 0) + 1
 
     // Validate that the working directory still exists.  Worktree directories
     // can be removed externally (cleanup, manual deletion, failed creation that
@@ -268,17 +271,28 @@ export class SessionLifecycle {
     const spawnFailed = proc.hasSpawnFailed ? proc.hasSpawnFailed() : false
 
     // If the process exited without ever producing stdout output, --resume
-    // hung on a broken/stale session. Clear claudeSessionId so the next
-    // restart attempt uses a fresh session instead of retrying the same
-    // broken resume — which would just hang again.
+    // likely hung on a broken/stale session.  But one failure could be transient
+    // (slow startup, brief network blip), so we track consecutive no-output exits
+    // and only clear claudeSessionId after 2 consecutive failures.  This avoids
+    // silent context loss from a single unlucky exit.
     // Exception: if spawn() itself failed (ENOENT/EACCES), the process never
-    // started — the session data on disk is fine, so preserve the ID for retry.
-    if (!producedOutput && session.claudeSessionId && !spawnFailed) {
-      console.warn(`[restart] Session ${sessionId} produced no output before exit — clearing claudeSessionId to force fresh session`)
-      session.claudeSessionId = null
-    }
+    // started — the session data on disk is fine, so preserve the ID and don't
+    // count it.
     if (spawnFailed) {
       console.warn(`[restart] Session ${sessionId} spawn failed (binary not found) — preserving claudeSessionId for retry`)
+    } else if (!producedOutput && session.claudeSessionId) {
+      session._noOutputExitCount = (session._noOutputExitCount ?? 0) + 1
+      const NO_OUTPUT_THRESHOLD = 2
+      if (session._noOutputExitCount >= NO_OUTPUT_THRESHOLD) {
+        console.warn(`[restart] Session ${sessionId} produced no output ${session._noOutputExitCount} consecutive times — clearing claudeSessionId to force fresh session`)
+        session.claudeSessionId = null
+        session._noOutputExitCount = 0
+      } else {
+        console.warn(`[restart] Session ${sessionId} produced no output before exit (${session._noOutputExitCount}/${NO_OUTPUT_THRESHOLD}) — will retry with same session ID`)
+      }
+    } else if (producedOutput) {
+      // Successful output resets the consecutive no-output counter
+      session._noOutputExitCount = 0
     }
 
     // Before evaluating restart, check if the working directory still exists.
@@ -324,7 +338,24 @@ export class SessionLifecycle {
       restartCount: session.restartCount,
       lastRestartAt: session.lastRestartAt,
       stoppedByUser: session._stoppedByUser || sessionConflict,
+      exitCode: code,
+      exitSignal: signal,
     })
+
+    if (action.kind === 'non_retryable') {
+      for (const listener of this.deps.exitListeners) {
+        try { listener(sessionId, code, signal, false) } catch { /* listener error */ }
+      }
+      const msg: WsServerMessage = {
+        type: 'system_message',
+        subtype: 'error',
+        text: `Claude process exited with non-retryable error (code=${action.exitCode}). This usually indicates a configuration or argument problem. Please check your session settings and restart manually.`,
+      }
+      this.deps.addToHistory(session, msg)
+      this.deps.broadcast(session, msg)
+      this.deps.broadcast(session, { type: 'exit', code: code ?? -1, signal })
+      return
+    }
 
     if (action.kind === 'stopped_by_user') {
       for (const listener of this.deps.exitListeners) {
@@ -358,10 +389,17 @@ export class SessionLifecycle {
 
       // Clear any previously scheduled restart to prevent duplicate spawns
       if (session._restartTimer) clearTimeout(session._restartTimer)
+      const generationAtSchedule = session._processGeneration ?? 0
       session._restartTimer = setTimeout(() => {
         session._restartTimer = undefined
-        // Verify session still exists and hasn't been stopped
+        // Verify session still exists, hasn't been stopped, and no newer
+        // process was started (by sendInput, manual restart, etc.) while
+        // this timer was pending.
         if (!this.deps.hasSession(sessionId) || session._stoppedByUser) return
+        if (session._processGeneration !== generationAtSchedule) {
+          console.log(`[restart] Skipping stale restart timer for session ${sessionId} (generation ${generationAtSchedule} → ${session._processGeneration})`)
+          return
+        }
         // startClaude uses --resume when claudeSessionId exists, so the CLI
         // picks up the full conversation history from the JSONL automatically.
         this.startClaude(sessionId)

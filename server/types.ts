@@ -103,6 +103,14 @@ export interface Session {
   }
   /** Timer handle for scheduled auto-restart, stored to prevent duplicate restarts. */
   _restartTimer?: ReturnType<typeof setTimeout>
+  /** Monotonically increasing counter bumped on every startClaude() call.
+   *  Restart timers capture the generation at scheduling time and bail if it
+   *  has changed by the time they fire — prevents stale timers from replacing
+   *  a healthy process that was started by a different code path. */
+  _processGeneration: number
+  /** Number of consecutive no-output exits with the same claudeSessionId.
+   *  Only after reaching the threshold do we clear claudeSessionId. */
+  _noOutputExitCount: number
   /** Grace period timer before auto-denying prompts after last client leaves. */
   _leaveGraceTimer?: ReturnType<typeof setTimeout> | null
   /** Timestamp of last meaningful activity (input, prompt response, client join). Used by idle reaper. */

@@ -3513,21 +3513,32 @@ describe('SessionManager', () => {
       vi.useRealTimers()
     })
 
-    it('clears claudeSessionId when process had no output but spawn succeeded', () => {
+    it('clears claudeSessionId after consecutive no-output exits reach threshold', () => {
       vi.useFakeTimers()
       const s = sm.create('no-output-test', '/tmp')
       const session = sm.get(s.id)!
       ;(session as any).claudeSessionId = 'stale-session'
       ;(session as any).restartCount = 0
+      ;(session as any)._noOutputExitCount = 0
 
-      const cp = fakeClaudeProcess(false)
-      cp.hadOutput.mockReturnValue(false)
-      cp.hasSpawnFailed.mockReturnValue(false)
+      const cp1 = fakeClaudeProcess(false)
+      cp1.hadOutput.mockReturnValue(false)
+      cp1.hasSpawnFailed.mockReturnValue(false)
 
-      ;(sm as any).handleClaudeExit(cp, session, s.id, 1, null)
+      // First no-output exit: should preserve claudeSessionId (threshold=2)
+      ;(sm as any).handleClaudeExit(cp1, session, s.id, 1, null)
+      expect(session.claudeSessionId).toBe('stale-session')
+      expect((session as any)._noOutputExitCount).toBe(1)
 
-      // claudeSessionId should be cleared since process started but produced nothing
+      // Second no-output exit: should clear claudeSessionId
+      session.claudeProcess = null // reset for second exit
+      const cp2 = fakeClaudeProcess(false)
+      cp2.hadOutput.mockReturnValue(false)
+      cp2.hasSpawnFailed.mockReturnValue(false)
+      ;(sm as any).handleClaudeExit(cp2, session, s.id, 1, null)
       expect(session.claudeSessionId).toBeNull()
+      expect((session as any)._noOutputExitCount).toBe(0)
+
       vi.useRealTimers()
     })
   })

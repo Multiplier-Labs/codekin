@@ -85,6 +85,8 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     _claudeTurnCount: 0,
     _namingAttempts: 0,
     _apiRetryCount: 0,
+    _processGeneration: 0,
+    _noOutputExitCount: 0,
     _lastActivityAt: Date.now(),
     planManager: makePlanManager() as any,
     ...overrides,
@@ -224,6 +226,15 @@ describe('SessionLifecycle', () => {
       expect(result).toBe(false)
       expect(session._stoppedByUser).toBe(true)
       expect(deps.broadcast).toHaveBeenCalledWith(session, expect.objectContaining({ type: 'system_message', subtype: 'error' }))
+    })
+
+    it('bumps _processGeneration on each call', () => {
+      expect(session._processGeneration).toBe(0)
+      lifecycle.startClaude('sess-1')
+      expect(session._processGeneration).toBe(1)
+      // Second call kills existing process and bumps again
+      lifecycle.startClaude('sess-1')
+      expect(session._processGeneration).toBe(2)
     })
   })
 
@@ -382,14 +393,16 @@ describe('SessionLifecycle', () => {
       expect(deps.broadcast).toHaveBeenCalledWith(session, expect.objectContaining({ type: 'exit' }))
     })
 
-    it('clears claudeSessionId when process had no output', () => {
+    it('increments no-output counter but preserves claudeSessionId on single no-output exit', () => {
       session.claudeSessionId = 'old-session-id'
+      session._noOutputExitCount = 0
       exitedProcess.hadOutput.mockReturnValue(false)
       mockEvaluateRestart.mockReturnValue({ kind: 'stopped_by_user' })
 
       lifecycle.handleClaudeExit(exitedProcess, session, 'sess-1', 1, null)
 
-      expect(session.claudeSessionId).toBeNull()
+      expect(session.claudeSessionId).toBe('old-session-id')
+      expect(session._noOutputExitCount).toBe(1)
     })
 
     it('preserves claudeSessionId when spawn failed', () => {
@@ -434,6 +447,84 @@ describe('SessionLifecycle', () => {
 
       expect(session._stoppedByUser).toBe(true)
       expect(deps.broadcast).toHaveBeenCalledWith(session, expect.objectContaining({ type: 'exit' }))
+    })
+
+    // --- Generation ID tests ---
+
+    it('restart timer skips if generation changed (another start happened)', () => {
+      mockEvaluateRestart.mockReturnValue({
+        kind: 'restart',
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 2000,
+        updatedCount: 1,
+        updatedLastRestartAt: Date.now(),
+      })
+
+      lifecycle.handleClaudeExit(exitedProcess, session, 'sess-1', 1, null)
+
+      // Simulate another code path starting Claude before the timer fires
+      // (e.g. user sends input which triggers sendInput → startClaude)
+      session._processGeneration = 99
+
+      vi.advanceTimersByTime(2000)
+
+      // The timer should have been a no-op — claudeProcess stays null
+      // (startClaude was not called by the timer)
+      expect(session.claudeProcess).toBeNull()
+    })
+
+    // --- Non-retryable exit code tests ---
+
+    it('does not restart on non-retryable exit code', () => {
+      mockEvaluateRestart.mockReturnValue({ kind: 'non_retryable', exitCode: 2 })
+      const listener = vi.fn()
+      deps.exitListeners.push(listener)
+
+      lifecycle.handleClaudeExit(exitedProcess, session, 'sess-1', 2, null)
+
+      expect(listener).toHaveBeenCalledWith('sess-1', 2, null, false)
+      expect(deps.addToHistory).toHaveBeenCalledWith(session, expect.objectContaining({
+        subtype: 'error',
+        text: expect.stringContaining('non-retryable'),
+      }))
+      expect(deps.broadcast).toHaveBeenCalledWith(session, expect.objectContaining({ type: 'exit' }))
+    })
+
+    // --- No-output threshold tests ---
+
+    it('preserves claudeSessionId on first no-output exit (threshold not reached)', () => {
+      session.claudeSessionId = 'old-session-id'
+      session._noOutputExitCount = 0
+      exitedProcess.hadOutput.mockReturnValue(false)
+      mockEvaluateRestart.mockReturnValue({ kind: 'stopped_by_user' })
+
+      lifecycle.handleClaudeExit(exitedProcess, session, 'sess-1', 1, null)
+
+      expect(session.claudeSessionId).toBe('old-session-id')
+      expect(session._noOutputExitCount).toBe(1)
+    })
+
+    it('clears claudeSessionId after consecutive no-output exits reach threshold', () => {
+      session.claudeSessionId = 'old-session-id'
+      session._noOutputExitCount = 1 // already had one failure
+      exitedProcess.hadOutput.mockReturnValue(false)
+      mockEvaluateRestart.mockReturnValue({ kind: 'stopped_by_user' })
+
+      lifecycle.handleClaudeExit(exitedProcess, session, 'sess-1', 1, null)
+
+      expect(session.claudeSessionId).toBeNull()
+      expect(session._noOutputExitCount).toBe(0) // reset after clearing
+    })
+
+    it('resets no-output counter when process produces output', () => {
+      session._noOutputExitCount = 1
+      exitedProcess.hadOutput.mockReturnValue(true)
+      mockEvaluateRestart.mockReturnValue({ kind: 'stopped_by_user' })
+
+      lifecycle.handleClaudeExit(exitedProcess, session, 'sess-1', 0, null)
+
+      expect(session._noOutputExitCount).toBe(0)
     })
 
     it('swallows errors from exit listeners', () => {

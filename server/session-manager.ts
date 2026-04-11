@@ -301,6 +301,8 @@ export class SessionManager {
       _turnCount: 0,
       _claudeTurnCount: 0,
       _namingAttempts: 0,
+      _processGeneration: 0,
+      _noOutputExitCount: 0,
       isProcessing: false,
       pendingControlRequests: new Map(),
       pendingToolApprovals: new Map(),
