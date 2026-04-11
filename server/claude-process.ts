@@ -308,7 +308,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
 
     // Log non-streaming event types for diagnostics
     if (event.type !== 'stream_event') {
-      const subtype = 'subtype' in event ? (event as Record<string, unknown>).subtype : '-'
+      const subtype = 'subtype' in event ? String((event as Record<string, unknown>).subtype) : '-'
       console.log(`[event] type=${event.type} subtype=${subtype || '-'}`)
     }
     // Log all event types we DON'T handle to catch unknown protocol messages
