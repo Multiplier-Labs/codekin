@@ -217,7 +217,8 @@ export default function App() {
   useEffect(() => {
     if (activeSessionProvider !== 'opencode' || !settings.token) return
     const wdChanged = activeOpenCodeWd && activeOpenCodeWd !== openCodeModelsDirRef.current
-    if (!wdChanged && openCodeModels.length > 0) return
+    const currentIsValidOpenCode = currentModelRef.current && openCodeModels.some(m => m.id === currentModelRef.current)
+    if (!wdChanged && openCodeModels.length > 0 && currentIsValidOpenCode) return
     const activeWd = activeOpenCodeWd
     fetchOpenCodeModels(settings.token, activeWd).then(result => {
       const models: ModelOption[] = result.models.map(m => ({
@@ -240,6 +241,14 @@ export default function App() {
   useEffect(() => {
     setHasFileChanges(false) // eslint-disable-line react-hooks/set-state-in-effect -- sync with session change
   }, [activeSessionId])
+
+  // Validate currentModel when switching to a Claude session (OpenCode validation is in the other useEffect)
+  useEffect(() => {
+    if (activeSessionProvider !== 'claude') return
+    if (!CLAUDE_MODELS.some(m => m.id === currentModel)) {
+      setModel(CLAUDE_MODELS[0].id)
+    }
+  }, [activeSessionProvider, currentModel, setModel])
 
   // Session orchestration: switching, creating, deleting sessions & repos
   const {
