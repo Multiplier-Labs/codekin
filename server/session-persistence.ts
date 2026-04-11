@@ -126,6 +126,7 @@ export class SessionPersistence {
           claudeSessionId: s.claudeSessionId ?? null,
           restartCount: 0,
           lastRestartAt: null,
+          _isStarting: false,
           _stoppedByUser: false,
           _wasActiveBeforeRestart: s.wasActive ?? false,
           _apiRetry: { count: 0 },
