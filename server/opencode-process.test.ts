@@ -179,6 +179,83 @@ describe('OpenCodeProcess', () => {
       expect(textHandler).not.toHaveBeenCalled()
     })
 
+    it('strips user echo prefix from text deltas', () => {
+      const textHandler = vi.fn()
+      ocp.on('text', textHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // Simulate sendMessage storing lastUserInput
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).lastUserInput = 'hello'
+
+      // First delta — matches user input, should be buffered
+      callHandleSSE(ocp, {
+        type: 'message.part.delta',
+        properties: { sessionID: 'oc-session-1', field: 'text', delta: 'hello' },
+      })
+      expect(textHandler).not.toHaveBeenCalled()
+
+      // Second delta — flushes buffer, strips user echo, emits remainder
+      callHandleSSE(ocp, {
+        type: 'message.part.delta',
+        properties: { sessionID: 'oc-session-1', field: 'text', delta: 'Hello there!' },
+      })
+      // Buffer was "helloHello there!" which starts with "hello", so emits "Hello there!"
+      expect(textHandler).toHaveBeenCalledWith('Hello there!')
+    })
+
+    it('emits full buffer when no user echo match', () => {
+      const textHandler = vi.fn()
+      ocp.on('text', textHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).lastUserInput = 'hello'
+
+      // Delta that doesn't match user input once it reaches the threshold
+      callHandleSSE(ocp, {
+        type: 'message.part.delta',
+        properties: { sessionID: 'oc-session-1', field: 'text', delta: 'Sure, I can help!' },
+      })
+      expect(textHandler).toHaveBeenCalledWith('Sure, I can help!')
+    })
+
+    it('emits reasoning deltas as thinking events', () => {
+      const thinkingHandler = vi.fn()
+      ocp.on('thinking', thinkingHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      // Short reasoning — not enough for summary
+      callHandleSSE(ocp, {
+        type: 'message.part.delta',
+        properties: { sessionID: 'oc-session-1', field: 'reasoning', delta: 'Let me ' },
+      })
+      expect(thinkingHandler).not.toHaveBeenCalled()
+
+      // More reasoning — exceeds threshold, emits thinking summary
+      callHandleSSE(ocp, {
+        type: 'message.part.delta',
+        properties: { sessionID: 'oc-session-1', field: 'reasoning', delta: 'think about this carefully.' },
+      })
+      expect(thinkingHandler).toHaveBeenCalledTimes(1)
+      expect(thinkingHandler.mock.calls[0][0]).toContain('Let me think about this carefully.')
+    })
+
+    it('strips user echo from full text in message.part.updated', () => {
+      const textHandler = vi.fn()
+      ocp.on('text', textHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).lastUserInput = 'hello'
+
+      callHandleSSE(ocp, {
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          part: { type: 'text', text: 'helloHere is my response.' },
+        },
+      })
+      expect(textHandler).toHaveBeenCalledWith('Here is my response.')
+    })
+
     it('ignores text part updates (content arrives via deltas)', () => {
       const textHandler = vi.fn()
       ocp.on('text', textHandler)

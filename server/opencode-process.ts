@@ -258,6 +258,16 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private receivedDeltas = false
   /** Whether we've already emitted text via message.part.updated (to avoid re-emitting from message.updated). */
   private emittedPartText = false
+  /** Last user input text — used to detect and strip user echo from assistant deltas. */
+  private lastUserInput = ''
+  /** Buffer for initial text deltas — held until we can check for user echo prefix. */
+  private deltaBuffer = ''
+  /** Whether the delta buffer has been flushed (user echo check complete). */
+  private deltaBufferFlushed = false
+  /** Accumulated reasoning delta text for emitting thinking summaries during streaming. */
+  private reasoningBuffer = ''
+  /** Whether we've already emitted a thinking summary from reasoning deltas. */
+  private emittedReasoningSummary = false
 
   constructor(workingDir: string, opts?: Partial<OpenCodeProcessOptions>) {
     super()
@@ -444,6 +454,20 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     return sessionID === this.opencodeSessionId
   }
 
+  /** Flush any buffered text deltas that haven't been emitted yet (e.g. turn ended before buffer threshold). */
+  private flushDeltaBuffer(): void {
+    if (!this.deltaBufferFlushed && this.deltaBuffer) {
+      this.deltaBufferFlushed = true
+      if (this.lastUserInput && this.deltaBuffer.startsWith(this.lastUserInput)) {
+        const remainder = this.deltaBuffer.slice(this.lastUserInput.length)
+        if (remainder) this.emit('text', remainder)
+      } else {
+        this.emit('text', this.deltaBuffer)
+      }
+      this.deltaBuffer = ''
+    }
+  }
+
   /** Map an OpenCode SSE event to CodingProcess events. */
   private handleSSEEvent(event: OpenCodeSSEEvent): void {
     const { type, properties } = event
@@ -456,7 +480,38 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         const delta = properties.delta as string | undefined
         if (field === 'text' && delta) {
           this.receivedDeltas = true
-          this.emit('text', delta)
+          // Buffer initial deltas to detect and strip user echo prefix.
+          // Some providers echo the user message at the start of the assistant
+          // response, which causes duplicate display.
+          if (!this.deltaBufferFlushed && this.lastUserInput) {
+            this.deltaBuffer += delta
+            if (this.deltaBuffer.length >= this.lastUserInput.length) {
+              this.deltaBufferFlushed = true
+              if (this.deltaBuffer.startsWith(this.lastUserInput)) {
+                const remainder = this.deltaBuffer.slice(this.lastUserInput.length)
+                if (remainder) this.emit('text', remainder)
+              } else {
+                this.emit('text', this.deltaBuffer)
+              }
+              this.deltaBuffer = ''
+            }
+            // Still buffering — don't emit yet
+          } else {
+            this.emit('text', delta)
+          }
+        } else if (field === 'reasoning' && delta) {
+          // Accumulate reasoning deltas and emit a thinking summary once we
+          // have enough content, so the UI shows a thinking indicator during
+          // streaming (not only when message.part.updated arrives later).
+          this.reasoningBuffer += delta
+          if (this.reasoningBuffer.length > 20 && !this.emittedReasoningSummary) {
+            this.emittedReasoningSummary = true
+            const match = this.reasoningBuffer.match(/^(.+?[.!?\n])/)
+            const summary = match && match[1].length <= 120
+              ? match[1].replace(/\n/g, ' ').trim()
+              : this.reasoningBuffer.slice(0, 80).trim()
+            this.emit('thinking', summary)
+          }
         }
         break
       }
@@ -476,7 +531,12 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
             // an earlier message.part.updated event.
             if (part.text && !this.receivedDeltas && !this.emittedPartText) {
               this.emittedPartText = true
-              this.emit('text', part.text)
+              // Strip user echo prefix if the full text starts with the last input
+              let text = part.text
+              if (this.lastUserInput && text.startsWith(this.lastUserInput)) {
+                text = text.slice(this.lastUserInput.length)
+              }
+              if (text) this.emit('text', text)
             }
             break
           }
@@ -543,6 +603,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         if (statusType === 'idle') {
           if (this.turnComplete) break
           this.turnComplete = true
+          this.flushDeltaBuffer()
           this.emit('result', '', false)
         }
         break
@@ -591,6 +652,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         if (!this.isOwnSession(properties)) break
         if (this.turnComplete) break
         this.turnComplete = true
+        this.flushDeltaBuffer()
         this.emit('result', '', false)
         break
       }
@@ -604,6 +666,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         if (sType === 'idle') {
           if (this.turnComplete) break
           this.turnComplete = true
+          this.flushDeltaBuffer()
           this.emit('result', '', false)
         }
         break
@@ -614,6 +677,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         if (!this.isOwnSession(properties)) break
         if (this.turnComplete) break
         this.turnComplete = true
+        this.flushDeltaBuffer()
         this.emit('result', '', false)
         break
       }
@@ -729,6 +793,10 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     this.turnComplete = false // reset completion latch for new turn
     this.receivedDeltas = false
     this.emittedPartText = false
+    this.deltaBuffer = ''
+    this.deltaBufferFlushed = false
+    this.reasoningBuffer = ''
+    this.emittedReasoningSummary = false
 
     const baseUrl = `http://localhost:${serverState.port}`
     // Parse [Attached files: ...] prefix and convert image paths to proper parts.
@@ -740,19 +808,32 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     if (attachMatch) {
       textContent = content.slice(attachMatch[0].length)
       const filePaths = attachMatch[1].split(',').map(p => p.trim())
+      const imageMimeMap: Record<string, string> = {
+        '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif', '.webp': 'image/webp',
+      }
+      const textExtensions = new Set(['.md', '.txt', '.csv', '.json', '.xml', '.yaml', '.yml', '.log'])
       for (const filePath of filePaths) {
-        const ext = extname(filePath).toLowerCase()
-        const mimeMap: Record<string, string> = {
-          '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-          '.gif': 'image/gif', '.webp': 'image/webp',
+        if (!existsSync(filePath)) {
+          console.warn(`[opencode] Attached file not found: ${filePath}`)
+          continue
         }
-        const mime = mimeMap[ext]
-        if (mime && existsSync(filePath)) {
+        const ext = extname(filePath).toLowerCase()
+        const imageMime = imageMimeMap[ext]
+        if (imageMime) {
           const base64 = readFileSync(filePath).toString('base64')
-          parts.push({ type: 'image', image: base64, mime })
+          parts.push({ type: 'image', image: base64, mime: imageMime })
+        } else if (textExtensions.has(ext)) {
+          // Send text-based files as inline text content
+          const fileContent = readFileSync(filePath, 'utf-8')
+          const fileName = filePath.split('/').pop() || filePath
+          parts.push({ type: 'text', text: `--- ${fileName} ---\n${fileContent}` })
+        } else {
+          console.warn(`[opencode] Unsupported file type for attachment: ${ext} (${filePath})`)
         }
       }
     }
+    this.lastUserInput = textContent.trim()
     if (textContent.trim()) {
       parts.push({ type: 'text', text: textContent })
     }
