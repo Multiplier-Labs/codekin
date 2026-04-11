@@ -1485,13 +1485,19 @@ export class SessionManager {
 
     // Kill all Claude child processes and wait for them to exit so their
     // session locks are released before the next server start.
+    // Mark all sessions as stopped-by-user and remove exit listeners BEFORE
+    // sending SIGTERM — otherwise handleClaudeExit fires, sees stoppedByUser
+    // is false, and injects a spurious "Restarting (attempt 1/3)" message.
     const exitPromises: Promise<void>[] = []
     for (const session of this.sessions.values()) {
       if (session.claudeProcess?.isAlive()) {
-        exitPromises.push(new Promise<void>((resolve) => {
-          session.claudeProcess!.once('exit', () => resolve())
-          session.claudeProcess!.stop()
-        }))
+        session._stoppedByUser = true
+        if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
+        if (session._apiRetry?.timer) clearTimeout(session._apiRetry.timer)
+        const cp = session.claudeProcess
+        cp.removeAllListeners()
+        exitPromises.push(cp.waitForExit())
+        cp.stop()
       }
     }
 
