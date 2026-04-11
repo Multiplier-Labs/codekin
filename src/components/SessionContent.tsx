@@ -111,16 +111,16 @@ export function SessionContent({
         <ChatView
           messages={messages}
           fontSize={fontSize}
-          disabled={disabled || isProviderDisabled}
+          disabled={disabled}
           planningMode={planningMode}
-          activityLabel={activityLabel}
+          activityLabel={isProviderDisabled ? undefined : activityLabel}
           isMobile={isMobile}
         />
         <TodoPanel tasks={tasks} />
 
         {/* Claude Code disabled banner */}
         {claudeDisabled && (
-          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+          <div className="absolute inset-0 flex items-center justify-center z-10 bg-neutral-12/90">
             <div className="flex flex-col items-center gap-3 text-center px-6 max-w-md">
               <div className="text-[15px] font-medium text-neutral-3">Claude Code is disabled</div>
               <p className="text-[13px] text-neutral-5 leading-relaxed">
@@ -132,7 +132,7 @@ export function SessionContent({
 
         {/* OpenCode not connected banner */}
         {isOpenCodeDisconnected && !claudeDisabled && (
-          <div className="absolute inset-0 flex items-center justify-center z-10">
+          <div className="absolute inset-0 flex items-center justify-center z-10 bg-neutral-12/90">
             <div className="flex flex-col items-center gap-3 text-center px-6 max-w-md">
               <div className="text-[15px] font-medium text-neutral-3">OpenCode is not connected</div>
               <p className="text-[13px] text-neutral-5 leading-relaxed">
@@ -194,6 +194,7 @@ export function SessionContent({
         onSendInput={onSendInput}
         isWaiting={!!activePrompt}
         disabled={disabled || isProviderDisabled}
+        placeholder={claudeDisabled ? 'Claude Code is disabled' : isOpenCodeDisconnected ? 'OpenCode is not connected' : undefined}
         onEscape={() => {}}
         pendingFiles={pendingFiles}
         onAddFiles={onAddFiles}
