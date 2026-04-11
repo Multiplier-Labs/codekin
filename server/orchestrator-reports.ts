@@ -5,7 +5,7 @@
  * to the orchestrator session for triage and action.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'fs'
 import { join, basename, resolve } from 'path'
 import { REPOS_ROOT, DATA_DIR } from './config.js'
 
@@ -100,13 +100,18 @@ export function scanRepoReports(repoPath: string): ReportMeta[] {
  * Read a report's full content.
  */
 export function readReport(filePath: string): ReportContent | null {
-  const resolved = resolve(filePath)
+  // Dereference symlinks to prevent path traversal escape
+  let resolved: string
+  try {
+    resolved = realpathSync(resolve(filePath))
+  } catch {
+    return null
+  }
   // Verify the path is within a known reports directory (anchored startsWith, not includes)
   const isDataReport = resolved.startsWith(DATA_DIR + '/reports/')
   const isRepoReport = resolved.startsWith(REPOS_ROOT + '/') &&
     /^[^/]+\/\.codekin\/reports\//.test(resolved.slice(REPOS_ROOT.length + 1))
   if (!isDataReport && !isRepoReport) return null
-  if (!existsSync(resolved)) return null
 
   const content = readFileSync(resolved, 'utf-8')
   const stat = statSync(resolved)

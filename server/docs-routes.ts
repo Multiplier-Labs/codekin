@@ -114,7 +114,7 @@ export function createDocsRouter(
       return res.status(403).json({ error: 'Access denied' })
     }
 
-    const mdFiles = findMarkdownFiles(repoPath, 3)
+    const mdFiles = findMarkdownFiles(realRepo, 3)
     const pinnedSet = new Set(PINNED_FILES.map(f => f.toLowerCase()))
 
     const pinned: DocFile[] = []
@@ -168,10 +168,16 @@ export function createDocsRouter(
       return res.status(400).json({ error: 'Only .md files are supported' })
     }
 
-    // Path traversal guard
-    const resolved = resolve(repoPath, filePath)
-    const repoResolved = resolve(repoPath)
-    if (!resolved.startsWith(repoResolved + '/') && resolved !== repoResolved) {
+    // Path traversal guard — dereference symlinks to prevent escape
+    let resolved: string
+    let realRepo: string
+    try {
+      resolved = realpathSync(resolve(repoPath, filePath))
+      realRepo = realpathSync(resolve(repoPath))
+    } catch {
+      return res.status(404).json({ error: 'File not found' })
+    }
+    if (!resolved.startsWith(realRepo + '/') && resolved !== realRepo) {
       return res.status(404).json({ error: 'File not found' })
     }
 
