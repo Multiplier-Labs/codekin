@@ -111,7 +111,7 @@ export function SessionContent({
         <ChatView
           messages={messages}
           fontSize={fontSize}
-          disabled={disabled}
+          disabled={disabled && !isProviderDisabled}
           planningMode={planningMode}
           activityLabel={isProviderDisabled ? undefined : activityLabel}
           isMobile={isMobile}

@@ -38,7 +38,7 @@ import { DiffPanel } from './components/DiffPanel'
 import { OrchestratorContent } from './components/OrchestratorContent'
 import { DocsBrowserContent } from './components/DocsBrowserContent'
 import { SessionContent } from './components/SessionContent'
-import type { PermissionMode, CodingProvider, ModelOption } from './types'
+import type { PermissionMode, CodingProvider, ModelOption, Repo } from './types'
 import { CLAUDE_MODELS } from './types'
 import { fetchOpenCodeModels } from './lib/ccApi'
 
@@ -522,6 +522,24 @@ export default function App() {
     }
   }, [openCodeDisabled, settings.token, activeSessionProvider, activeSessionId, leaveSession])
 
+  // Guard session creation when the target provider is disabled
+  const isProviderDisabledForCreation = useCallback((provider?: import('./types').CodingProvider) => {
+    const p = provider ?? providerRef.current
+    if (p === 'opencode' && openCodeDisabled) return true
+    if (p !== 'opencode' && claudeDisabled) return true
+    return false
+  }, [openCodeDisabled, claudeDisabled])
+
+  const guardedHandleOpenSession = useCallback((repo: Repo) => {
+    if (isProviderDisabledForCreation()) return
+    handleOpenSession(repo)
+  }, [handleOpenSession, isProviderDisabledForCreation])
+
+  const guardedHandleNewSessionForRepo = useCallback((provider?: import('./types').CodingProvider) => {
+    if (isProviderDisabledForCreation(provider)) return
+    handleNewSessionForRepo(provider)
+  }, [handleNewSessionForRepo, isProviderDisabledForCreation])
+
   const activeSession = sessions.find(s => s.id === activeSessionId)
   const activeSessionName = activeSession?.name ?? null
   const activeRepoName = activeRepo?.name ?? activeWorkingDir?.split('/').pop() ?? null
@@ -557,9 +575,9 @@ export default function App() {
         onSelectSession={(id) => { docsBrowser.close(); if (view === 'orchestrator') navigate(`/s/${id}`); handleSelectSession(id) }}
         onDeleteSession={handleDeleteSession}
         onRenameSession={renameSession}
-        onNewSession={handleNewSessionForRepo}
+        onNewSession={guardedHandleNewSessionForRepo}
         onNewSessionFromArchive={handleNewSessionFromArchive}
-        onOpenSession={handleOpenSession}
+        onOpenSession={guardedHandleOpenSession}
         onSelectRepo={handleSelectRepo}
         onDeleteRepo={handleDeleteRepo}
         onSettingsOpen={() => setSettingsOpen(true)}
@@ -593,7 +611,7 @@ export default function App() {
             repoName={activeRepoName}
             sessionName={activeSessionName}
             onMenuOpen={() => setMobileMenuOpen(true)}
-            onNewSession={handleNewSessionForRepo}
+            onNewSession={guardedHandleNewSessionForRepo}
             onSettingsOpen={() => setSettingsOpen(true)}
             activeRepo={activeRepo}
           />
@@ -726,7 +744,7 @@ export default function App() {
             claudeDisabled={activeSessionProvider !== 'opencode' && claudeDisabled}
           />
         ) : (
-          <RepoSelector groups={groups} token={settings.token} ghMissing={ghMissing} onOpen={handleOpenSession} onRefreshRepos={refreshRepos} />
+          <RepoSelector groups={groups} token={settings.token} ghMissing={ghMissing} onOpen={guardedHandleOpenSession} onRefreshRepos={refreshRepos} />
         )}
       </div>
 
@@ -759,7 +777,7 @@ export default function App() {
         repos={repos}
         globalSkills={globalSkills}
         globalModules={globalModules}
-        onOpenRepo={handleOpenSession}
+        onOpenRepo={guardedHandleOpenSession}
         onSendSkill={handleSendSkill}
         onSendModule={handleSendModule}
         onOpenSettings={() => setSettingsOpen(true)}

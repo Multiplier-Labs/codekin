@@ -78,6 +78,7 @@ export function useWsConnection({
 
   const connect = useCallback(() => {
     if (!token) return
+    intentionalClose.current = false
     cleanup()
     setConnState('connecting')
 
@@ -173,6 +174,9 @@ export function useWsConnection({
 
     if (ws && ws.readyState === WebSocket.CONNECTING) return
 
+    // Don't reconnect if the user intentionally disconnected (e.g. disabled provider)
+    if (intentionalClose.current) return
+
     checkAuthSession().then(valid => {
       if (!valid) { redirectToLogin(); return }
       backoff.current = 1000
@@ -186,7 +190,6 @@ export function useWsConnection({
   // Connect on mount when token available, disconnect on unmount
   useEffect(() => {
     if (token) {
-      intentionalClose.current = false
       connect() // eslint-disable-line react-hooks/set-state-in-effect -- WebSocket connect legitimately sets connState
     }
     return () => { disconnect() }
