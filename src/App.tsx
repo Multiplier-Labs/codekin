@@ -197,6 +197,7 @@ export default function App() {
   )
   // Dynamic model list for OpenCode (fetched from server on demand)
   const [openCodeModels, setOpenCodeModels] = useState<ModelOption[]>([])
+  const [openCodeConnected, setOpenCodeConnected] = useState<boolean | null>(null) // null = unknown
   const openCodeModelsDirRef = useRef<string | undefined>(undefined)
   // Derive the active session's provider (falls back to the default for new sessions)
   const activeSessionProvider = sessions.find(s => s.id === activeSessionId)?.provider ?? currentProvider
@@ -220,6 +221,7 @@ export default function App() {
         label: `${m.name} (${m.providerName})`,
       }))
       setOpenCodeModels(models)
+      setOpenCodeConnected(models.length > 0)
       openCodeModelsDirRef.current = activeWd
       const currentIsOpenCode = currentModelRef.current && models.some(m => m.id === currentModelRef.current)
       if (!currentIsOpenCode) {
@@ -227,7 +229,7 @@ export default function App() {
         if (defaultProvider && defaultModelId) setModel(`${defaultProvider}/${defaultModelId}`)
         else if (models.length > 0) setModel(models[0].id)
       }
-    }).catch(() => { /* OpenCode server not available */ })
+    }).catch(() => { setOpenCodeConnected(false) })
   }, [activeSessionProvider, settings.token, openCodeModels.length, setModel, activeOpenCodeWd])
 
   // Reset file-change tracking when switching sessions
@@ -676,6 +678,7 @@ export default function App() {
             onPermissionModeChange={handlePermissionModeChange}
             moveToWorktree={moveToWorktree}
             worktreePath={activeSession?.worktreePath}
+            openCodeConnected={activeSessionProvider === 'opencode' ? openCodeConnected : null}
           />
         ) : (
           <RepoSelector groups={groups} token={settings.token} ghMissing={ghMissing} onOpen={handleOpenSession} onRefreshRepos={refreshRepos} />
