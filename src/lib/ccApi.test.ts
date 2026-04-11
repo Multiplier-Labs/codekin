@@ -62,7 +62,6 @@ describe('verifyToken', () => {
         'Content-Type': 'application/json',
         Authorization: 'Bearer tok123',
       },
-      body: JSON.stringify({ token: 'tok123' }),
     })
   })
 
@@ -441,8 +440,6 @@ describe('checkAuthSession', () => {
     await checkAuthSession()
     expect(mockFetch).toHaveBeenCalledWith('/cc/auth-verify', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: '' }),
       redirect: 'manual',
     })
   })

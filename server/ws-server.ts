@@ -69,12 +69,8 @@ for (let i = 0; i < args.length; i++) {
 if (authToken) {
   console.log('Auth token configured')
 } else {
-  if (process.env.NODE_ENV !== 'development') {
-    console.error('FATAL: No auth token configured. Set AUTH_TOKEN or AUTH_TOKEN_FILE.')
-    process.exit(1)
-  }
-  console.warn('⚠️  WARNING: No auth token configured. All endpoints are unauthenticated!')
-  console.warn('   Set AUTH_TOKEN or AUTH_TOKEN_FILE to secure the server.')
+  console.error('FATAL: No auth token configured. Set AUTH_TOKEN or AUTH_TOKEN_FILE.')
+  process.exit(1)
 }
 
 /** Check if a token matches the configured auth token. Fails closed when no token is configured. */
@@ -98,17 +94,12 @@ function verifyTokenOrSessionToken(token: string | undefined, sessionId: string 
   return verifySessionToken(authToken, sessionId, token)
 }
 
-/** Extract auth token from Authorization header or request body. */
+/** Extract auth token from Authorization header only. */
 function extractToken(req: express.Request): string | undefined {
-  // Check Authorization header (preferred — avoids token in URL/logs)
   const authHeader = req.headers.authorization
   if (authHeader?.startsWith('Bearer ')) {
     return authHeader.slice(7)
   }
-
-  // Check body (used by auth-verify and legacy callers)
-  if (req.body?.token) return req.body.token
-
   return undefined
 }
 
@@ -263,14 +254,45 @@ app.post(
 // JSON body parser for all other routes
 app.use(express.json())
 
+// ---------------------------------------------------------------------------
+// Global per-IP rate limiter for API routes (excludes webhooks — they have
+// their own rate limiters registered above).
+// ---------------------------------------------------------------------------
+const apiRateBuckets = new Map<string, { count: number; resetAt: number }>()
+const API_RATE_WINDOW_MS = 60_000
+const API_RATE_MAX_REQUESTS = 300
+
+// Periodic cleanup to prevent unbounded map growth
+const apiRateCleanup = setInterval(() => {
+  const now = Date.now()
+  for (const [ip, entry] of apiRateBuckets) {
+    if (now >= entry.resetAt) apiRateBuckets.delete(ip)
+  }
+}, API_RATE_WINDOW_MS)
+if (apiRateCleanup.unref) apiRateCleanup.unref()
+
+app.use('/api/', (req, res, next) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown'
+  const now = Date.now()
+  const entry = apiRateBuckets.get(ip)
+  if (!entry || now >= entry.resetAt) {
+    apiRateBuckets.set(ip, { count: 1, resetAt: now + API_RATE_WINDOW_MS })
+    return next()
+  }
+  entry.count++
+  if (entry.count > API_RATE_MAX_REQUESTS) {
+    return res.status(429).json({ error: 'Too Many Requests', retryAfter: 60 })
+  }
+  next()
+})
+
 // Security headers
 app.use((_req, res, next) => {
   res.header('X-Content-Type-Options', 'nosniff')
   res.header('X-Frame-Options', 'DENY')
-  res.header('X-XSS-Protection', '1; mode=block')
   res.header('Referrer-Policy', 'strict-origin-when-cross-origin')
   res.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
-  res.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' wss: ws:; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com")
+  res.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com")
   if (process.env.NODE_ENV === 'production') {
     res.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
   }
@@ -399,6 +421,14 @@ function checkWsRateLimit(ip: string): boolean {
 }
 
 wss.on('connection', (ws: WebSocket, req) => {
+  // Validate Origin header to prevent cross-site WebSocket hijacking.
+  // In production CORS_ORIGIN is always set; in dev we also accept no origin (CLI tools).
+  const origin = req.headers.origin
+  if (origin && origin !== CORS_ORIGIN) {
+    ws.close(4003, 'Origin not allowed')
+    return
+  }
+
   // Rate-limit by IP before any processing
   const ip = (TRUST_PROXY && (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()) || req.socket.remoteAddress || 'unknown'
   if (!checkWsRateLimit(ip)) {

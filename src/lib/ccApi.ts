@@ -59,8 +59,6 @@ export async function checkAuthSession(): Promise<boolean> {
   try {
     const res = await fetch(`${BASE}/auth-verify`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: '' }),
       redirect: 'manual',
     })
     // If Authelia intercepts with a redirect or non-JSON response, session is expired.
@@ -92,7 +90,6 @@ export async function verifyToken(token: string): Promise<boolean> {
   const res = await authFetch(`${BASE}/auth-verify`, {
     method: 'POST',
     headers: headers(token),
-    body: JSON.stringify({ token }),
   })
   if (!res.ok) return false
   const data = await res.json()
