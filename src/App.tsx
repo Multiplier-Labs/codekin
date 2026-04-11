@@ -514,9 +514,13 @@ export default function App() {
       }
     } else {
       setOpenCodeDisabled(true)
-      setOpenCodeConnected(null)
+      setOpenCodeConnected(false)
+      // Leave the current session if it's an OpenCode session
+      if (activeSessionProvider === 'opencode' && activeSessionId) {
+        leaveSession()
+      }
     }
-  }, [openCodeDisabled, settings.token])
+  }, [openCodeDisabled, settings.token, activeSessionProvider, activeSessionId, leaveSession])
 
   const activeSession = sessions.find(s => s.id === activeSessionId)
   const activeSessionName = activeSession?.name ?? null
