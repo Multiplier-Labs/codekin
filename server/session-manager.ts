@@ -296,6 +296,7 @@ export class SessionManager {
       restartCount: 0,
       lastRestartAt: null,
       _stoppedByUser: false,
+      _isStarting: false,
       _wasActiveBeforeRestart: false,
       _apiRetry: { count: 0 },
       _turnCount: 0,
@@ -1103,10 +1104,14 @@ export class SessionManager {
     session._stoppedByUser = false
 
     if (!session.claudeProcess?.isAlive()) {
+      // Prevent two rapid sendInput calls from racing into two startClaude calls
+      if (session._isStarting) return
+      session._isStarting = true
       // Claude not running (e.g. after server restart or idle reap) — auto-start first.
       // Claude CLI in -p mode waits for first input before emitting init,
       // so we write directly to the stdin pipe buffer (no waiting for init).
       this.startClaude(sessionId)
+      session._isStarting = false
 
       // If we have a saved claudeSessionId, Claude CLI resumes with full
       // conversation history from its own session storage — no need for our

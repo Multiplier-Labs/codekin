@@ -18,7 +18,7 @@ const writeLocks = new Map<string, Promise<void>>()
 /** Acquire a per-repo write lock. All sessions share one Node process. */
 function withLock(repoDir: string, fn: () => Promise<void>): Promise<void> {
   const prev = writeLocks.get(repoDir) ?? Promise.resolve()
-  const next = prev.then(fn, fn)
+  const next = prev.catch(() => {}).then(fn)
   writeLocks.set(repoDir, next)
   // Clean up the reference once done so we don't leak memory
   void next.then(() => {

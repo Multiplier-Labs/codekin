@@ -68,6 +68,8 @@ export interface Session {
   lastRestartAt: number | null
   /** Set when the user explicitly stops Claude; prevents auto-restart. */
   _stoppedByUser: boolean
+  /** Guard to prevent concurrent startClaude calls from racing in sendInput. */
+  _isStarting: boolean
   /** Flag used during server restart to remember which sessions need auto-resume. */
   _wasActiveBeforeRestart: boolean
   /** In-flight control_request prompts awaiting user response, keyed by requestId. */
