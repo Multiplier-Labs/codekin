@@ -718,7 +718,8 @@ export default function App() {
             onPermissionModeChange={handlePermissionModeChange}
             moveToWorktree={moveToWorktree}
             worktreePath={activeSession?.worktreePath}
-            openCodeConnected={activeSessionProvider === 'opencode' ? openCodeConnected : null}
+            openCodeConnected={activeSessionProvider === 'opencode' ? (openCodeDisabled ? false : openCodeConnected) : null}
+            claudeDisabled={activeSessionProvider !== 'opencode' && claudeDisabled}
           />
         ) : (
           <RepoSelector groups={groups} token={settings.token} ghMissing={ghMissing} onOpen={handleOpenSession} onRefreshRepos={refreshRepos} />

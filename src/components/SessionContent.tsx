@@ -58,6 +58,8 @@ export interface SessionContentProps {
   worktreePath: string | undefined
   /** null = not an OpenCode session, true = connected, false = not connected */
   openCodeConnected: boolean | null
+  /** Whether Claude Code connection has been disabled by the user. */
+  claudeDisabled?: boolean
 }
 
 export function SessionContent({
@@ -99,23 +101,37 @@ export function SessionContent({
   moveToWorktree,
   worktreePath,
   openCodeConnected,
+  claudeDisabled,
 }: SessionContentProps) {
   const isOpenCodeDisconnected = openCodeConnected === false
+  const isProviderDisabled = claudeDisabled || isOpenCodeDisconnected
   return (
     <div className="flex flex-1 flex-col overflow-hidden min-h-0">
       <div className="relative flex-1 min-h-0 flex flex-col">
         <ChatView
           messages={messages}
           fontSize={fontSize}
-          disabled={disabled || isOpenCodeDisconnected}
+          disabled={disabled || isProviderDisabled}
           planningMode={planningMode}
           activityLabel={activityLabel}
           isMobile={isMobile}
         />
         <TodoPanel tasks={tasks} />
 
+        {/* Claude Code disabled banner */}
+        {claudeDisabled && (
+          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+            <div className="flex flex-col items-center gap-3 text-center px-6 max-w-md">
+              <div className="text-[15px] font-medium text-neutral-3">Claude Code is disabled</div>
+              <p className="text-[13px] text-neutral-5 leading-relaxed">
+                Re-enable Claude Code from the connection status menu to continue this session.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* OpenCode not connected banner */}
-        {isOpenCodeDisconnected && messages.length === 0 && (
+        {isOpenCodeDisconnected && !claudeDisabled && (
           <div className="absolute inset-0 flex items-center justify-center z-10">
             <div className="flex flex-col items-center gap-3 text-center px-6 max-w-md">
               <div className="text-[15px] font-medium text-neutral-3">OpenCode is not connected</div>
@@ -177,7 +193,7 @@ export function SessionContent({
         ref={inputBarRef}
         onSendInput={onSendInput}
         isWaiting={!!activePrompt}
-        disabled={disabled || isOpenCodeDisconnected}
+        disabled={disabled || isProviderDisabled}
         onEscape={() => {}}
         pendingFiles={pendingFiles}
         onAddFiles={onAddFiles}
