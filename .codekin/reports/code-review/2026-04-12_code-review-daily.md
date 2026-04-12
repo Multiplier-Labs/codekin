@@ -1,35 +1,72 @@
 # Daily Code Review: codekin
 
-**Date**: 2026-04-12T04:04:35.635Z
+**Date**: 2026-04-12T17:35:01.920Z
 **Repository**: /srv/repos/codekin
-**Branch**: fix/vitest-node-env-test
-**Workflow Run**: e51e3c7f-2b8b-45e3-89fd-6c1eaacb6361
-**Session**: 312e62c3-6b44-429a-9406-fadfe517521f
+**Branch**: main
+**Workflow Run**: 599313d4-879e-46ad-8578-67580b85fd50
+**Session**: 24e0c463-2133-45ff-9dde-b6a4c4a68877
 
 ---
 
-Now I have enough to write the review. Let me check one more thing quickly:Now I have everything needed. Let me write the report:Report written and committed to `.codekin/reports/code-review/2026-04-12_code-review-daily.md`. Here's the summary:
+Completed. I reviewed structure, recent commits, critical server/frontend paths, and ran validation checks (`npm test`, `npm run lint`, `npm run build`, `npm audit --omit=dev`).
 
----
+I also saved the full report to:
 
-## Daily Code Review — 2026-04-12
+```text
+.codekin/reports/code-review/2026-04-12_code-review-daily.md
+```
 
-**84 commits reviewed** over the past 7 days. The week was dominated by OpenCode provider integration, security hardening (symlink traversal, CSP, auth), and model picker UX. **No critical issues found.**
+## Critical
+- **None found** in this pass.
 
-### Warnings (4)
+## Warning
 
-| # | Where | Issue |
-|---|-------|-------|
-| **W1** | `server/session-manager.ts:66-70` | `API_RETRY_PATTERNS` uses bare `/500/`, `/502/`, `/503/` — matches any string containing those digits (e.g. `"port 5000"`, `"1500 lines"`). Adds spurious retries. Fix: use `\b500\b` etc. |
-| **W2** | `src/components/InputBar.tsx:148-151` | Model dropdown search query not cleared on close. Reopening shows stale search text. Fix: reset `query` when `isOpen` transitions to false. |
-| **W3** | `src/components/InputBar.tsx:172-247` | `visibleList` for keyboard nav includes recent models *and* all models (duplicates). Models in "Recent" also appear in "All Models", creating dead keyboard navigation positions. Fix: filter recents out of the "All Models" section. |
-| **W4** | `server/upload-routes.ts:296` | `realpathSync(resolveReposRoot())` throws `ENOENT` on a fresh install if the repos root dir doesn't exist yet. Fix: wrap in try/catch. |
+1. **Missing boundary validation for OpenCode model probe endpoint**
+   - **File**: `server/session-routes.ts:53-58`
+   - `/api/opencode/models` accepts `workingDir` and passes it to `fetchOpenCodeModels()` without the allowed-root realpath checks used in session creation.
+   - **Action**: Apply same guard pattern as `/api/sessions/create` and WS `create_session` (realpath + allowed roots).
 
-### Info (6)
+2. **Proxy/IP handling inconsistency in rate limiting**
+   - **Files**:
+     - `server/config.ts:95` (`TRUST_PROXY` exists)
+     - `server/ws-server.ts:275-277` (API limiter uses `req.ip`)
+     - `server/auth-routes.ts:27` (auth limiter uses `req.ip`)
+   - WS path has proxy-aware handling; REST rate limiters do not configure Express `trust proxy`.
+   - **Action**: Set `app.set('trust proxy', TRUST_PROXY)` and centralize IP extraction for all limiters.
 
-- **I1** `RECENTS_KEY` string constant defined inside `ModelDropdown` — recreated every render; move to module scope
-- **I2** `getRecents()` reads `localStorage` on every render — memoize
-- **I3** `localStorage.setItem` calls (height resize, model recents) lack `QuotaExceededError` guards
-- **I4** Vitest `node` environment for React hook tests needs a comment explaining why jsdom isn't required
-- **I5** `NEVER_AUTO_APPROVE_TOOLS` is empty — worth documenting which tools rely on `PlanManager` gating instead
-- **I6** `MAX_HISTORY = 2000` is count-based; large messages (image data, big tool results) could create memory pressure in multi-session deployments
+3. **Unrestricted image sources in assistant markdown rendering**
+   - **File**: `src/components/ChatView.tsx:215-223`
+   - Custom `img` renderer forwards arbitrary `src` from model output.
+   - **Risk**: Browser-side privacy leakage/tracking beacons.
+   - **Action**: Enforce protocol/host allowlist (similar to link safety logic).
+
+4. **Frontend bundle size warning (performance debt)**
+   - **Evidence**: `npm run build` reports main chunk ~`831.65 kB` (minified), warning threshold exceeded.
+   - **Action**: Add code splitting/lazy loading for heavier views.
+
+5. **Test gaps in critical route glue files**
+   - No direct tests found for:
+     - `server/ws-server.ts`
+     - `server/session-routes.ts`
+     - `server/upload-routes.ts`
+     - `server/docs-routes.ts`
+   - **Action**: Add integration tests around auth, boundary checks, and error responses.
+
+## Info
+
+1. **Recent 7-day git trend**
+   - Heavy churn in `session-lifecycle`, `opencode-process`, `session-manager`, and chat socket handling.
+   - Security hardening and webhook/workflow expansion are active.
+   - This area is improving, but still highest regression risk zone.
+
+2. **Quality consistency**
+   - `npm run lint` passes but with many warnings (notably unsafe `any` and null assertions) concentrated in backend request/process paths.
+   - **Action**: prioritize warning cleanup in `orchestrator-routes`, `session-routes`, `claude-process`, `opencode-process`.
+
+3. **Dependency/security posture**
+   - `npm audit --omit=dev`: **0 prod vulnerabilities**.
+   - Tests are healthy: **1600 passing**.
+
+4. **Docs consistency gap**
+   - `README.md` references OpenCode upstream differently than `server/opencode-process.ts` comments.
+   - **Action**: align canonical OpenCode repo reference.
