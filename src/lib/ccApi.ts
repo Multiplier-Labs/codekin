@@ -461,3 +461,97 @@ export async function fetchOpenCodeModels(
   if (!res.ok) return { models: [], defaults: {} }
   return res.json()
 }
+
+// ---------------------------------------------------------------------------
+// Integration health checks & setup
+// ---------------------------------------------------------------------------
+
+/** Health check detail for a single check. */
+export interface HealthCheckDetail {
+  ok: boolean
+  message: string
+}
+
+/** Result from the integration health check endpoint. */
+export interface HealthCheckResult {
+  overall: 'healthy' | 'degraded' | 'broken' | 'unconfigured'
+  checks: {
+    ghCli: HealthCheckDetail
+    config: HealthCheckDetail & { details?: { enabled: boolean; secretSet: boolean } }
+    webhook: HealthCheckDetail & { details?: { id: number; active: boolean; events: string[]; url: string } }
+    deliveries: HealthCheckDetail & { details?: { recent: Array<{ id: number; status: string; status_code: number; delivered_at: string; event: string }> } }
+  }
+}
+
+/** Run the integration health check for a specific repo. */
+export async function getIntegrationHealth(
+  token: string,
+  repo: string,
+  webhookUrl: string,
+): Promise<HealthCheckResult> {
+  const params = new URLSearchParams({ repo, webhookUrl })
+  const res = await authFetch(`${BASE}/api/integrations/github/pr-review/health?${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Health check failed: ${res.status}`)
+  return res.json()
+}
+
+/** Preview for webhook setup (what would be created/changed). */
+export interface SetupPreview {
+  action: 'create' | 'update' | 'none'
+  existing?: { id: number; active: boolean; events: string[]; config: { url: string } }
+  proposed: { url: string; events: string[]; active: boolean }
+  changes?: string[]
+}
+
+/** Preview what the webhook setup would do. */
+export async function previewWebhookSetup(
+  token: string,
+  repo: string,
+  webhookUrl: string,
+): Promise<{ preview: SetupPreview; secretGenerated: boolean }> {
+  const res = await authFetch(`${BASE}/api/integrations/github/pr-review/setup`, {
+    method: 'POST',
+    headers: headers(token),
+    body: JSON.stringify({ repo, webhookUrl, dryRun: true }),
+  })
+  if (!res.ok) throw new Error(`Setup preview failed: ${res.status}`)
+  return res.json()
+}
+
+/** Apply webhook setup (create or update webhook on GitHub). */
+export async function applyWebhookSetup(
+  token: string,
+  repo: string,
+  webhookUrl: string,
+): Promise<{ preview: SetupPreview; secretGenerated: boolean; webhook?: unknown }> {
+  const res = await authFetch(`${BASE}/api/integrations/github/pr-review/setup`, {
+    method: 'POST',
+    headers: headers(token),
+    body: JSON.stringify({ repo, webhookUrl }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'Setup failed' }))
+    throw new Error(data.error || `Setup failed: ${res.status}`)
+  }
+  return res.json()
+}
+
+/** Send a test ping to the webhook and check delivery. */
+export async function testWebhookDelivery(
+  token: string,
+  repo: string,
+  webhookUrl: string,
+): Promise<{ success: boolean; message: string; delivery?: { id: number; statusCode: number; event: string } }> {
+  const res = await authFetch(`${BASE}/api/integrations/github/pr-review/test`, {
+    method: 'POST',
+    headers: headers(token),
+    body: JSON.stringify({ repo, webhookUrl }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'Test failed' }))
+    throw new Error(data.error || `Test failed: ${res.status}`)
+  }
+  return res.json()
+}

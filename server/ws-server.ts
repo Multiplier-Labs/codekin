@@ -38,6 +38,7 @@ import { ensureHookConfig, syncCommitHooks } from './commit-event-hooks.js'
 import { createAuthRouter } from './auth-routes.js'
 import { createSessionRouter } from './session-routes.js'
 import { createWebhookRouter } from './webhook-routes.js'
+import { createWebhookSetupRouter } from './webhook-setup-routes.js'
 import { createUploadRouter } from './upload-routes.js'
 import { createDocsRouter } from './docs-routes.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
@@ -318,6 +319,7 @@ if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
 app.use(createAuthRouter(verifyToken, extractToken, sessions, claudeAvailable, claudeVersion, apiKeySet))
 app.use(createSessionRouter(verifyToken, extractToken, sessions, verifyTokenOrSessionToken))
 app.use(createWebhookRouter(verifyToken, extractToken, webhookHandler, stepflowHandler))
+app.use(createWebhookSetupRouter(verifyToken, extractToken, () => loadWebhookConfig()))
 app.use(createUploadRouter(verifyToken, extractToken, () => sessions.archive.getSetting('repos_path', '')))
 app.use(createDocsRouter(verifyToken, extractToken))
 

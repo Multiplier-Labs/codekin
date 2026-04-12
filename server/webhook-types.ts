@@ -152,6 +152,50 @@ export interface PullRequestPayload {
   sender: { login: string }
 }
 
+// --- GitHub webhook object (from Hooks API) ---
+export interface GitHubWebhook {
+  id: number
+  active: boolean
+  config: { url: string; content_type: string; insecure_ssl?: string }
+  events: string[]
+  created_at: string
+  updated_at: string
+}
+
+// --- GitHub webhook delivery (from Deliveries API) ---
+export interface GitHubDelivery {
+  id: number
+  delivered_at: string
+  status: string
+  status_code: number
+  event: string
+  action: string | null
+}
+
+// --- Integration health check result ---
+export interface HealthCheckDetail {
+  ok: boolean
+  message: string
+}
+
+export interface HealthCheckResult {
+  overall: 'healthy' | 'degraded' | 'broken' | 'unconfigured'
+  checks: {
+    ghCli: HealthCheckDetail
+    config: HealthCheckDetail & { details?: { enabled: boolean; secretSet: boolean } }
+    webhook: HealthCheckDetail & { details?: { id: number; active: boolean; events: string[]; url: string } }
+    deliveries: HealthCheckDetail & { details?: { recent: GitHubDelivery[] } }
+  }
+}
+
+// --- Webhook setup preview ---
+export interface SetupPreview {
+  action: 'create' | 'update' | 'none'
+  existing?: GitHubWebhook
+  proposed: { url: string; events: string[]; active: boolean }
+  changes?: string[]
+}
+
 // --- PR review context collected from gh CLI ---
 export interface PullRequestContext {
   repo: string                    // owner/repo

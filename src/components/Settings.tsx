@@ -9,7 +9,8 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   IconKey, IconPalette, IconBrandGithub, IconCopy, IconCheck,
   IconChevronDown, IconChevronRight, IconCircleCheckFilled, IconCircleXFilled,
-  IconRobot, IconArchive, IconGitBranch,
+  IconRobot, IconArchive, IconGitBranch, IconRefresh, IconAlertTriangle,
+  IconPlugConnected, IconPlayerPlay, IconWand,
 } from '@tabler/icons-react'
 import type { Settings as SettingsType } from '../types'
 import {
@@ -19,6 +20,8 @@ import {
   getWorktreePrefix, setWorktreePrefix as setWorktreePrefixApi,
   getQueueMessages, setQueueMessages as setQueueMessagesApi,
   setAgentName as setAgentNameApi,
+  getIntegrationHealth, previewWebhookSetup, applyWebhookSetup, testWebhookDelivery,
+  type HealthCheckResult, type SetupPreview,
 } from '../lib/ccApi'
 import { FolderPicker } from './FolderPicker'
 
@@ -113,6 +116,19 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
   const [webhookEvents, setWebhookEvents] = useState<Array<{ id: string; repo: string; branch: string; workflow: string; status: string; receivedAt: string }>>([])
   const [webhookExpanded, setWebhookExpanded] = useState(false)
   const [eventsExpanded, setEventsExpanded] = useState(false)
+
+  // Health check state
+  const [healthRepo, setHealthRepo] = useState('')
+  const [healthResult, setHealthResult] = useState<HealthCheckResult | null>(null)
+  const [healthLoading, setHealthLoading] = useState(false)
+  const [healthError, setHealthError] = useState<string | null>(null)
+
+  // Setup wizard state
+  const [wizardStep, setWizardStep] = useState<'idle' | 'preview' | 'applying' | 'testing' | 'done'>('idle')
+  const [setupPreview, setSetupPreview] = useState<SetupPreview | null>(null)
+  const [setupError, setSetupError] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [testLoading, setTestLoading] = useState(false)
 
   // Re-sync token input when settings change or modal reopens
   useEffect(() => { setTokenInput(settings.token); setStatus('idle'); setSaveError(null) }, [settings.token, open]) // eslint-disable-line react-hooks/set-state-in-effect -- sync on reopen
@@ -373,7 +389,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
 
           {/* ── GitHub Webhooks ── */}
           <SectionCard icon={<IconBrandGithub size={15} />} title="GitHub Webhooks">
-            {/* Status badge */}
+            {/* Server config status */}
             <div className="flex items-center gap-2 mb-3">
               {webhookConfig ? (
                 webhookConfig.enabled ? (
@@ -395,15 +411,12 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
               )}
             </div>
 
-            {/* Description */}
             <p className="text-[13px] text-neutral-5 mb-3">
-              Automatically create Claude sessions to diagnose and fix CI failures.
-              When a GitHub Actions workflow fails, a webhook triggers Codekin to
-              analyze logs, identify the issue, and propose a fix.
+              Automatically review PRs and diagnose CI failures via GitHub webhooks.
             </p>
 
             {/* Webhook URL */}
-            <div className="mb-3">
+            <div className="mb-4">
               <label className="mb-1 block text-[12px] font-medium text-neutral-5 uppercase tracking-wide">Webhook URL</label>
               <div className="flex items-center gap-1 rounded border border-neutral-9 bg-neutral-10 px-3 py-2">
                 <code className="flex-1 text-[13px] text-neutral-3 font-mono truncate select-all">{webhookUrl}</code>
@@ -411,43 +424,290 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
               </div>
             </div>
 
-            {/* Setup guide (collapsible) */}
+            {/* ── Integration Health Check ── */}
+            <div className="border-t border-neutral-9/40 pt-4 mb-4">
+              <div className="flex items-center gap-2 mb-3">
+                <IconPlugConnected size={14} className="text-neutral-5" />
+                <span className="text-[12px] font-semibold uppercase tracking-wide text-neutral-5">Integration Health</span>
+              </div>
+
+              {/* Repo input */}
+              <div className="flex gap-2 mb-3">
+                <input
+                  type="text"
+                  placeholder="owner/repo"
+                  value={healthRepo}
+                  onChange={e => setHealthRepo(e.target.value)}
+                  className="flex-1 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[14px] text-neutral-2 outline-none focus:border-primary-7 font-mono placeholder:text-neutral-7"
+                />
+                <button
+                  onClick={async () => {
+                    if (!healthRepo.trim() || !settings.token) return
+                    setHealthLoading(true)
+                    setHealthError(null)
+                    setHealthResult(null)
+                    try {
+                      const result = await getIntegrationHealth(settings.token, healthRepo.trim(), webhookUrl)
+                      setHealthResult(result)
+                    } catch (err) {
+                      setHealthError(err instanceof Error ? err.message : 'Health check failed')
+                    } finally {
+                      setHealthLoading(false)
+                    }
+                  }}
+                  disabled={!healthRepo.trim() || healthLoading}
+                  className="flex items-center gap-1.5 rounded bg-primary-8 px-3 py-2 text-[13px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-50 transition-colors"
+                >
+                  {healthLoading ? (
+                    <IconRefresh size={14} className="animate-spin" />
+                  ) : (
+                    <IconRefresh size={14} />
+                  )}
+                  Check
+                </button>
+              </div>
+
+              {/* Health error */}
+              {healthError && (
+                <p className="text-[13px] text-error-5 mb-3">{healthError}</p>
+              )}
+
+              {/* Health results */}
+              {healthResult && (
+                <div className="space-y-2 mb-3">
+                  {/* Overall badge */}
+                  <div className="flex items-center gap-2 mb-2">
+                    {healthResult.overall === 'healthy' && <IconCircleCheckFilled size={16} className="text-success-6" />}
+                    {healthResult.overall === 'degraded' && <IconAlertTriangle size={16} className="text-yellow-500" />}
+                    {healthResult.overall === 'broken' && <IconCircleXFilled size={16} className="text-error-5" />}
+                    {healthResult.overall === 'unconfigured' && <IconCircleXFilled size={16} className="text-neutral-6" />}
+                    <span className={`text-[14px] font-medium ${
+                      healthResult.overall === 'healthy' ? 'text-success-5' :
+                      healthResult.overall === 'degraded' ? 'text-yellow-500' :
+                      healthResult.overall === 'broken' ? 'text-error-5' :
+                      'text-neutral-5'
+                    }`}>
+                      {healthResult.overall === 'healthy' ? 'Healthy' :
+                       healthResult.overall === 'degraded' ? 'Degraded' :
+                       healthResult.overall === 'broken' ? 'Broken' :
+                       'Not Configured'}
+                    </span>
+                  </div>
+
+                  {/* Per-check rows */}
+                  <div className="rounded border border-neutral-9 bg-neutral-10/50 divide-y divide-neutral-9/50">
+                    {Object.entries(healthResult.checks).map(([key, check]) => (
+                      <div key={key} className="flex items-start gap-2.5 px-3 py-2.5">
+                        {check.ok ? (
+                          <IconCircleCheckFilled size={14} className="text-success-6 mt-0.5 shrink-0" />
+                        ) : (
+                          <IconCircleXFilled size={14} className="text-error-5 mt-0.5 shrink-0" />
+                        )}
+                        <div className="min-w-0">
+                          <span className="text-[12px] font-medium text-neutral-4 uppercase tracking-wide">
+                            {key === 'ghCli' ? 'GitHub CLI' :
+                             key === 'config' ? 'Server Config' :
+                             key === 'webhook' ? 'GitHub Webhook' :
+                             'Deliveries'}
+                          </span>
+                          <p className="text-[13px] text-neutral-5 mt-0.5">{check.message}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Setup wizard trigger */}
+                  {healthResult.checks.ghCli.ok && (healthResult.overall === 'broken' || healthResult.overall === 'degraded') && !healthResult.checks.webhook.ok && wizardStep === 'idle' && (
+                    <button
+                      onClick={async () => {
+                        setSetupError(null)
+                        setWizardStep('preview')
+                        try {
+                          const { preview } = await previewWebhookSetup(settings.token, healthRepo.trim(), webhookUrl)
+                          setSetupPreview(preview)
+                        } catch (err) {
+                          setSetupError(err instanceof Error ? err.message : 'Preview failed')
+                          setWizardStep('idle')
+                        }
+                      }}
+                      className="flex items-center gap-1.5 rounded bg-primary-8 px-3 py-2 text-[13px] font-medium text-neutral-1 hover:bg-primary-7 transition-colors mt-2"
+                    >
+                      <IconWand size={14} />
+                      Set up automatically
+                    </button>
+                  )}
+
+                  {/* Test delivery button (when webhook exists) */}
+                  {healthResult.checks.webhook.ok && wizardStep === 'idle' && (
+                    <button
+                      onClick={async () => {
+                        setTestLoading(true)
+                        setTestResult(null)
+                        try {
+                          const result = await testWebhookDelivery(settings.token, healthRepo.trim(), webhookUrl)
+                          setTestResult(result)
+                        } catch (err) {
+                          setTestResult({ success: false, message: err instanceof Error ? err.message : 'Test failed' })
+                        } finally {
+                          setTestLoading(false)
+                        }
+                      }}
+                      disabled={testLoading}
+                      className="flex items-center gap-1.5 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[13px] text-neutral-3 hover:bg-neutral-9 disabled:opacity-50 transition-colors mt-2"
+                    >
+                      {testLoading ? <IconRefresh size={14} className="animate-spin" /> : <IconPlayerPlay size={14} />}
+                      Test delivery
+                    </button>
+                  )}
+
+                  {/* Test result */}
+                  {testResult && (
+                    <div className={`rounded border px-3 py-2 text-[13px] mt-2 ${
+                      testResult.success
+                        ? 'border-success-9/50 bg-success-9/10 text-success-5'
+                        : 'border-error-9/50 bg-error-9/10 text-error-5'
+                    }`}>
+                      {testResult.message}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Setup wizard */}
+              {wizardStep !== 'idle' && (
+                <div className="rounded border border-primary-9/30 bg-primary-9/5 px-4 py-3 mb-3 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <IconWand size={14} className="text-primary-6" />
+                    <span className="text-[13px] font-medium text-primary-5">Webhook Setup</span>
+                  </div>
+
+                  {/* Preview step */}
+                  {wizardStep === 'preview' && setupPreview && (
+                    <>
+                      <div className="text-[13px] text-neutral-4 space-y-1.5">
+                        <p>
+                          {setupPreview.action === 'create'
+                            ? `Will create a new webhook on ${healthRepo}:`
+                            : `Will update the existing webhook on ${healthRepo}:`}
+                        </p>
+                        <div className="rounded bg-neutral-10/80 px-3 py-2 font-mono text-[12px] text-neutral-3 space-y-1">
+                          <div>URL: {setupPreview.proposed.url}</div>
+                          <div>Events: {setupPreview.proposed.events.join(', ')}</div>
+                          <div>Active: {setupPreview.proposed.active ? 'yes' : 'no'}</div>
+                        </div>
+                        {setupPreview.changes && setupPreview.changes.length > 0 && (
+                          <ul className="list-disc list-inside text-[12px] text-neutral-5">
+                            {setupPreview.changes.map((c, i) => <li key={i}>{c}</li>)}
+                          </ul>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={async () => {
+                            setWizardStep('applying')
+                            setSetupError(null)
+                            try {
+                              await applyWebhookSetup(settings.token, healthRepo.trim(), webhookUrl)
+                              setWizardStep('done')
+                              // Re-run health check
+                              const result = await getIntegrationHealth(settings.token, healthRepo.trim(), webhookUrl)
+                              setHealthResult(result)
+                            } catch (err) {
+                              setSetupError(err instanceof Error ? err.message : 'Setup failed')
+                              setWizardStep('preview')
+                            }
+                          }}
+                          className="rounded bg-primary-8 px-3 py-1.5 text-[13px] font-medium text-neutral-1 hover:bg-primary-7 transition-colors"
+                        >
+                          Apply
+                        </button>
+                        <button
+                          onClick={() => { setWizardStep('idle'); setSetupPreview(null); setSetupError(null) }}
+                          className="rounded px-3 py-1.5 text-[13px] text-neutral-5 hover:text-neutral-2 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Applying step */}
+                  {wizardStep === 'applying' && (
+                    <div className="flex items-center gap-2 text-[13px] text-neutral-4">
+                      <IconRefresh size={14} className="animate-spin text-primary-6" />
+                      Configuring webhook on GitHub...
+                    </div>
+                  )}
+
+                  {/* Done step */}
+                  {wizardStep === 'done' && (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-[13px] text-success-5">
+                        <IconCircleCheckFilled size={14} />
+                        Webhook configured successfully.
+                      </div>
+                      <button
+                        onClick={() => { setWizardStep('idle'); setSetupPreview(null) }}
+                        className="rounded px-3 py-1.5 text-[13px] text-neutral-5 hover:text-neutral-2 transition-colors"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Setup error */}
+                  {setupError && (
+                    <p className="text-[13px] text-error-5">{setupError}</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Setup guide (collapsible) — context-aware */}
             <button
               onClick={() => setWebhookExpanded(!webhookExpanded)}
               className="flex items-center gap-1.5 text-[13px] text-primary-6 hover:text-primary-5 mb-2 transition-colors"
             >
               {webhookExpanded ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
-              Setup instructions
+              Manual setup instructions
             </button>
             {webhookExpanded && (
               <div className="rounded border border-neutral-9 bg-neutral-10/50 px-4 py-3 mb-3 text-[13px] text-neutral-4 space-y-2.5">
+                {(!healthResult || !healthResult.checks.config.ok) && (
+                  <div className="flex gap-2">
+                    <span className="text-primary-6 font-semibold shrink-0">1.</span>
+                    <span>
+                      Set <code className="text-neutral-3 bg-neutral-9/50 px-1 rounded">GITHUB_WEBHOOK_ENABLED=true</code> and <code className="text-neutral-3 bg-neutral-9/50 px-1 rounded">GITHUB_WEBHOOK_SECRET=&lt;your-secret&gt;</code> on the server, then restart.
+                    </span>
+                  </div>
+                )}
                 <div className="flex gap-2">
-                  <span className="text-primary-6 font-semibold shrink-0">1.</span>
+                  <span className="text-primary-6 font-semibold shrink-0">{!healthResult || !healthResult.checks.config.ok ? '2' : '1'}.</span>
                   <span>
                     In your GitHub repo, go to <strong className="text-neutral-3">Settings &rarr; Webhooks &rarr; Add webhook</strong>
                   </span>
                 </div>
                 <div className="flex gap-2">
-                  <span className="text-primary-6 font-semibold shrink-0">2.</span>
+                  <span className="text-primary-6 font-semibold shrink-0">{!healthResult || !healthResult.checks.config.ok ? '3' : '2'}.</span>
                   <span>
                     Set <strong className="text-neutral-3">Payload URL</strong> to the webhook URL above.
                     Set <strong className="text-neutral-3">Content type</strong> to <code className="text-neutral-3 bg-neutral-9/50 px-1 rounded">application/json</code>
                   </span>
                 </div>
                 <div className="flex gap-2">
-                  <span className="text-primary-6 font-semibold shrink-0">3.</span>
+                  <span className="text-primary-6 font-semibold shrink-0">{!healthResult || !healthResult.checks.config.ok ? '4' : '3'}.</span>
                   <span>
-                    Set a <strong className="text-neutral-3">Secret</strong> matching the server&apos;s <code className="text-neutral-3 bg-neutral-9/50 px-1 rounded">GITHUB_WEBHOOK_SECRET</code> env var
+                    Set a <strong className="text-neutral-3">Secret</strong> matching the server&apos;s <code className="text-neutral-3 bg-neutral-9/50 px-1 rounded">GITHUB_WEBHOOK_SECRET</code>
                   </span>
                 </div>
                 <div className="flex gap-2">
-                  <span className="text-primary-6 font-semibold shrink-0">4.</span>
+                  <span className="text-primary-6 font-semibold shrink-0">{!healthResult || !healthResult.checks.config.ok ? '5' : '4'}.</span>
                   <span>
-                    Under <strong className="text-neutral-3">&ldquo;Which events?&rdquo;</strong>, select <strong className="text-neutral-3">Let me select individual events</strong> and check <strong className="text-neutral-3">Workflow runs</strong>
+                    Under <strong className="text-neutral-3">&ldquo;Which events?&rdquo;</strong>, select <strong className="text-neutral-3">Let me select individual events</strong> and check <strong className="text-neutral-3">Workflow runs</strong> and <strong className="text-neutral-3">Pull requests</strong>
                   </span>
                 </div>
                 <p className="text-[13px] text-neutral-6 pt-1 border-t border-neutral-9/50">
-                  Failed workflow runs will automatically spawn a <IconRobot size={12} className="inline -mt-0.5" /> session that analyzes logs and proposes fixes.
+                  Webhook events will automatically spawn <IconRobot size={12} className="inline -mt-0.5" /> sessions for PR reviews and CI failure analysis.
                 </p>
               </div>
             )}
@@ -478,7 +738,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
             )}
 
             {/* Disabled hint */}
-            {webhookConfig && !webhookConfig.enabled && (
+            {webhookConfig && !webhookConfig.enabled && !healthResult && (
               <p className="mt-3 text-[13px] text-neutral-6">
                 Set <code className="bg-neutral-9/50 px-1 rounded text-neutral-4">GITHUB_WEBHOOK_ENABLED=true</code> and <code className="bg-neutral-9/50 px-1 rounded text-neutral-4">GITHUB_WEBHOOK_SECRET</code> on the server to enable.
               </p>
