@@ -165,9 +165,11 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
     ? [...recents.map(id => models.find(m => m.id === id)).filter(Boolean) as ModelOption[], ...filtered]
     : filtered)
 
-  useEffect(() => {
-    setActiveIndex(0)
-  }, [query, isOpen])
+  const [prevOpen, setPrevOpen] = useState(isOpen)
+  if (prevOpen !== isOpen) {
+    setPrevOpen(isOpen)
+    if (isOpen) setActiveIndex(0)
+  }
 
   useEffect(() => {
     const el = itemRefs.current[activeIndex]
@@ -205,7 +207,7 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
             <input
               autoFocus
               value={query}
-              onChange={e => setQuery(e.target.value)}
+              onChange={e => { setQuery(e.target.value); setActiveIndex(0) }}
               onKeyDown={handleKeyDown}
               placeholder="Search models..."
               className="w-full bg-neutral-7 text-[13px] px-2 py-1.5 rounded-md outline-none text-neutral-2 placeholder:text-neutral-5"
