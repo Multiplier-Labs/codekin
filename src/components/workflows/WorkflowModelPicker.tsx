@@ -93,8 +93,13 @@ function SearchablePicker({ models, selected, onSelect }: {
       )
     : models
 
+  // Exclude recents from the "All Models" section to avoid duplicates
+  const allWithoutRecents = (!query && recents.length > 0)
+    ? filtered.filter(m => !recents.includes(m.id))
+    : filtered
+
   const visibleList = (!query && recents.length > 0)
-    ? [...recents.map(id => models.find(m => m.id === id)).filter(Boolean) as ModelOption[], ...filtered]
+    ? [...recents.map(id => models.find(m => m.id === id)).filter(Boolean) as ModelOption[], ...allWithoutRecents]
     : filtered
 
   // Scroll active item into view
@@ -192,10 +197,10 @@ function SearchablePicker({ models, selected, onSelect }: {
               {!query && (
                 <div className="px-3 py-1 text-[11px] text-neutral-5 uppercase tracking-wide">All Models</div>
               )}
-              {filtered.length === 0 && (
+              {allWithoutRecents.length === 0 && (
                 <div className="px-3 py-2 text-[13px] text-neutral-5">No models match your search</div>
               )}
-              {filtered.map((m, idx) => {
+              {allWithoutRecents.map((m, idx) => {
                 const baseIndex = (!query && recents.length > 0) ? recents.length : 0
                 const index = baseIndex + idx
                 return (
