@@ -41,6 +41,7 @@ export function ProviderModelSection({ token, provider, model, onProviderChange,
   // Check OpenCode availability on mount
   useEffect(() => {
     let cancelled = false
+    setLoadingOcModels(true)
     fetchOpenCodeModels(token).then(result => {
       if (cancelled) return
       if (result.models.length > 0) {
@@ -51,6 +52,8 @@ export function ProviderModelSection({ token, provider, model, onProviderChange,
       }
     }).catch(() => {
       if (!cancelled) setOpenCodeAvailable(false)
+    }).finally(() => {
+      if (!cancelled) setLoadingOcModels(false)
     })
     return () => { cancelled = true }
   }, [token])
