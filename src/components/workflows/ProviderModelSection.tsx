@@ -36,12 +36,11 @@ interface Props {
 export function ProviderModelSection({ token, provider, model, onProviderChange, onModelChange }: Props) {
   const [openCodeAvailable, setOpenCodeAvailable] = useState<boolean | null>(null)
   const [openCodeModels, setOpenCodeModels] = useState<ModelOption[]>([])
-  const [loadingOcModels, setLoadingOcModels] = useState(false)
+  const [loadingOcModels, setLoadingOcModels] = useState(true)
 
   // Check OpenCode availability on mount
   useEffect(() => {
     let cancelled = false
-    setLoadingOcModels(true)
     fetchOpenCodeModels(token).then(result => {
       if (cancelled) return
       if (result.models.length > 0) {
