@@ -169,8 +169,12 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
       )
     : models
 
+  const recentSet = new Set(recents)
+  const allModelsFiltered = (!query && recents.length > 0)
+    ? filtered.filter(m => !recentSet.has(m.id))
+    : filtered
   const visibleList = (!query && recents.length > 0
-    ? [...recents.map(id => models.find(m => m.id === id)).filter(Boolean) as ModelOption[], ...filtered]
+    ? [...recents.map(id => models.find(m => m.id === id)).filter(Boolean) as ModelOption[], ...allModelsFiltered]
     : filtered)
 
   useEffect(() => {
@@ -242,7 +246,7 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
               {!query && (
                 <div className="px-3 py-1 text-[11px] text-neutral-5">All Models</div>
               )}
-              {filtered.map((m, idx) => {
+              {allModelsFiltered.map((m, idx) => {
                 const baseIndex = (!query && recents.length > 0) ? recents.length : 0
                 const index = baseIndex + idx
                 return (
