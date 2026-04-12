@@ -63,10 +63,10 @@ const API_RETRY_PATTERNS = [
   /internal server error/i,
   /overloaded/i,
   /rate.?limit/i,
-  /529/,
-  /500/,
-  /502/,
-  /503/,
+  /\b529\b/,
+  /\b500\b/,
+  /\b502\b/,
+  /\b503\b/,
 ]
 
 /** Sources that represent headless (non-interactive) sessions managed by their own lifecycles. */
