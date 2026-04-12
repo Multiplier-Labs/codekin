@@ -901,10 +901,12 @@ export class SessionManager {
 
   private onSystemInit(cp: CodingProcess, session: Session, model: string): void {
     session.claudeSessionId = cp.getSessionId()
+    const previousModel = session._lastReportedModel
     session._lastReportedModel = model
-    // Always broadcast — this is the single "session is ready" notification.
-    // The text includes the model so the user knows which model is active.
-    this.broadcastAndHistory(session, { type: 'system_message', subtype: 'init', text: `Model: ${model}`, model })
+    // Only show the model message on first init or when the model changes.
+    if (!previousModel || previousModel !== model) {
+      this.broadcastAndHistory(session, { type: 'system_message', subtype: 'init', text: `Model: ${model}`, model })
+    }
   }
 
   private onTextEvent(session: Session, sessionId: string, text: string): void {
