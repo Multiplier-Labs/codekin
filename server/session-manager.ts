@@ -1125,6 +1125,7 @@ export class SessionManager {
           const combined = context + '\n\n' + data
           session._lastUserInput = combined
           session._lastUserInputAt = Date.now()
+          if (!session._namingUserInput) session._namingUserInput = data
           session._apiRetry.count = 0
           if (!session.isProcessing) {
             session.isProcessing = true
@@ -1144,6 +1145,7 @@ export class SessionManager {
       if (session.claudeProcess && !session.claudeProcess.isReady()) {
         session._lastUserInput = data
         session._lastUserInputAt = Date.now()
+        if (!session._namingUserInput) session._namingUserInput = data
         session._apiRetry.count = 0
         if (!session.isProcessing) {
           session.isProcessing = true
@@ -1164,6 +1166,7 @@ export class SessionManager {
 
     session._lastUserInput = data
     session._lastUserInputAt = Date.now()
+    if (!session._namingUserInput) session._namingUserInput = data
     session._apiRetry.count = 0
     if (!session.isProcessing) {
       session.isProcessing = true

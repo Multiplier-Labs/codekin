@@ -91,6 +91,8 @@ export interface Session {
   _lastReportedModel?: string
   /** Last user input sent, stored for API error retry. */
   _lastUserInput?: string
+  /** First user input, preserved for session naming (not cleared by API retry). */
+  _namingUserInput?: string
   /** Timestamp of last user input, used to detect stale retries. */
   _lastUserInputAt?: number
   /** Transient API error retry state for the current turn. */

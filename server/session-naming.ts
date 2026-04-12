@@ -111,7 +111,7 @@ export class SessionNaming {
       .join('')
       .slice(0, 2000)
 
-    const userMsg = session._lastUserInput || ''
+    const userMsg = session._namingUserInput || session._lastUserInput || ''
     if (!userMsg && !latestContext) {
       // No context yet — schedule a retry
       this.scheduleSessionNaming(sessionId)

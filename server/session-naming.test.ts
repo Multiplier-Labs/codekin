@@ -50,6 +50,7 @@ function fakeSession(overrides: Record<string, any> = {}): any {
     _namingTimer: undefined,
     _namingAttempts: 0,
     _lastUserInput: 'fix the login bug',
+    _namingUserInput: 'fix the login bug',
     outputHistory: [{ type: 'output', data: 'I will help fix the login bug.' }],
     ...overrides,
   }
@@ -67,7 +68,7 @@ describe('SessionNaming', () => {
   // 1. No context yet — retry scheduled
   it('re-schedules when no user input and no output history', async () => {
     vi.useFakeTimers()
-    const session = fakeSession({ _lastUserInput: '', outputHistory: [] })
+    const session = fakeSession({ _lastUserInput: '', _namingUserInput: '', outputHistory: [] })
     const deps = makeDeps({ getSession: vi.fn(() => session) })
     const naming = new SessionNaming(deps)
 
@@ -261,6 +262,27 @@ describe('SessionNaming', () => {
     vi.advanceTimersByTime(1)
     expect(vi.getTimerCount()).toBe(0)
     vi.useRealTimers()
+  })
+
+  // 12b. executeSessionNaming — uses _namingUserInput when _lastUserInput is cleared
+  it('uses _namingUserInput when _lastUserInput has been cleared', async () => {
+    // Simulates the bug scenario: finalizeResult clears _lastUserInput before naming runs
+    const session = fakeSession({
+      _lastUserInput: undefined,
+      _namingUserInput: 'add dark mode support',
+      outputHistory: [{ type: 'output', data: 'I will add dark mode.' }],
+    })
+    const deps = makeDeps({ getSession: vi.fn(() => session) })
+    const naming = new SessionNaming(deps)
+    mockSpawn.mockReturnValue(fakeProc('Add Dark Mode Support', 0))
+
+    await naming.executeSessionNaming('s1')
+
+    expect(deps.rename).toHaveBeenCalledWith('s1', 'Add Dark Mode Support')
+    // Verify the prompt included the user's message from _namingUserInput
+    const stdinWrite = mockSpawn.mock.results[0].value.stdin.write
+    const promptText = stdinWrite.mock.calls[0][0]
+    expect(promptText).toContain('add dark mode support')
   })
 
   // 13. executeSessionNaming — skips if session disappears mid-flight
