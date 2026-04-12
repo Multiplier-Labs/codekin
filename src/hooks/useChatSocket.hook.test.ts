@@ -554,12 +554,14 @@ describe('useChatSocket hook', () => {
       unmount()
     })
 
-    it('claude_started is suppressed (no message added)', () => {
+    it('claude_started shows Session started message', () => {
       const { result, unmount } = setupConnected()
       act(() => MockWebSocket.latest().simulateMessage({
         type: 'claude_started', sessionId: 's1',
       } as WsServerMessage))
-      expect(result.current.messages).toHaveLength(0)
+      expect(result.current.messages).toHaveLength(1)
+      expect(result.current.messages[0].type).toBe('system')
+      expect((result.current.messages[0] as any).text).toBe('Session started')
       unmount()
     })
 

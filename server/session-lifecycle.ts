@@ -172,6 +172,9 @@ export class SessionLifecycle {
 
     cp.start()
     session.claudeProcess = cp
+    // Reset so the next system_init always broadcasts the model message,
+    // even if the model hasn't changed since the previous process.
+    session._lastReportedModel = undefined
     this.deps.globalBroadcast?.({ type: 'sessions_updated' })
 
     const startMsg: WsServerMessage = { type: 'claude_started', sessionId }
