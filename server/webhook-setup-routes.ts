@@ -127,7 +127,14 @@ export function createWebhookSetupRouter(
     }
 
     // Check 4: Recent deliveries
-    const deliveries = await getWebhookDeliveries(repo, hook.id, 5)
+    const rawDeliveries = await getWebhookDeliveries(repo, hook.id, 5)
+    const deliveries = rawDeliveries.map(d => ({
+      id: d.id,
+      status: d.status,
+      statusCode: d.status_code,
+      deliveredAt: d.delivered_at,
+      event: d.event,
+    }))
     if (deliveries.length === 0) {
       result.checks.deliveries = {
         ok: true,
@@ -135,7 +142,7 @@ export function createWebhookSetupRouter(
         details: { recent: [] },
       }
     } else {
-      const failures = deliveries.filter(d => d.status_code >= 400 || d.status === 'error')
+      const failures = deliveries.filter(d => d.statusCode >= 400 || d.status === 'error')
       if (failures.length > 0) {
         result.checks.deliveries = {
           ok: false,
@@ -178,14 +185,22 @@ export function createWebhookSetupRouter(
       return res.json({ preview, secretGenerated: false })
     }
 
-    // Ensure a secret exists
+    // Ensure server is configured: generate secret if needed, enable if needed
     let config = getConfig()
     let secretGenerated = false
+    const configUpdates: Record<string, unknown> = {}
+
     if (!config.secret) {
-      const newSecret = generateWebhookSecret()
-      saveWebhookConfig({ secret: newSecret })
-      config = getConfig()
+      configUpdates.secret = generateWebhookSecret()
       secretGenerated = true
+    }
+    if (!config.enabled) {
+      configUpdates.enabled = true
+    }
+
+    if (Object.keys(configUpdates).length > 0) {
+      saveWebhookConfig(configUpdates)
+      config = getConfig()
     }
 
     try {

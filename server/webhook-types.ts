@@ -184,7 +184,7 @@ export interface HealthCheckResult {
     ghCli: HealthCheckDetail
     config: HealthCheckDetail & { details?: { enabled: boolean; secretSet: boolean } }
     webhook: HealthCheckDetail & { details?: { id: number; active: boolean; events: string[]; url: string } }
-    deliveries: HealthCheckDetail & { details?: { recent: GitHubDelivery[] } }
+    deliveries: HealthCheckDetail & { details?: { recent: Array<{ id: number; status: string; statusCode: number; deliveredAt: string; event: string }> } }
   }
 }
 

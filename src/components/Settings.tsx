@@ -124,7 +124,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
   const [healthError, setHealthError] = useState<string | null>(null)
 
   // Setup wizard state
-  const [wizardStep, setWizardStep] = useState<'idle' | 'preview' | 'applying' | 'testing' | 'done'>('idle')
+  const [wizardStep, setWizardStep] = useState<'idle' | 'preview' | 'applying' | 'done'>('idle')
   const [setupPreview, setSetupPreview] = useState<SetupPreview | null>(null)
   const [setupError, setSetupError] = useState<string | null>(null)
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
