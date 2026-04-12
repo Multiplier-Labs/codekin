@@ -189,19 +189,32 @@ export async function getConfig(token: string): Promise<WorkflowConfig> {
   return data.config
 }
 
-/** Add a new repo to the workflow configuration. Returns the updated config. */
+export interface WebhookSetupResult {
+  status: 'created' | 'updated' | 'already_configured' | 'failed'
+  message: string
+  repo?: string
+}
+
+export interface AddRepoResult {
+  config: WorkflowConfig
+  webhookSetup?: WebhookSetupResult
+}
+
+/** Add a new repo to the workflow configuration. Returns the updated config and optional webhook setup result. */
 export async function addRepoConfig(
   token: string,
-  repo: ReviewRepoConfig
-): Promise<WorkflowConfig> {
+  repo: ReviewRepoConfig,
+  webhookUrl?: string,
+): Promise<AddRepoResult> {
+  const body = webhookUrl ? { ...repo, webhookUrl } : repo
   const res = await fetch(`${BASE}/config/repos`, {
     method: 'POST',
     headers: headers(token),
-    body: JSON.stringify(repo),
+    body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(`Failed to add repo config: ${res.status}`)
   const data = await res.json()
-  return data.config
+  return { config: data.config, webhookSetup: data.webhookSetup }
 }
 
 /** Remove a repo from the workflow configuration. Returns the updated config. */

@@ -155,11 +155,20 @@ describe('workflowApi', () => {
     it('adds a repo config', async () => {
       mockFetch.mockResolvedValueOnce(jsonResponse({ config: { reviewRepos: [{ id: 'r1' }] } }))
       const repo = { id: 'r1', name: 'Repo', repoPath: '/tmp', cronExpression: '0 6 * * *', enabled: true }
-      const config = await addRepoConfig(token, repo)
-      expect(config.reviewRepos).toHaveLength(1)
+      const result = await addRepoConfig(token, repo)
+      expect(result.config.reviewRepos).toHaveLength(1)
       expect(mockFetch).toHaveBeenCalledWith('/cc/api/workflows/config/repos', expect.objectContaining({
         method: 'POST',
       }))
+    })
+
+    it('passes webhookUrl in request body when provided', async () => {
+      mockFetch.mockResolvedValueOnce(jsonResponse({ config: { reviewRepos: [{ id: 'r1' }] }, webhookSetup: { status: 'created', message: 'ok' } }))
+      const repo = { id: 'r1', name: 'Repo', repoPath: '/tmp', cronExpression: 'event', enabled: true, kind: 'pr-review' }
+      const result = await addRepoConfig(token, repo, 'https://example.com/cc/api/webhooks/github')
+      expect(result.webhookSetup).toEqual({ status: 'created', message: 'ok' })
+      const callBody = JSON.parse(mockFetch.mock.calls[0][1].body as string)
+      expect(callBody.webhookUrl).toBe('https://example.com/cc/api/webhooks/github')
     })
 
     it('throws on non-ok response', async () => {

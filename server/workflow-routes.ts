@@ -7,6 +7,8 @@
 
 import { Router } from 'express'
 import type { Request, Response } from 'express'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import { getWorkflowEngine } from './workflow-engine.js'
 import {
   loadWorkflowConfig,
@@ -20,6 +22,79 @@ import { syncCommitHooks } from './commit-event-hooks.js'
 import type { CommitEventHandler } from './commit-event-handler.js'
 import type { SessionManager } from './session-manager.js'
 import { VALID_PROVIDERS } from './types.js'
+import {
+  previewWebhookSetup,
+  createRepoWebhook,
+  updateRepoWebhook,
+} from './webhook-github-setup.js'
+import { loadWebhookConfig, generateWebhookSecret, saveWebhookConfig } from './webhook-config.js'
+
+const execFileAsync = promisify(execFile)
+
+/**
+ * Derive the GitHub `owner/repo` slug from a local repo path
+ * by parsing the git remote origin URL.
+ */
+async function getGitHubSlug(repoPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', repoPath, 'remote', 'get-url', 'origin'], { timeout: 5000 })
+    const url = stdout.trim()
+    // Match SSH (git@github.com:owner/repo.git) or HTTPS (https://github.com/owner/repo.git)
+    const match = url.match(/github\.com[:/]([^/]+\/[^/.]+?)(?:\.git)?$/)
+    return match?.[1] ?? null
+  } catch {
+    return null
+  }
+}
+
+export interface WebhookSetupResult {
+  status: 'created' | 'updated' | 'already_configured' | 'failed'
+  message: string
+  repo?: string
+}
+
+/**
+ * Auto-setup the GitHub webhook for a PR review workflow.
+ * Ensures the webhook config has a secret and is enabled, then
+ * creates/updates the webhook on the GitHub repo.
+ */
+async function autoSetupPrWebhook(repoPath: string, webhookUrl: string): Promise<WebhookSetupResult> {
+  const slug = await getGitHubSlug(repoPath)
+  if (!slug) {
+    return {
+      status: 'failed',
+      message: `Could not determine GitHub repository from ${repoPath}. Please set up the webhook manually in Settings.`,
+    }
+  }
+
+  const preview = await previewWebhookSetup(slug, webhookUrl)
+
+  if (preview.action === 'none') {
+    return { status: 'already_configured', message: 'GitHub webhook is already configured.', repo: slug }
+  }
+
+  // Ensure server webhook config has a secret and is enabled
+  let config = loadWebhookConfig()
+  const configUpdates: Record<string, unknown> = {}
+  if (!config.secret) configUpdates.secret = generateWebhookSecret()
+  if (!config.enabled) configUpdates.enabled = true
+  if (Object.keys(configUpdates).length > 0) {
+    saveWebhookConfig(configUpdates)
+    config = loadWebhookConfig()
+  }
+
+  if (preview.action === 'create') {
+    await createRepoWebhook(slug, webhookUrl, config.secret, preview.proposed.events)
+    return { status: 'created', message: `GitHub webhook created on ${slug}.`, repo: slug }
+  } else {
+    await updateRepoWebhook(slug, preview.existing!.id, {
+      events: preview.proposed.events,
+      active: true,
+      secret: config.secret,
+    })
+    return { status: 'updated', message: `GitHub webhook updated on ${slug}.`, repo: slug }
+  }
+}
 
 type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
@@ -299,8 +374,9 @@ export function createWorkflowRouter(
     res.json({ config: loadWorkflowConfig() })
   })
 
-  router.post('/config/repos', (req, res) => {
-    const { id, name, repoPath, cronExpression, enabled, customPrompt, kind, model, provider } = req.body as Partial<ReviewRepoConfig>
+  router.post('/config/repos', async (req, res) => {
+    const { id, name, repoPath, cronExpression, enabled, customPrompt, kind, model, provider, webhookUrl } =
+      req.body as Partial<ReviewRepoConfig> & { webhookUrl?: string }
     if (!id || !name || !repoPath || !cronExpression) {
       return res.status(400).json({ error: 'Missing required fields: id, name, repoPath, cronExpression' })
     }
@@ -335,7 +411,25 @@ export function createWorkflowRouter(
       // Engine might not be ready yet
     }
 
-    res.json({ config })
+    // Auto-setup GitHub webhook for pr-review workflows
+    let webhookSetup: WebhookSetupResult | undefined
+    if (kind === 'pr-review' && webhookUrl) {
+      try {
+        webhookSetup = await autoSetupPrWebhook(repoPath, webhookUrl)
+      } catch (err) {
+        webhookSetup = {
+          status: 'failed',
+          message: err instanceof Error ? err.message : 'Webhook setup failed. Please configure it manually in Settings.',
+        }
+      }
+    } else if (kind === 'pr-review' && !webhookUrl) {
+      webhookSetup = {
+        status: 'failed',
+        message: 'Webhook URL not provided. Please configure the GitHub webhook manually in Settings.',
+      }
+    }
+
+    res.json({ config, webhookSetup })
   })
 
   router.patch('/config/repos/:id', (req, res) => {

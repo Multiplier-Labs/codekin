@@ -21,6 +21,7 @@ import {
   type CronSchedule,
   type WorkflowConfig,
   type ReviewRepoConfig,
+  type WebhookSetupResult,
 } from '../lib/workflowApi'
 
 const POLL_FAST_MS = 5_000
@@ -36,7 +37,7 @@ interface UseWorkflowsResult {
   triggerRun: (kind: string, input?: Record<string, unknown>) => Promise<void>
   cancelRun: (runId: string) => Promise<void>
   triggerSchedule: (id: string) => Promise<void>
-  addRepo: (repo: ReviewRepoConfig) => Promise<void>
+  addRepo: (repo: ReviewRepoConfig, webhookUrl?: string) => Promise<WebhookSetupResult | undefined>
   removeRepo: (id: string) => Promise<void>
   updateRepo: (id: string, patch: Partial<ReviewRepoConfig>) => Promise<void>
   toggleScheduleEnabled: (id: string, enabled: boolean) => Promise<void>
@@ -108,9 +109,10 @@ export function useWorkflows(token: string): UseWorkflowsResult {
     }
   }, [token, refresh])
 
-  const addRepo = useCallback(async (repo: ReviewRepoConfig) => {
-    await addRepoConfig(token, repo)
+  const addRepo = useCallback(async (repo: ReviewRepoConfig, webhookUrl?: string): Promise<WebhookSetupResult | undefined> => {
+    const result = await addRepoConfig(token, repo, webhookUrl)
     await refresh()
+    return result.webhookSetup
   }, [token, refresh])
 
   const removeRepo = useCallback(async (id: string) => {

@@ -8,10 +8,10 @@
  */
 
 import { useState, useEffect } from 'react'
-import { IconX, IconLoader2, IconArrowLeft, IconArrowRight, IconCheck } from '@tabler/icons-react'
+import { IconX, IconLoader2, IconArrowLeft, IconArrowRight, IconCheck, IconAlertTriangle } from '@tabler/icons-react'
 import { useRepos } from '../hooks/useRepos'
 import { listKinds } from '../lib/workflowApi'
-import type { ReviewRepoConfig, WorkflowKindInfo } from '../lib/workflowApi'
+import type { ReviewRepoConfig, WorkflowKindInfo, WebhookSetupResult } from '../lib/workflowApi'
 import {
   WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL,
   buildCron, describeCron, slugify, kindCategory,
@@ -40,7 +40,7 @@ interface FormState {
 interface Props {
   token: string
   onClose: () => void
-  onAdd: (repo: ReviewRepoConfig) => Promise<void>
+  onAdd: (repo: ReviewRepoConfig, webhookUrl?: string) => Promise<WebhookSetupResult | undefined>
 }
 
 // ---------------------------------------------------------------------------
@@ -415,6 +415,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
   })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const [webhookResult, setWebhookResult] = useState<WebhookSetupResult | null>(null)
 
   const eventDriven = isEventDriven(form.kind)
   const updateForm = (patch: Partial<FormState>) => { setForm(f => ({ ...f, ...patch })); }
@@ -451,7 +452,11 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
       const cronExpression = eventDriven
         ? EVENT_CRON
         : buildCron(form.cronHour, form.cronDow, form.cronMinute)
-      await onAdd({
+      const isPrReview = form.kind === 'pr-review'
+      const webhookUrl = isPrReview
+        ? `${location.protocol}//${location.host}/cc/api/webhooks/github`
+        : undefined
+      const setupResult = await onAdd({
         id: `${slugify(name)}-${slugify(form.kind)}`,
         name,
         repoPath: form.repoPath.trim(),
@@ -461,8 +466,12 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
         customPrompt: form.customPrompt.trim() || undefined,
         model: form.model || undefined,
         provider: form.provider !== 'claude' ? form.provider : undefined,
-      })
-      onClose()
+      }, webhookUrl)
+      if (isPrReview && setupResult) {
+        setWebhookResult(setupResult)
+      } else {
+        onClose()
+      }
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to add workflow')
     } finally {
@@ -484,99 +493,149 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
           </button>
         </div>
 
-        {/* Step indicator */}
-        <StepIndicator current={step} eventDriven={eventDriven} />
-
-        {/* Step content */}
-        <div className="min-h-[200px]">
-          {step === 1 && (
-            <StepRepo
-              token={token}
-              selectedRepoId={selectedRepoId}
-              onSelect={(id, path, name) => {
-                setSelectedRepoId(id)
-                updateForm({ repoPath: path, repoName: name })
-              }}
-            />
-          )}
-
-          {step === 2 && (
-            <StepKind
-              token={token}
-              repoPath={form.repoPath}
-              selectedKind={form.kind}
-              onSelect={kind => { updateForm({ kind }); }}
-            />
-          )}
-
-          {step === 3 && (
-            <StepConfigure
-              token={token}
-              form={form}
-              onChange={updateForm}
-            />
-          )}
-        </div>
-
-        {/* Error */}
-        {formError && (
-          <div className="rounded-md bg-error-10/50 px-3 py-2 text-[13px] text-error-4 mt-3">{formError}</div>
-        )}
-
-        {/* Navigation */}
-        <div className="flex gap-2 mt-5 pt-4 border-t border-neutral-8/50">
-          {step > 1 ? (
-            <button
-              type="button"
-              onClick={handleBack}
-              className="flex items-center gap-1.5 rounded-md border border-neutral-7 bg-neutral-10 px-4 py-2 text-[15px] text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
-            >
-              <IconArrowLeft size={14} stroke={2} />
-              Back
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-md border border-neutral-7 bg-neutral-10 px-4 py-2 text-[15px] text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
-            >
-              Cancel
-            </button>
-          )}
-
-          <div className="flex-1" />
-
-          {step < 3 ? (
-            <button
-              type="button"
-              onClick={handleNext}
-              disabled={!canNext()}
-              className="flex items-center gap-1.5 rounded-md bg-primary-8 px-4 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-40 transition-colors"
-            >
-              Next
-              <IconArrowRight size={14} stroke={2} />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={saving}
-              className="flex items-center gap-1.5 rounded-md bg-primary-8 px-4 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-50 transition-colors"
-            >
-              {saving ? (
-                <>
-                  <IconLoader2 size={14} stroke={2} className="animate-spin" />
-                  Creating…
-                </>
+        {webhookResult ? (
+          /* Webhook setup result screen */
+          <>
+            <div className="min-h-[120px] py-2">
+              {webhookResult.status === 'failed' ? (
+                <div className="space-y-3">
+                  <div className="flex items-start gap-3 rounded-lg border border-warning-7/40 bg-warning-9/20 px-4 py-3">
+                    <IconAlertTriangle size={18} stroke={2} className="text-warning-4 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="text-[14px] font-medium text-warning-3">Webhook setup required</p>
+                      <p className="text-[13px] text-neutral-4 mt-1">{webhookResult.message}</p>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-neutral-7 bg-neutral-10 px-4 py-3">
+                    <p className="text-[13px] font-medium text-neutral-3 mb-2">To enable PR reviews, configure the webhook:</p>
+                    <ol className="text-[13px] text-neutral-4 space-y-1.5 list-decimal list-inside">
+                      <li>Go to <span className="text-neutral-2 font-medium">Settings</span> (gear icon in the sidebar)</li>
+                      <li>Scroll to <span className="text-neutral-2 font-medium">GitHub Webhooks</span></li>
+                      <li>Enter the repository name and click <span className="text-neutral-2 font-medium">Setup</span></li>
+                    </ol>
+                  </div>
+                </div>
               ) : (
-                <>
-                  <IconCheck size={14} stroke={2} />
-                  Create Workflow
-                </>
+                <div className="flex items-start gap-3 rounded-lg border border-success-7/40 bg-success-9/20 px-4 py-3">
+                  <IconCheck size={18} stroke={2} className="text-success-4 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-[14px] font-medium text-success-3">Workflow created</p>
+                    <p className="text-[13px] text-neutral-4 mt-1">
+                      {webhookResult.message} PRs will be reviewed automatically when opened or updated.
+                    </p>
+                  </div>
+                </div>
               )}
-            </button>
-          )}
-        </div>
+            </div>
+
+            <div className="flex justify-end mt-5 pt-4 border-t border-neutral-8/50">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md bg-primary-8 px-4 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </>
+        ) : (
+          /* Wizard steps */
+          <>
+            {/* Step indicator */}
+            <StepIndicator current={step} eventDriven={eventDriven} />
+
+            {/* Step content */}
+            <div className="min-h-[200px]">
+              {step === 1 && (
+                <StepRepo
+                  token={token}
+                  selectedRepoId={selectedRepoId}
+                  onSelect={(id, path, name) => {
+                    setSelectedRepoId(id)
+                    updateForm({ repoPath: path, repoName: name })
+                  }}
+                />
+              )}
+
+              {step === 2 && (
+                <StepKind
+                  token={token}
+                  repoPath={form.repoPath}
+                  selectedKind={form.kind}
+                  onSelect={kind => { updateForm({ kind }); }}
+                />
+              )}
+
+              {step === 3 && (
+                <StepConfigure
+                  token={token}
+                  form={form}
+                  onChange={updateForm}
+                />
+              )}
+            </div>
+
+            {/* Error */}
+            {formError && (
+              <div className="rounded-md bg-error-10/50 px-3 py-2 text-[13px] text-error-4 mt-3">{formError}</div>
+            )}
+
+            {/* Navigation */}
+            <div className="flex gap-2 mt-5 pt-4 border-t border-neutral-8/50">
+              {step > 1 ? (
+                <button
+                  type="button"
+                  onClick={handleBack}
+                  className="flex items-center gap-1.5 rounded-md border border-neutral-7 bg-neutral-10 px-4 py-2 text-[15px] text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
+                >
+                  <IconArrowLeft size={14} stroke={2} />
+                  Back
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-md border border-neutral-7 bg-neutral-10 px-4 py-2 text-[15px] text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
+                >
+                  Cancel
+                </button>
+              )}
+
+              <div className="flex-1" />
+
+              {step < 3 ? (
+                <button
+                  type="button"
+                  onClick={handleNext}
+                  disabled={!canNext()}
+                  className="flex items-center gap-1.5 rounded-md bg-primary-8 px-4 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-40 transition-colors"
+                >
+                  Next
+                  <IconArrowRight size={14} stroke={2} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSubmit}
+                  disabled={saving}
+                  className="flex items-center gap-1.5 rounded-md bg-primary-8 px-4 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-50 transition-colors"
+                >
+                  {saving ? (
+                    <>
+                      <IconLoader2 size={14} stroke={2} className="animate-spin" />
+                      {form.kind === 'pr-review' ? 'Setting up…' : 'Creating…'}
+                    </>
+                  ) : (
+                    <>
+                      <IconCheck size={14} stroke={2} />
+                      Create Workflow
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
