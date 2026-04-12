@@ -68,8 +68,10 @@ function applyMessageMut(messages: ChatMessage[], msg: WsServerMessage): boolean
       return true
 
     case 'claude_started':
-      messages.push({ type: 'system', subtype: 'init', text: 'Session started', key: nextKey() })
-      return true
+      // Process spawned — don't show a message yet.  The actual "Session started"
+      // is shown when system_init arrives (system_message subtype=init), proving
+      // the process is fully initialized and ready for input.
+      return false
 
     case 'tool_active':
       if (last && last.type === 'tool_group') {

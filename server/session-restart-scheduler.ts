@@ -6,10 +6,14 @@
  * Returns an action descriptor that the caller (SessionManager) executes.
  */
 
-/** Max auto-restart attempts before requiring manual intervention. */
+/** Max auto-restart attempts per cooldown window before pausing. */
 const MAX_RESTARTS = 3
-/** Window after which the restart counter resets (5 minutes). */
+/** Window after which the per-window restart counter resets (5 minutes). */
 const RESTART_COOLDOWN_MS = 5 * 60 * 1000
+/** Hard cap on total lifetime restarts.  Once reached, the session stops
+ *  permanently regardless of cooldown windows.  Prevents sessions from
+ *  restarting indefinitely (3 per window × many windows = hundreds). */
+const MAX_LIFETIME_RESTARTS = 10
 /** Delay between crash and auto-restart attempt. */
 const RESTART_DELAY_MS = 2000
 
@@ -30,12 +34,14 @@ export interface RestartState {
   exitCode?: number | null
   /** Signal that killed the process, if any. */
   exitSignal?: string | null
+  /** Total number of restarts over the entire session lifetime. */
+  lifetimeRestarts?: number
 }
 
 export type RestartAction =
   | { kind: 'stopped_by_user' }
   | { kind: 'non_retryable'; exitCode: number }
-  | { kind: 'restart'; attempt: number; maxAttempts: number; delayMs: number; updatedCount: number; updatedLastRestartAt: number }
+  | { kind: 'restart'; attempt: number; maxAttempts: number; delayMs: number; updatedCount: number; updatedLastRestartAt: number; updatedLifetimeCount: number }
   | { kind: 'exhausted'; maxAttempts: number }
 
 /**
@@ -52,10 +58,16 @@ export function evaluateRestart(state: RestartState): RestartAction {
     return { kind: 'non_retryable', exitCode: state.exitCode }
   }
 
+  // Hard lifetime cap: prevent sessions from restarting indefinitely
+  const lifetime = state.lifetimeRestarts ?? 0
+  if (lifetime >= MAX_LIFETIME_RESTARTS) {
+    return { kind: 'exhausted', maxAttempts: MAX_LIFETIME_RESTARTS }
+  }
+
   const now = Date.now()
   let { restartCount } = state
 
-  // Reset counter if cooldown has elapsed
+  // Reset per-window counter if cooldown has elapsed
   if (state.lastRestartAt && (now - state.lastRestartAt) > RESTART_COOLDOWN_MS) {
     restartCount = 0
   }
@@ -69,6 +81,7 @@ export function evaluateRestart(state: RestartState): RestartAction {
       delayMs: RESTART_DELAY_MS,
       updatedCount,
       updatedLastRestartAt: now,
+      updatedLifetimeCount: lifetime + 1,
     }
   }
 

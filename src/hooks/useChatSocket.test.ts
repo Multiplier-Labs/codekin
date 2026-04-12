@@ -158,11 +158,9 @@ describe('processMessage', () => {
       expect((result[0] as any).model).toBe('claude-opus-4-6')
     })
 
-    it('claude_started creates system init message', () => {
+    it('claude_started is suppressed (init shown on system_init instead)', () => {
       const result = processMessage(empty(), { type: 'claude_started', sessionId: '123' } as WsServerMessage)
-      expect(result).toHaveLength(1)
-      expect(result[0].type).toBe('system')
-      expect((result[0] as any).subtype).toBe('init')
+      expect(result).toHaveLength(0)
     })
   })
 
@@ -349,13 +347,11 @@ describe('rebuildFromHistory', () => {
     expect((result[0] as any).text).toBe('User input')
   })
 
-  it('handles claude_started', () => {
+  it('claude_started is suppressed in history rebuild', () => {
     const result = rebuildFromHistory([
       { type: 'claude_started', sessionId: 's1' } as WsServerMessage,
     ])
-    expect(result).toHaveLength(1)
-    expect(result[0].type).toBe('system')
-    expect((result[0] as any).subtype).toBe('init')
+    expect(result).toHaveLength(0)
   })
 
   it('builds tool_group from tool_active', () => {
@@ -451,16 +447,15 @@ describe('rebuildFromHistory', () => {
       { type: 'result' } as WsServerMessage,
     ]
     const result = rebuildFromHistory(buffer)
-    expect(result).toHaveLength(6)
-    expect(result[0].type).toBe('system')       // claude_started
-    expect(result[1].type).toBe('system')       // system_message
-    expect(result[2].type).toBe('user')          // user_echo
-    expect(result[3].type).toBe('assistant')     // "Sure, I can help." (incomplete — tool_active broke the chain)
-    expect((result[3] as any).text).toBe('Sure, I can help.')
-    expect((result[3] as any).complete).toBe(false)
-    expect(result[4].type).toBe('tool_group')    // Read tool
-    expect(result[5].type).toBe('assistant')     // "Here it is." — marked complete by result
-    expect((result[5] as any).text).toBe('Here it is.')
-    expect((result[5] as any).complete).toBe(true)
+    expect(result).toHaveLength(5)
+    expect(result[0].type).toBe('system')       // system_message (claude_started suppressed)
+    expect(result[1].type).toBe('user')          // user_echo
+    expect(result[2].type).toBe('assistant')     // "Sure, I can help." (incomplete — tool_active broke the chain)
+    expect((result[2] as any).text).toBe('Sure, I can help.')
+    expect((result[2] as any).complete).toBe(false)
+    expect(result[3].type).toBe('tool_group')    // Read tool
+    expect(result[4].type).toBe('assistant')     // "Here it is." — marked complete by result
+    expect((result[4] as any).text).toBe('Here it is.')
+    expect((result[4] as any).complete).toBe(true)
   })
 })

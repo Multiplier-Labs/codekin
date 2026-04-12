@@ -41,6 +41,7 @@ function mockSession(overrides: Partial<Session> = {}): Session {
     _namingAttempts: 0,
     _processGeneration: 0,
     _noOutputExitCount: 0,
+    _lifetimeRestarts: 0,
     _apiRetry: { count: 0 },
     ...overrides,
   }

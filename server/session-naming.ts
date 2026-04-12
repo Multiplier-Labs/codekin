@@ -26,6 +26,25 @@ export interface SessionNamingDeps {
   rename(sessionId: string, newName: string): boolean
 }
 
+/** Build a minimal env for claude -p that includes auth/config paths
+ *  without leaking the full parent env (e.g. CODEKIN_* session vars). */
+function buildNamingEnv(): Record<string, string> {
+  const env: Record<string, string> = {}
+  // Core paths
+  if (process.env.PATH) env.PATH = process.env.PATH
+  if (process.env.HOME) env.HOME = process.env.HOME
+  // XDG dirs — Claude CLI uses these for config/credential resolution
+  for (const key of ['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME']) {
+    if (process.env[key]) env[key] = process.env[key]!
+  }
+  // SHELL and TERM for proper subprocess behavior
+  if (process.env.SHELL) env.SHELL = process.env.SHELL
+  if (process.env.TERM) env.TERM = process.env.TERM
+  // Suppress Node.js warnings in child
+  env.NODE_NO_WARNINGS = '1'
+  return env
+}
+
 /** Generate a session name by spawning `claude -p` in one-shot mode. */
 function generateNameViaCLI(prompt: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -33,7 +52,7 @@ function generateNameViaCLI(prompt: string): Promise<string> {
     // Using 1 would sometimes cause the CLI to exit before producing output.
     const proc = spawn(CLAUDE_BINARY, ['-p', '--max-turns', '2', '--model', 'haiku'], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { PATH: process.env.PATH, HOME: process.env.HOME },
+      env: buildNamingEnv(),
     })
 
     let stdout = ''

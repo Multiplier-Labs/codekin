@@ -114,6 +114,10 @@ export interface Session {
   /** Number of consecutive no-output exits with the same claudeSessionId.
    *  Only after reaching the threshold do we clear claudeSessionId. */
   _noOutputExitCount: number
+  /** Total lifetime restart count.  Unlike restartCount (which resets after
+   *  the cooldown window), this never resets and provides a hard cap to
+   *  prevent sessions from restarting indefinitely. */
+  _lifetimeRestarts: number
   /** Grace period timer before auto-denying prompts after last client leaves. */
   _leaveGraceTimer?: ReturnType<typeof setTimeout> | null
   /** Timestamp of last meaningful activity (input, prompt response, client join). Used by idle reaper. */

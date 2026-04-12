@@ -135,6 +135,7 @@ export class SessionPersistence {
           _namingAttempts: 0,
           _processGeneration: 0,
           _noOutputExitCount: 0,
+          _lifetimeRestarts: 0,
           isProcessing: false,
           pendingControlRequests: new Map(),
           pendingToolApprovals: new Map(),

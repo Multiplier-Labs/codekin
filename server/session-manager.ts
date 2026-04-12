@@ -304,6 +304,7 @@ export class SessionManager {
       _namingAttempts: 0,
       _processGeneration: 0,
       _noOutputExitCount: 0,
+      _lifetimeRestarts: 0,
       isProcessing: false,
       pendingControlRequests: new Map(),
       pendingToolApprovals: new Map(),
@@ -900,11 +901,10 @@ export class SessionManager {
 
   private onSystemInit(cp: CodingProcess, session: Session, model: string): void {
     session.claudeSessionId = cp.getSessionId()
-    // Only show model message on first init or when model actually changes
-    if (!session._lastReportedModel || session._lastReportedModel !== model) {
-      session._lastReportedModel = model
-      this.broadcastAndHistory(session, { type: 'system_message', subtype: 'init', text: `Model: ${model}`, model })
-    }
+    session._lastReportedModel = model
+    // Always broadcast — this is the single "session is ready" notification.
+    // The text includes the model so the user knows which model is active.
+    this.broadcastAndHistory(session, { type: 'system_message', subtype: 'init', text: `Model: ${model}`, model })
   }
 
   private onTextEvent(session: Session, sessionId: string, text: string): void {
@@ -1104,66 +1104,30 @@ export class SessionManager {
     // Reset stopped-by-user flag so idle-reaped sessions can auto-start
     session._stoppedByUser = false
 
+    // --- Phase 1: ensure process is alive ---
     if (!session.claudeProcess?.isAlive()) {
       // Race guard: prevent concurrent startClaude calls when multiple sendInput
       // requests arrive for an inactive session
       if (session._isStarting) return
       session._isStarting = true
       // Claude not running (e.g. after server restart or idle reap) — auto-start first.
-      // Claude CLI in -p mode waits for first input before emitting init,
-      // so we write directly to the stdin pipe buffer (no waiting for init).
       try {
         this.startClaude(sessionId)
       } finally {
         session._isStarting = false
       }
+    }
 
-      // If we have a saved claudeSessionId, Claude CLI resumes with full
-      // conversation history from its own session storage — no need for our
-      // lossy 4000-char context summary. Only fall back to buildSessionContext
-      // for sessions without a saved Claude session ID.
-      if (!session.claudeSessionId) {
-        const context = this.buildSessionContext(session)
-        if (context) {
-          const combined = context + '\n\n' + data
-          session._lastUserInput = combined
-          session._lastUserInputAt = Date.now()
-          if (!session._namingUserInput) session._namingUserInput = data
-          session._apiRetry.count = 0
-          if (!session.isProcessing) {
-            session.isProcessing = true
-            this._globalBroadcast?.({ type: 'sessions_updated' })
-          }
-          if (session.claudeProcess && !session.claudeProcess.isReady()) {
-            void this.waitForReady(sessionId).then((ready) => {
-              if (ready) session.claudeProcess?.sendMessage(combined)
-              // If not ready (process exited), message stays in _lastUserInput
-              // and will be re-sent on auto-restart
-            })
-          } else {
-            session.claudeProcess?.sendMessage(combined)
-          }
-          return
-        }
-      }
+    // --- Phase 2: determine message content (with context injection if needed) ---
+    let messageToSend = data
 
-      // Process just started — if not ready yet (OpenCode needs server init),
-      // queue the message via waitForReady.
-      if (session.claudeProcess && !session.claudeProcess.isReady()) {
-        session._lastUserInput = data
-        session._lastUserInputAt = Date.now()
-        if (!session._namingUserInput) session._namingUserInput = data
-        session._apiRetry.count = 0
-        if (!session.isProcessing) {
-          session.isProcessing = true
-          this._globalBroadcast?.({ type: 'sessions_updated' })
-        }
-        void this.waitForReady(sessionId).then((ready) => {
-          if (ready) session.claudeProcess?.sendMessage(data)
-          // If not ready (process exited), message stays in _lastUserInput
-          // and will be re-sent on auto-restart
-        })
-        return
+    // If we auto-started above and have no saved claudeSessionId, Claude CLI
+    // starts a fresh session without conversation history.  Inject a context
+    // summary so the new process has awareness of prior conversation.
+    if (!session.claudeSessionId) {
+      const context = this.buildSessionContext(session)
+      if (context) {
+        messageToSend = context + '\n\n' + data
       }
     }
 
@@ -1175,7 +1139,7 @@ export class SessionManager {
       this.retrySessionNamingOnInteraction(sessionId)
     }
 
-    session._lastUserInput = data
+    session._lastUserInput = messageToSend
     session._lastUserInputAt = Date.now()
     if (!session._namingUserInput) session._namingUserInput = data
     session._apiRetry.count = 0
@@ -1183,7 +1147,17 @@ export class SessionManager {
       session.isProcessing = true
       this._globalBroadcast?.({ type: 'sessions_updated' })
     }
-    session.claudeProcess?.sendMessage(data)
+
+    // --- Phase 3: send, waiting for readiness if needed ---
+    if (session.claudeProcess && !session.claudeProcess.isReady()) {
+      void this.waitForReady(sessionId).then((ready) => {
+        if (ready) session.claudeProcess?.sendMessage(messageToSend)
+        // If not ready (process exited), message stays in _lastUserInput
+        // and will be re-sent on auto-restart
+      })
+    } else {
+      session.claudeProcess?.sendMessage(messageToSend)
+    }
   }
 
   /**

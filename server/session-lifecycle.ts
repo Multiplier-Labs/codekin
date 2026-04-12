@@ -343,6 +343,7 @@ export class SessionLifecycle {
       stoppedByUser: session._stoppedByUser || sessionConflict,
       exitCode: code,
       exitSignal: signal,
+      lifetimeRestarts: session._lifetimeRestarts,
     })
 
     if (action.kind === 'non_retryable') {
@@ -377,6 +378,7 @@ export class SessionLifecycle {
     if (action.kind === 'restart') {
       session.restartCount = action.updatedCount
       session.lastRestartAt = action.updatedLastRestartAt
+      session._lifetimeRestarts = action.updatedLifetimeCount
 
       for (const listener of this.deps.exitListeners) {
         try { listener(sessionId, code, signal, true) } catch { /* listener error */ }
