@@ -13,13 +13,15 @@ import { useRepos } from '../hooks/useRepos'
 import { listKinds } from '../lib/workflowApi'
 import type { ReviewRepoConfig, WorkflowKindInfo } from '../lib/workflowApi'
 import {
-  WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL, MODEL_OPTIONS,
+  WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL,
   buildCron, describeCron, slugify, kindCategory,
   isBiweeklyDow, isEventDriven, EVENT_CRON,
 } from '../lib/workflowHelpers'
+import type { CodingProvider } from '../types'
 import { CategoryBadge } from './WorkflowBadges'
 import TimePicker from './TimePicker'
 import { RepoList } from './RepoList'
+import { ProviderModelSection } from './workflows/ProviderModelSection'
 
 type Step = 1 | 2 | 3
 
@@ -32,6 +34,7 @@ interface FormState {
   cronDow: string
   customPrompt: string
   model: string
+  provider: CodingProvider
 }
 
 interface Props {
@@ -252,9 +255,11 @@ function FrequencyButton({
 }
 
 function StepConfigure({
+  token,
   form,
   onChange,
 }: {
+  token: string
   form: FormState
   onChange: (patch: Partial<FormState>) => void
 }) {
@@ -363,26 +368,14 @@ function StepConfigure({
         </>
       )}
 
-      {/* Model selection */}
-      <div>
-        <label className="block text-[13px] font-medium text-neutral-3 mb-2">Model</label>
-        <div className="flex gap-1.5">
-          {MODEL_OPTIONS.map(m => (
-            <button
-              key={m.value}
-              type="button"
-              onClick={() => { onChange({ model: m.value }); }}
-              className={`rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
-                form.model === m.value
-                  ? 'border-accent-6 bg-accent-9/40 text-accent-2'
-                  : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
-              }`}
-            >
-              {m.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      {/* Provider + Model selection */}
+      <ProviderModelSection
+        token={token}
+        provider={form.provider}
+        model={form.model}
+        onProviderChange={provider => { onChange({ provider }); }}
+        onModelChange={model => { onChange({ model }); }}
+      />
 
       <div>
         <label className="block text-[13px] font-medium text-neutral-3 mb-1.5">
@@ -417,6 +410,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
     cronDow: '*',
     customPrompt: '',
     model: '',
+    provider: 'claude' as CodingProvider,
   })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -465,6 +459,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
         enabled: true,
         customPrompt: form.customPrompt.trim() || undefined,
         model: form.model || undefined,
+        provider: form.provider !== 'claude' ? form.provider : undefined,
       })
       onClose()
     } catch (err) {
@@ -515,6 +510,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
 
           {step === 3 && (
             <StepConfigure
+              token={token}
               form={form}
               onChange={updateForm}
             />

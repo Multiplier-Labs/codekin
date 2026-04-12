@@ -7,11 +7,13 @@ import { useState } from 'react'
 import { IconX, IconLoader2 } from '@tabler/icons-react'
 import type { ReviewRepoConfig } from '../lib/workflowApi'
 import {
-  WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL, MODEL_OPTIONS, isBiweeklyDow,
+  WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL, isBiweeklyDow,
   buildCron, parseCron, describeCron, kindLabel, isEventDriven, EVENT_CRON,
 } from '../lib/workflowHelpers'
+import type { CodingProvider } from '../types'
 import { CategoryBadge } from './WorkflowBadges'
 import TimePicker from './TimePicker'
+import { ProviderModelSection } from './workflows/ProviderModelSection'
 
 const btnClass = (selected: boolean) =>
   `rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
@@ -21,6 +23,7 @@ const btnClass = (selected: boolean) =>
   }`
 
 interface Props {
+  token: string
   repo: ReviewRepoConfig
   schedules?: unknown[]
   recentRuns?: unknown[]
@@ -28,7 +31,7 @@ interface Props {
   onSave: (id: string, patch: Partial<ReviewRepoConfig>) => Promise<void>
 }
 
-export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
+export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
   const parsed = parseCron(repo.cronExpression)
   const [form, setForm] = useState({
     kind: repo.kind ?? 'coverage.daily',
@@ -37,6 +40,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
     cronDow: parsed.dow,
     customPrompt: repo.customPrompt ?? '',
     model: repo.model ?? '',
+    provider: (repo.provider ?? 'claude') as CodingProvider,
   })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
@@ -56,6 +60,7 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
         cronExpression,
         customPrompt: form.customPrompt.trim() || undefined,
         model: form.model || undefined,
+        provider: form.provider !== 'claude' ? form.provider : undefined,
       })
       onClose()
     } catch (err) {
@@ -182,22 +187,14 @@ export function EditWorkflowModal({ repo, onClose, onSave }: Props) {
             </div>
           )}
 
-          {/* Model selection */}
-          <div>
-            <label className="block text-[13px] font-medium text-neutral-3 mb-2">Model</label>
-            <div className="flex gap-1.5">
-              {MODEL_OPTIONS.map(m => (
-                <button
-                  key={m.value}
-                  type="button"
-                  onClick={() => setForm(f => ({ ...f, model: m.value }))}
-                  className={btnClass(form.model === m.value)}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* Provider + Model selection */}
+          <ProviderModelSection
+            token={token}
+            provider={form.provider}
+            model={form.model}
+            onProviderChange={provider => setForm(f => ({ ...f, provider }))}
+            onModelChange={model => setForm(f => ({ ...f, model }))}
+          />
 
           {/* Custom prompt */}
           <div>

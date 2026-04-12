@@ -139,6 +139,7 @@ export function describeCron(expr: string): string {
 /** Look up the display label for a model value, e.g. `"claude-sonnet-4-6"` → `"Sonnet 4.6"`. Returns `null` for empty/default. */
 export function modelLabel(model: string | undefined): string | null {
   if (!model) return null
+  // Check known Claude model options first, then fall back to the raw model ID
   return MODEL_OPTIONS.find(m => m.value === model)?.label ?? model
 }
 

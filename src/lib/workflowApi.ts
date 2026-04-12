@@ -67,6 +67,8 @@ export interface ReviewRepoConfig {
   kind?: string
   customPrompt?: string
   model?: string
+  /** AI provider to use for this workflow ('claude' or 'opencode'). Defaults to 'claude'. */
+  provider?: 'claude' | 'opencode'
 }
 
 export interface WorkflowConfig {

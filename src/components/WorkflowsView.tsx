@@ -231,6 +231,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
       {/* Edit Workflow Modal */}
       {editingRepo && (
         <EditWorkflowModal
+          token={token}
           repo={editingRepo}
           schedules={schedules.filter(s => s.id === editingRepo.id)}
           recentRuns={runs.filter(r =>
