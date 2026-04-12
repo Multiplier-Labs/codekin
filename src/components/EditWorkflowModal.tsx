@@ -33,6 +33,10 @@ interface Props {
 
 export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
   const parsed = parseCron(repo.cronExpression)
+  // Infer provider from model when provider field is missing (legacy configs)
+  const inferredProvider: CodingProvider =
+    repo.provider ?? (repo.model && !repo.model.startsWith('claude-') ? 'opencode' : 'claude')
+
   const [form, setForm] = useState({
     kind: repo.kind ?? 'coverage.daily',
     cronHour: parsed.hour,
@@ -40,7 +44,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
     cronDow: parsed.dow,
     customPrompt: repo.customPrompt ?? '',
     model: repo.model ?? '',
-    provider: (repo.provider ?? 'claude') as CodingProvider,
+    provider: inferredProvider,
   })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)

@@ -324,6 +324,7 @@ export function createWorkflowRouter(
       kind,
       customPrompt,
       model,
+      provider,
     })
 
     // Re-sync schedules and commit hooks with updated config
