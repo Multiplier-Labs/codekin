@@ -213,11 +213,16 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     ]
     // Kill any orphaned Claude process still holding this session ID's lock.
     // This can happen when the server restarts and old children survive (SIGKILL'd
-    // or reparented to init). Without this, --resume fails with "already in use".
-    // Uses the full binary path + exact session UUID to avoid matching unrelated processes.
+    // or reparented to init), or when startClaude() replaces a running process
+    // without waiting for the old one to exit.  Without this, --resume fails
+    // with "already in use".
+    // Match both --resume and --session-id because the orphan may have been
+    // started with either flag depending on whether it was a first start or
+    // a resume.  Uses the full binary path + exact session UUID to avoid
+    // matching unrelated processes.
     if (this.resume) {
       try {
-        const pattern = `${CLAUDE_BINARY} .*--resume ${this.sessionId}\\b`
+        const pattern = `${CLAUDE_BINARY} .*(--resume|--session-id) ${this.sessionId}(\\s|$)`
         execFileSync('pkill', ['-f', pattern], { timeout: 2000, stdio: 'ignore' })
       } catch {
         // pkill exits 1 when no matching process is found — that's the happy path

@@ -1112,8 +1112,11 @@ export class SessionManager {
       // Claude not running (e.g. after server restart or idle reap) — auto-start first.
       // Claude CLI in -p mode waits for first input before emitting init,
       // so we write directly to the stdin pipe buffer (no waiting for init).
-      this.startClaude(sessionId)
-      session._isStarting = false
+      try {
+        this.startClaude(sessionId)
+      } finally {
+        session._isStarting = false
+      }
 
       // If we have a saved claudeSessionId, Claude CLI resumes with full
       // conversation history from its own session storage — no need for our
@@ -1203,15 +1206,19 @@ export class SessionManager {
     if (session.provider === provider) return true
     session.provider = provider
     session.claudeSessionId = null
+    // Clear any pending restart timer from a prior crash to prevent a stale
+    // timer from spawning a second process after we restart below.
+    if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
     this.persistToDiskDebounced()
     if (session.claudeProcess?.isAlive()) {
-      this.stopClaude(sessionId)
-      session._stoppedByUser = false
-      setTimeout(() => {
-        if (this.sessions.has(sessionId) && !session._stoppedByUser) {
+      // Use stopClaudeAndWait to ensure the old process fully exits before
+      // spawning a new one — avoids concurrent processes in the same worktree.
+      void this.stopClaudeAndWait(sessionId).then(() => {
+        if (this.sessions.has(sessionId)) {
+          session._stoppedByUser = false
           this.startClaude(sessionId)
         }
-      }, 500)
+      })
     }
     return true
   }
@@ -1221,6 +1228,9 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return false
     session.model = model || undefined
+    // Clear any pending restart timer from a prior crash to prevent a stale
+    // timer from spawning a second process after we restart below.
+    if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
     this.persistToDiskDebounced()
     // Restart Claude with the new model if it's running.
     // Use stopClaudeAndWait to ensure the old process fully exits before
@@ -1242,6 +1252,9 @@ export class SessionManager {
     if (!session) return false
     const previousMode = session.permissionMode
     session.permissionMode = permissionMode
+    // Clear any pending restart timer from a prior crash to prevent a stale
+    // timer from spawning a second process after we restart below.
+    if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
     this.persistToDiskDebounced()
 
     // Audit log for dangerous mode changes
