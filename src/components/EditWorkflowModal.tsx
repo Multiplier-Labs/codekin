@@ -82,7 +82,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
-        className="w-[480px] max-h-[90vh] overflow-y-auto rounded-xl border border-neutral-7 bg-neutral-11 p-6 shadow-2xl"
+        className="w-[720px] max-h-[90vh] overflow-y-auto rounded-xl border border-neutral-7 bg-neutral-11 p-6 shadow-2xl"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -101,107 +101,113 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Workflow kind */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-[13px] font-medium text-neutral-3">Workflow type</label>
-              <CategoryBadge kind={form.kind} />
+          {/* Two-column layout: Workflow type | Schedule + Provider */}
+          <div className="grid grid-cols-2 gap-5">
+            {/* Left column — Workflow kind */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-[13px] font-medium text-neutral-3">Workflow type</label>
+                <CategoryBadge kind={form.kind} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {WORKFLOW_KINDS.map(k => (
+                  <button
+                    key={k.value}
+                    type="button"
+                    onClick={() => setForm(f => ({ ...f, kind: k.value }))}
+                    className={`rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                      form.kind === k.value
+                        ? 'border-accent-6 bg-accent-9/30 ring-1 ring-accent-6/30'
+                        : 'border-neutral-7 bg-neutral-10 hover:border-neutral-6'
+                    }`}
+                  >
+                    <span className={`block text-[13px] font-medium ${
+                      form.kind === k.value ? 'text-accent-2' : 'text-neutral-2'
+                    }`}>
+                      {k.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              {WORKFLOW_KINDS.map(k => (
-                <button
-                  key={k.value}
-                  type="button"
-                  onClick={() => setForm(f => ({ ...f, kind: k.value }))}
-                  className={`rounded-lg border px-3 py-2.5 text-left transition-colors ${
-                    form.kind === k.value
-                      ? 'border-accent-6 bg-accent-9/30 ring-1 ring-accent-6/30'
-                      : 'border-neutral-7 bg-neutral-10 hover:border-neutral-6'
-                  }`}
-                >
-                  <span className={`block text-[15px] font-medium ${
-                    form.kind === k.value ? 'text-accent-2' : 'text-neutral-2'
-                  }`}>
-                    {k.label}
+
+            {/* Right column — Schedule + Provider */}
+            <div className="space-y-4">
+              {/* Schedule — hidden for event-driven workflows */}
+              {eventDriven ? (
+                <div className="rounded-lg border border-purple-700/40 bg-purple-900/20 px-4 py-3">
+                  <span className="text-[14px] font-medium text-purple-400">
+                    {form.kind === 'pr-review' ? 'Trigger: On pull request' : 'Trigger: On commit'}
                   </span>
-                </button>
-              ))}
+                  <p className="text-[13px] text-neutral-4 mt-1">
+                    {form.kind === 'pr-review'
+                      ? 'Each PR will be reviewed automatically when opened, updated, or reopened. No schedule needed.'
+                      : 'Each commit will be reviewed automatically. No schedule needed.'}
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-[13px] font-medium text-neutral-3 mb-2">Time</label>
+                  <TimePicker
+                    hour={form.cronHour}
+                    minute={form.cronMinute}
+                    onChange={(h, m) => setForm(f => ({ ...f, cronHour: h, cronMinute: m }))}
+                    className="mb-3"
+                  />
+                  <label className="block text-[13px] font-medium text-neutral-3 mb-2">Frequency</label>
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {DAY_PRESETS.map(p => (
+                      <button
+                        key={p.dow}
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, cronDow: p.dow }))}
+                        className={btnClass(form.cronDow === p.dow)}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {DAY_INDIVIDUAL.map(p => (
+                      <button
+                        key={p.dow}
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, cronDow: biweekly ? `biweekly-${p.dow}` : p.dow }))}
+                        className={btnClass(baseDow === p.dow)}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  {isDay && (
+                    <div className="flex gap-1.5 mt-2">
+                      <button type="button" onClick={() => setForm(f => ({ ...f, cronDow: baseDow }))} className={btnClass(!biweekly)}>
+                        Every week
+                      </button>
+                      <button type="button" onClick={() => setForm(f => ({ ...f, cronDow: `biweekly-${baseDow}` }))} className={btnClass(biweekly)}>
+                        Every 2 weeks
+                      </button>
+                    </div>
+                  )}
+                  <div className="mt-2 text-[13px] text-neutral-5">
+                    {describeCron(buildCron(form.cronHour, form.cronDow, form.cronMinute))}
+                  </div>
+                </div>
+              )}
+
+              {/* Provider + Model selection */}
+              <ProviderModelSection
+                token={token}
+                workingDir={repo.repoPath}
+                provider={form.provider}
+                model={form.model}
+                onProviderChange={provider => setForm(f => ({ ...f, provider }))}
+                onModelChange={model => setForm(f => ({ ...f, model }))}
+              />
             </div>
           </div>
 
-          {/* Schedule — hidden for event-driven workflows */}
-          {eventDriven ? (
-            <div className="rounded-lg border border-purple-700/40 bg-purple-900/20 px-4 py-3">
-              <span className="text-[14px] font-medium text-purple-400">
-                {form.kind === 'pr-review' ? 'Trigger: On pull request' : 'Trigger: On commit'}
-              </span>
-              <p className="text-[13px] text-neutral-4 mt-1">
-                {form.kind === 'pr-review'
-                  ? 'Each PR will be reviewed automatically when opened, updated, or reopened. No schedule needed.'
-                  : 'Each commit will be reviewed automatically. No schedule needed.'}
-              </p>
-            </div>
-          ) : (
-            <div>
-              <label className="block text-[13px] font-medium text-neutral-3 mb-2">Time</label>
-              <TimePicker
-                hour={form.cronHour}
-                minute={form.cronMinute}
-                onChange={(h, m) => setForm(f => ({ ...f, cronHour: h, cronMinute: m }))}
-                className="mb-3"
-              />
-              <label className="block text-[13px] font-medium text-neutral-3 mb-2">Frequency</label>
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {DAY_PRESETS.map(p => (
-                  <button
-                    key={p.dow}
-                    type="button"
-                    onClick={() => setForm(f => ({ ...f, cronDow: p.dow }))}
-                    className={btnClass(form.cronDow === p.dow)}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-              <div className="flex gap-1.5">
-                {DAY_INDIVIDUAL.map(p => (
-                  <button
-                    key={p.dow}
-                    type="button"
-                    onClick={() => setForm(f => ({ ...f, cronDow: biweekly ? `biweekly-${p.dow}` : p.dow }))}
-                    className={btnClass(baseDow === p.dow)}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-              {isDay && (
-                <div className="flex gap-1.5 mt-2">
-                  <button type="button" onClick={() => setForm(f => ({ ...f, cronDow: baseDow }))} className={btnClass(!biweekly)}>
-                    Every week
-                  </button>
-                  <button type="button" onClick={() => setForm(f => ({ ...f, cronDow: `biweekly-${baseDow}` }))} className={btnClass(biweekly)}>
-                    Every 2 weeks
-                  </button>
-                </div>
-              )}
-              <div className="mt-2 text-[13px] text-neutral-5">
-                {describeCron(buildCron(form.cronHour, form.cronDow, form.cronMinute))}
-              </div>
-            </div>
-          )}
-
-          {/* Provider + Model selection */}
-          <ProviderModelSection
-            token={token}
-            workingDir={repo.repoPath}
-            provider={form.provider}
-            model={form.model}
-            onProviderChange={provider => setForm(f => ({ ...f, provider }))}
-            onModelChange={model => setForm(f => ({ ...f, model }))}
-          />
-
-          {/* Custom prompt */}
+          {/* Custom prompt — full width */}
           <div>
             <label className="block text-[13px] font-medium text-neutral-3 mb-1.5">
               Focus areas <span className="text-neutral-5 font-normal">(optional)</span>
@@ -209,7 +215,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
             <textarea
               value={form.customPrompt}
               onChange={e => setForm(f => ({ ...f, customPrompt: e.target.value }))}
-              rows={3}
+              rows={2}
               placeholder="e.g. Focus on the auth module and payment flows"
               className="w-full rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-1 placeholder-neutral-5 focus:border-accent-6 focus:outline-none resize-none"
             />
