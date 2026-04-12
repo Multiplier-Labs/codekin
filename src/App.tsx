@@ -207,6 +207,14 @@ export default function App() {
   const activeSessionProvider = sessions.find(s => s.id === activeSessionId)?.provider ?? currentProvider
   const availableModels = activeSessionProvider === 'opencode' ? openCodeModels : CLAUDE_MODELS
 
+  // Probe OpenCode availability on startup (regardless of active session provider)
+  useEffect(() => {
+    if (!settings.token || openCodeDisabled) return
+    fetchOpenCodeModels(settings.token).then(result => {
+      setOpenCodeConnected(result.models.length > 0)
+    }).catch(() => { setOpenCodeConnected(false) })
+  }, [settings.token, openCodeDisabled]) // eslint-disable-line react-hooks/exhaustive-deps -- one-time startup probe
+
   // Fetch OpenCode models when switching to an OpenCode session
   const currentModelRef = useRef(currentModel)
   useEffect(() => { currentModelRef.current = currentModel }, [currentModel])
