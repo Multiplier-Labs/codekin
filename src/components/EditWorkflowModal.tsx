@@ -190,6 +190,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
           {/* Provider + Model selection */}
           <ProviderModelSection
             token={token}
+            workingDir={repo.repoPath}
             provider={form.provider}
             model={form.model}
             onProviderChange={provider => setForm(f => ({ ...f, provider }))}

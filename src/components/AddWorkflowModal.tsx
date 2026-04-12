@@ -371,6 +371,7 @@ function StepConfigure({
       {/* Provider + Model selection */}
       <ProviderModelSection
         token={token}
+        workingDir={form.repoPath || undefined}
         provider={form.provider}
         model={form.model}
         onProviderChange={provider => { onChange({ provider }); }}

@@ -27,13 +27,15 @@ const CLAUDE_WORKFLOW_MODELS: ModelOption[] = MODEL_OPTIONS.map(m => ({
 
 interface Props {
   token: string
+  /** Working directory (repo path) for scoping OpenCode model queries. */
+  workingDir?: string
   provider: CodingProvider
   model: string
   onProviderChange: (provider: CodingProvider) => void
   onModelChange: (model: string) => void
 }
 
-export function ProviderModelSection({ token, provider, model, onProviderChange, onModelChange }: Props) {
+export function ProviderModelSection({ token, workingDir, provider, model, onProviderChange, onModelChange }: Props) {
   const [openCodeAvailable, setOpenCodeAvailable] = useState<boolean | null>(null)
   const [openCodeModels, setOpenCodeModels] = useState<ModelOption[]>([])
   const [loadingOcModels, setLoadingOcModels] = useState(true)
@@ -41,7 +43,7 @@ export function ProviderModelSection({ token, provider, model, onProviderChange,
   // Check OpenCode availability on mount
   useEffect(() => {
     let cancelled = false
-    fetchOpenCodeModels(token).then(result => {
+    fetchOpenCodeModels(token, workingDir).then(result => {
       if (cancelled) return
       if (result.models.length > 0) {
         setOpenCodeAvailable(true)
@@ -55,7 +57,7 @@ export function ProviderModelSection({ token, provider, model, onProviderChange,
       if (!cancelled) setLoadingOcModels(false)
     })
     return () => { cancelled = true }
-  }, [token])
+  }, [token, workingDir])
 
   // When switching provider, reset model to default if current model doesn't belong to new provider
   const handleProviderChange = (newProvider: CodingProvider) => {
