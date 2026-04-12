@@ -467,8 +467,11 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
         model: form.model || undefined,
         provider: form.provider !== 'claude' ? form.provider : undefined,
       }, webhookUrl)
-      if (isPrReview && setupResult) {
-        setWebhookResult(setupResult)
+      if (isPrReview) {
+        setWebhookResult(setupResult ?? {
+          status: 'failed',
+          message: 'No webhook setup information returned. Please configure the GitHub webhook manually in Settings.',
+        })
       } else {
         onClose()
       }

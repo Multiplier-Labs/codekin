@@ -32,16 +32,23 @@ import { loadWebhookConfig, generateWebhookSecret, saveWebhookConfig } from './w
 const execFileAsync = promisify(execFile)
 
 /**
+ * Parse a GitHub `owner/repo` slug from a git remote URL.
+ * Supports SSH (git@github.com:owner/repo.git) and HTTPS (https://github.com/owner/repo.git).
+ * Returns null for non-GitHub remotes.
+ */
+export function parseGitHubSlug(remoteUrl: string): string | null {
+  const match = remoteUrl.trim().match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/)
+  return match?.[1] ?? null
+}
+
+/**
  * Derive the GitHub `owner/repo` slug from a local repo path
  * by parsing the git remote origin URL.
  */
 async function getGitHubSlug(repoPath: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync('git', ['-C', repoPath, 'remote', 'get-url', 'origin'], { timeout: 5000 })
-    const url = stdout.trim()
-    // Match SSH (git@github.com:owner/repo.git) or HTTPS (https://github.com/owner/repo.git)
-    const match = url.match(/github\.com[:/]([^/]+\/[^/.]+?)(?:\.git)?$/)
-    return match?.[1] ?? null
+    return parseGitHubSlug(stdout)
   } catch {
     return null
   }
