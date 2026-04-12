@@ -115,12 +115,6 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
    */
   private _receivedOutput = false
 
-  /**
-   * Set to true once the process emits a system init event (type=system, subtype=init).
-   * Until this fires, the process is still loading configs/hooks and is not ready
-   * to process user messages reliably.
-   */
-  private _systemInitReceived = false
 
   // Grouped streaming state — reset per content block
   private thinking: ThinkingState = { active: false, text: '', summaryEmitted: false }
@@ -332,7 +326,6 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       case 'system':
         if (event.subtype === 'init') {
           this.sessionId = (event as ClaudeSystemInit).session_id || this.sessionId
-          this._systemInitReceived = true
           const model = ('model' in event ? (event as Record<string, unknown>).model : 'unknown') as string
           this.emit('system_init', model)
         }
