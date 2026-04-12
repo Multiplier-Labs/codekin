@@ -417,23 +417,21 @@ export class SessionLifecycle {
           const inputAge = session._lastUserInputAt ? Date.now() - session._lastUserInputAt : Infinity
           const hasPendingInput = pendingInput && inputAge < 60_000
 
-          session.claudeProcess.once('system_init', () => {
-            if (session.outputHistory.length > 0) {
-              const context = this.deps.buildSessionContext(session)
-              if (context) {
-                const msg = hasPendingInput
-                  ? context + '\n\n' + pendingInput
-                  : context + '\n\n[Session resumed after process restart. Continue where you left off. If you were in the middle of a task, resume it.]'
-                session.claudeProcess?.sendMessage(msg)
-                return
-              }
+          if (session.outputHistory.length > 0) {
+            const context = this.deps.buildSessionContext(session)
+            if (context) {
+              const msg = hasPendingInput
+                ? context + '\n\n' + pendingInput
+                : context + '\n\n[Session resumed after process restart. Continue where you left off. If you were in the middle of a task, resume it.]'
+              session.claudeProcess?.sendMessage(msg)
+              return
             }
-            // No output history but pending input (brand new session that
-            // crashed before responding) — re-send the user's message.
-            if (hasPendingInput) {
-              session.claudeProcess?.sendMessage(pendingInput)
-            }
-          })
+          }
+          // No output history but pending input (brand new session that
+          // crashed before responding) — re-send the user's message.
+          if (hasPendingInput) {
+            session.claudeProcess?.sendMessage(pendingInput)
+          }
         }
       }, action.delayMs)
       return

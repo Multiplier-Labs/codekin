@@ -744,9 +744,9 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   }
 
   isReady(): boolean {
-    // Ready only after system_init has been received, proving the process
-    // has finished loading configs/hooks and is accepting user messages.
-    return this.alive && this._systemInitReceived
+    // Claude CLI waits for the first input before emitting system_init.
+    // We must return true as soon as it's alive to prevent deadlocks in sendInput.
+    return this.alive
   }
 
   getSessionId(): string {
