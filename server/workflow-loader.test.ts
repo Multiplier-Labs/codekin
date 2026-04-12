@@ -105,7 +105,7 @@ function fakeSessionManager() {
     startClaude: vi.fn(),
     stopClaude: vi.fn(),
     sendInput: vi.fn(),
-    waitForReady: vi.fn(() => Promise.resolve()),
+    waitForReady: vi.fn(() => Promise.resolve(true)),
   } as any
 }
 

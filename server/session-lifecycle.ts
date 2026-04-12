@@ -186,23 +186,26 @@ export class SessionLifecycle {
    * session already has a claudeSessionId (process previously initialized).
    * Times out after `timeoutMs` (default 30s) to avoid hanging indefinitely.
    */
-  waitForReady(sessionId: string, timeoutMs = 30_000): Promise<void> {
+  waitForReady(sessionId: string, timeoutMs = 30_000): Promise<boolean> {
     const session = this.deps.getSession(sessionId)
-    if (!session?.claudeProcess) return Promise.resolve()
+    if (!session?.claudeProcess) return Promise.resolve(false)
     // If the process is already fully initialized, resolve immediately.
     // Uses isReady() which accounts for provider differences: Claude is ready
     // as soon as alive (stdin buffered), OpenCode needs alive + opencodeSessionId.
-    if (session.claudeProcess.isReady()) return Promise.resolve()
+    if (session.claudeProcess.isReady()) return Promise.resolve(true)
 
-    return new Promise<void>((resolve) => {
-      const done = () => { clearTimeout(timer); resolve() }
+    return new Promise<boolean>((resolve) => {
+      const onReady = () => { clearTimeout(timer); cp.removeListener('exit', onExit); resolve(true) }
+      const onExit = () => { clearTimeout(timer); cp.removeListener('system_init', onReady); resolve(false) }
+      const cp = session.claudeProcess!
       const timer = setTimeout(() => {
         console.warn(`[waitForReady] Timed out waiting for system_init on ${sessionId} after ${timeoutMs}ms`)
-        session.claudeProcess?.removeListener('exit', done)
-        resolve()
+        cp.removeListener('system_init', onReady)
+        cp.removeListener('exit', onExit)
+        resolve(false)
       }, timeoutMs)
-      session.claudeProcess!.once('system_init', done)
-      session.claudeProcess!.once('exit', done) // fail-fast if process dies during init
+      cp.once('system_init', onReady)
+      cp.once('exit', onExit) // fail-fast if process dies during init
     })
   }
 
@@ -407,13 +410,26 @@ export class SessionLifecycle {
         // Fallback: if claudeSessionId was already null (fresh session that
         // crashed before system_init), inject a context summary so the new
         // session has some awareness of prior conversation.
-        if (!session.claudeSessionId && session.claudeProcess && session.outputHistory.length > 0) {
+        if (!session.claudeSessionId && session.claudeProcess) {
+          const pendingInput = session._lastUserInput
+          const inputAge = session._lastUserInputAt ? Date.now() - session._lastUserInputAt : Infinity
+          const hasPendingInput = pendingInput && inputAge < 60_000
+
           session.claudeProcess.once('system_init', () => {
-            const context = this.deps.buildSessionContext(session)
-            if (context) {
-              session.claudeProcess?.sendMessage(
-                context + '\n\n[Session resumed after process restart. Continue where you left off. If you were in the middle of a task, resume it.]',
-              )
+            if (session.outputHistory.length > 0) {
+              const context = this.deps.buildSessionContext(session)
+              if (context) {
+                const msg = hasPendingInput
+                  ? context + '\n\n' + pendingInput
+                  : context + '\n\n[Session resumed after process restart. Continue where you left off. If you were in the middle of a task, resume it.]'
+                session.claudeProcess?.sendMessage(msg)
+                return
+              }
+            }
+            // No output history but pending input (brand new session that
+            // crashed before responding) — re-send the user's message.
+            if (hasPendingInput) {
+              session.claudeProcess?.sendMessage(pendingInput)
             }
           })
         }

@@ -872,7 +872,7 @@ export class SessionManager {
    * Wait for a session's Claude process to emit its system_init event.
    * Delegates to SessionLifecycle.
    */
-  waitForReady(sessionId: string, timeoutMs = 30_000): Promise<void> {
+  waitForReady(sessionId: string, timeoutMs = 30_000): Promise<boolean> {
     return this.sessionLifecycle.waitForReady(sessionId, timeoutMs)
   }
 
@@ -1135,7 +1135,11 @@ export class SessionManager {
             this._globalBroadcast?.({ type: 'sessions_updated' })
           }
           if (session.claudeProcess && !session.claudeProcess.isReady()) {
-            void this.waitForReady(sessionId).then(() => session.claudeProcess?.sendMessage(combined))
+            void this.waitForReady(sessionId).then((ready) => {
+              if (ready) session.claudeProcess?.sendMessage(combined)
+              // If not ready (process exited), message stays in _lastUserInput
+              // and will be re-sent on auto-restart
+            })
           } else {
             session.claudeProcess?.sendMessage(combined)
           }
@@ -1154,7 +1158,11 @@ export class SessionManager {
           session.isProcessing = true
           this._globalBroadcast?.({ type: 'sessions_updated' })
         }
-        void this.waitForReady(sessionId).then(() => session.claudeProcess?.sendMessage(data))
+        void this.waitForReady(sessionId).then((ready) => {
+          if (ready) session.claudeProcess?.sendMessage(data)
+          // If not ready (process exited), message stays in _lastUserInput
+          // and will be re-sent on auto-restart
+        })
         return
       }
     }
