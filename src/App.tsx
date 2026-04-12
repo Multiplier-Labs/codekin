@@ -305,6 +305,14 @@ export default function App() {
   // Unified slash command list for autocomplete (skills + bundled + built-in)
   const allCommands = useMemo(() => buildSlashCommandList(allSkills), [allSkills])
 
+  // Wrap setModel to also persist OpenCode model selection to localStorage
+  const handleModelChange = useCallback((model: string) => {
+    setModel(model)
+    if (activeSessionProvider === 'opencode') {
+      localStorage.setItem('opencode-model', model)
+    }
+  }, [setModel, activeSessionProvider])
+
   // Handle built-in slash commands locally (not sent to Claude)
   const handleBuiltinCommand = useCallback((command: string, args: string) => {
     switch (command) {
@@ -545,14 +553,6 @@ export default function App() {
       }
     }
   }, [openCodeDisabled, settings.token, activeSessionProvider, activeSessionId, leaveSession])
-
-  // Wrap setModel to also persist OpenCode model selection to localStorage
-  const handleModelChange = useCallback((model: string) => {
-    setModel(model)
-    if (activeSessionProvider === 'opencode') {
-      localStorage.setItem('opencode-model', model)
-    }
-  }, [setModel, activeSessionProvider])
 
   const activeSession = sessions.find(s => s.id === activeSessionId)
   const activeSessionName = activeSession?.name ?? null
