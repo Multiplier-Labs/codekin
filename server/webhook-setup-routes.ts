@@ -31,6 +31,8 @@ export function createWebhookSetupRouter(
 ): Router {
   const router = Router()
 
+  const REPO_PATTERN = /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/
+
   // --- Health check endpoint ---
 
   router.get('/api/integrations/github/pr-review/health', async (req, res) => {
@@ -42,6 +44,9 @@ export function createWebhookSetupRouter(
 
     if (!repo || !webhookUrl) {
       return res.status(400).json({ error: 'Missing required query params: repo, webhookUrl' })
+    }
+    if (!REPO_PATTERN.test(repo)) {
+      return res.status(400).json({ error: 'Invalid repo format. Expected owner/repo.' })
     }
 
     const config = getConfig()
@@ -177,6 +182,9 @@ export function createWebhookSetupRouter(
     if (!repo || !webhookUrl) {
       return res.status(400).json({ error: 'Missing required fields: repo, webhookUrl' })
     }
+    if (!REPO_PATTERN.test(repo)) {
+      return res.status(400).json({ error: 'Invalid repo format. Expected owner/repo.' })
+    }
 
     // Preview first
     const preview = await previewSetup(repo, webhookUrl)
@@ -243,6 +251,9 @@ export function createWebhookSetupRouter(
 
     if (!repo || !webhookUrl) {
       return res.status(400).json({ error: 'Missing required fields: repo, webhookUrl' })
+    }
+    if (!REPO_PATTERN.test(repo)) {
+      return res.status(400).json({ error: 'Invalid repo format. Expected owner/repo.' })
     }
 
     const hook = await findCodekinWebhook(repo, webhookUrl)
