@@ -38,6 +38,7 @@ import { SessionLifecycle } from './session-lifecycle.js'
 import { SessionNaming } from './session-naming.js'
 import { SessionPersistence } from './session-persistence.js'
 import { cleanGitEnv, DiffManager } from './diff-manager.js'
+import { ProcessCoordinator } from './process-coordinator.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -175,9 +176,10 @@ export class SessionManager {
       rename: (sessionId, newName) => this.rename(sessionId, newName),
     })
     this.sessionPersistence.restoreFromDisk()
-    // Wire PlanManager events for restored sessions
+    // Wire PlanManager events and coordinators for restored sessions
     for (const session of this.sessions.values()) {
       this.wirePlanManager(session)
+      session.coordinator = this.createCoordinator(session.id)
     }
     // Start idle session reaper
     this._idleReaperInterval = setInterval(() => this.reapIdleSessions(), IDLE_CHECK_INTERVAL_MS)
@@ -204,7 +206,7 @@ export class SessionManager {
       if (idleMs > IDLE_SESSION_TIMEOUT_MS) {
         console.log(`[idle-reaper] stopping idle session=${session.id} name="${session.name}" idle=${Math.round(idleMs / 60_000)}min`)
         session._stoppedByUser = true // prevent auto-restart
-        if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
+        session.coordinator.teardown()
         session.claudeProcess.removeAllListeners()
         session.claudeProcess.stop()
         session.claudeProcess = null
@@ -255,6 +257,19 @@ export class SessionManager {
   /** Re-trigger session naming on user interaction. */
   retrySessionNamingOnInteraction(sessionId: string): void {
     this.sessionNaming.retrySessionNamingOnInteraction(sessionId)
+  }
+
+  // ---------------------------------------------------------------------------
+  // Process coordinator factory
+  // ---------------------------------------------------------------------------
+
+  /** Create a ProcessCoordinator for a session.  The coordinator delegates
+   *  start/stop to the existing SessionLifecycle methods. */
+  createCoordinator(sessionId: string): ProcessCoordinator {
+    return new ProcessCoordinator(sessionId, {
+      startProcess: (id) => this.sessionLifecycle.startClaude(id),
+      stopProcessAndWait: (id) => this.sessionLifecycle.stopClaudeAndWait(id),
+    })
   }
 
   // ---------------------------------------------------------------------------
@@ -311,7 +326,9 @@ export class SessionManager {
       _leaveGraceTimer: null,
       _lastActivityAt: Date.now(),
       planManager: new PlanManager(),
+      coordinator: null as unknown as ProcessCoordinator, // set below
     }
+    session.coordinator = this.createCoordinator(id)
     this.wirePlanManager(session)
     this.sessions.set(id, session)
     this.persistToDisk()
@@ -778,12 +795,12 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return false
 
-    // Prevent auto-restart when deleting
+    // Prevent auto-restart when deleting — coordinator.teardown() cancels all
+    // lifecycle timers (restart, API retry) and sets userStopped.
     session._stoppedByUser = true
-    if (session._apiRetry.timer) clearTimeout(session._apiRetry.timer)
+    session.coordinator.teardown()
     if (session._namingTimer) clearTimeout(session._namingTimer)
     if (session._leaveGraceTimer) clearTimeout(session._leaveGraceTimer)
-    if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
 
     // Kill claude process if running — remove listeners first to prevent the
     // exit handler from triggering an auto-restart on a deleted session.
@@ -1021,15 +1038,16 @@ export class SessionManager {
 
       console.log(`[api-retry] session=${sessionId} attempt=${attempt}/${MAX_API_RETRIES} delay=${delay}ms error=${result.slice(0, 200)}`)
 
-      if (session._apiRetry.timer) clearTimeout(session._apiRetry.timer)
+      // Delegate timer management to the coordinator.  The coordinator ties
+      // the retry to the current process generation — if the process restarts
+      // or stops before the timer fires, the retry is silently dropped.
       session._apiRetry.scheduled = true
-      session._apiRetry.timer = setTimeout(() => {
-        session._apiRetry.timer = undefined
+      session.coordinator.scheduleApiRetry(delay, () => {
         session._apiRetry.scheduled = false
         if (!session.claudeProcess?.isAlive() || session._stoppedByUser) return
         console.log(`[api-retry] resending message for session=${sessionId} attempt=${attempt}`)
         session.claudeProcess.sendMessage(session._lastUserInput!)
-      }, delay)
+      })
       return true
     }
 
@@ -1053,6 +1071,7 @@ export class SessionManager {
   private finalizeResult(session: Session, sessionId: string, result: string, isError: boolean): void {
     session._apiRetry.count = 0
     session._apiRetry.scheduled = false
+    session.coordinator.cancelApiRetry()
     session._lastUserInput = undefined
     session._lastUserInputAt = undefined
 
@@ -1105,11 +1124,13 @@ export class SessionManager {
     session._lastActivityAt = Date.now()
     // Reset stopped-by-user flag so idle-reaped sessions can auto-start
     session._stoppedByUser = false
+    session.coordinator.clearUserStopped()
 
     // --- Phase 1: ensure process is alive ---
     if (!session.claudeProcess?.isAlive()) {
       // Race guard: prevent concurrent startClaude calls when multiple sendInput
-      // requests arrive for an inactive session
+      // requests arrive for an inactive session.  The coordinator's requestStart
+      // mutex handles this for async paths; _isStarting guards the sync path.
       if (session._isStarting) return
       session._isStarting = true
       // Claude not running (e.g. after server restart or idle reap) — auto-start first.
@@ -1188,21 +1209,15 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return false
     if (session.provider === provider) return true
-    session.provider = provider
-    session.claudeSessionId = null
-    // Clear any pending restart timer from a prior crash to prevent a stale
-    // timer from spawning a second process after we restart below.
-    if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
     this.persistToDiskDebounced()
     if (session.claudeProcess?.isAlive()) {
-      // Use stopClaudeAndWait to ensure the old process fully exits before
-      // spawning a new one — avoids concurrent processes in the same worktree.
-      void this.stopClaudeAndWait(sessionId).then(() => {
-        if (this.sessions.has(sessionId)) {
-          session._stoppedByUser = false
-          this.startClaude(sessionId)
-        }
+      void session.coordinator.requestReconfigure(() => {
+        session.provider = provider
+        session.claudeSessionId = null
       })
+    } else {
+      session.provider = provider
+      session.claudeSessionId = null
     }
     return true
   }
@@ -1212,23 +1227,12 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return false
     const newModel = model || undefined
-    // Skip restart if the model hasn't actually changed.
     if (session.model === newModel) return true
-    session.model = newModel
-    // Clear any pending restart timer from a prior crash to prevent a stale
-    // timer from spawning a second process after we restart below.
-    if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
     this.persistToDiskDebounced()
-    // Restart Claude with the new model if it's running.
-    // Use stopClaudeAndWait to ensure the old process fully exits before
-    // spawning a new one — avoids concurrent processes in the same worktree.
     if (session.claudeProcess?.isAlive()) {
-      void this.stopClaudeAndWait(sessionId).then(() => {
-        if (this.sessions.has(sessionId)) {
-          session._stoppedByUser = false
-          this.startClaude(sessionId)
-        }
-      })
+      void session.coordinator.requestReconfigure(() => { session.model = newModel })
+    } else {
+      session.model = newModel
     }
     return true
   }
@@ -1238,11 +1242,6 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return false
     const previousMode = session.permissionMode
-    session.permissionMode = permissionMode
-    // Clear any pending restart timer from a prior crash to prevent a stale
-    // timer from spawning a second process after we restart below.
-    if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
-    this.persistToDiskDebounced()
 
     // Audit log for dangerous mode changes
     if (permissionMode === 'bypassPermissions') {
@@ -1255,16 +1254,11 @@ export class SessionManager {
     this.addToHistory(session, sysMsg)
     this.broadcast(session, sysMsg)
 
-    // Restart Claude with the new permission mode if it's running.
-    // Use stopClaudeAndWait to ensure the old process fully exits before
-    // spawning a new one — avoids concurrent processes in the same worktree.
+    this.persistToDiskDebounced()
     if (session.claudeProcess?.isAlive()) {
-      void this.stopClaudeAndWait(sessionId).then(() => {
-        if (this.sessions.has(sessionId)) {
-          session._stoppedByUser = false
-          this.startClaude(sessionId)
-        }
-      })
+      void session.coordinator.requestReconfigure(() => { session.permissionMode = permissionMode })
+    } else {
+      session.permissionMode = permissionMode
     }
     return true
   }
@@ -1504,8 +1498,7 @@ export class SessionManager {
     for (const session of this.sessions.values()) {
       if (session.claudeProcess?.isAlive()) {
         session._stoppedByUser = true
-        if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
-        if (session._apiRetry?.timer) clearTimeout(session._apiRetry.timer)
+        session.coordinator.teardown()
         const cp = session.claudeProcess
         cp.removeAllListeners()
         exitPromises.push(cp.waitForExit())

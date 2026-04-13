@@ -2804,20 +2804,21 @@ describe('SessionManager', () => {
       const cp = fakeClaudeProcess(true)
       s.claudeProcess = cp
 
-      const stopWaitSpy = vi.spyOn(sm, 'stopClaudeAndWait').mockResolvedValue()
-      const startSpy = vi.spyOn(sm, 'startClaude').mockReturnValue(true)
+      // Spy on the coordinator's requestReconfigure to verify it's called
+      const reconfigSpy = vi.spyOn(s.coordinator, 'requestReconfigure')
+        .mockResolvedValue(true)
 
       sm.setModel(s.id, 'sonnet')
 
-      // stopClaudeAndWait is called, but startClaude is deferred until the promise resolves
-      expect(stopWaitSpy).toHaveBeenCalledWith(s.id)
-      expect(startSpy).not.toHaveBeenCalled()
+      // requestReconfigure is called with a callback that sets the model
+      expect(reconfigSpy).toHaveBeenCalledWith(expect.any(Function))
 
-      // Let the promise chain resolve
-      await vi.waitFor(() => expect(startSpy).toHaveBeenCalledWith(s.id))
+      // Verify the callback sets the model
+      const applyFn = reconfigSpy.mock.calls[0][0]
+      applyFn()
+      expect(s.model).toBe('sonnet')
 
-      stopWaitSpy.mockRestore()
-      startSpy.mockRestore()
+      reconfigSpy.mockRestore()
     })
 
     it('does NOT restart when process is not alive', () => {

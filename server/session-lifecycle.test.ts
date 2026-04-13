@@ -63,6 +63,21 @@ function makePlanManager() {
   }
 }
 
+function makeCoordinator() {
+  return {
+    requestStart: vi.fn(() => Promise.resolve(true)),
+    requestStop: vi.fn(() => Promise.resolve()),
+    requestReconfigure: vi.fn((apply: () => void) => { apply(); return Promise.resolve(true) }),
+    scheduleRestart: vi.fn(),
+    scheduleApiRetry: vi.fn(),
+    cancelApiRetry: vi.fn(),
+    teardown: vi.fn(),
+    clearUserStopped: vi.fn(),
+    get currentGeneration() { return 0 },
+    get isUserStopped() { return false },
+  }
+}
+
 function makeSession(overrides: Partial<Session> = {}): Session {
   return {
     id: 'sess-1',
@@ -90,6 +105,7 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     _lifetimeRestarts: 0,
     _lastActivityAt: Date.now(),
     planManager: makePlanManager() as any,
+    coordinator: makeCoordinator() as any,
     ...overrides,
   } as Session
 }
@@ -300,7 +316,7 @@ describe('SessionLifecycle', () => {
       expect(listener).toHaveBeenCalledWith('sess-1', 0, null, false)
     })
 
-    it('schedules restart on unexpected exit', () => {
+    it('schedules restart on unexpected exit via coordinator', () => {
       mockEvaluateRestart.mockReturnValue({
         kind: 'restart',
         attempt: 1,
@@ -318,11 +334,15 @@ describe('SessionLifecycle', () => {
       expect(session.restartCount).toBe(1)
       expect(deps.addToHistory).toHaveBeenCalledWith(session, expect.objectContaining({ subtype: 'restart' }))
 
-      // Restart timer should fire and call startClaude
-      expect(session._restartTimer).toBeDefined()
+      // Restart is now delegated to the coordinator
+      expect(session.coordinator.scheduleRestart).toHaveBeenCalledWith(
+        2000,
+        expect.any(Function),
+        expect.any(Function),
+      )
     })
 
-    it('restart timer calls startClaude after delay', () => {
+    it('coordinator scheduleRestart onBeforeStart checks session existence', () => {
       mockEvaluateRestart.mockReturnValue({
         kind: 'restart',
         attempt: 1,
@@ -334,52 +354,41 @@ describe('SessionLifecycle', () => {
 
       lifecycle.handleClaudeExit(exitedProcess, session, 'sess-1', 1, null)
 
-      // Before timer fires, startClaude shouldn't have been called (claudeProcess is null from exit)
-      expect(session.claudeProcess).toBeNull()
+      // Extract the onBeforeStart callback
+      const onBeforeStart = (session.coordinator.scheduleRestart as any).mock.calls[0][1]
+      expect(onBeforeStart()).toBe(true)
 
-      // Advance timer
-      vi.advanceTimersByTime(2000)
-
-      // startClaude should have run — session.claudeProcess should be set again
-      expect(session.claudeProcess).not.toBeNull()
-    })
-
-    it('restart timer does nothing if session was stopped', () => {
-      mockEvaluateRestart.mockReturnValue({
-        kind: 'restart',
-        attempt: 1,
-        maxAttempts: 3,
-        delayMs: 2000,
-        updatedCount: 1,
-        updatedLastRestartAt: Date.now(),
-      })
-
-      lifecycle.handleClaudeExit(exitedProcess, session, 'sess-1', 1, null)
-
-      // User stops the session before timer fires
-      session._stoppedByUser = true
-
-      vi.advanceTimersByTime(2000)
-
-      // Should not have started a new process
-      expect(session.claudeProcess).toBeNull()
-    })
-
-    it('restart timer does nothing if session was removed', () => {
-      mockEvaluateRestart.mockReturnValue({
-        kind: 'restart',
-        attempt: 1,
-        maxAttempts: 3,
-        delayMs: 2000,
-        updatedCount: 1,
-        updatedLastRestartAt: Date.now(),
-      })
+      // If session is removed, onBeforeStart returns false
       ;(deps.hasSession as any).mockReturnValue(false)
+      expect(onBeforeStart()).toBe(false)
+    })
 
+    it('coordinator scheduleRestart onAfterStart injects context when claudeSessionId is null', () => {
+      mockEvaluateRestart.mockReturnValue({
+        kind: 'restart',
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 2000,
+        updatedCount: 1,
+        updatedLastRestartAt: Date.now(),
+      })
+      session._lastUserInput = 'test input'
+      session._lastUserInputAt = Date.now()
+      session.outputHistory = [{ type: 'system_message', subtype: 'notification', text: 'hi' }]
+      ;(deps.buildSessionContext as any).mockReturnValue('context summary')
+
+      // handleClaudeExit nulls claudeProcess — call it first
       lifecycle.handleClaudeExit(exitedProcess, session, 'sess-1', 1, null)
-      vi.advanceTimersByTime(2000)
 
-      expect(session.claudeProcess).toBeNull()
+      // Simulate having a process after restart (coordinator's startProcess ran)
+      const mockProcess = { sendMessage: vi.fn() }
+      session.claudeProcess = mockProcess as any
+
+      // Extract and call onAfterStart (3rd arg to scheduleRestart)
+      const onAfterStart = (session.coordinator.scheduleRestart as any).mock.calls[0][2]
+      onAfterStart()
+
+      expect(mockProcess.sendMessage).toHaveBeenCalledWith('context summary\n\ntest input')
     })
 
     it('broadcasts error on exhausted restarts', () => {
@@ -452,7 +461,10 @@ describe('SessionLifecycle', () => {
 
     // --- Generation ID tests ---
 
-    it('restart timer skips if generation changed (another start happened)', () => {
+    it('generation-based staleness is handled by coordinator (no longer tested at this layer)', () => {
+      // Generation tracking and stale-timer invalidation are now internal to
+      // ProcessCoordinator and tested in process-coordinator.test.ts.
+      // This test verifies that scheduleRestart is called (delegation is correct).
       mockEvaluateRestart.mockReturnValue({
         kind: 'restart',
         attempt: 1,
@@ -464,15 +476,7 @@ describe('SessionLifecycle', () => {
 
       lifecycle.handleClaudeExit(exitedProcess, session, 'sess-1', 1, null)
 
-      // Simulate another code path starting Claude before the timer fires
-      // (e.g. user sends input which triggers sendInput → startClaude)
-      session._processGeneration = 99
-
-      vi.advanceTimersByTime(2000)
-
-      // The timer should have been a no-op — claudeProcess stays null
-      // (startClaude was not called by the timer)
-      expect(session.claudeProcess).toBeNull()
+      expect(session.coordinator.scheduleRestart).toHaveBeenCalled()
     })
 
     // --- Non-retryable exit code tests ---

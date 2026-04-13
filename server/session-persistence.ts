@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { join } from 'path'
 import { DATA_DIR } from './config.js'
 import { PlanManager } from './plan-manager.js'
+import type { ProcessCoordinator } from './process-coordinator.js'
 import type { Session, WsServerMessage } from './types.js'
 
 const SESSIONS_FILE = join(DATA_DIR, 'sessions.json')
@@ -141,6 +142,7 @@ export class SessionPersistence {
           pendingToolApprovals: new Map(),
           _lastActivityAt: Date.now(),
           planManager: new PlanManager(),
+          coordinator: null as unknown as ProcessCoordinator, // wired by SessionManager after restore
         }
         this.sessions.set(session.id, session)
       }
