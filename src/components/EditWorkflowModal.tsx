@@ -174,7 +174,6 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
                   <div className="flex flex-wrap gap-1 mb-1.5">
                     {DAY_PRESETS.map(p => {
                       const isActive = form.cronDow === p.dow
-                        || (p.dow === '*' && isDay)
                         || (p.dow === '1-5' && isDay && Number(baseDow) >= 1 && Number(baseDow) <= 5)
                       return (
                         <button
@@ -188,7 +187,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
                       )
                     })}
                   </div>
-                  <div className="grid grid-cols-7 gap-1">
+                  <div className="flex gap-1">
                     {DAY_INDIVIDUAL.map(p => (
                       <button
                         key={p.dow}
