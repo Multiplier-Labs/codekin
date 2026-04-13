@@ -59,12 +59,13 @@ export function ProviderModelSection({ token, workingDir, provider, model, onPro
     return () => { cancelled = true }
   }, [token, workingDir])
 
-  // When switching provider, reset model to default if current model doesn't belong to new provider
+  // When switching provider, select a sensible default for the new provider
   const handleProviderChange = (newProvider: CodingProvider) => {
     if (newProvider === provider) return
     onProviderChange(newProvider)
-    // Reset model — the current model likely doesn't exist in the other provider
-    onModelChange('')
+    // Pick the first model from the new provider's list ('' = Default Opus for Claude)
+    const newModels = newProvider === 'opencode' ? openCodeModels : CLAUDE_WORKFLOW_MODELS
+    onModelChange(newModels[0]?.id ?? '')
   }
 
   const currentModels: ModelOption[] = provider === 'opencode' ? openCodeModels : CLAUDE_WORKFLOW_MODELS
