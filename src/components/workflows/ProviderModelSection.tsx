@@ -71,12 +71,12 @@ export function ProviderModelSection({ token, workingDir, provider, model, onPro
   const isLoadingModels = provider === 'opencode' && loadingOcModels
 
   return (
-    <>
+    <div className="flex flex-wrap items-end gap-4">
       {/* Provider selector — only show when OpenCode is available */}
       {openCodeAvailable && (
         <div>
-          <label className="block text-[13px] font-medium text-neutral-3 mb-2">Provider</label>
-          <div className="flex gap-1.5">
+          <label className="block text-[13px] font-medium text-neutral-3 mb-1">Provider</label>
+          <div className="flex gap-1">
             <button
               type="button"
               onClick={() => handleProviderChange('claude')}
@@ -97,7 +97,7 @@ export function ProviderModelSection({ token, workingDir, provider, model, onPro
 
       {/* Model picker */}
       <div>
-        <label className="block text-[13px] font-medium text-neutral-3 mb-2">Model</label>
+        <label className="block text-[13px] font-medium text-neutral-3 mb-1">Model</label>
         <WorkflowModelPicker
           models={currentModels}
           selected={model}
@@ -105,6 +105,6 @@ export function ProviderModelSection({ token, workingDir, provider, model, onPro
           loading={isLoadingModels}
         />
       </div>
-    </>
+    </div>
   )
 }
