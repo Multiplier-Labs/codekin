@@ -71,7 +71,7 @@ import type {
   StepflowWebhookPayload,
 } from './stepflow-types.js'
 import { buildStepflowPrompt } from './stepflow-prompt.js'
-import { createWorkspace, cleanupWorkspace } from './webhook-workspace.js'
+import { createWorkspace, cleanupWorkspace, commitReportsFromWorkspace } from './webhook-workspace.js'
 import { WebhookHandlerBase } from './webhook-handler-base.js'
 import { REPOS_ROOT } from './config.js'
 
@@ -152,6 +152,11 @@ export class StepflowHandler extends WebhookHandlerBase<StepflowEvent, StepflowE
           console.warn(`[stepflow] Callback POST failed for event ${event.id}:`, err)
         })
       }
+
+      // Commit any report files to the codekin/reports branch before cleanup.
+      // This ensures reports are persisted even if Claude didn't commit them.
+      const commitPrefix = `chore: ${event.kind || 'workflow'} report`
+      commitReportsFromWorkspace(sessionId, commitPrefix)
 
       cleanupWorkspace(sessionId)
     })

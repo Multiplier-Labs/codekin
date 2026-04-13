@@ -22,18 +22,19 @@
 import type { StepflowSessionRequest } from './stepflow-types.js'
 
 /**
- * Maps workflow kinds that produce report artifacts to their `.codekin/outputs/` subdirectory.
- * When a session's kind matches, the prompt instructs Claude to write the report there.
+ * Maps workflow kinds that produce report artifacts to their `.codekin/reports/` subdirectory.
+ * Uses the same paths as the MD-based workflow engine and the orchestrator report scanner
+ * so that all reports are discoverable in a single location.
  */
 const KIND_OUTPUT_DIR: Record<string, string> = {
-  'code.review':          '.codekin/outputs/code-reviews',
-  'security.audit':       '.codekin/outputs/security-audits',
-  'complexity.analysis':  '.codekin/outputs/complexity-reports',
-  'complexity.report':    '.codekin/outputs/complexity-reports',
-  'coverage.assessment':  '.codekin/outputs/coverage-assessments',
-  'coverage.analysis':    '.codekin/outputs/coverage-assessments',
-  'comment.assessment':   '.codekin/outputs/comment-assessments',
-  'dependency.health':    '.codekin/outputs/dependency-health',
+  'code.review':          '.codekin/reports/code-review',
+  'security.audit':       '.codekin/reports/security',
+  'complexity.analysis':  '.codekin/reports/complexity',
+  'complexity.report':    '.codekin/reports/complexity',
+  'coverage.assessment':  '.codekin/reports/coverage',
+  'coverage.analysis':    '.codekin/reports/coverage',
+  'comment.assessment':   '.codekin/reports/comments',
+  'dependency.health':    '.codekin/reports/dependencies',
 }
 
 /**
@@ -119,7 +120,8 @@ export function buildStepflowPrompt(
   const outputDir = KIND_OUTPUT_DIR[kind]
   if (outputDir) {
     const slug = req.repo.replace('/', '-')
-    const filename = `${slug}-${runId.slice(0, 8)}.md`
+    const date = new Date().toISOString().slice(0, 10)
+    const filename = `${date}_${slug}-${runId.slice(0, 8)}.md`
     lines.push('')
     lines.push('## Report Output')
     lines.push('')
@@ -128,7 +130,9 @@ export function buildStepflowPrompt(
     lines.push(`\`${outputDir}/${filename}\``)
     lines.push('')
     lines.push('The report should summarise findings, issues, and recommendations.')
-    lines.push('Commit this file along with any code changes.')
+    lines.push('')
+    lines.push('**Important**: Do NOT commit this report on the current branch. The workflow engine will')
+    lines.push('automatically commit and push it to the `codekin/reports` branch after your session completes.')
   }
 
   return lines.join('\n')

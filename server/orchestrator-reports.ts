@@ -39,13 +39,16 @@ export interface ReportContent extends ReportMeta {
 
 const REPORTS_DIR = '.codekin/reports'
 
-/** Known report categories. */
+/** Known report categories — must include every subdirectory used by MD and Stepflow workflows. */
 const REPORT_CATEGORIES = [
   'code-review',
   'comments',
+  'commit-review',
   'complexity',
+  'coverage',
   'dependencies',
   'docs-audit',
+  'pr-review',
   'repo-health',
   'security',
   'test-coverage',

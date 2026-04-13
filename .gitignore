@@ -31,8 +31,7 @@ dist-ssr
 .codekin/settings.json
 .codekin/scripts/
 
-# Generated workflow outputs
-.codekin/outputs/
+# Legacy workflow output dirs (no longer used — reports go to .codekin/reports/)
 review logs/
 dependency-reports/
 coverage-reports/
