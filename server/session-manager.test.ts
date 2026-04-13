@@ -2799,8 +2799,8 @@ describe('SessionManager', () => {
       expect(s.model).toBeUndefined()
     })
 
-    it('restarts Claude when process is alive', async () => {
-      const s = sm.create('test', '/tmp')
+    it('restarts Claude when process is alive and model is changing', async () => {
+      const s = sm.create('test', '/tmp', { model: 'opus' })
       const cp = fakeClaudeProcess(true)
       s.claudeProcess = cp
 
@@ -2816,6 +2816,23 @@ describe('SessionManager', () => {
       // Verify the callback sets the model
       const applyFn = reconfigSpy.mock.calls[0][0]
       applyFn()
+      expect(s.model).toBe('sonnet')
+
+      reconfigSpy.mockRestore()
+    })
+
+    it('does NOT reconfigure when model was previously undefined (initial assignment)', () => {
+      const s = sm.create('test', '/tmp')
+      const cp = fakeClaudeProcess(true)
+      s.claudeProcess = cp
+
+      const reconfigSpy = vi.spyOn(s.coordinator, 'requestReconfigure')
+        .mockResolvedValue(true)
+
+      sm.setModel(s.id, 'sonnet')
+
+      // Should just assign without reconfiguring
+      expect(reconfigSpy).not.toHaveBeenCalled()
       expect(s.model).toBe('sonnet')
 
       reconfigSpy.mockRestore()
