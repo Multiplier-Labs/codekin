@@ -917,7 +917,6 @@ export class SessionManager {
   }
 
   private onSystemInit(cp: CodingProcess, session: Session, model: string): void {
-    console.log(`[onSystemInit] session=${session.id} model=${model} prevModel=${session._lastReportedModel ?? 'null'} claudeSessionId=${cp.getSessionId()}`)
     session.claudeSessionId = cp.getSessionId()
     const previousModel = session._lastReportedModel
     session._lastReportedModel = model
@@ -961,7 +960,6 @@ export class SessionManager {
    * session naming on first completed turn.
    */
   private handleClaudeResult(session: Session, sessionId: string, result: string, isError: boolean): void {
-    console.log(`[handleClaudeResult] session=${sessionId} isError=${isError} resultLen=${result.length} result=${result.slice(0, 100)}`)
     session.isProcessing = false
     session._claudeTurnCount++
     this._globalBroadcast?.({ type: 'sessions_updated' })
@@ -1128,8 +1126,6 @@ export class SessionManager {
     session._stoppedByUser = false
     session.coordinator.clearUserStopped()
 
-    console.log(`[sendInput] session=${sessionId} processAlive=${session.claudeProcess?.isAlive() ?? 'no-process'} model=${session.model} claudeSessionId=${session.claudeSessionId ?? 'null'} data=${data.slice(0, 80)}`)
-
     // --- Phase 1: ensure process is alive ---
     if (!session.claudeProcess?.isAlive()) {
       // Race guard: prevent concurrent startClaude calls when multiple sendInput
@@ -1176,17 +1172,13 @@ export class SessionManager {
     }
 
     // --- Phase 3: send, waiting for readiness if needed ---
-    console.log(`[sendInput] phase3 session=${sessionId} isReady=${session.claudeProcess?.isReady() ?? 'no-process'} messageLen=${messageToSend.length}`)
     if (session.claudeProcess && !session.claudeProcess.isReady()) {
-      console.log(`[sendInput] waiting for ready session=${sessionId}`)
       void this.waitForReady(sessionId).then((ready) => {
-        console.log(`[sendInput] waitForReady resolved session=${sessionId} ready=${ready}`)
         if (ready) session.claudeProcess?.sendMessage(messageToSend)
         // If not ready (process exited), message stays in _lastUserInput
         // and will be re-sent on auto-restart
       })
     } else {
-      console.log(`[sendInput] sending immediately session=${sessionId}`)
       session.claudeProcess?.sendMessage(messageToSend)
     }
   }
@@ -1236,16 +1228,18 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return false
     const newModel = model || undefined
-    console.log(`[setModel] session=${sessionId} currentModel=${session.model} newModel=${newModel} processAlive=${session.claudeProcess?.isAlive() ?? 'no-process'} willReconfigure=${session.model !== newModel && !!session.claudeProcess?.isAlive()}`)
     if (session.model === newModel) return true
-    if (session.claudeProcess?.isAlive()) {
+    // When the session had no model set (e.g. just created), simply assign it
+    // without reconfiguring — the running process already defaults to this model
+    // and killing it mid-turn causes the first user message to be lost.
+    if (!session.model || !session.claudeProcess?.isAlive()) {
+      session.model = newModel
+      this.persistToDiskDebounced()
+    } else {
       void session.coordinator.requestReconfigure(() => {
         session.model = newModel
         this.persistToDiskDebounced()
       })
-    } else {
-      session.model = newModel
-      this.persistToDiskDebounced()
     }
     return true
   }
