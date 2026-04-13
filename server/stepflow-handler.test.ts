@@ -17,6 +17,7 @@ vi.mock('./stepflow-prompt.js', () => ({
 vi.mock('./webhook-workspace.js', () => ({
   createWorkspace: vi.fn(async () => '/tmp/workspaces/session-1'),
   cleanupWorkspace: vi.fn(),
+  commitReportsFromWorkspace: vi.fn(),
 }))
 
 import { StepflowHandler, loadStepflowConfig } from './stepflow-handler.js'
