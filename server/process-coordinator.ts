@@ -149,7 +149,10 @@ export class ProcessCoordinator {
     let reject!: (e: unknown) => void
     const result = new Promise<T>((res, rej) => { resolve = res; reject = rej })
     this.chain = this.chain
-      .then(() => op().then(resolve as (v: T | boolean) => void, reject))
+      .then(() => {
+        console.log(`[coordinator] ${this.sessionId} enqueue=${label} gen=${this.generation}`)
+        return op().then(resolve as (v: T | boolean) => void, reject)
+      })
       .catch(() => { /* swallow to keep chain alive */ })
     return result
   }

@@ -1209,15 +1209,16 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return false
     if (session.provider === provider) return true
-    this.persistToDiskDebounced()
     if (session.claudeProcess?.isAlive()) {
       void session.coordinator.requestReconfigure(() => {
         session.provider = provider
         session.claudeSessionId = null
+        this.persistToDiskDebounced()
       })
     } else {
       session.provider = provider
       session.claudeSessionId = null
+      this.persistToDiskDebounced()
     }
     return true
   }
@@ -1228,11 +1229,14 @@ export class SessionManager {
     if (!session) return false
     const newModel = model || undefined
     if (session.model === newModel) return true
-    this.persistToDiskDebounced()
     if (session.claudeProcess?.isAlive()) {
-      void session.coordinator.requestReconfigure(() => { session.model = newModel })
+      void session.coordinator.requestReconfigure(() => {
+        session.model = newModel
+        this.persistToDiskDebounced()
+      })
     } else {
       session.model = newModel
+      this.persistToDiskDebounced()
     }
     return true
   }
@@ -1254,11 +1258,14 @@ export class SessionManager {
     this.addToHistory(session, sysMsg)
     this.broadcast(session, sysMsg)
 
-    this.persistToDiskDebounced()
     if (session.claudeProcess?.isAlive()) {
-      void session.coordinator.requestReconfigure(() => { session.permissionMode = permissionMode })
+      void session.coordinator.requestReconfigure(() => {
+        session.permissionMode = permissionMode
+        this.persistToDiskDebounced()
+      })
     } else {
       session.permissionMode = permissionMode
+      this.persistToDiskDebounced()
     }
     return true
   }
