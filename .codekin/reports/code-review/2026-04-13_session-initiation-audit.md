@@ -86,7 +86,17 @@ The `_isStarting` flag at `session-manager.ts:1113-1119` prevents concurrent `st
 
 ## Recommendations
 
-1. **Skip `claude_started` in history for restarts**: Only call `addToHistory()` when `!isRestart`, matching the broadcast guard.
-2. **Deduplicate `claude_started` in `rebuildFromHistory`**: Only keep the most recent `claude_started` when rebuilding from output buffer, or filter out all but the first.
-3. **Guard `onHealthPong` rejoin**: Check whether the client is already joined to the session before sending `join_session` on pong.
-4. **Suppress duplicate "Session started" on auto-start**: When `sendInput` auto-starts a process, either suppress the `claude_started` message or combine it with the pending user input so the user sees a seamless flow.
+Ordered by risk — client-side display fixes first, server-side changes second.
+
+### Phase 1: Client-side deduplication (low risk)
+
+1. **Deduplicate `claude_started` in `rebuildFromHistory`**: Only keep the most recent `claude_started` when rebuilding from output buffer, or filter out all but the first. This is the safest fix and addresses the most common scenario (history replay on rejoin).
+2. **Guard `onHealthPong` rejoin**: Check whether the client is already joined to the session before sending `join_session` on pong. Avoids unnecessary history replays entirely.
+
+### Phase 2: Server-side event semantics (moderate risk)
+
+3. **Tag restart events in history**: Keep `addToHistory()` for all `claude_started` events (preserves lifecycle observability for debugging), but add a `restart: true` metadata flag for non-initial starts. The client can then filter/coalesce restart events during `rebuildFromHistory` while the server retains a complete audit trail.
+
+### Phase 3: UX refinement
+
+4. **Suppress duplicate "Session started" on auto-start**: When `sendInput` auto-starts a process, either suppress the `claude_started` message or combine it with the pending user input so the user sees a seamless flow rather than an unexpected "Session started".
