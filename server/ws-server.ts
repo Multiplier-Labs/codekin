@@ -262,6 +262,8 @@ app.use(express.json())
 const apiRateBuckets = new Map<string, { count: number; resetAt: number }>()
 const API_RATE_WINDOW_MS = 60_000
 const API_RATE_MAX_REQUESTS = 300
+/** Maximum number of tracked IPs in the API rate-limiter map to prevent unbounded memory growth. */
+const API_RATE_MAP_MAX_SIZE = 10_000
 
 // Periodic cleanup to prevent unbounded map growth
 const apiRateCleanup = setInterval(() => {
@@ -277,6 +279,10 @@ app.use('/api/', (req, res, next) => {
   const now = Date.now()
   const entry = apiRateBuckets.get(ip)
   if (!entry || now >= entry.resetAt) {
+    // Reject new IPs if the map has grown too large (DoS protection)
+    if (!entry && apiRateBuckets.size >= API_RATE_MAP_MAX_SIZE) {
+      return res.status(429).json({ error: 'Too Many Requests', retryAfter: 60 })
+    }
     apiRateBuckets.set(ip, { count: 1, resetAt: now + API_RATE_WINDOW_MS })
     return next()
   }

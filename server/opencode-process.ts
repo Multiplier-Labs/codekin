@@ -19,7 +19,7 @@
 import { EventEmitter } from 'events'
 import { spawn, type ChildProcess } from 'child_process'
 import { randomUUID } from 'crypto'
-import { readFileSync, existsSync } from 'fs'
+import { readFileSync, existsSync, statSync } from 'fs'
 import { extname } from 'path'
 import type { ClaudeProcessEvents } from './claude-process.js'
 import { OPENCODE_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
@@ -877,6 +877,13 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       for (const filePath of filePaths) {
         if (!existsSync(filePath)) {
           console.warn(`[opencode] Attached file not found: ${filePath}`)
+          continue
+        }
+        const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024 // 10 MB
+        const fileSize = statSync(filePath).size
+        if (fileSize > MAX_ATTACHMENT_BYTES) {
+          console.warn(`[opencode] Attachment too large (${(fileSize / 1024 / 1024).toFixed(1)} MB, max 10 MB): ${filePath}`)
+          parts.push({ type: 'text', text: `[Attachment rejected: ${filePath.split('/').pop()} is ${(fileSize / 1024 / 1024).toFixed(1)} MB, exceeding the 10 MB limit]` })
           continue
         }
         const ext = extname(filePath).toLowerCase()
