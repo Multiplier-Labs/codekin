@@ -1,7 +1,7 @@
 import { execFile, execFileSync } from 'child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
-import { join, resolve } from 'path'
+import { dirname, join, resolve } from 'path'
 import { promisify } from 'util'
 
 const execFileAsync = promisify(execFile)
@@ -272,13 +272,26 @@ export function commitReportsFromWorkspace(
       // Copy each report file into the worktree
       for (const report of reportFiles) {
         const destPath = join(wtDir, report.relativePath)
-        const destDir = join(destPath, '..')
+        const destDir = dirname(destPath)
         if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true })
         writeFileSync(destPath, report.content, 'utf-8')
       }
 
-      // Stage, commit, push
+      // Stage and check if there's anything to commit
       execFileSync('git', ['add', '.codekin/reports'], { cwd: wtDir, timeout: 10_000 })
+      try {
+        execFileSync('git', ['diff', '--cached', '--quiet'], { cwd: wtDir, timeout: 5_000 })
+        // Exit code 0 means no staged changes — nothing to commit
+        console.log(`[webhook-workspace] Reports already up to date on ${REPORTS_BRANCH}, skipping commit`)
+        return
+      } catch {
+        // Exit code 1 means there are staged changes — proceed with commit
+      }
+
+      // Set git identity in the worktree to avoid "Author identity unknown"
+      execFileSync('git', ['config', 'user.name', 'Codekin Workflow'], { cwd: wtDir, timeout: 5_000 })
+      execFileSync('git', ['config', 'user.email', 'workflow@codekin.local'], { cwd: wtDir, timeout: 5_000 })
+
       execFileSync(
         'git', ['commit', '-m', `${commitPrefix} ${dateStr}`],
         { cwd: wtDir, timeout: 15_000 },
