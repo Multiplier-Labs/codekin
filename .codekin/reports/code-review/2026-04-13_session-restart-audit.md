@@ -215,7 +215,9 @@ if (hasPendingInput) {
 
 **Files:** `session-restart-scheduler.ts:51-89`
 
-**Description:** The restart counter resets after a 5-minute cooldown window. A session that crashes at minute 0, 1, 2 (3 restarts, exhausted), then stays alive until minute 7, gets a fresh 3-restart budget. The lifetime cap of 10 total restarts prevents infinite loops, but 10 restarts over 20+ minutes of a flaky session may be too generous. Each restart creates a context injection, potential duplicate messages, and user-facing churn.
+**Description:** The restart counter resets after a 5-minute cooldown window. A session that crashes at minute 0, 1, 2 (3 restarts, exhausted), then stays alive until minute 7, gets a fresh 3-restart budget. Over an hour, a flaky session could restart up to 36 times before hitting the lifetime cap of 10.
+
+Wait — the lifetime cap of 10 actually catches this. After 10 total restarts, the session stops permanently. So the real issue is: 10 restarts over potentially 20+ minutes of a flaky session may be too generous. Each restart creates a context injection, potential duplicate messages, and user-facing churn.
 
 **Impact:** Extended flappy behavior before the session finally gives up.
 
