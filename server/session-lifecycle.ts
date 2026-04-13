@@ -65,6 +65,8 @@ export class SessionLifecycle {
     const session = this.deps.getSession(sessionId)
     if (!session) return false
 
+    console.log(`[startClaude] session=${sessionId} model=${session.model} resume=${!!session.claudeSessionId} existingProcess=${!!session.claudeProcess} caller=${new Error().stack?.split('\n')[2]?.trim()}`)
+
     // Clear stopped flag and any pending restart timer on explicit start
     session._stoppedByUser = false
     if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
