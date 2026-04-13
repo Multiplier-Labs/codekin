@@ -153,7 +153,7 @@ export class ProcessCoordinator {
         console.log(`[coordinator] ${this.sessionId} enqueue=${label} gen=${this.generation}`)
         return op().then(resolve as (v: T | boolean) => void, reject)
       })
-      .catch(() => { /* swallow to keep chain alive */ })
+      .catch((err) => { console.warn(`[coordinator] ${this.sessionId} enqueue=${label} swallowed error:`, err) })
     return result
   }
 

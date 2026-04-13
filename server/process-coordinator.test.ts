@@ -360,4 +360,84 @@ describe('ProcessCoordinator', () => {
       expect(deps.startProcess).toHaveBeenCalled()
     })
   })
+
+  describe('startProcess returns false', () => {
+    it('requestStart resolves to false when startProcess fails', async () => {
+      const deps = makeDeps({ startProcess: vi.fn(() => false) })
+      const coord = new ProcessCoordinator('s1', deps)
+      const result = await coord.requestStart()
+      expect(result).toBe(false)
+    })
+
+    it('requestReconfigure resolves to false when startProcess fails', async () => {
+      const deps = makeDeps({ startProcess: vi.fn(() => false) })
+      const coord = new ProcessCoordinator('s1', deps)
+      const applied = vi.fn()
+      const result = await coord.requestReconfigure(applied)
+      expect(result).toBe(false)
+      expect(applied).toHaveBeenCalled()
+      expect(deps.stopProcessAndWait).toHaveBeenCalled()
+    })
+
+    it('scheduleRestart onAfterStart not called when startProcess fails', async () => {
+      const deps = makeDeps({ startProcess: vi.fn(() => false) })
+      const coord = new ProcessCoordinator('s1', deps)
+      const onAfterStart = vi.fn()
+      coord.scheduleRestart(100, undefined, onAfterStart)
+
+      vi.advanceTimersByTime(200)
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(deps.startProcess).toHaveBeenCalled()
+      expect(onAfterStart).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('API retry cancelled by concurrent restart', () => {
+    it('scheduleRestart cancels pending API retry timer', async () => {
+      const sendRetry = vi.fn()
+      const deps = makeDeps()
+      const coord = new ProcessCoordinator('s1', deps)
+
+      coord.scheduleApiRetry(5000, sendRetry)
+      // A crash-restart should cancel the API retry
+      coord.scheduleRestart(100)
+
+      vi.advanceTimersByTime(6000)
+      await vi.advanceTimersByTimeAsync(0)
+
+      // API retry should NOT have fired (cancelled by scheduleRestart timer setup)
+      expect(sendRetry).not.toHaveBeenCalled()
+      // But start should have fired from the restart
+      expect(deps.startProcess).toHaveBeenCalled()
+    })
+
+    it('requestReconfigure cancels pending API retry timer', async () => {
+      const sendRetry = vi.fn()
+      const deps = makeDeps()
+      const coord = new ProcessCoordinator('s1', deps)
+
+      coord.scheduleApiRetry(5000, sendRetry)
+      await coord.requestReconfigure(() => {})
+
+      vi.advanceTimersByTime(6000)
+      expect(sendRetry).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('stopProcessAndWait failure', () => {
+    it('chain remains usable after stop rejects', async () => {
+      const deps = makeDeps({
+        stopProcessAndWait: vi.fn(async () => { throw new Error('kill failed') }),
+      })
+      const coord = new ProcessCoordinator('s1', deps)
+
+      const stopResult = coord.requestStop()
+      await expect(stopResult).rejects.toThrow('kill failed')
+
+      // Chain should still work
+      const started = await coord.requestStart()
+      expect(started).toBe(true)
+    })
+  })
 })

@@ -570,6 +570,17 @@ describe('SessionLifecycle', () => {
       lifecycle.stopClaude('sess-1')
       expect(deps.broadcast).not.toHaveBeenCalled()
     })
+
+    it('calls coordinator.teardown()', () => {
+      const proc = new EventEmitter() as any
+      proc.removeAllListeners = vi.fn()
+      proc.stop = vi.fn()
+      session.claudeProcess = proc
+
+      lifecycle.stopClaude('sess-1')
+
+      expect(session.coordinator.teardown).toHaveBeenCalled()
+    })
   })
 
   describe('stopClaudeAndWait', () => {
@@ -584,6 +595,18 @@ describe('SessionLifecycle', () => {
 
       expect(proc.waitForExit).toHaveBeenCalled()
       expect(session.claudeProcess).toBeNull()
+    })
+
+    it('calls coordinator.teardown()', async () => {
+      const proc = new EventEmitter() as any
+      proc.removeAllListeners = vi.fn()
+      proc.stop = vi.fn()
+      proc.waitForExit = vi.fn(() => Promise.resolve())
+      session.claudeProcess = proc
+
+      await lifecycle.stopClaudeAndWait('sess-1')
+
+      expect(session.coordinator.teardown).toHaveBeenCalled()
     })
   })
 })
