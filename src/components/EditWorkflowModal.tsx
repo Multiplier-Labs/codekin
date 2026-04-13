@@ -8,7 +8,7 @@ import { IconX, IconLoader2 } from '@tabler/icons-react'
 import type { ReviewRepoConfig } from '../lib/workflowApi'
 import {
   WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL, isBiweeklyDow,
-  buildCron, parseCron, describeCron, kindLabel, isEventDriven, EVENT_CRON,
+  buildCron, parseCron, describeCron, kindLabel, isEventDriven, EVENT_CRON, normalizeModel,
 } from '../lib/workflowHelpers'
 import type { CodingProvider } from '../types'
 import { CategoryBadge } from './WorkflowBadges'
@@ -43,7 +43,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
     cronMinute: parsed.minute,
     cronDow: parsed.dow,
     customPrompt: repo.customPrompt ?? '',
-    model: repo.model ?? '',
+    model: normalizeModel(repo.model),
     provider: inferredProvider,
   })
   const [saving, setSaving] = useState(false)
@@ -172,18 +172,23 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
                   </div>
                   <label className="block text-[13px] font-medium text-neutral-3 mb-1">Frequency</label>
                   <div className="flex flex-wrap gap-1 mb-1.5">
-                    {DAY_PRESETS.map(p => (
-                      <button
-                        key={p.dow}
-                        type="button"
-                        onClick={() => setForm(f => ({ ...f, cronDow: p.dow }))}
-                        className={btnClass(form.cronDow === p.dow)}
-                      >
-                        {p.label}
-                      </button>
-                    ))}
+                    {DAY_PRESETS.map(p => {
+                      const isActive = form.cronDow === p.dow
+                        || (p.dow === '*' && isDay)
+                        || (p.dow === '1-5' && isDay && Number(baseDow) >= 1 && Number(baseDow) <= 5)
+                      return (
+                        <button
+                          key={p.dow}
+                          type="button"
+                          onClick={() => setForm(f => ({ ...f, cronDow: p.dow }))}
+                          className={btnClass(isActive)}
+                        >
+                          {p.label}
+                        </button>
+                      )
+                    })}
                   </div>
-                  <div className="flex flex-wrap gap-1">
+                  <div className="grid grid-cols-7 gap-1">
                     {DAY_INDIVIDUAL.map(p => (
                       <button
                         key={p.dow}

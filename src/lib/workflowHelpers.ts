@@ -44,6 +44,15 @@ export const MODEL_OPTIONS = [
   { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
 ]
 
+/** Model IDs that map to the default (Opus). Stored explicitly by some configs but equivalent to empty. */
+const DEFAULT_MODEL_IDS = new Set(['claude-opus-4-6', 'claude-opus-4-5-20250918'])
+
+/** Normalize a model value: known Opus model IDs → empty string (server default). */
+export function normalizeModel(model: string | undefined): string {
+  if (!model) return ''
+  return DEFAULT_MODEL_IDS.has(model) ? '' : model
+}
+
 /** Cron day-of-week presets (Daily, Weekdays) for the schedule picker. `dow` is the cron field value. */
 export const DAY_PRESETS = [
   { label: 'Daily', dow: '*' },
