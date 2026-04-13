@@ -143,7 +143,7 @@ export class ProcessCoordinator {
   // Internal machinery
   // ---------------------------------------------------------------------------
 
-  private enqueue<T>(_label: string, op: () => Promise<T | boolean>): Promise<T> {
+  private enqueue<T>(label: string, op: () => Promise<T | boolean>): Promise<T> {
     this.cancelAllTimers()
     let resolve!: (v: T) => void
     let reject!: (e: unknown) => void
