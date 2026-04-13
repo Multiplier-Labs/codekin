@@ -9,6 +9,7 @@
 import type { WebSocket } from 'ws'
 import type { CodingProcess, CodingProvider } from './coding-process.js'
 import type { PlanManager } from './plan-manager.js'
+import type { ProcessCoordinator } from './process-coordinator.js'
 
 /**
  * Permission modes supported by the Claude CLI `--permission-mode` flag.
@@ -126,6 +127,9 @@ export interface Session {
   _lastActivityAt: number
   /** Plan mode state machine — owns the enter/review/approve lifecycle. */
   planManager: PlanManager
+  /** Unified process lifecycle coordinator — serializes start/stop/restart
+   *  operations and manages all lifecycle timers (restart, API retry). */
+  coordinator: ProcessCoordinator
   /** Guard to prevent double-wiring PlanManager event listeners. */
   _planManagerWired?: boolean
 }

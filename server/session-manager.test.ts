@@ -2804,20 +2804,21 @@ describe('SessionManager', () => {
       const cp = fakeClaudeProcess(true)
       s.claudeProcess = cp
 
-      const stopWaitSpy = vi.spyOn(sm, 'stopClaudeAndWait').mockResolvedValue()
-      const startSpy = vi.spyOn(sm, 'startClaude').mockReturnValue(true)
+      // Spy on the coordinator's requestReconfigure to verify it's called
+      const reconfigSpy = vi.spyOn(s.coordinator, 'requestReconfigure')
+        .mockResolvedValue(true)
 
       sm.setModel(s.id, 'sonnet')
 
-      // stopClaudeAndWait is called, but startClaude is deferred until the promise resolves
-      expect(stopWaitSpy).toHaveBeenCalledWith(s.id)
-      expect(startSpy).not.toHaveBeenCalled()
+      // requestReconfigure is called with a callback that sets the model
+      expect(reconfigSpy).toHaveBeenCalledWith(expect.any(Function))
 
-      // Let the promise chain resolve
-      await vi.waitFor(() => expect(startSpy).toHaveBeenCalledWith(s.id))
+      // Verify the callback sets the model
+      const applyFn = reconfigSpy.mock.calls[0][0]
+      applyFn()
+      expect(s.model).toBe('sonnet')
 
-      stopWaitSpy.mockRestore()
-      startSpy.mockRestore()
+      reconfigSpy.mockRestore()
     })
 
     it('does NOT restart when process is not alive', () => {
@@ -2831,6 +2832,134 @@ describe('SessionManager', () => {
 
       expect(stopWaitSpy).not.toHaveBeenCalled()
       stopWaitSpy.mockRestore()
+    })
+  })
+
+  describe('setProvider()', () => {
+    it('calls coordinator.requestReconfigure when process is alive', () => {
+      const s = sm.create('test', '/tmp')
+      const cp = fakeClaudeProcess(true)
+      s.claudeProcess = cp
+
+      const reconfigSpy = vi.spyOn(s.coordinator, 'requestReconfigure')
+        .mockResolvedValue(true)
+
+      sm.setProvider(s.id, 'openai' as any)
+
+      expect(reconfigSpy).toHaveBeenCalledWith(expect.any(Function))
+
+      // Verify the callback sets the provider and clears claudeSessionId
+      const applyFn = reconfigSpy.mock.calls[0][0]
+      applyFn()
+      expect(s.provider).toBe('openai')
+      expect(s.claudeSessionId).toBeNull()
+
+      reconfigSpy.mockRestore()
+    })
+
+    it('does NOT call coordinator when process is not alive', () => {
+      const s = sm.create('test', '/tmp')
+      const cp = fakeClaudeProcess(false)
+      s.claudeProcess = cp
+
+      const reconfigSpy = vi.spyOn(s.coordinator, 'requestReconfigure')
+
+      sm.setProvider(s.id, 'openai' as any)
+
+      expect(reconfigSpy).not.toHaveBeenCalled()
+      expect(s.provider).toBe('openai')
+
+      reconfigSpy.mockRestore()
+    })
+  })
+
+  describe('setPermissionMode()', () => {
+    it('calls coordinator.requestReconfigure when process is alive', () => {
+      const s = sm.create('test', '/tmp')
+      const cp = fakeClaudeProcess(true)
+      s.claudeProcess = cp
+
+      const reconfigSpy = vi.spyOn(s.coordinator, 'requestReconfigure')
+        .mockResolvedValue(true)
+
+      sm.setPermissionMode(s.id, 'bypassPermissions')
+
+      expect(reconfigSpy).toHaveBeenCalledWith(expect.any(Function))
+
+      // Verify the callback sets the permission mode
+      const applyFn = reconfigSpy.mock.calls[0][0]
+      applyFn()
+      expect(s.permissionMode).toBe('bypassPermissions')
+
+      reconfigSpy.mockRestore()
+    })
+
+    it('does NOT call coordinator when process is not alive', () => {
+      const s = sm.create('test', '/tmp')
+      const cp = fakeClaudeProcess(false)
+      s.claudeProcess = cp
+
+      const reconfigSpy = vi.spyOn(s.coordinator, 'requestReconfigure')
+
+      sm.setPermissionMode(s.id, 'bypassPermissions')
+
+      expect(reconfigSpy).not.toHaveBeenCalled()
+      expect(s.permissionMode).toBe('bypassPermissions')
+
+      reconfigSpy.mockRestore()
+    })
+  })
+
+  describe('sendInput() coordinator integration', () => {
+    it('calls coordinator.clearUserStopped', () => {
+      const s = sm.create('test', '/tmp')
+      const cp = fakeClaudeProcess(true)
+      s.claudeProcess = cp
+
+      const clearSpy = vi.spyOn(s.coordinator, 'clearUserStopped')
+
+      sm.sendInput(s.id, 'hello')
+
+      expect(clearSpy).toHaveBeenCalled()
+      clearSpy.mockRestore()
+    })
+  })
+
+  describe('finalizeResult() coordinator integration', () => {
+    it('calls coordinator.cancelApiRetry on successful result', () => {
+      const s = sm.create('test', '/tmp')
+      const cp = fakeClaudeProcess(true)
+      s.claudeProcess = cp
+      ;(s as any)._lastUserInput = 'test'
+
+      const cancelSpy = vi.spyOn(s.coordinator, 'cancelApiRetry')
+
+      // Call finalizeResult via handleClaudeResult with a non-error result
+      ;(sm as any).handleClaudeResult(s, s.id, 'success result', false)
+
+      expect(cancelSpy).toHaveBeenCalled()
+      cancelSpy.mockRestore()
+    })
+  })
+
+  describe('handleApiRetry() coordinator integration', () => {
+    it('delegates timer to coordinator.scheduleApiRetry', () => {
+      vi.useFakeTimers()
+      const s = sm.create('test', '/tmp')
+      const cp = fakeClaudeProcess(true)
+      s.claudeProcess = cp
+      ;(s as any)._lastUserInput = 'test input'
+      ;(s as any)._lastUserInputAt = Date.now()
+
+      const scheduleSpy = vi.spyOn(s.coordinator, 'scheduleApiRetry')
+
+      // Trigger a retryable API error
+      ;(sm as any).handleClaudeResult(s, s.id, 'API error: overloaded', true)
+
+      expect(scheduleSpy).toHaveBeenCalledWith(expect.any(Number), expect.any(Function))
+
+      scheduleSpy.mockRestore()
+      vi.useRealTimers()
     })
   })
 

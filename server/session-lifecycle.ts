@@ -398,48 +398,39 @@ export class SessionLifecycle {
       this.deps.addToHistory(session, msg)
       this.deps.broadcast(session, msg)
 
-      // Clear any previously scheduled restart to prevent duplicate spawns
-      if (session._restartTimer) clearTimeout(session._restartTimer)
-      const generationAtSchedule = session._processGeneration ?? 0
-      session._restartTimer = setTimeout(() => {
-        session._restartTimer = undefined
-        // Verify session still exists, hasn't been stopped, and no newer
-        // process was started (by sendInput, manual restart, etc.) while
-        // this timer was pending.
-        if (!this.deps.hasSession(sessionId) || session._stoppedByUser) return
-        if (session._processGeneration !== generationAtSchedule) {
-          console.log(`[restart] Skipping stale restart timer for session ${sessionId} (generation ${generationAtSchedule} → ${session._processGeneration})`)
-          return
-        }
-        // startClaude uses --resume when claudeSessionId exists, so the CLI
-        // picks up the full conversation history from the JSONL automatically.
-        this.startClaude(sessionId)
+      // Delegate restart scheduling to the coordinator.  The coordinator
+      // manages timer deduplication, generation-based staleness, and mutex
+      // serialization — replacing the manual _restartTimer / _processGeneration
+      // pattern that was previously here.
+      session.coordinator.scheduleRestart(
+        action.delayMs,
+        // onBeforeStart: verify session still exists
+        () => this.deps.hasSession(sessionId),
+        // onAfterStart: inject context for sessions that lost their claudeSessionId
+        // (crashed before system_init).  startClaude uses --resume when
+        // claudeSessionId exists, so this only fires for fresh-start fallbacks.
+        () => {
+          if (!session.claudeSessionId && session.claudeProcess) {
+            const pendingInput = session._lastUserInput
+            const inputAge = session._lastUserInputAt ? Date.now() - session._lastUserInputAt : Infinity
+            const hasPendingInput = pendingInput && inputAge < 60_000
 
-        // Fallback: if claudeSessionId was already null (fresh session that
-        // crashed before system_init), inject a context summary so the new
-        // session has some awareness of prior conversation.
-        if (!session.claudeSessionId && session.claudeProcess) {
-          const pendingInput = session._lastUserInput
-          const inputAge = session._lastUserInputAt ? Date.now() - session._lastUserInputAt : Infinity
-          const hasPendingInput = pendingInput && inputAge < 60_000
-
-          if (session.outputHistory.length > 0) {
-            const context = this.deps.buildSessionContext(session)
-            if (context) {
-              const msg = hasPendingInput
-                ? context + '\n\n' + pendingInput
-                : context + '\n\n[Session resumed after process restart. Continue where you left off. If you were in the middle of a task, resume it.]'
-              session.claudeProcess?.sendMessage(msg)
-              return
+            if (session.outputHistory.length > 0) {
+              const context = this.deps.buildSessionContext(session)
+              if (context) {
+                const msg = hasPendingInput
+                  ? context + '\n\n' + pendingInput
+                  : context + '\n\n[Session resumed after process restart. Continue where you left off. If you were in the middle of a task, resume it.]'
+                session.claudeProcess?.sendMessage(msg)
+                return
+              }
+            }
+            if (hasPendingInput) {
+              session.claudeProcess?.sendMessage(pendingInput)
             }
           }
-          // No output history but pending input (brand new session that
-          // crashed before responding) — re-send the user's message.
-          if (hasPendingInput) {
-            session.claudeProcess?.sendMessage(pendingInput)
-          }
-        }
-      }, action.delayMs)
+        },
+      )
       return
     }
 
@@ -461,8 +452,7 @@ export class SessionLifecycle {
     const session = this.deps.getSession(sessionId)
     if (session?.claudeProcess) {
       session._stoppedByUser = true
-      if (session._apiRetry?.timer) clearTimeout(session._apiRetry.timer)
-      if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
+      session.coordinator.teardown()
       session.claudeProcess.removeAllListeners()
       session.claudeProcess.stop()
       session.claudeProcess = null
@@ -481,8 +471,7 @@ export class SessionLifecycle {
 
     const cp = session.claudeProcess
     session._stoppedByUser = true
-    if (session._apiRetry?.timer) clearTimeout(session._apiRetry.timer)
-    if (session._restartTimer) { clearTimeout(session._restartTimer); session._restartTimer = undefined }
+    session.coordinator.teardown()
     cp.removeAllListeners()
     cp.stop()
     this.deps.broadcast(session, { type: 'claude_stopped' })
