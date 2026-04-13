@@ -1,5 +1,5 @@
-import { execFile } from 'child_process'
-import { existsSync, mkdirSync, rmSync } from 'fs'
+import { execFile, execFileSync } from 'child_process'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { join, resolve } from 'path'
 import { promisify } from 'util'
@@ -187,6 +187,122 @@ export async function createWorkspace(
         console.warn(`[webhook-workspace] Failed to clean up partial workspace ${workspacePath}:`, cleanupErr)
       }
     }
+  }
+}
+
+/**
+ * Scan a workspace for report files under `.codekin/reports/` and commit them
+ * to the `codekin/reports` branch of origin.
+ *
+ * Uses the same worktree-based approach as the MD workflow engine's save_report
+ * step so that reports from both systems end up in the same place.  This must
+ * be called BEFORE cleanupWorkspace() so the workspace still exists.
+ *
+ * @param sessionId    - Session ID (used for log context and temp worktree naming).
+ * @param commitPrefix - Commit message prefix (e.g. "chore: code review").
+ */
+export function commitReportsFromWorkspace(
+  sessionId: string,
+  commitPrefix: string,
+): void {
+  const workspacePath = join(WORKSPACES_DIR, sessionId)
+  const reportsDir = join(workspacePath, '.codekin', 'reports')
+  if (!existsSync(reportsDir)) return
+
+  // Collect all .md report files
+  const reportFiles: { relativePath: string; content: string }[] = []
+  try {
+    for (const category of readdirSync(reportsDir)) {
+      const categoryDir = join(reportsDir, category)
+      let entries: string[]
+      try { entries = readdirSync(categoryDir) } catch { continue }
+      for (const file of entries) {
+        if (!file.endsWith('.md')) continue
+        const fullPath = join(categoryDir, file)
+        reportFiles.push({
+          relativePath: `.codekin/reports/${category}/${file}`,
+          content: readFileSync(fullPath, 'utf-8'),
+        })
+      }
+    }
+  } catch (err) {
+    console.warn(`[webhook-workspace] Failed to scan reports in ${workspacePath}:`, err)
+    return
+  }
+
+  if (reportFiles.length === 0) return
+
+  const REPORTS_BRANCH = 'codekin/reports'
+  const dateStr = new Date().toISOString().slice(0, 10)
+
+  try {
+    // Ensure the reports branch exists on origin (create from HEAD if needed)
+    try {
+      execFileSync('git', ['rev-parse', '--verify', `origin/${REPORTS_BRANCH}`], {
+        cwd: workspacePath, timeout: 5_000, stdio: 'pipe',
+      })
+    } catch {
+      // Remote branch doesn't exist — create it locally first
+      try {
+        execFileSync('git', ['branch', REPORTS_BRANCH], {
+          cwd: workspacePath, timeout: 5_000,
+        })
+      } catch {
+        // May already exist locally
+      }
+    }
+
+    // Fetch the reports branch so we have the latest
+    try {
+      execFileSync(
+        'git', ['fetch', 'origin', `${REPORTS_BRANCH}:${REPORTS_BRANCH}`],
+        { cwd: workspacePath, timeout: 30_000, stdio: 'pipe', env: GIT_AUTH_ENV },
+      )
+    } catch {
+      // Branch may not exist on remote yet — that's OK
+    }
+
+    // Create a temporary worktree on the reports branch
+    const wtDir = join(WORKSPACES_DIR, `.report-wt-${sessionId.slice(0, 12)}`)
+    try {
+      execFileSync('git', ['worktree', 'add', wtDir, REPORTS_BRANCH], {
+        cwd: workspacePath, timeout: 10_000,
+      })
+
+      // Copy each report file into the worktree
+      for (const report of reportFiles) {
+        const destPath = join(wtDir, report.relativePath)
+        const destDir = join(destPath, '..')
+        if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true })
+        writeFileSync(destPath, report.content, 'utf-8')
+      }
+
+      // Stage, commit, push
+      execFileSync('git', ['add', '.codekin/reports'], { cwd: wtDir, timeout: 10_000 })
+      execFileSync(
+        'git', ['commit', '-m', `${commitPrefix} ${dateStr}`],
+        { cwd: wtDir, timeout: 15_000 },
+      )
+      console.log(`[webhook-workspace] Committed ${reportFiles.length} report(s) on ${REPORTS_BRANCH}`)
+
+      try {
+        execFileSync(
+          'git', ['push', 'origin', REPORTS_BRANCH],
+          { cwd: wtDir, timeout: 30_000, stdio: 'pipe', env: GIT_AUTH_ENV },
+        )
+        console.log(`[webhook-workspace] Pushed ${REPORTS_BRANCH} to origin`)
+      } catch (pushErr) {
+        console.warn(`[webhook-workspace] Could not push ${REPORTS_BRANCH}: ${pushErr}`)
+      }
+    } finally {
+      try {
+        execFileSync('git', ['worktree', 'remove', '--force', wtDir], {
+          cwd: workspacePath, timeout: 10_000,
+        })
+      } catch { /* best-effort cleanup */ }
+    }
+  } catch (err) {
+    console.warn(`[webhook-workspace] Could not commit reports from workspace ${sessionId}: ${err}`)
   }
 }
 
