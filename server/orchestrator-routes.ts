@@ -13,7 +13,7 @@ import type { SessionManager } from './session-manager.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, getOrCreateOrchestratorId } from './orchestrator-manager.js'
 import { getAgentDisplayName, REPOS_ROOT } from './config.js'
 import { scanRepoReports, readReport, getReportsSince } from './orchestrator-reports.js'
-import { OrchestratorMemory } from './orchestrator-memory.js'
+import { OrchestratorMemory, type MemoryType, type TrustLevel } from './orchestrator-memory.js'
 import { OrchestratorChildManager } from './orchestrator-children.js'
 import type { OrchestratorMonitor } from './orchestrator-monitor.js'
 import {
@@ -23,6 +23,89 @@ import {
   recordDecision, assessDecisionOutcome, getPendingOutcomeAssessments,
   type FindingOutcome,
 } from './orchestrator-learning.js'
+
+// ---------------------------------------------------------------------------
+// Request body interfaces for route handlers
+// ---------------------------------------------------------------------------
+
+interface SpawnChildBody {
+  repo: string
+  task: string
+  branchName: string
+  completionPolicy?: 'pr' | 'merge' | 'commit-only'
+  deployAfter?: boolean
+  useWorktree?: boolean
+  model?: string
+  allowedTools?: string[]
+}
+
+interface MemoryUpsertBody {
+  id?: string
+  memoryType: MemoryType
+  scope?: string | null
+  title?: string | null
+  content: string
+  sourceRef?: string | null
+  confidence?: number
+  expiresAt?: string | null
+  isPinned?: boolean
+  tags?: string[]
+}
+
+interface TrustActionBody {
+  action: string
+  category: string
+  repo?: string | null
+}
+
+interface TrustPinBody extends TrustActionBody {
+  level: TrustLevel
+}
+
+interface NotificationMarkBody {
+  ids: string[]
+}
+
+interface SessionRespondBody {
+  requestId?: string
+  value: string
+}
+
+interface MemoryExtractBody {
+  userMessage: string
+  assistantResponse: string
+  repo?: string | null
+  sourceRef?: string | null
+}
+
+interface FindingOutcomeBody {
+  findingId: string
+  repo: string
+  category: string
+  severity?: string
+  action: 'implemented' | 'skipped' | 'deferred'
+  reason?: string
+  sessionId?: string | null
+  outcome?: 'success' | 'failure' | 'pending' | null
+}
+
+interface SkillUpdateBody {
+  domain: string
+  signal: string
+  level: 'beginner' | 'intermediate' | 'advanced' | 'expert'
+}
+
+interface DecisionBody {
+  decision: string
+  rationale: string
+  repo?: string | null
+  relatedFinding?: string | null
+  expectedOutcome?: string
+}
+
+interface DecisionAssessBody {
+  actualOutcome: string
+}
 
 type VerifyFn = (token: string | undefined) => boolean
 type VerifySessionFn = (token: string | undefined, sessionId: string | undefined) => boolean
@@ -143,7 +226,7 @@ export function createOrchestratorRouter(
   })
 
   /** Spawn a child session. */
-  router.post('/api/orchestrator/children', async (req, res) => {
+  router.post('/api/orchestrator/children', async (req: Request<Record<string, string>, unknown, SpawnChildBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { repo, task, branchName, completionPolicy, deployAfter, useWorktree, model, allowedTools } = req.body
@@ -216,7 +299,7 @@ export function createOrchestratorRouter(
       res.json({ items })
     } else {
       const items = memory.list({
-        memoryType: type as import('./orchestrator-memory.js').MemoryType | undefined,
+        memoryType: type as MemoryType | undefined,
         limit,
       })
       res.json({ items })
@@ -224,7 +307,7 @@ export function createOrchestratorRouter(
   })
 
   /** Add or update a memory item. */
-  router.post('/api/orchestrator/memory', (req, res) => {
+  router.post('/api/orchestrator/memory', (req: Request<Record<string, string>, unknown, MemoryUpsertBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { id, memoryType, scope, title, content, sourceRef, confidence, expiresAt, isPinned, tags } = req.body
@@ -281,7 +364,7 @@ export function createOrchestratorRouter(
   })
 
   /** Record an approval. */
-  router.post('/api/orchestrator/trust/approve', (req, res) => {
+  router.post('/api/orchestrator/trust/approve', (req: Request<Record<string, string>, unknown, TrustActionBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { action, category, repo } = req.body
@@ -294,7 +377,7 @@ export function createOrchestratorRouter(
   })
 
   /** Record a rejection (resets trust to ASK). */
-  router.post('/api/orchestrator/trust/reject', (req, res) => {
+  router.post('/api/orchestrator/trust/reject', (req: Request<Record<string, string>, unknown, TrustActionBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { action, category, repo } = req.body
@@ -307,7 +390,7 @@ export function createOrchestratorRouter(
   })
 
   /** Pin trust to a specific level (user override). */
-  router.post('/api/orchestrator/trust/pin', (req, res) => {
+  router.post('/api/orchestrator/trust/pin', (req: Request<Record<string, string>, unknown, TrustPinBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { action, category, repo, level } = req.body
@@ -343,7 +426,7 @@ export function createOrchestratorRouter(
   })
 
   /** Mark notifications as delivered. */
-  router.post('/api/orchestrator/notifications/mark-delivered', (req, res) => {
+  router.post('/api/orchestrator/notifications/mark-delivered', (req: Request<Record<string, string>, unknown, NotificationMarkBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const monitor = monitorRef?.current
@@ -386,7 +469,7 @@ export function createOrchestratorRouter(
   // -------------------------------------------------------------------------
 
   /** Extract memory candidates from a session interaction. */
-  router.post('/api/orchestrator/memory/extract', (req, res) => {
+  router.post('/api/orchestrator/memory/extract', (req: Request<Record<string, string>, unknown, MemoryExtractBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { userMessage, assistantResponse, repo, sourceRef } = req.body
@@ -413,7 +496,7 @@ export function createOrchestratorRouter(
   // -------------------------------------------------------------------------
 
   /** Record a finding outcome. */
-  router.post('/api/orchestrator/findings/outcome', (req, res) => {
+  router.post('/api/orchestrator/findings/outcome', (req: Request<Record<string, string>, unknown, FindingOutcomeBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { findingId, repo, category, severity, action, reason, sessionId, outcome } = req.body
@@ -421,14 +504,15 @@ export function createOrchestratorRouter(
       return res.status(400).json({ error: 'Missing required fields' })
     }
 
-    const id = recordFindingOutcome(memory, {
+    const findingRecord: FindingOutcome = {
       findingId, repo, category,
       severity: severity ?? 'medium',
       action, reason: reason ?? '',
       sessionId: sessionId ?? null,
       outcome: outcome ?? null,
       timestamp: new Date().toISOString(),
-    } as FindingOutcome)
+    }
+    const id = recordFindingOutcome(memory, findingRecord)
 
     res.json({ id })
   })
@@ -459,7 +543,7 @@ export function createOrchestratorRouter(
   })
 
   /** Update a skill level based on an observed signal. */
-  router.post('/api/orchestrator/skills', (req, res) => {
+  router.post('/api/orchestrator/skills', (req: Request<Record<string, string>, unknown, SkillUpdateBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { domain, signal, level } = req.body
@@ -476,7 +560,7 @@ export function createOrchestratorRouter(
   // -------------------------------------------------------------------------
 
   /** Record a decision. */
-  router.post('/api/orchestrator/decisions', (req, res) => {
+  router.post('/api/orchestrator/decisions', (req: Request<Record<string, string>, unknown, DecisionBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { decision, rationale, repo, relatedFinding, expectedOutcome } = req.body
@@ -494,7 +578,7 @@ export function createOrchestratorRouter(
   })
 
   /** Assess a decision's outcome. */
-  router.post('/api/orchestrator/decisions/:id/assess', (req, res) => {
+  router.post('/api/orchestrator/decisions/:id/assess', (req: Request<{ id: string }, unknown, DecisionAssessBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { actualOutcome } = req.body
@@ -523,7 +607,7 @@ export function createOrchestratorRouter(
   })
 
   /** Approve or deny a pending prompt in any session. */
-  router.post('/api/orchestrator/sessions/:id/respond', (req, res) => {
+  router.post('/api/orchestrator/sessions/:id/respond', (req: Request<{ id: string }, unknown, SessionRespondBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const sessionId = req.params.id

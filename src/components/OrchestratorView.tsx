@@ -56,7 +56,7 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
         headers: { Authorization: `Bearer ${token}` },
       })
       if (res.ok) {
-        const data = await res.json()
+        const data = await res.json() as { stats: DashboardStats }
         setStats(data.stats)
       }
     } catch {

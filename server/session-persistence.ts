@@ -11,6 +11,7 @@ import { DATA_DIR } from './config.js'
 import { PlanManager } from './plan-manager.js'
 import type { ProcessCoordinator } from './process-coordinator.js'
 import type { Session, WsServerMessage } from './types.js'
+import { jsonParse } from './json-parse.js'
 
 const SESSIONS_FILE = join(DATA_DIR, 'sessions.json')
 const PERSIST_DEBOUNCE_MS = 2000
@@ -86,7 +87,7 @@ export class SessionPersistence {
 
     try {
       const raw = readFileSync(SESSIONS_FILE, 'utf-8')
-      const data: PersistedSession[] = JSON.parse(raw)
+      const data = jsonParse(raw) as PersistedSession[]
 
       for (const s of data) {
         // Validate worktree paths on restore: if the worktree directory was

@@ -18,7 +18,7 @@ interface DocFile {
 /** Load starred doc paths from localStorage. Keyed by repo dir. */
 function loadStarred(): Record<string, string[]> {
   try {
-    return JSON.parse(localStorage.getItem(STARRED_KEY) || '{}')
+    return JSON.parse(localStorage.getItem(STARRED_KEY) || '{}') as Record<string, string[]>
   } catch {
     return {}
   }
@@ -96,7 +96,7 @@ export function useDocsBrowser(): UseDocsBrowserReturn {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) throw new Error(`Failed to list docs: ${res.status}`)
-      const data = await res.json()
+      const data = await res.json() as { files?: DocFile[] }
       setPickerFiles(data.files ?? [])
     } catch {
       setPickerFiles([])
@@ -124,7 +124,7 @@ export function useDocsBrowser(): UseDocsBrowserReturn {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) throw new Error(`Failed to load file: ${res.status}`)
-      const data = await res.json()
+      const data = await res.json() as { content: string }
       setContent(data.content)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load file')

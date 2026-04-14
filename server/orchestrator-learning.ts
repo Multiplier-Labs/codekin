@@ -13,6 +13,7 @@
 
 import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs'
 import { join } from 'path'
+import { jsonParse } from './json-parse.js'
 import { OrchestratorMemory, type MemoryType, type MemoryItem } from './orchestrator-memory.js'
 import { ORCHESTRATOR_DIR } from './orchestrator-manager.js'
 
@@ -508,7 +509,7 @@ const SKILL_PROFILE_FILE = join(ORCHESTRATOR_DIR, 'skill-profile.json')
 export function loadSkillProfile(): SkillLevel[] {
   if (!existsSync(SKILL_PROFILE_FILE)) return []
   try {
-    return JSON.parse(readFileSync(SKILL_PROFILE_FILE, 'utf-8'))
+    return jsonParse(readFileSync(SKILL_PROFILE_FILE, 'utf-8')) as SkillLevel[]
   } catch {
     return []
   }

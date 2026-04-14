@@ -20,6 +20,7 @@ import type { ClaudeEvent, ClaudeSystemInit, ClaudeControlRequest, ClaudeResultE
 import { SCREENSHOTS_DIR, CLAUDE_BINARY } from './config.js'
 import { summarizeToolInput } from './tool-labels.js'
 import { redactSecrets } from './crypto-utils.js'
+import { jsonParse } from './json-parse.js'
 import { CLAUDE_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
 
 /** Options for constructing a ClaudeProcess. Replaces positional constructor parameters. */
@@ -294,7 +295,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   private handleLine(line: string): void {
     let event: ClaudeEvent
     try {
-      event = JSON.parse(line)
+      event = jsonParse(line) as ClaudeEvent
     } catch {
       console.warn(`[claude stdout] unparseable line: ${line.slice(0, 200)}`)
       return
@@ -426,7 +427,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   private handleToolBlockStop(): void {
     let summary: string | undefined
     try {
-      const parsed = JSON.parse(this.tool.input)
+      const parsed = jsonParse(this.tool.input) as Record<string, unknown>
       summary = summarizeToolInput(this.tool.name!, parsed) || undefined
       const isTask = this.tool.name === 'TaskCreate' || this.tool.name === 'TaskUpdate' || this.tool.name === 'TodoWrite' || this.tool.name === 'TodoRead'
       if (isTask && TOOL_DEBUG) console.log('[task-debug] tool:', this.tool.name, 'input:', JSON.stringify(parsed).slice(0, 200))

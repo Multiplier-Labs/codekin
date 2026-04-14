@@ -47,7 +47,7 @@ function parseApiError(text: string): { prefix: string; errorType: string; messa
   const jsonMatch = text.match(/^(.*?)\s*(\{.+\})\s*$/)
   if (!jsonMatch) return null
   try {
-    const parsed = JSON.parse(jsonMatch[2])
+    const parsed = JSON.parse(jsonMatch[2]) as { error?: { message?: string; type?: string }; request_id?: string } | null
     if (parsed?.error?.message) {
       return {
         prefix: jsonMatch[1].replace(/\s*$/, ''),
