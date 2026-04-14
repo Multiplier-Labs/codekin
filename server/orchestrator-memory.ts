@@ -10,6 +10,7 @@ import { existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { ORCHESTRATOR_DIR } from './orchestrator-manager.js'
+import { jsonParse } from './json-parse.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -361,7 +362,7 @@ export class OrchestratorMemory {
       updatedAt: row.updated_at as string,
       expiresAt: row.expires_at as string | null,
       isPinned: (row.is_pinned as number) === 1,
-      tags: JSON.parse((row.tags as string) || '[]'),
+      tags: jsonParse((row.tags as string) || '[]') as string[],
     }
   }
 

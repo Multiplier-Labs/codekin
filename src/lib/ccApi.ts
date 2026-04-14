@@ -12,6 +12,22 @@ const BASE = '/cc'
 /** Authelia login page — redirect here when session expires. */
 const LOGIN_URL = '/authelia/login'
 
+/**
+ * Type-safe wrapper around Response.json().
+ * Centralises the single unavoidable `any` → `T` assertion so call-sites stay clean.
+ */
+async function jsonBody<T>(res: Response): Promise<T> {
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+  return await res.json()
+}
+
+/**
+ * Extract a JSON error body from a failed response, falling back to a default message.
+ */
+async function errorBody(res: Response, fallback: string): Promise<{ error?: string }> {
+  return await jsonBody<{ error?: string }>(res).catch(() => ({ error: fallback }))
+}
+
 /** Build standard JSON + Bearer auth headers for REST calls. */
 function headers(token: string): HeadersInit {
   return {
@@ -92,7 +108,7 @@ export async function verifyToken(token: string): Promise<boolean> {
     headers: headers(token),
   })
   if (!res.ok) return false
-  const data = await res.json()
+  const data = await jsonBody<{ valid?: boolean }>(res)
   return data.valid === true
 }
 
@@ -102,7 +118,7 @@ export async function listSessions(token: string): Promise<Session[]> {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to list sessions: ${res.status}`)
-  const data = await res.json()
+  const data = await jsonBody<{ sessions?: Session[] }>(res)
   return data.sessions ?? []
 }
 
@@ -118,7 +134,7 @@ export async function createSession(
     body: JSON.stringify({ name, workingDir }),
   })
   if (!res.ok) throw new Error(`Failed to create session: ${res.status}`)
-  return res.json()
+  return jsonBody<{ sessionId: string; session: Session }>(res)
 }
 
 /** Rename a session. */
@@ -147,7 +163,7 @@ export async function startOrchestrator(token: string): Promise<{ sessionId: str
     headers: headers(token),
   })
   if (!res.ok) throw new Error(`Failed to start orchestrator: ${res.status}`)
-  return res.json()
+  return jsonBody<{ sessionId: string; status: string; agentName?: string }>(res)
 }
 
 /** Upload a file via the server. Returns the server-side file path. */
@@ -160,7 +176,7 @@ export async function uploadFile(token: string, file: File): Promise<string> {
     body: form,
   })
   if (!res.ok) throw new Error(`Upload failed: ${res.status}`)
-  const data = await res.json()
+  const data = await jsonBody<{ path: string }>(res)
   return data.path
 }
 
@@ -193,7 +209,7 @@ export async function getRepoApprovals(token: string, workingDir: string): Promi
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to fetch approvals: ${res.status}`)
-  return res.json()
+  return jsonBody<RepoApprovals>(res)
 }
 
 /** Remove an auto-approval rule for a repo (by workingDir path). */
@@ -256,7 +272,7 @@ export async function listArchivedSessions(token: string, workingDir?: string): 
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to list archived sessions: ${res.status}`)
-  const data = await res.json()
+  const data = await jsonBody<{ sessions?: ArchivedSessionInfo[] }>(res)
   return data.sessions ?? []
 }
 
@@ -266,7 +282,7 @@ export async function getArchivedSession(token: string, sessionId: string): Prom
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get archived session: ${res.status}`)
-  return res.json()
+  return jsonBody<ArchivedSessionFull>(res)
 }
 
 /** Delete an archived session permanently. */
@@ -284,7 +300,7 @@ export async function getRetentionDays(token: string): Promise<number> {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get retention settings: ${res.status}`)
-  const data = await res.json()
+  const data = await jsonBody<{ days: number }>(res)
   return data.days
 }
 
@@ -296,7 +312,7 @@ export async function setRetentionDays(token: string, days: number): Promise<num
     body: JSON.stringify({ days }),
   })
   if (!res.ok) throw new Error(`Failed to update retention settings: ${res.status}`)
-  const data = await res.json()
+  const data = await jsonBody<{ days: number }>(res)
   return data.days
 }
 
@@ -306,7 +322,7 @@ export async function getReposPath(token: string): Promise<string> {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get repos path: ${res.status}`)
-  const data = await res.json()
+  const data = await jsonBody<{ path: string }>(res)
   return data.path
 }
 
@@ -318,10 +334,10 @@ export async function setReposPath(token: string, path: string): Promise<string>
     body: JSON.stringify({ path }),
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: 'Failed to save repos path' }))
-    throw new Error(data.error || `Failed to set repos path: ${res.status}`)
+    const data = await errorBody(res, 'Failed to save repos path')
+    throw new Error(data.error ?? `Failed to set repos path: ${res.status}`)
   }
-  const data = await res.json()
+  const data = await jsonBody<{ path: string }>(res)
   return data.path
 }
 
@@ -331,7 +347,7 @@ export async function getQueueMessages(token: string): Promise<boolean> {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get queue messages setting: ${res.status}`)
-  const data = await res.json()
+  const data = await jsonBody<{ enabled: boolean }>(res)
   return data.enabled
 }
 
@@ -343,7 +359,7 @@ export async function setQueueMessages(token: string, enabled: boolean): Promise
     body: JSON.stringify({ enabled }),
   })
   if (!res.ok) throw new Error(`Failed to update queue messages setting: ${res.status}`)
-  const data = await res.json()
+  const data = await jsonBody<{ enabled: boolean }>(res)
   return data.enabled
 }
 
@@ -353,7 +369,7 @@ export async function getWorktreePrefix(token: string): Promise<string> {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get worktree prefix: ${res.status}`)
-  const data = await res.json()
+  const data = await jsonBody<{ prefix: string }>(res)
   return data.prefix
 }
 
@@ -365,10 +381,10 @@ export async function setWorktreePrefix(token: string, prefix: string): Promise<
     body: JSON.stringify({ prefix }),
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: 'Failed to save worktree prefix' }))
-    throw new Error(data.error || `Failed to set worktree prefix: ${res.status}`)
+    const data = await errorBody(res, 'Failed to save worktree prefix')
+    throw new Error(data.error ?? `Failed to set worktree prefix: ${res.status}`)
   }
-  const data = await res.json()
+  const data = await jsonBody<{ prefix: string }>(res)
   return data.prefix
 }
 
@@ -378,7 +394,7 @@ export async function getAgentName(token: string): Promise<string> {
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get agent name: ${res.status}`)
-  const data = await res.json()
+  const data = await jsonBody<{ name: string }>(res)
   return data.name
 }
 
@@ -390,10 +406,10 @@ export async function setAgentName(token: string, name: string): Promise<string>
     body: JSON.stringify({ name }),
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: 'Failed to save agent name' }))
-    throw new Error(data.error || `Failed to set agent name: ${res.status}`)
+    const data = await errorBody(res, 'Failed to save agent name')
+    throw new Error(data.error ?? `Failed to set agent name: ${res.status}`)
   }
-  const data = await res.json()
+  const data = await jsonBody<{ name: string }>(res)
   return data.name
 }
 
@@ -404,10 +420,10 @@ export async function browseDirs(token: string, path?: string): Promise<{ path: 
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: 'Failed to browse directory' }))
-    throw new Error(data.error || `Failed to browse: ${res.status}`)
+    const data = await errorBody(res, 'Failed to browse directory')
+    throw new Error(data.error ?? `Failed to browse: ${res.status}`)
   }
-  return res.json()
+  return jsonBody<{ path: string; dirs: string[] }>(res)
 }
 
 /** Webhook configuration (public subset, no secret). */
@@ -423,7 +439,7 @@ export async function getWebhookConfig(token: string): Promise<WebhookConfigInfo
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get webhook config: ${res.status}`)
-  const data = await res.json()
+  const data = await jsonBody<{ config: WebhookConfigInfo }>(res)
   return data.config
 }
 
@@ -433,7 +449,8 @@ export async function getWebhookEvents(token: string): Promise<Array<{ id: strin
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Failed to get webhook events: ${res.status}`)
-  const data = await res.json()
+  type Event = { id: string; repo: string; branch: string; workflow: string; conclusion: string; status: string; receivedAt: string }
+  const data = await jsonBody<{ events?: Event[] }>(res)
   return data.events ?? []
 }
 
@@ -459,7 +476,10 @@ export async function fetchOpenCodeModels(
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) return { models: [], defaults: {} }
-  return res.json()
+  return jsonBody<{
+    models: Array<{ id: string; name: string; providerID: string; providerName: string }>
+    defaults: Record<string, string>
+  }>(res)
 }
 
 // ---------------------------------------------------------------------------
@@ -494,7 +514,7 @@ export async function getIntegrationHealth(
     headers: { Authorization: `Bearer ${token}` },
   })
   if (!res.ok) throw new Error(`Health check failed: ${res.status}`)
-  return res.json()
+  return jsonBody<HealthCheckResult>(res)
 }
 
 /** Preview for webhook setup (what would be created/changed). */
@@ -517,7 +537,7 @@ export async function previewWebhookSetup(
     body: JSON.stringify({ repo, webhookUrl, dryRun: true }),
   })
   if (!res.ok) throw new Error(`Setup preview failed: ${res.status}`)
-  return res.json()
+  return jsonBody<{ preview: SetupPreview; secretGenerated: boolean }>(res)
 }
 
 /** Apply webhook setup (create or update webhook on GitHub). */
@@ -532,10 +552,10 @@ export async function applyWebhookSetup(
     body: JSON.stringify({ repo, webhookUrl }),
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: 'Setup failed' }))
-    throw new Error(data.error || `Setup failed: ${res.status}`)
+    const data = await errorBody(res, 'Setup failed')
+    throw new Error(data.error ?? `Setup failed: ${res.status}`)
   }
-  return res.json()
+  return jsonBody<{ preview: SetupPreview; secretGenerated: boolean; webhook?: unknown }>(res)
 }
 
 /** Send a test ping to the webhook and check delivery. */
@@ -550,8 +570,8 @@ export async function testWebhookDelivery(
     body: JSON.stringify({ repo, webhookUrl }),
   })
   if (!res.ok) {
-    const data = await res.json().catch(() => ({ error: 'Test failed' }))
-    throw new Error(data.error || `Test failed: ${res.status}`)
+    const data = await errorBody(res, 'Test failed')
+    throw new Error(data.error ?? `Test failed: ${res.status}`)
   }
-  return res.json()
+  return jsonBody<{ success: boolean; message: string; delivery?: { id: number; statusCode: number; event: string } }>(res)
 }

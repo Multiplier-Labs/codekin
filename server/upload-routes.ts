@@ -114,7 +114,8 @@ async function fetchGhRepos(owner: string, reposRoot: string) {
     '--json', 'name,url,description',
     '--limit', '100',
   ], { env: ghEnv })
-  const repos: Array<{ name: string; url: string; description?: string }> = JSON.parse(stdout)
+  const parsed: unknown = JSON.parse(stdout)
+  const repos = parsed as Array<{ name: string; url: string; description?: string }>
   repos.sort((a, b) => a.name.localeCompare(b.name))
   return repos.map((r) => {
     const repoPath = `${reposRoot}/${r.name}`
@@ -193,10 +194,12 @@ export function createUploadRouter(
     }
     next()
   }, (req, res, next) => {
-    upload.single('file')(req, res, (err) => {
+    upload.single('file')(req, res, (err: unknown) => {
       if (err) {
-        const status = err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE' ? 413 : 400
-        res.status(status).json({ error: err.message })
+        const isMulterLimit = err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE'
+        const status = isMulterLimit ? 413 : 400
+        const message = err instanceof Error ? err.message : 'Upload failed'
+        res.status(status).json({ error: message })
         return
       }
       next()
@@ -262,14 +265,14 @@ export function createUploadRouter(
   })
 
   // --- Clone a repo ---
-  router.post('/api/clone', (req, res) => {
+  router.post('/api/clone', (req: Request<Record<string, string>, unknown, { owner?: string; name?: string }>, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) {
       res.status(401).json({ error: 'Unauthorized' })
       return
     }
 
-    const { owner, name } = req.body as { owner?: string; name?: string }
+    const { owner, name } = req.body
     if (!owner || !name) {
       res.status(400).json({ error: 'Missing owner or name' })
       return

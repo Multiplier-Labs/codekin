@@ -15,7 +15,7 @@ const RECENTS_KEY = 'codekin.workflowRecentModels'
 const MAX_RECENTS = 5
 
 function getRecents(): string[] {
-  try { return JSON.parse(localStorage.getItem(RECENTS_KEY) || '[]') } catch { return [] }
+  try { return JSON.parse(localStorage.getItem(RECENTS_KEY) || '[]') as string[] } catch { return [] }
 }
 
 function addRecent(id: string) {

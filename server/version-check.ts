@@ -8,6 +8,7 @@
 
 import { readFileSync } from 'fs'
 import { join } from 'path'
+import { jsonParse } from './json-parse.js'
 
 /** How long to cache the npm lookup result (6 hours). */
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000
@@ -33,8 +34,8 @@ const state: VersionState = {
 function getCurrentVersion(): string {
   if (!state.currentVersion) {
     const pkgPath = join(import.meta.dirname, '..', 'package.json')
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'))
-    state.currentVersion = pkg.version
+    const pkg = jsonParse(readFileSync(pkgPath, 'utf-8')) as Record<string, unknown>
+    state.currentVersion = String(pkg.version)
   }
   return state.currentVersion
 }

@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, chmodSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import type { WsServerMessage } from './types.js'
+import { jsonParse } from './json-parse.js'
 
 const DATA_DIR = join(homedir(), '.codekin')
 const DB_PATH = join(DATA_DIR, 'session-archive.db')
@@ -164,7 +165,7 @@ export class SessionArchive {
       created: row.created,
       archivedAt: row.archived_at,
       messageCount: row.message_count,
-      outputHistory: (() => { try { return JSON.parse(row.output_history) } catch { return [] } })(),
+      outputHistory: (() => { try { return jsonParse(row.output_history) as WsServerMessage[] } catch { return [] } })(),
     }
   }
 

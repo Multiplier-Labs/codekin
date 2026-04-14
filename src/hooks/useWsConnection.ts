@@ -97,7 +97,7 @@ export function useWsConnection({
 
     ws.onmessage = (event) => {
       let msg: WsServerMessage
-      try { msg = JSON.parse(event.data) } catch { return }
+      try { msg = JSON.parse(event.data as string) as WsServerMessage } catch { return }
 
       // Intercept health-check pong before forwarding
       if (msg.type === 'pong' && awaitingHealthPong.current) {

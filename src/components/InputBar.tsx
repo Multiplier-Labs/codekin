@@ -151,7 +151,7 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
   }
 
   const getRecents = (): string[] => {
-    try { return JSON.parse(localStorage.getItem(RECENTS_KEY) || '[]') } catch { return [] }
+    try { return JSON.parse(localStorage.getItem(RECENTS_KEY) || '[]') as string[] } catch { return [] }
   }
 
   const addRecent = (id: string) => {

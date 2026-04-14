@@ -32,6 +32,7 @@ import { generate404Page, generate500Page } from './error-page.js'
 import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
 import { CommitEventHandler } from './commit-event-handler.js'
+import { jsonParse } from './json-parse.js'
 import { checkForUpdates, getUpdateNotification } from './version-check.js'
 import { stopOpenCodeServer } from './opencode-process.js'
 import { ensureHookConfig, syncCommitHooks } from './commit-event-hooks.js'
@@ -125,10 +126,10 @@ let apiKeySet = apiKeyEnvSet
 if (claudeAvailable && !apiKeyEnvSet) {
   try {
     const authJson = execFileSync(CLAUDE_BINARY, ['auth', 'status'], { timeout: 5000 }).toString()
-    const auth = JSON.parse(authJson)
+    const auth = jsonParse(authJson) as Record<string, unknown>
     if (auth.loggedIn) {
       apiKeySet = true
-      console.log(`Claude CLI authenticated via ${auth.authMethod || 'unknown method'}`)
+      console.log(`Claude CLI authenticated via ${String(auth.authMethod || 'unknown method')}`)
     }
   } catch {
     // auth status check failed — fall through to warning
@@ -477,7 +478,7 @@ wss.on('connection', (ws: WebSocket, req) => {
   ws.on('message', (raw) => {
     let msg: WsClientMessage
     try {
-      msg = JSON.parse(raw.toString())
+      msg = jsonParse(raw.toString()) as WsClientMessage
     } catch {
       return
     }

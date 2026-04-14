@@ -13,6 +13,7 @@ import { randomUUID } from 'crypto'
 import { ApprovalManager } from './approval-manager.js'
 import type { CodingProcess } from './coding-process.js'
 import type { PromptQuestion, Session, WsServerMessage } from './types.js'
+import { jsonParse } from './json-parse.js'
 
 /** Dependencies injected by SessionManager so PromptRouter can interact with session state. */
 export interface PromptRouterDeps {
@@ -555,7 +556,7 @@ export class PromptRouter {
     if (typeof value === 'string') {
       // Try parsing as JSON answers map (multi-question flow)
       try {
-        const parsed = JSON.parse(value)
+        const parsed: unknown = jsonParse(value)
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
           answers = parsed as Record<string, string>
         } else if (Array.isArray(questions) && questions.length > 0) {

@@ -56,7 +56,7 @@ export function usePromptState(): UsePromptStateReturn {
     }
     setQueues(prev => {
       const next = new Map(prev)
-      const sessionQueue = new Map(prev.get(sessionId) ?? new Map())
+      const sessionQueue = new Map(prev.get(sessionId) ?? new Map<string, PromptEntry>())
       sessionQueue.set(requestId, entry)
       next.set(sessionId, sessionQueue)
       return next

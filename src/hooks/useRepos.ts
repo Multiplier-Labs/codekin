@@ -51,7 +51,7 @@ export function useRepos(token?: string) {
         setGhMissing(data.ghMissing ?? false)
         setError(null)
       })
-      .catch(err => setError(err.message))
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setLoading(false))
   }, [token, refreshCount])
 

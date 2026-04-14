@@ -1,4 +1,5 @@
 import type { RequestHandler } from 'express'
+import { jsonParse } from './json-parse.js'
 
 /**
  * Creates a per-key sliding window rate limiter for webhook requests.
@@ -56,9 +57,9 @@ export function createWebhookRateLimiter(
     let key: string | undefined
 
     try {
-      const body = req.body
+      const body: unknown = req.body
       if (Buffer.isBuffer(body)) {
-        const parsed = JSON.parse(body.toString('utf-8'))
+        const parsed: unknown = jsonParse(body.toString('utf-8'))
         key = keyExtractor(parsed)
       }
     } catch {

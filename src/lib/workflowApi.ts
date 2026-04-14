@@ -6,6 +6,11 @@
 
 const BASE = '/cc/api/workflows'
 
+/** Type-safe wrapper around Response.json() to avoid `any` leakage. */
+async function fetchJson<T>(res: Response): Promise<T> {
+  return res.json() as Promise<T>
+}
+
 function headers(token: string): HeadersInit {
   return {
     'Content-Type': 'application/json',
@@ -95,7 +100,7 @@ export async function listKinds(
   const qs = params.toString()
   const res = await fetch(`${BASE}/kinds${qs ? `?${qs}` : ''}`, { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to list kinds: ${res.status}`)
-  const data = await res.json()
+  const data = await fetchJson<{ kinds: WorkflowKindInfo[] }>(res)
   return data.kinds
 }
 
@@ -117,7 +122,7 @@ export async function listRuns(
   const qs = params.toString()
   const res = await fetch(`${BASE}/runs${qs ? `?${qs}` : ''}`, { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to list runs: ${res.status}`)
-  const data = await res.json()
+  const data = await fetchJson<{ runs: WorkflowRun[] }>(res)
   return data.runs
 }
 
@@ -125,7 +130,7 @@ export async function listRuns(
 export async function getRun(token: string, runId: string): Promise<WorkflowRunWithSteps> {
   const res = await fetch(`${BASE}/runs/${runId}`, { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to get run: ${res.status}`)
-  const data = await res.json()
+  const data = await fetchJson<{ run: WorkflowRunWithSteps }>(res)
   return data.run
 }
 
@@ -141,7 +146,7 @@ export async function triggerRun(
     body: JSON.stringify({ kind, input }),
   })
   if (!res.ok) throw new Error(`Failed to trigger run: ${res.status}`)
-  const data = await res.json()
+  const data = await fetchJson<{ run: WorkflowRun }>(res)
   return data.run
 }
 
@@ -162,7 +167,7 @@ export async function cancelRun(token: string, runId: string): Promise<void> {
 export async function listSchedules(token: string): Promise<CronSchedule[]> {
   const res = await fetch(`${BASE}/schedules`, { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to list schedules: ${res.status}`)
-  const data = await res.json()
+  const data = await fetchJson<{ schedules: CronSchedule[] }>(res)
   return data.schedules
 }
 
@@ -173,7 +178,7 @@ export async function triggerSchedule(token: string, id: string): Promise<Workfl
     headers: headers(token),
   })
   if (!res.ok) throw new Error(`Failed to trigger schedule: ${res.status}`)
-  const data = await res.json()
+  const data = await fetchJson<{ run: WorkflowRun }>(res)
   return data.run
 }
 
@@ -185,7 +190,7 @@ export async function triggerSchedule(token: string, id: string): Promise<Workfl
 export async function getConfig(token: string): Promise<WorkflowConfig> {
   const res = await fetch(`${BASE}/config`, { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to get config: ${res.status}`)
-  const data = await res.json()
+  const data = await fetchJson<{ config: WorkflowConfig }>(res)
   return data.config
 }
 
@@ -213,7 +218,7 @@ export async function addRepoConfig(
     body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(`Failed to add repo config: ${res.status}`)
-  const data = await res.json()
+  const data = await fetchJson<{ config: WorkflowConfig; webhookSetup?: WebhookSetupResult }>(res)
   return { config: data.config, webhookSetup: data.webhookSetup }
 }
 
@@ -224,7 +229,7 @@ export async function removeRepoConfig(token: string, id: string): Promise<Workf
     headers: headers(token),
   })
   if (!res.ok) throw new Error(`Failed to remove repo config: ${res.status}`)
-  const data = await res.json()
+  const data = await fetchJson<{ config: WorkflowConfig }>(res)
   return data.config
 }
 
@@ -240,6 +245,6 @@ export async function patchRepoConfig(
     body: JSON.stringify(patch),
   })
   if (!res.ok) throw new Error(`Failed to update repo config: ${res.status}`)
-  const data = await res.json()
+  const data = await fetchJson<{ config: WorkflowConfig }>(res)
   return data.config
 }

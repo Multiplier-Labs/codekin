@@ -12,6 +12,7 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
+import { jsonParse } from './json-parse.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -507,8 +508,8 @@ export class WorkflowEngine extends EventEmitter {
         runId: s.run_id,
         key: s.key,
         status: s.status as StepStatus,
-        input: s.input ? JSON.parse(s.input) : null,
-        output: s.output ? JSON.parse(s.output) : null,
+        input: s.input ? jsonParse(s.input) as Record<string, unknown> : null,
+        output: s.output ? jsonParse(s.output) as Record<string, unknown> : null,
         error: s.error,
         startedAt: s.started_at,
         completedAt: s.completed_at,
@@ -518,8 +519,8 @@ export class WorkflowEngine extends EventEmitter {
       id: row.id,
       kind: row.kind,
       status: row.status as RunStatus,
-      input: JSON.parse(row.input),
-      output: row.output ? JSON.parse(row.output) : null,
+      input: jsonParse(row.input) as Record<string, unknown>,
+      output: row.output ? jsonParse(row.output) as Record<string, unknown> : null,
       error: row.error,
       createdAt: row.created_at,
       startedAt: row.started_at,
@@ -544,8 +545,8 @@ export class WorkflowEngine extends EventEmitter {
       id: row.id,
       kind: row.kind,
       status: row.status as RunStatus,
-      input: JSON.parse(row.input),
-      output: row.output ? JSON.parse(row.output) : null,
+      input: jsonParse(row.input) as Record<string, unknown>,
+      output: row.output ? jsonParse(row.output) as Record<string, unknown> : null,
       error: row.error,
       createdAt: row.created_at,
       startedAt: row.started_at,
@@ -589,7 +590,7 @@ export class WorkflowEngine extends EventEmitter {
       id: row.id as string,
       kind: row.kind as string,
       cronExpression: row.cron_expression as string,
-      input: JSON.parse(row.input as string),
+      input: jsonParse(row.input as string) as Record<string, unknown>,
       enabled: !!(row.enabled as number),
       lastRunAt: row.last_run_at as string | null,
       nextRunAt: row.next_run_at as string | null,
@@ -604,7 +605,7 @@ export class WorkflowEngine extends EventEmitter {
       id: row.id as string,
       kind: row.kind as string,
       cronExpression: row.cron_expression as string,
-      input: JSON.parse(row.input as string),
+      input: jsonParse(row.input as string) as Record<string, unknown>,
       enabled: !!(row.enabled as number),
       lastRunAt: row.last_run_at as string | null,
       nextRunAt: row.next_run_at as string | null,

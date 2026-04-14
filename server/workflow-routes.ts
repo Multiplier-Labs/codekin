@@ -29,6 +29,41 @@ import {
 } from './webhook-github-setup.js'
 import { loadWebhookConfig, generateWebhookSecret, saveWebhookConfig } from './webhook-config.js'
 
+// ---------------------------------------------------------------------------
+// Request body interfaces for route handlers
+// ---------------------------------------------------------------------------
+
+interface CommitEventBody {
+  repoPath: string
+  branch: string
+  commitHash: string
+  commitMessage: string
+  author?: string
+}
+
+interface StartRunBody {
+  kind: string
+  input?: Record<string, unknown>
+}
+
+interface UpsertScheduleBody {
+  id: string
+  kind: string
+  cronExpression: string
+  input?: Record<string, unknown>
+  enabled?: boolean
+}
+
+interface PatchScheduleBody {
+  cronExpression?: string
+  input?: Record<string, unknown>
+  enabled?: boolean
+}
+
+interface AddRepoBody extends Partial<ReviewRepoConfig> {
+  webhookUrl?: string
+}
+
 const execFileAsync = promisify(execFile)
 
 /**
@@ -201,7 +236,7 @@ export function createWorkflowRouter(
   // without touching the other routes.
   // -------------------------------------------------------------------------
 
-  router.post('/commit-event', async (req, res) => {
+  router.post('/commit-event', async (req: Request<Record<string, string>, unknown, CommitEventBody>, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) {
       return res.status(401).json({ error: 'Unauthorized' })
@@ -278,7 +313,7 @@ export function createWorkflowRouter(
     res.json({ run })
   })
 
-  router.post('/runs', async (req, res) => {
+  router.post('/runs', async (req: Request<Record<string, string>, unknown, StartRunBody>, res) => {
     const engine = getEngine(res)
     if (!engine) return
 
@@ -313,7 +348,7 @@ export function createWorkflowRouter(
     res.json({ schedules: engine.listSchedules() })
   })
 
-  router.post('/schedules', (req, res) => {
+  router.post('/schedules', (req: Request<Record<string, string>, unknown, UpsertScheduleBody>, res) => {
     const engine = getEngine(res)
     if (!engine) return
 
@@ -335,7 +370,7 @@ export function createWorkflowRouter(
     res.json({ schedule })
   })
 
-  router.patch('/schedules/:id', (req, res) => {
+  router.patch('/schedules/:id', (req: Request<{ id: string }, unknown, PatchScheduleBody>, res) => {
     const engine = getEngine(res)
     if (!engine) return
 
@@ -381,9 +416,9 @@ export function createWorkflowRouter(
     res.json({ config: loadWorkflowConfig() })
   })
 
-  router.post('/config/repos', async (req, res) => {
+  router.post('/config/repos', async (req: Request<Record<string, string>, unknown, AddRepoBody>, res) => {
     const { id, name, repoPath, cronExpression, enabled, customPrompt, kind, model, provider, webhookUrl } =
-      req.body as Partial<ReviewRepoConfig> & { webhookUrl?: string }
+      req.body
     if (!id || !name || !repoPath || !cronExpression) {
       return res.status(400).json({ error: 'Missing required fields: id, name, repoPath, cronExpression' })
     }
@@ -439,7 +474,7 @@ export function createWorkflowRouter(
     res.json({ config, webhookSetup })
   })
 
-  router.patch('/config/repos/:id', (req, res) => {
+  router.patch('/config/repos/:id', (req: Request<{ id: string }, unknown, Partial<ReviewRepoConfig>>, res) => {
     try {
       const config = updateReviewRepo(req.params.id, req.body)
       try {

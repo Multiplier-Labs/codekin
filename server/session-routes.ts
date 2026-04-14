@@ -19,7 +19,71 @@ import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
 import { REPOS_ROOT, getAgentDisplayName } from './config.js'
 import { VALID_PROVIDERS } from './types.js'
+import type { CodingProvider } from './coding-process.js'
+import type { PermissionMode } from './types.js'
 import { fetchOpenCodeModels } from './opencode-process.js'
+
+// ---------------------------------------------------------------------------
+// Request body interfaces for route handlers
+// ---------------------------------------------------------------------------
+
+interface CreateSessionBody {
+  name: string
+  workingDir: string
+  provider?: CodingProvider
+  model?: string
+  permissionMode?: PermissionMode
+}
+
+interface RenameBody {
+  name: string
+}
+
+interface RetentionBody {
+  days: number
+}
+
+interface WorktreePrefixBody {
+  prefix: string
+}
+
+interface QueueMessagesBody {
+  enabled: boolean
+}
+
+interface ReposPathBody {
+  path: string
+}
+
+interface AgentNameBody {
+  name: string
+}
+
+interface ApprovalDeleteBody {
+  tool?: string
+  command?: string
+  pattern?: string
+  items?: Array<{ tool?: string; command?: string; pattern?: string }>
+}
+
+interface HookDecisionBody {
+  sessionId: string
+  toolName: string
+  toolInput?: Record<string, unknown>
+}
+
+interface HookNotifyBody {
+  sessionId: string
+  notificationType?: string
+  title?: string
+  message?: string
+  toolName?: string
+  toolInput?: Record<string, unknown>
+}
+
+interface AuthValidateBody {
+  sessionId?: string
+}
 
 /** Expand leading ~ to the user's home directory. */
 function expandTilde(p: string): string {
@@ -72,7 +136,7 @@ export function createSessionRouter(
     res.json(result)
   })
 
-  router.post('/api/sessions/create', (req, res) => {
+  router.post('/api/sessions/create', (req: Request<Record<string, string>, unknown, CreateSessionBody>, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
 
@@ -141,7 +205,7 @@ export function createSessionRouter(
     }
   })
 
-  router.patch('/api/sessions/:id/rename', (req, res) => {
+  router.patch('/api/sessions/:id/rename', (req: Request<{ id: string }, unknown, RenameBody>, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
 
@@ -179,7 +243,7 @@ export function createSessionRouter(
     res.json({ days: sessions.archive.getRetentionDays() })
   })
 
-  router.put('/api/settings/retention', (req, res) => {
+  router.put('/api/settings/retention', (req: Request<Record<string, string>, unknown, RetentionBody>, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
     const { days } = req.body
@@ -198,7 +262,7 @@ export function createSessionRouter(
     res.json({ prefix: sessions.getWorktreeBranchPrefix() })
   })
 
-  router.put('/api/settings/worktree-prefix', (req, res) => {
+  router.put('/api/settings/worktree-prefix', (req: Request<Record<string, string>, unknown, WorktreePrefixBody>, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
     const { prefix } = req.body
@@ -221,7 +285,7 @@ export function createSessionRouter(
     res.json({ enabled: enabled === 'true' })
   })
 
-  router.put('/api/settings/queue-messages', (req, res) => {
+  router.put('/api/settings/queue-messages', (req: Request<Record<string, string>, unknown, QueueMessagesBody>, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
     const { enabled } = req.body
@@ -241,7 +305,7 @@ export function createSessionRouter(
     res.json({ path })
   })
 
-  router.put('/api/settings/repos-path', (req, res) => {
+  router.put('/api/settings/repos-path', (req: Request<Record<string, string>, unknown, ReposPathBody>, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
     const { path: rawPath } = req.body
@@ -268,7 +332,7 @@ export function createSessionRouter(
     res.json({ name: getAgentDisplayName() })
   })
 
-  router.put('/api/settings/agent-name', (req, res) => {
+  router.put('/api/settings/agent-name', (req: Request<Record<string, string>, unknown, AgentNameBody>, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
     const { name } = req.body
@@ -348,7 +412,7 @@ export function createSessionRouter(
     res.json(sessions.approvalManager.getGlobalApprovals())
   })
 
-  router.delete('/api/approvals', (req, res) => {
+  router.delete('/api/approvals', (req: Request<Record<string, string>, unknown, ApprovalDeleteBody>, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
 
@@ -377,7 +441,7 @@ export function createSessionRouter(
   // --- Hook endpoints (called by Claude CLI hooks) ---
 
   // Hook decision endpoint (PreToolUse hook via HttpTransport)
-  router.post('/api/hook-decision', async (req, res) => {
+  router.post('/api/hook-decision', async (req: Request<Record<string, string>, unknown, HookDecisionBody>, res) => {
     const token = extractToken(req)
     const { sessionId, toolName, toolInput } = req.body
     if (!verifyHookToken(token, sessionId)) return res.status(401).json({ error: 'Unauthorized' })
@@ -398,10 +462,11 @@ export function createSessionRouter(
       // The tool expects `answers: Record<string, string>` keyed by question text.
       // The UI sends either a JSON answers map (multi-question) or a plain string.
       if (toolName === 'AskUserQuestion' && result.allow && result.answer !== undefined) {
-        const questions = (toolInput || {}).questions as Array<{ question: string }> | undefined
+        const inputObj = toolInput ?? {}
+        const questions = inputObj.questions as Array<{ question: string }> | undefined
         let answers: Record<string, string> = {}
         try {
-          const parsed = JSON.parse(result.answer)
+          const parsed: unknown = JSON.parse(result.answer)
           if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
             answers = parsed as Record<string, string>
           } else if (Array.isArray(questions) && questions.length > 0) {
@@ -434,7 +499,7 @@ export function createSessionRouter(
   })
 
   // Hook notification endpoint (Notification hook via HttpTransport)
-  router.post('/api/hook-notify', (req, res) => {
+  router.post('/api/hook-notify', (req: Request<Record<string, string>, unknown, HookNotifyBody>, res) => {
     const token = extractToken(req)
     const { sessionId, notificationType, title, message } = req.body
     if (!verifyHookToken(token, sessionId)) {
@@ -466,9 +531,9 @@ export function createSessionRouter(
   })
 
   // Auth validation endpoint (PermissionRequest hook for webhook sessions)
-  router.post('/api/auth/validate', (req, res) => {
+  router.post('/api/auth/validate', (req: Request<Record<string, string>, unknown, AuthValidateBody>, res) => {
     const token = extractToken(req)
-    const { sessionId } = req.body || {}
+    const { sessionId } = req.body
     if (!verifyHookToken(token, sessionId)) {
       return res.status(401).json({ valid: false, error: 'Invalid token' })
     }
