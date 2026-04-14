@@ -13,7 +13,6 @@ import { Router } from 'express'
 import type { Request } from 'express'
 import { readFileSync, readdirSync, statSync, realpathSync } from 'fs'
 import { join, resolve, relative, extname } from 'path'
-import { homedir } from 'os'
 import { REPOS_ROOT } from './config.js'
 
 type VerifyFn = (token: string | undefined) => boolean
@@ -106,9 +105,8 @@ export function createDocsRouter(
       return res.status(404).json({ error: 'Repo not found' })
     }
 
-    // Boundary check: restrict to allowed roots (home dir and REPOS_ROOT)
-    const home = homedir()
-    const allowedRoots = [home, REPOS_ROOT]
+    // Boundary check: restrict to REPOS_ROOT only (not arbitrary home-dir paths)
+    const allowedRoots = [REPOS_ROOT]
     const realRepo = realpathSync(resolve(repoPath))
     if (!allowedRoots.some(root => realRepo.startsWith(root + '/') || realRepo === root)) {
       return res.status(403).json({ error: 'Access denied' })
@@ -151,9 +149,8 @@ export function createDocsRouter(
       return res.status(400).json({ error: 'Missing repo or file query parameter' })
     }
 
-    // Boundary check: restrict to allowed roots (home dir and REPOS_ROOT)
-    const home = homedir()
-    const allowedRoots = [home, REPOS_ROOT]
+    // Boundary check: restrict to REPOS_ROOT only (not arbitrary home-dir paths)
+    const allowedRoots = [REPOS_ROOT]
     try {
       const realRepo = realpathSync(resolve(repoPath))
       if (!allowedRoots.some(root => realRepo.startsWith(root + '/') || realRepo === root)) {

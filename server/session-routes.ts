@@ -98,7 +98,7 @@ export function createSessionRouter(
     if (provider && !VALID_PROVIDERS.has(provider)) {
       return res.status(400).json({ error: `Invalid provider: ${provider}. Must be one of: ${[...VALID_PROVIDERS].join(', ')}` })
     }
-    const session = sessions.create(name, workingDir, { provider, model, permissionMode })
+    const session = sessions.create(name, resolvedDir, { provider, model, permissionMode })
     res.json({
       sessionId: session.id,
       session: {
