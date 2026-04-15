@@ -17,6 +17,7 @@ Codekin is a web-based terminal UI for managing multiple Claude Code sessions. I
 - [Repository Browser](#repository-browser)
 - [Slash-Command Skills](#slash-command-skills)
 - [Automated Workflows](#automated-workflows)
+- [PR Review Automation](#pr-review-automation)
 - [Agent Joe Orchestrator](#agent-joe-orchestrator)
 - [Git Worktrees](#git-worktrees)
 - [Modules](#modules)
@@ -187,6 +188,24 @@ Codekin can run scheduled Claude Code sessions against repositories to produce s
 - **Auto-committed reports** — Output is saved to a configurable directory within the repo (e.g. `review logs/`, `security-reports/`) and committed with a configurable message.
 
 See [docs/WORKFLOWS.md](./WORKFLOWS.md) for the full workflow definition format, frontmatter field reference, and instructions for writing per-repo overrides.
+
+---
+
+## PR Review Automation
+
+**Shipped**: 2026-04-10
+
+Codekin automatically reviews pull requests by responding to GitHub webhook events. When a PR is opened, updated, or marked ready for review, a Claude session is spawned to analyze the diff and post findings directly to the PR.
+
+- **Event-driven** — Triggered by `pull_request` webhook events (opened, synchronize, reopened, ready_for_review). No polling or manual invocation required.
+- **Inline and summary comments** — Claude posts a summary comment (updated in place on subsequent pushes) and individual inline code comments for specific findings.
+- **Per-PR context cache** — Prior review context is cached per PR so subsequent reviews (after new commits) are faster and more informed. Cache is archived on merge, deleted on close.
+- **Session superseding** — If a new push arrives while a review session is running, the old session is cancelled and a new one starts with the latest diff.
+- **3-tier prompt resolution** — The review prompt resolves from: repo-level `.codekin/pr-review-prompt.md` → global `~/.codekin/pr-review-prompt.md` → built-in default.
+- **Concurrency control** — Maximum concurrent PR review sessions is configurable (default 3, can be raised in `~/.codekin/webhook-config.json`).
+- **Cleanup on close/merge** — When a PR is closed, active sessions are killed and the context cache is archived (merged) or deleted (abandoned).
+
+See [docs/PR-REVIEW-WEBHOOK.md](./PR-REVIEW-WEBHOOK.md) for architecture details, configuration, and operational notes.
 
 ---
 
