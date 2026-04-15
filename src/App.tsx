@@ -24,6 +24,10 @@ import { useSessionOrchestration } from './hooks/useSessionOrchestration'
 import { useDocsBrowser } from './hooks/useDocsBrowser'
 import { useIsMobile } from './hooks/useIsMobile'
 import { useSendMessage } from './hooks/useSendMessage'
+import { useErrorNotification } from './hooks/useErrorNotification'
+import { useGlobalKeyBindings } from './hooks/useGlobalKeyBindings'
+import { useOpenCodeModelSync } from './hooks/useOpenCodeModelSync'
+import { useProviderValidation } from './hooks/useProviderValidation'
 import { buildSlashCommandList } from './lib/slashCommands'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { getQueueMessages, getAgentName } from './lib/ccApi'
@@ -77,8 +81,7 @@ export default function App() {
   /** Tracks whether file-mutating tools have fired in this session (heuristic for "has diffs"). */
   const [hasFileChanges, setHasFileChanges] = useState(false)
   const [archiveRefreshKey, setArchiveRefreshKey] = useState(0)
-  const [error, setError] = useState<string | null>(null)
-  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { error, showError } = useErrorNotification()
   /** Holds context text (e.g. from archive "Continue" action) to inject into the next session's first message. */
   const pendingContextRef = useRef<string | null>(null)
   /** Stable ref to the current sendInput function, used by callbacks that close over stale state. */
@@ -167,9 +170,7 @@ export default function App() {
       setArchiveRefreshKey(k => k + 1)
     },
     onError: (msg) => {
-      if (errorTimerRef.current) clearTimeout(errorTimerRef.current)
-      setError(msg)
-      errorTimerRef.current = setTimeout(() => setError(null), 5000)
+      showError(msg)
       if (msg.toLowerCase().includes('not found')) {
         setActiveSessionId(null)
       }
@@ -197,73 +198,31 @@ export default function App() {
   const [currentProvider] = useState<CodingProvider>(
     (localStorage.getItem('codekin-provider') as CodingProvider) || 'claude'
   )
-  // Dynamic model list for OpenCode (fetched from server on demand)
-  const [openCodeModels, setOpenCodeModels] = useState<ModelOption[]>([])
-  const [openCodeConnected, setOpenCodeConnected] = useState<boolean | null>(null) // null = unknown
   const [claudeDisabled, setClaudeDisabled] = useState(false)
   const [openCodeDisabled, setOpenCodeDisabled] = useState(false)
-  const openCodeModelsDirRef = useRef<string | undefined>(undefined)
   // Derive the active session's provider (falls back to the default for new sessions)
   const activeSessionProvider = sessions.find(s => s.id === activeSessionId)?.provider ?? currentProvider
-  const availableModels = activeSessionProvider === 'opencode' ? openCodeModels : CLAUDE_MODELS
-
-  // Probe OpenCode availability on startup (regardless of active session provider)
-  useEffect(() => {
-    if (!settings.token || openCodeDisabled) return
-    fetchOpenCodeModels(settings.token).then(result => {
-      setOpenCodeConnected(result.models.length > 0)
-    }).catch(() => { setOpenCodeConnected(false) })
-  }, [settings.token, openCodeDisabled]) // eslint-disable-line react-hooks/exhaustive-deps -- one-time startup probe
-
-  // Fetch OpenCode models when switching to an OpenCode session
-  const currentModelRef = useRef(currentModel)
-  useEffect(() => { currentModelRef.current = currentModel }, [currentModel])
 
   const activeOpenCodeWd = activeSessionProvider === 'opencode'
     ? sessions.find(s => s.id === activeSessionId)?.workingDir
     : undefined
-  useEffect(() => {
-    if (activeSessionProvider !== 'opencode' || !settings.token) return
-    const wdChanged = activeOpenCodeWd && activeOpenCodeWd !== openCodeModelsDirRef.current
-    const currentIsValidOpenCode = currentModelRef.current && openCodeModels.some(m => m.id === currentModelRef.current)
-    if (!wdChanged && openCodeModels.length > 0 && currentIsValidOpenCode) return
-    const activeWd = activeOpenCodeWd
-    fetchOpenCodeModels(settings.token, activeWd).then(result => {
-      const models: ModelOption[] = result.models.map(m => ({
-        id: `${m.providerID}/${m.id}`,
-        label: `${m.name} (${m.providerName})`,
-      }))
-      setOpenCodeModels(models)
-      setOpenCodeConnected(models.length > 0)
-      openCodeModelsDirRef.current = activeWd
-      const currentIsOpenCode = currentModelRef.current && models.some(m => m.id === currentModelRef.current)
-      if (!currentIsOpenCode) {
-        // Prefer the user's last OpenCode model selection from localStorage
-        const savedOcModel = localStorage.getItem('opencode-model')
-        const savedIsValid = savedOcModel && models.some(m => m.id === savedOcModel)
-        if (savedIsValid) {
-          setModel(savedOcModel)
-        } else {
-          const [defaultProvider, defaultModelId] = Object.entries(result.defaults)[0] ?? []
-          if (defaultProvider && defaultModelId) setModel(`${defaultProvider}/${defaultModelId}`)
-          else if (models.length > 0) setModel(models[0].id)
-        }
-      }
-    }).catch(() => { setOpenCodeConnected(false) })
-  }, [activeSessionProvider, settings.token, openCodeModels.length, setModel, activeOpenCodeWd])
+
+  const { openCodeModels, openCodeConnected, setOpenCodeModels, setOpenCodeConnected } = useOpenCodeModelSync({
+    token: settings.token,
+    activeSessionProvider,
+    activeOpenCodeWd,
+    currentModel,
+    setModel,
+    openCodeDisabled,
+  })
+  const availableModels = activeSessionProvider === 'opencode' ? openCodeModels : CLAUDE_MODELS
 
   // Reset file-change tracking when switching sessions
   useEffect(() => {
     setHasFileChanges(false) // eslint-disable-line react-hooks/set-state-in-effect -- sync with session change
   }, [activeSessionId])
 
-  // Validate currentModel when switching to a Claude session (OpenCode validation is in the other useEffect)
-  useEffect(() => {
-    if (activeSessionProvider !== 'claude') return
-    if (!CLAUDE_MODELS.some(m => m.id === currentModel)) {
-      setModel(CLAUDE_MODELS[0].id)
-    }
-  }, [activeSessionProvider, currentModel, setModel])
+  useProviderValidation({ activeSessionProvider, currentModel, setModel })
 
   // Session orchestration: switching, creating, deleting sessions & repos
   const {
@@ -376,20 +335,9 @@ export default function App() {
   useEffect(() => { sendInputRef.current = sendInput }, [sendInput])
 
   // Cmd+K and Cmd+Shift+D listeners
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault()
-        setPaletteOpen(prev => !prev)
-      }
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'D') {
-        e.preventDefault()
-        setDiffPanelOpen(prev => !prev)
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  const togglePalette = useCallback(() => setPaletteOpen(prev => !prev), [])
+  const toggleDiffPanel = useCallback(() => setDiffPanelOpen(prev => !prev), [])
+  useGlobalKeyBindings({ onTogglePalette: togglePalette, onToggleDiffPanel: toggleDiffPanel })
 
   // Persist active session ID
   useEffect(() => {
