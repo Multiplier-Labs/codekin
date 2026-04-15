@@ -76,8 +76,9 @@ Codekin ships with nine built-in workflow definitions in `server/workflows/`:
 | `docs-audit.weekly.md` | `docs-audit.weekly` | Weekly | `.codekin/reports/docs-audit/` |
 | `commit-review.md` | `commit-review` | Event-driven | `.codekin/reports/commit-review/` |
 | `repo-health.weekly.md` | `repo-health.weekly` | Weekly | `.codekin/reports/repo-health/` |
+| `pr-review.md` | `pr-review` | Event-driven | _(no file output — posts to GitHub PR)_ |
 
-> **Note**: `commit-review` is event-driven (triggered by commit events) rather than scheduled, so it does not follow the `<topic>.<frequency>` naming convention.
+> **Note**: `commit-review` and `pr-review` are event-driven (webhook-triggered) rather than scheduled, so they do not follow the `<topic>.<frequency>` naming convention. `pr-review` is triggered by GitHub `pull_request` events and posts findings directly to the PR as review comments rather than saving a report file.
 
 All built-in workflows are loaded automatically at server start.
 

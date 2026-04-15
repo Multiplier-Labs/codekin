@@ -4,6 +4,8 @@
 **Date**: 2026-02-23
 **Author**: Codekin Team
 
+> **See also**: [docs/PR-REVIEW-WEBHOOK.md](./PR-REVIEW-WEBHOOK.md) — the PR review feature built on top of this webhook infrastructure, handling `pull_request` events to automate code review.
+
 ---
 
 ## Table of Contents
@@ -24,6 +26,7 @@
 - [Observability](#observability)
 - [Implementation Phases](#implementation-phases)
 - [Open Questions](#open-questions)
+- [Roadmap](#roadmap)
 
 ---
 
@@ -130,15 +133,15 @@ If the health check fails, webhook processing is disabled with a clear log warni
 
 **Phase 1 implements `workflow_run` only.** This fires once per workflow and includes the full context (repo, branch, head SHA, PR associations). `check_run` and `check_suite` are listed for future reference.
 
-### Phase 2 — Expanded Events (Future)
+### Expanded Events (Roadmap / Partially Implemented)
 
-| GitHub Event | Use Case |
-|---|---|
-| `pull_request` | Auto-review PRs, suggest changes |
-| `issues` | Triage new issues, attempt auto-fix for bug reports |
-| `push` | Run analysis on new commits |
-| `issue_comment` | Respond to comments mentioning `@claude` |
-| `pull_request_review` | Address review feedback automatically |
+| GitHub Event | Use Case | Status |
+|---|---|---|
+| `pull_request` | Auto-review PRs, post findings as comments | **Implemented** — see [docs/PR-REVIEW-WEBHOOK.md](./PR-REVIEW-WEBHOOK.md) |
+| `issues` | Triage new issues, attempt auto-fix for bug reports | Roadmap (Phase 4) |
+| `push` | Run analysis on new commits | Roadmap (Phase 4) |
+| `issue_comment` | Respond to comments mentioning `@claude` | Roadmap (Phase 4) |
+| `pull_request_review` | Address review feedback automatically | Roadmap (Phase 4) |
 
 ### Event Filtering
 
@@ -748,45 +751,6 @@ Last 100 webhook events stored in memory, accessible via:
 
 **Deliverable**: Webhooks trigger Claude sessions that diagnose and fix CI failures. Webhook sessions are visually distinct in the UI.
 
-### Phase 2 — Configuration & Modes [Planned — Not Yet Implemented]
-
-**Scope**: Make behavior configurable, add operating modes.
-
-- [ ] Implement webhook config file (`~/.codekin/webhook-config.json`)
-- [ ] Add event filtering (by workflow, branch, repo)
-- [ ] Implement operating modes (autonomous, supervised, notify-only)
-- [ ] Per-workflow mode overrides
-- [ ] Session reuse for same branch
-- [ ] `GET/PUT /api/webhooks/config` endpoints
-- [ ] Resource limits (max concurrent sessions, queue)
-
-**Deliverable**: Configurable, production-ready webhook processing.
-
-### Phase 3 — UI Integration [Planned — Not Yet Implemented]
-
-**Scope**: Surface webhook activity in the frontend.
-
-- [ ] Add `webhook_event` WebSocket message type
-- [ ] Webhook events panel in sidebar
-- [ ] Visual distinction for webhook-created sessions
-- [ ] Toast notifications for new webhook events
-- [ ] Auto-switch to webhook session option
-- [ ] Webhook configuration UI (settings panel)
-
-**Deliverable**: Full visibility into webhook activity from the browser.
-
-### Phase 4 — Expanded Events [Planned — Not Yet Implemented]
-
-**Scope**: Handle more GitHub event types.
-
-- [ ] `pull_request` events — auto-review, suggest changes
-- [ ] `issues` events — triage, attempt auto-fix for bugs
-- [ ] `issue_comment` / `pull_request_review` — respond to mentions
-- [ ] `push` events — run analysis on new commits
-- [ ] Outbound: update check run status on GitHub when Claude completes
-
-**Deliverable**: Codekin as a full GitHub-integrated AI assistant.
-
 ---
 
 ## Known Limitations (Phase 1)
@@ -811,3 +775,49 @@ Last 100 webhook events stored in memory, accessible via:
 5. **Cost control** — Each webhook-triggered session consumes API tokens. Should there be a daily budget or token cap for webhook-triggered sessions?
 
 6. **PR comments** — Instead of (or in addition to) pushing fixes, should Claude post its diagnosis as a PR comment? This would integrate with existing code review workflows.
+
+---
+
+## Roadmap
+
+The following phases are planned but not yet implemented. Phase 1 is the only functionality live today.
+
+### Phase 2 — Configuration & Modes
+
+**Scope**: Make behavior configurable, add operating modes.
+
+- [ ] Implement webhook config file (`~/.codekin/webhook-config.json`)
+- [ ] Add event filtering (by workflow, branch, repo)
+- [ ] Implement operating modes (autonomous, supervised, notify-only)
+- [ ] Per-workflow mode overrides
+- [ ] Session reuse for same branch
+- [ ] `GET/PUT /api/webhooks/config` endpoints
+- [ ] Resource limits (max concurrent sessions, queue)
+
+**Deliverable**: Configurable, production-ready webhook processing.
+
+### Phase 3 — UI Integration
+
+**Scope**: Surface webhook activity in the frontend.
+
+- [ ] Add `webhook_event` WebSocket message type
+- [ ] Webhook events panel in sidebar
+- [ ] Visual distinction for webhook-created sessions
+- [ ] Toast notifications for new webhook events
+- [ ] Auto-switch to webhook session option
+- [ ] Webhook configuration UI (settings panel)
+
+**Deliverable**: Full visibility into webhook activity from the browser.
+
+### Phase 4 — Expanded Events
+
+**Scope**: Handle more GitHub event types.
+
+- [ ] `issues` events — triage, attempt auto-fix for bugs
+- [ ] `issue_comment` / `pull_request_review` — respond to mentions
+- [ ] `push` events — run analysis on new commits
+- [ ] Outbound: update check run status on GitHub when Claude completes
+
+> **Note**: `pull_request` event handling (PR review automation) was implemented separately and is documented in [docs/PR-REVIEW-WEBHOOK.md](./PR-REVIEW-WEBHOOK.md).
+
+**Deliverable**: Codekin as a full GitHub-integrated AI assistant.
