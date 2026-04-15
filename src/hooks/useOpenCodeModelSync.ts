@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { fetchOpenCodeModels } from '../lib/ccApi'
 import type { ModelOption, CodingProvider } from '../types'
 
@@ -37,7 +37,7 @@ export function useOpenCodeModelSync({
     fetchOpenCodeModels(token).then(result => {
       setOpenCodeConnected(result.models.length > 0)
     }).catch(() => { setOpenCodeConnected(false) })
-  }, [token, openCodeDisabled]) // eslint-disable-line react-hooks/exhaustive-deps -- one-time startup probe
+  }, [token, openCodeDisabled])
 
   // Fetch models when switching to an OpenCode session
   useEffect(() => {
@@ -69,5 +69,18 @@ export function useOpenCodeModelSync({
     }).catch(() => { setOpenCodeConnected(false) })
   }, [activeSessionProvider, token, openCodeModels.length, setModel, activeOpenCodeWd])
 
-  return { openCodeModels, openCodeConnected, setOpenCodeModels, setOpenCodeConnected }
+  /** Re-fetch models to check connection (used when re-enabling OpenCode). */
+  const reconnect = useCallback(() => {
+    if (!token) return
+    fetchOpenCodeModels(token).then(result => {
+      const models: ModelOption[] = result.models.map(m => ({
+        id: `${m.providerID}/${m.id}`,
+        label: `${m.name} (${m.providerName})`,
+      }))
+      setOpenCodeModels(models)
+      setOpenCodeConnected(models.length > 0)
+    }).catch(() => { setOpenCodeConnected(false) })
+  }, [token])
+
+  return { openCodeModels, openCodeConnected, setOpenCodeConnected, reconnect }
 }

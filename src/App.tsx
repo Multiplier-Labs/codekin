@@ -42,9 +42,8 @@ import { DiffPanel } from './components/DiffPanel'
 import { OrchestratorContent } from './components/OrchestratorContent'
 import { DocsBrowserContent } from './components/DocsBrowserContent'
 import { SessionContent } from './components/SessionContent'
-import type { PermissionMode, CodingProvider, ModelOption } from './types'
+import type { PermissionMode, CodingProvider } from './types'
 import { CLAUDE_MODELS } from './types'
-import { fetchOpenCodeModels } from './lib/ccApi'
 
 export default function App() {
   const { settings, updateSettings } = useSettings()
@@ -207,7 +206,7 @@ export default function App() {
     ? sessions.find(s => s.id === activeSessionId)?.workingDir
     : undefined
 
-  const { openCodeModels, openCodeConnected, setOpenCodeModels, setOpenCodeConnected } = useOpenCodeModelSync({
+  const { openCodeModels, openCodeConnected, setOpenCodeConnected, reconnect: reconnectOpenCode } = useOpenCodeModelSync({
     token: settings.token,
     activeSessionProvider,
     activeOpenCodeWd,
@@ -481,17 +480,7 @@ export default function App() {
   const handleToggleOpenCode = useCallback(() => {
     if (openCodeDisabled) {
       setOpenCodeDisabled(false)
-      // Re-fetch models to check connection
-      if (settings.token) {
-        fetchOpenCodeModels(settings.token).then(result => {
-          const models: ModelOption[] = result.models.map(m => ({
-            id: `${m.providerID}/${m.id}`,
-            label: `${m.name} (${m.providerName})`,
-          }))
-          setOpenCodeModels(models)
-          setOpenCodeConnected(models.length > 0)
-        }).catch(() => { setOpenCodeConnected(false) })
-      }
+      reconnectOpenCode()
     } else {
       setOpenCodeDisabled(true)
       setOpenCodeConnected(false)
@@ -500,7 +489,7 @@ export default function App() {
         leaveSession()
       }
     }
-  }, [openCodeDisabled, settings.token, activeSessionProvider, activeSessionId, leaveSession])
+  }, [openCodeDisabled, activeSessionProvider, activeSessionId, leaveSession, reconnectOpenCode, setOpenCodeConnected])
 
   const activeSession = sessions.find(s => s.id === activeSessionId)
   const activeSessionName = activeSession?.name ?? null
