@@ -45,7 +45,7 @@ export const MODEL_OPTIONS = [
 ]
 
 /** Model IDs that map to the default (Opus). Stored explicitly by some configs but equivalent to empty. */
-const DEFAULT_MODEL_IDS = new Set(['claude-opus-4-6', 'claude-opus-4-5-20250918'])
+const DEFAULT_MODEL_IDS = new Set(['claude-opus-4-7', 'claude-opus-4-6', 'claude-opus-4-5-20250918'])
 
 /** Normalize a model value: known Opus model IDs → empty string (server default). */
 export function normalizeModel(model: string | undefined): string {

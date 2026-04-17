@@ -25,6 +25,7 @@ export const VALID_PERMISSION_MODES = new Set<PermissionMode>(['default', 'accep
 /** Allow-list for server-side validation of client-supplied model IDs.
  *  Only Claude models — OpenCode sessions bypass this (models are dynamic). */
 export const VALID_MODELS = new Set([
+  'claude-opus-4-7',
   'claude-opus-4-6',
   'claude-sonnet-4-6',
   'claude-haiku-4-5-20251001',
