@@ -8,6 +8,9 @@ import { Router } from 'express'
 import type { Request, RequestHandler } from 'express'
 import type { SessionManager } from './session-manager.js'
 
+/** Maximum number of tracked IPs in the auth rate-limiter map to prevent unbounded memory growth. */
+const AUTH_RATE_MAP_MAX_SIZE = 10_000
+
 /** Simple per-IP rate limiter for auth endpoints. */
 function createIpRateLimiter(maxPerMinute: number): RequestHandler {
   const ipTimestamps = new Map<string, number[]>()
@@ -30,6 +33,11 @@ function createIpRateLimiter(maxPerMinute: number): RequestHandler {
 
     if (timestamps.length >= maxPerMinute) {
       ipTimestamps.set(ip, timestamps)
+      return res.status(429).json({ error: 'Too Many Requests', retryAfter: 60 })
+    }
+
+    // Reject new IPs if the map has grown too large (DoS protection)
+    if (timestamps.length === 0 && ipTimestamps.size >= AUTH_RATE_MAP_MAX_SIZE) {
       return res.status(429).json({ error: 'Too Many Requests', retryAfter: 60 })
     }
 

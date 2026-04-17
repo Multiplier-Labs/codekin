@@ -33,6 +33,8 @@ export function createWebhookRateLimiter(
   keyExtractor: (body: unknown) => string | undefined = (body) =>
     (body as { repository?: { full_name?: string } } | undefined)?.repository?.full_name,
 ): RequestHandler {
+  /** Maximum number of tracked keys to prevent unbounded memory growth. */
+  const WEBHOOK_RATE_MAP_MAX_SIZE = 10_000
   const keyTimestamps = new Map<string, number[]>()
 
   // Periodic cleanup: every 5 minutes, remove keys with no recent timestamps
@@ -80,6 +82,12 @@ export function createWebhookRateLimiter(
     if (recent.length >= maxPerMinute) {
       keyTimestamps.set(key, recent)
       res.status(429).json({ error: 'Too Many Requests', repo: key, retryAfter: 60 })
+      return
+    }
+
+    // Reject new keys if the map has grown too large (DoS protection)
+    if (recent.length === 0 && keyTimestamps.size >= WEBHOOK_RATE_MAP_MAX_SIZE) {
+      res.status(429).json({ error: 'Too Many Requests', retryAfter: 60 })
       return
     }
 
