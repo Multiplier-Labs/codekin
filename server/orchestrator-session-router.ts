@@ -6,7 +6,7 @@
 import { Router } from 'express'
 import type { Request } from 'express'
 import { resolve } from 'path'
-import { existsSync, statSync } from 'fs'
+import { existsSync, statSync, realpathSync } from 'fs'
 import type { SessionManager } from './session-manager.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, getOrCreateOrchestratorId } from './orchestrator-manager.js'
 import { getAgentDisplayName, REPOS_ROOT } from './config.js'
@@ -153,13 +153,15 @@ export function createSessionRouter(
       }
     }
 
-    // Validate repo path: must resolve under REPOS_ROOT and be an existing directory
-    const resolvedRepo = resolve(repo)
+    // Validate repo path: must exist and be a directory
+    const absRepo = resolve(repo)
+    if (!existsSync(absRepo) || !statSync(absRepo).isDirectory()) {
+      return res.status(400).json({ error: 'Invalid repo path: directory does not exist' })
+    }
+    // Use realpathSync to resolve symlinks before boundary check (prevents symlink bypass)
+    const resolvedRepo = realpathSync(absRepo)
     if (!resolvedRepo.startsWith(REPOS_ROOT + '/') && resolvedRepo !== REPOS_ROOT) {
       return res.status(400).json({ error: 'Invalid repo path: must be under configured repos root' })
-    }
-    if (!existsSync(resolvedRepo) || !statSync(resolvedRepo).isDirectory()) {
-      return res.status(400).json({ error: 'Invalid repo path: directory does not exist' })
     }
 
     try {
