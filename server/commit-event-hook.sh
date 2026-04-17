@@ -44,12 +44,21 @@ case "$COMMIT_MESSAGE" in
     ;;
 esac
 
-# JSON-escape the commit message properly (handles newlines, tabs, special chars)
+# Build JSON payload safely using jq to prevent injection via crafted values
 if command -v jq >/dev/null 2>&1; then
-  ESCAPED_MESSAGE=$(printf '%s' "$COMMIT_MESSAGE" | jq -Rs .)
+  PAYLOAD=$(jq -n \
+    --arg repoPath "$REPO_PATH" \
+    --arg branch "$BRANCH" \
+    --arg commitHash "$COMMIT_HASH" \
+    --arg commitMessage "$COMMIT_MESSAGE" \
+    --arg author "$AUTHOR" \
+    '{repoPath: $repoPath, branch: $branch, commitHash: $commitHash, commitMessage: $commitMessage, author: $author}')
 else
-  # Fallback: escape backslashes, double quotes, and control characters
-  ESCAPED_MESSAGE=$(printf '%s' "$COMMIT_MESSAGE" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e "s/$(printf '\t')/\\t/g" | { echo -n '"'; cat; echo -n '"'; })
+  # Fallback: escape each variable individually for safe JSON embedding
+  json_escape() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e "s/$(printf '\t')/\\t/g" -e "s/$(printf '\r')//g"
+  }
+  PAYLOAD="{\"repoPath\":\"$(json_escape "$REPO_PATH")\",\"branch\":\"$(json_escape "$BRANCH")\",\"commitHash\":\"$(json_escape "$COMMIT_HASH")\",\"commitMessage\":\"$(json_escape "$COMMIT_MESSAGE")\",\"author\":\"$(json_escape "$AUTHOR")\"}"
 fi
 
 # Fire-and-forget POST to the server (5s timeout, backgrounded)
@@ -57,7 +66,7 @@ curl -s -o /dev/null -m 5 \
   -X POST "${SERVER_URL}/api/workflows/commit-event" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d "{\"repoPath\":\"${REPO_PATH}\",\"branch\":\"${BRANCH}\",\"commitHash\":\"${COMMIT_HASH}\",\"commitMessage\":${ESCAPED_MESSAGE},\"author\":\"${AUTHOR}\"}" \
+  -d "$PAYLOAD" \
   &
 
 exit 0
