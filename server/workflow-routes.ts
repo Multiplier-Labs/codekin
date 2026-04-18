@@ -21,6 +21,7 @@ import { listAvailableKinds, ensureRepoWorkflowsRegistered } from './workflow-lo
 import { syncCommitHooks } from './commit-event-hooks.js'
 import type { CommitEventHandler } from './commit-event-handler.js'
 import type { SessionManager } from './session-manager.js'
+import { resolveRepoPathInRoot } from './config.js'
 import { VALID_PROVIDERS } from './types.js'
 import {
   previewWebhookSetup,
@@ -142,7 +143,7 @@ type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
 
 /** Validate a 5-field cron expression. Returns true if the format is valid. */
-function isValidCron(expr: string): boolean {
+export function isValidCron(expr: string): boolean {
   const parts = expr.trim().split(/\s+/)
   if (parts.length !== 5) return false
   const ranges = [
@@ -377,6 +378,10 @@ export function createWorkflowRouter(
     const existing = engine.getSchedule(req.params.id)
     if (!existing) return res.status(404).json({ error: 'Schedule not found' })
 
+    if (req.body.cronExpression !== undefined && !isValidCron(req.body.cronExpression)) {
+      return res.status(400).json({ error: 'Invalid cron expression' })
+    }
+
     const schedule = engine.upsertSchedule({
       id: existing.id,
       kind: existing.kind,
@@ -424,6 +429,9 @@ export function createWorkflowRouter(
     }
     if (provider && !VALID_PROVIDERS.has(provider)) {
       return res.status(400).json({ error: `Invalid provider: ${provider}` })
+    }
+    if (!resolveRepoPathInRoot(repoPath)) {
+      return res.status(400).json({ error: 'Invalid repoPath: must be an existing directory under the configured repos root' })
     }
 
     // Register any standalone repo workflows before saving config
@@ -475,6 +483,9 @@ export function createWorkflowRouter(
   })
 
   router.patch('/config/repos/:id', (req: Request<{ id: string }, unknown, Partial<ReviewRepoConfig>>, res) => {
+    if (req.body.repoPath !== undefined && !resolveRepoPathInRoot(req.body.repoPath)) {
+      return res.status(400).json({ error: 'Invalid repoPath: must be an existing directory under the configured repos root' })
+    }
     try {
       const config = updateReviewRepo(req.params.id, req.body)
       try {
