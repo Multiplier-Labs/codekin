@@ -148,4 +148,59 @@ describe('config', () => {
       mockError.mockRestore()
     })
   })
+
+  describe('resolveRepoPathInRoot', () => {
+    it('returns resolved path for a child directory inside REPOS_ROOT', async () => {
+      process.env.REPOS_ROOT = '/srv/repos'
+      mockExistsSync.mockImplementation((p: unknown) => p === '/srv/repos')
+      mockRealpathSync.mockImplementation((p: string) => p === '/srv/repos/myrepo' ? '/srv/repos/myrepo' : p)
+
+      const config = await loadConfig()
+      expect(config.resolveRepoPathInRoot('/srv/repos/myrepo')).toBe('/srv/repos/myrepo')
+    })
+
+    it('returns the root itself when passed REPOS_ROOT', async () => {
+      process.env.REPOS_ROOT = '/srv/repos'
+      mockExistsSync.mockImplementation((p: unknown) => p === '/srv/repos')
+      mockRealpathSync.mockImplementation((p: string) => p)
+
+      const config = await loadConfig()
+      expect(config.resolveRepoPathInRoot('/srv/repos')).toBe('/srv/repos')
+    })
+
+    it('rejects a path-traversal attempt that resolves outside REPOS_ROOT', async () => {
+      process.env.REPOS_ROOT = '/srv/repos'
+      mockExistsSync.mockImplementation((p: unknown) => p === '/srv/repos')
+      // Simulate realpath escaping via "../etc" or via a symlink that points outside
+      mockRealpathSync.mockImplementation((p: string) => {
+        if (p === '/srv/repos') return '/srv/repos'
+        return '/etc/passwd'
+      })
+
+      const config = await loadConfig()
+      expect(config.resolveRepoPathInRoot('/srv/repos/../etc/passwd')).toBeNull()
+      expect(config.resolveRepoPathInRoot('/srv/repos/symlink-to-etc')).toBeNull()
+    })
+
+    it('rejects a sibling-prefix confusion (/srv/repos vs /srv/repos-evil)', async () => {
+      process.env.REPOS_ROOT = '/srv/repos'
+      mockExistsSync.mockImplementation((p: unknown) => p === '/srv/repos')
+      mockRealpathSync.mockImplementation((p: string) => p)
+
+      const config = await loadConfig()
+      expect(config.resolveRepoPathInRoot('/srv/repos-evil/x')).toBeNull()
+    })
+
+    it('returns null when realpathSync throws (path does not exist)', async () => {
+      process.env.REPOS_ROOT = '/srv/repos'
+      mockExistsSync.mockImplementation((p: unknown) => p === '/srv/repos')
+      mockRealpathSync.mockImplementation((p: string) => {
+        if (p === '/srv/repos') return '/srv/repos'
+        throw new Error('ENOENT')
+      })
+
+      const config = await loadConfig()
+      expect(config.resolveRepoPathInRoot('/srv/repos/nonexistent')).toBeNull()
+    })
+  })
 })

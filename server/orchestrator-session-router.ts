@@ -9,7 +9,7 @@ import { resolve } from 'path'
 import { existsSync, statSync, realpathSync } from 'fs'
 import type { SessionManager } from './session-manager.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, getOrCreateOrchestratorId } from './orchestrator-manager.js'
-import { getAgentDisplayName, REPOS_ROOT } from './config.js'
+import { getAgentDisplayName, REPOS_ROOT, resolveRepoPathInRoot } from './config.js'
 import { scanRepoReports, readReport, getReportsSince } from './orchestrator-reports.js'
 import type { OrchestratorMemory } from './orchestrator-memory.js'
 import type { OrchestratorChildManager } from './orchestrator-children.js'
@@ -96,7 +96,11 @@ export function createSessionRouter(
     const since = req.query.since as string | undefined
 
     if (repoPath) {
-      const reports = scanRepoReports(repoPath)
+      const resolvedRepoPath = resolveRepoPathInRoot(repoPath)
+      if (!resolvedRepoPath) {
+        return res.status(400).json({ error: 'Invalid repo path: must be an existing directory under the configured repos root' })
+      }
+      const reports = scanRepoReports(resolvedRepoPath)
       res.json({ reports })
     } else if (since) {
       const repoItems = memory.list({ memoryType: 'repo_context' })
