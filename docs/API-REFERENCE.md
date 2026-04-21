@@ -381,14 +381,14 @@ List all workflow schedules.
 Create a new schedule.
 
 **Request body:** `{ "id": "...", "kind": "code-review", "cronExpression": "0 4 * * *", "input": {}, "enabled": true }`
-**Response:** `{ "schedule": Schedule }`
+**Response:** `{ "schedule": Schedule }`, or `400` with `{ "error": "..." }` when required fields are missing or `cronExpression` is not a valid 5-field cron.
 
 ### `PATCH /api/workflows/schedules/:id`
 
 Update a schedule.
 
 **Request body:** `{ "cronExpression": "...", "input": {}, "enabled": false }` (all fields optional)
-**Response:** `{ "schedule": Schedule }` or `404`
+**Response:** `{ "schedule": Schedule }`, `400` with `{ "error": "Invalid cron expression" }` when a provided `cronExpression` fails validation, or `404`.
 
 ### `DELETE /api/workflows/schedules/:id`
 
@@ -412,14 +412,17 @@ Get workflow engine configuration.
 
 Add a repo workflow configuration.
 
+`repoPath` is resolved via `realpath` and must sit under the configured `REPOS_ROOT` — otherwise the request is rejected with `400`.
+
 **Request body:** `{ "id": "...", "name": "...", "repoPath": "...", "cronExpression": "...", "enabled": true, "customPrompt": "...", "kind": "...", "model": "..." }`
-**Response:** `{ "config": WorkflowConfig }`
+**Response:** `{ "config": WorkflowConfig, "webhookSetup"?: WebhookSetupResult }`, or `400` with `{ "error": "..." }` when required fields are missing, `provider` is invalid, or `repoPath` is not an existing directory under the configured repos root.
 
 ### `PATCH /api/workflows/config/repos/:id`
 
 Update a repo workflow configuration.
 
-**Response:** `{ "config": WorkflowConfig }` or `404`
+**Request body:** Partial `ReviewRepoConfig`. When `repoPath` is supplied, it must resolve to a directory under `REPOS_ROOT`.
+**Response:** `{ "config": WorkflowConfig }`, `400` with `{ "error": "Invalid repoPath: ..." }` for an out-of-root `repoPath`, or `404`.
 
 ### `DELETE /api/workflows/config/repos/:id`
 
@@ -451,17 +454,19 @@ Ensure the orchestrator session is running. Starts it if not already active.
 
 #### `GET /api/orchestrator/reports`
 
-List available audit reports across managed repos.
+List available audit reports. Exactly one of `repo` or `since` must be provided.
 
-**Query params:** `repo` (optional), `category` (optional), `since` (optional — ISO timestamp)
-**Response:** `{ "reports": Report[] }`
+When `repo` is supplied, it is resolved via `realpath` and must sit under the configured `REPOS_ROOT`; otherwise the request is rejected with `400`.
+
+**Query params:** `repo` (path under `REPOS_ROOT`) **or** `since` (YYYY-MM-DD date; lists reports across managed repos newer than that date)
+**Response:** `{ "reports": ReportMeta[] }`, or `400` with `{ "error": "..." }` when neither query param is provided or when `repo` is not under the configured repos root.
 
 #### `GET /api/orchestrator/reports/read`
 
-Read the contents of a specific report file.
+Read the contents of a specific report file. The resolved path must sit under `REPOS_ROOT` and contain `/.codekin/reports/`, or under the Codekin data directory's `reports/` subfolder — otherwise the request returns `404`.
 
-**Query params:** `path` (required) — report file path
-**Response:** `{ "content": "...", "path": "..." }`
+**Query params:** `path` (required) — absolute report file path
+**Response:** `{ "report": ReportContent }` where `ReportContent` includes `filePath`, `category`, `date`, `repoPath`, `size`, `mtime`, and `content`. `400` when `path` is missing; `404` when the resolved path is outside the allowed roots or the file cannot be read.
 
 ### Child Sessions
 
@@ -473,10 +478,10 @@ List child sessions spawned by the orchestrator.
 
 #### `POST /api/orchestrator/children`
 
-Spawn a new child session for a task.
+Spawn a new child session for a task. `repo` is resolved via `realpath` and must sit under `REPOS_ROOT`. `branchName` must match `^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$`.
 
-**Request body:** `{ "repo": "...", "task": "...", "branchName": "...", "useWorktree": true, "completionPolicy": "pr" | "merge" | "commit-only" }`
-**Response:** `{ "childId": "...", "sessionId": "..." }`
+**Request body:** `{ "repo": "...", "task": "...", "branchName": "...", "useWorktree"?: boolean, "completionPolicy"?: "pr" | "merge" | "commit-only", "deployAfter"?: boolean, "model"?: "...", "allowedTools"?: string[] }`
+**Response:** `{ "child": ChildSession }`, `400` with `{ "error": "..." }` when required fields are missing, `branchName` / `allowedTools` fail validation, or `repo` is not an existing directory under the configured repos root, or `503` when the child session cannot be spawned.
 
 #### `GET /api/orchestrator/children/:id`
 
@@ -502,20 +507,20 @@ Get sessions that have pending approval prompts.
 
 Respond to a pending prompt in a session.
 
-**Request body:** `{ "requestId": "...", "value": "..." }`
-**Response:** `{ "success": true }`
+**Request body:** `{ "requestId"?: "...", "value": "..." }`
+**Response:** `{ "ok": true }`, `400` when `value` is missing, `404` when the session does not exist, or `409` when there is no pending prompt to respond to.
 
 #### `DELETE /api/orchestrator/sessions/cleanup`
 
-Clean up stale or completed child sessions.
+Delete all automated sessions (sources: `workflow`, `webhook`, `stepflow`, `agent`).
 
-**Response:** `{ "cleaned": number }`
+**Response:** `{ "deleted": number }` — count of sessions deleted.
 
 #### `DELETE /api/orchestrator/sessions/:id`
 
 Delete a specific orchestrator-managed session.
 
-**Response:** `{ "success": true }` or `404`
+**Response:** `{ "deleted": true }` or `404`
 
 ### Memory
 
