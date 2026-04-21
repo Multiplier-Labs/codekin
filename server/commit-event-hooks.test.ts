@@ -383,6 +383,7 @@ describe('syncCommitHooks', () => {
     expect(existsSync(hookPath)).toBe(false)
   })
 
+
   it('handles multiple repos — installing the enabled commit-review one only', () => {
     state.workflowConfig.reviewRepos = [
       { id: 'a', name: 'A', repoPath: repoA, cronExpression: 'event', enabled: true, kind: 'commit-review' },
