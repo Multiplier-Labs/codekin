@@ -37,7 +37,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "^12.9.0",
     "express": "^5.1.0",
     "multer": "^2.0.0",
     "ws": "^8.18.0"
@@ -62,7 +62,7 @@
     "@vitejs/plugin-react": "^6.0.1",
     "@vitest/coverage-v8": "^4.1.2",
     "cmdk": "^1.1.1",
-    "dompurify": "^3.3.2",
+    "dompurify": "^3.4.0",
     "eslint": "^10.1.0",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",

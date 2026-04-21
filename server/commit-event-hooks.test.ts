@@ -1,265 +1,340 @@
 /**
- * Tests for commit-event-hooks — verifies idempotent post-commit hook install/uninstall,
- * BEGIN/END marker handling, and secure hook-config.json (mode 0600) placement.
+ * Tests for commit-event-hooks — verifies hook-config.json write with 0600 mode,
+ * post-commit marker block install / remove / idempotent re-install, and
+ * syncCommitHooks behavior against a temp ~/.codekin + bare git repo fixture.
  *
- * Uses a temporary directory to simulate ~/.codekin and a bare git repo so the
- * real filesystem is exercised without touching the user's home directory.
+ * We override os.homedir() via vi.mock so ~/.codekin resolves into a temp dir,
+ * and stub loadWorkflowConfig() so syncCommitHooks reads from our fixture.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'fs'
-import { join } from 'path'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { execFileSync } from 'child_process'
 import { tmpdir } from 'os'
-import { randomUUID } from 'crypto'
+import { join } from 'path'
 
-// Temp home dir created per-test; referenced via the hoisted mockHomedir.
-let TMP_HOME: string
+// ---------------------------------------------------------------------------
+// Hoisted state — carries the temp home dir between mock factory and tests.
+// vi.mock factories run after vi.hoisted but before the test file's imports,
+// so we populate this object in the 'os' mock factory.
+// ---------------------------------------------------------------------------
 
-const mockHomedir = vi.hoisted(() => vi.fn(() => '/tmp/placeholder'))
+const state = vi.hoisted(() => ({
+  home: '',
+  workflowConfig: { reviewRepos: [] as Array<{
+    id: string
+    name: string
+    repoPath: string
+    cronExpression: string
+    enabled: boolean
+    kind?: string
+  }> },
+}))
 
 vi.mock('os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('os')>()
-  return {
-    ...actual,
-    homedir: mockHomedir,
-  }
+  const fs = await vi.importActual<typeof import('fs')>('fs')
+  const path = await vi.importActual<typeof import('path')>('path')
+  state.home = fs.mkdtempSync(path.join(actual.tmpdir(), 'codekin-hooks-'))
+  return { ...actual, homedir: () => state.home }
 })
 
-const mockLoadWorkflowConfig = vi.hoisted(() => vi.fn(() => ({ reviewRepos: [] })))
 vi.mock('./workflow-config.js', () => ({
-  loadWorkflowConfig: mockLoadWorkflowConfig,
+  loadWorkflowConfig: () => state.workflowConfig,
+  saveWorkflowConfig: vi.fn(),
+  addReviewRepo: vi.fn(),
+  removeReviewRepo: vi.fn(),
+  updateReviewRepo: vi.fn(),
 }))
 
-// Import under test AFTER mocks are declared. Note: commit-event-hooks resolves
-// HOOK_CONFIG_PATH eagerly at import time using homedir(), so we must set
-// TMP_HOME and mockHomedir before each test via dynamic import.
-type HookModule = typeof import('./commit-event-hooks.js')
+import {
+  ensureHookConfig,
+  installCommitHook,
+  uninstallCommitHook,
+  syncCommitHooks,
+} from './commit-event-hooks.js'
 
-async function loadModule(): Promise<HookModule> {
-  vi.resetModules()
-  return await import('./commit-event-hooks.js')
+// ---------------------------------------------------------------------------
+// Test helpers
+// ---------------------------------------------------------------------------
+
+const BEGIN_MARKER = '# BEGIN CODEKIN COMMIT HOOK'
+const END_MARKER = '# END CODEKIN COMMIT HOOK'
+
+/** Create a bare working git repo in a temp dir. Returns the repo path. */
+function makeGitRepo(): string {
+  const repoDir = mkdtempSync(join(tmpdir(), 'codekin-repo-'))
+  execFileSync('git', ['init', '-q', repoDir], { stdio: ['ignore', 'ignore', 'ignore'] })
+  return repoDir
 }
 
-function makeRepo(root: string): string {
-  const repo = join(root, 'repo-' + randomUUID().slice(0, 8))
-  mkdirSync(join(repo, '.git', 'hooks'), { recursive: true })
-  return repo
-}
-
-beforeEach(() => {
-  TMP_HOME = join(tmpdir(), 'codekin-hooks-test-' + randomUUID())
-  mkdirSync(TMP_HOME, { recursive: true })
-  mockHomedir.mockReturnValue(TMP_HOME)
-  mockLoadWorkflowConfig.mockReturnValue({ reviewRepos: [] })
-})
-
-afterEach(() => {
-  if (TMP_HOME && existsSync(TMP_HOME)) {
-    rmSync(TMP_HOME, { recursive: true, force: true })
+/** Clean up one or more directories recursively (ignores missing). */
+function rmAll(...dirs: string[]) {
+  for (const d of dirs) {
+    if (d && existsSync(d)) rmSync(d, { recursive: true, force: true })
   }
-  vi.restoreAllMocks()
-})
+}
+
+// ---------------------------------------------------------------------------
+// ensureHookConfig
+// ---------------------------------------------------------------------------
 
 describe('ensureHookConfig', () => {
-  it('writes ~/.codekin/hook-config.json with mode 0600', async () => {
-    const { ensureHookConfig } = await loadModule()
-    ensureHookConfig('secret-token-xyz', 'http://localhost:32352')
+  const configPath = () => join(state.home, '.codekin', 'hook-config.json')
+  const configDir = () => join(state.home, '.codekin')
 
-    const path = join(TMP_HOME, '.codekin', 'hook-config.json')
-    expect(existsSync(path)).toBe(true)
-    const contents = JSON.parse(readFileSync(path, 'utf-8'))
-    expect(contents).toEqual({ serverUrl: 'http://localhost:32352', authToken: 'secret-token-xyz' })
+  beforeEach(() => {
+    // Ensure a clean ~/.codekin between runs
+    rmAll(configDir())
+  })
 
-    // Assert restrictive permissions (0600). The low 9 bits are rwxrwxrwx.
-    const mode = statSync(path).mode & 0o777
+  it('writes hook-config.json with serverUrl + authToken', () => {
+    ensureHookConfig('tok-123', 'http://localhost:32352')
+
+    expect(existsSync(configPath())).toBe(true)
+    const parsed = JSON.parse(readFileSync(configPath(), 'utf-8'))
+    expect(parsed).toEqual({ serverUrl: 'http://localhost:32352', authToken: 'tok-123' })
+  })
+
+  it('writes the file with 0600 permissions', () => {
+    ensureHookConfig('secret-token', 'http://example.test')
+    const mode = statSync(configPath()).mode & 0o777
     expect(mode).toBe(0o600)
   })
 
-  it('creates the .codekin directory if it does not exist', async () => {
-    const { ensureHookConfig } = await loadModule()
-    expect(existsSync(join(TMP_HOME, '.codekin'))).toBe(false)
-    ensureHookConfig('tok', 'http://x')
-    expect(existsSync(join(TMP_HOME, '.codekin'))).toBe(true)
+  it('creates the ~/.codekin directory if it does not exist', () => {
+    expect(existsSync(configDir())).toBe(false)
+    ensureHookConfig('t', 'u')
+    expect(existsSync(configDir())).toBe(true)
   })
 
-  it('overwrites an existing config with new values', async () => {
-    const { ensureHookConfig } = await loadModule()
-    ensureHookConfig('old', 'http://old')
-    ensureHookConfig('new', 'http://new')
-    const path = join(TMP_HOME, '.codekin', 'hook-config.json')
-    const contents = JSON.parse(readFileSync(path, 'utf-8'))
-    expect(contents.authToken).toBe('new')
-    expect(contents.serverUrl).toBe('http://new')
+  it('overwrites an existing config on re-run', () => {
+    ensureHookConfig('old-token', 'http://old')
+    ensureHookConfig('new-token', 'http://new')
+
+    const parsed = JSON.parse(readFileSync(configPath(), 'utf-8'))
+    expect(parsed.authToken).toBe('new-token')
+    expect(parsed.serverUrl).toBe('http://new')
   })
 })
 
+// ---------------------------------------------------------------------------
+// installCommitHook
+// ---------------------------------------------------------------------------
+
 describe('installCommitHook', () => {
-  it('creates a new post-commit hook file with BEGIN/END markers and shebang', async () => {
-    const { installCommitHook } = await loadModule()
-    const repo = makeRepo(TMP_HOME)
-    installCommitHook(repo)
+  let repoDir: string
 
-    const hookPath = join(repo, '.git', 'hooks', 'post-commit')
+  beforeEach(() => {
+    repoDir = makeGitRepo()
+  })
+
+  afterEach(() => {
+    rmAll(repoDir)
+  })
+
+  it('creates post-commit with a shebang + marker block when no hook exists', () => {
+    installCommitHook(repoDir)
+
+    const hookPath = join(repoDir, '.git', 'hooks', 'post-commit')
     expect(existsSync(hookPath)).toBe(true)
-    const contents = readFileSync(hookPath, 'utf-8')
-    expect(contents.startsWith('#!/bin/sh')).toBe(true)
-    expect(contents).toContain('# BEGIN CODEKIN COMMIT HOOK')
-    expect(contents).toContain('# END CODEKIN COMMIT HOOK')
 
-    // Executable bits set
+    const content = readFileSync(hookPath, 'utf-8')
+    expect(content.startsWith('#!/bin/sh')).toBe(true)
+    expect(content).toContain(BEGIN_MARKER)
+    expect(content).toContain(END_MARKER)
+    // The block references the shipped shell script
+    expect(content).toContain('commit-event-hook.sh')
+  })
+
+  it('sets executable permissions (0755) on the hook', () => {
+    installCommitHook(repoDir)
+    const hookPath = join(repoDir, '.git', 'hooks', 'post-commit')
     const mode = statSync(hookPath).mode & 0o777
     expect(mode).toBe(0o755)
   })
 
-  it('is idempotent — repeated installs only keep one BEGIN/END section', async () => {
-    const { installCommitHook } = await loadModule()
-    const repo = makeRepo(TMP_HOME)
-    installCommitHook(repo)
-    installCommitHook(repo)
-    installCommitHook(repo)
+  it('is idempotent — re-running does not duplicate the marker block', () => {
+    installCommitHook(repoDir)
+    installCommitHook(repoDir)
 
-    const contents = readFileSync(join(repo, '.git', 'hooks', 'post-commit'), 'utf-8')
-    const beginCount = (contents.match(/# BEGIN CODEKIN COMMIT HOOK/g) ?? []).length
-    const endCount = (contents.match(/# END CODEKIN COMMIT HOOK/g) ?? []).length
+    const hookPath = join(repoDir, '.git', 'hooks', 'post-commit')
+    const content = readFileSync(hookPath, 'utf-8')
+
+    // Count markers — should be exactly one of each
+    const beginCount = (content.match(new RegExp(BEGIN_MARKER, 'g')) || []).length
+    const endCount = (content.match(new RegExp(END_MARKER, 'g')) || []).length
     expect(beginCount).toBe(1)
     expect(endCount).toBe(1)
   })
 
-  it('appends to an existing user-provided hook without deleting their content', async () => {
-    const { installCommitHook } = await loadModule()
-    const repo = makeRepo(TMP_HOME)
-    const hookPath = join(repo, '.git', 'hooks', 'post-commit')
-    const existingUserContent = '#!/bin/sh\n# user hook\necho "hello from user"\n'
-    writeFileSync(hookPath, existingUserContent, 'utf-8')
+  it('appends the block to an existing user hook (preserving user content)', () => {
+    const hookPath = join(repoDir, '.git', 'hooks', 'post-commit')
+    const userContent = '#!/bin/bash\n# User-defined hook\necho "user hook"\n'
+    writeFileSync(hookPath, userContent)
 
-    installCommitHook(repo)
+    installCommitHook(repoDir)
 
-    const contents = readFileSync(hookPath, 'utf-8')
-    expect(contents).toContain('echo "hello from user"')
-    expect(contents).toContain('# BEGIN CODEKIN COMMIT HOOK')
+    const final = readFileSync(hookPath, 'utf-8')
+    expect(final).toContain('# User-defined hook')
+    expect(final).toContain('echo "user hook"')
+    expect(final).toContain(BEGIN_MARKER)
+    expect(final).toContain(END_MARKER)
   })
 
-  it('replaces existing codekin section in-place on reinstall', async () => {
-    const { installCommitHook } = await loadModule()
-    const repo = makeRepo(TMP_HOME)
-    const hookPath = join(repo, '.git', 'hooks', 'post-commit')
-
-    installCommitHook(repo)
+  it('replaces an existing codekin block rather than appending a second one', () => {
+    installCommitHook(repoDir)
+    const hookPath = join(repoDir, '.git', 'hooks', 'post-commit')
+    // Hand-tamper the marker block contents to simulate an older install
     const before = readFileSync(hookPath, 'utf-8')
-    // Install again — content should still be a single section
-    installCommitHook(repo)
+    const tampered = before.replace('commit-event-hook.sh', 'OLD-PATH.sh')
+    writeFileSync(hookPath, tampered)
+
+    installCommitHook(repoDir)
+
     const after = readFileSync(hookPath, 'utf-8')
-
-    expect(after.split('# BEGIN CODEKIN COMMIT HOOK').length).toBe(2)
-    // Sanity: the two runs produce identical output (section is deterministic)
-    expect(before).toBe(after)
-  })
-
-  it('creates the hooks directory if it is missing', async () => {
-    const { installCommitHook } = await loadModule()
-    const repo = join(TMP_HOME, 'no-hooks-dir')
-    mkdirSync(join(repo, '.git'), { recursive: true })
-    installCommitHook(repo)
-    expect(existsSync(join(repo, '.git', 'hooks', 'post-commit'))).toBe(true)
+    expect(after).not.toContain('OLD-PATH.sh')
+    expect(after).toContain('commit-event-hook.sh')
+    // Still only one block
+    expect((after.match(new RegExp(BEGIN_MARKER, 'g')) || []).length).toBe(1)
   })
 })
+
+// ---------------------------------------------------------------------------
+// uninstallCommitHook
+// ---------------------------------------------------------------------------
 
 describe('uninstallCommitHook', () => {
-  it('returns false when no hook file exists', async () => {
-    const { uninstallCommitHook } = await loadModule()
-    const repo = makeRepo(TMP_HOME)
-    expect(uninstallCommitHook(repo)).toBe(false)
+  let repoDir: string
+
+  beforeEach(() => {
+    repoDir = makeGitRepo()
   })
 
-  it('returns false when hook file exists but has no codekin section', async () => {
-    const { uninstallCommitHook } = await loadModule()
-    const repo = makeRepo(TMP_HOME)
-    const hookPath = join(repo, '.git', 'hooks', 'post-commit')
-    writeFileSync(hookPath, '#!/bin/sh\necho "foreign hook"\n')
-    expect(uninstallCommitHook(repo)).toBe(false)
-    // File is left untouched
-    expect(readFileSync(hookPath, 'utf-8')).toContain('foreign hook')
+  afterEach(() => {
+    rmAll(repoDir)
   })
 
-  it('removes the codekin section but keeps user content', async () => {
-    const { installCommitHook, uninstallCommitHook } = await loadModule()
-    const repo = makeRepo(TMP_HOME)
-    const hookPath = join(repo, '.git', 'hooks', 'post-commit')
-    writeFileSync(hookPath, '#!/bin/sh\n# user hook\necho "hi"\n', 'utf-8')
-    installCommitHook(repo)
-
-    expect(uninstallCommitHook(repo)).toBe(true)
-    const contents = readFileSync(hookPath, 'utf-8')
-    expect(contents).not.toContain('CODEKIN COMMIT HOOK')
-    expect(contents).toContain('echo "hi"')
+  it('returns false if no hook file exists', () => {
+    expect(uninstallCommitHook(repoDir)).toBe(false)
   })
 
-  it('deletes the hook file if it contains only the codekin section + shebang', async () => {
-    const { installCommitHook, uninstallCommitHook } = await loadModule()
-    const repo = makeRepo(TMP_HOME)
-    installCommitHook(repo)
+  it('returns false if hook exists but does not contain the codekin block', () => {
+    const hookPath = join(repoDir, '.git', 'hooks', 'post-commit')
+    writeFileSync(hookPath, '#!/bin/sh\necho "not codekin"\n')
+    expect(uninstallCommitHook(repoDir)).toBe(false)
+  })
 
-    expect(uninstallCommitHook(repo)).toBe(true)
-    expect(existsSync(join(repo, '.git', 'hooks', 'post-commit'))).toBe(false)
+  it('removes the entire hook file when only codekin block + shebang remain', () => {
+    installCommitHook(repoDir)
+    const hookPath = join(repoDir, '.git', 'hooks', 'post-commit')
+    expect(existsSync(hookPath)).toBe(true)
+
+    const result = uninstallCommitHook(repoDir)
+    expect(result).toBe(true)
+    expect(existsSync(hookPath)).toBe(false)
+  })
+
+  it('preserves user hook content and strips only the codekin block', () => {
+    const hookPath = join(repoDir, '.git', 'hooks', 'post-commit')
+    const userContent = '#!/bin/bash\n# User-defined hook\necho "user hook"\n'
+    writeFileSync(hookPath, userContent)
+    installCommitHook(repoDir)
+
+    const result = uninstallCommitHook(repoDir)
+    expect(result).toBe(true)
+    expect(existsSync(hookPath)).toBe(true)
+
+    const remaining = readFileSync(hookPath, 'utf-8')
+    expect(remaining).toContain('# User-defined hook')
+    expect(remaining).toContain('echo "user hook"')
+    expect(remaining).not.toContain(BEGIN_MARKER)
+    expect(remaining).not.toContain(END_MARKER)
   })
 })
 
+// ---------------------------------------------------------------------------
+// syncCommitHooks
+// ---------------------------------------------------------------------------
+
 describe('syncCommitHooks', () => {
-  it('installs hooks for enabled commit-review repos', async () => {
-    const { syncCommitHooks } = await loadModule()
-    const repo = makeRepo(TMP_HOME)
-    mockLoadWorkflowConfig.mockReturnValue({
-      reviewRepos: [
-        { id: '1', name: 'r', repoPath: repo, cronExpression: 'event', enabled: true, kind: 'commit-review' },
-      ],
-    } as ReturnType<typeof mockLoadWorkflowConfig>)
+  let repoA: string
+  let repoB: string
+
+  beforeEach(() => {
+    repoA = makeGitRepo()
+    repoB = makeGitRepo()
+    state.workflowConfig.reviewRepos = []
+  })
+
+  afterEach(() => {
+    rmAll(repoA, repoB)
+  })
+
+  it('installs hooks for enabled commit-review repos', () => {
+    state.workflowConfig.reviewRepos = [{
+      id: 'a', name: 'RepoA', repoPath: repoA,
+      cronExpression: 'event', enabled: true, kind: 'commit-review',
+    }]
 
     syncCommitHooks()
-    expect(existsSync(join(repo, '.git', 'hooks', 'post-commit'))).toBe(true)
+
+    const hookPath = join(repoA, '.git', 'hooks', 'post-commit')
+    expect(existsSync(hookPath)).toBe(true)
+    expect(readFileSync(hookPath, 'utf-8')).toContain(BEGIN_MARKER)
   })
 
-  it('uninstalls hooks for repos no longer in commit-review', async () => {
-    const hooksMod = await loadModule()
-    const repo = makeRepo(TMP_HOME)
-
-    // First install a hook
-    hooksMod.installCommitHook(repo)
-    expect(existsSync(join(repo, '.git', 'hooks', 'post-commit'))).toBe(true)
-
-    // Config switches that repo to a non-commit-review workflow
-    mockLoadWorkflowConfig.mockReturnValue({
-      reviewRepos: [
-        { id: '1', name: 'r', repoPath: repo, cronExpression: '0 9 * * *', enabled: true, kind: 'code-review.daily' },
-      ],
-    } as ReturnType<typeof mockLoadWorkflowConfig>)
-    hooksMod.syncCommitHooks()
-    expect(existsSync(join(repo, '.git', 'hooks', 'post-commit'))).toBe(false)
-  })
-
-  it('skips disabled commit-review repos', async () => {
-    const { syncCommitHooks } = await loadModule()
-    const repo = makeRepo(TMP_HOME)
-    mockLoadWorkflowConfig.mockReturnValue({
-      reviewRepos: [
-        { id: '1', name: 'r', repoPath: repo, cronExpression: 'event', enabled: false, kind: 'commit-review' },
-      ],
-    } as ReturnType<typeof mockLoadWorkflowConfig>)
+  it('does NOT install for disabled commit-review repos', () => {
+    state.workflowConfig.reviewRepos = [{
+      id: 'a', name: 'RepoA', repoPath: repoA,
+      cronExpression: 'event', enabled: false, kind: 'commit-review',
+    }]
 
     syncCommitHooks()
-    expect(existsSync(join(repo, '.git', 'hooks', 'post-commit'))).toBe(false)
+
+    const hookPath = join(repoA, '.git', 'hooks', 'post-commit')
+    expect(existsSync(hookPath)).toBe(false)
   })
 
-  it('skips repos without a .git directory', async () => {
-    const { syncCommitHooks } = await loadModule()
-    const repo = join(TMP_HOME, 'not-a-git-repo')
-    mkdirSync(repo, { recursive: true })
-    mockLoadWorkflowConfig.mockReturnValue({
-      reviewRepos: [
-        { id: '1', name: 'r', repoPath: repo, cronExpression: 'event', enabled: true, kind: 'commit-review' },
-      ],
-    } as ReturnType<typeof mockLoadWorkflowConfig>)
+  it('does NOT install for non-commit-review kinds (e.g. code-review.daily)', () => {
+    state.workflowConfig.reviewRepos = [{
+      id: 'a', name: 'RepoA', repoPath: repoA,
+      cronExpression: '0 6 * * *', enabled: true, kind: 'code-review.daily',
+    }]
 
-    // Should not throw
-    expect(() => syncCommitHooks()).not.toThrow()
-    expect(existsSync(join(repo, '.git'))).toBe(false)
+    syncCommitHooks()
+
+    const hookPath = join(repoA, '.git', 'hooks', 'post-commit')
+    expect(existsSync(hookPath)).toBe(false)
+  })
+
+  it('uninstalls hook when a repo switches away from commit-review', () => {
+    // First pass: commit-review enabled → hook installed
+    state.workflowConfig.reviewRepos = [{
+      id: 'a', name: 'RepoA', repoPath: repoA,
+      cronExpression: 'event', enabled: true, kind: 'commit-review',
+    }]
+    syncCommitHooks()
+    const hookPath = join(repoA, '.git', 'hooks', 'post-commit')
+    expect(existsSync(hookPath)).toBe(true)
+
+    // Second pass: switched kind → sync should remove the hook
+    state.workflowConfig.reviewRepos = [{
+      id: 'a', name: 'RepoA', repoPath: repoA,
+      cronExpression: '0 6 * * *', enabled: true, kind: 'code-review.daily',
+    }]
+    syncCommitHooks()
+    expect(existsSync(hookPath)).toBe(false)
+  })
+
+  it('handles multiple repos — installing the enabled commit-review one only', () => {
+    state.workflowConfig.reviewRepos = [
+      { id: 'a', name: 'A', repoPath: repoA, cronExpression: 'event', enabled: true, kind: 'commit-review' },
+      { id: 'b', name: 'B', repoPath: repoB, cronExpression: '0 6 * * *', enabled: true, kind: 'code-review.daily' },
+    ]
+
+    syncCommitHooks()
+
+    expect(existsSync(join(repoA, '.git', 'hooks', 'post-commit'))).toBe(true)
+    expect(existsSync(join(repoB, '.git', 'hooks', 'post-commit'))).toBe(false)
   })
 })

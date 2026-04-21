@@ -108,6 +108,14 @@ function scanModules(modulesDir: string) {
 const ghEnv = { ...process.env }
 delete ghEnv.GITHUB_TOKEN
 
+/**
+ * Local on-disk path for a repo, namespaced by owner to prevent collisions
+ * between ownerA/foo and ownerB/foo.
+ */
+export function localRepoPath(reposRoot: string, owner: string, name: string): string {
+  return join(reposRoot, owner, name)
+}
+
 async function fetchGhRepos(owner: string, reposRoot: string) {
   const { stdout } = await execFileAsync('gh', [
     'repo', 'list', owner,
@@ -118,7 +126,7 @@ async function fetchGhRepos(owner: string, reposRoot: string) {
   const repos = parsed as Array<{ name: string; url: string; description?: string }>
   repos.sort((a, b) => a.name.localeCompare(b.name))
   return repos.map((r) => {
-    const repoPath = `${reposRoot}/${r.name}`
+    const repoPath = localRepoPath(reposRoot, owner, r.name)
     const cloned = existsSync(repoPath)
     return {
       id: r.name,
@@ -297,7 +305,8 @@ export function createUploadRouter(
     }
 
     const reposRoot = realpathSync(resolveReposRoot())
-    const dest = join(reposRoot, name)
+    const ownerDir = join(reposRoot, owner)
+    const dest = localRepoPath(reposRoot, owner, name)
     // Boundary check: ensure resolved dest stays within REPOS_ROOT
     // Use realpathSync on reposRoot to prevent symlink bypass
     const resolvedDest = resolve(dest)
@@ -309,6 +318,9 @@ export function createUploadRouter(
       res.json({ success: true, path: dest })
       return
     }
+    // Ensure the owner-namespaced parent directory exists — git clone does not
+    // create missing parents.
+    mkdirSync(ownerDir, { recursive: true })
 
     console.log(`Cloning ${owner}/${name} into ${dest}...`)
     execFileAsync('gh', ['repo', 'clone', `${owner}/${name}`, dest], { timeout: 120000 })

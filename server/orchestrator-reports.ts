@@ -110,10 +110,12 @@ export function readReport(filePath: string): ReportContent | null {
   } catch {
     return null
   }
-  // Verify the path is within a known reports directory (anchored startsWith, not includes)
+  // Verify the path is within a known reports directory. Depth-agnostic so nested
+  // layouts like REPOS_ROOT/org/repo/.codekin/reports/... are accepted; the
+  // realpath-based REPOS_ROOT containment check prevents traversal escape.
   const isDataReport = resolved.startsWith(DATA_DIR + '/reports/')
   const isRepoReport = resolved.startsWith(REPOS_ROOT + '/') &&
-    /^[^/]+\/\.codekin\/reports\//.test(resolved.slice(REPOS_ROOT.length + 1))
+    resolved.includes('/.codekin/reports/')
   if (!isDataReport && !isRepoReport) return null
 
   const content = readFileSync(resolved, 'utf-8')
