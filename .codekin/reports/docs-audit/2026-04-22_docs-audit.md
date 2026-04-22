@@ -1,7 +1,14 @@
-# Documentation Audit Report — 2026-04-22
+# Documentation Audit: codekin
 
-**Project**: codekin v0.6.3
-**Generated**: 2026-04-22
+**Date**: 2026-04-22T01:24:05.242Z
+**Repository**: /srv/repos/codekin
+**Branch**: docs/audit-reports-2026-04-18
+**Workflow Run**: a7442aa1-892e-4985-86d2-abb794965a30
+**Session**: 60cb7829-8d2e-463d-9a30-b866bc5c5266
+
+---
+
+I'll start by exploring the repository to inventory all documentation files, then analyze them for staleness, accuracy, and redundancy.Now let me do a deeper accuracy and cross-reference check against the actual codebase.Let me do one more targeted check on potential staleness and overlap issues.I now have all the data needed to produce the report. Writing the final structured audit.
 
 ---
 
@@ -81,7 +88,7 @@ The spec describes a single `orchestrator-routes.ts` handling all orchestrator R
 | `docs/GITHUB-WEBHOOKS-SPEC.md` | 823 | Full webhook infra spec — architecture, workspace management, git auth, CI failure handling, all phases |
 | `docs/PR-REVIEW-WEBHOOK.md` | 220 | PR review automation — event flow, context cache, comment updating, dedup logic |
 
-**Overlap**: Both cover the PR review webhook event flow, session lifecycle, git authentication, dedup logic, configuration variables, and test suite counts. `PR-REVIEW-WEBHOOK.md` is a deep-dive on a single subsystem that is already outlined in `GITHUB-WEBHOOKS-SPEC.md`.
+**Overlap**: Both cover the PR review webhook event flow, session lifecycle, git authentication, dedup logic, configuration variables, and test suite counts (140+ tests referenced in both). `PR-REVIEW-WEBHOOK.md` is a deep-dive on a single subsystem that is already outlined in `GITHUB-WEBHOOKS-SPEC.md`.
 
 **Recommendation**: Fold `PR-REVIEW-WEBHOOK.md` into `GITHUB-WEBHOOKS-SPEC.md` as a dedicated section ("§ PR Review Implementation"). The spec already has a Phase-based structure; the PR review doc maps cleanly to Phase 1. After merging, delete `PR-REVIEW-WEBHOOK.md`.
 
@@ -94,7 +101,7 @@ The spec describes a single `orchestrator-routes.ts` handling all orchestrator R
 
 **Overlap**: The Agent Joe sections in `FEATURES.md` summarise the same capabilities described at length in `ORCHESTRATOR-SPEC.md`. They do not conflict, but a reader may be uncertain which document to trust for implementation truth.
 
-**Recommendation**: Convert `ORCHESTRATOR-SPEC.md` into an "Implementation Reference" rather than a design spec — strip prescriptive future-tense language, update the route structure section to reflect the sub-router refactor, and add a header note that `FEATURES.md` is the user-facing summary.
+**Recommendation**: Convert `ORCHESTRATOR-SPEC.md` into an "Implementation Reference" rather than a design spec — strip the prescriptive future-tense language, update the route structure section to reflect the sub-router refactor, and add a header note that `FEATURES.md` is the user-facing summary. The two files can coexist if they are clearly differentiated.
 
 ---
 
@@ -102,9 +109,9 @@ The spec describes a single `orchestrator-routes.ts` handling all orchestrator R
 
 ### 1. Installation guidance split across two files
 
-`docs/INSTALL-DISTRIBUTION.md` (one-liner, npm, service) and `docs/SETUP.md` (bare-metal, nginx, Authelia, systemd) serve different audiences and are **intentionally separate** — well-differentiated, not fragmentation.
+`docs/INSTALL-DISTRIBUTION.md` (one-liner, npm, service) and `docs/SETUP.md` (bare-metal, nginx, Authelia, systemd) serve different audiences and are **intentionally separate** — this is well-differentiated, not fragmentation.
 
-### 2. Webhook docs are fragmented
+### 2. Webhook docs are fragmented (see Overlap Group A)
 
 The PR review subsystem is documented in a standalone file but belongs inside the webhook spec. 220 lines of detail for a single webhook type do not justify a top-level file.
 
@@ -160,4 +167,4 @@ All four phases are shipped. The document is neither a living reference nor an a
 
 9. **Consider adding a `docs/` index file (`docs/README.md`).** With 10 files in `docs/`, new contributors have no navigation aid. A short index listing each file with one-line descriptions would reduce orientation time without requiring any content changes to existing files.
 
-10. **Preserve the `-SPEC` naming convention with clarity.** `GITHUB-WEBHOOKS-SPEC.md` and `ORCHESTRATOR-SPEC.md` use a `-SPEC` suffix that signals "design document" — but after all phases ship, this label becomes misleading. Consider renaming to `GITHUB-WEBHOOKS.md` and `ORCHESTRATOR.md` to signal current-state reference rather than proposal.
+10. **Preserve the `-SPEC` naming convention with clarity.** `GITHUB-WEBHOOKS-SPEC.md` and `ORCHESTRATOR-SPEC.md` use a `-SPEC` suffix that signals "design document" — but after all phases ship, this label becomes misleading. Consider renaming to `GITHUB-WEBHOOKS.md` and `ORCHESTRATOR.md` to signal current-state reference rather than proposal.I'll commit the pending dependency health report change and save + commit the docs audit report I just generated.The file was corrupted — it was overwritten with a short version containing internal reasoning text. I'll restore the clean original from git, then write and commit the docs audit report.Good — the dependency report is restored to its clean state. Now I'll write the docs audit report to the correct location and push both unpushed commits plus the new report.All done. The docs audit report is saved to `.codekin/reports/docs-audit/2026-04-22_docs-audit.md` and pushed (3 commits total, including the two that were already ahead of origin). The corrupted dependency health file was restored to its clean committed state before pushing.
