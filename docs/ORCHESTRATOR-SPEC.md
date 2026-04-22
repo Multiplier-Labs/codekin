@@ -2,8 +2,10 @@
 
 > *"Agent Joe"* — a calm, knowledgeable ops manager who keeps your repositories healthy, your workflows running, and your audit findings actioned. Guides non-expert users toward becoming better vibe coders through pragmatic, friendly advice.
 
-**Status**: v1.0 — Phase 1 shipped (v0.5.0). Phases 2–4 shipped (v0.5.2). One Phase 3 item (auto-suggest workflow setup) remains roadmap.
+**Status**: v1.0 — all four implementation phases shipped as of **v0.5.2** (Phase 1 in v0.5.0; Phases 2–4 in v0.5.2). One Phase 3 item (auto-suggest workflow setup for new repos) is the only remaining roadmap entry.
 **Location in UI**: Left sidebar, below "AI Workflows"
+
+> **Document role**: This file is now a present-tense reference for the shipped Agent Joe system. Earlier prescriptive ("we will...") language describes the current implementation. Pending roadmap items are flagged explicitly.
 
 ---
 
@@ -108,12 +110,17 @@ Agent Joe is a `ClaudeProcess` session with:
 - `permissionMode: 'acceptEdits'` (it needs to read reports, write memory, spawn sessions)
 - Working directory: `~/.codekin/orchestrator/` (its own workspace)
 
-New additions to `SessionManager`:
+Methods exposed by `SessionManager`:
 ```typescript
 // In session-manager.ts
 getOrchestratorSession(): OrchestratorSession | null
 ensureOrchestratorRunning(): Promise<OrchestratorSession>
 spawnChildSession(repo: string, task: string, options: ChildSessionOptions): Promise<string>
+
+// Lifecycle hooks (added in commit 4cdabef) — used by Agent Joe to react to
+// child-session prompts and completions without polling.
+onSessionPrompt(listener: (sessionId, promptType, toolName?, requestId?) => void): void
+onSessionResult(listener: (sessionId, isError) => void): () => void
 ```
 
 ---
@@ -386,7 +393,7 @@ When you start fresh after a restart:
 
 ### 9.1 Sidebar Entry
 
-In `LeftSidebar.tsx`, add a new pinned menu item below "AI Workflows":
+`LeftSidebar.tsx` includes a pinned menu item below "AI Workflows":
 
 ```tsx
 <button
@@ -447,21 +454,93 @@ if (pathname === '/orchestrator') return { sessionId: null, view: 'orchestrator'
 
 ## 10. API Additions
 
-### 10.1 Server Routes (`server/orchestrator-routes.ts`)
+### 10.1 Route Module Structure
+
+`server/orchestrator-routes.ts` is now a thin wrapper that mounts three focused sub-routers (refactored in v0.5.2):
+
+| Sub-router | File | Concerns |
+|---|---|---|
+| Sessions | `server/orchestrator-session-router.ts` | Status & lifecycle, child sessions, reports, dashboard, pending prompts, session cleanup |
+| Memory & Trust | `server/orchestrator-memory-router.ts` | Memory CRUD, trust records, notifications |
+| Learning | `server/orchestrator-learning-router.ts` | Finding outcomes, skill levels, decisions, memory extraction/aging |
+
+Each sub-router shares the same `verifyOrchestratorAuth` callback (master Bearer token OR the orchestrator session's scoped token).
+
+### 10.2 Endpoints (live)
+
+All endpoints live under `/api/orchestrator/`. See [docs/API-REFERENCE.md](./API-REFERENCE.md#orchestrator-agent-joe) for full request/response schemas.
+
+**Status & lifecycle** (`orchestrator-session-router.ts`):
 
 ```
-GET    /cc/api/orchestrator/status          — session status + summary stats
-POST   /cc/api/orchestrator/start           — ensure Agent Joe is running
-GET    /cc/api/orchestrator/repos           — repo registry
-POST   /cc/api/orchestrator/repos           — add repo to registry
-PATCH  /cc/api/orchestrator/repos/:id       — update repo policy
-DELETE /cc/api/orchestrator/repos/:id       — remove repo from registry
-GET    /cc/api/orchestrator/memory          — query memory store (FTS)
-GET    /cc/api/orchestrator/children        — list child sessions
-GET    /cc/api/orchestrator/journal         — recent journal entries
+GET    /api/orchestrator/status                     — session status + summary stats
+POST   /api/orchestrator/start                      — ensure Agent Joe is running
+GET    /api/orchestrator/dashboard                  — summary statistics
 ```
 
-### 10.2 WebSocket Messages
+**Reports** (`orchestrator-session-router.ts`):
+
+```
+GET    /api/orchestrator/reports                    — list reports for a repo or since a date
+GET    /api/orchestrator/reports/read               — read a specific report file
+```
+
+**Child & managed sessions** (`orchestrator-session-router.ts`):
+
+```
+GET    /api/orchestrator/children                   — list spawned child sessions
+POST   /api/orchestrator/children                   — spawn a new child session
+GET    /api/orchestrator/children/:id               — get a child session
+GET    /api/orchestrator/sessions                   — list orchestrator-visible sessions
+GET    /api/orchestrator/sessions/pending-prompts   — sessions awaiting approval
+POST   /api/orchestrator/sessions/:id/respond       — respond to a pending prompt
+DELETE /api/orchestrator/sessions/cleanup           — delete all automated sessions
+DELETE /api/orchestrator/sessions/:id               — delete a managed session
+```
+
+**Memory, trust, notifications** (`orchestrator-memory-router.ts`):
+
+```
+GET    /api/orchestrator/memory                     — query memory store (FTS)
+POST   /api/orchestrator/memory                     — create/update memory item
+DELETE /api/orchestrator/memory/:id                 — delete memory item
+GET    /api/orchestrator/trust                      — list trust records
+GET    /api/orchestrator/trust/level                — compute trust for an action signature
+POST   /api/orchestrator/trust/approve              — record approval
+POST   /api/orchestrator/trust/reject               — record rejection (resets to ASK)
+POST   /api/orchestrator/trust/pin                  — pin trust level (override)
+POST   /api/orchestrator/trust/reset                — clear all learned trust
+GET    /api/orchestrator/notifications              — list pending notifications
+POST   /api/orchestrator/notifications/mark-delivered
+```
+
+**Learning** (`orchestrator-learning-router.ts`):
+
+```
+POST   /api/orchestrator/memory/extract             — extract memory candidates from interaction
+POST   /api/orchestrator/memory/age                 — run aging/decay cycle
+POST   /api/orchestrator/findings/outcome           — record audit finding outcome
+GET    /api/orchestrator/findings/recommend         — triage recommendation
+GET    /api/orchestrator/skills                     — user skill profile
+POST   /api/orchestrator/skills                     — record skill signal
+POST   /api/orchestrator/decisions                  — record a decision
+POST   /api/orchestrator/decisions/:id/assess       — assess past decision outcome
+GET    /api/orchestrator/decisions/pending          — decisions awaiting assessment
+```
+
+### 10.3 Session Lifecycle Hooks & Approval Endpoints
+
+Added in v0.4.x (commit `4cdabef`) to support event-driven monitoring of child sessions. `SessionManager` exposes two hooks:
+
+```typescript
+// In server/session-manager.ts
+sessions.onSessionPrompt((sessionId, promptType, toolName, requestId) => { ... })
+sessions.onSessionResult((sessionId, isError) => { ... })  // returns disposer
+```
+
+Agent Joe subscribes to these on startup, replacing the previous polling loop. Combined with the new approval endpoints — `GET /api/orchestrator/sessions/pending-prompts` and `POST /api/orchestrator/sessions/:id/respond` — Agent Joe can discover stuck child sessions and respond to permission/question prompts on the user's behalf (subject to trust level — see §12).
+
+### 10.4 WebSocket Messages
 
 ```typescript
 // New message types
