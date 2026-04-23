@@ -12,7 +12,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, unlinkSync } from 'fs'
 import { execFileSync } from 'child_process'
 import { homedir } from 'os'
-import { dirname, join } from 'path'
+import { dirname, isAbsolute, join } from 'path'
 import { loadWorkflowConfig } from './workflow-config.js'
 
 // ---------------------------------------------------------------------------
@@ -62,14 +62,16 @@ export function ensureHookConfig(authToken: string, serverUrl: string): void {
 /**
  * Resolve the hooks directory for a given repo.
  * Respects `core.hooksPath` if configured, otherwise uses `.git/hooks/`.
+ * A relative `core.hooksPath` is resolved against the repo root, matching
+ * git's own behavior — otherwise writes would target process CWD.
  */
-function getHooksDir(repoPath: string): string {
+export function getHooksDir(repoPath: string): string {
   try {
     const customPath = execFileSync(
       'git', ['config', '--get', 'core.hooksPath'],
       { cwd: repoPath, timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] },
     ).toString().trim()
-    if (customPath) return customPath
+    if (customPath) return isAbsolute(customPath) ? customPath : join(repoPath, customPath)
   } catch {
     // Not set — use default
   }
