@@ -8,7 +8,7 @@ import express from 'express'
 import type { Request } from 'express'
 import type { AddressInfo } from 'net'
 import type { Server } from 'http'
-import { mkdirSync, rmSync, realpathSync } from 'fs'
+import { mkdirSync, rmSync, realpathSync, symlinkSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
@@ -357,6 +357,50 @@ describe('createSessionRouter', () => {
         method: 'PUT', headers: auth(), body: JSON.stringify({ path: '~' }),
       })
       expect(res.status).toBe(200)
+    })
+
+    it('happy path: accepts a directory inside the allowed parent', async () => {
+      const res = await fetch(`${server.baseUrl}/api/settings/repos-path`, {
+        method: 'PUT', headers: auth(),
+        body: JSON.stringify({ path: join(REPOS_DIR, 'ok') }),
+      })
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.path).toBe(realpathSync(join(REPOS_DIR, 'ok')))
+    })
+
+    it('rejects a traversal attempt via ../../etc', async () => {
+      // Many ".." segments climb past root and resolve to /etc on Linux.
+      const traversal = REPOS_DIR + '/../../../../../../../../../etc'
+      const res = await fetch(`${server.baseUrl}/api/settings/repos-path`, {
+        method: 'PUT', headers: auth(),
+        body: JSON.stringify({ path: traversal }),
+      })
+      expect(res.status).toBe(400)
+      const body = await res.json()
+      expect(body.error).toMatch(/outside allowed/i)
+    })
+
+    it('rejects an absolute path outside allowed parents', async () => {
+      const res = await fetch(`${server.baseUrl}/api/settings/repos-path`, {
+        method: 'PUT', headers: auth(),
+        body: JSON.stringify({ path: OUTSIDE_DIR }),
+      })
+      expect(res.status).toBe(400)
+      const body = await res.json()
+      expect(body.error).toMatch(/outside allowed/i)
+    })
+
+    it('rejects a symlink that points outside allowed parents', async () => {
+      const linkPath = join(HOME_DIR, 'escape-link')
+      symlinkSync(OUTSIDE_DIR, linkPath, 'dir')
+      const res = await fetch(`${server.baseUrl}/api/settings/repos-path`, {
+        method: 'PUT', headers: auth(),
+        body: JSON.stringify({ path: linkPath }),
+      })
+      expect(res.status).toBe(400)
+      const body = await res.json()
+      expect(body.error).toMatch(/outside allowed/i)
     })
   })
 

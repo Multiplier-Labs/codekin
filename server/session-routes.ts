@@ -93,9 +93,12 @@ export function expandTilde(p: string): string {
 
 /**
  * Canonicalize a user-supplied repos path for persistence.
- * Expands ~, then resolves the absolute canonical path via realpathSync so
- * stored values never contain ~ or symlinks that later code would have to
- * re-expand. Returns an error discriminated union.
+ *
+ * Expands ~, resolves to an absolute canonical path via realpathSync (so the
+ * stored value never contains ~ or symlinks), then enforces that the resolved
+ * path is the user's home dir, REPOS_ROOT, or a descendant of either.
+ * Mirrors the boundary check used by /api/browse-dirs and /api/sessions/create
+ * to prevent the setting from pointing at arbitrary host paths (e.g. /etc).
  */
 export function canonicalizeReposPath(
   raw: string,
@@ -104,11 +107,19 @@ export function canonicalizeReposPath(
   if (!fsExistsSync(expanded) || !fsStatSync(expanded).isDirectory()) {
     return { ok: false, error: 'Path does not exist or is not a directory' }
   }
+  let resolved: string
   try {
-    return { ok: true, path: fsRealpathSync(expanded) }
+    resolved = fsRealpathSync(expanded)
   } catch {
     return { ok: false, error: 'Path could not be resolved' }
   }
+  const home = osHomedir()
+  const allowedRoots = [home, REPOS_ROOT]
+  const inAllowed = allowedRoots.some(root => resolved === root || resolved.startsWith(root + '/'))
+  if (!inAllowed) {
+    return { ok: false, error: 'Path is outside allowed directories (must be under home or repos root)' }
+  }
+  return { ok: true, path: resolved }
 }
 
 type VerifyFn = (token: string | undefined) => boolean
