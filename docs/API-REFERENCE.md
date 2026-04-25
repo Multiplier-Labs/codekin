@@ -16,6 +16,21 @@ Unauthenticated requests return `401 Unauthorized`.
 
 ---
 
+## Models
+
+Endpoints that accept a `model` field (e.g. session creation via WebSocket, workflow config, orchestrator children) accept the following Claude model identifiers:
+
+| Identifier | Label |
+|---|---|
+| `claude-opus-4-7` | Opus 4.7 |
+| `claude-opus-4-6` | Opus 4.6 |
+| `claude-sonnet-4-6` | Sonnet 4.6 |
+| `claude-haiku-4-5-20251001` | Haiku 4.5 |
+
+When `model` is omitted, the server default is used. The canonical list lives in `CLAUDE_MODELS` in `src/types.ts`.
+
+---
+
 ## Auth & Health
 
 ### `POST /auth-verify`
@@ -414,7 +429,7 @@ Add a repo workflow configuration.
 
 `repoPath` is resolved via `realpath` and must sit under the configured `REPOS_ROOT` — otherwise the request is rejected with `400`.
 
-**Request body:** `{ "id": "...", "name": "...", "repoPath": "...", "cronExpression": "...", "enabled": true, "customPrompt": "...", "kind": "...", "model": "..." }`
+**Request body:** `{ "id": "...", "name": "...", "repoPath": "...", "cronExpression": "...", "enabled": true, "customPrompt": "...", "kind": "...", "model": "claude-opus-4-7" }` (see [Models](#models) for accepted identifiers)
 **Response:** `{ "config": WorkflowConfig, "webhookSetup"?: WebhookSetupResult }`, or `400` with `{ "error": "..." }` when required fields are missing, `provider` is invalid, or `repoPath` is not an existing directory under the configured repos root.
 
 ### `PATCH /api/workflows/config/repos/:id`
@@ -480,7 +495,7 @@ List child sessions spawned by the orchestrator.
 
 Spawn a new child session for a task. `repo` is resolved via `realpath` and must sit under `REPOS_ROOT`. `branchName` must match `^[a-zA-Z0-9][a-zA-Z0-9/_.-]*$`.
 
-**Request body:** `{ "repo": "...", "task": "...", "branchName": "...", "useWorktree"?: boolean, "completionPolicy"?: "pr" | "merge" | "commit-only", "deployAfter"?: boolean, "model"?: "...", "allowedTools"?: string[] }`
+**Request body:** `{ "repo": "...", "task": "...", "branchName": "...", "useWorktree"?: boolean, "completionPolicy"?: "pr" | "merge" | "commit-only", "deployAfter"?: boolean, "model"?: "claude-opus-4-7", "allowedTools"?: string[] }` (see [Models](#models) for accepted `model` identifiers)
 **Response:** `{ "child": ChildSession }`, `400` with `{ "error": "..." }` when required fields are missing, `branchName` / `allowedTools` fail validation, or `repo` is not an existing directory under the configured repos root, or `503` when the child session cannot be spawned.
 
 #### `GET /api/orchestrator/children/:id`

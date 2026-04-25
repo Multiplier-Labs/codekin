@@ -48,8 +48,8 @@ export default defineConfig([
     },
   },
   {
-    files: ['server/*.ts'],
-    ignores: ['server/*.test.ts'],
+    files: ['server/**/*.ts'],
+    ignores: ['server/**/*.test.ts'],
     extends: [
       js.configs.recommended,
       tseslint.configs.strictTypeChecked,
