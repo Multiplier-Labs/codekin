@@ -4,7 +4,7 @@
 **Date**: 2026-02-23
 **Author**: Codekin Team
 
-> **See also**: [docs/PR-REVIEW-WEBHOOK.md](./PR-REVIEW-WEBHOOK.md) — the PR review feature built on top of this webhook infrastructure, handling `pull_request` events to automate code review.
+> **PR review** (`pull_request` events) is built on top of this webhook infrastructure. See [PR Review Implementation](#pr-review-implementation) below.
 
 ---
 
@@ -25,6 +25,7 @@
 - [Error Handling & Edge Cases](#error-handling--edge-cases)
 - [Observability](#observability)
 - [Implementation Phases](#implementation-phases)
+- [PR Review Implementation](#pr-review-implementation)
 - [Open Questions](#open-questions)
 - [Roadmap](#roadmap)
 
@@ -137,7 +138,7 @@ If the health check fails, webhook processing is disabled with a clear log warni
 
 | GitHub Event | Use Case | Status |
 |---|---|---|
-| `pull_request` | Auto-review PRs, post findings as comments | **Implemented** — see [docs/PR-REVIEW-WEBHOOK.md](./PR-REVIEW-WEBHOOK.md) |
+| `pull_request` | Auto-review PRs, post findings as comments | **Implemented** — see [PR Review Implementation](#pr-review-implementation) |
 | `issues` | Triage new issues, attempt auto-fix for bug reports | Roadmap (Phase 4) |
 | `push` | Run analysis on new commits | Roadmap (Phase 4) |
 | `issue_comment` | Respond to comments mentioning `@claude` | Roadmap (Phase 4) |
@@ -753,6 +754,129 @@ Last 100 webhook events stored in memory, accessible via:
 
 ---
 
+## PR Review Implementation
+
+`pull_request` events are part of Phase 1 and reuse the shared infrastructure above (signature validation, dedup, rate limiting, workspace isolation, `gh`-based git auth). This section documents the bits that are unique to the PR review feature.
+
+Trigger actions: `opened`, `synchronize`, `reopened`, `ready_for_review`, `closed`.
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `server/webhook-handler.ts` | Core dispatcher — `handlePullRequestEvent()` and `processPullRequestAsync()` |
+| `server/webhook-pr-github.ts` | GitHub data fetching — diff, files, commits, review comments, reviews, existing Codekin comment |
+| `server/webhook-pr-prompt.ts` | 3-tier prompt resolution and assembly, cache/comment instructions |
+| `server/webhook-pr-cache.ts` | Per-PR context cache — `loadPrCache()`, `getCachePath()`, `ensureCacheDir()`, `archivePrCache()`, `deletePrCache()`, `PrCacheData` interface |
+| `server/webhook-types.ts` | `PullRequestPayload` (includes `merged`), `PullRequestContext`, `WebhookEventStatus` |
+
+### Closed/Merged Flow
+
+When a PR is closed, the handler runs synchronously — no workspace or Claude session is spun up:
+
+1. Record the event in the event ring buffer for observability
+2. Kill any active review sessions for the PR via `supersedePrSessions`
+3. If **merged**: move cache file to `~/.codekin/pr-cache/{owner}/{repo}/archived/pr-{number}.json`
+4. If **closed** (not merged): delete the cache file
+
+### Session Configuration
+
+- **Model**: Sonnet (cost/speed tradeoff for reviews — Opus is overkill)
+- **allowedTools**: `Bash(gh:*)`, `Write`, context7 MCP tools, `WebFetch`, `WebSearch` (plus pre-approved file ops from `acceptEdits` mode)
+- **addDirs**: The PR cache directory (`~/.codekin/pr-cache/{owner}/{repo}/`) is passed via `addDirs` through session creation to `ClaudeProcess`, which adds it via `--add-dir` so Claude can write cache files inside the sandbox.
+- **No auto-restore**: Webhook sessions are one-shot; they are NOT restored on server restart, preventing finished reviews from consuming concurrency slots.
+- **Superseding**: When a new push arrives for the same PR, any active review session is marked `superseded` and deleted before the new one starts. Race condition guards check superseded status before workspace creation and session creation.
+
+### Review Prompt — 3-Tier Resolution
+
+1. **Repo-level**: `.codekin/pr-review-prompt.md` in the PR's repository
+2. **Global**: `~/.codekin/pr-review-prompt.md`
+3. **Built-in default**: Hardcoded fallback
+
+The shipped global prompt is configured with: expert council pattern (2–4 reviewers selected by tech stack), mandatory Codex cross-review before posting, practical-impact filter, signal-over-noise discipline, security/scalability as first-class concerns, existing-comment awareness (no duplicates), and never-approve (only COMMENT or REQUEST_CHANGES).
+
+### PR Context Cache
+
+Subsequent reviews of the same PR reuse prior context instead of starting from scratch.
+
+Cache location: `~/.codekin/pr-cache/{owner}/{repo}/pr-{number}.json`
+
+```json
+{
+  "prNumber": 42,
+  "repo": "owner/repo",
+  "lastReviewedSha": "abc1234",
+  "timestamp": "2026-04-03T12:00:00.000Z",
+  "priorReviewSummary": "PR adds SSO authentication...",
+  "codebaseContext": "Auth module at src/auth/, uses JWT tokens...",
+  "reviewFindings": "Found null check issue in auth.ts line 42..."
+}
+```
+
+**Re-fetched every time** (cheap, change between pushes): diff, files, commits, GitHub comments/reviews.
+**Cached**: Claude's prior review summary, codebase familiarity notes, and specific findings.
+
+Lifecycle:
+
+1. First review: no cache exists; prompt has no "Prior Review Context" section.
+2. End of review: Claude writes the cache JSON via the `Write` tool (instructed in the prompt).
+3. `synchronize` / `reopened`: cache loaded and included as a "Prior Review Context" section, with a note that the current diff and comments are fresh.
+4. Claude uses prior context for faster, more informed reviews while still reviewing the full current diff.
+5. PR **merged**: cache moved to `archived/` (preserves review history).
+6. PR **closed** (not merged): cache deleted (no value in keeping abandoned-PR context).
+
+Resilience: missing cache silently skipped; malformed JSON logged as warning and treated as no cache; stale cache after force-push is fine because the fresh diff is authoritative; concurrent reviews — last writer wins.
+
+### Comment Update Pattern (instead of repeated postings)
+
+Codekin updates its existing summary comment instead of posting a new one for every review. Inline code comments are still posted fresh.
+
+Marker — every Codekin review summary comment starts with a hidden HTML marker:
+
+```html
+<!-- codekin-review -->
+```
+
+GitHub preserves HTML comments in issue comment bodies, so the marker is invisible to readers but detectable via API.
+
+How it works:
+
+1. Before the review session starts, `fetchExistingReviewComment()` searches the PR's issue comments (via `gh api /repos/{repo}/issues/{prNumber}/comments --paginate`) for the marker.
+2. If found, the comment ID is passed to Claude with PATCH instructions to update it.
+3. If not found, Claude receives POST instructions to create a new comment.
+4. Both paths include the marker requirement so future reviews can find the comment.
+
+Shell-escaping note: Claude is instructed to write the comment body to `${workspacePath}/review-body.md` and use `gh api ... -F body=@${workspacePath}/review-body.md` rather than passing the body inline. The workspace path is used instead of `/tmp` because the Claude sandbox blocks writes to `/tmp`.
+
+### Dedup Split (PR-review-driven fix)
+
+The original `isDuplicate()` was check-and-record in one call, which meant events rejected by the concurrency cap were still recorded as "seen", making redelivery impossible. Now split into:
+
+- `isDuplicate(deliveryId, idempotencyKey)` — check only, no side effects
+- `recordProcessed(deliveryId, idempotencyKey)` — called after the event passes all gates
+
+This is in addition to the composite-key dedup described under [Deduplication](#deduplication).
+
+### Tests
+
+| File | Tests | Coverage |
+|---|---|---|
+| `server/webhook-handler.test.ts` | 57 | PR events, superseding, cache/comment integration, closed/merged handling |
+| `server/webhook-pr-github.test.ts` | 22 | Diff, files, commits, review comments, reviews, existing-review detection |
+| `server/webhook-pr-prompt.test.ts` | 26 | Prompt resolution, prior-context rendering, cache-write/comment-update instructions |
+| `server/webhook-pr-cache.test.ts` | 15 | Cache load, path generation, validation, error handling, archive, delete |
+| `server/webhook-dedup.test.ts` | 26 | Check/record split, TTL eviction, max entries, disk persistence |
+
+Run: `npm test`.
+
+### Known Limitations (PR review)
+
+- **Codekin permission delegation**: The Claude CLI rejects tools not in `--allowedTools` before any hook fires, so Codekin can't show approval prompts for these tools. Workaround: add needed tools to `allowedTools` at spawn time.
+- **MCP tools in webhook sessions**: context7 tools must be in `allowedTools` to work. Added explicitly.
+- **Codex cross-review**: Requires `codex` CLI installed. Uses input redirection (`< file`) not pipes (Codekin's bash doesn't support pipes).
+
+---
+
 ## Known Limitations (Phase 1)
 
 - **No automatic session cleanup** — Webhook-created sessions accumulate and must be manually deleted. Auto-close with configurable delay is planned for Phase 2.
@@ -818,6 +942,6 @@ The following phases are planned but not yet implemented. Phase 1 is the only fu
 - [ ] `push` events — run analysis on new commits
 - [ ] Outbound: update check run status on GitHub when Claude completes
 
-> **Note**: `pull_request` event handling (PR review automation) was implemented separately and is documented in [docs/PR-REVIEW-WEBHOOK.md](./PR-REVIEW-WEBHOOK.md).
+> **Note**: `pull_request` event handling (PR review automation) was implemented separately under Phase 1. See [PR Review Implementation](#pr-review-implementation).
 
 **Deliverable**: Codekin as a full GitHub-integrated AI assistant.

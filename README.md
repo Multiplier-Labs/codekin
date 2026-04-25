@@ -13,6 +13,7 @@ Web UI for [Claude Code](https://github.com/anthropics/claude-code) and [OpenCod
 
 **Prerequisites:**
 - macOS or Linux
+- Node.js v20+ (the install script can install this for you via nvm)
 - [Claude Code CLI](https://github.com/anthropics/claude-code) installed and authenticated (`claude` must be in your PATH)
 - *(Optional)* [OpenCode](https://github.com/nicepkg/opencode) installed for multi-provider LLM support
 
