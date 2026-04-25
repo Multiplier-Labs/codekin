@@ -48,6 +48,7 @@ vi.mock('./workflow-config.js', () => ({
 
 import {
   ensureHookConfig,
+  getHooksDir,
   installCommitHook,
   uninstallCommitHook,
   syncCommitHooks,
@@ -114,6 +115,45 @@ describe('ensureHookConfig', () => {
     const parsed = JSON.parse(readFileSync(configPath(), 'utf-8'))
     expect(parsed.authToken).toBe('new-token')
     expect(parsed.serverUrl).toBe('http://new')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getHooksDir
+// ---------------------------------------------------------------------------
+
+describe('getHooksDir', () => {
+  let repoDir: string
+
+  beforeEach(() => {
+    repoDir = makeGitRepo()
+  })
+
+  afterEach(() => {
+    rmAll(repoDir)
+  })
+
+  it('returns .git/hooks when core.hooksPath is not set', () => {
+    expect(getHooksDir(repoDir)).toBe(join(repoDir, '.git', 'hooks'))
+  })
+
+  it('resolves a relative core.hooksPath against the repo root', () => {
+    execFileSync('git', ['-C', repoDir, 'config', 'core.hooksPath', '.githooks'], {
+      stdio: ['ignore', 'ignore', 'ignore'],
+    })
+    expect(getHooksDir(repoDir)).toBe(join(repoDir, '.githooks'))
+  })
+
+  it('returns an absolute core.hooksPath unchanged', () => {
+    const absDir = mkdtempSync(join(tmpdir(), 'codekin-hooksdir-'))
+    try {
+      execFileSync('git', ['-C', repoDir, 'config', 'core.hooksPath', absDir], {
+        stdio: ['ignore', 'ignore', 'ignore'],
+      })
+      expect(getHooksDir(repoDir)).toBe(absDir)
+    } finally {
+      rmAll(absDir)
+    }
   })
 })
 
