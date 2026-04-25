@@ -205,7 +205,7 @@ Codekin automatically reviews pull requests by responding to GitHub webhook even
 - **Concurrency control** — Maximum concurrent PR review sessions is configurable (default 3, can be raised in `~/.codekin/webhook-config.json`).
 - **Cleanup on close/merge** — When a PR is closed, active sessions are killed and the context cache is archived (merged) or deleted (abandoned).
 
-See [docs/PR-REVIEW-WEBHOOK.md](./PR-REVIEW-WEBHOOK.md) for architecture details, configuration, and operational notes.
+See [docs/GITHUB-WEBHOOKS-SPEC.md#pr-review-implementation](./GITHUB-WEBHOOKS-SPEC.md#pr-review-implementation) for architecture details, configuration, and operational notes.
 
 ---
 
