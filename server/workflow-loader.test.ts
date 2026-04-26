@@ -715,7 +715,11 @@ This is the repo-specific override prompt.
         await promise
 
         expect(caughtError).toBeTruthy()
-        expect(caughtError!.message).toContain('not found')
+        // run_prompt now throws a typed SessionGoneError with run id, step, session id, and last seen timestamp.
+        expect(caughtError!.name).toBe('SessionGoneError')
+        expect(caughtError!.message).toContain('session=session-1')
+        expect(caughtError!.message).toContain('run=r1')
+        expect(caughtError!.message).toContain('step=run_prompt')
 
         vi.useRealTimers()
       })
