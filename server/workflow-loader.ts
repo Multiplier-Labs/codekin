@@ -35,6 +35,7 @@ import { dirname, join, sep } from 'path'
 import { REPOS_ROOT } from './config.js'
 import { fileURLToPath } from 'url'
 import type { WorkflowEngine, WorkflowRun } from './workflow-engine.js'
+import { SessionGoneError } from './workflow-engine.js'
 import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
 
@@ -148,16 +149,20 @@ function loadRepoOverride(repoPath: string, kind: string): WorkflowDef | null {
 async function waitForSessionResult(
   sessions: SessionManager,
   sessionId: string,
-  opts: { timeoutMs?: number; pollMs?: number; abortSignal?: AbortSignal } = {}
+  opts: { timeoutMs?: number; pollMs?: number; abortSignal?: AbortSignal; runId?: string; stepKey?: string } = {}
 ): Promise<{ success: boolean; text: string }> {
-  const { timeoutMs = 600_000, pollMs = 2000, abortSignal } = opts
+  const { timeoutMs = 600_000, pollMs = 2000, abortSignal, runId, stepKey } = opts
   const deadline = Date.now() + timeoutMs
+  let lastSeen: string | null = null
 
   while (Date.now() < deadline) {
     if (abortSignal?.aborted) throw new Error('Aborted')
 
     const session = sessions.get(sessionId)
-    if (!session) throw new Error(`Session ${sessionId} not found`)
+    if (!session) {
+      throw new SessionGoneError(runId ?? 'unknown', stepKey ?? 'run_prompt', sessionId, lastSeen)
+    }
+    lastSeen = new Date().toISOString()
 
     const resultMsg = session.outputHistory.find(m => m.type === 'result')
     if (resultMsg) {
@@ -246,6 +251,10 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
             allowedTools: ['Bash(gh pr:*)'],
           })
 
+          // Persist the session id on the run BEFORE returning so a server crash
+          // between this step and `run_prompt` can still locate the session.
+          ctx.recordSessionId?.(session.id)
+
           console.log(`[workflow:${def.kind}] Created session ${session.id} for ${repoName} (run ${ctx.runId})`)
           return { sessionId: session.id, repoPath, repoName, branch: input.branch, lastCommit: input.lastCommit }
         },
@@ -260,27 +269,42 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
           const repoPath = input.repoPath as string
           const customPrompt = input.customPrompt as string | undefined
 
+          // If the session is already gone, fail with a typed error before doing any work —
+          // gives a much clearer signal than a downstream "Session X not found" stack trace.
+          if (!sessions.get(sessionId)) {
+            throw new SessionGoneError(ctx.runId, 'run_prompt', sessionId, ctx.run.lastStepAt ?? null)
+          }
+
           sessions.startClaude(sessionId)
           await sessions.waitForReady(sessionId)
 
-          // Per-repo override: check {repoPath}/.codekin/workflows/{kind}.md
-          const repoOverride = loadRepoOverride(repoPath, ctx.run.kind)
-          const basePrompt = repoOverride ? repoOverride.prompt : def.prompt
+          if (ctx.resumed) {
+            // The prompt was already sent in the original run before the server crashed.
+            // Just wait for the result Claude is (still) producing — sending again would
+            // duplicate the prompt and fork the conversation.
+            console.log(`[workflow:${def.kind}] Resuming run ${ctx.runId}: re-attaching to session ${sessionId} (no re-send)`)
+          } else {
+            // Per-repo override: check {repoPath}/.codekin/workflows/{kind}.md
+            const repoOverride = loadRepoOverride(repoPath, ctx.run.kind)
+            const basePrompt = repoOverride ? repoOverride.prompt : def.prompt
 
-          const prompt = customPrompt
-            ? `${basePrompt}\n\nAdditional focus areas:\n${customPrompt}`
-            : basePrompt
+            const prompt = customPrompt
+              ? `${basePrompt}\n\nAdditional focus areas:\n${customPrompt}`
+              : basePrompt
 
-          if (repoOverride) {
-            console.log(`[workflow:${def.kind}] Using per-repo prompt override from ${repoPath}`)
+            if (repoOverride) {
+              console.log(`[workflow:${def.kind}] Using per-repo prompt override from ${repoPath}`)
+            }
+
+            sessions.sendInput(sessionId, prompt)
+            console.log(`[workflow:${def.kind}] Sent prompt to session ${sessionId} for ${repoName}`)
           }
-
-          sessions.sendInput(sessionId, prompt)
-          console.log(`[workflow:${def.kind}] Sent prompt to session ${sessionId} for ${repoName}`)
 
           const result = await waitForSessionResult(sessions, sessionId, {
             timeoutMs: 600_000,
             abortSignal: ctx.abortSignal,
+            runId: ctx.runId,
+            stepKey: 'run_prompt',
           })
 
           console.log(`[workflow:${def.kind}] Completed for ${repoName} (${result.text.length} chars)`)
@@ -504,5 +528,19 @@ export function loadMdWorkflows(engine: WorkflowEngine, sessions: SessionManager
   for (const def of defs) {
     registerWorkflow(engine, sessions, def)
   }
+
+  // Let the engine consult the session manager when deciding whether an interrupted
+  // run is still resumable. Returning null tells the engine the session has gone and
+  // the run should fail with a clear, typed reason instead of being skipped silently.
+  // (Defensive optional-call so older test doubles without setSessionResolver still pass.)
+  engine.setSessionResolver?.((sessionId) => {
+    const session = sessions.get(sessionId)
+    if (!session) return null
+    const lastActivityAt = session._lastActivityAt
+      ? new Date(session._lastActivityAt).toISOString()
+      : null
+    return { lastActivityAt }
+  })
+
   console.log(`[workflow-loader] Loaded ${defs.length} workflow(s) from MD definitions`)
 }

@@ -30,7 +30,7 @@ vi.mock('fs', async (importOriginal) => {
   }
 })
 
-import { WorkflowEngine, WorkflowSkipped, initWorkflowEngine, getWorkflowEngine, shutdownWorkflowEngine } from './workflow-engine.js'
+import { WorkflowEngine, WorkflowSkipped, SessionGoneError, initWorkflowEngine, getWorkflowEngine, shutdownWorkflowEngine } from './workflow-engine.js'
 import type { StepHandler } from './workflow-engine.js'
 
 describe('WorkflowEngine', () => {
@@ -488,8 +488,12 @@ describe('WorkflowEngine', () => {
   })
 
   describe('resumeInterrupted', () => {
-    it('marks running runs as failed on startup', async () => {
-      mockAll.mockReturnValueOnce([{ id: 'interrupted-1' }, { id: 'interrupted-2' }])
+    it('marks running runs without resumable step as failed on startup', async () => {
+      // Two interrupted runs; neither has a resumable current_step_key, so both fail loudly.
+      mockAll.mockReturnValueOnce([
+        { id: 'interrupted-1', kind: 'unregistered', session_id: null, current_step_key: 'validate_repo', last_step_at: null, input: '{}' },
+        { id: 'interrupted-2', kind: 'unregistered', session_id: null, current_step_key: 'create_session', last_step_at: null, input: '{}' },
+      ])
 
       await engine.resumeInterrupted()
 
@@ -503,6 +507,198 @@ describe('WorkflowEngine', () => {
       await engine.resumeInterrupted()
       // No new update calls
       expect(mockRun.mock.calls.length).toBe(callsBefore)
+    })
+
+    it('resumes a mid-run_prompt run by re-executing the in-flight step with resumed=true', async () => {
+      // Workflow with the four real step keys so resumeInterrupted recognises run_prompt as resumable.
+      const validate: StepHandler = vi.fn(async () => ({ ok: true }))
+      const createSession: StepHandler = vi.fn(async () => ({ sessionId: 'sess-A' }))
+      const runPromptCalls: Array<{ resumed: boolean | undefined }> = []
+      const runPrompt: StepHandler = vi.fn(async (_input, ctx) => {
+        runPromptCalls.push({ resumed: ctx.resumed })
+        return { reportText: 'final report' }
+      })
+      const saveReport: StepHandler = vi.fn(async () => ({ filePath: '/tmp/report.md' }))
+
+      engine.registerWorkflow({
+        kind: 'restart-resume',
+        steps: [
+          { key: 'validate_repo', handler: validate },
+          { key: 'create_session', handler: createSession },
+          { key: 'run_prompt', handler: runPrompt },
+          { key: 'save_report', handler: saveReport },
+        ],
+      })
+
+      // Simulate a session that survived the crash: resolver returns liveness info.
+      engine.setSessionResolver(() => ({ lastActivityAt: '2026-04-26T10:25:00.000Z' }))
+
+      // 1) Interrupted-runs scan.
+      mockAll.mockReturnValueOnce([{
+        id: 'run-resume-1',
+        kind: 'restart-resume',
+        session_id: 'sess-A',
+        current_step_key: 'run_prompt',
+        last_step_at: '2026-04-26T10:30:00.000Z',
+        input: '{}',
+      }])
+
+      // 2) getRun() body: row + steps for the run.
+      mockGet.mockImplementationOnce(() => ({
+        id: 'run-resume-1',
+        kind: 'restart-resume',
+        status: 'running',
+        input: '{}',
+        output: null,
+        error: null,
+        created_at: '2026-04-26T10:20:00.000Z',
+        started_at: '2026-04-26T10:21:00.000Z',
+        completed_at: null,
+        session_id: 'sess-A',
+        last_step_at: '2026-04-26T10:30:00.000Z',
+        current_step_key: 'run_prompt',
+      }))
+      // 3) Step rows for getRun() AND for prior-output reconstruction.
+      const stepRowsForResume = [
+        { id: 's1', run_id: 'run-resume-1', key: 'validate_repo', status: 'succeeded', input: '{}', output: '{"ok":true}', error: null, started_at: null, completed_at: null },
+        { id: 's2', run_id: 'run-resume-1', key: 'create_session', status: 'succeeded', input: '{}', output: '{"sessionId":"sess-A"}', error: null, started_at: null, completed_at: null },
+        { id: 's3', run_id: 'run-resume-1', key: 'run_prompt', status: 'running', input: '{}', output: null, error: null, started_at: null, completed_at: null },
+        { id: 's4', run_id: 'run-resume-1', key: 'save_report', status: 'pending', input: null, output: null, error: null, started_at: null, completed_at: null },
+      ]
+      mockAll.mockReturnValueOnce(stepRowsForResume) // prior-output reconstruction
+      mockAll.mockReturnValueOnce(stepRowsForResume) // getRun() steps
+
+      // 4) Per-step lookups inside executeRun for run_prompt + save_report.
+      mockGet.mockImplementation(() => ({ id: 'step-resumed' }))
+
+      await engine.resumeInterrupted()
+      // Yield so the fire-and-forget executeRun can complete.
+      await new Promise(r => setTimeout(r, 30))
+
+      // The earlier steps must NOT be re-run — that's the whole point of resume.
+      expect(validate).not.toHaveBeenCalled()
+      expect(createSession).not.toHaveBeenCalled()
+      // run_prompt is the in-flight step — it runs with resumed=true.
+      expect(runPrompt).toHaveBeenCalledTimes(1)
+      expect(runPromptCalls[0].resumed).toBe(true)
+      // save_report continues normally afterwards.
+      expect(saveReport).toHaveBeenCalledTimes(1)
+    })
+
+    it('fails with a typed SessionGoneError reason when the session is gone before resume', async () => {
+      const handler: StepHandler = vi.fn(async () => ({}))
+      engine.registerWorkflow({
+        kind: 'orphan-resume',
+        steps: [
+          { key: 'validate_repo', handler },
+          { key: 'create_session', handler },
+          { key: 'run_prompt', handler },
+          { key: 'save_report', handler },
+        ],
+      })
+
+      // Resolver returns null → session no longer exists.
+      engine.setSessionResolver(() => null)
+
+      mockAll.mockReturnValueOnce([{
+        id: 'run-orphan-1',
+        kind: 'orphan-resume',
+        session_id: 'sess-gone',
+        current_step_key: 'run_prompt',
+        last_step_at: '2026-04-26T10:40:00.000Z',
+        input: '{}',
+      }])
+      // failInterrupted's lookup for the event payload.
+      mockGet.mockReturnValueOnce({ id: 'run-orphan-1', kind: 'orphan-resume' })
+
+      const events: Array<{ eventType: string; runId: string }> = []
+      engine.on('workflow_event', (e) => events.push(e))
+
+      await engine.resumeInterrupted()
+      // Yield so failInterrupted's emit propagates.
+      await new Promise(r => setTimeout(r, 5))
+
+      // The handler must NOT be invoked — we should never silently rerun the prompt.
+      expect(handler).not.toHaveBeenCalled()
+
+      // Find the UPDATE that wrote the failure reason on the run row.
+      const failedRunUpdate = mockRun.mock.calls.find(call => {
+        const reason = call[0]
+        return typeof reason === 'string'
+          && reason.includes('Workflow session is no longer available')
+          && reason.includes('session=sess-gone')
+          && reason.includes('step=run_prompt')
+      })
+      expect(failedRunUpdate).toBeDefined()
+      // Confirm event surface so UI sees the failure (vs silently skipping).
+      expect(events.some(e => e.eventType === 'run_failed' && e.runId === 'run-orphan-1')).toBe(true)
+    })
+
+    it('does NOT throw a bare stack trace — SessionGoneError is a real Error subclass', () => {
+      const err = new SessionGoneError('run-x', 'run_prompt', 'sess-y', '2026-04-26T10:00:00.000Z')
+      expect(err).toBeInstanceOf(Error)
+      expect(err.name).toBe('SessionGoneError')
+      expect(err.runId).toBe('run-x')
+      expect(err.stepKey).toBe('run_prompt')
+      expect(err.sessionId).toBe('sess-y')
+      expect(err.lastSeen).toBe('2026-04-26T10:00:00.000Z')
+      expect(err.message).toContain('run=run-x')
+      expect(err.message).toContain('step=run_prompt')
+      expect(err.message).toContain('session=sess-y')
+    })
+  })
+
+  describe('recordSessionId', () => {
+    it('persists the session id atomically on the workflow_runs row', () => {
+      engine.recordSessionId('run-1', 'sess-1')
+      // Verify the UPDATE was executed with the right values.
+      const sessionIdWrite = mockRun.mock.calls.find(call => call[0] === 'sess-1' && call[1] === 'run-1')
+      expect(sessionIdWrite).toBeDefined()
+    })
+
+    it('is exposed to step handlers via context.recordSessionId', async () => {
+      let receivedRecorder: ((sessionId: string) => void) | undefined
+      const handler: StepHandler = async (_input, ctx) => {
+        receivedRecorder = ctx.recordSessionId
+        ctx.recordSessionId?.('sess-from-handler')
+        return { sessionId: 'sess-from-handler' }
+      }
+      engine.registerWorkflow({
+        kind: 'record-id',
+        steps: [{ key: 'create_session', handler }],
+      })
+      mockGet.mockReturnValue({ id: 'step-rec-1' })
+
+      await engine.startRun('record-id')
+      await new Promise(r => setTimeout(r, 30))
+
+      expect(receivedRecorder).toBeTypeOf('function')
+      // Verify the recordSessionId write actually happened.
+      const recorded = mockRun.mock.calls.find(call => call[0] === 'sess-from-handler')
+      expect(recorded).toBeDefined()
+    })
+  })
+
+  describe('heartbeat', () => {
+    it('updates last_step_at and current_step_key on every step start', async () => {
+      const handler: StepHandler = async () => ({})
+      engine.registerWorkflow({
+        kind: 'heartbeat',
+        steps: [
+          { key: 'validate_repo', handler },
+          { key: 'create_session', handler },
+        ],
+      })
+      mockGet.mockReturnValue({ id: 'step-hb' })
+
+      await engine.startRun('heartbeat')
+      await new Promise(r => setTimeout(r, 30))
+
+      // Find the UPDATE writes that pushed step keys onto workflow_runs.
+      const validateBeat = mockRun.mock.calls.find(call => call[1] === 'validate_repo')
+      const createBeat = mockRun.mock.calls.find(call => call[1] === 'create_session')
+      expect(validateBeat).toBeDefined()
+      expect(createBeat).toBeDefined()
     })
   })
 
