@@ -33,6 +33,7 @@ import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
 import { CommitEventHandler } from './commit-event-handler.js'
 import { jsonParse } from './json-parse.js'
+import { createMessageRateLimiter } from './ws-rate-limit.js'
 import { checkForUpdates, getUpdateNotification } from './version-check.js'
 import { stopOpenCodeServer } from './opencode-process.js'
 import { ensureHookConfig, syncCommitHooks } from './commit-event-hooks.js'
@@ -473,13 +474,23 @@ wss.on('connection', (ws: WebSocket, req) => {
 
   const handlerCtx = { ws, sessions, clientSessions, send }
 
-  // Post-auth message rate limiting: max 60 messages per second
-  const MSG_RATE_LIMIT = 60
-  const MSG_RATE_WINDOW_MS = 1000
-  let msgCount = 0
-  let msgWindowStart = Date.now()
+  // Per-connection message rate limiting: max 60 messages per second.
+  // The counter is incremented for every received frame (including those that
+  // fail to parse) so a flood of malformed frames cannot bypass the limit.
+  const rateLimiter = createMessageRateLimiter(60, 1000)
 
   ws.on('message', (raw) => {
+    const decision = rateLimiter.observe()
+    if (!decision.allowed) {
+      if (decision.firstOverflow) {
+        send({ type: 'system_message', subtype: 'error', text: 'Rate limit exceeded (60 messages/second). Message dropped.' })
+      }
+      if (decision.shouldDisconnect) {
+        ws.close(4029, 'Message rate limit exceeded')
+      }
+      return
+    }
+
     let msg: WsClientMessage
     try {
       msg = jsonParse(raw.toString()) as WsClientMessage
@@ -502,17 +513,6 @@ wss.on('connection', (ws: WebSocket, req) => {
       void getUpdateNotification().then(text => {
         if (text) send({ type: 'system_message', subtype: 'notification', text })
       })
-      return
-    }
-
-    // Rate limit post-auth messages
-    const now = Date.now()
-    if (now - msgWindowStart > MSG_RATE_WINDOW_MS) {
-      msgCount = 0
-      msgWindowStart = now
-    }
-    if (++msgCount > MSG_RATE_LIMIT) {
-      send({ type: 'system_message', subtype: 'error', text: 'Rate limit exceeded (60 messages/second). Message dropped.' })
       return
     }
 
