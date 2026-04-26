@@ -15,6 +15,7 @@ import { OrchestratorMemory } from './orchestrator-memory.js'
 import { runAgingCycle, getPendingOutcomeAssessments } from './orchestrator-learning.js'
 import { getOrchestratorSessionId } from './orchestrator-manager.js'
 import { REPOS_ROOT, getAgentDisplayName } from './config.js'
+import { loadWorkflowConfig, type ReviewRepoConfig } from './workflow-config.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -186,9 +187,12 @@ export class OrchestratorMonitor {
   /** Check for repos that haven't had recent commits. */
   private checkPassiveRepos(repoPaths: string[]): void {
     const now = Date.now()
+    const reviewRepos = loadWorkflowConfig().reviewRepos
 
     for (const repoPath of repoPaths) {
       try {
+        if (!hasEnabledWorkflowForRepo(repoPath, reviewRepos)) continue
+
         const gitDir = join(repoPath, '.git')
         if (!existsSync(gitDir)) continue
 
@@ -280,4 +284,19 @@ export class OrchestratorMonitor {
       return []
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Suppress passive-repo alerts unless at least one workflow is enabled for the
+ * repo — there's nothing to "de-schedule" otherwise, so the nag is noise.
+ */
+export function hasEnabledWorkflowForRepo(
+  repoPath: string,
+  reviewRepos: ReviewRepoConfig[],
+): boolean {
+  return reviewRepos.some(r => r.repoPath === repoPath && r.enabled)
 }
