@@ -145,14 +145,6 @@ export function readReport(filePath: string): ReportContent | null {
 }
 
 /**
- * Get the latest report for a given repo and category.
- */
-export function getLatestReport(repoPath: string, category: string): ReportMeta | null {
-  const reports = scanRepoReports(repoPath)
-  return reports.find(r => r.category === category) ?? null
-}
-
-/**
  * Get reports that are newer than a given date.
  */
 export function getReportsSince(repoPaths: string[], sinceDate: string): ReportMeta[] {

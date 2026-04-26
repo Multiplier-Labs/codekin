@@ -37,12 +37,6 @@ export interface Repo {
   tags: string[]
 }
 
-/** Response shape from the upload server's /repos endpoint. */
-export interface RepoManifest {
-  repos: Repo[]
-  generatedAt: string
-}
-
 /**
  * Permission modes supported by the Claude CLI `--permission-mode` flag.
  * Controls how tool permissions are handled during a session.
