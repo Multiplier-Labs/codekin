@@ -328,6 +328,7 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
             // behavior, which otherwise creates a duplicate report file.
             const prompt = `${WORKFLOW_PROMPT_GUARD}\n\n${userPrompt}`
 
+
             if (repoOverride) {
               console.log(`[workflow:${def.kind}] Using per-repo prompt override from ${repoPath}`)
             }
