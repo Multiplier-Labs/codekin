@@ -39,6 +39,25 @@ export class WorkflowSkipped extends Error {
     this.name = 'WorkflowSkipped'
   }
 }
+
+/**
+ * Thrown when a step references a session that no longer exists in the session manager —
+ * either because it was deleted, expired, or never persisted across a server restart.
+ * Carries enough context (run id, step key, session id, last heartbeat) for diagnostics.
+ */
+export class SessionGoneError extends Error {
+  constructor(
+    public readonly runId: string,
+    public readonly stepKey: string,
+    public readonly sessionId: string,
+    public readonly lastSeen: string | null,
+  ) {
+    super(
+      `Workflow session is no longer available — run=${runId} step=${stepKey} session=${sessionId} lastSeen=${lastSeen ?? 'unknown'}`,
+    )
+    this.name = 'SessionGoneError'
+  }
+}
 /**
  * Lifecycle status of an individual workflow step.
  * - `pending`   — not yet reached by the executor
@@ -69,6 +88,12 @@ export interface WorkflowRun {
   startedAt: string | null
   /** ISO timestamp when execution finished (success, failure, or skip). */
   completedAt: string | null
+  /** Codekin session id owned by this run, recorded by `create_session`. Null until that step records it. */
+  sessionId?: string | null
+  /** ISO timestamp updated whenever a step starts; serves as a liveness heartbeat for resume. */
+  lastStepAt?: string | null
+  /** Key of the step that was most recently marked running. Used to resume from the right place. */
+  currentStepKey?: string | null
 }
 
 /** A single step within a workflow run. Insertion order (rowid) preserves definition order. */
@@ -132,14 +157,38 @@ export interface WorkflowEvent {
 /**
  * Step handler function — receives step input + run context, returns step output.
  * @param input  Merged output of all preceding steps (plus the run's original input).
- * @param context.runId       UUID of the current run.
- * @param context.run         Full WorkflowRun object (mutable — reflects current status).
- * @param context.abortSignal Fires when `cancelRun()` is called; handlers should check or listen on it.
+ * @param context.runId            UUID of the current run.
+ * @param context.run              Full WorkflowRun object (mutable — reflects current status).
+ * @param context.abortSignal      Fires when `cancelRun()` is called; handlers should check or listen on it.
+ * @param context.resumed          True when this step is being re-executed after a server restart.
+ *                                  Handlers can use this to skip side effects already performed
+ *                                  (e.g. don't re-send a Claude prompt — just await the result).
+ * @param context.recordSessionId  Persist the session id atomically with `create_session`, so that
+ *                                  a later `resumeInterrupted()` scan can reattach to the session
+ *                                  even if the server crashed before the step's output row was written.
  */
 export type StepHandler = (
   input: Record<string, unknown>,
-  context: { runId: string; run: WorkflowRun; abortSignal: AbortSignal }
+  context: {
+    runId: string
+    run: WorkflowRun
+    abortSignal: AbortSignal
+    resumed?: boolean
+    recordSessionId?: (sessionId: string) => void
+  }
 ) => Promise<Record<string, unknown>>
+
+/**
+ * Result of resolving a workflow's session at resume time.
+ * `null` means the session is gone (deleted, expired, never persisted) and the run cannot resume.
+ */
+export interface SessionLiveness {
+  /** ISO timestamp of the most recent activity on the session, if known. */
+  lastActivityAt?: string | null
+}
+
+/** Lookup function used by `resumeInterrupted()` to decide whether a session is still resumable. */
+export type SessionResolver = (sessionId: string) => SessionLiveness | null
 
 interface StepDefinition {
   key: string
@@ -247,6 +296,7 @@ export class WorkflowEngine extends EventEmitter {
   private workflows = new Map<string, WorkflowDefinition>()
   private activeAbortControllers = new Map<string, AbortController>()
   private cronTimer: ReturnType<typeof setInterval> | null = null
+  private sessionResolver: SessionResolver | null = null
 
   constructor(dbPath?: string) {
     super()
@@ -257,6 +307,7 @@ export class WorkflowEngine extends EventEmitter {
     if (resolvedPath !== ':memory:' && existsSync(resolvedPath)) chmodSync(resolvedPath, 0o600)
     this.db.pragma('journal_mode = WAL')
     this.createTables()
+    this.migrateSchema()
   }
 
   private createTables() {
@@ -306,6 +357,42 @@ export class WorkflowEngine extends EventEmitter {
       CREATE INDEX IF NOT EXISTS idx_runs_status ON workflow_runs(status);
       CREATE INDEX IF NOT EXISTS idx_steps_run_id ON workflow_steps(run_id);
     `)
+  }
+
+  /**
+   * Apply additive (backwards-compatible) schema migrations.
+   * Each ALTER TABLE is wrapped in try/catch so a re-run on a migrated DB is a no-op
+   * (SQLite has no `ADD COLUMN IF NOT EXISTS`). New columns are nullable so older rows
+   * keep working without backfill.
+   */
+  private migrateSchema() {
+    const additions = [
+      // session id captured by create_session — lets resume locate the still-alive session.
+      `ALTER TABLE workflow_runs ADD COLUMN session_id TEXT`,
+      // heartbeat updated on every step start — distinguishes stuck runs from newly-started ones.
+      `ALTER TABLE workflow_runs ADD COLUMN last_step_at TEXT`,
+      // most recently running step key — tells resume where the work stopped.
+      `ALTER TABLE workflow_runs ADD COLUMN current_step_key TEXT`,
+    ]
+    for (const sql of additions) {
+      try {
+        this.db.exec(sql)
+      } catch (err) {
+        // "duplicate column name" is the expected idempotent path; anything else is a real error.
+        const msg = err instanceof Error ? err.message : String(err)
+        if (!/duplicate column/i.test(msg)) throw err
+      }
+    }
+  }
+
+  /**
+   * Register a callback used by `resumeInterrupted()` to decide whether a workflow's
+   * session is still alive. Pass `null` to clear. Without a resolver, all interrupted
+   * runs whose session_id is set are conservatively treated as resumable — but the
+   * step handler will still surface a typed error if the session has actually gone.
+   */
+  setSessionResolver(resolver: SessionResolver | null) {
+    this.sessionResolver = resolver
   }
 
   // -------------------------------------------------------------------------
@@ -381,22 +468,47 @@ export class WorkflowEngine extends EventEmitter {
    *
    * Cancellation: `cancelRun()` calls controller.abort(); the AbortSignal is
    * passed to each handler so long-running async work can exit cooperatively.
+   *
+   * Resume: when `opts.resumeFromKey` is set, steps before that key are skipped
+   * (their outputs come from `opts.priorOutput`) and the resumed step receives
+   * `resumed: true` in its context so the handler can avoid double side effects.
    */
-  private async executeRun(run: WorkflowRun, definition: WorkflowDefinition) {
+  private async executeRun(
+    run: WorkflowRun,
+    definition: WorkflowDefinition,
+    opts?: { resumeFromKey?: string; priorOutput?: Record<string, unknown> },
+  ) {
     const abortController = new AbortController()
     this.activeAbortControllers.set(run.id, abortController)
 
-    // Mark running
-    run.status = 'running'
-    run.startedAt = new Date().toISOString()
-    this.db.prepare(`UPDATE workflow_runs SET status = 'running', started_at = ? WHERE id = ?`)
-      .run(run.startedAt, run.id)
-    this.emitEvent('run_started', run)
+    const resumeFromKey = opts?.resumeFromKey
+    const isResume = !!resumeFromKey
 
-    let lastOutput: Record<string, unknown> = { ...run.input }
+    // Mark running (no-op timestamp on resume so we keep the original startedAt)
+    run.status = 'running'
+    if (!isResume) {
+      run.startedAt = new Date().toISOString()
+      this.db.prepare(`UPDATE workflow_runs SET status = 'running', started_at = ? WHERE id = ?`)
+        .run(run.startedAt, run.id)
+      this.emitEvent('run_started', run)
+    } else {
+      this.db.prepare(`UPDATE workflow_runs SET status = 'running' WHERE id = ?`).run(run.id)
+      this.emitEvent('run_resumed', run)
+    }
+
+    let lastOutput: Record<string, unknown> = isResume
+      ? { ...(opts?.priorOutput ?? {}) }
+      : { ...run.input }
+
+    let reachedResumePoint = !isResume
 
     try {
       for (const stepDef of definition.steps) {
+        if (!reachedResumePoint) {
+          if (stepDef.key === resumeFromKey) reachedResumePoint = true
+          else continue
+        }
+
         if (abortController.signal.aborted) {
           throw new Error('Run canceled')
         }
@@ -405,17 +517,25 @@ export class WorkflowEngine extends EventEmitter {
           .get(run.id, stepDef.key) as { id: string } | undefined
         if (!stepRow) continue
 
-        // Mark step running
+        // Mark step running + bump heartbeat / current step key on the run
         const stepStarted = new Date().toISOString()
-        this.db.prepare(`UPDATE workflow_steps SET status = 'running', input = ?, started_at = ? WHERE id = ?`)
+        this.db.prepare(`UPDATE workflow_steps SET status = 'running', input = ?, started_at = ?, completed_at = NULL, output = NULL, error = NULL WHERE id = ?`)
           .run(JSON.stringify(lastOutput), stepStarted, stepRow.id)
+        this.db.prepare(`UPDATE workflow_runs SET last_step_at = ?, current_step_key = ? WHERE id = ?`)
+          .run(stepStarted, stepDef.key, run.id)
+        run.lastStepAt = stepStarted
+        run.currentStepKey = stepDef.key
         this.emitEvent('step_started', run, stepDef.key)
+
+        const stepIsResumed = isResume && stepDef.key === resumeFromKey
 
         try {
           const result = await stepDef.handler(lastOutput, {
             runId: run.id,
             run,
             abortSignal: abortController.signal,
+            resumed: stepIsResumed,
+            recordSessionId: (sessionId: string) => this.recordSessionId(run.id, sessionId),
           })
 
           // Mark step succeeded
@@ -493,6 +613,16 @@ export class WorkflowEngine extends EventEmitter {
     return false
   }
 
+  /**
+   * Persist a session id on a run so that `resumeInterrupted()` can locate the
+   * still-alive session even if the server crashes before the `create_session`
+   * step's output row is committed. Called from inside the step handler via
+   * `ctx.recordSessionId(...)`.
+   */
+  recordSessionId(runId: string, sessionId: string) {
+    this.db.prepare(`UPDATE workflow_runs SET session_id = ? WHERE id = ?`).run(sessionId, runId)
+  }
+
   // -------------------------------------------------------------------------
   // Queries
   // -------------------------------------------------------------------------
@@ -525,6 +655,9 @@ export class WorkflowEngine extends EventEmitter {
       createdAt: row.created_at,
       startedAt: row.started_at,
       completedAt: row.completed_at,
+      sessionId: row.session_id ?? null,
+      lastStepAt: row.last_step_at ?? null,
+      currentStepKey: row.current_step_key ?? null,
       steps,
     }
   }
@@ -551,6 +684,9 @@ export class WorkflowEngine extends EventEmitter {
       createdAt: row.created_at,
       startedAt: row.started_at,
       completedAt: row.completed_at,
+      sessionId: row.session_id ?? null,
+      lastStepAt: row.last_step_at ?? null,
+      currentStepKey: row.current_step_key ?? null,
     }))
   }
 
@@ -667,21 +803,126 @@ export class WorkflowEngine extends EventEmitter {
   // -------------------------------------------------------------------------
 
   /**
-   * Mark any runs that were in-flight when the server last shut down as failed.
-   * Called once at startup — a run left in 'running' state means the Node process
-   * died mid-execution and the AbortController / step callbacks are gone, so there
-   * is no safe way to resume; failing fast is cleaner than leaving them stuck.
+   * Resume runs that were in-flight when the server last shut down.
+   *
+   * Strategy:
+   *   1. Find all runs still marked `running` (no graceful completion happened).
+   *   2. For each, look at `session_id` + `current_step_key` — captured before the crash.
+   *   3. If the session is still alive (per `sessionResolver`) and the step is one we know how
+   *      to resume (`run_prompt`, `save_report`), re-execute from there with `resumed: true`.
+   *   4. Otherwise mark the run failed with a clear, typed reason. We do NOT silently mark
+   *      remaining steps `skipped` — the failure surface is loud so reports don't go missing.
+   *
+   * Earlier steps (`validate_repo`, `create_session`) are not resumed: by the time they were
+   * running, the workflow had no usable session yet, and re-creating one mid-way would risk
+   * spawning duplicate sessions or sending the prompt twice.
    */
   async resumeInterrupted() {
-    const interrupted = this.db.prepare(`SELECT id FROM workflow_runs WHERE status = 'running'`).all() as { id: string }[]
+    const interrupted = this.db.prepare(`
+      SELECT id, kind, session_id, current_step_key, last_step_at, input
+      FROM workflow_runs WHERE status = 'running'
+    `).all() as Array<{
+      id: string
+      kind: string
+      session_id: string | null
+      current_step_key: string | null
+      last_step_at: string | null
+      input: string | null
+    }>
     if (interrupted.length === 0) return
 
-    console.log(`[workflow] Found ${interrupted.length} interrupted run(s), marking as failed`)
-    for (const { id } of interrupted) {
-      this.db.prepare(`UPDATE workflow_runs SET status = 'failed', error = 'Server restarted during execution', completed_at = ? WHERE id = ?`)
-        .run(new Date().toISOString(), id)
-      this.db.prepare(`UPDATE workflow_steps SET status = 'skipped' WHERE run_id = ? AND status IN ('pending', 'running')`)
-        .run(id)
+    console.log(`[workflow] Found ${interrupted.length} interrupted run(s), evaluating for resume`)
+
+    for (const row of interrupted) {
+      const definition = this.workflows.get(row.kind)
+      if (!definition) {
+        this.failInterrupted(row.id, `Server restarted during execution (workflow kind '${row.kind}' is no longer registered)`)
+        continue
+      }
+
+      const stepKey = row.current_step_key
+      const sessionId = row.session_id
+
+      // Only the later steps are safely resumable: by then the session is established
+      // and the prompt has been (or is being) processed. Earlier steps are too short
+      // to bother resuming and re-running them risks duplicate side effects.
+      const RESUMABLE_STEPS = new Set(['run_prompt', 'save_report'])
+
+      if (!stepKey || !RESUMABLE_STEPS.has(stepKey)) {
+        this.failInterrupted(
+          row.id,
+          `Server restarted during '${stepKey ?? 'unknown'}' step before session was usable for resume`,
+        )
+        continue
+      }
+
+      if (!sessionId) {
+        this.failInterrupted(
+          row.id,
+          `Server restarted during '${stepKey}' step but no session id was recorded — cannot resume`,
+        )
+        continue
+      }
+
+      const liveness = this.sessionResolver?.(sessionId) ?? null
+      if (this.sessionResolver && !liveness) {
+        const err = new SessionGoneError(row.id, stepKey, sessionId, row.last_step_at)
+        console.warn(`[workflow] resume: ${err.message}`)
+        this.failInterrupted(row.id, err.message)
+        continue
+      }
+
+      console.log(`[workflow] Resuming run ${row.id} (${row.kind}) at step '${stepKey}' (session=${sessionId})`)
+
+      // Reconstruct the merged output of all previously succeeded steps so the resumed
+      // step receives the same `lastOutput` it would have during a normal run.
+      const stepRows = this.db.prepare(`
+        SELECT key, status, output FROM workflow_steps WHERE run_id = ? ORDER BY rowid
+      `).all(row.id) as Array<{ key: string; status: string; output: string | null }>
+
+      let priorOutput: Record<string, unknown> = row.input ? jsonParse(row.input) as Record<string, unknown> : {}
+      for (const sr of stepRows) {
+        if (sr.key === stepKey) break
+        if (sr.status === 'succeeded' && sr.output) {
+          priorOutput = { ...priorOutput, ...(jsonParse(sr.output) as Record<string, unknown>) }
+        }
+      }
+
+      const run = this.getRun(row.id)
+      if (!run) {
+        this.failInterrupted(row.id, 'Run row disappeared before resume could start')
+        continue
+      }
+
+      // Reset the in-flight step so executeRun can mark it running again
+      this.db.prepare(`UPDATE workflow_steps SET status = 'pending', error = NULL, completed_at = NULL WHERE run_id = ? AND key = ? AND status = 'running'`)
+        .run(row.id, stepKey)
+
+      // Kick off resume in the background — same fire-and-forget pattern as startRun
+      this.executeRun(run, definition, { resumeFromKey: stepKey, priorOutput }).catch(err => {
+        console.error(`[workflow] Unhandled error in resumed run ${row.id}:`, err)
+      })
+    }
+  }
+
+  /** Mark a run as failed during the resume scan (no AbortController, no in-memory run object). */
+  private failInterrupted(runId: string, reason: string) {
+    const completedAt = new Date().toISOString()
+    this.db.prepare(`UPDATE workflow_runs SET status = 'failed', error = ?, completed_at = ? WHERE id = ?`)
+      .run(reason, completedAt, runId)
+    this.db.prepare(`UPDATE workflow_steps SET status = 'failed', error = ?, completed_at = ? WHERE run_id = ? AND status = 'running'`)
+      .run(reason, completedAt, runId)
+    this.db.prepare(`UPDATE workflow_steps SET status = 'skipped' WHERE run_id = ? AND status = 'pending'`)
+      .run(runId)
+    const row = this.db.prepare(`SELECT id, kind FROM workflow_runs WHERE id = ?`).get(runId) as { id: string; kind: string } | undefined
+    if (row) {
+      this.emit('workflow_event', {
+        eventType: 'run_failed',
+        runId: row.id,
+        kind: row.kind,
+        status: 'failed',
+        timestamp: completedAt,
+      })
     }
   }
 
