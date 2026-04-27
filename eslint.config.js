@@ -95,6 +95,10 @@ export default defineConfig([
     },
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
+      // require() is needed inside vi.hoisted() callbacks, which run before ES imports resolve.
+      '@typescript-eslint/no-require-imports': 'off',
+      // Honor the `_`-prefix convention for intentionally unused args in mock callbacks.
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     },
   },
 ])
