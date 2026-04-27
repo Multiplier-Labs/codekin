@@ -23,6 +23,7 @@ const BEGIN_MARKER = '# BEGIN CODEKIN COMMIT HOOK'
 const END_MARKER = '# END CODEKIN COMMIT HOOK'
 
 const HOOK_CONFIG_PATH = join(homedir(), '.codekin', 'hook-config.json')
+const INSTALLED_HOOKS_PATH = join(homedir(), '.codekin', 'installed-commit-hooks.json')
 
 // Resolve the hook script path relative to this file.
 // In compiled mode (dist/), the shell script is at ../server/commit-event-hook.sh
@@ -166,8 +167,42 @@ export function uninstallCommitHook(repoPath: string): boolean {
 // ---------------------------------------------------------------------------
 
 /**
+ * Read the persisted set of repo paths that we previously installed hooks for.
+ * Returns an empty array on any read/parse error so sync can proceed.
+ */
+function loadInstalledHookPaths(): string[] {
+  try {
+    if (!existsSync(INSTALLED_HOOKS_PATH)) return []
+    const raw = readFileSync(INSTALLED_HOOKS_PATH, 'utf-8')
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((p): p is string => typeof p === 'string')
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Persist the current set of repo paths with installed hooks so a future
+ * sync can detect repos that have been fully removed from the config.
+ */
+function saveInstalledHookPaths(paths: string[]): void {
+  try {
+    const dir = dirname(INSTALLED_HOOKS_PATH)
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    writeFileSync(INSTALLED_HOOKS_PATH, JSON.stringify([...paths].sort(), null, 2), 'utf-8')
+  } catch (err) {
+    console.warn(`[commit-hooks] Failed to persist installed hook list:`, err)
+  }
+}
+
+/**
  * Sync commit hooks with the current workflow config.
  * Installs hooks for enabled commit-review repos, uninstalls for disabled/removed ones.
+ *
+ * To handle repos that have been fully removed from the config (not just changed
+ * kind), the previously-managed set is persisted to ~/.codekin/installed-commit-hooks.json
+ * and used to detect stale hooks that need to be cleaned up.
  */
 export function syncCommitHooks(): void {
   const config = loadWorkflowConfig()
@@ -187,16 +222,26 @@ export function syncCommitHooks(): void {
     }
   }
 
-  // Uninstall hooks for repos that are no longer configured for commit-review
+  // Build set of all paths we should clean up: any repo currently in config
+  // that isn't a target, plus any repo we previously installed for that's no
+  // longer a target (covers the fully-removed case).
+  const toUninstall = new Set<string>()
   for (const repo of config.reviewRepos) {
-    if (!commitReviewRepos.has(repo.repoPath)) {
-      try {
-        uninstallCommitHook(repo.repoPath)
-      } catch {
-        // Silently ignore — hook may not exist
-      }
+    if (!commitReviewRepos.has(repo.repoPath)) toUninstall.add(repo.repoPath)
+  }
+  for (const path of loadInstalledHookPaths()) {
+    if (!commitReviewRepos.has(path)) toUninstall.add(path)
+  }
+
+  for (const repoPath of toUninstall) {
+    try {
+      uninstallCommitHook(repoPath)
+    } catch {
+      // Silently ignore — hook may not exist
     }
   }
+
+  saveInstalledHookPaths([...commitReviewRepos])
 }
 
 // ---------------------------------------------------------------------------
