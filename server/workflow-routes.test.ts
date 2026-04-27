@@ -199,6 +199,12 @@ describe('isValidCron', () => {
   it('rejects inverted ranges', () => {
     expect(isValidCron('5-2 * * * *')).toBe(false)
   })
+
+  it('rejects step value of 0 (e.g. */0)', () => {
+    expect(isValidCron('*/0 * * * *')).toBe(false)
+    expect(isValidCron('* */0 * * *')).toBe(false)
+    expect(isValidCron('0-30/0 * * * *')).toBe(false)
+  })
 })
 
 // ---------------------------------------------------------------------------

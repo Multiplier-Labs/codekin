@@ -34,6 +34,7 @@ import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
 import { CommitEventHandler } from './commit-event-handler.js'
 import { jsonParse } from './json-parse.js'
 import { createMessageRateLimiter } from './ws-rate-limit.js'
+import { isWsOriginAllowed } from './ws-origin-check.js'
 import { checkForUpdates, getUpdateNotification } from './version-check.js'
 import { stopOpenCodeServer } from './opencode-process.js'
 import { ensureHookConfig, syncCommitHooks } from './commit-event-hooks.js'
@@ -443,9 +444,11 @@ function checkWsRateLimit(ip: string): boolean {
 
 wss.on('connection', (ws: WebSocket, req) => {
   // Validate Origin header to prevent cross-site WebSocket hijacking.
-  // In production CORS_ORIGIN is always set; in dev we also accept no origin (CLI tools).
+  // Production: require Origin === CORS_ORIGIN (browsers always send it; a
+  // missing Origin in prod indicates a non-browser client trying to bypass
+  // the check). Dev: accept missing Origin so CLI tools still work.
   const origin = req.headers.origin
-  if (origin && origin !== CORS_ORIGIN) {
+  if (!isWsOriginAllowed(origin, CORS_ORIGIN, process.env.NODE_ENV === 'production')) {
     ws.close(4003, 'Origin not allowed')
     return
   }

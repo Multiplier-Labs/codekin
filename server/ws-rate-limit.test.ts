@@ -59,6 +59,25 @@ describe('createMessageRateLimiter', () => {
     expect(next.firstOverflow).toBe(false)
   })
 
+  it('rolls the window for a request EXACTLY at the boundary (W5 — was off-by-one with >)', () => {
+    let t = 0
+    const limiter = createMessageRateLimiter(5, 1000, () => t)
+
+    // Fill the window
+    for (let i = 0; i < 5; i++) {
+      expect(limiter.observe().allowed).toBe(true)
+    }
+    // Next call at t=0 should overflow
+    expect(limiter.observe().allowed).toBe(false)
+
+    // A request exactly at windowStart + windowMs (t=1000) should be the start
+    // of a new window and therefore allowed.
+    t = 1000
+    const onBoundary = limiter.observe()
+    expect(onBoundary.allowed).toBe(true)
+    expect(onBoundary.firstOverflow).toBe(false)
+  })
+
   it('counts every frame, including frames that would fail JSON parsing — the call site only invokes observe() once per message regardless of payload validity', () => {
     const t = 0
     const limiter = createMessageRateLimiter(5, 1000, () => t)
