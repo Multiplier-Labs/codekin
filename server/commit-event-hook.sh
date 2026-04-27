@@ -4,7 +4,8 @@
 # between BEGIN/END CODEKIN markers manually.
 #
 # Client-side fast filters avoid unnecessary HTTP calls:
-#   1. Skip if branch = codekin/reports
+#   1. Skip if branch is a workflow reports branch
+#      (legacy 'codekin/reports' or per-run 'audit/<kind>-<YYYY-MM-DD>')
 #   2. Skip if message starts with a workflow commit prefix
 #
 # Fire-and-forget: never blocks `git commit`.
@@ -32,10 +33,17 @@ COMMIT_MESSAGE=$(git log -1 --format="%s" 2>/dev/null)
 AUTHOR=$(git log -1 --format="%an" 2>/dev/null)
 REPO_PATH=$(git rev-parse --show-toplevel 2>/dev/null)
 
-# Client-side filter 1: skip reports branch
-if [ "$BRANCH" = "codekin/reports" ]; then
-  exit 0
-fi
+# Client-side filter 1: skip workflow reports branches
+# - 'codekin/reports' (legacy long-lived branch)
+# - 'audit/<kind>-<YYYY-MM-DD>' (per-run branch produced by workflow-loader)
+case "$BRANCH" in
+  codekin/reports)
+    exit 0
+    ;;
+  audit/*-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+    exit 0
+    ;;
+esac
 
 # Client-side filter 2: skip workflow-generated commits
 case "$COMMIT_MESSAGE" in

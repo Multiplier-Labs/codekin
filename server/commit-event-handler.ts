@@ -6,7 +6,8 @@
  * for cycle prevention and deduplication.
  *
  * Filter chain (defense in depth):
- *   1. Branch filter — reject if `codekin/reports`
+ *   1. Branch filter — reject if a workflow reports branch (legacy
+ *      `codekin/reports` or per-run `audit/<kind>-<YYYY-MM-DD>`)
  *   2. Message filter — reject if message starts with any workflow commitMessage prefix
  *   3. Config lookup — reject if no enabled `commit-review` workflow for this repo
  *   4. Commit hash dedup — in-memory Map with 1h TTL, reject duplicates
@@ -15,7 +16,7 @@
 
 import { getWorkflowEngine } from './workflow-engine.js'
 import { loadWorkflowConfig } from './workflow-config.js'
-import { getWorkflowCommitPrefixes } from './workflow-loader.js'
+import { getWorkflowCommitPrefixes, isWorkflowReportsBranch } from './workflow-loader.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -61,7 +62,7 @@ export class CommitEventHandler {
    */
   async handle(event: CommitEvent): Promise<CommitEventResult> {
     // Layer 1: Branch filter
-    if (event.branch === 'codekin/reports') {
+    if (isWorkflowReportsBranch(event.branch)) {
       return { accepted: false, reason: 'Rejected: reports branch' }
     }
 
