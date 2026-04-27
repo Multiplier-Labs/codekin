@@ -29,7 +29,7 @@ export function createMessageRateLimiter(
   return {
     observe(): RateLimitDecision {
       const t = now()
-      if (t - windowStart > windowMs) {
+      if (t - windowStart >= windowMs) {
         count = 0
         windowStart = t
       }
