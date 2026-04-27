@@ -9,7 +9,8 @@
  *   1. validate_repo  — verify path exists, is a git repo, check staleness
  *   2. create_session — create a Codekin session for the run
  *   3. run_prompt     — start Claude, send the prompt, wait for result
- *   4. save_report    — write Markdown output to outputDir, commit on codekin/reports branch, push
+ *   4. save_report    — write Markdown output to outputDir, commit on a fresh
+ *                       audit/<kind>-<YYYY-MM-DD> branch, push
  *
  * MD file format — YAML frontmatter followed by the Claude prompt:
  *
@@ -192,6 +193,37 @@ async function waitForSessionResult(
 }
 
 // ---------------------------------------------------------------------------
+// Prompt guard
+// ---------------------------------------------------------------------------
+
+/**
+ * Prepended to every workflow prompt so Claude does not duplicate the report.
+ * The save_report step writes Claude's response text to the configured outputDir;
+ * if Claude also uses the Write tool (per CLAUDE.md guidance), two files appear
+ * — one substantive file under whatever category Claude chose, and one stub
+ * (the conversational reply) under the configured outputDir.
+ */
+const WORKFLOW_PROMPT_GUARD = [
+  'IMPORTANT: You are running as part of an automated Codekin workflow.',
+  'The workflow runner will save your entire response as the report file.',
+  'Do NOT use the Write or Edit tools to create the report yourself — that produces a duplicate file.',
+  'Respond with the report Markdown directly, with no preamble.',
+  'Disregard any conflicting guidance in CLAUDE.md about writing audit reports to disk; the workflow handles saving and committing.',
+].join(' ')
+
+/** Branch name for the per-run report commit. Kept short and stable per (kind, date). */
+export function reportBranchName(kind: string, dateStr: string): string {
+  return `audit/${kind}-${dateStr}`
+}
+
+/** True when a branch name is one a workflow run produces (or used to produce). */
+export function isWorkflowReportsBranch(branch: string): boolean {
+  // Accept the legacy long-lived branch and the new per-run audit/<kind>-<date> form.
+  if (branch === 'codekin/reports') return true
+  return /^audit\/[^/]+-\d{4}-\d{2}-\d{2}$/.test(branch)
+}
+
+// ---------------------------------------------------------------------------
 // Workflow registration
 // ---------------------------------------------------------------------------
 
@@ -288,9 +320,13 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
             const repoOverride = loadRepoOverride(repoPath, ctx.run.kind)
             const basePrompt = repoOverride ? repoOverride.prompt : def.prompt
 
-            const prompt = customPrompt
+            const userPrompt = customPrompt
               ? `${basePrompt}\n\nAdditional focus areas:\n${customPrompt}`
               : basePrompt
+
+            // Prepend the guard to suppress Claude's CLAUDE.md-driven file-write
+            // behavior, which otherwise creates a duplicate report file.
+            const prompt = `${WORKFLOW_PROMPT_GUARD}\n\n${userPrompt}`
 
             if (repoOverride) {
               console.log(`[workflow:${def.kind}] Using per-repo prompt override from ${repoPath}`)
@@ -357,26 +393,29 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
 
           console.log(`[workflow:${def.kind}] Saved report to ${filePath}`)
 
-          // Commit on a dedicated branch so reports don't pollute the working branch.
-          // Use a temporary git worktree to avoid stash/checkout races when
-          // multiple workflow runs target the same repo concurrently.
-          const REPORTS_BRANCH = 'codekin/reports'
+          // Commit on a fresh per-run branch (audit/<kind>-<YYYY-MM-DD>) so each
+          // audit gets its own PR and we never append to a stale, long-lived
+          // reports branch. Use a temporary git worktree to avoid stash/checkout
+          // races when multiple workflow runs target the same repo concurrently.
+          const reportsBranch = reportBranchName(def.kind, dateStr)
           try {
             const relativePath = `${def.outputDir}/${filename}`
 
-            // Ensure the reports branch exists (create if needed)
+            // Ensure the reports branch exists (create if needed). For same-day
+            // reruns of the same kind we reuse the existing daily branch and
+            // append a new commit.
             try {
-              execFileSync('git', ['rev-parse', '--verify', REPORTS_BRANCH], { cwd: repoPath, timeout: 5_000, stdio: 'pipe' })
+              execFileSync('git', ['rev-parse', '--verify', reportsBranch], { cwd: repoPath, timeout: 5_000, stdio: 'pipe' })
             } catch {
               // Branch doesn't exist yet — create it from the current branch
-              execFileSync('git', ['branch', REPORTS_BRANCH], { cwd: repoPath, timeout: 5_000 })
-              console.log(`[workflow:${def.kind}] Created branch ${REPORTS_BRANCH}`)
+              execFileSync('git', ['branch', reportsBranch], { cwd: repoPath, timeout: 5_000 })
+              console.log(`[workflow:${def.kind}] Created branch ${reportsBranch}`)
             }
 
             // Create a temporary worktree on the reports branch
             const wtDir = join(repoPath, '..', `.codekin-wt-report-${ctx.runId}`)
             try {
-              execFileSync('git', ['worktree', 'add', wtDir, REPORTS_BRANCH], { cwd: repoPath, timeout: 10_000 })
+              execFileSync('git', ['worktree', 'add', wtDir, reportsBranch], { cwd: repoPath, timeout: 10_000 })
 
               // Write the report file in the worktree
               const reportsDirInWt = join(wtDir, def.outputDir)
@@ -390,14 +429,14 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
                 'git', ['commit', '-m', `${def.commitMessage} ${dateStr}`],
                 { cwd: wtDir, timeout: 15_000 }
               )
-              console.log(`[workflow:${def.kind}] Committed ${relativePath} on ${REPORTS_BRANCH}`)
+              console.log(`[workflow:${def.kind}] Committed ${relativePath} on ${reportsBranch}`)
 
               // Push to remote
               try {
-                execFileSync('git', ['push', 'origin', REPORTS_BRANCH], { cwd: wtDir, timeout: 30_000, stdio: 'pipe' })
-                console.log(`[workflow:${def.kind}] Pushed ${REPORTS_BRANCH} to origin`)
+                execFileSync('git', ['push', 'origin', reportsBranch], { cwd: wtDir, timeout: 30_000, stdio: 'pipe' })
+                console.log(`[workflow:${def.kind}] Pushed ${reportsBranch} to origin`)
               } catch (pushErr) {
-                console.warn(`[workflow:${def.kind}] Could not push ${REPORTS_BRANCH}: ${pushErr}`)
+                console.warn(`[workflow:${def.kind}] Could not push ${reportsBranch}: ${pushErr}`)
               }
             } finally {
               // Always clean up the temporary worktree
