@@ -95,6 +95,14 @@ export default defineConfig([
     },
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      }],
+      // `require()` is needed inside `vi.hoisted(...)` blocks because regular
+      // ESM imports are not available at hoist-evaluation time.
+      '@typescript-eslint/no-require-imports': 'off',
     },
   },
 ])
