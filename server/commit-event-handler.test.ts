@@ -14,8 +14,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 // ---------------------------------------------------------------------------
 
 const mockState = vi.hoisted(() => ({
-  startRun: vi.fn(async (_kind: string, _input: Record<string, unknown>) => ({ id: 'run-123' })),
-  listRuns: vi.fn((_opts?: unknown) => [] as Array<{ input: { repoPath: string } }>),
+  startRun: vi.fn(async () => ({ id: 'run-123' })),
+  listRuns: vi.fn(() => [] as Array<{ input: { repoPath: string } }>),
   config: { reviewRepos: [] as Array<{
     id: string
     name: string
