@@ -108,17 +108,34 @@ function scanModules(modulesDir: string) {
 const ghEnv = { ...process.env }
 delete ghEnv.GITHUB_TOKEN
 
+// Timeout for gh CLI calls. Network/API issues should surface as a 504-style
+// error rather than a hung request.
+const GH_TIMEOUT_MS = 15_000
+
+/** True if an execFile error was caused by the timeout option killing the child. */
+function isExecTimeout(err: unknown): boolean {
+  return err instanceof Error && (err as NodeJS.ErrnoException & { killed?: boolean }).killed === true
+}
+
+/**
+ * Local on-disk path for a repo, namespaced by owner to prevent collisions
+ * between ownerA/foo and ownerB/foo.
+ */
+export function localRepoPath(reposRoot: string, owner: string, name: string): string {
+  return join(reposRoot, owner, name)
+}
+
 async function fetchGhRepos(owner: string, reposRoot: string) {
   const { stdout } = await execFileAsync('gh', [
     'repo', 'list', owner,
     '--json', 'name,url,description',
     '--limit', '100',
-  ], { env: ghEnv })
+  ], { env: ghEnv, timeout: GH_TIMEOUT_MS })
   const parsed: unknown = JSON.parse(stdout)
   const repos = parsed as Array<{ name: string; url: string; description?: string }>
   repos.sort((a, b) => a.name.localeCompare(b.name))
   return repos.map((r) => {
-    const repoPath = `${reposRoot}/${r.name}`
+    const repoPath = localRepoPath(reposRoot, owner, r.name)
     const cloned = existsSync(repoPath)
     return {
       id: r.name,
@@ -228,7 +245,7 @@ export function createUploadRouter(
 
     try {
       // Get current user login
-      const { stdout: userJson } = await execFileAsync('gh', ['api', 'user', '--jq', '.login'])
+      const { stdout: userJson } = await execFileAsync('gh', ['api', 'user', '--jq', '.login'], { env: ghEnv, timeout: GH_TIMEOUT_MS })
       const username = userJson.trim()
 
       const groups: Array<{ owner: string; repos: Awaited<ReturnType<typeof fetchGhRepos>> }> = []
@@ -237,10 +254,10 @@ export function createUploadRouter(
       let orgs = GH_ORGS
       if (orgs.length === 0) {
         try {
-          const { stdout: orgsJson } = await execFileAsync('gh', ['api', 'user/orgs', '--jq', '.[].login'], { env: ghEnv })
+          const { stdout: orgsJson } = await execFileAsync('gh', ['api', 'user/orgs', '--jq', '.[].login'], { env: ghEnv, timeout: GH_TIMEOUT_MS })
           orgs = orgsJson.trim().split('\n').filter(Boolean)
         } catch {
-          // Auto-detection failed — continue without org repos
+          // Auto-detection failed (incl. timeout) — continue without org repos
         }
       }
       for (const org of orgs) {
@@ -258,8 +275,16 @@ export function createUploadRouter(
       const ghMissing = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT'
       if (ghMissing) {
         console.error('GitHub CLI (gh) not found. Install it: https://cli.github.com')
+        // Return skills/modules even when gh is unavailable
+        res.json({ groups: [], globalSkills, globalModules, ghMissing, reposPath: reposRoot })
+        return
       }
-      // Return skills/modules even when GitHub is unavailable
+      if (isExecTimeout(err)) {
+        // Surface upstream slowness as 504 so the client can retry/back off
+        // instead of seeing skills+modules with no repos and assuming success.
+        res.status(504).json({ error: 'GitHub CLI timed out', globalSkills, globalModules, reposPath: reposRoot })
+        return
+      }
       res.json({ groups: [], globalSkills, globalModules, ghMissing, reposPath: reposRoot })
     }
   })
@@ -297,7 +322,8 @@ export function createUploadRouter(
     }
 
     const reposRoot = realpathSync(resolveReposRoot())
-    const dest = join(reposRoot, name)
+    const ownerDir = join(reposRoot, owner)
+    const dest = localRepoPath(reposRoot, owner, name)
     // Boundary check: ensure resolved dest stays within REPOS_ROOT
     // Use realpathSync on reposRoot to prevent symlink bypass
     const resolvedDest = resolve(dest)
@@ -309,6 +335,9 @@ export function createUploadRouter(
       res.json({ success: true, path: dest })
       return
     }
+    // Ensure the owner-namespaced parent directory exists — git clone does not
+    // create missing parents.
+    mkdirSync(ownerDir, { recursive: true })
 
     console.log(`Cloning ${owner}/${name} into ${dest}...`)
     execFileAsync('gh', ['repo', 'clone', `${owner}/${name}`, dest], { timeout: 120000 })

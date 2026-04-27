@@ -4,16 +4,60 @@
  */
 
 import { Router } from 'express'
-import type { Request } from 'express'
+import type { Request, RequestHandler } from 'express'
 import { resolve } from 'path'
 import { existsSync, statSync, realpathSync } from 'fs'
 import type { SessionManager } from './session-manager.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, getOrCreateOrchestratorId } from './orchestrator-manager.js'
-import { getAgentDisplayName, REPOS_ROOT } from './config.js'
+import { getAgentDisplayName, REPOS_ROOT, resolveRepoPathInRoot } from './config.js'
 import { scanRepoReports, readReport, getReportsSince } from './orchestrator-reports.js'
 import type { OrchestratorMemory } from './orchestrator-memory.js'
 import type { OrchestratorChildManager } from './orchestrator-children.js'
 import type { OrchestratorMonitor } from './orchestrator-monitor.js'
+
+// ---------------------------------------------------------------------------
+// Per-IP rate limiter for child-session spawn (mirrors auth-routes pattern).
+// Each spawn allocates a real subprocess, so we cap aggressively per IP and
+// hard-cap the tracking map to bound memory under DoS conditions.
+// ---------------------------------------------------------------------------
+
+/** Maximum tracked IPs in the spawn rate-limiter map (matches PR #418 cap). */
+const SPAWN_RATE_MAP_MAX_SIZE = 10_000
+
+function createSpawnRateLimiter(maxRequests: number, windowMs: number): RequestHandler {
+  const ipTimestamps = new Map<string, number[]>()
+
+  // Periodic cleanup of stale entries to bound memory growth.
+  const cleanup = setInterval(() => {
+    const now = Date.now()
+    for (const [ip, timestamps] of ipTimestamps) {
+      const recent = timestamps.filter(t => now - t < windowMs)
+      if (recent.length === 0) ipTimestamps.delete(ip)
+      else ipTimestamps.set(ip, recent)
+    }
+  }, Math.max(60_000, windowMs))
+  if (cleanup.unref) cleanup.unref()
+
+  return (req, res, next) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown'
+    const now = Date.now()
+    const timestamps = (ipTimestamps.get(ip) ?? []).filter(t => now - t < windowMs)
+
+    if (timestamps.length >= maxRequests) {
+      ipTimestamps.set(ip, timestamps)
+      return res.status(429).json({ error: 'Too Many Requests', retryAfter: Math.ceil(windowMs / 1000) })
+    }
+
+    // Reject new IPs once the map is full (DoS protection, matches PR #418).
+    if (timestamps.length === 0 && ipTimestamps.size >= SPAWN_RATE_MAP_MAX_SIZE) {
+      return res.status(429).json({ error: 'Too Many Requests', retryAfter: Math.ceil(windowMs / 1000) })
+    }
+
+    timestamps.push(now)
+    ipTimestamps.set(ip, timestamps)
+    next()
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Request body interfaces
@@ -47,6 +91,9 @@ export function createSessionRouter(
   monitorRef?: { current: OrchestratorMonitor | null },
 ): Router {
   const router = Router()
+  // 20 spawns per 5 minutes per IP — child sessions allocate real subprocesses,
+  // so this is intentionally tight. Tune via the constants if needed.
+  const spawnRateLimiter = createSpawnRateLimiter(20, 5 * 60_000)
 
   // -------------------------------------------------------------------------
   // Session lifecycle
@@ -96,7 +143,11 @@ export function createSessionRouter(
     const since = req.query.since as string | undefined
 
     if (repoPath) {
-      const reports = scanRepoReports(repoPath)
+      const resolvedRepoPath = resolveRepoPathInRoot(repoPath)
+      if (!resolvedRepoPath) {
+        return res.status(400).json({ error: 'Invalid repo path: must be an existing directory under the configured repos root' })
+      }
+      const reports = scanRepoReports(resolvedRepoPath)
       res.json({ reports })
     } else if (since) {
       const repoItems = memory.list({ memoryType: 'repo_context' })
@@ -133,7 +184,7 @@ export function createSessionRouter(
   })
 
   /** Spawn a child session. */
-  router.post('/api/orchestrator/children', async (req: Request<Record<string, string>, unknown, SpawnChildBody>, res) => {
+  router.post('/api/orchestrator/children', spawnRateLimiter, async (req: Request<Record<string, string>, unknown, SpawnChildBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const { repo, task, branchName, completionPolicy, deployAfter, useWorktree, model, allowedTools } = req.body

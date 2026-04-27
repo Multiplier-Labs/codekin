@@ -110,10 +110,12 @@ export function readReport(filePath: string): ReportContent | null {
   } catch {
     return null
   }
-  // Verify the path is within a known reports directory (anchored startsWith, not includes)
+  // Verify the path is within a known reports directory. Depth-agnostic so nested
+  // layouts like REPOS_ROOT/org/repo/.codekin/reports/... are accepted; the
+  // realpath-based REPOS_ROOT containment check prevents traversal escape.
   const isDataReport = resolved.startsWith(DATA_DIR + '/reports/')
   const isRepoReport = resolved.startsWith(REPOS_ROOT + '/') &&
-    /^[^/]+\/\.codekin\/reports\//.test(resolved.slice(REPOS_ROOT.length + 1))
+    resolved.includes('/.codekin/reports/')
   if (!isDataReport && !isRepoReport) return null
 
   const content = readFileSync(resolved, 'utf-8')
@@ -140,14 +142,6 @@ export function readReport(filePath: string): ReportContent | null {
     mtime: stat.mtime.toISOString(),
     content,
   }
-}
-
-/**
- * Get the latest report for a given repo and category.
- */
-export function getLatestReport(repoPath: string, category: string): ReportMeta | null {
-  const reports = scanRepoReports(repoPath)
-  return reports.find(r => r.category === category) ?? null
 }
 
 /**

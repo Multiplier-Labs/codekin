@@ -33,6 +33,7 @@ import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
 import { CommitEventHandler } from './commit-event-handler.js'
 import { jsonParse } from './json-parse.js'
+import { createMessageRateLimiter } from './ws-rate-limit.js'
 import { checkForUpdates, getUpdateNotification } from './version-check.js'
 import { stopOpenCodeServer } from './opencode-process.js'
 import { ensureHookConfig, syncCommitHooks } from './commit-event-hooks.js'
@@ -306,7 +307,10 @@ app.use((_req, res, next) => {
   res.header('X-Frame-Options', 'DENY')
   res.header('Referrer-Policy', 'strict-origin-when-cross-origin')
   res.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
-  res.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self' wss: ws:; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com")
+  // connect-src is restricted to same-origin: the frontend always connects to
+  // `${location.host}/cc/` (see src/lib/ccApi.ts wsUrl()), and CSP 'self'
+  // covers both http(s): and ws(s): schemes at the page origin.
+  res.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com")
   if (process.env.NODE_ENV === 'production') {
     res.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
   }
@@ -316,8 +320,9 @@ app.use((_req, res, next) => {
 // CORS — restrict to configured origin (default: localhost dev server)
 app.use((_req, res, next) => {
   res.header('Access-Control-Allow-Origin', CORS_ORIGIN)
-  res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  res.header('Vary', 'Origin')
   if (_req.method === 'OPTIONS') return res.sendStatus(204)
   next()
 })
@@ -469,13 +474,23 @@ wss.on('connection', (ws: WebSocket, req) => {
 
   const handlerCtx = { ws, sessions, clientSessions, send }
 
-  // Post-auth message rate limiting: max 60 messages per second
-  const MSG_RATE_LIMIT = 60
-  const MSG_RATE_WINDOW_MS = 1000
-  let msgCount = 0
-  let msgWindowStart = Date.now()
+  // Per-connection message rate limiting: max 60 messages per second.
+  // The counter is incremented for every received frame (including those that
+  // fail to parse) so a flood of malformed frames cannot bypass the limit.
+  const rateLimiter = createMessageRateLimiter(60, 1000)
 
   ws.on('message', (raw) => {
+    const decision = rateLimiter.observe()
+    if (!decision.allowed) {
+      if (decision.firstOverflow) {
+        send({ type: 'system_message', subtype: 'error', text: 'Rate limit exceeded (60 messages/second). Message dropped.' })
+      }
+      if (decision.shouldDisconnect) {
+        ws.close(4029, 'Message rate limit exceeded')
+      }
+      return
+    }
+
     let msg: WsClientMessage
     try {
       msg = jsonParse(raw.toString()) as WsClientMessage
@@ -498,17 +513,6 @@ wss.on('connection', (ws: WebSocket, req) => {
       void getUpdateNotification().then(text => {
         if (text) send({ type: 'system_message', subtype: 'notification', text })
       })
-      return
-    }
-
-    // Rate limit post-auth messages
-    const now = Date.now()
-    if (now - msgWindowStart > MSG_RATE_WINDOW_MS) {
-      msgCount = 0
-      msgWindowStart = now
-    }
-    if (++msgCount > MSG_RATE_LIMIT) {
-      send({ type: 'system_message', subtype: 'error', text: 'Rate limit exceeded (60 messages/second). Message dropped.' })
       return
     }
 

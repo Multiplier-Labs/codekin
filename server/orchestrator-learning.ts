@@ -582,15 +582,6 @@ export function updateSkillLevel(
 }
 
 /**
- * Get the user's assessed skill level for a domain.
- * Returns null if we have no data for this domain.
- */
-export function getSkillLevel(domain: string): SkillLevel | null {
-  const profile = loadSkillProfile()
-  return profile.find(s => s.domain === domain) ?? null
-}
-
-/**
  * Get a guidance style recommendation based on the user's overall skill profile.
  */
 export function getGuidanceStyle(): {

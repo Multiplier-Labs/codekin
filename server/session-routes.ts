@@ -86,9 +86,40 @@ interface AuthValidateBody {
 }
 
 /** Expand leading ~ to the user's home directory. */
-function expandTilde(p: string): string {
+export function expandTilde(p: string): string {
   if (p.startsWith('~/') || p === '~') return pathJoin(osHomedir(), p.slice(1))
   return p
+}
+
+/**
+ * Canonicalize a user-supplied repos path for persistence.
+ *
+ * Expands ~, resolves to an absolute canonical path via realpathSync (so the
+ * stored value never contains ~ or symlinks), then enforces that the resolved
+ * path is the user's home dir, REPOS_ROOT, or a descendant of either.
+ * Mirrors the boundary check used by /api/browse-dirs and /api/sessions/create
+ * to prevent the setting from pointing at arbitrary host paths (e.g. /etc).
+ */
+export function canonicalizeReposPath(
+  raw: string,
+): { ok: true; path: string } | { ok: false; error: string } {
+  const expanded = expandTilde(raw)
+  if (!fsExistsSync(expanded) || !fsStatSync(expanded).isDirectory()) {
+    return { ok: false, error: 'Path does not exist or is not a directory' }
+  }
+  let resolved: string
+  try {
+    resolved = fsRealpathSync(expanded)
+  } catch {
+    return { ok: false, error: 'Path could not be resolved' }
+  }
+  const home = osHomedir()
+  const allowedRoots = [home, REPOS_ROOT]
+  const inAllowed = allowedRoots.some(root => resolved === root || resolved.startsWith(root + '/'))
+  if (!inAllowed) {
+    return { ok: false, error: 'Path is outside allowed directories (must be under home or repos root)' }
+  }
+  return { ok: true, path: resolved }
 }
 
 type VerifyFn = (token: string | undefined) => boolean
@@ -314,14 +345,16 @@ export function createSessionRouter(
     }
     const trimmed = rawPath.trim()
     // Empty string means "use default REPOS_ROOT"
+    let toPersist = ''
     if (trimmed) {
-      const expanded = expandTilde(trimmed)
-      if (!fsExistsSync(expanded) || !fsStatSync(expanded).isDirectory()) {
-        return res.status(400).json({ error: 'Path does not exist or is not a directory' })
+      const result = canonicalizeReposPath(trimmed)
+      if (!result.ok) {
+        return res.status(400).json({ error: result.error })
       }
+      toPersist = result.path
     }
-    sessions.archive.setSetting('repos_path', trimmed)
-    res.json({ path: trimmed })
+    sessions.archive.setSetting('repos_path', toPersist)
+    res.json({ path: toPersist })
   })
 
   // --- Agent name setting ---

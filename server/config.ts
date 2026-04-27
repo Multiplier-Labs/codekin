@@ -7,7 +7,7 @@
  */
 
 import { homedir } from 'os'
-import { join } from 'path'
+import { join, resolve as pathResolve } from 'path'
 import { readFileSync, existsSync, realpathSync } from 'fs'
 import { execFileSync } from 'child_process'
 
@@ -62,6 +62,23 @@ const rawReposRoot = process.env.REPOS_ROOT || join(homedir(), 'repos')
 export const REPOS_ROOT = existsSync(rawReposRoot)
   ? realpathSync(rawReposRoot)
   : rawReposRoot
+
+/**
+ * Resolve a user-supplied repo path and verify it resides within REPOS_ROOT.
+ * Uses realpathSync to dereference symlinks, preventing symlink-bypass traversal.
+ * Returns the resolved absolute path, or null if the path does not exist,
+ * is inaccessible, or escapes REPOS_ROOT.
+ */
+export function resolveRepoPathInRoot(repoPath: string): string | null {
+  let resolved: string
+  try {
+    resolved = realpathSync(pathResolve(repoPath))
+  } catch {
+    return null
+  }
+  if (resolved !== REPOS_ROOT && !resolved.startsWith(REPOS_ROOT + '/')) return null
+  return resolved
+}
 
 /** Codekin data directory (sessions, approvals, workflows, etc.). */
 export const DATA_DIR = process.env.DATA_DIR || join(homedir(), '.codekin')
