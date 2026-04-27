@@ -14,7 +14,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 // ---------------------------------------------------------------------------
 
 const mockState = vi.hoisted(() => ({
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   startRun: vi.fn(async (_kind: string, _input: Record<string, unknown>) => ({ id: 'run-123' })),
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   listRuns: vi.fn((_opts?: unknown) => [] as Array<{ input: { repoPath: string } }>),
   config: { reviewRepos: [] as Array<{
     id: string
@@ -42,6 +44,8 @@ vi.mock('./workflow-config.js', () => ({
 
 vi.mock('./workflow-loader.js', () => ({
   getWorkflowCommitPrefixes: () => mockState.prefixes,
+  isWorkflowReportsBranch: (branch: string) =>
+    branch === 'codekin/reports' || /^audit\/[^/]+-\d{4}-\d{2}-\d{2}$/.test(branch),
 }))
 
 import { CommitEventHandler, type CommitEvent } from './commit-event-handler.js'

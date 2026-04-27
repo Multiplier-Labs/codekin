@@ -32,6 +32,7 @@ vi.mock('./orchestrator-learning.js', () => learningMocks)
 import { createLearningRouter } from './orchestrator-learning-router.js'
 import type { OrchestratorMemory } from './orchestrator-memory.js'
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const verifyAuth = vi.fn((_req: Request) => true)
 
 async function startApp(router: express.Router): Promise<{ baseUrl: string; close: () => Promise<void> }> {
