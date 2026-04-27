@@ -63,8 +63,8 @@ codekin uninstall               # Remove Codekin entirely
 - **Subscription & API key auth** — Works with both Claude subscription (OAuth) and API key authentication
 - **Mobile-friendly** — Responsive layout that works on phones and tablets
 - **Markdown browser** — Browse and view `.md` files directly in the UI
-- **AI Workflows** — Scheduled code and repository audits and maintenance, with support for custom workflows defined as Markdown files
-- **GitHub webhooks** — Automated bugfixing on CI failures and PR code review via webhook integration
+- **AI Workflows** — Scheduled code and repository audits and maintenance, with support for custom workflows defined as Markdown files; resilient across server restarts with automatic resume of in-flight runs
+- **GitHub webhooks** — Automated bugfixing on CI failures and PR code review via webhook integration, with auto-setup wizard for PR Review workflows
 - **Upgrade notifications** — In-app banner when a newer version is available
 
 ## Upgrade

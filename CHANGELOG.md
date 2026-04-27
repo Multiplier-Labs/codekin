@@ -7,11 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-04-27
+
+### Features
+- **Workflow engine restart resume** — Resume in-flight workflow runs after server restart and recover orphan sessions (#437)
+- Auto-setup GitHub webhook for PR Review workflows (#391)
+
+### Fixes
+- Single output path per audit + fresh branch per workflow run (#441)
+- Silence passive-repo alert for repos with no enabled workflows (#436)
+- Resolve WS rate-limit bypass, gh call timeouts, and align prompt-timeout docs (#435)
+- Resolve hooksPath resolution and CORS PATCH method (#432)
+- Nested reports path, narrower CSP `connect-src`, and API docs drift (#426)
+- Canonicalize `repos_path` and namespace local repo storage by owner (#425)
+- Validate `repoPath` and cron expression on workflow/orchestrator routes (#423)
+- Add hard key caps to auth and webhook rate-limiter maps (#418)
+- Prevent JSON injection in `commit-event-hook.sh` (#417)
+- Use `realpathSync` to prevent symlink bypass in spawn route
+- Harden docs browser root scope and persist canonical paths (#409)
+- Widen Edit Workflow modal to prevent day label clipping (#408)
+- Prevent spurious reconfigure when model is first assigned to a new session (#407)
+- Polish Edit Workflow modal — frequency highlights, day grid, model default (#403, #405)
+- Streamline Edit Workflow modal layout (#401)
+- Unify workflow report commit/push across MD and Stepflow systems (#398)
+- Add API rate limiter map cap and attachment file size limit (#397)
+- Harden path traversal, trust proxy, and image src allowlist
+- Improve Edit Workflow modal layout with two-column design (#393)
+- Audit warnings W1–W5: cron step value of 0, commit-hook cleanup, WS Origin, upload realpathSync, rate-window roll
+- Settings `repos_path` hardening and rate-limited child spawn (#431)
+
+### Features (smaller)
+- Add Claude Opus 4.7 to available models (#421)
+- Unified `ProcessCoordinator` for session lifecycle (#404)
+
+### Refactoring
+- Decompose `App.tsx` into focused hooks (#416)
+- Split `orchestrator-routes.ts` into focused sub-routers (#415)
+
+### Tests
+- Cover auth, docs, session, workflow, and commit-event route handlers (#428)
+- Cover workflow routes and commit-event hooks (#427)
+- Coverage gap session — error pages, commit-event-handler, webhook-routes, orchestrator-routes wrapper, orchestrator-learning-router, tool-labels, webhook-handler-base, version-check, session-persistence, stepflow-prompt
+
+### Documentation
+- Document workflow restart-resume and orphan-session handling
+- Document WebSocket rate limiting
+- Document H1 + M5 security error responses (#433)
+- Address 2026-04-22 docs-audit findings (#429)
+- Cleanup docs for Apr 15 audit — PR review, cross-references, roadmap restructure (#414)
+- Session initiation audit report (#399)
+
+### Chores
+- Bump dompurify to 3.4.0 and better-sqlite3 to 12.9.0 (#424)
+- Align server TS version and widen ESLint server glob (#430)
+- Enforce strict `@typescript-eslint/no-unsafe-*` rules across codebase (#410, #411)
+- Remove three unused exports (#434)
+
+## [0.6.3] - 2026-04-12
+
+### Fixes
+- Prevent model/session message cascade on OpenCode session start
+- Resolve duplicate model messages and mixed thinking text for OpenCode sessions
+- Separate reasoning from text in OpenCode streaming for Kimi
+- Persist OpenCode model selection across sessions (#384)
+- Show model info once per session instead of every turn (#383)
+- Show "Session started" immediately instead of empty chat on startup (#386)
+
+## [0.6.2] - 2026-04-12
+
+### Features
+- Provider selection and searchable model picker in workflows (#375)
+- GitHub webhook integration health checks and setup wizard (#373)
+- Improved model picker — search, recents, and keyboard navigation
+
+### Fixes
+- Resolve deadlock preventing Claude session start (#382)
+- Overhaul session lifecycle to fix crashes, message loss, and duplicate notifications (#381)
+- Prevent message loss when Claude process exits before `system_init` (#380)
+- Prevent session restart loops from process lifecycle races (#379)
+- Preserve user input for session naming (#378)
+- Persist OpenCode provider when saving workflow config (#377)
+- Probe OpenCode availability on startup for accurate connection status (#376)
+- Tighten retry regex patterns and dedupe model dropdown entries (#372)
+- Set `NODE_ENV=test` in vitest config to prevent `act-is-not-a-function` failures (#371)
+- Resolve eslint template literal error in claude-process (#369)
+- Address 5 small issues from audit reports (#366)
+
+## [0.6.1] - 2026-04-11
+
 ### Features
 - **Connection status popup** — Real-time provider health indicators with disable/enable toggles (#346)
 - **PR Review workflow** — Add PR Review as event-driven workflow kind in Workflows UI (#334)
 
 ### Fixes
+- Validate model when switching between Claude and OpenCode sessions (#363)
+- Add missing `_isStarting` property to restored sessions
+- Prevent symlink-based path traversal in docs and reports endpoints (#358)
+- Address 4 server correctness bugs found in code review (#359)
 - Restore `wss:`/`ws:` in CSP connect-src to unbreak WebSocket connections (#356)
 - Harden server security: auth token in headers only, rate limiting, CSP, WebSocket origin validation (#355)
 - Strip GIT_* env vars from OpenCode server to fix worktree git operations (#353)
@@ -31,6 +123,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Refactoring
 - Migrate to open-source @multiplier-labs/stepflow (#333)
+
+### Documentation
+- Update changelog and README to feature OpenCode support (#357)
 
 ## [0.6.0] - 2026-04-10
 
