@@ -33,6 +33,7 @@
  */
 
 import { execSync } from 'child_process'
+import Database from 'better-sqlite3'
 import {
   WorkflowEngine,
   SQLiteStorageAdapter,
@@ -63,7 +64,7 @@ const CRON_EXPRESSION = process.env.COVERAGE_CRON ?? '0 6 * * *'
 // ---------------------------------------------------------------------------
 
 const engine = new WorkflowEngine({
-  storage: new SQLiteStorageAdapter({ filename: './stepflow-coverage.db' }),
+  storage: new SQLiteStorageAdapter({ db: new Database('./stepflow-coverage.db') }),
   events: new WebhookEventTransport({
     endpoints: [{
       id: 'codekin',
