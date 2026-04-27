@@ -79,6 +79,7 @@ describe('createMessageRateLimiter', () => {
   })
 
 
+
   it('counts every frame, including frames that would fail JSON parsing — the call site only invokes observe() once per message regardless of payload validity', () => {
     const t = 0
     const limiter = createMessageRateLimiter(5, 1000, () => t)
