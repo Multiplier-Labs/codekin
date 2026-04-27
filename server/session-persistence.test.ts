@@ -1,12 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
 import { join } from 'path'
 
 const { TEST_DATA_DIR } = vi.hoisted(() => {
+  // vi.hoisted runs before ESM imports complete, so we must use require here.
+  /* eslint-disable @typescript-eslint/no-require-imports */
   const fs = require('fs') as typeof import('fs')
   const os = require('os') as typeof import('os')
   const path = require('path') as typeof import('path')
+  /* eslint-enable @typescript-eslint/no-require-imports */
   return { TEST_DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'codekin-persist-test-')) }
 })
 
@@ -109,13 +113,12 @@ describe('SessionPersistence.persistToDisk', () => {
     // Point DATA_DIR-derived SESSIONS_FILE at an unwritable path by replacing
     // the real sessions file with a directory at the .tmp location, which
     // causes writeFileSync to fail.
-    const fs = require('fs') as typeof import('fs')
-    fs.mkdirSync(SESSIONS_FILE + '.tmp', { recursive: true })
+    mkdirSync(SESSIONS_FILE + '.tmp', { recursive: true })
 
     expect(() => new SessionPersistence(sessions).persistToDisk()).not.toThrow()
     expect(errSpy).toHaveBeenCalledWith('Failed to persist sessions:', expect.any(Error))
 
-    fs.rmdirSync(SESSIONS_FILE + '.tmp')
+    rmdirSync(SESSIONS_FILE + '.tmp')
     errSpy.mockRestore()
   })
 })
@@ -194,9 +197,7 @@ describe('SessionPersistence.restoreFromDisk', () => {
   })
 
   it('falls back to groupDir when worktreePath no longer exists', () => {
-    const fs = require('fs') as typeof import('fs')
-    const os = require('os') as typeof import('os')
-    const repoDir = fs.mkdtempSync(join(os.tmpdir(), 'codekin-fallback-'))
+    const repoDir = mkdtempSync(join(tmpdir(), 'codekin-fallback-'))
     seed([{
       id: 's1',
       name: 'WT',
