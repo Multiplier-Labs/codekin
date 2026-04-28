@@ -582,6 +582,57 @@ describe('workflow routes', () => {
       const body = await res.json() as { error: string }
       expect(body.error).toMatch(/Invalid repoPath/)
     })
+
+    it('returns 400 for a malformed cron expression', async () => {
+      const res = await fetch(`${harness.baseUrl}/config/repos`, {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({
+          id: 'r1',
+          name: 'My Repo',
+          repoPath: '/fake/path',
+          cronExpression: '*/0 * * * *',
+        }),
+      })
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toBe('Invalid cron expression')
+      expect(mocks.addReviewRepo).not.toHaveBeenCalled()
+    })
+
+    it('returns 400 for non-cron / non-event cronExpression', async () => {
+      const res = await fetch(`${harness.baseUrl}/config/repos`, {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({
+          id: 'r1',
+          name: 'My Repo',
+          repoPath: '/fake/path',
+          cronExpression: 'not a cron',
+        }),
+      })
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toBe('Invalid cron expression')
+    })
+
+    it('accepts the special cronExpression value "event"', async () => {
+      const res = await fetch(`${harness.baseUrl}/config/repos`, {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({
+          id: 'r1',
+          name: 'My Repo',
+          repoPath: '/fake/path',
+          cronExpression: 'event',
+          kind: 'commit-review',
+        }),
+      })
+      expect(res.status).toBe(200)
+      expect(mocks.addReviewRepo).toHaveBeenCalledWith(
+        expect.objectContaining({ cronExpression: 'event' }),
+      )
+    })
   })
 
   describe('PATCH /config/repos/:id', () => {
@@ -618,6 +669,56 @@ describe('workflow routes', () => {
         body: JSON.stringify({ name: 'nope' }),
       })
       expect(res.status).toBe(404)
+    })
+
+    it('returns 400 for a malformed cron expression in patch', async () => {
+      const res = await fetch(`${harness.baseUrl}/config/repos/r1`, {
+        method: 'PATCH',
+        headers: authHeader(),
+        body: JSON.stringify({ cronExpression: '*/0 * * * *' }),
+      })
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toBe('Invalid cron expression')
+      expect(mocks.updateReviewRepo).not.toHaveBeenCalled()
+    })
+
+    it('accepts cronExpression="event" in patch', async () => {
+      mocks.workflowConfig.reviewRepos = [{
+        id: 'r1', name: 'X', repoPath: '/p', cronExpression: '0 6 * * *', enabled: true,
+      }]
+      const res = await fetch(`${harness.baseUrl}/config/repos/r1`, {
+        method: 'PATCH',
+        headers: authHeader(),
+        body: JSON.stringify({ cronExpression: 'event' }),
+      })
+      expect(res.status).toBe(200)
+      expect(mocks.updateReviewRepo).toHaveBeenCalledWith('r1', { cronExpression: 'event' })
+    })
+
+    it('returns 400 for an invalid provider in patch', async () => {
+      const res = await fetch(`${harness.baseUrl}/config/repos/r1`, {
+        method: 'PATCH',
+        headers: authHeader(),
+        body: JSON.stringify({ provider: 'bogus' }),
+      })
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toMatch(/Invalid provider/)
+      expect(mocks.updateReviewRepo).not.toHaveBeenCalled()
+    })
+
+    it('accepts a valid provider in patch', async () => {
+      mocks.workflowConfig.reviewRepos = [{
+        id: 'r1', name: 'X', repoPath: '/p', cronExpression: '0 6 * * *', enabled: true,
+      }]
+      const res = await fetch(`${harness.baseUrl}/config/repos/r1`, {
+        method: 'PATCH',
+        headers: authHeader(),
+        body: JSON.stringify({ provider: 'opencode' }),
+      })
+      expect(res.status).toBe(200)
+      expect(mocks.updateReviewRepo).toHaveBeenCalledWith('r1', { provider: 'opencode' })
     })
   })
 

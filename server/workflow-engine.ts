@@ -211,6 +211,12 @@ function parseCronField(field: string, min: number, max: number): number[] {
   for (const part of field.split(',')) {
     const stepMatch = part.match(/^(.+)\/(\d+)$/)
     const step = stepMatch ? parseInt(stepMatch[2], 10) : 1
+    // Defensive guard — `step <= 0` would make the loops below never advance
+    // (or run backwards), pinning the scheduler. Any caller that reaches this
+    // branch with a zero/negative step has bypassed isValidCron, so refuse loudly.
+    if (!Number.isFinite(step) || step <= 0) {
+      throw new Error(`Invalid cron step value: ${stepMatch?.[2]} (must be > 0)`)
+    }
     const range = stepMatch ? stepMatch[1] : part
 
     if (range === '*') {
@@ -225,24 +231,30 @@ function parseCronField(field: string, min: number, max: number): number[] {
   return values
 }
 
-function cronMatchesDate(expression: string, date: Date): boolean {
+export function cronMatchesDate(expression: string, date: Date): boolean {
   const parts = expression.trim().split(/\s+/)
   if (parts.length !== 5) return false
 
-  const [minF, hourF, domF, monF, dowF] = parts
-  const minute = parseCronField(minF, 0, 59)
-  const hour = parseCronField(hourF, 0, 23)
-  const dom = parseCronField(domF, 1, 31)
-  const month = parseCronField(monF, 1, 12)
-  const dow = parseCronField(dowF, 0, 6)
+  try {
+    const [minF, hourF, domF, monF, dowF] = parts
+    const minute = parseCronField(minF, 0, 59)
+    const hour = parseCronField(hourF, 0, 23)
+    const dom = parseCronField(domF, 1, 31)
+    const month = parseCronField(monF, 1, 12)
+    const dow = parseCronField(dowF, 0, 6)
 
-  return (
-    minute.includes(date.getMinutes()) &&
-    hour.includes(date.getHours()) &&
-    dom.includes(date.getDate()) &&
-    month.includes(date.getMonth() + 1) &&
-    dow.includes(date.getDay())
-  )
+    return (
+      minute.includes(date.getMinutes()) &&
+      hour.includes(date.getHours()) &&
+      dom.includes(date.getDate()) &&
+      month.includes(date.getMonth() + 1) &&
+      dow.includes(date.getDay())
+    )
+  } catch {
+    // Malformed expression (e.g. step 0). Treat as never-matching so a bad
+    // legacy schedule cannot pin the scheduler in a tight loop.
+    return false
+  }
 }
 
 /** Compute the next matching minute for a cron expression after `after`. */
