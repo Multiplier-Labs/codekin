@@ -32,7 +32,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'fs'
 import { execFileSync } from 'child_process'
-import { dirname, join, sep } from 'path'
+import { dirname, isAbsolute, join, resolve, sep } from 'path'
 import { REPOS_ROOT } from './config.js'
 import { fileURLToPath } from 'url'
 import type { WorkflowEngine, WorkflowRun } from './workflow-engine.js'
@@ -65,7 +65,27 @@ export interface WorkflowDef {
 // MD parser
 // ---------------------------------------------------------------------------
 
-/** Parse a workflow MD file into a WorkflowDef. Throws if required fields are missing. */
+/**
+ * Validate a relative path that came from untrusted MD frontmatter.
+ *
+ * `outputDir` and `filenameSuffix` are joined with `repoPath` and written to
+ * disk by the save_report step. A repo workflow author who set
+ * `outputDir: /etc` or `outputDir: ../../foo` could otherwise smuggle the
+ * write outside the repo. We reject absolute paths and any segment equal to
+ * `..`; the runtime check in save_report enforces the boundary defensively.
+ */
+function assertSafeRelativePath(value: string, field: string, sourcePath: string): void {
+  if (isAbsolute(value)) {
+    throw new Error(`Invalid ${field} in ${sourcePath}: absolute paths are not allowed`)
+  }
+  // Normalize backslashes so a Windows-style ..\\ is caught the same as ../
+  const segments = value.split(/[/\\]/)
+  if (segments.some(s => s === '..')) {
+    throw new Error(`Invalid ${field} in ${sourcePath}: path traversal segments ('..') are not allowed`)
+  }
+}
+
+/** Parse a workflow MD file into a WorkflowDef. Throws if required fields are missing or unsafe. */
 function parseMdWorkflow(content: string, sourcePath: string): WorkflowDef {
   const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/m)
   if (!fmMatch) throw new Error(`No frontmatter found in ${sourcePath}`)
@@ -84,6 +104,12 @@ function parseMdWorkflow(content: string, sourcePath: string): WorkflowDef {
   for (const key of required) {
     if (!meta[key]) throw new Error(`Missing frontmatter field "${key}" in ${sourcePath}`)
   }
+
+  // Reject path-traversal in any frontmatter field that is later joined with
+  // repoPath at save time. Failing here prevents an unsafe def from being
+  // registered at all.
+  assertSafeRelativePath(meta.outputDir, 'outputDir', sourcePath)
+  assertSafeRelativePath(meta.filenameSuffix, 'filenameSuffix', sourcePath)
 
   return {
     kind: meta.kind,
@@ -391,6 +417,31 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
 
           const filename = `${dateStr}${def.filenameSuffix}`
           const filePath = join(reportsDir, filename)
+
+          // Defense in depth — even though parseMdWorkflow rejects unsafe
+          // outputDir/filenameSuffix at load, re-verify the resolved write
+          // target is under the repo. realpath the parent so a symlinked
+          // outputDir cannot escape; the file itself does not exist yet.
+          const repoRealRoot = existsSync(repoPath) ? realpathSync(repoPath) : resolve(repoPath)
+          const reportsRealRoot = existsSync(reportsDir) ? realpathSync(reportsDir) : resolve(reportsDir)
+          if (
+            !reportsRealRoot.startsWith(repoRealRoot + sep) &&
+            reportsRealRoot !== repoRealRoot
+          ) {
+            throw new Error(
+              `Refusing to write report outside repo: ${reportsRealRoot} is not under ${repoRealRoot}`,
+            )
+          }
+          const resolvedFilePath = resolve(reportsRealRoot, filename)
+          if (
+            !resolvedFilePath.startsWith(reportsRealRoot + sep) &&
+            resolvedFilePath !== reportsRealRoot
+          ) {
+            throw new Error(
+              `Refusing to write report outside outputDir: ${resolvedFilePath} is not under ${reportsRealRoot}`,
+            )
+          }
+
           writeFileSync(filePath, markdown, 'utf-8')
 
           console.log(`[workflow:${def.kind}] Saved report to ${filePath}`)

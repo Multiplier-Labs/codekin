@@ -196,6 +196,31 @@ describe('CommitEventHandler', () => {
     expect(mockState.startRun).toHaveBeenCalledOnce()
   })
 
+  it('does NOT cross-suppress identical hashes across different repos', async () => {
+    // Two unrelated repos can produce the same commit hash (e.g. cherry-pick,
+    // identical empty commit). Each deserves its own commit-review run. The
+    // dedup key must be scoped per-repo.
+    mockState.config.reviewRepos = [
+      { id: 'r1', name: 'foo', repoPath: '/repos/owner/foo', enabled: true, kind: 'commit-review' },
+      { id: 'r2', name: 'bar', repoPath: '/repos/owner/bar', enabled: true, kind: 'commit-review' },
+    ]
+    const sharedHash = 'd'.repeat(40)
+
+    const r1 = await handler.handle(makeEvent({ repoPath: '/repos/owner/foo', commitHash: sharedHash }))
+    expect(r1.accepted).toBe(true)
+
+    const r2 = await handler.handle(makeEvent({ repoPath: '/repos/owner/bar', commitHash: sharedHash }))
+    expect(r2.accepted).toBe(true)
+
+    // And a *third* call against the first repo with the same hash is still
+    // suppressed (per-repo dedup is intact).
+    const r1Dup = await handler.handle(makeEvent({ repoPath: '/repos/owner/foo', commitHash: sharedHash }))
+    expect(r1Dup.accepted).toBe(false)
+    expect(r1Dup.reason).toMatch(/duplicate commit hash/i)
+
+    expect(mockState.startRun).toHaveBeenCalledTimes(2)
+  })
+
   it('accepts the same commit hash again after the dedup TTL elapses', async () => {
     enableRepoConfig()
     const event = makeEvent({ commitHash: 'c'.repeat(40) })

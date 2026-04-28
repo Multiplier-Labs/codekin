@@ -30,7 +30,7 @@ vi.mock('fs', async (importOriginal) => {
   }
 })
 
-import { WorkflowEngine, WorkflowSkipped, SessionGoneError, initWorkflowEngine, getWorkflowEngine, shutdownWorkflowEngine } from './workflow-engine.js'
+import { WorkflowEngine, WorkflowSkipped, SessionGoneError, initWorkflowEngine, getWorkflowEngine, shutdownWorkflowEngine, cronMatchesDate } from './workflow-engine.js'
 import type { StepHandler } from './workflow-engine.js'
 
 describe('WorkflowEngine', () => {
@@ -807,5 +807,30 @@ describe('WorkflowSkipped', () => {
     expect(err.name).toBe('WorkflowSkipped')
     expect(err.message).toBe('no changes')
     expect(err).toBeInstanceOf(Error)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// cronMatchesDate — defensive parseCronField guard against step <= 0
+// ---------------------------------------------------------------------------
+describe('cronMatchesDate', () => {
+  it('returns true for a matching minute on a plain expression', () => {
+    // 2024-01-15 09:30:00 UTC — 09:30 on a Monday
+    const d = new Date('2024-01-15T09:30:00Z')
+    // Build the expression in local time so the test is timezone-stable
+    expect(cronMatchesDate(`${d.getMinutes()} ${d.getHours()} * * *`, d)).toBe(true)
+  })
+
+  it('returns false for a malformed step value of 0 (defense in depth)', () => {
+    // parseCronField now throws on step <= 0; cronMatchesDate must catch and
+    // return false rather than propagate or hang the scheduler.
+    expect(cronMatchesDate('*/0 * * * *', new Date())).toBe(false)
+    expect(cronMatchesDate('* */0 * * *', new Date())).toBe(false)
+    expect(cronMatchesDate('0-30/0 * * * *', new Date())).toBe(false)
+  })
+
+  it('returns false for the wrong number of fields', () => {
+    expect(cronMatchesDate('* * * *', new Date())).toBe(false)
+    expect(cronMatchesDate('* * * * * *', new Date())).toBe(false)
   })
 })

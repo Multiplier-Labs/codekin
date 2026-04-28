@@ -47,13 +47,24 @@ const DEDUP_TTL_MS = 60 * 60 * 1000
 const DEDUP_CLEANUP_INTERVAL_MS = 10 * 60 * 1000
 
 export class CommitEventHandler {
-  /** commitHash → timestamp of when it was recorded. */
+  /**
+   * `${repoPath}::${commitHash}` → timestamp recorded.
+   *
+   * Keying by repoPath as well as the hash prevents a duplicate-suppression
+   * cross-talk between repos: two unrelated repos can legitimately produce
+   * the same short hash (or the same full hash, in degenerate cases) and
+   * each deserves its own commit-review run.
+   */
   private seenCommits = new Map<string, number>()
   private cleanupTimer: ReturnType<typeof setInterval>
 
   constructor() {
     // Periodically prune expired dedup entries
     this.cleanupTimer = setInterval(() => this.pruneExpired(), DEDUP_CLEANUP_INTERVAL_MS)
+  }
+
+  private dedupKey(repoPath: string, commitHash: string): string {
+    return `${repoPath}::${commitHash}`
   }
 
   /**
@@ -83,11 +94,13 @@ export class CommitEventHandler {
       return { accepted: false, reason: 'Rejected: no enabled commit-review config for this repo' }
     }
 
-    // Layer 4: Commit hash dedup
-    if (this.seenCommits.has(event.commitHash)) {
+    // Layer 4: Commit hash dedup (scoped per repoPath so identical hashes
+    // across different repos do not suppress each other).
+    const dedupKey = this.dedupKey(event.repoPath, event.commitHash)
+    if (this.seenCommits.has(dedupKey)) {
       return { accepted: false, reason: 'Rejected: duplicate commit hash' }
     }
-    this.seenCommits.set(event.commitHash, Date.now())
+    this.seenCommits.set(dedupKey, Date.now())
 
     // Layer 5: Concurrency cap — max 1 running commit-review per repo
     const engine = getWorkflowEngine()
@@ -122,8 +135,8 @@ export class CommitEventHandler {
   /** Remove dedup entries older than the TTL. */
   private pruneExpired() {
     const cutoff = Date.now() - DEDUP_TTL_MS
-    for (const [hash, ts] of this.seenCommits) {
-      if (ts < cutoff) this.seenCommits.delete(hash)
+    for (const [key, ts] of this.seenCommits) {
+      if (ts < cutoff) this.seenCommits.delete(key)
     }
   }
 
