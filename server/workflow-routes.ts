@@ -157,6 +157,10 @@ export function isValidCron(expr: string): boolean {
     const [min, max] = ranges[i]
     return part.split(',').every(segment => {
       const stepMatch = segment.match(/^(.+)\/(\d+)$/)
+      if (stepMatch) {
+        const step = parseInt(stepMatch[2], 10)
+        if (isNaN(step) || step < 1) return false
+      }
       const range = stepMatch ? stepMatch[1] : segment
       if (range === '*') return true
       if (range.includes('-')) {

@@ -321,7 +321,14 @@ export function createUploadRouter(
       return
     }
 
-    const reposRoot = realpathSync(resolveReposRoot())
+    let reposRoot: string
+    try {
+      reposRoot = realpathSync(resolveReposRoot())
+    } catch (err) {
+      console.error('Failed to resolve repos root:', err)
+      res.status(500).json({ error: 'invalid_repos_root' })
+      return
+    }
     const ownerDir = join(reposRoot, owner)
     const dest = localRepoPath(reposRoot, owner, name)
     // Boundary check: ensure resolved dest stays within REPOS_ROOT

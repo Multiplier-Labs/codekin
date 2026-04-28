@@ -9,7 +9,8 @@
  *   1. validate_repo  — verify path exists, is a git repo, check staleness
  *   2. create_session — create a Codekin session for the run
  *   3. run_prompt     — start Claude, send the prompt, wait for result
- *   4. save_report    — write Markdown output to outputDir, commit on codekin/reports branch, push
+ *   4. save_report    — write Markdown output to outputDir, commit on a fresh
+ *                       audit/<kind>-<YYYY-MM-DD> branch, push
  *
  * MD file format — YAML frontmatter followed by the Claude prompt:
  *
@@ -35,6 +36,7 @@ import { dirname, join, sep } from 'path'
 import { REPOS_ROOT } from './config.js'
 import { fileURLToPath } from 'url'
 import type { WorkflowEngine, WorkflowRun } from './workflow-engine.js'
+import { SessionGoneError } from './workflow-engine.js'
 import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
 
@@ -148,16 +150,20 @@ function loadRepoOverride(repoPath: string, kind: string): WorkflowDef | null {
 async function waitForSessionResult(
   sessions: SessionManager,
   sessionId: string,
-  opts: { timeoutMs?: number; pollMs?: number; abortSignal?: AbortSignal } = {}
+  opts: { timeoutMs?: number; pollMs?: number; abortSignal?: AbortSignal; runId?: string; stepKey?: string } = {}
 ): Promise<{ success: boolean; text: string }> {
-  const { timeoutMs = 600_000, pollMs = 2000, abortSignal } = opts
+  const { timeoutMs = 600_000, pollMs = 2000, abortSignal, runId, stepKey } = opts
   const deadline = Date.now() + timeoutMs
+  let lastSeen: string | null = null
 
   while (Date.now() < deadline) {
     if (abortSignal?.aborted) throw new Error('Aborted')
 
     const session = sessions.get(sessionId)
-    if (!session) throw new Error(`Session ${sessionId} not found`)
+    if (!session) {
+      throw new SessionGoneError(runId ?? 'unknown', stepKey ?? 'run_prompt', sessionId, lastSeen)
+    }
+    lastSeen = new Date().toISOString()
 
     const resultMsg = session.outputHistory.find(m => m.type === 'result')
     if (resultMsg) {
@@ -184,6 +190,37 @@ async function waitForSessionResult(
   }
 
   throw new Error(`Timed out waiting for session result after ${timeoutMs}ms`)
+}
+
+// ---------------------------------------------------------------------------
+// Prompt guard
+// ---------------------------------------------------------------------------
+
+/**
+ * Prepended to every workflow prompt so Claude does not duplicate the report.
+ * The save_report step writes Claude's response text to the configured outputDir;
+ * if Claude also uses the Write tool (per CLAUDE.md guidance), two files appear
+ * — one substantive file under whatever category Claude chose, and one stub
+ * (the conversational reply) under the configured outputDir.
+ */
+const WORKFLOW_PROMPT_GUARD = [
+  'IMPORTANT: You are running as part of an automated Codekin workflow.',
+  'The workflow runner will save your entire response as the report file.',
+  'Do NOT use the Write or Edit tools to create the report yourself — that produces a duplicate file.',
+  'Respond with the report Markdown directly, with no preamble.',
+  'Disregard any conflicting guidance in CLAUDE.md about writing audit reports to disk; the workflow handles saving and committing.',
+].join(' ')
+
+/** Branch name for the per-run report commit. Kept short and stable per (kind, date). */
+export function reportBranchName(kind: string, dateStr: string): string {
+  return `audit/${kind}-${dateStr}`
+}
+
+/** True when a branch name is one a workflow run produces (or used to produce). */
+export function isWorkflowReportsBranch(branch: string): boolean {
+  // Accept the legacy long-lived branch and the new per-run audit/<kind>-<date> form.
+  if (branch === 'codekin/reports') return true
+  return /^audit\/[^/]+-\d{4}-\d{2}-\d{2}$/.test(branch)
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +283,10 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
             allowedTools: ['Bash(gh pr:*)'],
           })
 
+          // Persist the session id on the run BEFORE returning so a server crash
+          // between this step and `run_prompt` can still locate the session.
+          ctx.recordSessionId?.(session.id)
+
           console.log(`[workflow:${def.kind}] Created session ${session.id} for ${repoName} (run ${ctx.runId})`)
           return { sessionId: session.id, repoPath, repoName, branch: input.branch, lastCommit: input.lastCommit }
         },
@@ -260,27 +301,46 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
           const repoPath = input.repoPath as string
           const customPrompt = input.customPrompt as string | undefined
 
+          // If the session is already gone, fail with a typed error before doing any work —
+          // gives a much clearer signal than a downstream "Session X not found" stack trace.
+          if (!sessions.get(sessionId)) {
+            throw new SessionGoneError(ctx.runId, 'run_prompt', sessionId, ctx.run.lastStepAt ?? null)
+          }
+
           sessions.startClaude(sessionId)
           await sessions.waitForReady(sessionId)
 
-          // Per-repo override: check {repoPath}/.codekin/workflows/{kind}.md
-          const repoOverride = loadRepoOverride(repoPath, ctx.run.kind)
-          const basePrompt = repoOverride ? repoOverride.prompt : def.prompt
+          if (ctx.resumed) {
+            // The prompt was already sent in the original run before the server crashed.
+            // Just wait for the result Claude is (still) producing — sending again would
+            // duplicate the prompt and fork the conversation.
+            console.log(`[workflow:${def.kind}] Resuming run ${ctx.runId}: re-attaching to session ${sessionId} (no re-send)`)
+          } else {
+            // Per-repo override: check {repoPath}/.codekin/workflows/{kind}.md
+            const repoOverride = loadRepoOverride(repoPath, ctx.run.kind)
+            const basePrompt = repoOverride ? repoOverride.prompt : def.prompt
 
-          const prompt = customPrompt
-            ? `${basePrompt}\n\nAdditional focus areas:\n${customPrompt}`
-            : basePrompt
+            const userPrompt = customPrompt
+              ? `${basePrompt}\n\nAdditional focus areas:\n${customPrompt}`
+              : basePrompt
 
-          if (repoOverride) {
-            console.log(`[workflow:${def.kind}] Using per-repo prompt override from ${repoPath}`)
+            // Prepend the guard to suppress Claude's CLAUDE.md-driven file-write
+            // behavior, which otherwise creates a duplicate report file.
+            const prompt = `${WORKFLOW_PROMPT_GUARD}\n\n${userPrompt}`
+
+            if (repoOverride) {
+              console.log(`[workflow:${def.kind}] Using per-repo prompt override from ${repoPath}`)
+            }
+
+            sessions.sendInput(sessionId, prompt)
+            console.log(`[workflow:${def.kind}] Sent prompt to session ${sessionId} for ${repoName}`)
           }
-
-          sessions.sendInput(sessionId, prompt)
-          console.log(`[workflow:${def.kind}] Sent prompt to session ${sessionId} for ${repoName}`)
 
           const result = await waitForSessionResult(sessions, sessionId, {
             timeoutMs: 600_000,
             abortSignal: ctx.abortSignal,
+            runId: ctx.runId,
+            stepKey: 'run_prompt',
           })
 
           console.log(`[workflow:${def.kind}] Completed for ${repoName} (${result.text.length} chars)`)
@@ -333,26 +393,29 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
 
           console.log(`[workflow:${def.kind}] Saved report to ${filePath}`)
 
-          // Commit on a dedicated branch so reports don't pollute the working branch.
-          // Use a temporary git worktree to avoid stash/checkout races when
-          // multiple workflow runs target the same repo concurrently.
-          const REPORTS_BRANCH = 'codekin/reports'
+          // Commit on a fresh per-run branch (audit/<kind>-<YYYY-MM-DD>) so each
+          // audit gets its own PR and we never append to a stale, long-lived
+          // reports branch. Use a temporary git worktree to avoid stash/checkout
+          // races when multiple workflow runs target the same repo concurrently.
+          const reportsBranch = reportBranchName(def.kind, dateStr)
           try {
             const relativePath = `${def.outputDir}/${filename}`
 
-            // Ensure the reports branch exists (create if needed)
+            // Ensure the reports branch exists (create if needed). For same-day
+            // reruns of the same kind we reuse the existing daily branch and
+            // append a new commit.
             try {
-              execFileSync('git', ['rev-parse', '--verify', REPORTS_BRANCH], { cwd: repoPath, timeout: 5_000, stdio: 'pipe' })
+              execFileSync('git', ['rev-parse', '--verify', reportsBranch], { cwd: repoPath, timeout: 5_000, stdio: 'pipe' })
             } catch {
               // Branch doesn't exist yet — create it from the current branch
-              execFileSync('git', ['branch', REPORTS_BRANCH], { cwd: repoPath, timeout: 5_000 })
-              console.log(`[workflow:${def.kind}] Created branch ${REPORTS_BRANCH}`)
+              execFileSync('git', ['branch', reportsBranch], { cwd: repoPath, timeout: 5_000 })
+              console.log(`[workflow:${def.kind}] Created branch ${reportsBranch}`)
             }
 
             // Create a temporary worktree on the reports branch
             const wtDir = join(repoPath, '..', `.codekin-wt-report-${ctx.runId}`)
             try {
-              execFileSync('git', ['worktree', 'add', wtDir, REPORTS_BRANCH], { cwd: repoPath, timeout: 10_000 })
+              execFileSync('git', ['worktree', 'add', wtDir, reportsBranch], { cwd: repoPath, timeout: 10_000 })
 
               // Write the report file in the worktree
               const reportsDirInWt = join(wtDir, def.outputDir)
@@ -366,14 +429,14 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
                 'git', ['commit', '-m', `${def.commitMessage} ${dateStr}`],
                 { cwd: wtDir, timeout: 15_000 }
               )
-              console.log(`[workflow:${def.kind}] Committed ${relativePath} on ${REPORTS_BRANCH}`)
+              console.log(`[workflow:${def.kind}] Committed ${relativePath} on ${reportsBranch}`)
 
               // Push to remote
               try {
-                execFileSync('git', ['push', 'origin', REPORTS_BRANCH], { cwd: wtDir, timeout: 30_000, stdio: 'pipe' })
-                console.log(`[workflow:${def.kind}] Pushed ${REPORTS_BRANCH} to origin`)
+                execFileSync('git', ['push', 'origin', reportsBranch], { cwd: wtDir, timeout: 30_000, stdio: 'pipe' })
+                console.log(`[workflow:${def.kind}] Pushed ${reportsBranch} to origin`)
               } catch (pushErr) {
-                console.warn(`[workflow:${def.kind}] Could not push ${REPORTS_BRANCH}: ${pushErr}`)
+                console.warn(`[workflow:${def.kind}] Could not push ${reportsBranch}: ${pushErr}`)
               }
             } finally {
               // Always clean up the temporary worktree
@@ -504,5 +567,19 @@ export function loadMdWorkflows(engine: WorkflowEngine, sessions: SessionManager
   for (const def of defs) {
     registerWorkflow(engine, sessions, def)
   }
+
+  // Let the engine consult the session manager when deciding whether an interrupted
+  // run is still resumable. Returning null tells the engine the session has gone and
+  // the run should fail with a clear, typed reason instead of being skipped silently.
+  // (Defensive optional-call so older test doubles without setSessionResolver still pass.)
+  engine.setSessionResolver?.((sessionId) => {
+    const session = sessions.get(sessionId)
+    if (!session) return null
+    const lastActivityAt = session._lastActivityAt
+      ? new Date(session._lastActivityAt).toISOString()
+      : null
+    return { lastActivityAt }
+  })
+
   console.log(`[workflow-loader] Loaded ${defs.length} workflow(s) from MD definitions`)
 }

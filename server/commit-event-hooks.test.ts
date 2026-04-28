@@ -366,6 +366,23 @@ describe('syncCommitHooks', () => {
     expect(existsSync(hookPath)).toBe(false)
   })
 
+  it('uninstalls hook when a repo is fully removed from the config (W2)', () => {
+    // First pass: commit-review enabled → hook installed
+    state.workflowConfig.reviewRepos = [{
+      id: 'a', name: 'RepoA', repoPath: repoA,
+      cronExpression: 'event', enabled: true, kind: 'commit-review',
+    }]
+    syncCommitHooks()
+    const hookPath = join(repoA, '.git', 'hooks', 'post-commit')
+    expect(existsSync(hookPath)).toBe(true)
+
+    // Second pass: repo fully removed from config (not just kind change).
+    // syncCommitHooks must still uninstall the stale hook left behind.
+    state.workflowConfig.reviewRepos = []
+    syncCommitHooks()
+    expect(existsSync(hookPath)).toBe(false)
+  })
+
   it('handles multiple repos — installing the enabled commit-review one only', () => {
     state.workflowConfig.reviewRepos = [
       { id: 'a', name: 'A', repoPath: repoA, cronExpression: 'event', enabled: true, kind: 'commit-review' },

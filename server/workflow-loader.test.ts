@@ -501,7 +501,7 @@ Prompt text.
 
         expect(sessions.sendInput).toHaveBeenCalledWith(
           'session-1',
-          'You are performing an automated test review of the codebase.'
+          expect.stringContaining('You are performing an automated test review of the codebase.')
         )
         expect(result.reportText).toBe('Review output text')
         expect(result.repoName).toBe('my-repo')
@@ -550,7 +550,7 @@ This is the repo-specific override prompt.
 
         expect(sessions.sendInput).toHaveBeenCalledWith(
           'session-1',
-          'This is the repo-specific override prompt.'
+          expect.stringContaining('This is the repo-specific override prompt.')
         )
         expect(result.reportText).toBe('Override result')
         expect(logSpy).toHaveBeenCalledWith(
@@ -715,7 +715,11 @@ This is the repo-specific override prompt.
         await promise
 
         expect(caughtError).toBeTruthy()
-        expect(caughtError!.message).toContain('not found')
+        // run_prompt now throws a typed SessionGoneError with run id, step, session id, and last seen timestamp.
+        expect(caughtError!.name).toBe('SessionGoneError')
+        expect(caughtError!.message).toContain('session=session-1')
+        expect(caughtError!.message).toContain('run=r1')
+        expect(caughtError!.message).toContain('step=run_prompt')
 
         vi.useRealTimers()
       })
@@ -866,15 +870,15 @@ This is the repo-specific override prompt.
         warnSpy.mockRestore()
       })
 
-      it('creates the reports branch when it does not exist', async () => {
+      it('creates a fresh per-run audit/<kind>-<date> branch when it does not exist', async () => {
         const gitCalls: string[][] = []
         mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
           gitCalls.push(args)
           // rev-parse --abbrev-ref HEAD → main
           if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return Buffer.from('main\n')
-          // rev-parse --verify codekin/reports → fail (branch doesn't exist)
+          // rev-parse --verify <branch> → fail (branch doesn't exist)
           if (args[0] === 'rev-parse' && args[1] === '--verify') throw new Error('not found')
-          // branch codekin/reports → success
+          // branch <name> → success
           if (args[0] === 'branch') return Buffer.from('')
           return Buffer.from('')
         })
@@ -891,9 +895,12 @@ This is the repo-specific override prompt.
           { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
         )
 
-        // Should have called 'git branch codekin/reports'
-        const branchCall = gitCalls.find(args => args[0] === 'branch' && args[1] === 'codekin/reports')
+        // Should have created a fresh audit/<kind>-<YYYY-MM-DD> branch — never
+        // the legacy long-lived 'codekin/reports' branch.
+        const branchCall = gitCalls.find(args => args[0] === 'branch' && /^audit\/test-review\.daily-\d{4}-\d{2}-\d{2}$/.test(args[1] ?? ''))
         expect(branchCall).toBeDefined()
+        const legacyCall = gitCalls.find(args => args[0] === 'branch' && args[1] === 'codekin/reports')
+        expect(legacyCall).toBeUndefined()
       })
 
       it('uses git worktree instead of stash/checkout', async () => {
@@ -1024,6 +1031,191 @@ This is the repo-specific override prompt.
 
         const writtenContent = mockWriteFileSync.mock.calls[0][1] as string
         expect(writtenContent).toContain('**Branch**: unknown')
+      })
+
+      // ----------------------------------------------------------------
+      // Output-path consistency (regression — 2026-04-27 coverage bug)
+      // ----------------------------------------------------------------
+
+      it('writes the report only under the configured outputDir', async () => {
+        // Today (2026-04-27) the coverage workflow produced two files: a
+        // substantive report under `.codekin/reports/test-coverage/` written by
+        // Claude itself, and a stub under `.codekin/reports/coverage/` written
+        // by the workflow's save_report step. The workflow's own write must
+        // target exactly one location: the configured outputDir.
+        mockExecFileSync.mockReturnValue(Buffer.from('main\n'))
+
+        const handler = registeredDef.steps[3].handler
+        await handler(
+          {
+            repoPath: '/tmp/repo',
+            repoName: 'my-repo',
+            reportText: '## Summary\nReport body.\n',
+            sessionId: 's1',
+            branch: 'main',
+          },
+          { runId: 'run-output-path', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        // Every writeFileSync call must target a path containing the configured
+        // outputDir + filename, never any other category (e.g. `test-coverage`).
+        const writePaths = mockWriteFileSync.mock.calls.map(c => String(c[0]))
+        expect(writePaths.length).toBeGreaterThan(0)
+        for (const p of writePaths) {
+          expect(p).toContain('.codekin/reports/test/')
+          expect(p).toMatch(/_test-review\.md$/)
+          expect(p).not.toContain('test-coverage')
+        }
+      })
+
+      it('runs save_report exactly once and writes a single distinct report path', async () => {
+        mockExecFileSync.mockReturnValue(Buffer.from('main\n'))
+
+        const handler = registeredDef.steps[3].handler
+        const result = await handler(
+          {
+            repoPath: '/tmp/repo',
+            repoName: 'my-repo',
+            reportText: '## R\nbody',
+            sessionId: 's1',
+            branch: 'main',
+          },
+          { runId: 'run-single', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        // The handler returns a single filePath/filename pair, and that
+        // filename matches the configured suffix.
+        expect(result.filePath).toMatch(/\.codekin\/reports\/test\/[^/]+_test-review\.md$/)
+        expect(result.filename).toMatch(/^\d{4}-\d{2}-\d{2}_test-review\.md$/)
+
+        // After dedup, the workflow only ever writes the single configured
+        // relative path (working tree + worktree both target the same
+        // outputDir/filename, just in different cwd's).
+        const writePaths = mockWriteFileSync.mock.calls.map(c => String(c[0]))
+        const relativePaths = new Set(
+          writePaths.map(p => {
+            const idx = p.indexOf('.codekin/reports/')
+            return idx === -1 ? p : p.slice(idx)
+          })
+        )
+        expect(relativePaths.size).toBe(1)
+      })
+
+      // ----------------------------------------------------------------
+      // Per-run branch (regression — stale docs/audit-reports-* branch)
+      // ----------------------------------------------------------------
+
+      it('uses a fresh per-run audit/<kind>-<YYYY-MM-DD> branch, never the legacy codekin/reports', async () => {
+        const gitCalls: string[][] = []
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          gitCalls.push(args)
+          if (args[0] === 'rev-parse' && args[1] === '--verify') return Buffer.from('')
+          return Buffer.from('')
+        })
+
+        const handler = registeredDef.steps[3].handler
+        await handler(
+          {
+            repoPath: '/tmp/repo',
+            repoName: 'my-repo',
+            reportText: 'Content',
+            sessionId: 's1',
+            branch: 'main',
+          },
+          { runId: 'run-fresh-branch', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        const reportsBranchPattern = /^audit\/test-review\.daily-\d{4}-\d{2}-\d{2}$/
+
+        const verifyCall = gitCalls.find(args =>
+          args[0] === 'rev-parse' && args[1] === '--verify' && reportsBranchPattern.test(String(args[2] ?? ''))
+        )
+        expect(verifyCall).toBeDefined()
+
+        const worktreeAddCall = gitCalls.find(args =>
+          args[0] === 'worktree' && args[1] === 'add' && reportsBranchPattern.test(String(args[3] ?? ''))
+        )
+        expect(worktreeAddCall).toBeDefined()
+
+        const pushCall = gitCalls.find(args =>
+          args[0] === 'push' && args[1] === 'origin' && reportsBranchPattern.test(String(args[2] ?? ''))
+        )
+        expect(pushCall).toBeDefined()
+
+        // The legacy branch must not appear in any git call.
+        const legacyCall = gitCalls.find(args => args.includes('codekin/reports'))
+        expect(legacyCall).toBeUndefined()
+      })
+
+      it('uses today\'s date in the branch name', async () => {
+        const gitCalls: string[][] = []
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          gitCalls.push(args)
+          if (args[0] === 'rev-parse' && args[1] === '--verify') return Buffer.from('')
+          return Buffer.from('')
+        })
+
+        const handler = registeredDef.steps[3].handler
+        await handler(
+          {
+            repoPath: '/tmp/repo',
+            repoName: 'my-repo',
+            reportText: 'Content',
+            sessionId: 's1',
+            branch: 'main',
+          },
+          { runId: 'run-today', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        const today = new Date().toISOString().slice(0, 10)
+        const expected = `audit/test-review.daily-${today}`
+        const branchCall = gitCalls.find(args =>
+          args[0] === 'worktree' && args[1] === 'add' && args[3] === expected
+        )
+        expect(branchCall).toBeDefined()
+      })
+    })
+
+    // ----------------------------------------------------------------
+    // Prompt guard (regression — Bug 1)
+    // ----------------------------------------------------------------
+
+    describe('run_prompt prompt guard', () => {
+      it('prepends a guard so Claude does not duplicate the report via the Write tool', async () => {
+        vi.useFakeTimers()
+
+        mockExistsSync.mockImplementation((p: string) => {
+          if (String(p).includes('.codekin/workflows')) return false
+          return true
+        })
+
+        sessions.get.mockReturnValue({
+          outputHistory: [
+            { type: 'output', data: 'guarded output' },
+            { type: 'result' },
+          ],
+        })
+
+        const handler = registeredDef.steps[2].handler
+        const promise = handler(
+          { sessionId: 'session-1', repoName: 'my-repo', repoPath: '/tmp/repo', branch: 'main' },
+          { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
+        )
+
+        await vi.advanceTimersByTimeAsync(2000)
+        await promise
+
+        const sentPrompt = String(sessions.sendInput.mock.calls[0][1])
+        // Guard names the offending tools and the override of CLAUDE.md guidance.
+        expect(sentPrompt).toContain('Do NOT use the Write or Edit tools')
+        expect(sentPrompt).toContain('CLAUDE.md')
+        // The original workflow prompt is still present, after the guard.
+        expect(sentPrompt).toContain('You are performing an automated test review of the codebase.')
+        const guardIdx = sentPrompt.indexOf('Do NOT use the Write or Edit tools')
+        const promptIdx = sentPrompt.indexOf('You are performing an automated test review of the codebase.')
+        expect(guardIdx).toBeLessThan(promptIdx)
+
+        vi.useRealTimers()
       })
     })
   })
@@ -1475,7 +1667,7 @@ This just keeps going without a closing ---
       // Should have used the default prompt since override failed
       expect(sessions.sendInput).toHaveBeenCalledWith(
         'session-1',
-        'You are performing an automated test review of the codebase.'
+        expect.stringContaining('You are performing an automated test review of the codebase.')
       )
       expect(result.reportText).toBe('Fallback output')
 
