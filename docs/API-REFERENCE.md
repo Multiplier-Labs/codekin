@@ -16,6 +16,58 @@ Unauthenticated requests return `401 Unauthorized`.
 
 ---
 
+## WebSocket Server Hardening
+
+The WebSocket endpoint at `/cc-ws` enforces several transport-level checks before any application message is processed. These are implemented in `server/ws-origin-check.ts`, `server/ws-rate-limit.ts`, and inline in `server/ws-server.ts`.
+
+### Origin validation (`server/ws-origin-check.ts`)
+
+Every incoming WS handshake is checked against the configured frontend origin to mitigate cross-site WebSocket hijacking.
+
+- **Production** (`NODE_ENV=production`): the request is rejected unless the `Origin` header is present and exactly equal to `CORS_ORIGIN`. Browsers always send `Origin` on WebSocket handshakes, so a missing header in production indicates a non-browser client and is also rejected.
+- **Development**: a missing `Origin` is allowed (CLI tools, local scripts), but a present-but-mismatched `Origin` is still rejected.
+
+Rejected handshakes are closed with WebSocket code `4003` ("Origin not allowed").
+
+**Configuration:**
+
+| Env var | Default | Notes |
+|---|---|---|
+| `CORS_ORIGIN` | `http://localhost:5173` | Production startup logs an error and refuses to default if `CORS_ORIGIN` is unset or contains `localhost`. Set it to the deployed frontend origin (e.g. `https://codekin.example.com`). |
+
+### Per-IP connection rate limit (`server/ws-server.ts`)
+
+Connection establishment is rate-limited per client IP, before authentication, to bound resource use under handshake floods. Limits are currently compile-time constants in `server/ws-server.ts`:
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `WS_RATE_WINDOW_MS` | `60_000` | Rolling window (1 minute) used for per-IP connection counting. |
+| `WS_RATE_MAX_CONNECTIONS` | `30` | Maximum new WebSocket connections per IP per window. |
+| `WS_RATE_MAP_MAX_SIZE` | `10_000` | Maximum tracked IPs; further new IPs are rejected to prevent unbounded memory growth. |
+| `WS_AUTH_TIMEOUT_MS` | `5_000` | Time an unauthenticated connection is held open waiting for an `auth` message before being closed. |
+
+When `TRUST_PROXY` is enabled, the first entry of the `X-Forwarded-For` header is used as the client IP; otherwise `req.socket.remoteAddress` is used. Connections that exceed the per-IP cap are closed with code `4029` ("Too many connections"); auth-timeouts close with `4001` ("Auth timeout").
+
+### Per-connection message rate limit (`server/ws-rate-limit.ts`)
+
+Each authenticated WebSocket connection runs a `createMessageRateLimiter(limit, windowMs)` that increments on **every** observed frame, before JSON parsing. This prevents a flood of malformed frames from bypassing the limit.
+
+Behaviour on overflow:
+
+- The first frame in a window that exceeds `limit` triggers a single `system_message` warning to the client; subsequent dropped frames in the same window are silently discarded.
+- Sustained traffic past `2 × limit` causes the server to close the connection with code `4029` ("Message rate limit exceeded").
+
+Defaults are passed at the call site in `server/ws-server.ts`:
+
+| Parameter | Value | Meaning |
+|---|---|---|
+| `limit` | `60` | Maximum messages per window per connection. |
+| `windowMs` | `1000` | Window size in milliseconds (so 60 messages/second). |
+
+These values are not currently env-var configurable; adjust the call to `createMessageRateLimiter(...)` in `ws-server.ts` if you need different thresholds.
+
+---
+
 ## Models
 
 Endpoints that accept a `model` field (e.g. session creation via WebSocket, workflow config, orchestrator children) accept the following Claude model identifiers:
