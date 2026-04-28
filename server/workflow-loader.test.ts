@@ -238,6 +238,137 @@ Prompt text.
 
       expect(engine.registerWorkflow).toHaveBeenCalledTimes(1)
     })
+
+    // ----------------------------------------------------------------
+    // Path traversal — outputDir / filenameSuffix coming from untrusted
+    // repo workflow MD frontmatter must not be allowed to escape repoPath
+    // ----------------------------------------------------------------
+
+    it('rejects an MD def with an absolute outputDir', () => {
+      const badMd = `---
+kind: bad.daily
+name: Bad
+sessionPrefix: bad
+outputDir: /etc
+filenameSuffix: _bad.md
+commitMessage: chore: bad
+---
+Prompt.
+`
+      mockReaddirSync.mockReturnValue(['bad.md'])
+      mockReadFileSync.mockReturnValue(badMd)
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const engine = fakeEngine()
+      loadMdWorkflows(engine, fakeSessionManager())
+
+      expect(engine.registerWorkflow).not.toHaveBeenCalled()
+      expect(errSpy).toHaveBeenCalled()
+      errSpy.mockRestore()
+    })
+
+    it('rejects an MD def with ".." in outputDir', () => {
+      const badMd = `---
+kind: bad.daily
+name: Bad
+sessionPrefix: bad
+outputDir: ../../etc
+filenameSuffix: _bad.md
+commitMessage: chore: bad
+---
+Prompt.
+`
+      mockReaddirSync.mockReturnValue(['bad.md'])
+      mockReadFileSync.mockReturnValue(badMd)
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const engine = fakeEngine()
+      loadMdWorkflows(engine, fakeSessionManager())
+
+      expect(engine.registerWorkflow).not.toHaveBeenCalled()
+      expect(errSpy).toHaveBeenCalled()
+      errSpy.mockRestore()
+    })
+
+    it('rejects an MD def with ".." nested deeper in outputDir', () => {
+      const badMd = `---
+kind: bad.daily
+name: Bad
+sessionPrefix: bad
+outputDir: .codekin/../../../etc
+filenameSuffix: _bad.md
+commitMessage: chore: bad
+---
+Prompt.
+`
+      mockReaddirSync.mockReturnValue(['bad.md'])
+      mockReadFileSync.mockReturnValue(badMd)
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const engine = fakeEngine()
+      loadMdWorkflows(engine, fakeSessionManager())
+
+      expect(engine.registerWorkflow).not.toHaveBeenCalled()
+      expect(errSpy).toHaveBeenCalled()
+      errSpy.mockRestore()
+    })
+
+    it('rejects an MD def with traversal in filenameSuffix', () => {
+      const badMd = `---
+kind: bad.daily
+name: Bad
+sessionPrefix: bad
+outputDir: .codekin/reports
+filenameSuffix: ../../etc/passwd
+commitMessage: chore: bad
+---
+Prompt.
+`
+      mockReaddirSync.mockReturnValue(['bad.md'])
+      mockReadFileSync.mockReturnValue(badMd)
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      const engine = fakeEngine()
+      loadMdWorkflows(engine, fakeSessionManager())
+
+      expect(engine.registerWorkflow).not.toHaveBeenCalled()
+      expect(errSpy).toHaveBeenCalled()
+      errSpy.mockRestore()
+    })
+
+    it('rejects a repo workflow with absolute outputDir at registration', () => {
+      const repoPath = '/tmp/traversal-repo'
+      const repoDir = join(repoPath, '.codekin', 'workflows')
+      const badMd = `---
+kind: traversal.daily
+name: Traversal
+sessionPrefix: traversal
+outputDir: /etc
+filenameSuffix: _x.md
+commitMessage: chore: x
+---
+Prompt.
+`
+      mockExistsSync.mockImplementation((p: string) => String(p) === repoDir)
+      mockReaddirSync.mockImplementation((p: string) =>
+        String(p) === repoDir ? ['traversal.daily.md'] : [],
+      )
+      mockReadFileSync.mockReturnValue(badMd)
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      const mockEngine = {
+        registerWorkflow: vi.fn(),
+        hasWorkflow: vi.fn(() => false),
+      } as any
+
+      ensureRepoWorkflowsRegistered(mockEngine, {} as any, repoPath)
+
+      expect(mockEngine.registerWorkflow).not.toHaveBeenCalled()
+      expect(warnSpy).toHaveBeenCalled()
+
+      warnSpy.mockRestore()
+    })
   })
 
   describe('registered workflow steps', () => {
@@ -821,6 +952,33 @@ This is the repo-specific override prompt.
         expect(result.sessionId).toBe('session-1')
         expect(mockWriteFileSync).toHaveBeenCalled()
         expect(mockExecFileSync).toHaveBeenCalled()
+      })
+
+      it('refuses to write outside repoPath when realpath resolves to elsewhere (symlink attack)', async () => {
+        // Simulate a symlinked outputDir whose realpath lands outside the
+        // repo. The save_report runtime check must reject the write rather
+        // than letting it through.
+        mockRealpathSync.mockImplementation((p: string) => {
+          if (String(p) === '/tmp/repo') return '/tmp/repo'
+          if (String(p).includes('.codekin/reports/test')) return '/etc/evil'
+          return p
+        })
+        mockExecFileSync.mockReturnValue(Buffer.from('main\n'))
+
+        const handler = registeredDef.steps[3].handler
+        await expect(handler(
+          {
+            repoPath: '/tmp/repo',
+            repoName: 'my-repo',
+            reportText: 'pwn',
+            sessionId: 's1',
+            branch: 'main',
+          },
+          { runId: 'r-traverse', run: {}, abortSignal: new AbortController().signal }
+        )).rejects.toThrow(/Refusing to write/)
+
+        // Reset for subsequent tests
+        mockRealpathSync.mockImplementation((p: string) => p)
       })
 
       it('creates output directory if it does not exist', async () => {
