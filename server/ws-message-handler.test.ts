@@ -136,6 +136,20 @@ describe('handleWsMessage', () => {
       })
       expect(ctx.sessions.startClaude).toHaveBeenCalledWith('new-1')
     })
+
+    it('rejects invalid permissionMode', () => {
+      handleWsMessage({
+        type: 'create_session',
+        name: 'Bad Mode',
+        workingDir: '/projects/app',
+        permissionMode: 'hacker-mode',
+      } as unknown as WsClientMessage, ctx)
+
+      expect(ctx.sessions.create).not.toHaveBeenCalled()
+      expect(ctx.sent).toHaveLength(1)
+      expect(ctx.sent[0].type).toBe('error')
+      expect((ctx.sent[0] as any).message).toContain('Invalid permission mode')
+    })
   })
 
   /* ---- create_session (with worktree) ---- */
