@@ -415,6 +415,13 @@ describe('handleWsMessage', () => {
       expect(ctx.sessions.setPermissionMode).toHaveBeenCalledWith('sess-1', 'bypassPermissions')
     })
 
+    it('accepts dangerouslySkipPermissions mode', () => {
+      handleWsMessage({ type: 'set_permission_mode', permissionMode: 'dangerouslySkipPermissions' } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setPermissionMode).toHaveBeenCalledWith('sess-1', 'dangerouslySkipPermissions')
+      expect(ctx.sent).toHaveLength(0)
+    })
+
     it('rejects invalid permission mode', () => {
       handleWsMessage({ type: 'set_permission_mode', permissionMode: 'hacker-mode' } as unknown as WsClientMessage, ctx)
 
