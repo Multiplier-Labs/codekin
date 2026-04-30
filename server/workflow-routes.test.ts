@@ -798,6 +798,24 @@ describe('workflow routes', () => {
       expect(harness.commitEventState.handler!.handle).toHaveBeenCalledWith(expect.objectContaining({ author: 'unknown' }))
     })
 
+    it('returns 400 when repoPath is outside repos root', async () => {
+      mocks.resolveRepoPathInRoot.mockReturnValueOnce(null)
+      const res = await fetch(`${harness.baseUrl}/commit-event`, {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({
+          repoPath: '/outside/etc',
+          branch: 'main',
+          commitHash: 'abc1234',
+          commitMessage: 'fix: something',
+        }),
+      })
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toMatch(/Invalid repoPath/)
+      expect(harness.commitEventState.handler!.handle).not.toHaveBeenCalled()
+    })
+
     it('returns 503 when no commit event handler is configured', async () => {
       await harness.close()
       harness = await startServer({ withCommitHandler: false })
