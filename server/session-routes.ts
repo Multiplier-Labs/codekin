@@ -18,7 +18,7 @@ import { homedir as osHomedir } from 'os'
 import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
 import { REPOS_ROOT, getAgentDisplayName } from './config.js'
-import { VALID_PROVIDERS } from './types.js'
+import { VALID_PROVIDERS, VALID_PERMISSION_MODES } from './types.js'
 import type { CodingProvider } from './coding-process.js'
 import type { PermissionMode } from './types.js'
 import { fetchOpenCodeModels } from './opencode-process.js'
@@ -192,6 +192,9 @@ export function createSessionRouter(
     const { provider, model, permissionMode } = req.body
     if (provider && !VALID_PROVIDERS.has(provider)) {
       return res.status(400).json({ error: `Invalid provider: ${provider}. Must be one of: ${[...VALID_PROVIDERS].join(', ')}` })
+    }
+    if (permissionMode && !VALID_PERMISSION_MODES.has(permissionMode)) {
+      return res.status(400).json({ error: `Invalid permissionMode: ${permissionMode}` })
     }
     const session = sessions.create(name, resolvedDir, { provider, model, permissionMode })
     res.json({
