@@ -515,6 +515,35 @@ describe('workflow routes', () => {
   })
 
   // -------------------------------------------------------------------------
+  // GET /kinds
+  // -------------------------------------------------------------------------
+
+  describe('GET /kinds', () => {
+    it('returns available workflow kinds', async () => {
+      const res = await fetch(`${harness.baseUrl}/kinds`, { headers: authHeader() })
+      expect(res.status).toBe(200)
+      const body = await res.json() as { kinds: unknown[] }
+      expect(Array.isArray(body.kinds)).toBe(true)
+      expect(mocks.listAvailableKinds).toHaveBeenCalledWith(undefined)
+    })
+
+    it('passes valid repoPath to listAvailableKinds', async () => {
+      const res = await fetch(`${harness.baseUrl}/kinds?repoPath=/valid/repo`, { headers: authHeader() })
+      expect(res.status).toBe(200)
+      expect(mocks.listAvailableKinds).toHaveBeenCalledWith('/valid/repo')
+    })
+
+    it('returns 400 when repoPath is outside repos root', async () => {
+      mocks.resolveRepoPathInRoot.mockReturnValueOnce(null)
+      const res = await fetch(`${harness.baseUrl}/kinds?repoPath=/outside/etc`, { headers: authHeader() })
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toMatch(/Invalid repoPath/)
+      expect(mocks.listAvailableKinds).not.toHaveBeenCalled()
+    })
+  })
+
+  // -------------------------------------------------------------------------
   // Config /repos PATCH + POST  (task references PATCH /repos/:repo; the actual
   // route is /config/repos/:id)
   // -------------------------------------------------------------------------
@@ -796,6 +825,24 @@ describe('workflow routes', () => {
         }),
       })
       expect(harness.commitEventState.handler!.handle).toHaveBeenCalledWith(expect.objectContaining({ author: 'unknown' }))
+    })
+
+    it('returns 400 when repoPath is outside repos root', async () => {
+      mocks.resolveRepoPathInRoot.mockReturnValueOnce(null)
+      const res = await fetch(`${harness.baseUrl}/commit-event`, {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({
+          repoPath: '/outside/etc',
+          branch: 'main',
+          commitHash: 'abc1234',
+          commitMessage: 'fix: something',
+        }),
+      })
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toMatch(/Invalid repoPath/)
+      expect(harness.commitEventState.handler!.handle).not.toHaveBeenCalled()
     })
 
     it('returns 503 when no commit event handler is configured', async () => {

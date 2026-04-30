@@ -209,7 +209,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
     case 'set_permission_mode': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
-        if (!VALID_PERMISSION_MODES.has(msg.permissionMode)) {
+        if (msg.permissionMode && !VALID_PERMISSION_MODES.has(msg.permissionMode)) {
           send({ type: 'error', message: `Invalid permission mode: ${msg.permissionMode}` })
           break
         }

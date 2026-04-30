@@ -256,6 +256,9 @@ export function createWorkflowRouter(
     if (!repoPath || !branch || !commitHash || !commitMessage) {
       return res.status(400).json({ error: 'Missing required fields: repoPath, branch, commitHash, commitMessage' })
     }
+    if (!resolveRepoPathInRoot(repoPath)) {
+      return res.status(400).json({ error: 'Invalid repoPath: must be an existing directory under the configured repos root' })
+    }
 
     const result = await handler.handle({
       repoPath,
@@ -287,6 +290,9 @@ export function createWorkflowRouter(
 
   router.get('/kinds', (req, res) => {
     const repoPath = req.query.repoPath as string | undefined
+    if (repoPath && !resolveRepoPathInRoot(repoPath)) {
+      return res.status(400).json({ error: 'Invalid repoPath: must be an existing directory under the configured repos root' })
+    }
     const kinds = listAvailableKinds(repoPath)
     res.json({ kinds })
   })
