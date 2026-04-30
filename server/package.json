@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "^12.9.0",
     "express": "^5.1.0",
     "multer": "^2.0.0",
     "ws": "^8.18.0"
