@@ -848,59 +848,6 @@ describe('workflow routes', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// Route handler tests — mount the router on express + issue fetch requests
-// ---------------------------------------------------------------------------
-
-const AUTH_TOKEN = 'test-master-token'
-
-function verifyToken(token: string | undefined): boolean {
-  return token === AUTH_TOKEN
-}
-
-function extractToken(req: { headers: Record<string, string | string[] | undefined> }): string | undefined {
-  const h = req.headers['authorization']
-  if (typeof h === 'string' && h.startsWith('Bearer ')) return h.slice(7)
-  return undefined
-}
-
-function authHeader(token: string = AUTH_TOKEN): Record<string, string> {
-  return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
-}
-
-interface TestHarness {
-  baseUrl: string
-  server: Server
-  commitEventState: { handler: { handle: ReturnType<typeof vi.fn> } | undefined }
-  close: () => Promise<void>
-}
-
-async function startServer(opts?: { withCommitHandler?: boolean }): Promise<TestHarness> {
-  const handle = vi.fn(async (event: unknown) => ({ accepted: true, runId: 'r-42', event }))
-  const commitEventState = {
-    handler: opts?.withCommitHandler === false ? undefined : { handle },
-  }
-  const app = express()
-  app.use(express.json())
-  app.use('/api/workflows', createWorkflowRouter(
-    verifyToken,
-    extractToken as unknown as (req: express.Request) => string | undefined,
-    undefined,
-    commitEventState as { handler: { handle: ReturnType<typeof vi.fn> } | undefined },
-  ))
-
-  const server = app.listen(0)
-  await new Promise<void>(res => server.once('listening', () => res()))
-  const port = (server.address() as AddressInfo).port
-
-  return {
-    baseUrl: `http://127.0.0.1:${port}/api/workflows`,
-    server,
-    commitEventState,
-    close: () => new Promise<void>(res => server.close(() => res())),
-  }
-}
-
 describe('workflow routes', () => {
   let harness: TestHarness
 
