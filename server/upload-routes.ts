@@ -8,8 +8,8 @@
 import { Router } from 'express'
 import type { Request } from 'express'
 import multer from 'multer'
-import { mkdirSync, existsSync, readFileSync, readdirSync, realpathSync } from 'fs'
-import { join, extname, resolve, sep } from 'path'
+import { mkdirSync, existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'fs'
+import { join, extname, sep } from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { homedir } from 'os'
@@ -331,9 +331,34 @@ export function createUploadRouter(
     }
     const ownerDir = join(reposRoot, owner)
     const dest = localRepoPath(reposRoot, owner, name)
-    // Boundary check: ensure resolved dest stays within REPOS_ROOT
-    // Use realpathSync on reposRoot to prevent symlink bypass
-    const resolvedDest = resolve(dest)
+    // C1: Prevent symlink-based path escape. lstat the owner dir to reject
+    // symlinks; then canonicalize with realpathSync before the boundary check.
+    // Lexical resolve() does not follow symlinks and cannot catch this class of escape.
+    let resolvedDest: string
+    if (existsSync(ownerDir)) {
+      let ownerStat
+      try {
+        ownerStat = lstatSync(ownerDir)
+      } catch {
+        res.status(400).json({ error: 'Path escapes allowed root' })
+        return
+      }
+      if (ownerStat.isSymbolicLink()) {
+        res.status(400).json({ error: 'Path escapes allowed root' })
+        return
+      }
+      let canonicalOwner: string
+      try {
+        canonicalOwner = realpathSync(ownerDir)
+      } catch {
+        res.status(400).json({ error: 'Path escapes allowed root' })
+        return
+      }
+      resolvedDest = join(canonicalOwner, name)
+    } else {
+      // ownerDir does not exist; reposRoot is already canonical so this is safe.
+      resolvedDest = join(reposRoot, owner, name)
+    }
     if (!resolvedDest.startsWith(reposRoot + sep) && resolvedDest !== reposRoot) {
       res.status(400).json({ error: 'Path escapes allowed root' })
       return
