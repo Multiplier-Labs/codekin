@@ -350,9 +350,28 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
               ? `${basePrompt}\n\nAdditional focus areas:\n${customPrompt}`
               : basePrompt
 
+            // If the run carries sanitized commit fields, prepend them as
+            // XML-delimited context so injected text cannot escape its data
+            // context. Fields are sanitized upstream in commit-event-handler.ts.
+            const commitMessage = input.commitMessage as string | undefined
+            const commitBranch = input.branch as string | undefined
+            const commitAuthor = input.author as string | undefined
+            let commitContext = ''
+            if (commitMessage !== undefined) {
+              commitContext = [
+                '<commit-message>',
+                commitMessage,
+                '</commit-message>',
+                `<branch>${commitBranch ?? 'unknown'}</branch>`,
+                `<author>${commitAuthor ?? 'unknown'}</author>`,
+                '',
+                '',
+              ].join('\n')
+            }
+
             // Prepend the guard to suppress Claude's CLAUDE.md-driven file-write
             // behavior, which otherwise creates a duplicate report file.
-            const prompt = `${WORKFLOW_PROMPT_GUARD}\n\n${userPrompt}`
+            const prompt = `${WORKFLOW_PROMPT_GUARD}\n\n${commitContext}${userPrompt}`
 
             if (repoOverride) {
               console.log(`[workflow:${def.kind}] Using per-repo prompt override from ${repoPath}`)
@@ -409,10 +428,6 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
           ].join('\n')
 
           const reportsDir = join(repoPath, def.outputDir)
-          if (!existsSync(reportsDir)) {
-            mkdirSync(reportsDir, { recursive: true })
-          }
-
           const filename = `${dateStr}${def.filenameSuffix}`
           const filePath = join(reportsDir, filename)
 
@@ -440,9 +455,7 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
             )
           }
 
-          writeFileSync(filePath, markdown, 'utf-8')
-
-          console.log(`[workflow:${def.kind}] Saved report to ${filePath}`)
+          console.log(`[workflow:${def.kind}] Writing report to ${filePath}`)
 
           // Commit on a fresh per-run branch (audit/<kind>-<YYYY-MM-DD>) so each
           // audit gets its own PR and we never append to a stale, long-lived
