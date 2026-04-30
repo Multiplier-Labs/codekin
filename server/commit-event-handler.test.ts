@@ -46,7 +46,7 @@ vi.mock('./workflow-loader.js', () => ({
     branch === 'codekin/reports' || /^audit\/[^/]+-\d{4}-\d{2}-\d{2}$/.test(branch),
 }))
 
-import { CommitEventHandler, type CommitEvent } from './commit-event-handler.js'
+import { CommitEventHandler, sanitizeCommitField, type CommitEvent } from './commit-event-handler.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -81,6 +81,31 @@ function enableRepoConfig(repoPath = '/repos/owner/foo') {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe('sanitizeCommitField', () => {
+  it('truncates strings longer than the default maxLen (500)', () => {
+    const long = 'a'.repeat(600)
+    expect(sanitizeCommitField(long)).toHaveLength(500)
+  })
+
+  it('truncates to a custom maxLen', () => {
+    const long = 'b'.repeat(300)
+    expect(sanitizeCommitField(long, 200)).toHaveLength(200)
+  })
+
+  it('strips ASCII control characters including NUL and ESC', () => {
+    expect(sanitizeCommitField('hello\x00world')).toBe('helloworld')
+    expect(sanitizeCommitField('esc\x1b[31mcolor')).toBe('esc[31mcolor')
+    expect(sanitizeCommitField('line\nfeed')).toBe('linefeed')
+    expect(sanitizeCommitField('\x7fhidden')).toBe('hidden')
+    expect(sanitizeCommitField('\x01\x02\x1f\x7f')).toBe('')
+  })
+
+  it('leaves normal commit message text unchanged', () => {
+    const msg = 'feat: add login page (issue #123)'
+    expect(sanitizeCommitField(msg)).toBe(msg)
+  })
+})
 
 describe('CommitEventHandler', () => {
   let handler: CommitEventHandler
@@ -288,6 +313,29 @@ describe('CommitEventHandler', () => {
         provider: 'claude',
       }),
     )
+  })
+
+  it('passes sanitized commitMessage, branch, and author to engine.startRun', async () => {
+    enableRepoConfig('/repos/owner/foo')
+    // Craft inputs with control characters that should be stripped and a
+    // commitMessage that exceeds 500 chars (should be truncated).
+    const longMsg = 'feat: ' + 'x'.repeat(600)
+    const event = makeEvent({
+      repoPath: '/repos/owner/foo',
+      commitHash: 'f'.repeat(40),
+      commitMessage: longMsg,
+      branch: 'main\x1b[danger',
+      author: 'alice\x00',
+    })
+
+    const result = await handler.handle(event)
+    expect(result.accepted).toBe(true)
+
+    const startRunInput = mockState.startRun.mock.calls[0][1] as Record<string, unknown>
+    expect((startRunInput.commitMessage as string).length).toBe(500)
+    expect(startRunInput.commitMessage).not.toContain('\x1b')
+    expect(startRunInput.branch).toBe('main[danger')
+    expect(startRunInput.author).toBe('alice')
   })
 
   it('returns a failure result and reason when startRun throws', async () => {

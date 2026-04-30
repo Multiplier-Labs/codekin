@@ -692,6 +692,82 @@ This is the repo-specific override prompt.
         vi.useRealTimers()
       })
 
+      it('includes XML commit context delimiters when commitMessage is in input (M2)', async () => {
+        vi.useFakeTimers()
+
+        mockExistsSync.mockImplementation((p: string) => {
+          if (String(p).includes('.codekin/workflows')) return false
+          return true
+        })
+
+        sessions.get.mockReturnValue({
+          outputHistory: [
+            { type: 'output', data: 'Commit review result' },
+            { type: 'result' },
+          ],
+        })
+
+        const handler = registeredDef.steps[2].handler
+        const promise = handler(
+          {
+            sessionId: 'session-1',
+            repoName: 'my-repo',
+            repoPath: '/tmp/repo',
+            branch: 'feat/my-branch',
+            commitMessage: 'fix: resolve the bug',
+            author: 'alice',
+          },
+          { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
+        )
+
+        await vi.advanceTimersByTimeAsync(2000)
+        await promise
+
+        const sentPrompt = String(sessions.sendInput.mock.calls[0][1])
+        expect(sentPrompt).toContain('<commit-message>')
+        expect(sentPrompt).toContain('fix: resolve the bug')
+        expect(sentPrompt).toContain('</commit-message>')
+        expect(sentPrompt).toContain('<branch>feat/my-branch</branch>')
+        expect(sentPrompt).toContain('<author>alice</author>')
+        // Context block must appear before the workflow prompt
+        const contextIdx = sentPrompt.indexOf('<commit-message>')
+        const promptIdx = sentPrompt.indexOf('You are performing an automated test review')
+        expect(contextIdx).toBeLessThan(promptIdx)
+
+        vi.useRealTimers()
+      })
+
+      it('does not add commit context when commitMessage is absent', async () => {
+        vi.useFakeTimers()
+
+        mockExistsSync.mockImplementation((p: string) => {
+          if (String(p).includes('.codekin/workflows')) return false
+          return true
+        })
+
+        sessions.get.mockReturnValue({
+          outputHistory: [
+            { type: 'output', data: 'Regular review output' },
+            { type: 'result' },
+          ],
+        })
+
+        const handler = registeredDef.steps[2].handler
+        const promise = handler(
+          { sessionId: 'session-1', repoName: 'my-repo', repoPath: '/tmp/repo', branch: 'main' },
+          { runId: 'r1', run: { kind: 'test-review.daily' }, abortSignal: new AbortController().signal }
+        )
+
+        await vi.advanceTimersByTimeAsync(2000)
+        await promise
+
+        const sentPrompt = String(sessions.sendInput.mock.calls[0][1])
+        expect(sentPrompt).not.toContain('<commit-message>')
+        expect(sentPrompt).not.toContain('<author>')
+
+        vi.useRealTimers()
+      })
+
       it('appends customPrompt to the base prompt', async () => {
         vi.useFakeTimers()
 
@@ -1303,6 +1379,33 @@ This is the repo-specific override prompt.
         // The legacy branch must not appear in any git call.
         const legacyCall = gitCalls.find(args => args.includes('codekin/reports'))
         expect(legacyCall).toBeUndefined()
+      })
+
+      it('does not write the report to the main working tree (C2 regression: no untracked reports file)', async () => {
+        // Before this fix, save_report wrote twice: once to the main working
+        // tree (creating an untracked .codekin/reports/** file) and once to
+        // the temporary audit worktree. Only the worktree write should remain.
+        mockExecFileSync.mockReturnValue(Buffer.from('main\n'))
+
+        const handler = registeredDef.steps[3].handler
+        await handler(
+          {
+            repoPath: '/tmp/repo',
+            repoName: 'my-repo',
+            reportText: 'Content',
+            sessionId: 's1',
+            branch: 'main',
+          },
+          { runId: 'run-c2', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        const writePaths = mockWriteFileSync.mock.calls.map(c => String(c[0]))
+        // No write must land under the main working tree
+        const mainTreeWrites = writePaths.filter(p => p.startsWith('/tmp/repo/'))
+        expect(mainTreeWrites).toHaveLength(0)
+        // Exactly one write lands in the temporary audit worktree
+        const worktreeWrites = writePaths.filter(p => p.includes('.codekin-wt-report-'))
+        expect(worktreeWrites).toHaveLength(1)
       })
 
       it('uses today\'s date in the branch name', async () => {
