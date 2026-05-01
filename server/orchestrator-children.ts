@@ -258,13 +258,19 @@ export class OrchestratorChildManager {
       body: this.buildTerminalNotificationBody(child),
     }
 
-    // Stamp before delivery to ensure idempotency even if the helper throws.
-    child.terminalNotifiedAt = new Date().toISOString()
-
+    // Only stamp `terminalNotifiedAt` on confirmed delivery so that a
+    // transient parent-down (notify returns false / throws) does not
+    // permanently suppress future retries.  Idempotency is still enforced
+    // by the early-return on terminalNotifiedAt at the top of this method.
+    let delivered = false
     try {
-      this.notify(args)
+      delivered = this.notify(args)
     } catch (err) {
       console.warn(`[orchestrator-child] Failed to notify parent ${parentSessionId} for ${child.id}:`, err)
+    }
+
+    if (delivered) {
+      child.terminalNotifiedAt = new Date().toISOString()
     }
   }
 

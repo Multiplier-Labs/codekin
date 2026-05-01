@@ -523,5 +523,72 @@ describe('OrchestratorChildManager', () => {
       // The stamp must not be reset by the second call.
       expect(child.terminalNotifiedAt).toBe(stamp)
     })
+
+    it('does NOT stamp terminalNotifiedAt when delivery fails (returns false)', async () => {
+      // Notify reports the parent is unreachable on the first attempt.
+      notify = vi.fn(() => false)
+      manager = new OrchestratorChildManager(sessions, { notify })
+
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => false), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'Done! Created PR #99 and pushed.' }],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+        worktreePath: '/repos/myproject-wt-abc12345',
+      }))
+
+      const child = await manager.spawn(makeRequest({
+        parentSessionId: 'parent-orchestrator-id',
+      }))
+
+      for (const listener of sessions._resultListeners) {
+        listener(child.id, false)
+      }
+
+      await vi.waitFor(() => {
+        expect(child.status).toBe('completed')
+      })
+
+      expect(notify).toHaveBeenCalledTimes(1)
+      // Failed delivery must leave the stamp null so a future invocation can retry.
+      expect(child.terminalNotifiedAt).toBeNull()
+
+      // Second invocation succeeds — stamp is set, future calls become no-ops.
+      notify.mockReturnValue(true)
+      ;(manager as any).notifyTerminal(child)
+      expect(notify).toHaveBeenCalledTimes(2)
+      expect(child.terminalNotifiedAt).toBeTruthy()
+
+      ;(manager as any).notifyTerminal(child)
+      expect(notify).toHaveBeenCalledTimes(2)
+    })
+
+    it('does NOT stamp terminalNotifiedAt when notify throws', async () => {
+      notify = vi.fn(() => { throw new Error('boom') })
+      manager = new OrchestratorChildManager(sessions, { notify })
+
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => false), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'Done! Created PR #99 and pushed.' }],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+        worktreePath: '/repos/myproject-wt-abc12345',
+      }))
+
+      const child = await manager.spawn(makeRequest({
+        parentSessionId: 'parent-orchestrator-id',
+      }))
+
+      for (const listener of sessions._resultListeners) {
+        listener(child.id, false)
+      }
+
+      await vi.waitFor(() => {
+        expect(child.status).toBe('completed')
+      })
+
+      expect(notify).toHaveBeenCalledTimes(1)
+      expect(child.terminalNotifiedAt).toBeNull()
+    })
   })
 })
