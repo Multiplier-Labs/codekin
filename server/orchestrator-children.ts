@@ -10,6 +10,10 @@ import { randomUUID } from 'crypto'
 import type { SessionManager } from './session-manager.js'
 import type { Session, WsServerMessage } from './types.js'
 import { getAgentDisplayName } from './config.js'
+import {
+  sendOrchestratorNotification,
+  type OrchestratorNotifyArgs,
+} from './orchestrator-notify.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,9 +38,23 @@ export interface ChildSessionRequest {
   model?: string
   /** Optional allowedTools override. When omitted, uses AGENT_CHILD_ALLOWED_TOOLS. */
   allowedTools?: string[]
+  /**
+   * Session ID of the orchestrator that spawned this child. When set, the
+   * parent receives a push notification on terminal-state transitions.
+   * Children created without this field (e.g. internal/test fixtures) do
+   * not generate notifications.
+   */
+  parentSessionId?: string
 }
 
 export type ChildStatus = 'starting' | 'running' | 'completed' | 'failed' | 'timed_out'
+
+/** Statuses considered terminal — once entered, the child is done. */
+const TERMINAL_STATUSES: ReadonlySet<ChildStatus> = new Set([
+  'completed',
+  'failed',
+  'timed_out',
+])
 
 export interface ChildSession {
   id: string
@@ -46,7 +64,19 @@ export interface ChildSession {
   completedAt: string | null
   result: string | null
   error: string | null
+  /**
+   * Timestamp when a terminal-state notification was delivered to the
+   * parent orchestrator. Used to enforce single-fire idempotency.
+   */
+  terminalNotifiedAt: string | null
 }
+
+/**
+ * Function signature for delivering a terminal-state notification to the
+ * parent orchestrator session. Injectable via the OrchestratorChildManager
+ * constructor so unit tests can stub the delivery without touching socket I/O.
+ */
+export type ChildNotifyFn = (args: OrchestratorNotifyArgs) => boolean
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -92,9 +122,11 @@ export const AGENT_CHILD_ALLOWED_TOOLS = [
 export class OrchestratorChildManager {
   private children = new Map<string, ChildSession>()
   private sessions: SessionManager
+  private notify: ChildNotifyFn
 
-  constructor(sessions: SessionManager) {
+  constructor(sessions: SessionManager, opts?: { notify?: ChildNotifyFn }) {
     this.sessions = sessions
+    this.notify = opts?.notify ?? ((args) => sendOrchestratorNotification(sessions, args))
   }
 
   /** Get all active/recent child sessions. */
@@ -159,6 +191,7 @@ export class OrchestratorChildManager {
       completedAt: null,
       result: null,
       error: null,
+      terminalNotifiedAt: null,
     }
     this.children.set(sessionId, child)
 
@@ -202,8 +235,80 @@ export class OrchestratorChildManager {
       child.status = 'failed'
       child.error = err instanceof Error ? err.message : String(err)
       child.completedAt = new Date().toISOString()
+      this.notifyTerminal(child)
       return child
     }
+  }
+
+  /**
+   * Deliver a single terminal-state notification to the parent orchestrator
+   * session. No-op (and idempotent) when the child has no parent, the status
+   * is not terminal, or a notification has already been delivered.
+   */
+  private notifyTerminal(child: ChildSession): void {
+    if (child.terminalNotifiedAt) return
+    if (!TERMINAL_STATUSES.has(child.status)) return
+    const parentSessionId = child.request.parentSessionId
+    if (!parentSessionId) return
+
+    const args: OrchestratorNotifyArgs = {
+      parentSessionId,
+      label: 'Child Session Stopped',
+      title: `Session: ${getAgentDisplayName().toLowerCase()}:${child.request.branchName} (${child.id})`,
+      body: this.buildTerminalNotificationBody(child),
+    }
+
+    // Only stamp `terminalNotifiedAt` on confirmed delivery so that a
+    // transient parent-down (notify returns false / throws) does not
+    // permanently suppress future retries.  Idempotency is still enforced
+    // by the early-return on terminalNotifiedAt at the top of this method.
+    let delivered = false
+    try {
+      delivered = this.notify(args)
+    } catch (err) {
+      console.warn(`[orchestrator-child] Failed to notify parent ${parentSessionId} for ${child.id}:`, err)
+    }
+
+    if (delivered) {
+      child.terminalNotifiedAt = new Date().toISOString()
+    }
+  }
+
+  /**
+   * Build the multi-line body for a terminal-state notification: status,
+   * branch, repo, optional error string, and an action hint tailored to
+   * the terminal status.
+   */
+  private buildTerminalNotificationBody(child: ChildSession): string {
+    const lines: string[] = [
+      `Status: ${child.status}`,
+      `Branch: ${child.request.branchName}`,
+      `Repo: ${child.request.repo}`,
+    ]
+    if (child.error) lines.push(`Error: ${child.error}`)
+    lines.push(this.buildHintLine(child))
+    return lines.join('\n')
+  }
+
+  /**
+   * Build a single-line hint about how to proceed, tailored to the status:
+   *   - timed_out / failed → point at the worktree so partial work can be salvaged
+   *   - completed         → remind that the PR may still need to be opened
+   */
+  private buildHintLine(child: ChildSession): string {
+    const session = this.sessions.get(child.id)
+    const worktreePath = session?.worktreePath
+    if (child.status === 'timed_out' || child.status === 'failed') {
+      const where = worktreePath ?? `${child.request.repo} (no worktree)`
+      return `Inspect worktree at ${where} for partial work.`
+    }
+    if (child.status === 'completed') {
+      const policy = child.request.completionPolicy
+      if (policy === 'pr') return 'Verify the PR was opened — push and create one if not.'
+      if (policy === 'merge') return 'Verify the branch was pushed.'
+      return 'Verify changes were committed locally as expected.'
+    }
+    return 'Review the child session output before deciding next steps.'
   }
 
   /**
@@ -392,6 +497,9 @@ export class OrchestratorChildManager {
       // handleClaudeResult should have already done this, but edge cases
       // (nudge race, missed result event) can leave the flag stuck.
       this.sessions.clearProcessingFlag(child.id)
+      // Push-notify the parent orchestrator so it learns about the terminal
+      // state immediately, instead of waiting for the 30-minute polling cron.
+      this.notifyTerminal(child)
     }
   }
 
