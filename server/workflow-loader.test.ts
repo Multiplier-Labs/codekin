@@ -1005,6 +1005,92 @@ This is the repo-specific override prompt.
         await registeredDef.afterRun({ output: { sessionId: 'session-1' } })
         expect(sessions.stopClaude).not.toHaveBeenCalled()
       })
+
+      // ----------------------------------------------------------------
+      // Fix B — restore main checkout after audit run (regression 2026-05-01)
+      // ----------------------------------------------------------------
+
+      it('restores main checkout to original branch when audit session changed it', async () => {
+        const gitCalls: string[][] = []
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          gitCalls.push(args)
+          // Simulate HEAD being on the audit branch after the run
+          if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') {
+            return Buffer.from('audit/test-review.daily-2026-05-01\n')
+          }
+          return Buffer.from('')
+        })
+
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+        await registeredDef.afterRun({
+          output: {
+            sessionId: 'session-1',
+            repoPath: '/tmp/repo',
+            branch: 'main',
+          },
+        })
+
+        // Should warn that the branch was changed
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('instead of'))
+
+        // Should restore to 'main'
+        const checkoutCall = gitCalls.find(args => args[0] === 'checkout' && args[1] === 'main')
+        expect(checkoutCall).toBeDefined()
+
+        warnSpy.mockRestore()
+      })
+
+      it('does not run git checkout when HEAD is already on the original branch', async () => {
+        const gitCalls: string[][] = []
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          gitCalls.push(args)
+          if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return Buffer.from('main\n')
+          return Buffer.from('')
+        })
+
+        await registeredDef.afterRun({
+          output: { sessionId: 'session-1', repoPath: '/tmp/repo', branch: 'main' },
+        })
+
+        const checkoutCall = gitCalls.find(args => args[0] === 'checkout')
+        expect(checkoutCall).toBeUndefined()
+      })
+
+      it('skips branch restore when repoPath or branch is missing from output', async () => {
+        const gitCalls: string[][] = []
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          gitCalls.push(args)
+          return Buffer.from('')
+        })
+
+        // No repoPath
+        await registeredDef.afterRun({ output: { sessionId: 'session-1', branch: 'main' } })
+        // No branch
+        await registeredDef.afterRun({ output: { sessionId: 'session-1', repoPath: '/tmp/repo' } })
+        // output is null (failed run)
+        await registeredDef.afterRun({ output: null })
+
+        // No git calls should happen (no rev-parse, no checkout)
+        expect(gitCalls).toHaveLength(0)
+      })
+
+      it('warns but does not throw when branch restore fails', async () => {
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          if (args[0] === 'rev-parse') throw new Error('not a git repo')
+          return Buffer.from('')
+        })
+
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+        // Should not throw
+        await expect(registeredDef.afterRun({
+          output: { sessionId: 'session-1', repoPath: '/tmp/repo', branch: 'main' },
+        })).resolves.not.toThrow()
+
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Could not restore branch'))
+        warnSpy.mockRestore()
+      })
     })
 
     describe('save_report step', () => {
@@ -1434,6 +1520,98 @@ This is the repo-specific override prompt.
           args[0] === 'worktree' && args[1] === 'add' && args[3] === expected
         )
         expect(branchCall).toBeDefined()
+      })
+
+      // ----------------------------------------------------------------
+      // Fix A — fork audit branches from origin/main (regression 2026-05-01)
+      // ----------------------------------------------------------------
+
+      it('fetches origin/main and creates audit branch from it when branch does not exist', async () => {
+        const gitCalls: string[][] = []
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          gitCalls.push(args)
+          if (args[0] === 'rev-parse' && args[1] === '--verify') throw new Error('not found')
+          return Buffer.from('')
+        })
+
+        const handler = registeredDef.steps[3].handler
+        await handler(
+          { repoPath: '/tmp/repo', repoName: 'my-repo', reportText: 'Content', sessionId: 's1', branch: 'main' },
+          { runId: 'r-fetch', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        // git fetch origin main must be attempted before branch creation
+        const fetchIdx = gitCalls.findIndex(args =>
+          args[0] === 'fetch' && args[1] === 'origin' && args[2] === 'main'
+        )
+        expect(fetchIdx).toBeGreaterThanOrEqual(0)
+
+        // git branch <name> origin/main — origin/main must be the explicit base
+        const branchCall = gitCalls.find(args =>
+          args[0] === 'branch' && /^audit\//.test(args[1] ?? '') && args[2] === 'origin/main'
+        )
+        expect(branchCall).toBeDefined()
+
+        // fetch must precede branch creation
+        const branchIdx = gitCalls.findIndex(args =>
+          args[0] === 'branch' && /^audit\//.test(args[1] ?? '')
+        )
+        expect(fetchIdx).toBeLessThan(branchIdx)
+      })
+
+      it('falls back to current HEAD with a warning when git fetch fails', async () => {
+        const gitCalls: string[][] = []
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          gitCalls.push(args)
+          if (args[0] === 'rev-parse' && args[1] === '--verify') throw new Error('not found')
+          if (args[0] === 'fetch') throw new Error('network error')
+          return Buffer.from('')
+        })
+
+        const handler = registeredDef.steps[3].handler
+        const result = await handler(
+          { repoPath: '/tmp/repo', repoName: 'my-repo', reportText: 'Content', sessionId: 's1', branch: 'main' },
+          { runId: 'r-fetch-fail', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        // Should still succeed (no throw)
+        expect(result.filePath).toBeDefined()
+
+        // Should warn about the fetch failure
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('git fetch origin main failed'))
+
+        // git branch should be called WITHOUT origin/main (falls back to HEAD)
+        const branchCall = gitCalls.find(args =>
+          args[0] === 'branch' && /^audit\//.test(args[1] ?? '')
+        )
+        expect(branchCall).toBeDefined()
+        expect(branchCall![2]).toBeUndefined()
+
+        warnSpy.mockRestore()
+      })
+
+      it('skips fetch and branch creation when audit branch already exists (same-day rerun)', async () => {
+        const gitCalls: string[][] = []
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          gitCalls.push(args)
+          // rev-parse --verify succeeds → branch already exists
+          if (args[0] === 'rev-parse' && args[1] === '--verify') return Buffer.from('abc123\n')
+          return Buffer.from('')
+        })
+
+        const handler = registeredDef.steps[3].handler
+        await handler(
+          { repoPath: '/tmp/repo', repoName: 'my-repo', reportText: 'Content', sessionId: 's1', branch: 'main' },
+          { runId: 'r-rerun', run: {}, abortSignal: new AbortController().signal }
+        )
+
+        // No fetch and no branch creation when branch already exists
+        const fetchCall = gitCalls.find(args => args[0] === 'fetch')
+        expect(fetchCall).toBeUndefined()
+        const branchCreateCall = gitCalls.find(args => args[0] === 'branch')
+        expect(branchCreateCall).toBeUndefined()
       })
     })
 
