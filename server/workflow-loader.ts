@@ -471,9 +471,20 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
             try {
               execFileSync('git', ['rev-parse', '--verify', reportsBranch], { cwd: repoPath, timeout: 5_000, stdio: 'pipe' })
             } catch {
-              // Branch doesn't exist yet — create it from the current branch
-              execFileSync('git', ['branch', reportsBranch], { cwd: repoPath, timeout: 5_000 })
-              console.log(`[workflow:${def.kind}] Created branch ${reportsBranch}`)
+              // Branch doesn't exist yet — create it from origin/main so the audit
+              // always forks from the latest upstream commit, even if the local HEAD
+              // is stale or sitting on a previous audit branch.
+              let fetchOk = false
+              try {
+                execFileSync('git', ['fetch', 'origin', 'main'], { cwd: repoPath, timeout: 30_000, stdio: 'pipe' })
+                fetchOk = true
+              } catch (fetchErr) {
+                console.warn(`[workflow:${def.kind}] git fetch origin main failed (will fork from local HEAD): ${fetchErr}`)
+              }
+              const branchArgs: string[] = ['branch', reportsBranch]
+              if (fetchOk) branchArgs.push('origin/main')
+              execFileSync('git', branchArgs, { cwd: repoPath, timeout: 5_000 })
+              console.log(`[workflow:${def.kind}] Created branch ${reportsBranch}${fetchOk ? ' from origin/main' : ' from current HEAD (fetch failed)'}`)
             }
 
             // Create a temporary worktree on the reports branch
@@ -530,6 +541,25 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
         }
       } catch {
         // Ignore cleanup errors
+      }
+
+      // Guard: the audit session runs directly in repoPath (no worktree isolation),
+      // so the Claude agent can check out the audit branch while following CLAUDE.md's
+      // instruction to commit reports on a branch. Restore the original branch so the
+      // next run does not fork its audit branch from a stale, audit-branch HEAD.
+      const repoPath = run.output?.repoPath as string | undefined
+      const branch = run.output?.branch as string | undefined
+      if (repoPath && branch) {
+        try {
+          const current = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'],
+            { cwd: repoPath, timeout: 5_000, stdio: 'pipe' }).toString().trim()
+          if (current !== branch) {
+            console.warn(`[workflow:${def.kind}] Main checkout is on '${current}' instead of '${branch}' — restoring`)
+            execFileSync('git', ['checkout', branch], { cwd: repoPath, timeout: 10_000, stdio: 'pipe' })
+          }
+        } catch (err) {
+          console.warn(`[workflow:${def.kind}] Could not restore branch to ${branch}: ${err}`)
+        }
       }
     },
   })
