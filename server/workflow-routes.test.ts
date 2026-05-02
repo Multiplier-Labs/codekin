@@ -157,6 +157,36 @@ describe('parseGitHubSlug', () => {
   it('handles repos with hyphens, underscores, and dots', () => {
     expect(parseGitHubSlug('git@github.com:my-org/my_repo.name.git')).toBe('my-org/my_repo.name')
   })
+
+  // Adversarial cases — the old regex matched any string containing "github.com"
+  // as a substring; the new implementation must reject all of these.
+  it('rejects URL where github.com appears only in the path (evil.com host)', () => {
+    expect(parseGitHubSlug('https://evil.com/github.com/foo/bar')).toBeNull()
+  })
+
+  it('rejects SSH-like string whose host is notgithub.com', () => {
+    expect(parseGitHubSlug('notgithub.com:foo/bar')).toBeNull()
+  })
+
+  it('rejects URL whose hostname is github.com.evil.com', () => {
+    expect(parseGitHubSlug('https://github.com.evil.com/foo/bar')).toBeNull()
+  })
+
+  it('parses SSH URL with .git suffix (adversarial baseline)', () => {
+    expect(parseGitHubSlug('git@github.com:foo/bar.git')).toBe('foo/bar')
+  })
+
+  it('parses HTTPS URL with .git suffix (adversarial baseline)', () => {
+    expect(parseGitHubSlug('https://github.com/foo/bar.git')).toBe('foo/bar')
+  })
+
+  it('parses HTTPS URL without .git suffix (adversarial baseline)', () => {
+    expect(parseGitHubSlug('https://github.com/foo/bar')).toBe('foo/bar')
+  })
+
+  it('parses www.github.com HTTPS URL', () => {
+    expect(parseGitHubSlug('https://www.github.com/foo/bar')).toBe('foo/bar')
+  })
 })
 
 describe('isValidCron', () => {

@@ -347,6 +347,21 @@ describe('CommitEventHandler', () => {
     expect(result.reason).toContain('engine boom')
   })
 
+  it('rolls back the dedup entry when startRun fails so the same hash can be retried', async () => {
+    enableRepoConfig()
+    mockState.startRun.mockRejectedValueOnce(new Error('engine boom'))
+
+    const first = await handler.handle(makeEvent({ commitHash: 'e'.repeat(40) }))
+    expect(first.accepted).toBe(false)
+    expect(first.reason).toContain('engine boom')
+
+    // The dedup key must have been removed — a second call with the same hash
+    // must not be rejected as a duplicate and must reach startRun.
+    const second = await handler.handle(makeEvent({ commitHash: 'e'.repeat(40) }))
+    expect(second.accepted).toBe(true)
+    expect(mockState.startRun).toHaveBeenCalledTimes(2)
+  })
+
   // -------------------------------------------------------------------------
   // shutdown / pruneExpired
   // -------------------------------------------------------------------------
