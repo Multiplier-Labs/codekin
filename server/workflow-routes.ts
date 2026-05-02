@@ -73,8 +73,23 @@ const execFileAsync = promisify(execFile)
  * Returns null for non-GitHub remotes.
  */
 export function parseGitHubSlug(remoteUrl: string): string | null {
-  const match = remoteUrl.trim().match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/)
-  return match?.[1] ?? null
+  const url = remoteUrl.trim()
+
+  // SSH form: strictly anchored so "notgithub.com:..." cannot match.
+  const sshMatch = url.match(/^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/)
+  if (sshMatch) return `${sshMatch[1]}/${sshMatch[2]}`
+
+  // HTTPS form: use the URL constructor so the hostname is checked exactly,
+  // preventing substring matches like "evil.com/github.com/...".
+  try {
+    const parsed = new URL(url)
+    if (parsed.hostname !== 'github.com' && parsed.hostname !== 'www.github.com') return null
+    const parts = parsed.pathname.replace(/\.git$/, '').split('/').filter(Boolean)
+    if (parts.length < 2) return null
+    return `${parts[0]}/${parts[1]}`
+  } catch {
+    return null
+  }
 }
 
 /**

@@ -147,6 +147,8 @@ export class CommitEventHandler {
       console.log(`[commit-event] Dispatched commit-review run ${run.id} for ${event.repoPath} (${event.commitHash.slice(0, 8)})`)
       return { accepted: true, runId: run.id }
     } catch (err) {
+      // Roll back the dedup entry so a later retry isn't suppressed.
+      this.seenCommits.delete(dedupKey)
       const msg = err instanceof Error ? err.message : String(err)
       console.error(`[commit-event] Failed to start run for ${event.repoPath}:`, msg)
       return { accepted: false, reason: `Failed to start run: ${msg}` }
