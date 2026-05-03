@@ -3827,7 +3827,7 @@ describe('SessionManager', () => {
     it('clears after cooldown elapses', () => {
       vi.useFakeTimers()
       const s = sm.create('test', '/tmp')
-      ;(sm as any).onRateLimitEvent(s, s.id, { type: 'rate_limit_event' })
+      ;(sm as any).onRateLimitEvent(s, s.id, { type: 'rate_limit_event', overageStatus: 'rejected' })
       expect(sm.isRateLimited()).toBe(true)
       // RATE_LIMIT_COOLDOWN_MS is 60 minutes; advance just past it
       vi.advanceTimersByTime(60 * 60 * 1000 + 1)
@@ -3840,12 +3840,29 @@ describe('SessionManager', () => {
       const ws = fakeWs()
       sm.join(s.id, ws)
 
-      ;(sm as any).onRateLimitEvent(s, s.id, { type: 'rate_limit_event' })
+      ;(sm as any).onRateLimitEvent(s, s.id, { type: 'rate_limit_event', overageStatus: 'rejected' })
       const firstCallCount = ws.send.mock.calls.length
 
       // A second event during the same cooldown should not re-broadcast
-      ;(sm as any).onRateLimitEvent(s, s.id, { type: 'rate_limit_event' })
+      ;(sm as any).onRateLimitEvent(s, s.id, { type: 'rate_limit_event', overageStatus: 'rejected' })
       expect(ws.send.mock.calls.length).toBe(firstCallCount)
+    })
+
+    it('does NOT engage on informational rate_limit_event without overageStatus', () => {
+      // The Claude CLI emits status-style rate_limit_events around startup
+      // and after turns even when the user is well under quota (~8% session,
+      // ~14% weekly). Tripping the breaker on these is a false alarm.
+      const s = sm.create('test', '/tmp')
+      ;(sm as any).onRateLimitEvent(s, s.id, { type: 'rate_limit_event' })
+      expect(sm.isRateLimited()).toBe(false)
+    })
+
+    it('does NOT engage when overageStatus is anything other than "rejected"', () => {
+      const s = sm.create('test', '/tmp')
+      ;(sm as any).onRateLimitEvent(s, s.id, { type: 'rate_limit_event', overageStatus: 'warning' })
+      expect(sm.isRateLimited()).toBe(false)
+      ;(sm as any).onRateLimitEvent(s, s.id, { type: 'rate_limit_event', overageStatus: 'ok' })
+      expect(sm.isRateLimited()).toBe(false)
     })
   })
 

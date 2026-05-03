@@ -284,26 +284,42 @@ export class SessionManager {
   }
 
   /**
-   * Handle a `rate_limit_event` from the Claude CLI stream.  Trips the
-   * circuit breaker and surfaces a notification to every connected client.
+   * Handle a `rate_limit_event` from the Claude CLI stream.
    *
-   * The notification deliberately does NOT claim anything about *which*
-   * Anthropic limit was hit (5-hour session window vs. weekly bucket) or
-   * when it resets — the event payload doesn't tell us that, and the
-   * cooldown is a local Codekin backoff, not a quota reset.
+   * The CLI emits this event for several distinct situations — observed in
+   * practice with `overageStatus` either absent (informational status update,
+   * e.g. emitted around process startup / shortly after each turn) or set
+   * to a value like 'rejected' (the request was blocked by Anthropic's
+   * quota enforcement). Only the second case warrants tripping the circuit
+   * breaker: tripping on the informational variant fires false alarms even
+   * when the user is at 8% session / 14% weekly usage.
+   *
+   * Until we have an authoritative list of overageStatus values, treat
+   * 'rejected' as the only definitive "blocked" signal and log everything
+   * else for diagnostics.
    */
   private onRateLimitEvent(session: Session, sessionId: string, event: Record<string, unknown>): void {
+    const overageStatus = typeof event.overageStatus === 'string' ? event.overageStatus : null
+    // Always log so we can see what payloads the CLI actually sends —
+    // helpful for expanding the trigger list if we learn about more
+    // blocking statuses (e.g. 'exceeded'). Truncate to keep the line short.
+    console.log(`[rate-limit-event] session=${sessionId} overageStatus=${overageStatus ?? '(none)'} payload=${JSON.stringify(event).slice(0, 300)}`)
+
+    if (overageStatus !== 'rejected') {
+      // Informational / status-only event — don't engage the breaker.
+      return
+    }
+
     const now = Date.now()
     const wasAlreadyTripped = now < this._rateLimitedUntil
     this._rateLimitedUntil = now + RATE_LIMIT_COOLDOWN_MS
     const minutes = Math.round(RATE_LIMIT_COOLDOWN_MS / 60_000)
-    const overage = typeof event.overageStatus === 'string' ? ` overageStatus=${event.overageStatus}` : ''
-    console.warn(`[rate-limit] session=${sessionId}${overage} — circuit breaker engaged for ${minutes}min`)
+    console.warn(`[rate-limit] session=${sessionId} overageStatus=rejected — circuit breaker engaged for ${minutes}min`)
     if (wasAlreadyTripped) return
     const msg: WsServerMessage = {
       type: 'system_message',
       subtype: 'notification',
-      text: `Claude reported a rate-limit event. Codekin will skip background polls (orchestrator monitor) for the next ${minutes} min as a local backoff. This is not your Claude quota reset — check your Anthropic usage page for the actual 5-hour session and weekly limit windows.`,
+      text: `Claude rejected a request with rate-limit overage. Codekin will skip background polls (orchestrator monitor) for the next ${minutes} min as a local backoff. This is not your Claude quota reset — check your Anthropic usage page for the actual 5-hour session and weekly limit windows.`,
     }
     this.addToHistory(session, msg)
     this.broadcast(session, msg)
