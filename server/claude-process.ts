@@ -71,6 +71,7 @@ export interface ClaudeProcessEvents {
   todo_update: [tasks: TaskItem[]]
   image: [base64: string, mediaType: string]
   result: [text: string, isError: boolean]
+  rate_limit: [event: Record<string, unknown>]
   error: [message: string]
   exit: [code: number | null, signal: string | null]
 }
@@ -319,7 +320,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       console.log(`[event] type=${event.type} subtype=${subtype || '-'}`)
     }
     // Log all event types we DON'T handle to catch unknown protocol messages
-    if (!['system', 'stream_event', 'assistant', 'user', 'result', 'control_request'].includes(event.type)) {
+    if (!['system', 'stream_event', 'assistant', 'user', 'result', 'control_request', 'rate_limit_event'].includes(event.type)) {
       console.log(`[event-unhandled] type=${event.type} data=${JSON.stringify(event).slice(0, 300)}`)
     }
 
@@ -356,6 +357,10 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
         this.handleControlRequest(ctrlEvent)
         break
       }
+
+      case 'rate_limit_event':
+        this.emit('rate_limit', event as unknown as Record<string, unknown>)
+        break
 
     }
   }

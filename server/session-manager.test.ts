@@ -3812,4 +3812,107 @@ describe('SessionManager', () => {
       expect(result).toEqual(mockResult)
     })
   })
+
+  describe('rate-limit circuit breaker', () => {
+    it('isRateLimited returns false initially', () => {
+      expect(sm.isRateLimited()).toBe(false)
+    })
+
+    it('engages cooldown when onRateLimitEvent fires', () => {
+      const s = sm.create('test', '/tmp')
+      ;(sm as any).onRateLimitEvent(s, s.id, { type: 'rate_limit_event', overageStatus: 'rejected' })
+      expect(sm.isRateLimited()).toBe(true)
+    })
+
+    it('clears after cooldown elapses', () => {
+      vi.useFakeTimers()
+      const s = sm.create('test', '/tmp')
+      ;(sm as any).onRateLimitEvent(s, s.id, { type: 'rate_limit_event' })
+      expect(sm.isRateLimited()).toBe(true)
+      // RATE_LIMIT_COOLDOWN_MS is 60 minutes; advance just past it
+      vi.advanceTimersByTime(60 * 60 * 1000 + 1)
+      expect(sm.isRateLimited()).toBe(false)
+      vi.useRealTimers()
+    })
+
+    it('broadcasts a notification only on the first hit during a cooldown window', () => {
+      const s = sm.create('test', '/tmp')
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+
+      ;(sm as any).onRateLimitEvent(s, s.id, { type: 'rate_limit_event' })
+      const firstCallCount = ws.send.mock.calls.length
+
+      // A second event during the same cooldown should not re-broadcast
+      ;(sm as any).onRateLimitEvent(s, s.id, { type: 'rate_limit_event' })
+      expect(ws.send.mock.calls.length).toBe(firstCallCount)
+    })
+  })
+
+  describe('headless conversation cap', () => {
+    it('clears claudeSessionId when a headless session passes the turn cap', () => {
+      const s = sm.create('orch', '/tmp', { source: 'orchestrator' })
+      s.claudeSessionId = 'long-running-claude-id'
+      s._claudeTurnCount = 100 // MAX_HEADLESS_CONVERSATION_TURNS
+      ;(s as any).claudeProcess = fakeClaudeProcess(true)
+
+      ;(sm as any).handleClaudeResult(s, s.id, 'success', false)
+
+      expect(s.claudeSessionId).toBeNull()
+      expect(s._claudeTurnCount).toBe(0)
+    })
+
+    it('leaves interactive sessions untouched at the same turn count', () => {
+      const s = sm.create('manual', '/tmp')
+      s.claudeSessionId = 'manual-claude-id'
+      s._claudeTurnCount = 200
+      ;(s as any).claudeProcess = fakeClaudeProcess(true)
+
+      ;(sm as any).handleClaudeResult(s, s.id, 'success', false)
+
+      expect(s.claudeSessionId).toBe('manual-claude-id')
+    })
+
+    it('does not clear claudeSessionId for headless sessions below the cap', () => {
+      const s = sm.create('orch', '/tmp', { source: 'orchestrator' })
+      s.claudeSessionId = 'still-fresh'
+      s._claudeTurnCount = 10
+      ;(s as any).claudeProcess = fakeClaudeProcess(true)
+
+      ;(sm as any).handleClaudeResult(s, s.id, 'success', false)
+
+      expect(s.claudeSessionId).toBe('still-fresh')
+    })
+  })
+
+  describe('headless stale prune', () => {
+    it('prunes a non-orchestrator headless session older than HEADLESS_STALE_AGE_MS', () => {
+      const s = sm.create('webhook-old', '/tmp', { source: 'webhook' })
+      // Backdate to 31 days old
+      s.created = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString()
+
+      ;(sm as any).reapIdleSessions()
+
+      expect(sm.get(s.id)).toBeUndefined()
+    })
+
+    it('keeps the orchestrator session even when older than the stale threshold', () => {
+      const s = sm.create('orch', '/tmp', { source: 'orchestrator' })
+      s.created = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
+
+      ;(sm as any).reapIdleSessions()
+
+      expect(sm.get(s.id)).toBeDefined()
+    })
+
+    it('keeps a recent headless session', () => {
+      const s = sm.create('webhook-fresh', '/tmp', { source: 'webhook' })
+      // 1 day old — well under the 30-day cap
+      s.created = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+
+      ;(sm as any).reapIdleSessions()
+
+      expect(sm.get(s.id)).toBeDefined()
+    })
+  })
 })
