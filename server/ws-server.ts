@@ -47,7 +47,7 @@ import { createDocsRouter } from './docs-routes.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, isOrchestratorSession } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
-import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, CLAUDE_BINARY } from './config.js'
+import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, CLAUDE_BINARY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR } from './config.js'
 
 // ---------------------------------------------------------------------------
 // CLI args (legacy bare-metal compat) and auth setup
@@ -556,14 +556,21 @@ server.listen(port, '0.0.0.0', () => {
   // Check for newer version on npm (non-blocking)
   void checkForUpdates()
 
-  // Auto-restart sessions that were active before the server went down
-  sessions.restoreActiveSessions()
-
-  // Start the orchestrator session (always-on)
-  try {
-    ensureOrchestratorRunning(sessions)
-  } catch (err) {
-    console.error('[orchestrator] Failed to start on boot:', err)
+  // Auto-restart sessions that were active before the server went down,
+  // and start the always-on orchestrator session. Both are opt-in: every
+  // boot-time Claude process consumes the user's subscription quota even
+  // when no human is connected. Quiet mode (the default) waits for an
+  // explicit user action before spawning anything.
+  if (AUTO_RESTORE_SESSIONS) {
+    sessions.restoreActiveSessions()
+    try {
+      ensureOrchestratorRunning(sessions)
+    } catch (err) {
+      console.error('[orchestrator] Failed to start on boot:', err)
+    }
+  } else {
+    console.log('[boot] Quiet mode: skipping session auto-restore and orchestrator auto-start.')
+    console.log('[boot]   Set CODEKIN_AUTO_RESTORE_SESSIONS=true to re-enable.')
   }
 
   // Wire up prompt listener: notify the orchestrator session when any child
@@ -631,10 +638,18 @@ server.listen(port, '0.0.0.0', () => {
       syncCommitHooks()
     }
 
-    // Start orchestrator proactive monitor with workflow engine events
+    // Wire up the orchestrator proactive monitor. The 15-min poll is opt-in
+    // because it pokes the orchestrator Claude session on a timer — the
+    // dominant source of idle-install token consumption. Workflow events
+    // are still delivered when the monitor is running.
     const monitor = new OrchestratorMonitor(sessions)
     monitor.setEngine(engine)
-    monitor.start()
+    if (ORCHESTRATOR_MONITOR) {
+      monitor.start()
+    } else {
+      console.log('[boot] Quiet mode: orchestrator proactive monitor disabled (15-min poll).')
+      console.log('[boot]   Set CODEKIN_ORCHESTRATOR_MONITOR=true to re-enable.')
+    }
     orchestratorMonitorRef.current = monitor
 
     console.log('[workflow] Workflow engine ready')

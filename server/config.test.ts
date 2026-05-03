@@ -39,6 +39,8 @@ beforeEach(() => {
   delete process.env.SCREENSHOTS_DIR
   delete process.env.FRONTEND_DIST
   delete process.env.GH_ORG
+  delete process.env.CODEKIN_AUTO_RESTORE_SESSIONS
+  delete process.env.CODEKIN_ORCHESTRATOR_MONITOR
 
   // Reset mock implementations to defaults
   mockExistsSync.mockReturnValue(false)
@@ -128,6 +130,56 @@ describe('config', () => {
       process.env.GH_ORG = 'org-one,,org-two,'
       const config = await loadConfig()
       expect(config.GH_ORGS).toEqual(['org-one', 'org-two'])
+    })
+  })
+
+  describe('AUTO_RESTORE_SESSIONS (quiet mode)', () => {
+    it('defaults to false when env is unset', async () => {
+      const config = await loadConfig()
+      expect(config.AUTO_RESTORE_SESSIONS).toBe(false)
+    })
+
+    it('is true when CODEKIN_AUTO_RESTORE_SESSIONS=true', async () => {
+      process.env.CODEKIN_AUTO_RESTORE_SESSIONS = 'true'
+      const config = await loadConfig()
+      expect(config.AUTO_RESTORE_SESSIONS).toBe(true)
+    })
+
+    it('is true when CODEKIN_AUTO_RESTORE_SESSIONS=1', async () => {
+      process.env.CODEKIN_AUTO_RESTORE_SESSIONS = '1'
+      const config = await loadConfig()
+      expect(config.AUTO_RESTORE_SESSIONS).toBe(true)
+    })
+
+    it('is false for any other value', async () => {
+      process.env.CODEKIN_AUTO_RESTORE_SESSIONS = 'yes'
+      const config = await loadConfig()
+      expect(config.AUTO_RESTORE_SESSIONS).toBe(false)
+    })
+  })
+
+  describe('ORCHESTRATOR_MONITOR (quiet mode)', () => {
+    it('defaults to false when env is unset', async () => {
+      const config = await loadConfig()
+      expect(config.ORCHESTRATOR_MONITOR).toBe(false)
+    })
+
+    it('is true when CODEKIN_ORCHESTRATOR_MONITOR=true', async () => {
+      process.env.CODEKIN_ORCHESTRATOR_MONITOR = 'true'
+      const config = await loadConfig()
+      expect(config.ORCHESTRATOR_MONITOR).toBe(true)
+    })
+
+    it('is true when CODEKIN_ORCHESTRATOR_MONITOR=1', async () => {
+      process.env.CODEKIN_ORCHESTRATOR_MONITOR = '1'
+      const config = await loadConfig()
+      expect(config.ORCHESTRATOR_MONITOR).toBe(true)
+    })
+
+    it('is false for any other value', async () => {
+      process.env.CODEKIN_ORCHESTRATOR_MONITOR = 'yes'
+      const config = await loadConfig()
+      expect(config.ORCHESTRATOR_MONITOR).toBe(false)
     })
   })
 
