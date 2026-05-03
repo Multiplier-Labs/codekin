@@ -263,7 +263,7 @@ function serviceUninstallMac() {
     return
   }
   spawnSync('launchctl', ['unload', LAUNCHD_PLIST], { stdio: 'inherit' })
-  import('fs').then(fs => fs.unlinkSync(LAUNCHD_PLIST))
+  rmSync(LAUNCHD_PLIST, { force: true })
   console.log('Codekin service removed.')
 }
 
@@ -327,9 +327,7 @@ function serviceInstallLinux() {
 
 function serviceUninstallLinux() {
   spawnSync('systemctl', ['--user', 'disable', '--now', 'codekin'], { stdio: 'inherit' })
-  if (existsSync(SYSTEMD_SERVICE_FILE)) {
-    import('fs').then(fs => fs.unlinkSync(SYSTEMD_SERVICE_FILE))
-  }
+  rmSync(SYSTEMD_SERVICE_FILE, { force: true })
   spawnSync('systemctl', ['--user', 'daemon-reload'], { stdio: 'inherit' })
   console.log('Codekin service removed.')
 }
@@ -359,10 +357,16 @@ function cmdStop() {
     }
     const result = spawnSync('launchctl', ['unload', LAUNCHD_PLIST], { stdio: 'inherit' })
     if (result.status === 0) {
-      console.log('Codekin service stopped. The plist remains installed —')
-      console.log('  - to start it again now:    launchctl load ' + LAUNCHD_PLIST)
-      console.log('  - to start it again at login: nothing to do (RunAtLoad will pick it up)')
-      console.log('  - to remove permanently:     codekin service uninstall')
+      // launchctl unload (no -w) takes the agent out of the current session's
+      // launchd job list. The plist file stays in ~/Library/LaunchAgents/, so
+      // loginwindow loads it again at next user login (which fires RunAtLoad).
+      // The user has to take an explicit action to opt out of that.
+      console.log('Codekin service stopped (launchctl unload).')
+      console.log('Notes:')
+      console.log('  - Plist file is still at ' + LAUNCHD_PLIST + '.')
+      console.log('  - It will reload automatically at next user login (RunAtLoad re-fires).')
+      console.log('  - To resume now without waiting:     launchctl load ' + LAUNCHD_PLIST)
+      console.log('  - To stop permanently (no auto-load): codekin service uninstall')
     } else {
       console.error('Failed to stop launchd service.')
       process.exit(1)
