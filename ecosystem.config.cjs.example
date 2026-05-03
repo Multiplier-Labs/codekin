@@ -1,0 +1,48 @@
+// Example pm2 ecosystem config for self-hosted deployments.
+//
+// Copy to ecosystem.config.cjs and adjust paths for your environment:
+//   cp ecosystem.config.cjs.example ecosystem.config.cjs
+//
+// The actual ecosystem.config.cjs is gitignored so each host can pin its
+// own interpreter, token paths, and CORS origin.
+
+const { readFileSync } = require('fs')
+const { execSync } = require('child_process')
+
+// Path to a file containing the auth token used by the web client.
+const AUTH_TOKEN_FILE = '/path/to/claude-code-web-token'
+const AUTH_TOKEN = readFileSync(AUTH_TOKEN_FILE, 'utf-8').trim()
+
+// Source API keys from a shared env file so OpenCode subprocesses inherit them.
+const apiKeyEnv = {}
+try {
+  const out = execSync('bash -c "source ~/.config/env/api-keys && env"', { encoding: 'utf-8' })
+  const baseline = new Set(Object.keys(process.env))
+  for (const line of out.split('\n')) {
+    const eq = line.indexOf('=')
+    if (eq < 1) continue
+    const key = line.slice(0, eq)
+    if (!baseline.has(key) || key.endsWith('_API_KEY') || key.endsWith('_KEY')) {
+      apiKeyEnv[key] = line.slice(eq + 1)
+    }
+  }
+} catch { /* api-keys file missing — non-fatal */ }
+
+module.exports = {
+  apps: [{
+    name: 'codekin',
+    script: 'server/dist/ws-server.js',
+    // Pin the Node binary so pm2 doesn't pick up a different version from PATH.
+    // better-sqlite3 ships a prebuilt .node tied to one NODE_MODULE_VERSION,
+    // so a mismatched runtime crashes SessionManager construction at boot.
+    // Use the absolute path of the Node version that built node_modules.
+    interpreter: '/path/to/node',
+    cwd: '/path/to/codekin',
+    env: {
+      ...apiKeyEnv,
+      AUTH_TOKEN,
+      CORS_ORIGIN: 'https://your.host',
+      NODE_ENV: 'production',
+    },
+  }],
+}
