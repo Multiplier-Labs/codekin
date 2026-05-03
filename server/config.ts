@@ -115,6 +115,34 @@ export const TRUST_PROXY = process.env.TRUST_PROXY === 'true' || process.env.TRU
 export const GH_ORGS: string[] = (process.env.GH_ORG || '').split(',').map(s => s.trim()).filter(Boolean)
 
 // ---------------------------------------------------------------------------
+// Background activity ("quiet mode" defaults)
+// ---------------------------------------------------------------------------
+//
+// Codekin authenticates via the user's `claude` CLI, so any background
+// API call is billed against their personal subscription quota. Default
+// behaviour is therefore "make no Claude API calls until the user explicitly
+// asks for one." Each background source is opt-in via env var.
+
+function envFlag(name: string): boolean {
+  const v = process.env[name]
+  return v === 'true' || v === '1'
+}
+
+/**
+ * Auto-restart Claude processes that were alive at the previous shutdown
+ * (and the always-on orchestrator session) when the server boots.
+ * Default: off. Set CODEKIN_AUTO_RESTORE_SESSIONS=true to opt in.
+ */
+export const AUTO_RESTORE_SESSIONS = envFlag('CODEKIN_AUTO_RESTORE_SESSIONS')
+
+/**
+ * Run the orchestrator proactive monitor (15-minute polling that pokes the
+ * orchestrator Claude session for new reports and idle repos).
+ * Default: off. Set CODEKIN_ORCHESTRATOR_MONITOR=true to opt in.
+ */
+export const ORCHESTRATOR_MONITOR = envFlag('CODEKIN_ORCHESTRATOR_MONITOR')
+
+// ---------------------------------------------------------------------------
 // Orchestrator (Agent)
 // ---------------------------------------------------------------------------
 
