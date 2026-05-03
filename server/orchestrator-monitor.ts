@@ -150,6 +150,14 @@ export class OrchestratorMonitor {
 
   /** Periodic poll — check for new reports and idle repos. */
   private async poll(): Promise<void> {
+    // Skip the entire poll if the rate-limit circuit breaker is open. This
+    // is the dominant source of background API calls; continuing to poke
+    // the orchestrator session during a cooldown just deepens the hole.
+    if (this.sessions.isRateLimited()) {
+      console.log('[orchestrator-monitor] rate-limit circuit breaker open — skipping poll')
+      return
+    }
+
     const repoPaths = this.discoverRepoPaths()
 
     // Check for new reports
@@ -255,6 +263,12 @@ export class OrchestratorMonitor {
 
   /** Deliver a notification to the orchestrator chat session. */
   private deliverToOrchestrator(notification: OrchestratorNotification): void {
+    // Don't push more API work at the orchestrator while the rate-limit
+    // circuit breaker is open. The notification stays in the buffer and
+    // can still be inspected via the API; it just isn't replayed as a
+    // chat message until the cooldown expires.
+    if (this.sessions.isRateLimited()) return
+
     const orchestratorId = getOrchestratorSessionId(this.sessions)
     if (!orchestratorId) return
 

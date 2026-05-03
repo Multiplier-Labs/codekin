@@ -44,6 +44,7 @@ export interface SessionLifecycleDeps {
   onToolDoneEvent(session: Session, toolName: string, summary: string | undefined): void
   handleClaudeResult(session: Session, sessionId: string, result: string, isError: boolean): void
   buildSessionContext(session: Session): string | null
+  onRateLimitEvent(session: Session, sessionId: string, event: Record<string, unknown>): void
 }
 
 export class SessionLifecycle {
@@ -244,6 +245,7 @@ export class SessionLifecycle {
       session.planManager.onTurnEnd()
       this.deps.handleClaudeResult(session, sessionId, result, isError)
     })
+    cp.on('rate_limit', (event) => this.deps.onRateLimitEvent(session, sessionId, event))
     cp.on('error', (message) => this.deps.broadcast(session, { type: 'error', message }))
     cp.on('exit', (code, signal) => { cp.removeAllListeners(); this.handleClaudeExit(cp, session, sessionId, code, signal) })
   }
