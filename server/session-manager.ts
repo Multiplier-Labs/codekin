@@ -285,9 +285,12 @@ export class SessionManager {
 
   /**
    * Handle a `rate_limit_event` from the Claude CLI stream.  Trips the
-   * circuit breaker and tells every connected client what happened so the
-   * user can stop the bleeding instead of discovering it in their billing
-   * console days later.
+   * circuit breaker and surfaces a notification to every connected client.
+   *
+   * The notification deliberately does NOT claim anything about *which*
+   * Anthropic limit was hit (5-hour session window vs. weekly bucket) or
+   * when it resets — the event payload doesn't tell us that, and the
+   * cooldown is a local Codekin backoff, not a quota reset.
    */
   private onRateLimitEvent(session: Session, sessionId: string, event: Record<string, unknown>): void {
     const now = Date.now()
@@ -300,7 +303,7 @@ export class SessionManager {
     const msg: WsServerMessage = {
       type: 'system_message',
       subtype: 'notification',
-      text: `Claude API rate limit hit. Pausing background activity (orchestrator monitor) for ${minutes} minutes so this idle install stops adding to your quota usage.`,
+      text: `Claude reported a rate-limit event. Codekin will skip background polls (orchestrator monitor) for the next ${minutes} min as a local backoff. This is not your Claude quota reset — check your Anthropic usage page for the actual 5-hour session and weekly limit windows.`,
     }
     this.addToHistory(session, msg)
     this.broadcast(session, msg)
