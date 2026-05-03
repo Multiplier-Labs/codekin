@@ -175,6 +175,12 @@ describe('config', () => {
       const config = await loadConfig()
       expect(config.ORCHESTRATOR_MONITOR).toBe(true)
     })
+
+    it('is false for any other value', async () => {
+      process.env.CODEKIN_ORCHESTRATOR_MONITOR = 'yes'
+      const config = await loadConfig()
+      expect(config.ORCHESTRATOR_MONITOR).toBe(false)
+    })
   })
 
   describe('production mode', () => {
