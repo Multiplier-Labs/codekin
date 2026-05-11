@@ -249,13 +249,6 @@ const WORKFLOW_PROMPT_GUARD = [
 /** Branch name for report commits. All workflow runs commit to this single long-lived branch. */
 export const REPORT_BRANCH = 'codekin/reports'
 
-/**
- * @deprecated Use REPORT_BRANCH directly. Retained for call-site compatibility.
- */
-export function reportBranchName(_kind: string, _dateStr: string): string {
-  return REPORT_BRANCH
-}
-
 /** True when a branch name is one a workflow run produces (or used to produce). */
 export function isWorkflowReportsBranch(branch: string): boolean {
   // Accept the legacy long-lived branch and the new per-run audit/<kind>-<date> form.
