@@ -50,7 +50,7 @@ vi.mock('better-sqlite3', () => {
   return { default: MockDatabase }
 })
 
-import { loadMdWorkflows, listAvailableKinds, ensureRepoWorkflowsRegistered, getWorkflowCommitPrefixes } from './workflow-loader.js'
+import { loadMdWorkflows, listAvailableKinds, ensureRepoWorkflowsRegistered, getWorkflowCommitPrefixes, REPORT_BRANCH } from './workflow-loader.js'
 import { join } from 'path'
 
 // Valid workflow MD content
@@ -160,23 +160,18 @@ describe('workflow-loader', () => {
       expect(engine.registerWorkflow).not.toHaveBeenCalled()
     })
 
-    it('skips MD files with invalid frontmatter', () => {
+    it('throws on MD files with invalid frontmatter (strict mode)', () => {
       mockReaddirSync.mockReturnValue(['bad.md', 'good.md'])
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       mockReadFileSync.mockImplementation((path: string) => {
         if (String(path).includes('bad')) return 'no frontmatter here'
         return VALID_MD
       })
 
       const engine = fakeEngine()
-      loadMdWorkflows(engine, fakeSessionManager())
-
-      expect(engine.registerWorkflow).toHaveBeenCalledTimes(1)
-      expect(consoleSpy).toHaveBeenCalled()
-      consoleSpy.mockRestore()
+      expect(() => loadMdWorkflows(engine, fakeSessionManager())).toThrow('No frontmatter found')
     })
 
-    it('skips MD files with missing required fields', () => {
+    it('throws on MD files with missing required fields (outputDir, commitMessage)', () => {
       const incompleteMd = `---
 kind: incomplete
 name: Incomplete
@@ -185,14 +180,43 @@ Some prompt.
 `
       mockReaddirSync.mockReturnValue(['incomplete.md'])
       mockReadFileSync.mockReturnValue(incompleteMd)
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
       const engine = fakeEngine()
-      loadMdWorkflows(engine, fakeSessionManager())
+      expect(() => loadMdWorkflows(engine, fakeSessionManager())).toThrow(/Missing frontmatter field/)
+    })
 
-      expect(engine.registerWorkflow).not.toHaveBeenCalled()
-      expect(consoleSpy).toHaveBeenCalled()
-      consoleSpy.mockRestore()
+    it('throws with clear error naming the offending file when outputDir is missing', () => {
+      const noOutputDir = `---
+kind: bad.daily
+name: Bad
+sessionPrefix: bad
+filenameSuffix: _bad.md
+commitMessage: chore: bad
+---
+Prompt.
+`
+      mockReaddirSync.mockReturnValue(['bad.md'])
+      mockReadFileSync.mockReturnValue(noOutputDir)
+
+      const engine = fakeEngine()
+      expect(() => loadMdWorkflows(engine, fakeSessionManager())).toThrow(/Missing frontmatter field "outputDir"/)
+    })
+
+    it('throws with clear error naming the offending file when commitMessage is missing', () => {
+      const noCommitMessage = `---
+kind: bad.daily
+name: Bad
+sessionPrefix: bad
+outputDir: .codekin/reports/bad
+filenameSuffix: _bad.md
+---
+Prompt.
+`
+      mockReaddirSync.mockReturnValue(['bad.md'])
+      mockReadFileSync.mockReturnValue(noCommitMessage)
+
+      const engine = fakeEngine()
+      expect(() => loadMdWorkflows(engine, fakeSessionManager())).toThrow(/Missing frontmatter field "commitMessage"/)
     })
 
     it('parses optional model field from frontmatter', () => {
@@ -257,14 +281,9 @@ Prompt.
 `
       mockReaddirSync.mockReturnValue(['bad.md'])
       mockReadFileSync.mockReturnValue(badMd)
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
       const engine = fakeEngine()
-      loadMdWorkflows(engine, fakeSessionManager())
-
-      expect(engine.registerWorkflow).not.toHaveBeenCalled()
-      expect(errSpy).toHaveBeenCalled()
-      errSpy.mockRestore()
+      expect(() => loadMdWorkflows(engine, fakeSessionManager())).toThrow(/absolute paths/)
     })
 
     it('rejects an MD def with ".." in outputDir', () => {
@@ -280,14 +299,9 @@ Prompt.
 `
       mockReaddirSync.mockReturnValue(['bad.md'])
       mockReadFileSync.mockReturnValue(badMd)
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
       const engine = fakeEngine()
-      loadMdWorkflows(engine, fakeSessionManager())
-
-      expect(engine.registerWorkflow).not.toHaveBeenCalled()
-      expect(errSpy).toHaveBeenCalled()
-      errSpy.mockRestore()
+      expect(() => loadMdWorkflows(engine, fakeSessionManager())).toThrow(/path traversal/)
     })
 
     it('rejects an MD def with ".." nested deeper in outputDir', () => {
@@ -303,14 +317,9 @@ Prompt.
 `
       mockReaddirSync.mockReturnValue(['bad.md'])
       mockReadFileSync.mockReturnValue(badMd)
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
       const engine = fakeEngine()
-      loadMdWorkflows(engine, fakeSessionManager())
-
-      expect(engine.registerWorkflow).not.toHaveBeenCalled()
-      expect(errSpy).toHaveBeenCalled()
-      errSpy.mockRestore()
+      expect(() => loadMdWorkflows(engine, fakeSessionManager())).toThrow(/path traversal/)
     })
 
     it('rejects an MD def with traversal in filenameSuffix', () => {
@@ -326,14 +335,9 @@ Prompt.
 `
       mockReaddirSync.mockReturnValue(['bad.md'])
       mockReadFileSync.mockReturnValue(badMd)
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
       const engine = fakeEngine()
-      loadMdWorkflows(engine, fakeSessionManager())
-
-      expect(engine.registerWorkflow).not.toHaveBeenCalled()
-      expect(errSpy).toHaveBeenCalled()
-      errSpy.mockRestore()
+      expect(() => loadMdWorkflows(engine, fakeSessionManager())).toThrow(/path traversal/)
     })
 
     it('rejects a repo workflow with absolute outputDir at registration', () => {
@@ -1014,9 +1018,9 @@ This is the repo-specific override prompt.
         const gitCalls: string[][] = []
         mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
           gitCalls.push(args)
-          // Simulate HEAD being on the audit branch after the run
+          // Simulate HEAD being on the reports branch after the run
           if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') {
-            return Buffer.from('audit/test-review.daily-2026-05-01\n')
+            return Buffer.from('codekin/reports\n')
           }
           return Buffer.from('')
         })
@@ -1168,12 +1172,11 @@ This is the repo-specific override prompt.
         )
       })
 
-      it('handles git commit failure gracefully', async () => {
+      it('fails the run when git commit fails (hard failure)', async () => {
         mockExecFileSync.mockImplementation(() => { throw new Error('git failed') })
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
         const handler = registeredDef.steps[3].handler
-        const result = await handler(
+        await expect(handler(
           {
             repoPath: '/tmp/repo',
             repoName: 'my-repo',
@@ -1182,23 +1185,16 @@ This is the repo-specific override prompt.
             branch: 'main',
           },
           { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
-        )
-
-        // Still returns the file path even if git fails
-        expect(result.filePath).toBeDefined()
-        expect(warnSpy).toHaveBeenCalled()
-        warnSpy.mockRestore()
+        )).rejects.toThrow('git failed')
       })
 
-      it('creates a fresh per-run audit/<kind>-<date> branch when it does not exist', async () => {
+      it('creates the codekin/reports branch when it does not exist', async () => {
         const gitCalls: string[][] = []
         mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
           gitCalls.push(args)
-          // rev-parse --abbrev-ref HEAD → main
-          if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return Buffer.from('main\n')
-          // rev-parse --verify <branch> → fail (branch doesn't exist)
+          // rev-parse --verify codekin/reports → fail (branch doesn't exist)
           if (args[0] === 'rev-parse' && args[1] === '--verify') throw new Error('not found')
-          // branch <name> → success
+          // branch codekin/reports → success
           if (args[0] === 'branch') return Buffer.from('')
           return Buffer.from('')
         })
@@ -1215,12 +1211,12 @@ This is the repo-specific override prompt.
           { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
         )
 
-        // Should have created a fresh audit/<kind>-<YYYY-MM-DD> branch — never
-        // the legacy long-lived 'codekin/reports' branch.
-        const branchCall = gitCalls.find(args => args[0] === 'branch' && /^audit\/test-review\.daily-\d{4}-\d{2}-\d{2}$/.test(args[1] ?? ''))
+        // Should have created the codekin/reports branch
+        const branchCall = gitCalls.find(args => args[0] === 'branch' && args[1] === REPORT_BRANCH)
         expect(branchCall).toBeDefined()
-        const legacyCall = gitCalls.find(args => args[0] === 'branch' && args[1] === 'codekin/reports')
-        expect(legacyCall).toBeUndefined()
+        // No per-run audit branches
+        const auditCall = gitCalls.find(args => args[0] === 'branch' && /^audit\//.test(args[1] ?? ''))
+        expect(auditCall).toBeUndefined()
       })
 
       it('uses git worktree instead of stash/checkout', async () => {
@@ -1277,7 +1273,7 @@ This is the repo-specific override prompt.
         expect(worktreeRemoveCall).toBeDefined()
       })
 
-      it('handles push failure gracefully and still cleans up worktree', async () => {
+      it('fails the run when push fails (no silent swallowing)', async () => {
         const gitCalls: string[][] = []
         mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
           gitCalls.push(args)
@@ -1289,7 +1285,7 @@ This is the repo-specific override prompt.
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
         const handler = registeredDef.steps[3].handler
-        const result = await handler(
+        await expect(handler(
           {
             repoPath: '/tmp/repo',
             repoName: 'my-repo',
@@ -1298,13 +1294,44 @@ This is the repo-specific override prompt.
             branch: 'develop',
           },
           { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
-        )
+        )).rejects.toThrow(/Failed to push report/)
 
-        // Should still return valid result
-        expect(result.filePath).toBeDefined()
         // Should still clean up worktree despite push failure
         const worktreeRemoveCall = gitCalls.find(args => args[0] === 'worktree' && args[1] === 'remove')
         expect(worktreeRemoveCall).toBeDefined()
+
+        warnSpy.mockRestore()
+      })
+
+      it('retries push with exponential backoff before failing', async () => {
+        const pushAttempts: number[] = []
+        let callCount = 0
+        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
+          if (args[0] === 'rev-parse' && args[1] === '--verify') return Buffer.from('')
+          if (args[0] === 'push') {
+            callCount++
+            pushAttempts.push(callCount)
+            throw new Error('network error')
+          }
+          return Buffer.from('')
+        })
+
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+        const handler = registeredDef.steps[3].handler
+        await expect(handler(
+          {
+            repoPath: '/tmp/repo',
+            repoName: 'my-repo',
+            reportText: 'Content',
+            sessionId: 's1',
+            branch: 'main',
+          },
+          { runId: 'r-retry', run: {}, abortSignal: new AbortController().signal }
+        )).rejects.toThrow(/Failed to push report.*3 attempts/)
+
+        // Should have attempted push 3 times (1 initial + 2 retries)
+        expect(pushAttempts).toHaveLength(3)
 
         warnSpy.mockRestore()
       })
@@ -1422,10 +1449,10 @@ This is the repo-specific override prompt.
       })
 
       // ----------------------------------------------------------------
-      // Per-run branch (regression — stale docs/audit-reports-* branch)
+      // Single long-lived branch — all runs commit to codekin/reports
       // ----------------------------------------------------------------
 
-      it('uses a fresh per-run audit/<kind>-<YYYY-MM-DD> branch, never the legacy codekin/reports', async () => {
+      it('uses the single codekin/reports branch, never per-run audit/* branches', async () => {
         const gitCalls: string[][] = []
         mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
           gitCalls.push(args)
@@ -1442,29 +1469,27 @@ This is the repo-specific override prompt.
             sessionId: 's1',
             branch: 'main',
           },
-          { runId: 'run-fresh-branch', run: {}, abortSignal: new AbortController().signal }
+          { runId: 'run-single-branch', run: {}, abortSignal: new AbortController().signal }
         )
 
-        const reportsBranchPattern = /^audit\/test-review\.daily-\d{4}-\d{2}-\d{2}$/
-
         const verifyCall = gitCalls.find(args =>
-          args[0] === 'rev-parse' && args[1] === '--verify' && reportsBranchPattern.test(String(args[2] ?? ''))
+          args[0] === 'rev-parse' && args[1] === '--verify' && args[2] === REPORT_BRANCH
         )
         expect(verifyCall).toBeDefined()
 
         const worktreeAddCall = gitCalls.find(args =>
-          args[0] === 'worktree' && args[1] === 'add' && reportsBranchPattern.test(String(args[3] ?? ''))
+          args[0] === 'worktree' && args[1] === 'add' && args[3] === REPORT_BRANCH
         )
         expect(worktreeAddCall).toBeDefined()
 
         const pushCall = gitCalls.find(args =>
-          args[0] === 'push' && args[1] === 'origin' && reportsBranchPattern.test(String(args[2] ?? ''))
+          args[0] === 'push' && args[1] === 'origin' && args[2] === REPORT_BRANCH
         )
         expect(pushCall).toBeDefined()
 
-        // The legacy branch must not appear in any git call.
-        const legacyCall = gitCalls.find(args => args.includes('codekin/reports'))
-        expect(legacyCall).toBeUndefined()
+        // No per-run audit branches should appear
+        const auditCall = gitCalls.find(args => args.some(a => /^audit\//.test(String(a))))
+        expect(auditCall).toBeUndefined()
       })
 
       it('does not write the report to the main working tree (C2 regression: no untracked reports file)', async () => {
@@ -1494,7 +1519,7 @@ This is the repo-specific override prompt.
         expect(worktreeWrites).toHaveLength(1)
       })
 
-      it('uses today\'s date in the branch name', async () => {
+      it('uses codekin/reports as worktree branch (not date-based)', async () => {
         const gitCalls: string[][] = []
         mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
           gitCalls.push(args)
@@ -1511,22 +1536,20 @@ This is the repo-specific override prompt.
             sessionId: 's1',
             branch: 'main',
           },
-          { runId: 'run-today', run: {}, abortSignal: new AbortController().signal }
+          { runId: 'run-branch-name', run: {}, abortSignal: new AbortController().signal }
         )
 
-        const today = new Date().toISOString().slice(0, 10)
-        const expected = `audit/test-review.daily-${today}`
         const branchCall = gitCalls.find(args =>
-          args[0] === 'worktree' && args[1] === 'add' && args[3] === expected
+          args[0] === 'worktree' && args[1] === 'add' && args[3] === REPORT_BRANCH
         )
         expect(branchCall).toBeDefined()
       })
 
       // ----------------------------------------------------------------
-      // Fix A — fork audit branches from origin/main (regression 2026-05-01)
+      // Branch creation and fast-forward
       // ----------------------------------------------------------------
 
-      it('fetches origin/main and creates audit branch from it when branch does not exist', async () => {
+      it('fetches origin/main and creates codekin/reports from it when branch does not exist', async () => {
         const gitCalls: string[][] = []
         mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
           gitCalls.push(args)
@@ -1546,45 +1569,42 @@ This is the repo-specific override prompt.
         )
         expect(fetchIdx).toBeGreaterThanOrEqual(0)
 
-        // git branch <name> origin/main — origin/main must be the explicit base
+        // git branch codekin/reports origin/main
         const branchCall = gitCalls.find(args =>
-          args[0] === 'branch' && /^audit\//.test(args[1] ?? '') && args[2] === 'origin/main'
+          args[0] === 'branch' && args[1] === REPORT_BRANCH && args[2] === 'origin/main'
         )
         expect(branchCall).toBeDefined()
 
         // fetch must precede branch creation
         const branchIdx = gitCalls.findIndex(args =>
-          args[0] === 'branch' && /^audit\//.test(args[1] ?? '')
+          args[0] === 'branch' && args[1] === REPORT_BRANCH
         )
         expect(fetchIdx).toBeLessThan(branchIdx)
       })
 
-      it('falls back to current HEAD with a warning when git fetch fails', async () => {
+      it('falls back to current HEAD with a warning when git fetch fails during branch creation', async () => {
         const gitCalls: string[][] = []
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
         mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
           gitCalls.push(args)
           if (args[0] === 'rev-parse' && args[1] === '--verify') throw new Error('not found')
-          if (args[0] === 'fetch') throw new Error('network error')
+          if (args[0] === 'fetch' && args[2] === 'main') throw new Error('network error')
           return Buffer.from('')
         })
 
         const handler = registeredDef.steps[3].handler
-        const result = await handler(
+        await handler(
           { repoPath: '/tmp/repo', repoName: 'my-repo', reportText: 'Content', sessionId: 's1', branch: 'main' },
           { runId: 'r-fetch-fail', run: {}, abortSignal: new AbortController().signal }
         )
-
-        // Should still succeed (no throw)
-        expect(result.filePath).toBeDefined()
 
         // Should warn about the fetch failure
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('git fetch origin main failed'))
 
         // git branch should be called WITHOUT origin/main (falls back to HEAD)
         const branchCall = gitCalls.find(args =>
-          args[0] === 'branch' && /^audit\//.test(args[1] ?? '')
+          args[0] === 'branch' && args[1] === REPORT_BRANCH
         )
         expect(branchCall).toBeDefined()
         expect(branchCall![2]).toBeUndefined()
@@ -1592,7 +1612,7 @@ This is the repo-specific override prompt.
         warnSpy.mockRestore()
       })
 
-      it('skips fetch and branch creation when audit branch already exists (same-day rerun)', async () => {
+      it('fast-forwards existing branch to origin when it already exists', async () => {
         const gitCalls: string[][] = []
         mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
           gitCalls.push(args)
@@ -1607,9 +1627,16 @@ This is the repo-specific override prompt.
           { runId: 'r-rerun', run: {}, abortSignal: new AbortController().signal }
         )
 
-        // No fetch and no branch creation when branch already exists
-        const fetchCall = gitCalls.find(args => args[0] === 'fetch')
-        expect(fetchCall).toBeUndefined()
+        // When branch exists, should fetch and update-ref to fast-forward
+        const fetchCall = gitCalls.find(args =>
+          args[0] === 'fetch' && args[1] === 'origin' && args[2] === REPORT_BRANCH
+        )
+        expect(fetchCall).toBeDefined()
+        const updateRefCall = gitCalls.find(args =>
+          args[0] === 'update-ref' && args[1] === `refs/heads/${REPORT_BRANCH}`
+        )
+        expect(updateRefCall).toBeDefined()
+        // No branch creation
         const branchCreateCall = gitCalls.find(args => args[0] === 'branch')
         expect(branchCreateCall).toBeUndefined()
       })
@@ -2024,24 +2051,19 @@ commitMessage: chore: test review
       expect(engine.registerWorkflow).toHaveBeenCalledTimes(1)
     })
 
-    it('rejects empty frontmatter (all required fields missing)', () => {
+    it('throws on empty frontmatter (all required fields missing)', () => {
       const emptyFm = `---
 ---
 Prompt text.
 `
       mockReaddirSync.mockReturnValue(['test.md'])
       mockReadFileSync.mockReturnValue(emptyFm)
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
       const engine = fakeEngine()
-      loadMdWorkflows(engine, fakeSessionManager())
-
-      expect(engine.registerWorkflow).not.toHaveBeenCalled()
-      expect(consoleSpy).toHaveBeenCalled()
-      consoleSpy.mockRestore()
+      expect(() => loadMdWorkflows(engine, fakeSessionManager())).toThrow(/No frontmatter found|Missing frontmatter field/)
     })
 
-    it('rejects content with no closing frontmatter delimiter', () => {
+    it('throws on content with no closing frontmatter delimiter', () => {
       const noClosing = `---
 kind: test-review.daily
 name: Test Review
@@ -2049,14 +2071,9 @@ This just keeps going without a closing ---
 `
       mockReaddirSync.mockReturnValue(['test.md'])
       mockReadFileSync.mockReturnValue(noClosing)
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
       const engine = fakeEngine()
-      loadMdWorkflows(engine, fakeSessionManager())
-
-      expect(engine.registerWorkflow).not.toHaveBeenCalled()
-      expect(consoleSpy).toHaveBeenCalled()
-      consoleSpy.mockRestore()
+      expect(() => loadMdWorkflows(engine, fakeSessionManager())).toThrow(/No frontmatter found/)
     })
   })
 
