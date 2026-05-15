@@ -8,8 +8,9 @@
 import { Router } from 'express'
 import type { Request } from 'express'
 import multer from 'multer'
-import { mkdirSync, existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'fs'
+import { mkdirSync, existsSync, lstatSync, readFileSync, readdirSync, realpathSync, unlinkSync } from 'fs'
 import { join, extname, sep } from 'path'
+import { fileTypeFromFile } from 'file-type'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { homedir } from 'os'
@@ -186,6 +187,8 @@ export function createUploadRouter(
   })
   const ALLOWED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'text/markdown']
   const ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.md']
+  /** Binary MIME types that have detectable file signatures (magic bytes). */
+  const BINARY_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
   const upload = multer({
     storage,
     limits: { fileSize: 20 * 1024 * 1024 },
@@ -221,12 +224,32 @@ export function createUploadRouter(
       }
       next()
     })
-  }, (req, res) => {
+  }, async (req, res) => {
     if (!req.file) {
       res.status(400).json({ error: 'No file uploaded' })
       return
     }
     const filePath = join(SCREENSHOTS_DIR, req.file.filename)
+
+    // Magic-byte validation for binary types — prevents polyglot/disguised files
+    if (BINARY_MIME_TYPES.has(req.file.mimetype)) {
+      try {
+        const detected = await fileTypeFromFile(filePath)
+        if (!detected || detected.mime !== req.file.mimetype) {
+          unlinkSync(filePath)
+          const actual = detected ? detected.mime : 'unknown'
+          res.status(400).json({
+            error: `File signature mismatch: claimed ${req.file.mimetype} but detected ${actual}`,
+          })
+          return
+        }
+      } catch {
+        unlinkSync(filePath)
+        res.status(400).json({ error: 'Failed to verify file signature' })
+        return
+      }
+    }
+
     console.log(`Saved file: ${filePath}`)
     res.json({ success: true, path: filePath })
   })
