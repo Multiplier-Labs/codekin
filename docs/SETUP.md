@@ -63,6 +63,20 @@ Contents of `~/.config/codekin/env`:
 # Webhook-specific vars are configured in Step 10.
 ```
 
+Key server environment variables (see `server/config.ts` for the full list):
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `32352` | Main server port |
+| `CORS_ORIGIN` | `http://localhost:5173` | Allowed CORS origin (must be set in production) |
+| `AUTH_TOKEN` | — | Shared auth token for WebSocket and REST API |
+| `REPOS_ROOT` | `~/repos` | Root directory for cloned repositories |
+| `DATA_DIR` | `~/.codekin` | Codekin data directory |
+| `TRUST_PROXY` | `false` | Trust `X-Forwarded-For` headers (set when behind a reverse proxy) |
+| `CODEKIN_AGENT_NAME` | `Joe` | Display name for the orchestrator agent |
+| `CODEKIN_AUTO_RESTORE_SESSIONS` | `false` | Auto-restart Claude processes that were alive at previous shutdown (`true` to opt in) |
+| `CODEKIN_ORCHESTRATOR_MONITOR` | `false` | Run the orchestrator proactive monitor (15-minute polling) (`true` to opt in) |
+
 Source it from `~/.bashrc` so it's available to all shells and systemd user services:
 
 ```bash
