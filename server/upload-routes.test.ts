@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
 import type { AddressInfo } from 'net'
 import type { Server } from 'http'
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync, existsSync } from 'fs'
+import { mkdtempSync, symlinkSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
