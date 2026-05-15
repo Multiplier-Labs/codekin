@@ -8,6 +8,7 @@
  */
 
 import { spawn } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import type { Session, WsServerMessage } from './types.js'
 import { CLAUDE_BINARY } from './config.js'
 
@@ -48,10 +49,13 @@ function buildNamingEnv(): Record<string, string> {
 /** Generate a session name by spawning `claude -p` in one-shot mode. */
 function generateNameViaCLI(prompt: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    // --max-turns 2: one turn to receive/process the prompt, one to reply with the name.
-    // Using 1 would sometimes cause the CLI to exit before producing output.
-    const proc = spawn(CLAUDE_BINARY, ['-p', '--max-turns', '2', '--model', 'haiku'], {
+    // Run in tmpdir so no project CLAUDE.md/hooks/skills get auto-loaded —
+    // those would inject unrelated context and the model ends up responding
+    // to that instead of the naming prompt. --tools "" disables tools so the
+    // model can't burn its single turn on a tool call.
+    const proc = spawn(CLAUDE_BINARY, ['-p', '--max-turns', '1', '--model', 'haiku', '--tools', ''], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: tmpdir(),
       env: buildNamingEnv(),
     })
 

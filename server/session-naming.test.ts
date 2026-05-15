@@ -162,8 +162,11 @@ describe('SessionNaming', () => {
     expect(deps.rename).toHaveBeenCalledWith('s1', 'Fix Login Page Styling')
     expect(mockSpawn).toHaveBeenCalledWith(
       'claude',
-      ['-p', '--max-turns', '2', '--model', 'haiku'],
-      expect.objectContaining({ stdio: ['pipe', 'pipe', 'pipe'] }),
+      ['-p', '--max-turns', '1', '--model', 'haiku', '--tools', ''],
+      expect.objectContaining({
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: expect.any(String),
+      }),
     )
   })
 
