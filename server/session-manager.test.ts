@@ -3085,7 +3085,8 @@ describe('SessionManager', () => {
       mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
         if (typeof cb === 'function') {
           if (args[0] === 'rev-parse') {
-            cb(null, '/repos/myproject\n', '')
+            // --git-common-dir returns the main repo's .git directory
+            cb(null, '/repos/myproject/.git\n', '')
           } else {
             cb(null, '', '')
           }
@@ -3107,7 +3108,8 @@ describe('SessionManager', () => {
       mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
         if (typeof cb === 'function') {
           if (args[0] === 'rev-parse') {
-            cb(null, '/repos/myproject\n', '')
+            // --git-common-dir returns the main repo's .git directory
+            cb(null, '/repos/myproject/.git\n', '')
           } else if (args[0] === 'worktree' && args[1] === 'add') {
             cb(new Error('fatal: worktree add failed'), '', 'fatal: worktree add failed')
           } else {
@@ -3133,7 +3135,8 @@ describe('SessionManager', () => {
       mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
         if (typeof cb === 'function') {
           if (args[0] === 'rev-parse') {
-            cb(null, '/repos/myproject\n', '')
+            // --git-common-dir returns the main repo's .git directory
+            cb(null, '/repos/myproject/.git\n', '')
           } else {
             cb(null, '', '')
           }
@@ -3483,7 +3486,8 @@ describe('SessionManager', () => {
         gitCalls.push(args)
         if (typeof cb === 'function') {
           if (args[0] === 'rev-parse') {
-            cb(null, '/repos/myproject\n', '')
+            // --git-common-dir returns the main repo's .git directory
+            cb(null, '/repos/myproject/.git\n', '')
           } else if (args[0] === 'show-ref') {
             // Branch does not exist yet
             cb(new Error('not found'), '', '')
@@ -3511,7 +3515,8 @@ describe('SessionManager', () => {
         gitCalls.push(args)
         if (typeof cb === 'function') {
           if (args[0] === 'rev-parse') {
-            cb(null, '/repos/myproject\n', '')
+            // --git-common-dir returns the main repo's .git directory
+            cb(null, '/repos/myproject/.git\n', '')
           } else if (args[0] === 'show-ref') {
             // Branch already exists
             cb(null, '', '')
@@ -3538,7 +3543,8 @@ describe('SessionManager', () => {
         gitCalls.push(args)
         if (typeof cb === 'function') {
           if (args[0] === 'rev-parse') {
-            cb(null, '/repos/myproject\n', '')
+            // --git-common-dir returns the main repo's .git directory
+            cb(null, '/repos/myproject/.git\n', '')
           } else if (args[0] === 'show-ref') {
             // Branch exists
             cb(null, '', '')
@@ -3566,7 +3572,8 @@ describe('SessionManager', () => {
         gitCalls.push(args)
         if (typeof cb === 'function') {
           if (args[0] === 'rev-parse') {
-            cb(null, '/repos/myproject\n', '')
+            // --git-common-dir returns the main repo's .git directory
+            cb(null, '/repos/myproject/.git\n', '')
           } else if (args[0] === 'show-ref') {
             cb(null, '', '') // branch exists
           } else {
@@ -3593,7 +3600,8 @@ describe('SessionManager', () => {
         gitCalls.push(args)
         if (typeof cb === 'function') {
           if (args[0] === 'rev-parse') {
-            cb(null, '/repos/myproject\n', '')
+            // --git-common-dir returns the main repo's .git directory
+            cb(null, '/repos/myproject/.git\n', '')
           } else if (args[0] === 'show-ref') {
             cb(new Error('not found'), '', '') // branch doesn't exist
           } else {
@@ -3620,7 +3628,8 @@ describe('SessionManager', () => {
         gitCalls.push(args)
         if (typeof cb === 'function') {
           if (args[0] === 'rev-parse') {
-            cb(null, '/repos/myproject\n', '')
+            // --git-common-dir returns the main repo's .git directory
+            cb(null, '/repos/myproject/.git\n', '')
           } else if (args[0] === 'show-ref') {
             cb(null, '', '') // branch exists
           } else {

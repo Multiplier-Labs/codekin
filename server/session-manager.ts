@@ -444,16 +444,25 @@ export class SessionManager {
     if (!session) return null
 
     try {
-      // Resolve the actual git repo root — workingDir may be a subdirectory
+      // Resolve the canonical (main) repo root.
+      // --git-common-dir points to the main repo's .git even when called from
+      // inside a worktree, so its parent is always the main repo working tree.
+      // (Plain --show-toplevel would return the *current* worktree path,
+      // causing nested worktrees and a separate sidebar group bug.)
       const env = cleanGitEnv()
-      const { stdout: repoRootRaw } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
-        cwd: workingDir,
-        env,
-        timeout: 5000,
-      })
-      const repoRoot = repoRootRaw.trim()
-      if (!repoRoot || !path.isAbsolute(repoRoot)) {
-        console.error(`[worktree] Invalid repo root resolved: "${repoRoot}"`)
+      const { stdout: commonDirRaw } = await execFileAsync(
+        'git',
+        ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+        { cwd: workingDir, env, timeout: 5000 },
+      )
+      const commonDir = commonDirRaw.trim()
+      if (!commonDir || !path.isAbsolute(commonDir)) {
+        console.error(`[worktree] Invalid git common dir resolved: "${commonDir}"`)
+        return null
+      }
+      const repoRoot = path.dirname(commonDir)
+      if (!path.isAbsolute(repoRoot)) {
+        console.error(`[worktree] Invalid repo root derived from common dir: "${repoRoot}"`)
         return null
       }
 
