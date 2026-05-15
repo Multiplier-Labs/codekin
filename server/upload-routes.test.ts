@@ -40,6 +40,27 @@ vi.mock('fs', async (importOriginal) => {
   }
 })
 
+// Stub child_process.execFile so `gh repo clone` fails instantly instead of
+// spawning a real process (which hangs in CI without GH_TOKEN).
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>()
+  return {
+    ...actual,
+    execFile: Object.assign(
+      (...args: unknown[]) => {
+        const cb = typeof args[args.length - 1] === 'function'
+          ? (args[args.length - 1] as (err: Error | null) => void)
+          : null
+        if (cb) {
+          process.nextTick(() => cb(new Error('gh stubbed in test')))
+        }
+      },
+      // Preserve custom promisify so util.promisify(execFile) works
+      { __promisify__: (..._args: unknown[]) => Promise.reject(new Error('gh stubbed in test')) },
+    ),
+  }
+})
+
 // Imported after vi.mock so the router picks up the mocked fs.
 import { localRepoPath, createUploadRouter } from './upload-routes.js'
 
