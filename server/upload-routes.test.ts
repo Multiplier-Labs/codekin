@@ -1,6 +1,6 @@
 /**
- * Tests for upload-routes — covers the localRepoPath helper plus the clone
- * route's handling of an unresolvable repos root (W4).
+ * Tests for upload-routes — covers the localRepoPath helper, clone route
+ * handling, and magic-byte file signature validation (M2).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
@@ -16,7 +16,18 @@ import { tmpdir } from 'os'
 
 const mocks = vi.hoisted(() => ({
   realpathThrows: false,
+  screenshotsDir: '',
 }))
+
+vi.mock('./config.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./config.js')>()
+  return {
+    ...actual,
+    get SCREENSHOTS_DIR() {
+      return mocks.screenshotsDir || actual.SCREENSHOTS_DIR
+    },
+  }
+})
 
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>()
@@ -197,5 +208,96 @@ describe('POST /api/clone — symlink escape (C1)', () => {
     })
     // Boundary check passes; clone itself may fail (no gh credentials) — not 400
     expect(res.status).not.toBe(400)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// POST /api/upload — magic-byte file signature validation (M2)
+// ---------------------------------------------------------------------------
+
+describe('POST /api/upload — magic-byte validation (M2)', () => {
+  let server: Server
+  let baseUrl: string
+  let screenshotsDir: string
+
+  // Minimal valid PNG: 1×1 pixel, RGBA
+  const VALID_PNG = Buffer.from(
+    '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489' +
+    '0000000a49444154789c626000000002000198e195280000000049454e44ae426082',
+    'hex',
+  )
+
+  // Minimal valid JPEG (SOI + APP0 JFIF marker + EOI)
+  const VALID_JPEG = Buffer.from(
+    'ffd8ffe000104a46494600010100000100010000ffd9',
+    'hex',
+  )
+
+  beforeEach(async () => {
+    mocks.realpathThrows = false
+    screenshotsDir = mkdtempSync(join(tmpdir(), 'codekin-upload-test-'))
+    mocks.screenshotsDir = screenshotsDir
+
+    const app = express()
+    app.use(createUploadRouter(
+      verifyToken,
+      extractToken as unknown as (req: express.Request) => string | undefined,
+    ))
+    server = app.listen(0)
+    await new Promise<void>(res => server.once('listening', () => res()))
+    const port = (server.address() as AddressInfo).port
+    baseUrl = `http://127.0.0.1:${port}`
+  })
+
+  afterEach(async () => {
+    await new Promise<void>(res => server.close(() => res()))
+    rmSync(screenshotsDir, { recursive: true, force: true })
+    mocks.screenshotsDir = ''
+  })
+
+  function uploadFile(filename: string, mime: string, content: Buffer) {
+    const boundary = '----TestBoundary' + Date.now()
+    const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${mime}\r\n\r\n`
+    const footer = `\r\n--${boundary}--\r\n`
+    const body = Buffer.concat([Buffer.from(header), content, Buffer.from(footer)])
+    return fetch(`${baseUrl}/api/upload`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${AUTH_TOKEN}`,
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      },
+      body,
+    })
+  }
+
+  it('accepts a valid PNG file', async () => {
+    const res = await uploadFile('test.png', 'image/png', VALID_PNG)
+    expect(res.status).toBe(200)
+    const body = await res.json() as { success: boolean; path: string }
+    expect(body.success).toBe(true)
+  })
+
+  it('rejects a file with PNG extension/mime but JPEG bytes (signature mismatch)', async () => {
+    const res = await uploadFile('fake.png', 'image/png', VALID_JPEG)
+    expect(res.status).toBe(400)
+    const body = await res.json() as { error: string }
+    expect(body.error).toContain('signature mismatch')
+    expect(body.error).toContain('image/jpeg')
+  })
+
+  it('accepts a markdown file (no magic-byte check for text types)', async () => {
+    const md = Buffer.from('# Hello\n\nThis is a test document.\n')
+    const res = await uploadFile('readme.md', 'text/markdown', md)
+    expect(res.status).toBe(200)
+    const body = await res.json() as { success: boolean }
+    expect(body.success).toBe(true)
+  })
+
+  it('rejects a file with unknown binary signature claiming to be PNG', async () => {
+    const garbage = Buffer.from('not a real image file at all')
+    const res = await uploadFile('bad.png', 'image/png', garbage)
+    expect(res.status).toBe(400)
+    const body = await res.json() as { error: string }
+    expect(body.error).toContain('signature mismatch')
   })
 })
