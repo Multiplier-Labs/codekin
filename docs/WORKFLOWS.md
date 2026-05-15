@@ -11,7 +11,7 @@ Every workflow follows the same four-step execution model:
 1. **validate_repo** — Verify the repo path exists and is a git repository. If a `sinceTimestamp` is provided, skip the run if there are no new commits since that time.
 2. **create_session** — Create a Codekin session scoped to the repo.
 3. **run_prompt** — Start Claude, send the workflow prompt, and wait for a result (10-minute timeout).
-4. **save_report** — Write the output as a dated Markdown file into the repo, then commit it.
+4. **save_report** — Write the output as a dated Markdown file into the repo, commit it to a single dedicated branch (forked fresh from `origin/main` each run), and push.
 
 Workflow runs are triggered by cron schedules configured per-repo via the workflow API.
 
@@ -162,7 +162,7 @@ Choose a `kind` that doesn't conflict with existing workflows. The convention is
 
 ## Report Output
 
-Each generated report is saved as:
+Each workflow run produces a single report file at a consistent output path:
 
 ```
 {repo}/{outputDir}/{YYYY-MM-DD}{filenameSuffix}
@@ -184,4 +184,4 @@ The file begins with an auto-generated header:
 {Claude output}
 ```
 
-After saving, the report is automatically staged and committed to the repository using the configured `commitMessage` + date suffix.
+After saving, the report is automatically staged and committed. All workflow report commits for a given repo land on a **single dedicated branch** (`codekin/reports`) which is forked fresh from `origin/main` at the start of each run. This avoids polluting the main branch with report commits and ensures each run uses a single consistent output path with no duplication (#441, #472).

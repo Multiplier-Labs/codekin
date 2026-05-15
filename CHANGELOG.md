@@ -7,11 +7,139 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Features
+## [0.6.5] - 2026-05-14
+
+### Added
+- Enforce single-branch report commit for AI workflows (#472)
+- Add ecosystem.config.cjs.example with interpreter pin (#471)
+- Notify parent session immediately when orchestrator child terminates (#462, #463)
+
+### Changed
+- Default to quiet mode — no boot-time Claude spawns or 15-minute monitor (#467)
+
+### Fixed
+- Only trip circuit breaker on `overageStatus=rejected` (#470)
+- Make rate-limit notification text honest about backoff vs quota (#469)
+- Cap headless session lifetime and circuit-break on rate limits (#468)
+- Roll back dedup key on `startRun` failure; harden GitHub slug parser (#465)
+- Fork audit branches from `origin/main` and restore main checkout (#457, #461)
+
+### Security
+- Sanitize commit-event prompt input, remove duplicate report write (#455)
+- Validate commit-event repoPath, `set_permission_mode` WS check, dep alignment (#454)
+- Canonicalize clone destination to prevent symlink escape (C1) (#453)
+- Validate `permissionMode` at runtime on session creation (#452)
+- Cron DoS, path traversal, dedup scoping, PATCH validation (#449)
+
+### Chores
+- Repo-health cleanup: orphaned dist, WS docs, tsconfig (#451)
+- Bump marked from 17 to 18.0.2 (#450)
+- Bump @multiplier-labs/stepflow to 0.3.4 (#445)
+- Add `isWorkflowReportsBranch` to workflow-loader mock (#448)
+- Add code-review and security audit reports for 2026-04-30 (#456)
+
+## [0.6.4] - 2026-04-28
+
+### Added
+- Workflow engine restart resume and orphan session handling (#437)
+- Unified ProcessCoordinator for session lifecycle (#404)
+- Auto-setup GitHub webhook for PR Review workflows (#391)
+- Add Claude Opus 4.7 to available models (#421)
+
+### Fixed
+- Single output path per audit + fresh branch per run (#441)
+- Silence passive-repo alert for repos with no enabled workflows (#436)
+- WS rate-limit bypass, gh call timeouts, and prompt-timeout docs alignment (#435)
+- hooksPath resolution and CORS PATCH method (#432)
+- Nested reports path, narrow CSP connect-src, and API docs drift (#426)
+- Canonicalize repos_path and namespace local repo storage by owner (#425)
+- Validate repoPath and cron expression on workflow/orchestrator routes (#423)
+- Add hard key caps to auth and webhook rate-limiter maps (#418)
+- Prevent JSON injection in commit-event-hook.sh (#417)
+- Prevent symlink bypass in spawn route (#419)
+- Harden docs browser root scope and persist canonical paths (#409)
+- Widen Edit Workflow modal to prevent day label clipping (#408)
+- Prevent spurious reconfigure when model is first assigned to a new session (#407)
+- Polish Edit Workflow modal layout (#401, #403, #405)
+- Streamline Edit Workflow modal layout (#401)
+- Address GPT review feedback on report commit robustness (#400)
+- Unify workflow report commit/push across MD and Stepflow systems (#398)
+- Add API rate limiter map cap and attachment file size limit (#397)
+- Harden path traversal, trust proxy, and image src allowlist (#394)
+- Improve Edit Workflow modal layout with two-column design (#393)
+- Roll window at boundary, not after (W5) (#438)
+- Guard realpathSync in clone route (W4) (#438)
+- Require Origin header in production WS handshake (W3) (#438)
+- Clean up hooks for fully-removed repos (W2) (#438)
+- Reject cron step value of 0 (W1) (#438)
+
+### Security
+- Harden settings repos-path and rate-limit child spawn (#431)
+
+### Refactoring
+- Decompose App.tsx into focused hooks (#416)
+- Split orchestrator-routes.ts into focused sub-routers (#415)
+
+### Tests
+- Cover server coverage gaps: stepflow-prompt, session-persistence, version-check, webhook-handler-base, tool-labels, orchestrator-learning-router, orchestrator-routes, webhook-routes, commit-event-handler, error-page (#440)
+- Cover auth, docs, session, workflow, and commit-event route handlers (#427, #428)
+
+### Documentation
+- Document H1 + M5 security error responses (#433)
+- Address 2026-04-22 docs-audit findings (#429)
+- Cleanup docs for Apr 15 audit — add PR review, cross-references, roadmap restructure (#414)
+- Document WebSocket rate limiting and workflow restart-resume (#439)
+- Session initiation audit report (#399)
+
+### Chores
+- Enforce strict @typescript-eslint/no-unsafe-* rules across codebase (#410, #411)
+- Align server TS version and widen ESLint server glob (#430)
+- Remove three unused exports (#434)
+- Remove leftover blank line from debug lifecycle log cleanup (#420)
+- Bump dompurify to 3.4.0 and better-sqlite3 to 12.9.0 (#424)
+
+## [0.6.3] - 2026-04-14
+
+### Fixed
+- Resolve duplicate model messages and mixed thinking text for OpenCode sessions (#385)
+- Persist OpenCode model selection across sessions (#384)
+- Only show model info once per session instead of every turn (#383)
+- Show 'Session started' immediately instead of empty chat on startup (#386)
+- Prevent model/session message cascade on OpenCode session start (#387, #388, #389)
+- Separate reasoning from text in OpenCode streaming for Kimi (#388)
+
+## [0.6.2] - 2026-04-12
+
+### Added
+- Provider selection and searchable model picker in workflows (#375)
+- GitHub webhook integration health checks and setup wizard (#373)
+
+### Fixed
+- Resolve deadlock preventing Claude session start (#382)
+- Overhaul session lifecycle to fix crashes, message loss, and duplicate notifications (#381)
+- Prevent message loss when Claude process exits before system_init (#380)
+- Prevent session restart loops from process lifecycle races (#379)
+- Preserve user input for session naming (#378)
+- Persist OpenCode provider when saving workflow config (#377)
+- Probe OpenCode availability on startup for accurate connection status (#376)
+- Tighten retry regex patterns and dedupe model dropdown entries (#372)
+- Set NODE_ENV=test in vitest config to prevent act-is-not-a-function failures (#371)
+
+## [0.6.1] - 2026-04-11
+
+### Added
 - **Connection status popup** — Real-time provider health indicators with disable/enable toggles (#346)
 - **PR Review workflow** — Add PR Review as event-driven workflow kind in Workflows UI (#334)
+- Show disconnected message for OpenCode sessions (#345)
+- Model picker with search, recents, and keyboard navigation (#368)
 
-### Fixes
+### Fixed
+- Resolve ESLint template literal error in claude-process (#369)
+- Address 5 small issues from audit reports (#366)
+- Validate model when switching between claude and opencode sessions (#363)
+- Add missing _isStarting property to restored sessions (#361)
+- Prevent symlink-based path traversal in docs and reports endpoints (#358)
+- Address 4 server correctness bugs found in code review (#359)
 - Restore `wss:`/`ws:` in CSP connect-src to unbreak WebSocket connections (#356)
 - Harden server security: auth token in headers only, rate limiting, CSP, WebSocket origin validation (#355)
 - Strip GIT_* env vars from OpenCode server to fix worktree git operations (#353)
@@ -21,7 +149,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prevent false session resets from aggressive zombie detection and leave grace period (#349)
 - Provider disabled overlay and input bar UX improvements (#348)
 - Disable input and show message when provider is disabled (#347)
-- Show disconnected message for OpenCode sessions (#345)
 - Use FilePartInput format for image attachments in OpenCode sessions (#343)
 - Strip user echo, handle reasoning deltas, and support text file attachments in OpenCode (#342)
 - Make model dropdown scrollable with max 10 visible items (#341)
@@ -31,6 +158,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Refactoring
 - Migrate to open-source @multiplier-labs/stepflow (#333)
+
+### Documentation
+- Update changelog and README to feature OpenCode support (#357)
 
 ## [0.6.0] - 2026-04-10
 
