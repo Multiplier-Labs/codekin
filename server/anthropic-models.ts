@@ -20,16 +20,41 @@ export interface ClaudeModelInfo {
   label: string
 }
 
-/** Hardcoded fallback used until dynamic discovery completes. */
+/** Hardcoded fallback used until dynamic discovery completes.
+ *  Per https://platform.claude.com/docs/en/about-claude/models/overview */
 export const FALLBACK_MODELS: ClaudeModelInfo[] = [
+  { id: 'claude-opus-4-8', label: 'Opus 4.8' },
   { id: 'claude-opus-4-7', label: 'Opus 4.7' },
   { id: 'claude-opus-4-6', label: 'Opus 4.6' },
   { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
   { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
 ]
 
-/** Known CLI aliases to probe. The CLI resolves these to the latest model IDs. */
-const CLI_ALIASES = ['opus', 'sonnet', 'haiku'] as const
+/**
+ * Candidate model IDs to probe via the CLI. We don't probe aliases (opus/sonnet/haiku)
+ * because the CLI's alias resolution lags — `opus` still resolves to 4-6 even when
+ * 4-8 is the latest. Instead, we probe specific version IDs spanning current and
+ * likely-future releases. Failed probes return in ~2.5s at zero cost; successful
+ * probes cost ~$0.04 each. Probing in parallel keeps total wall time under 5s.
+ */
+const CANDIDATE_MODEL_IDS: string[] = [
+  // Opus family (currently 4.6, 4.7, 4.8 are live; probe ahead for new releases)
+  'claude-opus-4-6',
+  'claude-opus-4-7',
+  'claude-opus-4-8',
+  'claude-opus-4-9',
+  'claude-opus-5-0',
+  // Sonnet family (currently 4.6 is latest; probe ahead)
+  'claude-sonnet-4-6',
+  'claude-sonnet-4-7',
+  'claude-sonnet-4-8',
+  'claude-sonnet-5-0',
+  // Haiku family (currently 4.5 is latest; probe ahead — note dated suffix)
+  'claude-haiku-4-5-20251001',
+  'claude-haiku-4-6',
+  'claude-haiku-4-7',
+  'claude-haiku-5-0',
+]
 
 // ---------------------------------------------------------------------------
 // Shared cache
@@ -104,33 +129,37 @@ async function fetchViaApi(): Promise<ClaudeModelInfo[] | null> {
 // Strategy 2: CLI alias probing
 // ---------------------------------------------------------------------------
 
-/** Probe a single CLI alias and return the resolved model ID, or null on failure. */
-function probeAlias(alias: string): Promise<string | null> {
+/**
+ * Probe a single model ID via the CLI. Returns the model ID if available,
+ * null otherwise. Failed probes return in ~2.5s without consuming tokens;
+ * successful probes take ~4.5s and cost ~$0.04 (one short turn).
+ */
+function probeModel(modelId: string): Promise<string | null> {
   return new Promise(resolve => {
     const child = execFile(
       CLAUDE_BINARY,
-      ['-p', '--model', alias, '--output-format', 'json', '--bare', 'reply with only: ok'],
-      { timeout: 30_000, env: { ...process.env, CLAUDE_CODE_SIMPLE: '1' } },
+      // Note: do NOT pass --bare — it strips the modelUsage field we need.
+      ['-p', '--model', modelId, '--output-format', 'json', 'reply with only: ok'],
+      { timeout: 30_000 },
       (err, stdout) => {
         if (err) { resolve(null); return }
         try {
-          const result = JSON.parse(stdout) as { modelUsage?: Record<string, unknown> }
-          // modelUsage is { "claude-opus-4-8": { ... } } — grab the first key
-          const modelId = Object.keys(result.modelUsage ?? {})[0]
-          resolve(modelId || null)
+          const result = JSON.parse(stdout) as { is_error?: boolean; modelUsage?: Record<string, unknown> }
+          if (result.is_error) { resolve(null); return }
+          const id = Object.keys(result.modelUsage ?? {})[0]
+          resolve(id || null)
         } catch {
           resolve(null)
         }
       },
     )
-    // Ensure we don't leak the child if something goes wrong
     child.unref?.()
   })
 }
 
-/** Probe all known aliases in parallel. Returns discovered models. */
+/** Probe all candidate model IDs in parallel. */
 async function fetchViaCli(): Promise<ClaudeModelInfo[] | null> {
-  const results = await Promise.all(CLI_ALIASES.map(probeAlias))
+  const results = await Promise.all(CANDIDATE_MODEL_IDS.map(probeModel))
   const models: ClaudeModelInfo[] = []
   const seen = new Set<string>()
 
@@ -141,6 +170,7 @@ async function fetchViaCli(): Promise<ClaudeModelInfo[] | null> {
     }
   }
 
+  // Sort newest version first within each family (opus > sonnet > haiku ordering preserved by input)
   return models.length > 0 ? models : null
 }
 

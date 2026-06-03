@@ -60,8 +60,9 @@ export const PROVIDERS: { id: CodingProvider; label: string; description: string
 /** Model option for UI selectors. */
 export interface ModelOption { id: string; label: string }
 
-/** Static models for Claude Code CLI. */
+/** Static models for Claude Code CLI. Used as fallback before dynamic discovery completes. */
 export const CLAUDE_MODELS: ModelOption[] = [
+  { id: 'claude-opus-4-8', label: 'Opus 4.8' },
   { id: 'claude-opus-4-7', label: 'Opus 4.7' },
   { id: 'claude-opus-4-6', label: 'Opus 4.6' },
   { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
