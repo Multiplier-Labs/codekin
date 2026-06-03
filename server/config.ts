@@ -80,6 +80,24 @@ export function resolveRepoPathInRoot(repoPath: string): string | null {
   return resolved
 }
 
+/**
+ * Resolve the canonical local repo directory used to group sessions in the
+ * sidebar. Repos are cloned owner-namespaced (`REPOS_ROOT/owner/name`, see
+ * `localRepoPath` in upload-routes), and manual sessions group under that same
+ * path. Automated sessions (webhook, stepflow) must use the owner-namespaced
+ * path too — otherwise a flat `REPOS_ROOT/name` groupDir produces a second,
+ * duplicate repo node in the sidebar. Falls back to the flat layout for older
+ * flat clones that predate owner-namespacing.
+ *
+ * @param fullName GitHub `owner/name` (e.g. `repository.full_name`).
+ * @param repoName Bare repo name (e.g. `repository.name`).
+ */
+export function resolveRepoGroupDir(fullName: string, repoName: string): string {
+  const nested = `${REPOS_ROOT}/${fullName}`
+  if (existsSync(nested)) return nested
+  return `${REPOS_ROOT}/${repoName}`
+}
+
 /** Codekin data directory (sessions, approvals, workflows, etc.). */
 export const DATA_DIR = process.env.DATA_DIR || join(homedir(), '.codekin')
 
