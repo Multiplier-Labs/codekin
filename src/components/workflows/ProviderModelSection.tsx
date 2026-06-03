@@ -38,7 +38,7 @@ interface Props {
 export function ProviderModelSection({ token, workingDir, provider, model, onProviderChange, onModelChange }: Props) {
   const [openCodeAvailable, setOpenCodeAvailable] = useState<boolean | null>(null)
   const [openCodeModels, setOpenCodeModels] = useState<ModelOption[]>([])
-  const [claudeWorkflowModels, setClaudeWorkflowModels] = useState<ModelOption[]>(FALLBACK_WORKFLOW_MODELS)
+  const [claudeWorkflowModels, setClaudeWorkflowModels] = useState(FALLBACK_WORKFLOW_MODELS)
   const [loadingOcModels, setLoadingOcModels] = useState(true)
 
   // Fetch Claude models dynamically on mount

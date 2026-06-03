@@ -114,9 +114,9 @@ function probeAlias(alias: string): Promise<string | null> {
       (err, stdout) => {
         if (err) { resolve(null); return }
         try {
-          const result = JSON.parse(stdout)
+          const result = JSON.parse(stdout) as { modelUsage?: Record<string, unknown> }
           // modelUsage is { "claude-opus-4-8": { ... } } — grab the first key
-          const modelId = Object.keys(result.modelUsage || {})[0]
+          const modelId = Object.keys(result.modelUsage ?? {})[0]
           resolve(modelId || null)
         } catch {
           resolve(null)

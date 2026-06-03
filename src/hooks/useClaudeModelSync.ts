@@ -20,7 +20,7 @@ export function useClaudeModelSync({
   currentModel: string | null
   setModel: (model: string) => void
 }): { claudeModels: ModelOption[] } {
-  const [claudeModels, setClaudeModels] = useState<ModelOption[]>(CLAUDE_MODELS)
+  const [claudeModels, setClaudeModels] = useState(CLAUDE_MODELS)
   const hasFetched = useRef(false)
   const currentModelRef = useRef(currentModel)
   useEffect(() => { currentModelRef.current = currentModel }, [currentModel])
