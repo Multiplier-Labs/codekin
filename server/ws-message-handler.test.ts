@@ -4,10 +4,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // Mock config so REPOS_ROOT covers test paths
 vi.mock('./config.js', () => ({ REPOS_ROOT: '/projects' }))
 
-// Mock fs.realpathSync to return paths as-is in tests (no real filesystem)
+// Mock fs.realpathSync — defaults to identity (no real filesystem); individual
+// tests can override the implementation to simulate symlink canonicalization.
+const realpathSyncMock = vi.fn((p: string) => p)
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>()
-  return { ...actual, realpathSync: (p: string) => p }
+  return { ...actual, realpathSync: (p: string) => realpathSyncMock(p) }
 })
 
 import { handleWsMessage, type WsHandlerContext } from './ws-message-handler.js'
@@ -89,6 +91,9 @@ describe('handleWsMessage', () => {
     ctx = createContext()
     // Wire up ws key so clientSessions.get(ws) works
     ctx.clientSessions.set(ctx.ws, 'sess-1')
+    // Reset realpath to identity by default
+    realpathSyncMock.mockReset()
+    realpathSyncMock.mockImplementation((p: string) => p)
   })
 
   /* ---- ping ---- */
@@ -137,6 +142,23 @@ describe('handleWsMessage', () => {
       expect(ctx.sessions.startClaude).toHaveBeenCalledWith('new-1')
     })
 
+    it('passes the canonical (realpath-resolved) dir to create(), not the raw path', () => {
+      // Simulate a symlinked working dir that resolves to a different canonical path
+      realpathSyncMock.mockImplementation((p: string) =>
+        p === '/projects/link' ? '/projects/app' : p,
+      )
+      const session = mockSession({ id: 'canon-1', workingDir: '/projects/app' })
+      ;(ctx.sessions.create as ReturnType<typeof vi.fn>).mockReturnValue(session)
+
+      handleWsMessage({
+        type: 'create_session',
+        name: 'Canon',
+        workingDir: '/projects/link',
+      } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.create).toHaveBeenCalledWith('Canon', '/projects/app', expect.any(Object))
+    })
+
     it('rejects invalid permissionMode', () => {
       handleWsMessage({
         type: 'create_session',
@@ -179,6 +201,27 @@ describe('handleWsMessage', () => {
         sessionId: 'wt-1',
       })
       expect(ctx.sessions.startClaude).toHaveBeenCalledWith('wt-1')
+    })
+
+    it('passes the canonical (realpath-resolved) dir to createWorktree(), not the raw path', async () => {
+      realpathSyncMock.mockImplementation((p: string) =>
+        p === '/projects/link' ? '/projects/app' : p,
+      )
+      const session = mockSession({ id: 'wt-canon', name: 'WT Canon', workingDir: '/projects/app' })
+      ;(ctx.sessions.create as ReturnType<typeof vi.fn>).mockReturnValue(session)
+      ;(ctx.sessions.createWorktree as ReturnType<typeof vi.fn>).mockResolvedValue('/tmp/worktree')
+
+      handleWsMessage({
+        type: 'create_session',
+        name: 'WT Canon',
+        workingDir: '/projects/link',
+        useWorktree: true,
+      } as WsClientMessage, ctx)
+
+      await vi.waitFor(() => expect(ctx.sent.length).toBeGreaterThan(0))
+
+      expect(ctx.sessions.create).toHaveBeenCalledWith('WT Canon', '/projects/app', expect.any(Object))
+      expect(ctx.sessions.createWorktree).toHaveBeenCalledWith('wt-canon', '/projects/app')
     })
 
     it('sends error when worktree creation fails, then falls back', async () => {

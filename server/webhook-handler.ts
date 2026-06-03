@@ -31,7 +31,7 @@ import { loadPrCache, ensureCacheDir, archivePrCache, deletePrCache } from './we
 import { buildPrompt } from './webhook-prompt.js'
 import { createWorkspace, cleanupWorkspace } from './webhook-workspace.js'
 import { WebhookHandlerBase } from './webhook-handler-base.js'
-import { REPOS_ROOT } from './config.js'
+import { resolveRepoGroupDir } from './config.js'
 
 /** How long an event can stay in 'processing' before the watchdog marks it as error. */
 const PROCESSING_TIMEOUT_MS = 5 * 60 * 1000
@@ -382,7 +382,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     // --- Create session ---
     // Use the canonical repo path as groupDir so the frontend groups webhook
     // sessions under the same tab as manual sessions for the same repo.
-    const groupDir = `${REPOS_ROOT}/${repoName}`
+    const groupDir = resolveRepoGroupDir(repo, repoName)
     const sessionName = `webhook/${repoName}/${wr.head_branch}/${wr.name}`
     this.sessions.create(sessionName, workspacePath, {
       source: 'webhook',
@@ -663,7 +663,7 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     }
 
     // --- Create session ---
-    const groupDir = `${REPOS_ROOT}/${repoName}`
+    const groupDir = resolveRepoGroupDir(repo, repoName)
     const sessionName = `review/${repoName}/PR-${prNumber}`
     this.sessions.create(sessionName, workspacePath, {
       source: 'webhook',

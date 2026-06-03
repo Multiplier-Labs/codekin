@@ -203,6 +203,7 @@ export class SessionManager {
       getSession: (id) => this.sessions.get(id),
       hasSession: (id) => this.sessions.has(id),
       rename: (sessionId, newName) => this.rename(sessionId, newName),
+      isRateLimited: () => this.isRateLimited(),
     })
     this.sessionPersistence.restoreFromDisk()
     // Wire PlanManager events and coordinators for restored sessions

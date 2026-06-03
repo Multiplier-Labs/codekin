@@ -9,7 +9,7 @@ import { realpathSync as fsRealpathSync } from 'fs'
 import { homedir as osHomedir } from 'os'
 import { resolve as pathResolve } from 'path'
 import type { WebSocket } from 'ws'
-import { triggerCliProbeIfNeeded } from './anthropic-models.js'
+import { getDefaultClaudeModel, triggerCliProbeIfNeeded } from './anthropic-models.js'
 import { REPOS_ROOT } from './config.js'
 import type { SessionManager } from './session-manager.js'
 import { VALID_PERMISSION_MODES, VALID_PROVIDERS } from './types.js'
@@ -53,7 +53,15 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
         send({ type: 'error', message: `Invalid permission mode: ${msg.permissionMode}` })
         break
       }
-      const session = sessions.create(msg.name, msg.workingDir, { model: msg.model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider })
+      // Default new Claude sessions to the latest known model so the CLI starts
+      // on it directly. Without this the CLI picks a stale default (e.g. opus-4-6)
+      // and the client's model-validation effect switches it post-start, which
+      // restarts the process and drops the user's first message.
+      const provider = msg.provider ?? 'claude'
+      const model = msg.model ?? (provider === 'claude' ? getDefaultClaudeModel() : undefined)
+      // Use the security-checked canonical path (not the raw msg.workingDir) so
+      // grouping/archive behavior stays consistent with the resolved directory.
+      const session = sessions.create(msg.name, resolvedDir, { model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider })
       session.clients.add(ws)
       clientSessions.set(ws, session.id)
 
@@ -62,7 +70,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
 
       if (msg.useWorktree) {
         // Create worktree asynchronously, then start Claude in it
-        void sessions.createWorktree(session.id, msg.workingDir).then((wtPath) => {
+        void sessions.createWorktree(session.id, resolvedDir).then((wtPath) => {
           if (wtPath) {
             send({
               type: 'session_created',
