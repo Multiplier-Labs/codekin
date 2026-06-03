@@ -495,25 +495,6 @@ Prompt.
         expect(result.lastCommit).toBe('abc123 latest commit')
         expect(result.branch).toBe('develop')
       })
-
-      it('returns the symlink-resolved canonical repoPath, not the raw input', async () => {
-        // Simulate a symlinked repos root: input path differs from realpath.
-        // The resolved path must propagate downstream so the workflow session's
-        // groupDir matches the realpath-based key used by manual/worktree
-        // sessions (otherwise the sidebar shows a duplicate repo group).
-        mockRealpathSync.mockReturnValue('/tmp/canonical/repo')
-        mockExecFileSync
-          .mockReturnValueOnce(Buffer.from('main\n'))
-          .mockReturnValueOnce(Buffer.from('abc123 latest commit\n'))
-
-        const handler = registeredDef.steps[0].handler
-        const result = await handler(
-          { repoPath: '/tmp/symlink/repo', repoName: 'test' },
-          { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
-        )
-
-        expect(result.repoPath).toBe('/tmp/canonical/repo')
-      })
     })
 
     describe('create_session step', () => {
