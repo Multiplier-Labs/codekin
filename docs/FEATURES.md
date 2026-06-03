@@ -182,18 +182,17 @@ Codekin can run scheduled Claude Code sessions against repositories to produce s
   - `docs-audit.weekly` — Weekly audit of documentation accuracy, staleness, and coverage
   - `commit-review` — Event-driven review of the most recent commit for correctness, security, and performance
   - `repo-health.weekly` — Weekly repository health assessment covering dead code, TODOs, config drift, license compliance, and git hygiene
+  - `pr-review` — Event-driven review of pull requests, posting findings directly to the PR as review comments (see [PR Review Automation](#pr-review-automation))
 - **Per-repo overrides** — Any workflow's prompt can be customized for a specific repo by placing a `.codekin/workflows/{kind}.md` file in the repo. The override prompt replaces the global one at run time.
 - **MD-based definitions** — Workflow types are defined as Markdown files with YAML frontmatter in `server/workflows/`. New workflow types can be added by dropping a `.md` file there — no code changes needed.
 - **Staleness check** — Workflows accept a `sinceTimestamp` parameter; if no commits have been made since the last run, the workflow is skipped automatically.
-- **Auto-committed reports** — Output is saved to a configurable directory within the repo (e.g. `review logs/`, `security-reports/`) and committed with a configurable message.
+- **Auto-committed reports** — Output is saved to a configurable directory within the repo (e.g. `.codekin/reports/code-review/`, `.codekin/reports/security/`) and committed with a configurable message.
 
 See [docs/WORKFLOWS.md](./WORKFLOWS.md) for the full workflow definition format, frontmatter field reference, and instructions for writing per-repo overrides.
 
 ---
 
 ## PR Review Automation
-
-**Shipped**: 2026-04-10
 
 Codekin automatically reviews pull requests by responding to GitHub webhook events. When a PR is opened, updated, or marked ready for review, a Claude session is spawned to analyze the diff and post findings directly to the PR.
 
@@ -327,7 +326,7 @@ A per-session registry that remembers which tools and commands have been approve
 
 ## Settings & Configuration
 
-- **Authentication token** — Enter your cc-web token in the Settings modal. The token is validated in real time with a checkmark (valid) or cross (invalid) indicator.
+- **Authentication token** — Enter your Codekin token in the Settings modal. The token is validated in real time with a checkmark (valid) or cross (invalid) indicator.
 - **Font size** — Adjustable from 10px to 24px via a slider in Settings.
 - **Persistent** — Settings are stored in `localStorage` under the key `codekin-settings`.
 - **Auto-open** — The Settings modal opens automatically on first visit when no token is configured.
@@ -396,7 +395,7 @@ Browser (React SPA)
   ↕ WebSocket + REST
 nginx (port 443, HTTPS)
   ├── /      → Static files (web root)
-  └── /cc/   → cc-web server (port 32352) — WebSocket + REST + uploads
+  └── /cc/   → Codekin server (port 32352) — WebSocket + REST + uploads
                     ↕
                Claude Code CLI
                (spawned per-session with stream-json format)
@@ -407,7 +406,7 @@ nginx (port 443, HTTPS)
 | Service | Port | Role |
 |---|---|---|
 | nginx | 443 | Reverse proxy, SSL termination, Authelia auth |
-| cc-web server | 32352 | Session management, Claude process lifecycle, real-time streaming, file uploads, repository listing |
+| Codekin server | 32352 | Session management, Claude process lifecycle, real-time streaming, file uploads, repository listing |
 
 ### Technology Stack
 

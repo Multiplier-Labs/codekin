@@ -432,3 +432,7 @@ codekin/
 | `~/.codekin/screenshots/`                     | Uploaded screenshots           |
 | `/etc/nginx/sites-available/codekin`          | nginx config (production)      |
 | `/etc/systemd/system/codekin.service` | codekin systemd unit            |
+
+## Operations
+
+For day-to-day production operations — WebSocket rate-limit tuning and monitoring, and workflow restart-resume / orphan-session handling — see the [Operations Guide](./OPERATIONS.md).

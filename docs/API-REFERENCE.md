@@ -74,6 +74,7 @@ Endpoints that accept a `model` field (e.g. session creation via WebSocket, work
 
 | Identifier | Label |
 |---|---|
+| `claude-opus-4-8` | Opus 4.8 |
 | `claude-opus-4-7` | Opus 4.7 |
 | `claude-opus-4-6` | Opus 4.6 |
 | `claude-sonnet-4-6` | Sonnet 4.6 |
@@ -487,7 +488,7 @@ Add a repo workflow configuration.
 
 `repoPath` is resolved via `realpath` and must sit under the configured `REPOS_ROOT` — otherwise the request is rejected with `400`.
 
-**Request body:** `{ "id": "...", "name": "...", "repoPath": "...", "cronExpression": "...", "enabled": true, "customPrompt": "...", "kind": "...", "model": "claude-opus-4-7" }` (see [Models](#models) for accepted identifiers)
+**Request body:** `{ "id": "...", "name": "...", "repoPath": "...", "cronExpression": "...", "enabled": true, "customPrompt": "...", "kind": "...", "model": "claude-opus-4-8" }` (see [Models](#models) for accepted identifiers)
 **Response:** `{ "config": WorkflowConfig, "webhookSetup"?: WebhookSetupResult }`, or `400` with `{ "error": "..." }` when required fields are missing, `provider` is invalid, or `repoPath` is not an existing directory under the configured repos root.
 
 ### `PATCH /api/workflows/config/repos/:id`
@@ -555,7 +556,7 @@ Spawn a new child session for a task. `repo` is resolved via `realpath` and must
 
 Because each spawn allocates a real Claude subprocess, this endpoint is additionally **rate-limited per client IP**: at most **20 spawn requests per 5-minute sliding window per IP**. The limiter is keyed on `req.ip` (which honours `X-Forwarded-For` when the server is configured with `TRUST_PROXY`) and runs *before* auth, so even unauthenticated floods are capped. It is applied on top of the global 300-requests-per-minute API limiter.
 
-**Request body:** `{ "repo": "...", "task": "...", "branchName": "...", "useWorktree"?: boolean, "completionPolicy"?: "pr" | "merge" | "commit-only", "deployAfter"?: boolean, "model"?: "claude-opus-4-7", "allowedTools"?: string[] }` (see [Models](#models) for accepted `model` identifiers)
+**Request body:** `{ "repo": "...", "task": "...", "branchName": "...", "useWorktree"?: boolean, "completionPolicy"?: "pr" | "merge" | "commit-only", "deployAfter"?: boolean, "model"?: "claude-opus-4-8", "allowedTools"?: string[] }` (see [Models](#models) for accepted `model` identifiers)
 **Response:** `{ "child": ChildSession }`, `400` with `{ "error": "..." }` when required fields are missing, `branchName` / `allowedTools` fail validation, or `repo` is not an existing directory under the configured repos root, `429` with `{ "error": "Too Many Requests", "retryAfter": 300 }` when the per-IP spawn cap is exceeded (`retryAfter` is in seconds), or `503` when the child session cannot be spawned.
 
 #### `GET /api/orchestrator/children/:id`

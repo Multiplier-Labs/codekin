@@ -41,6 +41,7 @@ codekin service status          # Check whether the service is running
 codekin service install         # (Re-)install the background service
 codekin service uninstall       # Remove the background service
 codekin start                   # Run in foreground (for debugging)
+codekin stop                    # Stop the running background service
 codekin setup --regenerate      # Generate a new auth token
 codekin upgrade                 # Upgrade to latest version
 codekin uninstall               # Remove Codekin entirely
