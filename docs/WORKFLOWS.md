@@ -1,6 +1,6 @@
 # Automated Workflows
 
-Codekin includes an automated workflow system that runs Claude Code sessions on a schedule to produce structured reports — code reviews, security audits, coverage assessments, and more. Workflows are defined as Markdown files with YAML frontmatter. Codekin ships with nine built-in workflows, and you can define your own custom workflows per-repo.
+Codekin includes an automated workflow system that runs Claude Code sessions on a schedule to produce structured reports — code reviews, security audits, coverage assessments, and more. Workflows are defined as Markdown files with YAML frontmatter. Codekin ships with ten built-in workflows, and you can define your own custom workflows per-repo.
 
 ---
 
@@ -43,7 +43,7 @@ You are performing an automated analysis. Please do the following:
 | `kind` | yes | Unique identifier for this workflow type. Used in API calls and as the filename stem for per-repo overrides. Convention: `<topic>.<frequency>` (e.g. `code-review.daily`) |
 | `name` | yes | Human-readable display name shown in the UI and as the report heading |
 | `sessionPrefix` | yes | Prefix for the Codekin session name created for each run (e.g. `review` → session named `review:<repo-name>`) |
-| `outputDir` | yes | Directory inside the repo where report files are written (e.g. `review logs`) |
+| `outputDir` | yes | Directory inside the repo where report files are written (e.g. `.codekin/reports/code-review`) |
 | `filenameSuffix` | yes | Filename suffix appended to the date (e.g. `_code-review-daily.md` → `2026-03-07_code-review-daily.md`) |
 | `commitMessage` | yes | Git commit message prefix used when the report is committed (date is appended automatically) |
 | `model` | no | Claude model to use for this workflow (e.g. `claude-sonnet-4-6`). If omitted, the server default (Opus) is used. Shown as a badge in the workflow list UI. |
@@ -63,16 +63,16 @@ Everything after the closing `---` is the prompt sent to Claude. Write it as a p
 
 ## Built-in Workflows
 
-Codekin ships with nine built-in workflow definitions in `server/workflows/`:
+Codekin ships with ten built-in workflow definitions in `server/workflows/`:
 
 | File | Kind | Schedule | Output Directory |
 |---|---|---|---|
-| `code-review.daily.md` | `code-review.daily` | Daily | `review logs/` |
-| `security-audit.weekly.md` | `security-audit.weekly` | Weekly | `security-reports/` |
-| `complexity.weekly.md` | `complexity.weekly` | Weekly | `complexity-reports/` |
-| `coverage.daily.md` | `coverage.daily` | Daily | `coverage-reports/` |
-| `comment-assessment.daily.md` | `comment-assessment.daily` | Daily | `comment-reports/` |
-| `dependency-health.daily.md` | `dependency-health.daily` | Daily | `dependency-reports/` |
+| `code-review.daily.md` | `code-review.daily` | Daily | `.codekin/reports/code-review/` |
+| `security-audit.weekly.md` | `security-audit.weekly` | Weekly | `.codekin/reports/security/` |
+| `complexity.weekly.md` | `complexity.weekly` | Weekly | `.codekin/reports/complexity/` |
+| `coverage.daily.md` | `coverage.daily` | Daily | `.codekin/reports/coverage/` |
+| `comment-assessment.daily.md` | `comment-assessment.daily` | Daily | `.codekin/reports/comments/` |
+| `dependency-health.daily.md` | `dependency-health.daily` | Daily | `.codekin/reports/dependencies/` |
 | `docs-audit.weekly.md` | `docs-audit.weekly` | Weekly | `.codekin/reports/docs-audit/` |
 | `commit-review.md` | `commit-review` | Event-driven | `.codekin/reports/commit-review/` |
 | `repo-health.weekly.md` | `repo-health.weekly` | Weekly | `.codekin/reports/repo-health/` |
