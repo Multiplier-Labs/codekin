@@ -59,7 +59,9 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       // restarts the process and drops the user's first message.
       const provider = msg.provider ?? 'claude'
       const model = msg.model ?? (provider === 'claude' ? getDefaultClaudeModel() : undefined)
-      const session = sessions.create(msg.name, msg.workingDir, { model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider })
+      // Use the security-checked canonical path (not the raw msg.workingDir) so
+      // grouping/archive behavior stays consistent with the resolved directory.
+      const session = sessions.create(msg.name, resolvedDir, { model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider })
       session.clients.add(ws)
       clientSessions.set(ws, session.id)
 
@@ -68,7 +70,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
 
       if (msg.useWorktree) {
         // Create worktree asynchronously, then start Claude in it
-        void sessions.createWorktree(session.id, msg.workingDir).then((wtPath) => {
+        void sessions.createWorktree(session.id, resolvedDir).then((wtPath) => {
           if (wtPath) {
             send({
               type: 'session_created',
