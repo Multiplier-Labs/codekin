@@ -255,4 +255,26 @@ describe('config', () => {
       expect(config.resolveRepoPathInRoot('/srv/repos/nonexistent')).toBeNull()
     })
   })
+
+  describe('resolveRepoGroupDir', () => {
+    it('prefers the owner-namespaced path when it exists', async () => {
+      process.env.REPOS_ROOT = '/srv/repos'
+      mockExistsSync.mockImplementation((p: unknown) =>
+        p === '/srv/repos' || p === '/srv/repos/Toggl/toggl_focus_fe')
+
+      const config = await loadConfig()
+      expect(config.resolveRepoGroupDir('Toggl/toggl_focus_fe', 'toggl_focus_fe'))
+        .toBe('/srv/repos/Toggl/toggl_focus_fe')
+    })
+
+    it('falls back to the flat path for older non-namespaced clones', async () => {
+      process.env.REPOS_ROOT = '/srv/repos'
+      // Only REPOS_ROOT exists; the owner-namespaced path does not.
+      mockExistsSync.mockImplementation((p: unknown) => p === '/srv/repos')
+
+      const config = await loadConfig()
+      expect(config.resolveRepoGroupDir('Toggl/toggl_focus_fe', 'toggl_focus_fe'))
+        .toBe('/srv/repos/toggl_focus_fe')
+    })
+  })
 })
