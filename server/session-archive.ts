@@ -110,14 +110,24 @@ export class SessionArchive {
 
   /** List archived sessions (metadata only, no history). Optionally filtered by workingDir. */
   list(workingDir?: string): ArchivedSessionInfo[] {
+    // Match by exact path, but also by repo basename so a session archived from
+    // a different checkout of the same repo (a separate clone, or an older path
+    // before the repo was moved) still surfaces. The sidebar groups a repo under
+    // its canonical root (group_dir), so we compare the trailing path segment of
+    // group_dir (falling back to working_dir) against the requested basename.
+    // Trade-off: two distinct repos that share a basename (e.g. org-a/api and
+    // org-b/api) would share an archive list. No such collision exists today.
+    const basename = workingDir ? (workingDir.replace(/\/+$/, '').split('/').pop() ?? workingDir) : ''
+    const likeBasename = '%/' + basename.replace(/[\\%_]/g, c => '\\' + c)
     const rows = workingDir
       ? this.db.prepare(`
           SELECT id, name, working_dir, group_dir, source, created, archived_at,
                  json_array_length(output_history) as message_count
           FROM archived_sessions
           WHERE working_dir = ? OR group_dir = ?
+             OR COALESCE(group_dir, working_dir) LIKE ? ESCAPE '\\'
           ORDER BY archived_at DESC
-        `).all(workingDir, workingDir)
+        `).all(workingDir, workingDir, likeBasename)
       : this.db.prepare(`
       SELECT id, name, working_dir, group_dir, source, created, archived_at,
              json_array_length(output_history) as message_count
