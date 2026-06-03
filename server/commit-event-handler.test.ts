@@ -42,9 +42,11 @@ vi.mock('./workflow-config.js', () => ({
 
 vi.mock('./workflow-loader.js', () => ({
   getWorkflowCommitPrefixes: () => mockState.prefixes,
+  isWorkflowReportsBranch: (branch: string) =>
+    branch === 'codekin/reports' || /^audit\/[^/]+-\d{4}-\d{2}-\d{2}$/.test(branch),
 }))
 
-import { CommitEventHandler, type CommitEvent } from './commit-event-handler.js'
+import { CommitEventHandler, sanitizeCommitField, type CommitEvent } from './commit-event-handler.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -79,6 +81,31 @@ function enableRepoConfig(repoPath = '/repos/owner/foo') {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe('sanitizeCommitField', () => {
+  it('truncates strings longer than the default maxLen (500)', () => {
+    const long = 'a'.repeat(600)
+    expect(sanitizeCommitField(long)).toHaveLength(500)
+  })
+
+  it('truncates to a custom maxLen', () => {
+    const long = 'b'.repeat(300)
+    expect(sanitizeCommitField(long, 200)).toHaveLength(200)
+  })
+
+  it('strips ASCII control characters including NUL and ESC', () => {
+    expect(sanitizeCommitField('hello\x00world')).toBe('helloworld')
+    expect(sanitizeCommitField('esc\x1b[31mcolor')).toBe('esc[31mcolor')
+    expect(sanitizeCommitField('line\nfeed')).toBe('linefeed')
+    expect(sanitizeCommitField('\x7fhidden')).toBe('hidden')
+    expect(sanitizeCommitField('\x01\x02\x1f\x7f')).toBe('')
+  })
+
+  it('leaves normal commit message text unchanged', () => {
+    const msg = 'feat: add login page (issue #123)'
+    expect(sanitizeCommitField(msg)).toBe(msg)
+  })
+})
 
 describe('CommitEventHandler', () => {
   let handler: CommitEventHandler
@@ -194,6 +221,31 @@ describe('CommitEventHandler', () => {
     expect(mockState.startRun).toHaveBeenCalledOnce()
   })
 
+  it('does NOT cross-suppress identical hashes across different repos', async () => {
+    // Two unrelated repos can produce the same commit hash (e.g. cherry-pick,
+    // identical empty commit). Each deserves its own commit-review run. The
+    // dedup key must be scoped per-repo.
+    mockState.config.reviewRepos = [
+      { id: 'r1', name: 'foo', repoPath: '/repos/owner/foo', enabled: true, kind: 'commit-review' },
+      { id: 'r2', name: 'bar', repoPath: '/repos/owner/bar', enabled: true, kind: 'commit-review' },
+    ]
+    const sharedHash = 'd'.repeat(40)
+
+    const r1 = await handler.handle(makeEvent({ repoPath: '/repos/owner/foo', commitHash: sharedHash }))
+    expect(r1.accepted).toBe(true)
+
+    const r2 = await handler.handle(makeEvent({ repoPath: '/repos/owner/bar', commitHash: sharedHash }))
+    expect(r2.accepted).toBe(true)
+
+    // And a *third* call against the first repo with the same hash is still
+    // suppressed (per-repo dedup is intact).
+    const r1Dup = await handler.handle(makeEvent({ repoPath: '/repos/owner/foo', commitHash: sharedHash }))
+    expect(r1Dup.accepted).toBe(false)
+    expect(r1Dup.reason).toMatch(/duplicate commit hash/i)
+
+    expect(mockState.startRun).toHaveBeenCalledTimes(2)
+  })
+
   it('accepts the same commit hash again after the dedup TTL elapses', async () => {
     enableRepoConfig()
     const event = makeEvent({ commitHash: 'c'.repeat(40) })
@@ -263,6 +315,29 @@ describe('CommitEventHandler', () => {
     )
   })
 
+  it('passes sanitized commitMessage, branch, and author to engine.startRun', async () => {
+    enableRepoConfig('/repos/owner/foo')
+    // Craft inputs with control characters that should be stripped and a
+    // commitMessage that exceeds 500 chars (should be truncated).
+    const longMsg = 'feat: ' + 'x'.repeat(600)
+    const event = makeEvent({
+      repoPath: '/repos/owner/foo',
+      commitHash: 'f'.repeat(40),
+      commitMessage: longMsg,
+      branch: 'main\x1b[danger',
+      author: 'alice\x00',
+    })
+
+    const result = await handler.handle(event)
+    expect(result.accepted).toBe(true)
+
+    const startRunInput = mockState.startRun.mock.calls[0][1] as Record<string, unknown>
+    expect((startRunInput.commitMessage as string).length).toBe(500)
+    expect(startRunInput.commitMessage).not.toContain('\x1b')
+    expect(startRunInput.branch).toBe('main[danger')
+    expect(startRunInput.author).toBe('alice')
+  })
+
   it('returns a failure result and reason when startRun throws', async () => {
     enableRepoConfig()
     mockState.startRun.mockRejectedValueOnce(new Error('engine boom'))
@@ -270,6 +345,21 @@ describe('CommitEventHandler', () => {
     const result = await handler.handle(makeEvent({ commitHash: 'e'.repeat(40) }))
     expect(result.accepted).toBe(false)
     expect(result.reason).toContain('engine boom')
+  })
+
+  it('rolls back the dedup entry when startRun fails so the same hash can be retried', async () => {
+    enableRepoConfig()
+    mockState.startRun.mockRejectedValueOnce(new Error('engine boom'))
+
+    const first = await handler.handle(makeEvent({ commitHash: 'e'.repeat(40) }))
+    expect(first.accepted).toBe(false)
+    expect(first.reason).toContain('engine boom')
+
+    // The dedup key must have been removed — a second call with the same hash
+    // must not be rejected as a duplicate and must reach startRun.
+    const second = await handler.handle(makeEvent({ commitHash: 'e'.repeat(40) }))
+    expect(second.accepted).toBe(true)
+    expect(mockState.startRun).toHaveBeenCalledTimes(2)
   })
 
   // -------------------------------------------------------------------------

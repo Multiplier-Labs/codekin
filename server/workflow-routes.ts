@@ -73,8 +73,23 @@ const execFileAsync = promisify(execFile)
  * Returns null for non-GitHub remotes.
  */
 export function parseGitHubSlug(remoteUrl: string): string | null {
-  const match = remoteUrl.trim().match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/)
-  return match?.[1] ?? null
+  const url = remoteUrl.trim()
+
+  // SSH form: strictly anchored so "notgithub.com:..." cannot match.
+  const sshMatch = url.match(/^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/)
+  if (sshMatch) return `${sshMatch[1]}/${sshMatch[2]}`
+
+  // HTTPS form: use the URL constructor so the hostname is checked exactly,
+  // preventing substring matches like "evil.com/github.com/...".
+  try {
+    const parsed = new URL(url)
+    if (parsed.hostname !== 'github.com' && parsed.hostname !== 'www.github.com') return null
+    const parts = parsed.pathname.replace(/\.git$/, '').split('/').filter(Boolean)
+    if (parts.length < 2) return null
+    return `${parts[0]}/${parts[1]}`
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -256,6 +271,9 @@ export function createWorkflowRouter(
     if (!repoPath || !branch || !commitHash || !commitMessage) {
       return res.status(400).json({ error: 'Missing required fields: repoPath, branch, commitHash, commitMessage' })
     }
+    if (!resolveRepoPathInRoot(repoPath)) {
+      return res.status(400).json({ error: 'Invalid repoPath: must be an existing directory under the configured repos root' })
+    }
 
     const result = await handler.handle({
       repoPath,
@@ -287,6 +305,9 @@ export function createWorkflowRouter(
 
   router.get('/kinds', (req, res) => {
     const repoPath = req.query.repoPath as string | undefined
+    if (repoPath && !resolveRepoPathInRoot(repoPath)) {
+      return res.status(400).json({ error: 'Invalid repoPath: must be an existing directory under the configured repos root' })
+    }
     const kinds = listAvailableKinds(repoPath)
     res.json({ kinds })
   })
@@ -431,6 +452,9 @@ export function createWorkflowRouter(
     if (!id || !name || !repoPath || !cronExpression) {
       return res.status(400).json({ error: 'Missing required fields: id, name, repoPath, cronExpression' })
     }
+    if (cronExpression !== 'event' && !isValidCron(cronExpression)) {
+      return res.status(400).json({ error: 'Invalid cron expression' })
+    }
     if (provider && !VALID_PROVIDERS.has(provider)) {
       return res.status(400).json({ error: `Invalid provider: ${provider}` })
     }
@@ -489,6 +513,16 @@ export function createWorkflowRouter(
   router.patch('/config/repos/:id', (req: Request<{ id: string }, unknown, Partial<ReviewRepoConfig>>, res) => {
     if (req.body.repoPath !== undefined && !resolveRepoPathInRoot(req.body.repoPath)) {
       return res.status(400).json({ error: 'Invalid repoPath: must be an existing directory under the configured repos root' })
+    }
+    if (
+      req.body.cronExpression !== undefined &&
+      req.body.cronExpression !== 'event' &&
+      !isValidCron(req.body.cronExpression)
+    ) {
+      return res.status(400).json({ error: 'Invalid cron expression' })
+    }
+    if (req.body.provider !== undefined && !VALID_PROVIDERS.has(req.body.provider)) {
+      return res.status(400).json({ error: `Invalid provider: ${req.body.provider}` })
     }
     try {
       const config = updateReviewRepo(req.params.id, req.body)

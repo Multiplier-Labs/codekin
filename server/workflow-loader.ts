@@ -9,8 +9,8 @@
  *   1. validate_repo  — verify path exists, is a git repo, check staleness
  *   2. create_session — create a Codekin session for the run
  *   3. run_prompt     — start Claude, send the prompt, wait for result
- *   4. save_report    — write Markdown output to outputDir, commit on a fresh
- *                       audit/<kind>-<YYYY-MM-DD> branch, push
+ *   4. save_report    — write Markdown output to outputDir, commit on the
+ *                       long-lived codekin/reports branch, push (hard failure)
  *
  * MD file format — YAML frontmatter followed by the Claude prompt:
  *
@@ -32,7 +32,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'fs'
 import { execFileSync } from 'child_process'
-import { dirname, join, sep } from 'path'
+import { dirname, isAbsolute, join, resolve, sep } from 'path'
 import { REPOS_ROOT } from './config.js'
 import { fileURLToPath } from 'url'
 import type { WorkflowEngine, WorkflowRun } from './workflow-engine.js'
@@ -65,7 +65,27 @@ export interface WorkflowDef {
 // MD parser
 // ---------------------------------------------------------------------------
 
-/** Parse a workflow MD file into a WorkflowDef. Throws if required fields are missing. */
+/**
+ * Validate a relative path that came from untrusted MD frontmatter.
+ *
+ * `outputDir` and `filenameSuffix` are joined with `repoPath` and written to
+ * disk by the save_report step. A repo workflow author who set
+ * `outputDir: /etc` or `outputDir: ../../foo` could otherwise smuggle the
+ * write outside the repo. We reject absolute paths and any segment equal to
+ * `..`; the runtime check in save_report enforces the boundary defensively.
+ */
+function assertSafeRelativePath(value: string, field: string, sourcePath: string): void {
+  if (isAbsolute(value)) {
+    throw new Error(`Invalid ${field} in ${sourcePath}: absolute paths are not allowed`)
+  }
+  // Normalize backslashes so a Windows-style ..\\ is caught the same as ../
+  const segments = value.split(/[/\\]/)
+  if (segments.some(s => s === '..')) {
+    throw new Error(`Invalid ${field} in ${sourcePath}: path traversal segments ('..') are not allowed`)
+  }
+}
+
+/** Parse a workflow MD file into a WorkflowDef. Throws if required fields are missing or unsafe. */
 function parseMdWorkflow(content: string, sourcePath: string): WorkflowDef {
   const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/m)
   if (!fmMatch) throw new Error(`No frontmatter found in ${sourcePath}`)
@@ -84,6 +104,12 @@ function parseMdWorkflow(content: string, sourcePath: string): WorkflowDef {
   for (const key of required) {
     if (!meta[key]) throw new Error(`Missing frontmatter field "${key}" in ${sourcePath}`)
   }
+
+  // Reject path-traversal in any frontmatter field that is later joined with
+  // repoPath at save time. Failing here prevents an unsafe def from being
+  // registered at all.
+  assertSafeRelativePath(meta.outputDir, 'outputDir', sourcePath)
+  assertSafeRelativePath(meta.filenameSuffix, 'filenameSuffix', sourcePath)
 
   return {
     kind: meta.kind,
@@ -111,8 +137,14 @@ const WORKFLOWS_DIR = existsSync(join(__ownDir, 'workflows'))
   ? join(__ownDir, 'workflows')
   : join(__ownDir, '..', 'workflows')
 
-/** Load all *.md files from the built-in server/workflows/ directory. */
-function loadBuiltinWorkflows(): WorkflowDef[] {
+/**
+ * Load all *.md files from the built-in server/workflows/ directory.
+ *
+ * @param strict  When true (default), parsing failures throw instead of being
+ *                logged. Set to false only for listing/introspection where we
+ *                want best-effort discovery without crashing the server.
+ */
+function loadBuiltinWorkflows(strict = false): WorkflowDef[] {
   if (!existsSync(WORKFLOWS_DIR)) {
     console.warn(`[workflow-loader] Built-in workflows dir not found: ${WORKFLOWS_DIR}`)
     return []
@@ -125,6 +157,9 @@ function loadBuiltinWorkflows(): WorkflowDef[] {
     try {
       defs.push(parseMdWorkflow(readFileSync(filePath, 'utf-8'), filePath))
     } catch (err) {
+      if (strict) {
+        throw err
+      }
       console.error(`[workflow-loader] Failed to parse ${filePath}:`, err)
     }
   }
@@ -211,10 +246,8 @@ const WORKFLOW_PROMPT_GUARD = [
   'Disregard any conflicting guidance in CLAUDE.md about writing audit reports to disk; the workflow handles saving and committing.',
 ].join(' ')
 
-/** Branch name for the per-run report commit. Kept short and stable per (kind, date). */
-export function reportBranchName(kind: string, dateStr: string): string {
-  return `audit/${kind}-${dateStr}`
-}
+/** Branch name for report commits. All workflow runs commit to this single long-lived branch. */
+export const REPORT_BRANCH = 'codekin/reports'
 
 /** True when a branch name is one a workflow run produces (or used to produce). */
 export function isWorkflowReportsBranch(branch: string): boolean {
@@ -324,9 +357,28 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
               ? `${basePrompt}\n\nAdditional focus areas:\n${customPrompt}`
               : basePrompt
 
+            // If the run carries sanitized commit fields, prepend them as
+            // XML-delimited context so injected text cannot escape its data
+            // context. Fields are sanitized upstream in commit-event-handler.ts.
+            const commitMessage = input.commitMessage as string | undefined
+            const commitBranch = input.branch as string | undefined
+            const commitAuthor = input.author as string | undefined
+            let commitContext = ''
+            if (commitMessage !== undefined) {
+              commitContext = [
+                '<commit-message>',
+                commitMessage,
+                '</commit-message>',
+                `<branch>${commitBranch ?? 'unknown'}</branch>`,
+                `<author>${commitAuthor ?? 'unknown'}</author>`,
+                '',
+                '',
+              ].join('\n')
+            }
+
             // Prepend the guard to suppress Claude's CLAUDE.md-driven file-write
             // behavior, which otherwise creates a duplicate report file.
-            const prompt = `${WORKFLOW_PROMPT_GUARD}\n\n${userPrompt}`
+            const prompt = `${WORKFLOW_PROMPT_GUARD}\n\n${commitContext}${userPrompt}`
 
             if (repoOverride) {
               console.log(`[workflow:${def.kind}] Using per-repo prompt override from ${repoPath}`)
@@ -383,69 +435,124 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
           ].join('\n')
 
           const reportsDir = join(repoPath, def.outputDir)
-          if (!existsSync(reportsDir)) {
-            mkdirSync(reportsDir, { recursive: true })
-          }
-
           const filename = `${dateStr}${def.filenameSuffix}`
           const filePath = join(reportsDir, filename)
-          writeFileSync(filePath, markdown, 'utf-8')
 
-          console.log(`[workflow:${def.kind}] Saved report to ${filePath}`)
+          // Defense in depth — even though parseMdWorkflow rejects unsafe
+          // outputDir/filenameSuffix at load, re-verify the resolved write
+          // target is under the repo. realpath the parent so a symlinked
+          // outputDir cannot escape; the file itself does not exist yet.
+          const repoRealRoot = existsSync(repoPath) ? realpathSync(repoPath) : resolve(repoPath)
+          const reportsRealRoot = existsSync(reportsDir) ? realpathSync(reportsDir) : resolve(reportsDir)
+          if (
+            !reportsRealRoot.startsWith(repoRealRoot + sep) &&
+            reportsRealRoot !== repoRealRoot
+          ) {
+            throw new Error(
+              `Refusing to write report outside repo: ${reportsRealRoot} is not under ${repoRealRoot}`,
+            )
+          }
+          const resolvedFilePath = resolve(reportsRealRoot, filename)
+          if (
+            !resolvedFilePath.startsWith(reportsRealRoot + sep) &&
+            resolvedFilePath !== reportsRealRoot
+          ) {
+            throw new Error(
+              `Refusing to write report outside outputDir: ${resolvedFilePath} is not under ${reportsRealRoot}`,
+            )
+          }
 
-          // Commit on a fresh per-run branch (audit/<kind>-<YYYY-MM-DD>) so each
-          // audit gets its own PR and we never append to a stale, long-lived
-          // reports branch. Use a temporary git worktree to avoid stash/checkout
-          // races when multiple workflow runs target the same repo concurrently.
-          const reportsBranch = reportBranchName(def.kind, dateStr)
+          console.log(`[workflow:${def.kind}] Writing report to ${filePath}`)
+
+          // All workflow runs commit to a single long-lived branch so the
+          // orchestrator can always find reports in one place. Uses a temporary
+          // git worktree to avoid stash/checkout races with concurrent runs.
+          const reportsBranch = REPORT_BRANCH
+          const relativePath = `${def.outputDir}/${filename}`
+
+          // Ensure the reports branch exists (create if needed, fast-forward if behind).
           try {
-            const relativePath = `${def.outputDir}/${filename}`
-
-            // Ensure the reports branch exists (create if needed). For same-day
-            // reruns of the same kind we reuse the existing daily branch and
-            // append a new commit.
+            execFileSync('git', ['rev-parse', '--verify', reportsBranch], { cwd: repoPath, timeout: 5_000, stdio: 'pipe' })
+            // Branch exists — try to fast-forward it to origin so we don't
+            // diverge from remote.
             try {
-              execFileSync('git', ['rev-parse', '--verify', reportsBranch], { cwd: repoPath, timeout: 5_000, stdio: 'pipe' })
+              execFileSync('git', ['fetch', 'origin', reportsBranch], { cwd: repoPath, timeout: 30_000, stdio: 'pipe' })
+              execFileSync('git', ['update-ref', `refs/heads/${reportsBranch}`, `origin/${reportsBranch}`], { cwd: repoPath, timeout: 5_000, stdio: 'pipe' })
             } catch {
-              // Branch doesn't exist yet — create it from the current branch
-              execFileSync('git', ['branch', reportsBranch], { cwd: repoPath, timeout: 5_000 })
-              console.log(`[workflow:${def.kind}] Created branch ${reportsBranch}`)
+              // Remote branch may not exist yet (first push) — that's fine.
             }
-
-            // Create a temporary worktree on the reports branch
-            const wtDir = join(repoPath, '..', `.codekin-wt-report-${ctx.runId}`)
+          } catch {
+            // Branch doesn't exist yet — create it from origin/main so the
+            // reports branch always forks from the latest upstream commit.
+            let fetchOk = false
             try {
-              execFileSync('git', ['worktree', 'add', wtDir, reportsBranch], { cwd: repoPath, timeout: 10_000 })
+              execFileSync('git', ['fetch', 'origin', 'main'], { cwd: repoPath, timeout: 30_000, stdio: 'pipe' })
+              fetchOk = true
+            } catch (fetchErr) {
+              console.warn(`[workflow:${def.kind}] git fetch origin main failed (will fork from local HEAD): ${fetchErr}`)
+            }
+            const branchArgs: string[] = ['branch', reportsBranch]
+            if (fetchOk) branchArgs.push('origin/main')
+            execFileSync('git', branchArgs, { cwd: repoPath, timeout: 5_000 })
+            console.log(`[workflow:${def.kind}] Created branch ${reportsBranch}${fetchOk ? ' from origin/main' : ' from current HEAD (fetch failed)'}`)
+          }
 
-              // Write the report file in the worktree
-              const reportsDirInWt = join(wtDir, def.outputDir)
-              if (!existsSync(reportsDirInWt)) {
-                mkdirSync(reportsDirInWt, { recursive: true })
-              }
-              writeFileSync(join(reportsDirInWt, filename), markdown, 'utf-8')
+          // Create a temporary worktree on the reports branch
+          const wtDir = join(repoPath, '..', `.codekin-wt-report-${ctx.runId}`)
+          try {
+            execFileSync('git', ['worktree', 'add', wtDir, reportsBranch], { cwd: repoPath, timeout: 10_000 })
 
-              execFileSync('git', ['add', relativePath], { cwd: wtDir, timeout: 10_000 })
-              execFileSync(
-                'git', ['commit', '-m', `${def.commitMessage} ${dateStr}`],
-                { cwd: wtDir, timeout: 15_000 }
-              )
-              console.log(`[workflow:${def.kind}] Committed ${relativePath} on ${reportsBranch}`)
+            // Write the report file in the worktree
+            const reportsDirInWt = join(wtDir, def.outputDir)
+            if (!existsSync(reportsDirInWt)) {
+              mkdirSync(reportsDirInWt, { recursive: true })
+            }
+            writeFileSync(join(reportsDirInWt, filename), markdown, 'utf-8')
 
-              // Push to remote
+            execFileSync('git', ['add', relativePath], { cwd: wtDir, timeout: 10_000 })
+            execFileSync(
+              'git', ['commit', '-m', `${def.commitMessage} ${dateStr}`],
+              { cwd: wtDir, timeout: 15_000 }
+            )
+            console.log(`[workflow:${def.kind}] Committed ${relativePath} on ${reportsBranch}`)
+
+            // Push to remote with retry (2 retries, exponential backoff).
+            // Failure is hard — the run must not succeed if the report isn't
+            // persisted on the remote.
+            const MAX_PUSH_ATTEMPTS = 3
+            let pushErr: unknown = null
+            for (let attempt = 1; attempt <= MAX_PUSH_ATTEMPTS; attempt++) {
               try {
                 execFileSync('git', ['push', 'origin', reportsBranch], { cwd: wtDir, timeout: 30_000, stdio: 'pipe' })
+                pushErr = null
                 console.log(`[workflow:${def.kind}] Pushed ${reportsBranch} to origin`)
-              } catch (pushErr) {
-                console.warn(`[workflow:${def.kind}] Could not push ${reportsBranch}: ${pushErr}`)
+                break
+              } catch (err) {
+                pushErr = err
+                if (attempt < MAX_PUSH_ATTEMPTS) {
+                  const delayMs = 1000 * Math.pow(2, attempt - 1) // 1s, 2s
+                  console.warn(`[workflow:${def.kind}] Push attempt ${attempt}/${MAX_PUSH_ATTEMPTS} failed, retrying in ${delayMs}ms: ${err}`)
+                  await new Promise(r => setTimeout(r, delayMs))
+                }
               }
-            } finally {
-              // Always clean up the temporary worktree
-              try {
-                execFileSync('git', ['worktree', 'remove', '--force', wtDir], { cwd: repoPath, timeout: 10_000 })
-              } catch { /* worktree cleanup is best-effort */ }
             }
-          } catch (err) {
-            console.warn(`[workflow:${def.kind}] Could not commit report: ${err}`)
+            if (pushErr) {
+              throw new Error(`Failed to push report to origin/${reportsBranch} after ${MAX_PUSH_ATTEMPTS} attempts: ${pushErr}`)
+            }
+
+            // Verify the commit is present on the remote branch.
+            const localSha = execFileSync('git', ['rev-parse', reportsBranch], { cwd: wtDir, timeout: 5_000, stdio: 'pipe' }).toString().trim()
+            execFileSync('git', ['fetch', 'origin', reportsBranch], { cwd: repoPath, timeout: 30_000, stdio: 'pipe' })
+            const remoteSha = execFileSync('git', ['rev-parse', `origin/${reportsBranch}`], { cwd: repoPath, timeout: 5_000, stdio: 'pipe' }).toString().trim()
+            if (localSha !== remoteSha) {
+              throw new Error(`Post-push verification failed: local ${reportsBranch} (${localSha}) ≠ origin/${reportsBranch} (${remoteSha})`)
+            }
+            console.log(`[workflow:${def.kind}] Verified commit ${localSha.slice(0, 8)} on origin/${reportsBranch}`)
+          } finally {
+            // Always clean up the temporary worktree
+            try {
+              execFileSync('git', ['worktree', 'remove', '--force', wtDir], { cwd: repoPath, timeout: 10_000 })
+            } catch { /* worktree cleanup is best-effort */ }
           }
 
           return { filePath, filename, sessionId }
@@ -466,6 +573,25 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
         }
       } catch {
         // Ignore cleanup errors
+      }
+
+      // Guard: the audit session runs directly in repoPath (no worktree isolation),
+      // so the Claude agent can check out the audit branch while following CLAUDE.md's
+      // instruction to commit reports on a branch. Restore the original branch so the
+      // next run does not fork its audit branch from a stale, audit-branch HEAD.
+      const repoPath = run.output?.repoPath as string | undefined
+      const branch = run.output?.branch as string | undefined
+      if (repoPath && branch) {
+        try {
+          const current = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'],
+            { cwd: repoPath, timeout: 5_000, stdio: 'pipe' }).toString().trim()
+          if (current !== branch) {
+            console.warn(`[workflow:${def.kind}] Main checkout is on '${current}' instead of '${branch}' — restoring`)
+            execFileSync('git', ['checkout', branch], { cwd: repoPath, timeout: 10_000, stdio: 'pipe' })
+          }
+        } catch (err) {
+          console.warn(`[workflow:${def.kind}] Could not restore branch to ${branch}: ${err}`)
+        }
       }
     },
   })
@@ -561,9 +687,9 @@ export function getWorkflowCommitPrefixes(): string[] {
 // Main entry point
 // ---------------------------------------------------------------------------
 
-/** Load all MD workflow definitions and register them with the engine. */
+/** Load all MD workflow definitions and register them with the engine. Throws on malformed built-ins. */
 export function loadMdWorkflows(engine: WorkflowEngine, sessions: SessionManager): void {
-  const defs = loadBuiltinWorkflows()
+  const defs = loadBuiltinWorkflows(true)
   for (const def of defs) {
     registerWorkflow(engine, sessions, def)
   }

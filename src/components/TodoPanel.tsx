@@ -50,6 +50,7 @@ export function TodoPanel({ tasks }: Props) {
       return () => { clearTimeout(timer); }
     }
     setDismissed(false) // eslint-disable-line react-hooks/set-state-in-effect -- reset dismissed when tasks become active
+    return undefined
   }, [allDone])
 
   // Auto-scroll to first non-completed task when completed count increases

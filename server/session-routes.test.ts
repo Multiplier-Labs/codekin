@@ -35,6 +35,7 @@ vi.mock('./config.js', () => ({
 
 vi.mock('./types.js', () => ({
   VALID_PROVIDERS: new Set(['claude', 'opencode']),
+  VALID_PERMISSION_MODES: new Set(['default', 'acceptEdits', 'plan', 'bypassPermissions']),
 }))
 
 vi.mock('./native-permissions.js', () => ({
@@ -213,6 +214,16 @@ describe('createSessionRouter', () => {
         body: JSON.stringify({ name: 'x', workingDir: join(REPOS_DIR, 'ok'), provider: 'bogus' }),
       })
       expect(res.status).toBe(400)
+    })
+
+    it('returns 400 for an invalid permissionMode', async () => {
+      const res = await fetch(`${server.baseUrl}/api/sessions/create`, {
+        method: 'POST', headers: auth(),
+        body: JSON.stringify({ name: 'x', workingDir: join(REPOS_DIR, 'ok'), permissionMode: 'hacker-mode' }),
+      })
+      expect(res.status).toBe(400)
+      const body = await res.json()
+      expect(body.error).toMatch(/Invalid permissionMode/)
     })
 
     it('creates a session under REPOS_ROOT', async () => {

@@ -157,6 +157,36 @@ describe('parseGitHubSlug', () => {
   it('handles repos with hyphens, underscores, and dots', () => {
     expect(parseGitHubSlug('git@github.com:my-org/my_repo.name.git')).toBe('my-org/my_repo.name')
   })
+
+  // Adversarial cases — the old regex matched any string containing "github.com"
+  // as a substring; the new implementation must reject all of these.
+  it('rejects URL where github.com appears only in the path (evil.com host)', () => {
+    expect(parseGitHubSlug('https://evil.com/github.com/foo/bar')).toBeNull()
+  })
+
+  it('rejects SSH-like string whose host is notgithub.com', () => {
+    expect(parseGitHubSlug('notgithub.com:foo/bar')).toBeNull()
+  })
+
+  it('rejects URL whose hostname is github.com.evil.com', () => {
+    expect(parseGitHubSlug('https://github.com.evil.com/foo/bar')).toBeNull()
+  })
+
+  it('parses SSH URL with .git suffix (adversarial baseline)', () => {
+    expect(parseGitHubSlug('git@github.com:foo/bar.git')).toBe('foo/bar')
+  })
+
+  it('parses HTTPS URL with .git suffix (adversarial baseline)', () => {
+    expect(parseGitHubSlug('https://github.com/foo/bar.git')).toBe('foo/bar')
+  })
+
+  it('parses HTTPS URL without .git suffix (adversarial baseline)', () => {
+    expect(parseGitHubSlug('https://github.com/foo/bar')).toBe('foo/bar')
+  })
+
+  it('parses www.github.com HTTPS URL', () => {
+    expect(parseGitHubSlug('https://www.github.com/foo/bar')).toBe('foo/bar')
+  })
 })
 
 describe('isValidCron', () => {
@@ -515,6 +545,35 @@ describe('workflow routes', () => {
   })
 
   // -------------------------------------------------------------------------
+  // GET /kinds
+  // -------------------------------------------------------------------------
+
+  describe('GET /kinds', () => {
+    it('returns available workflow kinds', async () => {
+      const res = await fetch(`${harness.baseUrl}/kinds`, { headers: authHeader() })
+      expect(res.status).toBe(200)
+      const body = await res.json() as { kinds: unknown[] }
+      expect(Array.isArray(body.kinds)).toBe(true)
+      expect(mocks.listAvailableKinds).toHaveBeenCalledWith(undefined)
+    })
+
+    it('passes valid repoPath to listAvailableKinds', async () => {
+      const res = await fetch(`${harness.baseUrl}/kinds?repoPath=/valid/repo`, { headers: authHeader() })
+      expect(res.status).toBe(200)
+      expect(mocks.listAvailableKinds).toHaveBeenCalledWith('/valid/repo')
+    })
+
+    it('returns 400 when repoPath is outside repos root', async () => {
+      mocks.resolveRepoPathInRoot.mockReturnValueOnce(null)
+      const res = await fetch(`${harness.baseUrl}/kinds?repoPath=/outside/etc`, { headers: authHeader() })
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toMatch(/Invalid repoPath/)
+      expect(mocks.listAvailableKinds).not.toHaveBeenCalled()
+    })
+  })
+
+  // -------------------------------------------------------------------------
   // Config /repos PATCH + POST  (task references PATCH /repos/:repo; the actual
   // route is /config/repos/:id)
   // -------------------------------------------------------------------------
@@ -582,6 +641,57 @@ describe('workflow routes', () => {
       const body = await res.json() as { error: string }
       expect(body.error).toMatch(/Invalid repoPath/)
     })
+
+    it('returns 400 for a malformed cron expression', async () => {
+      const res = await fetch(`${harness.baseUrl}/config/repos`, {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({
+          id: 'r1',
+          name: 'My Repo',
+          repoPath: '/fake/path',
+          cronExpression: '*/0 * * * *',
+        }),
+      })
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toBe('Invalid cron expression')
+      expect(mocks.addReviewRepo).not.toHaveBeenCalled()
+    })
+
+    it('returns 400 for non-cron / non-event cronExpression', async () => {
+      const res = await fetch(`${harness.baseUrl}/config/repos`, {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({
+          id: 'r1',
+          name: 'My Repo',
+          repoPath: '/fake/path',
+          cronExpression: 'not a cron',
+        }),
+      })
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toBe('Invalid cron expression')
+    })
+
+    it('accepts the special cronExpression value "event"', async () => {
+      const res = await fetch(`${harness.baseUrl}/config/repos`, {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({
+          id: 'r1',
+          name: 'My Repo',
+          repoPath: '/fake/path',
+          cronExpression: 'event',
+          kind: 'commit-review',
+        }),
+      })
+      expect(res.status).toBe(200)
+      expect(mocks.addReviewRepo).toHaveBeenCalledWith(
+        expect.objectContaining({ cronExpression: 'event' }),
+      )
+    })
   })
 
   describe('PATCH /config/repos/:id', () => {
@@ -618,6 +728,56 @@ describe('workflow routes', () => {
         body: JSON.stringify({ name: 'nope' }),
       })
       expect(res.status).toBe(404)
+    })
+
+    it('returns 400 for a malformed cron expression in patch', async () => {
+      const res = await fetch(`${harness.baseUrl}/config/repos/r1`, {
+        method: 'PATCH',
+        headers: authHeader(),
+        body: JSON.stringify({ cronExpression: '*/0 * * * *' }),
+      })
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toBe('Invalid cron expression')
+      expect(mocks.updateReviewRepo).not.toHaveBeenCalled()
+    })
+
+    it('accepts cronExpression="event" in patch', async () => {
+      mocks.workflowConfig.reviewRepos = [{
+        id: 'r1', name: 'X', repoPath: '/p', cronExpression: '0 6 * * *', enabled: true,
+      }]
+      const res = await fetch(`${harness.baseUrl}/config/repos/r1`, {
+        method: 'PATCH',
+        headers: authHeader(),
+        body: JSON.stringify({ cronExpression: 'event' }),
+      })
+      expect(res.status).toBe(200)
+      expect(mocks.updateReviewRepo).toHaveBeenCalledWith('r1', { cronExpression: 'event' })
+    })
+
+    it('returns 400 for an invalid provider in patch', async () => {
+      const res = await fetch(`${harness.baseUrl}/config/repos/r1`, {
+        method: 'PATCH',
+        headers: authHeader(),
+        body: JSON.stringify({ provider: 'bogus' }),
+      })
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toMatch(/Invalid provider/)
+      expect(mocks.updateReviewRepo).not.toHaveBeenCalled()
+    })
+
+    it('accepts a valid provider in patch', async () => {
+      mocks.workflowConfig.reviewRepos = [{
+        id: 'r1', name: 'X', repoPath: '/p', cronExpression: '0 6 * * *', enabled: true,
+      }]
+      const res = await fetch(`${harness.baseUrl}/config/repos/r1`, {
+        method: 'PATCH',
+        headers: authHeader(),
+        body: JSON.stringify({ provider: 'opencode' }),
+      })
+      expect(res.status).toBe(200)
+      expect(mocks.updateReviewRepo).toHaveBeenCalledWith('r1', { provider: 'opencode' })
     })
   })
 
@@ -695,6 +855,24 @@ describe('workflow routes', () => {
         }),
       })
       expect(harness.commitEventState.handler!.handle).toHaveBeenCalledWith(expect.objectContaining({ author: 'unknown' }))
+    })
+
+    it('returns 400 when repoPath is outside repos root', async () => {
+      mocks.resolveRepoPathInRoot.mockReturnValueOnce(null)
+      const res = await fetch(`${harness.baseUrl}/commit-event`, {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({
+          repoPath: '/outside/etc',
+          branch: 'main',
+          commitHash: 'abc1234',
+          commitMessage: 'fix: something',
+        }),
+      })
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error: string }
+      expect(body.error).toMatch(/Invalid repoPath/)
+      expect(harness.commitEventState.handler!.handle).not.toHaveBeenCalled()
     })
 
     it('returns 503 when no commit event handler is configured', async () => {

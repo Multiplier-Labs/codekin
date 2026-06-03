@@ -4,6 +4,7 @@
  *
  * Usage:
  *   codekin start                  Run server in foreground
+ *   codekin stop                   Stop the running background service
  *   codekin setup                  First-time setup wizard
  *   codekin service install        Install + start background service
  *   codekin service uninstall      Remove background service
@@ -216,8 +217,17 @@ ${envEntries}
 \t</dict>
 \t<key>RunAtLoad</key>
 \t<true/>
+\t<!--
+\t  KeepAlive as a dict (not <true/>) so a clean exit (e.g. \`codekin stop\`,
+\t  which sends SIGTERM and triggers gracefulShutdown → exit(0)) is NOT
+\t  respawned. Only crashes (non-zero exit) trigger restart, preserving
+\t  the daemon UX without making the process unkillable.
+\t-->
 \t<key>KeepAlive</key>
-\t<true/>
+\t<dict>
+\t\t<key>SuccessfulExit</key>
+\t\t<false/>
+\t</dict>
 \t<key>StandardOutPath</key>
 \t<string>${join(homedir(), '.codekin', 'server.log')}</string>
 \t<key>StandardErrorPath</key>
@@ -253,7 +263,7 @@ function serviceUninstallMac() {
     return
   }
   spawnSync('launchctl', ['unload', LAUNCHD_PLIST], { stdio: 'inherit' })
-  import('fs').then(fs => fs.unlinkSync(LAUNCHD_PLIST))
+  rmSync(LAUNCHD_PLIST, { force: true })
   console.log('Codekin service removed.')
 }
 
@@ -284,7 +294,9 @@ After=network.target
 Type=simple
 ExecStart=${runner} ${script}
 EnvironmentFile=${ENV_FILE}
-Restart=always
+# on-failure (not always) so \`codekin stop\` / \`systemctl --user stop\` exits
+# cleanly without an immediate respawn. Crashes still get restarted.
+Restart=on-failure
 RestartSec=5
 
 [Install]
@@ -315,9 +327,7 @@ function serviceInstallLinux() {
 
 function serviceUninstallLinux() {
   spawnSync('systemctl', ['--user', 'disable', '--now', 'codekin'], { stdio: 'inherit' })
-  if (existsSync(SYSTEMD_SERVICE_FILE)) {
-    import('fs').then(fs => fs.unlinkSync(SYSTEMD_SERVICE_FILE))
-  }
+  rmSync(SYSTEMD_SERVICE_FILE, { force: true })
   spawnSync('systemctl', ['--user', 'daemon-reload'], { stdio: 'inherit' })
   console.log('Codekin service removed.')
 }
@@ -330,6 +340,56 @@ function serviceStatusLinux() {
     printAccessUrl()
   } else {
     console.log('Codekin service is not running.')
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Stop (cross-platform)
+// ---------------------------------------------------------------------------
+
+function cmdStop() {
+  const os = platform()
+  if (os === 'darwin') {
+    if (!existsSync(LAUNCHD_PLIST)) {
+      console.log('Codekin background service is not installed.')
+      console.log('If a foreground server is running, switch to its terminal and press Ctrl+C.')
+      return
+    }
+    const result = spawnSync('launchctl', ['unload', LAUNCHD_PLIST], { stdio: 'inherit' })
+    if (result.status === 0) {
+      // launchctl unload (no -w) takes the agent out of the current session's
+      // launchd job list. The plist file stays in ~/Library/LaunchAgents/, so
+      // loginwindow loads it again at next user login (which fires RunAtLoad).
+      // The user has to take an explicit action to opt out of that.
+      console.log('Codekin service stopped (launchctl unload).')
+      console.log('Notes:')
+      console.log('  - Plist file is still at ' + LAUNCHD_PLIST + '.')
+      console.log('  - It will reload automatically at next user login (RunAtLoad re-fires).')
+      console.log('  - To resume now without waiting:     launchctl load ' + LAUNCHD_PLIST)
+      console.log('  - To stop permanently (no auto-load): codekin service uninstall')
+    } else {
+      console.error('Failed to stop launchd service.')
+      process.exit(1)
+    }
+  } else if (os === 'linux') {
+    if (!existsSync(SYSTEMD_SERVICE_FILE)) {
+      console.log('Codekin background service is not installed.')
+      console.log('If a foreground server is running, switch to its terminal and press Ctrl+C.')
+      return
+    }
+    const result = spawnSync('systemctl', ['--user', 'stop', 'codekin'], { stdio: 'pipe', encoding: 'utf-8' })
+    if (result.status === 0) {
+      console.log('Codekin service stopped. The unit remains installed —')
+      console.log('  - to start it again:     systemctl --user start codekin')
+      console.log('  - to remove permanently: codekin service uninstall')
+    } else {
+      const msg = (result.stderr || '').trim()
+      if (msg) console.error(msg)
+      process.exit(1)
+    }
+  } else {
+    console.error(`Service stop is not supported on ${os}. Press Ctrl+C in the foreground server's terminal.`)
+    process.exit(1)
   }
 }
 
@@ -445,6 +505,8 @@ const cmd = args[0]
 
 if (cmd === 'start') {
   cmdStart()
+} else if (cmd === 'stop') {
+  cmdStop()
 } else if (cmd === 'setup') {
   await cmdSetup({ regenerate: args.includes('--regenerate') })
 } else if (cmd === 'config') {
@@ -467,6 +529,7 @@ if (cmd === 'start') {
 
 Usage:
   codekin start                   Run server in foreground
+  codekin stop                    Stop the running background service
   codekin setup                   First-time setup wizard
   codekin setup --regenerate      Regenerate auth token
   codekin config                  Update settings

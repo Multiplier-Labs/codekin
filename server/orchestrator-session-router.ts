@@ -225,6 +225,9 @@ export function createSessionRouter(
         useWorktree: useWorktree ?? true,
         model,
         allowedTools,
+        // Stamp the orchestrator (parent) session ID so the child can push
+        // a terminal-state notification back to it without a 30-min poll.
+        parentSessionId: getOrCreateOrchestratorId(),
       })
       res.json({ child })
     } catch (err) {

@@ -8,8 +8,9 @@
 import { Router } from 'express'
 import type { Request } from 'express'
 import multer from 'multer'
-import { mkdirSync, existsSync, readFileSync, readdirSync, realpathSync } from 'fs'
-import { join, extname, resolve, sep } from 'path'
+import { mkdirSync, existsSync, lstatSync, readFileSync, readdirSync, realpathSync, unlinkSync } from 'fs'
+import { join, extname, sep } from 'path'
+import { fileTypeFromFile } from 'file-type'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { homedir } from 'os'
@@ -186,6 +187,8 @@ export function createUploadRouter(
   })
   const ALLOWED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'text/markdown']
   const ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.md']
+  /** Binary MIME types that have detectable file signatures (magic bytes). */
+  const BINARY_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
   const upload = multer({
     storage,
     limits: { fileSize: 20 * 1024 * 1024 },
@@ -221,12 +224,32 @@ export function createUploadRouter(
       }
       next()
     })
-  }, (req, res) => {
+  }, async (req, res) => {
     if (!req.file) {
       res.status(400).json({ error: 'No file uploaded' })
       return
     }
     const filePath = join(SCREENSHOTS_DIR, req.file.filename)
+
+    // Magic-byte validation for binary types — prevents polyglot/disguised files
+    if (BINARY_MIME_TYPES.has(req.file.mimetype)) {
+      try {
+        const detected = await fileTypeFromFile(filePath)
+        if (!detected || detected.mime !== req.file.mimetype) {
+          unlinkSync(filePath)
+          const actual = detected ? detected.mime : 'unknown'
+          res.status(400).json({
+            error: `File signature mismatch: claimed ${req.file.mimetype} but detected ${actual}`,
+          })
+          return
+        }
+      } catch {
+        unlinkSync(filePath)
+        res.status(400).json({ error: 'Failed to verify file signature' })
+        return
+      }
+    }
+
     console.log(`Saved file: ${filePath}`)
     res.json({ success: true, path: filePath })
   })
@@ -331,9 +354,34 @@ export function createUploadRouter(
     }
     const ownerDir = join(reposRoot, owner)
     const dest = localRepoPath(reposRoot, owner, name)
-    // Boundary check: ensure resolved dest stays within REPOS_ROOT
-    // Use realpathSync on reposRoot to prevent symlink bypass
-    const resolvedDest = resolve(dest)
+    // C1: Prevent symlink-based path escape. lstat the owner dir to reject
+    // symlinks; then canonicalize with realpathSync before the boundary check.
+    // Lexical resolve() does not follow symlinks and cannot catch this class of escape.
+    let resolvedDest: string
+    if (existsSync(ownerDir)) {
+      let ownerStat
+      try {
+        ownerStat = lstatSync(ownerDir)
+      } catch {
+        res.status(400).json({ error: 'Path escapes allowed root' })
+        return
+      }
+      if (ownerStat.isSymbolicLink()) {
+        res.status(400).json({ error: 'Path escapes allowed root' })
+        return
+      }
+      let canonicalOwner: string
+      try {
+        canonicalOwner = realpathSync(ownerDir)
+      } catch {
+        res.status(400).json({ error: 'Path escapes allowed root' })
+        return
+      }
+      resolvedDest = join(canonicalOwner, name)
+    } else {
+      // ownerDir does not exist; reposRoot is already canonical so this is safe.
+      resolvedDest = join(reposRoot, owner, name)
+    }
     if (!resolvedDest.startsWith(reposRoot + sep) && resolvedDest !== reposRoot) {
       res.status(400).json({ error: 'Path escapes allowed root' })
       return

@@ -19,6 +19,19 @@ import { loadWorkflowConfig } from './workflow-config.js'
 import { getWorkflowCommitPrefixes, isWorkflowReportsBranch } from './workflow-loader.js'
 
 // ---------------------------------------------------------------------------
+// Input sanitization
+// ---------------------------------------------------------------------------
+
+/**
+ * Sanitize a commit event field before it reaches a prompt.
+ * Strips ASCII control characters (0x00–0x1f, 0x7f) and truncates to maxLen.
+ */
+export function sanitizeCommitField(s: string, maxLen = 500): string {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/[\x00-\x1f\x7f]/g, '').slice(0, maxLen)
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -47,7 +60,14 @@ const DEDUP_TTL_MS = 60 * 60 * 1000
 const DEDUP_CLEANUP_INTERVAL_MS = 10 * 60 * 1000
 
 export class CommitEventHandler {
-  /** commitHash → timestamp of when it was recorded. */
+  /**
+   * `${repoPath}::${commitHash}` → timestamp recorded.
+   *
+   * Keying by repoPath as well as the hash prevents a duplicate-suppression
+   * cross-talk between repos: two unrelated repos can legitimately produce
+   * the same short hash (or the same full hash, in degenerate cases) and
+   * each deserves its own commit-review run.
+   */
   private seenCommits = new Map<string, number>()
   private cleanupTimer: ReturnType<typeof setInterval>
 
@@ -56,20 +76,29 @@ export class CommitEventHandler {
     this.cleanupTimer = setInterval(() => this.pruneExpired(), DEDUP_CLEANUP_INTERVAL_MS)
   }
 
+  private dedupKey(repoPath: string, commitHash: string): string {
+    return `${repoPath}::${commitHash}`
+  }
+
   /**
    * Process a commit event through the filter chain.
    * Returns accepted=true if a workflow run was dispatched.
    */
   async handle(event: CommitEvent): Promise<CommitEventResult> {
+    // Sanitize user-supplied fields before any filter checks or downstream use
+    const branch = sanitizeCommitField(event.branch, 200)
+    const commitMessage = sanitizeCommitField(event.commitMessage, 500)
+    const author = sanitizeCommitField(event.author, 200)
+
     // Layer 1: Branch filter
-    if (isWorkflowReportsBranch(event.branch)) {
+    if (isWorkflowReportsBranch(branch)) {
       return { accepted: false, reason: 'Rejected: reports branch' }
     }
 
     // Layer 2: Message filter — reject if message starts with any workflow commit prefix
     const prefixes = getWorkflowCommitPrefixes()
     for (const prefix of prefixes) {
-      if (event.commitMessage.startsWith(prefix)) {
+      if (commitMessage.startsWith(prefix)) {
         return { accepted: false, reason: `Rejected: workflow commit message (${prefix})` }
       }
     }
@@ -83,11 +112,13 @@ export class CommitEventHandler {
       return { accepted: false, reason: 'Rejected: no enabled commit-review config for this repo' }
     }
 
-    // Layer 4: Commit hash dedup
-    if (this.seenCommits.has(event.commitHash)) {
+    // Layer 4: Commit hash dedup (scoped per repoPath so identical hashes
+    // across different repos do not suppress each other).
+    const dedupKey = this.dedupKey(event.repoPath, event.commitHash)
+    if (this.seenCommits.has(dedupKey)) {
       return { accepted: false, reason: 'Rejected: duplicate commit hash' }
     }
-    this.seenCommits.set(event.commitHash, Date.now())
+    this.seenCommits.set(dedupKey, Date.now())
 
     // Layer 5: Concurrency cap — max 1 running commit-review per repo
     const engine = getWorkflowEngine()
@@ -105,6 +136,9 @@ export class CommitEventHandler {
         repoPath: event.repoPath,
         repoName: repoConfig.name,
         commitHash: event.commitHash,
+        commitMessage,
+        branch,
+        author,
         customPrompt: repoConfig.customPrompt,
         model: repoConfig.model,
         provider: repoConfig.provider,
@@ -113,6 +147,8 @@ export class CommitEventHandler {
       console.log(`[commit-event] Dispatched commit-review run ${run.id} for ${event.repoPath} (${event.commitHash.slice(0, 8)})`)
       return { accepted: true, runId: run.id }
     } catch (err) {
+      // Roll back the dedup entry so a later retry isn't suppressed.
+      this.seenCommits.delete(dedupKey)
       const msg = err instanceof Error ? err.message : String(err)
       console.error(`[commit-event] Failed to start run for ${event.repoPath}:`, msg)
       return { accepted: false, reason: `Failed to start run: ${msg}` }
@@ -122,8 +158,8 @@ export class CommitEventHandler {
   /** Remove dedup entries older than the TTL. */
   private pruneExpired() {
     const cutoff = Date.now() - DEDUP_TTL_MS
-    for (const [hash, ts] of this.seenCommits) {
-      if (ts < cutoff) this.seenCommits.delete(hash)
+    for (const [key, ts] of this.seenCommits) {
+      if (ts < cutoff) this.seenCommits.delete(key)
     }
   }
 

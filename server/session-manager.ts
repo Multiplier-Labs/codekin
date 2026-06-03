@@ -54,6 +54,27 @@ const IDLE_SESSION_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
 const IDLE_CHECK_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
 /** How old a dead session must be before automatic pruning (7 days). */
 const STALE_SESSION_AGE_MS = 7 * 24 * 60 * 60 * 1000
+/**
+ * How old a dead headless session (webhook/workflow/stepflow/agent) must be
+ * before automatic pruning. Longer than the interactive threshold because
+ * automation pipelines may legitimately leave session metadata around between
+ * runs. Orchestrator sessions are exempt (they're meant to be long-lived).
+ */
+const HEADLESS_STALE_AGE_MS = 30 * 24 * 60 * 60 * 1000
+/**
+ * Hard cap on the number of completed Claude turns a single headless session
+ * may resume across before its claudeSessionId is reset. This bounds the
+ * cache-read cost of long-lived background sessions (the orchestrator session
+ * in particular accumulates context every poll if not capped). When tripped,
+ * the next process spawn starts a fresh Claude conversation.
+ */
+const MAX_HEADLESS_CONVERSATION_TURNS = 100
+/**
+ * How long the circuit breaker pauses background activity after a Claude
+ * `rate_limit_event` arrives. Picked so a single rate-limit hit doesn't keep
+ * generating new traffic until the user notices.
+ */
+const RATE_LIMIT_COOLDOWN_MS = 60 * 60 * 1000
 /** Number of Claude turns before showing a context compression warning. */
 const CONTEXT_WARNING_TURN_THRESHOLD = 15
 /** Second warning at this threshold. */
@@ -129,6 +150,13 @@ export class SessionManager {
   private sessionLifecycle: SessionLifecycle
   /** Interval handle for the idle session reaper. */
   private _idleReaperInterval: ReturnType<typeof setInterval> | null = null
+  /**
+   * Timestamp (epoch ms) at which the rate-limit circuit breaker expires.
+   * Background pollers (e.g. the orchestrator monitor) check {@link isRateLimited}
+   * before doing API work, so a single rate-limit hit doesn't generate more
+   * traffic until either the cooldown elapses or the user clears it.
+   */
+  private _rateLimitedUntil = 0
 
   constructor() {
     this.archive = new SessionArchive()
@@ -168,6 +196,7 @@ export class SessionManager {
       onToolDoneEvent: (session, toolName, summary) => this.onToolDoneEvent(session, toolName, summary),
       handleClaudeResult: (session, sessionId, result, isError) => this.handleClaudeResult(session, sessionId, result, isError),
       buildSessionContext: (session) => this.buildSessionContext(session),
+      onRateLimitEvent: (session, sessionId, event) => this.onRateLimitEvent(session, sessionId, event),
     })
     this.sessionPersistence = new SessionPersistence(this.sessions)
     this.sessionNaming = new SessionNaming({
@@ -218,22 +247,83 @@ export class SessionManager {
       }
     }
 
-    // Prune stale sessions: no process, no clients, older than STALE_SESSION_AGE_MS
-    // Headless sessions are exempt from stale pruning — they are long-lived by design.
+    // Prune stale sessions: no process, no clients, older than the relevant
+    // age threshold. Interactive sessions and most headless sessions are
+    // pruned (with different thresholds). The orchestrator session is the
+    // only true singleton — it's exempt from age-based prune because its
+    // identity is recreated by the orchestrator manager if missing, and
+    // pruning it would silently drop accumulated memory.
     const staleIds: string[] = []
     for (const session of this.sessions.values()) {
-      if (isHeadlessSession(session)) continue
       if (session.claudeProcess?.isAlive()) continue
       if (session.clients.size > 0) continue
+      if (session.source === 'orchestrator') continue
+      const headless = isHeadlessSession(session)
+      const threshold = headless ? HEADLESS_STALE_AGE_MS : STALE_SESSION_AGE_MS
       const ageMs = now - new Date(session.created).getTime()
-      if (ageMs > STALE_SESSION_AGE_MS) {
+      if (ageMs > threshold) {
         staleIds.push(session.id)
       }
     }
     for (const id of staleIds) {
-      console.log(`[idle-reaper] pruning stale session=${id} (age > ${STALE_SESSION_AGE_MS / 86_400_000}d)`)
+      const s = this.sessions.get(id)
+      const days = s ? Math.round((now - new Date(s.created).getTime()) / 86_400_000) : 0
+      console.log(`[idle-reaper] pruning stale session=${id} source=${s?.source ?? '?'} age=${days}d`)
       this.delete(id)
     }
+  }
+
+  /**
+   * Whether the rate-limit circuit breaker is currently open.
+   * Background pollers (orchestrator monitor, future cron triggers) should
+   * check this before doing any Claude API work to avoid worsening a quota
+   * situation the user has already hit.
+   */
+  isRateLimited(): boolean {
+    return Date.now() < this._rateLimitedUntil
+  }
+
+  /**
+   * Handle a `rate_limit_event` from the Claude CLI stream.
+   *
+   * The CLI emits this event for several distinct situations — observed in
+   * practice with `overageStatus` either absent (informational status update,
+   * e.g. emitted around process startup / shortly after each turn) or set
+   * to a value like 'rejected' (the request was blocked by Anthropic's
+   * quota enforcement). Only the second case warrants tripping the circuit
+   * breaker: tripping on the informational variant fires false alarms even
+   * when the user is at 8% session / 14% weekly usage.
+   *
+   * Until we have an authoritative list of overageStatus values, treat
+   * 'rejected' as the only definitive "blocked" signal and log everything
+   * else for diagnostics.
+   */
+  private onRateLimitEvent(session: Session, sessionId: string, event: Record<string, unknown>): void {
+    const overageStatus = typeof event.overageStatus === 'string' ? event.overageStatus : null
+    // Always log so we can see what payloads the CLI actually sends —
+    // helpful for expanding the trigger list if we learn about more
+    // blocking statuses (e.g. 'exceeded'). Truncate to keep the line short.
+    console.log(`[rate-limit-event] session=${sessionId} overageStatus=${overageStatus ?? '(none)'} payload=${JSON.stringify(event).slice(0, 300)}`)
+
+    if (overageStatus !== 'rejected') {
+      // Informational / status-only event — don't engage the breaker.
+      return
+    }
+
+    const now = Date.now()
+    const wasAlreadyTripped = now < this._rateLimitedUntil
+    this._rateLimitedUntil = now + RATE_LIMIT_COOLDOWN_MS
+    const minutes = Math.round(RATE_LIMIT_COOLDOWN_MS / 60_000)
+    console.warn(`[rate-limit] session=${sessionId} overageStatus=rejected — circuit breaker engaged for ${minutes}min`)
+    if (wasAlreadyTripped) return
+    const msg: WsServerMessage = {
+      type: 'system_message',
+      subtype: 'notification',
+      text: `Claude rejected a request with rate-limit overage. Codekin will skip background polls (orchestrator monitor) for the next ${minutes} min as a local backoff. This is not your Claude quota reset — check your Anthropic usage page for the actual 5-hour session and weekly limit windows.`,
+    }
+    this.addToHistory(session, msg)
+    this.broadcast(session, msg)
+    this._globalBroadcast?.(msg)
   }
 
   // ---------------------------------------------------------------------------
@@ -354,16 +444,25 @@ export class SessionManager {
     if (!session) return null
 
     try {
-      // Resolve the actual git repo root — workingDir may be a subdirectory
+      // Resolve the canonical (main) repo root.
+      // --git-common-dir points to the main repo's .git even when called from
+      // inside a worktree, so its parent is always the main repo working tree.
+      // (Plain --show-toplevel would return the *current* worktree path,
+      // causing nested worktrees and a separate sidebar group bug.)
       const env = cleanGitEnv()
-      const { stdout: repoRootRaw } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
-        cwd: workingDir,
-        env,
-        timeout: 5000,
-      })
-      const repoRoot = repoRootRaw.trim()
-      if (!repoRoot || !path.isAbsolute(repoRoot)) {
-        console.error(`[worktree] Invalid repo root resolved: "${repoRoot}"`)
+      const { stdout: commonDirRaw } = await execFileAsync(
+        'git',
+        ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+        { cwd: workingDir, env, timeout: 5000 },
+      )
+      const commonDir = commonDirRaw.trim()
+      if (!commonDir || !path.isAbsolute(commonDir)) {
+        console.error(`[worktree] Invalid git common dir resolved: "${commonDir}"`)
+        return null
+      }
+      const repoRoot = path.dirname(commonDir)
+      if (!path.isAbsolute(repoRoot)) {
+        console.error(`[worktree] Invalid repo root derived from common dir: "${repoRoot}"`)
         return null
       }
 
@@ -963,6 +1062,21 @@ export class SessionManager {
     session.isProcessing = false
     session._claudeTurnCount++
     this._globalBroadcast?.({ type: 'sessions_updated' })
+
+    // Headless conversation cap: long-lived background sessions (orchestrator,
+    // workflow, etc.) accumulate context across every resume, and cache-read
+    // tokens grow with that context. Once a headless session has gone past
+    // MAX_HEADLESS_CONVERSATION_TURNS, drop claudeSessionId so the next process
+    // spawn starts a fresh Claude conversation and the per-call cost resets.
+    if (
+      isHeadlessSession(session) &&
+      session.claudeSessionId &&
+      session._claudeTurnCount > MAX_HEADLESS_CONVERSATION_TURNS
+    ) {
+      console.warn(`[headless-cap] session=${sessionId} source=${session.source} turns=${session._claudeTurnCount} > ${MAX_HEADLESS_CONVERSATION_TURNS} — clearing claudeSessionId so next spawn starts fresh`)
+      session.claudeSessionId = null
+      session._claudeTurnCount = 0
+    }
 
     // Attempt API retry for transient errors — returns true if a retry was scheduled
     if (isError && this.handleApiRetry(session, sessionId, result)) {

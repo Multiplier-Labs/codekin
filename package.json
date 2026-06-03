@@ -1,6 +1,6 @@
 {
   "name": "codekin",
-  "version": "0.6.3",
+  "version": "0.6.5",
   "license": "MIT",
   "licenseNotes": "dompurify is dual-licensed (MPL-2.0 OR Apache-2.0); both are permissively compatible with MIT for library use. lightningcss (MPL-2.0) is a build-time-only dependency used by TailwindCSS and is not included in distributed artifacts.",
   "author": "multiplier-labs",
@@ -39,6 +39,7 @@
   "dependencies": {
     "better-sqlite3": "^12.9.0",
     "express": "^5.1.0",
+    "file-type": "^22.0.1",
     "multer": "^2.0.0",
     "ws": "^8.18.0"
   },
@@ -69,8 +70,8 @@
     "globals": "^17.4.0",
     "highlight.js": "^11.11.1",
     "jsdom": "^29.0.1",
-    "marked": "^17.0.4",
-    "marked-highlight": "^2.2.3",
+    "marked": "^18.0.2",
+    "marked-highlight": "^2.2.4",
     "react": "^19.2.0",
     "react-diff-view": "^3.3.2",
     "react-dom": "^19.2.0",

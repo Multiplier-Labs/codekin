@@ -71,6 +71,7 @@ export interface ClaudeProcessEvents {
   todo_update: [tasks: TaskItem[]]
   image: [base64: string, mediaType: string]
   result: [text: string, isError: boolean]
+  rate_limit: [event: Record<string, unknown>]
   error: [message: string]
   exit: [code: number | null, signal: string | null]
 }
@@ -223,6 +224,10 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     // a resume.  Uses the full binary path + exact session UUID to avoid
     // matching unrelated processes.
     if (this.resume) {
+      // Guard against non-UUID values being interpolated into the pkill pattern
+      if (!/^[0-9a-f-]{36}$/i.test(this.sessionId)) {
+        throw new Error(`[claude-spawn] sessionId is not a valid UUID: ${this.sessionId}`)
+      }
       try {
         const pattern = `${CLAUDE_BINARY} .*(--resume|--session-id) ${this.sessionId}(\\s|$)`
         execFileSync('pkill', ['-f', pattern], { timeout: 2000, stdio: 'ignore' })
@@ -231,7 +236,12 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       }
     }
 
-    console.log(`[claude-spawn] cwd=${this.workingDir} args=${JSON.stringify(args)}`)
+    const redactedArgs = args.map((a, i) =>
+      i > 0 && /^[0-9a-f-]{36}$/i.test(a) && ['--session-id', '--resume'].includes(args[i - 1])
+        ? '<redacted>'
+        : a,
+    )
+    console.log(`[claude-spawn] cwd=${this.workingDir} args=${JSON.stringify(redactedArgs)}`)
     this.proc = spawn(CLAUDE_BINARY, args, {
       cwd: this.workingDir,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -319,7 +329,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       console.log(`[event] type=${event.type} subtype=${subtype || '-'}`)
     }
     // Log all event types we DON'T handle to catch unknown protocol messages
-    if (!['system', 'stream_event', 'assistant', 'user', 'result', 'control_request'].includes(event.type)) {
+    if (!['system', 'stream_event', 'assistant', 'user', 'result', 'control_request', 'rate_limit_event'].includes(event.type)) {
       console.log(`[event-unhandled] type=${event.type} data=${JSON.stringify(event).slice(0, 300)}`)
     }
 
@@ -356,6 +366,10 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
         this.handleControlRequest(ctrlEvent)
         break
       }
+
+      case 'rate_limit_event':
+        this.emit('rate_limit', event as unknown as Record<string, unknown>)
+        break
 
     }
   }

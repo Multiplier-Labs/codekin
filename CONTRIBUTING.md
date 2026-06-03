@@ -46,6 +46,8 @@ The server reads its configuration from environment variables defined in `server
 | `AUTH_TOKEN_FILE` | No | — | Path to file containing the auth token (legacy bare-metal deploy compat) |
 | `TRUST_PROXY` | No | `false` | Trust `X-Forwarded-For` headers (`true` or `1` to enable; set when behind a reverse proxy) |
 | `CODEKIN_AGENT_NAME` | No | `Joe` | Display name for the orchestrator agent |
+| `CODEKIN_AUTO_RESTORE_SESSIONS` | No | `false` | Auto-restart Claude processes that were alive at previous shutdown (`true` to opt in) |
+| `CODEKIN_ORCHESTRATOR_MONITOR` | No | `false` | Run the orchestrator proactive monitor (15-minute polling) (`true` to opt in) |
 
 ### Running Tests
 

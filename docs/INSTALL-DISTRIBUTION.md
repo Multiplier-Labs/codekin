@@ -141,6 +141,8 @@ All configuration is via environment variables. Defaults suit a local install; o
 | `CORS_ORIGIN` | `http://localhost:5173` | Restrict CORS for remote access |
 | `GH_ORG` | — | Comma-separated GitHub orgs for repo listing |
 | `SCREENSHOTS_DIR` | `~/.codekin/screenshots` | Directory for uploaded file storage |
+| `CODEKIN_AUTO_RESTORE_SESSIONS` | `false` | Auto-restart Claude processes that were alive at previous shutdown (`true` to opt in) |
+| `CODEKIN_ORCHESTRATOR_MONITOR` | `false` | Run the orchestrator proactive monitor (15-minute polling) (`true` to opt in) |
 
 For webhook-specific environment variables (`GITHUB_WEBHOOK_SECRET`, `GITHUB_WEBHOOK_ENABLED`, etc.), see the [webhook setup section in SETUP.md](./SETUP.md#10-configure-github-webhooks-optional).
 

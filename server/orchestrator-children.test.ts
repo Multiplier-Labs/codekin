@@ -42,6 +42,7 @@ function makeMockSessions(worktreeSucceeds = true) {
       outputHistory: [],
       pendingToolApprovals: new Map(),
       pendingControlRequests: new Map(),
+      worktreePath: '/repos/myproject-wt-child123',
     })),
     onSessionResult: vi.fn((cb: any) => {
       resultListeners.push(cb)
@@ -382,6 +383,212 @@ describe('OrchestratorChildManager', () => {
 
       const prompt = sessions._sentInputs[0]
       expect(prompt).toContain('Do NOT push')
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Parent-session terminal notifications
+  // -------------------------------------------------------------------------
+
+  describe('parent terminal notifications', () => {
+    let notify: ReturnType<typeof vi.fn>
+
+    beforeEach(() => {
+      sessions = makeMockSessions()
+      notify = vi.fn(() => true)
+      manager = new OrchestratorChildManager(sessions, { notify })
+    })
+
+    it('fires exactly one notification when a child times out', async () => {
+      vi.useFakeTimers()
+      try {
+        sessions.get = vi.fn(() => ({
+          claudeProcess: { isAlive: vi.fn(() => true), stop: vi.fn() },
+          outputHistory: [],
+          pendingToolApprovals: new Map(),
+          pendingControlRequests: new Map(),
+          worktreePath: '/repos/myproject-wt-abc12345',
+        }))
+
+        const child = await manager.spawn(makeRequest({
+          parentSessionId: 'parent-orchestrator-id',
+          timeoutMs: 5000,
+        }))
+
+        vi.advanceTimersByTime(5000)
+
+        await vi.waitFor(() => {
+          expect(child.status).toBe('timed_out')
+        })
+
+        expect(notify).toHaveBeenCalledTimes(1)
+        const args = notify.mock.calls[0][0]
+        expect(args.parentSessionId).toBe('parent-orchestrator-id')
+        expect(args.label).toBe('Child Session Stopped')
+        expect(args.title).toContain(child.id)
+        expect(args.body).toContain('Status: timed_out')
+        expect(args.body).toContain(`Branch: ${child.request.branchName}`)
+        expect(args.body).toContain(`Repo: ${child.request.repo}`)
+        expect(args.body).toContain('Inspect worktree at /repos/myproject-wt-abc12345')
+        expect(child.terminalNotifiedAt).toBeTruthy()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('fires a notification when a child completes', async () => {
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => false), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'Done! Created PR #99 and pushed.' }],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+        worktreePath: '/repos/myproject-wt-abc12345',
+      }))
+
+      const child = await manager.spawn(makeRequest({
+        parentSessionId: 'parent-orchestrator-id',
+      }))
+
+      for (const listener of sessions._resultListeners) {
+        listener(child.id, false)
+      }
+
+      await vi.waitFor(() => {
+        expect(child.status).toBe('completed')
+      })
+
+      expect(notify).toHaveBeenCalledTimes(1)
+      const args = notify.mock.calls[0][0]
+      expect(args.parentSessionId).toBe('parent-orchestrator-id')
+      expect(args.label).toBe('Child Session Stopped')
+      expect(args.body).toContain('Status: completed')
+      expect(args.body).toContain(`Branch: ${child.request.branchName}`)
+      expect(args.body).toContain(`Repo: ${child.request.repo}`)
+      // Hint for completed PR-policy children references PR follow-through.
+      expect(args.body).toMatch(/PR/)
+    })
+
+    it('does NOT fire a notification when the child has no parentSessionId', async () => {
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => false), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'Done! Created PR #99 with all changes.' }],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+        worktreePath: '/repos/myproject-wt-abc12345',
+      }))
+
+      const child = await manager.spawn(makeRequest()) // no parentSessionId
+
+      for (const listener of sessions._resultListeners) {
+        listener(child.id, false)
+      }
+
+      await vi.waitFor(() => {
+        expect(child.status).toBe('completed')
+      })
+
+      expect(notify).not.toHaveBeenCalled()
+      expect(child.terminalNotifiedAt).toBeNull()
+    })
+
+    it('is idempotent — repeated terminal triggers fire the notification once', async () => {
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => false), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'Done! Created PR #99 and pushed.' }],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+        worktreePath: '/repos/myproject-wt-abc12345',
+      }))
+
+      const child = await manager.spawn(makeRequest({
+        parentSessionId: 'parent-orchestrator-id',
+      }))
+
+      // First terminal trigger: result event marks the child completed.
+      for (const listener of sessions._resultListeners) {
+        listener(child.id, false)
+      }
+
+      await vi.waitFor(() => {
+        expect(child.status).toBe('completed')
+      })
+      expect(notify).toHaveBeenCalledTimes(1)
+
+      // Re-invoke the private notifier directly (simulates a second
+      // terminal-state callback firing after restart-resume / hook re-fire).
+      // Cast to any so we can reach into the manager's internal helper.
+      const stamp = child.terminalNotifiedAt
+      ;(manager as any).notifyTerminal(child)
+      expect(notify).toHaveBeenCalledTimes(1)
+      // The stamp must not be reset by the second call.
+      expect(child.terminalNotifiedAt).toBe(stamp)
+    })
+
+    it('does NOT stamp terminalNotifiedAt when delivery fails (returns false)', async () => {
+      // Notify reports the parent is unreachable on the first attempt.
+      notify = vi.fn(() => false)
+      manager = new OrchestratorChildManager(sessions, { notify })
+
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => false), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'Done! Created PR #99 and pushed.' }],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+        worktreePath: '/repos/myproject-wt-abc12345',
+      }))
+
+      const child = await manager.spawn(makeRequest({
+        parentSessionId: 'parent-orchestrator-id',
+      }))
+
+      for (const listener of sessions._resultListeners) {
+        listener(child.id, false)
+      }
+
+      await vi.waitFor(() => {
+        expect(child.status).toBe('completed')
+      })
+
+      expect(notify).toHaveBeenCalledTimes(1)
+      // Failed delivery must leave the stamp null so a future invocation can retry.
+      expect(child.terminalNotifiedAt).toBeNull()
+
+      // Second invocation succeeds — stamp is set, future calls become no-ops.
+      notify.mockReturnValue(true)
+      ;(manager as any).notifyTerminal(child)
+      expect(notify).toHaveBeenCalledTimes(2)
+      expect(child.terminalNotifiedAt).toBeTruthy()
+
+      ;(manager as any).notifyTerminal(child)
+      expect(notify).toHaveBeenCalledTimes(2)
+    })
+
+    it('does NOT stamp terminalNotifiedAt when notify throws', async () => {
+      notify = vi.fn(() => { throw new Error('boom') })
+      manager = new OrchestratorChildManager(sessions, { notify })
+
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => false), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'Done! Created PR #99 and pushed.' }],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+        worktreePath: '/repos/myproject-wt-abc12345',
+      }))
+
+      const child = await manager.spawn(makeRequest({
+        parentSessionId: 'parent-orchestrator-id',
+      }))
+
+      for (const listener of sessions._resultListeners) {
+        listener(child.id, false)
+      }
+
+      await vi.waitFor(() => {
+        expect(child.status).toBe('completed')
+      })
+
+      expect(notify).toHaveBeenCalledTimes(1)
+      expect(child.terminalNotifiedAt).toBeNull()
     })
   })
 })
