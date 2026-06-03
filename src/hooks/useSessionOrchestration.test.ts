@@ -301,4 +301,21 @@ describe('useSessionOrchestration', () => {
     expect(params.wsCreateSession).toHaveBeenCalledWith('hub:repo1', '/repo', false, 'default', undefined)
     unmount()
   })
+
+  it('handleNewSessionFromArchive: resolves repo by basename when path differs (worktree/alt clone)', () => {
+    // Registered repo lives at one path; the archived session was created from a
+    // different checkout of the same repo (e.g. a separate clone). Resume should
+    // still create a session in the canonical registered repo.
+    const repo = makeRepo({ id: 'repo1', workingDir: '/srv/repos/Org/project' })
+    params.repos = [repo]
+    params.useWorktreeRef = { current: false }
+    params.permissionModeRef = { current: 'default' }
+    const { result, unmount } = renderHook(() => useSessionOrchestration(params))
+
+    act(() => result.current.handleNewSessionFromArchive('/srv/repos/project', 'archived context'))
+
+    expect(params.pendingContextRef.current).toBe('archived context')
+    expect(params.wsCreateSession).toHaveBeenCalledWith('hub:repo1', '/srv/repos/Org/project', false, 'default', undefined)
+    unmount()
+  })
 })

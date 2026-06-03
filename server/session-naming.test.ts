@@ -40,6 +40,7 @@ function makeDeps(overrides: Partial<SessionNamingDeps> = {}): SessionNamingDeps
     getSession: vi.fn(() => undefined),
     hasSession: vi.fn(() => true),
     rename: vi.fn(() => true),
+    isRateLimited: vi.fn(() => false),
     ...overrides,
   }
 }
@@ -150,6 +151,24 @@ describe('SessionNaming', () => {
     vi.useRealTimers()
   })
 
+  // 6b. executeSessionNaming — defers (no CLI call, no attempt) while rate-limited
+  it('defers naming without spawning or counting an attempt when rate-limited', async () => {
+    vi.useFakeTimers()
+    const session = fakeSession({ _namingAttempts: 0 })
+    const deps = makeDeps({
+      getSession: vi.fn(() => session),
+      isRateLimited: vi.fn(() => true),
+    })
+    const naming = new SessionNaming(deps)
+
+    await naming.executeSessionNaming('s1')
+
+    expect(mockSpawn).not.toHaveBeenCalled()
+    expect(session._namingAttempts).toBe(0)
+    expect(session._namingTimer).toBeDefined()
+    vi.useRealTimers()
+  })
+
   // 7. executeSessionNaming — successful naming with valid CLI response
   it('renames session when CLI returns a valid name', async () => {
     const session = fakeSession()
@@ -162,7 +181,7 @@ describe('SessionNaming', () => {
     expect(deps.rename).toHaveBeenCalledWith('s1', 'Fix Login Page Styling')
     expect(mockSpawn).toHaveBeenCalledWith(
       'claude',
-      ['-p', '--max-turns', '1', '--model', 'haiku', '--tools', ''],
+      ['-p', '--max-turns', '1', '--model', 'haiku', '--tools', '', '--system-prompt', expect.any(String)],
       expect.objectContaining({
         stdio: ['pipe', 'pipe', 'pipe'],
         cwd: expect.any(String),

@@ -145,6 +145,23 @@ describe('SessionArchive', () => {
       expect(result.map(r => r.id).sort()).toEqual(['direct-1', 'wt-1', 'wt-2'])
     })
 
+    it('matches sessions by repo basename when archived under a different parent path', () => {
+      // Same repo, two checkouts: an older/alternate clone and the current root.
+      archive.archive({ ...baseSession, id: 'alt-1', workingDir: '/srv/repos/project', groupDir: '/srv/repos/project' })
+      // Worktree of the current clone.
+      archive.archive({ ...baseSession, id: 'wt-1', workingDir: '/srv/repos/Org/project-wt-abc', groupDir: '/srv/repos/Org/project' })
+      // Unrelated repo with a different basename must NOT match.
+      archive.archive({ ...baseSession, id: 'other-1', workingDir: '/srv/repos/Org/other', groupDir: '/srv/repos/Org/other' })
+
+      const result = archive.list('/srv/repos/Org/project')
+      expect(result.map(r => r.id).sort()).toEqual(['alt-1', 'wt-1'])
+    })
+
+    it('does not match a repo whose name is a substring of the filter basename', () => {
+      archive.archive({ ...baseSession, id: 'sub-1', workingDir: '/srv/repos/proj', groupDir: '/srv/repos/proj' })
+      expect(archive.list('/srv/repos/project')).toEqual([])
+    })
+
     it('includes all ArchivedSessionInfo fields', () => {
       archive.archive(baseSession)
       const item = archive.list()[0]
