@@ -143,13 +143,20 @@ export function useSessionOrchestration({
   }, [activeWorkingDir, repos, clearMessages, leaveSession, wsCreateSession, permissionModeRef, useWorktreeRef, providerRef])
 
   const handleNewSessionFromArchive = useCallback((workingDir: string, context: string) => {
-    const repo = repos.find(r => r.workingDir === workingDir)
+    // The archived workingDir may be a worktree path or an alternate clone path
+    // that no longer matches any registered repo. Fall back to basename matching,
+    // then to the active repo, so resume never silently no-ops.
+    const basename = (p: string) => p.replace(/\/+$/, '').split('/').pop() ?? p
+    const repo =
+      repos.find(r => r.workingDir === workingDir) ??
+      repos.find(r => basename(r.workingDir) === basename(workingDir)) ??
+      repos.find(r => r.workingDir === activeWorkingDir)
     if (!repo) return
     pendingContextRef.current = context
     clearMessages()
     leaveSession()
     wsCreateSession(`hub:${repo.id}`, repo.workingDir, useWorktreeRef.current, permissionModeRef.current, providerRef?.current)
-  }, [repos, clearMessages, leaveSession, wsCreateSession, pendingContextRef, permissionModeRef, useWorktreeRef, providerRef])
+  }, [repos, activeWorkingDir, clearMessages, leaveSession, wsCreateSession, pendingContextRef, permissionModeRef, useWorktreeRef, providerRef])
 
   return {
     activeSession,

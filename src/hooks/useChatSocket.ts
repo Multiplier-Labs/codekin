@@ -19,6 +19,11 @@ import { useWsConnection } from './useWsConnection'
 /** Max chat messages kept in the browser before trimming older entries. */
 const MAX_BROWSER_MESSAGES = 500
 
+/** Shown in the chat while the socket is down (e.g. the Codekin server restarted). */
+const DISCONNECT_TEXT = 'Connection to Codekin lost. Reconnecting…'
+/** Persistent marker added once the session rejoins after a drop. */
+const RECONNECT_TEXT = 'Reconnected to Codekin'
+
 /** Monotonically increasing counter for stable React keys across trims. */
 let msgKeyCounter = 0
 function nextKey(): string { return `m${++msgKeyCounter}` }
@@ -177,6 +182,8 @@ export function useChatSocket({
   const [thinkingSummary, setThinkingSummary] = useState<string | null>(null)
   const promptState = usePromptState()
   const currentSessionId = useRef<string | null>(null)
+  /** True after the socket drops (e.g. server restart) until the session rejoins. */
+  const wasDisconnectedRef = useRef(false)
   const [renderSessionId, setRenderSessionId] = useState<string | null>(null)
   const activePrompt = promptState.getActive(renderSessionId)
   const promptQueueSize = promptState.getQueueSize(renderSessionId)
@@ -345,6 +352,13 @@ export function useChatSocket({
             }
           }
         }
+        // If we rejoined after a connection drop (e.g. server restart), append a
+        // persistent marker so the user sees that the outage happened — the
+        // transient DISCONNECT_TEXT bubble is wiped by this history rebuild.
+        if (wasDisconnectedRef.current) {
+          wasDisconnectedRef.current = false
+          rebuilt.push({ type: 'system', subtype: 'init', text: RECONNECT_TEXT, key: nextKey() })
+        }
         setPlanningMode(restoredPlanMode)
         setTasks(restoredTasks)
         setMessages(trimMessages(rebuilt))
@@ -408,6 +422,17 @@ export function useChatSocket({
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current)
       rafRef.current = null
+    }
+    // Surface a visible notice when the connection drops (e.g. the Codekin
+    // server restarted). Only while viewing a session, and de-duped so repeated
+    // close events don't stack. Cleared/replaced once the session rejoins.
+    if (currentSessionId.current) {
+      wasDisconnectedRef.current = true
+      setMessages(prev => {
+        const last = prev[prev.length - 1]
+        if (prev.length > 0 && last.type === 'system' && last.subtype === 'exit' && last.text === DISCONNECT_TEXT) return prev
+        return trimMessages([...prev, { type: 'system', subtype: 'exit', text: DISCONNECT_TEXT, key: nextKey() }])
+      })
     }
   }, [])
 
