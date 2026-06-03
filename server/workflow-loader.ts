@@ -291,12 +291,7 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
             }
 
             console.log(`[workflow:${def.kind}] Validated repo: ${repoPath} (${branch}) — ${lastCommit}`)
-            // Propagate the symlink-resolved canonical path downstream so the
-            // session's groupDir matches the realpath-based grouping key used by
-            // manual/worktree/webhook sessions (git --git-common-dir yields a
-            // resolved path). Otherwise a symlinked REPOS_ROOT produces a
-            // duplicate repo group in the sidebar.
-            return { branch, lastCommit, repoPath: resolvedPath, repoName: input.repoName }
+            return { branch, lastCommit, repoPath, repoName: input.repoName }
           } catch (err) {
             if (err instanceof Error && err.name === 'WorkflowSkipped') throw err
             throw new Error(`Not a valid git repository: ${repoPath}`, { cause: err })
