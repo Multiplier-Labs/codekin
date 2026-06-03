@@ -179,6 +179,18 @@ async function fetchViaCli(): Promise<ClaudeModelInfo[] | null> {
 // ---------------------------------------------------------------------------
 
 /**
+ * Synchronously return the best-known default Claude model ID — the first
+ * (newest) entry of the discovered list, or the hardcoded fallback's first
+ * entry when discovery hasn't completed yet. This matches the model the
+ * frontend auto-selects (the [0] of the same list), so new sessions start on
+ * it directly instead of letting the CLI pick a stale default and forcing a
+ * disruptive model-switch restart that drops the user's first message.
+ */
+export function getDefaultClaudeModel(): string {
+  return (cache?.models[0] ?? FALLBACK_MODELS[0]).id
+}
+
+/**
  * Return available Claude models. Uses cached results when valid.
  * Called by the GET /api/claude/models endpoint.
  */
