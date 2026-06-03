@@ -2821,7 +2821,7 @@ describe('SessionManager', () => {
       reconfigSpy.mockRestore()
     })
 
-    it('does NOT reconfigure when model was previously undefined (initial assignment)', () => {
+    it('reconfigures when model was previously undefined and process is alive', () => {
       const s = sm.create('test', '/tmp')
       const cp = fakeClaudeProcess(true)
       s.claudeProcess = cp
@@ -2831,8 +2831,12 @@ describe('SessionManager', () => {
 
       sm.setModel(s.id, 'sonnet')
 
-      // Should just assign without reconfiguring
-      expect(reconfigSpy).not.toHaveBeenCalled()
+      // Should reconfigure because the process is alive
+      expect(reconfigSpy).toHaveBeenCalledOnce()
+
+      // Verify the callback sets the model
+      const applyFn = reconfigSpy.mock.calls[0][0]
+      applyFn()
       expect(s.model).toBe('sonnet')
 
       reconfigSpy.mockRestore()

@@ -1,24 +1,26 @@
 import { useEffect } from 'react'
-import { CLAUDE_MODELS } from '../types'
-import type { CodingProvider } from '../types'
+import type { CodingProvider, ModelOption } from '../types'
 
 /**
  * When the active session uses the Claude provider, ensures `currentModel`
- * is one of the known CLAUDE_MODELS. Falls back to the first model if not.
+ * is one of the known models. Falls back to the first model if not.
  */
 export function useProviderValidation({
   activeSessionProvider,
   currentModel,
   setModel,
+  claudeModels,
 }: {
   activeSessionProvider: CodingProvider
   currentModel: string | null
   setModel: (model: string) => void
+  claudeModels: ModelOption[]
 }) {
   useEffect(() => {
     if (activeSessionProvider !== 'claude') return
-    if (!CLAUDE_MODELS.some(m => m.id === currentModel)) {
-      setModel(CLAUDE_MODELS[0].id)
+    if (claudeModels.length === 0) return
+    if (!claudeModels.some(m => m.id === currentModel)) {
+      setModel(claudeModels[0].id)
     }
-  }, [activeSessionProvider, currentModel, setModel])
+  }, [activeSessionProvider, currentModel, setModel, claudeModels])
 }

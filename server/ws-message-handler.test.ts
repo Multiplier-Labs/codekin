@@ -381,14 +381,20 @@ describe('handleWsMessage', () => {
       expect(ctx.sent).toHaveLength(0)
     })
 
-    it('rejects invalid model', () => {
+    it('accepts any non-empty model string (models are dynamic)', () => {
       handleWsMessage({ type: 'set_model', model: 'gpt-4o' } as WsClientMessage, ctx)
+
+      // Dynamic model list means any non-empty string is accepted
+      expect(ctx.sessions.setModel).toHaveBeenCalledWith('sess-1', 'gpt-4o')
+      expect(ctx.sent).toHaveLength(0)
+    })
+
+    it('rejects empty model', () => {
+      handleWsMessage({ type: 'set_model', model: '' } as WsClientMessage, ctx)
 
       expect(ctx.sessions.setModel).not.toHaveBeenCalled()
       expect(ctx.sent).toHaveLength(1)
       expect(ctx.sent[0].type).toBe('error')
-      expect((ctx.sent[0] as any).message).toContain('Invalid model')
-      expect((ctx.sent[0] as any).message).toContain('gpt-4o')
     })
 
     it('does nothing without active session', () => {
