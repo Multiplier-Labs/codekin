@@ -482,6 +482,18 @@ export async function fetchOpenCodeModels(
   }>(res)
 }
 
+/** Fetch available Claude models from the Anthropic API (via server proxy). */
+export async function fetchClaudeModels(
+  token: string,
+): Promise<Array<{ id: string; label: string }>> {
+  const res = await fetch(`${BASE}/api/claude/models`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) return []
+  const data = await jsonBody<{ models: Array<{ id: string; label: string }> }>(res)
+  return data.models ?? []
+}
+
 // ---------------------------------------------------------------------------
 // Integration health checks & setup
 // ---------------------------------------------------------------------------

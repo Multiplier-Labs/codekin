@@ -9,9 +9,10 @@ import { realpathSync as fsRealpathSync } from 'fs'
 import { homedir as osHomedir } from 'os'
 import { resolve as pathResolve } from 'path'
 import type { WebSocket } from 'ws'
+import { triggerCliProbeIfNeeded } from './anthropic-models.js'
 import { REPOS_ROOT } from './config.js'
 import type { SessionManager } from './session-manager.js'
-import { VALID_MODELS, VALID_PERMISSION_MODES, VALID_PROVIDERS } from './types.js'
+import { VALID_PERMISSION_MODES, VALID_PROVIDERS } from './types.js'
 import type { WsClientMessage, WsServerMessage } from './types.js'
 
 /** Closure state passed to handleWsMessage from the ws.on('connection') scope. */
@@ -51,6 +52,9 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       const session = sessions.create(msg.name, msg.workingDir, { model: msg.model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider })
       session.clients.add(ws)
       clientSessions.set(ws, session.id)
+
+      // Trigger background CLI probe to discover latest model IDs (once per day)
+      triggerCliProbeIfNeeded()
 
       if (msg.useWorktree) {
         // Create worktree asynchronously, then start Claude in it
@@ -172,14 +176,13 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
-    // Change the model for the session. Validates against the server-side allowlist.
+    // Change the model for the session. Basic sanity check on model ID format.
     case 'set_model': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
-        // For OpenCode sessions, accept any model string (models are dynamic).
-        // For Claude sessions, validate against the static allowlist.
-        const sessionProvider = sessions.getSessionProvider(sessionId)
-        if (sessionProvider !== 'opencode' && !VALID_MODELS.has(msg.model)) {
+        // Accept any non-empty model string — models are fetched dynamically
+        // from the Anthropic API so we can't validate against a static list.
+        if (!msg.model || typeof msg.model !== 'string') {
           send({ type: 'error', message: `Invalid model: ${msg.model}` })
           break
         }

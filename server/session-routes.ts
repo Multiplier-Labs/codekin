@@ -18,6 +18,7 @@ import { homedir as osHomedir } from 'os'
 import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
 import { REPOS_ROOT, getAgentDisplayName } from './config.js'
+import { fetchAnthropicModels } from './anthropic-models.js'
 import { VALID_PROVIDERS } from './types.js'
 import type { CodingProvider } from './coding-process.js'
 import type { PermissionMode } from './types.js'
@@ -143,6 +144,13 @@ export function createSessionRouter(
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
     res.json({ sessions: sessions.list() })
+  })
+
+  router.get('/api/claude/models', async (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const models = await fetchAnthropicModels()
+    res.json({ models })
   })
 
   router.get('/api/opencode/models', async (req, res) => {

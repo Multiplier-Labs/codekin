@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect } from 'react'
-import { fetchOpenCodeModels } from '../../lib/ccApi'
+import { fetchClaudeModels, fetchOpenCodeModels } from '../../lib/ccApi'
 import { MODEL_OPTIONS } from '../../lib/workflowHelpers'
 import type { ModelOption, CodingProvider } from '../../types'
 import { WorkflowModelPicker } from './WorkflowModelPicker'
@@ -19,8 +19,8 @@ const providerBtnClass = (selected: boolean) =>
       : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
   }`
 
-/** Claude model options for the workflow picker (includes "Default" option). */
-const CLAUDE_WORKFLOW_MODELS: ModelOption[] = MODEL_OPTIONS.map(m => ({
+/** Fallback Claude model options for workflows (includes "Default" option). */
+const FALLBACK_WORKFLOW_MODELS: ModelOption[] = MODEL_OPTIONS.map(m => ({
   id: m.value,
   label: m.label,
 }))
@@ -38,7 +38,22 @@ interface Props {
 export function ProviderModelSection({ token, workingDir, provider, model, onProviderChange, onModelChange }: Props) {
   const [openCodeAvailable, setOpenCodeAvailable] = useState<boolean | null>(null)
   const [openCodeModels, setOpenCodeModels] = useState<ModelOption[]>([])
+  const [claudeWorkflowModels, setClaudeWorkflowModels] = useState<ModelOption[]>(FALLBACK_WORKFLOW_MODELS)
   const [loadingOcModels, setLoadingOcModels] = useState(true)
+
+  // Fetch Claude models dynamically on mount
+  useEffect(() => {
+    let cancelled = false
+    fetchClaudeModels(token).then(models => {
+      if (cancelled || models.length === 0) return
+      // Prepend the "Default (Opus)" option for workflows
+      setClaudeWorkflowModels([
+        { id: '', label: 'Default (Opus)' },
+        ...models.map(m => ({ id: m.id, label: m.label })),
+      ])
+    }).catch(() => { /* keep fallback */ })
+    return () => { cancelled = true }
+  }, [token])
 
   // Check OpenCode availability on mount
   useEffect(() => {
@@ -64,11 +79,11 @@ export function ProviderModelSection({ token, workingDir, provider, model, onPro
     if (newProvider === provider) return
     onProviderChange(newProvider)
     // Pick the first model from the new provider's list ('' = Default Opus for Claude)
-    const newModels = newProvider === 'opencode' ? openCodeModels : CLAUDE_WORKFLOW_MODELS
+    const newModels = newProvider === 'opencode' ? openCodeModels : claudeWorkflowModels
     onModelChange(newModels[0]?.id ?? '')
   }
 
-  const currentModels: ModelOption[] = provider === 'opencode' ? openCodeModels : CLAUDE_WORKFLOW_MODELS
+  const currentModels: ModelOption[] = provider === 'opencode' ? openCodeModels : claudeWorkflowModels
   const isLoadingModels = provider === 'opencode' && loadingOcModels
 
   return (

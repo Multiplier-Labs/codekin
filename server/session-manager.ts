@@ -1229,10 +1229,10 @@ export class SessionManager {
     if (!session) return false
     const newModel = model || undefined
     if (session.model === newModel) return true
-    // When the session had no model set (e.g. just created), simply assign it
-    // without reconfiguring — the running process already defaults to this model
-    // and killing it mid-turn causes the first user message to be lost.
-    if (!session.model || !session.claudeProcess?.isAlive()) {
+    // When no process is running, just assign the model directly.
+    // When a process IS alive, always reconfigure (stop + restart) so the CLI
+    // actually uses the new model — even if session.model was previously unset.
+    if (!session.claudeProcess?.isAlive()) {
       session.model = newModel
       this.persistToDiskDebounced()
     } else {

@@ -43,7 +43,7 @@ import { OrchestratorContent } from './components/OrchestratorContent'
 import { DocsBrowserContent } from './components/DocsBrowserContent'
 import { SessionContent } from './components/SessionContent'
 import type { PermissionMode, CodingProvider } from './types'
-import { CLAUDE_MODELS } from './types'
+import { useClaudeModelSync } from './hooks/useClaudeModelSync'
 
 export default function App() {
   const { settings, updateSettings } = useSettings()
@@ -214,14 +214,19 @@ export default function App() {
     setModel,
     openCodeDisabled,
   })
-  const availableModels = activeSessionProvider === 'opencode' ? openCodeModels : CLAUDE_MODELS
+  const { claudeModels } = useClaudeModelSync({
+    token: settings.token,
+    currentModel,
+    setModel,
+  })
+  const availableModels = activeSessionProvider === 'opencode' ? openCodeModels : claudeModels
 
   // Reset file-change tracking when switching sessions
   useEffect(() => {
     setHasFileChanges(false) // eslint-disable-line react-hooks/set-state-in-effect -- sync with session change
   }, [activeSessionId])
 
-  useProviderValidation({ activeSessionProvider, currentModel, setModel })
+  useProviderValidation({ activeSessionProvider, currentModel, setModel, claudeModels })
 
   // Session orchestration: switching, creating, deleting sessions & repos
   const {
