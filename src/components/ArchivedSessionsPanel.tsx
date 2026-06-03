@@ -138,7 +138,9 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
     if (!viewing || !onNewSessionFromArchive) return
     const messages = rebuildFromHistory(viewing.outputHistory)
     const context = buildContextSummary(messages, displayName(viewing))
-    onNewSessionFromArchive(viewing.workingDir, context)
+    // Prefer the canonical repo root (groupDir). The raw workingDir of a worktree
+    // session points at a now-deleted worktree path that matches no live repo.
+    onNewSessionFromArchive(viewing.groupDir ?? viewing.workingDir, context)
     setViewing(null)
     onClose?.()
   }, [viewing, onNewSessionFromArchive, onClose])
