@@ -17,14 +17,30 @@ const MAX_NAMING_ATTEMPTS = 5
 /** Back-off delays for naming retries: 20s, 60s, 120s, 240s, 240s */
 const NAMING_DELAYS = [20_000, 60_000, 120_000, 240_000, 240_000]
 
-/** Timeout for the claude -p process (15 seconds). */
-const CLI_TIMEOUT_MS = 15_000
+/** Timeout for the claude -p process. Standalone the call returns in ~5s, but
+ *  in production it runs concurrently with the session's live Claude process and
+ *  shares the same subscription/rate-limit budget, so it needs more headroom. */
+const CLI_TIMEOUT_MS = 30_000
+
+/** Terse system prompt that replaces Claude Code's default assistant persona.
+ *  Without it, Haiku treats the naming prompt conversationally ("Hey! I'm ready
+ *  to help…" / "I need to know what you're working on…") and the chatty reply
+ *  fails the name validator, wasting an attempt. */
+const NAMING_SYSTEM_PROMPT =
+  'You generate short titles for coding sessions. Output ONLY a 3-6 word title ' +
+  'summarizing the work, in Title Case. No quotes, no punctuation, no explanation, ' +
+  'no questions, no preamble. If the context is thin, make your best guess from ' +
+  'whatever text is available.'
 
 /** Callback interface for SessionNaming to interact with SessionManager. */
 export interface SessionNamingDeps {
   getSession(id: string): Session | undefined
   hasSession(id: string): boolean
   rename(sessionId: string, newName: string): boolean
+  /** Whether the rate-limit circuit breaker is currently open. When true,
+   *  naming is deferred — firing claude -p into a rate-limited account just
+   *  hangs until the 30s timeout and worsens the quota situation. */
+  isRateLimited(): boolean
 }
 
 /** Build a minimal env for claude -p that includes auth/config paths
@@ -53,7 +69,7 @@ function generateNameViaCLI(prompt: string): Promise<string> {
     // those would inject unrelated context and the model ends up responding
     // to that instead of the naming prompt. --tools "" disables tools so the
     // model can't burn its single turn on a tool call.
-    const proc = spawn(CLAUDE_BINARY, ['-p', '--max-turns', '1', '--model', 'haiku', '--tools', ''], {
+    const proc = spawn(CLAUDE_BINARY, ['-p', '--max-turns', '1', '--model', 'haiku', '--tools', '', '--system-prompt', NAMING_SYSTEM_PROMPT], {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: tmpdir(),
       env: buildNamingEnv(),
@@ -124,6 +140,14 @@ export class SessionNaming {
     const session = this.deps.getSession(sessionId)
     if (!session) return
     if (!session.name.startsWith('hub:')) return
+
+    // Defer (without counting an attempt) while the rate-limit breaker is open —
+    // a claude -p call here would just hang until timeout and worsen the quota
+    // situation. Re-checks on the next scheduled tick once the breaker clears.
+    if (this.deps.isRateLimited()) {
+      this.scheduleSessionNaming(sessionId)
+      return
+    }
 
     session._namingAttempts++
 
