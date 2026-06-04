@@ -282,17 +282,45 @@ interface ListQueryOpts {
   offset?: number
 }
 
-/** Build a parameterized SELECT query from typed filter objects. */
-function buildListQuery(table: string, opts: ListQueryOpts): { sql: string; params: unknown[] } {
+/**
+ * A bare SQL identifier: a table or column name with no quoting, spaces, or
+ * other metacharacters. Filter values are always parameterized, but table and
+ * column names cannot be — so they are validated against this pattern to ensure
+ * a future caller passing user-controlled input cannot inject SQL.
+ */
+const SQL_IDENTIFIER = /^[a-z_][a-z0-9_]*$/i
+
+/** An ORDER BY clause: a single identifier followed by an explicit direction. */
+const SQL_ORDER_BY = /^[a-z_][a-z0-9_]* (ASC|DESC)$/i
+
+/**
+ * Build a parameterized SELECT query from typed filter objects.
+ *
+ * Exported for testing. Filter values are parameterized; table/column/orderBy
+ * are validated as bare SQL identifiers since they cannot be parameterized.
+ */
+export function buildListQuery(table: string, opts: ListQueryOpts): { sql: string; params: unknown[] } {
+  if (!SQL_IDENTIFIER.test(table)) {
+    throw new Error(`buildListQuery: invalid table name '${table}'`)
+  }
+
   const params: unknown[] = []
   let sql = `SELECT * FROM ${table} WHERE 1=1`
 
   for (const f of opts.filters) {
+    if (!SQL_IDENTIFIER.test(f.column)) {
+      throw new Error(`buildListQuery: invalid filter column '${f.column}'`)
+    }
     sql += ` AND ${f.column} = ?`
     params.push(f.value)
   }
 
-  if (opts.orderBy) sql += ` ORDER BY ${opts.orderBy}`
+  if (opts.orderBy) {
+    if (!SQL_ORDER_BY.test(opts.orderBy)) {
+      throw new Error(`buildListQuery: invalid orderBy clause '${opts.orderBy}'`)
+    }
+    sql += ` ORDER BY ${opts.orderBy}`
+  }
   if (opts.limit) { sql += ` LIMIT ?`; params.push(opts.limit) }
   if (opts.offset) { sql += ` OFFSET ?`; params.push(opts.offset) }
 
