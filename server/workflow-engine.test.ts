@@ -30,7 +30,7 @@ vi.mock('fs', async (importOriginal) => {
   }
 })
 
-import { WorkflowEngine, WorkflowSkipped, SessionGoneError, initWorkflowEngine, getWorkflowEngine, shutdownWorkflowEngine, cronMatchesDate } from './workflow-engine.js'
+import { WorkflowEngine, WorkflowSkipped, SessionGoneError, initWorkflowEngine, getWorkflowEngine, shutdownWorkflowEngine, cronMatchesDate, buildListQuery } from './workflow-engine.js'
 import type { StepHandler } from './workflow-engine.js'
 
 describe('WorkflowEngine', () => {
@@ -447,6 +447,42 @@ describe('WorkflowEngine', () => {
       engine.listRuns({ kind: 'test', status: 'failed', limit: 10, offset: 5 })
       // Verify the SQL was called (we can check prepare was called)
       expect(mockAll).toHaveBeenCalled()
+    })
+  })
+
+  describe('buildListQuery', () => {
+    it('builds a parameterized query for valid inputs', () => {
+      const { sql, params } = buildListQuery('workflow_runs', {
+        filters: [{ column: 'kind', value: 'test' }, { column: 'status', value: 'failed' }],
+        orderBy: 'created_at DESC',
+        limit: 10,
+        offset: 5,
+      })
+      expect(sql).toBe('SELECT * FROM workflow_runs WHERE 1=1 AND kind = ? AND status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?')
+      expect(params).toEqual(['test', 'failed', 10, 5])
+    })
+
+    it('rejects an injection attempt in the table name', () => {
+      expect(() => buildListQuery('workflow_runs; DROP TABLE workflow_runs', { filters: [] }))
+        .toThrow(/invalid table name/)
+    })
+
+    it('rejects an injection attempt in a filter column', () => {
+      expect(() => buildListQuery('workflow_runs', {
+        filters: [{ column: 'kind = 1 OR 1=1 --', value: 'x' }],
+      })).toThrow(/invalid filter column/)
+    })
+
+    it('rejects an injection attempt in the orderBy clause', () => {
+      expect(() => buildListQuery('workflow_runs', {
+        filters: [],
+        orderBy: 'created_at; DROP TABLE workflow_runs',
+      })).toThrow(/invalid orderBy clause/)
+    })
+
+    it('rejects an orderBy without an explicit direction', () => {
+      expect(() => buildListQuery('workflow_runs', { filters: [], orderBy: 'created_at' }))
+        .toThrow(/invalid orderBy clause/)
     })
   })
 
