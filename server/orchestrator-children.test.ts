@@ -9,6 +9,12 @@ vi.mock('./config.js', () => ({
   DATA_DIR: '/tmp/codekin-test',
 }))
 
+// Tests inject their own notify fn; mock the outbox module so importing it
+// does not drag in orchestrator-manager (reads config constants at load time).
+vi.mock('./orchestrator-outbox.js', () => ({
+  getOrchestratorOutbox: () => ({ enqueue: () => {} }),
+}))
+
 import { OrchestratorChildManager, type ChildSessionRequest } from './orchestrator-children.js'
 
 // ---------------------------------------------------------------------------

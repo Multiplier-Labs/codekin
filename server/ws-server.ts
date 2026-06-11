@@ -48,6 +48,7 @@ import { createDocsRouter } from './docs-routes.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, isOrchestratorSession } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
+import { getOrchestratorOutbox } from './orchestrator-outbox.js'
 import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, CLAUDE_BINARY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR } from './config.js'
 
 // ---------------------------------------------------------------------------
@@ -670,6 +671,11 @@ server.listen(port, '0.0.0.0', () => {
       console.log('[boot]   Set CODEKIN_ORCHESTRATOR_MONITOR=true to re-enable.')
     }
     orchestratorMonitorRef.current = monitor
+
+    // Replay notifications queued while the orchestrator was down. The
+    // flusher only delivers when the orchestrator session is alive and the
+    // rate-limit circuit breaker is closed, so it is safe to run always.
+    getOrchestratorOutbox().startFlusher(sessions)
 
     console.log('[workflow] Workflow engine ready')
   } catch (err) {

@@ -14,6 +14,7 @@ import { scanRepoReports } from './orchestrator-reports.js'
 import { OrchestratorMemory } from './orchestrator-memory.js'
 import { runAgingCycle, getPendingOutcomeAssessments } from './orchestrator-learning.js'
 import { getOrchestratorSessionId } from './orchestrator-manager.js'
+import { getOrchestratorOutbox } from './orchestrator-outbox.js'
 import { REPOS_ROOT, getAgentDisplayName } from './config.js'
 import { loadWorkflowConfig, type ReviewRepoConfig } from './workflow-config.js'
 
@@ -273,7 +274,18 @@ export class OrchestratorMonitor {
     if (!orchestratorId) return
 
     const session = this.sessions.get(orchestratorId)
-    if (!session?.claudeProcess?.isAlive()) return
+    if (!session?.claudeProcess?.isAlive()) {
+      // Orchestrator not running — hand the notification to the persistent
+      // outbox so it is replayed (as a digest) when the session comes back,
+      // instead of rotting in the in-memory buffer forever.
+      getOrchestratorOutbox().enqueue({
+        label: notification.severity.toUpperCase(),
+        title: notification.title,
+        body: notification.body,
+      })
+      notification.delivered = true
+      return
+    }
 
     // Send as a system message that the orchestrator will see and respond to
     const message = `[Agent ${getAgentDisplayName()} Notification — ${notification.severity.toUpperCase()}]\n${notification.title}\n${notification.body}`
