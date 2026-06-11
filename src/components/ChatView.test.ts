@@ -15,6 +15,10 @@ describe('formatModelName', () => {
     expect(formatModelName('claude-haiku-3-5')).toBe('Haiku 3.5')
   })
 
+  it('parses single-version dateless id claude-fable-5 → Fable 5', () => {
+    expect(formatModelName('claude-fable-5')).toBe('Fable 5')
+  })
+
   it('returns raw string for non-matching input', () => {
     expect(formatModelName('gpt-4o')).toBe('gpt-4o')
   })

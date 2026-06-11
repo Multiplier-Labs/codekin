@@ -24,6 +24,7 @@ export interface ClaudeModelInfo {
  *  Per https://platform.claude.com/docs/en/about-claude/models/overview */
 export const FALLBACK_MODELS: ClaudeModelInfo[] = [
   { id: 'claude-opus-4-8', label: 'Opus 4.8' },
+  { id: 'claude-fable-5', label: 'Fable 5' },
   { id: 'claude-opus-4-7', label: 'Opus 4.7' },
   { id: 'claude-opus-4-6', label: 'Opus 4.6' },
   { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
@@ -38,6 +39,9 @@ export const FALLBACK_MODELS: ClaudeModelInfo[] = [
  * probes cost ~$0.04 each. Probing in parallel keeps total wall time under 5s.
  */
 const CANDIDATE_MODEL_IDS: string[] = [
+  // Fable family (5th-generation flagship; GA 2026-06-09). Dateless pinned ID.
+  'claude-fable-5',
+  'claude-fable-6',
   // Opus family (currently 4.6, 4.7, 4.8 are live; probe ahead for new releases)
   'claude-opus-4-6',
   'claude-opus-4-7',
@@ -75,13 +79,14 @@ let probeInFlight: Promise<void> | null = null
  * Build a human-friendly label from a model ID.
  * e.g. "claude-opus-4-8" → "Opus 4.8"
  *      "claude-haiku-4-5-20251001" → "Haiku 4.5"
+ *      "claude-fable-5" → "Fable 5"  (single-version, dateless IDs)
  */
 function labelFromId(id: string): string {
   const rest = id.replace(/^claude-/, '')
-  const m = rest.match(/^(\w+?)-(\d+)-(\d+)/)
+  const m = rest.match(/^(\w+?)-(\d+)(?:-(\d+))?/)
   if (m) {
     const family = m[1].charAt(0).toUpperCase() + m[1].slice(1)
-    return `${family} ${m[2]}.${m[3]}`
+    return m[3] ? `${family} ${m[2]}.${m[3]}` : `${family} ${m[2]}`
   }
   return id
 }
