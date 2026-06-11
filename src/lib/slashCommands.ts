@@ -16,7 +16,7 @@
 
 import type { Skill } from '../types'
 
-export type SlashCommandCategory = 'skill' | 'bundled' | 'builtin'
+export type SlashCommandCategory = 'skill' | 'bundled' | 'builtin' | 'opencode'
 
 export interface SlashCommand {
   command: string
@@ -79,6 +79,41 @@ export const BUNDLED_SKILLS: SlashCommand[] = [
  * If a filesystem skill has the same command as a bundled skill, the
  * filesystem version wins (it has real content to expand).
  */
+/** An OpenCode command as returned by GET /api/opencode/commands. */
+export interface OpenCodeCommand {
+  name: string
+  description?: string
+  source?: 'command' | 'mcp' | 'skill'
+}
+
+/**
+ * Build the slash command list for an OpenCode session: the server's own
+ * commands (routed server-side to POST /session/:id/command) plus Codekin's
+ * built-in commands (handled locally — /clear, /model, etc.).
+ */
+export function buildOpenCodeSlashCommandList(commands: OpenCodeCommand[]): SlashCommand[] {
+  const seen = new Set<string>()
+  const result: SlashCommand[] = []
+  for (const cmd of commands) {
+    const command = `/${cmd.name}`
+    if (seen.has(command)) continue
+    seen.add(command)
+    result.push({
+      command,
+      name: cmd.name,
+      description: cmd.description || (cmd.source === 'skill' ? 'OpenCode skill' : cmd.source === 'mcp' ? 'MCP prompt' : 'OpenCode command'),
+      category: 'opencode',
+    })
+  }
+  for (const cmd of BUILTIN_COMMANDS) {
+    if (seen.has(cmd.command)) continue
+    seen.add(cmd.command)
+    for (const alias of cmd.aliases ?? []) seen.add(alias)
+    result.push(cmd)
+  }
+  return result
+}
+
 export function buildSlashCommandList(allSkills: Skill[]): SlashCommand[] {
   const seen = new Set<string>()
   const result: SlashCommand[] = []

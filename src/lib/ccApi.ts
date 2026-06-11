@@ -482,6 +482,20 @@ export async function fetchOpenCodeModels(
   }>(res)
 }
 
+/** Fetch the OpenCode command list (slash commands / skills / MCP prompts). */
+export async function fetchOpenCodeCommands(
+  token: string,
+  workingDir?: string,
+): Promise<Array<{ name: string; description?: string; source?: 'command' | 'mcp' | 'skill' }>> {
+  const params = workingDir ? `?workingDir=${encodeURIComponent(workingDir)}` : ''
+  const res = await fetch(`${BASE}/api/opencode/commands${params}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) return []
+  const data = await jsonBody<{ commands?: Array<{ name: string; description?: string; source?: 'command' | 'mcp' | 'skill' }> }>(res)
+  return data.commands ?? []
+}
+
 /** Fetch available Claude models from the Anthropic API (via server proxy). */
 export async function fetchClaudeModels(
   token: string,

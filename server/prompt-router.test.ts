@@ -422,6 +422,33 @@ describe('PromptRouter', () => {
     it('formats unknown tools', () => {
       expect(router.summarizeToolPermission('WebFetch', {})).toBe('Allow WebFetch?')
     })
+
+    it('formats OpenCode external_directory with filepath and patterns', () => {
+      const result = router.summarizeToolPermission('external_directory', {
+        permission: 'external_directory',
+        filepath: '/etc/hosts',
+        patterns: ['/etc/*'],
+      })
+      expect(result).toContain('outside the project directory')
+      expect(result).toContain('/etc/hosts')
+      expect(result).toContain('/etc/*')
+    })
+
+    it('formats OpenCode external_directory without metadata', () => {
+      const result = router.summarizeToolPermission('external_directory', { permission: 'external_directory' })
+      expect(result).toContain('outside the project directory')
+    })
+
+    it('formats OpenCode doom_loop', () => {
+      const result = router.summarizeToolPermission('doom_loop', { permission: 'doom_loop' })
+      expect(result).toContain('repeating itself')
+    })
+
+    it('includes patterns for unknown OpenCode permission types', () => {
+      const result = router.summarizeToolPermission('webfetch', { permission: 'webfetch', patterns: ['https://example.com/*'] })
+      expect(result).toContain('Allow webfetch?')
+      expect(result).toContain('https://example.com/*')
+    })
   })
 
   // -------------------------------------------------------------------------

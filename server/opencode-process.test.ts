@@ -26,7 +26,7 @@ vi.mock('child_process', async (importOriginal) => {
   }
 })
 
-import { OpenCodeProcess, stopOpenCodeServer } from './opencode-process.js'
+import { OpenCodeProcess, stopOpenCodeServer, permissionRulesetFor, OPENCODE_SYSTEM_CONTEXT } from './opencode-process.js'
 import { OPENCODE_CAPABILITIES } from './coding-process.js'
 
 describe('OpenCodeProcess', () => {
@@ -632,6 +632,161 @@ describe('OpenCodeProcess', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (ocp as any).checkTurnLiveness(true)
       expect(resultHandler).toHaveBeenCalledWith('', false)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Permission mode → OpenCode permission ruleset
+  // ---------------------------------------------------------------------------
+
+  describe('permissionRulesetFor', () => {
+    it('maps bypassPermissions to an all-allow ruleset', () => {
+      expect(permissionRulesetFor('bypassPermissions')).toEqual([
+        { permission: '*', pattern: '*', action: 'allow' },
+      ])
+    })
+
+    it('maps dangerouslySkipPermissions to an all-allow ruleset', () => {
+      expect(permissionRulesetFor('dangerouslySkipPermissions')).toEqual([
+        { permission: '*', pattern: '*', action: 'allow' },
+      ])
+    })
+
+    it('maps acceptEdits to an edit-allow ruleset', () => {
+      expect(permissionRulesetFor('acceptEdits')).toEqual([
+        { permission: 'edit', pattern: '*', action: 'allow' },
+      ])
+    })
+
+    it('returns undefined for default, plan, and unset modes', () => {
+      expect(permissionRulesetFor('default')).toBeUndefined()
+      expect(permissionRulesetFor('plan')).toBeUndefined()
+      expect(permissionRulesetFor(undefined)).toBeUndefined()
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // sendMessage request body (agent, system, model, command routing)
+  // ---------------------------------------------------------------------------
+
+  describe('sendMessage request body', () => {
+    /** Prepare a connected process and capture the next outgoing request. */
+    const connect = (proc: OpenCodeProcess) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(proc as any).alive = true
+      setSessionId(proc, 'oc-session-1')
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    }
+
+    const lastRequest = () => {
+      const [url, init] = mockFetch.mock.calls[mockFetch.mock.calls.length - 1] as [string, { body: string }]
+      return { url, body: JSON.parse(init.body) as Record<string, unknown> }
+    }
+
+    it('selects the build agent and appends Codekin system context by default', () => {
+      connect(ocp)
+      ocp.sendMessage('hello')
+      const { url, body } = lastRequest()
+      expect(url).toContain('/session/oc-session-1/prompt_async')
+      expect(body.agent).toBe('build')
+      expect(body.system).toBe(OPENCODE_SYSTEM_CONTEXT)
+      expect(body.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+    })
+
+    it('selects the plan agent in plan mode', () => {
+      const planProc = new OpenCodeProcess('/tmp/test-repo', {
+        sessionId: 'plan-session',
+        model: 'anthropic/claude-sonnet-4',
+        permissionMode: 'plan',
+      })
+      connect(planProc)
+      planProc.sendMessage('propose a refactor')
+      const { body } = lastRequest()
+      expect(body.agent).toBe('plan')
+      planProc.stop()
+    })
+
+    it('splits OpenRouter-style model IDs at the first slash only', () => {
+      const orProc = new OpenCodeProcess('/tmp/test-repo', {
+        sessionId: 'or-session',
+        model: 'openrouter/meta-llama/llama-3.1-8b',
+      })
+      connect(orProc)
+      orProc.sendMessage('hi')
+      const { body } = lastRequest()
+      expect(body.model).toEqual({ providerID: 'openrouter', modelID: 'meta-llama/llama-3.1-8b' })
+      orProc.stop()
+    })
+
+    it('routes known slash commands to the command endpoint', () => {
+      connect(ocp)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).commands = new Map([['review', { name: 'review', source: 'command' }]])
+      ocp.sendMessage('/review src/index.ts')
+      const { url, body } = lastRequest()
+      expect(url).toContain('/session/oc-session-1/command')
+      expect(body.command).toBe('review')
+      expect(body.arguments).toBe('src/index.ts')
+      expect(body.agent).toBe('build')
+      expect(body.model).toBe('anthropic/claude-sonnet-4')
+    })
+
+    it('routes a known slash command without arguments', () => {
+      connect(ocp)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).commands = new Map([['init', { name: 'init' }]])
+      ocp.sendMessage('/init')
+      const { url, body } = lastRequest()
+      expect(url).toContain('/command')
+      expect(body.command).toBe('init')
+      expect(body.arguments).toBeUndefined()
+    })
+
+    it('sends unknown slash commands as a regular prompt', () => {
+      connect(ocp)
+      ocp.sendMessage('/not-a-command do things')
+      const { url, body } = lastRequest()
+      expect(url).toContain('/prompt_async')
+      expect((body.parts as Array<{ text: string }>)[0].text).toBe('/not-a-command do things')
+    })
+
+    it('does not route commands when attachments are present', () => {
+      connect(ocp)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).commands = new Map([['review', { name: 'review' }]])
+      // Attached file does not exist — attachment is skipped, but the message
+      // had an attachment prefix, so it must go through the prompt path.
+      ocp.sendMessage('[Attached files: /nonexistent/file.png]\n/review this')
+      const { url } = lastRequest()
+      expect(url).toContain('/prompt_async')
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // step-finish flushing
+  // ---------------------------------------------------------------------------
+
+  describe('step-finish', () => {
+    it('flushes buffered text deltas on step-finish', () => {
+      const textHandler = vi.fn()
+      ocp.on('text', textHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).lastUserInput = 'a long user message that exceeds the delta'
+
+      // Short delta — buffered awaiting the echo check
+      callHandleSSE(ocp, {
+        type: 'message.part.delta',
+        properties: { sessionID: 'oc-session-1', field: 'text', delta: 'Done.' },
+      })
+      expect(textHandler).not.toHaveBeenCalled()
+
+      // Step boundary — buffer must flush
+      callHandleSSE(ocp, {
+        type: 'message.part.updated',
+        properties: { sessionID: 'oc-session-1', part: { type: 'step-finish' } },
+      })
+      expect(textHandler).toHaveBeenCalledWith('Done.')
     })
   })
 
