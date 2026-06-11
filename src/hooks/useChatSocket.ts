@@ -291,6 +291,13 @@ export function useChatSocket({
         setMessages(prev => trimMessages(processMessage(prev, msg)))
         break
 
+      // Structured server-driven mode change (plan approval, fallback restart,
+      // another client switching modes) — keeps the toolbar in sync.
+      case 'permission_mode_changed':
+        setCurrentPermissionMode(msg.permissionMode)
+        localStorage.setItem('claude-permission-mode', msg.permissionMode)
+        break
+
       case 'todo_update':
         setTasks(msg.tasks)
         break
@@ -359,7 +366,9 @@ export function useChatSocket({
           wasDisconnectedRef.current = false
           rebuilt.push({ type: 'system', subtype: 'init', text: RECONNECT_TEXT, key: nextKey() })
         }
-        setPlanningMode(restoredPlanMode)
+        // Prefer the server's authoritative plan state over the value
+        // reconstructed from (possibly truncated) history.
+        setPlanningMode(msg.planState ? msg.planState !== 'idle' : restoredPlanMode)
         setTasks(restoredTasks)
         setMessages(trimMessages(rebuilt))
         callbacksRef.current.onSessionJoined?.(msg.sessionId)

@@ -73,6 +73,13 @@ export interface CodingProcess extends EventEmitter<ClaudeProcessEvents> {
    */
   sendControlResponse(requestId: string, behavior: 'allow' | 'deny', updatedInput?: Record<string, unknown>, message?: string): void
 
+  /**
+   * Optionally change the permission mode in-place without a restart.
+   * Resolves true if the provider acknowledged the change. Providers that
+   * don't support runtime mode changes omit this — callers fall back to restart.
+   */
+  setPermissionMode?(mode: import('./types.js').PermissionMode): Promise<boolean>
+
   /** Whether the process is currently running and accepting input. */
   isAlive(): boolean
 

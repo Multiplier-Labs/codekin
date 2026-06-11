@@ -486,10 +486,12 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   }, [onAddFiles])
 
   const handlePermissionModeSelect = useCallback((mode: PermissionMode) => {
-    if (mode === 'bypassPermissions') {
-      // Require confirmation for dangerous mode
+    // Require confirmation for any dangerous mode (bypassPermissions,
+    // dangerouslySkipPermissions) before activating.
+    if (PERMISSION_MODES.find(m => m.id === mode)?.dangerous) {
+      const label = PERMISSION_MODES.find(m => m.id === mode)?.label ?? mode
       const confirmed = window.confirm(
-        'Warning: Bypass permissions mode will accept ALL tool calls without asking.\n\n' +
+        `Warning: "${label}" will accept ALL tool calls without asking.\n\n` +
         'This includes file writes, bash commands, and web requests. ' +
         'Only use this if you fully trust the task.\n\n' +
         'Are you sure?'

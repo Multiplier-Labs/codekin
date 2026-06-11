@@ -173,6 +173,13 @@ export class SessionLifecycle {
 
     cp.start()
     session.claudeProcess = cp
+
+    // When spawning directly in plan mode (--permission-mode plan), the CLI
+    // never emits an EnterPlanMode tool call — arm the PlanManager here so
+    // ExitPlanMode still routes through user approval instead of auto-allowing.
+    if (session.permissionMode === 'plan') {
+      session.planManager.onEnterPlanMode()
+    }
     this.deps.globalBroadcast?.({ type: 'sessions_updated' })
 
     // Only show "Session started" for the very first start, not for restarts

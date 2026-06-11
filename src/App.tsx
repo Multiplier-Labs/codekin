@@ -259,6 +259,20 @@ export default function App() {
     ? repos.find(r => r.workingDir === activeWorkingDir) ?? null
     : null
 
+  // Re-scan repos (and their .claude/skills) when switching to a different
+  // repo, so skills added or edited mid-session show up without a reload.
+  // Guarded by the last-refreshed dir so joining sessions in the same repo
+  // doesn't refetch.
+  const lastSkillRefreshDirRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!activeWorkingDir) return
+    if (lastSkillRefreshDirRef.current === activeWorkingDir) return
+    const isFirstRepo = lastSkillRefreshDirRef.current === null
+    lastSkillRefreshDirRef.current = activeWorkingDir
+    // Skip the initial mount — useRepos already fetches on mount.
+    if (!isFirstRepo) refreshRepos()
+  }, [activeWorkingDir, refreshRepos])
+
   // All available skills for the current session (global + repo)
   const allSkills = useMemo(() => [
     ...globalSkills,
