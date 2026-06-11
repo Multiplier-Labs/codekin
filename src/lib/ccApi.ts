@@ -482,6 +482,21 @@ export async function fetchOpenCodeModels(
   }>(res)
 }
 
+/** Fetch available models from the Codex CLI (via short-lived app-server). */
+export async function fetchCodexModels(
+  token: string,
+): Promise<{
+  models: Array<{ id: string; name: string; description?: string; isDefault?: boolean }>
+}> {
+  const res = await fetch(`${BASE}/api/codex/models`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) return { models: [] }
+  return jsonBody<{
+    models: Array<{ id: string; name: string; description?: string; isDefault?: boolean }>
+  }>(res)
+}
+
 /** Fetch the OpenCode command list (slash commands / skills / MCP prompts). */
 export async function fetchOpenCodeCommands(
   token: string,
