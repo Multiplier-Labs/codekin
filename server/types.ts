@@ -286,7 +286,7 @@ export interface TaskItem {
 export type WsServerMessage =
   | { type: 'connected'; connectionId: string; claudeAvailable: boolean; claudeVersion: string; apiKeySet: boolean; codexAvailable?: boolean; codexAuthenticated?: boolean }
   | { type: 'session_created'; sessionId: string; sessionName: string; workingDir: string }
-  | { type: 'session_joined'; sessionId: string; sessionName: string; workingDir: string; active: boolean; outputBuffer: WsServerMessage[]; model?: string; permissionMode?: PermissionMode }
+  | { type: 'session_joined'; sessionId: string; sessionName: string; workingDir: string; active: boolean; outputBuffer: WsServerMessage[]; model?: string; permissionMode?: PermissionMode; planState?: 'idle' | 'planning' | 'reviewing' }
   | { type: 'session_left' }
   | { type: 'session_deleted'; message: string }
   | { type: 'claude_started'; sessionId: string }
@@ -308,6 +308,7 @@ export type WsServerMessage =
   | { type: 'result' }
   | { type: 'usage'; inputTokens: number; outputTokens: number; costUsd?: number }
   | { type: 'planning_mode'; active: boolean }
+  | { type: 'permission_mode_changed'; permissionMode: PermissionMode }
   | { type: 'todo_update'; tasks: TaskItem[] }
   | { type: 'session_name_update'; sessionId: string; name: string }
   | { type: 'webhook_event'; event: string; repo: string; branch: string; workflow: string; conclusion: string; status: string; sessionId?: string }
