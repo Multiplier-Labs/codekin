@@ -293,28 +293,45 @@ export class OrchestratorMonitor {
     notification.delivered = true
   }
 
-  /** Discover repo paths from REPOS_ROOT. */
+  /** Discover repo paths from REPOS_ROOT (see discoverRepoPathsUnder). */
   private discoverRepoPaths(): string[] {
-    if (!existsSync(REPOS_ROOT)) return []
-    try {
-      return readdirSync(REPOS_ROOT)
-        .map(name => join(REPOS_ROOT, name))
-        .filter(p => {
-          try {
-            return statSync(p).isDirectory() && existsSync(join(p, '.git'))
-          } catch {
-            return false
-          }
-        })
-    } catch {
-      return []
-    }
+    return discoverRepoPathsUnder(REPOS_ROOT)
   }
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Discover git repositories under a root directory, recursing one level into
+ * non-repo directories so org-style layouts (root/org/repo) are picked up
+ * alongside flat ones (root/repo). Unreadable entries are skipped.
+ */
+export function discoverRepoPathsUnder(root: string): string[] {
+  if (!existsSync(root)) return []
+  const repos: string[] = []
+  const scan = (dir: string, depth: number): void => {
+    let entries: string[]
+    try {
+      entries = readdirSync(dir)
+    } catch {
+      return
+    }
+    for (const name of entries) {
+      const p = join(dir, name)
+      try {
+        if (!statSync(p).isDirectory()) continue
+        if (existsSync(join(p, '.git'))) repos.push(p)
+        else if (depth < 2) scan(p, depth + 1)
+      } catch {
+        // unreadable entry — skip
+      }
+    }
+  }
+  scan(root, 1)
+  return repos
+}
 
 /**
  * Suppress passive-repo alerts unless at least one workflow is enabled for the

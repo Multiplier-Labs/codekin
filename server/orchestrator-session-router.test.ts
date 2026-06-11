@@ -79,9 +79,9 @@ describe('createSessionRouter', () => {
   let server: { baseUrl: string; close: () => Promise<void> }
   let children: OrchestratorChildManager
 
-  function mount(verifyAuth: (req: Request) => boolean): Promise<void> {
+  function mount(verifyAuth: (req: Request) => boolean, sessions?: SessionManager): Promise<void> {
     children = makeChildren()
-    const router = createSessionRouter(verifyAuth, makeSessions(), makeMemory(), children)
+    const router = createSessionRouter(verifyAuth, sessions ?? makeSessions(), makeMemory(), children)
     return startApp(router).then((s) => { server = s })
   }
 
@@ -206,6 +206,86 @@ describe('createSessionRouter', () => {
       const res = await fetch(`${server.baseUrl}/api/orchestrator/reports`)
       expect(res.status).toBe(400)
       expect((await res.json()).error).toMatch(/Provide \?repo=/)
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Child transcript
+  // -------------------------------------------------------------------------
+
+  describe('child transcript', () => {
+    const child = { id: 'child-1', status: 'running' }
+
+    function sessionsWith(outputHistory: Array<{ type: string; data?: string }> | null): SessionManager {
+      return {
+        get: vi.fn(() => (outputHistory ? { outputHistory } : undefined)),
+      } as unknown as SessionManager
+    }
+
+    it('401s when auth fails', async () => {
+      await mount(() => false)
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/children/child-1/transcript`)
+      expect(res.status).toBe(401)
+    })
+
+    it('404s when the child does not exist', async () => {
+      await mount(() => true)
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/children/nope/transcript`)
+      expect(res.status).toBe(404)
+      expect((await res.json()).error).toMatch(/Child session not found/)
+    })
+
+    it('404s when the underlying session was deleted', async () => {
+      await mount(() => true, sessionsWith(null))
+      ;(children.get as ReturnType<typeof vi.fn>).mockReturnValue(child)
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/children/child-1/transcript`)
+      expect(res.status).toBe(404)
+      expect((await res.json()).error).toMatch(/Session no longer exists/)
+    })
+
+    it('returns the joined output messages, skipping non-output entries', async () => {
+      await mount(() => true, sessionsWith([
+        { type: 'output', data: 'hello ' },
+        { type: 'system', data: 'ignored' },
+        { type: 'output', data: 'world' },
+      ]))
+      ;(children.get as ReturnType<typeof vi.fn>).mockReturnValue(child)
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/children/child-1/transcript`)
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({
+        childId: 'child-1',
+        status: 'running',
+        transcript: 'hello world',
+        truncated: false,
+        totalLength: 11,
+      })
+    })
+
+    it('returns the tail and sets truncated when output exceeds ?limit (min-clamped behavior)', async () => {
+      await mount(() => true, sessionsWith([{ type: 'output', data: 'abcdefghij' }]))
+      ;(children.get as ReturnType<typeof vi.fn>).mockReturnValue(child)
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/children/child-1/transcript?limit=4`)
+      const body = await res.json()
+      expect(body.transcript).toBe('ghij')
+      expect(body.truncated).toBe(true)
+      expect(body.totalLength).toBe(10)
+    })
+
+    it('falls back to the default limit on a bogus ?limit and caps at 50000', async () => {
+      const big = 'x'.repeat(6000)
+      await mount(() => true, sessionsWith([{ type: 'output', data: big }]))
+      ;(children.get as ReturnType<typeof vi.fn>).mockReturnValue(child)
+
+      const bogus = await fetch(`${server.baseUrl}/api/orchestrator/children/child-1/transcript?limit=banana`)
+      const bogusBody = await bogus.json()
+      expect(bogusBody.transcript.length).toBe(5000)
+      expect(bogusBody.truncated).toBe(true)
+
+      const huge = await fetch(`${server.baseUrl}/api/orchestrator/children/child-1/transcript?limit=999999`)
+      const hugeBody = await huge.json()
+      // limit capped at 50000 — full 6000-char output fits
+      expect(hugeBody.transcript.length).toBe(6000)
+      expect(hugeBody.truncated).toBe(false)
     })
   })
 })
