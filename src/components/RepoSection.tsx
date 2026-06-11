@@ -5,12 +5,13 @@
  * and approvals panel. Extracted from LeftSidebar to reduce file size.
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useLayoutEffect } from 'react'
 import {
   IconPlus, IconShieldCheck, IconArchive, IconFileText,
   IconChevronDown, IconChevronRight, IconRobot, IconSparkles, IconPencil, IconGitBranch, IconRobotFace,
 } from '@tabler/icons-react'
-import type { Session } from '../types'
+import type { Session, CodingProvider } from '../types'
+import { PROVIDERS } from '../types'
 import { listArchivedSessions, type ArchivedSessionInfo } from '../lib/ccApi'
 import { ApprovalsPanel } from './ApprovalsPanel'
 import { DocsFilePicker } from './DocsFilePicker'
@@ -69,6 +70,84 @@ function archivedCompactAge(dateStr: string): string {
   const hours = Math.floor(minutes / 60)
   if (hours < 24) return `${hours}h`
   return `${Math.floor(hours / 24)}d`
+}
+
+/**
+ * Compact "+ New" button with a provider dropdown (Claude / OpenCode / Codex).
+ * Uses fixed positioning so the menu is not clipped by the sidebar scroll
+ * container; dismisses on click-outside or Escape.
+ */
+function NewSessionMenu({ onNewSession, isMobile }: {
+  onNewSession: (provider: CodingProvider) => void
+  isMobile?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    if (!open || !buttonRef.current || !menuRef.current) return
+    const btn = buttonRef.current.getBoundingClientRect()
+    const menu = menuRef.current
+    const menuHeight = menu.offsetHeight
+    // Open below the button; flip above if it would overflow the viewport
+    const top = btn.bottom + menuHeight + 4 > window.innerHeight
+      ? btn.top - menuHeight - 4
+      : btn.bottom + 4
+    menu.style.top = `${top}px`
+    menu.style.left = `${btn.left}px`
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node
+      if (buttonRef.current && !buttonRef.current.contains(target) &&
+          menuRef.current && !menuRef.current.contains(target)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [open])
+
+  return (
+    <div className={`pl-10 ${isMobile || open ? 'opacity-100' : 'opacity-0 group-hover/repo:opacity-100 focus-within:opacity-100'}`}>
+      <button
+        ref={buttonRef}
+        onClick={() => setOpen(!open)}
+        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md ${isMobile ? 'text-[15px]' : 'text-[13px]'} transition-colors ${
+          open ? 'bg-neutral-6/50 text-neutral-2' : 'text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6/50'
+        }`}
+        title="New session"
+      >
+        <IconPlus size={12} stroke={2} className="flex-shrink-0" />
+        <span>New session</span>
+        <IconChevronDown size={11} stroke={2} className={`flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div ref={menuRef} className="fixed z-50 min-w-36 rounded-md border border-neutral-8 bg-neutral-11 py-1 shadow-lg shadow-black/30">
+          {PROVIDERS.map(p => (
+            <button
+              key={p.id}
+              onClick={() => { setOpen(false); onNewSession(p.id) }}
+              className="w-full flex items-center gap-2 px-3 py-1 text-left text-[13px] text-neutral-3 hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors"
+              title={p.description}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 // --------------------------------------------------------------------------
@@ -325,31 +404,7 @@ export function RepoSection({
           })}
 
           {/* New session for this repo (visible on hover) */}
-          {onNewSession && (
-            <div className={`pl-10 flex gap-1 ${isMobile ? 'opacity-100' : 'opacity-0 group-hover/repo:opacity-100'}`}>
-              <button
-                onClick={() => onNewSession('claude')}
-                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[13px] text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6/50 transition-colors"
-              >
-                <IconPlus size={12} stroke={2} className="flex-shrink-0" />
-                <span>Claude</span>
-              </button>
-              <button
-                onClick={() => onNewSession('opencode')}
-                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[13px] text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6/50 transition-colors"
-              >
-                <IconPlus size={12} stroke={2} className="flex-shrink-0" />
-                <span>OpenCode</span>
-              </button>
-              <button
-                onClick={() => onNewSession('codex')}
-                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[13px] text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6/50 transition-colors"
-              >
-                <IconPlus size={12} stroke={2} className="flex-shrink-0" />
-                <span>Codex</span>
-              </button>
-            </div>
-          )}
+          {onNewSession && <NewSessionMenu onNewSession={onNewSession} isMobile={isMobile} />}
 
           {/* Inline docs picker */}
           {docsPickerOpen && docsPickerRepoDir === node.workingDir && onDocsPickerSelect && onDocsPickerClose && (
