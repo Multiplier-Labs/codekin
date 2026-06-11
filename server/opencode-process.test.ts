@@ -535,6 +535,144 @@ describe('OpenCodeProcess', () => {
   })
 
   // ---------------------------------------------------------------------------
+  // Turn lifecycle hardening
+  // ---------------------------------------------------------------------------
+
+  describe('turn lifecycle', () => {
+    it('emits result only once even when multiple idle events arrive', () => {
+      const resultHandler = vi.fn()
+      ocp.on('result', resultHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'session.idle',
+        properties: { sessionID: 'oc-session-1' },
+      })
+      callHandleSSE(ocp, {
+        type: 'message.completed',
+        properties: { sessionID: 'oc-session-1' },
+      })
+      callHandleSSE(ocp, {
+        type: 'session.status',
+        properties: { sessionID: 'oc-session-1', status: { type: 'idle' } },
+      })
+      expect(resultHandler).toHaveBeenCalledTimes(1)
+    })
+
+    it('clears the turn watchdog when the turn completes', () => {
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).startTurnWatchdog()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((ocp as any).turnWatchdog).not.toBeNull()
+
+      callHandleSSE(ocp, {
+        type: 'session.idle',
+        properties: { sessionID: 'oc-session-1' },
+      })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((ocp as any).turnWatchdog).toBeNull()
+    })
+
+    it('recovers a missed completion event via message poll', async () => {
+      const resultHandler = vi.fn()
+      ocp.on('result', resultHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).alive = true
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).turnComplete = false
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { info: { role: 'user', time: { created: 1 } } },
+          { info: { role: 'assistant', time: { created: 2, completed: 3 } } },
+        ],
+      })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (ocp as any).checkTurnLiveness(true)
+      expect(resultHandler).toHaveBeenCalledWith('', false)
+    })
+
+    it('does not force-complete when the assistant message is still running', async () => {
+      const resultHandler = vi.fn()
+      ocp.on('result', resultHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).alive = true
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { info: { role: 'assistant', time: { created: 2 } } },
+        ],
+      })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (ocp as any).checkTurnLiveness(true)
+      expect(resultHandler).not.toHaveBeenCalled()
+    })
+
+    it('handles flat message objects (no info wrapper) in poll response', async () => {
+      const resultHandler = vi.fn()
+      ocp.on('result', resultHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).alive = true
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { role: 'assistant', time: { created: 2, completed: 3 } },
+        ],
+      })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (ocp as any).checkTurnLiveness(true)
+      expect(resultHandler).toHaveBeenCalledWith('', false)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Permission reply retries
+  // ---------------------------------------------------------------------------
+
+  describe('permission reply retries', () => {
+    it('emits error when all permission reply attempts fail', async () => {
+      const errorHandler = vi.fn()
+      ocp.on('error', errorHandler)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).permissionRetryDelayMs = 0
+      mockFetch.mockRejectedValue(new Error('connection refused'))
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (ocp as any).replyToPermission('perm-1', 'once')
+
+      expect(mockFetch).toHaveBeenCalledTimes(3)
+      expect(errorHandler).toHaveBeenCalledTimes(1)
+      expect(errorHandler.mock.calls[0][0]).toContain('permission response')
+    })
+
+    it('does not emit error when a retry succeeds', async () => {
+      const errorHandler = vi.fn()
+      ocp.on('error', errorHandler)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).permissionRetryDelayMs = 0
+      mockFetch
+        .mockRejectedValueOnce(new Error('connection refused'))
+        .mockResolvedValueOnce({ ok: true })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (ocp as any).replyToPermission('perm-2', 'once')
+
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+      expect(errorHandler).not.toHaveBeenCalled()
+    })
+  })
+
+  // ---------------------------------------------------------------------------
   // Tool input summarization
   // ---------------------------------------------------------------------------
 
