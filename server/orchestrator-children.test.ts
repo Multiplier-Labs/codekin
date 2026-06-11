@@ -31,6 +31,7 @@ function makeMockSessions(worktreeSucceeds = true) {
   const sentInputs: string[] = []
   const resultListeners: Array<(sessionId: string, isError: boolean) => void> = []
   const exitListeners: Array<(sessionId: string, code: number | null, signal: string | null, willRestart: boolean) => void> = []
+  const promptListeners: Array<(sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void> = []
 
   return {
     create: vi.fn(),
@@ -52,10 +53,15 @@ function makeMockSessions(worktreeSucceeds = true) {
       exitListeners.push(cb)
       return () => { const idx = exitListeners.indexOf(cb); if (idx >= 0) exitListeners.splice(idx, 1) }
     }),
+    onSessionPrompt: vi.fn((cb: any) => {
+      promptListeners.push(cb)
+      return () => { const idx = promptListeners.indexOf(cb); if (idx >= 0) promptListeners.splice(idx, 1) }
+    }),
     clearProcessingFlag: vi.fn(),
     _sentInputs: sentInputs,
     _resultListeners: resultListeners,
     _exitListeners: exitListeners,
+    _promptListeners: promptListeners,
   } as any
 }
 
@@ -563,6 +569,24 @@ describe('OrchestratorChildManager', () => {
       expect(notify).toHaveBeenCalledTimes(2)
     })
 
+    it('marks child as blocked when a result arrives with pending approvals', async () => {
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => true), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'About to push...' }],
+        pendingToolApprovals: new Map([['req-1', { requestId: 'req-1', toolName: 'Bash', toolInput: { command: 'git push --force' } }]]),
+        pendingControlRequests: new Map(),
+      }))
+
+      const child = await manager.spawn(makeRequest({ parentSessionId: 'parent-orchestrator-id' }))
+
+      for (const listener of sessions._resultListeners) {
+        listener(child.id, false)
+      }
+
+      expect(child.status).toBe('blocked')
+      expect(child.completedAt).toBeNull()
+    })
+
     it('does NOT stamp terminalNotifiedAt when notify throws', async () => {
       notify = vi.fn(() => { throw new Error('boom') })
       manager = new OrchestratorChildManager(sessions, { notify })
@@ -589,6 +613,141 @@ describe('OrchestratorChildManager', () => {
 
       expect(notify).toHaveBeenCalledTimes(1)
       expect(child.terminalNotifiedAt).toBeNull()
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Blocked-prompt notifications (realtime push to parent)
+  // -------------------------------------------------------------------------
+
+  describe('blocked-prompt notifications', () => {
+    let notify: ReturnType<typeof vi.fn>
+
+    function firePrompt(sessionId: string, promptType: 'permission' | 'question', toolName?: string, requestId?: string) {
+      for (const listener of sessions._promptListeners) {
+        listener(sessionId, promptType, toolName, requestId)
+      }
+    }
+
+    beforeEach(() => {
+      sessions = makeMockSessions()
+      notify = vi.fn(() => true)
+      manager = new OrchestratorChildManager(sessions, { notify })
+    })
+
+    it('subscribes to session prompt events on construction', () => {
+      expect(sessions.onSessionPrompt).toHaveBeenCalledTimes(1)
+    })
+
+    it('marks the child blocked and notifies the parent with respond instructions', async () => {
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => true), stop: vi.fn() },
+        outputHistory: [],
+        pendingToolApprovals: new Map([['req-42', { requestId: 'req-42', toolName: 'Bash', toolInput: { command: 'mkdir -p src/new' } }]]),
+        pendingControlRequests: new Map(),
+      }))
+
+      const child = await manager.spawn(makeRequest({ parentSessionId: 'parent-orchestrator-id' }))
+
+      firePrompt(child.id, 'permission', 'Bash', 'req-42')
+
+      expect(child.status).toBe('blocked')
+      expect(notify).toHaveBeenCalledTimes(1)
+      const args = notify.mock.calls[0][0]
+      expect(args.parentSessionId).toBe('parent-orchestrator-id')
+      expect(args.label).toBe('Child Session Blocked')
+      expect(args.title).toContain(child.id)
+      expect(args.body).toContain('RequestId: req-42')
+      expect(args.body).toContain(`/api/orchestrator/sessions/${child.id}/respond`)
+      expect(args.body).toContain('$ mkdir -p src/new')
+      expect(args.body).toContain('"value": "allow"')
+    })
+
+    it('suggests an answer payload for question prompts', async () => {
+      const child = await manager.spawn(makeRequest({ parentSessionId: 'parent-orchestrator-id' }))
+
+      firePrompt(child.id, 'question', 'AskUserQuestion', 'req-q1')
+
+      const args = notify.mock.calls[0][0]
+      expect(args.body).toContain('"value": "YOUR_ANSWER"')
+    })
+
+    it('notifies only once per requestId', async () => {
+      const child = await manager.spawn(makeRequest({ parentSessionId: 'parent-orchestrator-id' }))
+
+      firePrompt(child.id, 'permission', 'Bash', 'req-42')
+      firePrompt(child.id, 'permission', 'Bash', 'req-42')
+
+      expect(notify).toHaveBeenCalledTimes(1)
+    })
+
+    it('notifies again for a different requestId', async () => {
+      const child = await manager.spawn(makeRequest({ parentSessionId: 'parent-orchestrator-id' }))
+
+      firePrompt(child.id, 'permission', 'Bash', 'req-1')
+      firePrompt(child.id, 'permission', 'Bash', 'req-2')
+
+      expect(notify).toHaveBeenCalledTimes(2)
+    })
+
+    it('ignores prompts from sessions that are not our children', async () => {
+      await manager.spawn(makeRequest({ parentSessionId: 'parent-orchestrator-id' }))
+
+      firePrompt('some-other-session', 'permission', 'Bash', 'req-9')
+
+      expect(notify).not.toHaveBeenCalled()
+    })
+
+    it('ignores prompts for terminal children', async () => {
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => false), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'Done! Created PR #99 and pushed.' }],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+      }))
+
+      const child = await manager.spawn(makeRequest({ parentSessionId: 'parent-orchestrator-id' }))
+      for (const listener of sessions._resultListeners) listener(child.id, false)
+      await vi.waitFor(() => expect(child.status).toBe('completed'))
+      notify.mockClear()
+
+      firePrompt(child.id, 'permission', 'Bash', 'req-late')
+
+      expect(child.status).toBe('completed')
+      expect(notify).not.toHaveBeenCalled()
+    })
+
+    it('marks the child blocked but skips notify when there is no parent', async () => {
+      const child = await manager.spawn(makeRequest()) // no parentSessionId
+
+      firePrompt(child.id, 'permission', 'Bash', 'req-42')
+
+      expect(child.status).toBe('blocked')
+      expect(notify).not.toHaveBeenCalled()
+    })
+
+    it('still completes normally after being blocked', async () => {
+      const child = await manager.spawn(makeRequest({ parentSessionId: 'parent-orchestrator-id' }))
+      firePrompt(child.id, 'permission', 'Bash', 'req-42')
+      expect(child.status).toBe('blocked')
+
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => false), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'Done! Created PR #99 and pushed it.' }],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+      }))
+      for (const listener of sessions._resultListeners) listener(child.id, false)
+
+      await vi.waitFor(() => expect(child.status).toBe('completed'))
+    })
+
+    it('counts blocked children as active', async () => {
+      const child = await manager.spawn(makeRequest({ parentSessionId: 'parent-orchestrator-id' }))
+      firePrompt(child.id, 'permission', 'Bash', 'req-42')
+
+      expect(child.status).toBe('blocked')
+      expect(manager.activeCount()).toBe(1)
     })
   })
 })

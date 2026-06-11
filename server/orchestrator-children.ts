@@ -47,7 +47,7 @@ export interface ChildSessionRequest {
   parentSessionId?: string
 }
 
-export type ChildStatus = 'starting' | 'running' | 'completed' | 'failed' | 'timed_out'
+export type ChildStatus = 'starting' | 'running' | 'blocked' | 'completed' | 'failed' | 'timed_out'
 
 /** Statuses considered terminal — once entered, the child is done. */
 const TERMINAL_STATUSES: ReadonlySet<ChildStatus> = new Set([
@@ -86,6 +86,7 @@ const MAX_CONCURRENT = 5
 const DEFAULT_TIMEOUT_MS = 600_000  // 10 minutes
 const CHILD_RETENTION_MS = 3_600_000  // keep completed/failed children for 1 hour
 const MAX_RETAINED_CHILDREN = 100    // hard cap on total entries
+const MAX_NOTIFIED_PROMPT_IDS = 500  // cap on the blocked-prompt dedup set
 
 /**
  * Default allowed tools for agent child sessions. Covers standard dev
@@ -123,10 +124,111 @@ export class OrchestratorChildManager {
   private children = new Map<string, ChildSession>()
   private sessions: SessionManager
   private notify: ChildNotifyFn
+  /** Prompt requestIds already reported to the parent (single-fire per prompt). */
+  private notifiedPromptIds = new Set<string>()
 
   constructor(sessions: SessionManager, opts?: { notify?: ChildNotifyFn }) {
     this.sessions = sessions
     this.notify = opts?.notify ?? ((args) => sendOrchestratorNotification(sessions, args))
+    // Push a realtime notification to the parent orchestrator whenever one of
+    // our children blocks on a tool approval or question. Without this, a
+    // blocked child would silently sit until its timeout killed it.
+    this.sessions.onSessionPrompt((sessionId, promptType, toolName, requestId) => {
+      this.handleChildPrompt(sessionId, promptType, toolName, requestId)
+    })
+  }
+
+  /**
+   * Handle a prompt event from any session: if it belongs to one of our
+   * active children, mark the child as blocked and notify the parent
+   * orchestrator with everything it needs to unblock the child.
+   */
+  private handleChildPrompt(
+    sessionId: string,
+    promptType: 'permission' | 'question',
+    toolName: string | undefined,
+    requestId: string | undefined,
+  ): void {
+    const child = this.children.get(sessionId)
+    if (!child || TERMINAL_STATUSES.has(child.status)) return
+
+    child.status = 'blocked'
+
+    // Single-fire per requestId (re-broadcasts on client join would otherwise
+    // spam the parent). Prompts without a requestId can't be deduped or
+    // responded to by ID — still notify, but only describe them generically.
+    const dedupKey = requestId ?? `${sessionId}:${toolName ?? 'unknown'}`
+    if (this.notifiedPromptIds.has(dedupKey)) return
+    this.notifiedPromptIds.add(dedupKey)
+    if (this.notifiedPromptIds.size > MAX_NOTIFIED_PROMPT_IDS) {
+      // Drop oldest entries (Set preserves insertion order)
+      for (const id of this.notifiedPromptIds) {
+        this.notifiedPromptIds.delete(id)
+        if (this.notifiedPromptIds.size <= MAX_NOTIFIED_PROMPT_IDS) break
+      }
+    }
+
+    const parentSessionId = child.request.parentSessionId
+    if (!parentSessionId) return
+
+    try {
+      this.notify({
+        parentSessionId,
+        label: 'Child Session Blocked',
+        title: `Session: ${getAgentDisplayName().toLowerCase()}:${child.request.branchName} (${child.id})`,
+        body: this.buildBlockedNotificationBody(child, promptType, toolName, requestId),
+      })
+    } catch (err) {
+      console.warn(`[orchestrator-child] Failed to notify parent about blocked child ${child.id}:`, err)
+    }
+  }
+
+  /** Build the body for a blocked-child notification, including the exact
+   *  API call the orchestrator can use to respond. */
+  private buildBlockedNotificationBody(
+    child: ChildSession,
+    promptType: 'permission' | 'question',
+    toolName: string | undefined,
+    requestId: string | undefined,
+  ): string {
+    const lines: string[] = [
+      'Status: blocked — waiting for a response',
+      `Branch: ${child.request.branchName}`,
+      `Repo: ${child.request.repo}`,
+      `Prompt: ${promptType}${toolName ? ` (${toolName})` : ''}`,
+    ]
+
+    // Include a one-line summary of what the tool wants to do, if available.
+    const detail = this.describePendingPrompt(child.id, requestId)
+    if (detail) lines.push(`Detail: ${detail}`)
+
+    if (requestId) {
+      lines.push(
+        `RequestId: ${requestId}`,
+        'Respond with:',
+        `curl -s -X POST "http://localhost:$CODEKIN_PORT/api/orchestrator/sessions/${child.id}/respond" \\`,
+        '  -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN" -H "Content-Type: application/json" \\',
+        promptType === 'question'
+          ? `  -d '{"requestId": "${requestId}", "value": "YOUR_ANSWER"}'`
+          : `  -d '{"requestId": "${requestId}", "value": "allow"}'  # or "deny"`,
+      )
+    }
+    lines.push('Unanswered permission prompts are auto-denied after 5 minutes. If unsure, ask the user.')
+    return lines.join('\n')
+  }
+
+  /** One-line summary of the pending prompt's tool input (e.g. the Bash command). */
+  private describePendingPrompt(sessionId: string, requestId: string | undefined): string | null {
+    if (!requestId) return null
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+    const pending = session.pendingToolApprovals.get(requestId) ?? session.pendingControlRequests.get(requestId)
+    if (!pending) return null
+    const input = pending.toolInput
+    if (typeof input.command === 'string') return `$ ${input.command.split('\n')[0].slice(0, 200)}`
+    if (typeof input.file_path === 'string') return input.file_path
+    const json = JSON.stringify(input)
+    return json.length > 2 ? json.slice(0, 200) : null
   }
 
   /** Get all active/recent child sessions. */
@@ -145,7 +247,7 @@ export class OrchestratorChildManager {
   private purgeStaleChildren(): void {
     const now = Date.now()
     for (const [id, child] of this.children) {
-      if (child.status === 'starting' || child.status === 'running') continue
+      if (!TERMINAL_STATUSES.has(child.status)) continue
       if (child.completedAt && now - new Date(child.completedAt).getTime() > CHILD_RETENTION_MS) {
         this.children.delete(id)
       }
@@ -153,7 +255,7 @@ export class OrchestratorChildManager {
     // Hard cap: if still over limit, remove oldest completed entries
     if (this.children.size > MAX_RETAINED_CHILDREN) {
       const completed = Array.from(this.children.entries())
-        .filter(([, c]) => c.status !== 'starting' && c.status !== 'running')
+        .filter(([, c]) => TERMINAL_STATUSES.has(c.status))
         .sort((a, b) => (a[1].completedAt ?? '').localeCompare(b[1].completedAt ?? ''))
       while (this.children.size > MAX_RETAINED_CHILDREN && completed.length > 0) {
         const [id] = completed.shift()!
@@ -165,7 +267,7 @@ export class OrchestratorChildManager {
   /** Count currently active (non-terminal) child sessions. */
   activeCount(): number {
     return Array.from(this.children.values())
-      .filter(c => c.status === 'starting' || c.status === 'running')
+      .filter(c => !TERMINAL_STATUSES.has(c.status))
       .length
   }
 
@@ -453,15 +555,19 @@ export class OrchestratorChildManager {
             return
           }
 
+          // Don't mark as completed (or nudge) while the session still has
+          // pending tool approvals or control requests — the Claude process
+          // may still be alive and blocked on an approval (e.g. git push).
+          // Nudging here would waste the single nudge on a child that cannot
+          // act. Keep monitoring; the next result/exit event re-evaluates.
+          if (session.pendingToolApprovals.size > 0 || session.pendingControlRequests.size > 0) {
+            child.status = 'blocked'
+            return
+          }
+
           const text = this.extractText(session.outputHistory)
           // Check if the final step was done; if not, nudge (keep listening)
           if (this.ensureFinalStep(child, session, text, nudgedIds, supersededMsgs)) return
-
-          // Don't mark as completed while the session still has pending
-          // tool approvals or control requests — the Claude process may
-          // still be alive and blocked on an approval (e.g. git push).
-          // Keep monitoring; the next result/exit event will re-evaluate.
-          if (session.pendingToolApprovals.size > 0 || session.pendingControlRequests.size > 0) return
 
           child.status = isError ? 'failed' : 'completed'
           child.result = text || null

@@ -230,6 +230,28 @@ describe('PromptRouter', () => {
       expect(result).toEqual({ allow: false, always: false })
     })
 
+    it('registers a pending approval (not fast-deny) for headless agent sessions', async () => {
+      session.source = 'agent'
+      session.clients = new Set() as any
+      session.allowedTools = ['Bash(git:*)']
+      const listener = vi.fn()
+      deps.promptListeners.push(listener)
+
+      // Don't await — the promise stays pending until someone responds
+      void router.requestToolApproval('sess-1', 'Bash', { command: 'mkdir -p src' })
+
+      // The prompt is registered so the orchestrator can respond via API
+      expect(session.pendingToolApprovals.size).toBe(1)
+      // Prompt listeners (orchestrator child manager) are notified immediately
+      expect(listener).toHaveBeenCalledWith('sess-1', 'permission', 'Bash', expect.any(String))
+      // And the prompt is global-broadcast so a browsing user can also see it
+      expect(deps.globalBroadcast).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'prompt',
+        sessionId: 'sess-1',
+        toolName: 'Bash',
+      }))
+    })
+
     it('broadcasts prompt to clients when approval needed', async () => {
       // Don't await — just check the broadcast happened
       const promise = router.requestToolApproval('sess-1', 'Bash', { command: 'npm test' })
