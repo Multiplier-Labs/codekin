@@ -73,6 +73,7 @@ function makeDeps(session: Session, overrides: Partial<PromptRouterDeps> = {}): 
       NEVER_AUTO_APPROVE_TOOLS: new Set(),
     } as any,
     promptListeners: [],
+    onPlanApproved: vi.fn(),
     ...overrides,
   }
 }
@@ -103,8 +104,36 @@ describe('PromptRouter', () => {
   describe('resolveAutoApproval', () => {
     it('returns "permissionMode" for file tools in acceptEdits mode', () => {
       session.permissionMode = 'acceptEdits'
-      const result = router.resolveAutoApproval(session, 'Read', {})
+      const result = router.resolveAutoApproval(session, 'Write', {})
       expect(result).toBe('permissionMode')
+    })
+
+    it('returns "readOnly" for in-project read-only tools regardless of mode', () => {
+      session.permissionMode = 'acceptEdits'
+      expect(router.resolveAutoApproval(session, 'Read', {})).toBe('readOnly')
+      session.permissionMode = 'default'
+      expect(router.resolveAutoApproval(session, 'Read', { file_path: '/repos/test/src/index.ts' })).toBe('readOnly')
+      expect(router.resolveAutoApproval(session, 'Glob', { path: '/repos/test' })).toBe('readOnly')
+      expect(router.resolveAutoApproval(session, 'Grep', {})).toBe('readOnly')
+    })
+
+    it('does not auto-approve read-only tools outside the project', () => {
+      session.permissionMode = 'default'
+      expect(router.resolveAutoApproval(session, 'Read', { file_path: '/etc/passwd' })).toBe('prompt')
+      expect(router.resolveAutoApproval(session, 'Glob', { path: '/home/other' })).toBe('prompt')
+    })
+
+    it('returns "planDeny" for write tools while plan mode is active', () => {
+      session.permissionMode = 'plan'
+      expect(router.resolveAutoApproval(session, 'Write', { file_path: '/repos/test/a.ts' })).toBe('planDeny')
+      expect(router.resolveAutoApproval(session, 'Edit', {})).toBe('planDeny')
+      expect(router.resolveAutoApproval(session, 'NotebookEdit', {})).toBe('planDeny')
+    })
+
+    it('returns "planDeny" while PlanManager is active even if mode is not plan', () => {
+      session.permissionMode = 'default'
+      ;(session.planManager as any).state = 'planning'
+      expect(router.resolveAutoApproval(session, 'Write', {})).toBe('planDeny')
     })
 
     it('returns "permissionMode" for Edit in bypassPermissions mode', () => {
@@ -112,9 +141,9 @@ describe('PromptRouter', () => {
       expect(router.resolveAutoApproval(session, 'Edit', {})).toBe('permissionMode')
     })
 
-    it('does not auto-approve file tools in default mode', () => {
+    it('does not auto-approve write tools in default mode', () => {
       session.permissionMode = 'default'
-      expect(router.resolveAutoApproval(session, 'Read', {})).toBe('prompt')
+      expect(router.resolveAutoApproval(session, 'Write', {})).toBe('prompt')
     })
 
     it('returns "registry" when approval manager matches', () => {

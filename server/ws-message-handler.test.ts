@@ -45,6 +45,7 @@ function mockSession(overrides: Partial<Session> = {}): Session {
     _noOutputExitCount: 0,
     _lifetimeRestarts: 0,
     _apiRetry: { count: 0 },
+    planManager: { state: 'idle' } as any,
     ...overrides,
   }
 }

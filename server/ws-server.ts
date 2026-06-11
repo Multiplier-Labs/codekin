@@ -17,6 +17,7 @@ import { createServer } from 'http'
 import { WebSocketServer, WebSocket } from 'ws'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
+import { homedir } from 'os'
 import { execFileSync } from 'child_process'
 import { createHash, randomUUID, timingSafeEqual } from 'crypto'
 import { verifySessionToken } from './crypto-utils.js'
@@ -141,6 +142,24 @@ if (claudeAvailable && !apiKeyEnvSet) {
 
 if (!apiKeySet) {
   console.warn('No API key or subscription auth detected (ANTHROPIC_API_KEY, CLAUDE_CODE_API_KEY, or Claude subscription)')
+}
+
+// Detect the OpenAI Codex CLI and its auth state. Codex authenticates via
+// `codex login` (ChatGPT subscription OAuth) which writes ~/.codex/auth.json;
+// the app-server reuses it with automatic token refresh.
+let codexAvailable = false
+let codexAuthenticated = false
+try {
+  const codexVersion = execFileSync(process.env.CODEX_BINARY || 'codex', ['--version'], { timeout: 5000 }).toString().trim()
+  codexAvailable = true
+  console.log(`Codex CLI found: ${codexVersion}`)
+  const codexHome = process.env.CODEX_HOME || join(homedir(), '.codex')
+  codexAuthenticated = existsSync(join(codexHome, 'auth.json')) || !!process.env.OPENAI_API_KEY
+  if (!codexAuthenticated) {
+    console.warn('Codex CLI found but not authenticated — run `codex login` on this host to enable it')
+  }
+} catch {
+  // Codex CLI not installed — provider stays hidden in the UI
 }
 
 // ---------------------------------------------------------------------------
@@ -511,7 +530,7 @@ wss.on('connection', (ws: WebSocket, req) => {
       }
       authenticated = true
       clearTimeout(authTimeout)
-      send({ type: 'connected', connectionId, claudeAvailable, claudeVersion, apiKeySet })
+      send({ type: 'connected', connectionId, claudeAvailable, claudeVersion, apiKeySet, codexAvailable, codexAuthenticated })
 
       // Notify client if a newer version is available
       void getUpdateNotification().then(text => {

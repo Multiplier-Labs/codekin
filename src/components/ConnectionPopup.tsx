@@ -1,5 +1,5 @@
 /**
- * ConnectionPopup — shows status of Claude Code and OpenCode connections
+ * ConnectionPopup — shows status of Claude Code, OpenCode, and Codex connections
  * with toggle buttons to temporarily disable/enable each.
  */
 
@@ -19,6 +19,12 @@ interface Props {
   openCodeDisabled: boolean
   /** Toggle OpenCode connection on/off. */
   onToggleOpenCode: () => void
+  /** Codex connection state: true=connected, false=disconnected, null=unknown/not configured. */
+  codexConnected: boolean | null
+  /** Whether Codex connection is disabled by the user. */
+  codexDisabled: boolean
+  /** Toggle Codex connection on/off. */
+  onToggleCodex: () => void
   /** Close the popup. */
   onClose: () => void
 }
@@ -34,6 +40,9 @@ export function ConnectionPopup({
   openCodeConnected,
   openCodeDisabled,
   onToggleOpenCode,
+  codexConnected,
+  codexDisabled,
+  onToggleCodex,
   onClose,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null)
@@ -59,6 +68,13 @@ export function ConnectionPopup({
   const ocLabel = openCodeDisabled
     ? 'Disabled'
     : openCodeConnected === true ? 'Connected' : openCodeConnected === false ? 'Disconnected' : 'Not configured'
+
+  const codexDotColor = codexDisabled
+    ? 'bg-neutral-6'
+    : codexConnected === true ? 'bg-success-7' : codexConnected === false ? 'bg-error-7' : 'bg-neutral-6'
+  const codexLabel = codexDisabled
+    ? 'Disabled'
+    : codexConnected === true ? 'Connected' : codexConnected === false ? 'Run `codex login` on the host' : 'Not configured'
 
   return (
     <div
@@ -104,6 +120,25 @@ export function ConnectionPopup({
           }`}
         >
           {openCodeDisabled ? 'Enable' : 'Disable'}
+        </button>
+      </div>
+
+      {/* Codex */}
+      <div className="px-3 py-2.5 flex items-center gap-2 border-t border-neutral-8/20">
+        <StatusDot color={codexDotColor} />
+        <div className="flex-1 min-w-0">
+          <div className="text-[13px] text-neutral-2 font-medium">Codex</div>
+          <div className="text-[11px] text-neutral-5">{codexLabel}</div>
+        </div>
+        <button
+          onClick={onToggleCodex}
+          className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${
+            codexDisabled
+              ? 'border-success-8/50 text-success-5 hover:bg-success-9/20'
+              : 'border-neutral-8/50 text-neutral-4 hover:bg-neutral-8/30'
+          }`}
+        >
+          {codexDisabled ? 'Enable' : 'Disable'}
         </button>
       </div>
     </div>

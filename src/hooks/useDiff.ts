@@ -89,21 +89,25 @@ export function useDiff({ send, isOpen }: UseDiffOptions) {
   const handleToolDone = useCallback((toolName: string, toolSummary?: string) => {
     if (!isOpenRef.current) return
 
-    // Always refresh for Edit and Write
-    if (toolName === 'Edit' || toolName === 'Write') {
+    // Case-insensitive: Claude reports 'Edit'/'Write'/'Bash', OpenCode
+    // lowercase 'edit'/'write'/'patch'/'bash'.
+    const tool = toolName.toLowerCase()
+
+    // Always refresh for file-mutating tools
+    if (tool === 'edit' || tool === 'write' || tool === 'patch') {
       scheduleRefresh()
       return
     }
 
     // For Bash, skip if summary looks like a read-only command
-    if (toolName === 'Bash' && toolSummary) {
+    if (tool === 'bash' && toolSummary) {
       const trimmed = toolSummary.trim().toLowerCase()
       const isReadOnly = READ_ONLY_PREFIXES.some(prefix => trimmed.startsWith(prefix))
       if (isReadOnly) return
     }
 
     // For Bash without a recognizable read-only prefix, refresh
-    if (toolName === 'Bash') {
+    if (tool === 'bash') {
       scheduleRefresh()
     }
   }, [scheduleRefresh])

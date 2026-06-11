@@ -27,6 +27,7 @@ import { useSendMessage } from './hooks/useSendMessage'
 import { useErrorNotification } from './hooks/useErrorNotification'
 import { useGlobalKeyBindings } from './hooks/useGlobalKeyBindings'
 import { useOpenCodeModelSync } from './hooks/useOpenCodeModelSync'
+import { useCodexModelSync } from './hooks/useCodexModelSync'
 import { useOpenCodeCommands } from './hooks/useOpenCodeCommands'
 import { useProviderValidation } from './hooks/useProviderValidation'
 import { buildSlashCommandList, buildOpenCodeSlashCommandList } from './lib/slashCommands'
@@ -181,8 +182,10 @@ export default function App() {
         diffHandleMessageRef.current(msg)
       } else if (msg.type === 'tool_done') {
         diffHandleToolDoneRef.current(msg.toolName, msg.summary)
-        // Track file-mutating tools to show Code Review button
-        if (msg.toolName === 'Edit' || msg.toolName === 'Write') {
+        // Track file-mutating tools to show Code Review button.
+        // Case-insensitive: Claude reports 'Edit'/'Write', OpenCode 'edit'/'write'/'patch'.
+        const tool = msg.toolName.toLowerCase()
+        if (tool === 'edit' || tool === 'write' || tool === 'patch') {
           setHasFileChanges(true)
         }
       }
@@ -201,6 +204,7 @@ export default function App() {
   )
   const [claudeDisabled, setClaudeDisabled] = useState(false)
   const [openCodeDisabled, setOpenCodeDisabled] = useState(false)
+  const [codexDisabled, setCodexDisabled] = useState(false)
   // Derive the active session's provider (falls back to the default for new sessions)
   const activeSessionProvider = sessions.find(s => s.id === activeSessionId)?.provider ?? currentProvider
 
@@ -216,12 +220,21 @@ export default function App() {
     setModel,
     openCodeDisabled,
   })
+  const { codexModels, codexConnected, setCodexConnected, reconnect: reconnectCodex } = useCodexModelSync({
+    token: settings.token,
+    activeSessionProvider,
+    currentModel,
+    setModel,
+    codexDisabled,
+  })
   const { claudeModels } = useClaudeModelSync({
     token: settings.token,
     currentModel,
     setModel,
   })
-  const availableModels = activeSessionProvider === 'opencode' ? openCodeModels : claudeModels
+  const availableModels = activeSessionProvider === 'opencode' ? openCodeModels
+    : activeSessionProvider === 'codex' ? codexModels
+    : claudeModels
 
   // Reset file-change tracking when switching sessions
   useEffect(() => {
@@ -261,6 +274,20 @@ export default function App() {
     ? repos.find(r => r.workingDir === activeWorkingDir) ?? null
     : null
 
+  // Re-scan repos (and their .claude/skills) when switching to a different
+  // repo, so skills added or edited mid-session show up without a reload.
+  // Guarded by the last-refreshed dir so joining sessions in the same repo
+  // doesn't refetch.
+  const lastSkillRefreshDirRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!activeWorkingDir) return
+    if (lastSkillRefreshDirRef.current === activeWorkingDir) return
+    const isFirstRepo = lastSkillRefreshDirRef.current === null
+    lastSkillRefreshDirRef.current = activeWorkingDir
+    // Skip the initial mount — useRepos already fetches on mount.
+    if (!isFirstRepo) refreshRepos()
+  }, [activeWorkingDir, refreshRepos])
+
   // All available skills for the current session (global + repo)
   const allSkills = useMemo(() => [
     ...globalSkills,
@@ -287,6 +314,8 @@ export default function App() {
     setModel(model)
     if (activeSessionProvider === 'opencode') {
       localStorage.setItem('opencode-model', model)
+    } else if (activeSessionProvider === 'codex') {
+      localStorage.setItem('codex-model', model)
     }
   }, [setModel, activeSessionProvider])
 
@@ -517,6 +546,20 @@ export default function App() {
     }
   }, [openCodeDisabled, activeSessionProvider, activeSessionId, leaveSession, reconnectOpenCode, setOpenCodeConnected])
 
+  const handleToggleCodex = useCallback(() => {
+    if (codexDisabled) {
+      setCodexDisabled(false)
+      reconnectCodex()
+    } else {
+      setCodexDisabled(true)
+      setCodexConnected(false)
+      // Leave the current session if it's a Codex session
+      if (activeSessionProvider === 'codex' && activeSessionId) {
+        leaveSession()
+      }
+    }
+  }, [codexDisabled, activeSessionProvider, activeSessionId, leaveSession, reconnectCodex, setCodexConnected])
+
   const activeSession = sessions.find(s => s.id === activeSessionId)
   const activeSessionName = activeSession?.name ?? null
   const activeRepoName = activeRepo?.name ?? activeWorkingDir?.split('/').pop() ?? null
@@ -547,6 +590,9 @@ export default function App() {
         openCodeDisabled={openCodeDisabled}
         onToggleClaude={handleToggleClaude}
         onToggleOpenCode={handleToggleOpenCode}
+        codexConnected={codexConnected}
+        codexDisabled={codexDisabled}
+        onToggleCodex={handleToggleCodex}
         view={view}
         archiveRefreshKey={archiveRefreshKey}
         onSelectSession={(id) => { docsBrowser.close(); if (view === 'orchestrator') navigate(`/s/${id}`); handleSelectSession(id) }}
@@ -720,7 +766,8 @@ export default function App() {
             moveToWorktree={moveToWorktree}
             worktreePath={activeSession?.worktreePath}
             openCodeConnected={activeSessionProvider === 'opencode' ? (openCodeDisabled ? false : openCodeConnected) : null}
-            claudeDisabled={activeSessionProvider !== 'opencode' && claudeDisabled}
+            codexConnected={activeSessionProvider === 'codex' ? (codexDisabled ? false : codexConnected) : null}
+            claudeDisabled={activeSessionProvider === 'claude' && claudeDisabled}
           />
         ) : (
           <RepoSelector groups={groups} token={settings.token} ghMissing={ghMissing} onOpen={handleOpenSession} onRefreshRepos={refreshRepos} />
