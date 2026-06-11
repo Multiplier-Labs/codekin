@@ -532,6 +532,13 @@ describe('OpenCodeProcess', () => {
       ocp.sendControlResponse('req-2', 'deny')
       expect(replyFn).toHaveBeenCalledWith('req-2', 'reject')
     })
+
+    it('sendControlResponse maps allow_always to always', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const replyFn = vi.spyOn(ocp as any, 'replyToPermission').mockResolvedValue(undefined)
+      ocp.sendControlResponse('req-3', 'allow_always')
+      expect(replyFn).toHaveBeenCalledWith('req-3', 'always')
+    })
   })
 
   // ---------------------------------------------------------------------------
@@ -912,6 +919,442 @@ describe('OpenCodeProcess', () => {
       })
 
       expect(todoHandler).not.toHaveBeenCalled()
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Abort on stop (in-flight turn interrupt)
+  // ---------------------------------------------------------------------------
+
+  describe('abort on stop', () => {
+    const connect = (proc: OpenCodeProcess) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(proc as any).alive = true
+      setSessionId(proc, 'oc-session-1')
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    }
+
+    it('aborts an in-flight turn when stopped', () => {
+      connect(ocp)
+      ocp.sendMessage('do something long')
+      mockFetch.mockClear()
+
+      ocp.stop()
+
+      const abortCall = mockFetch.mock.calls.find(
+        ([url]) => typeof url === 'string' && url.includes('/session/oc-session-1/abort'),
+      )
+      expect(abortCall).toBeDefined()
+      expect((abortCall![1] as { method: string }).method).toBe('POST')
+    })
+
+    it('does not abort when no turn is in flight', () => {
+      connect(ocp)
+      mockFetch.mockClear()
+
+      ocp.stop()
+
+      const abortCall = mockFetch.mock.calls.find(
+        ([url]) => typeof url === 'string' && url.includes('/abort'),
+      )
+      expect(abortCall).toBeUndefined()
+    })
+
+    it('does not abort after the turn has completed', () => {
+      connect(ocp)
+      ocp.sendMessage('quick task')
+      callHandleSSE(ocp, {
+        type: 'session.idle',
+        properties: { sessionID: 'oc-session-1' },
+      })
+      mockFetch.mockClear()
+
+      ocp.stop()
+
+      const abortCall = mockFetch.mock.calls.find(
+        ([url]) => typeof url === 'string' && url.includes('/abort'),
+      )
+      expect(abortCall).toBeUndefined()
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // /compact → native summarize endpoint
+  // ---------------------------------------------------------------------------
+
+  describe('compact command', () => {
+    const connect = (proc: OpenCodeProcess) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(proc as any).alive = true
+      setSessionId(proc, 'oc-session-1')
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    }
+
+    const lastRequest = () => {
+      const [url, init] = mockFetch.mock.calls[mockFetch.mock.calls.length - 1] as [string, { method: string; body: string }]
+      return { url, method: init.method, body: JSON.parse(init.body) as Record<string, unknown> }
+    }
+
+    it('routes /compact to the summarize endpoint with the session model', () => {
+      connect(ocp)
+      ocp.sendMessage('/compact')
+      const { url, method, body } = lastRequest()
+      expect(url).toContain('/session/oc-session-1/summarize')
+      expect(method).toBe('POST')
+      expect(body).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+    })
+
+    it('routes /summarize to the summarize endpoint', () => {
+      connect(ocp)
+      ocp.sendMessage('/summarize')
+      const { url } = lastRequest()
+      expect(url).toContain('/session/oc-session-1/summarize')
+    })
+
+    it('sends an empty body when no model is set', () => {
+      const noModelProc = new OpenCodeProcess('/tmp/test-repo', { sessionId: 'no-model' })
+      connect(noModelProc)
+      noModelProc.sendMessage('/compact')
+      const { body } = lastRequest()
+      expect(body).toEqual({})
+      noModelProc.stop()
+    })
+
+    it('emits error when the summarize request fails', async () => {
+      connect(ocp)
+      const errorHandler = vi.fn()
+      ocp.on('error', errorHandler)
+      mockFetch.mockResolvedValue({ ok: false, status: 500 })
+
+      ocp.sendMessage('/compact')
+      await vi.waitFor(() => {
+        expect(errorHandler).toHaveBeenCalledWith('Failed to compact conversation: HTTP 500')
+      })
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Token/cost usage tracking
+  // ---------------------------------------------------------------------------
+
+  describe('usage tracking', () => {
+    it('emits cumulative usage from assistant message.updated tokens', () => {
+      const usageHandler = vi.fn()
+      ocp.on('usage', usageHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'message.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          info: {
+            id: 'm1',
+            role: 'assistant',
+            cost: 0.01,
+            tokens: { input: 100, output: 50, reasoning: 10, cache: { read: 20, write: 5 } },
+          },
+        },
+      })
+
+      expect(usageHandler).toHaveBeenCalledTimes(1)
+      expect(usageHandler).toHaveBeenCalledWith({ inputTokens: 125, outputTokens: 60, costUsd: 0.01 })
+    })
+
+    it('suppresses duplicate usage emissions for unchanged totals', () => {
+      const usageHandler = vi.fn()
+      ocp.on('usage', usageHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      const event = {
+        type: 'message.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          info: { id: 'm1', role: 'assistant', cost: 0.01, tokens: { input: 100, output: 50 } },
+        },
+      }
+      callHandleSSE(ocp, event)
+      callHandleSSE(ocp, event)
+
+      expect(usageHandler).toHaveBeenCalledTimes(1)
+    })
+
+    it('accumulates usage across messages and replaces same-message updates', () => {
+      const usageHandler = vi.fn()
+      ocp.on('usage', usageHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'message.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          info: { id: 'm1', role: 'assistant', cost: 0.01, tokens: { input: 100, output: 50 } },
+        },
+      })
+      // Same message grows (message.updated fires repeatedly) — replaces, not adds
+      callHandleSSE(ocp, {
+        type: 'message.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          info: { id: 'm1', role: 'assistant', cost: 0.02, tokens: { input: 150, output: 80 } },
+        },
+      })
+      // A second message accumulates on top
+      callHandleSSE(ocp, {
+        type: 'message.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          info: { id: 'm2', role: 'assistant', cost: 0.01, tokens: { input: 50, output: 20 } },
+        },
+      })
+
+      expect(usageHandler).toHaveBeenCalledTimes(3)
+      expect(usageHandler).toHaveBeenNthCalledWith(2, { inputTokens: 150, outputTokens: 80, costUsd: 0.02 })
+      expect(usageHandler).toHaveBeenNthCalledWith(3, { inputTokens: 200, outputTokens: 100, costUsd: 0.03 })
+    })
+
+    it('does not emit usage when tokens are absent or zero', () => {
+      const usageHandler = vi.fn()
+      ocp.on('usage', usageHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'message.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          info: { id: 'm1', role: 'assistant' },
+        },
+      })
+      callHandleSSE(ocp, {
+        type: 'message.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          info: { id: 'm2', role: 'assistant', tokens: { input: 0, output: 0 } },
+        },
+      })
+
+      expect(usageHandler).not.toHaveBeenCalled()
+    })
+
+    it('ignores usage on non-assistant messages', () => {
+      const usageHandler = vi.fn()
+      ocp.on('usage', usageHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'message.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          info: { id: 'u1', role: 'user', tokens: { input: 100, output: 0 } },
+        },
+      })
+
+      expect(usageHandler).not.toHaveBeenCalled()
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Missed-text recovery via message poll
+  // ---------------------------------------------------------------------------
+
+  describe('missed-text recovery', () => {
+    it('recovers assistant text when SSE events were lost', async () => {
+      const textHandler = vi.fn()
+      const resultHandler = vi.fn()
+      ocp.on('text', textHandler)
+      ocp.on('result', resultHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).alive = true
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            info: { role: 'assistant', time: { created: 2, completed: 3 } },
+            parts: [
+              { type: 'step-start' },
+              { type: 'text', text: 'Recovered answer' },
+            ],
+          },
+        ],
+      })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (ocp as any).checkTurnLiveness(true)
+
+      expect(textHandler).toHaveBeenCalledWith('Recovered answer')
+      expect(resultHandler).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not re-emit text when deltas were already received', async () => {
+      const textHandler = vi.fn()
+      ocp.on('text', textHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).alive = true
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).receivedDeltas = true
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            info: { role: 'assistant', time: { completed: 3 } },
+            parts: [{ type: 'text', text: 'Already streamed' }],
+          },
+        ],
+      })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (ocp as any).checkTurnLiveness(true)
+
+      expect(textHandler).not.toHaveBeenCalled()
+    })
+
+    it('strips user echo prefix from recovered text', async () => {
+      const textHandler = vi.fn()
+      ocp.on('text', textHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).alive = true
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).lastUserInput = 'what is 2+2?'
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            info: { role: 'assistant', time: { completed: 3 } },
+            parts: [{ type: 'text', text: 'what is 2+2?The answer is 4.' }],
+          },
+        ],
+      })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (ocp as any).checkTurnLiveness(true)
+
+      expect(textHandler).toHaveBeenCalledWith('The answer is 4.')
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Subagent (child session) activity
+  // ---------------------------------------------------------------------------
+
+  describe('subagent activity', () => {
+    it('surfaces a new child session as Task tool activity', () => {
+      const toolActiveHandler = vi.fn()
+      ocp.on('tool_active', toolActiveHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'session.created',
+        properties: {
+          info: { id: 'child-1', parentID: 'oc-session-1', title: 'Investigate bug' },
+        },
+      })
+
+      expect(toolActiveHandler).toHaveBeenCalledWith('Task', 'Investigate bug')
+    })
+
+    it('registers a child session only once', () => {
+      const toolActiveHandler = vi.fn()
+      ocp.on('tool_active', toolActiveHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      const event = {
+        type: 'session.updated',
+        properties: { info: { id: 'child-1', parentID: 'oc-session-1', title: 'Subtask' } },
+      }
+      callHandleSSE(ocp, event)
+      callHandleSSE(ocp, event)
+
+      expect(toolActiveHandler).toHaveBeenCalledTimes(1)
+    })
+
+    it('ignores child sessions of other parents', () => {
+      const toolActiveHandler = vi.fn()
+      ocp.on('tool_active', toolActiveHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'session.created',
+        properties: {
+          info: { id: 'child-x', parentID: 'some-other-session', title: 'Not ours' },
+        },
+      })
+
+      expect(toolActiveHandler).not.toHaveBeenCalled()
+    })
+
+    it('surfaces child session tool activity', () => {
+      const toolActiveHandler = vi.fn()
+      const toolDoneHandler = vi.fn()
+      ocp.on('tool_active', toolActiveHandler)
+      ocp.on('tool_done', toolDoneHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'session.created',
+        properties: { info: { id: 'child-1', parentID: 'oc-session-1', title: 'Research' } },
+      })
+      callHandleSSE(ocp, {
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'child-1',
+          part: { type: 'tool', tool: 'grep', state: { status: 'running', input: { pattern: 'foo' } } },
+        },
+      })
+      callHandleSSE(ocp, {
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'child-1',
+          part: { type: 'tool', tool: 'grep', state: { status: 'completed', output: 'match found' } },
+        },
+      })
+
+      expect(toolActiveHandler).toHaveBeenCalledWith('grep', 'foo')
+      expect(toolDoneHandler).toHaveBeenCalledWith('grep', 'match found')
+    })
+
+    it('does not surface child session text parts', () => {
+      const textHandler = vi.fn()
+      ocp.on('text', textHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'session.created',
+        properties: { info: { id: 'child-1', parentID: 'oc-session-1' } },
+      })
+      callHandleSSE(ocp, {
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'child-1',
+          part: { type: 'text', text: 'internal subagent text' },
+        },
+      })
+
+      expect(textHandler).not.toHaveBeenCalled()
+    })
+
+    it('does not complete the parent turn when a child session goes idle', () => {
+      const resultHandler = vi.fn()
+      ocp.on('result', resultHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'session.created',
+        properties: { info: { id: 'child-1', parentID: 'oc-session-1' } },
+      })
+      // session.updated for the child reporting idle — must NOT complete our turn
+      callHandleSSE(ocp, {
+        type: 'session.updated',
+        properties: {
+          info: { id: 'child-1', parentID: 'oc-session-1', status: { type: 'idle' } },
+        },
+      })
+
+      expect(resultHandler).not.toHaveBeenCalled()
     })
   })
 })

@@ -745,7 +745,7 @@ describe('SessionManager', () => {
 
       sm.sendPromptResponse(s.id, 'always_allow', 'req-1')
 
-      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow')
+      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow_always')
       // Pattern-first: 'npm test' is patternable, stored as pattern
       expect(sm.approvalManager.getApprovals(s.workingDir).patterns).toContain('npm test *')
     })
@@ -763,7 +763,7 @@ describe('SessionManager', () => {
 
       sm.sendPromptResponse(s.id, 'always_allow', 'req-1')
 
-      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow')
+      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow_always')
       expect(sm.approvalManager.getApprovals(s.workingDir).tools).toContain('Write')
     })
 
@@ -1481,7 +1481,7 @@ describe('SessionManager', () => {
 
       // Pattern-first: 'git status' is patternable, stored as pattern
       expect(sm.approvalManager.getApprovals(s.workingDir).patterns).toContain('git status *')
-      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow')
+      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow_always')
     })
 
   })

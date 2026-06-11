@@ -239,6 +239,7 @@ export class SessionLifecycle {
       // ExitPlanMode stream event intentionally ignored — hook handles it.
     })
     cp.on('todo_update', (tasks) => { this.deps.broadcastAndHistory(session, { type: 'todo_update', tasks }) })
+    cp.on('usage', (usage) => { this.deps.broadcastAndHistory(session, { type: 'usage', ...usage }) })
     cp.on('prompt', (...args) => this.deps.promptRouter.onPromptEvent(session, ...args))
     cp.on('control_request', (requestId, toolName, toolInput) => this.deps.promptRouter.onControlRequestEvent(cp, session, sessionId, requestId, toolName, toolInput))
     cp.on('result', (result, isError) => {

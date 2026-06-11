@@ -1403,3 +1403,65 @@ describe('stop — force kill timeout', () => {
     expect(killMock).toHaveBeenCalledWith('SIGTERM')
   })
 })
+
+describe('usage events (via handleLine result)', () => {
+  let cp: CP
+  const usageEvents: unknown[] = []
+
+  beforeEach(() => {
+    cp = makeCP()
+    usageEvents.length = 0
+    cp.on('usage', (u: unknown) => usageEvents.push(u))
+  })
+
+  it('emits cumulative usage from a result event', () => {
+    cp.handleLine(JSON.stringify({
+      type: 'result',
+      result: 'done',
+      total_cost_usd: 0.05,
+      usage: {
+        input_tokens: 100,
+        output_tokens: 40,
+        cache_read_input_tokens: 30,
+        cache_creation_input_tokens: 20,
+      },
+    }))
+
+    expect(usageEvents).toEqual([{ inputTokens: 150, outputTokens: 40, costUsd: 0.05 }])
+  })
+
+  it('accumulates token totals across turns and keeps the latest cost', () => {
+    cp.handleLine(JSON.stringify({
+      type: 'result',
+      result: 'first',
+      total_cost_usd: 0.02,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    }))
+    cp.handleLine(JSON.stringify({
+      type: 'result',
+      result: 'second',
+      total_cost_usd: 0.07,
+      usage: { input_tokens: 60, output_tokens: 30 },
+    }))
+
+    expect(usageEvents).toEqual([
+      { inputTokens: 100, outputTokens: 50, costUsd: 0.02 },
+      { inputTokens: 160, outputTokens: 80, costUsd: 0.07 },
+    ])
+  })
+
+  it('emits usage with cost only when usage block is absent', () => {
+    cp.handleLine(JSON.stringify({
+      type: 'result',
+      result: 'done',
+      total_cost_usd: 0.01,
+    }))
+
+    expect(usageEvents).toEqual([{ inputTokens: 0, outputTokens: 0, costUsd: 0.01 }])
+  })
+
+  it('does not emit usage when neither usage nor cost is present', () => {
+    cp.handleLine(JSON.stringify({ type: 'result', result: 'done' }))
+    expect(usageEvents).toEqual([])
+  })
+})
