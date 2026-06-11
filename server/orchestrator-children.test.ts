@@ -1,6 +1,5 @@
 /** Tests for OrchestratorChildManager — verifies spawn, status tracking,
  * listing, timeout, and prompt generation. */
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 vi.mock('./config.js', () => ({
@@ -15,7 +14,7 @@ vi.mock('./orchestrator-outbox.js', () => ({
   getOrchestratorOutbox: () => ({ enqueue: () => {} }),
 }))
 
-import { OrchestratorChildManager, type ChildSessionRequest } from './orchestrator-children.js'
+import { OrchestratorChildManager, AGENT_CHILD_ALLOWED_TOOLS, type ChildSessionRequest } from './orchestrator-children.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -136,6 +135,30 @@ describe('OrchestratorChildManager', () => {
       expect(child.status).toBe('running')
       const prompt = sessions._sentInputs[0]
       expect(prompt).toContain('Worktree Not Available')
+    })
+
+    it('reports worktree status "active" with the worktree path on success', async () => {
+      const child = await manager.spawn(makeRequest({ useWorktree: true }))
+
+      expect(child.worktree).toBe('active')
+      expect(child.worktreePath).toBe('/repos/myproject-wt-child123')
+    })
+
+    it('reports worktree status "failed" when worktree creation fails', async () => {
+      sessions = makeMockSessions(false)
+      manager = new OrchestratorChildManager(sessions)
+
+      const child = await manager.spawn(makeRequest({ useWorktree: true }))
+
+      expect(child.worktree).toBe('failed')
+      expect(child.worktreePath).toBeNull()
+    })
+
+    it('reports worktree status "none" when no worktree was requested', async () => {
+      const child = await manager.spawn(makeRequest({ useWorktree: false }))
+
+      expect(child.worktree).toBe('none')
+      expect(child.worktreePath).toBeNull()
     })
 
     it('records failed status when session creation throws', async () => {
@@ -273,6 +296,28 @@ describe('OrchestratorChildManager', () => {
   })
 
   // -------------------------------------------------------------------------
+  // Default allowlist
+  // -------------------------------------------------------------------------
+
+  describe('AGENT_CHILD_ALLOWED_TOOLS', () => {
+    it('includes the broadened dev toolset', () => {
+      for (const tool of [
+        'Bash(python3:*)', 'Bash(pytest:*)',
+        'Bash(sed:*)', 'Bash(rg:*)', 'Bash(jq:*)',
+        'Bash(mkdir:*)', 'Bash(cp:*)', 'Bash(mv:*)', 'Bash(touch:*)',
+      ]) {
+        expect(AGENT_CHILD_ALLOWED_TOOLS).toContain(tool)
+      }
+    })
+
+    it('still excludes destructive commands', () => {
+      for (const tool of ['Bash(rm:*)', 'Bash(sudo:*)', 'Bash(docker:*)', 'Bash:*', 'Bash']) {
+        expect(AGENT_CHILD_ALLOWED_TOOLS).not.toContain(tool)
+      }
+    })
+  })
+
+  // -------------------------------------------------------------------------
   // Timeout
   // -------------------------------------------------------------------------
 
@@ -304,6 +349,95 @@ describe('OrchestratorChildManager', () => {
       })
       expect(child.error).toContain('Timed out')
       expect(child.completedAt).toBeTruthy()
+    })
+
+    it('pauses the working clock while the child is blocked on a prompt', async () => {
+      const pendingApprovals = new Map([['req-1', { toolInput: { command: 'git push' } }]])
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => true), stop: vi.fn() },
+        outputHistory: [],
+        pendingToolApprovals: pendingApprovals,
+        pendingControlRequests: new Map(),
+      }))
+
+      const child = await manager.spawn(makeRequest({ timeoutMs: 60_000, parentSessionId: 'parent-1' }))
+
+      // Burn half the working budget, then block on a prompt
+      vi.advanceTimersByTime(30_000)
+      for (const cb of sessions._promptListeners) cb(child.id, 'permission', 'Bash', 'req-1')
+      expect(child.status).toBe('blocked')
+
+      // Way past the original working deadline while blocked — must NOT time out
+      vi.advanceTimersByTime(10 * 60_000)
+      expect(child.status).toBe('blocked')
+
+      // Prompt answered: a result arrives with no pendings → clock resumes
+      pendingApprovals.clear()
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => true), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'pushed and created a pull request '.repeat(10) }],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+      }))
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+
+      await vi.waitFor(() => {
+        expect(child.status).toBe('completed')
+      })
+    })
+
+    it('times out a child that stays blocked past the blocked-time budget', async () => {
+      const pendingApprovals = new Map([['req-1', { toolInput: { command: 'git push' } }]])
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => true), stop: vi.fn() },
+        outputHistory: [],
+        pendingToolApprovals: pendingApprovals,
+        pendingControlRequests: new Map(),
+      }))
+
+      const child = await manager.spawn(makeRequest({ timeoutMs: 60_000, parentSessionId: 'parent-1' }))
+
+      for (const cb of sessions._promptListeners) cb(child.id, 'permission', 'Bash', 'req-1')
+      expect(child.status).toBe('blocked')
+
+      // Exceed the 30-minute blocked budget
+      vi.advanceTimersByTime(31 * 60_000)
+
+      await vi.waitFor(() => {
+        expect(child.status).toBe('timed_out')
+      })
+      expect(child.error).toContain('pending approval')
+    })
+
+    it('resumes the working clock after unblock with the remaining budget', async () => {
+      const pendingApprovals = new Map([['req-1', { toolInput: { command: 'git push' } }]])
+      const makeSession = (pending: Map<string, unknown>) => ({
+        claudeProcess: { isAlive: vi.fn(() => true), stop: vi.fn() },
+        outputHistory: [],
+        pendingToolApprovals: pending,
+        pendingControlRequests: new Map(),
+      })
+      sessions.get = vi.fn(() => makeSession(pendingApprovals))
+
+      const child = await manager.spawn(makeRequest({ timeoutMs: 60_000, parentSessionId: 'parent-1' }))
+
+      // Use 30s of the budget, block, then unblock via a result event
+      vi.advanceTimersByTime(30_000)
+      for (const cb of sessions._promptListeners) cb(child.id, 'permission', 'Bash', 'req-1')
+      vi.advanceTimersByTime(5 * 60_000)
+
+      pendingApprovals.clear()
+      sessions.get = vi.fn(() => makeSession(new Map()))
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+      // Result with empty output → nudge consumed? No — process alive, PR policy,
+      // no "pull request" text → nudge fires and monitoring continues with the
+      // resumed clock. Remaining working budget is ~30s.
+      vi.advanceTimersByTime(31_000)
+
+      await vi.waitFor(() => {
+        expect(child.status).toBe('timed_out')
+      })
+      expect(child.error).toContain('working time')
     })
   })
 
