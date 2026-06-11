@@ -360,10 +360,12 @@ export class OrchestratorChildManager {
       body: this.buildTerminalNotificationBody(child),
     }
 
-    // Only stamp `terminalNotifiedAt` on confirmed delivery so that a
-    // transient parent-down (notify returns false / throws) does not
-    // permanently suppress future retries.  Idempotency is still enforced
-    // by the early-return on terminalNotifiedAt at the top of this method.
+    // `notify` returns true on immediate delivery AND when the notification
+    // was queued in the persistent outbox (the outbox owns replay from that
+    // point on) — both count as handled, so we stamp `terminalNotifiedAt`.
+    // It returns false only when queueing itself failed; we leave the stamp
+    // unset so a later terminal-path call can retry. Idempotency is still
+    // enforced by the early-return on terminalNotifiedAt at the top.
     let delivered = false
     try {
       delivered = this.notify(args)
