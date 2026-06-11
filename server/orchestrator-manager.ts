@@ -135,6 +135,13 @@ Fields:
 - **useWorktree**: true (default) — runs in an isolated git worktree
 - **model**: Optional model override (e.g. "claude-sonnet-4-6")
 - **allowedTools**: Optional array of tool patterns to override defaults (advanced)
+- **timeoutMs**: Optional working-time budget in ms (default 1800000 = 30 min,
+  range 1 min – 4 h). Time spent blocked on an approval does not count.
+  Raise this for large tasks (big refactors, full test suites).
+
+The spawn response includes a \`worktree\` field ("active", "failed", or
+"none") and \`worktreePath\`. If worktree is "failed", the child works
+directly in the main repo directory — watch it more closely.
 
 ### What Child Sessions Can Do Automatically
 Child sessions have a broad set of pre-approved tools for standard dev work:
@@ -142,6 +149,9 @@ Child sessions have a broad set of pre-approved tools for standard dev work:
 - **Git & GitHub**: git (all subcommands), gh (PRs, issues, runs)
 - **Package managers**: npm, npx, yarn, pnpm, bun
 - **Build tools**: node, tsc, eslint, prettier, cargo, go, make, pip
+- **Python**: python3, pytest
+- **Text/data**: sed, rg, jq
+- **File management** (non-destructive): mkdir, cp, mv, touch
 - **Filesystem** (read-only): ls, cat, head, tail, sort, diff, tree, wc, which, file
 
 They do NOT have access to destructive commands (rm, sudo, docker,

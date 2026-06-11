@@ -72,6 +72,7 @@ interface SpawnChildBody {
   useWorktree?: boolean
   model?: string
   allowedTools?: string[]
+  timeoutMs?: number
 }
 
 interface SessionRespondBody {
@@ -187,9 +188,16 @@ export function createSessionRouter(
   router.post('/api/orchestrator/children', spawnRateLimiter, async (req: Request<Record<string, string>, unknown, SpawnChildBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { repo, task, branchName, completionPolicy, deployAfter, useWorktree, model, allowedTools } = req.body
+    const { repo, task, branchName, completionPolicy, deployAfter, useWorktree, model, allowedTools, timeoutMs } = req.body
     if (!repo || !task || !branchName) {
       return res.status(400).json({ error: 'Missing required fields: repo, task, branchName' })
+    }
+
+    // Validate timeoutMs if provided: 1 minute to 4 hours
+    if (timeoutMs !== undefined) {
+      if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs < 60_000 || timeoutMs > 14_400_000) {
+        return res.status(400).json({ error: 'Invalid timeoutMs: must be a number between 60000 (1m) and 14400000 (4h)' })
+      }
     }
 
     // Validate branchName to prevent prompt injection
@@ -225,6 +233,7 @@ export function createSessionRouter(
         useWorktree: useWorktree ?? true,
         model,
         allowedTools,
+        timeoutMs,
         // Stamp the orchestrator (parent) session ID so the child can push
         // a terminal-state notification back to it without a 30-min poll.
         parentSessionId: getOrCreateOrchestratorId(),

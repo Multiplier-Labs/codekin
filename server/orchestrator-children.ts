@@ -32,7 +32,11 @@ export interface ChildSessionRequest {
   deployAfter: boolean
   /** Use a git worktree for isolation. */
   useWorktree: boolean
-  /** Timeout in ms (default 10 minutes). */
+  /**
+   * Working-time timeout in ms (default 30 minutes). Time spent blocked on
+   * a pending approval/question does not count against this budget — blocked
+   * time has its own separate cap (MAX_BLOCKED_MS).
+   */
   timeoutMs?: number
   /** Optional model override. */
   model?: string
@@ -69,6 +73,15 @@ export interface ChildSession {
    * parent orchestrator. Used to enforce single-fire idempotency.
    */
   terminalNotifiedAt: string | null
+  /**
+   * Worktree isolation outcome:
+   *  - 'active': worktree created, session runs isolated
+   *  - 'failed': worktree was requested but creation failed (running in repo)
+   *  - 'none':   worktree was not requested
+   */
+  worktree: 'active' | 'failed' | 'none'
+  /** Absolute path of the worktree when active. */
+  worktreePath: string | null
 }
 
 /**
@@ -83,7 +96,13 @@ export type ChildNotifyFn = (args: OrchestratorNotifyArgs) => boolean
 // ---------------------------------------------------------------------------
 
 const MAX_CONCURRENT = 5
-const DEFAULT_TIMEOUT_MS = 600_000  // 10 minutes
+const DEFAULT_TIMEOUT_MS = 1_800_000  // 30 minutes of working time
+/**
+ * Separate budget for time spent blocked on a pending approval or question.
+ * The working-time clock is paused while blocked; this cap ensures a child
+ * waiting on an answer that never comes still terminates eventually.
+ */
+const MAX_BLOCKED_MS = 1_800_000  // 30 minutes
 const CHILD_RETENTION_MS = 3_600_000  // keep completed/failed children for 1 hour
 const MAX_RETAINED_CHILDREN = 100    // hard cap on total entries
 const MAX_NOTIFIED_PROMPT_IDS = 500  // cap on the blocked-prompt dedup set
@@ -108,6 +127,12 @@ export const AGENT_CHILD_ALLOWED_TOOLS = [
   // Build / lint / test tools
   'Bash(node:*)', 'Bash(tsc:*)', 'Bash(eslint:*)', 'Bash(prettier:*)',
   'Bash(cargo:*)', 'Bash(go:*)', 'Bash(make:*)', 'Bash(pip:*)',
+  // Python toolchain (linting/tests in Python repos)
+  'Bash(python3:*)', 'Bash(pytest:*)',
+  // Text/data processing (read-only or scoped to working dir)
+  'Bash(sed:*)', 'Bash(rg:*)', 'Bash(jq:*)',
+  // Non-destructive file management (no rm — deletion still needs approval)
+  'Bash(mkdir:*)', 'Bash(cp:*)', 'Bash(mv:*)', 'Bash(touch:*)',
   // Safe filesystem inspection (read-only)
   'Bash(ls:*)', 'Bash(cat:*)', 'Bash(wc:*)',
   'Bash(head:*)', 'Bash(tail:*)', 'Bash(sort:*)', 'Bash(diff:*)',
@@ -126,6 +151,12 @@ export class OrchestratorChildManager {
   private notify: ChildNotifyFn
   /** Prompt requestIds already reported to the parent (single-fire per prompt). */
   private notifiedPromptIds = new Set<string>()
+  /**
+   * Per-child timeout controllers — lets the prompt handler pause the
+   * working-time clock the moment a child blocks on an approval/question,
+   * instead of waiting for the next monitor event.
+   */
+  private timeoutControllers = new Map<string, { pause(): void; resume(): void }>()
 
   constructor(sessions: SessionManager, opts?: { notify?: ChildNotifyFn }) {
     this.sessions = sessions
@@ -153,6 +184,8 @@ export class OrchestratorChildManager {
     if (!child || TERMINAL_STATUSES.has(child.status)) return
 
     child.status = 'blocked'
+    // Pause the working-time clock while the child waits for an answer.
+    this.timeoutControllers.get(sessionId)?.pause()
 
     // Single-fire per requestId (re-broadcasts on client join would otherwise
     // spam the parent). Prompts without a requestId can't be deduped or
@@ -294,6 +327,8 @@ export class OrchestratorChildManager {
       result: null,
       error: null,
       terminalNotifiedAt: null,
+      worktree: request.useWorktree ? 'failed' : 'none',  // upgraded to 'active' on success
+      worktreePath: null,
     }
     this.children.set(sessionId, child)
 
@@ -315,7 +350,10 @@ export class OrchestratorChildManager {
       let worktreeFailed = false
       if (request.useWorktree) {
         const wtPath = await this.sessions.createWorktree(sessionId, request.repo, request.branchName)
-        if (!wtPath) {
+        if (wtPath) {
+          child.worktree = 'active'
+          child.worktreePath = wtPath
+        } else {
           worktreeFailed = true
           console.warn(`[orchestrator-child] Failed to create worktree for ${sessionId}, falling back to main directory`)
         }
@@ -530,19 +568,62 @@ export class OrchestratorChildManager {
         let settled = false
         const settle = () => { if (!settled) { settled = true; resolve() } }
 
-        // Timeout handler
-        const timer = setTimeout(() => {
+        // ---- Pausable working-time clock -----------------------------------
+        // The working budget (timeoutMs) only burns while the child is doing
+        // work. When the child blocks on an approval/question, the clock is
+        // paused and a separate blocked-time cap (MAX_BLOCKED_MS) takes over
+        // so an unanswered prompt still terminates the child eventually.
+        let remainingMs = timeoutMs
+        let workStartedAt = Date.now()
+        let workTimer: ReturnType<typeof setTimeout> | null = null
+        let blockedTimer: ReturnType<typeof setTimeout> | null = null
+
+        const clearTimers = () => {
+          if (workTimer) { clearTimeout(workTimer); workTimer = null }
+          if (blockedTimer) { clearTimeout(blockedTimer); blockedTimer = null }
+        }
+
+        const fireTimeout = (error: string) => {
           if (settled) return
           child.status = 'timed_out'
-          child.error = `Timed out after ${timeoutMs}ms`
+          child.error = error
           child.completedAt = new Date().toISOString()
+          clearTimers()
 
           const session = this.sessions.get(child.id)
           if (session?.claudeProcess?.isAlive()) {
             session.claudeProcess.stop()
           }
           settle()
-        }, timeoutMs)
+        }
+
+        const pause = () => {
+          if (settled || !workTimer) return
+          clearTimeout(workTimer)
+          workTimer = null
+          remainingMs = Math.max(0, remainingMs - (Date.now() - workStartedAt))
+          blockedTimer ??= setTimeout(() => {
+            fireTimeout(`Timed out after waiting ${MAX_BLOCKED_MS}ms for a pending approval/answer`)
+          }, MAX_BLOCKED_MS)
+        }
+
+        const resume = () => {
+          if (settled || workTimer) return
+          if (blockedTimer) { clearTimeout(blockedTimer); blockedTimer = null }
+          workStartedAt = Date.now()
+          workTimer = setTimeout(() => {
+            fireTimeout(`Timed out after ${timeoutMs}ms of working time`)
+          }, remainingMs)
+        }
+
+        // Expose pause/resume to the prompt handler (handleChildPrompt).
+        this.timeoutControllers.set(child.id, { pause, resume })
+
+        // Start the working clock.
+        workStartedAt = Date.now()
+        workTimer = setTimeout(() => {
+          fireTimeout(`Timed out after ${timeoutMs}ms of working time`)
+        }, remainingMs)
 
         // Result hook: Claude completed a turn
         const onResult = (sessionId: string, isError: boolean) => {
@@ -552,7 +633,7 @@ export class OrchestratorChildManager {
             child.status = 'failed'
             child.error = 'Session was deleted'
             child.completedAt = new Date().toISOString()
-            clearTimeout(timer)
+            clearTimers()
             settle()
             return
           }
@@ -564,8 +645,14 @@ export class OrchestratorChildManager {
           // act. Keep monitoring; the next result/exit event re-evaluates.
           if (session.pendingToolApprovals.size > 0 || session.pendingControlRequests.size > 0) {
             child.status = 'blocked'
+            pause()
             return
           }
+
+          // The prompt (if any) was answered — restart the working clock so
+          // post-approval work draws from the remaining working budget.
+          resume()
+          if (child.status === 'blocked') child.status = 'running'
 
           const text = this.extractText(session.outputHistory)
           // Check if the final step was done; if not, nudge (keep listening)
@@ -575,7 +662,7 @@ export class OrchestratorChildManager {
           child.result = text || null
           child.error = isError ? 'Claude returned an error' : null
           child.completedAt = new Date().toISOString()
-          clearTimeout(timer)
+          clearTimers()
           settle()
         }
 
@@ -590,7 +677,7 @@ export class OrchestratorChildManager {
           child.result = text || null
           child.error = text.length <= 100 ? 'Claude exited without sufficient output' : null
           child.completedAt = new Date().toISOString()
-          clearTimeout(timer)
+          clearTimers()
           settle()
         }
 
@@ -601,6 +688,7 @@ export class OrchestratorChildManager {
       // Unsubscribe listeners to prevent accumulation across spawn() calls
       unsubResult?.()
       unsubExit?.()
+      this.timeoutControllers.delete(child.id)
       // Safety net: ensure isProcessing is cleared when monitoring ends.
       // handleClaudeResult should have already done this, but edge cases
       // (nudge race, missed result event) can leave the flag stuck.
