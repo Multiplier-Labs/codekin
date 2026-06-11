@@ -181,8 +181,10 @@ export default function App() {
         diffHandleMessageRef.current(msg)
       } else if (msg.type === 'tool_done') {
         diffHandleToolDoneRef.current(msg.toolName, msg.summary)
-        // Track file-mutating tools to show Code Review button
-        if (msg.toolName === 'Edit' || msg.toolName === 'Write') {
+        // Track file-mutating tools to show Code Review button.
+        // Case-insensitive: Claude reports 'Edit'/'Write', OpenCode 'edit'/'write'/'patch'.
+        const tool = msg.toolName.toLowerCase()
+        if (tool === 'edit' || tool === 'write' || tool === 'patch') {
           setHasFileChanges(true)
         }
       }

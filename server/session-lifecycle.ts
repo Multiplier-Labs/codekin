@@ -150,12 +150,20 @@ export class SessionLifecycle {
     const mergedAllowedTools = [...new Set([...(session.allowedTools || []), ...registryPatterns])]
     let cp: CodingProcess
     if (session.provider === 'opencode') {
+      // Recent assistant text already shown to the user — lets the resumed
+      // process skip re-emitting messages during missed-history hydration.
+      const recentOutputText = session.outputHistory
+        .filter((m): m is { type: 'output'; data: string } => m.type === 'output')
+        .slice(-100)
+        .map((m) => m.data)
+        .join('')
       cp = new OpenCodeProcess(session.workingDir, {
         sessionId: sessionId,
         opencodeSessionId: session.claudeSessionId || undefined,
         model: session.model,
         extraEnv,
         permissionMode: session.permissionMode,
+        recentOutputText,
       })
     } else {
       cp = new ClaudeProcess(session.workingDir, {
