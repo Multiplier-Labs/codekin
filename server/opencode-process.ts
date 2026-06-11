@@ -58,6 +58,63 @@ interface OpenCodeSSEEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Codekin context + permission mapping
+// ---------------------------------------------------------------------------
+
+/**
+ * Codekin environment context appended to OpenCode's agent system prompt via
+ * the `system` field on each prompt request. OpenCode APPENDS this to its
+ * tuned per-model prompt (verified against OpenCode 1.15) — unlike
+ * `agent.*.prompt` config which would REPLACE it. Mirrors the
+ * `--append-system-prompt` text used for the Claude path (claude-process.ts).
+ */
+export const OPENCODE_SYSTEM_CONTEXT = [
+  'You are running inside a web-based terminal (Codekin).',
+  'Tool permissions are managed by the system through an approval UI.',
+  'Do not tell the user to click approve or grant permission. Just proceed with your work.',
+  'If a tool call fails, read the error message carefully. Common causes: wrong file path, missing dependency, syntax error, or network issue.',
+].join(' ')
+
+/** One rule in OpenCode's permission ruleset (last match wins, wildcards on both fields). */
+interface OpenCodePermissionRule {
+  permission: string
+  pattern: string
+  action: 'allow' | 'deny' | 'ask'
+}
+
+/**
+ * Map Codekin's PermissionMode to an OpenCode permission ruleset, applied at
+ * session creation (and via PATCH on resume). Without this, bypass-mode
+ * sessions still hit server-side `ask` states (external_directory, doom_loop)
+ * that must round-trip through the UI even though the user opted out.
+ * Returns undefined for modes where OpenCode's defaults are appropriate.
+ */
+export function permissionRulesetFor(mode?: PermissionMode): OpenCodePermissionRule[] | undefined {
+  switch (mode) {
+    case 'bypassPermissions':
+    case 'dangerouslySkipPermissions':
+      return [{ permission: '*', pattern: '*', action: 'allow' }]
+    case 'acceptEdits':
+      return [{ permission: 'edit', pattern: '*', action: 'allow' }]
+    default:
+      // 'default' and 'plan' use OpenCode's defaults; plan-mode safety comes
+      // from selecting the read-only `plan` agent on each prompt.
+      return undefined
+  }
+}
+
+/** An OpenCode command (slash command / skill / MCP prompt) from GET /command. */
+export interface OpenCodeCommandInfo {
+  name: string
+  description?: string
+  agent?: string
+  model?: string
+  source?: 'command' | 'mcp' | 'skill'
+  template?: string
+  hints?: string[]
+}
+
+// ---------------------------------------------------------------------------
 // OpenCode server manager (singleton — one server for all sessions)
 // ---------------------------------------------------------------------------
 
@@ -214,6 +271,28 @@ export async function fetchOpenCodeModels(workingDir: string): Promise<{
   }
 }
 
+/**
+ * Fetch the list of commands (slash commands, skills, MCP prompts) from the
+ * running OpenCode server. Returns an empty array if the server is not running.
+ */
+export async function fetchOpenCodeCommands(workingDir: string): Promise<OpenCodeCommandInfo[]> {
+  try {
+    const baseUrl = await ensureOpenCodeServer(workingDir)
+    const res = await fetch(`${baseUrl}/command`, {
+      headers: {
+        ...authHeaders(),
+        'x-opencode-directory': workingDir,
+      },
+      signal: AbortSignal.timeout(15000),
+    })
+    if (!res.ok) return []
+    const data = await res.json() as OpenCodeCommandInfo[]
+    return Array.isArray(data) ? data : []
+  } catch {
+    return []
+  }
+}
+
 /** Stop the shared OpenCode server. */
 export function stopOpenCodeServer(): void {
   if (serverState.process) {
@@ -263,6 +342,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private abortController: AbortController | null = null
   private startupTimer: ReturnType<typeof setTimeout> | null = null
   private permissionMode?: PermissionMode
+  /** OpenCode commands available on the server, keyed by name (for /name routing). */
+  private commands = new Map<string, OpenCodeCommandInfo>()
   private tasks = new Map<string, TaskItem>()
   private turnComplete = false
   private taskSeq = 0
@@ -335,8 +416,30 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     // Create or resume a session — must happen BEFORE SSE subscription
     // so that this.opencodeSessionId is set and the session ID filter
     // guards in handleSSEEvent() are active (prevents cross-session leakage).
+    const permission = permissionRulesetFor(this.permissionMode)
     if (this.opencodeSessionId) {
-      // Resume existing session — just reconnect to SSE
+      // Resume existing session — reconnect to SSE, but push the current
+      // permission ruleset since the mode may have changed since creation
+      // (mode changes restart the process with resume).
+      if (permission) {
+        try {
+          const patchRes = await fetch(`${baseUrl}/session/${this.opencodeSessionId}`, {
+            method: 'PATCH',
+            headers: {
+              ...authHeaders(),
+              'Content-Type': 'application/json',
+              'x-opencode-directory': this.workingDir,
+            },
+            body: JSON.stringify({ permission }),
+            signal: AbortSignal.timeout(10_000),
+          })
+          if (!patchRes.ok) {
+            console.warn(`[opencode] Failed to update session permissions: HTTP ${patchRes.status}`)
+          }
+        } catch (err) {
+          console.warn('[opencode] Failed to update session permissions:', err)
+        }
+      }
     } else {
       const createRes = await fetch(`${baseUrl}/session`, {
         method: 'POST',
@@ -347,6 +450,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         },
         body: JSON.stringify({
           title: `Codekin session ${this.sessionId.slice(0, 8)}`,
+          ...(permission ? { permission } : {}),
         }),
       })
 
@@ -357,6 +461,11 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       const data = await createRes.json() as { id: string }
       this.opencodeSessionId = data.id
     }
+
+    // Load available commands (slash commands / skills / MCP prompts) so
+    // sendMessage can route `/name args` input to the command endpoint.
+    // Non-fatal — command routing simply stays disabled on failure.
+    void this.loadCommands(baseUrl)
 
     // Subscribe to SSE events AFTER opencodeSessionId is set so session
     // filtering is active from the first event received.
@@ -375,6 +484,32 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     if (this.model) {
       const modelName = this.model.includes('/') ? this.model.slice(this.model.indexOf('/') + 1) : this.model
       this.emit('system_init', modelName)
+    }
+
+    // Surface plan mode in the UI — OpenCode plan mode is implemented by
+    // selecting the read-only `plan` agent on every prompt this session.
+    if (this.permissionMode === 'plan') {
+      this.emit('planning_mode', true)
+    }
+  }
+
+  /** Fetch the command list from the server (used for slash-command routing). */
+  private async loadCommands(baseUrl: string): Promise<void> {
+    try {
+      const res = await fetch(`${baseUrl}/command`, {
+        headers: {
+          ...authHeaders(),
+          'x-opencode-directory': this.workingDir,
+        },
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (!res.ok) return
+      const data = await res.json() as OpenCodeCommandInfo[]
+      if (Array.isArray(data)) {
+        this.commands = new Map(data.map(c => [c.name, c]))
+      }
+    } catch (err) {
+      console.warn('[opencode] Failed to load command list:', err)
     }
   }
 
@@ -687,7 +822,15 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
             break
           }
 
-          // step-start / step-finish are agentic iteration boundaries — no mapping needed
+          case 'step-finish': {
+            // Agentic iteration boundary — any buffered text below the echo
+            // threshold belongs to the finished step; flush it now instead of
+            // holding it until turn end.
+            this.flushDeltaBuffer()
+            break
+          }
+
+          // step-start is an agentic iteration boundary — no mapping needed
         }
         break
       }
@@ -1008,6 +1151,37 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       }
     }
     this.lastUserInput = textContent.trim()
+
+    // Route known slash commands (`/name args`) to OpenCode's command
+    // endpoint so its commands/skills/MCP prompts work from Codekin.
+    // Only when there are no attached files — commands take text args.
+    const cmdMatch = !attachMatch ? textContent.trim().match(/^\/([a-zA-Z0-9_:-]+)(?:\s+([\s\S]*))?$/) : null
+    const command = cmdMatch ? this.commands.get(cmdMatch[1]) : undefined
+    if (cmdMatch && command) {
+      const cmdBody: Record<string, unknown> = {
+        command: command.name,
+        ...(cmdMatch[2] ? { arguments: cmdMatch[2] } : {}),
+        ...(this.model ? { model: this.model } : {}),
+        agent: this.permissionMode === 'plan' ? 'plan' : 'build',
+      }
+      void fetch(`${baseUrl}/session/${this.opencodeSessionId}/command`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders(),
+          'Content-Type': 'application/json',
+          'x-opencode-directory': this.workingDir,
+        },
+        body: JSON.stringify(cmdBody),
+      }).then((res) => {
+        if (!res.ok) {
+          this.emit('error', `Failed to run command /${command.name}: HTTP ${res.status}`)
+        }
+      }).catch((err) => {
+        this.emit('error', `Failed to run command /${command.name}: ${err instanceof Error ? err.message : String(err)}`)
+      })
+      return
+    }
+
     if (textContent.trim()) {
       parts.push({ type: 'text', text: textContent })
     }
@@ -1021,6 +1195,12 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       const modelID = this.model.slice(slashIdx + 1)
       body.model = { providerID, modelID }
     }
+    // Select the agent per turn: plan mode uses OpenCode's read-only `plan`
+    // agent (real plan mode); everything else uses the default `build` agent.
+    body.agent = this.permissionMode === 'plan' ? 'plan' : 'build'
+    // Append Codekin environment context to the agent's system prompt
+    // (OpenCode appends `system` — it does not replace the tuned prompt).
+    body.system = OPENCODE_SYSTEM_CONTEXT
     // Use prompt_async for fire-and-forget (events come via SSE)
     void fetch(`${baseUrl}/session/${this.opencodeSessionId}/prompt_async`, {
       method: 'POST',

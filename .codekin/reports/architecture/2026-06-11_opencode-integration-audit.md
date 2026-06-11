@@ -86,6 +86,11 @@ The three reported symptoms map to concrete causes:
 - `src/components/InputBar.tsx`, `src/App.tsx` — provider-conditional UI
 - `~/.config/opencode/opencode.jsonc` — system prompt override (outside repo)
 
+## Decision log
+
+- **2026-06-11 — `@opencode-ai/sdk` adoption (roadmap item 4): deferred.** The hand-rolled HTTP/SSE client has since been hardened (turn watchdog, resync via message history, permission-reply retries) and is covered by unit tests that exercise the exact wire shapes of the installed OpenCode version. The SDK tracks the latest upstream protocol and pulls in its own transport; swapping it in now risks regressing the just-fixed turn-lifecycle behavior for no immediate functional gain. Revisit when upgrading the OpenCode server version, where the SDK's typed protocol would pay for the migration.
+- **2026-06-11 — Roadmap items 1–3, 5, 6 implemented**: prompt-override removal, turn-lifecycle hardening, permission-mode mapping (`permission` ruleset on session create/PATCH), plan mode via the `plan` agent, Codekin context via the additive `system` prompt field, OpenCode commands surfaced in the slash-command autocomplete and routed to `POST /session/:id/command`, permission metadata in approval prompts, step-finish flushing, and provider inference fixes.
+
 ## Upstream references
 
 - OpenCode server/SDK docs: opencode.ai/docs/server, /docs/sdk, /docs/permissions, /docs/agents, /docs/rules

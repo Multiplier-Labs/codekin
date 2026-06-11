@@ -69,8 +69,8 @@ function SendButton({ onClick, disabled, hasContent, size = 16, rounded = 'round
 }
 
 /** Desktop permission mode dropdown with full descriptions. */
-function PermissionModeDropdown({ currentMode, isOpen, menuRef, onToggle, onSelect }: {
-  currentMode: PermissionMode; isOpen: boolean
+function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle, onSelect }: {
+  currentMode: PermissionMode; modes: typeof PERMISSION_MODES; isOpen: boolean
   menuRef: React.RefObject<HTMLDivElement | null>
   onToggle: () => void; onSelect: (mode: PermissionMode) => void
 }) {
@@ -95,7 +95,7 @@ function PermissionModeDropdown({ currentMode, isOpen, menuRef, onToggle, onSele
       </button>
       {isOpen && (
         <div className="absolute bottom-full mb-1 left-0 z-50 min-w-[260px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
-          {PERMISSION_MODES.map(m => {
+          {modes.map(m => {
             const ModeIcon = PERMISSION_MODE_ICONS[m.icon]
             const isActive = m.id === currentMode
             return (
@@ -308,6 +308,8 @@ interface InputBarProps {
   onModelChange?: (model: string) => void
   /** Available models for the current provider. */
   availableModels?: ModelOption[]
+  /** Coding provider of the active session — filters provider-specific permission modes. */
+  sessionProvider?: 'claude' | 'opencode'
   /** Override the default placeholder text in the textarea. */
   placeholder?: string
   /** When true, disables drag-to-resize and uses auto-height instead. */
@@ -330,8 +332,13 @@ interface InputBarProps {
   variant?: InputBarVariant
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, availableModels = [], placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, availableModels = [], sessionProvider, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
   const isOrchestrator = variant === 'orchestrator'
+  // OpenCode has no equivalent of Claude's --dangerously-skip-permissions flag;
+  // bypassPermissions (all-allow ruleset) already covers that use case.
+  const visibleModes = sessionProvider === 'opencode'
+    ? PERMISSION_MODES.filter(m => m.id !== 'dangerouslySkipPermissions')
+    : PERMISSION_MODES
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
@@ -581,6 +588,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               {currentPermissionMode && onPermissionModeChange && (
                 <PermissionModeDropdown
                   currentMode={currentPermissionMode}
+                  modes={visibleModes}
                   isOpen={permMenuOpen}
                   menuRef={permMenuRef}
                   onToggle={() => { closeAllPopups('perm'); setPermMenuOpen(!permMenuOpen) }}
@@ -692,7 +700,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                     {currentPermissionMode && onPermissionModeChange && (
                       <>
                         <div className="px-3 py-1.5 text-[12px] text-neutral-5 uppercase tracking-wider">Permissions</div>
-                        {PERMISSION_MODES.map(m => {
+                        {visibleModes.map(m => {
                           const ModeIcon = PERMISSION_MODE_ICONS[m.icon]
                           const isActive = m.id === currentPermissionMode
                           return (

@@ -33,9 +33,11 @@ interface Props {
 
 export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
   const parsed = parseCron(repo.cronExpression)
-  // Infer provider from model when provider field is missing (legacy configs)
+  // Infer provider from model when provider field is missing (legacy configs).
+  // OpenCode models are "providerID/modelID" (contain a slash); Claude models
+  // never do (full IDs like "claude-sonnet-4-6" or aliases like "opus").
   const inferredProvider: CodingProvider =
-    repo.provider ?? (repo.model && !repo.model.startsWith('claude-') ? 'opencode' : 'claude')
+    repo.provider ?? (repo.model?.includes('/') ? 'opencode' : 'claude')
 
   const [form, setForm] = useState({
     kind: repo.kind ?? 'coverage.daily',

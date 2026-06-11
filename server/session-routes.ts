@@ -22,7 +22,7 @@ import { fetchAnthropicModels } from './anthropic-models.js'
 import { VALID_PROVIDERS, VALID_PERMISSION_MODES } from './types.js'
 import type { CodingProvider } from './coding-process.js'
 import type { PermissionMode } from './types.js'
-import { fetchOpenCodeModels } from './opencode-process.js'
+import { fetchOpenCodeModels, fetchOpenCodeCommands } from './opencode-process.js'
 
 // ---------------------------------------------------------------------------
 // Request body interfaces for route handlers
@@ -173,6 +173,28 @@ export function createSessionRouter(
 
     const result = await fetchOpenCodeModels(resolvedDir)
     res.json(result)
+  })
+
+  router.get('/api/opencode/commands', async (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const rawDir = (req.query.workingDir as string) || osHomedir()
+
+    // Bounds-check: workingDir must be under home or REPOS_ROOT (same as /api/opencode/models)
+    const home = osHomedir()
+    const allowedRoots = [home, REPOS_ROOT]
+    let resolvedDir: string
+    try {
+      resolvedDir = fsRealpathSync(pathResolve(rawDir))
+    } catch {
+      return res.status(400).json({ error: 'workingDir could not be resolved (path does not exist or is inaccessible)' })
+    }
+    if (!allowedRoots.some(root => resolvedDir === root || resolvedDir.startsWith(root + '/'))) {
+      return res.status(403).json({ error: 'workingDir is outside allowed directories' })
+    }
+
+    const commands = await fetchOpenCodeCommands(resolvedDir)
+    res.json({ commands })
   })
 
   router.post('/api/sessions/create', (req: Request<Record<string, string>, unknown, CreateSessionBody>, res) => {

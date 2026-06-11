@@ -27,8 +27,9 @@ import { useSendMessage } from './hooks/useSendMessage'
 import { useErrorNotification } from './hooks/useErrorNotification'
 import { useGlobalKeyBindings } from './hooks/useGlobalKeyBindings'
 import { useOpenCodeModelSync } from './hooks/useOpenCodeModelSync'
+import { useOpenCodeCommands } from './hooks/useOpenCodeCommands'
 import { useProviderValidation } from './hooks/useProviderValidation'
-import { buildSlashCommandList } from './lib/slashCommands'
+import { buildSlashCommandList, buildOpenCodeSlashCommandList } from './lib/slashCommands'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { getQueueMessages, getAgentName } from './lib/ccApi'
 import { Settings } from './components/Settings'
@@ -267,6 +268,18 @@ export default function App() {
 
   // Unified slash command list for autocomplete (skills + bundled + built-in)
   const allCommands = useMemo(() => buildSlashCommandList(allSkills), [allSkills])
+
+  // OpenCode sessions get the server's own commands instead of Claude skills
+  const openCodeCommands = useOpenCodeCommands({
+    token: settings.token,
+    activeSessionProvider,
+    activeOpenCodeWd,
+    openCodeDisabled,
+  })
+  const sessionCommands = useMemo(
+    () => activeSessionProvider === 'opencode' ? buildOpenCodeSlashCommandList(openCodeCommands) : allCommands,
+    [activeSessionProvider, openCodeCommands, allCommands],
+  )
 
   // Wrap setModel to also persist OpenCode model selection to localStorage
   const handleModelChange = useCallback((model: string) => {
@@ -646,7 +659,7 @@ export default function App() {
             onAddFiles={addFiles}
             onRemoveFile={removeFile}
             skillGroups={skillGroups}
-            slashCommands={allCommands}
+            slashCommands={sessionCommands}
             sessionInputs={sessionInputs}
             onSessionInputChange={handleSessionInputChange}
             currentModel={currentModel}
@@ -683,12 +696,13 @@ export default function App() {
             onAddFiles={addFiles}
             onRemoveFile={removeFile}
             skillGroups={skillGroups}
-            slashCommands={allCommands}
+            slashCommands={sessionCommands}
             sessionInputs={sessionInputs}
             onSessionInputChange={handleSessionInputChange}
             currentModel={currentModel}
             onModelChange={handleModelChange}
             availableModels={availableModels}
+            sessionProvider={activeSessionProvider}
             hasUserMessages={messages.some(m => m.type === 'user')}
             useWorktree={useWorktree}
             onWorktreeChange={setUseWorktree}

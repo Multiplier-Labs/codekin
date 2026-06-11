@@ -674,8 +674,24 @@ export class PromptRouter {
         const filePath = String(toolInput.file_path || '')
         return `Allow Read? \`${filePath}\``
       }
-      default:
-        return `Allow ${toolName}?`
+      // OpenCode permission types — toolInput carries {permission, ...metadata, patterns}
+      case 'external_directory': {
+        const target = String(toolInput.filepath || toolInput.parentDir || '')
+        const patterns = Array.isArray(toolInput.patterns) && toolInput.patterns.length
+          ? ` (${(toolInput.patterns as unknown[]).map(String).join(', ')})`
+          : ''
+        return target
+          ? `Allow access outside the project directory? \`${target}\`${patterns}`
+          : `Allow access outside the project directory?${patterns}`
+      }
+      case 'doom_loop':
+        return 'The agent appears to be repeating itself (possible loop). Allow it to continue?'
+      default: {
+        const patterns = Array.isArray(toolInput.patterns) && toolInput.patterns.length
+          ? ` \`${(toolInput.patterns as unknown[]).map(String).join(', ')}\``
+          : ''
+        return `Allow ${toolName}?${patterns}`
+      }
     }
   }
 }

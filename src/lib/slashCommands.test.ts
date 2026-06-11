@@ -4,6 +4,7 @@ import {
   BUNDLED_SKILLS,
   resolveBuiltinAlias,
   buildSlashCommandList,
+  buildOpenCodeSlashCommandList,
 } from './slashCommands'
 import type { Skill } from '../types'
 
@@ -134,5 +135,56 @@ describe('buildSlashCommandList', () => {
 
     expect(deployEntries).toHaveLength(1)
     expect(deployEntries[0].name).toBe('Deploy A')
+  })
+})
+
+describe('buildOpenCodeSlashCommandList', () => {
+  it('returns only built-ins when no opencode commands provided', () => {
+    const result = buildOpenCodeSlashCommandList([])
+    expect(result).toHaveLength(BUILTIN_COMMANDS.length)
+    expect(result.every((c) => c.category === 'builtin')).toBe(true)
+  })
+
+  it('maps opencode commands with the opencode category', () => {
+    const result = buildOpenCodeSlashCommandList([
+      { name: 'review', description: 'Review code', source: 'command' },
+    ])
+    const entry = result.find((c) => c.command === '/review')
+    expect(entry).toBeDefined()
+    expect(entry!.category).toBe('opencode')
+    expect(entry!.description).toBe('Review code')
+  })
+
+  it('derives a description from the source when missing', () => {
+    const result = buildOpenCodeSlashCommandList([
+      { name: 'myskill', source: 'skill' },
+      { name: 'myprompt', source: 'mcp' },
+      { name: 'mycmd' },
+    ])
+    expect(result.find((c) => c.command === '/myskill')!.description).toBe('OpenCode skill')
+    expect(result.find((c) => c.command === '/myprompt')!.description).toBe('MCP prompt')
+    expect(result.find((c) => c.command === '/mycmd')!.description).toBe('OpenCode command')
+  })
+
+  it('opencode commands take priority over built-ins with the same name', () => {
+    const result = buildOpenCodeSlashCommandList([{ name: 'help', description: 'OpenCode help' }])
+    const helpEntries = result.filter((c) => c.command === '/help')
+    expect(helpEntries).toHaveLength(1)
+    expect(helpEntries[0].category).toBe('opencode')
+  })
+
+  it('deduplicates opencode commands with the same name', () => {
+    const result = buildOpenCodeSlashCommandList([
+      { name: 'review', description: 'First' },
+      { name: 'review', description: 'Second' },
+    ])
+    const entries = result.filter((c) => c.command === '/review')
+    expect(entries).toHaveLength(1)
+    expect(entries[0].description).toBe('First')
+  })
+
+  it('does not include Claude bundled skills', () => {
+    const result = buildOpenCodeSlashCommandList([])
+    expect(result.find((c) => c.command === '/commit')).toBeUndefined()
   })
 })
