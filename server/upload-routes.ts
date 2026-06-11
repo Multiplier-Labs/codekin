@@ -14,6 +14,7 @@ import { fileTypeFromFile } from 'file-type'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { homedir } from 'os'
+import { parse as parseYaml } from 'yaml'
 import { SCREENSHOTS_DIR, REPOS_ROOT, GH_ORGS } from './config.js'
 
 const execFileAsync = promisify(execFile)
@@ -30,33 +31,36 @@ type ExtractFn = (req: Request) => string | undefined
 
 interface FrontmatterMeta { name: string; description: string }
 
-function parseMdWithFrontmatter(content: string): FrontmatterMeta & { body: string } {
-  const lines = content.split('\n')
+export function parseMdWithFrontmatter(content: string): FrontmatterMeta & { body: string } {
+  // Frontmatter must open on the first line; otherwise the whole file is body.
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/)
+  if (!match) {
+    return { name: '', description: '', body: content.trim() }
+  }
+  const [, rawFrontmatter, rawBody] = match
   const meta: FrontmatterMeta = { name: '', description: '' }
-  let inFrontmatter = false
-  let bodyStart = 0
 
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim() === '---') {
-      if (inFrontmatter) {
-        bodyStart = i + 1
-        break
-      }
-      inFrontmatter = true
-      continue
+  try {
+    const parsed: unknown = parseYaml(rawFrontmatter)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const obj = parsed as Record<string, unknown>
+      if (obj.name != null) meta.name = String(obj.name).trim()
+      if (obj.description != null) meta.description = String(obj.description).trim()
     }
-    if (inFrontmatter) {
-      const match = lines[i].match(/^(\w+):\s*(.+)/)
-      if (match) {
-        const [, key, value] = match
-        if (key === 'name') meta.name = value.trim()
-        if (key === 'description') meta.description = value.trim()
+  } catch (err) {
+    // Malformed YAML — fall back to simple key:value line parsing so a single
+    // bad line doesn't blank out the whole skill's metadata.
+    console.warn(`[skills] Malformed YAML frontmatter, falling back to line parsing: ${err instanceof Error ? err.message : err}`)
+    for (const line of rawFrontmatter.split('\n')) {
+      const kv = line.match(/^(\w+):\s*(.+)/)
+      if (kv) {
+        if (kv[1] === 'name') meta.name = kv[2].trim()
+        if (kv[1] === 'description') meta.description = kv[2].trim()
       }
     }
   }
 
-  const body = lines.slice(bodyStart).join('\n').trim()
-  return { ...meta, body }
+  return { ...meta, body: rawBody.trim() }
 }
 
 function scanSkills(skillsDir: string) {

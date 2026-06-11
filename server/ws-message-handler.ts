@@ -121,6 +121,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           outputBuffer: session.outputHistory.slice(-500),
           model: session.model,
           permissionMode: session.permissionMode,
+          planState: session.planManager.state,
         })
       } else {
         send({ type: 'error', message: 'Session not found' })

@@ -103,6 +103,12 @@ interface Props {
   onToggleClaude: () => void
   /** Toggle OpenCode connection on/off. */
   onToggleOpenCode: () => void
+  /** Codex connection state: true=connected, false=disconnected, null=unknown. */
+  codexConnected: boolean | null
+  /** Whether Codex connection is disabled by the user. */
+  codexDisabled: boolean
+  /** Toggle Codex connection on/off. */
+  onToggleCodex: () => void
   /** Current route view ('chat' | 'workflows'). */
   view: string
   /** Agent display name for the orchestrator button. */
@@ -166,6 +172,9 @@ export function LeftSidebar({
   openCodeDisabled,
   onToggleClaude,
   onToggleOpenCode,
+  codexConnected,
+  codexDisabled,
+  onToggleCodex,
   view,
   archiveRefreshKey,
   onSelectSession,
@@ -308,6 +317,9 @@ export function LeftSidebar({
                 openCodeConnected={openCodeConnected}
                 openCodeDisabled={openCodeDisabled}
                 onToggleOpenCode={onToggleOpenCode}
+                codexConnected={codexConnected}
+                codexDisabled={codexDisabled}
+                onToggleCodex={onToggleCodex}
                 onClose={() => setConnPopupOpen(false)}
               />
             )}
@@ -495,6 +507,9 @@ export function LeftSidebar({
                 openCodeConnected={openCodeConnected}
                 openCodeDisabled={openCodeDisabled}
                 onToggleOpenCode={onToggleOpenCode}
+                codexConnected={codexConnected}
+                codexDisabled={codexDisabled}
+                onToggleCodex={onToggleCodex}
                 onClose={() => setConnPopupOpen(false)}
               />
             )}

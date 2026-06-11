@@ -26,7 +26,10 @@ vi.mock('child_process', async (importOriginal) => {
   }
 })
 
-import { OpenCodeProcess, stopOpenCodeServer, permissionRulesetFor, OPENCODE_SYSTEM_CONTEXT } from './opencode-process.js'
+import { OpenCodeProcess, stopOpenCodeServer, permissionRulesetFor, OPENCODE_SYSTEM_CONTEXT, isVersionOlder, MIN_TESTED_OPENCODE_VERSION } from './opencode-process.js'
+import { writeFileSync, mkdtempSync, rmSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { OPENCODE_CAPABILITIES } from './coding-process.js'
 
 describe('OpenCodeProcess', () => {
@@ -1355,6 +1358,264 @@ describe('OpenCodeProcess', () => {
       })
 
       expect(resultHandler).not.toHaveBeenCalled()
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Resume hydration (missed history tail)
+  // ---------------------------------------------------------------------------
+
+  describe('resume hydration', () => {
+    const makeResumed = (recentOutputText: string) => {
+      const proc = new OpenCodeProcess('/tmp/test-repo', {
+        sessionId: 'resume-session',
+        opencodeSessionId: 'oc-session-1',
+        recentOutputText,
+      })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(proc as any).alive = true
+      return proc
+    }
+
+    const historyResponse = (entries: unknown[]) => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => entries })
+    }
+
+    it('re-emits a completed assistant message lost while detached', async () => {
+      const proc = makeResumed('Earlier output that was shown.')
+      const textHandler = vi.fn()
+      proc.on('text', textHandler)
+
+      historyResponse([
+        { info: { role: 'user', time: { created: 1 } } },
+        {
+          info: { role: 'assistant', time: { created: 2, completed: 3 } },
+          parts: [{ type: 'text', text: 'Answer generated during the crash' }],
+        },
+      ])
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (proc as any).hydrateMissedTail('http://localhost:1234')
+
+      expect(textHandler).toHaveBeenCalledWith('Answer generated during the crash')
+      proc.stop()
+    })
+
+    it('does not re-emit text that was already displayed', async () => {
+      const proc = makeResumed('intro... The final answer is 42. ...outro')
+      const textHandler = vi.fn()
+      proc.on('text', textHandler)
+
+      historyResponse([
+        {
+          info: { role: 'assistant', time: { completed: 3 } },
+          parts: [{ type: 'text', text: 'The final answer is 42.' }],
+        },
+      ])
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (proc as any).hydrateMissedTail('http://localhost:1234')
+
+      expect(textHandler).not.toHaveBeenCalled()
+      proc.stop()
+    })
+
+    it('does not hydrate when the last entry is a user message', async () => {
+      const proc = makeResumed('')
+      const textHandler = vi.fn()
+      proc.on('text', textHandler)
+
+      historyResponse([
+        {
+          info: { role: 'assistant', time: { completed: 2 } },
+          parts: [{ type: 'text', text: 'Old answer' }],
+        },
+        { info: { role: 'user', time: { created: 3 } } },
+      ])
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (proc as any).hydrateMissedTail('http://localhost:1234')
+
+      expect(textHandler).not.toHaveBeenCalled()
+      proc.stop()
+    })
+
+    it('does not hydrate an incomplete (in-flight) assistant message', async () => {
+      const proc = makeResumed('')
+      const textHandler = vi.fn()
+      proc.on('text', textHandler)
+
+      historyResponse([
+        {
+          info: { role: 'assistant', time: { created: 2 } },
+          parts: [{ type: 'text', text: 'Still streaming...' }],
+        },
+      ])
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (proc as any).hydrateMissedTail('http://localhost:1234')
+
+      expect(textHandler).not.toHaveBeenCalled()
+      proc.stop()
+    })
+
+    it('survives a failed history fetch', async () => {
+      const proc = makeResumed('')
+      const textHandler = vi.fn()
+      proc.on('text', textHandler)
+      mockFetch.mockRejectedValueOnce(new Error('connection refused'))
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await expect((proc as any).hydrateMissedTail('http://localhost:1234')).resolves.toBeUndefined()
+      expect(textHandler).not.toHaveBeenCalled()
+      proc.stop()
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Mid-turn message queueing
+  // ---------------------------------------------------------------------------
+
+  describe('mid-turn message queueing', () => {
+    const connect = (proc: OpenCodeProcess) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(proc as any).alive = true
+      setSessionId(proc, 'oc-session-1')
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    }
+
+    const promptCalls = () =>
+      mockFetch.mock.calls.filter(([url]) => typeof url === 'string' && url.includes('/prompt_async'))
+
+    it('queues a message sent while a turn is in flight', () => {
+      connect(ocp)
+      ocp.sendMessage('first')
+      ocp.sendMessage('second')
+
+      expect(promptCalls()).toHaveLength(1)
+      const body = JSON.parse((promptCalls()[0][1] as { body: string }).body) as { parts: Array<{ text: string }> }
+      expect(body.parts[0].text).toBe('first')
+    })
+
+    it('sends the queued message when the turn completes', async () => {
+      connect(ocp)
+      ocp.sendMessage('first')
+      ocp.sendMessage('second')
+
+      callHandleSSE(ocp, {
+        type: 'session.idle',
+        properties: { sessionID: 'oc-session-1' },
+      })
+      // Queued send is deferred via setImmediate
+      await new Promise((r) => setImmediate(r))
+
+      expect(promptCalls()).toHaveLength(2)
+      const body = JSON.parse((promptCalls()[1][1] as { body: string }).body) as { parts: Array<{ text: string }> }
+      expect(body.parts[0].text).toBe('second')
+    })
+
+    it('preserves queue order across multiple turns', async () => {
+      connect(ocp)
+      ocp.sendMessage('first')
+      ocp.sendMessage('second')
+      ocp.sendMessage('third')
+
+      callHandleSSE(ocp, { type: 'session.idle', properties: { sessionID: 'oc-session-1' } })
+      await new Promise((r) => setImmediate(r))
+      callHandleSSE(ocp, { type: 'session.idle', properties: { sessionID: 'oc-session-1' } })
+      await new Promise((r) => setImmediate(r))
+
+      const texts = promptCalls().map(([, init]) =>
+        (JSON.parse((init as { body: string }).body) as { parts: Array<{ text: string }> }).parts[0].text)
+      expect(texts).toEqual(['first', 'second', 'third'])
+    })
+
+    it('drops queued messages on stop', async () => {
+      connect(ocp)
+      ocp.sendMessage('first')
+      ocp.sendMessage('second')
+
+      ocp.stop()
+      await new Promise((r) => setImmediate(r))
+
+      expect(promptCalls()).toHaveLength(1)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Version comparison
+  // ---------------------------------------------------------------------------
+
+  describe('isVersionOlder', () => {
+    it('compares major/minor/patch numerically', () => {
+      expect(isVersionOlder('1.14.9', '1.15.0')).toBe(true)
+      expect(isVersionOlder('1.15.0', '1.15.0')).toBe(false)
+      expect(isVersionOlder('1.16.0', '1.15.0')).toBe(false)
+      expect(isVersionOlder('0.9.9', '1.0.0')).toBe(true)
+      expect(isVersionOlder('1.15', '1.15.0')).toBe(false)
+      expect(isVersionOlder('2.0.0', MIN_TESTED_OPENCODE_VERSION)).toBe(false)
+    })
+
+    it('treats unparseable versions as not older', () => {
+      expect(isVersionOlder('dev', '1.15.0')).toBe(false)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Attachments
+  // ---------------------------------------------------------------------------
+
+  describe('attachments', () => {
+    let dir: string
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), 'codekin-attach-'))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).alive = true
+      setSessionId(ocp, 'oc-session-1')
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    })
+
+    afterEach(() => {
+      rmSync(dir, { recursive: true, force: true })
+    })
+
+    const sentParts = () => {
+      const [, init] = mockFetch.mock.calls[mockFetch.mock.calls.length - 1] as [string, { body: string }]
+      return (JSON.parse(init.body) as { parts: Array<Record<string, unknown>> }).parts
+    }
+
+    it('sends PDFs as data-URL file parts', () => {
+      const pdfPath = join(dir, 'doc.pdf')
+      writeFileSync(pdfPath, Buffer.from('%PDF-1.4 fake'))
+
+      ocp.sendMessage(`[Attached files: ${pdfPath}]\nsummarize this`)
+
+      const filePart = sentParts().find((p) => p.type === 'file')
+      expect(filePart).toBeDefined()
+      expect(filePart!.mime).toBe('application/pdf')
+      expect(String(filePart!.url)).toMatch(/^data:application\/pdf;base64,/)
+    })
+
+    it('inlines unknown text-like files (no extension allowlist)', () => {
+      const tsPath = join(dir, 'snippet.tsx')
+      writeFileSync(tsPath, 'export const x = 1\n')
+
+      ocp.sendMessage(`[Attached files: ${tsPath}]\nreview`)
+
+      const textParts = sentParts().filter((p) => p.type === 'text')
+      expect(textParts.some((p) => String(p.text).includes('--- snippet.tsx ---') && String(p.text).includes('export const x = 1'))).toBe(true)
+    })
+
+    it('skips binary files with a visible note', () => {
+      const binPath = join(dir, 'blob.bin')
+      writeFileSync(binPath, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x00, 0x01, 0x02]))
+
+      ocp.sendMessage(`[Attached files: ${binPath}]\nwhat is this`)
+
+      const parts = sentParts()
+      expect(parts.some((p) => p.type === 'file')).toBe(false)
+      expect(parts.some((p) => p.type === 'text' && String(p.text).includes('unsupported binary format'))).toBe(true)
     })
   })
 })

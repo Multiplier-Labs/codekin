@@ -203,6 +203,9 @@ async function startOpenCodeServer(workingDir: string): Promise<void> {
       if (res.ok) {
         serverState.ready = true
         console.log(`[opencode-server] Ready on port ${serverState.port}`)
+        // One-shot version check — warns when the server is older than the
+        // version this integration was built against. Non-fatal.
+        void checkServerVersion(baseUrl)
         return
       }
     } catch {
@@ -216,6 +219,49 @@ async function startOpenCodeServer(workingDir: string): Promise<void> {
     serverState.process = null
   }
   throw new Error(`OpenCode server failed to start within ${maxAttempts}s`)
+}
+
+/** Minimum OpenCode version this integration is tested against. */
+export const MIN_TESTED_OPENCODE_VERSION = '1.15.0'
+
+/** Returns true when version `a` is older than version `b` (semver-ish numeric compare). */
+export function isVersionOlder(a: string, b: string): boolean {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0
+    const y = pb[i] ?? 0
+    if (Number.isNaN(x) || Number.isNaN(y)) return false
+    if (x !== y) return x < y
+  }
+  return false
+}
+
+/**
+ * Query the server's version (GET /global/health) and warn when it's older
+ * than the version this integration was built against. Older servers may
+ * lack endpoints we rely on (summarize, abort, permission replies).
+ */
+async function checkServerVersion(baseUrl: string): Promise<void> {
+  try {
+    const res = await fetch(`${baseUrl}/global/health`, {
+      headers: authHeaders(),
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) return
+    const data = await res.json() as { version?: string }
+    if (typeof data.version !== 'string') return
+    if (isVersionOlder(data.version, MIN_TESTED_OPENCODE_VERSION)) {
+      console.warn(
+        `[opencode-server] Server version ${data.version} is older than the tested version ${MIN_TESTED_OPENCODE_VERSION} — ` +
+        'some features (compact, abort, native permissions) may not work. Consider upgrading OpenCode.'
+      )
+    } else {
+      console.log(`[opencode-server] Version ${data.version}`)
+    }
+  } catch {
+    // Older servers may not expose /global/health — nothing to report.
+  }
 }
 
 /** Build auth headers for OpenCode API calls. */
@@ -319,6 +365,12 @@ export interface OpenCodeProcessOptions {
   extraEnv?: Record<string, string>
   /** Permission mode — mapped to OpenCode's permission config. */
   permissionMode?: PermissionMode
+  /**
+   * Recent assistant output already shown to the user (concatenated text from
+   * the session's output history). Used on resume to avoid re-emitting an
+   * assistant message that was already displayed when hydrating missed history.
+   */
+  recentOutputText?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -354,6 +406,10 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private usageByMessage = new Map<string, { input: number; output: number; cost: number }>()
   /** Last emitted usage totals, serialized — suppresses duplicate usage events. */
   private lastEmittedUsage = ''
+  /** Messages received while a turn was in flight — sent when the turn completes. */
+  private pendingMessages: string[] = []
+  /** Recent already-displayed assistant text (from output history) for resume hydration dedup. */
+  private recentOutputText = ''
   private taskSeq = 0
   /**
    * Watchdog that detects turns stalled by a missed completion event.
@@ -395,6 +451,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     this.opencodeSessionId = opts?.opencodeSessionId || null
     this.model = opts?.model
     this.permissionMode = opts?.permissionMode
+    this.recentOutputText = opts?.recentOutputText ?? ''
   }
 
   /** Connect to the OpenCode server, create a session, and subscribe to SSE events. */
@@ -448,6 +505,9 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
           console.warn('[opencode] Failed to update session permissions:', err)
         }
       }
+      // Hydrate any assistant response that completed while we were detached
+      // (backend crash/restart mid-turn) — non-fatal on failure.
+      void this.hydrateMissedTail(baseUrl)
     } else {
       const createRes = await fetch(`${baseUrl}/session`, {
         method: 'POST',
@@ -522,16 +582,50 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   }
 
   /** Subscribe to the OpenCode SSE event stream and map events to CodingProcess events. */
-  private subscribeToEvents(baseUrl: string): void {
+  private subscribeToEvents(initialBaseUrl: string): void {
     this.abortController = new AbortController()
     let reconnectDelay = 1000
     const MAX_RECONNECT_DELAY = 30_000
     const MAX_RECONNECT_ATTEMPTS = 20
 
     let reconnectAttempts = 0
+    let firstConnect = true
 
-    const connectSSE = () => {
+    /** Count a failed attempt and schedule a retry. Returns false when retries are exhausted. */
+    const scheduleReconnect = (reason: string): boolean => {
+      reconnectAttempts++
+      if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+        this.emit('error', `SSE reconnect failed after ${MAX_RECONNECT_ATTEMPTS} attempts (${reason})`)
+        this.stop()
+        return false
+      }
+      console.warn(`[opencode-sse] ${reason}, reconnecting in ${reconnectDelay / 1000}s (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`)
+      setTimeout(() => { void connectSSE() }, reconnectDelay)
+      reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY)
+      return true
+    }
+
+    const connectSSE = async () => {
       if (!this.alive) return
+
+      // Re-resolve the base URL on every attempt: if the shared OpenCode
+      // server died, it respawns on a NEW random port — reconnecting to the
+      // old URL would never succeed. ensureOpenCodeServer respawns the server
+      // if needed and returns the current URL. The first connect reuses the
+      // URL from initialize() to avoid a redundant health check.
+      let baseUrl = initialBaseUrl
+      if (!firstConnect) {
+        try {
+          baseUrl = await ensureOpenCodeServer(this.workingDir)
+        } catch (err) {
+          if (this.alive) {
+            scheduleReconnect(`Server unavailable (${err instanceof Error ? err.message : String(err)})`)
+          }
+          return
+        }
+        if (!this.alive) return
+      }
+      firstConnect = false
 
       void fetch(`${baseUrl}/event`, {
         headers: {
@@ -543,15 +637,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       }).then(async (res) => {
         if (!res.ok || !res.body) {
           if (this.alive) {
-            reconnectAttempts++
-            if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
-              this.emit('error', `SSE reconnect failed after ${MAX_RECONNECT_ATTEMPTS} attempts (last status: ${res.status})`)
-              this.stop()
-              return
-            }
-            console.warn(`[opencode-sse] Non-2xx ${res.status}, reconnecting in ${reconnectDelay / 1000}s (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`)
-            setTimeout(connectSSE, reconnectDelay)
-            reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY)
+            scheduleReconnect(`Non-2xx ${res.status}`)
           }
           return
         }
@@ -596,33 +682,17 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
 
         // Clean EOF — reconnect if still alive (server restart, proxy timeout, etc.)
         if (this.alive) {
-          reconnectAttempts++
-          if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
-            this.emit('error', `SSE reconnect failed after ${MAX_RECONNECT_ATTEMPTS} attempts`)
-            this.stop()
-            return
-          }
-          console.warn(`[opencode-sse] Stream closed cleanly, reconnecting in ${reconnectDelay / 1000}s (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`)
-          setTimeout(connectSSE, reconnectDelay)
-          reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY)
+          scheduleReconnect('Stream closed cleanly')
         }
-      }).catch((err) => {
+      }).catch((err: unknown) => {
         if (err instanceof Error && err.name === 'AbortError') return
         if (this.alive) {
-          reconnectAttempts++
-          if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
-            this.emit('error', `SSE reconnect failed after ${MAX_RECONNECT_ATTEMPTS} attempts`)
-            this.stop()
-            return
-          }
-          console.warn(`[opencode-sse] Connection lost, reconnecting in ${reconnectDelay / 1000}s (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`, err)
-          setTimeout(connectSSE, reconnectDelay)
-          reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY)
+          scheduleReconnect(`Connection lost (${err instanceof Error ? err.message : String(err)})`)
         }
       })
     }
 
-    connectSSE()
+    void connectSSE()
   }
 
   /**
@@ -666,6 +736,11 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     this.clearTurnWatchdog()
     this.flushDeltaBuffer()
     this.emit('result', '', false)
+    // Send the next queued message (received mid-turn) after result handlers run.
+    const next = this.pendingMessages.shift()
+    if (next !== undefined && this.alive) {
+      setImmediate(() => { this.sendMessage(next) })
+    }
   }
 
   /** Map an OpenCode SSE event to CodingProcess events. */
@@ -1106,6 +1181,48 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   }
 
   /**
+   * On resume, recover the tail of the conversation that may have been lost
+   * while Codekin was detached (backend crash/restart mid-turn). Fetches the
+   * session's message history from OpenCode and re-emits the last assistant
+   * message's text — unless it was already displayed (present in the
+   * persisted output history passed via recentOutputText).
+   */
+  private async hydrateMissedTail(baseUrl: string): Promise<void> {
+    if (!this.opencodeSessionId) return
+    try {
+      const res = await fetch(`${baseUrl}/session/${this.opencodeSessionId}/message`, {
+        headers: {
+          ...authHeaders(),
+          'x-opencode-directory': this.workingDir,
+        },
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (!res.ok) return
+      const messages = await res.json() as Array<Record<string, unknown>>
+      if (!Array.isArray(messages) || messages.length === 0) return
+      const last = messages[messages.length - 1]
+      const info = (last.info ?? last) as { role?: string; time?: { completed?: number }; parts?: OpenCodeMessagePart[] }
+      // Only hydrate a *completed* assistant message that is the latest entry —
+      // an in-flight turn is handled by the watchdog, and a trailing user
+      // message means there's nothing of ours to recover.
+      if (info.role !== 'assistant' || !info.time?.completed) return
+      const parts = (last.parts ?? info.parts) as OpenCodeMessagePart[] | undefined
+      if (!Array.isArray(parts)) return
+      const text = parts
+        .filter((p) => p.type === 'text' && p.text)
+        .map((p) => p.text)
+        .join('\n')
+      if (!text) return
+      // Already shown before the restart — nothing was lost.
+      if (this.recentOutputText.includes(text)) return
+      console.warn(`[opencode] Hydrating ${text.length} chars of missed assistant text on resume for ${this.opencodeSessionId}`)
+      this.emit('text', text)
+    } catch (err) {
+      console.warn(`[opencode] Resume hydration failed for ${this.opencodeSessionId}:`, err)
+    }
+  }
+
+  /**
    * Reply to an OpenCode permission request via HTTP, with retries.
    * A dropped reply leaves OpenCode blocked on the permission forever, so
    * failures are retried and ultimately surfaced as a session error instead
@@ -1202,6 +1319,15 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       return
     }
 
+    // A turn is already running server-side — queue locally and send when it
+    // completes. Sending prompt_async mid-turn would reset our turn latches,
+    // letting the FIRST turn's idle event instantly "complete" the second
+    // turn and confuse the watchdog. (Claude's CLI queues stdin natively.)
+    if (this.turnInFlight && !this.turnComplete) {
+      this.pendingMessages.push(content)
+      return
+    }
+
     this.turnComplete = false // reset completion latch for new turn
     this.turnInFlight = true
     this.receivedDeltas = false
@@ -1223,11 +1349,12 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     if (attachMatch) {
       textContent = content.slice(attachMatch[0].length)
       const filePaths = attachMatch[1].split(',').map(p => p.trim())
-      const imageMimeMap: Record<string, string> = {
+      // Binary formats sent as data-URL file parts (provider handles decoding).
+      const fileMimeMap: Record<string, string> = {
         '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
         '.gif': 'image/gif', '.webp': 'image/webp',
+        '.pdf': 'application/pdf',
       }
-      const textExtensions = new Set(['.md', '.txt', '.csv', '.json', '.xml', '.yaml', '.yml', '.log'])
       for (const filePath of filePaths) {
         if (!existsSync(filePath)) {
           console.warn(`[opencode] Attached file not found: ${filePath}`)
@@ -1241,17 +1368,23 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
           continue
         }
         const ext = extname(filePath).toLowerCase()
-        const imageMime = imageMimeMap[ext]
-        if (imageMime) {
+        const fileMime = fileMimeMap[ext]
+        const fileName = filePath.split('/').pop() || filePath
+        if (fileMime) {
           const base64 = readFileSync(filePath).toString('base64')
-          parts.push({ type: 'file', mime: imageMime, filename: filePath.split('/').pop(), url: `data:${imageMime};base64,${base64}` })
-        } else if (textExtensions.has(ext)) {
-          // Send text-based files as inline text content
-          const fileContent = readFileSync(filePath, 'utf-8')
-          const fileName = filePath.split('/').pop() || filePath
-          parts.push({ type: 'text', text: `--- ${fileName} ---\n${fileContent}` })
+          parts.push({ type: 'file', mime: fileMime, filename: fileName, url: `data:${fileMime};base64,${base64}` })
         } else {
-          console.warn(`[opencode] Unsupported file type for attachment: ${ext} (${filePath})`)
+          // Everything else: inline as text when the content looks like text
+          // (no NUL byte in the first 8 KB) — covers source code, configs,
+          // logs, etc. without maintaining an extension allowlist.
+          const buf = readFileSync(filePath)
+          const probe = buf.subarray(0, 8192)
+          if (probe.includes(0)) {
+            console.warn(`[opencode] Unsupported binary attachment: ${ext || '(no extension)'} (${filePath})`)
+            parts.push({ type: 'text', text: `[Attachment skipped: ${fileName} is an unsupported binary format]` })
+          } else {
+            parts.push({ type: 'text', text: `--- ${fileName} ---\n${buf.toString('utf-8')}` })
+          }
         }
       }
     }
@@ -1378,6 +1511,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   stop(): void {
     if (!this.alive) return
     this.alive = false
+    this.pendingMessages = []
     if (this.turnInFlight && this.opencodeSessionId) {
       this.turnInFlight = false
       void fetch(`http://localhost:${serverState.port}/session/${this.opencodeSessionId}/abort`, {
