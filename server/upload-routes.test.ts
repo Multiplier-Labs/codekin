@@ -40,6 +40,23 @@ vi.mock('fs', async (importOriginal) => {
   }
 })
 
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>()
+  return {
+    ...actual,
+    execFile: ((...args: unknown[]) => {
+      // Immediately fail gh clone commands so tests don't depend on real gh credentials.
+      const cb = args[args.length - 1]
+      if (typeof cb === 'function') {
+        (cb as (err: Error) => void)(new Error('gh mock: no credentials'))
+        return
+      }
+      // Fallback for non-callback usage (shouldn't happen with promisify)
+      return actual.execFile(...(args as Parameters<typeof actual.execFile>))
+    }) as typeof actual.execFile,
+  }
+})
+
 // Imported after vi.mock so the router picks up the mocked fs.
 import { localRepoPath, createUploadRouter } from './upload-routes.js'
 
