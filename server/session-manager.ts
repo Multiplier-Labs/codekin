@@ -741,8 +741,12 @@ export class SessionManager {
   }
 
   /** Register a listener called when any session emits a prompt (permission request or question). */
-  onSessionPrompt(listener: (sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void): void {
+  onSessionPrompt(listener: (sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void): () => void {
     this._promptListeners.push(listener)
+    return () => {
+      const idx = this._promptListeners.indexOf(listener)
+      if (idx >= 0) this._promptListeners.splice(idx, 1)
+    }
   }
 
   /** Register a listener called when any session completes a turn (result event). */
@@ -869,6 +873,18 @@ export class SessionManager {
           session._leaveGraceTimer = null
           // Re-check: if still no clients after grace period, auto-deny
           if (session.clients.size === 0) {
+            // Orchestrator-managed child sessions are NOT auto-denied: the
+            // orchestrator is notified of pending prompts (onSessionPrompt)
+            // and can respond via the API. A user briefly opening and closing
+            // the child's tab must not kill its pending approvals. The 5-min
+            // approval timeout in PromptRouter remains the backstop.
+            if (session.source === 'agent') {
+              const pending = session.pendingControlRequests.size + session.pendingToolApprovals.size
+              if (pending > 0) {
+                console.log(`[session] last client left agent session, keeping ${pending} pending prompt(s) for orchestrator`)
+              }
+              return
+            }
             if (session.pendingControlRequests.size > 0) {
               console.log(`[session] last client left, auto-denying ${session.pendingControlRequests.size} pending control requests`)
               for (const [requestId] of session.pendingControlRequests) {
