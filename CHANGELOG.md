@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Dynamic Claude model discovery — probe candidate model IDs at runtime instead of relying on static aliases, adding Opus 4.8 support (#479, #480)
+
+### Changed
+- Make coverage configuration honest (`coverage.all`) and start covering React components (#487)
+
+### Fixed
+- Canonicalize WebSocket `workingDir` and add model-discovery tests (#488)
+- Group webhook/stepflow sessions under canonical owner-namespaced repo (#481)
+- Surface and resume archived sessions across repo clone paths (#482)
+- Start new sessions on the latest model and surface reconnect notices (#483)
+- Make session auto-naming resilient to rate limits and chatty replies (#484)
+
+### Docs
+- Fix accuracy drift surfaced by docs audit (#489)
+
 ## [0.6.5] - 2026-05-14
 
 ### Added
