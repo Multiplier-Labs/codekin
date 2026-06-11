@@ -142,7 +142,7 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
 
       {/* Help text */}
       {helpText && !error && !browseError && (
-        <p className="mt-1 text-[12px] text-neutral-6">{helpText}</p>
+        <p className="mt-1 text-[12px] text-neutral-5">{helpText}</p>
       )}
 
       {/* Directory browser dropdown */}
@@ -174,7 +174,7 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
           {/* Directory list */}
           <div className="max-h-48 overflow-y-auto py-1">
             {dirs.length === 0 ? (
-              <p className="px-3 py-2 text-[12px] text-neutral-6">No subdirectories</p>
+              <p className="px-3 py-2 text-[12px] text-neutral-5">No subdirectories</p>
             ) : (
               dirs.map(dir => (
                 <button

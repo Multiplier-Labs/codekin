@@ -54,7 +54,7 @@ function SendButton({ onClick, disabled, hasContent, size = 16, rounded = 'round
 }) {
   const activeClass = accent
     ? 'bg-accent-7 text-neutral-1 hover:bg-accent-6'
-    : 'bg-primary-8 text-neutral-1 hover:bg-primary-7'
+    : 'bg-primary-8 text-on-primary hover:bg-primary-7'
   return (
     <button
       onClick={onClick}

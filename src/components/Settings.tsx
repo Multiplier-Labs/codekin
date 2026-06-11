@@ -196,7 +196,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
               <button
                 onClick={handleVerify}
                 disabled={verifying || !tokenInput.trim()}
-                className="rounded bg-primary-8 px-3 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-50"
+                className="rounded bg-primary-8 px-3 py-2 text-[15px] font-medium text-on-primary hover:bg-primary-7 disabled:opacity-50"
               >
                 {verifying ? '...' : 'Verify'}
               </button>
@@ -248,7 +248,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                     className="w-40 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
                   />
                 </div>
-                <p className="mt-1 text-[13px] text-neutral-6">Display name for the orchestrator agent in the sidebar and chat</p>
+                <p className="mt-1 text-[13px] text-neutral-5">Display name for the orchestrator agent in the sidebar and chat</p>
               </div>
 
               <div className="border-t border-neutral-9/40" />
@@ -263,7 +263,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                       onClick={() => onUpdate({ theme: 'dark' })}
                       className={`rounded px-4 py-1.5 text-[15px] font-medium transition-colors ${
                         settings.theme !== 'light'
-                          ? 'bg-primary-8 text-neutral-1'
+                          ? 'bg-primary-8 text-on-primary'
                           : 'border border-neutral-9 bg-neutral-10 text-neutral-3 hover:bg-neutral-9'
                       }`}
                     >
@@ -273,7 +273,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                       onClick={() => onUpdate({ theme: 'light' })}
                       className={`rounded px-4 py-1.5 text-[15px] font-medium transition-colors ${
                         settings.theme === 'light'
-                          ? 'bg-primary-8 text-neutral-1'
+                          ? 'bg-primary-8 text-on-primary'
                           : 'border border-neutral-9 bg-neutral-10 text-neutral-3 hover:bg-neutral-9'
                       }`}
                     >
@@ -305,7 +305,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                     />
                     <span className="text-[15px] text-neutral-5">days</span>
                   </div>
-                  <p className="mt-1 text-[13px] text-neutral-6">Auto-delete archived sessions older than this</p>
+                  <p className="mt-1 text-[13px] text-neutral-5">Auto-delete archived sessions older than this</p>
                 </div>
               </div>
 
@@ -328,7 +328,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                     Queue messages across sessions
                   </span>
                 </label>
-                <p className="mt-1 ml-[26px] text-[13px] text-neutral-6">
+                <p className="mt-1 ml-[26px] text-[13px] text-neutral-5">
                   When enabled, messages sent while another session for the same repo is processing will be queued and sent automatically when it finishes.
                 </p>
               </div>
@@ -362,7 +362,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                       Auto-enable worktrees for new sessions
                     </span>
                   </label>
-                  <p className="mt-1 ml-[26px] text-[13px] text-neutral-6">When enabled, new sessions will automatically start in a git worktree</p>
+                  <p className="mt-1 ml-[26px] text-[13px] text-neutral-5">When enabled, new sessions will automatically start in a git worktree</p>
                 </div>
 
                 <div>
@@ -380,7 +380,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                       className="w-40 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-2 outline-none focus:border-primary-7"
                     />
                   </div>
-                  <p className="mt-1 text-[13px] text-neutral-6">Prefix for worktree branch names (e.g. wt/ → wt/abc12345)</p>
+                  <p className="mt-1 text-[13px] text-neutral-5">Prefix for worktree branch names (e.g. wt/ → wt/abc12345)</p>
                 </div>
               </div>
 
@@ -396,7 +396,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                   <>
                     <IconCircleCheckFilled size={16} className="text-success-6" />
                     <span className="text-[15px] text-success-5 font-medium">Active</span>
-                    <span className="text-[13px] text-neutral-6">
+                    <span className="text-[13px] text-neutral-5">
                       &middot; max {webhookConfig.maxConcurrentSessions} concurrent sessions
                     </span>
                   </>
@@ -407,7 +407,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                   </>
                 )
               ) : (
-                <span className="text-[13px] text-neutral-6">Loading...</span>
+                <span className="text-[13px] text-neutral-5">Loading...</span>
               )}
             </div>
 
@@ -456,7 +456,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                     }
                   }}
                   disabled={!healthRepo.trim() || healthLoading}
-                  className="flex items-center gap-1.5 rounded bg-primary-8 px-3 py-2 text-[13px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-50 transition-colors"
+                  className="flex items-center gap-1.5 rounded bg-primary-8 px-3 py-2 text-[13px] font-medium text-on-primary hover:bg-primary-7 disabled:opacity-50 transition-colors"
                 >
                   {healthLoading ? (
                     <IconRefresh size={14} className="animate-spin" />
@@ -530,7 +530,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                           setWizardStep('idle')
                         }
                       }}
-                      className="flex items-center gap-1.5 rounded bg-primary-8 px-3 py-2 text-[13px] font-medium text-neutral-1 hover:bg-primary-7 transition-colors mt-2"
+                      className="flex items-center gap-1.5 rounded bg-primary-8 px-3 py-2 text-[13px] font-medium text-on-primary hover:bg-primary-7 transition-colors mt-2"
                     >
                       <IconWand size={14} />
                       Set up automatically
@@ -617,7 +617,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                               setWizardStep('preview')
                             }
                           }}
-                          className="rounded bg-primary-8 px-3 py-1.5 text-[13px] font-medium text-neutral-1 hover:bg-primary-7 transition-colors"
+                          className="rounded bg-primary-8 px-3 py-1.5 text-[13px] font-medium text-on-primary hover:bg-primary-7 transition-colors"
                         >
                           Apply
                         </button>
@@ -706,7 +706,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                     Under <strong className="text-neutral-3">&ldquo;Which events?&rdquo;</strong>, select <strong className="text-neutral-3">Let me select individual events</strong> and check <strong className="text-neutral-3">Workflow runs</strong> and <strong className="text-neutral-3">Pull requests</strong>
                   </span>
                 </div>
-                <p className="text-[13px] text-neutral-6 pt-1 border-t border-neutral-9/50">
+                <p className="text-[13px] text-neutral-5 pt-1 border-t border-neutral-9/50">
                   Webhook events will automatically spawn <IconRobot size={12} className="inline -mt-0.5" /> sessions for PR reviews and CI failure analysis.
                 </p>
               </div>
@@ -739,7 +739,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
 
             {/* Disabled hint */}
             {webhookConfig && !webhookConfig.enabled && !healthResult && (
-              <p className="mt-3 text-[13px] text-neutral-6">
+              <p className="mt-3 text-[13px] text-neutral-5">
                 Set <code className="bg-neutral-9/50 px-1 rounded text-neutral-4">GITHUB_WEBHOOK_ENABLED=true</code> and <code className="bg-neutral-9/50 px-1 rounded text-neutral-4">GITHUB_WEBHOOK_SECRET</code> on the server to enable.
               </p>
             )}
@@ -757,7 +757,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
             {settings.token && (
               <button
                 onClick={onClose}
-                className="rounded px-4 py-2 text-[15px] text-neutral-6 hover:text-neutral-2"
+                className="rounded px-4 py-2 text-[15px] text-neutral-5 hover:text-neutral-2"
               >
                 Cancel
               </button>
@@ -765,7 +765,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
             <button
               onClick={handleSave}
               disabled={!tokenInput.trim()}
-              className="rounded bg-primary-8 px-4 py-2 text-[15px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-50"
+              className="rounded bg-primary-8 px-4 py-2 text-[15px] font-medium text-on-primary hover:bg-primary-7 disabled:opacity-50"
             >
               Save
             </button>
