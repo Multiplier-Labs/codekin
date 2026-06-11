@@ -33,6 +33,8 @@ import {
   isOrchestratorSession,
   ensureOrchestratorRunning,
   getOrchestratorSessionId,
+  readTemplateVersion,
+  CLAUDE_MD_TEMPLATE_VERSION,
 } from './orchestrator-manager.js'
 
 function fakeSessionManager(existingSession?: any) {
@@ -97,14 +99,55 @@ describe('ensureOrchestratorDir', () => {
     expect(mockWriteFileSync).toHaveBeenCalledTimes(3)
   })
 
-  it('does not overwrite existing files', () => {
-    // All paths exist
+  it('does not overwrite existing files when CLAUDE.md is current', () => {
+    // All paths exist and CLAUDE.md carries the current template version
     mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue(
+      `<!-- codekin-template-version: ${CLAUDE_MD_TEMPLATE_VERSION} -->\n# custom`,
+    )
 
     ensureOrchestratorDir()
 
     expect(mockMkdirSync).not.toHaveBeenCalled()
     expect(mockWriteFileSync).not.toHaveBeenCalled()
+  })
+
+  it('refreshes CLAUDE.md when its template version is stale, leaving seed files alone', () => {
+    mockExistsSync.mockReturnValue(true)
+    // Unstamped (pre-versioning) CLAUDE.md → version 0 → stale
+    mockReadFileSync.mockReturnValue('# Agent — old template without a stamp')
+
+    ensureOrchestratorDir()
+
+    const writtenPaths = mockWriteFileSync.mock.calls.map((c: any[]) => c[0])
+    expect(writtenPaths).toEqual(['/tmp/test-data/orchestrator/CLAUDE.md'])
+    const written = mockWriteFileSync.mock.calls[0][1] as string
+    expect(written).toContain(`<!-- codekin-template-version: ${CLAUDE_MD_TEMPLATE_VERSION} -->`)
+  })
+})
+
+describe('readTemplateVersion', () => {
+  it('returns 0 when the file does not exist', () => {
+    mockExistsSync.mockReturnValue(false)
+    expect(readTemplateVersion('/tmp/none/CLAUDE.md')).toBe(0)
+  })
+
+  it('returns 0 when the file has no version stamp', () => {
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue('# no stamp here')
+    expect(readTemplateVersion('/tmp/x/CLAUDE.md')).toBe(0)
+  })
+
+  it('parses the stamped version', () => {
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue('<!-- codekin-template-version: 7 -->\n# hi')
+    expect(readTemplateVersion('/tmp/x/CLAUDE.md')).toBe(7)
+  })
+
+  it('returns 0 when reading throws', () => {
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockImplementation(() => { throw new Error('EACCES') })
+    expect(readTemplateVersion('/tmp/x/CLAUDE.md')).toBe(0)
   })
 })
 

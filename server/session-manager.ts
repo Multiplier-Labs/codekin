@@ -170,6 +170,7 @@ export class SessionManager {
       globalBroadcast: (msg) => this._globalBroadcast?.(msg),
       approvalManager: this._approvalManager,
       promptListeners: this._promptListeners,
+      onPlanApproved: (session) => this.onPlanApproved(session),
     })
     // Use a local ref so the getter closures capture `this` (the SessionManager instance)
     // eslint-disable-next-line @typescript-eslint/no-this-alias
@@ -741,8 +742,12 @@ export class SessionManager {
   }
 
   /** Register a listener called when any session emits a prompt (permission request or question). */
-  onSessionPrompt(listener: (sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void): void {
+  onSessionPrompt(listener: (sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void): () => void {
     this._promptListeners.push(listener)
+    return () => {
+      const idx = this._promptListeners.indexOf(listener)
+      if (idx >= 0) this._promptListeners.splice(idx, 1)
+    }
   }
 
   /** Register a listener called when any session completes a turn (result event). */
@@ -869,9 +874,23 @@ export class SessionManager {
           session._leaveGraceTimer = null
           // Re-check: if still no clients after grace period, auto-deny
           if (session.clients.size === 0) {
+            // Orchestrator-managed child sessions are NOT auto-denied: the
+            // orchestrator is notified of pending prompts (onSessionPrompt)
+            // and can respond via the API. A user briefly opening and closing
+            // the child's tab must not kill its pending approvals. The 5-min
+            // approval timeout in PromptRouter remains the backstop.
+            if (session.source === 'agent') {
+              const pending = session.pendingControlRequests.size + session.pendingToolApprovals.size
+              if (pending > 0) {
+                console.log(`[session] last client left agent session, keeping ${pending} pending prompt(s) for orchestrator`)
+              }
+              return
+            }
+            const deniedTools: string[] = []
             if (session.pendingControlRequests.size > 0) {
               console.log(`[session] last client left, auto-denying ${session.pendingControlRequests.size} pending control requests`)
-              for (const [requestId] of session.pendingControlRequests) {
+              for (const [requestId, pending] of session.pendingControlRequests) {
+                deniedTools.push(pending.toolName)
                 session.claudeProcess?.sendControlResponse(requestId, 'deny')
               }
               session.pendingControlRequests.clear()
@@ -879,10 +898,20 @@ export class SessionManager {
             if (session.pendingToolApprovals.size > 0) {
               console.log(`[session] last client left, auto-denying ${session.pendingToolApprovals.size} pending tool approval(s)`)
               for (const [reqId, pending] of session.pendingToolApprovals) {
+                deniedTools.push(pending.toolName)
                 pending.resolve({ allow: false, always: false })
                 this.broadcast(session, { type: 'prompt_dismiss', requestId: reqId })
               }
               session.pendingToolApprovals.clear()
+            }
+            // Record the auto-denial in history so a rejoining user can see
+            // why Claude stopped instead of being silently confused.
+            if (deniedTools.length > 0) {
+              this.addToHistory(session, {
+                type: 'system_message',
+                subtype: 'error',
+                text: `All clients disconnected — automatically denied ${deniedTools.length} pending approval request(s): ${[...new Set(deniedTools)].join(', ')}.`,
+              })
             }
           }
         }, 10_000)
@@ -1359,31 +1388,82 @@ export class SessionManager {
     return true
   }
 
-  /** Update the permission mode for a session and restart Claude with the new mode. */
+  /**
+   * Called by PromptRouter when the user approves a plan. Transitions the
+   * session out of plan mode (plan → acceptEdits) WITHOUT restarting the
+   * process — the CLI already exits plan mode itself when ExitPlanMode is
+   * allowed, and a restart here would kill the implementation turn that is
+   * just starting. Without this transition, every post-approval file edit
+   * would prompt the user, and any later restart would re-spawn the CLI
+   * with --permission-mode plan mid-implementation.
+   */
+  private onPlanApproved(session: Session): void {
+    if (session.permissionMode !== 'plan') return
+    const target: import('./types.js').PermissionMode = 'acceptEdits'
+    // Best-effort: align the CLI's native mode in-place. The PreToolUse hook
+    // is the actual permission gate, so a NACK here is harmless.
+    void session.claudeProcess?.setPermissionMode?.(target)
+    session.permissionMode = target
+    this.persistToDiskDebounced()
+    this.applyPermissionModeBroadcast(session, target, 'Plan approved — permission mode changed to: acceptEdits')
+  }
+
+  /** Broadcast + persist a permission mode change as both a human-readable and structured message. */
+  private applyPermissionModeBroadcast(session: Session, permissionMode: import('./types.js').PermissionMode, text: string): void {
+    this.broadcastAndHistory(session, { type: 'system_message', subtype: 'notification', text })
+    this.broadcastAndHistory(session, { type: 'permission_mode_changed', permissionMode })
+  }
+
+  /**
+   * Update the permission mode for a session. Prefers an in-place stream-json
+   * control request (no restart, keeps in-flight turns and pending approvals
+   * alive); falls back to a process restart when the provider doesn't support
+   * runtime mode changes or the CLI rejects the request.
+   */
   setPermissionMode(sessionId: string, permissionMode: import('./types.js').PermissionMode): boolean {
     const session = this.sessions.get(sessionId)
     if (!session) return false
     const previousMode = session.permissionMode
 
     // Audit log for dangerous mode changes
-    if (permissionMode === 'bypassPermissions') {
-      console.warn(`[security] Session ${sessionId} ("${session.name}") activated bypassPermissions mode (was: ${previousMode ?? 'default'})`)
+    if (permissionMode === 'bypassPermissions' || permissionMode === 'dangerouslySkipPermissions') {
+      console.warn(`[security] Session ${sessionId} ("${session.name}") activated ${permissionMode} mode (was: ${previousMode ?? 'default'})`)
     }
 
-    // Emit a visible system message so all clients see the mode change
     const modeLabel = permissionMode === 'bypassPermissions' ? 'Bypass permissions (all tools auto-accepted)' : permissionMode
-    const sysMsg: WsServerMessage = { type: 'system_message', subtype: 'notification', text: `Permission mode changed to: ${modeLabel}` }
-    this.addToHistory(session, sysMsg)
-    this.broadcast(session, sysMsg)
+    // Apply the new mode to session state and notify clients. Called only
+    // after the change actually took effect (in-place ACK, restart, or no
+    // process running) so the UI never reports a mode that failed to apply.
+    const apply = () => {
+      session.permissionMode = permissionMode
+      // Keep PlanManager in sync with manual mode changes: entering plan mode
+      // arms the ExitPlanMode approval gate (the CLI won't emit EnterPlanMode
+      // when spawned directly in plan mode); leaving it clears plan state.
+      if (permissionMode === 'plan') {
+        session.planManager.onEnterPlanMode()
+      } else if (previousMode === 'plan') {
+        session.planManager.reset()
+      }
+      this.persistToDiskDebounced()
+      this.applyPermissionModeBroadcast(session, permissionMode, `Permission mode changed to: ${modeLabel}`)
+    }
 
     if (session.claudeProcess?.isAlive()) {
-      void session.coordinator.requestReconfigure(() => {
-        session.permissionMode = permissionMode
-        this.persistToDiskDebounced()
-      })
+      const inPlace = session.claudeProcess.setPermissionMode?.(permissionMode)
+      if (inPlace) {
+        void inPlace.then((ok) => {
+          if (ok) {
+            apply()
+          } else {
+            console.log(`[permission-mode] in-place change rejected, falling back to restart (mode=${permissionMode})`)
+            void session.coordinator.requestReconfigure(apply)
+          }
+        })
+      } else {
+        void session.coordinator.requestReconfigure(apply)
+      }
     } else {
-      session.permissionMode = permissionMode
-      this.persistToDiskDebounced()
+      apply()
     }
     return true
   }

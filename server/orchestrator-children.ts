@@ -7,8 +7,9 @@
  */
 
 import { randomUUID } from 'crypto'
+import { execFile } from 'child_process'
 import type { SessionManager } from './session-manager.js'
-import type { Session, WsServerMessage } from './types.js'
+import type { WsServerMessage } from './types.js'
 import { getAgentDisplayName } from './config.js'
 import {
   sendOrchestratorNotification,
@@ -32,7 +33,11 @@ export interface ChildSessionRequest {
   deployAfter: boolean
   /** Use a git worktree for isolation. */
   useWorktree: boolean
-  /** Timeout in ms (default 10 minutes). */
+  /**
+   * Working-time timeout in ms (default 30 minutes). Time spent blocked on
+   * a pending approval/question does not count against this budget — blocked
+   * time has its own separate cap (MAX_BLOCKED_MS).
+   */
   timeoutMs?: number
   /** Optional model override. */
   model?: string
@@ -47,7 +52,7 @@ export interface ChildSessionRequest {
   parentSessionId?: string
 }
 
-export type ChildStatus = 'starting' | 'running' | 'completed' | 'failed' | 'timed_out'
+export type ChildStatus = 'starting' | 'running' | 'blocked' | 'completed' | 'failed' | 'timed_out'
 
 /** Statuses considered terminal — once entered, the child is done. */
 const TERMINAL_STATUSES: ReadonlySet<ChildStatus> = new Set([
@@ -69,6 +74,15 @@ export interface ChildSession {
    * parent orchestrator. Used to enforce single-fire idempotency.
    */
   terminalNotifiedAt: string | null
+  /**
+   * Worktree isolation outcome:
+   *  - 'active': worktree created, session runs isolated
+   *  - 'failed': worktree was requested but creation failed (running in repo)
+   *  - 'none':   worktree was not requested
+   */
+  worktree: 'active' | 'failed' | 'none'
+  /** Absolute path of the worktree when active. */
+  worktreePath: string | null
 }
 
 /**
@@ -78,14 +92,36 @@ export interface ChildSession {
  */
 export type ChildNotifyFn = (args: OrchestratorNotifyArgs) => boolean
 
+/**
+ * Runs an external command and resolves with stdout. Injectable so unit
+ * tests can stub ground-truth checks (gh / git) without spawning processes.
+ * Rejects when the command fails or times out.
+ */
+export type ExecFn = (cmd: string, args: string[], cwd: string) => Promise<string>
+
+const defaultExec: ExecFn = (cmd, args, cwd) =>
+  new Promise((resolvePromise, rejectPromise) => {
+    execFile(cmd, args, { cwd, timeout: 15_000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+      if (err) rejectPromise(err instanceof Error ? err : new Error(`${cmd} failed`))
+      else resolvePromise(stdout)
+    })
+  })
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const MAX_CONCURRENT = 5
-const DEFAULT_TIMEOUT_MS = 600_000  // 10 minutes
+const DEFAULT_TIMEOUT_MS = 1_800_000  // 30 minutes of working time
+/**
+ * Separate budget for time spent blocked on a pending approval or question.
+ * The working-time clock is paused while blocked; this cap ensures a child
+ * waiting on an answer that never comes still terminates eventually.
+ */
+const MAX_BLOCKED_MS = 1_800_000  // 30 minutes
 const CHILD_RETENTION_MS = 3_600_000  // keep completed/failed children for 1 hour
 const MAX_RETAINED_CHILDREN = 100    // hard cap on total entries
+const MAX_NOTIFIED_PROMPT_IDS = 500  // cap on the blocked-prompt dedup set
 
 /**
  * Default allowed tools for agent child sessions. Covers standard dev
@@ -107,6 +143,12 @@ export const AGENT_CHILD_ALLOWED_TOOLS = [
   // Build / lint / test tools
   'Bash(node:*)', 'Bash(tsc:*)', 'Bash(eslint:*)', 'Bash(prettier:*)',
   'Bash(cargo:*)', 'Bash(go:*)', 'Bash(make:*)', 'Bash(pip:*)',
+  // Python toolchain (linting/tests in Python repos)
+  'Bash(python3:*)', 'Bash(pytest:*)',
+  // Text/data processing (read-only or scoped to working dir)
+  'Bash(sed:*)', 'Bash(rg:*)', 'Bash(jq:*)',
+  // Non-destructive file management (no rm — deletion still needs approval)
+  'Bash(mkdir:*)', 'Bash(cp:*)', 'Bash(mv:*)', 'Bash(touch:*)',
   // Safe filesystem inspection (read-only)
   'Bash(ls:*)', 'Bash(cat:*)', 'Bash(wc:*)',
   'Bash(head:*)', 'Bash(tail:*)', 'Bash(sort:*)', 'Bash(diff:*)',
@@ -123,10 +165,121 @@ export class OrchestratorChildManager {
   private children = new Map<string, ChildSession>()
   private sessions: SessionManager
   private notify: ChildNotifyFn
+  /** Prompt requestIds already reported to the parent (single-fire per prompt). */
+  private notifiedPromptIds = new Set<string>()
+  /**
+   * Per-child timeout controllers — lets the prompt handler pause the
+   * working-time clock the moment a child blocks on an approval/question,
+   * instead of waiting for the next monitor event.
+   */
+  private timeoutControllers = new Map<string, { pause(): void; resume(): void }>()
+  private exec: ExecFn
 
-  constructor(sessions: SessionManager, opts?: { notify?: ChildNotifyFn }) {
+  constructor(sessions: SessionManager, opts?: { notify?: ChildNotifyFn; exec?: ExecFn }) {
     this.sessions = sessions
     this.notify = opts?.notify ?? ((args) => sendOrchestratorNotification(sessions, args))
+    this.exec = opts?.exec ?? defaultExec
+    // Push a realtime notification to the parent orchestrator whenever one of
+    // our children blocks on a tool approval or question. Without this, a
+    // blocked child would silently sit until its timeout killed it.
+    this.sessions.onSessionPrompt((sessionId, promptType, toolName, requestId) => {
+      this.handleChildPrompt(sessionId, promptType, toolName, requestId)
+    })
+  }
+
+  /**
+   * Handle a prompt event from any session: if it belongs to one of our
+   * active children, mark the child as blocked and notify the parent
+   * orchestrator with everything it needs to unblock the child.
+   */
+  private handleChildPrompt(
+    sessionId: string,
+    promptType: 'permission' | 'question',
+    toolName: string | undefined,
+    requestId: string | undefined,
+  ): void {
+    const child = this.children.get(sessionId)
+    if (!child || TERMINAL_STATUSES.has(child.status)) return
+
+    child.status = 'blocked'
+    // Pause the working-time clock while the child waits for an answer.
+    this.timeoutControllers.get(sessionId)?.pause()
+
+    // Single-fire per requestId (re-broadcasts on client join would otherwise
+    // spam the parent). Prompts without a requestId can't be deduped or
+    // responded to by ID — still notify, but only describe them generically.
+    const dedupKey = requestId ?? `${sessionId}:${toolName ?? 'unknown'}`
+    if (this.notifiedPromptIds.has(dedupKey)) return
+    this.notifiedPromptIds.add(dedupKey)
+    if (this.notifiedPromptIds.size > MAX_NOTIFIED_PROMPT_IDS) {
+      // Drop oldest entries (Set preserves insertion order)
+      for (const id of this.notifiedPromptIds) {
+        this.notifiedPromptIds.delete(id)
+        if (this.notifiedPromptIds.size <= MAX_NOTIFIED_PROMPT_IDS) break
+      }
+    }
+
+    const parentSessionId = child.request.parentSessionId
+    if (!parentSessionId) return
+
+    try {
+      this.notify({
+        parentSessionId,
+        label: 'Child Session Blocked',
+        title: `Session: ${getAgentDisplayName().toLowerCase()}:${child.request.branchName} (${child.id})`,
+        body: this.buildBlockedNotificationBody(child, promptType, toolName, requestId),
+      })
+    } catch (err) {
+      console.warn(`[orchestrator-child] Failed to notify parent about blocked child ${child.id}:`, err)
+    }
+  }
+
+  /** Build the body for a blocked-child notification, including the exact
+   *  API call the orchestrator can use to respond. */
+  private buildBlockedNotificationBody(
+    child: ChildSession,
+    promptType: 'permission' | 'question',
+    toolName: string | undefined,
+    requestId: string | undefined,
+  ): string {
+    const lines: string[] = [
+      'Status: blocked — waiting for a response',
+      `Branch: ${child.request.branchName}`,
+      `Repo: ${child.request.repo}`,
+      `Prompt: ${promptType}${toolName ? ` (${toolName})` : ''}`,
+    ]
+
+    // Include a one-line summary of what the tool wants to do, if available.
+    const detail = this.describePendingPrompt(child.id, requestId)
+    if (detail) lines.push(`Detail: ${detail}`)
+
+    if (requestId) {
+      lines.push(
+        `RequestId: ${requestId}`,
+        'Respond with:',
+        `curl -s -X POST "http://localhost:$CODEKIN_PORT/api/orchestrator/sessions/${child.id}/respond" \\`,
+        '  -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN" -H "Content-Type: application/json" \\',
+        promptType === 'question'
+          ? `  -d '{"requestId": "${requestId}", "value": "YOUR_ANSWER"}'`
+          : `  -d '{"requestId": "${requestId}", "value": "allow"}'  # or "deny"`,
+      )
+    }
+    lines.push('Unanswered permission prompts are auto-denied after 5 minutes. If unsure, ask the user.')
+    return lines.join('\n')
+  }
+
+  /** One-line summary of the pending prompt's tool input (e.g. the Bash command). */
+  private describePendingPrompt(sessionId: string, requestId: string | undefined): string | null {
+    if (!requestId) return null
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+    const pending = session.pendingToolApprovals.get(requestId) ?? session.pendingControlRequests.get(requestId)
+    if (!pending) return null
+    const input = pending.toolInput
+    if (typeof input.command === 'string') return `$ ${input.command.split('\n')[0].slice(0, 200)}`
+    if (typeof input.file_path === 'string') return input.file_path
+    const json = JSON.stringify(input)
+    return json.length > 2 ? json.slice(0, 200) : null
   }
 
   /** Get all active/recent child sessions. */
@@ -145,7 +298,7 @@ export class OrchestratorChildManager {
   private purgeStaleChildren(): void {
     const now = Date.now()
     for (const [id, child] of this.children) {
-      if (child.status === 'starting' || child.status === 'running') continue
+      if (!TERMINAL_STATUSES.has(child.status)) continue
       if (child.completedAt && now - new Date(child.completedAt).getTime() > CHILD_RETENTION_MS) {
         this.children.delete(id)
       }
@@ -153,7 +306,7 @@ export class OrchestratorChildManager {
     // Hard cap: if still over limit, remove oldest completed entries
     if (this.children.size > MAX_RETAINED_CHILDREN) {
       const completed = Array.from(this.children.entries())
-        .filter(([, c]) => c.status !== 'starting' && c.status !== 'running')
+        .filter(([, c]) => TERMINAL_STATUSES.has(c.status))
         .sort((a, b) => (a[1].completedAt ?? '').localeCompare(b[1].completedAt ?? ''))
       while (this.children.size > MAX_RETAINED_CHILDREN && completed.length > 0) {
         const [id] = completed.shift()!
@@ -165,7 +318,7 @@ export class OrchestratorChildManager {
   /** Count currently active (non-terminal) child sessions. */
   activeCount(): number {
     return Array.from(this.children.values())
-      .filter(c => c.status === 'starting' || c.status === 'running')
+      .filter(c => !TERMINAL_STATUSES.has(c.status))
       .length
   }
 
@@ -192,6 +345,8 @@ export class OrchestratorChildManager {
       result: null,
       error: null,
       terminalNotifiedAt: null,
+      worktree: request.useWorktree ? 'failed' : 'none',  // upgraded to 'active' on success
+      worktreePath: null,
     }
     this.children.set(sessionId, child)
 
@@ -213,7 +368,10 @@ export class OrchestratorChildManager {
       let worktreeFailed = false
       if (request.useWorktree) {
         const wtPath = await this.sessions.createWorktree(sessionId, request.repo, request.branchName)
-        if (!wtPath) {
+        if (wtPath) {
+          child.worktree = 'active'
+          child.worktreePath = wtPath
+        } else {
           worktreeFailed = true
           console.warn(`[orchestrator-child] Failed to create worktree for ${sessionId}, falling back to main directory`)
         }
@@ -258,10 +416,12 @@ export class OrchestratorChildManager {
       body: this.buildTerminalNotificationBody(child),
     }
 
-    // Only stamp `terminalNotifiedAt` on confirmed delivery so that a
-    // transient parent-down (notify returns false / throws) does not
-    // permanently suppress future retries.  Idempotency is still enforced
-    // by the early-return on terminalNotifiedAt at the top of this method.
+    // `notify` returns true on immediate delivery AND when the notification
+    // was queued in the persistent outbox (the outbox owns replay from that
+    // point on) — both count as handled, so we stamp `terminalNotifiedAt`.
+    // It returns false only when queueing itself failed; we leave the stamp
+    // unset so a later terminal-path call can retry. Idempotency is still
+    // enforced by the early-return on terminalNotifiedAt at the top.
     let delivered = false
     try {
       delivered = this.notify(args)
@@ -419,56 +579,134 @@ export class OrchestratorChildManager {
     let unsubResult: (() => void) | undefined
     let unsubExit: (() => void) | undefined
     const nudgedIds = new Set<string>()
-    const supersededMsgs = new Set<WsServerMessage>()
 
     try {
       await new Promise<void>((resolve) => {
         let settled = false
         const settle = () => { if (!settled) { settled = true; resolve() } }
+        // Re-read after awaits — a timeout may settle while a ground-truth
+        // check is in flight (also defeats overly-eager type narrowing).
+        const isSettled = () => settled
 
-        // Timeout handler
-        const timer = setTimeout(() => {
+        // ---- Pausable working-time clock -----------------------------------
+        // The working budget (timeoutMs) only burns while the child is doing
+        // work. When the child blocks on an approval/question, the clock is
+        // paused and a separate blocked-time cap (MAX_BLOCKED_MS) takes over
+        // so an unanswered prompt still terminates the child eventually.
+        let remainingMs = timeoutMs
+        let workStartedAt = Date.now()
+        let workTimer: ReturnType<typeof setTimeout> | null = null
+        let blockedTimer: ReturnType<typeof setTimeout> | null = null
+
+        const clearTimers = () => {
+          if (workTimer) { clearTimeout(workTimer); workTimer = null }
+          if (blockedTimer) { clearTimeout(blockedTimer); blockedTimer = null }
+        }
+
+        const fireTimeout = (error: string) => {
           if (settled) return
           child.status = 'timed_out'
-          child.error = `Timed out after ${timeoutMs}ms`
+          child.error = error
           child.completedAt = new Date().toISOString()
+          clearTimers()
 
           const session = this.sessions.get(child.id)
           if (session?.claudeProcess?.isAlive()) {
             session.claudeProcess.stop()
           }
           settle()
-        }, timeoutMs)
+        }
+
+        const pause = () => {
+          if (settled || !workTimer) return
+          clearTimeout(workTimer)
+          workTimer = null
+          remainingMs = Math.max(0, remainingMs - (Date.now() - workStartedAt))
+          blockedTimer ??= setTimeout(() => {
+            fireTimeout(`Timed out after waiting ${MAX_BLOCKED_MS}ms for a pending approval/answer`)
+          }, MAX_BLOCKED_MS)
+        }
+
+        const resume = () => {
+          if (settled || workTimer) return
+          if (blockedTimer) { clearTimeout(blockedTimer); blockedTimer = null }
+          workStartedAt = Date.now()
+          workTimer = setTimeout(() => {
+            fireTimeout(`Timed out after ${timeoutMs}ms of working time`)
+          }, remainingMs)
+        }
+
+        // Expose pause/resume to the prompt handler (handleChildPrompt).
+        this.timeoutControllers.set(child.id, { pause, resume })
+
+        // Start the working clock.
+        workStartedAt = Date.now()
+        workTimer = setTimeout(() => {
+          fireTimeout(`Timed out after ${timeoutMs}ms of working time`)
+        }, remainingMs)
+
+        // Guard against overlapping async ground-truth checks when result
+        // events arrive in quick succession.
+        let verifying = false
 
         // Result hook: Claude completed a turn
         const onResult = (sessionId: string, isError: boolean) => {
-          if (sessionId !== child.id || settled) return
+          if (sessionId !== child.id || settled || verifying) return
           const session = this.sessions.get(child.id)
           if (!session) {
             child.status = 'failed'
             child.error = 'Session was deleted'
             child.completedAt = new Date().toISOString()
-            clearTimeout(timer)
+            clearTimers()
             settle()
             return
           }
 
-          const text = this.extractText(session.outputHistory)
-          // Check if the final step was done; if not, nudge (keep listening)
-          if (this.ensureFinalStep(child, session, text, nudgedIds, supersededMsgs)) return
+          // Don't mark as completed (or nudge) while the session still has
+          // pending tool approvals or control requests — the Claude process
+          // may still be alive and blocked on an approval (e.g. git push).
+          // Nudging here would waste the single nudge on a child that cannot
+          // act. Keep monitoring; the next result/exit event re-evaluates.
+          if (session.pendingToolApprovals.size > 0 || session.pendingControlRequests.size > 0) {
+            child.status = 'blocked'
+            pause()
+            return
+          }
 
-          // Don't mark as completed while the session still has pending
-          // tool approvals or control requests — the Claude process may
-          // still be alive and blocked on an approval (e.g. git push).
-          // Keep monitoring; the next result/exit event will re-evaluate.
-          if (session.pendingToolApprovals.size > 0 || session.pendingControlRequests.size > 0) return
+          // The prompt (if any) was answered — restart the working clock so
+          // post-approval work draws from the remaining working budget.
+          resume()
+          if (child.status === 'blocked') child.status = 'running'
 
-          child.status = isError ? 'failed' : 'completed'
-          child.result = text || null
-          child.error = isError ? 'Claude returned an error' : null
-          child.completedAt = new Date().toISOString()
-          clearTimeout(timer)
-          settle()
+          verifying = true
+          void (async () => {
+            try {
+              const text = this.extractText(session.outputHistory)
+              // Ground-truth check: did the final step (PR / push) really land?
+              const missing = await this.isFinalStepMissing(child, text)
+              if (isSettled()) return
+
+              // Final step missing — nudge once, then keep monitoring.
+              if (missing && !isError && !nudgedIds.has(child.id) && session.claudeProcess?.isAlive()) {
+                nudgedIds.add(child.id)
+                this.sessions.sendInput(child.id, this.buildNudgeInstruction(child.request.completionPolicy))
+                return
+              }
+
+              child.status = isError ? 'failed' : 'completed'
+              child.result = text || null
+              child.error = isError
+                ? 'Claude returned an error'
+                : missing
+                  ? `Completion not verified: expected ${child.request.completionPolicy === 'pr' ? 'a pull request' : 'a pushed branch'} but found none`
+                  : null
+              child.completedAt = new Date().toISOString()
+              clearTimers()
+              settle()
+            } finally {
+              verifying = false
+            }
+          })()
         }
 
         // Exit hook: Claude process exited
@@ -478,12 +716,21 @@ export class OrchestratorChildManager {
 
           const session = this.sessions.get(child.id)
           const text = session ? this.extractText(session.outputHistory) : ''
-          child.status = text.length > 100 ? 'completed' : 'failed'
-          child.result = text || null
-          child.error = text.length <= 100 ? 'Claude exited without sufficient output' : null
-          child.completedAt = new Date().toISOString()
-          clearTimeout(timer)
-          settle()
+          void (async () => {
+            // Process is gone — decide the terminal status from ground truth
+            // (did the PR / push land?) rather than transcript length.
+            let missing = session ? await this.isFinalStepMissing(child, text) : true
+            // commit-only has no remote artifact to verify; an exit without
+            // any output cannot be considered a success.
+            if (child.request.completionPolicy === 'commit-only' && !text) missing = true
+            if (isSettled()) return
+            child.status = missing ? 'failed' : 'completed'
+            child.result = text || null
+            child.error = missing ? 'Claude exited before the final step could be verified' : null
+            child.completedAt = new Date().toISOString()
+            clearTimers()
+            settle()
+          })()
         }
 
         unsubResult = this.sessions.onSessionResult(onResult)
@@ -493,6 +740,7 @@ export class OrchestratorChildManager {
       // Unsubscribe listeners to prevent accumulation across spawn() calls
       unsubResult?.()
       unsubExit?.()
+      this.timeoutControllers.delete(child.id)
       // Safety net: ensure isProcessing is cleared when monitoring ends.
       // handleClaudeResult should have already done this, but edge cases
       // (nudge race, missed result event) can leave the flag stuck.
@@ -504,52 +752,53 @@ export class OrchestratorChildManager {
   }
 
   /**
-   * Check whether the session completed the expected final step (PR, push, deploy).
-   * If not, send a follow-up instruction and return true so monitoring continues.
-   * Only nudges once per child to avoid infinite loops.
+   * Ground-truth check for the child's expected final step. Instead of
+   * sniffing the transcript for keywords (which both false-positives on
+   * mentions and false-negatives on terse output), ask the real systems:
+   *   - 'pr':    does an open/merged PR exist for the branch? (gh pr list)
+   *   - 'merge': does the branch exist on the remote? (git ls-remote)
+   *   - 'commit-only': nothing remote to verify — never missing.
+   * Falls back to transcript keyword sniffing when the command fails
+   * (e.g. gh not installed, no remote configured).
    */
-  private ensureFinalStep(
-    child: ChildSession,
-    session: Session,
-    text: string,
-    nudgedIds: Set<string>,
-    supersededMsgs: Set<WsServerMessage>,
-  ): boolean {
-    // Only nudge once per child
-    if (nudgedIds.has(child.id)) return false
-
+  private async isFinalStepMissing(child: ChildSession, text: string): Promise<boolean> {
     const policy = child.request.completionPolicy
-    const lowerText = text.toLowerCase()
+    if (policy === 'commit-only') return false
 
-    let missing = false
-    let instruction = ''
+    const cwd = child.worktreePath ?? child.request.repo
+    const branch = child.request.branchName
 
     if (policy === 'pr') {
-      // Check if a PR was created
-      const prCreated = lowerText.includes('pull request') || lowerText.includes('created a pr') || lowerText.includes('gh pr create')
-      if (!prCreated) {
-        missing = true
-        instruction = 'You completed the code changes but did not create a Pull Request. Please push your branch and create a PR now with a clear description of what was changed and why.'
-      }
-    } else if (policy === 'merge') {
-      // Check if changes were pushed
-      const pushed = lowerText.includes('git push') || lowerText.includes('pushed')
-      if (!pushed) {
-        missing = true
-        instruction = 'You completed the code changes but did not push them. Please push your changes to the remote now.'
+      try {
+        const out = await this.exec(
+          'gh',
+          ['pr', 'list', '--head', branch, '--state', 'all', '--json', 'number', '--limit', '1'],
+          cwd,
+        )
+        const parsed: unknown = JSON.parse(out)
+        return !(Array.isArray(parsed) && parsed.length > 0)
+      } catch {
+        const lower = text.toLowerCase()
+        return !(lower.includes('pull request') || lower.includes('created a pr') || lower.includes('gh pr create'))
       }
     }
 
-    if (missing && instruction && session.claudeProcess?.isAlive()) {
-      nudgedIds.add(child.id)
-      // Track the result message as superseded locally rather than mutating history entries
-      const resultMsg = session.outputHistory.find(m => m.type === 'result')
-      if (resultMsg) supersededMsgs.add(resultMsg)
-      this.sessions.sendInput(child.id, instruction)
-      return true
+    // policy === 'merge' — verify the branch was pushed to the remote
+    try {
+      const out = await this.exec('git', ['ls-remote', '--heads', 'origin', branch], cwd)
+      return out.trim().length === 0
+    } catch {
+      const lower = text.toLowerCase()
+      return !(lower.includes('git push') || lower.includes('pushed'))
     }
+  }
 
-    return false
+  /** Follow-up instruction sent (once) when the final step is missing. */
+  private buildNudgeInstruction(policy: ChildSessionRequest['completionPolicy']): string {
+    if (policy === 'pr') {
+      return 'You completed the code changes but no Pull Request exists for your branch yet. Please push your branch and create a PR now with a clear description of what was changed and why.'
+    }
+    return 'You completed the code changes but your branch has not been pushed to the remote. Please push your changes now.'
   }
 
   /**

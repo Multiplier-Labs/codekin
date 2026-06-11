@@ -72,6 +72,7 @@ interface SpawnChildBody {
   useWorktree?: boolean
   model?: string
   allowedTools?: string[]
+  timeoutMs?: number
 }
 
 interface SessionRespondBody {
@@ -187,9 +188,16 @@ export function createSessionRouter(
   router.post('/api/orchestrator/children', spawnRateLimiter, async (req: Request<Record<string, string>, unknown, SpawnChildBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { repo, task, branchName, completionPolicy, deployAfter, useWorktree, model, allowedTools } = req.body
+    const { repo, task, branchName, completionPolicy, deployAfter, useWorktree, model, allowedTools, timeoutMs } = req.body
     if (!repo || !task || !branchName) {
       return res.status(400).json({ error: 'Missing required fields: repo, task, branchName' })
+    }
+
+    // Validate timeoutMs if provided: 1 minute to 4 hours
+    if (timeoutMs !== undefined) {
+      if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs < 60_000 || timeoutMs > 14_400_000) {
+        return res.status(400).json({ error: 'Invalid timeoutMs: must be a number between 60000 (1m) and 14400000 (4h)' })
+      }
     }
 
     // Validate branchName to prevent prompt injection
@@ -225,6 +233,7 @@ export function createSessionRouter(
         useWorktree: useWorktree ?? true,
         model,
         allowedTools,
+        timeoutMs,
         // Stamp the orchestrator (parent) session ID so the child can push
         // a terminal-state notification back to it without a 30-min poll.
         parentSessionId: getOrCreateOrchestratorId(),
@@ -243,6 +252,41 @@ export function createSessionRouter(
     if (!child) return res.status(404).json({ error: 'Child session not found' })
 
     res.json({ child })
+  })
+
+  /**
+   * Get the tail of a child session's transcript (Claude output only).
+   * Lets the orchestrator inspect what a child actually did — e.g. when a
+   * child stops with "Completion not verified" or gets stuck — without
+   * attaching to the session. `?limit` caps the returned characters
+   * (default 5000, max 50000).
+   */
+  router.get('/api/orchestrator/children/:id/transcript', (req, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const child = children.get(req.params.id)
+    if (!child) return res.status(404).json({ error: 'Child session not found' })
+
+    const session = sessions.get(child.id)
+    if (!session) {
+      return res.status(404).json({ error: 'Session no longer exists (it may have been deleted)' })
+    }
+
+    const rawLimit = Number(req.query.limit)
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 50_000) : 5_000
+
+    const full = session.outputHistory
+      .filter((m): m is { type: 'output'; data: string } => m.type === 'output')
+      .map(m => m.data)
+      .join('')
+    const truncated = full.length > limit
+    res.json({
+      childId: child.id,
+      status: child.status,
+      transcript: truncated ? full.slice(-limit) : full,
+      truncated,
+      totalLength: full.length,
+    })
   })
 
   // -------------------------------------------------------------------------

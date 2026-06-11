@@ -49,6 +49,10 @@ export interface SessionContentProps {
   currentModel: string | null
   onModelChange: (model: string) => void
   availableModels?: import('../types').ModelOption[]
+  /** Coding provider of the active session — drives provider-specific UI (permission modes). */
+  sessionProvider?: import('../types').CodingProvider
+  /** Cumulative token/cost usage for the active session (shown in the input bar). */
+  usage?: import('../types').SessionUsage | null
   hasUserMessages: boolean
   useWorktree: boolean
   onWorktreeChange: (v: boolean) => void
@@ -58,6 +62,8 @@ export interface SessionContentProps {
   worktreePath: string | undefined
   /** null = not an OpenCode session, true = connected, false = not connected */
   openCodeConnected: boolean | null
+  /** null = not a Codex session, true = connected, false = not connected */
+  codexConnected: boolean | null
   /** Whether Claude Code connection has been disabled by the user. */
   claudeDisabled?: boolean
 }
@@ -93,6 +99,8 @@ export function SessionContent({
   currentModel,
   onModelChange,
   availableModels,
+  sessionProvider,
+  usage,
   hasUserMessages,
   useWorktree,
   onWorktreeChange,
@@ -101,10 +109,12 @@ export function SessionContent({
   moveToWorktree,
   worktreePath,
   openCodeConnected,
+  codexConnected,
   claudeDisabled,
 }: SessionContentProps) {
   const isOpenCodeDisconnected = openCodeConnected === false
-  const isProviderDisabled = claudeDisabled || isOpenCodeDisconnected
+  const isCodexDisconnected = codexConnected === false
+  const isProviderDisabled = claudeDisabled || isOpenCodeDisconnected || isCodexDisconnected
   return (
     <div className="flex flex-1 flex-col overflow-hidden min-h-0">
       <div className="relative flex-1 min-h-0 flex flex-col">
@@ -139,6 +149,19 @@ export function SessionContent({
                 Install OpenCode to use this session. Visit{' '}
                 <a href="https://opencode.ai" target="_blank" rel="noopener noreferrer" className="text-primary-5 hover:underline">opencode.ai</a>
                 {' '}and run <code className="bg-neutral-10 px-1.5 py-0.5 rounded text-[12px]">opencode serve</code> to start the server.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Codex not connected banner */}
+        {isCodexDisconnected && !claudeDisabled && (
+          <div className="absolute inset-0 flex items-center justify-center z-10 bg-neutral-12/90">
+            <div className="flex flex-col items-center gap-3 text-center px-6 max-w-md">
+              <div className="text-[15px] font-medium text-neutral-3">Codex is not connected</div>
+              <p className="text-[13px] text-neutral-5 leading-relaxed">
+                Install the Codex CLI with <code className="bg-neutral-10 px-1.5 py-0.5 rounded text-[12px]">npm i -g @openai/codex</code>
+                {' '}and authenticate by running <code className="bg-neutral-10 px-1.5 py-0.5 rounded text-[12px]">codex login</code> on the host.
               </p>
             </div>
           </div>
@@ -194,7 +217,7 @@ export function SessionContent({
         onSendInput={onSendInput}
         isWaiting={!!activePrompt}
         disabled={disabled || isProviderDisabled}
-        placeholder={claudeDisabled ? 'Claude Code is disabled' : isOpenCodeDisconnected ? 'OpenCode is not connected' : undefined}
+        placeholder={claudeDisabled ? 'Claude Code is disabled' : isOpenCodeDisconnected ? 'OpenCode is not connected' : isCodexDisconnected ? 'Codex is not connected' : undefined}
         onEscape={() => {}}
         pendingFiles={pendingFiles}
         onAddFiles={onAddFiles}
@@ -206,6 +229,8 @@ export function SessionContent({
         currentModel={currentModel}
         onModelChange={onModelChange}
         availableModels={availableModels}
+        sessionProvider={sessionProvider}
+        usage={usage}
         isMobile={isMobile}
         showWorktreeToggle={!hasUserMessages}
         useWorktree={useWorktree}

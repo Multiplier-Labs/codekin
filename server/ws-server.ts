@@ -17,6 +17,7 @@ import { createServer } from 'http'
 import { WebSocketServer, WebSocket } from 'ws'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
+import { homedir } from 'os'
 import { execFileSync } from 'child_process'
 import { createHash, randomUUID, timingSafeEqual } from 'crypto'
 import { verifySessionToken } from './crypto-utils.js'
@@ -47,6 +48,7 @@ import { createDocsRouter } from './docs-routes.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, isOrchestratorSession } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
+import { getOrchestratorOutbox } from './orchestrator-outbox.js'
 import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, CLAUDE_BINARY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR } from './config.js'
 
 // ---------------------------------------------------------------------------
@@ -140,6 +142,24 @@ if (claudeAvailable && !apiKeyEnvSet) {
 
 if (!apiKeySet) {
   console.warn('No API key or subscription auth detected (ANTHROPIC_API_KEY, CLAUDE_CODE_API_KEY, or Claude subscription)')
+}
+
+// Detect the OpenAI Codex CLI and its auth state. Codex authenticates via
+// `codex login` (ChatGPT subscription OAuth) which writes ~/.codex/auth.json;
+// the app-server reuses it with automatic token refresh.
+let codexAvailable = false
+let codexAuthenticated = false
+try {
+  const codexVersion = execFileSync(process.env.CODEX_BINARY || 'codex', ['--version'], { timeout: 5000 }).toString().trim()
+  codexAvailable = true
+  console.log(`Codex CLI found: ${codexVersion}`)
+  const codexHome = process.env.CODEX_HOME || join(homedir(), '.codex')
+  codexAuthenticated = existsSync(join(codexHome, 'auth.json')) || !!process.env.OPENAI_API_KEY
+  if (!codexAuthenticated) {
+    console.warn('Codex CLI found but not authenticated — run `codex login` on this host to enable it')
+  }
+} catch {
+  // Codex CLI not installed — provider stays hidden in the UI
 }
 
 // ---------------------------------------------------------------------------
@@ -510,7 +530,7 @@ wss.on('connection', (ws: WebSocket, req) => {
       }
       authenticated = true
       clearTimeout(authTimeout)
-      send({ type: 'connected', connectionId, claudeAvailable, claudeVersion, apiKeySet })
+      send({ type: 'connected', connectionId, claudeAvailable, claudeVersion, apiKeySet, codexAvailable, codexAuthenticated })
 
       // Notify client if a newer version is available
       void getUpdateNotification().then(text => {
@@ -651,6 +671,11 @@ server.listen(port, '0.0.0.0', () => {
       console.log('[boot]   Set CODEKIN_ORCHESTRATOR_MONITOR=true to re-enable.')
     }
     orchestratorMonitorRef.current = monitor
+
+    // Replay notifications queued while the orchestrator was down. The
+    // flusher only delivers when the orchestrator session is alive and the
+    // rate-limit circuit breaker is closed, so it is safe to run always.
+    getOrchestratorOutbox().startFlusher(sessions)
 
     console.log('[workflow] Workflow engine ready')
   } catch (err) {

@@ -20,12 +20,14 @@ const CATEGORY_BADGE: Record<SlashCommandCategory, { label: string; className: s
   skill: { label: 'skill', className: 'bg-accent-9/30 text-accent-5' },
   bundled: { label: 'built-in', className: 'bg-primary-9/30 text-primary-5' },
   builtin: { label: 'command', className: 'bg-neutral-8 text-neutral-4' },
+  opencode: { label: 'opencode', className: 'bg-primary-9/30 text-primary-5' },
 }
 
 const CATEGORY_ICON_CLASS: Record<SlashCommandCategory, string> = {
   skill: 'text-accent-6',
   bundled: 'text-primary-5',
   builtin: 'text-neutral-5',
+  opencode: 'text-primary-5',
 }
 
 export function SlashAutocomplete({ commands, filter, onSelect, onClose }: Props) {

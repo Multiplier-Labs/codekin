@@ -365,6 +365,29 @@ describe('SessionManager', () => {
       vi.useRealTimers()
     })
 
+    it('does NOT auto-deny pending prompts for agent (orchestrator child) sessions', () => {
+      vi.useFakeTimers()
+      const s = sm.create('test', '/tmp', { source: 'agent' })
+      const ws = fakeWs()
+      const cp = fakeClaudeProcess()
+      s.claudeProcess = cp
+      sm.join(s.id, ws)
+
+      const resolve = vi.fn()
+      s.pendingToolApprovals.set('test-req', { resolve, toolName: 'Bash', toolInput: { command: 'mkdir foo' }, requestId: 'test-req' })
+      s.pendingControlRequests.set('req-1', { requestId: 'req-1', toolName: 'Bash', toolInput: { command: 'ls' } })
+
+      sm.leave(s.id, ws)
+      vi.advanceTimersByTime(10_000)
+
+      // Agent sessions keep their prompts so the orchestrator can respond via API
+      expect(resolve).not.toHaveBeenCalled()
+      expect(cp.sendControlResponse).not.toHaveBeenCalled()
+      expect(s.pendingToolApprovals.size).toBe(1)
+      expect(s.pendingControlRequests.size).toBe(1)
+      vi.useRealTimers()
+    })
+
     it('cancels auto-deny if client rejoins during grace period', () => {
       vi.useFakeTimers()
       const s = sm.create('test', '/tmp')
@@ -745,7 +768,7 @@ describe('SessionManager', () => {
 
       sm.sendPromptResponse(s.id, 'always_allow', 'req-1')
 
-      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow')
+      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow_always')
       // Pattern-first: 'npm test' is patternable, stored as pattern
       expect(sm.approvalManager.getApprovals(s.workingDir).patterns).toContain('npm test *')
     })
@@ -763,7 +786,7 @@ describe('SessionManager', () => {
 
       sm.sendPromptResponse(s.id, 'always_allow', 'req-1')
 
-      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow')
+      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow_always')
       expect(sm.approvalManager.getApprovals(s.workingDir).tools).toContain('Write')
     })
 
@@ -1481,7 +1504,7 @@ describe('SessionManager', () => {
 
       // Pattern-first: 'git status' is patternable, stored as pattern
       expect(sm.approvalManager.getApprovals(s.workingDir).patterns).toContain('git status *')
-      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow')
+      expect(cp.sendControlResponse).toHaveBeenCalledWith('req-1', 'allow_always')
     })
 
   })

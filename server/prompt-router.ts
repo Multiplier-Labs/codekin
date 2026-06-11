@@ -10,6 +10,7 @@
  */
 
 import { randomUUID } from 'crypto'
+import path from 'path'
 import { ApprovalManager } from './approval-manager.js'
 import type { CodingProcess } from './coding-process.js'
 import type { PromptQuestion, Session, WsServerMessage } from './types.js'
@@ -24,6 +25,8 @@ export interface PromptRouterDeps {
   globalBroadcast(msg: WsServerMessage): void
   approvalManager: ApprovalManager
   promptListeners: Array<(sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void>
+  /** Called after the user approves a plan, so the session can transition out of plan mode. */
+  onPlanApproved(session: Session): void
 }
 
 export class PromptRouter {
@@ -131,8 +134,14 @@ export class PromptRouter {
     }
     console.log(`[control_request] session=${sessionId} tool=${toolName} requestId=${requestId}`)
 
-    if (this.resolveAutoApproval(session, toolName, toolInput) !== 'prompt') {
-      console.log(`[control_request] auto-approved: ${toolName}`)
+    const autoResult = this.resolveAutoApproval(session, toolName, toolInput)
+    if (autoResult === 'planDeny') {
+      console.log(`[control_request] denied (plan mode active): ${toolName}`)
+      cp.sendControlResponse(requestId, 'deny', undefined, PromptRouter.PLAN_MODE_DENY_MESSAGE)
+      return
+    }
+    if (autoResult !== 'prompt') {
+      console.log(`[control_request] auto-approved (${autoResult}): ${toolName}`)
       cp.sendControlResponse(requestId, 'allow')
       return
     }
@@ -272,6 +281,14 @@ export class PromptRouter {
     }
 
     const autoResult = this.resolveAutoApproval(session, toolName, toolInput)
+    if (autoResult === 'planDeny') {
+      console.log(`[tool-approval] denied (plan mode active): ${toolName}`)
+      return Promise.resolve({ allow: false, always: false, answer: PromptRouter.PLAN_MODE_DENY_MESSAGE })
+    }
+    if (autoResult === 'readOnly') {
+      console.log(`[tool-approval] auto-approved (read-only in project): ${toolName}`)
+      return Promise.resolve({ allow: true, always: false })
+    }
     if (autoResult === 'permissionMode') {
       console.log(`[tool-approval] auto-approved (permissionMode=${session.permissionMode}): ${toolName}`)
       return Promise.resolve({ allow: true, always: false })
@@ -289,12 +306,10 @@ export class PromptRouter {
       return Promise.resolve({ allow: true, always: false })
     }
 
-    // Agent child sessions with no browser client: fast-deny tools not in
-    // allowedTools rather than hanging 5 minutes on a prompt nobody will see.
-    if (session.clients.size === 0 && session.source === 'agent') {
-      console.log(`[tool-approval] fast-deny headless agent (tool not in allowedTools): ${toolName}`)
-      return Promise.resolve({ allow: false, always: false })
-    }
+    // Agent child sessions with no browser client: register the prompt and
+    // continue — the orchestrator is notified via promptListeners and can
+    // approve/deny through the API. The 5-minute approval timeout below is
+    // the backstop deny if nobody (orchestrator or user) responds.
 
     console.log(`[tool-approval] requesting approval: session=${sessionId} tool=${toolName} clients=${session.clients.size}`)
 
@@ -340,6 +355,7 @@ export class PromptRouter {
           // Dismiss the stale prompt in all clients so they don't inject
           // "allow"/"deny" as plain text after the timeout
           this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: approvalRequestId })
+          this.notifyAutoDeny(session, `Approval request for ${toolName} timed out after 5 minutes and was automatically denied.`)
           resolve({ allow: false, always: false })
         }
       }, 300_000) // 5 min for all approval types
@@ -419,6 +435,16 @@ export class PromptRouter {
   // Internal helpers
   // ---------------------------------------------------------------------------
 
+  /**
+   * Surface an automatic denial to the user as a visible system message
+   * (broadcast + history), so silent timeouts/disconnect denials are explained.
+   */
+  private notifyAutoDeny(session: Session, text: string): void {
+    const msg: WsServerMessage = { type: 'system_message', subtype: 'error', text }
+    this.deps.addToHistory(session, msg)
+    this.deps.broadcast(session, msg)
+  }
+
   /** Decode the allow/deny/always/pattern intent from a prompt response value. */
   private decodeApprovalValue(value: string | string[]): { isDeny: boolean; isAlwaysAllow: boolean; isApprovePattern: boolean } {
     const first = Array.isArray(value) ? value[0] : value
@@ -458,6 +484,10 @@ export class PromptRouter {
         session.planManager.approve(approval.requestId)
         console.log(`[plan-approval] approved`)
         approval.resolve({ allow: true, always: false })
+        // Transition the session out of plan mode (plan → acceptEdits) so the
+        // implementation phase doesn't prompt on every file edit and process
+        // restarts don't re-enter plan mode mid-implementation.
+        this.deps.onPlanApproved(session)
       }
       session.pendingToolApprovals.delete(approval.requestId)
       this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: approval.requestId })
@@ -504,6 +534,7 @@ export class PromptRouter {
           session.pendingToolApprovals.delete(reviewId)
           session.planManager.deny(reviewId)
           this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: reviewId })
+          this.notifyAutoDeny(session, 'Plan approval request timed out after 5 minutes — the plan was automatically rejected.')
           resolve({ allow: false, always: false })
         }
       }, 300_000)
@@ -593,7 +624,10 @@ export class PromptRouter {
       this.deps.approvalManager.savePatternApproval(session.groupDir ?? session.workingDir, pending.toolName, pending.toolInput)
     }
 
-    const behavior = isDeny ? 'deny' : 'allow'
+    // 'allow_always' lets providers persist the grant natively (OpenCode maps
+    // it to its 'always' reply; Claude treats it as a plain allow — Codekin's
+    // ApprovalManager handles persistence there).
+    const behavior = isDeny ? 'deny' : isAlwaysAllow ? 'allow_always' : 'allow'
     if (!session.claudeProcess?.isAlive()) return
     session.claudeProcess.sendControlResponse(pending.requestId, behavior)
   }
@@ -610,7 +644,47 @@ export class PromptRouter {
   /** Permission modes that auto-approve file-editing tools. */
   private static readonly EDIT_MODES = new Set(['acceptEdits', 'bypassPermissions', 'dangerouslySkipPermissions'])
 
-  resolveAutoApproval(session: Session, toolName: string, toolInput: Record<string, unknown>): 'registry' | 'session' | 'headless' | 'permissionMode' | 'prompt' {
+  /** Read-only tools that are safe in every permission mode (including plan). */
+  private static readonly READ_ONLY_TOOLS = new Set(['Read', 'Glob', 'Grep'])
+
+  /** File-mutating tools that must be denied (not prompted) while plan mode is active. */
+  private static readonly WRITE_TOOLS = new Set(['Write', 'Edit', 'NotebookEdit'])
+
+  /** Denial reason sent back to Claude when a write tool is blocked during planning. */
+  static readonly PLAN_MODE_DENY_MESSAGE =
+    'Plan mode is active — file modifications are blocked until the plan is approved. Present your plan with ExitPlanMode first.'
+
+  /** True while the session is in plan mode (by permission mode or active plan state machine). */
+  private isPlanModeActive(session: Session): boolean {
+    return session.permissionMode === 'plan' || session.planManager.state !== 'idle'
+  }
+
+  /**
+   * True if the tool input's target path resolves inside the session's working
+   * directory (or its group repo). Inputs without a path target the cwd and count
+   * as in-project.
+   */
+  private isPathInProject(session: Session, toolInput: Record<string, unknown>): boolean {
+    const raw = toolInput.file_path ?? toolInput.path
+    if (raw === undefined || raw === null) return true // defaults to cwd
+    if (typeof raw !== 'string') return false
+    const resolved = path.resolve(session.workingDir, raw)
+    const roots = [session.workingDir, session.groupDir].filter((r): r is string => !!r)
+    return roots.some(root => resolved === root || resolved.startsWith(root + path.sep))
+  }
+
+  resolveAutoApproval(session: Session, toolName: string, toolInput: Record<string, unknown>): 'registry' | 'session' | 'headless' | 'permissionMode' | 'readOnly' | 'planDeny' | 'prompt' {
+    // Plan mode is read-only: deny write tools outright instead of prompting,
+    // so the user can't accidentally approve an edit during planning and
+    // Claude gets a clear, parseable reason.
+    if (PromptRouter.WRITE_TOOLS.has(toolName) && this.isPlanModeActive(session)) {
+      return 'planDeny'
+    }
+    // Read-only tools on in-project paths are safe in every mode — without
+    // this, plan mode (a research mode) prompts on every Glob/Grep.
+    if (PromptRouter.READ_ONLY_TOOLS.has(toolName) && this.isPathInProject(session, toolInput)) {
+      return 'readOnly'
+    }
     // File tools are governed by permission mode, not per-tool approval.
     // The PreToolUse hook intercepts them before Claude's native permission
     // logic runs, so we must enforce permission mode here.
@@ -674,8 +748,24 @@ export class PromptRouter {
         const filePath = String(toolInput.file_path || '')
         return `Allow Read? \`${filePath}\``
       }
-      default:
-        return `Allow ${toolName}?`
+      // OpenCode permission types — toolInput carries {permission, ...metadata, patterns}
+      case 'external_directory': {
+        const target = String(toolInput.filepath || toolInput.parentDir || '')
+        const patterns = Array.isArray(toolInput.patterns) && toolInput.patterns.length
+          ? ` (${(toolInput.patterns as unknown[]).map(String).join(', ')})`
+          : ''
+        return target
+          ? `Allow access outside the project directory? \`${target}\`${patterns}`
+          : `Allow access outside the project directory?${patterns}`
+      }
+      case 'doom_loop':
+        return 'The agent appears to be repeating itself (possible loop). Allow it to continue?'
+      default: {
+        const patterns = Array.isArray(toolInput.patterns) && toolInput.patterns.length
+          ? ` \`${(toolInput.patterns as unknown[]).map(String).join(', ')}\``
+          : ''
+        return `Allow ${toolName}?${patterns}`
+      }
     }
   }
 }

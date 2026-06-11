@@ -14,6 +14,7 @@ import { scanRepoReports } from './orchestrator-reports.js'
 import { OrchestratorMemory } from './orchestrator-memory.js'
 import { runAgingCycle, getPendingOutcomeAssessments } from './orchestrator-learning.js'
 import { getOrchestratorSessionId } from './orchestrator-manager.js'
+import { getOrchestratorOutbox } from './orchestrator-outbox.js'
 import { REPOS_ROOT, getAgentDisplayName } from './config.js'
 import { loadWorkflowConfig, type ReviewRepoConfig } from './workflow-config.js'
 
@@ -273,7 +274,18 @@ export class OrchestratorMonitor {
     if (!orchestratorId) return
 
     const session = this.sessions.get(orchestratorId)
-    if (!session?.claudeProcess?.isAlive()) return
+    if (!session?.claudeProcess?.isAlive()) {
+      // Orchestrator not running — hand the notification to the persistent
+      // outbox so it is replayed (as a digest) when the session comes back,
+      // instead of rotting in the in-memory buffer forever.
+      getOrchestratorOutbox().enqueue({
+        label: notification.severity.toUpperCase(),
+        title: notification.title,
+        body: notification.body,
+      })
+      notification.delivered = true
+      return
+    }
 
     // Send as a system message that the orchestrator will see and respond to
     const message = `[Agent ${getAgentDisplayName()} Notification — ${notification.severity.toUpperCase()}]\n${notification.title}\n${notification.body}`
@@ -281,28 +293,45 @@ export class OrchestratorMonitor {
     notification.delivered = true
   }
 
-  /** Discover repo paths from REPOS_ROOT. */
+  /** Discover repo paths from REPOS_ROOT (see discoverRepoPathsUnder). */
   private discoverRepoPaths(): string[] {
-    if (!existsSync(REPOS_ROOT)) return []
-    try {
-      return readdirSync(REPOS_ROOT)
-        .map(name => join(REPOS_ROOT, name))
-        .filter(p => {
-          try {
-            return statSync(p).isDirectory() && existsSync(join(p, '.git'))
-          } catch {
-            return false
-          }
-        })
-    } catch {
-      return []
-    }
+    return discoverRepoPathsUnder(REPOS_ROOT)
   }
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Discover git repositories under a root directory, recursing one level into
+ * non-repo directories so org-style layouts (root/org/repo) are picked up
+ * alongside flat ones (root/repo). Unreadable entries are skipped.
+ */
+export function discoverRepoPathsUnder(root: string): string[] {
+  if (!existsSync(root)) return []
+  const repos: string[] = []
+  const scan = (dir: string, depth: number): void => {
+    let entries: string[]
+    try {
+      entries = readdirSync(dir)
+    } catch {
+      return
+    }
+    for (const name of entries) {
+      const p = join(dir, name)
+      try {
+        if (!statSync(p).isDirectory()) continue
+        if (existsSync(join(p, '.git'))) repos.push(p)
+        else if (depth < 2) scan(p, depth + 1)
+      } catch {
+        // unreadable entry — skip
+      }
+    }
+  }
+  scan(root, 1)
+  return repos
+}
 
 /**
  * Suppress passive-repo alerts unless at least one workflow is enabled for the

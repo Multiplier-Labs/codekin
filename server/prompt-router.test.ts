@@ -73,6 +73,7 @@ function makeDeps(session: Session, overrides: Partial<PromptRouterDeps> = {}): 
       NEVER_AUTO_APPROVE_TOOLS: new Set(),
     } as any,
     promptListeners: [],
+    onPlanApproved: vi.fn(),
     ...overrides,
   }
 }
@@ -103,8 +104,36 @@ describe('PromptRouter', () => {
   describe('resolveAutoApproval', () => {
     it('returns "permissionMode" for file tools in acceptEdits mode', () => {
       session.permissionMode = 'acceptEdits'
-      const result = router.resolveAutoApproval(session, 'Read', {})
+      const result = router.resolveAutoApproval(session, 'Write', {})
       expect(result).toBe('permissionMode')
+    })
+
+    it('returns "readOnly" for in-project read-only tools regardless of mode', () => {
+      session.permissionMode = 'acceptEdits'
+      expect(router.resolveAutoApproval(session, 'Read', {})).toBe('readOnly')
+      session.permissionMode = 'default'
+      expect(router.resolveAutoApproval(session, 'Read', { file_path: '/repos/test/src/index.ts' })).toBe('readOnly')
+      expect(router.resolveAutoApproval(session, 'Glob', { path: '/repos/test' })).toBe('readOnly')
+      expect(router.resolveAutoApproval(session, 'Grep', {})).toBe('readOnly')
+    })
+
+    it('does not auto-approve read-only tools outside the project', () => {
+      session.permissionMode = 'default'
+      expect(router.resolveAutoApproval(session, 'Read', { file_path: '/etc/passwd' })).toBe('prompt')
+      expect(router.resolveAutoApproval(session, 'Glob', { path: '/home/other' })).toBe('prompt')
+    })
+
+    it('returns "planDeny" for write tools while plan mode is active', () => {
+      session.permissionMode = 'plan'
+      expect(router.resolveAutoApproval(session, 'Write', { file_path: '/repos/test/a.ts' })).toBe('planDeny')
+      expect(router.resolveAutoApproval(session, 'Edit', {})).toBe('planDeny')
+      expect(router.resolveAutoApproval(session, 'NotebookEdit', {})).toBe('planDeny')
+    })
+
+    it('returns "planDeny" while PlanManager is active even if mode is not plan', () => {
+      session.permissionMode = 'default'
+      ;(session.planManager as any).state = 'planning'
+      expect(router.resolveAutoApproval(session, 'Write', {})).toBe('planDeny')
     })
 
     it('returns "permissionMode" for Edit in bypassPermissions mode', () => {
@@ -112,9 +141,9 @@ describe('PromptRouter', () => {
       expect(router.resolveAutoApproval(session, 'Edit', {})).toBe('permissionMode')
     })
 
-    it('does not auto-approve file tools in default mode', () => {
+    it('does not auto-approve write tools in default mode', () => {
       session.permissionMode = 'default'
-      expect(router.resolveAutoApproval(session, 'Read', {})).toBe('prompt')
+      expect(router.resolveAutoApproval(session, 'Write', {})).toBe('prompt')
     })
 
     it('returns "registry" when approval manager matches', () => {
@@ -199,6 +228,28 @@ describe('PromptRouter', () => {
       ;(deps.getSession as any).mockReturnValue(undefined)
       const result = await router.requestToolApproval('no-exist', 'Bash', {})
       expect(result).toEqual({ allow: false, always: false })
+    })
+
+    it('registers a pending approval (not fast-deny) for headless agent sessions', async () => {
+      session.source = 'agent'
+      session.clients = new Set() as any
+      session.allowedTools = ['Bash(git:*)']
+      const listener = vi.fn()
+      deps.promptListeners.push(listener)
+
+      // Don't await — the promise stays pending until someone responds
+      void router.requestToolApproval('sess-1', 'Bash', { command: 'mkdir -p src' })
+
+      // The prompt is registered so the orchestrator can respond via API
+      expect(session.pendingToolApprovals.size).toBe(1)
+      // Prompt listeners (orchestrator child manager) are notified immediately
+      expect(listener).toHaveBeenCalledWith('sess-1', 'permission', 'Bash', expect.any(String))
+      // And the prompt is global-broadcast so a browsing user can also see it
+      expect(deps.globalBroadcast).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'prompt',
+        sessionId: 'sess-1',
+        toolName: 'Bash',
+      }))
     })
 
     it('broadcasts prompt to clients when approval needed', async () => {
@@ -373,6 +424,18 @@ describe('PromptRouter', () => {
       expect(deps.approvalManager.saveAlwaysAllow).toHaveBeenCalledWith('/repos/test', 'Bash', { command: 'npm test' })
     })
 
+    it('forwards always_allow to the provider as allow_always', () => {
+      session.pendingControlRequests.set('cr-4', {
+        requestId: 'cr-4',
+        toolName: 'Bash',
+        toolInput: { command: 'npm test' },
+      })
+
+      router.sendPromptResponse('sess-1', 'always_allow', 'cr-4')
+
+      expect(session.claudeProcess!.sendControlResponse).toHaveBeenCalledWith('cr-4', 'allow_always')
+    })
+
     it('infers sole pending prompt when no requestId given', () => {
       session.pendingControlRequests.set('cr-only', {
         requestId: 'cr-only',
@@ -421,6 +484,33 @@ describe('PromptRouter', () => {
 
     it('formats unknown tools', () => {
       expect(router.summarizeToolPermission('WebFetch', {})).toBe('Allow WebFetch?')
+    })
+
+    it('formats OpenCode external_directory with filepath and patterns', () => {
+      const result = router.summarizeToolPermission('external_directory', {
+        permission: 'external_directory',
+        filepath: '/etc/hosts',
+        patterns: ['/etc/*'],
+      })
+      expect(result).toContain('outside the project directory')
+      expect(result).toContain('/etc/hosts')
+      expect(result).toContain('/etc/*')
+    })
+
+    it('formats OpenCode external_directory without metadata', () => {
+      const result = router.summarizeToolPermission('external_directory', { permission: 'external_directory' })
+      expect(result).toContain('outside the project directory')
+    })
+
+    it('formats OpenCode doom_loop', () => {
+      const result = router.summarizeToolPermission('doom_loop', { permission: 'doom_loop' })
+      expect(result).toContain('repeating itself')
+    })
+
+    it('includes patterns for unknown OpenCode permission types', () => {
+      const result = router.summarizeToolPermission('webfetch', { permission: 'webfetch', patterns: ['https://example.com/*'] })
+      expect(result).toContain('Allow webfetch?')
+      expect(result).toContain('https://example.com/*')
     })
   })
 

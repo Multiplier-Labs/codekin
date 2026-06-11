@@ -12,7 +12,7 @@
  */
 
 import { useRef, useCallback, useEffect, useState } from 'react'
-import type { WsClientMessage, WsServerMessage, ChatMessage, TaskItem, PermissionMode } from '../types'
+import type { WsClientMessage, WsServerMessage, ChatMessage, TaskItem, PermissionMode, SessionUsage } from '../types'
 import { usePromptState } from './usePromptState'
 import { useWsConnection } from './useWsConnection'
 
@@ -180,6 +180,7 @@ export function useChatSocket({
     (localStorage.getItem('claude-permission-mode') as PermissionMode) || 'acceptEdits'
   )
   const [thinkingSummary, setThinkingSummary] = useState<string | null>(null)
+  const [usage, setUsage] = useState<SessionUsage | null>(null)
   const promptState = usePromptState()
   const currentSessionId = useRef<string | null>(null)
   /** True after the socket drops (e.g. server restart) until the session rejoins. */
@@ -291,8 +292,19 @@ export function useChatSocket({
         setMessages(prev => trimMessages(processMessage(prev, msg)))
         break
 
+      // Structured server-driven mode change (plan approval, fallback restart,
+      // another client switching modes) — keeps the toolbar in sync.
+      case 'permission_mode_changed':
+        setCurrentPermissionMode(msg.permissionMode)
+        localStorage.setItem('claude-permission-mode', msg.permissionMode)
+        break
+
       case 'todo_update':
         setTasks(msg.tasks)
+        break
+
+      case 'usage':
+        setUsage({ inputTokens: msg.inputTokens, outputTokens: msg.outputTokens, costUsd: msg.costUsd })
         break
 
       // Prompt handling: permission requests and questions from Claude's control protocol.
@@ -319,6 +331,7 @@ export function useChatSocket({
         setRenderSessionId(msg.sessionId)
         setMessages([])
         setTasks([])
+        setUsage(null)
         setIsProcessing(false)
         setThinkingSummary(null)
         callbacksRef.current.onSessionCreated?.(msg.sessionId)
@@ -341,6 +354,7 @@ export function useChatSocket({
         let rebuilt: ChatMessage[] = []
         let restoredPlanMode = false
         let restoredTasks: TaskItem[] = []
+        let restoredUsage: SessionUsage | null = null
         if (msg.outputBuffer?.length) {
           rebuilt = rebuildFromHistory(msg.outputBuffer)
           for (const bufferedMsg of msg.outputBuffer) {
@@ -349,6 +363,9 @@ export function useChatSocket({
             }
             if (bufferedMsg.type === 'todo_update') {
               restoredTasks = bufferedMsg.tasks
+            }
+            if (bufferedMsg.type === 'usage') {
+              restoredUsage = { inputTokens: bufferedMsg.inputTokens, outputTokens: bufferedMsg.outputTokens, costUsd: bufferedMsg.costUsd }
             }
           }
         }
@@ -359,8 +376,11 @@ export function useChatSocket({
           wasDisconnectedRef.current = false
           rebuilt.push({ type: 'system', subtype: 'init', text: RECONNECT_TEXT, key: nextKey() })
         }
-        setPlanningMode(restoredPlanMode)
+        // Prefer the server's authoritative plan state over the value
+        // reconstructed from (possibly truncated) history.
+        setPlanningMode(msg.planState ? msg.planState !== 'idle' : restoredPlanMode)
         setTasks(restoredTasks)
+        setUsage(restoredUsage)
         setMessages(trimMessages(rebuilt))
         callbacksRef.current.onSessionJoined?.(msg.sessionId)
         break
@@ -515,6 +535,7 @@ export function useChatSocket({
     connState,
     messages,
     tasks,
+    usage,
     planningMode,
     isProcessing,
     thinkingSummary,

@@ -27,8 +27,10 @@ import { useSendMessage } from './hooks/useSendMessage'
 import { useErrorNotification } from './hooks/useErrorNotification'
 import { useGlobalKeyBindings } from './hooks/useGlobalKeyBindings'
 import { useOpenCodeModelSync } from './hooks/useOpenCodeModelSync'
+import { useCodexModelSync } from './hooks/useCodexModelSync'
+import { useOpenCodeCommands } from './hooks/useOpenCodeCommands'
 import { useProviderValidation } from './hooks/useProviderValidation'
-import { buildSlashCommandList } from './lib/slashCommands'
+import { buildSlashCommandList, buildOpenCodeSlashCommandList } from './lib/slashCommands'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { getQueueMessages, getAgentName } from './lib/ccApi'
 import { Settings } from './components/Settings'
@@ -126,6 +128,7 @@ export default function App() {
     connState,
     messages,
     tasks,
+    usage,
     planningMode,
     isProcessing,
     thinkingSummary,
@@ -179,8 +182,10 @@ export default function App() {
         diffHandleMessageRef.current(msg)
       } else if (msg.type === 'tool_done') {
         diffHandleToolDoneRef.current(msg.toolName, msg.summary)
-        // Track file-mutating tools to show Code Review button
-        if (msg.toolName === 'Edit' || msg.toolName === 'Write') {
+        // Track file-mutating tools to show Code Review button.
+        // Case-insensitive: Claude reports 'Edit'/'Write', OpenCode 'edit'/'write'/'patch'.
+        const tool = msg.toolName.toLowerCase()
+        if (tool === 'edit' || tool === 'write' || tool === 'patch') {
           setHasFileChanges(true)
         }
       }
@@ -199,6 +204,7 @@ export default function App() {
   )
   const [claudeDisabled, setClaudeDisabled] = useState(false)
   const [openCodeDisabled, setOpenCodeDisabled] = useState(false)
+  const [codexDisabled, setCodexDisabled] = useState(false)
   // Derive the active session's provider (falls back to the default for new sessions)
   const activeSessionProvider = sessions.find(s => s.id === activeSessionId)?.provider ?? currentProvider
 
@@ -214,12 +220,21 @@ export default function App() {
     setModel,
     openCodeDisabled,
   })
+  const { codexModels, codexConnected, setCodexConnected, reconnect: reconnectCodex } = useCodexModelSync({
+    token: settings.token,
+    activeSessionProvider,
+    currentModel,
+    setModel,
+    codexDisabled,
+  })
   const { claudeModels } = useClaudeModelSync({
     token: settings.token,
     currentModel,
     setModel,
   })
-  const availableModels = activeSessionProvider === 'opencode' ? openCodeModels : claudeModels
+  const availableModels = activeSessionProvider === 'opencode' ? openCodeModels
+    : activeSessionProvider === 'codex' ? codexModels
+    : claudeModels
 
   // Reset file-change tracking when switching sessions
   useEffect(() => {
@@ -259,6 +274,20 @@ export default function App() {
     ? repos.find(r => r.workingDir === activeWorkingDir) ?? null
     : null
 
+  // Re-scan repos (and their .claude/skills) when switching to a different
+  // repo, so skills added or edited mid-session show up without a reload.
+  // Guarded by the last-refreshed dir so joining sessions in the same repo
+  // doesn't refetch.
+  const lastSkillRefreshDirRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!activeWorkingDir) return
+    if (lastSkillRefreshDirRef.current === activeWorkingDir) return
+    const isFirstRepo = lastSkillRefreshDirRef.current === null
+    lastSkillRefreshDirRef.current = activeWorkingDir
+    // Skip the initial mount — useRepos already fetches on mount.
+    if (!isFirstRepo) refreshRepos()
+  }, [activeWorkingDir, refreshRepos])
+
   // All available skills for the current session (global + repo)
   const allSkills = useMemo(() => [
     ...globalSkills,
@@ -268,11 +297,25 @@ export default function App() {
   // Unified slash command list for autocomplete (skills + bundled + built-in)
   const allCommands = useMemo(() => buildSlashCommandList(allSkills), [allSkills])
 
+  // OpenCode sessions get the server's own commands instead of Claude skills
+  const openCodeCommands = useOpenCodeCommands({
+    token: settings.token,
+    activeSessionProvider,
+    activeOpenCodeWd,
+    openCodeDisabled,
+  })
+  const sessionCommands = useMemo(
+    () => activeSessionProvider === 'opencode' ? buildOpenCodeSlashCommandList(openCodeCommands) : allCommands,
+    [activeSessionProvider, openCodeCommands, allCommands],
+  )
+
   // Wrap setModel to also persist OpenCode model selection to localStorage
   const handleModelChange = useCallback((model: string) => {
     setModel(model)
     if (activeSessionProvider === 'opencode') {
       localStorage.setItem('opencode-model', model)
+    } else if (activeSessionProvider === 'codex') {
+      localStorage.setItem('codex-model', model)
     }
   }, [setModel, activeSessionProvider])
 
@@ -287,7 +330,14 @@ export default function App() {
         if (activeWorkingDir) handleNewSessionForRepo()
         break
       case '/compact':
-        sendInput('Please compact the conversation context to save tokens while preserving important context.')
+        // OpenCode has a native summarize endpoint — the server maps the
+        // literal /compact to POST /session/:id/summarize. Claude (stream-json)
+        // has no such command, so ask the model to compact in-band.
+        if (activeSessionProvider === 'opencode') {
+          sendInput('/compact')
+        } else {
+          sendInput('Please compact the conversation context to save tokens while preserving important context.')
+        }
         break
       case '/model':
         if (args) {
@@ -303,7 +353,7 @@ export default function App() {
         sendInput(`[Codekin] Command ${command} is not available in the web UI.`)
         break
     }
-  }, [leaveSession, clearMessages, activeWorkingDir, handleNewSessionForRepo, sendInput, currentModel, handleModelChange])
+  }, [leaveSession, clearMessages, activeWorkingDir, handleNewSessionForRepo, sendInput, currentModel, handleModelChange, activeSessionProvider])
 
   // Message sending: file uploads, skill expansion, tentative queue
   const {
@@ -496,6 +546,20 @@ export default function App() {
     }
   }, [openCodeDisabled, activeSessionProvider, activeSessionId, leaveSession, reconnectOpenCode, setOpenCodeConnected])
 
+  const handleToggleCodex = useCallback(() => {
+    if (codexDisabled) {
+      setCodexDisabled(false)
+      reconnectCodex()
+    } else {
+      setCodexDisabled(true)
+      setCodexConnected(false)
+      // Leave the current session if it's a Codex session
+      if (activeSessionProvider === 'codex' && activeSessionId) {
+        leaveSession()
+      }
+    }
+  }, [codexDisabled, activeSessionProvider, activeSessionId, leaveSession, reconnectCodex, setCodexConnected])
+
   const activeSession = sessions.find(s => s.id === activeSessionId)
   const activeSessionName = activeSession?.name ?? null
   const activeRepoName = activeRepo?.name ?? activeWorkingDir?.split('/').pop() ?? null
@@ -526,6 +590,9 @@ export default function App() {
         openCodeDisabled={openCodeDisabled}
         onToggleClaude={handleToggleClaude}
         onToggleOpenCode={handleToggleOpenCode}
+        codexConnected={codexConnected}
+        codexDisabled={codexDisabled}
+        onToggleCodex={handleToggleCodex}
         view={view}
         archiveRefreshKey={archiveRefreshKey}
         onSelectSession={(id) => { docsBrowser.close(); if (view === 'orchestrator') navigate(`/s/${id}`); handleSelectSession(id) }}
@@ -646,7 +713,7 @@ export default function App() {
             onAddFiles={addFiles}
             onRemoveFile={removeFile}
             skillGroups={skillGroups}
-            slashCommands={allCommands}
+            slashCommands={sessionCommands}
             sessionInputs={sessionInputs}
             onSessionInputChange={handleSessionInputChange}
             currentModel={currentModel}
@@ -683,12 +750,14 @@ export default function App() {
             onAddFiles={addFiles}
             onRemoveFile={removeFile}
             skillGroups={skillGroups}
-            slashCommands={allCommands}
+            slashCommands={sessionCommands}
             sessionInputs={sessionInputs}
             onSessionInputChange={handleSessionInputChange}
             currentModel={currentModel}
             onModelChange={handleModelChange}
             availableModels={availableModels}
+            sessionProvider={activeSessionProvider}
+            usage={usage}
             hasUserMessages={messages.some(m => m.type === 'user')}
             useWorktree={useWorktree}
             onWorktreeChange={setUseWorktree}
@@ -697,7 +766,8 @@ export default function App() {
             moveToWorktree={moveToWorktree}
             worktreePath={activeSession?.worktreePath}
             openCodeConnected={activeSessionProvider === 'opencode' ? (openCodeDisabled ? false : openCodeConnected) : null}
-            claudeDisabled={activeSessionProvider !== 'opencode' && claudeDisabled}
+            codexConnected={activeSessionProvider === 'codex' ? (codexDisabled ? false : codexConnected) : null}
+            claudeDisabled={activeSessionProvider === 'claude' && claudeDisabled}
           />
         ) : (
           <RepoSelector groups={groups} token={settings.token} ghMissing={ghMissing} onOpen={handleOpenSession} onRefreshRepos={refreshRepos} />

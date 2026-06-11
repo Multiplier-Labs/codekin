@@ -12,6 +12,7 @@ import { existsSync } from 'fs'
 import path from 'path'
 import { ClaudeProcess } from './claude-process.js'
 import { OpenCodeProcess } from './opencode-process.js'
+import { CodexProcess } from './codex-process.js'
 import type { CodingProcess } from './coding-process.js'
 import { ApprovalManager } from './approval-manager.js'
 import type { PromptRouter } from './prompt-router.js'
@@ -150,9 +151,25 @@ export class SessionLifecycle {
     const mergedAllowedTools = [...new Set([...(session.allowedTools || []), ...registryPatterns])]
     let cp: CodingProcess
     if (session.provider === 'opencode') {
+      // Recent assistant text already shown to the user — lets the resumed
+      // process skip re-emitting messages during missed-history hydration.
+      const recentOutputText = session.outputHistory
+        .filter((m): m is { type: 'output'; data: string } => m.type === 'output')
+        .slice(-100)
+        .map((m) => m.data)
+        .join('')
       cp = new OpenCodeProcess(session.workingDir, {
         sessionId: sessionId,
         opencodeSessionId: session.claudeSessionId || undefined,
+        model: session.model,
+        extraEnv,
+        permissionMode: session.permissionMode,
+        recentOutputText,
+      })
+    } else if (session.provider === 'codex') {
+      cp = new CodexProcess(session.workingDir, {
+        sessionId: sessionId,
+        codexThreadId: session.claudeSessionId || undefined,
         model: session.model,
         extraEnv,
         permissionMode: session.permissionMode,
@@ -173,6 +190,13 @@ export class SessionLifecycle {
 
     cp.start()
     session.claudeProcess = cp
+
+    // When spawning directly in plan mode (--permission-mode plan), the CLI
+    // never emits an EnterPlanMode tool call — arm the PlanManager here so
+    // ExitPlanMode still routes through user approval instead of auto-allowing.
+    if (session.permissionMode === 'plan') {
+      session.planManager.onEnterPlanMode()
+    }
     this.deps.globalBroadcast?.({ type: 'sessions_updated' })
 
     // Only show "Session started" for the very first start, not for restarts
@@ -239,6 +263,7 @@ export class SessionLifecycle {
       // ExitPlanMode stream event intentionally ignored — hook handles it.
     })
     cp.on('todo_update', (tasks) => { this.deps.broadcastAndHistory(session, { type: 'todo_update', tasks }) })
+    cp.on('usage', (usage) => { this.deps.broadcastAndHistory(session, { type: 'usage', ...usage }) })
     cp.on('prompt', (...args) => this.deps.promptRouter.onPromptEvent(session, ...args))
     cp.on('control_request', (requestId, toolName, toolInput) => this.deps.promptRouter.onControlRequestEvent(cp, session, sessionId, requestId, toolName, toolInput))
     cp.on('result', (result, isError) => {
