@@ -310,7 +310,7 @@ interface InputBarProps {
   /** Available models for the current provider. */
   availableModels?: ModelOption[]
   /** Coding provider of the active session — filters provider-specific permission modes. */
-  sessionProvider?: 'claude' | 'opencode'
+  sessionProvider?: import('../types').CodingProvider
   /** Cumulative token/cost usage for the session — shown as a small toolbar indicator. */
   usage?: import('../types').SessionUsage | null
   /** Override the default placeholder text in the textarea. */
@@ -337,9 +337,9 @@ interface InputBarProps {
 
 export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, availableModels = [], sessionProvider, usage, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
   const isOrchestrator = variant === 'orchestrator'
-  // OpenCode has no equivalent of Claude's --dangerously-skip-permissions flag;
-  // bypassPermissions (all-allow ruleset) already covers that use case.
-  const visibleModes = sessionProvider === 'opencode'
+  // OpenCode and Codex have no equivalent of Claude's --dangerously-skip-permissions
+  // flag; bypassPermissions already covers that use case for both.
+  const visibleModes = sessionProvider === 'opencode' || sessionProvider === 'codex'
     ? PERMISSION_MODES.filter(m => m.id !== 'dangerouslySkipPermissions')
     : PERMISSION_MODES
   const [value, setValue] = useState(initialValue)

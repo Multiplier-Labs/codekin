@@ -48,17 +48,27 @@ export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermiss
  * Supported AI coding assistant providers.
  * - 'claude': Claude Code CLI (subprocess, NDJSON on stdin/stdout)
  * - 'opencode': OpenCode server (HTTP REST + SSE)
+ * - 'codex': OpenAI Codex CLI (subprocess, `codex app-server` JSON-RPC on stdin/stdout)
  */
-export type CodingProvider = 'claude' | 'opencode'
+export type CodingProvider = 'claude' | 'opencode' | 'codex'
 
 /** Provider metadata for the UI selector. */
 export const PROVIDERS: { id: CodingProvider; label: string; description: string }[] = [
   { id: 'claude', label: 'Claude Code', description: 'Anthropic Claude Code CLI' },
   { id: 'opencode', label: 'OpenCode', description: 'OpenCode server (multi-provider)' },
+  { id: 'codex', label: 'Codex', description: 'OpenAI Codex CLI (ChatGPT subscription)' },
 ]
 
 /** Model option for UI selectors. */
 export interface ModelOption { id: string; label: string }
+
+/** Static models for the OpenAI Codex CLI. Used as fallback before dynamic discovery completes. */
+export const CODEX_MODELS: ModelOption[] = [
+  { id: 'gpt-5.5', label: 'GPT-5.5' },
+  { id: 'gpt-5.4', label: 'GPT-5.4' },
+  { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
+  { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
+]
 
 /** Static models for Claude Code CLI. Used as fallback before dynamic discovery completes. */
 export const CLAUDE_MODELS: ModelOption[] = [
@@ -169,7 +179,7 @@ export interface SessionUsage {
  * `webhook_event` and `workflow_event` are broadcast to all clients, not session-scoped.
  */
 export type WsServerMessage =
-  | { type: 'connected'; connectionId: string; claudeAvailable: boolean; claudeVersion: string; apiKeySet: boolean }
+  | { type: 'connected'; connectionId: string; claudeAvailable: boolean; claudeVersion: string; apiKeySet: boolean; codexAvailable?: boolean; codexAuthenticated?: boolean }
   | { type: 'session_created'; sessionId: string; sessionName: string; workingDir: string }
   | { type: 'session_joined'; sessionId: string; sessionName: string; workingDir: string; active: boolean; outputBuffer: WsServerMessage[]; model?: string; permissionMode?: PermissionMode }
   | { type: 'session_left' }
