@@ -69,10 +69,10 @@ export interface CodingProcess extends EventEmitter<ClaudeProcessEvents> {
 
   /**
    * Respond to a permission/control request.
-   * Claude: writes control_response JSON to stdin.
-   * OpenCode: POSTs to /permission/:requestId/reply.
+   * Claude: writes control_response JSON to stdin ('allow_always' = 'allow').
+   * OpenCode: POSTs to /permission/:requestId/reply (once/always/reject).
    */
-  sendControlResponse(requestId: string, behavior: 'allow' | 'deny', updatedInput?: Record<string, unknown>, message?: string): void
+  sendControlResponse(requestId: string, behavior: 'allow' | 'deny' | 'allow_always', updatedInput?: Record<string, unknown>, message?: string): void
 
   /** Whether the process is currently running and accepting input. */
   isAlive(): boolean

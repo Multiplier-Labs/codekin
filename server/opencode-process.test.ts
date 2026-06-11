@@ -26,7 +26,10 @@ vi.mock('child_process', async (importOriginal) => {
   }
 })
 
-import { OpenCodeProcess, stopOpenCodeServer } from './opencode-process.js'
+import { OpenCodeProcess, stopOpenCodeServer, permissionRulesetFor, OPENCODE_SYSTEM_CONTEXT, isVersionOlder, MIN_TESTED_OPENCODE_VERSION } from './opencode-process.js'
+import { writeFileSync, mkdtempSync, rmSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { OPENCODE_CAPABILITIES } from './coding-process.js'
 
 describe('OpenCodeProcess', () => {
@@ -532,6 +535,306 @@ describe('OpenCodeProcess', () => {
       ocp.sendControlResponse('req-2', 'deny')
       expect(replyFn).toHaveBeenCalledWith('req-2', 'reject')
     })
+
+    it('sendControlResponse maps allow_always to always', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const replyFn = vi.spyOn(ocp as any, 'replyToPermission').mockResolvedValue(undefined)
+      ocp.sendControlResponse('req-3', 'allow_always')
+      expect(replyFn).toHaveBeenCalledWith('req-3', 'always')
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Turn lifecycle hardening
+  // ---------------------------------------------------------------------------
+
+  describe('turn lifecycle', () => {
+    it('emits result only once even when multiple idle events arrive', () => {
+      const resultHandler = vi.fn()
+      ocp.on('result', resultHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'session.idle',
+        properties: { sessionID: 'oc-session-1' },
+      })
+      callHandleSSE(ocp, {
+        type: 'message.completed',
+        properties: { sessionID: 'oc-session-1' },
+      })
+      callHandleSSE(ocp, {
+        type: 'session.status',
+        properties: { sessionID: 'oc-session-1', status: { type: 'idle' } },
+      })
+      expect(resultHandler).toHaveBeenCalledTimes(1)
+    })
+
+    it('clears the turn watchdog when the turn completes', () => {
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).startTurnWatchdog()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((ocp as any).turnWatchdog).not.toBeNull()
+
+      callHandleSSE(ocp, {
+        type: 'session.idle',
+        properties: { sessionID: 'oc-session-1' },
+      })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((ocp as any).turnWatchdog).toBeNull()
+    })
+
+    it('recovers a missed completion event via message poll', async () => {
+      const resultHandler = vi.fn()
+      ocp.on('result', resultHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).alive = true
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).turnComplete = false
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { info: { role: 'user', time: { created: 1 } } },
+          { info: { role: 'assistant', time: { created: 2, completed: 3 } } },
+        ],
+      })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (ocp as any).checkTurnLiveness(true)
+      expect(resultHandler).toHaveBeenCalledWith('', false)
+    })
+
+    it('does not force-complete when the assistant message is still running', async () => {
+      const resultHandler = vi.fn()
+      ocp.on('result', resultHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).alive = true
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { info: { role: 'assistant', time: { created: 2 } } },
+        ],
+      })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (ocp as any).checkTurnLiveness(true)
+      expect(resultHandler).not.toHaveBeenCalled()
+    })
+
+    it('handles flat message objects (no info wrapper) in poll response', async () => {
+      const resultHandler = vi.fn()
+      ocp.on('result', resultHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).alive = true
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { role: 'assistant', time: { created: 2, completed: 3 } },
+        ],
+      })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (ocp as any).checkTurnLiveness(true)
+      expect(resultHandler).toHaveBeenCalledWith('', false)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Permission mode → OpenCode permission ruleset
+  // ---------------------------------------------------------------------------
+
+  describe('permissionRulesetFor', () => {
+    it('maps bypassPermissions to an all-allow ruleset', () => {
+      expect(permissionRulesetFor('bypassPermissions')).toEqual([
+        { permission: '*', pattern: '*', action: 'allow' },
+      ])
+    })
+
+    it('maps dangerouslySkipPermissions to an all-allow ruleset', () => {
+      expect(permissionRulesetFor('dangerouslySkipPermissions')).toEqual([
+        { permission: '*', pattern: '*', action: 'allow' },
+      ])
+    })
+
+    it('maps acceptEdits to an edit-allow ruleset', () => {
+      expect(permissionRulesetFor('acceptEdits')).toEqual([
+        { permission: 'edit', pattern: '*', action: 'allow' },
+      ])
+    })
+
+    it('returns undefined for default, plan, and unset modes', () => {
+      expect(permissionRulesetFor('default')).toBeUndefined()
+      expect(permissionRulesetFor('plan')).toBeUndefined()
+      expect(permissionRulesetFor(undefined)).toBeUndefined()
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // sendMessage request body (agent, system, model, command routing)
+  // ---------------------------------------------------------------------------
+
+  describe('sendMessage request body', () => {
+    /** Prepare a connected process and capture the next outgoing request. */
+    const connect = (proc: OpenCodeProcess) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(proc as any).alive = true
+      setSessionId(proc, 'oc-session-1')
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    }
+
+    const lastRequest = () => {
+      const [url, init] = mockFetch.mock.calls[mockFetch.mock.calls.length - 1] as [string, { body: string }]
+      return { url, body: JSON.parse(init.body) as Record<string, unknown> }
+    }
+
+    it('selects the build agent and appends Codekin system context by default', () => {
+      connect(ocp)
+      ocp.sendMessage('hello')
+      const { url, body } = lastRequest()
+      expect(url).toContain('/session/oc-session-1/prompt_async')
+      expect(body.agent).toBe('build')
+      expect(body.system).toBe(OPENCODE_SYSTEM_CONTEXT)
+      expect(body.model).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+    })
+
+    it('selects the plan agent in plan mode', () => {
+      const planProc = new OpenCodeProcess('/tmp/test-repo', {
+        sessionId: 'plan-session',
+        model: 'anthropic/claude-sonnet-4',
+        permissionMode: 'plan',
+      })
+      connect(planProc)
+      planProc.sendMessage('propose a refactor')
+      const { body } = lastRequest()
+      expect(body.agent).toBe('plan')
+      planProc.stop()
+    })
+
+    it('splits OpenRouter-style model IDs at the first slash only', () => {
+      const orProc = new OpenCodeProcess('/tmp/test-repo', {
+        sessionId: 'or-session',
+        model: 'openrouter/meta-llama/llama-3.1-8b',
+      })
+      connect(orProc)
+      orProc.sendMessage('hi')
+      const { body } = lastRequest()
+      expect(body.model).toEqual({ providerID: 'openrouter', modelID: 'meta-llama/llama-3.1-8b' })
+      orProc.stop()
+    })
+
+    it('routes known slash commands to the command endpoint', () => {
+      connect(ocp)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).commands = new Map([['review', { name: 'review', source: 'command' }]])
+      ocp.sendMessage('/review src/index.ts')
+      const { url, body } = lastRequest()
+      expect(url).toContain('/session/oc-session-1/command')
+      expect(body.command).toBe('review')
+      expect(body.arguments).toBe('src/index.ts')
+      expect(body.agent).toBe('build')
+      expect(body.model).toBe('anthropic/claude-sonnet-4')
+    })
+
+    it('routes a known slash command without arguments', () => {
+      connect(ocp)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).commands = new Map([['init', { name: 'init' }]])
+      ocp.sendMessage('/init')
+      const { url, body } = lastRequest()
+      expect(url).toContain('/command')
+      expect(body.command).toBe('init')
+      expect(body.arguments).toBeUndefined()
+    })
+
+    it('sends unknown slash commands as a regular prompt', () => {
+      connect(ocp)
+      ocp.sendMessage('/not-a-command do things')
+      const { url, body } = lastRequest()
+      expect(url).toContain('/prompt_async')
+      expect((body.parts as Array<{ text: string }>)[0].text).toBe('/not-a-command do things')
+    })
+
+    it('does not route commands when attachments are present', () => {
+      connect(ocp)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).commands = new Map([['review', { name: 'review' }]])
+      // Attached file does not exist — attachment is skipped, but the message
+      // had an attachment prefix, so it must go through the prompt path.
+      ocp.sendMessage('[Attached files: /nonexistent/file.png]\n/review this')
+      const { url } = lastRequest()
+      expect(url).toContain('/prompt_async')
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // step-finish flushing
+  // ---------------------------------------------------------------------------
+
+  describe('step-finish', () => {
+    it('flushes buffered text deltas on step-finish', () => {
+      const textHandler = vi.fn()
+      ocp.on('text', textHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).lastUserInput = 'a long user message that exceeds the delta'
+
+      // Short delta — buffered awaiting the echo check
+      callHandleSSE(ocp, {
+        type: 'message.part.delta',
+        properties: { sessionID: 'oc-session-1', field: 'text', delta: 'Done.' },
+      })
+      expect(textHandler).not.toHaveBeenCalled()
+
+      // Step boundary — buffer must flush
+      callHandleSSE(ocp, {
+        type: 'message.part.updated',
+        properties: { sessionID: 'oc-session-1', part: { type: 'step-finish' } },
+      })
+      expect(textHandler).toHaveBeenCalledWith('Done.')
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Permission reply retries
+  // ---------------------------------------------------------------------------
+
+  describe('permission reply retries', () => {
+    it('emits error when all permission reply attempts fail', async () => {
+      const errorHandler = vi.fn()
+      ocp.on('error', errorHandler)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).permissionRetryDelayMs = 0
+      mockFetch.mockRejectedValue(new Error('connection refused'))
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (ocp as any).replyToPermission('perm-1', 'once')
+
+      expect(mockFetch).toHaveBeenCalledTimes(3)
+      expect(errorHandler).toHaveBeenCalledTimes(1)
+      expect(errorHandler.mock.calls[0][0]).toContain('permission response')
+    })
+
+    it('does not emit error when a retry succeeds', async () => {
+      const errorHandler = vi.fn()
+      ocp.on('error', errorHandler)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).permissionRetryDelayMs = 0
+      mockFetch
+        .mockRejectedValueOnce(new Error('connection refused'))
+        .mockResolvedValueOnce({ ok: true })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (ocp as any).replyToPermission('perm-2', 'once')
+
+      expect(mockFetch).toHaveBeenCalledTimes(2)
+      expect(errorHandler).not.toHaveBeenCalled()
+    })
   })
 
   // ---------------------------------------------------------------------------
@@ -619,6 +922,700 @@ describe('OpenCodeProcess', () => {
       })
 
       expect(todoHandler).not.toHaveBeenCalled()
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Abort on stop (in-flight turn interrupt)
+  // ---------------------------------------------------------------------------
+
+  describe('abort on stop', () => {
+    const connect = (proc: OpenCodeProcess) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(proc as any).alive = true
+      setSessionId(proc, 'oc-session-1')
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    }
+
+    it('aborts an in-flight turn when stopped', () => {
+      connect(ocp)
+      ocp.sendMessage('do something long')
+      mockFetch.mockClear()
+
+      ocp.stop()
+
+      const abortCall = mockFetch.mock.calls.find(
+        ([url]) => typeof url === 'string' && url.includes('/session/oc-session-1/abort'),
+      )
+      expect(abortCall).toBeDefined()
+      expect((abortCall![1] as { method: string }).method).toBe('POST')
+    })
+
+    it('does not abort when no turn is in flight', () => {
+      connect(ocp)
+      mockFetch.mockClear()
+
+      ocp.stop()
+
+      const abortCall = mockFetch.mock.calls.find(
+        ([url]) => typeof url === 'string' && url.includes('/abort'),
+      )
+      expect(abortCall).toBeUndefined()
+    })
+
+    it('does not abort after the turn has completed', () => {
+      connect(ocp)
+      ocp.sendMessage('quick task')
+      callHandleSSE(ocp, {
+        type: 'session.idle',
+        properties: { sessionID: 'oc-session-1' },
+      })
+      mockFetch.mockClear()
+
+      ocp.stop()
+
+      const abortCall = mockFetch.mock.calls.find(
+        ([url]) => typeof url === 'string' && url.includes('/abort'),
+      )
+      expect(abortCall).toBeUndefined()
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // /compact → native summarize endpoint
+  // ---------------------------------------------------------------------------
+
+  describe('compact command', () => {
+    const connect = (proc: OpenCodeProcess) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(proc as any).alive = true
+      setSessionId(proc, 'oc-session-1')
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    }
+
+    const lastRequest = () => {
+      const [url, init] = mockFetch.mock.calls[mockFetch.mock.calls.length - 1] as [string, { method: string; body: string }]
+      return { url, method: init.method, body: JSON.parse(init.body) as Record<string, unknown> }
+    }
+
+    it('routes /compact to the summarize endpoint with the session model', () => {
+      connect(ocp)
+      ocp.sendMessage('/compact')
+      const { url, method, body } = lastRequest()
+      expect(url).toContain('/session/oc-session-1/summarize')
+      expect(method).toBe('POST')
+      expect(body).toEqual({ providerID: 'anthropic', modelID: 'claude-sonnet-4' })
+    })
+
+    it('routes /summarize to the summarize endpoint', () => {
+      connect(ocp)
+      ocp.sendMessage('/summarize')
+      const { url } = lastRequest()
+      expect(url).toContain('/session/oc-session-1/summarize')
+    })
+
+    it('sends an empty body when no model is set', () => {
+      const noModelProc = new OpenCodeProcess('/tmp/test-repo', { sessionId: 'no-model' })
+      connect(noModelProc)
+      noModelProc.sendMessage('/compact')
+      const { body } = lastRequest()
+      expect(body).toEqual({})
+      noModelProc.stop()
+    })
+
+    it('emits error when the summarize request fails', async () => {
+      connect(ocp)
+      const errorHandler = vi.fn()
+      ocp.on('error', errorHandler)
+      mockFetch.mockResolvedValue({ ok: false, status: 500 })
+
+      ocp.sendMessage('/compact')
+      await vi.waitFor(() => {
+        expect(errorHandler).toHaveBeenCalledWith('Failed to compact conversation: HTTP 500')
+      })
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Token/cost usage tracking
+  // ---------------------------------------------------------------------------
+
+  describe('usage tracking', () => {
+    it('emits cumulative usage from assistant message.updated tokens', () => {
+      const usageHandler = vi.fn()
+      ocp.on('usage', usageHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'message.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          info: {
+            id: 'm1',
+            role: 'assistant',
+            cost: 0.01,
+            tokens: { input: 100, output: 50, reasoning: 10, cache: { read: 20, write: 5 } },
+          },
+        },
+      })
+
+      expect(usageHandler).toHaveBeenCalledTimes(1)
+      expect(usageHandler).toHaveBeenCalledWith({ inputTokens: 125, outputTokens: 60, costUsd: 0.01 })
+    })
+
+    it('suppresses duplicate usage emissions for unchanged totals', () => {
+      const usageHandler = vi.fn()
+      ocp.on('usage', usageHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      const event = {
+        type: 'message.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          info: { id: 'm1', role: 'assistant', cost: 0.01, tokens: { input: 100, output: 50 } },
+        },
+      }
+      callHandleSSE(ocp, event)
+      callHandleSSE(ocp, event)
+
+      expect(usageHandler).toHaveBeenCalledTimes(1)
+    })
+
+    it('accumulates usage across messages and replaces same-message updates', () => {
+      const usageHandler = vi.fn()
+      ocp.on('usage', usageHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'message.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          info: { id: 'm1', role: 'assistant', cost: 0.01, tokens: { input: 100, output: 50 } },
+        },
+      })
+      // Same message grows (message.updated fires repeatedly) — replaces, not adds
+      callHandleSSE(ocp, {
+        type: 'message.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          info: { id: 'm1', role: 'assistant', cost: 0.02, tokens: { input: 150, output: 80 } },
+        },
+      })
+      // A second message accumulates on top
+      callHandleSSE(ocp, {
+        type: 'message.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          info: { id: 'm2', role: 'assistant', cost: 0.01, tokens: { input: 50, output: 20 } },
+        },
+      })
+
+      expect(usageHandler).toHaveBeenCalledTimes(3)
+      expect(usageHandler).toHaveBeenNthCalledWith(2, { inputTokens: 150, outputTokens: 80, costUsd: 0.02 })
+      expect(usageHandler).toHaveBeenNthCalledWith(3, { inputTokens: 200, outputTokens: 100, costUsd: 0.03 })
+    })
+
+    it('does not emit usage when tokens are absent or zero', () => {
+      const usageHandler = vi.fn()
+      ocp.on('usage', usageHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'message.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          info: { id: 'm1', role: 'assistant' },
+        },
+      })
+      callHandleSSE(ocp, {
+        type: 'message.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          info: { id: 'm2', role: 'assistant', tokens: { input: 0, output: 0 } },
+        },
+      })
+
+      expect(usageHandler).not.toHaveBeenCalled()
+    })
+
+    it('ignores usage on non-assistant messages', () => {
+      const usageHandler = vi.fn()
+      ocp.on('usage', usageHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'message.updated',
+        properties: {
+          sessionID: 'oc-session-1',
+          info: { id: 'u1', role: 'user', tokens: { input: 100, output: 0 } },
+        },
+      })
+
+      expect(usageHandler).not.toHaveBeenCalled()
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Missed-text recovery via message poll
+  // ---------------------------------------------------------------------------
+
+  describe('missed-text recovery', () => {
+    it('recovers assistant text when SSE events were lost', async () => {
+      const textHandler = vi.fn()
+      const resultHandler = vi.fn()
+      ocp.on('text', textHandler)
+      ocp.on('result', resultHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).alive = true
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            info: { role: 'assistant', time: { created: 2, completed: 3 } },
+            parts: [
+              { type: 'step-start' },
+              { type: 'text', text: 'Recovered answer' },
+            ],
+          },
+        ],
+      })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (ocp as any).checkTurnLiveness(true)
+
+      expect(textHandler).toHaveBeenCalledWith('Recovered answer')
+      expect(resultHandler).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not re-emit text when deltas were already received', async () => {
+      const textHandler = vi.fn()
+      ocp.on('text', textHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).alive = true
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).receivedDeltas = true
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            info: { role: 'assistant', time: { completed: 3 } },
+            parts: [{ type: 'text', text: 'Already streamed' }],
+          },
+        ],
+      })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (ocp as any).checkTurnLiveness(true)
+
+      expect(textHandler).not.toHaveBeenCalled()
+    })
+
+    it('strips user echo prefix from recovered text', async () => {
+      const textHandler = vi.fn()
+      ocp.on('text', textHandler)
+      setSessionId(ocp, 'oc-session-1')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).alive = true
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).lastUserInput = 'what is 2+2?'
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          {
+            info: { role: 'assistant', time: { completed: 3 } },
+            parts: [{ type: 'text', text: 'what is 2+2?The answer is 4.' }],
+          },
+        ],
+      })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (ocp as any).checkTurnLiveness(true)
+
+      expect(textHandler).toHaveBeenCalledWith('The answer is 4.')
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Subagent (child session) activity
+  // ---------------------------------------------------------------------------
+
+  describe('subagent activity', () => {
+    it('surfaces a new child session as Task tool activity', () => {
+      const toolActiveHandler = vi.fn()
+      ocp.on('tool_active', toolActiveHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'session.created',
+        properties: {
+          info: { id: 'child-1', parentID: 'oc-session-1', title: 'Investigate bug' },
+        },
+      })
+
+      expect(toolActiveHandler).toHaveBeenCalledWith('Task', 'Investigate bug')
+    })
+
+    it('registers a child session only once', () => {
+      const toolActiveHandler = vi.fn()
+      ocp.on('tool_active', toolActiveHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      const event = {
+        type: 'session.updated',
+        properties: { info: { id: 'child-1', parentID: 'oc-session-1', title: 'Subtask' } },
+      }
+      callHandleSSE(ocp, event)
+      callHandleSSE(ocp, event)
+
+      expect(toolActiveHandler).toHaveBeenCalledTimes(1)
+    })
+
+    it('ignores child sessions of other parents', () => {
+      const toolActiveHandler = vi.fn()
+      ocp.on('tool_active', toolActiveHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'session.created',
+        properties: {
+          info: { id: 'child-x', parentID: 'some-other-session', title: 'Not ours' },
+        },
+      })
+
+      expect(toolActiveHandler).not.toHaveBeenCalled()
+    })
+
+    it('surfaces child session tool activity', () => {
+      const toolActiveHandler = vi.fn()
+      const toolDoneHandler = vi.fn()
+      ocp.on('tool_active', toolActiveHandler)
+      ocp.on('tool_done', toolDoneHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'session.created',
+        properties: { info: { id: 'child-1', parentID: 'oc-session-1', title: 'Research' } },
+      })
+      callHandleSSE(ocp, {
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'child-1',
+          part: { type: 'tool', tool: 'grep', state: { status: 'running', input: { pattern: 'foo' } } },
+        },
+      })
+      callHandleSSE(ocp, {
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'child-1',
+          part: { type: 'tool', tool: 'grep', state: { status: 'completed', output: 'match found' } },
+        },
+      })
+
+      expect(toolActiveHandler).toHaveBeenCalledWith('grep', 'foo')
+      expect(toolDoneHandler).toHaveBeenCalledWith('grep', 'match found')
+    })
+
+    it('does not surface child session text parts', () => {
+      const textHandler = vi.fn()
+      ocp.on('text', textHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'session.created',
+        properties: { info: { id: 'child-1', parentID: 'oc-session-1' } },
+      })
+      callHandleSSE(ocp, {
+        type: 'message.part.updated',
+        properties: {
+          sessionID: 'child-1',
+          part: { type: 'text', text: 'internal subagent text' },
+        },
+      })
+
+      expect(textHandler).not.toHaveBeenCalled()
+    })
+
+    it('does not complete the parent turn when a child session goes idle', () => {
+      const resultHandler = vi.fn()
+      ocp.on('result', resultHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'session.created',
+        properties: { info: { id: 'child-1', parentID: 'oc-session-1' } },
+      })
+      // session.updated for the child reporting idle — must NOT complete our turn
+      callHandleSSE(ocp, {
+        type: 'session.updated',
+        properties: {
+          info: { id: 'child-1', parentID: 'oc-session-1', status: { type: 'idle' } },
+        },
+      })
+
+      expect(resultHandler).not.toHaveBeenCalled()
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Resume hydration (missed history tail)
+  // ---------------------------------------------------------------------------
+
+  describe('resume hydration', () => {
+    const makeResumed = (recentOutputText: string) => {
+      const proc = new OpenCodeProcess('/tmp/test-repo', {
+        sessionId: 'resume-session',
+        opencodeSessionId: 'oc-session-1',
+        recentOutputText,
+      })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(proc as any).alive = true
+      return proc
+    }
+
+    const historyResponse = (entries: unknown[]) => {
+      mockFetch.mockResolvedValueOnce({ ok: true, json: async () => entries })
+    }
+
+    it('re-emits a completed assistant message lost while detached', async () => {
+      const proc = makeResumed('Earlier output that was shown.')
+      const textHandler = vi.fn()
+      proc.on('text', textHandler)
+
+      historyResponse([
+        { info: { role: 'user', time: { created: 1 } } },
+        {
+          info: { role: 'assistant', time: { created: 2, completed: 3 } },
+          parts: [{ type: 'text', text: 'Answer generated during the crash' }],
+        },
+      ])
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (proc as any).hydrateMissedTail('http://localhost:1234')
+
+      expect(textHandler).toHaveBeenCalledWith('Answer generated during the crash')
+      proc.stop()
+    })
+
+    it('does not re-emit text that was already displayed', async () => {
+      const proc = makeResumed('intro... The final answer is 42. ...outro')
+      const textHandler = vi.fn()
+      proc.on('text', textHandler)
+
+      historyResponse([
+        {
+          info: { role: 'assistant', time: { completed: 3 } },
+          parts: [{ type: 'text', text: 'The final answer is 42.' }],
+        },
+      ])
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (proc as any).hydrateMissedTail('http://localhost:1234')
+
+      expect(textHandler).not.toHaveBeenCalled()
+      proc.stop()
+    })
+
+    it('does not hydrate when the last entry is a user message', async () => {
+      const proc = makeResumed('')
+      const textHandler = vi.fn()
+      proc.on('text', textHandler)
+
+      historyResponse([
+        {
+          info: { role: 'assistant', time: { completed: 2 } },
+          parts: [{ type: 'text', text: 'Old answer' }],
+        },
+        { info: { role: 'user', time: { created: 3 } } },
+      ])
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (proc as any).hydrateMissedTail('http://localhost:1234')
+
+      expect(textHandler).not.toHaveBeenCalled()
+      proc.stop()
+    })
+
+    it('does not hydrate an incomplete (in-flight) assistant message', async () => {
+      const proc = makeResumed('')
+      const textHandler = vi.fn()
+      proc.on('text', textHandler)
+
+      historyResponse([
+        {
+          info: { role: 'assistant', time: { created: 2 } },
+          parts: [{ type: 'text', text: 'Still streaming...' }],
+        },
+      ])
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (proc as any).hydrateMissedTail('http://localhost:1234')
+
+      expect(textHandler).not.toHaveBeenCalled()
+      proc.stop()
+    })
+
+    it('survives a failed history fetch', async () => {
+      const proc = makeResumed('')
+      const textHandler = vi.fn()
+      proc.on('text', textHandler)
+      mockFetch.mockRejectedValueOnce(new Error('connection refused'))
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await expect((proc as any).hydrateMissedTail('http://localhost:1234')).resolves.toBeUndefined()
+      expect(textHandler).not.toHaveBeenCalled()
+      proc.stop()
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Mid-turn message queueing
+  // ---------------------------------------------------------------------------
+
+  describe('mid-turn message queueing', () => {
+    const connect = (proc: OpenCodeProcess) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(proc as any).alive = true
+      setSessionId(proc, 'oc-session-1')
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    }
+
+    const promptCalls = () =>
+      mockFetch.mock.calls.filter(([url]) => typeof url === 'string' && url.includes('/prompt_async'))
+
+    it('queues a message sent while a turn is in flight', () => {
+      connect(ocp)
+      ocp.sendMessage('first')
+      ocp.sendMessage('second')
+
+      expect(promptCalls()).toHaveLength(1)
+      const body = JSON.parse((promptCalls()[0][1] as { body: string }).body) as { parts: Array<{ text: string }> }
+      expect(body.parts[0].text).toBe('first')
+    })
+
+    it('sends the queued message when the turn completes', async () => {
+      connect(ocp)
+      ocp.sendMessage('first')
+      ocp.sendMessage('second')
+
+      callHandleSSE(ocp, {
+        type: 'session.idle',
+        properties: { sessionID: 'oc-session-1' },
+      })
+      // Queued send is deferred via setImmediate
+      await new Promise((r) => setImmediate(r))
+
+      expect(promptCalls()).toHaveLength(2)
+      const body = JSON.parse((promptCalls()[1][1] as { body: string }).body) as { parts: Array<{ text: string }> }
+      expect(body.parts[0].text).toBe('second')
+    })
+
+    it('preserves queue order across multiple turns', async () => {
+      connect(ocp)
+      ocp.sendMessage('first')
+      ocp.sendMessage('second')
+      ocp.sendMessage('third')
+
+      callHandleSSE(ocp, { type: 'session.idle', properties: { sessionID: 'oc-session-1' } })
+      await new Promise((r) => setImmediate(r))
+      callHandleSSE(ocp, { type: 'session.idle', properties: { sessionID: 'oc-session-1' } })
+      await new Promise((r) => setImmediate(r))
+
+      const texts = promptCalls().map(([, init]) =>
+        (JSON.parse((init as { body: string }).body) as { parts: Array<{ text: string }> }).parts[0].text)
+      expect(texts).toEqual(['first', 'second', 'third'])
+    })
+
+    it('drops queued messages on stop', async () => {
+      connect(ocp)
+      ocp.sendMessage('first')
+      ocp.sendMessage('second')
+
+      ocp.stop()
+      await new Promise((r) => setImmediate(r))
+
+      expect(promptCalls()).toHaveLength(1)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Version comparison
+  // ---------------------------------------------------------------------------
+
+  describe('isVersionOlder', () => {
+    it('compares major/minor/patch numerically', () => {
+      expect(isVersionOlder('1.14.9', '1.15.0')).toBe(true)
+      expect(isVersionOlder('1.15.0', '1.15.0')).toBe(false)
+      expect(isVersionOlder('1.16.0', '1.15.0')).toBe(false)
+      expect(isVersionOlder('0.9.9', '1.0.0')).toBe(true)
+      expect(isVersionOlder('1.15', '1.15.0')).toBe(false)
+      expect(isVersionOlder('2.0.0', MIN_TESTED_OPENCODE_VERSION)).toBe(false)
+    })
+
+    it('treats unparseable versions as not older', () => {
+      expect(isVersionOlder('dev', '1.15.0')).toBe(false)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Attachments
+  // ---------------------------------------------------------------------------
+
+  describe('attachments', () => {
+    let dir: string
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), 'codekin-attach-'))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(ocp as any).alive = true
+      setSessionId(ocp, 'oc-session-1')
+      mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) })
+    })
+
+    afterEach(() => {
+      rmSync(dir, { recursive: true, force: true })
+    })
+
+    const sentParts = () => {
+      const [, init] = mockFetch.mock.calls[mockFetch.mock.calls.length - 1] as [string, { body: string }]
+      return (JSON.parse(init.body) as { parts: Array<Record<string, unknown>> }).parts
+    }
+
+    it('sends PDFs as data-URL file parts', () => {
+      const pdfPath = join(dir, 'doc.pdf')
+      writeFileSync(pdfPath, Buffer.from('%PDF-1.4 fake'))
+
+      ocp.sendMessage(`[Attached files: ${pdfPath}]\nsummarize this`)
+
+      const filePart = sentParts().find((p) => p.type === 'file')
+      expect(filePart).toBeDefined()
+      expect(filePart!.mime).toBe('application/pdf')
+      expect(String(filePart!.url)).toMatch(/^data:application\/pdf;base64,/)
+    })
+
+    it('inlines unknown text-like files (no extension allowlist)', () => {
+      const tsPath = join(dir, 'snippet.tsx')
+      writeFileSync(tsPath, 'export const x = 1\n')
+
+      ocp.sendMessage(`[Attached files: ${tsPath}]\nreview`)
+
+      const textParts = sentParts().filter((p) => p.type === 'text')
+      expect(textParts.some((p) => String(p.text).includes('--- snippet.tsx ---') && String(p.text).includes('export const x = 1'))).toBe(true)
+    })
+
+    it('skips binary files with a visible note', () => {
+      const binPath = join(dir, 'blob.bin')
+      writeFileSync(binPath, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x00, 0x01, 0x02]))
+
+      ocp.sendMessage(`[Attached files: ${binPath}]\nwhat is this`)
+
+      const parts = sentParts()
+      expect(parts.some((p) => p.type === 'file')).toBe(false)
+      expect(parts.some((p) => p.type === 'text' && String(p.text).includes('unsupported binary format'))).toBe(true)
     })
   })
 })

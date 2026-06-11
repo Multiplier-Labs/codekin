@@ -593,7 +593,10 @@ export class PromptRouter {
       this.deps.approvalManager.savePatternApproval(session.groupDir ?? session.workingDir, pending.toolName, pending.toolInput)
     }
 
-    const behavior = isDeny ? 'deny' : 'allow'
+    // 'allow_always' lets providers persist the grant natively (OpenCode maps
+    // it to its 'always' reply; Claude treats it as a plain allow — Codekin's
+    // ApprovalManager handles persistence there).
+    const behavior = isDeny ? 'deny' : isAlwaysAllow ? 'allow_always' : 'allow'
     if (!session.claudeProcess?.isAlive()) return
     session.claudeProcess.sendControlResponse(pending.requestId, behavior)
   }
@@ -674,8 +677,24 @@ export class PromptRouter {
         const filePath = String(toolInput.file_path || '')
         return `Allow Read? \`${filePath}\``
       }
-      default:
-        return `Allow ${toolName}?`
+      // OpenCode permission types — toolInput carries {permission, ...metadata, patterns}
+      case 'external_directory': {
+        const target = String(toolInput.filepath || toolInput.parentDir || '')
+        const patterns = Array.isArray(toolInput.patterns) && toolInput.patterns.length
+          ? ` (${(toolInput.patterns as unknown[]).map(String).join(', ')})`
+          : ''
+        return target
+          ? `Allow access outside the project directory? \`${target}\`${patterns}`
+          : `Allow access outside the project directory?${patterns}`
+      }
+      case 'doom_loop':
+        return 'The agent appears to be repeating itself (possible loop). Allow it to continue?'
+      default: {
+        const patterns = Array.isArray(toolInput.patterns) && toolInput.patterns.length
+          ? ` \`${(toolInput.patterns as unknown[]).map(String).join(', ')}\``
+          : ''
+        return `Allow ${toolName}?${patterns}`
+      }
     }
   }
 }

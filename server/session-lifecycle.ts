@@ -151,12 +151,20 @@ export class SessionLifecycle {
     const mergedAllowedTools = [...new Set([...(session.allowedTools || []), ...registryPatterns])]
     let cp: CodingProcess
     if (session.provider === 'opencode') {
+      // Recent assistant text already shown to the user — lets the resumed
+      // process skip re-emitting messages during missed-history hydration.
+      const recentOutputText = session.outputHistory
+        .filter((m): m is { type: 'output'; data: string } => m.type === 'output')
+        .slice(-100)
+        .map((m) => m.data)
+        .join('')
       cp = new OpenCodeProcess(session.workingDir, {
         sessionId: sessionId,
         opencodeSessionId: session.claudeSessionId || undefined,
         model: session.model,
         extraEnv,
         permissionMode: session.permissionMode,
+        recentOutputText,
       })
     } else if (session.provider === 'codex') {
       cp = new CodexProcess(session.workingDir, {
@@ -248,6 +256,7 @@ export class SessionLifecycle {
       // ExitPlanMode stream event intentionally ignored — hook handles it.
     })
     cp.on('todo_update', (tasks) => { this.deps.broadcastAndHistory(session, { type: 'todo_update', tasks }) })
+    cp.on('usage', (usage) => { this.deps.broadcastAndHistory(session, { type: 'usage', ...usage }) })
     cp.on('prompt', (...args) => this.deps.promptRouter.onPromptEvent(session, ...args))
     cp.on('control_request', (requestId, toolName, toolInput) => this.deps.promptRouter.onControlRequestEvent(cp, session, sessionId, requestId, toolName, toolInput))
     cp.on('result', (result, isError) => {

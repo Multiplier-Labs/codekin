@@ -73,6 +73,7 @@ export const CODEX_MODELS: ModelOption[] = [
 /** Static models for Claude Code CLI. Used as fallback before dynamic discovery completes. */
 export const CLAUDE_MODELS: ModelOption[] = [
   { id: 'claude-opus-4-8', label: 'Opus 4.8' },
+  { id: 'claude-fable-5', label: 'Fable 5' },
   { id: 'claude-opus-4-7', label: 'Opus 4.7' },
   { id: 'claude-opus-4-6', label: 'Opus 4.6' },
   { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
@@ -151,6 +152,13 @@ export interface TaskItem {
   activeForm?: string
 }
 
+/** Cumulative session token/cost usage reported by the coding process. */
+export interface SessionUsage {
+  inputTokens: number
+  outputTokens: number
+  costUsd?: number
+}
+
 /**
  * Messages sent from the WebSocket server to the browser client.
  *
@@ -193,6 +201,7 @@ export type WsServerMessage =
   | { type: 'system_message'; subtype: 'init' | 'exit' | 'error' | 'restart' | 'notification' | 'info'; text: string; model?: string }
   | { type: 'user_echo'; text: string }
   | { type: 'result' }
+  | { type: 'usage'; inputTokens: number; outputTokens: number; costUsd?: number }
   | { type: 'planning_mode'; active: boolean }
   | { type: 'todo_update'; tasks: TaskItem[] }
   | { type: 'session_name_update'; sessionId: string; name: string }
