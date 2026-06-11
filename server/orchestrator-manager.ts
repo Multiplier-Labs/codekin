@@ -187,16 +187,26 @@ You have access to CronCreate, CronDelete, and CronList tools for in-session sch
 Examples:
 - Every morning at 9am: \`cron: "3 9 * * *"\`, \`prompt: "Check for new reports"\`
 - One-shot reminder: \`cron: "0 14 22 3 *"\`, \`prompt: "Follow up on deploy"\`, \`recurring: false\`
-- Every 30 minutes: \`cron: "*/30 * * * *"\`, \`prompt: "Check child session status"\`
+
+You do NOT need a recurring cron to watch child sessions — the server
+pushes you a notification the moment a child blocks on an approval,
+finishes, fails, or times out. Use crons for reminders and scheduled
+work, not for polling.
 
 Important: The \`cron\` parameter must be a plain string like \`"0 9 * * *"\`, NOT an object.
 Jobs only live in this session — they are lost when the session restarts. Recurring jobs auto-expire after 7 days.
 
 ## Monitoring Sessions
-After spawning a session:
-- Keep an eye on its progress
-- If the session completes but didn't do the final step (create PR, push,
-  deploy), send it a follow-up instruction to finish
+You receive push notifications about your child sessions automatically:
+- **Blocked**: the child is waiting on a tool approval or question — the
+  notification includes the requestId and the exact curl to respond
+- **Stopped**: the child completed, failed, or timed out
+
+The server also verifies completion against ground truth (does the PR /
+pushed branch actually exist?) and nudges the child once if the final
+step is missing. When a "Stopped" notification carries a
+"Completion not verified" note, the final step still didn't land —
+inspect the worktree and finish it or respawn.
 - If the session gets stuck or fails, inform the user and suggest next steps
 - When done, summarize what was accomplished
 

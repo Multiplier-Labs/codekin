@@ -7,8 +7,9 @@
  */
 
 import { randomUUID } from 'crypto'
+import { execFile } from 'child_process'
 import type { SessionManager } from './session-manager.js'
-import type { Session, WsServerMessage } from './types.js'
+import type { WsServerMessage } from './types.js'
 import { getAgentDisplayName } from './config.js'
 import {
   sendOrchestratorNotification,
@@ -91,6 +92,21 @@ export interface ChildSession {
  */
 export type ChildNotifyFn = (args: OrchestratorNotifyArgs) => boolean
 
+/**
+ * Runs an external command and resolves with stdout. Injectable so unit
+ * tests can stub ground-truth checks (gh / git) without spawning processes.
+ * Rejects when the command fails or times out.
+ */
+export type ExecFn = (cmd: string, args: string[], cwd: string) => Promise<string>
+
+const defaultExec: ExecFn = (cmd, args, cwd) =>
+  new Promise((resolvePromise, rejectPromise) => {
+    execFile(cmd, args, { cwd, timeout: 15_000, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+      if (err) rejectPromise(err instanceof Error ? err : new Error(`${cmd} failed`))
+      else resolvePromise(stdout)
+    })
+  })
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -157,10 +173,12 @@ export class OrchestratorChildManager {
    * instead of waiting for the next monitor event.
    */
   private timeoutControllers = new Map<string, { pause(): void; resume(): void }>()
+  private exec: ExecFn
 
-  constructor(sessions: SessionManager, opts?: { notify?: ChildNotifyFn }) {
+  constructor(sessions: SessionManager, opts?: { notify?: ChildNotifyFn; exec?: ExecFn }) {
     this.sessions = sessions
     this.notify = opts?.notify ?? ((args) => sendOrchestratorNotification(sessions, args))
+    this.exec = opts?.exec ?? defaultExec
     // Push a realtime notification to the parent orchestrator whenever one of
     // our children blocks on a tool approval or question. Without this, a
     // blocked child would silently sit until its timeout killed it.
@@ -561,12 +579,14 @@ export class OrchestratorChildManager {
     let unsubResult: (() => void) | undefined
     let unsubExit: (() => void) | undefined
     const nudgedIds = new Set<string>()
-    const supersededMsgs = new Set<WsServerMessage>()
 
     try {
       await new Promise<void>((resolve) => {
         let settled = false
         const settle = () => { if (!settled) { settled = true; resolve() } }
+        // Re-read after awaits — a timeout may settle while a ground-truth
+        // check is in flight (also defeats overly-eager type narrowing).
+        const isSettled = () => settled
 
         // ---- Pausable working-time clock -----------------------------------
         // The working budget (timeoutMs) only burns while the child is doing
@@ -625,9 +645,13 @@ export class OrchestratorChildManager {
           fireTimeout(`Timed out after ${timeoutMs}ms of working time`)
         }, remainingMs)
 
+        // Guard against overlapping async ground-truth checks when result
+        // events arrive in quick succession.
+        let verifying = false
+
         // Result hook: Claude completed a turn
         const onResult = (sessionId: string, isError: boolean) => {
-          if (sessionId !== child.id || settled) return
+          if (sessionId !== child.id || settled || verifying) return
           const session = this.sessions.get(child.id)
           if (!session) {
             child.status = 'failed'
@@ -654,16 +678,35 @@ export class OrchestratorChildManager {
           resume()
           if (child.status === 'blocked') child.status = 'running'
 
-          const text = this.extractText(session.outputHistory)
-          // Check if the final step was done; if not, nudge (keep listening)
-          if (this.ensureFinalStep(child, session, text, nudgedIds, supersededMsgs)) return
+          verifying = true
+          void (async () => {
+            try {
+              const text = this.extractText(session.outputHistory)
+              // Ground-truth check: did the final step (PR / push) really land?
+              const missing = await this.isFinalStepMissing(child, text)
+              if (isSettled()) return
 
-          child.status = isError ? 'failed' : 'completed'
-          child.result = text || null
-          child.error = isError ? 'Claude returned an error' : null
-          child.completedAt = new Date().toISOString()
-          clearTimers()
-          settle()
+              // Final step missing — nudge once, then keep monitoring.
+              if (missing && !isError && !nudgedIds.has(child.id) && session.claudeProcess?.isAlive()) {
+                nudgedIds.add(child.id)
+                this.sessions.sendInput(child.id, this.buildNudgeInstruction(child.request.completionPolicy))
+                return
+              }
+
+              child.status = isError ? 'failed' : 'completed'
+              child.result = text || null
+              child.error = isError
+                ? 'Claude returned an error'
+                : missing
+                  ? `Completion not verified: expected ${child.request.completionPolicy === 'pr' ? 'a pull request' : 'a pushed branch'} but found none`
+                  : null
+              child.completedAt = new Date().toISOString()
+              clearTimers()
+              settle()
+            } finally {
+              verifying = false
+            }
+          })()
         }
 
         // Exit hook: Claude process exited
@@ -673,12 +716,21 @@ export class OrchestratorChildManager {
 
           const session = this.sessions.get(child.id)
           const text = session ? this.extractText(session.outputHistory) : ''
-          child.status = text.length > 100 ? 'completed' : 'failed'
-          child.result = text || null
-          child.error = text.length <= 100 ? 'Claude exited without sufficient output' : null
-          child.completedAt = new Date().toISOString()
-          clearTimers()
-          settle()
+          void (async () => {
+            // Process is gone — decide the terminal status from ground truth
+            // (did the PR / push land?) rather than transcript length.
+            let missing = session ? await this.isFinalStepMissing(child, text) : true
+            // commit-only has no remote artifact to verify; an exit without
+            // any output cannot be considered a success.
+            if (child.request.completionPolicy === 'commit-only' && !text) missing = true
+            if (isSettled()) return
+            child.status = missing ? 'failed' : 'completed'
+            child.result = text || null
+            child.error = missing ? 'Claude exited before the final step could be verified' : null
+            child.completedAt = new Date().toISOString()
+            clearTimers()
+            settle()
+          })()
         }
 
         unsubResult = this.sessions.onSessionResult(onResult)
@@ -700,52 +752,53 @@ export class OrchestratorChildManager {
   }
 
   /**
-   * Check whether the session completed the expected final step (PR, push, deploy).
-   * If not, send a follow-up instruction and return true so monitoring continues.
-   * Only nudges once per child to avoid infinite loops.
+   * Ground-truth check for the child's expected final step. Instead of
+   * sniffing the transcript for keywords (which both false-positives on
+   * mentions and false-negatives on terse output), ask the real systems:
+   *   - 'pr':    does an open/merged PR exist for the branch? (gh pr list)
+   *   - 'merge': does the branch exist on the remote? (git ls-remote)
+   *   - 'commit-only': nothing remote to verify — never missing.
+   * Falls back to transcript keyword sniffing when the command fails
+   * (e.g. gh not installed, no remote configured).
    */
-  private ensureFinalStep(
-    child: ChildSession,
-    session: Session,
-    text: string,
-    nudgedIds: Set<string>,
-    supersededMsgs: Set<WsServerMessage>,
-  ): boolean {
-    // Only nudge once per child
-    if (nudgedIds.has(child.id)) return false
-
+  private async isFinalStepMissing(child: ChildSession, text: string): Promise<boolean> {
     const policy = child.request.completionPolicy
-    const lowerText = text.toLowerCase()
+    if (policy === 'commit-only') return false
 
-    let missing = false
-    let instruction = ''
+    const cwd = child.worktreePath ?? child.request.repo
+    const branch = child.request.branchName
 
     if (policy === 'pr') {
-      // Check if a PR was created
-      const prCreated = lowerText.includes('pull request') || lowerText.includes('created a pr') || lowerText.includes('gh pr create')
-      if (!prCreated) {
-        missing = true
-        instruction = 'You completed the code changes but did not create a Pull Request. Please push your branch and create a PR now with a clear description of what was changed and why.'
-      }
-    } else if (policy === 'merge') {
-      // Check if changes were pushed
-      const pushed = lowerText.includes('git push') || lowerText.includes('pushed')
-      if (!pushed) {
-        missing = true
-        instruction = 'You completed the code changes but did not push them. Please push your changes to the remote now.'
+      try {
+        const out = await this.exec(
+          'gh',
+          ['pr', 'list', '--head', branch, '--state', 'all', '--json', 'number', '--limit', '1'],
+          cwd,
+        )
+        const parsed: unknown = JSON.parse(out)
+        return !(Array.isArray(parsed) && parsed.length > 0)
+      } catch {
+        const lower = text.toLowerCase()
+        return !(lower.includes('pull request') || lower.includes('created a pr') || lower.includes('gh pr create'))
       }
     }
 
-    if (missing && instruction && session.claudeProcess?.isAlive()) {
-      nudgedIds.add(child.id)
-      // Track the result message as superseded locally rather than mutating history entries
-      const resultMsg = session.outputHistory.find(m => m.type === 'result')
-      if (resultMsg) supersededMsgs.add(resultMsg)
-      this.sessions.sendInput(child.id, instruction)
-      return true
+    // policy === 'merge' — verify the branch was pushed to the remote
+    try {
+      const out = await this.exec('git', ['ls-remote', '--heads', 'origin', branch], cwd)
+      return out.trim().length === 0
+    } catch {
+      const lower = text.toLowerCase()
+      return !(lower.includes('git push') || lower.includes('pushed'))
     }
+  }
 
-    return false
+  /** Follow-up instruction sent (once) when the final step is missing. */
+  private buildNudgeInstruction(policy: ChildSessionRequest['completionPolicy']): string {
+    if (policy === 'pr') {
+      return 'You completed the code changes but no Pull Request exists for your branch yet. Please push your branch and create a PR now with a clear description of what was changed and why.'
+    }
+    return 'You completed the code changes but your branch has not been pushed to the remote. Please push your changes now.'
   }
 
   /**

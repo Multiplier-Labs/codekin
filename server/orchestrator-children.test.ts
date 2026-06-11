@@ -70,6 +70,22 @@ function makeMockSessions(worktreeSucceeds = true) {
   } as any
 }
 
+/**
+ * Build a manager with a stubbed exec so ground-truth checks (gh / git)
+ * never spawn real processes. The default stub reports the final step as
+ * done ('[{"number": 1}]' parses as a non-empty PR list, and is non-empty
+ * output for git ls-remote). Override `exec` to simulate a missing step.
+ */
+function makeManager(
+  sessions: any,
+  opts: { notify?: any; exec?: any } = {},
+): OrchestratorChildManager {
+  return new OrchestratorChildManager(sessions, {
+    exec: opts.exec ?? vi.fn(async () => '[{"number": 1}]'),
+    ...(opts.notify ? { notify: opts.notify } : {}),
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -89,7 +105,7 @@ describe('OrchestratorChildManager', () => {
   describe('spawn', () => {
     beforeEach(() => {
       sessions = makeMockSessions()
-      manager = new OrchestratorChildManager(sessions)
+      manager = makeManager(sessions)
     })
 
     it('creates a child that transitions from starting to running', async () => {
@@ -128,7 +144,7 @@ describe('OrchestratorChildManager', () => {
 
     it('falls back gracefully when worktree creation fails', async () => {
       sessions = makeMockSessions(false)
-      manager = new OrchestratorChildManager(sessions)
+      manager = makeManager(sessions)
 
       const child = await manager.spawn(makeRequest({ useWorktree: true }))
 
@@ -146,7 +162,7 @@ describe('OrchestratorChildManager', () => {
 
     it('reports worktree status "failed" when worktree creation fails', async () => {
       sessions = makeMockSessions(false)
-      manager = new OrchestratorChildManager(sessions)
+      manager = makeManager(sessions)
 
       const child = await manager.spawn(makeRequest({ useWorktree: true }))
 
@@ -187,7 +203,7 @@ describe('OrchestratorChildManager', () => {
   describe('status tracking', () => {
     beforeEach(() => {
       sessions = makeMockSessions()
-      manager = new OrchestratorChildManager(sessions)
+      manager = makeManager(sessions)
     })
 
     it('marks child as completed when result event fires', async () => {
@@ -230,10 +246,11 @@ describe('OrchestratorChildManager', () => {
       expect(child.error).toBe('Claude returned an error')
     })
 
-    it('marks child as completed on exit with sufficient output', async () => {
+    it('marks child as completed on exit when ground truth confirms the final step', async () => {
+      // Default makeManager exec stub reports an existing PR for the branch.
       sessions.get = vi.fn(() => ({
         claudeProcess: null,
-        outputHistory: [{ type: 'output', data: 'A'.repeat(200) }],
+        outputHistory: [{ type: 'output', data: 'brief' }],
         pendingToolApprovals: new Map(),
         pendingControlRequests: new Map(),
       }))
@@ -249,7 +266,8 @@ describe('OrchestratorChildManager', () => {
       })
     })
 
-    it('marks child as failed on exit without sufficient output', async () => {
+    it('marks child as failed on exit when the final step never landed', async () => {
+      manager = makeManager(sessions, { exec: vi.fn(async () => '[]') })
       sessions.get = vi.fn(() => ({
         claudeProcess: null,
         outputHistory: [{ type: 'output', data: 'short' }],
@@ -266,7 +284,26 @@ describe('OrchestratorChildManager', () => {
       await vi.waitFor(() => {
         expect(child.status).toBe('failed')
       })
-      expect(child.error).toContain('without sufficient output')
+      expect(child.error).toContain('before the final step')
+    })
+
+    it('marks commit-only child as failed on exit with no output at all', async () => {
+      sessions.get = vi.fn(() => ({
+        claudeProcess: null,
+        outputHistory: [],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+      }))
+
+      const child = await manager.spawn(makeRequest({ completionPolicy: 'commit-only' }))
+
+      for (const listener of sessions._exitListeners) {
+        listener(child.id, 1, null, false)
+      }
+
+      await vi.waitFor(() => {
+        expect(child.status).toBe('failed')
+      })
     })
 
     it('keeps monitoring when exit has willRestart=true', async () => {
@@ -292,6 +329,127 @@ describe('OrchestratorChildManager', () => {
         expect(child.status).toBe('failed')
       })
       expect(child.error).toBe('Session was deleted')
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Ground-truth final-step verification
+  // -------------------------------------------------------------------------
+
+  describe('ground-truth final-step verification', () => {
+    const aliveSession = (output: string) => ({
+      claudeProcess: { isAlive: vi.fn(() => true), stop: vi.fn() },
+      outputHistory: output ? [{ type: 'output', data: output }] : [],
+      pendingToolApprovals: new Map(),
+      pendingControlRequests: new Map(),
+    })
+
+    beforeEach(() => {
+      sessions = makeMockSessions()
+    })
+
+    it('checks gh pr list (in the worktree) for pr policy', async () => {
+      const exec = vi.fn(async () => '[{"number": 7}]')
+      manager = makeManager(sessions, { exec })
+      sessions.get = vi.fn(() => aliveSession('done'))
+
+      const child = await manager.spawn(makeRequest({ completionPolicy: 'pr' }))
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+
+      await vi.waitFor(() => {
+        expect(child.status).toBe('completed')
+      })
+      expect(exec).toHaveBeenCalledWith(
+        'gh',
+        ['pr', 'list', '--head', 'fix/login-bug', '--state', 'all', '--json', 'number', '--limit', '1'],
+        '/repos/myproject-wt-child123',
+      )
+      expect(child.error).toBeNull()
+    })
+
+    it('nudges once when no PR exists, then completes with an unverified note', async () => {
+      const exec = vi.fn(async () => '[]')
+      manager = makeManager(sessions, { exec })
+      sessions.get = vi.fn(() => aliveSession('made the changes and committed'))
+
+      const child = await manager.spawn(makeRequest({ completionPolicy: 'pr' }))
+
+      // First result: PR missing → nudge, keep monitoring
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+      await vi.waitFor(() => {
+        expect(sessions._sentInputs.some((p: string) => p.includes('no Pull Request exists'))).toBe(true)
+      })
+      expect(child.status).toBe('running')
+
+      // Second result: still no PR → no second nudge, terminal with note
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+      await vi.waitFor(() => {
+        expect(child.status).toBe('completed')
+      })
+      expect(child.error).toContain('Completion not verified')
+      const nudges = sessions._sentInputs.filter((p: string) => p.includes('no Pull Request exists'))
+      expect(nudges.length).toBe(1)
+    })
+
+    it('checks git ls-remote for merge policy and nudges when the branch is not on the remote', async () => {
+      const exec = vi.fn(async () => '')
+      manager = makeManager(sessions, { exec })
+      sessions.get = vi.fn(() => aliveSession('committed everything'))
+
+      const child = await manager.spawn(makeRequest({ completionPolicy: 'merge' }))
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+
+      await vi.waitFor(() => {
+        expect(sessions._sentInputs.some((p: string) => p.includes('has not been pushed'))).toBe(true)
+      })
+      expect(exec).toHaveBeenCalledWith(
+        'git',
+        ['ls-remote', '--heads', 'origin', 'fix/login-bug'],
+        '/repos/myproject-wt-child123',
+      )
+    })
+
+    it('treats a non-empty ls-remote as pushed for merge policy', async () => {
+      const exec = vi.fn(async () => 'abc123\trefs/heads/fix/login-bug\n')
+      manager = makeManager(sessions, { exec })
+      sessions.get = vi.fn(() => aliveSession('pushed'))
+
+      const child = await manager.spawn(makeRequest({ completionPolicy: 'merge' }))
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+
+      await vi.waitFor(() => {
+        expect(child.status).toBe('completed')
+      })
+      expect(child.error).toBeNull()
+    })
+
+    it('falls back to transcript sniffing when the ground-truth command fails', async () => {
+      const exec = vi.fn(async () => { throw new Error('gh: command not found') })
+      manager = makeManager(sessions, { exec })
+      sessions.get = vi.fn(() => aliveSession('Opened a pull request with the changes.'))
+
+      const child = await manager.spawn(makeRequest({ completionPolicy: 'pr' }))
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+
+      await vi.waitFor(() => {
+        expect(child.status).toBe('completed')
+      })
+      expect(child.error).toBeNull()
+    })
+
+    it('never verifies remotely for commit-only policy', async () => {
+      const exec = vi.fn(async () => '[]')
+      manager = makeManager(sessions, { exec })
+      sessions.get = vi.fn(() => aliveSession('committed locally'))
+
+      const child = await manager.spawn(makeRequest({ completionPolicy: 'commit-only' }))
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+
+      await vi.waitFor(() => {
+        expect(child.status).toBe('completed')
+      })
+      expect(exec).not.toHaveBeenCalled()
+      expect(child.error).toBeNull()
     })
   })
 
@@ -325,7 +483,7 @@ describe('OrchestratorChildManager', () => {
     beforeEach(() => {
       vi.useFakeTimers()
       sessions = makeMockSessions()
-      manager = new OrchestratorChildManager(sessions)
+      manager = makeManager(sessions)
     })
 
     afterEach(() => {
@@ -410,6 +568,9 @@ describe('OrchestratorChildManager', () => {
     })
 
     it('resumes the working clock after unblock with the remaining budget', async () => {
+      // Ground truth reports no PR → after unblock, the child gets nudged and
+      // monitoring continues on the resumed clock (~30s of budget left).
+      manager = makeManager(sessions, { exec: vi.fn(async () => '[]') })
       const pendingApprovals = new Map([['req-1', { toolInput: { command: 'git push' } }]])
       const makeSession = (pending: Map<string, unknown>) => ({
         claudeProcess: { isAlive: vi.fn(() => true), stop: vi.fn() },
@@ -429,9 +590,10 @@ describe('OrchestratorChildManager', () => {
       pendingApprovals.clear()
       sessions.get = vi.fn(() => makeSession(new Map()))
       for (const cb of sessions._resultListeners) cb(child.id, false)
-      // Result with empty output → nudge consumed? No — process alive, PR policy,
-      // no "pull request" text → nudge fires and monitoring continues with the
-      // resumed clock. Remaining working budget is ~30s.
+      // Let the async ground-truth check + nudge settle, then burn the
+      // remaining ~30s of working budget.
+      await vi.advanceTimersByTimeAsync(0)
+      expect(sessions._sentInputs.some((p: string) => p.includes('no Pull Request exists'))).toBe(true)
       vi.advanceTimersByTime(31_000)
 
       await vi.waitFor(() => {
@@ -448,7 +610,7 @@ describe('OrchestratorChildManager', () => {
   describe('list and get', () => {
     beforeEach(() => {
       sessions = makeMockSessions()
-      manager = new OrchestratorChildManager(sessions)
+      manager = makeManager(sessions)
     })
 
     it('lists children and retrieves by ID', async () => {
@@ -478,7 +640,7 @@ describe('OrchestratorChildManager', () => {
   describe('prompt generation', () => {
     beforeEach(() => {
       sessions = makeMockSessions()
-      manager = new OrchestratorChildManager(sessions)
+      manager = makeManager(sessions)
     })
 
     it('includes worktree environment section when worktree succeeds', async () => {
@@ -510,7 +672,7 @@ describe('OrchestratorChildManager', () => {
 
     it('includes create-branch step when NOT in worktree', async () => {
       sessions = makeMockSessions(false)
-      manager = new OrchestratorChildManager(sessions)
+      manager = makeManager(sessions)
       await manager.spawn(makeRequest({ useWorktree: true, completionPolicy: 'pr' }))
 
       const prompt = sessions._sentInputs[0]
@@ -542,7 +704,7 @@ describe('OrchestratorChildManager', () => {
     beforeEach(() => {
       sessions = makeMockSessions()
       notify = vi.fn(() => true)
-      manager = new OrchestratorChildManager(sessions, { notify })
+      manager = makeManager(sessions, { notify })
     })
 
     it('fires exactly one notification when a child times out', async () => {
@@ -673,7 +835,7 @@ describe('OrchestratorChildManager', () => {
     it('does NOT stamp terminalNotifiedAt when delivery fails (returns false)', async () => {
       // Notify reports the parent is unreachable on the first attempt.
       notify = vi.fn(() => false)
-      manager = new OrchestratorChildManager(sessions, { notify })
+      manager = makeManager(sessions, { notify })
 
       sessions.get = vi.fn(() => ({
         claudeProcess: { isAlive: vi.fn(() => false), stop: vi.fn() },
@@ -729,7 +891,7 @@ describe('OrchestratorChildManager', () => {
 
     it('does NOT stamp terminalNotifiedAt when notify throws', async () => {
       notify = vi.fn(() => { throw new Error('boom') })
-      manager = new OrchestratorChildManager(sessions, { notify })
+      manager = makeManager(sessions, { notify })
 
       sessions.get = vi.fn(() => ({
         claudeProcess: { isAlive: vi.fn(() => false), stop: vi.fn() },
@@ -772,7 +934,7 @@ describe('OrchestratorChildManager', () => {
     beforeEach(() => {
       sessions = makeMockSessions()
       notify = vi.fn(() => true)
-      manager = new OrchestratorChildManager(sessions, { notify })
+      manager = makeManager(sessions, { notify })
     })
 
     it('subscribes to session prompt events on construction', () => {
