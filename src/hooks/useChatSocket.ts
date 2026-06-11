@@ -12,7 +12,7 @@
  */
 
 import { useRef, useCallback, useEffect, useState } from 'react'
-import type { WsClientMessage, WsServerMessage, ChatMessage, TaskItem, PermissionMode } from '../types'
+import type { WsClientMessage, WsServerMessage, ChatMessage, TaskItem, PermissionMode, SessionUsage } from '../types'
 import { usePromptState } from './usePromptState'
 import { useWsConnection } from './useWsConnection'
 
@@ -180,6 +180,7 @@ export function useChatSocket({
     (localStorage.getItem('claude-permission-mode') as PermissionMode) || 'acceptEdits'
   )
   const [thinkingSummary, setThinkingSummary] = useState<string | null>(null)
+  const [usage, setUsage] = useState<SessionUsage | null>(null)
   const promptState = usePromptState()
   const currentSessionId = useRef<string | null>(null)
   /** True after the socket drops (e.g. server restart) until the session rejoins. */
@@ -295,6 +296,10 @@ export function useChatSocket({
         setTasks(msg.tasks)
         break
 
+      case 'usage':
+        setUsage({ inputTokens: msg.inputTokens, outputTokens: msg.outputTokens, costUsd: msg.costUsd })
+        break
+
       // Prompt handling: permission requests and questions from Claude's control protocol.
       // See server/types.ts:ClaudeControlRequest — prompt responses require a control_response
       // wrapper sent via the 'prompt_response' WsClientMessage type, not a regular 'input' message.
@@ -319,6 +324,7 @@ export function useChatSocket({
         setRenderSessionId(msg.sessionId)
         setMessages([])
         setTasks([])
+        setUsage(null)
         setIsProcessing(false)
         setThinkingSummary(null)
         callbacksRef.current.onSessionCreated?.(msg.sessionId)
@@ -341,6 +347,7 @@ export function useChatSocket({
         let rebuilt: ChatMessage[] = []
         let restoredPlanMode = false
         let restoredTasks: TaskItem[] = []
+        let restoredUsage: SessionUsage | null = null
         if (msg.outputBuffer?.length) {
           rebuilt = rebuildFromHistory(msg.outputBuffer)
           for (const bufferedMsg of msg.outputBuffer) {
@@ -349,6 +356,9 @@ export function useChatSocket({
             }
             if (bufferedMsg.type === 'todo_update') {
               restoredTasks = bufferedMsg.tasks
+            }
+            if (bufferedMsg.type === 'usage') {
+              restoredUsage = { inputTokens: bufferedMsg.inputTokens, outputTokens: bufferedMsg.outputTokens, costUsd: bufferedMsg.costUsd }
             }
           }
         }
@@ -361,6 +371,7 @@ export function useChatSocket({
         }
         setPlanningMode(restoredPlanMode)
         setTasks(restoredTasks)
+        setUsage(restoredUsage)
         setMessages(trimMessages(rebuilt))
         callbacksRef.current.onSessionJoined?.(msg.sessionId)
         break
@@ -515,6 +526,7 @@ export function useChatSocket({
     connState,
     messages,
     tasks,
+    usage,
     planningMode,
     isProcessing,
     thinkingSummary,

@@ -346,6 +346,14 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private commands = new Map<string, OpenCodeCommandInfo>()
   private tasks = new Map<string, TaskItem>()
   private turnComplete = false
+  /** True while a prompt/command turn is running server-side (set on send, cleared on completion). */
+  private turnInFlight = false
+  /** OpenCode child sessions spawned by this session's subagents (task tool). */
+  private childSessionIds = new Set<string>()
+  /** Latest token/cost usage per assistant message ID (message.updated fires repeatedly). */
+  private usageByMessage = new Map<string, { input: number; output: number; cost: number }>()
+  /** Last emitted usage totals, serialized — suppresses duplicate usage events. */
+  private lastEmittedUsage = ''
   private taskSeq = 0
   /**
    * Watchdog that detects turns stalled by a missed completion event.
@@ -654,6 +662,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private completeTurn(): void {
     if (this.turnComplete) return
     this.turnComplete = true
+    this.turnInFlight = false
     this.clearTurnWatchdog()
     this.flushDeltaBuffer()
     this.emit('result', '', false)
@@ -664,9 +673,11 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     const { type, properties } = event
 
     // Track liveness of this session's event flow for the turn watchdog.
-    // Only count events explicitly scoped to our session — server-level
-    // events (heartbeats etc.) say nothing about our turn's progress.
-    if (properties.sessionID === this.opencodeSessionId) {
+    // Only count events explicitly scoped to our session (or a subagent child
+    // session) — server-level events (heartbeats etc.) say nothing about our
+    // turn's progress.
+    const evtSessionID = properties.sessionID as string | undefined
+    if (evtSessionID && (evtSessionID === this.opencodeSessionId || this.childSessionIds.has(evtSessionID))) {
       this.lastSessionEventTime = Date.now()
     }
 
@@ -738,8 +749,15 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         const part = properties.part as OpenCodeMessagePart | undefined
         if (!part) break
 
-        // Only process events for our session
-        if (!this.isOwnSession(properties)) break
+        // Only process events for our session. Subagent child sessions get
+        // their tool activity surfaced (text/reasoning is internal to the
+        // subagent and would pollute the main transcript).
+        if (!this.isOwnSession(properties)) {
+          if (evtSessionID && this.childSessionIds.has(evtSessionID) && part.type === 'tool') {
+            this.handleChildToolPart(part)
+          }
+          break
+        }
 
         if (process.env.CODEKIN_DEBUG_SSE) {
           console.log(`[opencode-sse] part.updated type=${part.type} len=${part.text?.length ?? 0} text=${part.text?.slice(0, 80)} receivedDeltas=${this.receivedDeltas} emittedPartText=${this.emittedPartText}`)
@@ -891,10 +909,23 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         break
       }
 
-      // session.updated may carry idle status in some OpenCode versions
+      // session.updated may carry idle status in some OpenCode versions.
+      // session.created/session.updated also announce subagent child sessions
+      // (parentID = our session) which we track to surface their tool activity.
+      case 'session.created':
       case 'session.updated': {
+        const session = (properties.info ?? properties.session) as Record<string, unknown> | undefined
+        const sessId = session?.id as string | undefined
+        const parentID = session?.parentID as string | undefined
+        if (sessId && parentID && parentID === this.opencodeSessionId && !this.childSessionIds.has(sessId)) {
+          this.childSessionIds.add(sessId)
+          const title = typeof session?.title === 'string' && session.title ? session.title : 'subagent'
+          this.emit('tool_active', 'Task', title)
+        }
         if (!this.isOwnSession(properties)) break
-        const session = properties.session as Record<string, unknown> | undefined
+        // Guard: a session object for a different session (e.g. a child) must
+        // not complete our turn even if it reports idle.
+        if (sessId && sessId !== this.opencodeSessionId) break
         const sessionStatus = session?.status
         const sType = typeof sessionStatus === 'string' ? sessionStatus : (sessionStatus as { type?: string } | undefined)?.type
         if (sType === 'idle') {
@@ -915,10 +946,15 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       case 'message.updated': {
         if (!this.isOwnSession(properties)) break
         const info = properties.info as {
+          id?: string
           role?: string
           parts?: OpenCodeMessagePart[]
+          cost?: number
+          tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } }
         } | undefined
-        if (!info || info.role !== 'assistant' || !info.parts) break
+        if (!info || info.role !== 'assistant') break
+        this.trackUsage(info)
+        if (!info.parts) break
         if (process.env.CODEKIN_DEBUG_SSE) {
           console.log(`[opencode-sse] message.updated parts=${info.parts.length} types=${info.parts.map(p => p.type).join(',')}`)
           for (const p of info.parts) {
@@ -939,6 +975,48 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
           }
         }
         break
+    }
+  }
+
+  /**
+   * Accumulate token/cost usage from assistant message.updated info and emit
+   * cumulative session totals. message.updated fires repeatedly per message,
+   * so usage is keyed by message ID (latest wins) and duplicate totals are
+   * suppressed.
+   */
+  private trackUsage(info: { id?: string; cost?: number; tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } } }): void {
+    const t = info.tokens
+    if (!t || !info.id) return
+    const input = (t.input ?? 0) + (t.cache?.read ?? 0) + (t.cache?.write ?? 0)
+    const output = (t.output ?? 0) + (t.reasoning ?? 0)
+    if (input === 0 && output === 0) return
+    this.usageByMessage.set(info.id, { input, output, cost: info.cost ?? 0 })
+    let inputTokens = 0
+    let outputTokens = 0
+    let costUsd = 0
+    for (const u of this.usageByMessage.values()) {
+      inputTokens += u.input
+      outputTokens += u.output
+      costUsd += u.cost
+    }
+    const key = `${inputTokens}/${outputTokens}/${costUsd}`
+    if (key === this.lastEmittedUsage) return
+    this.lastEmittedUsage = key
+    this.emit('usage', { inputTokens, outputTokens, costUsd })
+  }
+
+  /** Surface a subagent (child session) tool part as tool activity in the main session. */
+  private handleChildToolPart(part: OpenCodeMessagePart): void {
+    const toolName = part.tool || 'unknown'
+    const status = part.state?.status
+    if (status === 'running') {
+      const inputStr = part.state?.input ? summarizeToolInput(toolName, part.state.input) : undefined
+      this.emit('tool_active', toolName, inputStr)
+    } else if (status === 'completed') {
+      const output = part.state?.output
+      this.emit('tool_done', toolName, output ? output.slice(0, 200) : undefined)
+    } else if (status === 'error') {
+      this.emit('tool_done', toolName, `Error: ${part.state?.error || 'unknown'}`)
     }
   }
 
@@ -994,10 +1072,36 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       const info = (last.info ?? last) as { role?: string; time?: { completed?: number } }
       if (info.role === 'assistant' && info.time?.completed) {
         console.warn(`[opencode] Missed turn-completion event for session ${this.opencodeSessionId} — recovered via message poll`)
+        this.recoverMissedText(last)
         this.completeTurn()
       }
     } catch (err) {
       console.warn(`[opencode] Turn liveness poll failed for ${this.opencodeSessionId}:`, err)
+    }
+  }
+
+  /**
+   * When a turn completed server-side but its SSE events were lost (stream
+   * drop), the assistant's response text was never emitted. Recover it from
+   * the polled message-history entry so the user isn't left with a silent turn.
+   */
+  private recoverMissedText(entry: Record<string, unknown>): void {
+    if (this.receivedDeltas || this.emittedPartText || this.deltaBuffer) return
+    const parts = (entry.parts ?? (entry.info as Record<string, unknown> | undefined)?.parts) as OpenCodeMessagePart[] | undefined
+    if (!Array.isArray(parts)) return
+    const text = parts
+      .filter((p) => p.type === 'text' && p.text)
+      .map((p) => p.text)
+      .join('\n')
+    if (!text) return
+    let out = text
+    if (this.lastUserInput && out.startsWith(this.lastUserInput)) {
+      out = out.slice(this.lastUserInput.length)
+    }
+    if (out) {
+      this.emittedPartText = true
+      console.warn(`[opencode] Recovered ${out.length} chars of missed assistant text for session ${this.opencodeSessionId}`)
+      this.emit('text', out)
     }
   }
 
@@ -1099,6 +1203,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     }
 
     this.turnComplete = false // reset completion latch for new turn
+    this.turnInFlight = true
     this.receivedDeltas = false
     this.emittedPartText = false
     this.deltaBuffer = ''
@@ -1151,6 +1256,35 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       }
     }
     this.lastUserInput = textContent.trim()
+
+    // /compact and /summarize map to OpenCode's native summarize endpoint,
+    // which condenses the conversation server-side. The summarization runs as
+    // a turn — SSE events stream in and the idle event completes the latch.
+    const trimmedText = textContent.trim()
+    if (!attachMatch && (trimmedText === '/compact' || trimmedText === '/summarize')) {
+      const summarizeBody: Record<string, unknown> = {}
+      if (this.model && this.model.includes('/')) {
+        const slashIdx = this.model.indexOf('/')
+        summarizeBody.providerID = this.model.slice(0, slashIdx)
+        summarizeBody.modelID = this.model.slice(slashIdx + 1)
+      }
+      void fetch(`${baseUrl}/session/${this.opencodeSessionId}/summarize`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders(),
+          'Content-Type': 'application/json',
+          'x-opencode-directory': this.workingDir,
+        },
+        body: JSON.stringify(summarizeBody),
+      }).then((res) => {
+        if (!res.ok) {
+          this.emit('error', `Failed to compact conversation: HTTP ${res.status}`)
+        }
+      }).catch((err) => {
+        this.emit('error', `Failed to compact conversation: ${err instanceof Error ? err.message : String(err)}`)
+      })
+      return
+    }
 
     // Route known slash commands (`/name args`) to OpenCode's command
     // endpoint so its commands/skills/MCP prompts work from Codekin.
@@ -1227,17 +1361,36 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
 
   /**
    * Respond to a permission/control request.
-   * Maps Codekin's allow/deny to OpenCode's once/always/reject.
+   * Maps Codekin's allow/deny/allow_always to OpenCode's once/reject/always.
+   * 'always' makes OpenCode remember the grant server-side, so the same
+   * permission won't round-trip through the approval UI again this session.
    */
-  sendControlResponse(requestId: string, behavior: 'allow' | 'deny'): void {
-    const type = behavior === 'deny' ? 'reject' : 'once'
+  sendControlResponse(requestId: string, behavior: 'allow' | 'deny' | 'allow_always'): void {
+    const type = behavior === 'deny' ? 'reject' : behavior === 'allow_always' ? 'always' : 'once'
     void this.replyToPermission(requestId, type)
   }
 
-  /** Stop the OpenCode session and disconnect the SSE stream. */
+  /**
+   * Stop the OpenCode session and disconnect the SSE stream. If a turn is
+   * still running server-side, abort it — otherwise OpenCode keeps generating
+   * (and editing files) with nobody attached.
+   */
   stop(): void {
     if (!this.alive) return
     this.alive = false
+    if (this.turnInFlight && this.opencodeSessionId) {
+      this.turnInFlight = false
+      void fetch(`http://localhost:${serverState.port}/session/${this.opencodeSessionId}/abort`, {
+        method: 'POST',
+        headers: {
+          ...authHeaders(),
+          'x-opencode-directory': this.workingDir,
+        },
+        signal: AbortSignal.timeout(5000),
+      }).catch((err) => {
+        console.warn(`[opencode] Failed to abort in-flight turn for ${this.opencodeSessionId}:`, err)
+      })
+    }
     this.clearTurnWatchdog()
     if (this.startupTimer) {
       clearTimeout(this.startupTimer)

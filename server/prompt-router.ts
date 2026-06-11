@@ -593,7 +593,10 @@ export class PromptRouter {
       this.deps.approvalManager.savePatternApproval(session.groupDir ?? session.workingDir, pending.toolName, pending.toolInput)
     }
 
-    const behavior = isDeny ? 'deny' : 'allow'
+    // 'allow_always' lets providers persist the grant natively (OpenCode maps
+    // it to its 'always' reply; Claude treats it as a plain allow — Codekin's
+    // ApprovalManager handles persistence there).
+    const behavior = isDeny ? 'deny' : isAlwaysAllow ? 'allow_always' : 'allow'
     if (!session.claudeProcess?.isAlive()) return
     session.claudeProcess.sendControlResponse(pending.requestId, behavior)
   }

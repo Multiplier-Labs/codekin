@@ -225,6 +225,20 @@ export interface ClaudeResultEvent {
   session_id: string
   duration_ms: number
   total_cost_usd: number
+  /** Per-turn token usage (present in recent CLI versions). */
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    cache_read_input_tokens?: number
+    cache_creation_input_tokens?: number
+  }
+}
+
+/** Cumulative session token/cost usage emitted by coding processes. */
+export interface SessionUsage {
+  inputTokens: number
+  outputTokens: number
+  costUsd?: number
 }
 
 /**
@@ -292,6 +306,7 @@ export type WsServerMessage =
   | { type: 'system_message'; subtype: 'init' | 'exit' | 'error' | 'restart' | 'notification'; text: string; model?: string }
   | { type: 'user_echo'; text: string }
   | { type: 'result' }
+  | { type: 'usage'; inputTokens: number; outputTokens: number; costUsd?: number }
   | { type: 'planning_mode'; active: boolean }
   | { type: 'todo_update'; tasks: TaskItem[] }
   | { type: 'session_name_update'; sessionId: string; name: string }

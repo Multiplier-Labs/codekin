@@ -373,6 +373,18 @@ describe('PromptRouter', () => {
       expect(deps.approvalManager.saveAlwaysAllow).toHaveBeenCalledWith('/repos/test', 'Bash', { command: 'npm test' })
     })
 
+    it('forwards always_allow to the provider as allow_always', () => {
+      session.pendingControlRequests.set('cr-4', {
+        requestId: 'cr-4',
+        toolName: 'Bash',
+        toolInput: { command: 'npm test' },
+      })
+
+      router.sendPromptResponse('sess-1', 'always_allow', 'cr-4')
+
+      expect(session.claudeProcess!.sendControlResponse).toHaveBeenCalledWith('cr-4', 'allow_always')
+    })
+
     it('infers sole pending prompt when no requestId given', () => {
       session.pendingControlRequests.set('cr-only', {
         requestId: 'cr-only',

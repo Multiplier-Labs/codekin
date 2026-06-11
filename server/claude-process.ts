@@ -16,7 +16,7 @@ import { createInterface, type Interface } from 'readline'
 import { existsSync } from 'fs'
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
-import type { ClaudeEvent, ClaudeSystemInit, ClaudeControlRequest, ClaudeResultEvent, ClaudeStreamEvent, TaskItem, PromptQuestion, PermissionMode } from './types.js'
+import type { ClaudeEvent, ClaudeSystemInit, ClaudeControlRequest, ClaudeResultEvent, ClaudeStreamEvent, TaskItem, PromptQuestion, PermissionMode, SessionUsage } from './types.js'
 import { SCREENSHOTS_DIR, CLAUDE_BINARY } from './config.js'
 import { summarizeToolInput } from './tool-labels.js'
 import { redactSecrets } from './crypto-utils.js'
@@ -71,6 +71,7 @@ export interface ClaudeProcessEvents {
   todo_update: [tasks: TaskItem[]]
   image: [base64: string, mediaType: string]
   result: [text: string, isError: boolean]
+  usage: [usage: SessionUsage]
   rate_limit: [event: Record<string, unknown>]
   error: [message: string]
   exit: [code: number | null, signal: string | null]
@@ -101,6 +102,10 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
    * skip retries when this flag is true.
    */
   private _sessionConflict = false
+
+  /** Cumulative token counts across all result events in this process's lifetime. */
+  private cumulativeInputTokens = 0
+  private cumulativeOutputTokens = 0
 
   /**
    * Set to true when spawn() itself fails (ENOENT, EACCES, etc.).
@@ -356,6 +361,20 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
 
       case 'result': {
         const resultEvent = event as ClaudeResultEvent
+        // Surface cumulative token/cost usage. The CLI's result event carries
+        // per-turn usage plus a cumulative total_cost_usd for the session.
+        const u = resultEvent.usage
+        if (u) {
+          this.cumulativeInputTokens += (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
+          this.cumulativeOutputTokens += u.output_tokens ?? 0
+        }
+        if (u || typeof resultEvent.total_cost_usd === 'number') {
+          this.emit('usage', {
+            inputTokens: this.cumulativeInputTokens,
+            outputTokens: this.cumulativeOutputTokens,
+            ...(typeof resultEvent.total_cost_usd === 'number' ? { costUsd: resultEvent.total_cost_usd } : {}),
+          })
+        }
         this.emit('result', resultEvent.result || '', resultEvent.is_error || false)
         break
       }
@@ -571,8 +590,12 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     }
   }
 
-  /** Send a control_response back to the CLI to allow or deny a pending request. */
-  sendControlResponse(requestId: string, behavior: 'allow' | 'deny', updatedInput?: Record<string, unknown>, message?: string): void {
+  /**
+   * Send a control_response back to the CLI to allow or deny a pending request.
+   * 'allow_always' is treated as 'allow' — the CLI protocol has no persistent
+   * grant; persistence is handled by Codekin's ApprovalManager.
+   */
+  sendControlResponse(requestId: string, behavior: 'allow' | 'deny' | 'allow_always', updatedInput?: Record<string, unknown>, message?: string): void {
     // The CLI expects a nested format: { type, response: { subtype, request_id, response: { behavior, ... } } }
     // Inner response schema:
     //   allow: { behavior: "allow", updatedInput: Record<string, unknown> }  (updatedInput required)

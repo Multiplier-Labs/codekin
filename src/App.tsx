@@ -127,6 +127,7 @@ export default function App() {
     connState,
     messages,
     tasks,
+    usage,
     planningMode,
     isProcessing,
     thinkingSummary,
@@ -300,7 +301,14 @@ export default function App() {
         if (activeWorkingDir) handleNewSessionForRepo()
         break
       case '/compact':
-        sendInput('Please compact the conversation context to save tokens while preserving important context.')
+        // OpenCode has a native summarize endpoint — the server maps the
+        // literal /compact to POST /session/:id/summarize. Claude (stream-json)
+        // has no such command, so ask the model to compact in-band.
+        if (activeSessionProvider === 'opencode') {
+          sendInput('/compact')
+        } else {
+          sendInput('Please compact the conversation context to save tokens while preserving important context.')
+        }
         break
       case '/model':
         if (args) {
@@ -316,7 +324,7 @@ export default function App() {
         sendInput(`[Codekin] Command ${command} is not available in the web UI.`)
         break
     }
-  }, [leaveSession, clearMessages, activeWorkingDir, handleNewSessionForRepo, sendInput, currentModel, handleModelChange])
+  }, [leaveSession, clearMessages, activeWorkingDir, handleNewSessionForRepo, sendInput, currentModel, handleModelChange, activeSessionProvider])
 
   // Message sending: file uploads, skill expansion, tentative queue
   const {
@@ -703,6 +711,7 @@ export default function App() {
             onModelChange={handleModelChange}
             availableModels={availableModels}
             sessionProvider={activeSessionProvider}
+            usage={usage}
             hasUserMessages={messages.some(m => m.type === 'user')}
             useWorktree={useWorktree}
             onWorktreeChange={setUseWorktree}

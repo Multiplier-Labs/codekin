@@ -14,6 +14,7 @@ import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
 import type { SlashCommand } from '../lib/slashCommands'
+import { formatUsageLabel } from '../lib/formatUsage'
 import { PERMISSION_MODES, type PermissionMode, type ModelOption } from '../types'
 
 const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
@@ -310,6 +311,8 @@ interface InputBarProps {
   availableModels?: ModelOption[]
   /** Coding provider of the active session — filters provider-specific permission modes. */
   sessionProvider?: 'claude' | 'opencode'
+  /** Cumulative token/cost usage for the session — shown as a small toolbar indicator. */
+  usage?: import('../types').SessionUsage | null
   /** Override the default placeholder text in the textarea. */
   placeholder?: string
   /** When true, disables drag-to-resize and uses auto-height instead. */
@@ -332,7 +335,7 @@ interface InputBarProps {
   variant?: InputBarVariant
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, availableModels = [], sessionProvider, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, availableModels = [], sessionProvider, usage, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
   const isOrchestrator = variant === 'orchestrator'
   // OpenCode has no equivalent of Claude's --dangerously-skip-permissions flag;
   // bypassPermissions (all-allow ruleset) already covers that use case.
@@ -629,6 +632,14 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               ) : null}
             </div>
             <div className="flex items-center gap-1">
+              {usage && (usage.inputTokens > 0 || usage.outputTokens > 0) && (
+                <span
+                  className="hidden md:inline px-2 py-1 text-[11px] text-neutral-5 whitespace-nowrap"
+                  title={`Session usage — input: ${usage.inputTokens.toLocaleString()} tokens, output: ${usage.outputTokens.toLocaleString()} tokens${usage.costUsd ? `, cost: $${usage.costUsd.toFixed(4)}` : ''}`}
+                >
+                  {formatUsageLabel(usage)}
+                </span>
+              )}
               {currentModel && onModelChange && (
                 <ModelDropdown
                   currentModel={currentModel}
