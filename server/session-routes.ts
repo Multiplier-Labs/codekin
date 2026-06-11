@@ -23,6 +23,7 @@ import { VALID_PROVIDERS, VALID_PERMISSION_MODES } from './types.js'
 import type { CodingProvider } from './coding-process.js'
 import type { PermissionMode } from './types.js'
 import { fetchOpenCodeModels, fetchOpenCodeCommands } from './opencode-process.js'
+import { fetchCodexModels } from './codex-process.js'
 
 // ---------------------------------------------------------------------------
 // Request body interfaces for route handlers
@@ -151,6 +152,13 @@ export function createSessionRouter(
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
     const models = await fetchAnthropicModels()
     res.json({ models })
+  })
+
+  router.get('/api/codex/models', async (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const result = await fetchCodexModels()
+    res.json(result)
   })
 
   router.get('/api/opencode/models', async (req, res) => {

@@ -1,13 +1,13 @@
 /**
  * Combined provider selector + model picker for workflow modals.
  *
- * Fetches OpenCode models on mount to determine availability.
- * Shows provider toggle only when OpenCode is available.
+ * Fetches OpenCode and Codex models on mount to determine availability.
+ * Shows provider toggle only when an alternative provider is available.
  * Delegates model rendering to WorkflowModelPicker.
  */
 
 import { useState, useEffect } from 'react'
-import { fetchClaudeModels, fetchOpenCodeModels } from '../../lib/ccApi'
+import { fetchClaudeModels, fetchOpenCodeModels, fetchCodexModels } from '../../lib/ccApi'
 import { MODEL_OPTIONS } from '../../lib/workflowHelpers'
 import type { ModelOption, CodingProvider } from '../../types'
 import { WorkflowModelPicker } from './WorkflowModelPicker'
@@ -38,8 +38,11 @@ interface Props {
 export function ProviderModelSection({ token, workingDir, provider, model, onProviderChange, onModelChange }: Props) {
   const [openCodeAvailable, setOpenCodeAvailable] = useState<boolean | null>(null)
   const [openCodeModels, setOpenCodeModels] = useState<ModelOption[]>([])
+  const [codexAvailable, setCodexAvailable] = useState<boolean | null>(null)
+  const [codexModels, setCodexModels] = useState<ModelOption[]>([])
   const [claudeWorkflowModels, setClaudeWorkflowModels] = useState(FALLBACK_WORKFLOW_MODELS)
   const [loadingOcModels, setLoadingOcModels] = useState(true)
+  const [loadingCodexModels, setLoadingCodexModels] = useState(true)
 
   // Fetch Claude models dynamically on mount
   useEffect(() => {
@@ -74,22 +77,45 @@ export function ProviderModelSection({ token, workingDir, provider, model, onPro
     return () => { cancelled = true }
   }, [token, workingDir])
 
+  // Check Codex availability on mount
+  useEffect(() => {
+    let cancelled = false
+    fetchCodexModels(token).then(result => {
+      if (cancelled) return
+      if (result.models.length > 0) {
+        setCodexAvailable(true)
+        setCodexModels(result.models.map(m => ({ id: m.id, label: m.name || m.id })))
+      } else {
+        setCodexAvailable(false)
+      }
+    }).catch(() => {
+      if (!cancelled) setCodexAvailable(false)
+    }).finally(() => {
+      if (!cancelled) setLoadingCodexModels(false)
+    })
+    return () => { cancelled = true }
+  }, [token])
+
   // When switching provider, select a sensible default for the new provider
   const handleProviderChange = (newProvider: CodingProvider) => {
     if (newProvider === provider) return
     onProviderChange(newProvider)
     // Pick the first model from the new provider's list ('' = Default Opus for Claude)
-    const newModels = newProvider === 'opencode' ? openCodeModels : claudeWorkflowModels
+    const newModels = newProvider === 'opencode' ? openCodeModels
+      : newProvider === 'codex' ? codexModels
+      : claudeWorkflowModels
     onModelChange(newModels[0]?.id ?? '')
   }
 
-  const currentModels: ModelOption[] = provider === 'opencode' ? openCodeModels : claudeWorkflowModels
-  const isLoadingModels = provider === 'opencode' && loadingOcModels
+  const currentModels: ModelOption[] = provider === 'opencode' ? openCodeModels
+    : provider === 'codex' ? codexModels
+    : claudeWorkflowModels
+  const isLoadingModels = (provider === 'opencode' && loadingOcModels) || (provider === 'codex' && loadingCodexModels)
 
   return (
     <div className="flex flex-wrap items-end gap-4">
-      {/* Provider selector — only show when OpenCode is available */}
-      {openCodeAvailable && (
+      {/* Provider selector — only show when an alternative provider is available */}
+      {(openCodeAvailable || codexAvailable) && (
         <div>
           <label className="block text-[13px] font-medium text-neutral-3 mb-1">Provider</label>
           <div className="flex gap-1">
@@ -100,13 +126,24 @@ export function ProviderModelSection({ token, workingDir, provider, model, onPro
             >
               Claude Code
             </button>
-            <button
-              type="button"
-              onClick={() => handleProviderChange('opencode')}
-              className={providerBtnClass(provider === 'opencode')}
-            >
-              OpenCode
-            </button>
+            {openCodeAvailable && (
+              <button
+                type="button"
+                onClick={() => handleProviderChange('opencode')}
+                className={providerBtnClass(provider === 'opencode')}
+              >
+                OpenCode
+              </button>
+            )}
+            {codexAvailable && (
+              <button
+                type="button"
+                onClick={() => handleProviderChange('codex')}
+                className={providerBtnClass(provider === 'codex')}
+              >
+                Codex
+              </button>
+            )}
           </div>
         </div>
       )}
