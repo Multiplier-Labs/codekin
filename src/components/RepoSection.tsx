@@ -291,6 +291,14 @@ export function RepoSection({
                         OC
                       </span>
                     )}
+                    {s.provider === 'codex' && (
+                      <span
+                        title="Codex session"
+                        className="text-[10px] px-1 py-0 rounded bg-neutral-7 text-neutral-4 font-medium leading-tight"
+                      >
+                        CX
+                      </span>
+                    )}
                     {sessionDisplayName(s)}
                   </span>
                 )}
@@ -332,6 +340,13 @@ export function RepoSection({
               >
                 <IconPlus size={12} stroke={2} className="flex-shrink-0" />
                 <span>OpenCode</span>
+              </button>
+              <button
+                onClick={() => onNewSession('codex')}
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[13px] text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6/50 transition-colors"
+              >
+                <IconPlus size={12} stroke={2} className="flex-shrink-0" />
+                <span>Codex</span>
               </button>
             </div>
           )}

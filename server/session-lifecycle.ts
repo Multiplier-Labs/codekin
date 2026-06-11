@@ -12,6 +12,7 @@ import { existsSync } from 'fs'
 import path from 'path'
 import { ClaudeProcess } from './claude-process.js'
 import { OpenCodeProcess } from './opencode-process.js'
+import { CodexProcess } from './codex-process.js'
 import type { CodingProcess } from './coding-process.js'
 import { ApprovalManager } from './approval-manager.js'
 import type { PromptRouter } from './prompt-router.js'
@@ -153,6 +154,14 @@ export class SessionLifecycle {
       cp = new OpenCodeProcess(session.workingDir, {
         sessionId: sessionId,
         opencodeSessionId: session.claudeSessionId || undefined,
+        model: session.model,
+        extraEnv,
+        permissionMode: session.permissionMode,
+      })
+    } else if (session.provider === 'codex') {
+      cp = new CodexProcess(session.workingDir, {
+        sessionId: sessionId,
+        codexThreadId: session.claudeSessionId || undefined,
         model: session.model,
         extraEnv,
         permissionMode: session.permissionMode,

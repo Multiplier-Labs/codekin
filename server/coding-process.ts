@@ -17,8 +17,9 @@ import type { ClaudeProcessEvents } from './claude-process.js'
  * Supported AI coding assistant providers.
  * - 'claude': Claude Code CLI (subprocess, NDJSON on stdin/stdout)
  * - 'opencode': OpenCode server (HTTP REST + SSE)
+ * - 'codex': OpenAI Codex CLI (subprocess, `codex app-server` JSON-RPC on stdin/stdout)
  */
-export type CodingProvider = 'claude' | 'opencode'
+export type CodingProvider = 'claude' | 'opencode' | 'codex'
 
 /**
  * Capabilities that differ between providers. SessionManager and frontend
@@ -112,4 +113,15 @@ export const OPENCODE_CAPABILITIES: ProviderCapabilities = {
   thinkingDisplay: true,
   multiProvider: true,
   planMode: true,
+}
+
+/** Default capabilities for the OpenAI Codex CLI provider. */
+export const CODEX_CAPABILITIES: ProviderCapabilities = {
+  streaming: true,
+  multiTurn: true,
+  permissionControl: true,
+  toolEvents: true,
+  thinkingDisplay: true,
+  multiProvider: false,
+  planMode: false,
 }

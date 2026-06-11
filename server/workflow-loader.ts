@@ -307,7 +307,7 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
           const repoName = (input.repoName as string) || repoPath.split('/').pop() || 'unknown'
 
           const model = (input.model as string | undefined) || def.model
-          const provider = (input.provider as 'claude' | 'opencode' | undefined)
+          const provider = (input.provider as 'claude' | 'opencode' | 'codex' | undefined)
           const session = sessions.create(`${def.sessionPrefix}:${repoName}`, repoPath, {
             source: 'workflow',
             groupDir: repoPath,
