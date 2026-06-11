@@ -116,6 +116,7 @@
   --color-ink: var(--color-neutral-2);            /* primary text */
   --color-ink-muted: var(--color-neutral-5);      /* secondary text */
   --color-ink-faint: var(--color-neutral-6);      /* de-emphasized metadata */
+  --color-on-primary: var(--color-primary-12);    /* text on gold (primary-8) fills */
 }
 
 /* Terminal / chat area — warm gray palette.
@@ -255,6 +256,8 @@
   --color-primary-10: #fcedcc;
   --color-primary-11: #fef3dc;
   --color-primary-12: #fef8ec;
+  /* The light scale is inverted, so "dark text on gold" is primary-1 here */
+  --color-on-primary: var(--color-primary-1);
 
   /* Secondary (terracotta) — inverted */
   --color-secondary-1:  #321d14;
@@ -513,6 +516,16 @@
   --color-neutral-4: #555555;
   --color-neutral-5: #707070;
   --color-neutral-6: #8a8a8a;
+}
+
+/* Tell the browser which scheme native UI (checkboxes, scrollbars, number
+   spinners, pickers) should use — without this, unchecked checkboxes render
+   as stark white boxes in dark mode. */
+:root {
+  color-scheme: dark;
+}
+[data-theme="light"] {
+  color-scheme: light;
 }
 
 html, body, #root {

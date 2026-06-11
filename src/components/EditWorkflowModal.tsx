@@ -248,7 +248,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
             <button
               type="submit"
               disabled={saving}
-              className="flex-1 rounded-md bg-primary-8 py-2 text-[14px] font-medium text-neutral-1 hover:bg-primary-7 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+              className="flex-1 rounded-md bg-primary-8 py-2 text-[14px] font-medium text-on-primary hover:bg-primary-7 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
             >
               {saving ? (
                 <>
