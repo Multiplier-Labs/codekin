@@ -100,22 +100,22 @@
   --color-success-11: #0c2b1a;
   --color-success-12: #07180e;
 
-  /* Info — cyan-blue */
-  --color-info-1: #eff8fb;
-  --color-info-2: #d0edf5;
-  --color-info-3: #a0d9ea;
-  --color-info-4: #6dc2da;
-  --color-info-5: #40a9c8;
-  --color-info-6: #2d8fb0;
-  --color-info-7: #247592;
-  --color-info-8: #1d5e76;
-  --color-info-9: #17495c;
-  --color-info-10: #113644;
-  --color-info-11: #0c242e;
-  --color-info-12: #07151a;
-
   /* Font family */
   --font-sans: 'Lato', sans-serif;
+
+  /* ── Semantic aliases ──────────────────────────────────────────────────
+     Role-based tokens that resolve through the scale variables, so they
+     automatically follow every override scope (.terminal-area, light mode,
+     etc.). Prefer these in new/edited components over raw scale steps:
+     bg-surface, border-edge, text-ink-muted, ... */
+  --color-page: var(--color-neutral-12);          /* app/page background */
+  --color-surface: var(--color-neutral-11);       /* cards, code blocks */
+  --color-surface-raised: var(--color-neutral-10);/* hovered/raised surfaces */
+  --color-edge: var(--color-neutral-9);           /* default borders */
+  --color-edge-strong: var(--color-neutral-8);    /* emphasized borders */
+  --color-ink: var(--color-neutral-2);            /* primary text */
+  --color-ink-muted: var(--color-neutral-5);      /* secondary text */
+  --color-ink-faint: var(--color-neutral-6);      /* de-emphasized metadata */
 }
 
 /* Terminal / chat area — warm gray palette.
@@ -219,20 +219,6 @@
   --color-success-10: #1d3f2a;
   --color-success-11: #142b1d;
   --color-success-12: #0b1811;
-
-  /* Info — warmer cyan, text lightened */
-  --color-info-1: #f3f9f9;
-  --color-info-2: #daecf0;
-  --color-info-3: #b2d9e0;
-  --color-info-4: #87c1cd;
-  --color-info-5: #5ea8b8;
-  --color-info-6: #478fa0;
-  --color-info-7: #387486;
-  --color-info-8: #2d5d6c;
-  --color-info-9: #234854;
-  --color-info-10: #1a353e;
-  --color-info-11: #12242b;
-  --color-info-12: #0a1519;
 }
 
 /* ── Light mode overrides ────────────────────────────────────────────────── */
@@ -242,8 +228,6 @@
    readable accents on light backgrounds. */
 
 [data-theme="light"] {
-  font-weight: 465;
-
   /* Neutral — inverted: dark text on light backgrounds */
   --color-neutral-1:  #0f0e0d;
   --color-neutral-2:  #1b1a18;
@@ -341,20 +325,14 @@
   --color-success-10: #d0f2e2;
   --color-success-11: #e5f8ef;
   --color-success-12: #effaf5;
+}
 
-  /* Info — inverted */
-  --color-info-1:  #07151a;
-  --color-info-2:  #113644;
-  --color-info-3:  #17495c;
-  --color-info-4:  #1d5e76;
-  --color-info-5:  #247592;
-  --color-info-6:  #2d8fb0;
-  --color-info-7:  #40a9c8;
-  --color-info-8:  #6dc2da;
-  --color-info-9:  #a0d9ea;
-  --color-info-10: #d0edf5;
-  --color-info-11: #e5f4fa;
-  --color-info-12: #eff8fb;
+/* Dark mode — lift the chrome (sidebar/top bar) one step above the terminal
+   so the cool-chrome/warm-content split actually reads; at the raw scale
+   values both backgrounds rendered as indistinguishable near-black. */
+[data-theme="dark"] .app-left-sidebar,
+[data-theme="dark"] .app-right-sidebar {
+  background-color: #11181a;
 }
 
 /* Light mode — component-specific background overrides */
@@ -423,14 +401,23 @@
   background-color: color-mix(in srgb, var(--color-neutral-8) 80%, transparent);
 }
 
-/* Terminal area overrides in light mode */
+/* User message bubble — faint warm tint in dark mode so the user's turns
+   stand apart from assistant text without shouting */
+[data-theme="dark"] .terminal-area .user-bubble {
+  background-color: color-mix(in srgb, var(--color-primary-11) 35%, var(--color-neutral-11));
+}
+
+/* Terminal area overrides in light mode.
+   Steps 5–6 are darkened relative to the plain inverted scale so muted
+   text (tool summaries, timestamps, request IDs) meets ~4.5:1 on the
+   cream background. */
 [data-theme="light"] .terminal-area {
   --color-neutral-1:  #0f0e0d;
   --color-neutral-2:  #1b1a18;
   --color-neutral-3:  #333131;
   --color-neutral-4:  #424040;
-  --color-neutral-5:  #777571;
-  --color-neutral-6:  #93918c;
+  --color-neutral-5:  #6b6964;
+  --color-neutral-6:  #7c7a75;
   --color-neutral-7:  #e4e2de;
   --color-neutral-8:  #eeebe6;
   --color-neutral-9:  #f3f1ec;
@@ -442,7 +429,7 @@
   --color-primary-2:  #584528;
   --color-primary-3:  #775c35;
   --color-primary-4:  #977443;
-  --color-primary-5:  #af8958;
+  --color-primary-5:  #8a6a3c; /* darkened for AA on cream (notification text) */
   --color-primary-6:  #cba557;
   --color-primary-7:  #be9d5a;
   --color-primary-8:  #eccc8e;
@@ -455,8 +442,8 @@
   --color-accent-2:  #1e3c39;
   --color-accent-3:  #29524d;
   --color-accent-4:  #356b65;
-  --color-accent-5:  #42847d;
-  --color-accent-6:  #559f97;
+  --color-accent-5:  #356f69; /* darkened for AA on cream (links) */
+  --color-accent-6:  #3d7a72; /* darkened for AA on cream (tool names) */
   --color-accent-7:  #6cb7af;
   --color-accent-8:  #93ccc6;
   --color-accent-9:  #bae1dc;
@@ -494,7 +481,7 @@
   --color-success-2:  #1d3f2a;
   --color-success-3:  #275438;
   --color-success-4:  #326c48;
-  --color-success-5:  #3f8559;
+  --color-success-5:  #327249; /* darkened for AA on cream (init banner) */
   --color-success-6:  #53a578;
   --color-success-7:  #66bb8e;
   --color-success-8:  #8ccfab;
@@ -608,10 +595,44 @@ html, body, #root {
   background: var(--color-neutral-6);
 }
 
-/* Prose overrides — shared structural rules */
+/* Prose overrides — shared structural rules.
+   Note: @tailwindcss/typography is NOT installed; these rules provide the
+   full markdown styling (heading scale, list markers, blockquotes) that the
+   `prose` class would otherwise supply. */
 .prose.prose-themed code {
   font-family: 'Inconsolata', monospace;
 }
+
+.prose.prose-themed h1 { font-size: 1.4em; font-weight: 700; }
+.prose.prose-themed h2 { font-size: 1.2em; font-weight: 600; }
+.prose.prose-themed h3 { font-size: 1.05em; font-weight: 600; }
+.prose.prose-themed h4 { font-size: 1em; font-weight: 600; }
+
+.prose.prose-themed ul { list-style: disc; padding-left: 1.5em; }
+.prose.prose-themed ol { list-style: decimal; padding-left: 1.5em; }
+.prose.prose-themed li { margin: 0.2em 0; }
+.prose.prose-themed li > ul,
+.prose.prose-themed li > ol { margin: 0.1em 0; }
+
+.prose.prose-themed blockquote {
+  border-left: 3px solid var(--tw-prose-quote-borders);
+  padding-left: 1em;
+  margin: 0.5em 0;
+  color: var(--tw-prose-quotes);
+}
+
+.prose.prose-themed hr {
+  border: none;
+  border-top: 1px solid var(--tw-prose-hr);
+  margin: 1em 0;
+}
+
+.prose.prose-themed strong { color: var(--tw-prose-bold); font-weight: 700; }
+.prose.prose-themed h1, .prose.prose-themed h2,
+.prose.prose-themed h3, .prose.prose-themed h4 { color: var(--tw-prose-headings); }
+.prose.prose-themed a { color: var(--tw-prose-links); }
+.prose.prose-themed :not(pre) > code { color: var(--tw-prose-code); }
+.prose.prose-themed th { font-weight: 600; }
 
 .prose.prose-themed pre {
   background: var(--color-neutral-11);
@@ -656,7 +677,7 @@ html, body, #root {
 [data-theme="dark"] .prose.prose-themed {
   --tw-prose-body: var(--color-neutral-2);
   --tw-prose-headings: var(--color-neutral-2);
-  --tw-prose-links: var(--color-accent-5);
+  --tw-prose-links: var(--color-accent-4); /* one step brighter for salience */
   --tw-prose-bold: var(--color-neutral-2);
   --tw-prose-code: var(--color-accent-4);
   --tw-prose-pre-bg: var(--color-neutral-11);
@@ -705,6 +726,37 @@ html, body, #root {
 .prose.prose-invert code {
   font-family: 'Inconsolata', monospace;
 }
+
+.prose.prose-invert h1 { font-size: 1.4em; font-weight: 700; }
+.prose.prose-invert h2 { font-size: 1.2em; font-weight: 600; }
+.prose.prose-invert h3 { font-size: 1.05em; font-weight: 600; }
+.prose.prose-invert h4 { font-size: 1em; font-weight: 600; }
+
+.prose.prose-invert ul { list-style: disc; padding-left: 1.5em; }
+.prose.prose-invert ol { list-style: decimal; padding-left: 1.5em; }
+.prose.prose-invert li { margin: 0.2em 0; }
+.prose.prose-invert li > ul,
+.prose.prose-invert li > ol { margin: 0.1em 0; }
+
+.prose.prose-invert blockquote {
+  border-left: 3px solid var(--tw-prose-quote-borders);
+  padding-left: 1em;
+  margin: 0.5em 0;
+  color: var(--tw-prose-quotes);
+}
+
+.prose.prose-invert hr {
+  border: none;
+  border-top: 1px solid var(--tw-prose-hr);
+  margin: 1em 0;
+}
+
+.prose.prose-invert strong { color: var(--tw-prose-bold); font-weight: 700; }
+.prose.prose-invert h1, .prose.prose-invert h2,
+.prose.prose-invert h3, .prose.prose-invert h4 { color: var(--tw-prose-headings); }
+.prose.prose-invert a { color: var(--tw-prose-links); }
+.prose.prose-invert :not(pre) > code { color: var(--tw-prose-code); }
+.prose.prose-invert th { font-weight: 600; }
 
 .prose.prose-invert pre {
   background: var(--color-neutral-11);
@@ -757,60 +809,62 @@ html, body, #root {
   font-family: 'Inconsolata', monospace;
 }
 
-/* Dark theme tokens */
+/* Dark theme tokens — warm-leaning palette to match the terminal area
+   (cool VS Code blues replaced with gold/teal/sage; warm tokens kept). */
 [data-theme="dark"] .hljs-keyword,
-[data-theme="dark"] .hljs-tag { color: #569cd6; }
-[data-theme="dark"] .hljs-built_in { color: #4ec9b0; }
+[data-theme="dark"] .hljs-tag { color: #d8a657; }
+[data-theme="dark"] .hljs-built_in { color: #7daea3; }
 [data-theme="dark"] .hljs-type,
-[data-theme="dark"] .hljs-title.class_ { color: #4ec9b0; }
+[data-theme="dark"] .hljs-title.class_ { color: #7daea3; }
 [data-theme="dark"] .hljs-title.function_ { color: #dcdcaa; }
 [data-theme="dark"] .hljs-string,
 [data-theme="dark"] .hljs-addition { color: #ce9178; }
 [data-theme="dark"] .hljs-number { color: #b5cea8; }
 [data-theme="dark"] .hljs-comment,
-[data-theme="dark"] .hljs-quote { color: #6a9955; }
+[data-theme="dark"] .hljs-quote { color: #8f8a80; }
 [data-theme="dark"] .hljs-variable,
-[data-theme="dark"] .hljs-template-variable { color: #9cdcfe; }
+[data-theme="dark"] .hljs-template-variable { color: #83a598; }
 [data-theme="dark"] .hljs-attr,
-[data-theme="dark"] .hljs-attribute { color: #9cdcfe; }
-[data-theme="dark"] .hljs-literal { color: #569cd6; }
+[data-theme="dark"] .hljs-attribute { color: #83a598; }
+[data-theme="dark"] .hljs-literal { color: #d8a657; }
 [data-theme="dark"] .hljs-regexp { color: #d16969; }
 [data-theme="dark"] .hljs-symbol { color: #b5cea8; }
-[data-theme="dark"] .hljs-meta { color: #c586c0; }
+[data-theme="dark"] .hljs-meta { color: #d3869b; }
 [data-theme="dark"] .hljs-selector-tag,
 [data-theme="dark"] .hljs-selector-class,
 [data-theme="dark"] .hljs-selector-id { color: #d7ba7d; }
 [data-theme="dark"] .hljs-deletion { color: #ce9178; background: rgba(206,145,120,0.1); }
-[data-theme="dark"] .hljs-name { color: #569cd6; }
-[data-theme="dark"] .hljs-params { color: #9cdcfe; }
+[data-theme="dark"] .hljs-name { color: #d8a657; }
+[data-theme="dark"] .hljs-params { color: #83a598; }
 
-/* Light theme tokens */
+/* Light theme tokens — softened, warm-leaning palette (pure #0000ff/#a31515
+   were harsh against the cream background). */
 [data-theme="light"] .hljs { background: var(--color-neutral-10); }
 [data-theme="light"] .hljs-keyword,
-[data-theme="light"] .hljs-tag { color: #0000ff; }
+[data-theme="light"] .hljs-tag { color: #2d5e8f; }
 [data-theme="light"] .hljs-built_in { color: #267f99; }
 [data-theme="light"] .hljs-type,
 [data-theme="light"] .hljs-title.class_ { color: #267f99; }
 [data-theme="light"] .hljs-title.function_ { color: #795e26; }
 [data-theme="light"] .hljs-string,
-[data-theme="light"] .hljs-addition { color: #a31515; }
+[data-theme="light"] .hljs-addition { color: #9a4a32; }
 [data-theme="light"] .hljs-number { color: #098658; }
 [data-theme="light"] .hljs-comment,
-[data-theme="light"] .hljs-quote { color: #008000; }
+[data-theme="light"] .hljs-quote { color: #5a7a4a; }
 [data-theme="light"] .hljs-variable,
-[data-theme="light"] .hljs-template-variable { color: #001080; }
+[data-theme="light"] .hljs-template-variable { color: #38556e; }
 [data-theme="light"] .hljs-attr,
-[data-theme="light"] .hljs-attribute { color: #001080; }
-[data-theme="light"] .hljs-literal { color: #0000ff; }
+[data-theme="light"] .hljs-attribute { color: #38556e; }
+[data-theme="light"] .hljs-literal { color: #2d5e8f; }
 [data-theme="light"] .hljs-regexp { color: #811f3f; }
 [data-theme="light"] .hljs-symbol { color: #098658; }
-[data-theme="light"] .hljs-meta { color: #af00db; }
+[data-theme="light"] .hljs-meta { color: #8a4a8f; }
 [data-theme="light"] .hljs-selector-tag,
 [data-theme="light"] .hljs-selector-class,
-[data-theme="light"] .hljs-selector-id { color: #800000; }
-[data-theme="light"] .hljs-deletion { color: #a31515; background: rgba(163,21,21,0.1); }
-[data-theme="light"] .hljs-name { color: #0000ff; }
-[data-theme="light"] .hljs-params { color: #001080; }
+[data-theme="light"] .hljs-selector-id { color: #7a4a3a; }
+[data-theme="light"] .hljs-deletion { color: #9a4a32; background: rgba(154,74,50,0.1); }
+[data-theme="light"] .hljs-name { color: #2d5e8f; }
+[data-theme="light"] .hljs-params { color: #38556e; }
 
 /* ── Docs browser header (inverted) ────────────────────────────────────── */
 /* Inverted neutral colors so the header clearly signals "not terminal". */

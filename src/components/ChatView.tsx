@@ -62,13 +62,14 @@ function parseApiError(text: string): { prefix: string; errorType: string; messa
 
 /** Renders system banners (init, error, exit, notification) with color-coded dot and optional API error formatting. */
 function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
+  // Notifications keep the gold (attention-seeking); exit/restart are
+  // informational session-lifecycle events and use the neutral treatment so
+  // they're visually distinct from notifications (gold-on-gold was ambiguous).
   const colorClass = msg.subtype === 'init'
     ? 'text-success-5'
     : msg.subtype === 'notification'
     ? 'text-primary-5'
-    : msg.subtype === 'exit' || msg.subtype === 'restart'
-    ? 'text-warning-5'
-    : msg.subtype === 'info'
+    : msg.subtype === 'exit' || msg.subtype === 'restart' || msg.subtype === 'info'
     ? 'text-neutral-5'
     : 'text-error-5'
 
@@ -602,7 +603,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
       {showScrollButton && (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-neutral-8/90 p-2 text-neutral-3 shadow-lg transition hover:bg-neutral-7 hover:text-neutral-1"
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-neutral-8 p-2 text-neutral-2 shadow-xl shadow-black/40 ring-1 ring-neutral-6/40 transition hover:bg-neutral-7 hover:text-neutral-1"
           title="Scroll to bottom"
         >
           <IconArrowDown size={16} stroke={2} />
