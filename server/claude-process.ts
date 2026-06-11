@@ -131,6 +131,9 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   private tasks = new Map<string, TaskItem>()
   private taskSeq = 0
 
+  /** Outbound control requests (server → CLI, e.g. set_permission_mode) awaiting a control_response. */
+  private pendingOutboundControl = new Map<string, (ok: boolean) => void>
+
   /** Additional env vars passed to the child process (session ID, port, token). */
   private extraEnv: Record<string, string>
 
@@ -302,6 +305,10 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       this.rl = null
       this.proc = null
       this.tasks.clear()
+      // Fail any outbound control requests still awaiting a response —
+      // the process is gone, so callers should fall back to a restart.
+      for (const resolve of this.pendingOutboundControl.values()) resolve(false)
+      this.pendingOutboundControl.clear()
       this.emit('exit', code, signal)
     })
   }
@@ -334,7 +341,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       console.log(`[event] type=${event.type} subtype=${subtype || '-'}`)
     }
     // Log all event types we DON'T handle to catch unknown protocol messages
-    if (!['system', 'stream_event', 'assistant', 'user', 'result', 'control_request', 'rate_limit_event'].includes(event.type)) {
+    if (!['system', 'stream_event', 'assistant', 'user', 'result', 'control_request', 'control_response', 'rate_limit_event'].includes(event.type)) {
       console.log(`[event-unhandled] type=${event.type} data=${JSON.stringify(event).slice(0, 300)}`)
     }
 
@@ -383,6 +390,19 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
         const ctrlEvent = event as ClaudeControlRequest
         if (TOOL_DEBUG) console.log(`[control_request] requestId=${ctrlEvent.request_id} tool=${ctrlEvent.request?.tool_name}`)
         this.handleControlRequest(ctrlEvent)
+        break
+      }
+
+      case 'control_response': {
+        // Response to an outbound control_request we sent (e.g. set_permission_mode).
+        const resp = (event as { response?: { subtype?: string; request_id?: string } }).response
+        if (resp?.request_id) {
+          const resolve = this.pendingOutboundControl.get(resp.request_id)
+          if (resolve) {
+            this.pendingOutboundControl.delete(resp.request_id)
+            resolve(resp.subtype === 'success')
+          }
+        }
         break
       }
 
@@ -719,6 +739,42 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     if (!ok) {
       this.proc.stdin.once('drain', () => { /* ready for more */ })
     }
+  }
+
+  /**
+   * Change the CLI's permission mode in-place via a stream-json control request,
+   * without restarting the process (which would kill in-flight turns and pending
+   * approvals). Resolves true on CLI acknowledgement, false on timeout/error/exit —
+   * callers should fall back to a process restart on false.
+   *
+   * 'dangerouslySkipPermissions' is a spawn flag (--dangerously-skip-permissions),
+   * not a runtime mode, so it always requires a restart.
+   */
+  setPermissionMode(mode: PermissionMode): Promise<boolean> {
+    if (mode === 'dangerouslySkipPermissions' || this.permissionMode === 'dangerouslySkipPermissions') {
+      return Promise.resolve(false)
+    }
+    if (!this.proc?.stdin?.writable) return Promise.resolve(false)
+
+    const requestId = randomUUID()
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingOutboundControl.delete(requestId)
+        console.warn(`[set-permission-mode] timed out waiting for CLI ack (mode=${mode})`)
+        resolve(false)
+      }, 5000)
+      this.pendingOutboundControl.set(requestId, (ok) => {
+        clearTimeout(timer)
+        if (ok) this.permissionMode = mode
+        console.log(`[set-permission-mode] CLI ${ok ? 'acknowledged' : 'rejected'} mode=${mode}`)
+        resolve(ok)
+      })
+      this.sendRaw(JSON.stringify({
+        type: 'control_request',
+        request_id: requestId,
+        request: { subtype: 'set_permission_mode', mode },
+      }))
+    })
   }
 
   /** Write raw data to stdin (used for control_response messages). */

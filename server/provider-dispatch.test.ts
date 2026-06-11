@@ -108,6 +108,11 @@ describe('Provider dispatch', () => {
       expect(session.provider).toBe('opencode')
     })
 
+    it('creates sessions with codex provider', () => {
+      const session = sm.create('Test session', '/tmp/repo', { provider: 'codex' })
+      expect(session.provider).toBe('codex')
+    })
+
     it('preserves provider alongside other options', () => {
       const session = sm.create('Test session', '/tmp/repo', {
         provider: 'opencode',
