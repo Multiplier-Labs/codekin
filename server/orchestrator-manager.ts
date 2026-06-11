@@ -35,7 +35,17 @@ Agent ${AGENT_DISPLAY_NAME} tracks repositories you work with in Codekin.
 (none yet — ${AGENT_DISPLAY_NAME} will populate this as you work)
 `
 
-const CLAUDE_MD_TEMPLATE = `# Agent ${AGENT_DISPLAY_NAME} — Codekin Orchestrator
+/**
+ * Bump this whenever CLAUDE_MD_TEMPLATE changes. Already-seeded CLAUDE.md
+ * files carrying an older (or no) version stamp are refreshed on boot —
+ * without this, installs keep running on stale orchestrator instructions
+ * forever. CLAUDE.md is system-managed; user memory lives in PROFILE.md,
+ * REPOS.md and journal/, which are never overwritten.
+ */
+export const CLAUDE_MD_TEMPLATE_VERSION = 2
+
+const CLAUDE_MD_TEMPLATE = `<!-- codekin-template-version: ${CLAUDE_MD_TEMPLATE_VERSION} -->
+# Agent ${AGENT_DISPLAY_NAME} — Codekin Orchestrator
 
 You are ${AGENT_DISPLAY_NAME}, a calm and friendly ops manager inside Codekin.
 You help users keep their repositories healthy, their workflows running
@@ -174,6 +184,12 @@ curl -s "http://localhost:$CODEKIN_PORT/api/orchestrator/children" \\
 # Get specific child session
 curl -s "http://localhost:$CODEKIN_PORT/api/orchestrator/children/SESSION_ID" \\
   -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN"
+
+# Read the tail of a child's transcript (what Claude actually output).
+# Useful when a child stops with "Completion not verified" or gets stuck.
+# ?limit caps the returned characters (default 5000, max 50000).
+curl -s "http://localhost:$CODEKIN_PORT/api/orchestrator/children/SESSION_ID/transcript?limit=10000" \\
+  -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN"
 \`\`\`
 
 ## Scheduling Reminders & Recurring Tasks
@@ -214,31 +230,31 @@ inspect the worktree and finish it or respawn.
 Sessions can get stuck waiting for tool approvals or user answers. You can
 discover and unblock them:
 
-\\\`\\\`\\\`bash
+\`\`\`bash
 # List all sessions with pending prompts
 curl -s "http://localhost:$CODEKIN_PORT/api/orchestrator/sessions/pending-prompts" \\
   -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN"
-\\\`\\\`\\\`
+\`\`\`
 
-Returns sessions with their pending prompts, including the \\\`requestId\\\`,
-\\\`toolName\\\`, and \\\`promptType\\\` ("permission" or "question").
+Returns sessions with their pending prompts, including the \`requestId\`,
+\`toolName\`, and \`promptType\` ("permission" or "question").
 
 ### Giving Approvals to Stuck Sessions
 If a child session is blocked on a tool approval and you're confident it's
 safe, you can approve it directly:
 
-\\\`\\\`\\\`bash
+\`\`\`bash
 curl -s -X POST "http://localhost:$CODEKIN_PORT/api/orchestrator/sessions/SESSION_ID/respond" \\
   -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{"requestId": "REQUEST_ID", "value": "allow"}'
-\\\`\\\`\\\`
+\`\`\`
 
-Values: \\\`"allow"\\\`, \\\`"deny"\\\`, \\\`"always_allow"\\\`, or free text for question prompts.
+Values: \`"allow"\`, \`"deny"\`, \`"always_allow"\`, or free text for question prompts.
 
 **Guidelines for giving approvals:**
 - Only approve tools you understand — if unsure, ask the user
-- Prefer \\\`"allow"\\\` over \\\`"always_allow"\\\` for child sessions
+- Prefer \`"allow"\` over \`"always_allow"\` for child sessions
 - Never approve destructive commands (rm -rf, git push --force, DROP TABLE)
   without user confirmation
 - For question prompts, provide a reasonable answer or ask the user
@@ -299,9 +315,9 @@ Users can manage trust directly in chat:
 4. Read skill-profile.json for guidance style adaptation
 5. Check for new audit reports that may have landed
 6. Check for decisions pending outcome assessment
-7. **Re-establish cron jobs** — cron jobs do not survive session restarts, so always re-create your standard recurring checks on startup:
+7. **Re-establish cron jobs** — cron jobs do not survive session restarts, so re-create your scheduled work on startup:
    - Report check: \`cron: "3 9 * * *"\`, \`prompt: "Check for new audit reports across all managed repos and triage any new findings"\`
-   - Child session monitor: \`cron: "*/30 * * * *"\`, \`prompt: "Check child session status and unblock any stuck sessions"\`
+   - Do NOT create a child-session polling cron — the server pushes blocked/terminal notifications to you in realtime.
 8. Greet the user with a brief, friendly status update
 
 ### Greeting Guidelines
@@ -321,14 +337,31 @@ export function ensureOrchestratorDir(): void {
   const journalDir = join(ORCHESTRATOR_DIR, 'journal')
   if (!existsSync(journalDir)) mkdirSync(journalDir, { recursive: true })
 
-  // Seed files only if they don't exist (preserve user edits)
+  // Seed memory files only if they don't exist (preserve user edits)
   const seeds: [string, string][] = [
     [join(ORCHESTRATOR_DIR, 'PROFILE.md'), PROFILE_TEMPLATE],
     [join(ORCHESTRATOR_DIR, 'REPOS.md'), REPOS_TEMPLATE],
-    [join(ORCHESTRATOR_DIR, 'CLAUDE.md'), CLAUDE_MD_TEMPLATE],
   ]
   for (const [path, content] of seeds) {
     if (!existsSync(path)) writeFileSync(path, content, 'utf-8')
+  }
+
+  // CLAUDE.md is system-managed: refresh it whenever the embedded template
+  // version is older than the current one (or missing entirely).
+  const claudeMdPath = join(ORCHESTRATOR_DIR, 'CLAUDE.md')
+  if (readTemplateVersion(claudeMdPath) < CLAUDE_MD_TEMPLATE_VERSION) {
+    writeFileSync(claudeMdPath, CLAUDE_MD_TEMPLATE, 'utf-8')
+  }
+}
+
+/** Parse the template version stamp from a seeded CLAUDE.md; 0 when absent. */
+export function readTemplateVersion(path: string): number {
+  try {
+    if (!existsSync(path)) return 0
+    const match = /<!-- codekin-template-version: (\d+) -->/.exec(readFileSync(path, 'utf-8'))
+    return match ? parseInt(match[1], 10) : 0
+  } catch {
+    return 0
   }
 }
 

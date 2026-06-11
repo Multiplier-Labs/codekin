@@ -254,6 +254,41 @@ export function createSessionRouter(
     res.json({ child })
   })
 
+  /**
+   * Get the tail of a child session's transcript (Claude output only).
+   * Lets the orchestrator inspect what a child actually did — e.g. when a
+   * child stops with "Completion not verified" or gets stuck — without
+   * attaching to the session. `?limit` caps the returned characters
+   * (default 5000, max 50000).
+   */
+  router.get('/api/orchestrator/children/:id/transcript', (req, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+
+    const child = children.get(req.params.id)
+    if (!child) return res.status(404).json({ error: 'Child session not found' })
+
+    const session = sessions.get(child.id)
+    if (!session) {
+      return res.status(404).json({ error: 'Session no longer exists (it may have been deleted)' })
+    }
+
+    const rawLimit = Number(req.query.limit)
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 50_000) : 5_000
+
+    const full = session.outputHistory
+      .filter((m): m is { type: 'output'; data: string } => m.type === 'output')
+      .map(m => m.data)
+      .join('')
+    const truncated = full.length > limit
+    res.json({
+      childId: child.id,
+      status: child.status,
+      transcript: truncated ? full.slice(-limit) : full,
+      truncated,
+      totalLength: full.length,
+    })
+  })
+
   // -------------------------------------------------------------------------
   // Session prompts & approvals
   // -------------------------------------------------------------------------
