@@ -805,6 +805,12 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
     }
   }
 
+  /**
+   * No-op: Codex emits the full plan on every turn/plan/updated notification,
+   * so there is no incremental task state to seed after a restart.
+   */
+  seedTasks(): void {}
+
   isAlive(): boolean {
     return this.alive
   }
