@@ -26,6 +26,7 @@ export interface SessionContentProps {
   planningMode: boolean
   activityLabel?: string
   tasks: TaskItem[]
+  isProcessing: boolean
   disabled: boolean
   hasFileChanges: boolean
   diffPanelOpen: boolean
@@ -76,6 +77,7 @@ export function SessionContent({
   planningMode,
   activityLabel,
   tasks,
+  isProcessing,
   disabled,
   hasFileChanges,
   diffPanelOpen,
@@ -126,7 +128,7 @@ export function SessionContent({
           activityLabel={isProviderDisabled ? undefined : activityLabel}
           isMobile={isMobile}
         />
-        <TodoPanel tasks={tasks} />
+        <TodoPanel tasks={tasks} isProcessing={isProcessing} />
 
         {/* Claude Code disabled banner */}
         {claudeDisabled && (

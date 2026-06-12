@@ -486,7 +486,9 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       if (isTask && TOOL_DEBUG) console.log('[task-debug] tool:', this.tool.name, 'input:', JSON.stringify(parsed).slice(0, 200))
       if (this.handleTaskTool(this.tool.name!, parsed)) {
         if (TOOL_DEBUG) console.log('[task-debug] emitting todo_update, tasks:', this.tasks.size)
-        this.emit('todo_update', Array.from(this.tasks.values()))
+        // Copy items so later in-place TaskUpdate mutations don't alias into
+        // previously broadcast/history-stored snapshots.
+        this.emit('todo_update', Array.from(this.tasks.values(), t => ({ ...t })))
       }
     } catch (err) {
       console.warn(`[claude] Failed to parse tool input for ${this.tool.name}:`, err instanceof Error ? err.message : err)
@@ -648,14 +650,17 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
    * Returns true if the task list changed (caller should emit todo_update).
    */
   private handleTaskTool(toolName: string, input: Record<string, unknown>): boolean {
-    // TodoWrite sends the entire list at once
+    // TodoWrite sends the entire list at once.
+    // Note: taskSeq is intentionally NOT reset — keeping ids monotonic across
+    // list generations lets the frontend detect a brand-new list by id and
+    // avoids id collisions with later TaskCreate/TaskUpdate calls.
     if (toolName === 'TodoWrite') {
       const todos = input.todos as Array<Record<string, unknown>> | undefined
       if (!Array.isArray(todos)) return false
       this.tasks.clear()
-      this.taskSeq = 0
       for (const item of todos) {
         const id = String(item.id || ++this.taskSeq)
+        this.syncTaskSeq(id)
         const status = item.status as string
         if (status !== 'pending' && status !== 'in_progress' && status !== 'completed') continue
         this.tasks.set(id, {
@@ -669,7 +674,8 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     }
     // TaskCreate/TaskUpdate are the newer tool names
     if (toolName === 'TaskCreate') {
-      const id = String(++this.taskSeq)
+      const id = String(input.taskId || input.id || ++this.taskSeq)
+      this.syncTaskSeq(id)
       this.tasks.set(id, {
         id,
         subject: String(input.subject || ''),
@@ -680,8 +686,17 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     }
     if (toolName === 'TaskUpdate') {
       const id = String(input.taskId || '')
-      const task = this.tasks.get(id)
-      if (!task) return false
+      if (!id) return false
+      let task = this.tasks.get(id)
+      if (!task) {
+        // Unknown id — our in-memory map can diverge from the CLI's real task
+        // list (e.g. after a process restart mid-session). Upsert instead of
+        // dropping the update, otherwise the UI shows a stale list forever.
+        if (input.status === 'deleted') return false
+        task = { id, subject: String(input.subject || `Task ${id}`), status: 'pending' }
+        this.tasks.set(id, task)
+        this.syncTaskSeq(id)
+      }
       const status = input.status as string | undefined
       if (status === 'deleted') {
         this.tasks.delete(id)
@@ -695,6 +710,25 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       return true
     }
     return false
+  }
+
+  /** Keep taskSeq ahead of any numeric id we have seen, so generated ids never collide. */
+  private syncTaskSeq(id: string): void {
+    const n = Number(id)
+    if (Number.isInteger(n) && n > this.taskSeq) this.taskSeq = n
+  }
+
+  /**
+   * Seed task state from a previous process's last known list (session restore).
+   * Without this, a restarted process starts with an empty map and TaskUpdate
+   * calls referencing pre-restart task ids would otherwise be lost.
+   */
+  seedTasks(tasks: TaskItem[]): void {
+    this.tasks.clear()
+    for (const t of tasks) {
+      this.tasks.set(t.id, { ...t })
+      this.syncTaskSeq(t.id)
+    }
   }
 
   /**

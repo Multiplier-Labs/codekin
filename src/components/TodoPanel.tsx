@@ -12,28 +12,40 @@ import type { TaskItem } from '../types'
 
 interface Props {
   tasks: TaskItem[]
+  /** Whether the session is currently processing a turn. Used to close/collapse the panel when work stops. */
+  isProcessing?: boolean
 }
 
-export function TodoPanel({ tasks }: Props) {
+export function TodoPanel({ tasks, isProcessing = false }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [dismissed, setDismissed] = useState(false)
-  const prevCountRef = useRef(0)
+  const prevIdSigRef = useRef('')
   const hadActiveTaskRef = useRef(false)
   const prevCompletedRef = useRef(0)
+  const prevProcessingRef = useRef(isProcessing)
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-arguments -- new Map() infers Map<any,any>
   const taskRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
   const completed = tasks.filter(t => t.status === 'completed').length
   const allDone = tasks.length > 0 && completed === tasks.length
+  // Signature of task identity — detects replaced lists, not just count growth
+  const idSig = tasks.map(t => t.id).join(',')
 
-  // Auto-expand when new tasks appear
+  // Auto-show when a new or replaced task list with active work appears.
+  // Compares task ids (not just count) so a fresh list of equal/smaller size
+  // still re-shows a previously dismissed panel.
   useEffect(() => {
-    if (tasks.length > prevCountRef.current) {
-      setExpanded(true) // eslint-disable-line react-hooks/set-state-in-effect -- auto-expand on new tasks
-      setDismissed(false)  
+    if (idSig !== prevIdSigRef.current) {
+      prevIdSigRef.current = idSig
+      if (idSig && !allDone) {
+        /* eslint-disable react-hooks/set-state-in-effect -- auto-show on new task list */
+        setDismissed(false)
+        // Expand only while actively processing; on idle restore show the pill
+        if (isProcessing) setExpanded(true)
+        /* eslint-enable react-hooks/set-state-in-effect */
+      }
     }
-    prevCountRef.current = tasks.length
-  }, [tasks.length])
+  }, [idSig, allDone, isProcessing])
 
   // Track if we ever saw a non-completed task (distinguishes live vs restore)
   useEffect(() => {
@@ -42,16 +54,28 @@ export function TodoPanel({ tasks }: Props) {
     }
   }, [tasks, allDone])
 
-  // Auto-dismiss after all tasks complete
+  // Auto-dismiss after all tasks complete: quickly once the turn is over,
+  // with a longer grace period while Claude is still working.
   useEffect(() => {
     if (allDone) {
-      const delay = hadActiveTaskRef.current ? 10000 : 0
+      const delay = !hadActiveTaskRef.current ? 0 : isProcessing ? 10000 : 3000
       const timer = setTimeout(() => { setDismissed(true); }, delay)
       return () => { clearTimeout(timer); }
     }
     setDismissed(false) // eslint-disable-line react-hooks/set-state-in-effect -- reset dismissed when tasks become active
     return undefined
-  }, [allDone])
+  }, [allDone, isProcessing])
+
+  // When a turn ends with unfinished tasks (Claude often forgets the final
+  // update), collapse the expanded card to the compact pill so it stops
+  // obstructing the chat while still showing progress.
+  useEffect(() => {
+    const wasProcessing = prevProcessingRef.current
+    prevProcessingRef.current = isProcessing
+    if (wasProcessing && !isProcessing && tasks.length > 0 && !allDone) {
+      setExpanded(false) // eslint-disable-line react-hooks/set-state-in-effect -- collapse on turn end
+    }
+  }, [isProcessing, tasks.length, allDone])
 
   // Auto-scroll to first non-completed task when completed count increases
   useEffect(() => {

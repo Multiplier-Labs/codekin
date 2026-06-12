@@ -889,13 +889,13 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
               this.emit('tool_active', toolName, inputStr)
               // Detect task/todo tool calls and emit todo_update
               if (part.state?.input && this.handleTaskTool(toolName, part.state.input)) {
-                this.emit('todo_update', Array.from(this.tasks.values()))
+                this.emit('todo_update', Array.from(this.tasks.values(), t => ({ ...t })))
               }
             } else if (status === 'completed') {
               // Also check for task tools at completion (some providers only
               // populate input at this stage, not during 'running')
               if (part.state?.input && this.handleTaskTool(toolName, part.state.input)) {
-                this.emit('todo_update', Array.from(this.tasks.values()))
+                this.emit('todo_update', Array.from(this.tasks.values(), t => ({ ...t })))
               }
               const output = part.state?.output
               const summary = output ? output.slice(0, 200) : undefined
@@ -1265,13 +1265,16 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private handleTaskTool(toolName: string, input: Record<string, unknown>): boolean {
     // Normalize tool name — OpenCode may report as 'todowrite', 'TodoWrite', 'todo_write', etc.
     const normalized = toolName.toLowerCase().replace(/_/g, '')
+    // Note: taskSeq is intentionally NOT reset on TodoWrite — keeping ids
+    // monotonic across list generations lets the frontend detect a brand-new
+    // list by id and avoids collisions with later TaskCreate/TaskUpdate calls.
     if (normalized === 'todowrite') {
       const todos = input.todos as Array<Record<string, unknown>> | undefined
       if (!Array.isArray(todos)) return false
       this.tasks.clear()
-      this.taskSeq = 0
       for (const item of todos) {
         const id = String(item.id || ++this.taskSeq)
+        this.syncTaskSeq(id)
         const status = item.status as string
         if (status !== 'pending' && status !== 'in_progress' && status !== 'completed') continue
         this.tasks.set(id, {
@@ -1284,7 +1287,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       return true
     }
     if (normalized === 'taskcreate') {
-      const id = String(++this.taskSeq)
+      const id = String(input.taskId || input.id || ++this.taskSeq)
+      this.syncTaskSeq(id)
       this.tasks.set(id, {
         id,
         subject: String(input.subject || ''),
@@ -1295,8 +1299,17 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     }
     if (normalized === 'taskupdate') {
       const id = String(input.taskId || '')
-      const task = this.tasks.get(id)
-      if (!task) return false
+      if (!id) return false
+      let task = this.tasks.get(id)
+      if (!task) {
+        // Unknown id — our in-memory map can diverge from the provider's real
+        // task list (e.g. after a process restart mid-session). Upsert instead
+        // of dropping the update, otherwise the UI shows a stale list forever.
+        if (input.status === 'deleted') return false
+        task = { id, subject: String(input.subject || `Task ${id}`), status: 'pending' }
+        this.tasks.set(id, task)
+        this.syncTaskSeq(id)
+      }
       const status = input.status as string | undefined
       if (status === 'deleted') {
         this.tasks.delete(id)
@@ -1310,6 +1323,25 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
       return true
     }
     return false
+  }
+
+  /** Keep taskSeq ahead of any numeric id we have seen, so generated ids never collide. */
+  private syncTaskSeq(id: string): void {
+    const n = Number(id)
+    if (Number.isInteger(n) && n > this.taskSeq) this.taskSeq = n
+  }
+
+  /**
+   * Seed task state from a previous process's last known list (session restore).
+   * Without this, a restarted process starts with an empty map and TaskUpdate
+   * calls referencing pre-restart task ids would otherwise be lost.
+   */
+  seedTasks(tasks: TaskItem[]): void {
+    this.tasks.clear()
+    for (const t of tasks) {
+      this.tasks.set(t.id, { ...t })
+      this.syncTaskSeq(t.id)
+    }
   }
 
   /** Send a user message to the OpenCode session. */
