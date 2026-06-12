@@ -188,6 +188,18 @@ export class SessionLifecycle {
 
     this.wireClaudeEvents(cp, session, sessionId)
 
+    // On resume, carry the last known task list into the new process so
+    // TaskUpdate calls referencing pre-restart task ids aren't dropped.
+    if (resume) {
+      for (let i = session.outputHistory.length - 1; i >= 0; i--) {
+        const msg = session.outputHistory[i]
+        if (msg.type === 'todo_update') {
+          cp.seedTasks(msg.tasks)
+          break
+        }
+      }
+    }
+
     cp.start()
     session.claudeProcess = cp
 

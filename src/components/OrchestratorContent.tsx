@@ -27,6 +27,7 @@ export interface OrchestratorContentProps {
   planningMode: boolean
   activityLabel?: string
   tasks: TaskItem[]
+  isProcessing: boolean
   activePrompt: PromptEntry | null
   sendPromptResponse: (value: string | string[], requestId?: string) => void
   inputBarRef: RefObject<InputBarHandle | null>
@@ -55,6 +56,7 @@ export function OrchestratorContent({
   planningMode,
   activityLabel,
   tasks,
+  isProcessing,
   activePrompt,
   sendPromptResponse,
   inputBarRef,
@@ -93,7 +95,7 @@ export function OrchestratorContent({
               variant="orchestrator"
               agentName={agentName}
             />
-            <TodoPanel tasks={tasks} />
+            <TodoPanel tasks={tasks} isProcessing={isProcessing} />
           </div>
           {activePrompt && (
             <PromptButtons

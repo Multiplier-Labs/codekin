@@ -12,6 +12,7 @@
 
 import type { EventEmitter } from 'events'
 import type { ClaudeProcessEvents } from './claude-process.js'
+import type { TaskItem } from './types.js'
 
 /**
  * Supported AI coding assistant providers.
@@ -80,6 +81,9 @@ export interface CodingProcess extends EventEmitter<ClaudeProcessEvents> {
    * don't support runtime mode changes omit this — callers fall back to restart.
    */
   setPermissionMode?(mode: import('./types.js').PermissionMode): Promise<boolean>
+
+  /** Seed task/todo state from a previous process's last known list (session restore). */
+  seedTasks(tasks: TaskItem[]): void
 
   /** Whether the process is currently running and accepting input. */
   isAlive(): boolean

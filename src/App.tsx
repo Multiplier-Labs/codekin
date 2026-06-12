@@ -666,6 +666,7 @@ export default function App() {
             planningMode={planningMode}
             activityLabel={activityLabel}
             tasks={tasks}
+            isProcessing={isProcessing}
             activePrompt={activePrompt}
             sendPromptResponse={sendPromptResponse}
             inputBarRef={inputBarRef}
@@ -733,6 +734,7 @@ export default function App() {
             planningMode={planningMode}
             activityLabel={activityLabel}
             tasks={tasks}
+            isProcessing={isProcessing}
             disabled={!settings.token}
             hasFileChanges={hasFileChanges}
             diffPanelOpen={diffPanelOpen}

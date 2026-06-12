@@ -133,14 +133,16 @@ describe('handleTaskTool', () => {
       expect(cp.tasks.size).toBe(1)
     })
 
-    it('clears existing tasks and resets ID sequence', () => {
+    it('clears existing tasks but keeps the ID sequence monotonic', () => {
       cp.handleTaskTool('TaskCreate', { subject: 'Old task' })
       expect(cp.tasks.size).toBe(1)
       cp.handleTaskTool('TodoWrite', {
         todos: [{ content: 'New', status: 'in_progress' }],
       })
       expect(cp.tasks.size).toBe(1)
-      expect(cp.tasks.get('1')!.subject).toBe('New')
+      // New list gets a fresh id (not reused '1') so the frontend can detect
+      // a replaced list and later TaskCreate/TaskUpdate ids never collide.
+      expect(cp.tasks.get('2')!.subject).toBe('New')
     })
 
     it('returns false for non-array todos', () => {
@@ -182,8 +184,18 @@ describe('handleTaskTool', () => {
       expect(cp.tasks.has('1')).toBe(false)
     })
 
-    it('returns false for nonexistent task', () => {
-      expect(cp.handleTaskTool('TaskUpdate', { taskId: '999', status: 'completed' })).toBe(false)
+    it('upserts a task for an unknown id instead of dropping the update', () => {
+      expect(cp.handleTaskTool('TaskUpdate', { taskId: '999', status: 'completed' })).toBe(true)
+      expect(cp.tasks.get('999')!.status).toBe('completed')
+      expect(cp.tasks.get('999')!.subject).toBe('Task 999')
+    })
+
+    it('returns false for unknown id with deleted status', () => {
+      expect(cp.handleTaskTool('TaskUpdate', { taskId: '999', status: 'deleted' })).toBe(false)
+    })
+
+    it('returns false for missing taskId', () => {
+      expect(cp.handleTaskTool('TaskUpdate', { status: 'completed' })).toBe(false)
     })
 
     it('updates subject and activeForm', () => {
@@ -195,6 +207,23 @@ describe('handleTaskTool', () => {
 
   it('returns false for unknown tool', () => {
     expect(cp.handleTaskTool('UnknownTool', {})).toBe(false)
+  })
+
+  describe('seedTasks', () => {
+    it('restores tasks and continues the id sequence past seeded ids', () => {
+      cp.seedTasks([
+        { id: '3', subject: 'Restored A', status: 'completed' },
+        { id: '4', subject: 'Restored B', status: 'in_progress' },
+      ])
+      expect(cp.tasks.size).toBe(2)
+      // TaskUpdate against a pre-restart id now resolves to the real task
+      cp.handleTaskTool('TaskUpdate', { taskId: '4', status: 'completed' })
+      expect(cp.tasks.get('4')!.status).toBe('completed')
+      expect(cp.tasks.get('4')!.subject).toBe('Restored B')
+      // New TaskCreate ids do not collide with seeded ids
+      cp.handleTaskTool('TaskCreate', { subject: 'Next' })
+      expect(cp.tasks.get('5')!.subject).toBe('Next')
+    })
   })
 })
 
