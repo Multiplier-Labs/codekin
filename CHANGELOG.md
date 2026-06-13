@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-13
+
 ### Added
 - **OpenAI Codex provider** — Integrate `codex app-server` (JSON-RPC 2.0 over stdio) as a third coding-agent backend behind the existing `CodingProcess` interface, unlocking ChatGPT-subscription-gated OpenAI models for sessions and workflows. Includes a `CodexProcess` adapter (handshake, event mapping, command/file-change approvals, thread resume across restarts, permission-mode → approvalPolicy/sandbox mapping), model discovery at `/api/codex/models`, startup binary/auth detection, and a frontend provider option with `codex login` guidance (#499)
 - **Claude Fable 5 model support** (#492)
