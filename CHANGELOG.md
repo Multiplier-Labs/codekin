@@ -8,20 +8,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Dynamic Claude model discovery — probe candidate model IDs at runtime instead of relying on static aliases, adding Opus 4.8 support (#479, #480)
+- **OpenAI Codex provider** — Integrate `codex app-server` (JSON-RPC 2.0 over stdio) as a third coding-agent backend behind the existing `CodingProcess` interface, unlocking ChatGPT-subscription-gated OpenAI models for sessions and workflows. Includes a `CodexProcess` adapter (handshake, event mapping, command/file-change approvals, thread resume across restarts, permission-mode → approvalPolicy/sandbox mapping), model discovery at `/api/codex/models`, startup binary/auth detection, and a frontend provider option with `codex login` guidance (#499)
+- **Claude Fable 5 model support** (#492)
+- **Dynamic Claude model discovery** — probe candidate model IDs at runtime instead of relying on static aliases, with Anthropic API and CLI alias probing, adding Opus 4.8 support (#479, #480)
+- **Agent Joe resilience suite** — realtime blocked-child notifications (#498), persistent notification outbox with replay when the orchestrator returns (#501), pausable child timeouts with broader allowlist and worktree status in spawn responses (#503), ground-truth child completion verification instead of transcript sniffing (#504), and template fixes with a child transcript endpoint and org-aware repo discovery (#505)
+- **OpenCode native integration** — use OpenCode's native agents, permissions, commands, and system context (#494)
+- **OpenCode runtime improvements** — abort, compact, usage reporting, recovery, and subagents (#496)
+- **OpenCode resilience** — resume hydration, restart recovery, mid-turn queueing, diff detection, and version check (#500)
+- Compact, provider-aware new-session dropdown replacing the per-provider buttons (#509)
 
 ### Changed
+- Apply UI style audit recommendations across prose, contrast, and palette (#508)
 - Make coverage configuration honest (`coverage.all`) and start covering React components (#487)
 
 ### Fixed
-- Canonicalize WebSocket `workingDir` and add model-discovery tests (#488)
-- Group webhook/stepflow sessions under canonical owner-namespaced repo (#481)
+- Dark-mode form controls and gold-button contrast (#510)
+- Make todo panel updates reliable and close the panel when work stops
+- Plan-mode permission lifecycle, read-only auto-approval, and skills refresh (#502)
+- Harden OpenCode turn lifecycle per integration audit (#493)
+- Canonicalize WebSocket `workingDir` (#488)
 - Surface and resume archived sessions across repo clone paths (#482)
+- Group webhook/stepflow sessions under canonical owner-namespaced repo (#481)
+- Group nested worktrees under canonical main repo in sidebar (#476)
 - Start new sessions on the latest model and surface reconnect notices (#483)
 - Make session auto-naming resilient to rate limits and chatty replies (#484)
+- Isolate session-naming `claude -p` from project context (#477)
 
-### Docs
+### Security
+- Validate identifiers in workflow query builder to prevent SQL injection (#490)
+- Server-side magic-byte validation for uploads (M2) (#475)
+- Security quick-wins (M3/M4) (#474)
+
+### Documentation
+- Add UI style & color scheme audit report (#507)
 - Fix accuracy drift surfaced by docs audit (#489)
+- Refresh docs — env vars and WORKFLOWS (#474)
 
 ## [0.6.5] - 2026-05-14
 
