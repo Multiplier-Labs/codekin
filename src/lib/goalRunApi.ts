@@ -67,6 +67,7 @@ export interface GoalRun {
   turnCount: number
   costUsd: number
   verdict: string | null
+  prUrl: string | null
   createdAt: string
   completedAt: string | null
 }

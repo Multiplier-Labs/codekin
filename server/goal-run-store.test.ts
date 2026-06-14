@@ -118,6 +118,15 @@ describe('GoalRunStore', () => {
       expect(updated?.status).toBe('succeeded')
       expect(updated?.completedAt).toBe('2026-06-14T00:00:00Z')
     })
+
+    it('round-trips the finalization pr url (defaults null)', () => {
+      const run = store.createRun(makeInput())
+      expect(run.prUrl).toBeNull()
+      store.patchRun(run.id, { status: 'succeeded', prUrl: 'https://github.com/acme/repo/pull/9' })
+      expect(store.getRun(run.id)?.prUrl).toBe('https://github.com/acme/repo/pull/9')
+      store.patchRun(run.id, { prUrl: null })
+      expect(store.getRun(run.id)?.prUrl).toBeNull()
+    })
   })
 
   describe('appendTurn / listTurns', () => {

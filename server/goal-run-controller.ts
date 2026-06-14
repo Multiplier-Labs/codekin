@@ -39,6 +39,7 @@ import {
   type VerifyResult,
 } from './verifier-runner.js'
 import { matchesAnyGlob } from './glob-match.js'
+import { defaultFinalizer, type FinalizerApi } from './goal-run-finalizer.js'
 
 // ---------------------------------------------------------------------------
 // Injected dependencies
@@ -125,6 +126,7 @@ export class GoalRunController {
     private readonly host: SessionHost,
     private readonly store: GoalRunStore,
     private readonly verifier: VerifierApi = defaultVerifier,
+    private readonly finalizer: FinalizerApi = defaultFinalizer,
   ) {}
 
   /** Create and start a goal run. Resolves once the maker has been kicked off. */
@@ -310,7 +312,7 @@ export class GoalRunController {
    */
   private async onVerifyPassed(ctx: RunCtx, run: GoalRun): Promise<void> {
     if (!run.spec.checker) {
-      this.finalizeSucceeded(ctx, run)
+      await this.finalizeSucceeded(ctx, run)
       return
     }
     await this.startChecker(ctx, run, run.spec.checker)
@@ -335,7 +337,7 @@ export class GoalRunController {
     this.store.patchRun(run.id, { status: 'checking', checkerSessionId: session.id })
     ctx.checkerDispose = this.host.onSessionResult((sid, isError) => {
       if (sid !== ctx.checkerSessionId) return
-      this.onCheckerResult(ctx, isError)
+      void this.onCheckerResult(ctx, isError)
     })
     this.host.startClaude(session.id)
     this.host.sendInput(session.id, buildCheckerPrompt(run, diff))
@@ -347,7 +349,7 @@ export class GoalRunController {
    * notes back to the maker and resume the loop; escalate or an unparseable
    * verdict → human checkpoint.
    */
-  private onCheckerResult(ctx: RunCtx, isError: boolean): void {
+  private async onCheckerResult(ctx: RunCtx, isError: boolean): Promise<void> {
     if (ctx.checkerProcessing) return
     ctx.checkerProcessing = true
     try {
@@ -379,7 +381,7 @@ export class GoalRunController {
         return
       }
       if (parsed.verdict === 'approve') {
-        this.finalizeSucceeded(ctx, run)
+        await this.finalizeSucceeded(ctx, run)
         return
       }
       if (parsed.verdict === 'escalate') {
@@ -394,17 +396,31 @@ export class GoalRunController {
     }
   }
 
-  private finalizeSucceeded(ctx: RunCtx, run: GoalRun): void {
-    this.host.sendInput(ctx.makerSessionId, buildFinalizePrompt(run.spec))
+  /**
+   * Verification passed: land the verified tree deterministically rather than
+   * trusting the maker to commit/push/PR. The maker is stopped (its work is done),
+   * Codekin commits the verified tree and — per completion policy — pushes and
+   * opens a PR. A push/PR failure does not fail the run (verification passed); the
+   * outcome is recorded in the ledger and `prUrl` left null.
+   */
+  private async finalizeSucceeded(ctx: RunCtx, run: GoalRun): Promise<void> {
+    this.host.stopClaude(ctx.makerSessionId)
+    const { prUrl, note } = await this.finalizer.finalize({
+      cwd: ctx.cwd,
+      branch: run.branch,
+      policy: run.spec.completionPolicy,
+      title: buildPrTitle(run),
+      body: buildPrBody(run),
+    })
     this.store.appendTurn({
       runId: run.id,
       turnIndex: ctx.turnCount,
       role: 'maker',
       diffSummary: ctx.lastDiff,
-      outputTail: 'Verification passed; finalize instruction sent.',
+      outputTail: note,
       costUsd: totalCost(ctx),
     })
-    this.store.patchRun(run.id, { status: 'succeeded', completedAt: new Date().toISOString() })
+    this.store.patchRun(run.id, { status: 'succeeded', prUrl, completedAt: new Date().toISOString() })
     this.teardown(ctx)
   }
 
@@ -508,14 +524,21 @@ export function buildReadonlyFeedback(violations: string[], readonly: string[]):
   ].join('\n')
 }
 
-export function buildFinalizePrompt(spec: GoalRunSpec): string {
-  if (spec.completionPolicy === 'pr') {
-    return 'Verification passed. Commit your changes, push the branch, and open a pull request with a clear summary of what changed and why. Do not merge it.'
-  }
-  if (spec.completionPolicy === 'merge') {
-    return 'Verification passed. Commit your changes and push the branch to the remote. Do not open a pull request.'
-  }
-  return 'Verification passed. Commit your changes locally. Do not push or open a pull request.'
+export function buildPrTitle(run: GoalRun): string {
+  const firstLine = run.goal.split('\n')[0].trim()
+  return firstLine ? `${run.kind}: ${firstLine}` : `${run.kind} (GoalRun)`
+}
+
+export function buildPrBody(run: GoalRun): string {
+  const lines = [
+    run.goal.trim(),
+    '',
+    '## Verification',
+    ...run.spec.verify.map((c) => `- \`${c}\``),
+    '',
+    `Opened automatically by a Codekin GoalRun (\`${run.kind}\`). Do not merge without review.`,
+  ]
+  return lines.join('\n')
 }
 
 /** Concatenate the assistant's text output from a session's history. */

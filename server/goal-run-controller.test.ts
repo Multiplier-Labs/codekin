@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { GoalRunController, parseCheckerVerdict, type SessionHost, type VerifierApi } from './goal-run-controller.js'
 import { GoalRunStore, type CreateGoalRunInput, type GoalRunSpec } from './goal-run-store.js'
+import type { FinalizeOptions, FinalizeResult, FinalizerApi } from './goal-run-finalizer.js'
 import type { VerifyResult } from './verifier-runner.js'
 
 const PASS: VerifyResult = { passed: true, results: [{ command: 'npm test', exitCode: 0, outputTail: 'ok', durationMs: 1, timedOut: false }] }
@@ -79,6 +80,18 @@ class FakeVerifier implements VerifierApi {
   }
 }
 
+class FakeFinalizer implements FinalizerApi {
+  calls: FinalizeOptions[] = []
+  result: FinalizeResult = {
+    prUrl: 'https://github.com/acme/repo/pull/7',
+    note: 'Verification passed; opened PR: https://github.com/acme/repo/pull/7',
+  }
+  finalize(opts: FinalizeOptions): Promise<FinalizeResult> {
+    this.calls.push(opts)
+    return Promise.resolve(this.result)
+  }
+}
+
 function spec(overrides: Partial<GoalRunSpec> = {}): GoalRunSpec {
   return {
     maker: { provider: 'claude' },
@@ -100,13 +113,15 @@ describe('GoalRunController', () => {
   let store: GoalRunStore
   let host: FakeHost
   let verifier: FakeVerifier
+  let finalizer: FakeFinalizer
   let controller: GoalRunController
 
   beforeEach(() => {
     store = new GoalRunStore(':memory:')
     host = new FakeHost()
     verifier = new FakeVerifier()
-    controller = new GoalRunController(host, store, verifier)
+    finalizer = new FakeFinalizer()
+    controller = new GoalRunController(host, store, verifier, finalizer)
   })
 
   afterEach(() => {
@@ -121,18 +136,36 @@ describe('GoalRunController', () => {
     expect(host.sent[0]).toContain('make checks pass')
   })
 
-  it('finalizes as succeeded when the verifier passes', async () => {
+  it('finalizes deterministically and captures the PR url when the verifier passes', async () => {
     const run = await controller.startRun(input(spec()))
     await host.fire()
     const updated = store.getRun(run.id)
     expect(updated?.status).toBe('succeeded')
     expect(updated?.completedAt).toBeTruthy()
-    // a finalize (push + PR) instruction was sent
-    expect(host.sent.some((s) => s.includes('open a pull request'))).toBe(true)
-    // evidence ledger has a verifier row that passed
+    // Codekin finalized deterministically: the maker was stopped and the finalizer
+    // was invoked with the run's worktree, branch and completion policy.
+    expect(host.stopped).toContain('sess-1')
+    expect(finalizer.calls).toHaveLength(1)
+    expect(finalizer.calls[0].branch).toBe('fix/ci')
+    expect(finalizer.calls[0].policy).toBe('pr')
+    expect(finalizer.calls[0].cwd).toBe('/wt/feat')
+    // the captured PR url is persisted and the note recorded in the ledger
+    expect(updated?.prUrl).toBe('https://github.com/acme/repo/pull/7')
     const turns = store.listTurns(run.id)
     expect(turns.some((t) => t.role === 'verifier' && t.exitCode === 0)).toBe(true)
+    expect(turns.some((t) => t.outputTail?.includes('opened PR'))).toBe(true)
     expect(controller.activeRunIds()).toHaveLength(0)
+  })
+
+  it('still succeeds (with null prUrl) when finalization fails to open a PR', async () => {
+    finalizer.result = { prUrl: null, note: 'Verification passed; branch pushed but PR creation failed: offline' }
+    const run = await controller.startRun(input(spec()))
+    await host.fire()
+    const updated = store.getRun(run.id)
+    expect(updated?.status).toBe('succeeded')
+    expect(updated?.prUrl).toBeNull()
+    const turns = store.listTurns(run.id)
+    expect(turns.some((t) => t.outputTail?.includes('PR creation failed'))).toBe(true)
   })
 
   it('feeds a verify failure back to the maker, then succeeds on the next turn', async () => {
@@ -213,7 +246,8 @@ describe('GoalRunController', () => {
       await host.fireSession(host.createdIds[1]) // checker → approve
       const updated = store.getRun(run.id)
       expect(updated?.status).toBe('succeeded')
-      expect(host.sent.some((s) => s.includes('open a pull request'))).toBe(true)
+      expect(finalizer.calls).toHaveLength(1) // deterministic finalization ran on approve
+      expect(updated?.prUrl).toBe('https://github.com/acme/repo/pull/7')
       expect(host.stopped).toContain(host.createdIds[1]) // checker torn down
       const checkerTurn = store.listTurns(run.id).find((t) => t.role === 'checker')
       expect(checkerTurn?.verdict).toBe('approve')

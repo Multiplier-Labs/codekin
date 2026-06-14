@@ -281,6 +281,23 @@ function RunDetail({
         </button>
       )}
 
+      {run.prUrl ? (
+        <div className="mt-3">
+          <a
+            href={run.prUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[14px] text-accent-3 hover:text-accent-2 hover:underline"
+          >
+            View pull request →
+          </a>
+        </div>
+      ) : run.status === 'succeeded' && (
+        <div className="mt-3 text-[14px] text-warning-3">
+          Finalization failed — branch is committed locally but no PR was opened. See the evidence ledger.
+        </div>
+      )}
+
       {/* Evidence ledger */}
       <h3 className="mt-5 mb-2 text-[14px] font-medium uppercase tracking-wide text-neutral-5">Evidence Ledger</h3>
       {run.turns.length === 0 ? (

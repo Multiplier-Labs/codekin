@@ -97,6 +97,8 @@ export interface GoalRun {
   costUsd: number
   /** Last checker verdict (raw JSON string), if any. */
   verdict: string | null
+  /** URL of the pull request opened at finalization (completionPolicy 'pr'), if any. */
+  prUrl: string | null
   createdAt: string
   completedAt: string | null
 }
@@ -118,6 +120,7 @@ export interface GoalRunPatch {
   turnCount?: number
   costUsd?: number
   verdict?: string | null
+  prUrl?: string | null
   completedAt?: string | null
 }
 
@@ -174,6 +177,7 @@ interface GoalRunRow {
   turn_count: number
   cost_usd: number
   verdict: string | null
+  pr_url: string | null
   created_at: string
   completed_at: string | null
 }
@@ -200,6 +204,7 @@ const PATCH_COLUMNS: Record<keyof GoalRunPatch, string> = {
   turnCount: 'turn_count',
   costUsd: 'cost_usd',
   verdict: 'verdict',
+  prUrl: 'pr_url',
   completedAt: 'completed_at',
 }
 
@@ -218,6 +223,15 @@ export class GoalRunStore {
     if (resolvedPath !== ':memory:' && existsSync(resolvedPath)) chmodSync(resolvedPath, 0o600)
     this.db.pragma('journal_mode = WAL')
     this.createTables()
+    this.migrateSchema()
+  }
+
+  /** Additive, idempotent column migrations for databases created before a column existed. */
+  private migrateSchema() {
+    const columns = (this.db.prepare(`PRAGMA table_info(goal_runs)`).all() as { name: string }[]).map((c) => c.name)
+    if (!columns.includes('pr_url')) {
+      this.db.exec(`ALTER TABLE goal_runs ADD COLUMN pr_url TEXT`)
+    }
   }
 
   private createTables() {
@@ -235,6 +249,7 @@ export class GoalRunStore {
         turn_count         INTEGER NOT NULL DEFAULT 0,
         cost_usd           REAL NOT NULL DEFAULT 0,
         verdict            TEXT,
+        pr_url             TEXT,
         created_at         TEXT NOT NULL,
         completed_at       TEXT
       );
@@ -371,6 +386,7 @@ function mapRun(row: GoalRunRow): GoalRun {
     turnCount: row.turn_count,
     costUsd: row.cost_usd,
     verdict: row.verdict,
+    prUrl: row.pr_url,
     createdAt: row.created_at,
     completedAt: row.completed_at,
   }
