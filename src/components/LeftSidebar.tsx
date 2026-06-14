@@ -12,6 +12,7 @@ import {
   IconBook, IconSettings as IconSettingsGear,
   IconLogout, IconSun, IconMoon,
   IconChevronRight, IconChevronLeft, IconSparkles, IconX, IconRobotFace,
+  IconRefresh,
 } from '@tabler/icons-react'
 import type { Session, Module, Repo, DocsPickerProps, MobileProps, ConnectionState } from '../types'
 import type { RepoGroup } from '../hooks/useRepos'
@@ -139,6 +140,8 @@ interface Props {
   onSendModule: (mod: Module) => void
   /** Navigate to the workflows view. */
   onNavigateToWorkflows: () => void
+  /** Navigate to the loop runs view. */
+  onNavigateToLoops: () => void
   /** Navigate to the orchestrator view. */
   onNavigateToOrchestrator: () => void
   /** Open the docs browser for a repo's documentation files. */
@@ -190,6 +193,7 @@ export function LeftSidebar({
   onSendModule,
   agentName = 'Joe',
   onNavigateToWorkflows,
+  onNavigateToLoops,
   onNavigateToOrchestrator,
   onBrowseDocs,
   docsPicker = {},
@@ -389,6 +393,17 @@ export function LeftSidebar({
           >
             <IconSparkles size={16} stroke={2} className="flex-shrink-0" />
             <span className="flex-1 text-left">AI Workflows</span>
+          </button>
+          <button
+            onClick={() => { onNavigateToLoops(); if (isMobile) onMobileClose?.() }}
+            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[15px] transition-colors ${
+              view === 'loops'
+                ? 'bg-accent-9/30 text-accent-2'
+                : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6'
+            }`}
+          >
+            <IconRefresh size={16} stroke={2} className="flex-shrink-0" />
+            <span className="flex-1 text-left">Loop Runs</span>
           </button>
           <button
             onClick={() => { onNavigateToOrchestrator(); if (isMobile) onMobileClose?.() }}

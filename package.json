@@ -26,7 +26,8 @@
     "bin/",
     "dist/",
     "server/dist/",
-    "server/workflows/"
+    "server/workflows/",
+    "server/loops/"
   ],
   "scripts": {
     "dev": "vite",
