@@ -305,6 +305,103 @@ describe('OpenCodeProcess', () => {
       expect(thinkingHandler).not.toHaveBeenCalled()
     })
 
+    it('routes Kimi-style field=text deltas by partID (reasoning hidden, answer shown)', async () => {
+      // Kimi via OpenCode streams BOTH reasoning and the answer as field=text
+      // deltas, distinguished only by partID, and never sends
+      // message.part.updated — so the part kind is resolved via a REST lookup.
+      const textHandler = vi.fn()
+      const thinkingHandler = vi.fn()
+      ocp.on('text', textHandler)
+      ocp.on('thinking', thinkingHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      // classifyPart fetches GET /session/{sid}/message/{mid}, which returns the
+      // message with all its parts and their types.
+      mockFetch.mockImplementation((url: string) => {
+        if (url.includes('/message/msg_1')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+              parts: [
+                { id: 'prt_reason', type: 'reasoning' },
+                { id: 'prt_answer', type: 'text' },
+              ],
+            }),
+          })
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+      })
+
+      for (const d of ['The user ', 'is greeting me. ', 'I should respond.']) {
+        callHandleSSE(ocp, {
+          type: 'message.part.delta',
+          properties: { sessionID: 'oc-session-1', messageID: 'msg_1', partID: 'prt_reason', field: 'text', delta: d },
+        })
+      }
+      // Deltas are buffered pending classification — nothing emitted yet.
+      expect(textHandler).not.toHaveBeenCalled()
+      expect(thinkingHandler).not.toHaveBeenCalled()
+
+      // Once the lookup resolves, reasoning becomes a thinking summary, never text.
+      await vi.waitFor(() => expect(thinkingHandler).toHaveBeenCalledTimes(1))
+      expect(textHandler).not.toHaveBeenCalled()
+
+      // The answer part was classified by the same fetch, so its deltas show.
+      for (const d of ['Hello', '! How can I help?']) {
+        callHandleSSE(ocp, {
+          type: 'message.part.delta',
+          properties: { sessionID: 'oc-session-1', messageID: 'msg_1', partID: 'prt_answer', field: 'text', delta: d },
+        })
+      }
+      await vi.waitFor(() => expect(textHandler).toHaveBeenCalled())
+      const shown = textHandler.mock.calls.map(c => c[0] as string).join('')
+      expect(shown).toBe('Hello! How can I help?')
+      expect(shown).not.toContain('greeting')
+    })
+
+    it('strips literal <think>...</think> tags emitted inside a text part', () => {
+      // Kimi k2.7 sometimes wraps chain-of-thought in literal <think> tags inside
+      // a visible text part, so part-kind classification can't hide it. The
+      // streaming filter must drop the tags and their contents.
+      const textHandler = vi.fn()
+      const thinkingHandler = vi.fn()
+      ocp.on('text', textHandler)
+      ocp.on('thinking', thinkingHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'message.part.delta',
+        properties: {
+          sessionID: 'oc-session-1',
+          field: 'text',
+          delta: '<think>Let me consider the options carefully.</think>The answer is 42.',
+        },
+      })
+      const shown = textHandler.mock.calls.map(c => c[0] as string).join('')
+      expect(shown).toBe('The answer is 42.')
+      expect(shown).not.toContain('consider')
+      expect(thinkingHandler).toHaveBeenCalled()
+    })
+
+    it('strips <think> tags split across multiple text deltas', () => {
+      const textHandler = vi.fn()
+      ocp.on('text', textHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      // Tags and contents arrive fragmented, including the tags themselves split
+      // mid-token (e.g. "<thi" + "nk>", "</thi" + "nk>").
+      for (const d of ['Before. <thi', 'nk>hidden rea', 'soning here</thi', 'nk>After.']) {
+        callHandleSSE(ocp, {
+          type: 'message.part.delta',
+          properties: { sessionID: 'oc-session-1', field: 'text', delta: d },
+        })
+      }
+      const shown = textHandler.mock.calls.map(c => c[0] as string).join('')
+      expect(shown).toBe('Before. After.')
+      expect(shown).not.toContain('hidden')
+      expect(shown).not.toContain('think')
+    })
+
     it('maps running tool parts to tool_active events', () => {
       const toolActiveHandler = vi.fn()
       ocp.on('tool_active', toolActiveHandler)
