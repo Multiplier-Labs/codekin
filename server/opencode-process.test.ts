@@ -315,10 +315,21 @@ describe('OpenCodeProcess', () => {
       ocp.on('thinking', thinkingHandler)
       setSessionId(ocp, 'oc-session-1')
 
-      // Classify 'prt_reason' as reasoning, everything else as text.
+      // classifyPart fetches GET /session/{sid}/message/{mid}, which returns the
+      // message with all its parts and their types.
       mockFetch.mockImplementation((url: string) => {
-        const type = url.includes('prt_reason') ? 'reasoning' : 'text'
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ type }) })
+        if (url.includes('/message/msg_1')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+              parts: [
+                { id: 'prt_reason', type: 'reasoning' },
+                { id: 'prt_answer', type: 'text' },
+              ],
+            }),
+          })
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
       })
 
       for (const d of ['The user ', 'is greeting me. ', 'I should respond.']) {
@@ -335,6 +346,7 @@ describe('OpenCodeProcess', () => {
       await vi.waitFor(() => expect(thinkingHandler).toHaveBeenCalledTimes(1))
       expect(textHandler).not.toHaveBeenCalled()
 
+      // The answer part was classified by the same fetch, so its deltas show.
       for (const d of ['Hello', '! How can I help?']) {
         callHandleSSE(ocp, {
           type: 'message.part.delta',
