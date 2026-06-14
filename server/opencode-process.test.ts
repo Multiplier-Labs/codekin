@@ -305,6 +305,48 @@ describe('OpenCodeProcess', () => {
       expect(thinkingHandler).not.toHaveBeenCalled()
     })
 
+    it('routes Kimi-style field=text deltas by partID (reasoning hidden, answer shown)', async () => {
+      // Kimi via OpenCode streams BOTH reasoning and the answer as field=text
+      // deltas, distinguished only by partID, and never sends
+      // message.part.updated — so the part kind is resolved via a REST lookup.
+      const textHandler = vi.fn()
+      const thinkingHandler = vi.fn()
+      ocp.on('text', textHandler)
+      ocp.on('thinking', thinkingHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      // Classify 'prt_reason' as reasoning, everything else as text.
+      mockFetch.mockImplementation((url: string) => {
+        const type = url.includes('prt_reason') ? 'reasoning' : 'text'
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ type }) })
+      })
+
+      for (const d of ['The user ', 'is greeting me. ', 'I should respond.']) {
+        callHandleSSE(ocp, {
+          type: 'message.part.delta',
+          properties: { sessionID: 'oc-session-1', messageID: 'msg_1', partID: 'prt_reason', field: 'text', delta: d },
+        })
+      }
+      // Deltas are buffered pending classification — nothing emitted yet.
+      expect(textHandler).not.toHaveBeenCalled()
+      expect(thinkingHandler).not.toHaveBeenCalled()
+
+      // Once the lookup resolves, reasoning becomes a thinking summary, never text.
+      await vi.waitFor(() => expect(thinkingHandler).toHaveBeenCalledTimes(1))
+      expect(textHandler).not.toHaveBeenCalled()
+
+      for (const d of ['Hello', '! How can I help?']) {
+        callHandleSSE(ocp, {
+          type: 'message.part.delta',
+          properties: { sessionID: 'oc-session-1', messageID: 'msg_1', partID: 'prt_answer', field: 'text', delta: d },
+        })
+      }
+      await vi.waitFor(() => expect(textHandler).toHaveBeenCalled())
+      const shown = textHandler.mock.calls.map(c => c[0] as string).join('')
+      expect(shown).toBe('Hello! How can I help?')
+      expect(shown).not.toContain('greeting')
+    })
+
     it('maps running tool parts to tool_active events', () => {
       const toolActiveHandler = vi.fn()
       ocp.on('tool_active', toolActiveHandler)
