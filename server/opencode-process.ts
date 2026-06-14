@@ -460,6 +460,16 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private partClassifyInflight = new Set<string>()
   /** Most recent assistant messageID seen on a delta — used to classify stragglers at turn end. */
   private lastDeltaMessageId = ''
+  /**
+   * Some models (e.g. Kimi k2.7 via ollama-cloud) emit chain-of-thought wrapped
+   * in literal `<think>...</think>` tags INSIDE a visible text part, so part-kind
+   * classification can't hide it. These two fields drive a streaming-safe filter
+   * that strips think tags even when they're split across deltas:
+   * `thinkActive` is true while inside an open `<think>`; `thinkCarry` holds a
+   * trailing partial tag (e.g. `<thi`) until the next delta completes or refutes it.
+   */
+  private thinkActive = false
+  private thinkCarry = ''
 
   constructor(workingDir: string, opts?: Partial<OpenCodeProcessOptions>) {
     super()
@@ -734,6 +744,86 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
    * detected and stripped before display.
    */
   private emitTextDelta(delta: string): void {
+    const visible = this.stripThinkTags(delta)
+    if (visible) this.emitVisibleText(visible)
+  }
+
+  /**
+   * Strip literal `<think>...</think>` chain-of-thought from a text delta,
+   * streaming-safely. Content inside the tags is routed to the reasoning buffer
+   * (surfaced only as a thinking summary, never as transcript text). Handles tags
+   * split across deltas by holding a trailing partial tag in `this.thinkCarry`
+   * until the next delta arrives. Returns the visible (non-think) text.
+   */
+  private stripThinkTags(input: string): string {
+    let s = this.thinkCarry + input
+    this.thinkCarry = ''
+    let visible = ''
+    while (s.length > 0) {
+      if (this.thinkActive) {
+        const close = s.indexOf('</think>')
+        if (close === -1) {
+          const tail = this.partialTagTail(s, '</think>')
+          if (tail > 0) {
+            this.appendReasoningDelta(s.slice(0, s.length - tail))
+            this.thinkCarry = s.slice(s.length - tail)
+          } else {
+            this.appendReasoningDelta(s)
+          }
+          s = ''
+        } else {
+          this.appendReasoningDelta(s.slice(0, close))
+          this.thinkActive = false
+          s = s.slice(close + '</think>'.length)
+        }
+      } else {
+        const open = s.indexOf('<think>')
+        if (open === -1) {
+          const tail = this.partialTagTail(s, '<think>')
+          if (tail > 0) {
+            visible += s.slice(0, s.length - tail)
+            this.thinkCarry = s.slice(s.length - tail)
+          } else {
+            visible += s
+          }
+          s = ''
+        } else {
+          visible += s.slice(0, open)
+          this.thinkActive = true
+          s = s.slice(open + '<think>'.length)
+        }
+      }
+    }
+    return visible
+  }
+
+  /**
+   * Length of the longest non-empty suffix of `s` that is a proper prefix of
+   * `tag` — i.e. how much trailing text might be the start of a split tag and
+   * must be held back until the next delta. Returns 0 if none.
+   */
+  private partialTagTail(s: string, tag: string): number {
+    const max = Math.min(s.length, tag.length - 1)
+    for (let len = max; len > 0; len--) {
+      if (tag.startsWith(s.slice(s.length - len))) return len
+    }
+    return 0
+  }
+
+  /**
+   * Flush any text held in `thinkCarry` at turn end. A leftover carry while
+   * outside a think block was a partial `<think>` that never completed, so it's
+   * real visible text. Carry while inside a think block is unterminated reasoning
+   * and stays hidden.
+   */
+  private flushThinkCarry(): void {
+    if (this.thinkCarry && !this.thinkActive) {
+      this.emitVisibleText(this.thinkCarry)
+    }
+    this.thinkCarry = ''
+  }
+
+  private emitVisibleText(delta: string): void {
     if (!this.deltaBufferFlushed && this.lastUserInput) {
       this.deltaBuffer += delta
       if (this.deltaBuffer.length >= this.lastUserInput.length) {
@@ -880,6 +970,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
 
   /** Emit the turn result and dispatch any message queued mid-turn. */
   private finalizeTurn(): void {
+    this.flushThinkCarry()
     this.flushDeltaBuffer()
     this.emit('result', '', false)
     // Send the next queued message (received mid-turn) after result handlers run.
@@ -1516,6 +1607,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     this.partDeltaBuffers.clear()
     this.partClassifyInflight.clear()
     this.lastDeltaMessageId = ''
+    this.thinkActive = false
+    this.thinkCarry = ''
     this.startTurnWatchdog()
 
     const baseUrl = `http://localhost:${serverState.port}`

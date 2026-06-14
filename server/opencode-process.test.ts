@@ -359,6 +359,49 @@ describe('OpenCodeProcess', () => {
       expect(shown).not.toContain('greeting')
     })
 
+    it('strips literal <think>...</think> tags emitted inside a text part', () => {
+      // Kimi k2.7 sometimes wraps chain-of-thought in literal <think> tags inside
+      // a visible text part, so part-kind classification can't hide it. The
+      // streaming filter must drop the tags and their contents.
+      const textHandler = vi.fn()
+      const thinkingHandler = vi.fn()
+      ocp.on('text', textHandler)
+      ocp.on('thinking', thinkingHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      callHandleSSE(ocp, {
+        type: 'message.part.delta',
+        properties: {
+          sessionID: 'oc-session-1',
+          field: 'text',
+          delta: '<think>Let me consider the options carefully.</think>The answer is 42.',
+        },
+      })
+      const shown = textHandler.mock.calls.map(c => c[0] as string).join('')
+      expect(shown).toBe('The answer is 42.')
+      expect(shown).not.toContain('consider')
+      expect(thinkingHandler).toHaveBeenCalled()
+    })
+
+    it('strips <think> tags split across multiple text deltas', () => {
+      const textHandler = vi.fn()
+      ocp.on('text', textHandler)
+      setSessionId(ocp, 'oc-session-1')
+
+      // Tags and contents arrive fragmented, including the tags themselves split
+      // mid-token (e.g. "<thi" + "nk>", "</thi" + "nk>").
+      for (const d of ['Before. <thi', 'nk>hidden rea', 'soning here</thi', 'nk>After.']) {
+        callHandleSSE(ocp, {
+          type: 'message.part.delta',
+          properties: { sessionID: 'oc-session-1', field: 'text', delta: d },
+        })
+      }
+      const shown = textHandler.mock.calls.map(c => c[0] as string).join('')
+      expect(shown).toBe('Before. After.')
+      expect(shown).not.toContain('hidden')
+      expect(shown).not.toContain('think')
+    })
+
     it('maps running tool parts to tool_active events', () => {
       const toolActiveHandler = vi.fn()
       ocp.on('tool_active', toolActiveHandler)
