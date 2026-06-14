@@ -28,10 +28,13 @@ import {
   type GoalRun,
   type GoalRunSpec,
   type LoopProvider,
+  type ProviderRole,
+  type CheckerVerdict,
 } from './goal-run-store.js'
 import {
   runVerifier,
   getDiffSummary,
+  getDiff,
   getChangedFiles,
   type VerifyResult,
 } from './verifier-runner.js'
@@ -73,13 +76,17 @@ export interface SessionHost {
 export interface VerifierApi {
   runVerifier(opts: { cwd: string; commands: string[] }): Promise<VerifyResult>
   getDiffSummary(cwd: string): Promise<string>
+  getDiff(cwd: string): Promise<string>
   getChangedFiles(cwd: string): Promise<string[]>
 }
 
-const defaultVerifier: VerifierApi = { runVerifier, getDiffSummary, getChangedFiles }
+const defaultVerifier: VerifierApi = { runVerifier, getDiffSummary, getDiff, getChangedFiles }
 
 /** Max consecutive readonly-glob violations before escalating to a human. */
 const MAX_READONLY_STRIKES = 2
+
+/** Max chars of the diff embedded in the checker prompt (rest is truncated). */
+const MAX_CHECKER_DIFF_CHARS = 60_000
 
 // ---------------------------------------------------------------------------
 // Per-run runtime context (not persisted — rebuilt from the store on restart)
@@ -90,14 +97,21 @@ interface RunCtx {
   makerSessionId: string
   cwd: string
   turnCount: number
+  /** Maker session cumulative cost. */
   costUsd: number
+  /** Checker session cumulative cost (summed into the run's total). */
+  checkerCostUsd: number
   /** Diff stat at the last verify, used to debounce re-running the verifier. */
   lastDiff: string | null
   lastVerifyPassed: boolean
   readonlyStrikes: number
-  /** Re-entrancy guard — one result is processed at a time per run. */
+  /** Re-entrancy guard — one maker result is processed at a time per run. */
   processing: boolean
   dispose: () => void
+  /** Live checker session, set only while a maker–checker review is in flight. */
+  checkerSessionId: string | null
+  checkerProcessing: boolean
+  checkerDispose: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -132,11 +146,15 @@ export class GoalRunController {
       cwd,
       turnCount: 0,
       costUsd: 0,
+      checkerCostUsd: 0,
       lastDiff: null,
       lastVerifyPassed: false,
       readonlyStrikes: 0,
       processing: false,
       dispose: () => {},
+      checkerSessionId: null,
+      checkerProcessing: false,
+      checkerDispose: () => {},
     }
     ctx.dispose = this.host.onSessionResult((sid, isError) => {
       if (sid !== ctx.makerSessionId) return
@@ -163,7 +181,7 @@ export class GoalRunController {
 
       ctx.turnCount += 1
       ctx.costUsd = readCumulativeCost(this.host.get(ctx.makerSessionId)?.outputHistory ?? [])
-      this.store.patchRun(run.id, { turnCount: ctx.turnCount, costUsd: ctx.costUsd })
+      this.store.patchRun(run.id, { turnCount: ctx.turnCount, costUsd: totalCost(ctx) })
 
       // A process-level error ends the turn with nothing to verify — treat a
       // failed result as a maker error and re-prompt within budget.
@@ -242,7 +260,7 @@ export class GoalRunController {
       }
 
       if (result.passed) {
-        this.onVerifyPassed(ctx, run)
+        await this.onVerifyPassed(ctx, run)
         return
       }
 
@@ -256,12 +274,99 @@ export class GoalRunController {
   }
 
   /**
-   * Seam for Cut 2 (maker–checker). When `spec.checker` is set, this is where a
-   * second-provider checker session will be spawned on the maker's branch and
-   * its verdict routed (approve → finalize, request_changes → re-prompt maker,
-   * escalate → human). For Cut 1 a passing verifier finalizes directly.
+   * The deterministic verifier passed. With no checker configured this finalizes
+   * directly (Cut 1). With a `spec.checker`, it hands off to a second-provider
+   * review pass — the verifier is the cheap objective gate; the checker is the
+   * subjective one (does the change actually achieve the goal without gaming the
+   * tests?). Using a *different* provider avoids a model grading its own work.
    */
-  private onVerifyPassed(ctx: RunCtx, run: GoalRun): void {
+  private async onVerifyPassed(ctx: RunCtx, run: GoalRun): Promise<void> {
+    if (!run.spec.checker) {
+      this.finalizeSucceeded(ctx, run)
+      return
+    }
+    await this.startChecker(ctx, run, run.spec.checker)
+  }
+
+  /**
+   * Spawn the checker on its own review branch off the maker's branch. Git forbids
+   * two worktrees on the same branch, and the maker's edits are uncommitted (so a
+   * sibling worktree can't see them) — the diff therefore travels in the prompt,
+   * and the checker reviews read-only.
+   */
+  private async startChecker(ctx: RunCtx, run: GoalRun, checker: ProviderRole): Promise<void> {
+    const diff = await this.verifier.getDiff(ctx.cwd)
+    const session = this.host.create(`goal:${run.kind}:check:${run.branch}`, run.repo, {
+      provider: checker.provider,
+      model: checker.model,
+      source: 'agent',
+    })
+    await this.host.createWorktree(session.id, run.repo, `${run.branch}-review`, run.branch)
+    ctx.checkerSessionId = session.id
+    ctx.checkerProcessing = false
+    this.store.patchRun(run.id, { status: 'checking', checkerSessionId: session.id })
+    ctx.checkerDispose = this.host.onSessionResult((sid, isError) => {
+      if (sid !== ctx.checkerSessionId) return
+      this.onCheckerResult(ctx, isError)
+    })
+    this.host.startClaude(session.id)
+    this.host.sendInput(session.id, buildCheckerPrompt(run, diff))
+  }
+
+  /**
+   * Route the checker's verdict (parsed from its last message — there is no
+   * structured verdict event). approve → finalize; request_changes → feed the
+   * notes back to the maker and resume the loop; escalate or an unparseable
+   * verdict → human checkpoint.
+   */
+  private onCheckerResult(ctx: RunCtx, isError: boolean): void {
+    if (ctx.checkerProcessing) return
+    ctx.checkerProcessing = true
+    try {
+      const run = this.store.getRun(ctx.runId)
+      if (!run || !this.active.has(ctx.runId) || !ctx.checkerSessionId) return
+
+      const history = this.host.get(ctx.checkerSessionId)?.outputHistory ?? []
+      ctx.checkerCostUsd = readCumulativeCost(history)
+      const parsed = isError ? null : parseCheckerVerdict(extractAssistantText(history))
+      const reason = parsed?.reason ?? (isError ? 'checker session errored' : 'unparseable checker verdict')
+
+      this.store.appendTurn({
+        runId: run.id,
+        turnIndex: ctx.turnCount,
+        role: 'checker',
+        diffSummary: ctx.lastDiff,
+        verdict: parsed?.verdict ?? null,
+        outputTail: reason,
+        costUsd: totalCost(ctx),
+      })
+      this.store.patchRun(run.id, {
+        costUsd: totalCost(ctx),
+        verdict: JSON.stringify(parsed ?? { verdict: 'escalate', reason }),
+      })
+      this.disposeChecker(ctx)
+
+      if (!parsed) {
+        this.finalizeEscalated(ctx, reason)
+        return
+      }
+      if (parsed.verdict === 'approve') {
+        this.finalizeSucceeded(ctx, run)
+        return
+      }
+      if (parsed.verdict === 'escalate') {
+        this.finalizeEscalated(ctx, parsed.reason ?? 'checker requested human review')
+        return
+      }
+      // request_changes — feed the reviewer's notes back to the maker and resume.
+      this.host.sendInput(ctx.makerSessionId, buildCheckerFeedback(parsed.reason))
+      this.store.patchRun(run.id, { status: 'running' })
+    } finally {
+      ctx.checkerProcessing = false
+    }
+  }
+
+  private finalizeSucceeded(ctx: RunCtx, run: GoalRun): void {
     this.host.sendInput(ctx.makerSessionId, buildFinalizePrompt(run.spec))
     this.store.appendTurn({
       runId: run.id,
@@ -269,14 +374,24 @@ export class GoalRunController {
       role: 'maker',
       diffSummary: ctx.lastDiff,
       outputTail: 'Verification passed; finalize instruction sent.',
-      costUsd: ctx.costUsd,
+      costUsd: totalCost(ctx),
     })
     this.store.patchRun(run.id, { status: 'succeeded', completedAt: new Date().toISOString() })
     this.teardown(ctx)
   }
 
+  /** Stop the checker session and unregister its listener (idempotent). */
+  private disposeChecker(ctx: RunCtx): void {
+    if (!ctx.checkerSessionId) return
+    this.host.stopClaude(ctx.checkerSessionId)
+    ctx.checkerDispose()
+    ctx.checkerDispose = () => {}
+    ctx.checkerSessionId = null
+    this.store.patchRun(ctx.runId, { checkerSessionId: null })
+  }
+
   private budgetExhausted(ctx: RunCtx, spec: GoalRunSpec): boolean {
-    return ctx.turnCount >= spec.maxTurns || ctx.costUsd >= spec.maxCostUsd
+    return ctx.turnCount >= spec.maxTurns || totalCost(ctx) >= spec.maxCostUsd
   }
 
   private finalizeFailed(ctx: RunCtx, reason: string): void {
@@ -294,6 +409,7 @@ export class GoalRunController {
   }
 
   private teardown(ctx: RunCtx): void {
+    this.disposeChecker(ctx)
     ctx.dispose()
     this.active.delete(ctx.runId)
   }
@@ -312,9 +428,14 @@ function readCumulativeCost(history: HistoryMsg[]): number {
   return 0
 }
 
+/** Run total cost = maker + checker session cumulative cost. */
+function totalCost(ctx: RunCtx): number {
+  return ctx.costUsd + ctx.checkerCostUsd
+}
+
 function budgetReason(ctx: RunCtx, spec: GoalRunSpec): string {
   if (ctx.turnCount >= spec.maxTurns) return `turn budget exhausted (${ctx.turnCount}/${spec.maxTurns})`
-  return `cost budget exhausted ($${ctx.costUsd.toFixed(2)}/$${spec.maxCostUsd.toFixed(2)})`
+  return `cost budget exhausted ($${totalCost(ctx).toFixed(2)}/$${spec.maxCostUsd.toFixed(2)})`
 }
 
 export function buildMakerPrompt(run: GoalRun): string {
@@ -367,4 +488,75 @@ export function buildFinalizePrompt(spec: GoalRunSpec): string {
     return 'Verification passed. Commit your changes and push the branch to the remote. Do not open a pull request.'
   }
   return 'Verification passed. Commit your changes locally. Do not push or open a pull request.'
+}
+
+/** Concatenate the assistant's text output from a session's history. */
+function extractAssistantText(history: HistoryMsg[]): string {
+  let out = ''
+  for (const m of history) {
+    if (m.type === 'output' && typeof m.data === 'string') out += m.data
+  }
+  return out
+}
+
+export interface ParsedVerdict {
+  verdict: CheckerVerdict
+  reason?: string
+}
+
+/**
+ * Parse a checker's free-text reply into a structured verdict. The checker has
+ * no structured verdict event, so it is contracted (via the prompt) to end with
+ * a `VERDICT: <approve|request_changes|escalate>` line. The LAST occurrence wins
+ * so a model that restates the instructions before deciding still resolves to
+ * its final choice. Returns null when no verdict marker is present — the caller
+ * treats that as an escalation rather than a silent pass.
+ */
+export function parseCheckerVerdict(text: string): ParsedVerdict | null {
+  const matches = [...text.matchAll(/VERDICT:\s*(approve|request_changes|escalate)/gi)]
+  if (!matches.length) return null
+  const last = matches[matches.length - 1]
+  const verdict = last[1].toLowerCase() as CheckerVerdict
+  const after = text.slice(last.index + last[0].length)
+  const reasonMatch = after.match(/REASON:\s*(.+)/i)
+  return reasonMatch ? { verdict, reason: reasonMatch[1].trim() } : { verdict }
+}
+
+export function buildCheckerPrompt(run: GoalRun, diff: string): string {
+  const body = diff.length > MAX_CHECKER_DIFF_CHARS ? `${diff.slice(0, MAX_CHECKER_DIFF_CHARS)}\n... [diff truncated]` : diff
+  return [
+    `# Goal Run Review: ${run.kind}`,
+    '',
+    `## Goal`,
+    run.goal,
+    '',
+    `## Deterministic verification`,
+    'These commands already PASSED on this change:',
+    ...run.spec.verify.map((c) => `- \`${c}\``),
+    '',
+    `## Your job`,
+    'Review the diff below as an independent checker. Confirm it genuinely achieves the goal and does NOT:',
+    '- weaken, skip, or delete tests to make verification pass',
+    '- introduce unsafe, incorrect, or out-of-scope changes',
+    'You are reviewing only — do not modify any files.',
+    '',
+    `## Diff`,
+    '```diff',
+    body,
+    '```',
+    '',
+    `## Required response`,
+    'End your reply with exactly one verdict line:',
+    '- `VERDICT: approve` — correct and ready to land',
+    '- `VERDICT: request_changes` then a `REASON:` line stating what must change',
+    '- `VERDICT: escalate` then a `REASON:` line when a human must decide',
+  ].join('\n')
+}
+
+export function buildCheckerFeedback(reason: string | undefined): string {
+  return [
+    'A reviewer assessed your change and requested changes before it can land.',
+    reason ? `Reviewer feedback: ${reason}` : 'The reviewer did not approve the change.',
+    'Address the feedback and continue. Do not weaken tests to satisfy verification.',
+  ].join('\n')
 }

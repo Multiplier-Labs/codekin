@@ -130,6 +130,17 @@ export async function getDiffSummary(cwd: string): Promise<string> {
   return out.trimEnd()
 }
 
+/**
+ * Full `git diff HEAD` patch of the working tree. Fed to a maker–checker review
+ * pass so the checker can assess the actual change (the maker's edits are
+ * uncommitted, so a sibling worktree can't see them — the patch travels in the
+ * prompt instead).
+ */
+export async function getDiff(cwd: string): Promise<string> {
+  const out = await execGit(['diff', 'HEAD'], cwd)
+  return out.trimEnd()
+}
+
 /** Files changed in the working tree vs HEAD — input to readonly-glob enforcement. */
 export async function getChangedFiles(cwd: string): Promise<string[]> {
   const out = await execGit(['diff', '--name-only', 'HEAD'], cwd)
