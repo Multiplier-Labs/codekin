@@ -260,6 +260,46 @@ describe('GoalRunController', () => {
       expect(checkerTurn?.verdict).toBeNull()
     })
   })
+
+  describe('abortRun (Cut 4)', () => {
+    it('stops the maker and marks an active run aborted', async () => {
+      const run = await controller.startRun(input(spec()))
+      expect(controller.activeRunIds()).toContain(run.id)
+
+      const aborted = controller.abortRun(run.id)
+      expect(aborted).toBe(true)
+      expect(store.getRun(run.id)?.status).toBe('aborted')
+      expect(store.getRun(run.id)?.completedAt).not.toBeNull()
+      expect(host.stopped).toContain(run.makerSessionId)
+      expect(controller.activeRunIds()).not.toContain(run.id)
+      // An abort note is recorded in the evidence ledger.
+      expect(store.listTurns(run.id).some((t) => t.outputTail === 'Run aborted by user.')).toBe(true)
+    })
+
+    it('returns false for an unknown run', () => {
+      expect(controller.abortRun('does-not-exist')).toBe(false)
+    })
+
+    it('refuses to abort an already-terminal run', async () => {
+      const run = await controller.startRun(input(spec()))
+      host.outputHistory.push({ type: 'usage', costUsd: 0.1 })
+      await host.fire() // verify passes (no checker) → succeeded
+      expect(store.getRun(run.id)?.status).toBe('succeeded')
+
+      expect(controller.abortRun(run.id)).toBe(false)
+      expect(store.getRun(run.id)?.status).toBe('succeeded')
+    })
+
+    it('marks a persisted-but-inactive run aborted without a session stop', () => {
+      const run = store.createRun(input(spec()))
+      store.patchRun(run.id, { status: 'running' })
+
+      const aborted = controller.abortRun(run.id)
+      expect(aborted).toBe(true)
+      expect(store.getRun(run.id)?.status).toBe('aborted')
+      expect(host.stopped).toHaveLength(0)
+    })
+  })
 })
 
 describe('parseCheckerVerdict', () => {

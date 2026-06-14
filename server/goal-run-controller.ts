@@ -172,6 +172,34 @@ export class GoalRunController {
     return [...this.active.keys()]
   }
 
+  /**
+   * Abort a run on user request. An active run has its maker (and any in-flight
+   * checker) stopped and is torn down; a run that is only persisted (e.g. after a
+   * server restart) is marked aborted in the store. Already-terminal runs are
+   * left untouched. Returns true if the run transitioned to `aborted`.
+   */
+  abortRun(runId: string): boolean {
+    const run = this.store.getRun(runId)
+    if (!run) return false
+    const ctx = this.active.get(runId)
+    if (ctx) {
+      this.store.appendTurn({
+        runId,
+        turnIndex: ctx.turnCount,
+        role: 'verifier',
+        outputTail: 'Run aborted by user.',
+        costUsd: totalCost(ctx),
+      })
+      this.host.stopClaude(ctx.makerSessionId)
+      this.store.patchRun(runId, { status: 'aborted', completedAt: new Date().toISOString() })
+      this.teardown(ctx)
+      return true
+    }
+    if (run.status === 'succeeded' || run.status === 'failed' || run.status === 'aborted') return false
+    this.store.patchRun(runId, { status: 'aborted', completedAt: new Date().toISOString() })
+    return true
+  }
+
   private async onMakerResult(ctx: RunCtx, isError: boolean): Promise<void> {
     if (ctx.processing) return
     ctx.processing = true
