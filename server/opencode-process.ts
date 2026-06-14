@@ -458,6 +458,8 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   private partDeltaBuffers = new Map<string, string[]>()
   /** partIDs with an in-flight classifyPart REST lookup (dedup guard). */
   private partClassifyInflight = new Set<string>()
+  /** Most recent assistant messageID seen on a delta — used to classify stragglers at turn end. */
+  private lastDeltaMessageId = ''
 
   constructor(workingDir: string, opts?: Partial<OpenCodeProcessOptions>) {
     super()
@@ -786,35 +788,62 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
   }
 
   /**
-   * Resolve a part's kind via REST when the SSE stream gives no type signal.
+   * Resolve part kinds via REST when the SSE stream gives no type signal.
    * OpenCode's delta stream uses `field=text` for both reasoning and text
    * parts, and some providers (e.g. Kimi/ollama-cloud) never emit
-   * message.part.updated, so the part must be fetched to know whether its
-   * deltas are visible response text or hidden reasoning. Defaults to showing
-   * the content on any failure — better to display than to silently hide.
+   * message.part.updated, so the message must be fetched to learn whether a
+   * part's deltas are visible response text or hidden reasoning.
+   *
+   * Fetches the whole message (`GET /session/{sid}/message/{mid}`) and records
+   * the kind for EVERY part it contains, so a single round-trip classifies all
+   * of a message's parts. If the target part isn't listed yet (a delta can
+   * briefly outrace the parts snapshot), the in-flight guard is released so the
+   * next delta retries — its deltas stay buffered (hidden) until resolved.
    */
   private async classifyPart(messageID: string, partID: string): Promise<void> {
     if (this.partKinds.has(partID) || this.partClassifyInflight.has(partID)) return
     this.partClassifyInflight.add(partID)
-    let kind: 'reasoning' | 'text' | 'other' = 'text'
     try {
       const baseUrl = `http://localhost:${serverState.port}`
       const res = await fetch(
-        `${baseUrl}/session/${this.opencodeSessionId}/message/${messageID}/part/${partID}`,
+        `${baseUrl}/session/${this.opencodeSessionId}/message/${messageID}`,
         {
           headers: { ...authHeaders(), 'x-opencode-directory': this.workingDir },
           signal: AbortSignal.timeout(10_000),
         },
       )
       if (res.ok) {
-        const part = await res.json() as { type?: string }
-        kind = part.type === 'reasoning' ? 'reasoning' : part.type === 'text' ? 'text' : 'other'
+        const msg = await res.json() as { parts?: Array<{ id?: string; type?: string }> }
+        for (const part of msg.parts ?? []) {
+          if (!part.id || this.partKinds.has(part.id)) continue
+          const kind = part.type === 'reasoning' ? 'reasoning' : part.type === 'text' ? 'text' : 'other'
+          this.recordPartKind(part.id, kind)
+        }
       }
     } catch {
-      // Network/timeout — fall back to showing the content as text.
+      // Network/timeout — leave unresolved; a later delta retries the lookup.
     }
     this.partClassifyInflight.delete(partID)
-    this.recordPartKind(partID, kind)
+  }
+
+  /**
+   * At turn end, resolve any parts whose kind never came back during streaming,
+   * then flush whatever is still buffered. A final classification keeps reasoning
+   * hidden; anything that still can't be resolved (total REST failure) is shown
+   * as text rather than silently dropping the answer.
+   */
+  private async flushPendingParts(): Promise<void> {
+    if (this.partDeltaBuffers.size === 0) return
+    if (this.lastDeltaMessageId) {
+      for (const pid of [...this.partDeltaBuffers.keys()]) {
+        this.partClassifyInflight.delete(pid)
+        await this.classifyPart(this.lastDeltaMessageId, pid)
+      }
+    }
+    for (const [pid, buf] of [...this.partDeltaBuffers.entries()]) {
+      this.partDeltaBuffers.delete(pid)
+      for (const d of buf) this.emitTextDelta(d)
+    }
   }
 
   /** Flush any buffered text deltas that haven't been emitted yet (e.g. turn ended before buffer threshold). */
@@ -840,6 +869,17 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     this.turnComplete = true
     this.turnInFlight = false
     this.clearTurnWatchdog()
+    // If any part deltas are still buffered awaiting classification, resolve and
+    // flush them before finalizing so their text isn't lost or misordered.
+    if (this.partDeltaBuffers.size > 0) {
+      void this.flushPendingParts().finally(() => { this.finalizeTurn() })
+    } else {
+      this.finalizeTurn()
+    }
+  }
+
+  /** Emit the turn result and dispatch any message queued mid-turn. */
+  private finalizeTurn(): void {
     this.flushDeltaBuffer()
     this.emit('result', '', false)
     // Send the next queued message (received mid-turn) after result handlers run.
@@ -905,7 +945,10 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
           if (buf) buf.push(delta)
           else this.partDeltaBuffers.set(partID, [delta])
           const messageID = properties.messageID as string | undefined
-          if (messageID) void this.classifyPart(messageID, partID)
+          if (messageID) {
+            this.lastDeltaMessageId = messageID
+            void this.classifyPart(messageID, partID)
+          }
         } else if (field === 'reasoning' && delta) {
           // Some providers send reasoning on a dedicated `field=reasoning`
           // stream — always hidden from the transcript.
@@ -1472,6 +1515,7 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     this.partKinds.clear()
     this.partDeltaBuffers.clear()
     this.partClassifyInflight.clear()
+    this.lastDeltaMessageId = ''
     this.startTurnWatchdog()
 
     const baseUrl = `http://localhost:${serverState.port}`
