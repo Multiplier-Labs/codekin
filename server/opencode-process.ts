@@ -32,6 +32,8 @@ import { summarizeToolInput } from './tool-labels.js'
 
 /** A part within an OpenCode message (text, reasoning, tool, step markers). */
 interface OpenCodeMessagePart {
+  /** Stable part ID — matches the `partID` carried on message.part.delta events. */
+  id?: string
   type: 'text' | 'reasoning' | 'tool' | 'step-start' | 'step-finish'
   /** Text/reasoning content (field name is 'text', not 'content'). */
   text?: string
@@ -443,6 +445,31 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
    * buffer instead of being emitted as visible text.
    */
   private inReasoningPhase = false
+  /**
+   * Cache of message-part kinds keyed by partID. OpenCode's `message.part.delta`
+   * stream uses `field=text` for BOTH reasoning and text parts — the only
+   * discriminator is the `partID`. Some providers (Kimi/ollama-cloud) never emit
+   * `message.part.updated`/`message.updated`, so the part type must be resolved
+   * via a REST lookup (classifyPart) and remembered here to route subsequent
+   * deltas without re-fetching.
+   */
+  private partKinds = new Map<string, 'reasoning' | 'text' | 'other'>()
+  /** Buffered `field=text` deltas per partID, held until the part kind is known. */
+  private partDeltaBuffers = new Map<string, string[]>()
+  /** partIDs with an in-flight classifyPart REST lookup (dedup guard). */
+  private partClassifyInflight = new Set<string>()
+  /** Most recent assistant messageID seen on a delta — used to classify stragglers at turn end. */
+  private lastDeltaMessageId = ''
+  /**
+   * Some models (e.g. Kimi k2.7 via ollama-cloud) emit chain-of-thought wrapped
+   * in literal `<think>...</think>` tags INSIDE a visible text part, so part-kind
+   * classification can't hide it. These two fields drive a streaming-safe filter
+   * that strips think tags even when they're split across deltas:
+   * `thinkActive` is true while inside an open `<think>`; `thinkCarry` holds a
+   * trailing partial tag (e.g. `<thi`) until the next delta completes or refutes it.
+   */
+  private thinkActive = false
+  private thinkCarry = ''
 
   constructor(workingDir: string, opts?: Partial<OpenCodeProcessOptions>) {
     super()
@@ -711,6 +738,204 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     return sessionID === this.opencodeSessionId
   }
 
+  /**
+   * Emit a visible-text delta, buffering the leading deltas first so a
+   * user-echo prefix (some providers echo the user message back) can be
+   * detected and stripped before display.
+   */
+  private emitTextDelta(delta: string): void {
+    const visible = this.stripThinkTags(delta)
+    if (visible) this.emitVisibleText(visible)
+  }
+
+  /**
+   * Strip literal `<think>...</think>` chain-of-thought from a text delta,
+   * streaming-safely. Content inside the tags is routed to the reasoning buffer
+   * (surfaced only as a thinking summary, never as transcript text). Handles tags
+   * split across deltas by holding a trailing partial tag in `this.thinkCarry`
+   * until the next delta arrives. Returns the visible (non-think) text.
+   */
+  private stripThinkTags(input: string): string {
+    let s = this.thinkCarry + input
+    this.thinkCarry = ''
+    let visible = ''
+    while (s.length > 0) {
+      if (this.thinkActive) {
+        const close = s.indexOf('</think>')
+        if (close === -1) {
+          const tail = this.partialTagTail(s, '</think>')
+          if (tail > 0) {
+            this.appendReasoningDelta(s.slice(0, s.length - tail))
+            this.thinkCarry = s.slice(s.length - tail)
+          } else {
+            this.appendReasoningDelta(s)
+          }
+          s = ''
+        } else {
+          this.appendReasoningDelta(s.slice(0, close))
+          this.thinkActive = false
+          s = s.slice(close + '</think>'.length)
+        }
+      } else {
+        const open = s.indexOf('<think>')
+        if (open === -1) {
+          const tail = this.partialTagTail(s, '<think>')
+          if (tail > 0) {
+            visible += s.slice(0, s.length - tail)
+            this.thinkCarry = s.slice(s.length - tail)
+          } else {
+            visible += s
+          }
+          s = ''
+        } else {
+          visible += s.slice(0, open)
+          this.thinkActive = true
+          s = s.slice(open + '<think>'.length)
+        }
+      }
+    }
+    return visible
+  }
+
+  /**
+   * Length of the longest non-empty suffix of `s` that is a proper prefix of
+   * `tag` — i.e. how much trailing text might be the start of a split tag and
+   * must be held back until the next delta. Returns 0 if none.
+   */
+  private partialTagTail(s: string, tag: string): number {
+    const max = Math.min(s.length, tag.length - 1)
+    for (let len = max; len > 0; len--) {
+      if (tag.startsWith(s.slice(s.length - len))) return len
+    }
+    return 0
+  }
+
+  /**
+   * Flush any text held in `thinkCarry` at turn end. A leftover carry while
+   * outside a think block was a partial `<think>` that never completed, so it's
+   * real visible text. Carry while inside a think block is unterminated reasoning
+   * and stays hidden.
+   */
+  private flushThinkCarry(): void {
+    if (this.thinkCarry && !this.thinkActive) {
+      this.emitVisibleText(this.thinkCarry)
+    }
+    this.thinkCarry = ''
+  }
+
+  private emitVisibleText(delta: string): void {
+    if (!this.deltaBufferFlushed && this.lastUserInput) {
+      this.deltaBuffer += delta
+      if (this.deltaBuffer.length >= this.lastUserInput.length) {
+        this.deltaBufferFlushed = true
+        if (this.deltaBuffer.startsWith(this.lastUserInput)) {
+          const remainder = this.deltaBuffer.slice(this.lastUserInput.length)
+          if (remainder) this.emit('text', remainder)
+        } else {
+          this.emit('text', this.deltaBuffer)
+        }
+        this.deltaBuffer = ''
+      }
+      // Still buffering — don't emit yet
+    } else {
+      this.emit('text', delta)
+    }
+  }
+
+  /**
+   * Accumulate a reasoning delta and emit a one-line thinking summary once
+   * enough content has arrived. Reasoning is never shown in the transcript.
+   */
+  private appendReasoningDelta(delta: string): void {
+    this.reasoningBuffer += delta
+    if (this.reasoningBuffer.length > 20 && !this.emittedReasoningSummary) {
+      this.emittedReasoningSummary = true
+      const match = this.reasoningBuffer.match(/^(.+?[.!?\n])/)
+      const summary = match && match[1].length <= 120
+        ? match[1].replace(/\n/g, ' ').trim()
+        : this.reasoningBuffer.slice(0, 80).trim()
+      this.emit('thinking', summary)
+    }
+  }
+
+  /**
+   * Record the resolved kind for a partID and flush any deltas buffered while
+   * its type was unknown — reasoning deltas become a thinking summary, text
+   * deltas are emitted, anything else is dropped.
+   */
+  private recordPartKind(partID: string, kind: 'reasoning' | 'text' | 'other'): void {
+    if (this.partKinds.get(partID) === kind && !this.partDeltaBuffers.has(partID)) return
+    this.partKinds.set(partID, kind)
+    const buf = this.partDeltaBuffers.get(partID)
+    if (!buf) return
+    this.partDeltaBuffers.delete(partID)
+    if (kind === 'reasoning') {
+      for (const d of buf) this.appendReasoningDelta(d)
+    } else if (kind === 'text') {
+      for (const d of buf) this.emitTextDelta(d)
+    }
+    // 'other' (tool/step) → discard buffered text
+  }
+
+  /**
+   * Resolve part kinds via REST when the SSE stream gives no type signal.
+   * OpenCode's delta stream uses `field=text` for both reasoning and text
+   * parts, and some providers (e.g. Kimi/ollama-cloud) never emit
+   * message.part.updated, so the message must be fetched to learn whether a
+   * part's deltas are visible response text or hidden reasoning.
+   *
+   * Fetches the whole message (`GET /session/{sid}/message/{mid}`) and records
+   * the kind for EVERY part it contains, so a single round-trip classifies all
+   * of a message's parts. If the target part isn't listed yet (a delta can
+   * briefly outrace the parts snapshot), the in-flight guard is released so the
+   * next delta retries — its deltas stay buffered (hidden) until resolved.
+   */
+  private async classifyPart(messageID: string, partID: string): Promise<void> {
+    if (this.partKinds.has(partID) || this.partClassifyInflight.has(partID)) return
+    this.partClassifyInflight.add(partID)
+    try {
+      const baseUrl = `http://localhost:${serverState.port}`
+      const res = await fetch(
+        `${baseUrl}/session/${this.opencodeSessionId}/message/${messageID}`,
+        {
+          headers: { ...authHeaders(), 'x-opencode-directory': this.workingDir },
+          signal: AbortSignal.timeout(10_000),
+        },
+      )
+      if (res.ok) {
+        const msg = await res.json() as { parts?: Array<{ id?: string; type?: string }> }
+        for (const part of msg.parts ?? []) {
+          if (!part.id || this.partKinds.has(part.id)) continue
+          const kind = part.type === 'reasoning' ? 'reasoning' : part.type === 'text' ? 'text' : 'other'
+          this.recordPartKind(part.id, kind)
+        }
+      }
+    } catch {
+      // Network/timeout — leave unresolved; a later delta retries the lookup.
+    }
+    this.partClassifyInflight.delete(partID)
+  }
+
+  /**
+   * At turn end, resolve any parts whose kind never came back during streaming,
+   * then flush whatever is still buffered. A final classification keeps reasoning
+   * hidden; anything that still can't be resolved (total REST failure) is shown
+   * as text rather than silently dropping the answer.
+   */
+  private async flushPendingParts(): Promise<void> {
+    if (this.partDeltaBuffers.size === 0) return
+    if (this.lastDeltaMessageId) {
+      for (const pid of [...this.partDeltaBuffers.keys()]) {
+        this.partClassifyInflight.delete(pid)
+        await this.classifyPart(this.lastDeltaMessageId, pid)
+      }
+    }
+    for (const [pid, buf] of [...this.partDeltaBuffers.entries()]) {
+      this.partDeltaBuffers.delete(pid)
+      for (const d of buf) this.emitTextDelta(d)
+    }
+  }
+
   /** Flush any buffered text deltas that haven't been emitted yet (e.g. turn ended before buffer threshold). */
   private flushDeltaBuffer(): void {
     if (!this.deltaBufferFlushed && this.deltaBuffer) {
@@ -734,6 +959,18 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     this.turnComplete = true
     this.turnInFlight = false
     this.clearTurnWatchdog()
+    // If any part deltas are still buffered awaiting classification, resolve and
+    // flush them before finalizing so their text isn't lost or misordered.
+    if (this.partDeltaBuffers.size > 0) {
+      void this.flushPendingParts().finally(() => { this.finalizeTurn() })
+    } else {
+      this.finalizeTurn()
+    }
+  }
+
+  /** Emit the turn result and dispatch any message queued mid-turn. */
+  private finalizeTurn(): void {
+    this.flushThinkCarry()
     this.flushDeltaBuffer()
     this.emit('result', '', false)
     // Send the next queued message (received mid-turn) after result handlers run.
@@ -767,55 +1004,46 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         }
         if (field === 'text' && delta) {
           this.receivedDeltas = true
+          const partID = properties.partID as string | undefined
 
-          // Some providers (e.g. Kimi via OpenCode) send reasoning content as
-          // field=text deltas. When inReasoningPhase is set (by a preceding
-          // part.updated type=reasoning event), route to reasoning buffer.
+          // OpenCode streams BOTH reasoning and visible-text parts as
+          // `field=text` deltas; the only discriminator is the partID. Route
+          // based on the known part kind. Legacy `inReasoningPhase` (set by
+          // part.updated type=reasoning on versions that emit it) still wins.
           if (this.inReasoningPhase) {
-            this.reasoningBuffer += delta
-            if (this.reasoningBuffer.length > 20 && !this.emittedReasoningSummary) {
-              this.emittedReasoningSummary = true
-              const match = this.reasoningBuffer.match(/^(.+?[.!?\n])/)
-              const summary = match && match[1].length <= 120
-                ? match[1].replace(/\n/g, ' ').trim()
-                : this.reasoningBuffer.slice(0, 80).trim()
-              this.emit('thinking', summary)
-            }
+            this.appendReasoningDelta(delta)
+            break
+          }
+          const kind = partID ? this.partKinds.get(partID) : undefined
+          if (kind === 'reasoning') {
+            this.appendReasoningDelta(delta)
+            break
+          }
+          if (kind === 'other') {
+            // tool/step parts shouldn't stream visible text — ignore.
+            break
+          }
+          if (kind === 'text' || !partID) {
+            this.emitTextDelta(delta)
             break
           }
 
-          // Buffer initial deltas to detect and strip user echo prefix.
-          // Some providers echo the user message at the start of the assistant
-          // response, which causes duplicate display.
-          if (!this.deltaBufferFlushed && this.lastUserInput) {
-            this.deltaBuffer += delta
-            if (this.deltaBuffer.length >= this.lastUserInput.length) {
-              this.deltaBufferFlushed = true
-              if (this.deltaBuffer.startsWith(this.lastUserInput)) {
-                const remainder = this.deltaBuffer.slice(this.lastUserInput.length)
-                if (remainder) this.emit('text', remainder)
-              } else {
-                this.emit('text', this.deltaBuffer)
-              }
-              this.deltaBuffer = ''
-            }
-            // Still buffering — don't emit yet
-          } else {
-            this.emit('text', delta)
+          // Unknown partID: some providers (e.g. Kimi/ollama-cloud) never emit
+          // message.part.updated, so the part type isn't known from the stream.
+          // Buffer this part's deltas and resolve its kind via a REST lookup;
+          // the buffer is flushed (or dropped, if reasoning) once classified.
+          const buf = this.partDeltaBuffers.get(partID)
+          if (buf) buf.push(delta)
+          else this.partDeltaBuffers.set(partID, [delta])
+          const messageID = properties.messageID as string | undefined
+          if (messageID) {
+            this.lastDeltaMessageId = messageID
+            void this.classifyPart(messageID, partID)
           }
         } else if (field === 'reasoning' && delta) {
-          // Accumulate reasoning deltas and emit a thinking summary once we
-          // have enough content, so the UI shows a thinking indicator during
-          // streaming (not only when message.part.updated arrives later).
-          this.reasoningBuffer += delta
-          if (this.reasoningBuffer.length > 20 && !this.emittedReasoningSummary) {
-            this.emittedReasoningSummary = true
-            const match = this.reasoningBuffer.match(/^(.+?[.!?\n])/)
-            const summary = match && match[1].length <= 120
-              ? match[1].replace(/\n/g, ' ').trim()
-              : this.reasoningBuffer.slice(0, 80).trim()
-            this.emit('thinking', summary)
-          }
+          // Some providers send reasoning on a dedicated `field=reasoning`
+          // stream — always hidden from the transcript.
+          this.appendReasoningDelta(delta)
         }
         break
       }
@@ -845,6 +1073,9 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
             if (this.inReasoningPhase) {
               this.inReasoningPhase = false
             }
+            // Record the kind so streaming deltas for this partID route
+            // correctly without a REST lookup (and flush any buffered ones).
+            if (part.id) this.recordPartKind(part.id, 'text')
             // Text may arrive via message.part.delta (streaming) or as full
             // content here (OpenCode >=1.4 message.updated). Only emit if we
             // haven't already streamed it via delta events or emitted it from
@@ -866,6 +1097,9 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
             // are reasoning content, not visible text. Set the phase flag so
             // the delta handler routes them to the reasoning buffer.
             this.inReasoningPhase = true
+            // Record the kind so streaming deltas for this partID are routed
+            // to the reasoning buffer (and flush any buffered ones).
+            if (part.id) this.recordPartKind(part.id, 'reasoning')
             // OpenCode uses 'text' field, not 'content'. Reasoning may be
             // empty or encrypted (e.g. OpenAI models). Only emit if present.
             const content = part.text || ''
@@ -1369,6 +1603,12 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
     this.reasoningBuffer = ''
     this.emittedReasoningSummary = false
     this.inReasoningPhase = false
+    this.partKinds.clear()
+    this.partDeltaBuffers.clear()
+    this.partClassifyInflight.clear()
+    this.lastDeltaMessageId = ''
+    this.thinkActive = false
+    this.thinkCarry = ''
     this.startTurnWatchdog()
 
     const baseUrl = `http://localhost:${serverState.port}`

@@ -37,6 +37,7 @@ import { Settings } from './components/Settings'
 import { LeftSidebar } from './components/LeftSidebar'
 import { MobileTopBar } from './components/MobileTopBar'
 import { WorkflowsView } from './components/WorkflowsView'
+import { LoopRunsView } from './components/LoopRunsView'
 import { CommandPalette } from './components/CommandPalette'
 import type { InputBarHandle } from './components/InputBar'
 import { RepoSelector } from './components/RepoSelector'
@@ -608,6 +609,7 @@ export default function App() {
         onSendModule={handleSendModule}
         agentName={agentName}
         onNavigateToWorkflows={() => navigate('/workflows')}
+        onNavigateToLoops={() => navigate('/loops')}
         onNavigateToOrchestrator={() => handleNavigateToOrchestrator()}
         onBrowseDocs={handleBrowseDocs}
         docsPicker={{
@@ -685,6 +687,16 @@ export default function App() {
           />
         ) : view === 'workflows' ? (
           <WorkflowsView
+            token={settings.token}
+            onNavigateToSession={(sessionId) => {
+              clearMessages()
+              leaveSession()
+              joinSession(sessionId)
+              navigate(`/s/${sessionId}`)
+            }}
+          />
+        ) : view === 'loops' ? (
+          <LoopRunsView
             token={settings.token}
             onNavigateToSession={(sessionId) => {
               clearMessages()

@@ -32,6 +32,9 @@ import { initWorkflowEngine, shutdownWorkflowEngine, type WorkflowEvent } from '
 import { generate404Page, generate500Page } from './error-page.js'
 import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
+import { GoalRunStore } from './goal-run-store.js'
+import { GoalRunController } from './goal-run-controller.js'
+import { createGoalRunRouter } from './goal-run-routes.js'
 import { CommitEventHandler } from './commit-event-handler.js'
 import { jsonParse } from './json-parse.js'
 import { createMessageRateLimiter } from './ws-rate-limit.js'
@@ -368,6 +371,10 @@ app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessio
 // Orchestrator router — monitorRef is populated after workflow engine init
 const orchestratorMonitorRef: { current: OrchestratorMonitor | null } = { current: null }
 app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken))
+// Goal Run (loop) router — durable act→verify→continue loops with an evidence ledger.
+const goalRunStore = new GoalRunStore()
+const goalRunController = new GoalRunController(sessions, goalRunStore)
+app.use('/api/goal-runs', createGoalRunRouter(verifyToken, extractToken, goalRunStore, goalRunController))
 
 // --- SPA fallback: serve index.html for non-API routes (client-side routing) ---
 if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
@@ -688,6 +695,7 @@ server.listen(port, '0.0.0.0', () => {
 async function gracefulShutdown(signal: string): Promise<void> {
   console.log(`${signal} received, shutting down...`)
   shutdownWorkflowEngine()
+  goalRunStore.close()
   commitEventState.handler?.shutdown()
   webhookHandler.shutdown()
   stepflowHandler.shutdown()

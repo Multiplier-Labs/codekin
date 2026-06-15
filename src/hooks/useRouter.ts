@@ -11,7 +11,7 @@ import { useState, useCallback, useEffect } from 'react'
 interface RouteState {
   path: string
   sessionId: string | null
-  view: 'chat' | 'workflows' | 'orchestrator'
+  view: 'chat' | 'workflows' | 'orchestrator' | 'loops'
 }
 
 export function parsePath(pathname: string): RouteState {
@@ -20,6 +20,9 @@ export function parsePath(pathname: string): RouteState {
   }
   if (pathname === '/workflows' || pathname === '/workflows/') {
     return { path: pathname, sessionId: null, view: 'workflows' }
+  }
+  if (pathname === '/loops' || pathname === '/loops/') {
+    return { path: pathname, sessionId: null, view: 'loops' }
   }
   const match = pathname.match(/^\/s\/([a-f0-9-]+)\/?$/)
   return {
