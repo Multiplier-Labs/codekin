@@ -427,6 +427,30 @@ describe('DiffManager.discardChanges', () => {
     expect(result.message).toContain('Invalid path')
   })
 
+  it('rejects ".." traversal in statuses keys when paths is omitted', async () => {
+    const result = await dm.discardChanges('/repo', 'all', undefined, {
+      '../../target': 'added',
+    }) as any
+    expect(result.type).toBe('diff_error')
+    expect(result.message).toContain('Invalid path')
+  })
+
+  it('rejects absolute paths in statuses keys when paths is omitted', async () => {
+    const result = await dm.discardChanges('/repo', 'all', undefined, {
+      '/etc/passwd': 'added',
+    }) as any
+    expect(result.type).toBe('diff_error')
+    expect(result.message).toContain('Invalid path')
+  })
+
+  it('rejects traversal in statuses keys even when valid paths are provided', async () => {
+    const result = await dm.discardChanges('/repo', 'all', ['src/app.ts'], {
+      '../../target': 'added',
+    }) as any
+    expect(result.type).toBe('diff_error')
+    expect(result.message).toContain('Invalid path')
+  })
+
   it('uses git restore --staged --worktree for scope=all with tracked files', async () => {
     stubExecFileByArgs({
       'status --porcelain': ' M src/app.ts\0',

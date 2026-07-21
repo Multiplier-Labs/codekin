@@ -215,17 +215,18 @@ export class DiffManager {
     statuses?: Record<string, DiffFileStatus>,
   ): Promise<WsServerMessage> {
     try {
-      // Validate paths
-      if (paths) {
-        const root = path.join(path.resolve(cwd), path.sep)
-        for (const p of paths) {
-          if (p.includes('..') || path.isAbsolute(p)) {
-            return { type: 'diff_error', message: `Invalid path: ${p}` }
-          }
-          const resolved = path.resolve(cwd, p)
-          if (resolved !== path.resolve(cwd) && !resolved.startsWith(root)) {
-            return { type: 'diff_error', message: `Path escapes working directory: ${p}` }
-          }
+      // Validate every client-supplied path (both `paths` and `statuses`
+      // keys, since either can become the effective target list below)
+      // against path traversal, before any of them reach git or fs calls.
+      const root = path.join(path.resolve(cwd), path.sep)
+      const clientPaths = [...(paths ?? []), ...Object.keys(statuses ?? {})]
+      for (const p of clientPaths) {
+        if (p.includes('..') || path.isAbsolute(p)) {
+          return { type: 'diff_error', message: `Invalid path: ${p}` }
+        }
+        const resolved = path.resolve(cwd, p)
+        if (resolved !== path.resolve(cwd) && !resolved.startsWith(root)) {
+          return { type: 'diff_error', message: `Path escapes working directory: ${p}` }
         }
       }
 
