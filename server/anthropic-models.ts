@@ -23,6 +23,8 @@ export interface ClaudeModelInfo {
 /** Hardcoded fallback used until dynamic discovery completes.
  *  Per https://platform.claude.com/docs/en/about-claude/models/overview */
 export const FALLBACK_MODELS: ClaudeModelInfo[] = [
+  { id: 'claude-opus-5', label: 'Opus 5' },
+  { id: 'claude-sonnet-5', label: 'Sonnet 5' },
   { id: 'claude-opus-4-8', label: 'Opus 4.8' },
   { id: 'claude-fable-5', label: 'Fable 5' },
   { id: 'claude-opus-4-7', label: 'Opus 4.7' },
@@ -39,25 +41,27 @@ export const FALLBACK_MODELS: ClaudeModelInfo[] = [
  * probes cost ~$0.04 each. Probing in parallel keeps total wall time under 5s.
  */
 const CANDIDATE_MODEL_IDS: string[] = [
-  // Fable family (5th-generation flagship; GA 2026-06-09). Dateless pinned ID.
+  // 5th-generation IDs are dateless and single-number — `claude-opus-5`, NOT
+  // `claude-opus-5-0`. The `-0` guesses probed here originally never matched
+  // anything, which is why Opus 5 stayed invisible in the UI.
+  // Fable family (GA 2026-06-09).
   'claude-fable-5',
   'claude-fable-6',
-  // Opus family (currently 4.6, 4.7, 4.8 are live; probe ahead for new releases)
+  // Opus family (4.6/4.7/4.8 and 5 are live; probe ahead for new releases)
   'claude-opus-4-6',
   'claude-opus-4-7',
   'claude-opus-4-8',
-  'claude-opus-4-9',
-  'claude-opus-5-0',
-  // Sonnet family (currently 4.6 is latest; probe ahead)
+  'claude-opus-5',
+  'claude-opus-6',
+  // Sonnet family (4.6 and 5 are live; probe ahead)
   'claude-sonnet-4-6',
   'claude-sonnet-4-7',
-  'claude-sonnet-4-8',
-  'claude-sonnet-5-0',
-  // Haiku family (currently 4.5 is latest; probe ahead — note dated suffix)
+  'claude-sonnet-5',
+  'claude-sonnet-6',
+  // Haiku family (currently 4.5 is latest — note dated suffix; probe ahead)
   'claude-haiku-4-5-20251001',
   'claude-haiku-4-6',
-  'claude-haiku-4-7',
-  'claude-haiku-5-0',
+  'claude-haiku-5',
 ]
 
 // ---------------------------------------------------------------------------

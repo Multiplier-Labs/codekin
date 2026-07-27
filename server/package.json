@@ -15,7 +15,8 @@
     "test:watch": "vitest"
   },
   "overrides": {
-    "vite": "^8.0.5"
+    "vite": "^8.0.5",
+    "postcss": "^8.5.18"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
