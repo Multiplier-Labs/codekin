@@ -90,7 +90,7 @@ export function DropZone({ onUpload, disabled }: Props) {
   if (!dragOver || disabled) return null
 
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center rounded border-2 border-dashed border-primary-7 bg-primary-11/60 backdrop-blur-sm pointer-events-none">
+    <div className="absolute inset-0 z-50 flex items-center justify-center rounded-control border-2 border-dashed border-primary-7 bg-primary-11/60 backdrop-blur-sm pointer-events-none">
       <div className="text-center">
         <IconUpload className="mx-auto mb-2 text-primary-6" size={40} stroke={1.5} />
         <p className="text-body font-medium text-primary-5">Drop files here</p>

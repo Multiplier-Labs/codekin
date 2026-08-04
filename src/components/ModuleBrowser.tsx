@@ -32,7 +32,7 @@ export function ModuleBrowser({ repo, globalModules = [], onSendModule, disabled
                 key={mod.id}
                 onClick={() => onSendModule(mod)}
                 disabled={disabled}
-                className="group rounded px-2 py-1.5 text-left transition hover:bg-neutral-10/50 disabled:opacity-50 disabled:pointer-events-none"
+                className="group rounded-control px-2 py-1.5 text-left transition hover:bg-neutral-10/50 disabled:opacity-50 disabled:pointer-events-none"
               >
                 <div className="text-body font-medium text-primary-6 group-hover:text-primary-5">
                   {mod.name}
@@ -57,7 +57,7 @@ export function ModuleBrowser({ repo, globalModules = [], onSendModule, disabled
                 key={mod.id}
                 onClick={() => onSendModule(mod)}
                 disabled={disabled}
-                className="group rounded px-2 py-1.5 text-left transition hover:bg-neutral-10/50 disabled:opacity-50 disabled:pointer-events-none"
+                className="group rounded-control px-2 py-1.5 text-left transition hover:bg-neutral-10/50 disabled:opacity-50 disabled:pointer-events-none"
               >
                 <div className="text-body font-medium text-primary-6 group-hover:text-primary-5">
                   {mod.name}

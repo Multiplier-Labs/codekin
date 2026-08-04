@@ -60,7 +60,7 @@ export function WorkflowRow({
 
   return (
     <div>
-      <div className={`group flex items-center gap-3 px-3 py-2 rounded-md transition-colors hover:bg-neutral-10/50 ${paused && !eventDriven ? 'opacity-60' : ''}`}>
+      <div className={`group flex items-center gap-3 px-3 py-2 rounded-control transition-colors hover:bg-neutral-10/50 ${paused && !eventDriven ? 'opacity-60' : ''}`}>
         <HealthDot status={lastRun?.status} />
         <span className={`text-body font-medium min-w-0 truncate ${paused && !eventDriven ? 'text-neutral-5' : 'text-neutral-2'}`}>
           {kindLabel(repo.kind ?? '')}
@@ -74,7 +74,7 @@ export function WorkflowRow({
             : schedule ? describeCron(schedule.cronExpression) : describeCron(repo.cronExpression)}
         </span>
         {modelLabel(repo.model) && (
-          <span className="text-meta text-neutral-5 bg-neutral-9 rounded px-1.5 py-0.5 shrink-0">
+          <span className="text-meta text-neutral-5 bg-neutral-9 rounded-control px-1.5 py-0.5 shrink-0">
             {modelLabel(repo.model)}
           </span>
         )}
@@ -90,7 +90,7 @@ export function WorkflowRow({
         {recentRuns.length > 0 && (
           <button
             onClick={() => setShowRuns(!showRuns)}
-            className="flex items-center gap-0.5 shrink-0 rounded px-1 py-0.5 hover:bg-neutral-9 transition-colors"
+            className="flex items-center gap-0.5 shrink-0 rounded-control px-1 py-0.5 hover:bg-neutral-9 transition-colors"
             title={`${recentRuns.length} recent runs`}
           >
             {recentRuns.slice(0, 5).map(r => (
@@ -103,7 +103,7 @@ export function WorkflowRow({
           {!eventDriven && (
             <button
               onClick={() => onTrigger(repo.id)}
-              className="rounded p-1 text-neutral-5 hover:text-accent-3 hover:bg-neutral-9 transition-colors"
+              className="rounded-control p-1 text-neutral-5 hover:text-accent-3 hover:bg-neutral-9 transition-colors"
               title="Run now"
             >
               <IconPlayerPlay size={14} stroke={2} />
@@ -112,7 +112,7 @@ export function WorkflowRow({
           {!eventDriven && (
             <button
               onClick={() => onToggleEnabled(repo.id, !schedule?.enabled)}
-              className={`rounded p-1 transition-colors ${
+              className={`rounded-control p-1 transition-colors ${
                 paused
                   ? 'text-success-5 hover:text-success-3 hover:bg-neutral-9'
                   : 'text-neutral-5 hover:text-warning-4 hover:bg-neutral-9'
@@ -124,14 +124,14 @@ export function WorkflowRow({
           )}
           <button
             onClick={() => onEdit(repo)}
-            className="rounded p-1 text-neutral-5 hover:text-neutral-2 hover:bg-neutral-9 transition-colors"
+            className="rounded-control p-1 text-neutral-5 hover:text-neutral-2 hover:bg-neutral-9 transition-colors"
             title="Edit"
           >
             <IconPencil size={14} stroke={2} />
           </button>
           <button
             onClick={() => onDelete(repo.id)}
-            className="rounded p-1 text-neutral-6 hover:text-error-4 hover:bg-neutral-9 transition-colors"
+            className="rounded-control p-1 text-neutral-6 hover:text-error-4 hover:bg-neutral-9 transition-colors"
             title="Delete"
           >
             <IconTrash size={14} stroke={2} />
@@ -141,7 +141,7 @@ export function WorkflowRow({
 
       {/* Expandable run history */}
       {showRuns && recentRuns.length > 0 && (
-        <div className="ml-6 border-l border-neutral-8/40 pl-2 pb-1">
+        <div className="ml-6 border-l border-edge pl-2 pb-1">
           {recentRuns.map(run => (
             <MiniRunRow
               key={run.id}

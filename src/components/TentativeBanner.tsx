@@ -23,13 +23,13 @@ export function TentativeBanner({ count, repoName, onExecute, onDiscard }: Props
       <div className="flex gap-2">
         <button
           onClick={onExecute}
-          className="rounded px-2.5 py-1 text-body bg-warning-9/30 hover:bg-warning-8/50 text-warning-3 transition-colors"
+          className="rounded-control px-2.5 py-1 text-body bg-warning-9/30 hover:bg-warning-8/50 text-warning-3 transition-colors"
         >
           Execute now
         </button>
         <button
           onClick={onDiscard}
-          className="rounded px-2.5 py-1 text-body text-neutral-4 hover:text-neutral-2 hover:bg-neutral-8/50 transition-colors"
+          className="rounded-control px-2.5 py-1 text-body text-neutral-4 hover:text-neutral-2 hover:bg-neutral-8/50 transition-colors"
         >
           Discard
         </button>

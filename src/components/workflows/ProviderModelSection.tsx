@@ -13,10 +13,10 @@ import type { ModelOption, CodingProvider } from '../../types'
 import { WorkflowModelPicker } from './WorkflowModelPicker'
 
 const providerBtnClass = (selected: boolean) =>
-  `rounded-md border px-3 py-1.5 text-body font-medium transition-colors ${
+  `rounded-control border px-3 py-1.5 text-body font-medium transition-colors ${
     selected
       ? 'border-accent-6 bg-accent-9/40 text-accent-2'
-      : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
+      : 'border-edge bg-surface text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
   }`
 
 /** Fallback Claude model options for workflows (includes "Default" option). */

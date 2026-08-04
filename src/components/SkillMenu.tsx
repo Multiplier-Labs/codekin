@@ -46,14 +46,14 @@ export function SkillMenu({ groups, onSelectSkill, onClose }: Props) {
   return (
     <div
       ref={ref}
-      className="absolute bottom-full right-0 mb-1 w-56 rounded-lg border border-neutral-6 bg-neutral-8 py-1 shadow-lg z-50"
+      className="absolute bottom-full right-0 mb-1 w-56 rounded-floating border border-edge-strong bg-surface-raised py-1 shadow-floating z-50"
     >
-      <div className="px-3 py-1.5 text-body font-semibold text-neutral-3 border-b border-neutral-7 mb-1">
+      <div className="px-3 py-1.5 text-body font-semibold text-neutral-3 border-b border-edge mb-1">
         Claude Skills
       </div>
       {nonEmpty.map((group, gi) => (
         <div key={group.label}>
-          {gi > 0 && <div className="my-1 border-t border-neutral-7" />}
+          {gi > 0 && <div className="my-1 border-t border-edge" />}
           <div className="px-3 py-1 text-meta font-medium uppercase tracking-wider text-neutral-5">
             {group.label}
           </div>

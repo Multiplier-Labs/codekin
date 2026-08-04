@@ -79,9 +79,9 @@ export function ConnectionPopup({
   return (
     <div
       ref={ref}
-      className="absolute bottom-full left-0 mb-2 w-56 rounded-lg border border-neutral-8/40 bg-neutral-11 shadow-lg z-50"
+      className="absolute bottom-full left-0 mb-2 w-56 rounded-floating border border-edge-strong bg-surface-raised shadow-floating z-50"
     >
-      <div className="px-3 py-2 border-b border-neutral-8/30 text-micro font-medium uppercase tracking-wider text-neutral-5">
+      <div className="px-3 py-2 border-b border-edge text-micro font-medium uppercase tracking-wider text-neutral-5">
         Connections
       </div>
 
@@ -94,10 +94,10 @@ export function ConnectionPopup({
         </div>
         <button
           onClick={onToggleClaude}
-          className={`text-micro px-2 py-0.5 rounded border transition-colors ${
+          className={`text-micro px-2 py-0.5 rounded-control border transition-colors ${
             claudeDisabled
               ? 'border-success-8/50 text-success-5 hover:bg-success-9/20'
-              : 'border-neutral-8/50 text-neutral-4 hover:bg-neutral-8/30'
+              : 'border-edge text-neutral-4 hover:bg-neutral-8/30'
           }`}
         >
           {claudeDisabled ? 'Enable' : 'Disable'}
@@ -105,7 +105,7 @@ export function ConnectionPopup({
       </div>
 
       {/* OpenCode */}
-      <div className="px-3 py-2.5 flex items-center gap-2 border-t border-neutral-8/20">
+      <div className="px-3 py-2.5 flex items-center gap-2 border-t border-edge">
         <StatusDot color={ocDotColor} />
         <div className="flex-1 min-w-0">
           <div className="text-body text-neutral-2 font-medium">OpenCode</div>
@@ -113,10 +113,10 @@ export function ConnectionPopup({
         </div>
         <button
           onClick={onToggleOpenCode}
-          className={`text-micro px-2 py-0.5 rounded border transition-colors ${
+          className={`text-micro px-2 py-0.5 rounded-control border transition-colors ${
             openCodeDisabled
               ? 'border-success-8/50 text-success-5 hover:bg-success-9/20'
-              : 'border-neutral-8/50 text-neutral-4 hover:bg-neutral-8/30'
+              : 'border-edge text-neutral-4 hover:bg-neutral-8/30'
           }`}
         >
           {openCodeDisabled ? 'Enable' : 'Disable'}
@@ -124,7 +124,7 @@ export function ConnectionPopup({
       </div>
 
       {/* Codex */}
-      <div className="px-3 py-2.5 flex items-center gap-2 border-t border-neutral-8/20">
+      <div className="px-3 py-2.5 flex items-center gap-2 border-t border-edge">
         <StatusDot color={codexDotColor} />
         <div className="flex-1 min-w-0">
           <div className="text-body text-neutral-2 font-medium">Codex</div>
@@ -132,10 +132,10 @@ export function ConnectionPopup({
         </div>
         <button
           onClick={onToggleCodex}
-          className={`text-micro px-2 py-0.5 rounded border transition-colors ${
+          className={`text-micro px-2 py-0.5 rounded-control border transition-colors ${
             codexDisabled
               ? 'border-success-8/50 text-success-5 hover:bg-success-9/20'
-              : 'border-neutral-8/50 text-neutral-4 hover:bg-neutral-8/30'
+              : 'border-edge text-neutral-4 hover:bg-neutral-8/30'
           }`}
         >
           {codexDisabled ? 'Enable' : 'Disable'}

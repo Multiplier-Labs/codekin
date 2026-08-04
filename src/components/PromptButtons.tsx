@@ -148,10 +148,10 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
               key={opt.value}
               onClick={() => { toggle(opt.value); }}
               title={opt.description}
-              className={`rounded-full border ${btnPad} transition-colors ${
+              className={`rounded-control border ${btnPad} transition-colors ${
                 selected.has(opt.value)
                   ? 'border-primary-6 bg-primary-9 text-primary-3'
-                  : 'border-neutral-8 bg-neutral-10 text-neutral-2 hover:border-primary-7 hover:bg-neutral-9 hover:text-neutral-1'
+                  : 'border-edge-strong bg-neutral-10 text-neutral-2 hover:border-primary-7 hover:bg-neutral-9 hover:text-neutral-1'
               }`}
             >
               {opt.label}
@@ -160,7 +160,7 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
           {selected.size > 0 && (
             <button
               onClick={confirm}
-              className={`rounded-full border border-primary-7 bg-primary-9 ${btnPad} text-primary-3 hover:bg-primary-8 transition-colors`}
+              className={`rounded-control border border-primary-7 bg-primary-9 ${btnPad} text-primary-3 hover:bg-primary-8 transition-colors`}
             >
               Confirm ({selected.size})
             </button>
@@ -187,7 +187,7 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
             ? (approvePattern ? `Auto-approve: ${approvePattern}` : 'Auto-approve this exact command')
             : undefined
           const isDeny = isPermission && opt.value === 'deny'
-          let btnClass = `rounded-full border ${btnPad} transition-colors `
+          let btnClass = `rounded-control border ${btnPad} transition-colors `
           if (isAllow) {
             btnClass += 'border-success-7 bg-success-10/50 text-success-4 hover:bg-success-9/50'
           } else if (isAlwaysAllow) {
@@ -195,7 +195,7 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
           } else if (isDeny) {
             btnClass += 'border-error-7 bg-error-10/50 text-error-4 hover:bg-error-9/50'
           } else {
-            btnClass += 'border-neutral-8 bg-neutral-10 text-neutral-2 hover:border-primary-7 hover:bg-neutral-9 hover:text-neutral-1'
+            btnClass += 'border-edge-strong bg-neutral-10 text-neutral-2 hover:border-primary-7 hover:bg-neutral-9 hover:text-neutral-1'
           }
           return (
             <button

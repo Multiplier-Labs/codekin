@@ -123,7 +123,7 @@ function NewSessionMenu({ onNewSession, isMobile }: {
       <button
         ref={buttonRef}
         onClick={() => setOpen(!open)}
-        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-body transition-colors ${
+        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-control text-body transition-colors ${
           open ? 'bg-neutral-6/50 text-neutral-2' : 'text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6/50'
         }`}
         title="New session"
@@ -133,7 +133,7 @@ function NewSessionMenu({ onNewSession, isMobile }: {
         <IconChevronDown size={11} stroke={2} className={`flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div ref={menuRef} className="fixed z-50 min-w-36 rounded-md border border-neutral-8 bg-neutral-11 py-1 shadow-lg shadow-black/30">
+        <div ref={menuRef} className="fixed z-50 min-w-36 rounded-floating border border-edge-strong bg-surface-raised py-1 shadow-floating">
           {PROVIDERS.map(p => (
             <button
               key={p.id}
@@ -266,7 +266,7 @@ export function RepoSection({
       <div className="group flex items-center gap-1.5 px-2 py-1">
         <button
           onClick={() => { setExpanded(!expanded); if (!isActive) onSelectRepo(node.workingDir) }}
-          className="flex flex-1 items-center gap-2 min-w-0 rounded px-2 py-0.5 text-left transition-colors text-neutral-3 hover:text-neutral-2"
+          className="flex flex-1 items-center gap-2 min-w-0 rounded-control px-2 py-0.5 text-left transition-colors text-neutral-3 hover:text-neutral-2"
         >
           {expanded
             ? <IconChevronDown size={14} stroke={2.5} className="flex-shrink-0 text-neutral-5 opacity-0 group-hover/repo:opacity-100 transition-opacity" />
@@ -281,7 +281,7 @@ export function RepoSection({
         {onBrowseDocs && (
           <button
             onClick={(e) => { e.stopPropagation(); onBrowseDocs(node.workingDir) }}
-            className={`flex-shrink-0 rounded p-0.5 transition-colors opacity-0 group-hover:opacity-100 ${
+            className={`flex-shrink-0 rounded-control p-0.5 transition-colors opacity-0 group-hover:opacity-100 ${
               docsPickerOpen && docsPickerRepoDir === node.workingDir ? 'text-primary-5 opacity-100!' : 'text-neutral-5 hover:text-neutral-2'
             }`}
             title="Browse docs"
@@ -291,7 +291,7 @@ export function RepoSection({
         )}
         <button
           onClick={() => setApprovalsOpen(!approvalsOpen)}
-          className={`flex-shrink-0 rounded p-0.5 transition-colors opacity-0 group-hover:opacity-100 ${
+          className={`flex-shrink-0 rounded-control p-0.5 transition-colors opacity-0 group-hover:opacity-100 ${
             approvalsOpen ? 'text-primary-5 opacity-100!' : 'text-neutral-5 hover:text-neutral-2'
           }`}
           title="Repo approvals"
@@ -300,7 +300,7 @@ export function RepoSection({
         </button>
         <button
           onClick={() => setArchiveOpen(!archiveOpen)}
-          className={`flex-shrink-0 rounded p-0.5 transition-colors opacity-0 group-hover:opacity-100 ${
+          className={`flex-shrink-0 rounded-control p-0.5 transition-colors opacity-0 group-hover:opacity-100 ${
             archiveOpen ? 'text-primary-5 opacity-100!' : 'text-neutral-5 hover:text-neutral-2'
           }`}
           title="Archived sessions"
@@ -332,7 +332,7 @@ export function RepoSection({
               <div
                 key={s.id}
                 onClick={() => { if (!isEditing) onSelectSession(s.id) }}
-                className={`group w-full flex items-baseline gap-2 pl-10 pr-2 py-1 text-left ${isMobile ? 'text-title' : 'text-body'} transition-colors rounded-md cursor-pointer ${
+                className={`group w-full flex items-baseline gap-2 pl-10 pr-2 py-1 text-left ${isMobile ? 'text-title' : 'text-body'} transition-colors rounded-control cursor-pointer ${
                   isActiveSession
                     ? 'bg-accent-9/30 text-accent-2'
                     : 'text-neutral-3 hover:bg-neutral-6/50 hover:text-neutral-1'
@@ -357,7 +357,7 @@ export function RepoSection({
                       if (e.key === 'Escape') setEditingSessionId(null)
                     }}
                     onClick={e => e.stopPropagation()}
-                    className="flex-1 min-w-0 bg-neutral-10 border border-neutral-7 rounded px-1 py-0 text-body text-neutral-1 outline-none focus:border-primary-6"
+                    className="flex-1 min-w-0 bg-surface border border-edge-strong rounded-control px-1 py-0 text-body text-neutral-1 outline-none focus:border-primary-6"
                   />
                 ) : (
                   <span className="flex-1 truncate font-normal flex items-center gap-1">
@@ -365,7 +365,7 @@ export function RepoSection({
                     {s.provider === 'opencode' && (
                       <span
                         title="OpenCode session"
-                        className="text-micro px-1 py-0 rounded bg-neutral-7 text-neutral-4 font-medium leading-tight"
+                        className="text-micro px-1 py-0 rounded-control bg-neutral-7 text-neutral-4 font-medium leading-tight"
                       >
                         OC
                       </span>
@@ -373,7 +373,7 @@ export function RepoSection({
                     {s.provider === 'codex' && (
                       <span
                         title="Codex session"
-                        className="text-micro px-1 py-0 rounded bg-neutral-7 text-neutral-4 font-medium leading-tight"
+                        className="text-micro px-1 py-0 rounded-control bg-neutral-7 text-neutral-4 font-medium leading-tight"
                       >
                         CX
                       </span>
@@ -419,7 +419,7 @@ export function RepoSection({
 
           {/* Inline approvals */}
           {approvalsOpen && (
-            <div className="mt-1 border-t border-neutral-8/30">
+            <div className="mt-1 border-t border-edge">
               <ApprovalsPanel
                 token={token}
                 workingDir={node.workingDir}
@@ -430,7 +430,7 @@ export function RepoSection({
 
           {/* Inline archived sessions */}
           {archiveOpen && (
-            <div className="mt-1 border-t border-neutral-8/30 pt-1">
+            <div className="mt-1 border-t border-edge pt-1">
               {archivedSessions.length === 0 ? (
                 <div className="pl-12 pr-2 py-1 text-body text-neutral-5">No archived sessions</div>
               ) : (

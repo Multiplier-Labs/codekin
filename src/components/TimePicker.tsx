@@ -49,7 +49,7 @@ export default function TimePicker({ hour, minute, onChange, step = 15, classNam
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-body font-mono text-neutral-1 focus:border-accent-6 focus:outline-none w-40 cursor-pointer hover:border-neutral-5 transition-colors"
+        className="flex items-center gap-2 rounded-control border border-edge-strong bg-surface px-3 py-2 text-body font-mono text-neutral-1 focus:border-accent-6 focus:outline-none w-40 cursor-pointer hover:border-neutral-5 transition-colors"
       >
         <span className="flex-1 text-left">{pad(hour)}:{pad(minute)}</span>
         {/* Clock icon */}
@@ -61,7 +61,7 @@ export default function TimePicker({ hour, minute, onChange, step = 15, classNam
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute top-full left-0 z-50 mt-1 flex rounded-md border border-neutral-7 bg-neutral-10 shadow-lg overflow-hidden">
+        <div className="absolute top-full left-0 z-50 mt-1 flex rounded-floating border border-edge-strong bg-surface-raised shadow-floating overflow-hidden">
           {/* Hours column */}
           <div ref={hourListRef} className="h-52 overflow-y-auto scrollbar-thin">
             {HOURS.map(h => (

@@ -38,7 +38,7 @@ export function MiniRunRow({
     <div>
       <div
         onClick={onToggle}
-        className={`flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors rounded-md ${
+        className={`flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors rounded-control ${
           selected ? 'bg-neutral-10' : 'hover:bg-neutral-10/50'
         }`}
       >
@@ -61,7 +61,7 @@ export function MiniRunRow({
           {run.status === 'running' && (
             <button
               onClick={() => onCancel(run.id)}
-              className="rounded p-1 text-neutral-4 hover:text-error-4 hover:bg-neutral-9 transition-colors"
+              className="rounded-control p-1 text-neutral-4 hover:text-error-4 hover:bg-neutral-9 transition-colors"
               title="Cancel"
             >
               <IconPlayerStop size={13} stroke={2} />
@@ -70,7 +70,7 @@ export function MiniRunRow({
           {sessionId && onNavigateToSession && (
             <button
               onClick={() => onNavigateToSession(sessionId)}
-              className="rounded p-1 text-neutral-4 hover:text-accent-3 hover:bg-neutral-9 transition-colors"
+              className="rounded-control p-1 text-neutral-4 hover:text-accent-3 hover:bg-neutral-9 transition-colors"
               title="View session"
             >
               <IconExternalLink size={13} stroke={2} />

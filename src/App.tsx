@@ -629,7 +629,7 @@ export default function App() {
       />
 
       {/* Main area */}
-      <div className="terminal-area flex flex-1 flex-col overflow-hidden bg-neutral-12">
+      <div className="terminal-area flex flex-1 flex-col overflow-hidden bg-page">
         {/* Mobile top bar */}
         {isMobile && (
           <MobileTopBar

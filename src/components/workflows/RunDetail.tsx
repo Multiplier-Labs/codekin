@@ -11,7 +11,7 @@ import { StepCard, JsonBlock } from './StepCard'
 
 export function RunDetail({ run }: { run: WorkflowRunWithSteps }) {
   return (
-    <div className="mt-2 space-y-1.5 border-l-2 border-neutral-8/50 pl-3">
+    <div className="mt-2 space-y-1.5 border-l-2 border-edge pl-3">
       <div className="text-body font-medium text-neutral-5 uppercase tracking-wider mb-2">Steps</div>
 
       {run.steps.length === 0 ? (

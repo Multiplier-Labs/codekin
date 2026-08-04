@@ -46,8 +46,8 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
   return (
     <div
       ref={onScrollRef}
-      className={`border rounded-lg overflow-hidden ${
-        isActive ? 'border-primary-6' : 'border-neutral-9'
+      className={`border rounded-control overflow-hidden ${
+        isActive ? 'border-primary-6' : 'border-edge'
       }`}
     >
       {/* Card header */}
@@ -76,14 +76,14 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
         {/* Action buttons */}
         <div className="flex items-center gap-1 ml-1" onClick={e => e.stopPropagation()}>
           <button
-            className="p-1 rounded hover:bg-neutral-8 text-neutral-4 hover:text-neutral-2"
+            className="p-1 rounded-control hover:bg-neutral-8 text-neutral-4 hover:text-neutral-2"
             onClick={handleCopyPath}
             title="Copy path"
           >
             <IconCopy size={13} />
           </button>
           <button
-            className={`p-1 rounded hover:bg-error-950/50 ${
+            className={`p-1 rounded-control hover:bg-error-950/50 ${
               confirmDiscard ? 'text-error-5' : 'text-neutral-4 hover:text-error-5'
             }`}
             onClick={handleDiscard}
@@ -96,7 +96,7 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
 
       {/* Card body */}
       {expanded && (
-        <div className="border-t border-neutral-9">
+        <div className="border-t border-edge">
           {file.isBinary ? (
             <div className="flex items-center gap-2 px-4 py-3 text-neutral-5 text-xs italic">
               <IconFile size={14} />
@@ -119,7 +119,7 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
       {/* Collapsed large diff note */}
       {!expanded && isLarge && (
         <div
-          className="border-t border-neutral-9 px-4 py-2 text-xs text-neutral-5 italic cursor-pointer hover:text-neutral-3"
+          className="border-t border-edge px-4 py-2 text-xs text-neutral-5 italic cursor-pointer hover:text-neutral-3"
           onClick={() => setExpanded(true)}
         >
           Large diff ({totalChanges} lines) — click to expand

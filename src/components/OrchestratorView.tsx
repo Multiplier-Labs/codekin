@@ -31,7 +31,7 @@ interface Props {
 
 function StatCard({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2.5 rounded-lg bg-neutral-11 px-3 py-2 min-w-[120px]">
+    <div className="flex items-center gap-2.5 rounded-control bg-neutral-11 px-3 py-2 min-w-[120px]">
       <div className="text-neutral-5">{icon}</div>
       <div>
         <div className="text-head font-semibold text-neutral-2">{value}</div>

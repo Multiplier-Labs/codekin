@@ -46,7 +46,7 @@ export function DocsFilePicker({ files, loading, starredDocs, onSelect, onClose 
   const hasGroups = (starred.length > 0 ? 1 : 0) + (pinned.length > 0 ? 1 : 0) + (rest.length > 0 ? 1 : 0) > 1
 
   return (
-    <div ref={ref} className="mt-1 border-t border-neutral-8/30 pt-1">
+    <div ref={ref} className="mt-1 border-t border-edge pt-1">
       {loading ? (
         <div className="flex items-center justify-center py-3">
           <IconLoader2 size={14} className="animate-spin text-neutral-5" />
@@ -63,7 +63,7 @@ export function DocsFilePicker({ files, loading, starredDocs, onSelect, onClose 
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Filter docs..."
                 autoFocus
-                className="w-full rounded border border-neutral-7 bg-neutral-10/50 px-2 py-1 text-body text-neutral-2 placeholder-neutral-5 focus:border-accent-6 focus:outline-none"
+                className="w-full rounded-control border border-edge-strong bg-neutral-10/50 px-2 py-1 text-body text-neutral-2 placeholder-neutral-5 focus:border-accent-6 focus:outline-none"
               />
             </div>
           )}
@@ -76,33 +76,33 @@ export function DocsFilePicker({ files, loading, starredDocs, onSelect, onClose 
                   <button
                     key={f.path}
                     onClick={() => onSelect(f.path)}
-                    className="group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-body text-neutral-2 font-medium hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors cursor-pointer rounded-md"
+                    className="group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-body text-neutral-2 font-medium hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors cursor-pointer rounded-control"
                   >
                     <IconStarFilled size={13} className="flex-shrink-0 text-primary-5" />
                     <span className="flex-1 truncate">{f.path}</span>
                   </button>
                 ))}
                 {starred.length > 0 && hasGroups && (
-                  <div className="border-t border-neutral-8/30 my-0.5 mx-10" />
+                  <div className="border-t border-edge my-0.5 mx-10" />
                 )}
                 {pinned.map(f => (
                   <button
                     key={f.path}
                     onClick={() => onSelect(f.path)}
-                    className="group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-body text-neutral-2 font-medium hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors cursor-pointer rounded-md"
+                    className="group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-body text-neutral-2 font-medium hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors cursor-pointer rounded-control"
                   >
                     <IconFileText size={13} className="flex-shrink-0 text-neutral-5" />
                     <span className="flex-1 truncate">{f.path}</span>
                   </button>
                 ))}
                 {pinned.length > 0 && rest.length > 0 && (
-                  <div className="border-t border-neutral-8/30 my-0.5 mx-10" />
+                  <div className="border-t border-edge my-0.5 mx-10" />
                 )}
                 {rest.map(f => (
                   <button
                     key={f.path}
                     onClick={() => onSelect(f.path)}
-                    className="group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-body text-neutral-4 hover:bg-neutral-6/50 hover:text-neutral-2 transition-colors cursor-pointer rounded-md"
+                    className="group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-body text-neutral-4 hover:bg-neutral-6/50 hover:text-neutral-2 transition-colors cursor-pointer rounded-control"
                   >
                     <IconFileText size={13} className="flex-shrink-0 text-neutral-6" />
                     <span className="flex-1 truncate">{f.path}</span>

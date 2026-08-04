@@ -29,12 +29,12 @@ export function CommandPalette({ open, onClose, repos, globalSkills = [], global
     <div className={`fixed inset-0 z-50 flex bg-black/60 ${isMobile ? 'items-end' : 'items-start justify-center pt-[20vh]'}`} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className={`w-full ${isMobile ? '' : 'max-w-lg'}`}>
         <Command
-          className="rounded-lg border border-neutral-10 bg-neutral-11 shadow-2xl"
+          className="rounded-floating border border-edge-strong bg-surface-raised shadow-floating"
           label="Command palette"
         >
           <Command.Input
             placeholder="Search repos, skills, modules, actions..."
-            className="w-full border-b border-neutral-10 bg-transparent px-4 py-3 text-body text-neutral-2 outline-none placeholder:text-neutral-5"
+            className="w-full border-b border-edge bg-transparent px-4 py-3 text-body text-neutral-2 outline-none placeholder:text-neutral-5"
             autoFocus
           />
           <Command.List className="max-h-72 overflow-y-auto p-2">
@@ -48,7 +48,7 @@ export function CommandPalette({ open, onClose, repos, globalSkills = [], global
                   key={repo.id}
                   value={`repo ${repo.name} ${repo.tags.join(' ')}`}
                   onSelect={() => { onOpenRepo(repo); onClose() }}
-                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-body text-neutral-4 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
+                  className="flex cursor-pointer items-center gap-2 rounded-control px-2 py-1.5 text-body text-neutral-4 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
                 >
                   <span className="text-neutral-5">&#9634;</span>
                   {repo.name}
@@ -63,7 +63,7 @@ export function CommandPalette({ open, onClose, repos, globalSkills = [], global
                   key={`global-${skill.id}`}
                   value={`skill ${skill.name} ${skill.command} global`}
                   onSelect={() => { onSendSkill(skill.command); onClose() }}
-                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-body text-neutral-4 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
+                  className="flex cursor-pointer items-center gap-2 rounded-control px-2 py-1.5 text-body text-neutral-4 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
                 >
                   <span className="text-accent-6">/</span>
                   <span>{skill.name}</span>
@@ -76,7 +76,7 @@ export function CommandPalette({ open, onClose, repos, globalSkills = [], global
                     key={`${repo.id}-${skill.id}`}
                     value={`skill ${skill.name} ${skill.command} ${repo.name}`}
                     onSelect={() => { onSendSkill(skill.command); onClose() }}
-                    className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-body text-neutral-4 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
+                    className="flex cursor-pointer items-center gap-2 rounded-control px-2 py-1.5 text-body text-neutral-4 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
                   >
                     <span className="text-accent-6">/</span>
                     <span>{skill.name}</span>
@@ -92,7 +92,7 @@ export function CommandPalette({ open, onClose, repos, globalSkills = [], global
                   key={`module-${mod.id}`}
                   value={`module ${mod.name} ${mod.description} global`}
                   onSelect={() => { onSendModule(mod); onClose() }}
-                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-body text-neutral-4 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
+                  className="flex cursor-pointer items-center gap-2 rounded-control px-2 py-1.5 text-body text-neutral-4 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
                 >
                   <span className="text-primary-6">&#9670;</span>
                   <span>{mod.name}</span>
@@ -105,7 +105,7 @@ export function CommandPalette({ open, onClose, repos, globalSkills = [], global
               <Command.Item
                 value="settings token configure"
                 onSelect={() => { onOpenSettings(); onClose() }}
-                className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-body text-neutral-4 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
+                className="flex cursor-pointer items-center gap-2 rounded-control px-2 py-1.5 text-body text-neutral-4 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
               >
                 <span className="text-neutral-5">&#9881;</span>
                 Settings

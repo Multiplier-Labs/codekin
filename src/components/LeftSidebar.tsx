@@ -286,13 +286,13 @@ export function LeftSidebar({
 
   if (!isMobile && collapsed) {
     return (
-      <div className="app-left-sidebar flex flex-col items-center w-12 flex-shrink-0 bg-neutral-12 py-3 gap-3 border-r border-neutral-8/30">
+      <div className="app-left-sidebar flex flex-col items-center w-12 flex-shrink-0 bg-surface py-3 gap-3 border-r border-edge">
         <div className="app-logo-circle flex items-center justify-center rounded-full" style={{ width: 28, height: 28 }}>
           <AppIcon size={26} className="text-primary-7" />
         </div>
         <button
           onClick={() => setCollapsed(false)}
-          className="rounded-lg p-1.5 text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1"
+          className="rounded-control p-1.5 text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1"
           title="Expand sidebar"
         >
           <IconChevronRight size={14} stroke={2} />
@@ -300,7 +300,7 @@ export function LeftSidebar({
         <div className="mt-auto flex flex-col items-center gap-2">
           <button
             onClick={() => onUpdateTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="rounded-lg p-1.5 text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1"
+            className="rounded-control p-1.5 text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1"
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           >
             {theme === 'dark' ? <IconSun size={14} stroke={2} /> : <IconMoon size={14} stroke={2} />}
@@ -308,7 +308,7 @@ export function LeftSidebar({
           <div className="relative">
             <button
               onClick={() => setConnPopupOpen(o => !o)}
-              className="flex items-center justify-center rounded p-1 hover:bg-neutral-6 transition-colors"
+              className="flex items-center justify-center rounded-control p-1 hover:bg-neutral-6 transition-colors"
               title="Connection status"
             >
               <span className={`inline-block h-2 w-2 rounded-full ${connDotColor}`} />
@@ -339,8 +339,8 @@ export function LeftSidebar({
 
   const sidebarContent = (
     <div
-      className={`app-left-sidebar relative flex flex-col bg-neutral-12 min-h-0 h-full ${
-        isMobile ? 'w-[280px] max-w-[85vw]' : 'flex-shrink-0 border-r border-neutral-8/30'
+      className={`app-left-sidebar relative flex flex-col bg-surface min-h-0 h-full ${
+        isMobile ? 'w-[280px] max-w-[85vw]' : 'flex-shrink-0 border-r border-edge'
       }`}
       style={isMobile ? undefined : { width }}
     >
@@ -353,7 +353,7 @@ export function LeftSidebar({
       )}
 
       {/* Header: logo + title + collapse + new session */}
-      <div className="group/header flex items-center gap-2 px-3 py-2.5 border-b border-neutral-8/30 flex-shrink-0">
+      <div className="group/header flex items-center gap-2 px-3 py-2.5 border-b border-edge flex-shrink-0">
         <div className="app-logo-circle flex items-center justify-center rounded-full flex-shrink-0" style={{ width: 26, height: 26 }}>
           <AppIcon size={24} className="text-primary-7" />
         </div>
@@ -361,7 +361,7 @@ export function LeftSidebar({
         {isMobile ? (
           <button
             onClick={onMobileClose}
-            className="rounded p-1 text-neutral-3 hover:text-neutral-2 hover:bg-neutral-6 transition-colors flex-shrink-0"
+            className="rounded-control p-1 text-neutral-3 hover:text-neutral-2 hover:bg-neutral-6 transition-colors flex-shrink-0"
             title="Close menu"
           >
             <IconX size={18} stroke={2} />
@@ -369,7 +369,7 @@ export function LeftSidebar({
         ) : (
           <button
             onClick={() => setCollapsed(true)}
-            className="rounded p-1 text-neutral-3 hover:text-neutral-2 hover:bg-neutral-6 transition-colors flex-shrink-0 opacity-0 group-hover/header:opacity-100"
+            className="rounded-control p-1 text-neutral-3 hover:text-neutral-2 hover:bg-neutral-6 transition-colors flex-shrink-0 opacity-0 group-hover/header:opacity-100"
             title="Collapse sidebar"
           >
             <IconChevronLeft size={16} stroke={2} />
@@ -385,7 +385,7 @@ export function LeftSidebar({
         <div className="px-2 py-1">
           <button
             onClick={() => { onNavigateToWorkflows(); if (isMobile) onMobileClose?.() }}
-            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-body transition-colors ${
+            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-control text-body transition-colors ${
               view === 'workflows'
                 ? 'bg-accent-9/30 text-accent-2'
                 : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6'
@@ -396,7 +396,7 @@ export function LeftSidebar({
           </button>
           <button
             onClick={() => { onNavigateToLoops(); if (isMobile) onMobileClose?.() }}
-            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-body transition-colors ${
+            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-control text-body transition-colors ${
               view === 'loops'
                 ? 'bg-accent-9/30 text-accent-2'
                 : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6'
@@ -407,7 +407,7 @@ export function LeftSidebar({
           </button>
           <button
             onClick={() => { onNavigateToOrchestrator(); if (isMobile) onMobileClose?.() }}
-            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-body transition-colors ${
+            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-control text-body transition-colors ${
               view === 'orchestrator'
                 ? 'bg-accent-9/30 text-accent-2'
                 : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6'
@@ -420,7 +420,7 @@ export function LeftSidebar({
             <div ref={modulesRef} className="relative">
               <button
                 onClick={() => setModulesOpen(!modulesOpen)}
-                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-body transition-colors ${
+                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-control text-body transition-colors ${
                   modulesOpen
                     ? 'bg-accent-9/30 text-accent-2'
                     : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6/50'
@@ -430,7 +430,7 @@ export function LeftSidebar({
                 <span className="flex-1">Modules</span>
               </button>
               {modulesOpen && (
-                <div className="absolute left-full top-0 ml-1 w-64 z-50 rounded-md border border-neutral-10 bg-neutral-12 px-3 pb-3 shadow-lg">
+                <div className="absolute left-full top-0 ml-1 w-64 z-50 rounded-floating border border-edge-strong bg-surface-raised px-3 pb-3 shadow-floating">
                   <ModuleBrowser
                     repo={activeRepo}
                     globalModules={globalModules}
@@ -444,7 +444,7 @@ export function LeftSidebar({
         </div>
 
         {/* Divider between menu items and repo folders */}
-        <div className="mx-3 my-1 border-t border-neutral-8/40" />
+        <div className="mx-3 my-1 border-t border-edge" />
 
         {/* Section label for active sessions */}
         {repoNodes.length > 0 && (
@@ -504,12 +504,12 @@ export function LeftSidebar({
       </div>
 
       {/* Bottom toolbar */}
-      <div className="flex flex-col border-t border-neutral-8/30 flex-shrink-0">
+      <div className="flex flex-col border-t border-edge flex-shrink-0">
         <div className={`flex items-center gap-0.5 px-2 ${isMobile ? 'gap-1 py-3' : 'py-2'}`}>
           <div className="relative">
             <button
               onClick={() => setConnPopupOpen(o => !o)}
-              className="flex items-center justify-center px-1 py-1 rounded hover:bg-neutral-6 transition-colors"
+              className="flex items-center justify-center px-1 py-1 rounded-control hover:bg-neutral-6 transition-colors"
               title="Connection status"
             >
               <span className={`inline-block h-2 w-2 rounded-full ${connDotColor}`} />
@@ -531,7 +531,7 @@ export function LeftSidebar({
           </div>
           <button
             onClick={onSettingsOpen}
-            className={`flex items-center gap-1 rounded text-body text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6 transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
+            className={`flex items-center gap-1 rounded-control text-body text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6 transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
             title="Settings"
           >
             <IconSettingsGear size={isMobile ? 24 : 20} stroke={2} />
@@ -539,14 +539,14 @@ export function LeftSidebar({
           <div className="flex-1" />
           <button
             onClick={() => onUpdateTheme(theme === 'dark' ? 'light' : 'dark')}
-            className={`rounded text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1 transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
+            className={`rounded-control text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1 transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           >
             {theme === 'dark' ? <IconSun size={isMobile ? 24 : 20} stroke={2} /> : <IconMoon size={isMobile ? 24 : 20} stroke={2} />}
           </button>
           <button
             onClick={() => { window.location.href = '/authelia/logout' }}
-            className={`rounded text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1 transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
+            className={`rounded-control text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1 transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
             title="Logout"
           >
             <IconLogout size={isMobile ? 24 : 20} stroke={2} />

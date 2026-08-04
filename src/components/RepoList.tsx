@@ -51,15 +51,15 @@ export function RepoList({ groups, selectedId, onSelect, cloningId, maxHeight = 
         value={search}
         onChange={e => setSearch(e.target.value)}
         placeholder="Search repos…"
-        className="mb-2 w-full rounded-lg border border-neutral-7 bg-neutral-11/50 px-3 py-2 text-body text-neutral-2 placeholder-neutral-5 focus:border-accent-6 focus:outline-none"
+        className="mb-2 w-full rounded-control border border-edge-strong bg-neutral-11/50 px-3 py-2 text-body text-neutral-2 placeholder-neutral-5 focus:border-accent-6 focus:outline-none"
       />
-      <div className="overflow-y-auto rounded-lg border border-neutral-7 bg-neutral-11/50" style={{ maxHeight }}>
+      <div className="overflow-y-auto rounded-control border border-edge-strong bg-neutral-11/50" style={{ maxHeight }}>
         {filteredGroups.length === 0 ? (
           <p className="px-3 py-3 text-body text-neutral-5 text-center">No matching repos</p>
         ) : (
           filteredGroups.map((group) => (
             <div key={group.owner}>
-              <div className="sticky top-0 z-10 bg-neutral-8 backdrop-blur-sm px-3 py-1.5 text-body font-medium uppercase tracking-wider text-neutral-4 border-b border-neutral-7">
+              <div className="sticky top-0 z-10 bg-neutral-8 backdrop-blur-sm px-3 py-1.5 text-body font-medium uppercase tracking-wider text-neutral-4 border-b border-edge-strong">
                 {group.owner}
               </div>
               {group.repos.map((repo) => {
@@ -71,7 +71,7 @@ export function RepoList({ groups, selectedId, onSelect, cloningId, maxHeight = 
                     type="button"
                     onClick={() => onSelect(repo)}
                     disabled={!!cloningId}
-                    className={`group flex w-full items-start gap-3 border-b border-neutral-7/50 px-3 py-2.5 text-left transition last:border-b-0 ${
+                    className={`group flex w-full items-start gap-3 border-b border-edge-strong px-3 py-2.5 text-left transition last:border-b-0 ${
                       isSelected
                         ? 'bg-accent-9/20 border-l-2 border-l-accent-6'
                         : cloningId ? 'cursor-wait opacity-60' : 'hover:bg-neutral-7/20'
@@ -90,12 +90,12 @@ export function RepoList({ groups, selectedId, onSelect, cloningId, maxHeight = 
                           {repo.name}
                         </span>
                         {isCloning && (
-                          <span className="flex-shrink-0 rounded bg-primary-9/30 px-1.5 py-0.5 text-meta text-primary-4 animate-pulse">
+                          <span className="flex-shrink-0 rounded-control bg-primary-9/30 px-1.5 py-0.5 text-meta text-primary-4 animate-pulse">
                             cloning...
                           </span>
                         )}
                         {!repo.cloned && !isCloning && (
-                          <span className="flex-shrink-0 rounded border border-neutral-6 bg-neutral-8/50 px-1.5 py-0.5 text-meta text-neutral-3">
+                          <span className="flex-shrink-0 rounded-control border border-neutral-6 bg-neutral-8/50 px-1.5 py-0.5 text-meta text-neutral-3">
                             remote
                           </span>
                         )}

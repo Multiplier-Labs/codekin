@@ -56,7 +56,7 @@ export function DocsBrowser({
         </button>
         <button
           onClick={onToggleRaw}
-          className={`docs-header-toggle rounded px-2 py-0.5 text-body transition-colors cursor-pointer ${
+          className={`docs-header-toggle rounded-control px-2 py-0.5 text-body transition-colors cursor-pointer ${
             rawMode ? 'is-active' : ''
           }`}
         >
@@ -74,7 +74,7 @@ export function DocsBrowser({
             <IconLoader2 size={20} className="animate-spin text-neutral-5" />
           </div>
         ) : error ? (
-          <div className="rounded-md bg-error-10/50 px-3 py-2 text-body text-error-4 mx-4 mt-4">
+          <div className="rounded-control bg-error-10/50 px-3 py-2 text-body text-error-4 mx-4 mt-4">
             {error}
           </div>
         ) : content !== null ? (

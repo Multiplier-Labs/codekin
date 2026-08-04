@@ -155,7 +155,7 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
   // Loading state for direct view mode
   if (initialViewId && loading && !viewing) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-12">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-page">
         <IconLoader2 size={24} className="text-neutral-4 animate-spin" />
       </div>
     )
@@ -165,9 +165,9 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
   if (viewing) {
     const messages = rebuildFromHistory(viewing.outputHistory)
     return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-neutral-12">
+      <div className="fixed inset-0 z-50 flex flex-col bg-page">
         {/* Header */}
-        <div className="flex items-center gap-3 px-4 py-2 bg-neutral-9/70 border-b border-neutral-8/40 flex-shrink-0">
+        <div className="flex items-center gap-3 px-4 py-2 bg-neutral-9/70 border-b border-edge flex-shrink-0">
           <IconArchive size={16} className="text-neutral-4" />
           <div className="flex-1 min-w-0">
             <span className="text-body font-medium text-neutral-1 truncate block">{displayName(viewing)}</span>
@@ -178,7 +178,7 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
           {onNewSessionFromArchive && (
             <button
               onClick={handleNewFromContext}
-              className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-body font-medium text-primary-4 bg-primary-10/30 hover:bg-primary-9/40 hover:text-primary-3 transition-colors"
+              className="flex items-center gap-1.5 rounded-control px-2.5 py-1.5 text-body font-medium text-primary-4 bg-primary-10/30 hover:bg-primary-9/40 hover:text-primary-3 transition-colors"
               title="Start a new session with this conversation as context"
             >
               <IconMessagePlus size={16} stroke={2} />
@@ -187,7 +187,7 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
           )}
           <button
             onClick={handleCloseViewer}
-            className="rounded p-1 text-neutral-4 hover:text-neutral-1 hover:bg-neutral-8 transition-colors"
+            className="rounded-control p-1 text-neutral-4 hover:text-neutral-1 hover:bg-neutral-8 transition-colors"
             title="Close"
           >
             <IconX size={16} stroke={2} />
@@ -212,7 +212,7 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
   return (
     <div className="flex flex-col min-h-0 flex-1">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-neutral-9/70 border-b border-neutral-8/40 flex-shrink-0">
+      <div className="flex items-center justify-between px-3 py-2 bg-neutral-9/70 border-b border-edge flex-shrink-0">
         <span className="text-body font-semibold text-neutral-1 uppercase tracking-wider">Archived Sessions</span>
         <div className="flex items-center gap-1">
           <label className="text-meta text-neutral-5" title="Auto-delete after this many days">
@@ -224,7 +224,7 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
             max={365}
             value={retentionDays}
             onChange={e => handleRetentionChange(Number(e.target.value))}
-            className="w-10 text-body text-neutral-2 bg-neutral-8 border border-neutral-7 rounded px-1 py-0.5 text-center"
+            className="w-10 text-body text-neutral-2 bg-surface border border-edge-strong rounded-control px-1 py-0.5 text-center"
           />
           <span className="text-meta text-neutral-5">d</span>
         </div>

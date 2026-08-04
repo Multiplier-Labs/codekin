@@ -56,11 +56,11 @@ export function JsonBlock({ label, data, defaultOpen = false }: {
 
 export function StepCard({ step }: { step: WorkflowStep }) {
   return (
-    <div className="rounded-md border border-neutral-8/40 bg-neutral-11/60 px-3 py-2">
+    <div className="rounded-md border border-edge bg-surface px-3 py-2">
       <div className="flex items-center gap-2">
         <StepIcon status={step.status} />
         <span className="font-mono text-body text-neutral-2 font-medium">{step.key}</span>
-        <span className={`ml-auto inline-flex items-center rounded px-1.5 py-0.5 text-meta font-medium ${statusBadge(step.status)}`}>
+        <span className={`ml-auto inline-flex items-center rounded-control px-1.5 py-0.5 text-meta font-medium ${statusBadge(step.status)}`}>
           {step.status}
         </span>
         <span className="text-body text-neutral-5 tabular-nums">

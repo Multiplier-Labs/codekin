@@ -42,7 +42,7 @@ export function DiffToolbar({
   }
 
   return (
-    <div className="sticky top-0 z-10 bg-neutral-10 border-b border-neutral-9 px-3 py-2 flex flex-col gap-2">
+    <div className="sticky top-0 z-10 bg-neutral-10 border-b border-edge px-3 py-2 flex flex-col gap-2">
       {/* Row 1: Branch + scope + actions */}
       <div className="flex items-center gap-2">
         {/* Branch */}
@@ -54,7 +54,7 @@ export function DiffToolbar({
         {/* Scope dropdown */}
         <div className="relative flex-1">
           <button
-            className="flex items-center gap-1 text-xs text-neutral-2 bg-neutral-10 hover:bg-neutral-9 rounded px-2 py-1"
+            className="flex items-center gap-1 text-xs text-neutral-2 bg-neutral-10 hover:bg-neutral-9 rounded-control px-2 py-1"
             onClick={() => setScopeOpen(!scopeOpen)}
           >
             <span>{SCOPE_LABELS[scope]}</span>
@@ -66,7 +66,7 @@ export function DiffToolbar({
           {scopeOpen && (
             <>
               <div className="fixed inset-0 z-10" onClick={() => setScopeOpen(false)} />
-              <div className="absolute top-full left-0 mt-1 bg-neutral-10 border border-neutral-8 rounded shadow-lg z-20 min-w-[160px]">
+              <div className="absolute top-full left-0 mt-1 bg-surface-raised border border-edge-strong rounded-floating shadow-floating z-20 min-w-[160px]">
                 {(['all', 'staged', 'unstaged'] as DiffScope[]).map(s => (
                   <button
                     key={s}
@@ -85,7 +85,7 @@ export function DiffToolbar({
 
         {/* Actions */}
         <button
-          className={`p-1 rounded hover:bg-neutral-9 text-neutral-4 hover:text-neutral-2 ${loading ? 'animate-spin' : ''}`}
+          className={`p-1 rounded-control hover:bg-neutral-9 text-neutral-4 hover:text-neutral-2 ${loading ? 'animate-spin' : ''}`}
           onClick={onRefresh}
           title="Refresh diff"
           disabled={loading}
@@ -93,7 +93,7 @@ export function DiffToolbar({
           <IconRefresh size={14} />
         </button>
         <button
-          className={`p-1 rounded text-xs ${
+          className={`p-1 rounded-control text-xs ${
             summary.filesChanged === 0
               ? 'text-neutral-7 cursor-not-allowed'
               : confirmDiscard

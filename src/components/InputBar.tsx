@@ -33,7 +33,7 @@ function shortModelLabel(modelId: string, models: ModelOption[]): string {
 // ---------------------------------------------------------------------------
 
 /** Attach-files button with configurable size and rounding. */
-function AttachButton({ onClick, disabled, size = 16, rounded = 'rounded-md', className = '' }: {
+function AttachButton({ onClick, disabled, size = 16, rounded = 'rounded-control', className = '' }: {
   onClick: () => void; disabled: boolean; size?: number; rounded?: string; className?: string
 }) {
   return (
@@ -49,7 +49,7 @@ function AttachButton({ onClick, disabled, size = 16, rounded = 'rounded-md', cl
 }
 
 /** Send button with configurable accent theme and size. */
-function SendButton({ onClick, disabled, hasContent, size = 16, rounded = 'rounded-md', accent = false, className = '' }: {
+function SendButton({ onClick, disabled, hasContent, size = 16, rounded = 'rounded-control', accent = false, className = '' }: {
   onClick: () => void; disabled: boolean; hasContent: boolean; size?: number; rounded?: string; accent?: boolean; className?: string
 }) {
   const activeClass = accent
@@ -79,7 +79,7 @@ function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle,
     <div className="relative" ref={menuRef}>
       <button
         onClick={onToggle}
-        className={`flex items-center gap-1 rounded-md px-2 py-1 text-meta font-medium transition-colors ${
+        className={`flex items-center gap-1 rounded-control px-2 py-1 text-meta font-medium transition-colors ${
           currentMode === 'bypassPermissions'
             ? 'text-error-5 hover:text-error-4 hover:bg-error-9/30'
             : 'text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7'
@@ -95,7 +95,7 @@ function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle,
         <IconChevronDown size={12} stroke={2} />
       </button>
       {isOpen && (
-        <div className="absolute bottom-full mb-1 left-0 z-50 min-w-[260px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
+        <div className="absolute bottom-full mb-1 left-0 z-50 min-w-[260px] rounded-floating border border-edge-strong bg-surface-raised shadow-floating py-1">
           {modes.map(m => {
             const ModeIcon = PERMISSION_MODE_ICONS[m.icon]
             const isActive = m.id === currentMode
@@ -202,14 +202,14 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
     <div className="relative" ref={menuRef}>
       <button
         onClick={onToggle}
-        className="flex items-center gap-1 rounded-md px-2 py-1 text-meta font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
+        className="flex items-center gap-1 rounded-control px-2 py-1 text-meta font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
         title="Change model"
       >
         {shortModelLabel(currentModel, models)}
         <IconChevronDown size={12} stroke={2} />
       </button>
       {isOpen && (
-        <div className="absolute bottom-full mb-1 right-0 z-50 w-[260px] max-h-[360px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg flex flex-col">
+        <div className="absolute bottom-full mb-1 right-0 z-50 w-[260px] max-h-[360px] rounded-floating border border-edge-strong bg-surface-raised shadow-floating flex flex-col">
           <div className="p-2 border-b border-neutral-7">
             <input
               autoFocus
@@ -217,7 +217,7 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
               onChange={e => { setQuery(e.target.value); setActiveIndex(0) }}
               onKeyDown={handleKeyDown}
               placeholder="Search models..."
-              className="w-full bg-neutral-7 text-body px-2 py-1.5 rounded-md outline-none text-neutral-2 placeholder:text-neutral-5"
+              className="w-full bg-neutral-7 text-body px-2 py-1.5 rounded-control outline-none text-neutral-2 placeholder:text-neutral-5"
             />
           </div>
 
@@ -543,12 +543,12 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           {pendingFiles.map((file, i) => (
             <span
               key={`${file.name}-${i}`}
-              className="flex items-center gap-1 rounded bg-neutral-7 px-2 py-0.5 text-meta text-neutral-2"
+              className="flex items-center gap-1 rounded-control bg-neutral-7 px-2 py-0.5 text-meta text-neutral-2"
             >
               <span className="max-w-[150px] truncate">{file.name}</span>
               <button
                 onClick={() => onRemoveFile(i)}
-                className="flex-shrink-0 rounded p-0.5 text-neutral-4 hover:text-neutral-1"
+                className="flex-shrink-0 rounded-control p-0.5 text-neutral-4 hover:text-neutral-1"
               >
                 <IconX size={12} stroke={2} />
               </button>
@@ -604,7 +604,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               {/* Worktree: indicator when active, toggle before first message, or move button mid-session */}
               {worktreePath ? (
                 <span
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-meta font-medium text-primary-5"
+                  className="flex items-center gap-1 rounded-control px-2 py-1 text-meta font-medium text-primary-5"
                   title={worktreePath}
                 >
                   <IconGitBranch size={14} stroke={2} />
@@ -613,7 +613,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               ) : showWorktreeToggle && onWorktreeChange ? (
                 <button
                   onClick={() => onWorktreeChange(!useWorktree)}
-                  className={`flex items-center gap-1 rounded-md px-2 py-1 text-meta font-medium transition-colors ${
+                  className={`flex items-center gap-1 rounded-control px-2 py-1 text-meta font-medium transition-colors ${
                     useWorktree
                       ? 'text-primary-5 bg-primary-9/30 hover:bg-primary-9/50'
                       : 'text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7'
@@ -626,7 +626,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               ) : onMoveToWorktree ? (
                 <button
                   onClick={onMoveToWorktree}
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-meta font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
+                  className="flex items-center gap-1 rounded-control px-2 py-1 text-meta font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
                   title="Move session to a git worktree"
                 >
                   <IconGitBranch size={14} stroke={2} />
@@ -658,7 +658,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   <button
                     onClick={() => { closeAllPopups('skill'); setSkillMenuOpen(!skillMenuOpen) }}
                     disabled={disabled}
-                    className="flex items-center gap-1 rounded-md px-2 py-1 text-meta font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors disabled:opacity-30"
+                    className="flex items-center gap-1 rounded-control px-2 py-1 text-meta font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors disabled:opacity-30"
                     title="Claude Skills"
                   >
                     <IconTerminal2 size={14} stroke={2} />
@@ -678,8 +678,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   )}
                 </div>
               )}
-              <AttachButton onClick={handleFileSelect} disabled={disabled} size={16} rounded="rounded-md" />
-              <SendButton onClick={handleSend} disabled={disabled} hasContent={!!(value.trim() || pendingFiles.length > 0)} size={16} rounded="rounded-md" />
+              <AttachButton onClick={handleFileSelect} disabled={disabled} size={16} rounded="rounded-control" />
+              <SendButton onClick={handleSend} disabled={disabled} hasContent={!!(value.trim() || pendingFiles.length > 0)} size={16} rounded="rounded-control" />
             </div>
           </>
         )}
@@ -704,13 +704,13 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 <button
                   onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
                   disabled={disabled}
-                  className="flex items-center justify-center rounded min-w-[34px] min-h-[34px] p-1.5 text-neutral-3 hover:text-neutral-1 hover:bg-neutral-7 transition-colors disabled:opacity-30"
+                  className="flex items-center justify-center rounded-control min-w-[34px] min-h-[34px] p-1.5 text-neutral-3 hover:text-neutral-1 hover:bg-neutral-7 transition-colors disabled:opacity-30"
                   title="More options"
                 >
                   <IconDots size={24} stroke={2} />
                 </button>
                 {mobileMenuOpen && (
-                  <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[220px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
+                  <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[220px] rounded-floating border border-edge-strong bg-surface-raised shadow-floating py-1">
                     {currentPermissionMode && onPermissionModeChange && (
                       <>
                         <div className="px-3 py-1.5 text-meta text-neutral-5 uppercase tracking-wider">Permissions</div>
@@ -785,7 +785,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   />
                 )}
               </div>
-              <SendButton onClick={handleSend} disabled={disabled} hasContent={!!(value.trim() || pendingFiles.length > 0)} size={24} rounded="rounded" className="min-w-[34px] min-h-[34px]" />
+              <SendButton onClick={handleSend} disabled={disabled} hasContent={!!(value.trim() || pendingFiles.length > 0)} size={24} rounded="rounded-control" className="min-w-[34px] min-h-[34px]" />
             </div>
           </>
         )}

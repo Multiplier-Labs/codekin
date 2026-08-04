@@ -97,7 +97,7 @@ export function TodoPanel({ tasks, isProcessing = false }: Props) {
       <div className="absolute top-14 right-3 z-20">
         <button
           onClick={() => { setExpanded(true); }}
-          className="flex items-center gap-1.5 rounded-lg bg-neutral-9/90 backdrop-blur border border-neutral-8/60 px-2.5 py-1.5 shadow-lg hover:bg-neutral-8/90 transition-colors"
+          className="flex items-center gap-1.5 rounded-floating bg-surface-raised backdrop-blur border border-edge-strong px-2.5 py-1.5 shadow-floating hover:bg-neutral-8/90 transition-colors"
         >
           {!allDone && <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary-5 animate-pulse" />}
           <span className="text-meta font-semibold text-neutral-2">
@@ -111,9 +111,9 @@ export function TodoPanel({ tasks, isProcessing = false }: Props) {
 
   // Expanded card view
   return (
-    <div className="absolute top-14 right-3 z-20 w-64 rounded-lg bg-neutral-9/90 backdrop-blur border border-neutral-8/60 shadow-lg">
+    <div className="absolute top-14 right-3 z-20 w-64 rounded-floating bg-surface-raised backdrop-blur border border-edge-strong shadow-floating">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-8/40">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-edge">
         <span className="text-body font-semibold text-neutral-1 uppercase tracking-wider flex items-center gap-1.5">
           {!allDone && <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary-5 animate-pulse" />}
           Tasks
@@ -124,14 +124,14 @@ export function TodoPanel({ tasks, isProcessing = false }: Props) {
         <div className="flex items-center gap-0.5">
           <button
             onClick={() => { setExpanded(false); }}
-            className="rounded p-0.5 text-neutral-4 hover:text-neutral-2 hover:bg-neutral-8/60 transition-colors"
+            className="rounded-control p-0.5 text-neutral-4 hover:text-neutral-2 hover:bg-neutral-8/60 transition-colors"
             title="Collapse"
           >
             <IconChevronUp size={14} />
           </button>
           <button
             onClick={() => { setDismissed(true); }}
-            className="rounded p-0.5 text-neutral-4 hover:text-neutral-2 hover:bg-neutral-8/60 transition-colors"
+            className="rounded-control p-0.5 text-neutral-4 hover:text-neutral-2 hover:bg-neutral-8/60 transition-colors"
             title="Dismiss"
           >
             <IconX size={14} />

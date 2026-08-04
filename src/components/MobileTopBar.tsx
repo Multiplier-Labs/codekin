@@ -20,10 +20,10 @@ interface Props {
 
 export function MobileTopBar({ repoName, sessionName, onMenuOpen, onNewSession, onSettingsOpen }: Props) {
   return (
-    <div className="app-left-sidebar mobile-top-bar-safe flex items-center h-12 px-1.5 border-b border-neutral-8/30 bg-neutral-12 flex-shrink-0">
+    <div className="app-left-sidebar mobile-top-bar-safe flex items-center h-12 px-1.5 border-b border-edge bg-surface flex-shrink-0">
       <button
         onClick={onMenuOpen}
-        className="flex items-center justify-center rounded-lg size-[34px] text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6 transition-colors"
+        className="flex items-center justify-center rounded-control size-[34px] text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6 transition-colors"
         aria-label="Open menu"
       >
         <IconMenu2 size={24} stroke={2} />
@@ -48,7 +48,7 @@ export function MobileTopBar({ repoName, sessionName, onMenuOpen, onNewSession, 
       <div className="flex items-center gap-0.5">
         <button
           onClick={onSettingsOpen}
-          className="flex items-center justify-center rounded-lg size-[34px] text-neutral-4 hover:text-neutral-1 hover:bg-neutral-6 transition-colors"
+          className="flex items-center justify-center rounded-control size-[34px] text-neutral-4 hover:text-neutral-1 hover:bg-neutral-6 transition-colors"
           aria-label="Settings"
         >
           <IconSettings size={24} stroke={2} />
@@ -56,7 +56,7 @@ export function MobileTopBar({ repoName, sessionName, onMenuOpen, onNewSession, 
 
         <button
           onClick={onNewSession}
-          className="flex items-center justify-center rounded-lg size-[34px] text-neutral-4 hover:text-neutral-1 hover:bg-neutral-6 transition-colors"
+          className="flex items-center justify-center rounded-control size-[34px] text-neutral-4 hover:text-neutral-1 hover:bg-neutral-6 transition-colors"
           aria-label="New session"
         >
           <IconPlus size={24} stroke={2} />

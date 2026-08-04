@@ -26,10 +26,10 @@ function addRecent(id: string) {
 }
 
 const btnClass = (selected: boolean) =>
-  `rounded-md border px-3 py-1.5 text-body font-medium transition-colors ${
+  `rounded-control border px-3 py-1.5 text-body font-medium transition-colors ${
     selected
       ? 'border-accent-6 bg-accent-9/40 text-accent-2'
-      : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
+      : 'border-edge bg-surface text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
   }`
 
 // ---------------------------------------------------------------------------
@@ -140,10 +140,10 @@ function SearchablePicker({ models, selected, onSelect }: {
       <button
         type="button"
         onClick={() => { setOpen(o => !o); setActiveIndex(0) }}
-        className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-body font-medium transition-colors ${
+        className={`flex items-center gap-2 rounded-control border px-3 py-1.5 text-body font-medium transition-colors ${
           selected
             ? 'border-accent-6 bg-accent-9/40 text-accent-2'
-            : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
+            : 'border-edge bg-surface text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
         }`}
       >
         {selectedLabel}
@@ -152,7 +152,7 @@ function SearchablePicker({ models, selected, onSelect }: {
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute top-full mt-1 left-0 z-50 w-[280px] max-h-[320px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg flex flex-col">
+        <div className="absolute top-full mt-1 left-0 z-50 w-[280px] max-h-[320px] rounded-floating border border-edge-strong bg-surface-raised shadow-floating flex flex-col">
           {/* Search */}
           <div className="p-2 border-b border-neutral-7">
             <div className="relative">
@@ -163,7 +163,7 @@ function SearchablePicker({ models, selected, onSelect }: {
                 onChange={e => { setQuery(e.target.value); setActiveIndex(0) }}
                 onKeyDown={handleKeyDown}
                 placeholder="Search models..."
-                className="w-full bg-neutral-7 text-body pl-7 pr-2 py-1.5 rounded-md outline-none text-neutral-2 placeholder:text-neutral-5"
+                className="w-full bg-neutral-7 text-body pl-7 pr-2 py-1.5 rounded-control outline-none text-neutral-2 placeholder:text-neutral-5"
               />
             </div>
           </div>

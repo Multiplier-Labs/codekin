@@ -116,13 +116,13 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
           onKeyDown={e => { if (e.key === 'Enter') void save() }}
           placeholder={placeholder}
           disabled={saving}
-          className={`flex-1 rounded border border-neutral-9 bg-neutral-10 px-3 py-2 ${inputSizeClass} font-mono text-neutral-3 outline-none focus:border-primary-7 disabled:opacity-50`}
+          className={`flex-1 rounded-control border border-edge bg-surface px-3 py-2 ${inputSizeClass} font-mono text-neutral-3 outline-none focus:border-primary-7 disabled:opacity-50`}
         />
         <button
           type="button"
           onClick={() => browserOpen ? setBrowserOpen(false) : void browse(path || undefined)}
           disabled={!token || browseLoading}
-          className="flex items-center gap-1 rounded border border-neutral-9 bg-neutral-10 px-2.5 py-2 text-body text-neutral-4 hover:border-neutral-7 hover:text-neutral-3 disabled:opacity-50"
+          className="flex items-center gap-1 rounded-control border border-edge bg-surface px-2.5 py-2 text-body text-neutral-4 hover:border-neutral-7 hover:text-neutral-3 disabled:opacity-50"
           title="Browse folders"
         >
           {browseLoading ? (
@@ -149,14 +149,14 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
       {browserOpen && browsePath !== null && (
         <div
           ref={dropdownRef}
-          className="absolute z-50 mt-1 w-full rounded-lg border border-neutral-8 bg-neutral-10 shadow-lg"
+          className="absolute z-50 mt-1 w-full rounded-floating border border-edge-strong bg-surface-raised shadow-floating"
         >
           {/* Current path header */}
-          <div className="flex items-center gap-2 border-b border-neutral-8 px-3 py-2">
+          <div className="flex items-center gap-2 border-b border-edge px-3 py-2">
             <button
               type="button"
               onClick={navigateUp}
-              className="rounded p-0.5 text-neutral-5 hover:bg-neutral-8 hover:text-neutral-3"
+              className="rounded-control p-0.5 text-neutral-5 hover:bg-neutral-8 hover:text-neutral-3"
               title="Go up"
             >
               <IconArrowUp size={14} />
@@ -165,7 +165,7 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
             <button
               type="button"
               onClick={() => setBrowserOpen(false)}
-              className="rounded p-0.5 text-neutral-5 hover:bg-neutral-8 hover:text-neutral-3"
+              className="rounded-control p-0.5 text-neutral-5 hover:bg-neutral-8 hover:text-neutral-3"
             >
               <IconX size={14} />
             </button>
@@ -192,11 +192,11 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
           </div>
 
           {/* Select current directory button */}
-          <div className="border-t border-neutral-8 px-3 py-2">
+          <div className="border-t border-edge px-3 py-2">
             <button
               type="button"
               onClick={pickCurrentDir}
-              className="w-full rounded bg-primary-7 px-3 py-1.5 text-body font-medium text-white hover:bg-primary-6"
+              className="w-full rounded-control bg-primary-7 px-3 py-1.5 text-body font-medium text-white hover:bg-primary-6"
             >
               Select this folder
             </button>

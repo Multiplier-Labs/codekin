@@ -103,6 +103,20 @@
   /* Font family */
   --font-sans: 'Lato', sans-serif;
 
+  /* ── Elevation & radius ────────────────────────────────────────────────
+     Three surface levels carry the layout structure:
+       0 page     — transcript ground        (bg-page, no border, no shadow)
+       1 surface  — sidebar, panels, cards   (bg-surface + border-edge)
+       2 floating — modals, popovers, palette (bg-surface-raised +
+                    border-edge-strong + shadow-floating; the ONLY level
+                    with a shadow)
+     rounded-control (6px) for buttons/inputs/rows/badges,
+     rounded-floating (10px) for modals/popovers/palette,
+     rounded-full only for status dots and avatars. */
+  --shadow-floating: 0 12px 28px -8px rgb(0 0 0 / 0.7);
+  --radius-control: 6px;
+  --radius-floating: 10px;
+
   /* ── Type scale ────────────────────────────────────────────────────────
      Five named steps; line-height is bound to the step so a label cannot
      be authored half-right. Do not add arbitrary text-[Npx] sizes — if
@@ -343,14 +357,6 @@
   --color-success-10: #d0f2e2;
   --color-success-11: #e5f8ef;
   --color-success-12: #effaf5;
-}
-
-/* Dark mode — lift the chrome (sidebar/top bar) one step above the terminal
-   so the cool-chrome/warm-content split actually reads; at the raw scale
-   values both backgrounds rendered as indistinguishable near-black. */
-[data-theme="dark"] .app-left-sidebar,
-[data-theme="dark"] .app-right-sidebar {
-  background-color: #11181a;
 }
 
 /* Light mode — component-specific background overrides */

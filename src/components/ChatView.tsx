@@ -135,7 +135,7 @@ function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
 function UserMessage({ msg, fontSize, isMobile }: { msg: ChatMessage & { type: 'user' }; fontSize: number; isMobile?: boolean }) {
   return (
     <div
-      className={`user-bubble rounded-md border border-edge bg-surface px-3 py-2 text-neutral-3 whitespace-pre-wrap ${isMobile ? 'max-w-[95%]' : 'max-w-[80%]'}`}
+      className={`user-bubble rounded-control border border-edge bg-surface px-3 py-2 text-neutral-3 whitespace-pre-wrap ${isMobile ? 'max-w-[95%]' : 'max-w-[80%]'}`}
       style={{ fontSize: `${fontSize}px` }}
     >
       {formatUserText(msg.text)}
@@ -156,7 +156,7 @@ function CodeCopyButton({ code }: { code: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="absolute top-2 right-2 rounded p-1 opacity-0 transition-opacity group-hover/codeblock:opacity-100 bg-neutral-8/80 hover:bg-neutral-7 text-neutral-4 hover:text-neutral-2 cursor-pointer"
+      className="absolute top-2 right-2 rounded-control p-1 opacity-0 transition-opacity group-hover/codeblock:opacity-100 bg-neutral-8/80 hover:bg-neutral-7 text-neutral-4 hover:text-neutral-2 cursor-pointer"
       title="Copy to clipboard"
     >
       {copied ? (
@@ -221,7 +221,7 @@ function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: {
                 )
               }
               return (
-                <code className={`${className || ''} rounded bg-neutral-10 px-1.5 py-0.5`} {...props}>
+                <code className={`${className || ''} rounded-control bg-neutral-10 px-1.5 py-0.5`} {...props}>
                   {children}
                 </code>
               )
@@ -238,7 +238,7 @@ function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: {
                 <img
                   src={safeSrc}
                   alt={alt || 'Image'}
-                  className="max-w-full max-h-96 rounded-lg border border-neutral-8 my-2"
+                  className="max-w-full max-h-96 rounded-control border border-edge-strong my-2"
                   loading="lazy"
                   {...props}
                 />
@@ -249,7 +249,7 @@ function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: {
           {displayText}
         </Markdown>
         {repeatCount && repeatCount > 1 && (
-          <span className="inline-block ml-1 text-meta text-neutral-5 bg-neutral-10 rounded-full px-2 py-0.5 align-middle">
+          <span className="inline-block ml-1 text-meta text-neutral-5 bg-neutral-10 rounded-control px-2 py-0.5 align-middle">
             ×{repeatCount}
           </span>
         )}
@@ -375,7 +375,7 @@ function ImageInline({ msg }: { msg: ChatMessage & { type: 'image' } }) {
       <img
         src={src}
         alt="Tool output"
-        className={`rounded-lg border border-neutral-8 cursor-pointer transition-all ${expanded ? 'max-w-full' : 'max-w-xs max-h-48 object-contain'}`}
+        className={`rounded-control border border-edge-strong cursor-pointer transition-all ${expanded ? 'max-w-full' : 'max-w-xs max-h-48 object-contain'}`}
         onClick={() => setExpanded(!expanded)}
       />
     </div>
@@ -385,7 +385,7 @@ function ImageInline({ msg }: { msg: ChatMessage & { type: 'image' } }) {
 function TentativeMessage({ msg, fontSize }: { msg: ChatMessage & { type: 'tentative' }; fontSize: number }) {
   return (
     <div
-      className="max-w-[80%] rounded-md border-l-2 border-warning-6 bg-warning-11/20 px-3 py-2 text-neutral-4 whitespace-pre-wrap"
+      className="max-w-[80%] rounded-control border-l-2 border-warning-6 bg-warning-11/20 px-3 py-2 text-neutral-4 whitespace-pre-wrap"
       style={{ fontSize: `${fontSize}px` }}
     >
       <div className="mb-1 text-meta text-warning-5 uppercase tracking-wider">queued</div>
@@ -423,7 +423,7 @@ function OrchestratorWelcome({ agentName }: { agentName?: string }) {
             'Spawn implementation sessions for issues or tasks',
             'Review code, plan refactors, or investigate bugs',
           ].map((text) => (
-            <div key={text} className="flex items-center gap-3 rounded-lg border border-neutral-10 px-3.5 py-2.5 text-neutral-4 transition-colors hover:border-neutral-8 hover:text-neutral-3">
+            <div key={text} className="flex items-center gap-3 rounded-control border border-neutral-10 px-3.5 py-2.5 text-neutral-4 transition-colors hover:border-neutral-8 hover:text-neutral-3">
               <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent-6" />
               <span>{text}</span>
             </div>
@@ -450,7 +450,7 @@ function ActivityIndicator({ label, variant = 'default' }: { label: string; vari
 
   return (
     <div className="pt-2">
-      <div className="app-thinking-badge inline-flex items-center gap-2 rounded-lg bg-neutral-9/80 px-3.5 py-2">
+      <div className="app-thinking-badge inline-flex items-center gap-2 rounded-control bg-neutral-9/80 px-3.5 py-2">
         <svg
           className="h-4 w-4 animate-[spin_3s_linear_infinite]"
           xmlns="http://www.w3.org/2000/svg"
@@ -645,7 +645,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
       {showScrollButton && (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-neutral-8 p-2 text-neutral-2 shadow-xl shadow-black/40 ring-1 ring-neutral-6/40 transition hover:bg-neutral-7 hover:text-neutral-1"
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-surface-raised border border-edge-strong p-2 text-neutral-2 shadow-floating ring-1 ring-neutral-6/40 transition hover:bg-neutral-7 hover:text-neutral-1"
           title="Scroll to bottom"
         >
           <IconArrowDown size={16} stroke={2} />

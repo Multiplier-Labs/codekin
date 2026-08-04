@@ -56,7 +56,7 @@ export function SlashAutocomplete({ commands, filter, onSelect, onClose }: Props
       className="absolute bottom-full left-0 mb-1 z-50 w-72"
     >
       <Command
-        className="rounded-lg border border-neutral-10 bg-neutral-11 shadow-2xl"
+        className="rounded-floating border border-edge-strong bg-surface-raised shadow-floating"
         label="Slash commands"
         filter={(value, search) => {
           // Match against command name (without /) and display name
@@ -86,14 +86,14 @@ export function SlashAutocomplete({ commands, filter, onSelect, onClose }: Props
                 key={cmd.command}
                 value={`${cmd.command.slice(1)} ${cmd.name}`}
                 onSelect={() => handleSelect(cmd.command)}
-                className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-body text-neutral-3 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
+                className="flex cursor-pointer items-center gap-2 rounded-control px-2 py-1.5 text-body text-neutral-3 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
               >
                 <span className={`font-mono text-meta ${iconClass}`}>/</span>
                 <span className="flex-1 truncate">
                   <span className="font-medium">{cmd.name}</span>
                   <span className="ml-1.5 text-meta text-neutral-5">{cmd.description}</span>
                 </span>
-                <span className={`flex-shrink-0 rounded-full px-1.5 py-0.5 text-micro font-medium ${badge.className}`}>
+                <span className={`flex-shrink-0 rounded-control px-1.5 py-0.5 text-micro font-medium ${badge.className}`}>
                   {badge.label}
                 </span>
               </Command.Item>

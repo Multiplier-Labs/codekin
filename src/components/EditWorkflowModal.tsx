@@ -16,7 +16,7 @@ import TimePicker from './TimePicker'
 import { ProviderModelSection } from './workflows/ProviderModelSection'
 
 const btnClass = (selected: boolean) =>
-  `rounded-md border px-3 py-1.5 text-body font-medium transition-colors ${
+  `rounded-control border px-3 py-1.5 text-body font-medium transition-colors ${
     selected
       ? 'border-accent-6 bg-accent-9/40 text-accent-2'
       : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
@@ -84,7 +84,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
-        className="w-[740px] max-h-[90vh] overflow-y-auto rounded-xl border border-neutral-7 bg-neutral-11 p-5 shadow-2xl"
+        className="w-[740px] max-h-[90vh] overflow-y-auto rounded-floating border border-edge-strong bg-surface-raised p-5 shadow-floating"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
@@ -97,7 +97,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
               <span className="text-meta text-neutral-4">{kindLabel(repo.kind ?? '')}</span>
             </div>
           </div>
-          <button onClick={onClose} className="rounded p-1 text-neutral-4 hover:text-neutral-1 hover:bg-neutral-9">
+          <button onClick={onClose} className="rounded-control p-1 text-neutral-4 hover:text-neutral-1 hover:bg-neutral-9">
             <IconX size={16} stroke={2} />
           </button>
         </div>
@@ -117,10 +117,10 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
                     key={k.value}
                     type="button"
                     onClick={() => setForm(f => ({ ...f, kind: k.value }))}
-                    className={`rounded-md border px-2.5 py-1.5 text-left transition-colors ${
+                    className={`rounded-control border px-2.5 py-1.5 text-left transition-colors ${
                       form.kind === k.value
                         ? 'border-accent-6 bg-accent-9/30 ring-1 ring-accent-6/30'
-                        : 'border-neutral-7 bg-neutral-10 hover:border-neutral-6'
+                        : 'border-edge bg-surface hover:border-neutral-6'
                     }`}
                   >
                     <span className={`block text-meta font-medium leading-tight ${
@@ -137,7 +137,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
             <div>
               {/* Schedule — hidden for event-driven workflows */}
               {eventDriven ? (
-                <div className="rounded-lg border border-purple-700/40 bg-purple-900/20 px-3 py-2.5">
+                <div className="rounded-control border border-purple-700/40 bg-purple-900/20 px-3 py-2.5">
                   <span className="text-body font-medium text-purple-400">
                     {form.kind === 'pr-review' ? 'Trigger: On pull request' : 'Trigger: On commit'}
                   </span>
@@ -229,26 +229,26 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
               onChange={e => setForm(f => ({ ...f, customPrompt: e.target.value }))}
               rows={2}
               placeholder="e.g. Focus on the auth module and payment flows"
-              className="w-full rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-body text-neutral-1 placeholder-neutral-5 focus:border-accent-6 focus:outline-none resize-none"
+              className="w-full rounded-control border border-edge-strong bg-surface px-3 py-2 text-body text-neutral-1 placeholder-neutral-5 focus:border-accent-6 focus:outline-none resize-none"
             />
           </div>
 
           {formError && (
-            <div className="rounded-md bg-error-10/50 px-3 py-2 text-body text-error-4">{formError}</div>
+            <div className="rounded-control bg-error-10/50 px-3 py-2 text-body text-error-4">{formError}</div>
           )}
 
-          <div className="flex gap-2 pt-2 border-t border-neutral-8/50">
+          <div className="flex gap-2 pt-2 border-t border-edge">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 rounded-md border border-neutral-7 bg-neutral-10 py-2 text-body text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
+              className="flex-1 rounded-control border border-neutral-7 bg-neutral-10 py-2 text-body text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="flex-1 rounded-md bg-primary-8 py-2 text-body font-medium text-on-primary hover:bg-primary-7 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+              className="flex-1 rounded-control bg-primary-8 py-2 text-body font-medium text-on-primary hover:bg-primary-7 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
             >
               {saving ? (
                 <>
