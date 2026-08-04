@@ -136,18 +136,18 @@ export function LoopRunsView({ token, onNavigateToSession }: Props) {
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-neutral-8/50 px-5 py-3">
-        <h1 className="text-[18px] font-medium text-neutral-1">Loop Runs</h1>
+        <h1 className="text-head font-medium text-neutral-1">Loop Runs</h1>
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => { void refreshRuns() }}
-            className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[15px] text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6 transition-colors"
+            className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-body text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6 transition-colors"
             title="Refresh"
           >
             <IconRefresh size={14} stroke={2} />
           </button>
           <button
             onClick={() => { setShowForm(true) }}
-            className="flex items-center gap-1.5 rounded-md bg-primary-8 px-3 py-1.5 text-[15px] font-medium text-on-primary hover:bg-primary-7 transition-colors"
+            className="flex items-center gap-1.5 rounded-md bg-primary-8 px-3 py-1.5 text-body font-medium text-on-primary hover:bg-primary-7 transition-colors"
           >
             <IconPlayerPlay size={14} stroke={2} />
             Start Loop
@@ -156,7 +156,7 @@ export function LoopRunsView({ token, onNavigateToSession }: Props) {
       </div>
 
       {error && (
-        <div className="border-b border-error-9/50 bg-error-10/40 px-4 py-2 text-[15px] text-error-4">
+        <div className="border-b border-error-9/50 bg-error-10/40 px-4 py-2 text-body text-error-4">
           {error}
         </div>
       )}
@@ -165,7 +165,7 @@ export function LoopRunsView({ token, onNavigateToSession }: Props) {
         {/* Runs list */}
         <div className="w-80 flex-shrink-0 overflow-y-auto border-r border-neutral-8/50">
           {runs.length === 0 ? (
-            <div className="px-4 py-10 text-center text-[15px] text-neutral-5">
+            <div className="px-4 py-10 text-center text-body text-neutral-5">
               No loop runs yet.
             </div>
           ) : (
@@ -179,12 +179,12 @@ export function LoopRunsView({ token, onNavigateToSession }: Props) {
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="truncate text-[15px] font-medium text-neutral-2">{run.kind}</span>
-                      <span className={`inline-flex flex-shrink-0 items-center rounded px-1.5 py-0.5 text-[12px] font-medium ${statusBadge(run.status)}`}>
+                      <span className="truncate text-body font-medium text-neutral-2">{run.kind}</span>
+                      <span className={`inline-flex flex-shrink-0 items-center rounded px-1.5 py-0.5 text-meta font-medium ${statusBadge(run.status)}`}>
                         {run.status}
                       </span>
                     </div>
-                    <div className="mt-0.5 flex items-center justify-between gap-2 text-[13px] text-neutral-5">
+                    <div className="mt-0.5 flex items-center justify-between gap-2 text-meta text-neutral-5">
                       <span className="truncate">{run.branch}</span>
                       <span className="flex-shrink-0">{formatTime(run.createdAt)}</span>
                     </div>
@@ -198,11 +198,11 @@ export function LoopRunsView({ token, onNavigateToSession }: Props) {
         {/* Detail */}
         <div className="flex-1 overflow-y-auto">
           {!selectedRunId ? (
-            <div className="flex h-full items-center justify-center text-[15px] text-neutral-5">
+            <div className="flex h-full items-center justify-center text-body text-neutral-5">
               Select a run to see its evidence ledger.
             </div>
           ) : !detail || detail.id !== selectedRunId ? (
-            <div className="px-5 py-6 text-[15px] text-neutral-5">Loading…</div>
+            <div className="px-5 py-6 text-body text-neutral-5">Loading…</div>
           ) : (
             <RunDetail
               run={detail}
@@ -244,17 +244,17 @@ function RunDetail({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h2 className="text-[17px] font-medium text-neutral-1">{run.kind}</h2>
-            <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[12px] font-medium ${statusBadge(run.status)}`}>
+            <h2 className="text-title font-medium text-neutral-1">{run.kind}</h2>
+            <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-meta font-medium ${statusBadge(run.status)}`}>
               {run.status}
             </span>
           </div>
-          <p className="mt-1 text-[14px] text-neutral-4">{run.goal}</p>
+          <p className="mt-1 text-body text-neutral-4">{run.goal}</p>
         </div>
         {isActive(run.status) && (
           <button
             onClick={() => { onAbort(run.id) }}
-            className="flex flex-shrink-0 items-center gap-1.5 rounded-md border border-error-8/50 px-2.5 py-1 text-[14px] text-error-3 hover:bg-error-10/40 transition-colors"
+            className="flex flex-shrink-0 items-center gap-1.5 rounded-md border border-error-8/50 px-2.5 py-1 text-body text-error-3 hover:bg-error-10/40 transition-colors"
           >
             <IconX size={13} stroke={2} />
             Abort
@@ -263,7 +263,7 @@ function RunDetail({
       </div>
 
       {/* Meta */}
-      <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-[14px] sm:grid-cols-3">
+      <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-body sm:grid-cols-3">
         <Meta label="Branch" value={run.branch} />
         <Meta label="Turns" value={`${run.turnCount} / ${run.spec.maxTurns}`} />
         <Meta label="Cost" value={`$${run.costUsd.toFixed(2)} / $${run.spec.maxCostUsd.toFixed(2)}`} />
@@ -275,7 +275,7 @@ function RunDetail({
       {makerSessionId && onNavigateToSession && (
         <button
           onClick={() => { onNavigateToSession(makerSessionId) }}
-          className="mt-3 text-[14px] text-accent-3 hover:text-accent-2 hover:underline"
+          className="mt-3 text-body text-accent-3 hover:text-accent-2 hover:underline"
         >
           Open maker session →
         </button>
@@ -287,21 +287,21 @@ function RunDetail({
             href={run.prUrl}
             target="_blank"
             rel="noreferrer"
-            className="text-[14px] text-accent-3 hover:text-accent-2 hover:underline"
+            className="text-body text-accent-3 hover:text-accent-2 hover:underline"
           >
             View pull request →
           </a>
         </div>
       ) : run.status === 'succeeded' && (
-        <div className="mt-3 text-[14px] text-warning-3">
+        <div className="mt-3 text-body text-warning-3">
           Finalization failed — branch is committed locally but no PR was opened. See the evidence ledger.
         </div>
       )}
 
       {/* Evidence ledger */}
-      <h3 className="mt-5 mb-2 text-[14px] font-medium uppercase tracking-wide text-neutral-5">Evidence Ledger</h3>
+      <h3 className="mt-5 mb-2 text-body font-medium uppercase tracking-wide text-neutral-5">Evidence Ledger</h3>
       {run.turns.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-neutral-8 px-4 py-6 text-center text-[14px] text-neutral-5">
+        <div className="rounded-lg border border-dashed border-neutral-8 px-4 py-6 text-center text-body text-neutral-5">
           No turns recorded yet.
         </div>
       ) : (
@@ -328,28 +328,28 @@ function TurnRow({ turn }: { turn: GoalRunTurn }) {
   return (
     <li className="rounded-lg border border-neutral-9/60 bg-neutral-10/30 px-3 py-2">
       <div className="flex items-center gap-2">
-        <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[12px] font-medium ${roleBadge(turn.role)}`}>
+        <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-meta font-medium ${roleBadge(turn.role)}`}>
           {turn.role}
         </span>
-        <span className="text-[13px] text-neutral-5">turn {turn.turnIndex}</span>
+        <span className="text-meta text-neutral-5">turn {turn.turnIndex}</span>
         {turn.verdict && (
-          <span className="text-[13px] text-neutral-3">verdict: {turn.verdict}</span>
+          <span className="text-meta text-neutral-3">verdict: {turn.verdict}</span>
         )}
         {turn.exitCode !== null && (
-          <span className={`text-[13px] ${turn.exitCode === 0 ? 'text-success-3' : 'text-error-3'}`}>
+          <span className={`text-meta ${turn.exitCode === 0 ? 'text-success-3' : 'text-error-3'}`}>
             exit {turn.exitCode}
           </span>
         )}
-        <span className="ml-auto text-[12px] text-neutral-6">{formatTime(turn.createdAt)}</span>
+        <span className="ml-auto text-meta text-neutral-6">{formatTime(turn.createdAt)}</span>
       </div>
       {turn.verifyCmd && (
-        <div className="mt-1 font-mono text-[13px] text-neutral-3">$ {turn.verifyCmd}</div>
+        <div className="mt-1 font-mono text-meta text-neutral-3">$ {turn.verifyCmd}</div>
       )}
       {turn.diffSummary && (
-        <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[12px] text-neutral-4">{turn.diffSummary}</pre>
+        <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-meta text-neutral-4">{turn.diffSummary}</pre>
       )}
       {turn.outputTail && (
-        <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[12px] text-neutral-5">{turn.outputTail}</pre>
+        <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words font-mono text-meta text-neutral-5">{turn.outputTail}</pre>
       )}
     </li>
   )
@@ -403,7 +403,7 @@ function StartLoopModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div className="w-full max-w-lg rounded-xl border border-neutral-8 bg-neutral-12 p-5 shadow-xl" onClick={(e) => { e.stopPropagation() }}>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-[17px] font-medium text-neutral-1">Start Loop Run</h2>
+          <h2 className="text-title font-medium text-neutral-1">Start Loop Run</h2>
           <button onClick={onClose} className="rounded p-1 text-neutral-4 hover:text-neutral-2 hover:bg-neutral-9">
             <IconX size={18} stroke={2} />
           </button>
@@ -414,7 +414,7 @@ function StartLoopModal({
             <select
               value={kind}
               onChange={(e) => { setKind(e.target.value) }}
-              className="w-full rounded-md border border-neutral-8 bg-neutral-11 px-2.5 py-1.5 text-[15px] text-neutral-2 focus:border-primary-7 focus:outline-none"
+              className="w-full rounded-md border border-neutral-8 bg-neutral-11 px-2.5 py-1.5 text-body text-neutral-2 focus:border-primary-7 focus:outline-none"
             >
               {templates.length === 0 && <option value="">No templates available</option>}
               {templates.map((t) => (
@@ -428,7 +428,7 @@ function StartLoopModal({
               value={repo}
               onChange={(e) => { setRepo(e.target.value) }}
               placeholder="/path/to/repo"
-              className="w-full rounded-md border border-neutral-8 bg-neutral-11 px-2.5 py-1.5 text-[15px] text-neutral-2 focus:border-primary-7 focus:outline-none"
+              className="w-full rounded-md border border-neutral-8 bg-neutral-11 px-2.5 py-1.5 text-body text-neutral-2 focus:border-primary-7 focus:outline-none"
             />
           </Field>
 
@@ -437,7 +437,7 @@ function StartLoopModal({
               value={branch}
               onChange={(e) => { setBranch(e.target.value) }}
               placeholder="fix/ci"
-              className="w-full rounded-md border border-neutral-8 bg-neutral-11 px-2.5 py-1.5 text-[15px] text-neutral-2 focus:border-primary-7 focus:outline-none"
+              className="w-full rounded-md border border-neutral-8 bg-neutral-11 px-2.5 py-1.5 text-body text-neutral-2 focus:border-primary-7 focus:outline-none"
             />
           </Field>
 
@@ -447,13 +447,13 @@ function StartLoopModal({
               onChange={(e) => { setGoal(e.target.value) }}
               rows={3}
               placeholder="Leave blank to use the template's default goal."
-              className="w-full resize-y rounded-md border border-neutral-8 bg-neutral-11 px-2.5 py-1.5 text-[15px] text-neutral-2 focus:border-primary-7 focus:outline-none"
+              className="w-full resize-y rounded-md border border-neutral-8 bg-neutral-11 px-2.5 py-1.5 text-body text-neutral-2 focus:border-primary-7 focus:outline-none"
             />
           </Field>
         </div>
 
         {formError && (
-          <div className="mt-3 rounded-md border border-error-8/50 bg-error-10/40 px-3 py-2 text-[14px] text-error-4">
+          <div className="mt-3 rounded-md border border-error-8/50 bg-error-10/40 px-3 py-2 text-body text-error-4">
             {formError}
           </div>
         )}
@@ -461,14 +461,14 @@ function StartLoopModal({
         <div className="mt-4 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="rounded-md px-3 py-1.5 text-[15px] text-neutral-3 hover:text-neutral-1 hover:bg-neutral-9 transition-colors"
+            className="rounded-md px-3 py-1.5 text-body text-neutral-3 hover:text-neutral-1 hover:bg-neutral-9 transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={() => { void submit() }}
             disabled={submitting}
-            className="flex items-center gap-1.5 rounded-md bg-primary-8 px-3 py-1.5 text-[15px] font-medium text-on-primary hover:bg-primary-7 disabled:opacity-50 transition-colors"
+            className="flex items-center gap-1.5 rounded-md bg-primary-8 px-3 py-1.5 text-body font-medium text-on-primary hover:bg-primary-7 disabled:opacity-50 transition-colors"
           >
             <IconPlayerPlay size={14} stroke={2} />
             {submitting ? 'Starting…' : 'Start'}
@@ -482,7 +482,7 @@ function StartLoopModal({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[14px] text-neutral-4">{label}</span>
+      <span className="mb-1 block text-body text-neutral-4">{label}</span>
       {children}
     </label>
   )

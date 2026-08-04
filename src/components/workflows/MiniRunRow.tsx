@@ -48,10 +48,10 @@ export function MiniRunRow({
             : <IconChevronRight size={13} stroke={2} />
           }
         </span>
-        <span className="text-[14px] text-neutral-4 tabular-nums whitespace-nowrap">
+        <span className="text-body text-neutral-4 tabular-nums whitespace-nowrap">
           {formatTime(run.createdAt)}
         </span>
-        <span className="text-[14px] text-neutral-4 tabular-nums whitespace-nowrap">
+        <span className="text-body text-neutral-4 tabular-nums whitespace-nowrap">
           {formatDuration(run.startedAt, run.completedAt)}
         </span>
         <span className="ml-auto">
@@ -81,7 +81,7 @@ export function MiniRunRow({
       {selected && (
         <div className="px-3 pb-2">
           {detailLoading ? (
-            <div className="flex items-center gap-2 py-3 text-[14px] text-neutral-5">
+            <div className="flex items-center gap-2 py-3 text-body text-neutral-5">
               <IconLoader2 size={16} stroke={2} className="animate-spin" />
               Loading steps…
             </div>

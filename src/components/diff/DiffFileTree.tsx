@@ -37,7 +37,7 @@ export function DiffFileTree({ files, activeFile, onSelectFile }: DiffFileTreePr
             }`}
             onClick={() => onSelectFile(file.path)}
           >
-            <span className={`inline-flex items-center justify-center w-4 h-4 rounded text-[10px] font-bold shrink-0 ${cfg.color}`}>
+            <span className={`inline-flex items-center justify-center w-4 h-4 rounded text-micro font-bold shrink-0 ${cfg.color}`}>
               {cfg.label}
             </span>
             <span className="font-mono truncate flex-1" title={displayPath}>

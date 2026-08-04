@@ -34,7 +34,7 @@ interface PromptButtonsProps {
 export function PromptButtons({ options, question, multiSelect, promptType, questions, approvePattern, onSelect, isMobile = false }: PromptButtonsProps) {
   const isPermission = promptType === 'permission'
   const isQuestion = promptType === 'question'
-  const btnPad = isMobile ? 'px-4 py-2.5 text-[16px] min-h-[34px]' : isQuestion ? 'px-4 py-1.5 text-[15px]' : 'px-3 py-0.5 text-[13px]'
+  const btnPad = isMobile ? 'px-4 py-2.5 text-body min-h-[34px]' : isQuestion ? 'px-4 py-1.5 text-body' : 'px-3 py-0.5 text-body'
 
   // Auto-allow countdown for permission prompts
   const [timeLeft, setTimeLeft] = useState(15)
@@ -137,7 +137,7 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
     return (
       <div className={`border-t ${isQuestion ? 'px-4 py-3' : 'px-3 py-2'} ${isPermission ? 'border-warning-9/50 bg-warning-11/30' : 'border-neutral-10 bg-neutral-11'}`}>
         {displayQuestion && (
-          <p className={`${isQuestion ? 'text-[15px] mb-2' : 'text-[13px] mb-1.5'} ${isPermission ? 'text-warning-4' : 'text-neutral-3'}`}>
+          <p className={`${isQuestion ? 'text-body mb-2' : 'text-body mb-1.5'} ${isPermission ? 'text-warning-4' : 'text-neutral-3'}`}>
             {progressLabel && <span className="text-neutral-5 mr-1">{progressLabel}</span>}
             {displayQuestion}
           </p>
@@ -174,7 +174,7 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
   return (
     <div className={`border-t ${isQuestion ? 'px-4 py-3' : 'px-3 py-2'} ${isPermission ? 'border-warning-9/50 bg-warning-11/30' : 'border-neutral-10 bg-neutral-11'}`}>
       {displayQuestion && (
-        <p className={`${isQuestion ? 'text-[15px] mb-2' : 'text-[13px] mb-1.5'} ${isPermission ? 'text-warning-4' : 'text-neutral-3'}`}>
+        <p className={`${isQuestion ? 'text-body mb-2' : 'text-body mb-1.5'} ${isPermission ? 'text-warning-4' : 'text-neutral-3'}`}>
           {progressLabel && <span className="text-neutral-5 mr-1">{progressLabel}</span>}
           {displayQuestion}
         </p>

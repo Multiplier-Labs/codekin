@@ -40,7 +40,7 @@ export function RepoList({ groups, selectedId, onSelect, cloningId, maxHeight = 
   const totalRepos = groups.reduce((n, g) => n + g.repos.length, 0)
 
   if (totalRepos === 0) {
-    return <p className="text-center text-[15px] text-neutral-6 py-2">No repositories available</p>
+    return <p className="text-center text-body text-neutral-6 py-2">No repositories available</p>
   }
 
   return (
@@ -51,15 +51,15 @@ export function RepoList({ groups, selectedId, onSelect, cloningId, maxHeight = 
         value={search}
         onChange={e => setSearch(e.target.value)}
         placeholder="Search repos…"
-        className="mb-2 w-full rounded-lg border border-neutral-7 bg-neutral-11/50 px-3 py-2 text-[15px] text-neutral-2 placeholder-neutral-5 focus:border-accent-6 focus:outline-none"
+        className="mb-2 w-full rounded-lg border border-neutral-7 bg-neutral-11/50 px-3 py-2 text-body text-neutral-2 placeholder-neutral-5 focus:border-accent-6 focus:outline-none"
       />
       <div className="overflow-y-auto rounded-lg border border-neutral-7 bg-neutral-11/50" style={{ maxHeight }}>
         {filteredGroups.length === 0 ? (
-          <p className="px-3 py-3 text-[13px] text-neutral-5 text-center">No matching repos</p>
+          <p className="px-3 py-3 text-body text-neutral-5 text-center">No matching repos</p>
         ) : (
           filteredGroups.map((group) => (
             <div key={group.owner}>
-              <div className="sticky top-0 z-10 bg-neutral-8 backdrop-blur-sm px-3 py-1.5 text-[13px] font-medium uppercase tracking-wider text-neutral-4 border-b border-neutral-7">
+              <div className="sticky top-0 z-10 bg-neutral-8 backdrop-blur-sm px-3 py-1.5 text-body font-medium uppercase tracking-wider text-neutral-4 border-b border-neutral-7">
                 {group.owner}
               </div>
               {group.repos.map((repo) => {
@@ -86,22 +86,22 @@ export function RepoList({ groups, selectedId, onSelect, cloningId, maxHeight = 
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="text-[15px] font-medium text-neutral-2 group-hover:text-neutral-1 transition-colors truncate">
+                        <span className="text-body font-medium text-neutral-2 group-hover:text-neutral-1 transition-colors truncate">
                           {repo.name}
                         </span>
                         {isCloning && (
-                          <span className="flex-shrink-0 rounded bg-primary-9/30 px-1.5 py-0.5 text-[13px] text-primary-4 animate-pulse">
+                          <span className="flex-shrink-0 rounded bg-primary-9/30 px-1.5 py-0.5 text-meta text-primary-4 animate-pulse">
                             cloning...
                           </span>
                         )}
                         {!repo.cloned && !isCloning && (
-                          <span className="flex-shrink-0 rounded border border-neutral-6 bg-neutral-8/50 px-1.5 py-0.5 text-[13px] text-neutral-3">
+                          <span className="flex-shrink-0 rounded border border-neutral-6 bg-neutral-8/50 px-1.5 py-0.5 text-meta text-neutral-3">
                             remote
                           </span>
                         )}
                       </div>
                       {repo.description && (
-                        <div className="mt-0.5 text-[13px] text-neutral-6 truncate">
+                        <div className="mt-0.5 text-meta text-neutral-6 truncate">
                           {repo.description}
                         </div>
                       )}

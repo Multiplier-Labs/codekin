@@ -34,8 +34,8 @@ function StatCard({ label, value, icon }: { label: string; value: number; icon: 
     <div className="flex items-center gap-2.5 rounded-lg bg-neutral-11 px-3 py-2 min-w-[120px]">
       <div className="text-neutral-5">{icon}</div>
       <div>
-        <div className="text-[18px] font-semibold text-neutral-2 leading-tight">{value}</div>
-        <div className="text-[12px] text-neutral-5 leading-tight">{label}</div>
+        <div className="text-head font-semibold text-neutral-2">{value}</div>
+        <div className="text-meta text-neutral-5 leading-tight">{label}</div>
       </div>
     </div>
   )
@@ -101,7 +101,7 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
       <div className="flex flex-1 items-center justify-center">
         <div className="flex items-center gap-3 text-neutral-4">
           <IconRobotFace size={20} stroke={2} />
-          <span className="text-[15px]">Starting Agent {agentName}...</span>
+          <span className="text-body">Starting Agent {agentName}...</span>
         </div>
       </div>
     )
@@ -113,9 +113,9 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
         <div className="text-center">
           <div className="flex items-center justify-center gap-2 text-error-5 mb-2">
             <IconRobotFace size={20} stroke={2} />
-            <span className="text-[15px] font-medium">Failed to start Agent {agentName}</span>
+            <span className="text-body font-medium">Failed to start Agent {agentName}</span>
           </div>
-          <p className="text-[14px] text-neutral-5">{error}</p>
+          <p className="text-body text-neutral-5">{error}</p>
         </div>
       </div>
     )
@@ -128,7 +128,7 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
     <div className="flex items-center gap-3 px-4 py-2.5 border-b border-neutral-10 bg-neutral-12">
       <div className="flex items-center gap-2 text-neutral-2">
         <IconRobotFace size={18} stroke={2} className="text-accent-5" />
-        <span className="text-[15px] font-medium">Agent {agentName}</span>
+        <span className="text-body font-medium">Agent {agentName}</span>
       </div>
       {stats && (
         <div className="flex items-center gap-2 ml-auto">

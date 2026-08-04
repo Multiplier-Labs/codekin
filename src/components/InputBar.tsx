@@ -79,7 +79,7 @@ function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle,
     <div className="relative" ref={menuRef}>
       <button
         onClick={onToggle}
-        className={`flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium transition-colors ${
+        className={`flex items-center gap-1 rounded-md px-2 py-1 text-meta font-medium transition-colors ${
           currentMode === 'bypassPermissions'
             ? 'text-error-5 hover:text-error-4 hover:bg-error-9/30'
             : 'text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7'
@@ -113,10 +113,10 @@ function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle,
                   className={`mt-0.5 flex-shrink-0 ${m.dangerous ? 'text-error-5' : isActive ? 'text-primary-4' : 'text-neutral-4'}`}
                 />
                 <div className="flex-1 min-w-0">
-                  <div className={`text-[13px] font-medium ${m.dangerous ? 'text-error-5' : isActive ? 'text-primary-4' : 'text-neutral-2'}`}>
+                  <div className={`text-body font-medium ${m.dangerous ? 'text-error-5' : isActive ? 'text-primary-4' : 'text-neutral-2'}`}>
                     {m.label}
                   </div>
-                  <div className={`text-[12px] ${m.dangerous ? 'text-error-6' : 'text-neutral-5'}`}>
+                  <div className={`text-meta ${m.dangerous ? 'text-error-6' : 'text-neutral-5'}`}>
                     {m.description}
                   </div>
                 </div>
@@ -202,7 +202,7 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
     <div className="relative" ref={menuRef}>
       <button
         onClick={onToggle}
-        className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
+        className="flex items-center gap-1 rounded-md px-2 py-1 text-meta font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
         title="Change model"
       >
         {shortModelLabel(currentModel, models)}
@@ -217,14 +217,14 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
               onChange={e => { setQuery(e.target.value); setActiveIndex(0) }}
               onKeyDown={handleKeyDown}
               placeholder="Search models..."
-              className="w-full bg-neutral-7 text-[13px] px-2 py-1.5 rounded-md outline-none text-neutral-2 placeholder:text-neutral-5"
+              className="w-full bg-neutral-7 text-body px-2 py-1.5 rounded-md outline-none text-neutral-2 placeholder:text-neutral-5"
             />
           </div>
 
           <div className="overflow-y-auto py-1">
             {!query && recents.length > 0 && (
               <div className="mb-1">
-                <div className="px-3 py-1 text-[11px] text-neutral-5">Recent</div>
+                <div className="px-3 py-1 text-micro text-neutral-5">Recent</div>
                 {recents.map((id, idx) => {
                   const m = models.find(x => x.id === id)
                   if (!m) return null
@@ -234,7 +234,7 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
                       key={m.id}
                       ref={el => { itemRefs.current[index] = el }}
                       onClick={() => { addRecent(m.id); onChange(m.id) }}
-                      className={`w-full text-left px-3 py-1.5 text-[13px] transition-colors ${index === activeIndex ? 'bg-neutral-7' : 'hover:bg-neutral-7'} ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
+                      className={`w-full text-left px-3 py-1.5 text-body transition-colors ${index === activeIndex ? 'bg-neutral-7' : 'hover:bg-neutral-7'} ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
                     >
                       {m.label}
                     </button>
@@ -245,7 +245,7 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
 
             <div>
               {!query && (
-                <div className="px-3 py-1 text-[11px] text-neutral-5">All Models</div>
+                <div className="px-3 py-1 text-micro text-neutral-5">All Models</div>
               )}
               {allModelsFiltered.map((m, idx) => {
                 const baseIndex = (!query && recents.length > 0) ? recents.length : 0
@@ -255,7 +255,7 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
                   key={m.id}
                   ref={el => { itemRefs.current[index] = el }}
                   onClick={() => { addRecent(m.id); onChange(m.id) }}
-                  className={`w-full text-left px-3 py-1.5 text-[13px] transition-colors ${index === activeIndex ? 'bg-neutral-7' : 'hover:bg-neutral-7'} ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
+                  className={`w-full text-left px-3 py-1.5 text-body transition-colors ${index === activeIndex ? 'bg-neutral-7' : 'hover:bg-neutral-7'} ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
                 >
                   {m.label}
                 </button>
@@ -543,7 +543,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           {pendingFiles.map((file, i) => (
             <span
               key={`${file.name}-${i}`}
-              className="flex items-center gap-1 rounded bg-neutral-7 px-2 py-0.5 text-[13px] text-neutral-2"
+              className="flex items-center gap-1 rounded bg-neutral-7 px-2 py-0.5 text-meta text-neutral-2"
             >
               <span className="max-w-[150px] truncate">{file.name}</span>
               <button
@@ -572,7 +572,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           disabled={disabled}
           autoFocus
           placeholder={placeholder ?? (isOrchestrator ? 'Ask the orchestrator...' : isWaiting ? 'Type response...' : 'What do you want to build?')}
-          className={`flex-1 min-h-0 resize-none bg-transparent ${isMobile ? 'text-[16px]' : 'text-[15px]'} leading-snug text-neutral-1 placeholder:text-neutral-5 outline-none disabled:opacity-50 overflow-y-auto`}
+          // Mobile must stay 16px: font sizes under 16px trigger iOS Safari zoom-on-focus
+          className={`flex-1 min-h-0 resize-none bg-transparent ${isMobile ? 'text-[16px]' : 'text-body'} leading-snug text-neutral-1 placeholder:text-neutral-5 outline-none disabled:opacity-50 overflow-y-auto`}
         />
         <input
           ref={fileInputRef}
@@ -603,7 +604,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               {/* Worktree: indicator when active, toggle before first message, or move button mid-session */}
               {worktreePath ? (
                 <span
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-primary-5"
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-meta font-medium text-primary-5"
                   title={worktreePath}
                 >
                   <IconGitBranch size={14} stroke={2} />
@@ -612,7 +613,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               ) : showWorktreeToggle && onWorktreeChange ? (
                 <button
                   onClick={() => onWorktreeChange(!useWorktree)}
-                  className={`flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium transition-colors ${
+                  className={`flex items-center gap-1 rounded-md px-2 py-1 text-meta font-medium transition-colors ${
                     useWorktree
                       ? 'text-primary-5 bg-primary-9/30 hover:bg-primary-9/50'
                       : 'text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7'
@@ -625,7 +626,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               ) : onMoveToWorktree ? (
                 <button
                   onClick={onMoveToWorktree}
-                  className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
+                  className="flex items-center gap-1 rounded-md px-2 py-1 text-meta font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors"
                   title="Move session to a git worktree"
                 >
                   <IconGitBranch size={14} stroke={2} />
@@ -636,7 +637,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
             <div className="flex items-center gap-1">
               {usage && (usage.inputTokens > 0 || usage.outputTokens > 0) && (
                 <span
-                  className="hidden md:inline px-2 py-1 text-[11px] text-neutral-5 whitespace-nowrap"
+                  className="hidden md:inline px-2 py-1 text-micro text-neutral-5 whitespace-nowrap"
                   title={`Session usage — input: ${usage.inputTokens.toLocaleString()} tokens, output: ${usage.outputTokens.toLocaleString()} tokens${usage.costUsd ? `, cost: $${usage.costUsd.toFixed(4)}` : ''}`}
                 >
                   {formatUsageLabel(usage)}
@@ -657,7 +658,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   <button
                     onClick={() => { closeAllPopups('skill'); setSkillMenuOpen(!skillMenuOpen) }}
                     disabled={disabled}
-                    className="flex items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors disabled:opacity-30"
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-meta font-medium text-neutral-4 hover:text-neutral-2 hover:bg-neutral-7 transition-colors disabled:opacity-30"
                     title="Claude Skills"
                   >
                     <IconTerminal2 size={14} stroke={2} />
@@ -712,7 +713,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[220px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg py-1">
                     {currentPermissionMode && onPermissionModeChange && (
                       <>
-                        <div className="px-3 py-1.5 text-[12px] text-neutral-5 uppercase tracking-wider">Permissions</div>
+                        <div className="px-3 py-1.5 text-meta text-neutral-5 uppercase tracking-wider">Permissions</div>
                         {visibleModes.map(m => {
                           const ModeIcon = PERMISSION_MODE_ICONS[m.icon]
                           const isActive = m.id === currentPermissionMode
@@ -720,7 +721,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                             <button
                               key={m.id}
                               onClick={() => { handlePermissionModeSelect(m.id); setMobileMenuOpen(false) }}
-                              className={`w-full text-left px-3 py-2 text-[14px] hover:bg-neutral-7 transition-colors flex items-center gap-2 ${
+                              className={`w-full text-left px-3 py-2 text-body hover:bg-neutral-7 transition-colors flex items-center gap-2 ${
                                 m.dangerous ? 'hover:bg-error-9/20' : ''
                               }`}
                             >
@@ -741,12 +742,12 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                     )}
                     {currentModel && onModelChange && (
                       <>
-                        <div className="px-3 py-1.5 text-[12px] text-neutral-5 uppercase tracking-wider">Model</div>
+                        <div className="px-3 py-1.5 text-meta text-neutral-5 uppercase tracking-wider">Model</div>
                         {availableModels.map(m => (
                           <button
                             key={m.id}
                             onClick={() => { onModelChange(m.id); setMobileMenuOpen(false) }}
-                            className={`w-full text-left px-3 py-2 text-[14px] hover:bg-neutral-7 transition-colors ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
+                            className={`w-full text-left px-3 py-2 text-body hover:bg-neutral-7 transition-colors ${m.id === currentModel ? 'text-primary-4' : 'text-neutral-2'}`}
                           >
                             {m.label}
                           </button>
@@ -757,7 +758,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                     {hasSkills && (
                       <button
                         onClick={() => { setMobileMenuOpen(false); setSkillMenuOpen(!skillMenuOpen) }}
-                        className="flex items-center gap-2 w-full text-left px-3 py-2 text-[14px] text-neutral-2 hover:bg-neutral-7 transition-colors"
+                        className="flex items-center gap-2 w-full text-left px-3 py-2 text-body text-neutral-2 hover:bg-neutral-7 transition-colors"
                       >
                         <IconTerminal2 size={18} stroke={2} className="text-neutral-4" />
                         Skills
@@ -765,7 +766,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                     )}
                     <button
                       onClick={() => { setMobileMenuOpen(false); handleFileSelect() }}
-                      className="flex items-center gap-2 w-full text-left px-3 py-2 text-[14px] text-neutral-2 hover:bg-neutral-7 transition-colors"
+                      className="flex items-center gap-2 w-full text-left px-3 py-2 text-body text-neutral-2 hover:bg-neutral-7 transition-colors"
                     >
                       <IconPaperclip size={18} stroke={2} className="text-neutral-4" />
                       Attach files

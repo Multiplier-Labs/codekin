@@ -59,7 +59,7 @@ function StepIndicator({ current, eventDriven }: { current: Step; eventDriven: b
       {steps.map((s, i) => (
         <div key={s.num} className="flex items-center gap-1 flex-1">
           <div className="flex items-center gap-2 flex-1">
-            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[12px] font-semibold shrink-0 ${
+            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-meta font-semibold shrink-0 ${
               s.num < current
                 ? 'bg-success-7 text-white'
                 : s.num === current
@@ -68,7 +68,7 @@ function StepIndicator({ current, eventDriven }: { current: Step; eventDriven: b
             }`}>
               {s.num < current ? <IconCheck size={12} stroke={3} /> : s.num}
             </span>
-            <span className={`text-[13px] font-medium ${
+            <span className={`text-body font-medium ${
               s.num === current ? 'text-neutral-1' : 'text-neutral-5'
             }`}>
               {s.label}
@@ -101,7 +101,7 @@ function StepRepo({
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 py-8 justify-center text-[13px] text-neutral-5">
+      <div className="flex items-center gap-2 py-8 justify-center text-body text-neutral-5">
         <IconLoader2 size={16} stroke={2} className="animate-spin" />
         Loading repositories…
       </div>
@@ -110,7 +110,7 @@ function StepRepo({
 
   if (error) {
     return (
-      <div className="rounded-md bg-error-10/50 px-3 py-2 text-[13px] text-error-4">
+      <div className="rounded-md bg-error-10/50 px-3 py-2 text-body text-error-4">
         Failed to load repos: {error}
       </div>
     )
@@ -118,7 +118,7 @@ function StepRepo({
 
   return (
     <div>
-      <p className="text-[13px] text-neutral-4 mb-3">
+      <p className="text-body text-neutral-4 mb-3">
         Choose which repository this workflow will run against.
       </p>
       <RepoList
@@ -176,12 +176,12 @@ function StepKind({
 
   return (
     <div>
-      <p className="text-[13px] text-neutral-4 mb-3">
+      <p className="text-body text-neutral-4 mb-3">
         Select the type of automated workflow to run.
       </p>
 
       {loading && (
-        <div className="flex items-center gap-2 py-2 text-[13px] text-neutral-5 mb-2">
+        <div className="flex items-center gap-2 py-2 text-body text-neutral-5 mb-2">
           <IconLoader2 size={14} stroke={2} className="animate-spin" />
           Checking for repo-specific workflows…
         </div>
@@ -205,13 +205,13 @@ function StepKind({
                       : 'border-neutral-7 bg-neutral-10 hover:border-neutral-6'
                   }`}
                 >
-                  <span className={`block text-[15px] font-medium ${
+                  <span className={`block text-body font-medium ${
                     selectedKind === k.kind ? 'text-accent-2' : 'text-neutral-2'
                   }`}>
                     {k.name}
                   </span>
                   {k.source === 'repo' && (
-                    <span className="block text-[11px] text-neutral-5 mt-0.5">repo-specific</span>
+                    <span className="block text-micro text-neutral-5 mt-0.5">repo-specific</span>
                   )}
                 </button>
               ))}
@@ -221,7 +221,7 @@ function StepKind({
       </div>
 
       {!loading && (
-        <p className="mt-4 text-[12px] text-neutral-5 leading-relaxed">
+        <p className="mt-4 text-meta text-neutral-5 leading-relaxed">
           You can define custom workflow types by adding <code className="text-neutral-4">.md</code> files
           to <code className="text-neutral-4">{repoPath}/.codekin/workflows/</code>. See the guide on the Workflows page for details.
         </p>
@@ -243,7 +243,7 @@ function FrequencyButton({
     <button
       type="button"
       onClick={() => { onSelect(dow); }}
-      className={`rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
+      className={`rounded-md border px-3 py-1.5 text-body font-medium transition-colors ${
         selected
           ? 'border-accent-6 bg-accent-9/40 text-accent-2'
           : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
@@ -270,16 +270,16 @@ function StepConfigure({
       {/* Schedule section — hidden for event-driven workflows */}
       {eventDriven ? (
         <div>
-          <p className="text-[13px] text-neutral-4 mb-3">
+          <p className="text-body text-neutral-4 mb-3">
             {form.kind === 'pr-review'
               ? 'This workflow runs automatically when a pull request is opened or updated via GitHub webhooks.'
               : 'This workflow runs automatically on every commit via a post-commit hook.'}
           </p>
           <div className="rounded-lg border border-purple-700/40 bg-purple-900/20 px-4 py-3">
-            <span className="text-[14px] font-medium text-purple-400">
+            <span className="text-body font-medium text-purple-400">
               {form.kind === 'pr-review' ? 'Trigger: On pull request' : 'Trigger: On commit'}
             </span>
-            <p className="text-[13px] text-neutral-4 mt-1">
+            <p className="text-body text-neutral-4 mt-1">
               {form.kind === 'pr-review'
                 ? 'Each PR will be reviewed automatically when opened, updated, or reopened. No schedule needed.'
                 : 'Each commit will be reviewed automatically. No schedule needed.'}
@@ -289,12 +289,12 @@ function StepConfigure({
       ) : (
         <>
           <div>
-            <p className="text-[13px] text-neutral-4 mb-3">
+            <p className="text-body text-neutral-4 mb-3">
               Choose when this workflow should run automatically.
             </p>
 
             {/* Time picker */}
-            <label className="block text-[13px] font-medium text-neutral-3 mb-2">Time</label>
+            <label className="block text-body font-medium text-neutral-3 mb-2">Time</label>
             <TimePicker
               hour={form.cronHour}
               minute={form.cronMinute}
@@ -303,7 +303,7 @@ function StepConfigure({
           </div>
 
           <div>
-            <label className="block text-[13px] font-medium text-neutral-3 mb-2">Frequency</label>
+            <label className="block text-body font-medium text-neutral-3 mb-2">Frequency</label>
             <div className="flex flex-wrap gap-1.5 mb-2">
               {DAY_PRESETS.map(p => {
                 const selected = form.cronDow === p.dow
@@ -361,7 +361,7 @@ function StepConfigure({
                 </div>
               )
             })()}
-            <div className="mt-2 text-[13px] text-neutral-5">
+            <div className="mt-2 text-meta text-neutral-5">
               {describeCron(buildCron(form.cronHour, form.cronDow, form.cronMinute))}
             </div>
           </div>
@@ -379,7 +379,7 @@ function StepConfigure({
       />
 
       <div>
-        <label className="block text-[13px] font-medium text-neutral-3 mb-1.5">
+        <label className="block text-body font-medium text-neutral-3 mb-1.5">
           Focus areas <span className="text-neutral-5 font-normal">(optional)</span>
         </label>
         <textarea
@@ -387,7 +387,7 @@ function StepConfigure({
           onChange={e => { onChange({ customPrompt: e.target.value }); }}
           rows={3}
           placeholder="e.g. Focus on the auth module and payment flows"
-          className="w-full rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[15px] text-neutral-1 placeholder-neutral-5 focus:border-accent-6 focus:outline-none resize-none"
+          className="w-full rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-body text-neutral-1 placeholder-neutral-5 focus:border-accent-6 focus:outline-none resize-none"
         />
       </div>
     </div>
@@ -490,7 +490,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-1">
-          <h2 className="text-[19px] font-semibold text-neutral-1">New Workflow</h2>
+          <h2 className="text-head font-semibold text-neutral-1">New Workflow</h2>
           <button onClick={onClose} className="rounded p-1 text-neutral-4 hover:text-neutral-1 hover:bg-neutral-9">
             <IconX size={16} stroke={2} />
           </button>
@@ -505,13 +505,13 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
                   <div className="flex items-start gap-3 rounded-lg border border-warning-7/40 bg-warning-9/20 px-4 py-3">
                     <IconAlertTriangle size={18} stroke={2} className="text-warning-4 mt-0.5 shrink-0" />
                     <div>
-                      <p className="text-[14px] font-medium text-warning-3">Webhook setup required</p>
-                      <p className="text-[13px] text-neutral-4 mt-1">{webhookResult.message}</p>
+                      <p className="text-body font-medium text-warning-3">Webhook setup required</p>
+                      <p className="text-body text-neutral-4 mt-1">{webhookResult.message}</p>
                     </div>
                   </div>
                   <div className="rounded-lg border border-neutral-7 bg-neutral-10 px-4 py-3">
-                    <p className="text-[13px] font-medium text-neutral-3 mb-2">To enable PR reviews, configure the webhook:</p>
-                    <ol className="text-[13px] text-neutral-4 space-y-1.5 list-decimal list-inside">
+                    <p className="text-body font-medium text-neutral-3 mb-2">To enable PR reviews, configure the webhook:</p>
+                    <ol className="text-body text-neutral-4 space-y-1.5 list-decimal list-inside">
                       <li>Go to <span className="text-neutral-2 font-medium">Settings</span> (gear icon in the sidebar)</li>
                       <li>Scroll to <span className="text-neutral-2 font-medium">GitHub Webhooks</span></li>
                       <li>Enter the repository name and click <span className="text-neutral-2 font-medium">Setup</span></li>
@@ -522,8 +522,8 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
                 <div className="flex items-start gap-3 rounded-lg border border-success-7/40 bg-success-9/20 px-4 py-3">
                   <IconCheck size={18} stroke={2} className="text-success-4 mt-0.5 shrink-0" />
                   <div>
-                    <p className="text-[14px] font-medium text-success-3">Workflow created</p>
-                    <p className="text-[13px] text-neutral-4 mt-1">
+                    <p className="text-body font-medium text-success-3">Workflow created</p>
+                    <p className="text-body text-neutral-4 mt-1">
                       {webhookResult.message} PRs will be reviewed automatically when opened or updated.
                     </p>
                   </div>
@@ -535,7 +535,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-md bg-primary-8 px-4 py-2 text-[15px] font-medium text-on-primary hover:bg-primary-7 transition-colors"
+                className="rounded-md bg-primary-8 px-4 py-2 text-body font-medium text-on-primary hover:bg-primary-7 transition-colors"
               >
                 Done
               </button>
@@ -580,7 +580,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
 
             {/* Error */}
             {formError && (
-              <div className="rounded-md bg-error-10/50 px-3 py-2 text-[13px] text-error-4 mt-3">{formError}</div>
+              <div className="rounded-md bg-error-10/50 px-3 py-2 text-body text-error-4 mt-3">{formError}</div>
             )}
 
             {/* Navigation */}
@@ -589,7 +589,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
                 <button
                   type="button"
                   onClick={handleBack}
-                  className="flex items-center gap-1.5 rounded-md border border-neutral-7 bg-neutral-10 px-4 py-2 text-[15px] text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
+                  className="flex items-center gap-1.5 rounded-md border border-neutral-7 bg-neutral-10 px-4 py-2 text-body text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
                 >
                   <IconArrowLeft size={14} stroke={2} />
                   Back
@@ -598,7 +598,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-md border border-neutral-7 bg-neutral-10 px-4 py-2 text-[15px] text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
+                  className="rounded-md border border-neutral-7 bg-neutral-10 px-4 py-2 text-body text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
                 >
                   Cancel
                 </button>
@@ -611,7 +611,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
                   type="button"
                   onClick={handleNext}
                   disabled={!canNext()}
-                  className="flex items-center gap-1.5 rounded-md bg-primary-8 px-4 py-2 text-[15px] font-medium text-on-primary hover:bg-primary-7 disabled:opacity-40 transition-colors"
+                  className="flex items-center gap-1.5 rounded-md bg-primary-8 px-4 py-2 text-body font-medium text-on-primary hover:bg-primary-7 disabled:opacity-40 transition-colors"
                 >
                   Next
                   <IconArrowRight size={14} stroke={2} />
@@ -621,7 +621,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
                   type="button"
                   onClick={handleSubmit}
                   disabled={saving}
-                  className="flex items-center gap-1.5 rounded-md bg-primary-8 px-4 py-2 text-[15px] font-medium text-on-primary hover:bg-primary-7 disabled:opacity-50 transition-colors"
+                  className="flex items-center gap-1.5 rounded-md bg-primary-8 px-4 py-2 text-body font-medium text-on-primary hover:bg-primary-7 disabled:opacity-50 transition-colors"
                 >
                   {saving ? (
                     <>

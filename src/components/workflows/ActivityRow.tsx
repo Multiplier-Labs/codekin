@@ -24,16 +24,16 @@ export function ActivityRow({
   return (
     <div className="flex items-center gap-3 px-4 py-2 hover:bg-neutral-10/30 transition-colors rounded-md">
       <HealthDot status={run.status} />
-      <span className="text-[15px] font-medium text-neutral-2 min-w-0 truncate max-w-[140px]">
+      <span className="text-body font-medium text-neutral-2 min-w-0 truncate max-w-[140px]">
         {repoNameFromRun(run)}
       </span>
-      <span className="text-[14px] text-neutral-4">
+      <span className="text-body text-neutral-4">
         {kindLabel(run.kind)}
       </span>
-      <span className="text-[14px] text-neutral-5 tabular-nums ml-auto whitespace-nowrap">
+      <span className="text-body text-neutral-5 tabular-nums ml-auto whitespace-nowrap">
         {formatTime(run.createdAt)}
       </span>
-      <span className="text-[14px] text-neutral-5 tabular-nums whitespace-nowrap">
+      <span className="text-body text-neutral-5 tabular-nums whitespace-nowrap">
         {formatDuration(run.startedAt, run.completedAt)}
       </span>
       <StatusBadge status={run.status} />

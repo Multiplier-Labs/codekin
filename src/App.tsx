@@ -643,14 +643,14 @@ export default function App() {
         )}
         {/* Error banner */}
         {error && (
-          <div className="border-b border-error-9/50 bg-error-10/50 px-4 py-2 text-[15px] text-error-5">
+          <div className="border-b border-error-9/50 bg-error-10/50 px-4 py-2 text-body text-error-5">
             {error}
           </div>
         )}
 
         {/* Upload status */}
         {uploadStatus && (
-          <div className="border-b border-primary-9/50 bg-primary-10/50 px-4 py-2 text-[15px] text-primary-5">
+          <div className="border-b border-primary-9/50 bg-primary-10/50 px-4 py-2 text-body text-primary-5">
             {uploadStatus}
           </div>
         )}

@@ -357,7 +357,7 @@ export function LeftSidebar({
         <div className="app-logo-circle flex items-center justify-center rounded-full flex-shrink-0" style={{ width: 26, height: 26 }}>
           <AppIcon size={24} className="text-primary-7" />
         </div>
-        <span className="flex-1 text-[17px] font-semibold text-neutral-2 truncate">Codekin</span>
+        <span className="flex-1 text-title font-semibold text-neutral-2 truncate">Codekin</span>
         {isMobile ? (
           <button
             onClick={onMobileClose}
@@ -385,7 +385,7 @@ export function LeftSidebar({
         <div className="px-2 py-1">
           <button
             onClick={() => { onNavigateToWorkflows(); if (isMobile) onMobileClose?.() }}
-            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[15px] transition-colors ${
+            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-body transition-colors ${
               view === 'workflows'
                 ? 'bg-accent-9/30 text-accent-2'
                 : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6'
@@ -396,7 +396,7 @@ export function LeftSidebar({
           </button>
           <button
             onClick={() => { onNavigateToLoops(); if (isMobile) onMobileClose?.() }}
-            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[15px] transition-colors ${
+            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-body transition-colors ${
               view === 'loops'
                 ? 'bg-accent-9/30 text-accent-2'
                 : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6'
@@ -407,7 +407,7 @@ export function LeftSidebar({
           </button>
           <button
             onClick={() => { onNavigateToOrchestrator(); if (isMobile) onMobileClose?.() }}
-            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[15px] transition-colors ${
+            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-body transition-colors ${
               view === 'orchestrator'
                 ? 'bg-accent-9/30 text-accent-2'
                 : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6'
@@ -420,7 +420,7 @@ export function LeftSidebar({
             <div ref={modulesRef} className="relative">
               <button
                 onClick={() => setModulesOpen(!modulesOpen)}
-                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[15px] transition-colors ${
+                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-body transition-colors ${
                   modulesOpen
                     ? 'bg-accent-9/30 text-accent-2'
                     : 'text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6/50'
@@ -448,7 +448,7 @@ export function LeftSidebar({
 
         {/* Section label for active sessions */}
         {repoNodes.length > 0 && (
-          <div className="px-4 pt-1.5 pb-0.5 text-[11px] font-medium uppercase tracking-wider text-neutral-6">
+          <div className="px-4 pt-1.5 pb-0.5 text-micro font-medium uppercase tracking-wider text-neutral-6">
             Active sessions
           </div>
         )}
@@ -485,7 +485,7 @@ export function LeftSidebar({
 
         {/* Empty state */}
         {repoNodes.length === 0 && (
-          <div className="px-4 py-6 text-center text-[13px] text-neutral-5">
+          <div className="px-4 py-6 text-center text-body text-neutral-5">
             No sessions yet.<br />Click + to start one.
           </div>
         )}
@@ -531,7 +531,7 @@ export function LeftSidebar({
           </div>
           <button
             onClick={onSettingsOpen}
-            className={`flex items-center gap-1 rounded text-[13px] text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6 transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
+            className={`flex items-center gap-1 rounded text-body text-neutral-3 hover:text-neutral-1 hover:bg-neutral-6 transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
             title="Settings"
           >
             <IconSettingsGear size={isMobile ? 24 : 20} stroke={2} />

@@ -74,7 +74,7 @@ export function SlashAutocomplete({ commands, filter, onSelect, onClose }: Props
           readOnly
         />
         <Command.List ref={listRef} className="max-h-64 overflow-y-auto p-1">
-          <Command.Empty className="px-3 py-4 text-center text-[13px] text-neutral-5">
+          <Command.Empty className="px-3 py-4 text-center text-body text-neutral-5">
             No matching commands.
           </Command.Empty>
 
@@ -86,14 +86,14 @@ export function SlashAutocomplete({ commands, filter, onSelect, onClose }: Props
                 key={cmd.command}
                 value={`${cmd.command.slice(1)} ${cmd.name}`}
                 onSelect={() => handleSelect(cmd.command)}
-                className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[14px] text-neutral-3 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
+                className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-body text-neutral-3 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
               >
-                <span className={`font-mono text-[13px] ${iconClass}`}>/</span>
+                <span className={`font-mono text-meta ${iconClass}`}>/</span>
                 <span className="flex-1 truncate">
                   <span className="font-medium">{cmd.name}</span>
-                  <span className="ml-1.5 text-[12px] text-neutral-5">{cmd.description}</span>
+                  <span className="ml-1.5 text-meta text-neutral-5">{cmd.description}</span>
                 </span>
-                <span className={`flex-shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${badge.className}`}>
+                <span className={`flex-shrink-0 rounded-full px-1.5 py-0.5 text-micro font-medium ${badge.className}`}>
                   {badge.label}
                 </span>
               </Command.Item>

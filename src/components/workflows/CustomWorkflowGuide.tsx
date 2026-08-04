@@ -16,27 +16,27 @@ export function CustomWorkflowGuide() {
     <div className="workflow-card mt-6 rounded-lg border border-neutral-9/60 bg-neutral-10/30">
       <button
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center gap-2 px-4 py-3 text-left text-[15px] font-medium text-neutral-3 hover:text-neutral-1 transition-colors"
+        className="w-full flex items-center gap-2 px-4 py-3 text-left text-body font-medium text-neutral-3 hover:text-neutral-1 transition-colors"
       >
         {open
           ? <IconChevronDown size={14} stroke={2} className="text-neutral-5" />
           : <IconChevronRight size={14} stroke={2} className="text-neutral-5" />
         }
         Defining Custom Workflows
-        <span className="text-[13px] text-neutral-5 font-normal ml-1">via workflow.md files</span>
+        <span className="text-meta text-neutral-5 font-normal ml-1">via workflow.md files</span>
       </button>
 
       {open && (
-        <div className="px-4 pb-4 text-[14px] text-neutral-4 space-y-3 border-t border-neutral-9/40 pt-3">
+        <div className="px-4 pb-4 text-body text-neutral-4 space-y-3 border-t border-neutral-9/40 pt-3">
           <p>
             You can define custom workflow types per-repo by adding <code className="text-accent-3 bg-neutral-10 px-1 rounded">.md</code> files to:
           </p>
-          <pre className="rounded-md bg-neutral-12 px-3 py-2 text-[14px] text-neutral-3 font-mono overflow-x-auto">
+          <pre className="rounded-md bg-neutral-12 px-3 py-2 text-body text-neutral-3 font-mono overflow-x-auto">
 {'<repo>/.codekin/workflows/<kind>.md'}
           </pre>
 
           <p>Each file uses YAML frontmatter + a prompt body:</p>
-          <pre className="rounded-md bg-neutral-12 px-3 py-2 text-[14px] text-neutral-3 font-mono overflow-x-auto leading-relaxed">{
+          <pre className="rounded-md bg-neutral-12 px-3 py-2 text-body text-neutral-3 font-mono overflow-x-auto">{
 `---
 kind: api-docs.weekly
 name: API Documentation Check
@@ -54,7 +54,7 @@ You are reviewing the API documentation for this project.
 Important: Do NOT modify any source files.`
           }</pre>
 
-          <div className="space-y-1.5 text-[14px]">
+          <div className="space-y-1.5 text-body">
             <p className="font-medium text-neutral-3">Frontmatter fields:</p>
             <ul className="list-disc list-inside space-y-0.5 text-neutral-4 ml-1">
               <li><code className="text-neutral-3">kind</code> — unique ID, e.g. <code className="text-neutral-3">code-review.daily</code></li>

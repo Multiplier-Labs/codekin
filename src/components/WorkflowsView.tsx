@@ -124,11 +124,11 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-neutral-8/50 px-5 py-3">
-        <h1 className="text-[18px] font-medium text-neutral-1">Workflows</h1>
+        <h1 className="text-head font-medium text-neutral-1">Workflows</h1>
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => setShowAddForm(true)}
-            className="flex items-center gap-1.5 rounded-md bg-primary-8 px-3 py-1.5 text-[15px] font-medium text-on-primary hover:bg-primary-7 transition-colors"
+            className="flex items-center gap-1.5 rounded-md bg-primary-8 px-3 py-1.5 text-body font-medium text-on-primary hover:bg-primary-7 transition-colors"
           >
             <IconPlus size={14} stroke={2} />
             New Workflow
@@ -139,7 +139,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
       <div className="flex-1 overflow-y-auto p-5">
         {/* Error */}
         {error && (
-          <div className="rounded-lg border border-error-8/50 bg-error-10/30 px-4 py-2 text-[16px] text-error-4 mb-4">
+          <div className="rounded-lg border border-error-8/50 bg-error-10/30 px-4 py-2 text-body text-error-4 mb-4">
             {error}
           </div>
         )}
@@ -149,14 +149,14 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
           <div className="rounded-xl border border-dashed border-neutral-8 px-6 py-10 text-center">
             <div className="text-neutral-5 mb-1">
               <IconCalendarEvent size={32} stroke={1.5} className="mx-auto mb-3 text-neutral-6" />
-              <div className="text-[16px] text-neutral-3 font-medium mb-1">No workflows configured</div>
-              <div className="text-[14px] text-neutral-5">
+              <div className="text-body text-neutral-3 font-medium mb-1">No workflows configured</div>
+              <div className="text-body text-neutral-5">
                 Set up automated code reviews, security audits, and more.
               </div>
             </div>
             <button
               onClick={() => setShowAddForm(true)}
-              className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-primary-8 px-4 py-2 text-[15px] font-medium text-on-primary hover:bg-primary-7 transition-colors"
+              className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-primary-8 px-4 py-2 text-body font-medium text-on-primary hover:bg-primary-7 transition-colors"
             >
               <IconPlus size={14} stroke={2} />
               Create your first workflow
@@ -191,14 +191,14 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
           <div className="mt-6">
             <button
               onClick={() => setShowActivity(!showActivity)}
-              className="flex items-center gap-2 text-[15px] font-medium text-neutral-3 hover:text-neutral-1 transition-colors mb-2"
+              className="flex items-center gap-2 text-body font-medium text-neutral-3 hover:text-neutral-1 transition-colors mb-2"
             >
               {showActivity
                 ? <IconChevronDown size={14} stroke={2} />
                 : <IconArrowRight size={14} stroke={2} />
               }
               Recent Activity
-              <span className="text-[13px] text-neutral-5 font-normal">({runs.length} runs)</span>
+              <span className="text-meta text-neutral-5 font-normal">({runs.length} runs)</span>
             </button>
 
             {showActivity && (

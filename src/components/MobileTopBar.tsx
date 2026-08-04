@@ -31,7 +31,7 @@ export function MobileTopBar({ repoName, sessionName, onMenuOpen, onNewSession, 
 
       <div className="flex items-center gap-2 flex-1 min-w-0 px-1.5">
         <AppIcon size={24} className="text-primary-7 flex-shrink-0" />
-        <div className="flex-1 min-w-0 truncate text-[16px] text-neutral-2">
+        <div className="flex-1 min-w-0 truncate text-body text-neutral-2">
           {repoName ? (
             <>
               <span className="font-semibold">{repoName}</span>

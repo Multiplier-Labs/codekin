@@ -63,7 +63,7 @@ export function ApprovalsPanel({ token, workingDir, visible }: Props) {
   if (!workingDir) {
     return (
       <div className="border-t border-neutral-8/30 px-3 py-3">
-        <p className="text-[13px] text-neutral-5">Select a session to manage approvals.</p>
+        <p className="text-body text-neutral-5">Select a session to manage approvals.</p>
       </div>
     )
   }
@@ -71,7 +71,7 @@ export function ApprovalsPanel({ token, workingDir, visible }: Props) {
   if (loading) {
     return (
       <div className="border-t border-neutral-8/30 px-3 py-3">
-        <p className="text-[13px] text-neutral-5">Loading...</p>
+        <p className="text-body text-neutral-5">Loading...</p>
       </div>
     )
   }
@@ -79,7 +79,7 @@ export function ApprovalsPanel({ token, workingDir, visible }: Props) {
   if (error || !approvals) {
     return (
       <div className="border-t border-neutral-8/30 px-3 py-3">
-        <p className="text-[13px] text-neutral-5">Could not load approvals.</p>
+        <p className="text-body text-neutral-5">Could not load approvals.</p>
       </div>
     )
   }
@@ -92,8 +92,8 @@ export function ApprovalsPanel({ token, workingDir, visible }: Props) {
       <div className="ml-3 border-l border-neutral-7/30 flex flex-col min-h-0">
         {/* Header */}
         <div className="flex items-center gap-2 px-3 py-1.5 flex-shrink-0">
-          <span className="text-[13px] font-medium text-neutral-5 uppercase tracking-wider flex-shrink-0">Approvals</span>
-          <span className="text-[12px] font-mono text-neutral-6 truncate" title={workingDir}>{repoName}</span>
+          <span className="text-body font-medium text-neutral-5 uppercase tracking-wider flex-shrink-0">Approvals</span>
+          <span className="text-meta font-mono text-neutral-6 truncate" title={workingDir}>{repoName}</span>
         </div>
         <ApprovalsContent
           approvals={approvals}
@@ -151,7 +151,7 @@ function ApprovalsContent({ approvals, onRemove, onRevokeMultiple }: {
       {!empty && (
         <div className="flex-shrink-0 px-3 pb-1.5">
           <div className="flex items-center justify-between">
-            <span className="text-[13px] text-neutral-5">
+            <span className="text-meta text-neutral-5">
               {totalCount} rule{totalCount !== 1 ? 's' : ''}
             </span>
             <button
@@ -165,7 +165,7 @@ function ApprovalsContent({ approvals, onRemove, onRevokeMultiple }: {
                   onRevokeMultiple(items)
                 }
               }}
-              className="text-[13px] text-neutral-5 hover:text-error-5 transition-colors"
+              className="text-body text-neutral-5 hover:text-error-5 transition-colors"
             >
               Revoke All
             </button>
@@ -176,7 +176,7 @@ function ApprovalsContent({ approvals, onRemove, onRevokeMultiple }: {
       {/* Scrollable list */}
       <div className="overflow-y-auto min-h-0 flex-1 px-2 py-1 approvals-scroll">
         {!hasTools && !hasPatterns && !hasCommands && (
-          <p className="text-[13px] text-neutral-6 py-2 text-center">
+          <p className="text-body text-neutral-6 py-2 text-center">
             No auto-approval rules yet.
           </p>
         )}
@@ -196,7 +196,7 @@ function ApprovalsContent({ approvals, onRemove, onRevokeMultiple }: {
             >
               <ul className="space-y-0.5">
                 {filteredPatterns.map(pattern => (
-                  <li key={pattern} className="group flex items-center justify-between rounded-md px-2 py-1 text-[13px] text-neutral-3 hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors">
+                  <li key={pattern} className="group flex items-center justify-between rounded-md px-2 py-1 text-body text-neutral-3 hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors">
                     <code className="truncate font-mono">{pattern}</code>
                     <button
                       onClick={() => { onRemove({ pattern }); }}
@@ -224,7 +224,7 @@ function ApprovalsContent({ approvals, onRemove, onRevokeMultiple }: {
             >
               <ul className="space-y-0.5">
                 {filteredTools.map(tool => (
-                  <li key={tool} className="group flex items-center justify-between rounded-md px-2 py-1 text-[13px] text-neutral-3 hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors">
+                  <li key={tool} className="group flex items-center justify-between rounded-md px-2 py-1 text-body text-neutral-3 hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors">
                     <span className="truncate">{tool}</span>
                     <button
                       onClick={() => { onRemove({ tool }); }}
@@ -305,7 +305,7 @@ function ApprovalSection({ title, count, collapsed, onToggle, onRevokeAll, child
       <div className="flex items-center justify-between mb-1">
         <button
           onClick={onToggle}
-          className="flex items-center gap-1.5 text-[15px] text-neutral-4 hover:text-neutral-2 transition-colors"
+          className="flex items-center gap-1.5 text-body text-neutral-4 hover:text-neutral-2 transition-colors"
         >
           <svg
             className={`w-2.5 h-2.5 transition-transform flex-shrink-0 ${collapsed ? '' : 'rotate-90'}`}
@@ -317,12 +317,12 @@ function ApprovalSection({ title, count, collapsed, onToggle, onRevokeAll, child
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
           </svg>
           <span className="font-medium">{title}</span>
-          <span className="text-[13px] text-neutral-5">{count}</span>
+          <span className="text-meta text-neutral-5">{count}</span>
         </button>
         {!collapsed && count > 1 && (
           <button
             onClick={onRevokeAll}
-            className="text-[13px] text-neutral-5 hover:text-error-5 transition-colors"
+            className="text-body text-neutral-5 hover:text-error-5 transition-colors"
           >
             revoke all
           </button>
@@ -344,7 +344,7 @@ function CommandGroup({ prefix, commands, collapsed, onToggle, onRemove, onRevok
   if (commands.length === 1) {
     return (
       <div className="group flex items-center justify-between rounded-md px-2 py-1 hover:bg-neutral-6/50 transition-colors">
-        <code className="truncate font-mono text-[13px] text-neutral-3" title={commands[0]}>
+        <code className="truncate font-mono text-body text-neutral-3" title={commands[0]}>
           $ {commands[0]}
         </code>
         <button
@@ -362,7 +362,7 @@ function CommandGroup({ prefix, commands, collapsed, onToggle, onRemove, onRevok
       <div className="flex items-center justify-between px-2 py-0.5">
         <button
           onClick={onToggle}
-          className="flex items-center gap-1 text-[13px] text-neutral-4 hover:text-neutral-2 transition-colors"
+          className="flex items-center gap-1 text-body text-neutral-4 hover:text-neutral-2 transition-colors"
         >
           <svg
             className={`w-2 h-2 transition-transform flex-shrink-0 ${collapsed ? '' : 'rotate-90'}`}
@@ -374,12 +374,12 @@ function CommandGroup({ prefix, commands, collapsed, onToggle, onRemove, onRevok
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
           </svg>
           <code className="font-mono font-medium">{prefix}</code>
-          <span className="text-[13px] text-neutral-5">{commands.length}</span>
+          <span className="text-meta text-neutral-5">{commands.length}</span>
         </button>
         {!collapsed && (
           <button
             onClick={onRevokeAll}
-            className="text-[13px] text-neutral-5 hover:text-error-5 transition-colors"
+            className="text-body text-neutral-5 hover:text-error-5 transition-colors"
           >
             revoke all
           </button>
@@ -389,7 +389,7 @@ function CommandGroup({ prefix, commands, collapsed, onToggle, onRemove, onRevok
         <ul className="pl-3">
           {commands.map(cmd => (
             <li key={cmd} className="group flex items-center justify-between rounded-md px-2 py-1 hover:bg-neutral-6/50 transition-colors">
-              <code className="truncate font-mono text-[13px] text-neutral-3" title={cmd}>
+              <code className="truncate font-mono text-body text-neutral-3" title={cmd}>
                 $ {cmd}
               </code>
               <button

@@ -101,8 +101,8 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
       {open && (
         <div ref={popupRef} className="fixed z-50 w-72 rounded-md border border-neutral-10 bg-neutral-12 shadow-lg">
           <div className="px-3 pt-3 pb-1">
-            <h3 className="text-[15px] font-medium text-neutral-3">New Session</h3>
-            <p className="mt-0.5 text-[13px] text-neutral-6">Choose a repository to work on</p>
+            <h3 className="text-body font-medium text-neutral-3">New Session</h3>
+            <p className="mt-0.5 text-body text-neutral-6">Choose a repository to work on</p>
           </div>
           <div className="px-2 pb-2">
             <RepoList

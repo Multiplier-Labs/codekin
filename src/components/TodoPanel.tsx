@@ -100,7 +100,7 @@ export function TodoPanel({ tasks, isProcessing = false }: Props) {
           className="flex items-center gap-1.5 rounded-lg bg-neutral-9/90 backdrop-blur border border-neutral-8/60 px-2.5 py-1.5 shadow-lg hover:bg-neutral-8/90 transition-colors"
         >
           {!allDone && <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary-5 animate-pulse" />}
-          <span className="text-[13px] font-semibold text-neutral-2">
+          <span className="text-meta font-semibold text-neutral-2">
             {completed}/{tasks.length}
           </span>
           <IconChevronDown size={14} className="text-neutral-4" />
@@ -114,10 +114,10 @@ export function TodoPanel({ tasks, isProcessing = false }: Props) {
     <div className="absolute top-14 right-3 z-20 w-64 rounded-lg bg-neutral-9/90 backdrop-blur border border-neutral-8/60 shadow-lg">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-8/40">
-        <span className="text-[13px] font-semibold text-neutral-1 uppercase tracking-wider flex items-center gap-1.5">
+        <span className="text-body font-semibold text-neutral-1 uppercase tracking-wider flex items-center gap-1.5">
           {!allDone && <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary-5 animate-pulse" />}
           Tasks
-          <span className={`text-[13px] font-medium ml-1 ${allDone ? 'text-success-5' : 'text-neutral-5'}`}>
+          <span className={`text-meta font-medium ml-1 ${allDone ? 'text-success-5' : 'text-neutral-5'}`}>
             {completed}/{tasks.length}
           </span>
         </span>
@@ -145,10 +145,10 @@ export function TodoPanel({ tasks, isProcessing = false }: Props) {
           <div
             key={task.id}
             ref={(el) => { if (el) taskRefs.current.set(task.id, el); else taskRefs.current.delete(task.id) }}
-            className="flex items-start gap-2 text-[15px]"
+            className="flex items-start gap-2 text-body"
           >
             {task.status === 'completed' ? (
-              <span className="flex-shrink-0 text-success-5 text-[13px] mt-[3px]">&#10003;</span>
+              <span className="flex-shrink-0 text-success-5 text-meta mt-[3px]">&#10003;</span>
             ) : task.status === 'in_progress' ? (
               <span className="inline-block h-2 w-2 mt-[7px] rounded-full bg-primary-5 animate-pulse flex-shrink-0" />
             ) : (

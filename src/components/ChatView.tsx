@@ -90,15 +90,15 @@ function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
 
   if (apiError) {
     return (
-      <div className={`px-4 py-2 text-[15px] ${colorClass}`}>
+      <div className={`px-4 py-2 text-body ${colorClass}`}>
         <div className="flex items-center gap-2">
           <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotClass} flex-shrink-0`} />
           <span className="font-semibold">{apiError.prefix || 'API Error'}</span>
         </div>
-        <div className="ml-3.5 mt-1 space-y-0.5 text-[14px] opacity-90">
+        <div className="ml-3.5 mt-1 space-y-0.5 text-body opacity-90">
           <div>{apiError.message}</div>
           {apiError.requestId && (
-            <div className="opacity-50 text-[12px] font-mono">Request ID: {apiError.requestId}</div>
+            <div className="opacity-50 text-meta font-mono">Request ID: {apiError.requestId}</div>
           )}
         </div>
       </div>
@@ -106,7 +106,7 @@ function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
   }
 
   return (
-    <div className={`px-4 py-1.5 text-[15px] ${colorClass} flex items-center gap-2`}>
+    <div className={`px-4 py-1.5 text-body ${colorClass} flex items-center gap-2`}>
       <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotClass} flex-shrink-0`} />
       {msg.text}{modelLabel}
     </div>
@@ -232,7 +232,7 @@ function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: {
           {displayText}
         </Markdown>
         {repeatCount && repeatCount > 1 && (
-          <span className="inline-block ml-1 text-[12px] text-neutral-5 bg-neutral-10 rounded-full px-2 py-0.5 align-middle">
+          <span className="inline-block ml-1 text-meta text-neutral-5 bg-neutral-10 rounded-full px-2 py-0.5 align-middle">
             ×{repeatCount}
           </span>
         )}
@@ -373,7 +373,7 @@ function TentativeMessage({ msg, fontSize }: { msg: ChatMessage & { type: 'tenta
         className="max-w-[80%] rounded-lg border-l-2 border-warning-6 bg-warning-11/20 px-3 py-2 text-neutral-4 whitespace-pre-wrap"
         style={{ fontSize: `${fontSize}px` }}
       >
-        <div className="mb-1 text-[13px] text-warning-5 uppercase tracking-wider">queued</div>
+        <div className="mb-1 text-meta text-warning-5 uppercase tracking-wider">queued</div>
         {msg.text}
       </div>
     </div>
@@ -382,7 +382,7 @@ function TentativeMessage({ msg, fontSize }: { msg: ChatMessage & { type: 'tenta
 
 function PlanningModeMessage({ msg }: { msg: ChatMessage & { type: 'planning_mode' } }) {
   return (
-    <div className="px-4 py-1.5 text-[15px] text-primary-5 flex items-center gap-2">
+    <div className="px-4 py-1.5 text-body text-primary-5 flex items-center gap-2">
       <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary-5 flex-shrink-0" />
       {msg.active ? 'Entered plan mode' : 'Exited plan mode'}
     </div>
@@ -399,11 +399,11 @@ function OrchestratorWelcome({ agentName }: { agentName?: string }) {
             <IconRobotFace size={22} className="text-accent-5" />
           </div>
           <div>
-            <h2 className="text-[17px] font-semibold text-neutral-2 leading-tight">Agent {name}</h2>
-            <p className="text-[13px] text-neutral-5">Your AI ops manager</p>
+            <h2 className="text-title font-semibold text-neutral-2">Agent {name}</h2>
+            <p className="text-body text-neutral-5">Your AI ops manager</p>
           </div>
         </div>
-        <div className="grid gap-2 text-[14px]">
+        <div className="grid gap-2 text-body">
           {[
             'Triage repo health reports and prioritize fixes',
             'Spawn implementation sessions for issues or tasks',
@@ -456,9 +456,9 @@ function ActivityIndicator({ label, variant = 'default' }: { label: string; vari
           <path d="M16 20.1a9 9 0 0 0 5 -7.1" />
           <path d="M6.2 5a9 9 0 0 1 11.4 0" />
         </svg>
-        <span className="text-[13px] text-neutral-4 tracking-wide">{label}</span>
+        <span className="text-meta text-neutral-4 tracking-wide">{label}</span>
         {elapsed >= 10 && (
-          <span className="text-[12px] text-neutral-5">{elapsed}s</span>
+          <span className="text-meta text-neutral-5">{elapsed}s</span>
         )}
       </div>
     </div>
@@ -500,7 +500,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
   return (
     <div className="relative flex flex-1 min-h-0 w-full flex-col">
       {planningMode && (
-        <div className="z-10 flex items-center gap-2 border-b border-primary-9/50 bg-primary-11/80 px-4 py-1.5 text-[15px] text-primary-5 backdrop-blur-sm flex-shrink-0">
+        <div className="z-10 flex items-center gap-2 border-b border-primary-9/50 bg-primary-11/80 px-4 py-1.5 text-body text-primary-5 backdrop-blur-sm flex-shrink-0">
           <span className="inline-block h-2 w-2 rounded-full bg-primary-5 animate-pulse" />
           Plan Mode
         </div>
@@ -530,7 +530,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                 const d = new Date(ts)
                 const hh = String(d.getHours()).padStart(2, '0')
                 const mm = String(d.getMinutes()).padStart(2, '0')
-                nodes.push(<div key={`ts-${msg.key || i}`} className="px-4 pt-3 pb-0.5 text-[13px] text-neutral-6">{hh}:{mm}</div>)
+                nodes.push(<div key={`ts-${msg.key || i}`} className="px-4 pt-3 pb-0.5 text-meta text-neutral-6">{hh}:{mm}</div>)
               }
 
               // Collect consecutive tool_group/tool_output/image into a single ToolActivity
@@ -571,7 +571,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
               switch (msg.type) {
                 case 'system':
                   if (msg.subtype === 'trim') {
-                    node = <div key={msg.key || i} className="px-4 py-1.5 text-[15px] text-neutral-6 flex items-center gap-2">
+                    node = <div key={msg.key || i} className="px-4 py-1.5 text-body text-neutral-6 flex items-center gap-2">
                       <span className="inline-block h-1.5 w-1.5 rounded-full bg-neutral-6 flex-shrink-0" />
                       Older messages trimmed
                     </div>
@@ -612,7 +612,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
 
       {disabled && (
         <div className="absolute inset-0 flex items-center justify-center bg-neutral-12/80">
-          <p className="text-[15px] text-neutral-3">Configure token in Settings to use chat</p>
+          <p className="text-body text-neutral-3">Configure token in Settings to use chat</p>
         </div>
       )}
 

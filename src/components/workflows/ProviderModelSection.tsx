@@ -13,7 +13,7 @@ import type { ModelOption, CodingProvider } from '../../types'
 import { WorkflowModelPicker } from './WorkflowModelPicker'
 
 const providerBtnClass = (selected: boolean) =>
-  `rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
+  `rounded-md border px-3 py-1.5 text-body font-medium transition-colors ${
     selected
       ? 'border-accent-6 bg-accent-9/40 text-accent-2'
       : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
@@ -117,7 +117,7 @@ export function ProviderModelSection({ token, workingDir, provider, model, onPro
       {/* Provider selector — only show when an alternative provider is available */}
       {(openCodeAvailable || codexAvailable) && (
         <div>
-          <label className="block text-[13px] font-medium text-neutral-3 mb-1">Provider</label>
+          <label className="block text-body font-medium text-neutral-3 mb-1">Provider</label>
           <div className="flex gap-1">
             <button
               type="button"
@@ -150,7 +150,7 @@ export function ProviderModelSection({ token, workingDir, provider, model, onPro
 
       {/* Model picker */}
       <div>
-        <label className="block text-[13px] font-medium text-neutral-3 mb-1">Model</label>
+        <label className="block text-body font-medium text-neutral-3 mb-1">Model</label>
         <WorkflowModelPicker
           models={currentModels}
           selected={model}

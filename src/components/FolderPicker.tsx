@@ -96,7 +96,7 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
     setBrowserOpen(false)
   }
 
-  const inputSizeClass = inputClass ?? 'text-[13px]'
+  const inputSizeClass = inputClass ?? 'text-body'
 
   return (
     <div className="relative">
@@ -122,7 +122,7 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
           type="button"
           onClick={() => browserOpen ? setBrowserOpen(false) : void browse(path || undefined)}
           disabled={!token || browseLoading}
-          className="flex items-center gap-1 rounded border border-neutral-9 bg-neutral-10 px-2.5 py-2 text-[13px] text-neutral-4 hover:border-neutral-7 hover:text-neutral-3 disabled:opacity-50"
+          className="flex items-center gap-1 rounded border border-neutral-9 bg-neutral-10 px-2.5 py-2 text-body text-neutral-4 hover:border-neutral-7 hover:text-neutral-3 disabled:opacity-50"
           title="Browse folders"
         >
           {browseLoading ? (
@@ -135,14 +135,14 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
 
       {/* Error message */}
       {(error || browseError) && (
-        <p className="mt-1 text-[12px] text-red-400">
+        <p className="mt-1 text-meta text-red-400">
           {error || browseError}
         </p>
       )}
 
       {/* Help text */}
       {helpText && !error && !browseError && (
-        <p className="mt-1 text-[12px] text-neutral-5">{helpText}</p>
+        <p className="mt-1 text-meta text-neutral-5">{helpText}</p>
       )}
 
       {/* Directory browser dropdown */}
@@ -161,7 +161,7 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
             >
               <IconArrowUp size={14} />
             </button>
-            <span className="flex-1 truncate font-mono text-[12px] text-neutral-4">{browsePath}</span>
+            <span className="flex-1 truncate font-mono text-meta text-neutral-4">{browsePath}</span>
             <button
               type="button"
               onClick={() => setBrowserOpen(false)}
@@ -174,14 +174,14 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
           {/* Directory list */}
           <div className="max-h-48 overflow-y-auto py-1">
             {dirs.length === 0 ? (
-              <p className="px-3 py-2 text-[12px] text-neutral-5">No subdirectories</p>
+              <p className="px-3 py-2 text-meta text-neutral-5">No subdirectories</p>
             ) : (
               dirs.map(dir => (
                 <button
                   key={dir}
                   type="button"
                   onClick={() => selectDir(dir)}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-neutral-3 hover:bg-neutral-8"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-body text-neutral-3 hover:bg-neutral-8"
                 >
                   <IconFolder size={14} className="shrink-0 text-neutral-5" />
                   <span className="truncate">{dir}</span>
@@ -196,7 +196,7 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
             <button
               type="button"
               onClick={pickCurrentDir}
-              className="w-full rounded bg-primary-7 px-3 py-1.5 text-[13px] font-medium text-white hover:bg-primary-6"
+              className="w-full rounded bg-primary-7 px-3 py-1.5 text-body font-medium text-white hover:bg-primary-6"
             >
               Select this folder
             </button>

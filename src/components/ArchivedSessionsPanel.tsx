@@ -170,15 +170,15 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
         <div className="flex items-center gap-3 px-4 py-2 bg-neutral-9/70 border-b border-neutral-8/40 flex-shrink-0">
           <IconArchive size={16} className="text-neutral-4" />
           <div className="flex-1 min-w-0">
-            <span className="text-[15px] font-medium text-neutral-1 truncate block">{displayName(viewing)}</span>
-            <span className="text-[13px] text-neutral-5">
+            <span className="text-body font-medium text-neutral-1 truncate block">{displayName(viewing)}</span>
+            <span className="text-meta text-neutral-5">
               Archived {compactAge(viewing.archivedAt)} ago &middot; {viewing.messageCount} messages
             </span>
           </div>
           {onNewSessionFromArchive && (
             <button
               onClick={handleNewFromContext}
-              className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[13px] font-medium text-primary-4 bg-primary-10/30 hover:bg-primary-9/40 hover:text-primary-3 transition-colors"
+              className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-body font-medium text-primary-4 bg-primary-10/30 hover:bg-primary-9/40 hover:text-primary-3 transition-colors"
               title="Start a new session with this conversation as context"
             >
               <IconMessagePlus size={16} stroke={2} />
@@ -213,9 +213,9 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
     <div className="flex flex-col min-h-0 flex-1">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 bg-neutral-9/70 border-b border-neutral-8/40 flex-shrink-0">
-        <span className="text-[13px] font-semibold text-neutral-1 uppercase tracking-wider">Archived Sessions</span>
+        <span className="text-body font-semibold text-neutral-1 uppercase tracking-wider">Archived Sessions</span>
         <div className="flex items-center gap-1">
-          <label className="text-[12px] text-neutral-5" title="Auto-delete after this many days">
+          <label className="text-meta text-neutral-5" title="Auto-delete after this many days">
             Keep
           </label>
           <input
@@ -224,15 +224,15 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
             max={365}
             value={retentionDays}
             onChange={e => handleRetentionChange(Number(e.target.value))}
-            className="w-10 text-[13px] text-neutral-2 bg-neutral-8 border border-neutral-7 rounded px-1 py-0.5 text-center"
+            className="w-10 text-body text-neutral-2 bg-neutral-8 border border-neutral-7 rounded px-1 py-0.5 text-center"
           />
-          <span className="text-[12px] text-neutral-5">d</span>
+          <span className="text-meta text-neutral-5">d</span>
         </div>
       </div>
 
       {/* Session list */}
       {sessions.length === 0 ? (
-        <div className="px-3 py-4 text-[13px] text-neutral-5 text-center">
+        <div className="px-3 py-4 text-body text-neutral-5 text-center">
           No archived sessions
         </div>
       ) : (
@@ -252,8 +252,8 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
               ) : (
                 <IconArchive size={12} className="shrink-0 opacity-50" />
               )}
-              <span className="flex-1 truncate text-[15px]">{displayName(s)}</span>
-              <span className="shrink-0 text-[13px] text-neutral-5 tabular-nums">{compactAge(s.archivedAt)}</span>
+              <span className="flex-1 truncate text-body">{displayName(s)}</span>
+              <span className="shrink-0 text-meta text-neutral-5 tabular-nums">{compactAge(s.archivedAt)}</span>
               {loading ? (
                 <IconLoader2 size={14} className="shrink-0 text-neutral-5 animate-spin" />
               ) : (

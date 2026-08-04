@@ -39,12 +39,12 @@ export function DocsBrowser({
       <div className="docs-header flex items-center gap-2 px-4 py-2 border-b flex-shrink-0">
         <button
           onClick={onClose}
-          className="docs-header-back flex items-center gap-1 text-[13px] transition-colors cursor-pointer"
+          className="docs-header-back flex items-center gap-1 text-body transition-colors cursor-pointer"
         >
           <IconChevronLeft size={14} stroke={2.5} />
           Back
         </button>
-        <span className="docs-header-path flex-1 text-[13px] text-center truncate">
+        <span className="docs-header-path flex-1 text-meta text-center truncate">
           {repoName} <span className="docs-header-slash">/</span> {filePath}
         </span>
         <button
@@ -56,7 +56,7 @@ export function DocsBrowser({
         </button>
         <button
           onClick={onToggleRaw}
-          className={`docs-header-toggle rounded px-2 py-0.5 text-[13px] transition-colors cursor-pointer ${
+          className={`docs-header-toggle rounded px-2 py-0.5 text-body transition-colors cursor-pointer ${
             rawMode ? 'is-active' : ''
           }`}
         >
@@ -74,12 +74,12 @@ export function DocsBrowser({
             <IconLoader2 size={20} className="animate-spin text-neutral-5" />
           </div>
         ) : error ? (
-          <div className="rounded-md bg-error-10/50 px-3 py-2 text-[13px] text-error-4 mx-4 mt-4">
+          <div className="rounded-md bg-error-10/50 px-3 py-2 text-body text-error-4 mx-4 mt-4">
             {error}
           </div>
         ) : content !== null ? (
           rawMode ? (
-            <pre className="px-6 py-4 text-[14px] text-neutral-3 whitespace-pre-wrap" style={{ fontFamily: "'Inconsolata', monospace" }}>
+            <pre className="px-6 py-4 text-body text-neutral-3 whitespace-pre-wrap" style={{ fontFamily: "'Inconsolata', monospace" }}>
               {content}
             </pre>
           ) : (

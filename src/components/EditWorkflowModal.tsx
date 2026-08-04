@@ -16,7 +16,7 @@ import TimePicker from './TimePicker'
 import { ProviderModelSection } from './workflows/ProviderModelSection'
 
 const btnClass = (selected: boolean) =>
-  `rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
+  `rounded-md border px-3 py-1.5 text-body font-medium transition-colors ${
     selected
       ? 'border-accent-6 bg-accent-9/40 text-accent-2'
       : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
@@ -90,11 +90,11 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-[19px] font-semibold text-neutral-1">Edit Workflow</h2>
+            <h2 className="text-head font-semibold text-neutral-1">Edit Workflow</h2>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-[13px] text-neutral-4">{repoShortName}</span>
+              <span className="text-meta text-neutral-4">{repoShortName}</span>
               <span className="text-neutral-7">·</span>
-              <span className="text-[13px] text-neutral-4">{kindLabel(repo.kind ?? '')}</span>
+              <span className="text-meta text-neutral-4">{kindLabel(repo.kind ?? '')}</span>
             </div>
           </div>
           <button onClick={onClose} className="rounded p-1 text-neutral-4 hover:text-neutral-1 hover:bg-neutral-9">
@@ -108,7 +108,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
             {/* Left column — Workflow kind */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-[13px] font-medium text-neutral-3">Workflow type</label>
+                <label className="text-body font-medium text-neutral-3">Workflow type</label>
                 <CategoryBadge kind={form.kind} />
               </div>
               <div className="grid grid-cols-2 gap-1.5">
@@ -123,7 +123,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
                         : 'border-neutral-7 bg-neutral-10 hover:border-neutral-6'
                     }`}
                   >
-                    <span className={`block text-[12px] font-medium leading-tight ${
+                    <span className={`block text-meta font-medium leading-tight ${
                       form.kind === k.value ? 'text-accent-2' : 'text-neutral-2'
                     }`}>
                       {k.label}
@@ -138,10 +138,10 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
               {/* Schedule — hidden for event-driven workflows */}
               {eventDriven ? (
                 <div className="rounded-lg border border-purple-700/40 bg-purple-900/20 px-3 py-2.5">
-                  <span className="text-[13px] font-medium text-purple-400">
+                  <span className="text-body font-medium text-purple-400">
                     {form.kind === 'pr-review' ? 'Trigger: On pull request' : 'Trigger: On commit'}
                   </span>
-                  <p className="text-[12px] text-neutral-4 mt-0.5">
+                  <p className="text-meta text-neutral-4 mt-0.5">
                     {form.kind === 'pr-review'
                       ? 'Runs automatically when PRs are opened or updated.'
                       : 'Runs automatically on each commit.'}
@@ -151,7 +151,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
                 <div>
                   <div className="flex items-center gap-3 mb-2.5">
                     <div>
-                      <label className="block text-[13px] font-medium text-neutral-3 mb-1">Time</label>
+                      <label className="block text-body font-medium text-neutral-3 mb-1">Time</label>
                       <TimePicker
                         hour={form.cronHour}
                         minute={form.cronMinute}
@@ -160,7 +160,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
                     </div>
                     {isDay && (
                       <div>
-                        <label className="block text-[13px] font-medium text-neutral-3 mb-1">Repeat</label>
+                        <label className="block text-body font-medium text-neutral-3 mb-1">Repeat</label>
                         <div className="flex gap-1">
                           <button type="button" onClick={() => setForm(f => ({ ...f, cronDow: baseDow }))} className={btnClass(!biweekly)}>
                             Weekly
@@ -172,7 +172,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
                       </div>
                     )}
                   </div>
-                  <label className="block text-[13px] font-medium text-neutral-3 mb-1">Frequency</label>
+                  <label className="block text-body font-medium text-neutral-3 mb-1">Frequency</label>
                   <div className="flex flex-wrap gap-1 mb-1.5">
                     {DAY_PRESETS.map(p => {
                       const isActive = form.cronDow === p.dow
@@ -201,7 +201,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
                       </button>
                     ))}
                   </div>
-                  <div className="mt-1 text-[12px] text-neutral-5">
+                  <div className="mt-1 text-meta text-neutral-5">
                     {describeCron(buildCron(form.cronHour, form.cronDow, form.cronMinute))}
                   </div>
                 </div>
@@ -221,7 +221,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
 
           {/* Custom prompt — full width */}
           <div>
-            <label className="block text-[13px] font-medium text-neutral-3 mb-1">
+            <label className="block text-body font-medium text-neutral-3 mb-1">
               Focus areas <span className="text-neutral-5 font-normal">(optional)</span>
             </label>
             <textarea
@@ -229,26 +229,26 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
               onChange={e => setForm(f => ({ ...f, customPrompt: e.target.value }))}
               rows={2}
               placeholder="e.g. Focus on the auth module and payment flows"
-              className="w-full rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[14px] text-neutral-1 placeholder-neutral-5 focus:border-accent-6 focus:outline-none resize-none"
+              className="w-full rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-body text-neutral-1 placeholder-neutral-5 focus:border-accent-6 focus:outline-none resize-none"
             />
           </div>
 
           {formError && (
-            <div className="rounded-md bg-error-10/50 px-3 py-2 text-[13px] text-error-4">{formError}</div>
+            <div className="rounded-md bg-error-10/50 px-3 py-2 text-body text-error-4">{formError}</div>
           )}
 
           <div className="flex gap-2 pt-2 border-t border-neutral-8/50">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 rounded-md border border-neutral-7 bg-neutral-10 py-2 text-[14px] text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
+              className="flex-1 rounded-md border border-neutral-7 bg-neutral-10 py-2 text-body text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={saving}
-              className="flex-1 rounded-md bg-primary-8 py-2 text-[14px] font-medium text-on-primary hover:bg-primary-7 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
+              className="flex-1 rounded-md bg-primary-8 py-2 text-body font-medium text-on-primary hover:bg-primary-7 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5"
             >
               {saving ? (
                 <>

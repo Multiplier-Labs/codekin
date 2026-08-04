@@ -81,7 +81,7 @@ export function ConnectionPopup({
       ref={ref}
       className="absolute bottom-full left-0 mb-2 w-56 rounded-lg border border-neutral-8/40 bg-neutral-11 shadow-lg z-50"
     >
-      <div className="px-3 py-2 border-b border-neutral-8/30 text-[11px] font-medium uppercase tracking-wider text-neutral-5">
+      <div className="px-3 py-2 border-b border-neutral-8/30 text-micro font-medium uppercase tracking-wider text-neutral-5">
         Connections
       </div>
 
@@ -89,12 +89,12 @@ export function ConnectionPopup({
       <div className="px-3 py-2.5 flex items-center gap-2">
         <StatusDot color={claudeDotColor} />
         <div className="flex-1 min-w-0">
-          <div className="text-[13px] text-neutral-2 font-medium">Claude Code</div>
-          <div className="text-[11px] text-neutral-5">{claudeLabel}</div>
+          <div className="text-body text-neutral-2 font-medium">Claude Code</div>
+          <div className="text-micro text-neutral-5">{claudeLabel}</div>
         </div>
         <button
           onClick={onToggleClaude}
-          className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${
+          className={`text-micro px-2 py-0.5 rounded border transition-colors ${
             claudeDisabled
               ? 'border-success-8/50 text-success-5 hover:bg-success-9/20'
               : 'border-neutral-8/50 text-neutral-4 hover:bg-neutral-8/30'
@@ -108,12 +108,12 @@ export function ConnectionPopup({
       <div className="px-3 py-2.5 flex items-center gap-2 border-t border-neutral-8/20">
         <StatusDot color={ocDotColor} />
         <div className="flex-1 min-w-0">
-          <div className="text-[13px] text-neutral-2 font-medium">OpenCode</div>
-          <div className="text-[11px] text-neutral-5">{ocLabel}</div>
+          <div className="text-body text-neutral-2 font-medium">OpenCode</div>
+          <div className="text-micro text-neutral-5">{ocLabel}</div>
         </div>
         <button
           onClick={onToggleOpenCode}
-          className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${
+          className={`text-micro px-2 py-0.5 rounded border transition-colors ${
             openCodeDisabled
               ? 'border-success-8/50 text-success-5 hover:bg-success-9/20'
               : 'border-neutral-8/50 text-neutral-4 hover:bg-neutral-8/30'
@@ -127,12 +127,12 @@ export function ConnectionPopup({
       <div className="px-3 py-2.5 flex items-center gap-2 border-t border-neutral-8/20">
         <StatusDot color={codexDotColor} />
         <div className="flex-1 min-w-0">
-          <div className="text-[13px] text-neutral-2 font-medium">Codex</div>
-          <div className="text-[11px] text-neutral-5">{codexLabel}</div>
+          <div className="text-body text-neutral-2 font-medium">Codex</div>
+          <div className="text-micro text-neutral-5">{codexLabel}</div>
         </div>
         <button
           onClick={onToggleCodex}
-          className={`text-[11px] px-2 py-0.5 rounded border transition-colors ${
+          className={`text-micro px-2 py-0.5 rounded border transition-colors ${
             codexDisabled
               ? 'border-success-8/50 text-success-5 hover:bg-success-9/20'
               : 'border-neutral-8/50 text-neutral-4 hover:bg-neutral-8/30'

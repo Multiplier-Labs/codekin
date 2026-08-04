@@ -62,26 +62,26 @@ export function WorkflowRow({
     <div>
       <div className={`group flex items-center gap-3 px-3 py-2 rounded-md transition-colors hover:bg-neutral-10/50 ${paused && !eventDriven ? 'opacity-60' : ''}`}>
         <HealthDot status={lastRun?.status} />
-        <span className={`text-[14px] font-medium min-w-0 truncate ${paused && !eventDriven ? 'text-neutral-5' : 'text-neutral-2'}`}>
+        <span className={`text-body font-medium min-w-0 truncate ${paused && !eventDriven ? 'text-neutral-5' : 'text-neutral-2'}`}>
           {kindLabel(repo.kind ?? '')}
         </span>
         {paused && !eventDriven && (
-          <span className="text-[12px] text-warning-5 shrink-0">paused</span>
+          <span className="text-meta text-warning-5 shrink-0">paused</span>
         )}
-        <span className={`text-[14px] whitespace-nowrap shrink-0 ${eventDriven ? 'text-purple-400' : 'text-neutral-5'}`}>
+        <span className={`text-body whitespace-nowrap shrink-0 ${eventDriven ? 'text-purple-400' : 'text-neutral-5'}`}>
           {eventDriven
             ? (repo.kind === 'pr-review' ? 'On pull request' : 'On commit')
             : schedule ? describeCron(schedule.cronExpression) : describeCron(repo.cronExpression)}
         </span>
         {modelLabel(repo.model) && (
-          <span className="text-[12px] text-neutral-5 bg-neutral-9 rounded px-1.5 py-0.5 shrink-0">
+          <span className="text-meta text-neutral-5 bg-neutral-9 rounded px-1.5 py-0.5 shrink-0">
             {modelLabel(repo.model)}
           </span>
         )}
         {lastRun && (
           <>
             <StatusBadge status={lastRun.status} />
-            <span className="text-[13px] text-neutral-5 tabular-nums whitespace-nowrap shrink-0">
+            <span className="text-meta text-neutral-5 tabular-nums whitespace-nowrap shrink-0">
               {formatTime(lastRun.createdAt)}
             </span>
           </>

@@ -49,7 +49,7 @@ export default function TimePicker({ hour, minute, onChange, step = 15, classNam
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[15px] font-mono text-neutral-1 focus:border-accent-6 focus:outline-none w-40 cursor-pointer hover:border-neutral-5 transition-colors"
+        className="flex items-center gap-2 rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-body font-mono text-neutral-1 focus:border-accent-6 focus:outline-none w-40 cursor-pointer hover:border-neutral-5 transition-colors"
       >
         <span className="flex-1 text-left">{pad(hour)}:{pad(minute)}</span>
         {/* Clock icon */}
@@ -70,7 +70,7 @@ export default function TimePicker({ hour, minute, onChange, step = 15, classNam
                 type="button"
                 data-selected={h === hour}
                 onClick={() => { onChange(h, minute); }}
-                className={`block w-full px-4 py-1.5 text-center font-mono text-[14px] transition-colors cursor-pointer
+                className={`block w-full px-4 py-1.5 text-center font-mono text-body transition-colors cursor-pointer
                   ${h === hour
                     ? 'bg-accent-8 text-accent-2'
                     : 'text-neutral-2 hover:bg-neutral-8'
@@ -92,7 +92,7 @@ export default function TimePicker({ hour, minute, onChange, step = 15, classNam
                 type="button"
                 data-selected={m === minute}
                 onClick={() => { onChange(hour, m); }}
-                className={`block w-full px-4 py-1.5 text-center font-mono text-[14px] transition-colors cursor-pointer
+                className={`block w-full px-4 py-1.5 text-center font-mono text-body transition-colors cursor-pointer
                   ${m === minute
                     ? 'bg-accent-8 text-accent-2'
                     : 'text-neutral-2 hover:bg-neutral-8'

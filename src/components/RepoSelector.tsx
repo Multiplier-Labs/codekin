@@ -76,11 +76,11 @@ export function RepoSelector({ groups, token, ghMissing, onOpen, onRefreshRepos 
           <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-neutral-7/50">
             <IconGitBranch size={24} stroke={1.5} className="text-neutral-3" />
           </div>
-          <h2 className="text-[19px] font-medium text-neutral-2">Choose a repository to start a Claude Code session</h2>
+          <h2 className="text-head font-medium text-neutral-2">Choose a repository to start a Claude Code session</h2>
         </div>
 
         {ghMissing ? (
-          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[13px] leading-relaxed text-neutral-3">
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-body text-neutral-3">
             <p className="mb-2 font-medium text-amber-400">GitHub CLI (gh) not found</p>
             <p className="text-neutral-4">The repo browser needs <code className="rounded bg-neutral-8 px-1 py-0.5 text-neutral-3">gh</code> to list and clone your repositories.</p>
             <p className="mt-2 text-neutral-4">
@@ -94,7 +94,7 @@ export function RepoSelector({ groups, token, ghMissing, onOpen, onRefreshRepos 
             </p>
           </div>
         ) : totalRepos === 0 ? (
-          <p className="text-center text-[17px] text-neutral-6">No repositories configured</p>
+          <p className="text-center text-title text-neutral-6">No repositories configured</p>
         ) : (
           <RepoList
             groups={groups}
