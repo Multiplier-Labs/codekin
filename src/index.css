@@ -530,6 +530,69 @@
   --color-neutral-6: #8a8a8a;
 }
 
+/* ── Density ───────────────────────────────────────────────────────────────
+   One knob, set once on the app shell via data-density="touch" (App.tsx),
+   with a pointer:coarse fallback so a touch laptop gets sane targets even
+   when the JS breakpoint disagrees. Rows read these variables instead of
+   branching on isMobile per element. Anything that must stay visually small
+   (a status dot, a close X) gets a transparent hit area of --tap-min. */
+:root {
+  --row-h: 28px;
+  --row-pad: 10px;
+  --icon-size: 20px;
+  --tap-min: 28px;
+}
+
+[data-density="touch"] {
+  --row-h: 44px;
+  --row-pad: 12px;
+  --icon-size: 24px;
+  --tap-min: 44px;
+}
+
+@media (pointer: coarse) {
+  :root {
+    --row-h: 44px;
+    --row-pad: 12px;
+    --icon-size: 24px;
+    --tap-min: 44px;
+  }
+}
+
+/* Rows and icon buttons read the density knob instead of branching per
+   element. min-* is used rather than fixed sizing so desktop keeps its
+   existing intrinsic heights and only touch mode grows. */
+.density-row {
+  min-height: var(--row-h);
+}
+
+.density-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--row-h);
+  min-height: var(--row-h);
+}
+
+.density-icon {
+  width: var(--icon-size);
+  height: var(--icon-size);
+}
+
+/* Interactive elements that stay visually small but need a real target. */
+.tap-target {
+  position: relative;
+}
+.tap-target::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+}
+
 /* Tell the browser which scheme native UI (checkboxes, scrollbars, number
    spinners, pickers) should use — without this, unchecked checkboxes render
    as stark white boxes in dark mode. */

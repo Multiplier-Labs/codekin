@@ -571,7 +571,7 @@ export default function App() {
   }, [])
 
   return (
-    <div className="flex h-full bg-edge-strong">
+    <div className="flex h-full bg-edge-strong" data-density={isMobile ? 'touch' : undefined}>
       {/* Left sidebar — repo/session tree + nav */}
       <LeftSidebar
         sessions={sessions}

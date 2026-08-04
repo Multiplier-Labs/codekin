@@ -26,15 +26,14 @@ interface PromptButtonsProps {
   /** Derived pattern for "Approve Pattern" button, e.g. "cat *". Only present for Bash permission prompts. */
   approvePattern?: string
   onSelect: (value: string | string[]) => void
-  /** When true, uses larger tap targets for mobile. */
-  isMobile?: boolean
 }
 
 /** Sticky prompt bar for permission approvals, single/multi-select questions, and multi-question AskUserQuestion flows. */
-export function PromptButtons({ options, question, multiSelect, promptType, questions, approvePattern, onSelect, isMobile = false }: PromptButtonsProps) {
+export function PromptButtons({ options, question, multiSelect, promptType, questions, approvePattern, onSelect }: PromptButtonsProps) {
   const isPermission = promptType === 'permission'
   const isQuestion = promptType === 'question'
-  const btnPad = isMobile ? 'px-4 py-2.5 text-body min-h-[34px]' : isQuestion ? 'px-4 py-1.5 text-body' : 'px-3 py-0.5 text-body'
+  // Height comes from the density knob (--row-h), not a mobile branch.
+  const btnPad = `density-row text-body ${isQuestion ? 'px-4 py-1.5' : 'px-3 py-0.5'}`
 
   // Auto-allow countdown for permission prompts
   const [timeLeft, setTimeLeft] = useState(15)
@@ -142,7 +141,7 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
             {displayQuestion}
           </p>
         )}
-        <div className={`flex flex-wrap items-center ${isMobile ? 'gap-2.5' : isQuestion ? 'gap-2' : 'gap-1.5'}`}>
+        <div className={`flex flex-wrap items-center ${isQuestion ? 'gap-2' : 'gap-1.5'}`}>
           {displayOptions.map((opt) => (
             <button
               key={opt.value}

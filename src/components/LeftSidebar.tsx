@@ -505,11 +505,11 @@ export function LeftSidebar({
 
       {/* Bottom toolbar */}
       <div className="flex flex-col border-t border-edge flex-shrink-0">
-        <div className={`flex items-center gap-0.5 px-2 ${isMobile ? 'gap-1 py-3' : 'py-2'}`}>
+        <div className="flex items-center gap-0.5 px-2 py-2">
           <div className="relative">
             <button
               onClick={() => setConnPopupOpen(o => !o)}
-              className="flex items-center justify-center px-1 py-1 rounded-control hover:bg-surface-raised transition-colors"
+              className="density-icon-btn tap-target px-1 py-1 rounded-control hover:bg-surface-raised transition-colors"
               title="Connection status"
             >
               <span className={`inline-block h-2 w-2 rounded-full ${connDotColor}`} />
@@ -531,25 +531,25 @@ export function LeftSidebar({
           </div>
           <button
             onClick={onSettingsOpen}
-            className={`flex items-center gap-1 rounded-control text-body text-ink hover:text-ink hover:bg-surface-raised transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
+            className="density-icon-btn gap-1 px-1.5 py-1 rounded-control text-body text-ink hover:text-ink hover:bg-surface-raised transition-colors"
             title="Settings"
           >
-            <IconSettingsGear size={isMobile ? 24 : 20} stroke={2} />
+            <IconSettingsGear className="density-icon" stroke={2} />
           </button>
           <div className="flex-1" />
           <button
             onClick={() => onUpdateTheme(theme === 'dark' ? 'light' : 'dark')}
-            className={`rounded-control text-ink hover:bg-surface-raised hover:text-ink transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
+            className="density-icon-btn px-1.5 py-1 rounded-control text-ink hover:bg-surface-raised hover:text-ink transition-colors"
             title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
           >
-            {theme === 'dark' ? <IconSun size={isMobile ? 24 : 20} stroke={2} /> : <IconMoon size={isMobile ? 24 : 20} stroke={2} />}
+            {theme === 'dark' ? <IconSun className="density-icon" stroke={2} /> : <IconMoon className="density-icon" stroke={2} />}
           </button>
           <button
             onClick={() => { window.location.href = '/authelia/logout' }}
-            className={`rounded-control text-ink hover:bg-surface-raised hover:text-ink transition-colors ${isMobile ? 'px-2 py-2' : 'px-1.5 py-1'}`}
+            className="density-icon-btn px-1.5 py-1 rounded-control text-ink hover:bg-surface-raised hover:text-ink transition-colors"
             title="Logout"
           >
-            <IconLogout size={isMobile ? 24 : 20} stroke={2} />
+            <IconLogout className="density-icon" stroke={2} />
           </button>
         </div>
       </div>

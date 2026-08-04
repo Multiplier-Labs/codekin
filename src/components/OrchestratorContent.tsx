@@ -107,7 +107,6 @@ export function OrchestratorContent({
               questions={activePrompt.questions}
               approvePattern={activePrompt.approvePattern}
               onSelect={sendPromptResponse}
-              isMobile={isMobile}
             />
           )}
           <InputBar

@@ -126,7 +126,6 @@ export function SessionContent({
           disabled={disabled}
           planningMode={planningMode}
           activityLabel={isProviderDisabled ? undefined : activityLabel}
-          isMobile={isMobile}
         />
         <TodoPanel tasks={tasks} isProcessing={isProcessing} />
 
@@ -193,7 +192,6 @@ export function SessionContent({
           questions={activePrompt.questions}
           approvePattern={activePrompt.approvePattern}
           onSelect={sendPromptResponse}
-          isMobile={isMobile}
         />
       )}
       {promptQueueSize > 1 && (

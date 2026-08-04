@@ -266,14 +266,14 @@ export function RepoSection({
       <div className="group flex items-center gap-1.5 px-2 py-1">
         <button
           onClick={() => { setExpanded(!expanded); if (!isActive) onSelectRepo(node.workingDir) }}
-          className="flex flex-1 items-center gap-2 min-w-0 rounded-control px-2 py-0.5 text-left transition-colors text-ink hover:text-ink"
+          className="density-row flex flex-1 items-center gap-2 min-w-0 rounded-control px-2 py-0.5 text-left transition-colors text-ink hover:text-ink"
         >
           {expanded
             ? <IconChevronDown size={14} stroke={2.5} className="flex-shrink-0 text-ink-muted opacity-0 group-hover/repo:opacity-100 transition-opacity" />
             : <IconChevronRight size={14} stroke={2.5} className="flex-shrink-0 text-ink-muted opacity-0 group-hover/repo:opacity-100 transition-opacity" />
           }
           <span className={`inline-block h-1.5 w-1.5 rounded-full flex-shrink-0 ${statusDot}`} title={statusTitle} />
-          <span className={`truncate font-semibold tracking-wide ${isMobile ? 'text-title' : 'text-body'}`}>{node.displayName}</span>
+          <span className="truncate font-semibold tracking-wide text-body">{node.displayName}</span>
           {!expanded && node.sessions.length > 1 && (
             <span className="text-meta text-ink-faint flex-shrink-0">({node.sessions.length})</span>
           )}
@@ -332,7 +332,7 @@ export function RepoSection({
               <div
                 key={s.id}
                 onClick={() => { if (!isEditing) onSelectSession(s.id) }}
-                className={`group w-full flex items-baseline gap-2 pl-10 pr-2 py-1 text-left ${isMobile ? 'text-title' : 'text-body'} transition-colors rounded-control cursor-pointer ${
+                className={`density-row group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-body transition-colors rounded-control cursor-pointer ${
                   isActiveSession
                     ? 'bg-accent-9/30 text-accent-2'
                     : 'text-ink hover:bg-surface-raised hover:text-ink'
