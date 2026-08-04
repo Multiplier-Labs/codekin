@@ -16,7 +16,7 @@
   },
   "overrides": {
     "vite": "^8.0.5",
-    "postcss": "^8.5.18"
+    "postcss": "^8.5.23"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
