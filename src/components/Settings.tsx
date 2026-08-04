@@ -45,8 +45,8 @@ function SectionCard({ icon, title, children }: { icon: React.ReactNode; title: 
   return (
     <section className="settings-section-card rounded-lg border border-edge bg-surface">
       <div className="flex items-center gap-2 px-4 py-3 border-b border-edge">
-        <span className="text-neutral-5">{icon}</span>
-        <h3 className="text-meta font-semibold uppercase tracking-wide text-neutral-5">{title}</h3>
+        <span className="text-ink-muted">{icon}</span>
+        <h3 className="text-meta font-semibold uppercase tracking-wide text-ink-muted">{title}</h3>
       </div>
       <div className="px-4 py-4">
         {children}
@@ -70,7 +70,7 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="rounded-control p-1.5 text-neutral-5 hover:bg-neutral-9 hover:text-neutral-2 transition-colors"
+      className="rounded-control p-1.5 text-ink-muted hover:bg-surface-raised hover:text-ink transition-colors"
       title="Copy to clipboard"
     >
       {copied ? <IconCheck size={14} className="text-success-6" /> : <IconCopy size={14} />}
@@ -85,11 +85,11 @@ function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
     completed: 'bg-success-9/30 text-success-5',
     session_created: 'bg-primary-9/30 text-primary-5',
-    processing: 'bg-yellow-900/30 text-yellow-500',
+    processing: 'bg-warning-9/30 text-warning-5',
     error: 'bg-error-9/30 text-error-5',
-    filtered: 'bg-neutral-9/50 text-neutral-5',
-    duplicate: 'bg-neutral-9/50 text-neutral-5',
-    received: 'bg-neutral-9/50 text-neutral-4',
+    filtered: 'bg-edge/50 text-ink-muted',
+    duplicate: 'bg-edge/50 text-ink-muted',
+    received: 'bg-edge/50 text-ink-muted',
   }
   return (
     <span className={`rounded-control px-1.5 py-0.5 text-micro font-medium ${styles[status] || styles.received}`}>
@@ -174,8 +174,8 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
     <div className={`fixed inset-0 z-50 flex bg-black/60 ${isMobile ? 'items-end' : 'items-center justify-center'}`}>
       <div className={`w-full bg-surface-raised border border-edge-strong shadow-floating flex flex-col ${isMobile ? 'max-h-[95vh] rounded-t-floating' : 'max-w-2xl rounded-floating max-h-[85vh]'}`}>
         {/* Header */}
-        <div className="flex-shrink-0 px-6 pt-5 pb-4 border-b border-neutral-10">
-          <h2 className="text-head font-semibold text-neutral-2">Settings</h2>
+        <div className="flex-shrink-0 px-6 pt-5 pb-4 border-b border-edge">
+          <h2 className="text-head font-semibold text-ink">Settings</h2>
         </div>
 
         {/* Scrollable content */}
@@ -183,14 +183,14 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
 
           {/* ── Authentication ── */}
           <SectionCard icon={<IconKey size={15} />} title="Authentication">
-            <label className="mb-1 block text-body text-neutral-4">Claude Code Web Token</label>
+            <label className="mb-1 block text-body text-ink-muted">Claude Code Web Token</label>
             <div className="flex gap-2">
               <input
                 type="password"
                 value={tokenInput}
                 onChange={e => { setTokenInput(e.target.value); setStatus('idle') }}
                 placeholder="Enter your auth token"
-                className="flex-1 rounded-control border border-edge bg-surface px-3 py-2 text-body text-neutral-2 outline-none focus:border-primary-7"
+                className="flex-1 rounded-control border border-edge bg-surface px-3 py-2 text-body text-ink outline-none focus:border-primary-7"
                 onKeyDown={e => e.key === 'Enter' && handleVerify()}
               />
               <button
@@ -215,9 +215,9 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
 
               {/* ─ Agent Name ─ */}
               <div>
-                <label className="mb-1.5 block text-body text-neutral-4">
+                <label className="mb-1.5 block text-body text-ink-muted">
                   <span className="flex items-center gap-1.5">
-                    <IconRobot size={14} className="text-neutral-5" />
+                    <IconRobot size={14} className="text-ink-muted" />
                     Agent Name
                   </span>
                 </label>
@@ -245,10 +245,10 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                     }}
                     placeholder="Joe"
                     maxLength={30}
-                    className="w-40 rounded-control border border-edge bg-surface px-3 py-2 text-body text-neutral-2 outline-none focus:border-primary-7"
+                    className="w-40 rounded-control border border-edge bg-surface px-3 py-2 text-body text-ink outline-none focus:border-primary-7"
                   />
                 </div>
-                <p className="mt-1 text-body text-neutral-5">Display name for the orchestrator agent in the sidebar and chat</p>
+                <p className="mt-1 text-body text-ink-muted">Display name for the orchestrator agent in the sidebar and chat</p>
               </div>
 
               <div className="border-t border-edge" />
@@ -257,14 +257,14 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
               <div className="grid grid-cols-2 gap-x-6 gap-y-4">
                 {/* Theme */}
                 <div>
-                  <label className="mb-1.5 block text-body text-neutral-4">Theme</label>
+                  <label className="mb-1.5 block text-body text-ink-muted">Theme</label>
                   <div className="flex gap-2">
                     <button
                       onClick={() => onUpdate({ theme: 'dark' })}
                       className={`rounded-control px-4 py-1.5 text-body font-medium transition-colors ${
                         settings.theme !== 'light'
                           ? 'bg-primary-8 text-on-primary'
-                          : 'border border-neutral-9 bg-neutral-10 text-neutral-3 hover:bg-neutral-9'
+                          : 'border border-edge bg-surface-raised text-ink hover:bg-edge'
                       }`}
                     >
                       Dark
@@ -274,7 +274,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                       className={`rounded-control px-4 py-1.5 text-body font-medium transition-colors ${
                         settings.theme === 'light'
                           ? 'bg-primary-8 text-on-primary'
-                          : 'border border-neutral-9 bg-neutral-10 text-neutral-3 hover:bg-neutral-9'
+                          : 'border border-edge bg-surface-raised text-ink hover:bg-edge'
                       }`}
                     >
                       Light
@@ -284,9 +284,9 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
 
                 {/* Archived Session Retention */}
                 <div>
-                  <label className="mb-1.5 block text-body text-neutral-4">
+                  <label className="mb-1.5 block text-body text-ink-muted">
                     <span className="flex items-center gap-1.5">
-                      <IconArchive size={14} className="text-neutral-5" />
+                      <IconArchive size={14} className="text-ink-muted" />
                       Archived Session Retention
                     </span>
                   </label>
@@ -301,11 +301,11 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                         setRetentionDays(days)
                         setRetentionDaysApi(settings.token, days).catch(() => setSaveError('Failed to save retention setting'))
                       }}
-                      className="w-20 rounded-control border border-edge bg-surface px-3 py-2 text-body text-neutral-2 outline-none focus:border-primary-7"
+                      className="w-20 rounded-control border border-edge bg-surface px-3 py-2 text-body text-ink outline-none focus:border-primary-7"
                     />
-                    <span className="text-body text-neutral-5">days</span>
+                    <span className="text-body text-ink-muted">days</span>
                   </div>
-                  <p className="mt-1 text-body text-neutral-5">Auto-delete archived sessions older than this</p>
+                  <p className="mt-1 text-body text-ink-muted">Auto-delete archived sessions older than this</p>
                 </div>
               </div>
 
@@ -322,13 +322,13 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                       setQueueMessages(next)
                       setQueueMessagesApi(settings.token, next).catch(() => setSaveError('Failed to save queue messages setting'))
                     }}
-                    className="h-4 w-4 rounded border-neutral-7 bg-neutral-10 text-primary-7 accent-primary-7 cursor-pointer"
+                    className="h-4 w-4 rounded border-edge-strong bg-surface-raised text-primary-7 accent-primary-7 cursor-pointer"
                   />
-                  <span className="text-body text-neutral-4 group-hover:text-neutral-3 transition-colors">
+                  <span className="text-body text-ink-muted group-hover:text-ink transition-colors">
                     Queue messages across sessions
                   </span>
                 </label>
-                <p className="mt-1 ml-[26px] text-body text-neutral-5">
+                <p className="mt-1 ml-[26px] text-body text-ink-muted">
                   When enabled, messages sent while another session for the same repo is processing will be queued and sent automatically when it finishes.
                 </p>
               </div>
@@ -355,18 +355,18 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                       type="checkbox"
                       checked={autoWorktree}
                       onChange={e => onAutoWorktreeChange?.(e.target.checked)}
-                      className="h-4 w-4 rounded border-neutral-7 bg-neutral-10 text-primary-7 accent-primary-7 cursor-pointer"
+                      className="h-4 w-4 rounded border-edge-strong bg-surface-raised text-primary-7 accent-primary-7 cursor-pointer"
                     />
-                    <span className="flex items-center gap-1.5 text-body text-neutral-4 group-hover:text-neutral-3 transition-colors">
-                      <IconGitBranch size={14} className="text-neutral-5" />
+                    <span className="flex items-center gap-1.5 text-body text-ink-muted group-hover:text-ink transition-colors">
+                      <IconGitBranch size={14} className="text-ink-muted" />
                       Auto-enable worktrees for new sessions
                     </span>
                   </label>
-                  <p className="mt-1 ml-[26px] text-body text-neutral-5">When enabled, new sessions will automatically start in a git worktree</p>
+                  <p className="mt-1 ml-[26px] text-body text-ink-muted">When enabled, new sessions will automatically start in a git worktree</p>
                 </div>
 
                 <div>
-                  <label className="mb-1.5 block text-body text-neutral-4">Worktree Branch Prefix</label>
+                  <label className="mb-1.5 block text-body text-ink-muted">Worktree Branch Prefix</label>
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
@@ -377,10 +377,10 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                         setWorktreePrefixApi(settings.token, val).catch(() => setSaveError('Failed to save worktree prefix'))
                       }}
                       placeholder="wt/"
-                      className="w-40 rounded-control border border-edge bg-surface px-3 py-2 text-body text-neutral-2 outline-none focus:border-primary-7"
+                      className="w-40 rounded-control border border-edge bg-surface px-3 py-2 text-body text-ink outline-none focus:border-primary-7"
                     />
                   </div>
-                  <p className="mt-1 text-body text-neutral-5">Prefix for worktree branch names (e.g. wt/ → wt/abc12345)</p>
+                  <p className="mt-1 text-body text-ink-muted">Prefix for worktree branch names (e.g. wt/ → wt/abc12345)</p>
                 </div>
               </div>
 
@@ -396,30 +396,30 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                   <>
                     <IconCircleCheckFilled size={16} className="text-success-6" />
                     <span className="text-body text-success-5 font-medium">Active</span>
-                    <span className="text-meta text-neutral-5">
+                    <span className="text-meta text-ink-muted">
                       &middot; max {webhookConfig.maxConcurrentSessions} concurrent sessions
                     </span>
                   </>
                 ) : (
                   <>
-                    <IconCircleXFilled size={16} className="text-neutral-6" />
-                    <span className="text-body text-neutral-5">Disabled</span>
+                    <IconCircleXFilled size={16} className="text-ink-faint" />
+                    <span className="text-body text-ink-muted">Disabled</span>
                   </>
                 )
               ) : (
-                <span className="text-body text-neutral-5">Loading...</span>
+                <span className="text-body text-ink-muted">Loading...</span>
               )}
             </div>
 
-            <p className="text-body text-neutral-5 mb-3">
+            <p className="text-body text-ink-muted mb-3">
               Automatically review PRs and diagnose CI failures via GitHub webhooks.
             </p>
 
             {/* Webhook URL */}
             <div className="mb-4">
-              <label className="mb-1 block text-meta font-medium text-neutral-5 uppercase tracking-wide">Webhook URL</label>
+              <label className="mb-1 block text-meta font-medium text-ink-muted uppercase tracking-wide">Webhook URL</label>
               <div className="flex items-center gap-1 rounded-control border border-edge bg-surface px-3 py-2">
-                <code className="flex-1 text-meta text-neutral-3 font-mono truncate select-all">{webhookUrl}</code>
+                <code className="flex-1 text-meta text-ink font-mono truncate select-all">{webhookUrl}</code>
                 <CopyButton text={webhookUrl} />
               </div>
             </div>
@@ -427,8 +427,8 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
             {/* ── Integration Health Check ── */}
             <div className="border-t border-edge pt-4 mb-4">
               <div className="flex items-center gap-2 mb-3">
-                <IconPlugConnected size={14} className="text-neutral-5" />
-                <span className="text-meta font-semibold uppercase tracking-wide text-neutral-5">Integration Health</span>
+                <IconPlugConnected size={14} className="text-ink-muted" />
+                <span className="text-meta font-semibold uppercase tracking-wide text-ink-muted">Integration Health</span>
               </div>
 
               {/* Repo input */}
@@ -438,7 +438,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                   placeholder="owner/repo"
                   value={healthRepo}
                   onChange={e => setHealthRepo(e.target.value)}
-                  className="flex-1 rounded-control border border-edge bg-surface px-3 py-2 text-body text-neutral-2 outline-none focus:border-primary-7 font-mono placeholder:text-neutral-7"
+                  className="flex-1 rounded-control border border-edge bg-surface px-3 py-2 text-body text-ink outline-none focus:border-primary-7 font-mono placeholder:text-ink-faint"
                 />
                 <button
                   onClick={async () => {
@@ -478,14 +478,14 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                   {/* Overall badge */}
                   <div className="flex items-center gap-2 mb-2">
                     {healthResult.overall === 'healthy' && <IconCircleCheckFilled size={16} className="text-success-6" />}
-                    {healthResult.overall === 'degraded' && <IconAlertTriangle size={16} className="text-yellow-500" />}
+                    {healthResult.overall === 'degraded' && <IconAlertTriangle size={16} className="text-warning-5" />}
                     {healthResult.overall === 'broken' && <IconCircleXFilled size={16} className="text-error-5" />}
-                    {healthResult.overall === 'unconfigured' && <IconCircleXFilled size={16} className="text-neutral-6" />}
+                    {healthResult.overall === 'unconfigured' && <IconCircleXFilled size={16} className="text-ink-faint" />}
                     <span className={`text-body font-medium ${
                       healthResult.overall === 'healthy' ? 'text-success-5' :
-                      healthResult.overall === 'degraded' ? 'text-yellow-500' :
+                      healthResult.overall === 'degraded' ? 'text-warning-5' :
                       healthResult.overall === 'broken' ? 'text-error-5' :
-                      'text-neutral-5'
+                      'text-ink-muted'
                     }`}>
                       {healthResult.overall === 'healthy' ? 'Healthy' :
                        healthResult.overall === 'degraded' ? 'Degraded' :
@@ -504,13 +504,13 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                           <IconCircleXFilled size={14} className="text-error-5 mt-0.5 shrink-0" />
                         )}
                         <div className="min-w-0">
-                          <span className="text-meta font-medium text-neutral-4 uppercase tracking-wide">
+                          <span className="text-meta font-medium text-ink-muted uppercase tracking-wide">
                             {key === 'ghCli' ? 'GitHub CLI' :
                              key === 'config' ? 'Server Config' :
                              key === 'webhook' ? 'GitHub Webhook' :
                              'Deliveries'}
                           </span>
-                          <p className="text-body text-neutral-5 mt-0.5">{check.message}</p>
+                          <p className="text-body text-ink-muted mt-0.5">{check.message}</p>
                         </div>
                       </div>
                     ))}
@@ -553,7 +553,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                         }
                       }}
                       disabled={testLoading}
-                      className="flex items-center gap-1.5 rounded-control border border-neutral-9 bg-neutral-10 px-3 py-2 text-body text-neutral-3 hover:bg-neutral-9 disabled:opacity-50 transition-colors mt-2"
+                      className="flex items-center gap-1.5 rounded-control border border-edge bg-surface-raised px-3 py-2 text-body text-ink hover:bg-edge disabled:opacity-50 transition-colors mt-2"
                     >
                       {testLoading ? <IconRefresh size={14} className="animate-spin" /> : <IconPlayerPlay size={14} />}
                       Test delivery
@@ -584,19 +584,19 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                   {/* Preview step */}
                   {wizardStep === 'preview' && setupPreview && (
                     <>
-                      <div className="text-body text-neutral-4 space-y-1.5">
+                      <div className="text-body text-ink-muted space-y-1.5">
                         <p>
                           {setupPreview.action === 'create'
                             ? `Will create a new webhook on ${healthRepo}:`
                             : `Will update the existing webhook on ${healthRepo}:`}
                         </p>
-                        <div className="rounded-control bg-surface px-3 py-2 font-mono text-meta text-neutral-3 space-y-1">
+                        <div className="rounded-control bg-surface px-3 py-2 font-mono text-meta text-ink space-y-1">
                           <div>URL: {setupPreview.proposed.url}</div>
                           <div>Events: {setupPreview.proposed.events.join(', ')}</div>
                           <div>Active: {setupPreview.proposed.active ? 'yes' : 'no'}</div>
                         </div>
                         {setupPreview.changes && setupPreview.changes.length > 0 && (
-                          <ul className="list-disc list-inside text-meta text-neutral-5">
+                          <ul className="list-disc list-inside text-meta text-ink-muted">
                             {setupPreview.changes.map((c, i) => <li key={i}>{c}</li>)}
                           </ul>
                         )}
@@ -623,7 +623,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                         </button>
                         <button
                           onClick={() => { setWizardStep('idle'); setSetupPreview(null); setSetupError(null) }}
-                          className="rounded-control px-3 py-1.5 text-body text-neutral-5 hover:text-neutral-2 transition-colors"
+                          className="rounded-control px-3 py-1.5 text-body text-ink-muted hover:text-ink transition-colors"
                         >
                           Cancel
                         </button>
@@ -633,7 +633,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
 
                   {/* Applying step */}
                   {wizardStep === 'applying' && (
-                    <div className="flex items-center gap-2 text-body text-neutral-4">
+                    <div className="flex items-center gap-2 text-body text-ink-muted">
                       <IconRefresh size={14} className="animate-spin text-primary-6" />
                       Configuring webhook on GitHub...
                     </div>
@@ -648,7 +648,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                       </div>
                       <button
                         onClick={() => { setWizardStep('idle'); setSetupPreview(null) }}
-                        className="rounded-control px-3 py-1.5 text-body text-neutral-5 hover:text-neutral-2 transition-colors"
+                        className="rounded-control px-3 py-1.5 text-body text-ink-muted hover:text-ink transition-colors"
                       >
                         Dismiss
                       </button>
@@ -672,41 +672,41 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
               Manual setup instructions
             </button>
             {webhookExpanded && (
-              <div className="rounded-control border border-edge bg-surface px-4 py-3 mb-3 text-body text-neutral-4 space-y-2.5">
+              <div className="rounded-control border border-edge bg-surface px-4 py-3 mb-3 text-body text-ink-muted space-y-2.5">
                 {(!healthResult || !healthResult.checks.config.ok) && (
                   <div className="flex gap-2">
                     <span className="text-primary-6 font-semibold shrink-0">1.</span>
                     <span>
-                      Set <code className="text-neutral-3 bg-neutral-9/50 px-1 rounded-control">GITHUB_WEBHOOK_ENABLED=true</code> and <code className="text-neutral-3 bg-neutral-9/50 px-1 rounded-control">GITHUB_WEBHOOK_SECRET=&lt;your-secret&gt;</code> on the server, then restart.
+                      Set <code className="text-ink bg-edge/50 px-1 rounded-control">GITHUB_WEBHOOK_ENABLED=true</code> and <code className="text-ink bg-edge/50 px-1 rounded-control">GITHUB_WEBHOOK_SECRET=&lt;your-secret&gt;</code> on the server, then restart.
                     </span>
                   </div>
                 )}
                 <div className="flex gap-2">
                   <span className="text-primary-6 font-semibold shrink-0">{!healthResult || !healthResult.checks.config.ok ? '2' : '1'}.</span>
                   <span>
-                    In your GitHub repo, go to <strong className="text-neutral-3">Settings &rarr; Webhooks &rarr; Add webhook</strong>
+                    In your GitHub repo, go to <strong className="text-ink">Settings &rarr; Webhooks &rarr; Add webhook</strong>
                   </span>
                 </div>
                 <div className="flex gap-2">
                   <span className="text-primary-6 font-semibold shrink-0">{!healthResult || !healthResult.checks.config.ok ? '3' : '2'}.</span>
                   <span>
-                    Set <strong className="text-neutral-3">Payload URL</strong> to the webhook URL above.
-                    Set <strong className="text-neutral-3">Content type</strong> to <code className="text-neutral-3 bg-neutral-9/50 px-1 rounded-control">application/json</code>
+                    Set <strong className="text-ink">Payload URL</strong> to the webhook URL above.
+                    Set <strong className="text-ink">Content type</strong> to <code className="text-ink bg-edge/50 px-1 rounded-control">application/json</code>
                   </span>
                 </div>
                 <div className="flex gap-2">
                   <span className="text-primary-6 font-semibold shrink-0">{!healthResult || !healthResult.checks.config.ok ? '4' : '3'}.</span>
                   <span>
-                    Set a <strong className="text-neutral-3">Secret</strong> matching the server&apos;s <code className="text-neutral-3 bg-neutral-9/50 px-1 rounded-control">GITHUB_WEBHOOK_SECRET</code>
+                    Set a <strong className="text-ink">Secret</strong> matching the server&apos;s <code className="text-ink bg-edge/50 px-1 rounded-control">GITHUB_WEBHOOK_SECRET</code>
                   </span>
                 </div>
                 <div className="flex gap-2">
                   <span className="text-primary-6 font-semibold shrink-0">{!healthResult || !healthResult.checks.config.ok ? '5' : '4'}.</span>
                   <span>
-                    Under <strong className="text-neutral-3">&ldquo;Which events?&rdquo;</strong>, select <strong className="text-neutral-3">Let me select individual events</strong> and check <strong className="text-neutral-3">Workflow runs</strong> and <strong className="text-neutral-3">Pull requests</strong>
+                    Under <strong className="text-ink">&ldquo;Which events?&rdquo;</strong>, select <strong className="text-ink">Let me select individual events</strong> and check <strong className="text-ink">Workflow runs</strong> and <strong className="text-ink">Pull requests</strong>
                   </span>
                 </div>
-                <p className="text-body text-neutral-5 pt-1 border-t border-edge">
+                <p className="text-body text-ink-muted pt-1 border-t border-edge">
                   Webhook events will automatically spawn <IconRobot size={12} className="inline -mt-0.5" /> sessions for PR reviews and CI failure analysis.
                 </p>
               </div>
@@ -726,9 +726,9 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                   <div className="mt-2 rounded-control border border-edge bg-surface divide-y divide-edge max-h-48 overflow-y-auto">
                     {webhookEvents.slice(0, 10).map(ev => (
                       <div key={ev.id} className="flex items-center gap-2 px-3 py-2 text-meta">
-                        <IconRobot size={13} className="text-neutral-6 shrink-0" />
-                        <span className="text-neutral-3 font-mono truncate flex-1">{ev.repo}</span>
-                        <span className="text-neutral-5 truncate max-w-24">{ev.workflow}</span>
+                        <IconRobot size={13} className="text-ink-faint shrink-0" />
+                        <span className="text-ink font-mono truncate flex-1">{ev.repo}</span>
+                        <span className="text-ink-muted truncate max-w-24">{ev.workflow}</span>
                         <StatusBadge status={ev.status} />
                       </div>
                     ))}
@@ -739,15 +739,15 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
 
             {/* Disabled hint */}
             {webhookConfig && !webhookConfig.enabled && !healthResult && (
-              <p className="mt-3 text-body text-neutral-5">
-                Set <code className="bg-neutral-9/50 px-1 rounded-control text-neutral-4">GITHUB_WEBHOOK_ENABLED=true</code> and <code className="bg-neutral-9/50 px-1 rounded-control text-neutral-4">GITHUB_WEBHOOK_SECRET</code> on the server to enable.
+              <p className="mt-3 text-body text-ink-muted">
+                Set <code className="bg-edge/50 px-1 rounded-control text-ink-muted">GITHUB_WEBHOOK_ENABLED=true</code> and <code className="bg-edge/50 px-1 rounded-control text-ink-muted">GITHUB_WEBHOOK_SECRET</code> on the server to enable.
               </p>
             )}
           </SectionCard>
         </div>
 
         {/* Footer */}
-        <div className="flex-shrink-0 px-6 py-4 border-t border-neutral-10 flex items-center justify-between">
+        <div className="flex-shrink-0 px-6 py-4 border-t border-edge flex items-center justify-between">
           <div>
             {saveError && (
               <p className="text-body text-error-5">{saveError}</p>
@@ -757,7 +757,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
             {settings.token && (
               <button
                 onClick={onClose}
-                className="rounded-control px-4 py-2 text-body text-neutral-5 hover:text-neutral-2"
+                className="rounded-control px-4 py-2 text-body text-ink-muted hover:text-ink"
               >
                 Cancel
               </button>

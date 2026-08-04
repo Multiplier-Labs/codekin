@@ -29,7 +29,7 @@ export function TentativeBanner({ count, repoName, onExecute, onDiscard }: Props
         </button>
         <button
           onClick={onDiscard}
-          className="rounded-control px-2.5 py-1 text-body text-neutral-4 hover:text-neutral-2 hover:bg-neutral-8/50 transition-colors"
+          className="rounded-control px-2.5 py-1 text-body text-ink-muted hover:text-ink hover:bg-surface-raised transition-colors"
         >
           Discard
         </button>

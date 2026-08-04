@@ -56,22 +56,22 @@ export function ConnectionPopup({
   }, [onClose])
 
   const claudeDotColor = claudeDisabled
-    ? 'bg-neutral-6'
+    ? 'bg-ink-faint'
     : claudeState === 'connected' ? 'bg-success-7' : claudeState === 'connecting' ? 'bg-warning-6' : 'bg-error-7'
   const claudeLabel = claudeDisabled
     ? 'Disabled'
     : claudeState === 'connected' ? 'Connected' : claudeState === 'connecting' ? 'Connecting' : 'Disconnected'
 
   const ocDotColor = openCodeDisabled
-    ? 'bg-neutral-6'
-    : openCodeConnected === true ? 'bg-success-7' : openCodeConnected === false ? 'bg-error-7' : 'bg-neutral-6'
+    ? 'bg-ink-faint'
+    : openCodeConnected === true ? 'bg-success-7' : openCodeConnected === false ? 'bg-error-7' : 'bg-ink-faint'
   const ocLabel = openCodeDisabled
     ? 'Disabled'
     : openCodeConnected === true ? 'Connected' : openCodeConnected === false ? 'Disconnected' : 'Not configured'
 
   const codexDotColor = codexDisabled
-    ? 'bg-neutral-6'
-    : codexConnected === true ? 'bg-success-7' : codexConnected === false ? 'bg-error-7' : 'bg-neutral-6'
+    ? 'bg-ink-faint'
+    : codexConnected === true ? 'bg-success-7' : codexConnected === false ? 'bg-error-7' : 'bg-ink-faint'
   const codexLabel = codexDisabled
     ? 'Disabled'
     : codexConnected === true ? 'Connected' : codexConnected === false ? 'Run `codex login` on the host' : 'Not configured'
@@ -81,7 +81,7 @@ export function ConnectionPopup({
       ref={ref}
       className="absolute bottom-full left-0 mb-2 w-56 rounded-floating border border-edge-strong bg-surface-raised shadow-floating z-50"
     >
-      <div className="px-3 py-2 border-b border-edge text-micro font-medium uppercase tracking-wider text-neutral-5">
+      <div className="px-3 py-2 border-b border-edge text-micro font-medium uppercase tracking-wider text-ink-muted">
         Connections
       </div>
 
@@ -89,15 +89,15 @@ export function ConnectionPopup({
       <div className="px-3 py-2.5 flex items-center gap-2">
         <StatusDot color={claudeDotColor} />
         <div className="flex-1 min-w-0">
-          <div className="text-body text-neutral-2 font-medium">Claude Code</div>
-          <div className="text-micro text-neutral-5">{claudeLabel}</div>
+          <div className="text-body text-ink font-medium">Claude Code</div>
+          <div className="text-micro text-ink-muted">{claudeLabel}</div>
         </div>
         <button
           onClick={onToggleClaude}
           className={`text-micro px-2 py-0.5 rounded-control border transition-colors ${
             claudeDisabled
               ? 'border-success-8/50 text-success-5 hover:bg-success-9/20'
-              : 'border-edge text-neutral-4 hover:bg-neutral-8/30'
+              : 'border-edge text-ink-muted hover:bg-edge'
           }`}
         >
           {claudeDisabled ? 'Enable' : 'Disable'}
@@ -108,15 +108,15 @@ export function ConnectionPopup({
       <div className="px-3 py-2.5 flex items-center gap-2 border-t border-edge">
         <StatusDot color={ocDotColor} />
         <div className="flex-1 min-w-0">
-          <div className="text-body text-neutral-2 font-medium">OpenCode</div>
-          <div className="text-micro text-neutral-5">{ocLabel}</div>
+          <div className="text-body text-ink font-medium">OpenCode</div>
+          <div className="text-micro text-ink-muted">{ocLabel}</div>
         </div>
         <button
           onClick={onToggleOpenCode}
           className={`text-micro px-2 py-0.5 rounded-control border transition-colors ${
             openCodeDisabled
               ? 'border-success-8/50 text-success-5 hover:bg-success-9/20'
-              : 'border-edge text-neutral-4 hover:bg-neutral-8/30'
+              : 'border-edge text-ink-muted hover:bg-edge'
           }`}
         >
           {openCodeDisabled ? 'Enable' : 'Disable'}
@@ -127,15 +127,15 @@ export function ConnectionPopup({
       <div className="px-3 py-2.5 flex items-center gap-2 border-t border-edge">
         <StatusDot color={codexDotColor} />
         <div className="flex-1 min-w-0">
-          <div className="text-body text-neutral-2 font-medium">Codex</div>
-          <div className="text-micro text-neutral-5">{codexLabel}</div>
+          <div className="text-body text-ink font-medium">Codex</div>
+          <div className="text-micro text-ink-muted">{codexLabel}</div>
         </div>
         <button
           onClick={onToggleCodex}
           className={`text-micro px-2 py-0.5 rounded-control border transition-colors ${
             codexDisabled
               ? 'border-success-8/50 text-success-5 hover:bg-success-9/20'
-              : 'border-edge text-neutral-4 hover:bg-neutral-8/30'
+              : 'border-edge text-ink-muted hover:bg-edge'
           }`}
         >
           {codexDisabled ? 'Enable' : 'Disable'}

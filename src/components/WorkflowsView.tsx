@@ -124,7 +124,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-edge px-5 py-3">
-        <h1 className="text-head font-medium text-neutral-1">Workflows</h1>
+        <h1 className="text-head font-medium text-ink">Workflows</h1>
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => setShowAddForm(true)}
@@ -147,10 +147,10 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
         {/* Workflow groups by repo */}
         {repos.length === 0 ? (
           <div className="rounded-xl border border-dashed border-edge-strong px-6 py-10 text-center">
-            <div className="text-neutral-5 mb-1">
-              <IconCalendarEvent size={32} stroke={1.5} className="mx-auto mb-3 text-neutral-6" />
-              <div className="text-body text-neutral-3 font-medium mb-1">No workflows configured</div>
-              <div className="text-body text-neutral-5">
+            <div className="text-ink-muted mb-1">
+              <IconCalendarEvent size={32} stroke={1.5} className="mx-auto mb-3 text-ink-faint" />
+              <div className="text-body text-ink font-medium mb-1">No workflows configured</div>
+              <div className="text-body text-ink-muted">
                 Set up automated code reviews, security audits, and more.
               </div>
             </div>
@@ -191,18 +191,18 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
           <div className="mt-6">
             <button
               onClick={() => setShowActivity(!showActivity)}
-              className="flex items-center gap-2 text-body font-medium text-neutral-3 hover:text-neutral-1 transition-colors mb-2"
+              className="flex items-center gap-2 text-body font-medium text-ink hover:text-ink transition-colors mb-2"
             >
               {showActivity
                 ? <IconChevronDown size={14} stroke={2} />
                 : <IconArrowRight size={14} stroke={2} />
               }
               Recent Activity
-              <span className="text-meta text-neutral-5 font-normal">({runs.length} runs)</span>
+              <span className="text-meta text-ink-muted font-normal">({runs.length} runs)</span>
             </button>
 
             {showActivity && (
-              <div className="workflow-card rounded-control border border-edge bg-neutral-10/30 py-1 divide-y divide-edge">
+              <div className="workflow-card rounded-control border border-edge bg-surface-raised/30 py-1 divide-y divide-edge">
                 {runs.slice(0, 20).map(run => (
                   <ActivityRow
                     key={run.id}

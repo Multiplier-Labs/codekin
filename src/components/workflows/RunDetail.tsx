@@ -12,10 +12,10 @@ import { StepCard, JsonBlock } from './StepCard'
 export function RunDetail({ run }: { run: WorkflowRunWithSteps }) {
   return (
     <div className="mt-2 space-y-1.5 border-l-2 border-edge pl-3">
-      <div className="text-body font-medium text-neutral-5 uppercase tracking-wider mb-2">Steps</div>
+      <div className="text-body font-medium text-ink-muted uppercase tracking-wider mb-2">Steps</div>
 
       {run.steps.length === 0 ? (
-        <div className="text-body text-neutral-5 py-1">No steps recorded yet.</div>
+        <div className="text-body text-ink-muted py-1">No steps recorded yet.</div>
       ) : (
         run.steps.map(step => <StepCard key={step.id} step={step} />)
       )}

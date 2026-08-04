@@ -32,8 +32,8 @@ export function DiffFileTree({ files, activeFile, onSelectFile }: DiffFileTreePr
         return (
           <button
             key={file.path}
-            className={`flex items-center gap-2 px-3 py-1.5 text-left hover:bg-neutral-10 transition-colors ${
-              isActive ? 'bg-neutral-10 text-neutral-1' : 'text-neutral-3'
+            className={`flex items-center gap-2 px-3 py-1.5 text-left hover:bg-surface-raised transition-colors ${
+              isActive ? 'bg-surface-raised text-ink' : 'text-ink'
             }`}
             onClick={() => onSelectFile(file.path)}
           >
@@ -51,7 +51,7 @@ export function DiffFileTree({ files, activeFile, onSelectFile }: DiffFileTreePr
               </span>
             )}
             {file.isBinary && (
-              <span className="text-neutral-6 italic shrink-0">binary</span>
+              <span className="text-ink-faint italic shrink-0">binary</span>
             )}
           </button>
         )

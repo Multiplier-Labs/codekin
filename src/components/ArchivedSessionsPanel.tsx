@@ -156,7 +156,7 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
   if (initialViewId && loading && !viewing) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-page">
-        <IconLoader2 size={24} className="text-neutral-4 animate-spin" />
+        <IconLoader2 size={24} className="text-ink-muted animate-spin" />
       </div>
     )
   }
@@ -167,11 +167,11 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
     return (
       <div className="fixed inset-0 z-50 flex flex-col bg-page">
         {/* Header */}
-        <div className="flex items-center gap-3 px-4 py-2 bg-neutral-9/70 border-b border-edge flex-shrink-0">
-          <IconArchive size={16} className="text-neutral-4" />
+        <div className="flex items-center gap-3 px-4 py-2 bg-edge/70 border-b border-edge flex-shrink-0">
+          <IconArchive size={16} className="text-ink-muted" />
           <div className="flex-1 min-w-0">
-            <span className="text-body font-medium text-neutral-1 truncate block">{displayName(viewing)}</span>
-            <span className="text-meta text-neutral-5">
+            <span className="text-body font-medium text-ink truncate block">{displayName(viewing)}</span>
+            <span className="text-meta text-ink-muted">
               Archived {compactAge(viewing.archivedAt)} ago &middot; {viewing.messageCount} messages
             </span>
           </div>
@@ -187,7 +187,7 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
           )}
           <button
             onClick={handleCloseViewer}
-            className="rounded-control p-1 text-neutral-4 hover:text-neutral-1 hover:bg-neutral-8 transition-colors"
+            className="rounded-control p-1 text-ink-muted hover:text-ink hover:bg-ink-faint transition-colors"
             title="Close"
           >
             <IconX size={16} stroke={2} />
@@ -212,10 +212,10 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
   return (
     <div className="flex flex-col min-h-0 flex-1">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-neutral-9/70 border-b border-edge flex-shrink-0">
-        <span className="text-body font-semibold text-neutral-1 uppercase tracking-wider">Archived Sessions</span>
+      <div className="flex items-center justify-between px-3 py-2 bg-edge/70 border-b border-edge flex-shrink-0">
+        <span className="text-body font-semibold text-ink uppercase tracking-wider">Archived Sessions</span>
         <div className="flex items-center gap-1">
-          <label className="text-meta text-neutral-5" title="Auto-delete after this many days">
+          <label className="text-meta text-ink-muted" title="Auto-delete after this many days">
             Keep
           </label>
           <input
@@ -224,15 +224,15 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
             max={365}
             value={retentionDays}
             onChange={e => handleRetentionChange(Number(e.target.value))}
-            className="w-10 text-body text-neutral-2 bg-surface border border-edge-strong rounded-control px-1 py-0.5 text-center"
+            className="w-10 text-body text-ink bg-surface border border-edge-strong rounded-control px-1 py-0.5 text-center"
           />
-          <span className="text-meta text-neutral-5">d</span>
+          <span className="text-meta text-ink-muted">d</span>
         </div>
       </div>
 
       {/* Session list */}
       {sessions.length === 0 ? (
-        <div className="px-3 py-4 text-body text-neutral-5 text-center">
+        <div className="px-3 py-4 text-body text-ink-muted text-center">
           No archived sessions
         </div>
       ) : (
@@ -241,7 +241,7 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
             <button
               key={s.id}
               onClick={() => handleView(s.id)}
-              className="group flex items-center gap-2 px-3 py-1 text-left transition-colors text-neutral-3 hover:bg-neutral-8/50 hover:text-neutral-1"
+              className="group flex items-center gap-2 px-3 py-1 text-left transition-colors text-ink hover:bg-surface-raised hover:text-ink"
             >
               {s.source === 'workflow' ? (
                 <IconTimeline size={12} className="shrink-0 opacity-50" />
@@ -253,13 +253,13 @@ export function ArchivedSessionsPanel({ token, visible, fontSize, workingDir, re
                 <IconArchive size={12} className="shrink-0 opacity-50" />
               )}
               <span className="flex-1 truncate text-body">{displayName(s)}</span>
-              <span className="shrink-0 text-meta text-neutral-5 tabular-nums">{compactAge(s.archivedAt)}</span>
+              <span className="shrink-0 text-meta text-ink-muted tabular-nums">{compactAge(s.archivedAt)}</span>
               {loading ? (
-                <IconLoader2 size={14} className="shrink-0 text-neutral-5 animate-spin" />
+                <IconLoader2 size={14} className="shrink-0 text-ink-muted animate-spin" />
               ) : (
                 <span
                   onClick={e => handleDelete(s.id, e)}
-                  className="cursor-pointer text-transparent hover:text-error-5 group-hover:text-neutral-5 flex-shrink-0"
+                  className="cursor-pointer text-transparent hover:text-error-5 group-hover:text-ink-muted flex-shrink-0"
                 >
                   <IconTrash size={14} />
                 </span>

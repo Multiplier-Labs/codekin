@@ -97,13 +97,13 @@ export function TodoPanel({ tasks, isProcessing = false }: Props) {
       <div className="absolute top-14 right-3 z-20">
         <button
           onClick={() => { setExpanded(true); }}
-          className="flex items-center gap-1.5 rounded-floating bg-surface-raised backdrop-blur border border-edge-strong px-2.5 py-1.5 shadow-floating hover:bg-neutral-8/90 transition-colors"
+          className="flex items-center gap-1.5 rounded-floating bg-surface-raised backdrop-blur border border-edge-strong px-2.5 py-1.5 shadow-floating hover:bg-edge transition-colors"
         >
           {!allDone && <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary-5 animate-pulse" />}
-          <span className="text-meta font-semibold text-neutral-2">
+          <span className="text-meta font-semibold text-ink">
             {completed}/{tasks.length}
           </span>
-          <IconChevronDown size={14} className="text-neutral-4" />
+          <IconChevronDown size={14} className="text-ink-muted" />
         </button>
       </div>
     )
@@ -114,24 +114,24 @@ export function TodoPanel({ tasks, isProcessing = false }: Props) {
     <div className="absolute top-14 right-3 z-20 w-64 rounded-floating bg-surface-raised backdrop-blur border border-edge-strong shadow-floating">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-edge">
-        <span className="text-body font-semibold text-neutral-1 uppercase tracking-wider flex items-center gap-1.5">
+        <span className="text-body font-semibold text-ink uppercase tracking-wider flex items-center gap-1.5">
           {!allDone && <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary-5 animate-pulse" />}
           Tasks
-          <span className={`text-meta font-medium ml-1 ${allDone ? 'text-success-5' : 'text-neutral-5'}`}>
+          <span className={`text-meta font-medium ml-1 ${allDone ? 'text-success-5' : 'text-ink-muted'}`}>
             {completed}/{tasks.length}
           </span>
         </span>
         <div className="flex items-center gap-0.5">
           <button
             onClick={() => { setExpanded(false); }}
-            className="rounded-control p-0.5 text-neutral-4 hover:text-neutral-2 hover:bg-neutral-8/60 transition-colors"
+            className="rounded-control p-0.5 text-ink-muted hover:text-ink hover:bg-edge transition-colors"
             title="Collapse"
           >
             <IconChevronUp size={14} />
           </button>
           <button
             onClick={() => { setDismissed(true); }}
-            className="rounded-control p-0.5 text-neutral-4 hover:text-neutral-2 hover:bg-neutral-8/60 transition-colors"
+            className="rounded-control p-0.5 text-ink-muted hover:text-ink hover:bg-edge transition-colors"
             title="Dismiss"
           >
             <IconX size={14} />
@@ -152,9 +152,9 @@ export function TodoPanel({ tasks, isProcessing = false }: Props) {
             ) : task.status === 'in_progress' ? (
               <span className="inline-block h-2 w-2 mt-[7px] rounded-full bg-primary-5 animate-pulse flex-shrink-0" />
             ) : (
-              <span className="inline-block h-2 w-2 mt-[7px] rounded-full border border-neutral-5 flex-shrink-0" />
+              <span className="inline-block h-2 w-2 mt-[7px] rounded-full border border-ink-muted flex-shrink-0" />
             )}
-            <span className={task.status === 'completed' ? 'text-neutral-4 line-through' : 'text-neutral-2'}>
+            <span className={task.status === 'completed' ? 'text-ink-muted line-through' : 'text-ink'}>
               {task.status === 'in_progress' && task.activeForm ? task.activeForm : task.subject}
             </span>
           </div>

@@ -61,21 +61,21 @@ function StepIndicator({ current, eventDriven }: { current: Step; eventDriven: b
           <div className="flex items-center gap-2 flex-1">
             <span className={`w-6 h-6 rounded-full flex items-center justify-center text-meta font-semibold shrink-0 ${
               s.num < current
-                ? 'bg-success-7 text-white'
+                ? 'bg-success-7 text-ink-inverse'
                 : s.num === current
-                  ? 'bg-accent-7 text-white'
-                  : 'bg-neutral-9 text-neutral-5'
+                  ? 'bg-accent-7 text-ink-inverse'
+                  : 'bg-edge text-ink-muted'
             }`}>
               {s.num < current ? <IconCheck size={12} stroke={3} /> : s.num}
             </span>
             <span className={`text-body font-medium ${
-              s.num === current ? 'text-neutral-1' : 'text-neutral-5'
+              s.num === current ? 'text-ink' : 'text-ink-muted'
             }`}>
               {s.label}
             </span>
           </div>
           {i < steps.length - 1 && (
-            <div className={`h-px flex-1 mx-1 ${s.num < current ? 'bg-success-7' : 'bg-neutral-8'}`} />
+            <div className={`h-px flex-1 mx-1 ${s.num < current ? 'bg-success-7' : 'bg-edge-strong'}`} />
           )}
         </div>
       ))}
@@ -101,7 +101,7 @@ function StepRepo({
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 py-8 justify-center text-body text-neutral-5">
+      <div className="flex items-center gap-2 py-8 justify-center text-body text-ink-muted">
         <IconLoader2 size={16} stroke={2} className="animate-spin" />
         Loading repositories…
       </div>
@@ -118,7 +118,7 @@ function StepRepo({
 
   return (
     <div>
-      <p className="text-body text-neutral-4 mb-3">
+      <p className="text-body text-ink-muted mb-3">
         Choose which repository this workflow will run against.
       </p>
       <RepoList
@@ -176,12 +176,12 @@ function StepKind({
 
   return (
     <div>
-      <p className="text-body text-neutral-4 mb-3">
+      <p className="text-body text-ink-muted mb-3">
         Select the type of automated workflow to run.
       </p>
 
       {loading && (
-        <div className="flex items-center gap-2 py-2 text-body text-neutral-5 mb-2">
+        <div className="flex items-center gap-2 py-2 text-body text-ink-muted mb-2">
           <IconLoader2 size={14} stroke={2} className="animate-spin" />
           Checking for repo-specific workflows…
         </div>
@@ -202,16 +202,16 @@ function StepKind({
                   className={`rounded-control border px-3 py-2.5 text-left transition-colors ${
                     selectedKind === k.kind
                       ? 'border-accent-6 bg-accent-9/30 ring-1 ring-accent-6/30'
-                      : 'border-edge bg-surface hover:border-neutral-6'
+                      : 'border-edge bg-surface hover:border-ink-faint'
                   }`}
                 >
                   <span className={`block text-body font-medium ${
-                    selectedKind === k.kind ? 'text-accent-2' : 'text-neutral-2'
+                    selectedKind === k.kind ? 'text-accent-2' : 'text-ink'
                   }`}>
                     {k.name}
                   </span>
                   {k.source === 'repo' && (
-                    <span className="block text-micro text-neutral-5 mt-0.5">repo-specific</span>
+                    <span className="block text-micro text-ink-muted mt-0.5">repo-specific</span>
                   )}
                 </button>
               ))}
@@ -221,9 +221,9 @@ function StepKind({
       </div>
 
       {!loading && (
-        <p className="mt-4 text-meta text-neutral-5 leading-relaxed">
-          You can define custom workflow types by adding <code className="text-neutral-4">.md</code> files
-          to <code className="text-neutral-4">{repoPath}/.codekin/workflows/</code>. See the guide on the Workflows page for details.
+        <p className="mt-4 text-meta text-ink-muted leading-relaxed">
+          You can define custom workflow types by adding <code className="text-ink-muted">.md</code> files
+          to <code className="text-ink-muted">{repoPath}/.codekin/workflows/</code>. See the guide on the Workflows page for details.
         </p>
       )}
     </div>
@@ -246,7 +246,7 @@ function FrequencyButton({
       className={`rounded-control border px-3 py-1.5 text-body font-medium transition-colors ${
         selected
           ? 'border-accent-6 bg-accent-9/40 text-accent-2'
-          : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
+          : 'border-edge-strong bg-surface-raised text-ink hover:border-ink-faint hover:text-ink'
       }`}
     >
       {label}
@@ -270,16 +270,16 @@ function StepConfigure({
       {/* Schedule section — hidden for event-driven workflows */}
       {eventDriven ? (
         <div>
-          <p className="text-body text-neutral-4 mb-3">
+          <p className="text-body text-ink-muted mb-3">
             {form.kind === 'pr-review'
               ? 'This workflow runs automatically when a pull request is opened or updated via GitHub webhooks.'
               : 'This workflow runs automatically on every commit via a post-commit hook.'}
           </p>
-          <div className="rounded-control border border-purple-700/40 bg-purple-900/20 px-4 py-3">
-            <span className="text-body font-medium text-purple-400">
+          <div className="rounded-control border border-secondary-7/40 bg-secondary-9/20 px-4 py-3">
+            <span className="text-body font-medium text-secondary-4">
               {form.kind === 'pr-review' ? 'Trigger: On pull request' : 'Trigger: On commit'}
             </span>
-            <p className="text-body text-neutral-4 mt-1">
+            <p className="text-body text-ink-muted mt-1">
               {form.kind === 'pr-review'
                 ? 'Each PR will be reviewed automatically when opened, updated, or reopened. No schedule needed.'
                 : 'Each commit will be reviewed automatically. No schedule needed.'}
@@ -289,12 +289,12 @@ function StepConfigure({
       ) : (
         <>
           <div>
-            <p className="text-body text-neutral-4 mb-3">
+            <p className="text-body text-ink-muted mb-3">
               Choose when this workflow should run automatically.
             </p>
 
             {/* Time picker */}
-            <label className="block text-body font-medium text-neutral-3 mb-2">Time</label>
+            <label className="block text-body font-medium text-ink mb-2">Time</label>
             <TimePicker
               hour={form.cronHour}
               minute={form.cronMinute}
@@ -303,7 +303,7 @@ function StepConfigure({
           </div>
 
           <div>
-            <label className="block text-body font-medium text-neutral-3 mb-2">Frequency</label>
+            <label className="block text-body font-medium text-ink mb-2">Frequency</label>
             <div className="flex flex-wrap gap-1.5 mb-2">
               {DAY_PRESETS.map(p => {
                 const selected = form.cronDow === p.dow
@@ -361,7 +361,7 @@ function StepConfigure({
                 </div>
               )
             })()}
-            <div className="mt-2 text-meta text-neutral-5">
+            <div className="mt-2 text-meta text-ink-muted">
               {describeCron(buildCron(form.cronHour, form.cronDow, form.cronMinute))}
             </div>
           </div>
@@ -379,15 +379,15 @@ function StepConfigure({
       />
 
       <div>
-        <label className="block text-body font-medium text-neutral-3 mb-1.5">
-          Focus areas <span className="text-neutral-5 font-normal">(optional)</span>
+        <label className="block text-body font-medium text-ink mb-1.5">
+          Focus areas <span className="text-ink-muted font-normal">(optional)</span>
         </label>
         <textarea
           value={form.customPrompt}
           onChange={e => { onChange({ customPrompt: e.target.value }); }}
           rows={3}
           placeholder="e.g. Focus on the auth module and payment flows"
-          className="w-full rounded-control border border-edge-strong bg-surface px-3 py-2 text-body text-neutral-1 placeholder-neutral-5 focus:border-accent-6 focus:outline-none resize-none"
+          className="w-full rounded-control border border-edge-strong bg-surface px-3 py-2 text-body text-ink placeholder-ink-muted focus:border-focus focus:outline-none resize-none"
         />
       </div>
     </div>
@@ -490,8 +490,8 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
       >
         {/* Header */}
         <div className="flex items-center justify-between mb-1">
-          <h2 className="text-head font-semibold text-neutral-1">New Workflow</h2>
-          <button onClick={onClose} className="rounded-control p-1 text-neutral-4 hover:text-neutral-1 hover:bg-neutral-9">
+          <h2 className="text-head font-semibold text-ink">New Workflow</h2>
+          <button onClick={onClose} className="rounded-control p-1 text-ink-muted hover:text-ink hover:bg-edge">
             <IconX size={16} stroke={2} />
           </button>
         </div>
@@ -506,15 +506,15 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
                     <IconAlertTriangle size={18} stroke={2} className="text-warning-4 mt-0.5 shrink-0" />
                     <div>
                       <p className="text-body font-medium text-warning-3">Webhook setup required</p>
-                      <p className="text-body text-neutral-4 mt-1">{webhookResult.message}</p>
+                      <p className="text-body text-ink-muted mt-1">{webhookResult.message}</p>
                     </div>
                   </div>
                   <div className="rounded-control border border-edge bg-surface px-4 py-3">
-                    <p className="text-body font-medium text-neutral-3 mb-2">To enable PR reviews, configure the webhook:</p>
-                    <ol className="text-body text-neutral-4 space-y-1.5 list-decimal list-inside">
-                      <li>Go to <span className="text-neutral-2 font-medium">Settings</span> (gear icon in the sidebar)</li>
-                      <li>Scroll to <span className="text-neutral-2 font-medium">GitHub Webhooks</span></li>
-                      <li>Enter the repository name and click <span className="text-neutral-2 font-medium">Setup</span></li>
+                    <p className="text-body font-medium text-ink mb-2">To enable PR reviews, configure the webhook:</p>
+                    <ol className="text-body text-ink-muted space-y-1.5 list-decimal list-inside">
+                      <li>Go to <span className="text-ink font-medium">Settings</span> (gear icon in the sidebar)</li>
+                      <li>Scroll to <span className="text-ink font-medium">GitHub Webhooks</span></li>
+                      <li>Enter the repository name and click <span className="text-ink font-medium">Setup</span></li>
                     </ol>
                   </div>
                 </div>
@@ -523,7 +523,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
                   <IconCheck size={18} stroke={2} className="text-success-4 mt-0.5 shrink-0" />
                   <div>
                     <p className="text-body font-medium text-success-3">Workflow created</p>
-                    <p className="text-body text-neutral-4 mt-1">
+                    <p className="text-body text-ink-muted mt-1">
                       {webhookResult.message} PRs will be reviewed automatically when opened or updated.
                     </p>
                   </div>
@@ -589,7 +589,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
                 <button
                   type="button"
                   onClick={handleBack}
-                  className="flex items-center gap-1.5 rounded-control border border-neutral-7 bg-neutral-10 px-4 py-2 text-body text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
+                  className="flex items-center gap-1.5 rounded-control border border-edge-strong bg-surface-raised px-4 py-2 text-body text-ink hover:bg-edge hover:text-ink transition-colors"
                 >
                   <IconArrowLeft size={14} stroke={2} />
                   Back
@@ -598,7 +598,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
                 <button
                   type="button"
                   onClick={onClose}
-                  className="rounded-control border border-neutral-7 bg-neutral-10 px-4 py-2 text-body text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
+                  className="rounded-control border border-edge-strong bg-surface-raised px-4 py-2 text-body text-ink hover:bg-edge hover:text-ink transition-colors"
                 >
                   Cancel
                 </button>

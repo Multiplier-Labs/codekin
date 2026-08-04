@@ -31,11 +31,11 @@ interface Props {
 
 function StatCard({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-2.5 rounded-control bg-neutral-11 px-3 py-2 min-w-[120px]">
-      <div className="text-neutral-5">{icon}</div>
+    <div className="flex items-center gap-2.5 rounded-control bg-surface px-3 py-2 min-w-[120px]">
+      <div className="text-ink-muted">{icon}</div>
       <div>
-        <div className="text-head font-semibold text-neutral-2">{value}</div>
-        <div className="text-meta text-neutral-5 leading-tight">{label}</div>
+        <div className="text-head font-semibold text-ink">{value}</div>
+        <div className="text-meta text-ink-muted leading-tight">{label}</div>
       </div>
     </div>
   )
@@ -99,7 +99,7 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
   if (status === 'loading') {
     return (
       <div className="flex flex-1 items-center justify-center">
-        <div className="flex items-center gap-3 text-neutral-4">
+        <div className="flex items-center gap-3 text-ink-muted">
           <IconRobotFace size={20} stroke={2} />
           <span className="text-body">Starting Agent {agentName}...</span>
         </div>
@@ -115,7 +115,7 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
             <IconRobotFace size={20} stroke={2} />
             <span className="text-body font-medium">Failed to start Agent {agentName}</span>
           </div>
-          <p className="text-body text-neutral-5">{error}</p>
+          <p className="text-body text-ink-muted">{error}</p>
         </div>
       </div>
     )
@@ -125,8 +125,8 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
   if (!sessionJoined) return null
 
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5 border-b border-neutral-10 bg-neutral-12">
-      <div className="flex items-center gap-2 text-neutral-2">
+    <div className="flex items-center gap-3 px-4 py-2.5 border-b border-edge bg-page">
+      <div className="flex items-center gap-2 text-ink">
         <IconRobotFace size={18} stroke={2} className="text-accent-5" />
         <span className="text-body font-medium">Agent {agentName}</span>
       </div>

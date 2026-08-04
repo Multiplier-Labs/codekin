@@ -571,7 +571,7 @@ export default function App() {
   }, [])
 
   return (
-    <div className="flex h-full bg-neutral-7">
+    <div className="flex h-full bg-edge-strong">
       {/* Left sidebar — repo/session tree + nav */}
       <LeftSidebar
         sessions={sessions}

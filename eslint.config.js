@@ -48,6 +48,36 @@ export default defineConfig([
     },
   },
   {
+    // Styling guard: components must use the semantic tokens (bg-page,
+    // bg-surface, border-edge, text-ink-muted, ...) or the intent families
+    // (primary/secondary/accent/error/warning/success) — never raw neutral
+    // scale steps or Tailwind's default palette. See "Styling rules" in
+    // CLAUDE.md and the semantic aliases in src/index.css.
+    files: ['src/components/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'Literal[value=/\\b(bg|text|border|divide|ring|placeholder|from|to|via)-neutral-\\d/]',
+          message: 'Use semantic tokens (bg-page/bg-surface/bg-surface-raised, border-edge, text-ink…) instead of raw neutral scale steps.',
+        },
+        {
+          selector: 'TemplateElement[value.raw=/\\b(bg|text|border|divide|ring|placeholder|from|to|via)-neutral-\\d/]',
+          message: 'Use semantic tokens (bg-page/bg-surface/bg-surface-raised, border-edge, text-ink…) instead of raw neutral scale steps.',
+        },
+        {
+          selector: 'Literal[value=/\\b(bg|text|border)-(purple|red|blue|green|gray|grey|slate|zinc|stone|amber|yellow|emerald|teal|cyan|sky|orange|pink|rose|indigo|violet|fuchsia|lime)-\\d{3}|\\btext-white\\b|\\bbg-white\\b/]',
+          message: "Tailwind's default palette is off-system: use the intent families (secondary, error, …) or text-ink-inverse.",
+        },
+        {
+          selector: 'TemplateElement[value.raw=/\\b(bg|text|border)-(purple|red|blue|green|gray|grey|slate|zinc|stone|amber|yellow|emerald|teal|cyan|sky|orange|pink|rose|indigo|violet|fuchsia|lime)-\\d{3}|\\btext-white\\b|\\bbg-white\\b/]',
+          message: "Tailwind's default palette is off-system: use the intent families (secondary, error, …) or text-ink-inverse.",
+        },
+      ],
+    },
+  },
+  {
     files: ['server/**/*.ts'],
     ignores: ['server/**/*.test.ts'],
     extends: [

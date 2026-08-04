@@ -135,10 +135,10 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
     }
 
     return (
-      <div className={`border-t ${isQuestion ? 'px-4 py-3' : 'px-3 py-2'} ${isPermission ? 'border-warning-9/50 bg-warning-11/30' : 'border-neutral-10 bg-neutral-11'}`}>
+      <div className={`border-t ${isQuestion ? 'px-4 py-3' : 'px-3 py-2'} ${isPermission ? 'border-warning-9/50 bg-warning-11/30' : 'border-edge bg-surface'}`}>
         {displayQuestion && (
-          <p className={`${isQuestion ? 'text-body mb-2' : 'text-body mb-1.5'} ${isPermission ? 'text-warning-4' : 'text-neutral-3'}`}>
-            {progressLabel && <span className="text-neutral-5 mr-1">{progressLabel}</span>}
+          <p className={`${isQuestion ? 'text-body mb-2' : 'text-body mb-1.5'} ${isPermission ? 'text-warning-4' : 'text-ink'}`}>
+            {progressLabel && <span className="text-ink-muted mr-1">{progressLabel}</span>}
             {displayQuestion}
           </p>
         )}
@@ -151,7 +151,7 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
               className={`rounded-control border ${btnPad} transition-colors ${
                 selected.has(opt.value)
                   ? 'border-primary-6 bg-primary-9 text-primary-3'
-                  : 'border-edge-strong bg-neutral-10 text-neutral-2 hover:border-primary-7 hover:bg-neutral-9 hover:text-neutral-1'
+                  : 'border-edge-strong bg-surface-raised text-ink hover:border-primary-7 hover:bg-edge hover:text-ink'
               }`}
             >
               {opt.label}
@@ -172,10 +172,10 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
 
   // Single-select: click sends immediately
   return (
-    <div className={`border-t ${isQuestion ? 'px-4 py-3' : 'px-3 py-2'} ${isPermission ? 'border-warning-9/50 bg-warning-11/30' : 'border-neutral-10 bg-neutral-11'}`}>
+    <div className={`border-t ${isQuestion ? 'px-4 py-3' : 'px-3 py-2'} ${isPermission ? 'border-warning-9/50 bg-warning-11/30' : 'border-edge bg-surface'}`}>
       {displayQuestion && (
-        <p className={`${isQuestion ? 'text-body mb-2' : 'text-body mb-1.5'} ${isPermission ? 'text-warning-4' : 'text-neutral-3'}`}>
-          {progressLabel && <span className="text-neutral-5 mr-1">{progressLabel}</span>}
+        <p className={`${isQuestion ? 'text-body mb-2' : 'text-body mb-1.5'} ${isPermission ? 'text-warning-4' : 'text-ink'}`}>
+          {progressLabel && <span className="text-ink-muted mr-1">{progressLabel}</span>}
           {displayQuestion}
         </p>
       )}
@@ -195,7 +195,7 @@ export function PromptButtons({ options, question, multiSelect, promptType, ques
           } else if (isDeny) {
             btnClass += 'border-error-7 bg-error-10/50 text-error-4 hover:bg-error-9/50'
           } else {
-            btnClass += 'border-edge-strong bg-neutral-10 text-neutral-2 hover:border-primary-7 hover:bg-neutral-9 hover:text-neutral-1'
+            btnClass += 'border-edge-strong bg-surface-raised text-ink hover:border-primary-7 hover:bg-edge hover:text-ink'
           }
           return (
             <button

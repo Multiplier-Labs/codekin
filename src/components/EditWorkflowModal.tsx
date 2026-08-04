@@ -19,7 +19,7 @@ const btnClass = (selected: boolean) =>
   `rounded-control border px-3 py-1.5 text-body font-medium transition-colors ${
     selected
       ? 'border-accent-6 bg-accent-9/40 text-accent-2'
-      : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
+      : 'border-edge-strong bg-surface-raised text-ink hover:border-ink-faint hover:text-ink'
   }`
 
 interface Props {
@@ -90,14 +90,14 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-head font-semibold text-neutral-1">Edit Workflow</h2>
+            <h2 className="text-head font-semibold text-ink">Edit Workflow</h2>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-meta text-neutral-4">{repoShortName}</span>
-              <span className="text-neutral-7">·</span>
-              <span className="text-meta text-neutral-4">{kindLabel(repo.kind ?? '')}</span>
+              <span className="text-meta text-ink-muted">{repoShortName}</span>
+              <span className="text-ink-faint">·</span>
+              <span className="text-meta text-ink-muted">{kindLabel(repo.kind ?? '')}</span>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-control p-1 text-neutral-4 hover:text-neutral-1 hover:bg-neutral-9">
+          <button onClick={onClose} className="rounded-control p-1 text-ink-muted hover:text-ink hover:bg-edge">
             <IconX size={16} stroke={2} />
           </button>
         </div>
@@ -108,7 +108,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
             {/* Left column — Workflow kind */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-body font-medium text-neutral-3">Workflow type</label>
+                <label className="text-body font-medium text-ink">Workflow type</label>
                 <CategoryBadge kind={form.kind} />
               </div>
               <div className="grid grid-cols-2 gap-1.5">
@@ -120,11 +120,11 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
                     className={`rounded-control border px-2.5 py-1.5 text-left transition-colors ${
                       form.kind === k.value
                         ? 'border-accent-6 bg-accent-9/30 ring-1 ring-accent-6/30'
-                        : 'border-edge bg-surface hover:border-neutral-6'
+                        : 'border-edge bg-surface hover:border-ink-faint'
                     }`}
                   >
                     <span className={`block text-meta font-medium leading-tight ${
-                      form.kind === k.value ? 'text-accent-2' : 'text-neutral-2'
+                      form.kind === k.value ? 'text-accent-2' : 'text-ink'
                     }`}>
                       {k.label}
                     </span>
@@ -137,11 +137,11 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
             <div>
               {/* Schedule — hidden for event-driven workflows */}
               {eventDriven ? (
-                <div className="rounded-control border border-purple-700/40 bg-purple-900/20 px-3 py-2.5">
-                  <span className="text-body font-medium text-purple-400">
+                <div className="rounded-control border border-secondary-7/40 bg-secondary-9/20 px-3 py-2.5">
+                  <span className="text-body font-medium text-secondary-4">
                     {form.kind === 'pr-review' ? 'Trigger: On pull request' : 'Trigger: On commit'}
                   </span>
-                  <p className="text-meta text-neutral-4 mt-0.5">
+                  <p className="text-meta text-ink-muted mt-0.5">
                     {form.kind === 'pr-review'
                       ? 'Runs automatically when PRs are opened or updated.'
                       : 'Runs automatically on each commit.'}
@@ -151,7 +151,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
                 <div>
                   <div className="flex items-center gap-3 mb-2.5">
                     <div>
-                      <label className="block text-body font-medium text-neutral-3 mb-1">Time</label>
+                      <label className="block text-body font-medium text-ink mb-1">Time</label>
                       <TimePicker
                         hour={form.cronHour}
                         minute={form.cronMinute}
@@ -160,7 +160,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
                     </div>
                     {isDay && (
                       <div>
-                        <label className="block text-body font-medium text-neutral-3 mb-1">Repeat</label>
+                        <label className="block text-body font-medium text-ink mb-1">Repeat</label>
                         <div className="flex gap-1">
                           <button type="button" onClick={() => setForm(f => ({ ...f, cronDow: baseDow }))} className={btnClass(!biweekly)}>
                             Weekly
@@ -172,7 +172,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
                       </div>
                     )}
                   </div>
-                  <label className="block text-body font-medium text-neutral-3 mb-1">Frequency</label>
+                  <label className="block text-body font-medium text-ink mb-1">Frequency</label>
                   <div className="flex flex-wrap gap-1 mb-1.5">
                     {DAY_PRESETS.map(p => {
                       const isActive = form.cronDow === p.dow
@@ -201,7 +201,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
                       </button>
                     ))}
                   </div>
-                  <div className="mt-1 text-meta text-neutral-5">
+                  <div className="mt-1 text-meta text-ink-muted">
                     {describeCron(buildCron(form.cronHour, form.cronDow, form.cronMinute))}
                   </div>
                 </div>
@@ -221,15 +221,15 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
 
           {/* Custom prompt — full width */}
           <div>
-            <label className="block text-body font-medium text-neutral-3 mb-1">
-              Focus areas <span className="text-neutral-5 font-normal">(optional)</span>
+            <label className="block text-body font-medium text-ink mb-1">
+              Focus areas <span className="text-ink-muted font-normal">(optional)</span>
             </label>
             <textarea
               value={form.customPrompt}
               onChange={e => setForm(f => ({ ...f, customPrompt: e.target.value }))}
               rows={2}
               placeholder="e.g. Focus on the auth module and payment flows"
-              className="w-full rounded-control border border-edge-strong bg-surface px-3 py-2 text-body text-neutral-1 placeholder-neutral-5 focus:border-accent-6 focus:outline-none resize-none"
+              className="w-full rounded-control border border-edge-strong bg-surface px-3 py-2 text-body text-ink placeholder-ink-muted focus:border-focus focus:outline-none resize-none"
             />
           </div>
 
@@ -241,7 +241,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 rounded-control border border-neutral-7 bg-neutral-10 py-2 text-body text-neutral-3 hover:bg-neutral-9 hover:text-neutral-1 transition-colors"
+              className="flex-1 rounded-control border border-edge-strong bg-surface-raised py-2 text-body text-ink hover:bg-edge hover:text-ink transition-colors"
             >
               Cancel
             </button>

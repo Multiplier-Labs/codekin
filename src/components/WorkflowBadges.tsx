@@ -14,7 +14,7 @@ export function CategoryBadge({ kind }: { kind: string }) {
     assessment: 'border-accent-7/60 bg-accent-9/30 text-accent-4',
     organizer:  'border-success-7/60 bg-success-9/30 text-success-4',
     executor:   'border-warning-7/60 bg-warning-9/30 text-warning-4',
-    event:      'border-purple-700/60 bg-purple-900/30 text-purple-400',
+    event:      'border-secondary-7/60 bg-secondary-9/30 text-secondary-4',
   }
   return (
     <span className={`inline-flex items-center rounded-control border px-2.5 py-0.5 text-meta font-medium capitalize ${styles[cat]}`}>
@@ -48,7 +48,7 @@ export function StatusBadge({ status }: { status: string }) {
       )
     case 'queued':
       return (
-        <span className="inline-flex items-center gap-1.5 rounded-control border border-edge-strong bg-neutral-9/40 px-2.5 py-0.5 text-meta font-medium text-neutral-4">
+        <span className="inline-flex items-center gap-1.5 rounded-control border border-edge-strong bg-edge/40 px-2.5 py-0.5 text-meta font-medium text-ink-muted">
           <IconClock size={12} stroke={2} />
           queued
         </span>
@@ -62,14 +62,14 @@ export function StatusBadge({ status }: { status: string }) {
       )
     case 'skipped':
       return (
-        <span className="inline-flex items-center gap-1.5 rounded-control border border-edge-strong bg-neutral-9/40 px-2.5 py-0.5 text-meta font-medium text-neutral-5">
+        <span className="inline-flex items-center gap-1.5 rounded-control border border-edge-strong bg-edge/40 px-2.5 py-0.5 text-meta font-medium text-ink-muted">
           <IconPlayerPause size={12} stroke={2} />
           skipped
         </span>
       )
     default:
       return (
-        <span className="inline-flex items-center gap-1.5 rounded-control border border-edge-strong bg-neutral-9/40 px-2.5 py-0.5 text-meta font-medium text-neutral-4">
+        <span className="inline-flex items-center gap-1.5 rounded-control border border-edge-strong bg-edge/40 px-2.5 py-0.5 text-meta font-medium text-ink-muted">
           {status}
         </span>
       )

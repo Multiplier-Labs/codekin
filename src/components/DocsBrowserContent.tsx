@@ -116,8 +116,8 @@ export function DocsBrowserContent({
           worktreePath={worktreePath}
         />
       ) : (
-        <div className="px-4 py-3 border-t border-neutral-10">
-          <div className="rounded-control bg-neutral-11 px-3 py-2 text-body text-neutral-5 opacity-40">
+        <div className="px-4 py-3 border-t border-edge">
+          <div className="rounded-control bg-surface px-3 py-2 text-body text-ink-muted opacity-40">
             Start a session to edit this doc
           </div>
         </div>

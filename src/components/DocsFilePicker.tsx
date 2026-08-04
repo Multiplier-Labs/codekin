@@ -49,10 +49,10 @@ export function DocsFilePicker({ files, loading, starredDocs, onSelect, onClose 
     <div ref={ref} className="mt-1 border-t border-edge pt-1">
       {loading ? (
         <div className="flex items-center justify-center py-3">
-          <IconLoader2 size={14} className="animate-spin text-neutral-5" />
+          <IconLoader2 size={14} className="animate-spin text-ink-muted" />
         </div>
       ) : files.length === 0 ? (
-        <div className="pl-10 pr-2 py-1 text-body text-neutral-5">No markdown files found</div>
+        <div className="pl-10 pr-2 py-1 text-body text-ink-muted">No markdown files found</div>
       ) : (
         <>
           {files.length > 5 && (
@@ -63,20 +63,20 @@ export function DocsFilePicker({ files, loading, starredDocs, onSelect, onClose 
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Filter docs..."
                 autoFocus
-                className="w-full rounded-control border border-edge-strong bg-neutral-10/50 px-2 py-1 text-body text-neutral-2 placeholder-neutral-5 focus:border-accent-6 focus:outline-none"
+                className="w-full rounded-control border border-edge-strong bg-surface-raised px-2 py-1 text-body text-ink placeholder-ink-muted focus:border-focus focus:outline-none"
               />
             </div>
           )}
           <div className="overflow-y-auto" style={{ maxHeight: '320px' }}>
             {filtered.length === 0 ? (
-              <div className="pl-10 pr-2 py-1 text-body text-neutral-5">No matching files</div>
+              <div className="pl-10 pr-2 py-1 text-body text-ink-muted">No matching files</div>
             ) : (
               <>
                 {starred.map(f => (
                   <button
                     key={f.path}
                     onClick={() => onSelect(f.path)}
-                    className="group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-body text-neutral-2 font-medium hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors cursor-pointer rounded-control"
+                    className="group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-body text-ink font-medium hover:bg-surface-raised hover:text-ink transition-colors cursor-pointer rounded-control"
                   >
                     <IconStarFilled size={13} className="flex-shrink-0 text-primary-5" />
                     <span className="flex-1 truncate">{f.path}</span>
@@ -89,9 +89,9 @@ export function DocsFilePicker({ files, loading, starredDocs, onSelect, onClose 
                   <button
                     key={f.path}
                     onClick={() => onSelect(f.path)}
-                    className="group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-body text-neutral-2 font-medium hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors cursor-pointer rounded-control"
+                    className="group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-body text-ink font-medium hover:bg-surface-raised hover:text-ink transition-colors cursor-pointer rounded-control"
                   >
-                    <IconFileText size={13} className="flex-shrink-0 text-neutral-5" />
+                    <IconFileText size={13} className="flex-shrink-0 text-ink-muted" />
                     <span className="flex-1 truncate">{f.path}</span>
                   </button>
                 ))}
@@ -102,9 +102,9 @@ export function DocsFilePicker({ files, loading, starredDocs, onSelect, onClose 
                   <button
                     key={f.path}
                     onClick={() => onSelect(f.path)}
-                    className="group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-body text-neutral-4 hover:bg-neutral-6/50 hover:text-neutral-2 transition-colors cursor-pointer rounded-control"
+                    className="group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-body text-ink-muted hover:bg-surface-raised hover:text-ink transition-colors cursor-pointer rounded-control"
                   >
-                    <IconFileText size={13} className="flex-shrink-0 text-neutral-6" />
+                    <IconFileText size={13} className="flex-shrink-0 text-ink-faint" />
                     <span className="flex-1 truncate">{f.path}</span>
                   </button>
                 ))}

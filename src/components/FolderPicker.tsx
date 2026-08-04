@@ -100,9 +100,9 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
 
   return (
     <div className="relative">
-      <label className="mb-1.5 block text-neutral-5" style={{ fontSize: inputClass ? undefined : '13px' }}>
+      <label className="mb-1.5 block text-ink-muted" style={{ fontSize: inputClass ? undefined : '13px' }}>
         <span className="flex items-center gap-1.5">
-          <IconFolder size={13} className="text-neutral-6" />
+          <IconFolder size={13} className="text-ink-faint" />
           Repositories Path
         </span>
       </label>
@@ -116,17 +116,17 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
           onKeyDown={e => { if (e.key === 'Enter') void save() }}
           placeholder={placeholder}
           disabled={saving}
-          className={`flex-1 rounded-control border border-edge bg-surface px-3 py-2 ${inputSizeClass} font-mono text-neutral-3 outline-none focus:border-primary-7 disabled:opacity-50`}
+          className={`flex-1 rounded-control border border-edge bg-surface px-3 py-2 ${inputSizeClass} font-mono text-ink outline-none focus:border-primary-7 disabled:opacity-50`}
         />
         <button
           type="button"
           onClick={() => browserOpen ? setBrowserOpen(false) : void browse(path || undefined)}
           disabled={!token || browseLoading}
-          className="flex items-center gap-1 rounded-control border border-edge bg-surface px-2.5 py-2 text-body text-neutral-4 hover:border-neutral-7 hover:text-neutral-3 disabled:opacity-50"
+          className="flex items-center gap-1 rounded-control border border-edge bg-surface px-2.5 py-2 text-body text-ink-muted hover:border-edge-strong hover:text-ink disabled:opacity-50"
           title="Browse folders"
         >
           {browseLoading ? (
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-6 border-t-transparent" />
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink-faint border-t-transparent" />
           ) : (
             <IconFolderOpen size={16} />
           )}
@@ -135,14 +135,14 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
 
       {/* Error message */}
       {(error || browseError) && (
-        <p className="mt-1 text-meta text-red-400">
+        <p className="mt-1 text-meta text-error-4">
           {error || browseError}
         </p>
       )}
 
       {/* Help text */}
       {helpText && !error && !browseError && (
-        <p className="mt-1 text-meta text-neutral-5">{helpText}</p>
+        <p className="mt-1 text-meta text-ink-muted">{helpText}</p>
       )}
 
       {/* Directory browser dropdown */}
@@ -156,16 +156,16 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
             <button
               type="button"
               onClick={navigateUp}
-              className="rounded-control p-0.5 text-neutral-5 hover:bg-neutral-8 hover:text-neutral-3"
+              className="rounded-control p-0.5 text-ink-muted hover:bg-edge hover:text-ink"
               title="Go up"
             >
               <IconArrowUp size={14} />
             </button>
-            <span className="flex-1 truncate font-mono text-meta text-neutral-4">{browsePath}</span>
+            <span className="flex-1 truncate font-mono text-meta text-ink-muted">{browsePath}</span>
             <button
               type="button"
               onClick={() => setBrowserOpen(false)}
-              className="rounded-control p-0.5 text-neutral-5 hover:bg-neutral-8 hover:text-neutral-3"
+              className="rounded-control p-0.5 text-ink-muted hover:bg-edge hover:text-ink"
             >
               <IconX size={14} />
             </button>
@@ -174,18 +174,18 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
           {/* Directory list */}
           <div className="max-h-48 overflow-y-auto py-1">
             {dirs.length === 0 ? (
-              <p className="px-3 py-2 text-meta text-neutral-5">No subdirectories</p>
+              <p className="px-3 py-2 text-meta text-ink-muted">No subdirectories</p>
             ) : (
               dirs.map(dir => (
                 <button
                   key={dir}
                   type="button"
                   onClick={() => selectDir(dir)}
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-body text-neutral-3 hover:bg-neutral-8"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-body text-ink hover:bg-edge"
                 >
-                  <IconFolder size={14} className="shrink-0 text-neutral-5" />
+                  <IconFolder size={14} className="shrink-0 text-ink-muted" />
                   <span className="truncate">{dir}</span>
-                  <IconChevronRight size={12} className="ml-auto shrink-0 text-neutral-6" />
+                  <IconChevronRight size={12} className="ml-auto shrink-0 text-ink-faint" />
                 </button>
               ))
             )}
@@ -196,7 +196,7 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
             <button
               type="button"
               onClick={pickCurrentDir}
-              className="w-full rounded-control bg-primary-7 px-3 py-1.5 text-body font-medium text-white hover:bg-primary-6"
+              className="w-full rounded-control bg-primary-7 px-3 py-1.5 text-body font-medium text-ink-inverse hover:bg-primary-6"
             >
               Select this folder
             </button>

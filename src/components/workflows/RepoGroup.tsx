@@ -45,9 +45,9 @@ export function RepoGroup({
   return (
     <div className="workflow-card rounded-lg border border-edge bg-surface overflow-hidden">
       {/* Repo header */}
-      <div className="flex items-baseline gap-2 px-4 py-2.5 border-b border-edge bg-neutral-10/20">
-        <span className="text-body font-semibold text-neutral-2">{repoName}</span>
-        <span className="text-meta text-neutral-6">{workflows.length}</span>
+      <div className="flex items-baseline gap-2 px-4 py-2.5 border-b border-edge bg-surface-raised/20">
+        <span className="text-body font-semibold text-ink">{repoName}</span>
+        <span className="text-meta text-ink-faint">{workflows.length}</span>
       </div>
       {/* Workflow rows */}
       <div className="py-1 px-1">

@@ -71,7 +71,7 @@ export function DocsBrowser({
 
         {loading ? (
           <div className="flex items-center justify-center py-12">
-            <IconLoader2 size={20} className="animate-spin text-neutral-5" />
+            <IconLoader2 size={20} className="animate-spin text-ink-muted" />
           </div>
         ) : error ? (
           <div className="rounded-control bg-error-10/50 px-3 py-2 text-body text-error-4 mx-4 mt-4">
@@ -79,7 +79,7 @@ export function DocsBrowser({
           </div>
         ) : content !== null ? (
           rawMode ? (
-            <pre className="px-6 py-4 text-body text-neutral-3 whitespace-pre-wrap" style={{ fontFamily: "'Inconsolata', monospace" }}>
+            <pre className="px-6 py-4 text-body text-ink whitespace-pre-wrap" style={{ fontFamily: "'Inconsolata', monospace" }}>
               {content}
             </pre>
           ) : (

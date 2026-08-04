@@ -89,7 +89,7 @@ function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
     : msg.subtype === 'notification'
     ? 'text-primary-5'
     : msg.subtype === 'exit' || msg.subtype === 'restart' || msg.subtype === 'info'
-    ? 'text-neutral-5'
+    ? 'text-ink-muted'
     : 'text-error-5'
 
   const dotClass = msg.subtype === 'init'
@@ -99,7 +99,7 @@ function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
     : msg.subtype === 'exit' || msg.subtype === 'restart'
     ? 'bg-warning-5'
     : msg.subtype === 'info'
-    ? 'bg-neutral-5'
+    ? 'bg-ink-muted'
     : 'bg-error-5'
 
   const modelLabel = msg.model ? ` (${formatModelName(msg.model)})` : ''
@@ -135,7 +135,7 @@ function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
 function UserMessage({ msg, fontSize, isMobile }: { msg: ChatMessage & { type: 'user' }; fontSize: number; isMobile?: boolean }) {
   return (
     <div
-      className={`user-bubble rounded-control border border-edge bg-surface px-3 py-2 text-neutral-3 whitespace-pre-wrap ${isMobile ? 'max-w-[95%]' : 'max-w-[80%]'}`}
+      className={`user-bubble rounded-control border border-edge bg-surface px-3 py-2 text-ink whitespace-pre-wrap ${isMobile ? 'max-w-[95%]' : 'max-w-[80%]'}`}
       style={{ fontSize: `${fontSize}px` }}
     >
       {formatUserText(msg.text)}
@@ -156,7 +156,7 @@ function CodeCopyButton({ code }: { code: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="absolute top-2 right-2 rounded-control p-1 opacity-0 transition-opacity group-hover/codeblock:opacity-100 bg-neutral-8/80 hover:bg-neutral-7 text-neutral-4 hover:text-neutral-2 cursor-pointer"
+      className="absolute top-2 right-2 rounded-control p-1 opacity-0 transition-opacity group-hover/codeblock:opacity-100 bg-edge-strong/80 hover:bg-ink-faint text-ink-muted hover:text-ink cursor-pointer"
       title="Copy to clipboard"
     >
       {copied ? (
@@ -221,7 +221,7 @@ function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: {
                 )
               }
               return (
-                <code className={`${className || ''} rounded-control bg-neutral-10 px-1.5 py-0.5`} {...props}>
+                <code className={`${className || ''} rounded-control bg-surface-raised px-1.5 py-0.5`} {...props}>
                   {children}
                 </code>
               )
@@ -233,7 +233,7 @@ function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: {
             img({ src, alt, ...props }) {
               // Only allow https: and data: URIs to prevent tracking beacons and arbitrary protocol access
               const safeSrc = src && /^(https:|data:image\/)/i.test(src) ? src : undefined
-              if (!safeSrc) return <span className="text-neutral-5">[image blocked: untrusted source]</span>
+              if (!safeSrc) return <span className="text-ink-muted">[image blocked: untrusted source]</span>
               return (
                 <img
                   src={safeSrc}
@@ -249,7 +249,7 @@ function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: {
           {displayText}
         </Markdown>
         {repeatCount && repeatCount > 1 && (
-          <span className="inline-block ml-1 text-meta text-neutral-5 bg-neutral-10 rounded-control px-2 py-0.5 align-middle">
+          <span className="inline-block ml-1 text-meta text-ink-muted bg-surface-raised rounded-control px-2 py-0.5 align-middle">
             ×{repeatCount}
           </span>
         )}
@@ -262,7 +262,7 @@ function ToolGroupInline({ msg, fontSize }: { msg: ChatMessage & { type: 'tool_g
   const smallSize = fontSize - 1
   return (
     <div
-      className="flex flex-wrap gap-x-4 gap-y-0.5 text-neutral-4"
+      className="flex flex-wrap gap-x-4 gap-y-0.5 text-ink-muted"
       style={{ fontSize: `${smallSize}px`, fontFamily: "'Inconsolata', monospace" }}
     >
       {msg.tools.map((tool, i) => (
@@ -270,11 +270,11 @@ function ToolGroupInline({ msg, fontSize }: { msg: ChatMessage & { type: 'tool_g
           {tool.active ? (
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary-5 animate-pulse flex-shrink-0" />
           ) : (
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-neutral-6 flex-shrink-0" />
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-ink-faint flex-shrink-0" />
           )}
           <span className="text-accent-6">{tool.name}</span>
           {tool.summary && (
-            <span className="text-neutral-5 truncate max-w-[400px]">{tool.summary}</span>
+            <span className="text-ink-muted truncate max-w-[400px]">{tool.summary}</span>
           )}
         </span>
       ))}
@@ -285,7 +285,7 @@ function ToolGroupInline({ msg, fontSize }: { msg: ChatMessage & { type: 'tool_g
 function ToolOutputInline({ msg, fontSize }: { msg: ChatMessage & { type: 'tool_output' }; fontSize: number }) {
   const [expanded, setExpanded] = useState(false)
   const smallSize = fontSize - 1
-  const colorClass = msg.isError ? 'text-error-5' : 'text-neutral-5'
+  const colorClass = msg.isError ? 'text-error-5' : 'text-ink-muted'
   const lines = msg.content.split('\n')
   const collapsible = lines.length > 3
   const displayContent = collapsible && !expanded
@@ -300,7 +300,7 @@ function ToolOutputInline({ msg, fontSize }: { msg: ChatMessage & { type: 'tool_
       {collapsible && (
         <button
           onClick={() => setExpanded(!expanded)}
-          className="text-neutral-6 hover:text-neutral-3 transition-colors mt-0.5"
+          className="text-ink-faint hover:text-ink transition-colors mt-0.5"
           style={{ fontSize: `${smallSize}px` }}
         >
           {expanded ? '▴ collapse' : `▾ ${lines.length - 3} more lines`}
@@ -385,7 +385,7 @@ function ImageInline({ msg }: { msg: ChatMessage & { type: 'image' } }) {
 function TentativeMessage({ msg, fontSize }: { msg: ChatMessage & { type: 'tentative' }; fontSize: number }) {
   return (
     <div
-      className="max-w-[80%] rounded-control border-l-2 border-warning-6 bg-warning-11/20 px-3 py-2 text-neutral-4 whitespace-pre-wrap"
+      className="max-w-[80%] rounded-control border-l-2 border-warning-6 bg-warning-11/20 px-3 py-2 text-ink-muted whitespace-pre-wrap"
       style={{ fontSize: `${fontSize}px` }}
     >
       <div className="mb-1 text-meta text-warning-5 uppercase tracking-wider">queued</div>
@@ -413,8 +413,8 @@ function OrchestratorWelcome({ agentName }: { agentName?: string }) {
             <IconRobotFace size={22} className="text-accent-5" />
           </div>
           <div>
-            <h2 className="text-title font-semibold text-neutral-2">Agent {name}</h2>
-            <p className="text-body text-neutral-5">Your AI ops manager</p>
+            <h2 className="text-title font-semibold text-ink">Agent {name}</h2>
+            <p className="text-body text-ink-muted">Your AI ops manager</p>
           </div>
         </div>
         <div className="grid gap-2 text-body">
@@ -423,7 +423,7 @@ function OrchestratorWelcome({ agentName }: { agentName?: string }) {
             'Spawn implementation sessions for issues or tasks',
             'Review code, plan refactors, or investigate bugs',
           ].map((text) => (
-            <div key={text} className="flex items-center gap-3 rounded-control border border-neutral-10 px-3.5 py-2.5 text-neutral-4 transition-colors hover:border-neutral-8 hover:text-neutral-3">
+            <div key={text} className="flex items-center gap-3 rounded-control border border-edge px-3.5 py-2.5 text-ink-muted transition-colors hover:border-edge-strong hover:text-ink">
               <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent-6" />
               <span>{text}</span>
             </div>
@@ -450,7 +450,7 @@ function ActivityIndicator({ label, variant = 'default' }: { label: string; vari
 
   return (
     <div className="pt-2">
-      <div className="app-thinking-badge inline-flex items-center gap-2 rounded-control bg-neutral-9/80 px-3.5 py-2">
+      <div className="app-thinking-badge inline-flex items-center gap-2 rounded-control bg-edge/80 px-3.5 py-2">
         <svg
           className="h-4 w-4 animate-[spin_3s_linear_infinite]"
           xmlns="http://www.w3.org/2000/svg"
@@ -470,9 +470,9 @@ function ActivityIndicator({ label, variant = 'default' }: { label: string; vari
           <path d="M16 20.1a9 9 0 0 0 5 -7.1" />
           <path d="M6.2 5a9 9 0 0 1 11.4 0" />
         </svg>
-        <span className="text-meta text-neutral-4 tracking-wide">{label}</span>
+        <span className="text-meta text-ink-muted tracking-wide">{label}</span>
         {elapsed >= 10 && (
-          <span className="text-meta text-neutral-5">{elapsed}s</span>
+          <span className="text-meta text-ink-muted">{elapsed}s</span>
         )}
       </div>
     </div>
@@ -606,8 +606,8 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
               switch (msg.type) {
                 case 'system':
                   if (msg.subtype === 'trim') {
-                    node = <div className="text-body text-neutral-6 flex items-center gap-2">
-                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-neutral-6 flex-shrink-0" />
+                    node = <div className="text-body text-ink-faint flex items-center gap-2">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-ink-faint flex-shrink-0" />
                       Older messages trimmed
                     </div>
                     break
@@ -645,7 +645,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
       {showScrollButton && (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-surface-raised border border-edge-strong p-2 text-neutral-2 shadow-floating ring-1 ring-neutral-6/40 transition hover:bg-neutral-7 hover:text-neutral-1"
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-surface-raised border border-edge-strong p-2 text-ink shadow-floating ring-1 ring-ink-faint/40 transition hover:bg-edge hover:text-ink"
           title="Scroll to bottom"
         >
           <IconArrowDown size={16} stroke={2} />
@@ -653,8 +653,8 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
       )}
 
       {disabled && (
-        <div className="absolute inset-0 flex items-center justify-center bg-neutral-12/80">
-          <p className="text-body text-neutral-3">Configure token in Settings to use chat</p>
+        <div className="absolute inset-0 flex items-center justify-center bg-page/80">
+          <p className="text-body text-ink">Configure token in Settings to use chat</p>
         </div>
       )}
 

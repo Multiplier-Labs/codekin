@@ -42,11 +42,11 @@ export function DiffToolbar({
   }
 
   return (
-    <div className="sticky top-0 z-10 bg-neutral-10 border-b border-edge px-3 py-2 flex flex-col gap-2">
+    <div className="sticky top-0 z-10 bg-surface-raised border-b border-edge px-3 py-2 flex flex-col gap-2">
       {/* Row 1: Branch + scope + actions */}
       <div className="flex items-center gap-2">
         {/* Branch */}
-        <div className="flex items-center gap-1 text-xs text-neutral-4 shrink-0">
+        <div className="flex items-center gap-1 text-xs text-ink-muted shrink-0">
           <IconGitBranch size={13} />
           <span className="truncate max-w-[120px]" title={branch}>{branch}</span>
         </div>
@@ -54,12 +54,12 @@ export function DiffToolbar({
         {/* Scope dropdown */}
         <div className="relative flex-1">
           <button
-            className="flex items-center gap-1 text-xs text-neutral-2 bg-neutral-10 hover:bg-neutral-9 rounded-control px-2 py-1"
+            className="flex items-center gap-1 text-xs text-ink bg-surface-raised hover:bg-edge rounded-control px-2 py-1"
             onClick={() => setScopeOpen(!scopeOpen)}
           >
             <span>{SCOPE_LABELS[scope]}</span>
             {summary.filesChanged > 0 && (
-              <span className="text-neutral-5">({summary.filesChanged})</span>
+              <span className="text-ink-muted">({summary.filesChanged})</span>
             )}
             <IconChevronDown size={12} />
           </button>
@@ -70,8 +70,8 @@ export function DiffToolbar({
                 {(['all', 'staged', 'unstaged'] as DiffScope[]).map(s => (
                   <button
                     key={s}
-                    className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-9 ${
-                      s === scope ? 'text-primary-5' : 'text-neutral-2'
+                    className={`block w-full text-left px-3 py-1.5 text-xs hover:bg-edge ${
+                      s === scope ? 'text-primary-5' : 'text-ink'
                     }`}
                     onClick={() => { onScopeChange(s); setScopeOpen(false) }}
                   >
@@ -85,7 +85,7 @@ export function DiffToolbar({
 
         {/* Actions */}
         <button
-          className={`p-1 rounded-control hover:bg-neutral-9 text-neutral-4 hover:text-neutral-2 ${loading ? 'animate-spin' : ''}`}
+          className={`p-1 rounded-control hover:bg-edge text-ink-muted hover:text-ink ${loading ? 'animate-spin' : ''}`}
           onClick={onRefresh}
           title="Refresh diff"
           disabled={loading}
@@ -95,7 +95,7 @@ export function DiffToolbar({
         <button
           className={`p-1 rounded-control text-xs ${
             summary.filesChanged === 0
-              ? 'text-neutral-7 cursor-not-allowed'
+              ? 'text-ink-faint cursor-not-allowed'
               : confirmDiscard
                 ? 'text-error-4 bg-error-950/30 hover:bg-error-950/50'
                 : 'text-error-5 hover:bg-error-950/30'
@@ -113,7 +113,7 @@ export function DiffToolbar({
 
       {/* Row 2: Summary */}
       {summary.filesChanged > 0 && (
-        <div className="flex items-center gap-2 text-xs text-neutral-4">
+        <div className="flex items-center gap-2 text-xs text-ink-muted">
           <span className="flex items-center gap-1">
             {summary.truncated && (
               <span className="text-warning-5" title={summary.truncationReason}>truncated</span>

@@ -124,7 +124,7 @@ function NewSessionMenu({ onNewSession, isMobile }: {
         ref={buttonRef}
         onClick={() => setOpen(!open)}
         className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-control text-body transition-colors ${
-          open ? 'bg-neutral-6/50 text-neutral-2' : 'text-neutral-5 hover:text-neutral-2 hover:bg-neutral-6/50'
+          open ? 'bg-surface-raised text-ink' : 'text-ink-muted hover:text-ink hover:bg-surface-raised'
         }`}
         title="New session"
       >
@@ -138,7 +138,7 @@ function NewSessionMenu({ onNewSession, isMobile }: {
             <button
               key={p.id}
               onClick={() => { setOpen(false); onNewSession(p.id) }}
-              className="w-full flex items-center gap-2 px-3 py-1 text-left text-body text-neutral-3 hover:bg-neutral-6/50 hover:text-neutral-1 transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-1 text-left text-body text-ink hover:bg-edge hover:text-ink transition-colors"
               title={p.description}
             >
               {p.label}
@@ -243,7 +243,7 @@ export function RepoSection({
     ? ['bg-warning-5 animate-pulse', 'Waiting for input']
     : node.hasActive
     ? ['bg-success-6 animate-pulse', 'Processing']
-    : ['bg-neutral-6', 'Idle']
+    : ['bg-ink-faint', 'Idle']
 
   const visibleArchived = archiveExpanded ? archivedSessions : archivedSessions.slice(0, ARCHIVED_PREVIEW_LIMIT)
   const hasMore = archivedSessions.length > ARCHIVED_PREVIEW_LIMIT
@@ -266,23 +266,23 @@ export function RepoSection({
       <div className="group flex items-center gap-1.5 px-2 py-1">
         <button
           onClick={() => { setExpanded(!expanded); if (!isActive) onSelectRepo(node.workingDir) }}
-          className="flex flex-1 items-center gap-2 min-w-0 rounded-control px-2 py-0.5 text-left transition-colors text-neutral-3 hover:text-neutral-2"
+          className="flex flex-1 items-center gap-2 min-w-0 rounded-control px-2 py-0.5 text-left transition-colors text-ink hover:text-ink"
         >
           {expanded
-            ? <IconChevronDown size={14} stroke={2.5} className="flex-shrink-0 text-neutral-5 opacity-0 group-hover/repo:opacity-100 transition-opacity" />
-            : <IconChevronRight size={14} stroke={2.5} className="flex-shrink-0 text-neutral-5 opacity-0 group-hover/repo:opacity-100 transition-opacity" />
+            ? <IconChevronDown size={14} stroke={2.5} className="flex-shrink-0 text-ink-muted opacity-0 group-hover/repo:opacity-100 transition-opacity" />
+            : <IconChevronRight size={14} stroke={2.5} className="flex-shrink-0 text-ink-muted opacity-0 group-hover/repo:opacity-100 transition-opacity" />
           }
           <span className={`inline-block h-1.5 w-1.5 rounded-full flex-shrink-0 ${statusDot}`} title={statusTitle} />
           <span className={`truncate font-semibold tracking-wide ${isMobile ? 'text-title' : 'text-body'}`}>{node.displayName}</span>
           {!expanded && node.sessions.length > 1 && (
-            <span className="text-meta text-neutral-6 flex-shrink-0">({node.sessions.length})</span>
+            <span className="text-meta text-ink-faint flex-shrink-0">({node.sessions.length})</span>
           )}
         </button>
         {onBrowseDocs && (
           <button
             onClick={(e) => { e.stopPropagation(); onBrowseDocs(node.workingDir) }}
             className={`flex-shrink-0 rounded-control p-0.5 transition-colors opacity-0 group-hover:opacity-100 ${
-              docsPickerOpen && docsPickerRepoDir === node.workingDir ? 'text-primary-5 opacity-100!' : 'text-neutral-5 hover:text-neutral-2'
+              docsPickerOpen && docsPickerRepoDir === node.workingDir ? 'text-primary-5 opacity-100!' : 'text-ink-muted hover:text-ink'
             }`}
             title="Browse docs"
           >
@@ -292,7 +292,7 @@ export function RepoSection({
         <button
           onClick={() => setApprovalsOpen(!approvalsOpen)}
           className={`flex-shrink-0 rounded-control p-0.5 transition-colors opacity-0 group-hover:opacity-100 ${
-            approvalsOpen ? 'text-primary-5 opacity-100!' : 'text-neutral-5 hover:text-neutral-2'
+            approvalsOpen ? 'text-primary-5 opacity-100!' : 'text-ink-muted hover:text-ink'
           }`}
           title="Repo approvals"
         >
@@ -301,7 +301,7 @@ export function RepoSection({
         <button
           onClick={() => setArchiveOpen(!archiveOpen)}
           className={`flex-shrink-0 rounded-control p-0.5 transition-colors opacity-0 group-hover:opacity-100 ${
-            archiveOpen ? 'text-primary-5 opacity-100!' : 'text-neutral-5 hover:text-neutral-2'
+            archiveOpen ? 'text-primary-5 opacity-100!' : 'text-ink-muted hover:text-ink'
           }`}
           title="Archived sessions"
         >
@@ -309,7 +309,7 @@ export function RepoSection({
         </button>
         <span
           onClick={e => { e.stopPropagation(); onDeleteRepo(node.workingDir) }}
-          className="cursor-pointer text-body text-transparent hover:text-error-5 group-hover:text-neutral-6 flex-shrink-0 px-0.5"
+          className="cursor-pointer text-body text-transparent hover:text-error-5 group-hover:text-ink-faint flex-shrink-0 px-0.5"
         >
           ×
         </span>
@@ -325,7 +325,7 @@ export function RepoSection({
               ? ['bg-accent-6 animate-pulse', 'Queued']
               : waitingSessions[s.id]
               ? ['bg-warning-5 animate-pulse', 'Waiting for input']
-              : s.isProcessing ? ['bg-success-6 animate-pulse', 'Processing'] : s.active ? ['bg-neutral-5', 'Idle'] : ['bg-neutral-7', 'Inactive']
+              : s.isProcessing ? ['bg-success-6 animate-pulse', 'Processing'] : s.active ? ['bg-ink-muted', 'Idle'] : ['bg-edge-strong', 'Inactive']
             const isEditing = editingSessionId === s.id
 
             return (
@@ -335,7 +335,7 @@ export function RepoSection({
                 className={`group w-full flex items-baseline gap-2 pl-10 pr-2 py-1 text-left ${isMobile ? 'text-title' : 'text-body'} transition-colors rounded-control cursor-pointer ${
                   isActiveSession
                     ? 'bg-accent-9/30 text-accent-2'
-                    : 'text-neutral-3 hover:bg-neutral-6/50 hover:text-neutral-1'
+                    : 'text-ink hover:bg-surface-raised hover:text-ink'
                 }`}
               >
                 {s.source === 'workflow'
@@ -357,7 +357,7 @@ export function RepoSection({
                       if (e.key === 'Escape') setEditingSessionId(null)
                     }}
                     onClick={e => e.stopPropagation()}
-                    className="flex-1 min-w-0 bg-surface border border-edge-strong rounded-control px-1 py-0 text-body text-neutral-1 outline-none focus:border-primary-6"
+                    className="flex-1 min-w-0 bg-surface border border-edge-strong rounded-control px-1 py-0 text-body text-ink outline-none focus:border-primary-6"
                   />
                 ) : (
                   <span className="flex-1 truncate font-normal flex items-center gap-1">
@@ -365,7 +365,7 @@ export function RepoSection({
                     {s.provider === 'opencode' && (
                       <span
                         title="OpenCode session"
-                        className="text-micro px-1 py-0 rounded-control bg-neutral-7 text-neutral-4 font-medium leading-tight"
+                        className="text-micro px-1 py-0 rounded-control bg-edge-strong text-ink-muted font-medium leading-tight"
                       >
                         OC
                       </span>
@@ -373,7 +373,7 @@ export function RepoSection({
                     {s.provider === 'codex' && (
                       <span
                         title="Codex session"
-                        className="text-micro px-1 py-0 rounded-control bg-neutral-7 text-neutral-4 font-medium leading-tight"
+                        className="text-micro px-1 py-0 rounded-control bg-edge-strong text-ink-muted font-medium leading-tight"
                       >
                         CX
                       </span>
@@ -383,17 +383,17 @@ export function RepoSection({
                 )}
                 {!isEditing && (
                   <>
-                    <span className="text-meta text-neutral-6 tabular-nums flex-shrink-0">{compactAge(s.created)}</span>
+                    <span className="text-meta text-ink-faint tabular-nums flex-shrink-0">{compactAge(s.created)}</span>
                     <span
                       onClick={e => { e.stopPropagation(); startEditing(s) }}
-                      className="cursor-pointer flex-shrink-0 text-transparent group-hover:text-neutral-5 hover:text-neutral-2! transition-colors"
+                      className="cursor-pointer flex-shrink-0 text-transparent group-hover:text-ink-muted hover:text-ink! transition-colors"
                       title="Rename session"
                     >
                       <IconPencil size={13} stroke={2} />
                     </span>
                     <span
                       onClick={e => { e.stopPropagation(); onDeleteSession(s.id) }}
-                      className="cursor-pointer text-body text-transparent hover:text-error-5 group-hover:text-neutral-6 flex-shrink-0"
+                      className="cursor-pointer text-body text-transparent hover:text-error-5 group-hover:text-ink-faint flex-shrink-0"
                     >
                       ×
                     </span>
@@ -432,24 +432,24 @@ export function RepoSection({
           {archiveOpen && (
             <div className="mt-1 border-t border-edge pt-1">
               {archivedSessions.length === 0 ? (
-                <div className="pl-12 pr-2 py-1 text-body text-neutral-5">No archived sessions</div>
+                <div className="pl-12 pr-2 py-1 text-body text-ink-muted">No archived sessions</div>
               ) : (
                 <>
                   {visibleArchived.map(s => (
                     <button
                       key={s.id}
                       onClick={() => onViewArchivedSession(s.id)}
-                      className="group w-full flex items-baseline gap-2 pl-12 pr-2 py-0.5 text-left text-body text-neutral-4 hover:bg-neutral-6/50 hover:text-neutral-2 transition-colors"
+                      className="group w-full flex items-baseline gap-2 pl-12 pr-2 py-0.5 text-left text-body text-ink-muted hover:bg-surface-raised hover:text-ink transition-colors"
                     >
                       <IconArchive size={12} className="flex-shrink-0 self-center opacity-40" />
                       <span className="flex-1 truncate">{archivedDisplayName(s)}</span>
-                      <span className="shrink-0 text-meta text-neutral-6 tabular-nums">{archivedCompactAge(s.archivedAt)}</span>
+                      <span className="shrink-0 text-meta text-ink-faint tabular-nums">{archivedCompactAge(s.archivedAt)}</span>
                     </button>
                   ))}
                   {hasMore && !archiveExpanded && (
                     <button
                       onClick={() => setArchiveExpanded(true)}
-                      className="w-full pl-12 pr-2 py-0.5 text-left text-body text-neutral-5 hover:text-neutral-2 transition-colors"
+                      className="w-full pl-12 pr-2 py-0.5 text-left text-body text-ink-muted hover:text-ink transition-colors"
                     >
                       Show all {archivedSessions.length} archived...
                     </button>
@@ -457,7 +457,7 @@ export function RepoSection({
                   {archiveExpanded && hasMore && (
                     <button
                       onClick={() => setArchiveExpanded(false)}
-                      className="w-full pl-12 pr-2 py-0.5 text-left text-body text-neutral-5 hover:text-neutral-2 transition-colors"
+                      className="w-full pl-12 pr-2 py-0.5 text-left text-body text-ink-muted hover:text-ink transition-colors"
                     >
                       Show less
                     </button>

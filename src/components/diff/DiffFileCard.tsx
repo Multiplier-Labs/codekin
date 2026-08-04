@@ -52,31 +52,31 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
     >
       {/* Card header */}
       <div
-        className="flex items-center gap-2 px-3 py-2 bg-neutral-9 cursor-pointer select-none"
+        className="flex items-center gap-2 px-3 py-2 bg-edge cursor-pointer select-none"
         onClick={() => setExpanded(!expanded)}
       >
         {expanded
-          ? <IconChevronDown size={14} className="text-neutral-5 shrink-0" />
-          : <IconChevronRight size={14} className="text-neutral-5 shrink-0" />
+          ? <IconChevronDown size={14} className="text-ink-muted shrink-0" />
+          : <IconChevronRight size={14} className="text-ink-muted shrink-0" />
         }
-        <span className="font-mono text-xs text-neutral-2 truncate flex-1" title={displayPath}>
+        <span className="font-mono text-xs text-ink truncate flex-1" title={displayPath}>
           {displayPath}
         </span>
         {!file.isBinary && (
           <span className="text-xs whitespace-nowrap">
             {file.additions > 0 && <span className="text-success-5">+{file.additions}</span>}
-            {file.additions > 0 && file.deletions > 0 && <span className="text-neutral-5 mx-0.5"> </span>}
+            {file.additions > 0 && file.deletions > 0 && <span className="text-ink-muted mx-0.5"> </span>}
             {file.deletions > 0 && <span className="text-error-5">&minus;{file.deletions}</span>}
           </span>
         )}
         {file.isBinary && (
-          <span className="text-xs text-neutral-5 italic">binary</span>
+          <span className="text-xs text-ink-muted italic">binary</span>
         )}
 
         {/* Action buttons */}
         <div className="flex items-center gap-1 ml-1" onClick={e => e.stopPropagation()}>
           <button
-            className="p-1 rounded-control hover:bg-neutral-8 text-neutral-4 hover:text-neutral-2"
+            className="p-1 rounded-control hover:bg-edge-strong text-ink-muted hover:text-ink"
             onClick={handleCopyPath}
             title="Copy path"
           >
@@ -84,7 +84,7 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
           </button>
           <button
             className={`p-1 rounded-control hover:bg-error-950/50 ${
-              confirmDiscard ? 'text-error-5' : 'text-neutral-4 hover:text-error-5'
+              confirmDiscard ? 'text-error-5' : 'text-ink-muted hover:text-error-5'
             }`}
             onClick={handleDiscard}
             title={confirmDiscard ? 'Click again to confirm' : 'Discard file changes'}
@@ -98,7 +98,7 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
       {expanded && (
         <div className="border-t border-edge">
           {file.isBinary ? (
-            <div className="flex items-center gap-2 px-4 py-3 text-neutral-5 text-xs italic">
+            <div className="flex items-center gap-2 px-4 py-3 text-ink-muted text-xs italic">
               <IconFile size={14} />
               Binary file
             </div>
@@ -111,7 +111,7 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
               <DiffHunkView hunks={file.hunks}  />
             </div>
           ) : (
-            <div className="px-4 py-3 text-neutral-5 text-xs italic">No changes</div>
+            <div className="px-4 py-3 text-ink-muted text-xs italic">No changes</div>
           )}
         </div>
       )}
@@ -119,7 +119,7 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
       {/* Collapsed large diff note */}
       {!expanded && isLarge && (
         <div
-          className="border-t border-edge px-4 py-2 text-xs text-neutral-5 italic cursor-pointer hover:text-neutral-3"
+          className="border-t border-edge px-4 py-2 text-xs text-ink-muted italic cursor-pointer hover:text-ink"
           onClick={() => setExpanded(true)}
         >
           Large diff ({totalChanges} lines) — click to expand
