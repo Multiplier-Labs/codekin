@@ -4,10 +4,16 @@
  * 1. **Anthropic API** — `GET /v1/models` using ANTHROPIC_API_KEY (if set).
  *    Returns the full catalog, cached for 1 hour.
  *
- * 2. **CLI alias probing** — Spawns `claude -p --model <alias> "ok"` for each
- *    known alias (opus, sonnet, haiku) and reads the resolved model ID from
- *    the JSON output's `modelUsage` field. Runs once per day, triggered on
- *    first session creation. Works with OAuth/subscription auth (no API key).
+ * 2. **CLI probing** — Spawns `claude -p --model <id> "ok"` for each candidate
+ *    ID and reads the resolved model ID from the JSON output's `modelUsage`
+ *    field. Runs once per day, triggered on first session creation. Works with
+ *    OAuth/subscription auth (no API key).
+ *
+ * Probe failures are classified: a 404/403 from the API means the model
+ * genuinely doesn't exist (or isn't accessible) and it is dropped; any other
+ * failure (rate limit, overload, timeout) is transient — it is retried once,
+ * and a model already in the cache survives it. Without this, one bad probe
+ * run silently evicted live models for a full cache TTL.
  *
  * Falls back to a hardcoded list when neither strategy has completed yet.
  */
@@ -38,7 +44,7 @@ export const FALLBACK_MODELS: ClaudeModelInfo[] = [
  * because the CLI's alias resolution lags — `opus` still resolves to 4-6 even when
  * 4-8 is the latest. Instead, we probe specific version IDs spanning current and
  * likely-future releases. Failed probes return in ~2.5s at zero cost; successful
- * probes cost ~$0.04 each. Probing in parallel keeps total wall time under 5s.
+ * probes cost ~$0.04 each.
  */
 const CANDIDATE_MODEL_IDS: string[] = [
   // 5th-generation IDs are dateless and single-number — `claude-opus-5`, NOT
@@ -138,12 +144,28 @@ async function fetchViaApi(): Promise<ClaudeModelInfo[] | null> {
 // Strategy 2: CLI alias probing
 // ---------------------------------------------------------------------------
 
+/** Max concurrent CLI probes — 15 simultaneous spawns can trip rate limits,
+ *  and a rate-limited probe is indistinguishable from a slow one. */
+const PROBE_CONCURRENCY = 4
+/** Delay before retrying probes that failed transiently. */
+const PROBE_RETRY_DELAY_MS = 5_000
+
+type ProbeResult =
+  | { status: 'available'; id: string }
+  /** Definitive 404/403 — the model doesn't exist or this account can't use it. */
+  | { status: 'unavailable' }
+  /** Transient failure (rate limit, overload, timeout, unparsable output). */
+  | { status: 'error' }
+
 /**
- * Probe a single model ID via the CLI. Returns the model ID if available,
- * null otherwise. Failed probes return in ~2.5s without consuming tokens;
- * successful probes take ~4.5s and cost ~$0.04 (one short turn).
+ * Probe a single model ID via the CLI. Failed probes return in ~2.5s without
+ * consuming tokens; successful probes take ~4.5s and cost ~$0.04 (one short turn).
+ *
+ * The CLI exits non-zero on API errors but still writes the result JSON to
+ * stdout, so parse it regardless of the exit code — `api_error_status` is the
+ * only way to tell "model doesn't exist" (404) from "API had a bad moment".
  */
-function probeModel(modelId: string): Promise<string | null> {
+function probeModel(modelId: string): Promise<ProbeResult> {
   return new Promise(resolve => {
     const child = execFile(
       CLAUDE_BINARY,
@@ -151,14 +173,21 @@ function probeModel(modelId: string): Promise<string | null> {
       ['-p', '--model', modelId, '--output-format', 'json', 'reply with only: ok'],
       { timeout: 30_000 },
       (err, stdout) => {
-        if (err) { resolve(null); return }
         try {
-          const result = JSON.parse(stdout) as { is_error?: boolean; modelUsage?: Record<string, unknown> }
-          if (result.is_error) { resolve(null); return }
+          const result = JSON.parse(stdout) as {
+            is_error?: boolean
+            api_error_status?: number | null
+            modelUsage?: Record<string, unknown>
+          }
+          if (result.is_error || err) {
+            const status = result.api_error_status
+            resolve(status === 404 || status === 403 ? { status: 'unavailable' } : { status: 'error' })
+            return
+          }
           const id = Object.keys(result.modelUsage ?? {})[0]
-          resolve(id || null)
+          resolve(id ? { status: 'available', id } : { status: 'error' })
         } catch {
-          resolve(null)
+          resolve({ status: 'error' })
         }
       },
     )
@@ -166,20 +195,73 @@ function probeModel(modelId: string): Promise<string | null> {
   })
 }
 
-/** Probe all candidate model IDs in parallel. */
-async function fetchViaCli(): Promise<ClaudeModelInfo[] | null> {
-  const results = await Promise.all(CANDIDATE_MODEL_IDS.map(probeModel))
-  const models: ClaudeModelInfo[] = []
-  const seen = new Set<string>()
-
-  for (const id of results) {
-    if (id && !seen.has(id)) {
-      seen.add(id)
-      models.push({ id, label: labelFromId(id) })
+/** Run `fn` over `items` with at most `limit` in flight at once. */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let next = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++
+      results[i] = await fn(items[i])
     }
+  })
+  await Promise.all(workers)
+  return results
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+/**
+ * Probe all candidate model IDs. Transient failures are retried once; if a
+ * candidate still can't be probed, its previously-cached entry (if any) is
+ * carried over so a flaky probe run never shrinks the model list. Only a
+ * definitive 404/403 removes a model.
+ */
+async function fetchViaCli(): Promise<ClaudeModelInfo[] | null> {
+  const results = await mapWithConcurrency(CANDIDATE_MODEL_IDS, PROBE_CONCURRENCY, probeModel)
+
+  const failedIdx = results.flatMap((r, i) => (r.status === 'error' ? [i] : []))
+  if (failedIdx.length > 0) {
+    await delay(PROBE_RETRY_DELAY_MS)
+    const retried = await mapWithConcurrency(
+      failedIdx.map(i => CANDIDATE_MODEL_IDS[i]),
+      PROBE_CONCURRENCY,
+      probeModel,
+    )
+    failedIdx.forEach((idx, j) => {
+      if (retried[j].status !== 'error') results[idx] = retried[j]
+    })
   }
 
-  // Sort newest version first within each family (opus > sonnet > haiku ordering preserved by input)
+  const previous = new Map((cache?.models ?? []).map(m => [m.id, m]))
+  const models: ClaudeModelInfo[] = []
+  const seen = new Set<string>()
+  let carriedOver = 0
+
+  results.forEach((result, i) => {
+    if (result.status === 'available') {
+      if (!seen.has(result.id)) {
+        seen.add(result.id)
+        models.push({ id: result.id, label: labelFromId(result.id) })
+      }
+    } else if (result.status === 'error') {
+      // Transient failure — keep the last-known-good entry for this candidate.
+      const kept = previous.get(CANDIDATE_MODEL_IDS[i])
+      if (kept && !seen.has(kept.id)) {
+        seen.add(kept.id)
+        models.push(kept)
+        carriedOver++
+      }
+    }
+  })
+
+  const errors = results.filter(r => r.status === 'error').length
+  if (errors > 0) {
+    console.warn(`[model-probe] ${errors} probe(s) failed transiently after retry, ${carriedOver} model(s) carried over from previous run`)
+  }
+
   return models.length > 0 ? models : null
 }
 
@@ -223,8 +305,20 @@ export async function fetchAnthropicModels(): Promise<ClaudeModelInfo[]> {
   return FALLBACK_MODELS
 }
 
+/** Start a CLI probe and update the cache when it completes. */
+function startCliProbe(): Promise<void> {
+  return fetchViaCli()
+    .then(models => {
+      if (models) {
+        cache = { models, expiresAt: Date.now() + CLI_CACHE_TTL_MS }
+      }
+    })
+    .catch(() => { /* keep fallback */ })
+    .finally(() => { probeInFlight = null })
+}
+
 /**
- * Trigger a background CLI alias probe if the cache is stale or empty.
+ * Trigger a background CLI probe if the cache is stale or empty.
  * Call this on first session creation of the day. Non-blocking — returns
  * immediately and updates the cache when the probe finishes.
  */
@@ -236,12 +330,22 @@ export function triggerCliProbeIfNeeded(): void {
   // Skip if API key is available (fetchAnthropicModels will use the API instead)
   if (process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_API_KEY) return
 
-  probeInFlight = fetchViaCli()
-    .then(models => {
-      if (models) {
-        cache = { models, expiresAt: Date.now() + CLI_CACHE_TTL_MS }
-      }
-    })
-    .catch(() => { /* keep fallback */ })
-    .finally(() => { probeInFlight = null })
+  probeInFlight = startCliProbe()
+}
+
+/**
+ * Force a rediscovery, bypassing the cache TTL, and return the fresh list.
+ * The expired cache is kept (not cleared) so the probe's last-known-good
+ * carry-over still works. Called by POST /api/claude/models/refresh.
+ */
+export async function refreshAnthropicModels(): Promise<ClaudeModelInfo[]> {
+  if (cache) cache.expiresAt = 0
+
+  if (process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_API_KEY) {
+    return fetchAnthropicModels()
+  }
+
+  if (!probeInFlight) probeInFlight = startCliProbe()
+  await probeInFlight
+  return cache ? cache.models : FALLBACK_MODELS
 }

@@ -18,7 +18,7 @@ import { homedir as osHomedir } from 'os'
 import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
 import { REPOS_ROOT, getAgentDisplayName } from './config.js'
-import { fetchAnthropicModels } from './anthropic-models.js'
+import { fetchAnthropicModels, refreshAnthropicModels } from './anthropic-models.js'
 import { VALID_PROVIDERS, VALID_PERMISSION_MODES } from './types.js'
 import type { CodingProvider } from './coding-process.js'
 import type { PermissionMode } from './types.js'
@@ -151,6 +151,16 @@ export function createSessionRouter(
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
     const models = await fetchAnthropicModels()
+    res.json({ models })
+  })
+
+  // Force model rediscovery, bypassing the cache TTL. With CLI probing this
+  // spawns one claude process per candidate ID (~$0.04 per live model), so it
+  // is deliberately POST-only and never called automatically.
+  router.post('/api/claude/models/refresh', async (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const models = await refreshAnthropicModels()
     res.json({ models })
   })
 
