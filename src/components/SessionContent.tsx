@@ -126,16 +126,15 @@ export function SessionContent({
           disabled={disabled}
           planningMode={planningMode}
           activityLabel={isProviderDisabled ? undefined : activityLabel}
-          isMobile={isMobile}
         />
         <TodoPanel tasks={tasks} isProcessing={isProcessing} />
 
         {/* Claude Code disabled banner */}
         {claudeDisabled && (
-          <div className="absolute inset-0 flex items-center justify-center z-10 bg-neutral-12/90">
+          <div className="absolute inset-0 flex items-center justify-center z-10 bg-page/90">
             <div className="flex flex-col items-center gap-3 text-center px-6 max-w-md">
-              <div className="text-[15px] font-medium text-neutral-3">Claude Code is disabled</div>
-              <p className="text-[13px] text-neutral-5 leading-relaxed">
+              <div className="text-body font-medium text-ink">Claude Code is disabled</div>
+              <p className="text-body text-ink-muted">
                 Re-enable Claude Code from the connection status menu to continue this session.
               </p>
             </div>
@@ -144,13 +143,13 @@ export function SessionContent({
 
         {/* OpenCode not connected banner */}
         {isOpenCodeDisconnected && !claudeDisabled && (
-          <div className="absolute inset-0 flex items-center justify-center z-10 bg-neutral-12/90">
+          <div className="absolute inset-0 flex items-center justify-center z-10 bg-page/90">
             <div className="flex flex-col items-center gap-3 text-center px-6 max-w-md">
-              <div className="text-[15px] font-medium text-neutral-3">OpenCode is not connected</div>
-              <p className="text-[13px] text-neutral-5 leading-relaxed">
+              <div className="text-body font-medium text-ink">OpenCode is not connected</div>
+              <p className="text-body text-ink-muted">
                 Install OpenCode to use this session. Visit{' '}
                 <a href="https://opencode.ai" target="_blank" rel="noopener noreferrer" className="text-primary-5 hover:underline">opencode.ai</a>
-                {' '}and run <code className="bg-neutral-10 px-1.5 py-0.5 rounded text-[12px]">opencode serve</code> to start the server.
+                {' '}and run <code className="bg-surface-raised px-1.5 py-0.5 rounded-control text-meta">opencode serve</code> to start the server.
               </p>
             </div>
           </div>
@@ -158,12 +157,12 @@ export function SessionContent({
 
         {/* Codex not connected banner */}
         {isCodexDisconnected && !claudeDisabled && (
-          <div className="absolute inset-0 flex items-center justify-center z-10 bg-neutral-12/90">
+          <div className="absolute inset-0 flex items-center justify-center z-10 bg-page/90">
             <div className="flex flex-col items-center gap-3 text-center px-6 max-w-md">
-              <div className="text-[15px] font-medium text-neutral-3">Codex is not connected</div>
-              <p className="text-[13px] text-neutral-5 leading-relaxed">
-                Install the Codex CLI with <code className="bg-neutral-10 px-1.5 py-0.5 rounded text-[12px]">npm i -g @openai/codex</code>
-                {' '}and authenticate by running <code className="bg-neutral-10 px-1.5 py-0.5 rounded text-[12px]">codex login</code> on the host.
+              <div className="text-body font-medium text-ink">Codex is not connected</div>
+              <p className="text-body text-ink-muted">
+                Install the Codex CLI with <code className="bg-surface-raised px-1.5 py-0.5 rounded-control text-meta">npm i -g @openai/codex</code>
+                {' '}and authenticate by running <code className="bg-surface-raised px-1.5 py-0.5 rounded-control text-meta">codex login</code> on the host.
               </p>
             </div>
           </div>
@@ -172,7 +171,7 @@ export function SessionContent({
         {/* Diff view button — top-right corner, visible when files have been changed */}
         {hasFileChanges && !diffPanelOpen && (
           <button
-            className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-lg bg-primary-8 px-3 py-1.5 text-[13px] font-medium text-on-primary shadow-lg backdrop-blur-sm transition-colors hover:bg-primary-7"
+            className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-control bg-primary-8 px-3 py-1.5 text-body font-medium text-on-primary shadow-floating backdrop-blur-sm transition-colors hover:bg-primary-7"
             onClick={onOpenDiffPanel}
             title="Review code changes (Ctrl+Shift+D)"
           >
@@ -193,11 +192,10 @@ export function SessionContent({
           questions={activePrompt.questions}
           approvePattern={activePrompt.approvePattern}
           onSelect={sendPromptResponse}
-          isMobile={isMobile}
         />
       )}
       {promptQueueSize > 1 && (
-        <div className="px-3 py-1 text-[12px] text-neutral-5 bg-neutral-11 border-t border-neutral-10">
+        <div className="px-3 py-1 text-meta text-ink-muted bg-surface border-t border-edge">
           {promptQueueSize - 1} more pending
         </div>
       )}

@@ -108,7 +108,7 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
 
   return (
     <div
-      className="relative flex flex-col h-full bg-neutral-12 border-l border-neutral-9 overflow-hidden transition-[width] duration-150"
+      className="relative flex flex-col h-full bg-surface border-l border-edge overflow-hidden transition-[width] duration-150"
       style={{ width, minWidth: MIN_WIDTH, maxWidth: MAX_WIDTH }}
     >
       {/* Resize handle */}
@@ -118,15 +118,15 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
       />
 
       {/* Panel header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-9 shrink-0">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-edge shrink-0">
         <div className="flex items-center gap-2">
           {diff.summary.filesChanged > 0 && (
             <span className="w-2 h-2 rounded-full bg-success-5" />
           )}
-          <span className="text-sm font-medium text-neutral-2">Changes</span>
+          <span className="text-sm font-medium text-ink">Changes</span>
         </div>
         <button
-          className="p-1 rounded hover:bg-neutral-9 text-neutral-4 hover:text-neutral-2"
+          className="p-1 rounded-control hover:bg-surface-raised text-ink-muted hover:text-ink"
           onClick={onClose}
           title="Close diff panel"
         >
@@ -148,7 +148,7 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
 
       {/* Error state */}
       {diff.error && (
-        <div className="px-3 py-2 text-xs text-error-5 bg-error-950/20">
+        <div className="px-3 py-2 text-xs text-error-5 bg-error-11/20">
           {diff.error}
         </div>
       )}
@@ -157,7 +157,7 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
       <div className="flex-1 overflow-y-auto min-h-0">
         {/* File tree */}
         {diff.files.length > 0 && (
-          <div className="border-b border-neutral-9">
+          <div className="border-b border-edge">
             <DiffFileTree
               files={diff.files}
               activeFile={activeFile}
@@ -169,14 +169,14 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
         {/* File cards */}
         <div className="px-2 py-2 flex flex-col gap-2">
           {diff.files.length === 0 && !diff.loading && !diff.error && (
-            <div className="flex flex-col items-center justify-center py-8 text-neutral-6">
+            <div className="flex flex-col items-center justify-center py-8 text-ink-faint">
               <IconFileCode size={32} className="mb-2 opacity-50" />
               <span className="text-xs">No changes detected</span>
             </div>
           )}
 
           {diff.summary.truncated && (
-            <div className="px-3 py-2 text-xs text-warning-5 bg-warning-950/20 rounded">
+            <div className="px-3 py-2 text-xs text-warning-5 bg-warning-950/20 rounded-control">
               Diff truncated — showing partial results
             </div>
           )}

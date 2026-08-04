@@ -103,6 +103,35 @@
   /* Font family */
   --font-sans: 'Lato', sans-serif;
 
+  /* ── Elevation & radius ────────────────────────────────────────────────
+     Three surface levels carry the layout structure:
+       0 page     — transcript ground        (bg-page, no border, no shadow)
+       1 surface  — sidebar, panels, cards   (bg-surface + border-edge)
+       2 floating — modals, popovers, palette (bg-surface-raised +
+                    border-edge-strong + shadow-floating; the ONLY level
+                    with a shadow)
+     rounded-control (6px) for buttons/inputs/rows/badges,
+     rounded-floating (10px) for modals/popovers/palette,
+     rounded-full only for status dots and avatars. */
+  --shadow-floating: 0 12px 28px -8px rgb(0 0 0 / 0.7);
+  --radius-control: 6px;
+  --radius-floating: 10px;
+
+  /* ── Type scale ────────────────────────────────────────────────────────
+     Five named steps; line-height is bound to the step so a label cannot
+     be authored half-right. Do not add arbitrary text-[Npx] sizes — if
+     something genuinely does not fit, raise it instead. */
+  --text-micro: 11px;
+  --text-micro--line-height: 1.4;
+  --text-meta: 12.5px;
+  --text-meta--line-height: 1.45;
+  --text-body: 14.5px;
+  --text-body--line-height: 1.6;
+  --text-title: 17px;
+  --text-title--line-height: 1.35;
+  --text-head: 22px;
+  --text-head--line-height: 1.25;
+
   /* ── Semantic aliases ──────────────────────────────────────────────────
      Role-based tokens that resolve through the scale variables, so they
      automatically follow every override scope (.terminal-area, light mode,
@@ -116,7 +145,9 @@
   --color-ink: var(--color-neutral-2);            /* primary text */
   --color-ink-muted: var(--color-neutral-5);      /* secondary text */
   --color-ink-faint: var(--color-neutral-6);      /* de-emphasized metadata */
+  --color-ink-inverse: var(--color-neutral-12);   /* text on intent-color fills (replaces text-white) */
   --color-on-primary: var(--color-primary-12);    /* text on gold (primary-8) fills */
+  --color-focus: var(--color-accent-6);           /* focus rings and focused borders */
 }
 
 /* Terminal / chat area — warm gray palette.
@@ -330,14 +361,6 @@
   --color-success-12: #effaf5;
 }
 
-/* Dark mode — lift the chrome (sidebar/top bar) one step above the terminal
-   so the cool-chrome/warm-content split actually reads; at the raw scale
-   values both backgrounds rendered as indistinguishable near-black. */
-[data-theme="dark"] .app-left-sidebar,
-[data-theme="dark"] .app-right-sidebar {
-  background-color: #11181a;
-}
-
 /* Light mode — component-specific background overrides */
 [data-theme="light"] .app-logo-circle {
   background-color: rgba(255, 255, 255, 0.55);
@@ -395,19 +418,8 @@
   border-color: var(--color-neutral-7);
 }
 
-[data-theme="light"] .workflow-card .divide-neutral-9\/30 > :not(:first-child) {
+[data-theme="light"] .workflow-card .divide-edge > :not(:first-child) {
   border-color: var(--color-neutral-7);
-}
-
-/* User message bubble — darker background in light mode */
-[data-theme="light"] .terminal-area .user-bubble {
-  background-color: color-mix(in srgb, var(--color-neutral-8) 80%, transparent);
-}
-
-/* User message bubble — faint warm tint in dark mode so the user's turns
-   stand apart from assistant text without shouting */
-[data-theme="dark"] .terminal-area .user-bubble {
-  background-color: color-mix(in srgb, var(--color-primary-11) 35%, var(--color-neutral-11));
 }
 
 /* Terminal area overrides in light mode.
@@ -516,6 +528,69 @@
   --color-neutral-4: #555555;
   --color-neutral-5: #707070;
   --color-neutral-6: #8a8a8a;
+}
+
+/* ── Density ───────────────────────────────────────────────────────────────
+   One knob, set once on the app shell via data-density="touch" (App.tsx),
+   with a pointer:coarse fallback so a touch laptop gets sane targets even
+   when the JS breakpoint disagrees. Rows read these variables instead of
+   branching on isMobile per element. Anything that must stay visually small
+   (a status dot, a close X) gets a transparent hit area of --tap-min. */
+:root {
+  --row-h: 28px;
+  --row-pad: 10px;
+  --icon-size: 20px;
+  --tap-min: 28px;
+}
+
+[data-density="touch"] {
+  --row-h: 44px;
+  --row-pad: 12px;
+  --icon-size: 24px;
+  --tap-min: 44px;
+}
+
+@media (pointer: coarse) {
+  :root {
+    --row-h: 44px;
+    --row-pad: 12px;
+    --icon-size: 24px;
+    --tap-min: 44px;
+  }
+}
+
+/* Rows and icon buttons read the density knob instead of branching per
+   element. min-* is used rather than fixed sizing so desktop keeps its
+   existing intrinsic heights and only touch mode grows. */
+.density-row {
+  min-height: var(--row-h);
+}
+
+.density-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--row-h);
+  min-height: var(--row-h);
+}
+
+.density-icon {
+  width: var(--icon-size);
+  height: var(--icon-size);
+}
+
+/* Interactive elements that stay visually small but need a real target. */
+.tap-target {
+  position: relative;
+}
+.tap-target::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
 }
 
 /* Tell the browser which scheme native UI (checkboxes, scrollbars, number

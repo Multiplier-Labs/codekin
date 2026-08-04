@@ -49,11 +49,11 @@ export default function TimePicker({ hour, minute, onChange, step = 15, classNam
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 rounded-md border border-neutral-7 bg-neutral-10 px-3 py-2 text-[15px] font-mono text-neutral-1 focus:border-accent-6 focus:outline-none w-40 cursor-pointer hover:border-neutral-5 transition-colors"
+        className="flex items-center gap-2 rounded-control border border-edge-strong bg-surface px-3 py-2 text-body font-mono text-ink focus:border-focus focus:outline-none w-40 cursor-pointer hover:border-ink-muted transition-colors"
       >
         <span className="flex-1 text-left">{pad(hour)}:{pad(minute)}</span>
         {/* Clock icon */}
-        <svg className="w-4 h-4 text-neutral-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg className="w-4 h-4 text-ink" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="10" />
           <polyline points="12 6 12 12 16 14" />
         </svg>
@@ -61,7 +61,7 @@ export default function TimePicker({ hour, minute, onChange, step = 15, classNam
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute top-full left-0 z-50 mt-1 flex rounded-md border border-neutral-7 bg-neutral-10 shadow-lg overflow-hidden">
+        <div className="absolute top-full left-0 z-50 mt-1 flex rounded-floating border border-edge-strong bg-surface-raised shadow-floating overflow-hidden">
           {/* Hours column */}
           <div ref={hourListRef} className="h-52 overflow-y-auto scrollbar-thin">
             {HOURS.map(h => (
@@ -70,10 +70,10 @@ export default function TimePicker({ hour, minute, onChange, step = 15, classNam
                 type="button"
                 data-selected={h === hour}
                 onClick={() => { onChange(h, minute); }}
-                className={`block w-full px-4 py-1.5 text-center font-mono text-[14px] transition-colors cursor-pointer
+                className={`block w-full px-4 py-1.5 text-center font-mono text-body transition-colors cursor-pointer
                   ${h === hour
                     ? 'bg-accent-8 text-accent-2'
-                    : 'text-neutral-2 hover:bg-neutral-8'
+                    : 'text-ink hover:bg-edge'
                   }`}
               >
                 {pad(h)}
@@ -82,7 +82,7 @@ export default function TimePicker({ hour, minute, onChange, step = 15, classNam
           </div>
 
           {/* Divider */}
-          <div className="w-px bg-neutral-7" />
+          <div className="w-px bg-edge-strong" />
 
           {/* Minutes column */}
           <div ref={minListRef} className="h-52 overflow-y-auto scrollbar-thin">
@@ -92,10 +92,10 @@ export default function TimePicker({ hour, minute, onChange, step = 15, classNam
                 type="button"
                 data-selected={m === minute}
                 onClick={() => { onChange(hour, m); }}
-                className={`block w-full px-4 py-1.5 text-center font-mono text-[14px] transition-colors cursor-pointer
+                className={`block w-full px-4 py-1.5 text-center font-mono text-body transition-colors cursor-pointer
                   ${m === minute
                     ? 'bg-accent-8 text-accent-2'
-                    : 'text-neutral-2 hover:bg-neutral-8'
+                    : 'text-ink hover:bg-edge'
                   }`}
               >
                 {pad(m)}

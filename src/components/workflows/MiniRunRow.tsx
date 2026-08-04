@@ -38,20 +38,20 @@ export function MiniRunRow({
     <div>
       <div
         onClick={onToggle}
-        className={`flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors rounded-md ${
-          selected ? 'bg-neutral-10' : 'hover:bg-neutral-10/50'
+        className={`flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors rounded-control ${
+          selected ? 'bg-surface-raised' : 'hover:bg-surface-raised'
         }`}
       >
-        <span className="text-neutral-5 w-4 shrink-0">
+        <span className="text-ink-muted w-4 shrink-0">
           {selected
             ? <IconChevronDown size={13} stroke={2} />
             : <IconChevronRight size={13} stroke={2} />
           }
         </span>
-        <span className="text-[14px] text-neutral-4 tabular-nums whitespace-nowrap">
+        <span className="text-body text-ink-muted tabular-nums whitespace-nowrap">
           {formatTime(run.createdAt)}
         </span>
-        <span className="text-[14px] text-neutral-4 tabular-nums whitespace-nowrap">
+        <span className="text-body text-ink-muted tabular-nums whitespace-nowrap">
           {formatDuration(run.startedAt, run.completedAt)}
         </span>
         <span className="ml-auto">
@@ -61,7 +61,7 @@ export function MiniRunRow({
           {run.status === 'running' && (
             <button
               onClick={() => onCancel(run.id)}
-              className="rounded p-1 text-neutral-4 hover:text-error-4 hover:bg-neutral-9 transition-colors"
+              className="rounded-control p-1 text-ink-muted hover:text-error-4 hover:bg-edge transition-colors"
               title="Cancel"
             >
               <IconPlayerStop size={13} stroke={2} />
@@ -70,7 +70,7 @@ export function MiniRunRow({
           {sessionId && onNavigateToSession && (
             <button
               onClick={() => onNavigateToSession(sessionId)}
-              className="rounded p-1 text-neutral-4 hover:text-accent-3 hover:bg-neutral-9 transition-colors"
+              className="rounded-control p-1 text-ink-muted hover:text-accent-3 hover:bg-edge transition-colors"
               title="View session"
             >
               <IconExternalLink size={13} stroke={2} />
@@ -81,7 +81,7 @@ export function MiniRunRow({
       {selected && (
         <div className="px-3 pb-2">
           {detailLoading ? (
-            <div className="flex items-center gap-2 py-3 text-[14px] text-neutral-5">
+            <div className="flex items-center gap-2 py-3 text-body text-ink-muted">
               <IconLoader2 size={16} stroke={2} className="animate-spin" />
               Loading steps…
             </div>

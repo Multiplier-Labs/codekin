@@ -22,25 +22,25 @@ export function ActivityRow({
   const sessionId = (run.output?.sessionId || run.input?.sessionId) as string | undefined
 
   return (
-    <div className="flex items-center gap-3 px-4 py-2 hover:bg-neutral-10/30 transition-colors rounded-md">
+    <div className="flex items-center gap-3 px-4 py-2 hover:bg-surface-raised transition-colors rounded-control">
       <HealthDot status={run.status} />
-      <span className="text-[15px] font-medium text-neutral-2 min-w-0 truncate max-w-[140px]">
+      <span className="text-body font-medium text-ink min-w-0 truncate max-w-[140px]">
         {repoNameFromRun(run)}
       </span>
-      <span className="text-[14px] text-neutral-4">
+      <span className="text-body text-ink-muted">
         {kindLabel(run.kind)}
       </span>
-      <span className="text-[14px] text-neutral-5 tabular-nums ml-auto whitespace-nowrap">
+      <span className="text-body text-ink-muted tabular-nums ml-auto whitespace-nowrap">
         {formatTime(run.createdAt)}
       </span>
-      <span className="text-[14px] text-neutral-5 tabular-nums whitespace-nowrap">
+      <span className="text-body text-ink-muted tabular-nums whitespace-nowrap">
         {formatDuration(run.startedAt, run.completedAt)}
       </span>
       <StatusBadge status={run.status} />
       {sessionId && onNavigateToSession && (
         <button
           onClick={() => onNavigateToSession(sessionId)}
-          className="rounded p-1 text-neutral-5 hover:text-accent-3 hover:bg-neutral-9 transition-colors shrink-0"
+          className="rounded-control p-1 text-ink-muted hover:text-accent-3 hover:bg-edge transition-colors shrink-0"
           title="View session"
         >
           <IconExternalLink size={13} stroke={2} />

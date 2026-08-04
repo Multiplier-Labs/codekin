@@ -34,6 +34,30 @@ npm run lint         # eslint
 - WebSocket message types defined in `src/types.ts` (shared between client and server)
 - Monospace font: Inconsolata; Sans font: Lato
 
+## Styling Rules
+
+The visual system is token-driven; an ESLint guard enforces most of this in `src/components`.
+
+- **Semantic color tokens only** in components: `bg-page` / `bg-surface` / `bg-surface-raised`,
+  `border-edge` / `border-edge-strong`, `text-ink` / `text-ink-muted` / `text-ink-faint` /
+  `text-ink-inverse`, `focus:border-focus`. Never raw `*-neutral-N` steps or Tailwind's default
+  palette (`purple-400`, `text-white`, …). Intent families (`primary`, `secondary`, `accent`,
+  `error`, `warning`, `success`) are used directly for status color.
+- **Five type steps**, nothing else: `text-micro` (11px), `text-meta` (12.5px), `text-body`
+  (14.5px), `text-title` (17px), `text-head` (22px). Line-height is bound to each step. No
+  arbitrary `text-[Npx]` (single sanctioned exception: the 16px mobile composer textarea in
+  `InputBar.tsx`, which prevents iOS zoom-on-focus).
+- **Three surfaces**: level 0 page (transcript ground), level 1 `bg-surface` + `border-edge`
+  (sidebar, panels, cards), level 2 `bg-surface-raised` + `border-edge-strong` + `shadow-floating`
+  (modals, popovers, palette). `shadow-floating` is the only shadow. Radii: `rounded-control` for
+  buttons/inputs/rows/badges, `rounded-floating` for modals/popovers, `rounded-full` only for
+  circles (dots, avatars).
+- **Density via tokens**, not per-element `isMobile` ternaries: rows read `var(--row-h)`,
+  `var(--row-pad)`, `var(--icon-size)`; touch mode is set once via `data-density="touch"` on the
+  app shell.
+- Both theme polarities (`[data-theme="dark"]`, `[data-theme="light"]`) and the `.terminal-area`
+  scope must be checked when changing colors.
+
 ## Branching & Release Policy
 
 - **NEVER commit or push directly to `main`.** Always create a feature/fix branch and open a PR.

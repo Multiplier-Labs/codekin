@@ -43,11 +43,11 @@ export function RepoGroup({
   const repoName = repoPath.split('/').pop() || repoPath
 
   return (
-    <div className="workflow-card rounded-lg border border-neutral-9/60 bg-neutral-10/30 overflow-hidden">
+    <div className="workflow-card rounded-lg border border-edge bg-surface overflow-hidden">
       {/* Repo header */}
-      <div className="flex items-baseline gap-2 px-4 py-2.5 border-b border-neutral-9/40 bg-neutral-10/20">
-        <span className="text-[15px] font-semibold text-neutral-2">{repoName}</span>
-        <span className="text-[13px] text-neutral-6">{workflows.length}</span>
+      <div className="flex items-baseline gap-2 px-4 py-2.5 border-b border-edge bg-surface-raised/20">
+        <span className="text-body font-semibold text-ink">{repoName}</span>
+        <span className="text-meta text-ink-faint">{workflows.length}</span>
       </div>
       {/* Workflow rows */}
       <div className="py-1 px-1">

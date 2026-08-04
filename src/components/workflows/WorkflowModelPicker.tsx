@@ -26,10 +26,10 @@ function addRecent(id: string) {
 }
 
 const btnClass = (selected: boolean) =>
-  `rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
+  `rounded-control border px-3 py-1.5 text-body font-medium transition-colors ${
     selected
       ? 'border-accent-6 bg-accent-9/40 text-accent-2'
-      : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
+      : 'border-edge bg-surface text-ink hover:border-ink-faint hover:text-ink'
   }`
 
 // ---------------------------------------------------------------------------
@@ -140,10 +140,10 @@ function SearchablePicker({ models, selected, onSelect }: {
       <button
         type="button"
         onClick={() => { setOpen(o => !o); setActiveIndex(0) }}
-        className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-[13px] font-medium transition-colors ${
+        className={`flex items-center gap-2 rounded-control border px-3 py-1.5 text-body font-medium transition-colors ${
           selected
             ? 'border-accent-6 bg-accent-9/40 text-accent-2'
-            : 'border-neutral-7 bg-neutral-10 text-neutral-3 hover:border-neutral-6 hover:text-neutral-2'
+            : 'border-edge bg-surface text-ink hover:border-ink-faint hover:text-ink'
         }`}
       >
         {selectedLabel}
@@ -152,18 +152,18 @@ function SearchablePicker({ models, selected, onSelect }: {
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute top-full mt-1 left-0 z-50 w-[280px] max-h-[320px] rounded-lg border border-neutral-6 bg-neutral-8 shadow-lg flex flex-col">
+        <div className="absolute top-full mt-1 left-0 z-50 w-[280px] max-h-[320px] rounded-floating border border-edge-strong bg-surface-raised shadow-floating flex flex-col">
           {/* Search */}
-          <div className="p-2 border-b border-neutral-7">
+          <div className="p-2 border-b border-edge-strong">
             <div className="relative">
-              <IconSearch size={14} stroke={2} className="absolute left-2 top-1/2 -translate-y-1/2 text-neutral-5" />
+              <IconSearch size={14} stroke={2} className="absolute left-2 top-1/2 -translate-y-1/2 text-ink-muted" />
               <input
                 ref={inputRef}
                 value={query}
                 onChange={e => { setQuery(e.target.value); setActiveIndex(0) }}
                 onKeyDown={handleKeyDown}
                 placeholder="Search models..."
-                className="w-full bg-neutral-7 text-[13px] pl-7 pr-2 py-1.5 rounded-md outline-none text-neutral-2 placeholder:text-neutral-5"
+                className="w-full bg-edge-strong text-body pl-7 pr-2 py-1.5 rounded-control outline-none text-ink placeholder:text-ink-muted"
               />
             </div>
           </div>
@@ -172,7 +172,7 @@ function SearchablePicker({ models, selected, onSelect }: {
           <div className="overflow-y-auto py-1">
             {!query && recents.length > 0 && (
               <div className="mb-1">
-                <div className="px-3 py-1 text-[11px] text-neutral-5 uppercase tracking-wide">Recent</div>
+                <div className="px-3 py-1 text-micro text-ink-muted uppercase tracking-wide">Recent</div>
                 {recents.map((id, idx) => {
                   const m = models.find(x => x.id === id)
                   if (!m) return null
@@ -182,9 +182,9 @@ function SearchablePicker({ models, selected, onSelect }: {
                       ref={el => { itemRefs.current[idx] = el }}
                       type="button"
                       onClick={() => handleSelect(m.id)}
-                      className={`w-full text-left px-3 py-1.5 text-[13px] transition-colors ${
-                        idx === activeIndex ? 'bg-neutral-7' : 'hover:bg-neutral-7'
-                      } ${m.id === selected ? 'text-accent-3' : 'text-neutral-2'}`}
+                      className={`w-full text-left px-3 py-1.5 text-body transition-colors ${
+                        idx === activeIndex ? 'bg-edge' : 'hover:bg-edge'
+                      } ${m.id === selected ? 'text-accent-3' : 'text-ink'}`}
                     >
                       {m.label}
                     </button>
@@ -195,10 +195,10 @@ function SearchablePicker({ models, selected, onSelect }: {
 
             <div>
               {!query && (
-                <div className="px-3 py-1 text-[11px] text-neutral-5 uppercase tracking-wide">All Models</div>
+                <div className="px-3 py-1 text-micro text-ink-muted uppercase tracking-wide">All Models</div>
               )}
               {allWithoutRecents.length === 0 && (
-                <div className="px-3 py-2 text-[13px] text-neutral-5">No models match your search</div>
+                <div className="px-3 py-2 text-body text-ink-muted">No models match your search</div>
               )}
               {allWithoutRecents.map((m, idx) => {
                 const baseIndex = (!query && recents.length > 0) ? recents.length : 0
@@ -209,9 +209,9 @@ function SearchablePicker({ models, selected, onSelect }: {
                     ref={el => { itemRefs.current[index] = el }}
                     type="button"
                     onClick={() => handleSelect(m.id)}
-                    className={`w-full text-left px-3 py-1.5 text-[13px] transition-colors ${
-                      index === activeIndex ? 'bg-neutral-7' : 'hover:bg-neutral-7'
-                    } ${m.id === selected ? 'text-accent-3' : 'text-neutral-2'}`}
+                    className={`w-full text-left px-3 py-1.5 text-body transition-colors ${
+                      index === activeIndex ? 'bg-edge' : 'hover:bg-edge'
+                    } ${m.id === selected ? 'text-accent-3' : 'text-ink'}`}
                   >
                     {m.label}
                   </button>
@@ -239,11 +239,11 @@ interface WorkflowModelPickerProps {
 /** Model picker that switches between inline buttons (≤5) and searchable dropdown (>5). */
 export function WorkflowModelPicker({ models, selected, onSelect, loading }: WorkflowModelPickerProps) {
   if (loading) {
-    return <div className="text-[13px] text-neutral-5">Loading models...</div>
+    return <div className="text-body text-ink-muted">Loading models...</div>
   }
 
   if (models.length === 0) {
-    return <div className="text-[13px] text-neutral-5">No models available</div>
+    return <div className="text-body text-ink-muted">No models available</div>
   }
 
   if (models.length <= 5) {

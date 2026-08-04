@@ -46,26 +46,26 @@ export function SkillMenu({ groups, onSelectSkill, onClose }: Props) {
   return (
     <div
       ref={ref}
-      className="absolute bottom-full right-0 mb-1 w-56 rounded-lg border border-neutral-6 bg-neutral-8 py-1 shadow-lg z-50"
+      className="absolute bottom-full right-0 mb-1 w-56 rounded-floating border border-edge-strong bg-surface-raised py-1 shadow-floating z-50"
     >
-      <div className="px-3 py-1.5 text-[13px] font-semibold text-neutral-3 border-b border-neutral-7 mb-1">
+      <div className="px-3 py-1.5 text-body font-semibold text-ink border-b border-edge mb-1">
         Claude Skills
       </div>
       {nonEmpty.map((group, gi) => (
         <div key={group.label}>
-          {gi > 0 && <div className="my-1 border-t border-neutral-7" />}
-          <div className="px-3 py-1 text-[12px] font-medium uppercase tracking-wider text-neutral-5">
+          {gi > 0 && <div className="my-1 border-t border-edge" />}
+          <div className="px-3 py-1 text-meta font-medium uppercase tracking-wider text-ink-muted">
             {group.label}
           </div>
           {group.skills.map(skill => (
             <button
               key={skill.id}
               onClick={() => onSelectSkill(skill.command)}
-              className="flex w-full flex-col px-3 py-1.5 text-left hover:bg-neutral-7 transition-colors"
+              className="flex w-full flex-col px-3 py-1.5 text-left hover:bg-edge transition-colors"
             >
-              <span className="text-[15px] font-medium text-accent-6">{skill.command}</span>
+              <span className="text-body font-medium text-accent-6">{skill.command}</span>
               {skill.description && (
-                <span className="text-[13px] text-neutral-4">{skill.description}</span>
+                <span className="text-body text-ink-muted">{skill.description}</span>
               )}
             </button>
           ))}

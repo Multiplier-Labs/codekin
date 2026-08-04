@@ -19,14 +19,14 @@ interface Props {
 const CATEGORY_BADGE: Record<SlashCommandCategory, { label: string; className: string }> = {
   skill: { label: 'skill', className: 'bg-accent-9/30 text-accent-5' },
   bundled: { label: 'built-in', className: 'bg-primary-9/30 text-primary-5' },
-  builtin: { label: 'command', className: 'bg-neutral-8 text-neutral-4' },
+  builtin: { label: 'command', className: 'bg-edge-strong text-ink-muted' },
   opencode: { label: 'opencode', className: 'bg-primary-9/30 text-primary-5' },
 }
 
 const CATEGORY_ICON_CLASS: Record<SlashCommandCategory, string> = {
   skill: 'text-accent-6',
   bundled: 'text-primary-5',
-  builtin: 'text-neutral-5',
+  builtin: 'text-ink-muted',
   opencode: 'text-primary-5',
 }
 
@@ -56,7 +56,7 @@ export function SlashAutocomplete({ commands, filter, onSelect, onClose }: Props
       className="absolute bottom-full left-0 mb-1 z-50 w-72"
     >
       <Command
-        className="rounded-lg border border-neutral-10 bg-neutral-11 shadow-2xl"
+        className="rounded-floating border border-edge-strong bg-surface-raised shadow-floating"
         label="Slash commands"
         filter={(value, search) => {
           // Match against command name (without /) and display name
@@ -74,7 +74,7 @@ export function SlashAutocomplete({ commands, filter, onSelect, onClose }: Props
           readOnly
         />
         <Command.List ref={listRef} className="max-h-64 overflow-y-auto p-1">
-          <Command.Empty className="px-3 py-4 text-center text-[13px] text-neutral-5">
+          <Command.Empty className="px-3 py-4 text-center text-body text-ink-muted">
             No matching commands.
           </Command.Empty>
 
@@ -86,14 +86,14 @@ export function SlashAutocomplete({ commands, filter, onSelect, onClose }: Props
                 key={cmd.command}
                 value={`${cmd.command.slice(1)} ${cmd.name}`}
                 onSelect={() => handleSelect(cmd.command)}
-                className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[14px] text-neutral-3 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
+                className="flex cursor-pointer items-center gap-2 rounded-control px-2 py-1.5 text-body text-ink aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
               >
-                <span className={`font-mono text-[13px] ${iconClass}`}>/</span>
+                <span className={`font-mono text-meta ${iconClass}`}>/</span>
                 <span className="flex-1 truncate">
                   <span className="font-medium">{cmd.name}</span>
-                  <span className="ml-1.5 text-[12px] text-neutral-5">{cmd.description}</span>
+                  <span className="ml-1.5 text-meta text-ink-muted">{cmd.description}</span>
                 </span>
-                <span className={`flex-shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${badge.className}`}>
+                <span className={`flex-shrink-0 rounded-control px-1.5 py-0.5 text-micro font-medium ${badge.className}`}>
                   {badge.label}
                 </span>
               </Command.Item>

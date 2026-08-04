@@ -571,7 +571,7 @@ export default function App() {
   }, [])
 
   return (
-    <div className="flex h-full bg-neutral-7">
+    <div className="flex h-full bg-edge-strong" data-density={isMobile ? 'touch' : undefined}>
       {/* Left sidebar — repo/session tree + nav */}
       <LeftSidebar
         sessions={sessions}
@@ -629,7 +629,7 @@ export default function App() {
       />
 
       {/* Main area */}
-      <div className="terminal-area flex flex-1 flex-col overflow-hidden bg-neutral-12">
+      <div className="terminal-area flex flex-1 flex-col overflow-hidden bg-page">
         {/* Mobile top bar */}
         {isMobile && (
           <MobileTopBar
@@ -643,14 +643,14 @@ export default function App() {
         )}
         {/* Error banner */}
         {error && (
-          <div className="border-b border-error-9/50 bg-error-10/50 px-4 py-2 text-[15px] text-error-5">
+          <div className="border-b border-error-9/50 bg-error-10/50 px-4 py-2 text-body text-error-5">
             {error}
           </div>
         )}
 
         {/* Upload status */}
         {uploadStatus && (
-          <div className="border-b border-primary-9/50 bg-primary-10/50 px-4 py-2 text-[15px] text-primary-5">
+          <div className="border-b border-primary-9/50 bg-primary-10/50 px-4 py-2 text-body text-primary-5">
             {uploadStatus}
           </div>
         )}

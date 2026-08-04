@@ -29,45 +29,45 @@ export function CommandPalette({ open, onClose, repos, globalSkills = [], global
     <div className={`fixed inset-0 z-50 flex bg-black/60 ${isMobile ? 'items-end' : 'items-start justify-center pt-[20vh]'}`} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} className={`w-full ${isMobile ? '' : 'max-w-lg'}`}>
         <Command
-          className="rounded-lg border border-neutral-10 bg-neutral-11 shadow-2xl"
+          className="rounded-floating border border-edge-strong bg-surface-raised shadow-floating"
           label="Command palette"
         >
           <Command.Input
             placeholder="Search repos, skills, modules, actions..."
-            className="w-full border-b border-neutral-10 bg-transparent px-4 py-3 text-[15px] text-neutral-2 outline-none placeholder:text-neutral-5"
+            className="w-full border-b border-edge bg-transparent px-4 py-3 text-body text-ink outline-none placeholder:text-ink-muted"
             autoFocus
           />
           <Command.List className="max-h-72 overflow-y-auto p-2">
-            <Command.Empty className="px-4 py-8 text-center text-[15px] text-neutral-5">
+            <Command.Empty className="px-4 py-8 text-center text-body text-ink-muted">
               No results found.
             </Command.Empty>
 
-            <Command.Group heading="Repos" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-[12px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-neutral-5">
+            <Command.Group heading="Repos" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-meta [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-ink-muted">
               {repos.map(repo => (
                 <Command.Item
                   key={repo.id}
                   value={`repo ${repo.name} ${repo.tags.join(' ')}`}
                   onSelect={() => { onOpenRepo(repo); onClose() }}
-                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[15px] text-neutral-4 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
+                  className="flex cursor-pointer items-center gap-2 rounded-control px-2 py-1.5 text-body text-ink-muted aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
                 >
-                  <span className="text-neutral-5">&#9634;</span>
+                  <span className="text-ink-muted">&#9634;</span>
                   {repo.name}
-                  <span className="ml-auto text-[12px] text-neutral-5">{repo.tags.join(', ')}</span>
+                  <span className="ml-auto text-meta text-ink-muted">{repo.tags.join(', ')}</span>
                 </Command.Item>
               ))}
             </Command.Group>
 
-            <Command.Group heading="Skills" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-[12px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-neutral-5">
+            <Command.Group heading="Skills" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-meta [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-ink-muted">
               {globalSkills.map(skill => (
                 <Command.Item
                   key={`global-${skill.id}`}
                   value={`skill ${skill.name} ${skill.command} global`}
                   onSelect={() => { onSendSkill(skill.command); onClose() }}
-                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[15px] text-neutral-4 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
+                  className="flex cursor-pointer items-center gap-2 rounded-control px-2 py-1.5 text-body text-ink-muted aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
                 >
                   <span className="text-accent-6">/</span>
                   <span>{skill.name}</span>
-                  <span className="ml-auto text-[12px] text-neutral-5">global</span>
+                  <span className="ml-auto text-meta text-ink-muted">global</span>
                 </Command.Item>
               ))}
               {repos.flatMap(repo =>
@@ -76,38 +76,38 @@ export function CommandPalette({ open, onClose, repos, globalSkills = [], global
                     key={`${repo.id}-${skill.id}`}
                     value={`skill ${skill.name} ${skill.command} ${repo.name}`}
                     onSelect={() => { onSendSkill(skill.command); onClose() }}
-                    className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[15px] text-neutral-4 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
+                    className="flex cursor-pointer items-center gap-2 rounded-control px-2 py-1.5 text-body text-ink-muted aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
                   >
                     <span className="text-accent-6">/</span>
                     <span>{skill.name}</span>
-                    <span className="ml-auto text-[12px] text-neutral-5">{repo.name}</span>
+                    <span className="ml-auto text-meta text-ink-muted">{repo.name}</span>
                   </Command.Item>
                 )),
               )}
             </Command.Group>
 
-            <Command.Group heading="Modules" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-[12px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-neutral-5">
+            <Command.Group heading="Modules" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-meta [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-ink-muted">
               {globalModules.map(mod => (
                 <Command.Item
                   key={`module-${mod.id}`}
                   value={`module ${mod.name} ${mod.description} global`}
                   onSelect={() => { onSendModule(mod); onClose() }}
-                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[15px] text-neutral-4 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
+                  className="flex cursor-pointer items-center gap-2 rounded-control px-2 py-1.5 text-body text-ink-muted aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
                 >
                   <span className="text-primary-6">&#9670;</span>
                   <span>{mod.name}</span>
-                  <span className="ml-auto text-[12px] text-neutral-5">global</span>
+                  <span className="ml-auto text-meta text-ink-muted">global</span>
                 </Command.Item>
               ))}
             </Command.Group>
 
-            <Command.Group heading="Actions" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-[12px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-neutral-5">
+            <Command.Group heading="Actions" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-meta [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-ink-muted">
               <Command.Item
                 value="settings token configure"
                 onSelect={() => { onOpenSettings(); onClose() }}
-                className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[15px] text-neutral-4 aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
+                className="flex cursor-pointer items-center gap-2 rounded-control px-2 py-1.5 text-body text-ink-muted aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
               >
-                <span className="text-neutral-5">&#9881;</span>
+                <span className="text-ink-muted">&#9881;</span>
                 Settings
               </Command.Item>
             </Command.Group>

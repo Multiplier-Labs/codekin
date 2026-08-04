@@ -92,17 +92,17 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
     <div ref={containerRef} className="relative h-full flex items-center">
       <button
         onClick={() => setOpen(!open)}
-        className={`app-new-session-btn rounded p-1.5 transition ${open ? 'bg-neutral-6 text-neutral-1' : 'text-neutral-3 hover:bg-neutral-6 hover:text-neutral-1'}`}
+        className={`app-new-session-btn rounded-control p-1.5 transition ${open ? 'bg-surface-raised text-ink' : 'text-ink hover:bg-surface-raised hover:text-ink'}`}
         title="New session"
       >
         <IconPlus size={16} stroke={2} />
       </button>
 
       {open && (
-        <div ref={popupRef} className="fixed z-50 w-72 rounded-md border border-neutral-10 bg-neutral-12 shadow-lg">
+        <div ref={popupRef} className="fixed z-50 w-72 rounded-floating border border-edge-strong bg-surface-raised shadow-floating">
           <div className="px-3 pt-3 pb-1">
-            <h3 className="text-[15px] font-medium text-neutral-3">New Session</h3>
-            <p className="mt-0.5 text-[13px] text-neutral-6">Choose a repository to work on</p>
+            <h3 className="text-body font-medium text-ink">New Session</h3>
+            <p className="mt-0.5 text-body text-ink-faint">Choose a repository to work on</p>
           </div>
           <div className="px-2 pb-2">
             <RepoList
