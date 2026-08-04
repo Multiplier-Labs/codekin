@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@300..700&family=Lato:wght@300;400;700;900&display=swap" rel="stylesheet" />
+<style>
+  body { margin: 0; background: #090e0f; }
+  a { color: #74cbda; text-decoration: none; }
+  a:hover { color: #a5e0ea; }
+</style>
+</helmet>
+<div style="background:#090e0f;color:#c6d4d5;font-family:'Lato',sans-serif;min-height:100vh;padding:64px 40px 120px;display:flex;justify-content:center">
+<div style="width:100%;max-width:1080px;display:flex;flex-direction:column;gap:72px">
+
+  <header style="display:flex;flex-direction:column;gap:20px;border-bottom:1px solid #263a3e;padding-bottom:36px">
+    <div style="display:flex;align-items:center;gap:12px;font-family:'Inconsolata',monospace;font-size:12.5px;letter-spacing:0.1em;text-transform:uppercase;color:#748d91">
+      <span style="width:8px;height:8px;border-radius:999px;background:#f0c56e"></span>
+      <span>Multiplier-Labs/codekin @ main</span>
+      <span style="color:#465c60">/</span>
+      <span>styling review</span>
+    </div>
+    <h1 style="margin:0;font-size:44px;line-height:1.08;font-weight:900;letter-spacing:-0.02em;color:#dce4e5;max-width:20ch">Codekin needs a smaller design system, not a new one.</h1>
+    <p style="margin:0;font-size:17px;line-height:1.6;color:#94aeb1;max-width:68ch;text-wrap:pretty">The palette is deliberate and the warm-content / cool-chrome split is a genuine idea worth keeping. What is hurting the app is quantity: the system is declared once in <code style="font-family:'Inconsolata',monospace;color:#74cbda">@theme</code>, re-declared four more times for scoped overrides, and then bypassed a sixth time by components that hardcode pixel sizes and raw scale steps. Six proposals below, ordered by payoff.</p>
+  </header>
+
+  <section style="display:flex;flex-direction:column;gap:24px">
+    <h2 style="margin:0;font-size:13px;font-family:'Inconsolata',monospace;letter-spacing:0.14em;text-transform:uppercase;color:#748d91;font-weight:600">What I found</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:2px;background:#263a3e;border:1px solid #263a3e;border-radius:8px;overflow:hidden">
+      <div style="background:#101e21;padding:22px 20px;display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:30px;font-weight:900;color:#f0c56e;letter-spacing:-0.02em;line-height:1">405</div>
+        <div style="font-size:14px;line-height:1.5;color:#94aeb1">hardcoded <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">text-[Npx]</code> classes in <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">src/components</code>. Eight sizes between 11 and 19px, no named scale.</div>
+      </div>
+      <div style="background:#101e21;padding:22px 20px;display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:30px;font-weight:900;color:#f0c56e;letter-spacing:-0.02em;line-height:1">84 &times; 5</div>
+        <div style="font-size:14px;line-height:1.5;color:#94aeb1">colour tokens re-typed per scope — base, <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">.terminal-area</code>, light, light&nbsp;+&nbsp;terminal, sidebar — instead of derived from one scale.</div>
+      </div>
+      <div style="background:#101e21;padding:22px 20px;display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:30px;font-weight:900;color:#f0c56e;letter-spacing:-0.02em;line-height:1">1 of 9</div>
+        <div style="font-size:14px;line-height:1.5;color:#94aeb1">semantic aliases actually used. <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">on-primary</code> appears in five files; <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">surface</code>, <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">edge</code> and the <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">ink</code> steps are defined and unused.</div>
+      </div>
+      <div style="background:#101e21;padding:22px 20px;display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:30px;font-weight:900;color:#e86060;letter-spacing:-0.02em;line-height:1">off-scale</div>
+        <div style="font-size:14px;line-height:1.5;color:#94aeb1"><code style="font-family:'Inconsolata',monospace;color:#c6d4d5">text-purple-400</code>, <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">text-red-400</code>, <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">text-white</code>, and <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">#11181a</code> written straight into <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">index.css</code>.</div>
+      </div>
+      <div style="background:#101e21;padding:22px 20px;display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:30px;font-weight:900;color:#f0c56e;letter-spacing:-0.02em;line-height:1">1px</div>
+        <div style="font-size:14px;line-height:1.5;color:#94aeb1">every panel boundary is a <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">border-neutral-8/30</code> hairline. Alphas run /30, /40, /50 with no rule behind them.</div>
+      </div>
+      <div style="background:#101e21;padding:22px 20px;display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:30px;font-weight:900;color:#f0c56e;letter-spacing:-0.02em;line-height:1">n&times;</div>
+        <div style="font-size:14px;line-height:1.5;color:#94aeb1"><code style="font-family:'Inconsolata',monospace;color:#c6d4d5">isMobile ? 'px-2 py-2' : 'px-1.5 py-1'</code> inline in markup — density decided per element, per file.</div>
+      </div>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:14px">
+      <span style="font-family:'Inconsolata',monospace;font-size:13px;color:#9e7335;font-weight:600">01</span>
+      <h2 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-0.01em;color:#dce4e5">One type scale, five steps</h2>
+    </div>
+    <p style="margin:0 0 12px;font-size:16px;line-height:1.6;color:#94aeb1;max-width:70ch;text-wrap:pretty">13px, 14px and 15px are not distinguishable next to each other, but each one is a decision someone made 400 times. Collapse them. Bind line-height and weight into the step so a label cannot be authored half-right.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;background:#263a3e;border:1px solid #263a3e;border-radius:8px;overflow:hidden">
+      <div style="background:#101e21;padding:24px">
+        <div style="font-family:'Inconsolata',monospace;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#5c7377;margin-bottom:18px">today &mdash; 8 sizes in use</div>
+        <div style="display:flex;flex-direction:column;gap:9px;font-family:'Inconsolata',monospace;color:#748d91">
+          <div style="font-size:11px">11px &mdash; section labels, badges, hints</div>
+          <div style="font-size:12px">12px &mdash; metadata, request IDs, counts</div>
+          <div style="font-size:13px">13px &mdash; labels, list rows, buttons</div>
+          <div style="font-size:14px">14px &mdash; workflow body, evidence rows</div>
+          <div style="font-size:15px">15px &mdash; chat prose, nav rows, inputs</div>
+          <div style="font-size:17px">17px &mdash; app title, panel headings</div>
+          <div style="font-size:18px">18px &mdash; Loop Runs heading</div>
+          <div style="font-size:19px">19px &mdash; modal headings</div>
+        </div>
+      </div>
+      <div style="background:#0d1518;padding:24px">
+        <div style="font-family:'Inconsolata',monospace;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#9e7335;margin-bottom:18px">proposed &mdash; 5 named steps</div>
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Inconsolata',monospace;font-size:11px;color:#5c7377;width:8ch;flex-shrink:0">micro</span><span style="font-size:11px;line-height:1.4;letter-spacing:0.08em;text-transform:uppercase;color:#748d91;font-weight:700">Active sessions</span></div>
+          <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Inconsolata',monospace;font-size:11px;color:#5c7377;width:8ch;flex-shrink:0">meta</span><span style="font-family:'Inconsolata',monospace;font-size:12.5px;line-height:1.45;color:#748d91">wt/cf801f5f &middot; +116 &minus;8</span></div>
+          <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Inconsolata',monospace;font-size:11px;color:#5c7377;width:8ch;flex-shrink:0">body</span><span style="font-size:14.5px;line-height:1.6;color:#c6d4d5">Transcript prose, list rows, inputs</span></div>
+          <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Inconsolata',monospace;font-size:11px;color:#5c7377;width:8ch;flex-shrink:0">title</span><span style="font-size:17px;line-height:1.35;font-weight:700;color:#dce4e5">Panel and modal titles</span></div>
+          <div style="display:flex;align-items:baseline;gap:12px"><span style="font-family:'Inconsolata',monospace;font-size:11px;color:#5c7377;width:8ch;flex-shrink:0">head</span><span style="font-size:22px;line-height:1.25;font-weight:700;letter-spacing:-0.01em;color:#dce4e5">View headings</span></div>
+        </div>
+        <p style="margin:22px 0 0;font-size:13.5px;line-height:1.55;color:#748d91">Body moves 15&nbsp;&rarr;&nbsp;14.5px and gains line-height 1.6, which is the change most visible to users: the transcript stops feeling crammed.</p>
+      </div>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:14px">
+      <span style="font-family:'Inconsolata',monospace;font-size:13px;color:#9e7335;font-weight:600">02</span>
+      <h2 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-0.01em;color:#dce4e5">Derive the theme scopes instead of re-typing them</h2>
+    </div>
+    <p style="margin:0 0 12px;font-size:16px;line-height:1.6;color:#94aeb1;max-width:70ch;text-wrap:pretty">The terminal palette is described in the source as the base palette desaturated ~40% and shifted warm. That is a formula, but it ships as 84 hand-tuned hex values — so every future palette change has to be re-derived by hand in five places, and the drift shows up as the <code style="font-family:'Inconsolata',monospace;color:#74cbda">#11181a</code> patch and the four <code style="font-family:'Inconsolata',monospace;color:#74cbda">/* darkened for AA */</code> one-offs.</p>
+    <div style="background:#101e21;border:1px solid #263a3e;border-radius:8px;padding:26px;display:flex;flex-direction:column;gap:20px">
+      <div style="font-family:'Inconsolata',monospace;font-size:13px;line-height:1.75;color:#94aeb1;white-space:pre-wrap;overflow-x:auto">Define lightness once, express every scope as two knobs.
+
+<span style="color:#5c7377">/* one ramp, in oklch */</span>
+--l-1: 0.92;  --l-5: 0.60;  --l-9: 0.24;  --l-12: 0.09;
+--neutral-c: 0.014;   --neutral-h: 195;   <span style="color:#5c7377">/* chrome: teal-tinted */</span>
+--color-neutral-5: oklch(var(--l-5) var(--neutral-c) var(--neutral-h));
+
+<span style="color:#5c7377">/* content area: same ramp, warm and desaturated — 2 lines, not 84 */</span>
+.terminal-area { --neutral-c: 0.006; --neutral-h: 70; }
+
+<span style="color:#5c7377">/* light mode: flip the ramp, keep chroma and hue */</span>
+[data-theme="light"] { --l-1: 0.09; --l-5: 0.48; --l-12: 0.98; }</div>
+      <p style="margin:0;font-size:14px;line-height:1.6;color:#748d91;max-width:74ch">Because oklch lightness is perceptual, contrast holds across both polarities, which is what the manual AA darkening was compensating for. Same move for primary / accent / error / warning / success: one hue and chroma per family, shared lightness ramp.</p>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:14px">
+      <span style="font-family:'Inconsolata',monospace;font-size:13px;color:#9e7335;font-weight:600">03</span>
+      <h2 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-0.01em;color:#dce4e5">Make the semantic tokens the only public API</h2>
+    </div>
+    <p style="margin:0 0 12px;font-size:16px;line-height:1.6;color:#94aeb1;max-width:70ch;text-wrap:pretty">The semantic layer already exists and the comment already says to prefer it — only <code style="font-family:'Inconsolata',monospace;color:#74cbda">text-on-primary</code> ever gets used. Today <code style="font-family:'Inconsolata',monospace;color:#74cbda">neutral-5</code> is simultaneously muted text, a border, and an icon colour, so no adjustment can be made without collateral damage.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;background:#263a3e;border:1px solid #263a3e;border-radius:8px;overflow:hidden">
+      <div style="background:#101e21;padding:24px;display:flex;flex-direction:column;gap:10px;font-family:'Inconsolata',monospace;font-size:13px;line-height:1.7">
+        <div style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#5c7377;font-family:'Lato',sans-serif;font-weight:700;margin-bottom:6px">in components today</div>
+        <div style="color:#94aeb1">bg-neutral-10 border-neutral-7</div>
+        <div style="color:#94aeb1">text-neutral-5  text-neutral-6</div>
+        <div style="color:#94aeb1">hover:bg-neutral-6/50</div>
+        <div style="color:#94aeb1">border-neutral-8/30</div>
+        <div style="color:#e86060">text-purple-400  text-red-400</div>
+      </div>
+      <div style="background:#0d1518;padding:24px;display:flex;flex-direction:column;gap:10px;font-family:'Inconsolata',monospace;font-size:13px;line-height:1.7">
+        <div style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#9e7335;font-family:'Lato',sans-serif;font-weight:700;margin-bottom:6px">proposed</div>
+        <div style="color:#c6d4d5">bg-surface border-edge</div>
+        <div style="color:#c6d4d5">text-ink-muted  text-ink-faint</div>
+        <div style="color:#c6d4d5">hover:bg-surface-raised</div>
+        <div style="color:#c6d4d5">border-edge</div>
+        <div style="color:#40bc80">text-accent-5 &mdash; via the scale</div>
+      </div>
+    </div>
+    <p style="margin:4px 0 0;font-size:14px;line-height:1.6;color:#748d91;max-width:74ch">Worth an ESLint rule banning raw scale steps and Tailwind's default palette inside <code style="font-family:'Inconsolata',monospace;color:#94aeb1">src/components</code>. Add <code style="font-family:'Inconsolata',monospace;color:#94aeb1">--color-ink-inverse</code> and <code style="font-family:'Inconsolata',monospace;color:#94aeb1">--color-focus</code> while you are there; both are currently improvised.</p>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:14px">
+      <span style="font-family:'Inconsolata',monospace;font-size:13px;color:#9e7335;font-weight:600">04</span>
+      <h2 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-0.01em;color:#dce4e5">Three surfaces, not a field of hairlines</h2>
+    </div>
+    <p style="margin:0 0 12px;font-size:16px;line-height:1.6;color:#94aeb1;max-width:70ch;text-wrap:pretty">In the current build the sidebar, transcript, and diff panel are all near-black separated by a 30%-alpha 1px line. The <code style="font-family:'Inconsolata',monospace;color:#74cbda">#11181a</code> override in <code style="font-family:'Inconsolata',monospace;color:#74cbda">index.css</code> is a symptom: the layout needed elevation and only had borders. Define three levels and let background do the work.</p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+      <div style="background:#090e0f;border:1px solid #263a3e;border-radius:8px;padding:22px;display:flex;flex-direction:column;gap:8px;min-height:130px">
+        <div style="font-family:'Inconsolata',monospace;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#5c7377">level 0 &mdash; page</div>
+        <div style="font-size:14.5px;line-height:1.55;color:#94aeb1">Transcript ground. No border, no shadow.</div>
+      </div>
+      <div style="background:#101e21;border:1px solid #263a3e;border-radius:8px;padding:22px;display:flex;flex-direction:column;gap:8px;min-height:130px">
+        <div style="font-family:'Inconsolata',monospace;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#5c7377">level 1 &mdash; surface</div>
+        <div style="font-size:14.5px;line-height:1.55;color:#94aeb1">Sidebar, diff panel, code blocks, cards. One full-strength edge.</div>
+      </div>
+      <div style="background:#1a2c30;border:1px solid #354a4e;border-radius:8px;padding:22px;display:flex;flex-direction:column;gap:8px;min-height:130px;box-shadow:0 12px 28px -8px rgba(0,0,0,0.7)">
+        <div style="font-family:'Inconsolata',monospace;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#5c7377">level 2 &mdash; floating</div>
+        <div style="font-size:14.5px;line-height:1.55;color:#94aeb1">Palette, popovers, modals, the tasks card. Shadow only here.</div>
+      </div>
+    </div>
+    <p style="margin:4px 0 0;font-size:14px;line-height:1.6;color:#748d91;max-width:74ch">Radius follows the same discipline: 6px on controls and inputs, 10px on floating containers, full only on status dots and avatars. Today <code style="font-family:'Inconsolata',monospace;color:#94aeb1">rounded</code>, <code style="font-family:'Inconsolata',monospace;color:#94aeb1">rounded-md</code> and <code style="font-family:'Inconsolata',monospace;color:#94aeb1">rounded-lg</code> are used interchangeably on the same class of element.</p>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:14px">
+      <span style="font-family:'Inconsolata',monospace;font-size:13px;color:#9e7335;font-weight:600">05</span>
+      <h2 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-0.01em;color:#dce4e5">Quiet the transcript</h2>
+    </div>
+    <p style="margin:0 0 12px;font-size:16px;line-height:1.6;color:#94aeb1;max-width:70ch;text-wrap:pretty">This is the one change users will feel. In the current screenshot, model prose, tool-call rows, and timestamps all render at 15px in the same reading column, so eight repetitions of &ldquo;2 tool calls &mdash; Read&rdquo; compete with the sentences that matter. Machine bookkeeping should sit in a different register from language.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;background:#263a3e;border:1px solid #263a3e;border-radius:8px;overflow:hidden">
+      <div style="background:#0f0e0d;padding:26px 24px">
+        <div style="font-family:'Inconsolata',monospace;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#777571;margin-bottom:20px">today</div>
+        <div style="display:flex;flex-direction:column;gap:14px;font-size:15px;line-height:1.45;color:#d1cfcb">
+          <div>Now let me implement the changes. I&rsquo;ll add a helper function to derive the GitHub slug and modify the POST handler.</div>
+          <div style="font-family:'Inconsolata',monospace;color:#93918c">&#9656; 1 tool call &mdash; Read</div>
+          <div>Now let me implement the server-side changes. I need to:</div>
+          <div style="font-family:'Inconsolata',monospace;color:#93918c">&#9656; 1 tool call &mdash; Edit</div>
+          <div>Now modify the POST handler to auto-setup webhook for pr-review:</div>
+          <div style="font-family:'Inconsolata',monospace;color:#93918c">&#9656; 2 tool calls &mdash; Edit, TodoWrite</div>
+          <div style="font-size:13px;color:#777571">20:02</div>
+          <div>Now update the frontend API to pass <code style="font-family:'Inconsolata',monospace">webhookUrl</code> and return the webhook setup result.</div>
+          <div style="font-family:'Inconsolata',monospace;color:#93918c">&#9656; 2 tool calls &mdash; Read, Edit</div>
+        </div>
+      </div>
+      <div style="background:#0f0e0d;padding:26px 24px">
+        <div style="font-family:'Inconsolata',monospace;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#cba557;margin-bottom:20px">proposed</div>
+        <div style="display:flex;flex-direction:column;gap:18px;max-width:66ch">
+          <div style="display:flex;gap:16px">
+            <div style="font-family:'Inconsolata',monospace;font-size:12px;color:#555350;width:44px;flex-shrink:0;padding-top:4px;text-align:right">20:01</div>
+            <div style="font-size:14.5px;line-height:1.65;color:#e2e1de">Now let me implement the changes. I&rsquo;ll add a helper function to derive the GitHub slug and modify the POST handler.</div>
+          </div>
+          <div style="display:flex;gap:16px">
+            <div style="width:44px;flex-shrink:0"></div>
+            <div style="font-size:14.5px;line-height:1.65;color:#e2e1de">Now let me implement the server-side changes. I need to:</div>
+          </div>
+          <div style="display:flex;gap:16px">
+            <div style="width:44px;flex-shrink:0"></div>
+            <div style="border-left:2px solid #333130;padding:5px 0 5px 12px;display:flex;align-items:center;gap:10px;font-family:'Inconsolata',monospace;font-size:12.5px;color:#777571">
+              <span style="color:#555350">&#9656;</span>
+              <span>4 tool calls</span>
+              <span style="color:#424040">&middot;</span>
+              <span style="color:#93918c">Read, Edit, TodoWrite</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:16px">
+            <div style="font-family:'Inconsolata',monospace;font-size:12px;color:#555350;width:44px;flex-shrink:0;padding-top:4px;text-align:right">20:02</div>
+            <div style="font-size:14.5px;line-height:1.65;color:#e2e1de">Now update the frontend API to pass <code style="font-family:'Inconsolata',monospace;color:#deb769">webhookUrl</code> and return the webhook setup result.</div>
+          </div>
+          <div style="display:flex;gap:16px">
+            <div style="width:44px;flex-shrink:0"></div>
+            <div style="border-left:2px solid #333130;padding:5px 0 5px 12px;display:flex;align-items:center;gap:10px;font-family:'Inconsolata',monospace;font-size:12.5px;color:#777571">
+              <span style="color:#555350">&#9656;</span>
+              <span>2 tool calls</span>
+              <span style="color:#424040">&middot;</span>
+              <span style="color:#93918c">Read, Edit</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul style="margin:8px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:15px;line-height:1.6;color:#94aeb1;max-width:74ch">
+      <li>Cap the measure at ~66&ndash;72 characters. On a 1920px display the transcript currently runs the full column width, which is roughly 140 characters per line.</li>
+      <li>Merge consecutive tool-call rows into one collapsed group and move them to a monospace, indented rail. One glance tells you work happened; the disclosure gives detail on demand.</li>
+      <li>Move timestamps into a fixed left gutter so they stop interrupting vertical rhythm.</li>
+      <li>Give the user&rsquo;s own turns an explicit surface. The warm tint currently applied is subtle to the point of being invisible on most displays.</li>
+    </ul>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:baseline;gap:14px">
+      <span style="font-family:'Inconsolata',monospace;font-size:13px;color:#9e7335;font-weight:600">06</span>
+      <h2 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-0.01em;color:#dce4e5">Density as one token, not a ternary per element</h2>
+    </div>
+    <p style="margin:0 0 12px;font-size:16px;line-height:1.6;color:#94aeb1;max-width:70ch;text-wrap:pretty">Touch sizing is currently decided element by element inside JSX. The desktop rows land near 26px, which is fine for a pointer; several of the mobile branches still fall short of a 44px target, and the ones that hit it do so by accident.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px;background:#263a3e;border:1px solid #263a3e;border-radius:8px;overflow:hidden">
+      <div style="background:#101e21;padding:24px;display:flex;flex-direction:column;gap:14px">
+        <div style="font-family:'Inconsolata',monospace;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#5c7377">pointer &mdash; --row-h: 28px</div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <div style="height:28px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:6px;background:#1a2c30;font-size:14.5px;color:#c6d4d5"><span style="width:6px;height:6px;border-radius:999px;background:#40bc80"></span>codekin</div>
+          <div style="height:28px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:6px;font-size:14.5px;color:#94aeb1"><span style="width:6px;height:6px;border-radius:999px;background:#465c60"></span>workflow-engine</div>
+          <div style="height:28px;display:flex;align-items:center;gap:10px;padding:0 10px;border-radius:6px;font-size:14.5px;color:#94aeb1"><span style="width:6px;height:6px;border-radius:999px;background:#465c60"></span>orchestrator-spec</div>
+        </div>
+      </div>
+      <div style="background:#101e21;padding:24px;display:flex;flex-direction:column;gap:14px">
+        <div style="font-family:'Inconsolata',monospace;font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#9e7335">touch &mdash; --row-h: 44px</div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <div style="height:44px;display:flex;align-items:center;gap:12px;padding:0 12px;border-radius:6px;background:#1a2c30;font-size:15.5px;color:#c6d4d5"><span style="width:7px;height:7px;border-radius:999px;background:#40bc80"></span>codekin</div>
+          <div style="height:44px;display:flex;align-items:center;gap:12px;padding:0 12px;border-radius:6px;font-size:15.5px;color:#94aeb1"><span style="width:7px;height:7px;border-radius:999px;background:#465c60"></span>workflow-engine</div>
+          <div style="height:44px;display:flex;align-items:center;gap:12px;padding:0 12px;border-radius:6px;font-size:15.5px;color:#94aeb1"><span style="width:7px;height:7px;border-radius:999px;background:#465c60"></span>orchestrator-spec</div>
+        </div>
+      </div>
+    </div>
+    <p style="margin:4px 0 0;font-size:14px;line-height:1.6;color:#748d91;max-width:74ch">Set <code style="font-family:'Inconsolata',monospace;color:#94aeb1">--row-h</code> and <code style="font-family:'Inconsolata',monospace;color:#94aeb1">--row-pad</code> once on the app shell from <code style="font-family:'Inconsolata',monospace;color:#94aeb1">useIsMobile</code>; rows read the variable. The <code style="font-family:'Inconsolata',monospace;color:#94aeb1">isMobile ? &hellip; : &hellip;</code> branches then delete themselves, including the paired icon-size ternaries.</p>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:22px;border-top:1px solid #263a3e;padding-top:44px">
+    <h2 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-0.01em;color:#dce4e5">Where to start</h2>
+    <div style="display:flex;flex-direction:column;gap:2px;background:#263a3e;border:1px solid #263a3e;border-radius:8px;overflow:hidden">
+      <div style="background:#101e21;padding:20px 22px;display:flex;gap:20px;align-items:flex-start">
+        <span style="font-family:'Inconsolata',monospace;font-size:13px;color:#f0c56e;font-weight:700;flex-shrink:0;padding-top:2px">first</span>
+        <span style="font-size:15.5px;line-height:1.55;color:#c6d4d5">Transcript typography and rhythm &mdash; proposals 01 and 05. Visible to every user, confined to <code style="font-family:'Inconsolata',monospace;color:#74cbda">ChatView</code> and the type tokens.</span>
+      </div>
+      <div style="background:#101e21;padding:20px 22px;display:flex;gap:20px;align-items:flex-start">
+        <span style="font-family:'Inconsolata',monospace;font-size:13px;color:#94aeb1;font-weight:700;flex-shrink:0;padding-top:2px">then</span>
+        <span style="font-size:15.5px;line-height:1.55;color:#c6d4d5">Surfaces and radius &mdash; proposal 04. Removes the <code style="font-family:'Inconsolata',monospace;color:#74cbda">#11181a</code> patch and makes the panel structure legible without hairlines.</span>
+      </div>
+      <div style="background:#101e21;padding:20px 22px;display:flex;gap:20px;align-items:flex-start">
+        <span style="font-family:'Inconsolata',monospace;font-size:13px;color:#94aeb1;font-weight:700;flex-shrink:0;padding-top:2px">last</span>
+        <span style="font-size:15.5px;line-height:1.55;color:#c6d4d5">Token plumbing &mdash; proposals 02, 03, 06. Largest diff, no visual change on its own, but it is what stops the drift from coming back.</span>
+      </div>
+    </div>
+    <p style="margin:0;font-size:15px;line-height:1.6;color:#748d91;max-width:70ch;text-wrap:pretty">Say which of these you want to see built as real screens and I&rsquo;ll mock the after-state at full fidelity &mdash; transcript, sidebar, and diff panel side by side with the current build.</p>
+  </section>
+
+</div>
+</div>
+</x-dc>
+</body>
+</html>
