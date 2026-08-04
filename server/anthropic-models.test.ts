@@ -20,21 +20,36 @@ vi.mock('child_process', () => ({
 
 type ExecCallback = (err: Error | null, stdout: string) => void
 
+/** Probe response for a model that exists: exit 0, modelUsage keyed by the requested ID. */
+function okProbe(modelId: string): [Error | null, string] {
+  return [null, JSON.stringify({ is_error: false, modelUsage: { [modelId]: { inputTokens: 1 } } })]
+}
+
+/** Probe response for a model that doesn't exist: the CLI exits non-zero but
+ *  still writes result JSON with api_error_status 404 to stdout. */
+function notFoundProbe(): [Error | null, string] {
+  return [new Error('exit 1'), JSON.stringify({ is_error: true, api_error_status: 404, modelUsage: {} })]
+}
+
+/** Probe response for a transient failure (rate limit / overload / timeout). */
+function transientProbe(): [Error | null, string] {
+  return [new Error('exit 1'), JSON.stringify({ is_error: true, api_error_status: 529, modelUsage: {} })]
+}
+
 /**
  * Install execFile behavior. `available` lists model IDs that "exist" — for
  * those, the callback yields a JSON result whose modelUsage is keyed by the
- * requested ID. Any other ID yields an error (probe failure / unavailable).
+ * requested ID. Any other ID yields a definitive 404 (model doesn't exist).
+ * `transient` lists IDs that fail with a retryable error instead.
  */
-function setExecFileImpl(available: Set<string>): void {
+function setExecFileImpl(available: Set<string>, transient: Set<string> = new Set()): void {
   mockExecFile.mockImplementation((_bin: string, args: string[], _opts: any, cb: ExecCallback) => {
     // args = ['-p', '--model', <id>, '--output-format', 'json', <prompt>]
     const modelId = args[2]
     queueMicrotask(() => {
-      if (available.has(modelId)) {
-        cb(null, JSON.stringify({ is_error: false, modelUsage: { [modelId]: { inputTokens: 1 } } }))
-      } else {
-        cb(new Error('model not available'), '')
-      }
+      if (transient.has(modelId)) cb(...transientProbe())
+      else if (available.has(modelId)) cb(...okProbe(modelId))
+      else cb(...notFoundProbe())
     })
     return { unref: vi.fn() }
   })
@@ -251,6 +266,153 @@ describe('anthropic-models', () => {
       vi.advanceTimersByTime(60 * 60 * 1000)
       mod.triggerCliProbeIfNeeded()
       expect(mockExecFile.mock.calls.length).toBe(callsAfterFirstProbe)
+    })
+
+    it('caps concurrent probe spawns at 4', async () => {
+      let inFlight = 0
+      let maxInFlight = 0
+      mockExecFile.mockImplementation((_bin: string, args: string[], _opts: any, cb: ExecCallback) => {
+        inFlight++
+        maxInFlight = Math.max(maxInFlight, inFlight)
+        queueMicrotask(() => {
+          inFlight--
+          cb(...okProbe(args[2]))
+        })
+        return { unref: vi.fn() }
+      })
+
+      const mod = await loadFreshModule()
+      mod.triggerCliProbeIfNeeded()
+      await vi.waitFor(async () => {
+        const models = await mod.fetchAnthropicModels()
+        expect(models.length).toBeGreaterThan(1)
+      })
+      expect(maxInFlight).toBeLessThanOrEqual(4)
+    })
+  })
+
+  /* ---------------------------------------------------------------- */
+  /*  Probe resilience — transient failures vs definitive 404s        */
+  /* ---------------------------------------------------------------- */
+
+  describe('probe resilience', () => {
+    it('retries transiently-failed probes and picks up the retry result', async () => {
+      vi.useFakeTimers()
+      // claude-opus-5 fails with a 529 on the first attempt, succeeds on retry.
+      const attempts = new Map<string, number>()
+      mockExecFile.mockImplementation((_bin: string, args: string[], _opts: any, cb: ExecCallback) => {
+        const modelId = args[2]
+        const n = (attempts.get(modelId) ?? 0) + 1
+        attempts.set(modelId, n)
+        queueMicrotask(() => {
+          if (modelId === 'claude-opus-5' && n === 1) cb(...transientProbe())
+          else if (modelId === 'claude-opus-5' || modelId === 'claude-fable-5') cb(...okProbe(modelId))
+          else cb(...notFoundProbe())
+        })
+        return { unref: vi.fn() }
+      })
+
+      const mod = await loadFreshModule()
+      mod.triggerCliProbeIfNeeded()
+
+      // First wave completes on microtasks; then advance past the retry delay.
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(6_000)
+
+      const models = await mod.fetchAnthropicModels()
+      expect(models).toEqual([
+        { id: 'claude-fable-5', label: 'Fable 5' },
+        { id: 'claude-opus-5', label: 'Opus 5' },
+      ])
+      expect(attempts.get('claude-opus-5')).toBe(2)
+      // Definitive 404s are not retried.
+      expect(attempts.get('claude-sonnet-4-6')).toBe(1)
+    })
+
+    it('keeps last-known-good models when a probe keeps failing transiently', async () => {
+      vi.useFakeTimers()
+      // First run: fable-5 and opus-5 both exist.
+      setExecFileImpl(new Set(['claude-fable-5', 'claude-opus-5']))
+      const mod = await loadFreshModule()
+      mod.triggerCliProbeIfNeeded()
+      await vi.waitFor(async () => {
+        expect(await mod.fetchAnthropicModels()).toHaveLength(2)
+      })
+
+      // Past the 24h TTL, opus-5 now fails transiently (rate limit) on every
+      // attempt, and sonnet-5 has newly appeared (proves this run completed —
+      // a stale cache read could not contain it).
+      vi.advanceTimersByTime(25 * 60 * 60 * 1000)
+      setExecFileImpl(new Set(['claude-fable-5', 'claude-sonnet-5']), new Set(['claude-opus-5']))
+      mod.triggerCliProbeIfNeeded()
+
+      // First wave on microtasks, then past the retry delay, then the retry wave.
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(6_000)
+
+      const models = await mod.fetchAnthropicModels()
+      // opus-5 survives via carry-over from the previous run.
+      expect(models).toEqual([
+        { id: 'claude-fable-5', label: 'Fable 5' },
+        { id: 'claude-opus-5', label: 'Opus 5' },
+        { id: 'claude-sonnet-5', label: 'Sonnet 5' },
+      ])
+    })
+
+    it('drops a model once its probe returns a definitive 404', async () => {
+      vi.useFakeTimers()
+      setExecFileImpl(new Set(['claude-fable-5', 'claude-opus-5']))
+      const mod = await loadFreshModule()
+      mod.triggerCliProbeIfNeeded()
+      await vi.waitFor(async () => {
+        expect(await mod.fetchAnthropicModels()).toHaveLength(2)
+      })
+
+      // Past the TTL, opus-5 is retired — the API now 404s it.
+      vi.advanceTimersByTime(25 * 60 * 60 * 1000)
+      setExecFileImpl(new Set(['claude-fable-5']))
+      mod.triggerCliProbeIfNeeded()
+
+      await vi.waitFor(async () => {
+        const models = await mod.fetchAnthropicModels()
+        expect(models).toEqual([{ id: 'claude-fable-5', label: 'Fable 5' }])
+      })
+    })
+  })
+
+  /* ---------------------------------------------------------------- */
+  /*  refreshAnthropicModels — forced rediscovery                     */
+  /* ---------------------------------------------------------------- */
+
+  describe('refreshAnthropicModels', () => {
+    it('re-probes immediately even when the CLI cache is still valid', async () => {
+      setExecFileImpl(new Set(['claude-fable-5']))
+      const mod = await loadFreshModule()
+      mod.triggerCliProbeIfNeeded()
+      await vi.waitFor(async () => {
+        expect(await mod.fetchAnthropicModels()).toEqual([{ id: 'claude-fable-5', label: 'Fable 5' }])
+      })
+
+      // A model appears; the plain trigger would be a no-op for 24h, but
+      // refresh bypasses the TTL and returns the fresh list.
+      setExecFileImpl(new Set(['claude-fable-5', 'claude-opus-5']))
+      const models = await mod.refreshAnthropicModels()
+      expect(models).toEqual([
+        { id: 'claude-fable-5', label: 'Fable 5' },
+        { id: 'claude-opus-5', label: 'Opus 5' },
+      ])
+    })
+
+    it('uses the API strategy when an API key is present', async () => {
+      process.env.ANTHROPIC_API_KEY = 'sk-test'
+      mockFetch(() =>
+        jsonResponse({ data: [{ id: 'claude-opus-5', display_name: 'Opus 5', created_at: '2026-05-01' }] }),
+      )
+
+      const mod = await loadFreshModule()
+      const models = await mod.refreshAnthropicModels()
+      expect(models).toEqual([{ id: 'claude-opus-5', label: 'Opus 5' }])
+      expect(mockExecFile).not.toHaveBeenCalled()
     })
   })
 })
