@@ -41,6 +41,25 @@ interface Props {
   agentName?: string
 }
 
+/**
+ * Transcript row: fixed 44px left gutter (timestamp or empty spacer) + content
+ * capped at a readable measure. The gutter uses a fixed pixel width, not `ch`,
+ * so rows with and without a timestamp share one left edge.
+ */
+function Row({ ts, children }: { ts?: string | null; children: React.ReactNode }) {
+  return (
+    <div className="flex px-4">
+      <div
+        className="w-11 flex-shrink-0 pr-2 pt-1 text-right text-meta text-ink-faint select-none"
+        style={{ fontFamily: "'Inconsolata', monospace" }}
+      >
+        {ts}
+      </div>
+      <div className="min-w-0 flex-1 max-w-[68ch]">{children}</div>
+    </div>
+  )
+}
+
 /** Try to parse an API error JSON from a system error message and return structured parts. */
 function parseApiError(text: string): { prefix: string; errorType: string; message: string; requestId?: string } | null {
   // Match patterns like "Failed to authenticate. API Error: 401 {...}" or just "{...}" at the end
@@ -90,7 +109,7 @@ function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
 
   if (apiError) {
     return (
-      <div className={`px-4 py-2 text-body ${colorClass}`}>
+      <div className={`text-body ${colorClass}`}>
         <div className="flex items-center gap-2">
           <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotClass} flex-shrink-0`} />
           <span className="font-semibold">{apiError.prefix || 'API Error'}</span>
@@ -106,7 +125,7 @@ function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
   }
 
   return (
-    <div className={`px-4 py-1.5 text-body ${colorClass} flex items-center gap-2`}>
+    <div className={`text-body ${colorClass} flex items-center gap-2`}>
       <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotClass} flex-shrink-0`} />
       {msg.text}{modelLabel}
     </div>
@@ -115,13 +134,11 @@ function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
 
 function UserMessage({ msg, fontSize, isMobile }: { msg: ChatMessage & { type: 'user' }; fontSize: number; isMobile?: boolean }) {
   return (
-    <div className="px-4 py-2">
-      <div
-        className={`user-bubble rounded-lg bg-neutral-10/60 px-3 py-2 text-neutral-3 whitespace-pre-wrap ${isMobile ? 'max-w-[95%]' : 'max-w-[80%]'}`}
-        style={{ fontSize: `${fontSize}px` }}
-      >
-        {formatUserText(msg.text)}
-      </div>
+    <div
+      className={`user-bubble rounded-md border border-edge bg-surface px-3 py-2 text-neutral-3 whitespace-pre-wrap ${isMobile ? 'max-w-[95%]' : 'max-w-[80%]'}`}
+      style={{ fontSize: `${fontSize}px` }}
+    >
+      {formatUserText(msg.text)}
     </div>
   )
 }
@@ -174,9 +191,9 @@ function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: {
   if (!displayText) return null
 
   return (
-    <div className={`px-4 py-2 ${variant === 'orchestrator' ? 'orchestrator-assistant-msg' : ''}`}>
+    <div className={variant === 'orchestrator' ? 'orchestrator-assistant-msg' : undefined}>
       <div
-        className="prose prose-themed max-w-none"
+        className="prose prose-themed max-w-none text-body"
         style={{ fontSize: `${fontSize}px` }}
       >
         <Markdown
@@ -303,35 +320,34 @@ function ToolActivity({ run, fontSize }: { run: ToolRun; fontSize: number }) {
   const hasActive = run.groups.some(g => g.tools.some(t => t.active))
   const [expanded, setExpanded] = useState(false)
   const isOpen = hasActive || expanded
-  const smallSize = fontSize - 1
 
-  // Collect all unique tool names for the summary
+  // Collect all unique tool names for the summary (first-seen order)
   const allTools = run.groups.flatMap(g => g.tools)
   const uniqueNames = [...new Set(allTools.map(t => t.name))]
   const toolCount = allTools.length
   const errorCount = run.outputs.filter(o => o.isError).length
 
   return (
-    <div className="px-4 py-0.5">
+    <div className="border-l-2 border-edge pl-3">
       <button
         onClick={() => setExpanded(!isOpen)}
-        className="flex items-center gap-1.5 text-neutral-5 hover:text-neutral-3 transition-colors w-full text-left"
-        style={{ fontSize: `${smallSize}px`, fontFamily: "'Inconsolata', monospace" }}
+        className="flex items-center gap-1.5 text-meta text-ink-faint hover:text-ink-muted transition-colors w-full text-left"
+        style={{ fontFamily: "'Inconsolata', monospace" }}
       >
         {hasActive ? (
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary-5 animate-pulse flex-shrink-0" />
         ) : (
-          <span className="text-neutral-6 flex-shrink-0">{isOpen ? '▾' : '▸'}</span>
+          <span className="flex-shrink-0">{isOpen ? '▾' : '▸'}</span>
         )}
-        <span className="text-neutral-5">
+        <span>
           {toolCount} tool{toolCount !== 1 ? ' calls' : ' call'}
-          {' — '}
-          <span className="text-accent-6">{uniqueNames.slice(0, 4).join(', ')}{uniqueNames.length > 4 ? ` +${uniqueNames.length - 4}` : ''}</span>
+          <span className="mx-1.5">·</span>
+          <span className="text-ink-muted">{uniqueNames.slice(0, 4).join(', ')}{uniqueNames.length > 4 ? ` +${uniqueNames.length - 4}` : ''}</span>
           {errorCount > 0 && <span className="text-error-5 ml-1">({errorCount} error{errorCount !== 1 ? 's' : ''})</span>}
         </span>
       </button>
       {isOpen && (
-        <div className="pl-3 mt-0.5 border-l border-neutral-9/50">
+        <div className="pl-3 mt-0.5">
           {run.groups.map((g, gi) => (
             <div key={`g-${gi}`}>
               <ToolGroupInline msg={g} fontSize={fontSize} />
@@ -368,21 +384,19 @@ function ImageInline({ msg }: { msg: ChatMessage & { type: 'image' } }) {
 
 function TentativeMessage({ msg, fontSize }: { msg: ChatMessage & { type: 'tentative' }; fontSize: number }) {
   return (
-    <div className="px-4 py-2">
-      <div
-        className="max-w-[80%] rounded-lg border-l-2 border-warning-6 bg-warning-11/20 px-3 py-2 text-neutral-4 whitespace-pre-wrap"
-        style={{ fontSize: `${fontSize}px` }}
-      >
-        <div className="mb-1 text-meta text-warning-5 uppercase tracking-wider">queued</div>
-        {msg.text}
-      </div>
+    <div
+      className="max-w-[80%] rounded-md border-l-2 border-warning-6 bg-warning-11/20 px-3 py-2 text-neutral-4 whitespace-pre-wrap"
+      style={{ fontSize: `${fontSize}px` }}
+    >
+      <div className="mb-1 text-meta text-warning-5 uppercase tracking-wider">queued</div>
+      {msg.text}
     </div>
   )
 }
 
 function PlanningModeMessage({ msg }: { msg: ChatMessage & { type: 'planning_mode' } }) {
   return (
-    <div className="px-4 py-1.5 text-body text-primary-5 flex items-center gap-2">
+    <div className="text-body text-primary-5 flex items-center gap-2">
       <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary-5 flex-shrink-0" />
       {msg.active ? 'Entered plan mode' : 'Exited plan mode'}
     </div>
@@ -435,7 +449,7 @@ function ActivityIndicator({ label, variant = 'default' }: { label: string; vari
   }, [label])
 
   return (
-    <div className="px-4 pt-4 pb-2">
+    <div className="pt-2">
       <div className="app-thinking-badge inline-flex items-center gap-2 rounded-lg bg-neutral-9/80 px-3.5 py-2">
         <svg
           className="h-4 w-4 animate-[spin_3s_linear_infinite]"
@@ -513,7 +527,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
         {variant === 'orchestrator' && messages.length === 0 && !activityLabel ? (
           <OrchestratorWelcome agentName={agentName} />
         ) : (
-        <div className="flex flex-col py-2">
+        <div className="flex flex-col gap-[18px] py-4">
           {(() => {
             let lastShownTs = 0
             const nodes: React.ReactNode[] = []
@@ -523,29 +537,46 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
             while (i < messages.length) {
               const msg = messages[i]
 
-              // Check for timestamps on user/assistant messages
+              // Assistant messages that render to nothing (noise-only text)
+              // would otherwise leave empty rows in the gapped column.
+              if (msg.type === 'assistant' && !stripNoise(msg.text)) {
+                i++
+                continue
+              }
+
+              // Check for timestamps on user/assistant messages; shown in the
+              // fixed left gutter of the message's own row.
+              let tsLabel: string | null = null
               const ts = (msg as ChatMessage & { ts?: number }).ts
               if (ts && (msg.type === 'user' || msg.type === 'assistant') && ts - lastShownTs >= 60_000) {
                 lastShownTs = ts
                 const d = new Date(ts)
                 const hh = String(d.getHours()).padStart(2, '0')
                 const mm = String(d.getMinutes()).padStart(2, '0')
-                nodes.push(<div key={`ts-${msg.key || i}`} className="px-4 pt-3 pb-0.5 text-meta text-neutral-6">{hh}:{mm}</div>)
+                tsLabel = `${hh}:${mm}`
               }
 
-              // Collect consecutive tool_group/tool_output/image into a single ToolActivity
+              // Collect consecutive tool_group/tool_output/image into a single
+              // ToolActivity. Assistant messages that render to nothing are
+              // transparent, so one turn's tool calls spread across several
+              // API messages still collapse into a single rail.
               if (msg.type === 'tool_group' || msg.type === 'tool_output' || msg.type === 'image') {
                 const run: ToolRun = { groups: [], outputs: [], images: [] }
                 const startIdx = i
-                while (i < messages.length && (messages[i].type === 'tool_group' || messages[i].type === 'tool_output' || messages[i].type === 'image')) {
+                while (i < messages.length) {
                   const m = messages[i]
-                  if (m.type === 'tool_group') run.groups.push(m as ChatMessage & { type: 'tool_group' })
-                  if (m.type === 'tool_output') run.outputs.push(m as ChatMessage & { type: 'tool_output' })
-                  if (m.type === 'image') run.images.push(m as ChatMessage & { type: 'image' })
+                  if (m.type === 'tool_group') run.groups.push(m)
+                  else if (m.type === 'tool_output') run.outputs.push(m)
+                  else if (m.type === 'image') run.images.push(m)
+                  else if (!(m.type === 'assistant' && !stripNoise(m.text))) break
                   i++
                 }
                 const taKey = run.groups[0]?.key || run.outputs[0]?.key || `ta-${startIdx}`
-                nodes.push(<ToolActivity key={taKey} run={run} fontSize={fontSize} />)
+                nodes.push(
+                  <Row key={taKey}>
+                    <ToolActivity run={run} fontSize={fontSize} />
+                  </Row>
+                )
                 continue
               }
 
@@ -562,7 +593,11 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                     break
                   }
                 }
-                nodes.push(<AssistantMessage key={msg.key || i} msg={msg} fontSize={fontSize} variant={variant} repeatCount={repeatCount} />)
+                nodes.push(
+                  <Row key={msg.key || i} ts={tsLabel}>
+                    <AssistantMessage msg={msg} fontSize={fontSize} variant={variant} repeatCount={repeatCount} />
+                  </Row>
+                )
                 i++
                 continue
               }
@@ -571,30 +606,37 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
               switch (msg.type) {
                 case 'system':
                   if (msg.subtype === 'trim') {
-                    node = <div key={msg.key || i} className="px-4 py-1.5 text-body text-neutral-6 flex items-center gap-2">
+                    node = <div className="text-body text-neutral-6 flex items-center gap-2">
                       <span className="inline-block h-1.5 w-1.5 rounded-full bg-neutral-6 flex-shrink-0" />
                       Older messages trimmed
                     </div>
                     break
                   }
-                  node = <SystemMessage key={msg.key || i} msg={msg} />; break
+                  node = <SystemMessage msg={msg} />; break
                 case 'user':
-                  node = <UserMessage key={msg.key || i} msg={msg} fontSize={fontSize} isMobile={isMobile} />; break
+                  node = <UserMessage msg={msg} fontSize={fontSize} isMobile={isMobile} />; break
                 case 'assistant':
-                  node = <AssistantMessage key={msg.key || i} msg={msg} fontSize={fontSize} variant={variant} />; break
+                  node = <AssistantMessage msg={msg} fontSize={fontSize} variant={variant} />; break
                 case 'planning_mode':
-                  node = <PlanningModeMessage key={msg.key || i} msg={msg} />; break
+                  node = <PlanningModeMessage msg={msg} />; break
                 case 'todo_list':
                   node = null; break
                 case 'tentative':
-                  node = <TentativeMessage key={msg.key || `tentative-${msg.index}`} msg={msg} fontSize={fontSize} />; break
+                  node = <TentativeMessage msg={msg} fontSize={fontSize} />; break
               }
-              nodes.push(node)
+              if (node) {
+                const rowKey = msg.type === 'tentative' ? (msg.key || `tentative-${msg.index}`) : (msg.key || i)
+                nodes.push(<Row key={rowKey} ts={tsLabel}>{node}</Row>)
+              }
               i++
             }
             return nodes
           })()}
-          {activityLabel && <ActivityIndicator label={activityLabel} variant={variant} />}
+          {activityLabel && (
+            <Row>
+              <ActivityIndicator label={activityLabel} variant={variant} />
+            </Row>
+          )}
         </div>
         )}
       </div>

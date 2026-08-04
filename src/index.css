@@ -414,17 +414,6 @@
   border-color: var(--color-neutral-7);
 }
 
-/* User message bubble — darker background in light mode */
-[data-theme="light"] .terminal-area .user-bubble {
-  background-color: color-mix(in srgb, var(--color-neutral-8) 80%, transparent);
-}
-
-/* User message bubble — faint warm tint in dark mode so the user's turns
-   stand apart from assistant text without shouting */
-[data-theme="dark"] .terminal-area .user-bubble {
-  background-color: color-mix(in srgb, var(--color-primary-11) 35%, var(--color-neutral-11));
-}
-
 /* Terminal area overrides in light mode.
    Steps 5–6 are darkened relative to the plain inverted scale so muted
    text (tool summaries, timestamps, request IDs) meets ~4.5:1 on the
