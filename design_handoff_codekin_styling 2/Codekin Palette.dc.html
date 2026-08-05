@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@300..700&family=Lato:wght@300;400;700;900&display=swap" rel="stylesheet" />
+<style>
+  body { margin: 0; background: #090e0f; }
+  a { color: #6cb7af; text-decoration: none; }
+  a:hover { color: #93ccc6; }
+</style>
+</helmet>
+
+<section style="padding:56px 56px 80px;font-family:'Lato',sans-serif;background:#090e0f;display:flex;flex-direction:column;gap:40px">
+
+  <div style="display:flex;flex-direction:column;gap:16px;max-width:84ch">
+    <div style="display:flex;align-items:center;gap:12px;font-family:'Inconsolata',monospace;font-size:12.5px;letter-spacing:0.1em;text-transform:uppercase;color:#748d91">
+      <span style="width:8px;height:8px;border-radius:999px;background:#f0c56e"></span>
+      <span>chrome palette</span>
+      <span style="color:#465c60">/</span>
+      <span>--neutral-c, --neutral-h</span>
+    </div>
+    <h1 style="margin:0;font-size:34px;line-height:1.12;font-weight:900;letter-spacing:-0.02em;color:#dce4e5;max-width:26ch">Two numbers control all of the blue.</h1>
+    <p style="margin:0;font-size:16px;line-height:1.6;color:#94aeb1;text-wrap:pretty">Sidebar text is already pure grayscale in the build, so the blue you are seeing comes entirely from four chrome surfaces &mdash; page, surface, raised, edge. In the per-family structure from <a href="#taskref">task 02</a> those are one chroma and one hue, which means this is a two-value change rather than a repaint. Lightness is held constant across every option below, so the only thing moving is saturation and temperature.</p>
+    <p style="margin:0;font-size:15px;line-height:1.6;color:#748d91;max-width:84ch">The transcript is unchanged in all four &mdash; it is the warm scope and it stays warm. That contrast is the idea worth protecting; these options only reduce how loudly the cool side states it.</p>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start">
+
+    <div id="5a" style="width:420px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:10px">
+        <span style="font-family:'Inconsolata',monospace;font-size:12px;font-weight:700;letter-spacing:0.08em;background:#263a3e;color:#94aeb1;padding:3px 8px;border-radius:4px">now</span>
+        <h2 style="margin:0;font-size:19px;font-weight:700;color:#94aeb1">Shipped</h2>
+        <span style="font-family:'Inconsolata',monospace;font-size:12.5px;color:#5c7377">c 0.018 &middot; h 200</span>
+      </div>
+      <p style="margin:0;font-size:14.5px;line-height:1.55;color:#748d91;min-height:3.4em">Reference. The chroma is high enough that the surfaces read as a colour rather than as a neutral, which is what makes the column feel blue.</p>
+      <div style="display:flex;gap:3px;height:26px">
+        <div style="flex:1;background:oklch(0.155 0.018 200)"></div>
+        <div style="flex:1;background:oklch(0.235 0.018 200)"></div>
+        <div style="flex:1;background:oklch(0.300 0.018 200)"></div>
+        <div style="flex:1;background:oklch(0.355 0.018 200)"></div>
+        <div style="flex:1;background:oklch(0.420 0.018 200)"></div>
+      </div>
+      <div style="height:280px;display:flex;border:1px solid oklch(0.355 0.018 200);border-radius:8px;overflow:hidden">
+        <div style="width:158px;flex-shrink:0;background:oklch(0.235 0.018 200);border-right:1px solid oklch(0.355 0.018 200);display:flex;flex-direction:column">
+          <div style="height:36px;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid oklch(0.355 0.018 200)">
+            <div style="width:20px;height:20px;border-radius:999px;background:#fcedcc;flex-shrink:0"></div>
+            <span style="font-size:14px;font-weight:700;color:oklch(0.90 0 0)">Codekin</span>
+          </div>
+          <div style="padding:7px 6px;display:flex;flex-direction:column;gap:2px;font-size:13px">
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:oklch(0.80 0 0)"><span style="font-family:'Inconsolata',monospace;font-size:11px;color:oklch(0.58 0 0)">&#10022;</span>AI Workflows</div>
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:oklch(0.80 0 0)"><span style="font-family:'Inconsolata',monospace;font-size:11px;color:oklch(0.58 0 0)">&#8635;</span>Loop Runs</div>
+          </div>
+          <div style="margin:2px 10px 6px;border-top:1px solid oklch(0.355 0.018 200)"></div>
+          <div style="padding:0 14px 5px;font-size:10.5px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:oklch(0.52 0 0)">codekin</div>
+          <div style="padding:0 6px;display:flex;flex-direction:column;gap:2px;font-size:13px">
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;background:oklch(0.300 0.028 190);color:oklch(0.90 0 0)"><span style="width:5px;height:5px;border-radius:999px;background:#66bb8e;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Debug PR Review</span></div>
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:oklch(0.72 0 0)"><span style="width:5px;height:5px;border-radius:999px;border:1.5px solid oklch(0.52 0 0);box-sizing:border-box;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Token scale</span></div>
+          </div>
+        </div>
+        <div style="flex:1;min-width:0;background:#0f0e0d;display:flex;flex-direction:column;padding:12px 12px 0;gap:10px">
+          <div style="font-size:13.5px;line-height:1.6;color:#e2e1de">Now let me implement the server-side changes.</div>
+          <div style="border-left:2px solid #333130;padding:3px 0 3px 10px;font-family:'Inconsolata',monospace;font-size:11.5px;color:#777571">&#9656; 2 tool calls</div>
+          <div style="background:#1b1a18;border:1px solid #333130;border-radius:6px;padding:8px 10px;font-size:13.5px;line-height:1.55;color:#e2e1de">push to pr when ready</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="5b" style="width:420px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:10px">
+        <span style="font-family:'Inconsolata',monospace;font-size:12px;font-weight:700;letter-spacing:0.08em;background:#977443;color:#1d170d;padding:3px 8px;border-radius:4px">5b</span>
+        <h2 style="margin:0;font-size:19px;font-weight:700;color:#dce4e5">Half chroma</h2>
+        <span style="font-family:'Inconsolata',monospace;font-size:12.5px;color:#5c7377">c 0.009 &middot; h 200</span>
+      </div>
+      <p style="margin:0;font-size:14.5px;line-height:1.55;color:#94aeb1;min-height:3.4em">Same temperature, half the saturation. The blue becomes a tint you notice only next to the warm pane &mdash; which is exactly where you should notice it. One-value change.</p>
+      <div style="display:flex;gap:3px;height:26px">
+        <div style="flex:1;background:oklch(0.155 0.009 200)"></div>
+        <div style="flex:1;background:oklch(0.235 0.009 200)"></div>
+        <div style="flex:1;background:oklch(0.300 0.009 200)"></div>
+        <div style="flex:1;background:oklch(0.355 0.009 200)"></div>
+        <div style="flex:1;background:oklch(0.420 0.009 200)"></div>
+      </div>
+      <div style="height:280px;display:flex;border:1px solid oklch(0.355 0.009 200);border-radius:8px;overflow:hidden">
+        <div style="width:158px;flex-shrink:0;background:oklch(0.235 0.009 200);border-right:1px solid oklch(0.355 0.009 200);display:flex;flex-direction:column">
+          <div style="height:36px;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid oklch(0.355 0.009 200)">
+            <div style="width:20px;height:20px;border-radius:999px;background:#fcedcc;flex-shrink:0"></div>
+            <span style="font-size:14px;font-weight:700;color:oklch(0.90 0 0)">Codekin</span>
+          </div>
+          <div style="padding:7px 6px;display:flex;flex-direction:column;gap:2px;font-size:13px">
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:oklch(0.80 0 0)"><span style="font-family:'Inconsolata',monospace;font-size:11px;color:oklch(0.58 0 0)">&#10022;</span>AI Workflows</div>
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:oklch(0.80 0 0)"><span style="font-family:'Inconsolata',monospace;font-size:11px;color:oklch(0.58 0 0)">&#8635;</span>Loop Runs</div>
+          </div>
+          <div style="margin:2px 10px 6px;border-top:1px solid oklch(0.355 0.009 200)"></div>
+          <div style="padding:0 14px 5px;font-size:10.5px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:oklch(0.52 0 0)">codekin</div>
+          <div style="padding:0 6px;display:flex;flex-direction:column;gap:2px;font-size:13px">
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;background:oklch(0.300 0.018 190);color:oklch(0.90 0 0)"><span style="width:5px;height:5px;border-radius:999px;background:#66bb8e;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Debug PR Review</span></div>
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:oklch(0.72 0 0)"><span style="width:5px;height:5px;border-radius:999px;border:1.5px solid oklch(0.52 0 0);box-sizing:border-box;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Token scale</span></div>
+          </div>
+        </div>
+        <div style="flex:1;min-width:0;background:#0f0e0d;display:flex;flex-direction:column;padding:12px 12px 0;gap:10px">
+          <div style="font-size:13.5px;line-height:1.6;color:#e2e1de">Now let me implement the server-side changes.</div>
+          <div style="border-left:2px solid #333130;padding:3px 0 3px 10px;font-family:'Inconsolata',monospace;font-size:11.5px;color:#777571">&#9656; 2 tool calls</div>
+          <div style="background:#1b1a18;border:1px solid #333130;border-radius:6px;padding:8px 10px;font-size:13.5px;line-height:1.55;color:#e2e1de">push to pr when ready</div>
+        </div>
+      </div>
+      <div style="font-size:13.5px;line-height:1.5;color:#5c7377;font-style:italic">My pick. Smallest change, keeps the hue relationship intact.</div>
+    </div>
+
+    <div id="5c" style="width:420px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:10px">
+        <span style="font-family:'Inconsolata',monospace;font-size:12px;font-weight:700;letter-spacing:0.08em;background:#977443;color:#1d170d;padding:3px 8px;border-radius:4px">5c</span>
+        <h2 style="margin:0;font-size:19px;font-weight:700;color:#dce4e5">Toward green</h2>
+        <span style="font-family:'Inconsolata',monospace;font-size:12.5px;color:#5c7377">c 0.014 &middot; h 168</span>
+      </div>
+      <p style="margin:0;font-size:14.5px;line-height:1.55;color:#94aeb1;min-height:3.4em">Keeps the saturation but rotates the hue off blue and onto the green the running-status dots already use. The column reads cool and organic rather than cool and digital.</p>
+      <div style="display:flex;gap:3px;height:26px">
+        <div style="flex:1;background:oklch(0.155 0.014 168)"></div>
+        <div style="flex:1;background:oklch(0.235 0.014 168)"></div>
+        <div style="flex:1;background:oklch(0.300 0.014 168)"></div>
+        <div style="flex:1;background:oklch(0.355 0.014 168)"></div>
+        <div style="flex:1;background:oklch(0.420 0.014 168)"></div>
+      </div>
+      <div style="height:280px;display:flex;border:1px solid oklch(0.355 0.014 168);border-radius:8px;overflow:hidden">
+        <div style="width:158px;flex-shrink:0;background:oklch(0.235 0.014 168);border-right:1px solid oklch(0.355 0.014 168);display:flex;flex-direction:column">
+          <div style="height:36px;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid oklch(0.355 0.014 168)">
+            <div style="width:20px;height:20px;border-radius:999px;background:#fcedcc;flex-shrink:0"></div>
+            <span style="font-size:14px;font-weight:700;color:oklch(0.90 0 0)">Codekin</span>
+          </div>
+          <div style="padding:7px 6px;display:flex;flex-direction:column;gap:2px;font-size:13px">
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:oklch(0.80 0 0)"><span style="font-family:'Inconsolata',monospace;font-size:11px;color:oklch(0.58 0 0)">&#10022;</span>AI Workflows</div>
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:oklch(0.80 0 0)"><span style="font-family:'Inconsolata',monospace;font-size:11px;color:oklch(0.58 0 0)">&#8635;</span>Loop Runs</div>
+          </div>
+          <div style="margin:2px 10px 6px;border-top:1px solid oklch(0.355 0.014 168)"></div>
+          <div style="padding:0 14px 5px;font-size:10.5px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:oklch(0.52 0 0)">codekin</div>
+          <div style="padding:0 6px;display:flex;flex-direction:column;gap:2px;font-size:13px">
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;background:oklch(0.300 0.024 162);color:oklch(0.90 0 0)"><span style="width:5px;height:5px;border-radius:999px;background:#66bb8e;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Debug PR Review</span></div>
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:oklch(0.72 0 0)"><span style="width:5px;height:5px;border-radius:999px;border:1.5px solid oklch(0.52 0 0);box-sizing:border-box;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Token scale</span></div>
+          </div>
+        </div>
+        <div style="flex:1;min-width:0;background:#0f0e0d;display:flex;flex-direction:column;padding:12px 12px 0;gap:10px">
+          <div style="font-size:13.5px;line-height:1.6;color:#e2e1de">Now let me implement the server-side changes.</div>
+          <div style="border-left:2px solid #333130;padding:3px 0 3px 10px;font-family:'Inconsolata',monospace;font-size:11.5px;color:#777571">&#9656; 2 tool calls</div>
+          <div style="background:#1b1a18;border:1px solid #333130;border-radius:6px;padding:8px 10px;font-size:13.5px;line-height:1.55;color:#e2e1de">push to pr when ready</div>
+        </div>
+      </div>
+      <div style="font-size:13.5px;line-height:1.5;color:#5c7377;font-style:italic">Watch the green status dots &mdash; at this hue they lose a little of their pop against the surface.</div>
+    </div>
+
+    <div id="5d" style="width:420px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:10px">
+        <span style="font-family:'Inconsolata',monospace;font-size:12px;font-weight:700;letter-spacing:0.08em;background:#977443;color:#1d170d;padding:3px 8px;border-radius:4px">5d</span>
+        <h2 style="margin:0;font-size:19px;font-weight:700;color:#dce4e5">Graphite</h2>
+        <span style="font-family:'Inconsolata',monospace;font-size:12.5px;color:#5c7377">c 0.004 &middot; h 210</span>
+      </div>
+      <p style="margin:0;font-size:14.5px;line-height:1.55;color:#94aeb1;min-height:3.4em">As far as you can go and still honestly say the blue is there. Reads as a neutral dark grey; the cool cast only registers when the warm pane is adjacent. Furthest from today.</p>
+      <div style="display:flex;gap:3px;height:26px">
+        <div style="flex:1;background:oklch(0.155 0.004 210)"></div>
+        <div style="flex:1;background:oklch(0.235 0.004 210)"></div>
+        <div style="flex:1;background:oklch(0.300 0.004 210)"></div>
+        <div style="flex:1;background:oklch(0.355 0.004 210)"></div>
+        <div style="flex:1;background:oklch(0.420 0.004 210)"></div>
+      </div>
+      <div style="height:280px;display:flex;border:1px solid oklch(0.355 0.004 210);border-radius:8px;overflow:hidden">
+        <div style="width:158px;flex-shrink:0;background:oklch(0.235 0.004 210);border-right:1px solid oklch(0.355 0.004 210);display:flex;flex-direction:column">
+          <div style="height:36px;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid oklch(0.355 0.004 210)">
+            <div style="width:20px;height:20px;border-radius:999px;background:#fcedcc;flex-shrink:0"></div>
+            <span style="font-size:14px;font-weight:700;color:oklch(0.90 0 0)">Codekin</span>
+          </div>
+          <div style="padding:7px 6px;display:flex;flex-direction:column;gap:2px;font-size:13px">
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:oklch(0.80 0 0)"><span style="font-family:'Inconsolata',monospace;font-size:11px;color:oklch(0.58 0 0)">&#10022;</span>AI Workflows</div>
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:oklch(0.80 0 0)"><span style="font-family:'Inconsolata',monospace;font-size:11px;color:oklch(0.58 0 0)">&#8635;</span>Loop Runs</div>
+          </div>
+          <div style="margin:2px 10px 6px;border-top:1px solid oklch(0.355 0.004 210)"></div>
+          <div style="padding:0 14px 5px;font-size:10.5px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:oklch(0.52 0 0)">codekin</div>
+          <div style="padding:0 6px;display:flex;flex-direction:column;gap:2px;font-size:13px">
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;background:oklch(0.300 0.010 205);color:oklch(0.90 0 0)"><span style="width:5px;height:5px;border-radius:999px;background:#66bb8e;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Debug PR Review</span></div>
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:oklch(0.72 0 0)"><span style="width:5px;height:5px;border-radius:999px;border:1.5px solid oklch(0.52 0 0);box-sizing:border-box;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Token scale</span></div>
+          </div>
+        </div>
+        <div style="flex:1;min-width:0;background:#0f0e0d;display:flex;flex-direction:column;padding:12px 12px 0;gap:10px">
+          <div style="font-size:13.5px;line-height:1.6;color:#e2e1de">Now let me implement the server-side changes.</div>
+          <div style="border-left:2px solid #333130;padding:3px 0 3px 10px;font-family:'Inconsolata',monospace;font-size:11.5px;color:#777571">&#9656; 2 tool calls</div>
+          <div style="background:#1b1a18;border:1px solid #333130;border-radius:6px;padding:8px 10px;font-size:13.5px;line-height:1.55;color:#e2e1de">push to pr when ready</div>
+        </div>
+      </div>
+      <div style="font-size:13.5px;line-height:1.5;color:#5c7377;font-style:italic">Risk: at this chroma the warm/cool split stops being a system and starts looking like an accident.</div>
+    </div>
+
+    <div id="5e" style="width:420px;display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:baseline;gap:10px">
+        <span style="font-family:'Inconsolata',monospace;font-size:12px;font-weight:700;letter-spacing:0.08em;background:#42847d;color:#0c1918;padding:3px 8px;border-radius:4px">5e</span>
+        <h2 style="margin:0;font-size:19px;font-weight:700;color:#dce4e5">Playground</h2>
+      </div>
+      <p style="margin:0;font-size:14.5px;line-height:1.55;color:#94aeb1;min-height:3.4em">Drive the two values yourself from the Tweaks panel. Hue 150 is green, 200 is today's teal, 250 is properly blue; chroma 0 is pure grey.</p>
+      <div style="display:flex;gap:3px;height:26px">
+        <div style="flex:1;background:{{ sw1 }}"></div>
+        <div style="flex:1;background:{{ sw2 }}"></div>
+        <div style="flex:1;background:{{ sw3 }}"></div>
+        <div style="flex:1;background:{{ sw4 }}"></div>
+        <div style="flex:1;background:{{ sw5 }}"></div>
+      </div>
+      <div style="height:280px;display:flex;border:1px solid {{ edge }};border-radius:8px;overflow:hidden">
+        <div style="width:158px;flex-shrink:0;background:{{ surface }};border-right:1px solid {{ edge }};display:flex;flex-direction:column">
+          <div style="height:36px;display:flex;align-items:center;gap:8px;padding:0 10px;border-bottom:1px solid {{ edge }}">
+            <div style="width:20px;height:20px;border-radius:999px;background:#fcedcc;flex-shrink:0"></div>
+            <span style="font-size:14px;font-weight:700;color:oklch(0.90 0 0)">Codekin</span>
+          </div>
+          <div style="padding:7px 6px;display:flex;flex-direction:column;gap:2px;font-size:13px">
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:oklch(0.80 0 0)"><span style="font-family:'Inconsolata',monospace;font-size:11px;color:oklch(0.58 0 0)">&#10022;</span>AI Workflows</div>
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:oklch(0.80 0 0)"><span style="font-family:'Inconsolata',monospace;font-size:11px;color:oklch(0.58 0 0)">&#8635;</span>Loop Runs</div>
+          </div>
+          <div style="margin:2px 10px 6px;border-top:1px solid {{ edge }}"></div>
+          <div style="padding:0 14px 5px;font-size:10.5px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:oklch(0.52 0 0)">codekin</div>
+          <div style="padding:0 6px;display:flex;flex-direction:column;gap:2px;font-size:13px">
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;background:{{ selected }};color:oklch(0.90 0 0)"><span style="width:5px;height:5px;border-radius:999px;background:#66bb8e;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Debug PR Review</span></div>
+            <div style="height:26px;display:flex;align-items:center;gap:8px;padding:0 8px;border-radius:6px;color:oklch(0.72 0 0)"><span style="width:5px;height:5px;border-radius:999px;border:1.5px solid oklch(0.52 0 0);box-sizing:border-box;flex-shrink:0"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Token scale</span></div>
+          </div>
+        </div>
+        <div style="flex:1;min-width:0;background:#0f0e0d;display:flex;flex-direction:column;padding:12px 12px 0;gap:10px">
+          <div style="font-size:13.5px;line-height:1.6;color:#e2e1de">Now let me implement the server-side changes.</div>
+          <div style="border-left:2px solid #333130;padding:3px 0 3px 10px;font-family:'Inconsolata',monospace;font-size:11.5px;color:#777571">&#9656; 2 tool calls</div>
+          <div style="background:#1b1a18;border:1px solid #333130;border-radius:6px;padding:8px 10px;font-size:13.5px;line-height:1.55;color:#e2e1de">push to pr when ready</div>
+        </div>
+      </div>
+      <div style="font-family:'Inconsolata',monospace;font-size:12.5px;line-height:1.6;color:#748d91;background:#101e21;border:1px solid #263a3e;border-radius:6px;padding:10px 12px">--neutral-c: {{ cOut }};<br />--neutral-h: {{ hOut }};</div>
+    </div>
+
+  </div>
+
+  <div id="taskref" style="display:flex;flex-direction:column;gap:14px;border-top:1px solid #263a3e;padding-top:32px;max-width:84ch">
+    <h3 style="margin:0;font-size:18px;font-weight:700;color:#dce4e5">What changing this actually touches</h3>
+    <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:15px;line-height:1.6;color:#94aeb1">
+      <li>Only the chrome neutrals: page, surface, surface-raised, edge, edge-strong. Sidebar text is already <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">chroma 0</code>, so nothing in the type changes.</li>
+      <li>The selected-row tint needs the same treatment or it will look bluer than everything around it. It carries slightly more chroma than the surfaces by design &mdash; keep the ratio, not the absolute value.</li>
+      <li>The intent families are untouched. Green &ldquo;running&rdquo;, amber &ldquo;waiting&rdquo;, terracotta error and the gold accent all stay as they are.</li>
+      <li>Light mode has its own chroma value and will need the equivalent reduction; verify separately rather than assuming it follows.</li>
+      <li>Check the status dots against the new surface at each step &mdash; the lower the surface chroma, the more the coloured dots stand out, which is generally an improvement.</li>
+    </ul>
+    <p style="margin:4px 0 0;font-size:15px;line-height:1.6;color:#748d91;text-wrap:pretty">I would take <a href="#5b">5b</a>. It is a single value, it keeps the hue relationship the design was built on, and it removes most of what reads as blue. If it still feels too cool after living with it, <a href="#5d">5d</a> is the next stop and it is the same one-line edit.</p>
+  </div>
+
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;chromaValue&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:0.009,&quot;min&quot;:0,&quot;max&quot;:0.03,&quot;step&quot;:0.001,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Chrome palette&quot;},&quot;hueValue&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:200,&quot;min&quot;:140,&quot;max&quot;:260,&quot;step&quot;:2,&quot;unit&quot;:&quot;°&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Chrome palette&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const c = this.props.chromaValue ?? 0.009;
+    const h = this.props.hueValue ?? 200;
+    const at = (l, cm) => `oklch(${l} ${(cm ?? c).toFixed(3)} ${h})`;
+    return {
+      sw1: at(0.155), sw2: at(0.235), sw3: at(0.300), sw4: at(0.355), sw5: at(0.420),
+      surface: at(0.235),
+      edge: at(0.355),
+      selected: at(0.300, c * 2),
+      cOut: c.toFixed(3),
+      hOut: h,
+    };
+  }
+}
+</script>
+</body>
+</html>
