@@ -16,7 +16,6 @@ import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
 import type { SlashCommand } from '../lib/slashCommands'
-import { formatUsageLabel } from '../lib/formatUsage'
 import { PERMISSION_MODES, type PermissionMode, type ModelOption } from '../types'
 
 const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
@@ -88,18 +87,37 @@ function SendButton({ onClick, disabled, hasContent, accent = false }: {
   )
 }
 
-/** Unboxed session-state item: monospace, muted, no chip and no border. */
+/**
+ * Unboxed session-state item: monospace, muted, no chip and no border.
+ *
+ * `group/state` lets a child label collapse to nothing and expand on hover or
+ * keyboard focus — see StateLabel. The `title` carries the same text for touch,
+ * where there is no hover.
+ */
 function StateItem({ children, title, onClick, danger = false, innerRef }: {
   children: React.ReactNode; title?: string; onClick?: () => void; danger?: boolean
   innerRef?: React.Ref<HTMLButtonElement>
 }) {
   const tone = danger ? 'text-warning-4' : 'text-ink-muted hover:text-ink'
-  const className = `flex items-center gap-1.5 font-mono text-meta whitespace-nowrap transition-colors ${tone}`
+  const className = `group/state flex items-center gap-1.5 font-mono text-meta whitespace-nowrap transition-colors ${tone}`
   if (!onClick) return <span className={className} title={title}>{children}</span>
   return (
     <button ref={innerRef} onClick={onClick} className={className} title={title}>
       {children}
     </button>
+  )
+}
+
+/**
+ * A state item's text, hidden until its item is hovered or focused. Kept in the
+ * DOM (rather than conditionally rendered) so screen readers and find-in-page
+ * still see it.
+ */
+function StateLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="sr-only group-hover/state:not-sr-only group-focus-visible/state:not-sr-only">
+      {children}
+    </span>
   )
 }
 
@@ -113,10 +131,9 @@ function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle,
   const ModeIcon = PERMISSION_MODE_ICONS[mode?.icon ?? 'shield']
   return (
     <div className="relative" ref={menuRef}>
-      <StateItem onClick={onToggle} title="Permission mode" danger={!!mode?.dangerous}>
+      <StateItem onClick={onToggle} title={`Permission mode: ${mode?.label ?? currentMode}`} danger={!!mode?.dangerous}>
         <ModeIcon size={14} stroke={2} />
-        {/* Label drops out on a narrow composer, not a narrow viewport */}
-        <span className="hidden @[34rem]:inline">{mode?.label ?? currentMode}</span>
+        <StateLabel>{mode?.label ?? currentMode}</StateLabel>
         <IconChevronDown size={12} stroke={2} className="opacity-70" />
       </StateItem>
       {isOpen && (
@@ -327,8 +344,6 @@ interface InputBarProps {
   availableModels?: ModelOption[]
   /** Coding provider of the active session — filters provider-specific permission modes. */
   sessionProvider?: import('../types').CodingProvider
-  /** Cumulative token/cost usage for the session — shown as a small toolbar indicator. */
-  usage?: import('../types').SessionUsage | null
   /** Override the default placeholder text in the textarea. */
   placeholder?: string
   /** Narrow-viewport hint — suppresses autofocus so the keyboard doesn't pop up. */
@@ -351,7 +366,7 @@ interface InputBarProps {
   variant?: InputBarVariant
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, availableModels = [], sessionProvider, usage, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, availableModels = [], sessionProvider, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
   const isOrchestrator = variant === 'orchestrator'
   // OpenCode and Codex have no equivalent of Claude's --dangerously-skip-permissions
   // flag; bypassPermissions already covers that use case for both.
@@ -508,7 +523,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   // filter over these plus an accent flag — not a second layout.
   const showPermission = !isOrchestrator && !!currentPermissionMode && !!onPermissionModeChange
   const showModel = !isOrchestrator && !!currentModel && !!onModelChange
-  const showUsage = !isOrchestrator && !!usage && (usage.inputTokens > 0 || usage.outputTokens > 0)
   const showWorktree = !isOrchestrator && (!!worktreePath || (showWorktreeToggle && !!onWorktreeChange) || !!onMoveToWorktree)
   // Anything beyond the permission chip folds into the overflow menu on a
   // narrow composer; a dangerous mode must stay visible at every width.
@@ -593,11 +607,13 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 />
               )}
               {showWorktree && (
-                <div className="hidden @[34rem]:flex">
+                <div className="flex">
                   {worktreePath ? (
-                    <StateItem title={worktreePath}>
+                    <StateItem title={`Worktree: ${worktreePath}`}>
                       <IconGitBranch size={14} stroke={2} className="text-ink-faint" />
-                      <span className="max-w-[140px] truncate">{worktreePath.split('/').pop()}</span>
+                      <StateLabel>
+                        <span className="inline-block max-w-[140px] truncate align-bottom">{worktreePath.split('/').pop()}</span>
+                      </StateLabel>
                     </StateItem>
                   ) : showWorktreeToggle && onWorktreeChange ? (
                     <StateItem
@@ -605,18 +621,18 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                       title={useWorktree ? 'Worktree enabled — session will use a git worktree' : 'Enable git worktree for this session'}
                     >
                       <IconGitBranch size={14} stroke={2} className={useWorktree ? 'text-primary-5' : 'text-ink-faint'} />
-                      <span className={useWorktree ? 'text-primary-5' : undefined}>Worktree</span>
+                      <StateLabel><span className={useWorktree ? 'text-primary-5' : undefined}>Worktree</span></StateLabel>
                     </StateItem>
                   ) : onMoveToWorktree ? (
                     <StateItem onClick={onMoveToWorktree} title="Move session to a git worktree">
                       <IconGitBranch size={14} stroke={2} className="text-ink-faint" />
-                      <span>Worktree</span>
+                      <StateLabel>Worktree</StateLabel>
                     </StateItem>
                   ) : null}
                 </div>
               )}
               {showModel && (
-                <div className="hidden @[34rem]:flex">
+                <div className="flex">
                   <ModelDropdown
                     currentModel={currentModel}
                     models={availableModels}
@@ -626,14 +642,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                     onChange={(id) => { onModelChange(id); setModelMenuOpen(false) }}
                   />
                 </div>
-              )}
-              {showUsage && (
-                <span
-                  className="hidden @[44rem]:inline font-mono text-meta text-ink-faint whitespace-nowrap"
-                  title={`Session usage — input: ${usage.inputTokens.toLocaleString()} tokens, output: ${usage.outputTokens.toLocaleString()} tokens${usage.costUsd ? `, cost: $${usage.costUsd.toFixed(4)}` : ''}`}
-                >
-                  {formatUsageLabel(usage)}
-                </span>
               )}
             </div>
 

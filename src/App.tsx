@@ -141,7 +141,6 @@ export default function App() {
     connState,
     messages,
     tasks,
-    usage,
     planningMode,
     isProcessing,
     thinkingSummary,
@@ -797,7 +796,6 @@ export default function App() {
             onModelChange={handleModelChange}
             availableModels={availableModels}
             sessionProvider={activeSessionProvider}
-            usage={usage}
             hasUserMessages={messages.some(m => m.type === 'user')}
             useWorktree={useWorktree}
             onWorktreeChange={setUseWorktree}

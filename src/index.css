@@ -601,12 +601,20 @@
 }
 
 /* The composer opens at two lines: one line reads as a search field, and a
-   prompt is usually longer than that. `lh` follows whatever line-height the
-   textarea actually has (14.5px body, 16px on mobile); the px value is the
-   fallback for browsers without it. */
+   prompt is usually longer than that.
+
+   The fallback is a separate @supports block rather than two min-height
+   declarations, because the minifier drops the earlier one as dead — which
+   would leave browsers without `lh` no minimum at all. */
 .composer-textarea {
   min-height: 46px;
-  min-height: 2lh;
+}
+
+@supports (height: 1lh) {
+  /* Follows the textarea's real line-height: 14.5px body, 16px on mobile. */
+  .composer-textarea {
+    min-height: 2lh;
+  }
 }
 
 /* Interactive elements that stay visually small but need a real target. */
