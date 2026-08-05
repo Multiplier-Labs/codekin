@@ -546,25 +546,25 @@
    branching on isMobile per element. Anything that must stay visually small
    (a status dot, a close X) gets a transparent hit area of --tap-min. */
 :root {
-  --row-h: 28px;
+  --row-h: 32px;
   --row-pad: 10px;
   --icon-size: 20px;
-  --tap-min: 28px;
+  --tap-min: 32px;
 }
 
 [data-density="touch"] {
-  --row-h: 44px;
+  --row-h: 48px;
   --row-pad: 12px;
   --icon-size: 24px;
-  --tap-min: 44px;
+  --tap-min: 48px;
 }
 
 @media (pointer: coarse) {
   :root {
-    --row-h: 44px;
+    --row-h: 48px;
     --row-pad: 12px;
     --icon-size: 24px;
-    --tap-min: 44px;
+    --tap-min: 48px;
   }
 }
 
@@ -591,11 +591,11 @@
 /* The reading/writing column. The transcript and the composer share it so the
    caret starts where the text you are answering sits.
 
-   Fluid by default: the column follows the pane, which follows the window and
-   the user's sidebar width. Give this a length (e.g. `68ch`) to cap line
-   length instead — it is the single knob for both surfaces. */
+   Capped and centred in the pane, so line length stays readable however wide
+   the window is. This is the single knob for both surfaces: set it to `100%`
+   for a fluid full-width column instead. */
 :root {
-  --measure: 100%;
+  --measure: 72ch;
 }
 
 /* The composer's action row needs a 32px floor on pointer (the density

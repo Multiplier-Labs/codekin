@@ -431,7 +431,7 @@ export function LeftSidebar({
         </div>
 
         {/* Divider between menu items and repo folders */}
-        <div className="mx-3 my-1 border-t border-edge" />
+        <div className="mx-3 mt-3 mb-1 border-t border-edge" />
 
         {/* Repo nodes — each repo is its own section label */}
         {repoNodes.map(node => (
