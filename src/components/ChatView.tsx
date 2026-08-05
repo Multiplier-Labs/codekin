@@ -541,7 +541,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
         ) : (
         <div className="flex flex-col gap-[18px] py-4">
           {(() => {
-            let lastShownTs = 0
+            let lastShownLabel: string | null = null
             const nodes: React.ReactNode[] = []
 
             // Group consecutive tool_group + tool_output messages into ToolRuns
@@ -556,16 +556,21 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                 continue
               }
 
-              // Check for timestamps on user/assistant messages; shown in the
-              // fixed left gutter of the message's own row.
+              // Timestamps hang in the gutter beside user/assistant turns.
+              // Shown whenever the displayed minute changes rather than on a
+              // time threshold: the label only has minute resolution, so this
+              // is as often as it can be without repeating itself.
               let tsLabel: string | null = null
               const ts = (msg as ChatMessage & { ts?: number }).ts
-              if (ts && (msg.type === 'user' || msg.type === 'assistant') && ts - lastShownTs >= 60_000) {
-                lastShownTs = ts
+              if (ts && (msg.type === 'user' || msg.type === 'assistant')) {
                 const d = new Date(ts)
                 const hh = String(d.getHours()).padStart(2, '0')
                 const mm = String(d.getMinutes()).padStart(2, '0')
-                tsLabel = `${hh}:${mm}`
+                const label = `${hh}:${mm}`
+                if (label !== lastShownLabel) {
+                  lastShownLabel = label
+                  tsLabel = label
+                }
               }
 
               // Collect consecutive tool_group/tool_output/image into a single

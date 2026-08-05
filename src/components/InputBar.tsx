@@ -593,8 +593,13 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
             />
           </div>
 
-          {/* One toolbar: session state left, actions right */}
+          {/* One toolbar: attach on the left rail, state and actions on the
+              right — the arrangement the reference composer uses. */}
           <div className="flex items-center gap-3">
+            <AttachButton onClick={handleFileSelect} disabled={disabled} accent={isOrchestrator} />
+
+            <div className="flex-1" />
+
             <div className="flex min-w-0 items-center gap-3.5">
               {showPermission && (
                 <PermissionModeDropdown
@@ -652,8 +657,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 </div>
               )}
             </div>
-
-            <div className="flex-1" />
 
             <div className="flex items-center gap-1">
               {/* Overflow — carries the state items that collapsed */}
@@ -734,7 +737,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 </div>
               )}
 
-              <AttachButton onClick={handleFileSelect} disabled={disabled} accent={isOrchestrator} />
               <SendButton
                 onClick={handleSend}
                 disabled={disabled}
