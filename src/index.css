@@ -102,6 +102,7 @@
 
   /* Font family */
   --font-sans: 'Lato', sans-serif;
+  --font-mono: 'Inconsolata', monospace;
 
   /* ── Elevation & radius ────────────────────────────────────────────────
      Three surface levels carry the layout structure:
@@ -577,6 +578,13 @@
 .density-icon {
   width: var(--icon-size);
   height: var(--icon-size);
+}
+
+/* The composer's action row needs a 32px floor on pointer (the density
+   default of 28px is too small for the primary action) while still growing
+   to 44px on touch. */
+.composer-row {
+  height: max(32px, var(--row-h));
 }
 
 /* Interactive elements that stay visually small but need a real target. */
