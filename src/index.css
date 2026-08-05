@@ -399,13 +399,10 @@
   background-color: var(--color-surface);
 }
 
-[data-theme="light"] .app-left-sidebar button:hover {
-  background-color: color-mix(in srgb, var(--color-neutral-5) 18%, transparent);
-}
-
-[data-theme="light"] .app-new-session-btn:hover {
-  background-color: color-mix(in srgb, var(--color-neutral-5) 18%, transparent);
-}
+/* No blanket `button:hover` fill in the sidebar: rows and controls carry their
+   own hover:bg-surface-raised, and painting every nested button drew a second,
+   darker box inside an already-highlighted row. The spread light ramp gives
+   raised enough weight to read on its own. */
 
 [data-theme="light"] .app-session-tab:hover {
   background-color: color-mix(in srgb, var(--color-neutral-5) 18%, transparent);
@@ -633,6 +630,21 @@
   .row-reveal:hover .row-menu-reveal,
   .row-reveal:focus-within .row-menu-reveal,
   .row-reveal .row-menu-reveal[aria-expanded='true'] {
+    opacity: 1;
+  }
+
+  /* Same contract one level up: a control revealed by hovering anywhere in a
+     repo section (its "New session" row), rather than by hovering one row. A
+     separate class pair, so a section hover does not also reveal every row's
+     overflow menu. */
+  .section-reveal .section-reveal-target {
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+
+  .section-reveal:hover .section-reveal-target,
+  .section-reveal:focus-within .section-reveal-target,
+  .section-reveal .section-reveal-target[aria-expanded='true'] {
     opacity: 1;
   }
 }

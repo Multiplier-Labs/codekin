@@ -7,15 +7,17 @@
  * nothing scrolls independently, and nothing expands inside the sidebar tree
  * any more.
  *
- * Width is set by the host and is user-resizable, so the narrow layout is
- * driven by `@container` width rather than a viewport breakpoint: below 380px
- * the tab labels drop to icons with tooltips.
+ * The drawer owns its own width (persisted, drag-resizable from the left edge),
+ * so the narrow layout is driven by `@container` width rather than a viewport
+ * breakpoint: below 380px the tab labels drop to icons with tooltips. On mobile
+ * it takes over the screen as an overlay instead of sitting beside the
+ * transcript.
  *
  * Non-goal: the diff/Changes view never becomes a tab here. It keeps its own
  * panel, header and resize handle.
  */
 
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { IconX, IconFileText, IconArchive, IconShieldCheck, IconSearch } from '@tabler/icons-react'
 import { DocsFilePicker } from './DocsFilePicker'
 import { ArchivedSessionsList, ArchivedSessionViewer } from './ArchivedSessionsPanel'
@@ -53,9 +55,15 @@ export interface RepoDrawerProps {
    * repo's remembered tab. Omit to always reopen on the remembered tab.
    */
   initialTab?: RepoDrawerTab
+  /** Mobile takes over the viewport instead of docking beside the transcript. */
+  isMobile?: boolean
 }
 
 const TAB_STORAGE_PREFIX = 'codekin.repoDrawerTab:'
+const WIDTH_STORAGE_KEY = 'codekin-repo-drawer-width'
+const DEFAULT_WIDTH = 320
+const MIN_WIDTH = 240
+const MAX_WIDTH = 600
 
 const TABS: { id: RepoDrawerTab; label: string; icon: typeof IconFileText }[] = [
   { id: 'docs', label: 'Docs', icon: IconFileText },
@@ -96,6 +104,7 @@ export function RepoDrawer({
   onNewSessionFromArchive,
   fontSize,
   initialTab,
+  isMobile,
 }: RepoDrawerProps) {
   // Selection lives in state only for repos touched this session; everything
   // else falls back to what localStorage remembers. No effect, no flash.
@@ -106,6 +115,39 @@ export function RepoDrawer({
   const [filters, setFilters] = useState<{ dir: string | null; values: Record<RepoDrawerTab, string> }>(
     { dir: null, values: EMPTY_FILTERS },
   )
+  // The drawer is a flex sibling of the transcript, so it needs an explicit
+  // width — without one it collapses to whatever its content happens to be.
+  const [width, setWidth] = useState(() => {
+    const stored = Number(localStorage.getItem(WIDTH_STORAGE_KEY))
+    return stored ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, stored)) : DEFAULT_WIDTH
+  })
+  const drag = useRef<{ startX: number; startWidth: number } | null>(null)
+
+  useEffect(() => {
+    localStorage.setItem(WIDTH_STORAGE_KEY, String(width))
+  }, [width])
+
+  const onDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    drag.current = { startX: e.clientX, startWidth: width }
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!drag.current) return
+      // Dragging the left edge leftwards widens the drawer.
+      const next = drag.current.startWidth - (ev.clientX - drag.current.startX)
+      setWidth(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, next)))
+    }
+    const onMouseUp = () => {
+      drag.current = null
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [width])
 
   const storedTab = useMemo(() => readStoredTab(workingDir), [workingDir])
   const tab = (workingDir ? selected[workingDir] : undefined) ?? storedTab
@@ -159,8 +201,21 @@ export function RepoDrawer({
   const filter = filters.dir === workingDir ? filters.values[tab] : ''
   const showFilter = tab === 'docs' ? docsFiles.length > 5 : true
 
-  return (
-    <div className="@container flex h-full min-h-0 flex-col border-l border-edge bg-surface">
+  const panel = (
+    <div
+      className={`@container relative flex h-full min-h-0 flex-col border-l border-edge bg-surface ${
+        isMobile ? 'w-full' : 'flex-shrink-0'
+      }`}
+      style={isMobile ? undefined : { width }}
+    >
+      {/* Resize handle on the left edge — desktop only */}
+      {!isMobile && (
+        <div
+          className="absolute left-0 top-0 bottom-0 z-20 w-1 cursor-col-resize hover:bg-primary-7/50 active:bg-primary-6/60"
+          onMouseDown={onDragStart}
+        />
+      )}
+
       {/* Header */}
       <div className="density-row flex flex-shrink-0 items-center gap-2 border-b border-edge px-2">
         <span className="min-w-0 flex-1 truncate text-body font-semibold text-ink" title={workingDir}>
@@ -274,4 +329,18 @@ export function RepoDrawer({
       />
     </div>
   )
+
+  // On mobile there is no room to dock beside the transcript, so the drawer
+  // covers it and the scrim closes it.
+  if (isMobile) {
+    return (
+      <div className="fixed inset-0 z-40 flex justify-end bg-black/50" onClick={onClose}>
+        <div className="h-full w-[92vw] max-w-[420px]" onClick={e => { e.stopPropagation() }}>
+          {panel}
+        </div>
+      </div>
+    )
+  }
+
+  return panel
 }

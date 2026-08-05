@@ -4,7 +4,8 @@
  * The repo is a section label, not a tree row: sessions sit flush beneath it
  * at one depth level, which is what buys back name width at the 160px minimum
  * sidebar. Every row action lives behind a persistent overflow menu, so
- * nothing is reachable only on hover.
+ * nothing is reachable only on hover — the one hover affordance, "New session",
+ * also shows on touch and on keyboard focus.
  *
  * Docs, approvals and archived sessions no longer expand inside the tree —
  * they live in the repo drawer, and this component only deep-links to them.
@@ -12,10 +13,11 @@
 
 import { useState, useEffect } from 'react'
 import {
-  IconShieldCheck, IconArchive, IconFileText,
+  IconPlus, IconShieldCheck, IconArchive, IconFileText,
   IconRobot, IconSparkles, IconPencil, IconGitBranch, IconRobotFace, IconTrash,
 } from '@tabler/icons-react'
-import type { Session } from '../types'
+import type { Session, CodingProvider } from '../types'
+import { PROVIDERS } from '../types'
 import { RowMenu, type RowMenuItem } from './RowMenu'
 import type { RepoDrawerTab } from './RepoDrawer'
 
@@ -110,6 +112,8 @@ export interface RepoSectionProps {
   onSelectSession: (id: string) => void
   onDeleteSession: (id: string) => void
   onRenameSession: (id: string, name: string) => void
+  /** Start a session in this repo — the hover-revealed row under its sessions. */
+  onNewSession?: (provider?: CodingProvider) => void
   onSelectRepo: (workingDir: string) => void
   onDeleteRepo: (workingDir: string) => void
   /** Open the repo drawer on a given tab. */
@@ -131,6 +135,7 @@ export function RepoSection({
   onSelectSession,
   onDeleteSession,
   onRenameSession,
+  onNewSession,
   onSelectRepo,
   onDeleteRepo,
   onOpenDrawer,
@@ -168,13 +173,13 @@ export function RepoSection({
     { label: 'Docs', icon: <IconFileText size={14} stroke={2} />, onSelect: () => onOpenDrawer(node.workingDir, 'docs') },
     { label: 'Archived sessions', icon: <IconArchive size={14} stroke={2} />, onSelect: () => onOpenDrawer(node.workingDir, 'archive') },
     { label: 'Approvals', icon: <IconShieldCheck size={14} stroke={2} />, onSelect: () => onOpenDrawer(node.workingDir, 'approvals') },
-    { label: 'Remove repo', icon: <IconTrash size={14} stroke={2} />, onSelect: () => onDeleteRepo(node.workingDir), danger: true, separated: true },
+    { label: 'Close sessions', icon: <IconTrash size={14} stroke={2} />, onSelect: () => onDeleteRepo(node.workingDir), danger: true, separated: true },
   ]
 
   return (
-    <div className="mb-1">
+    <div className="section-reveal mb-1">
       {/* Repo label — a section header, not a row */}
-      <div className="group/repo flex items-center gap-1.5 px-[18px] pt-2 pb-1.5">
+      <div className="flex items-center gap-1.5 px-[18px] pt-2 pb-1.5">
         <button
           onClick={() => { setExpanded(!expanded); if (!isActive) onSelectRepo(node.workingDir) }}
           aria-expanded={expanded}
@@ -267,6 +272,29 @@ export function RepoSection({
             )
           })}
 
+          {/* New session in this repo. Revealed by hovering the section, on the
+              same terms as a row's overflow menu: visible on touch, while
+              focused, and while its own provider menu is open. */}
+          {onNewSession && (
+            <RowMenu
+              label="New session in this repo"
+              className="section-reveal-target"
+              triggerClassName="density-row flex w-full items-center gap-1.5 rounded-control pl-6 pr-2.5 text-left text-body text-ink-muted transition-colors hover:bg-surface-raised hover:text-ink aria-expanded:bg-surface-raised aria-expanded:text-ink"
+              trigger={
+                <>
+                  <span className="inline-flex w-3 flex-shrink-0 items-center justify-center">
+                    <IconPlus size={12} stroke={2} />
+                  </span>
+                  <span className="truncate">New session</span>
+                </>
+              }
+              items={PROVIDERS.map(p => ({
+                label: p.label,
+                title: p.description,
+                onSelect: () => { onNewSession(p.id) },
+              }))}
+            />
+          )}
         </div>
       )}
     </div>
