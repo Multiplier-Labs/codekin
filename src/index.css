@@ -147,8 +147,13 @@
   --color-edge: var(--color-neutral-9);           /* default borders */
   --color-edge-strong: var(--color-neutral-8);    /* emphasized borders */
   --color-ink: var(--color-neutral-2);            /* primary text */
-  --color-ink-muted: var(--color-neutral-5);      /* secondary text */
-  --color-ink-faint: var(--color-neutral-6);      /* de-emphasized metadata */
+  /* Both passive steps sit one stop brighter than they used to. At neutral-5
+     and -6 they measured 3.2–4.4:1 on their own surfaces — under AA, and
+     visibly washed out in the sidebar and composer. Now every scope clears
+     4.5:1: dark chrome 6.78 / 4.63, dark content 6.82 / 4.85, light 9.78 /
+     7.28, light content 9.78 / 5.21, light sidebar 7.08 / 4.70. */
+  --color-ink-muted: var(--color-neutral-4);      /* secondary text */
+  --color-ink-faint: var(--color-neutral-5);      /* de-emphasized metadata */
   --color-ink-inverse: var(--color-neutral-12);   /* text on intent-color fills (replaces text-white) */
   --color-on-primary: var(--color-primary-12);    /* text on gold (primary-8) fills */
   --color-focus: var(--color-accent-6);           /* focus rings and focused borders */

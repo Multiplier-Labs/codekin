@@ -11,7 +11,7 @@
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { useOutsideClick } from '../hooks/useOutsideClick'
 import { useAutoGrow } from '../hooks/useAutoGrow'
-import { IconPaperclip, IconX, IconTerminal2, IconChevronDown, IconDots, IconGitBranch, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck, IconCornerDownLeft } from '@tabler/icons-react'
+import { IconPaperclip, IconX, IconTerminal2, IconChevronDown, IconDots, IconGitBranch, IconGitBranchDeleted, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck, IconCornerDownLeft } from '@tabler/icons-react'
 import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
@@ -77,7 +77,7 @@ function SendButton({ onClick, disabled, hasContent, accent = false }: {
       onClick={onClick}
       disabled={isDisabled}
       className={`composer-row flex items-center gap-2 rounded-control px-3.5 text-body font-bold transition-colors ${
-        isDisabled ? 'bg-edge-strong text-ink-faint' : activeClass
+        isDisabled ? 'bg-edge-strong text-ink-muted' : activeClass
       }`}
       title="Send (Enter)"
     >
@@ -609,24 +609,32 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               {showWorktree && (
                 <div className="flex">
                   {worktreePath ? (
-                    <StateItem title={`Worktree: ${worktreePath}`}>
-                      <IconGitBranch size={14} stroke={2} className="text-ink-faint" />
+                    <StateItem title={`In a worktree: ${worktreePath}`}>
+                      <IconGitBranch size={14} stroke={2} className="text-primary-5" />
                       <StateLabel>
-                        <span className="inline-block max-w-[140px] truncate align-bottom">{worktreePath.split('/').pop()}</span>
+                        <span className="inline-block max-w-[140px] truncate align-bottom text-primary-5">{worktreePath.split('/').pop()}</span>
                       </StateLabel>
                     </StateItem>
                   ) : showWorktreeToggle && onWorktreeChange ? (
                     <StateItem
                       onClick={() => onWorktreeChange(!useWorktree)}
-                      title={useWorktree ? 'Worktree enabled — session will use a git worktree' : 'Enable git worktree for this session'}
+                      title={useWorktree
+                        ? 'This session will start in a git worktree — click to use the repo directly'
+                        : 'This session will run in the repo directly — click to use a git worktree'}
                     >
-                      <IconGitBranch size={14} stroke={2} className={useWorktree ? 'text-primary-5' : 'text-ink-faint'} />
-                      <StateLabel><span className={useWorktree ? 'text-primary-5' : undefined}>Worktree</span></StateLabel>
+                      {useWorktree
+                        ? <IconGitBranch size={14} stroke={2} className="text-primary-5" />
+                        : <IconGitBranchDeleted size={14} stroke={2} />}
+                      <StateLabel>
+                        <span className={useWorktree ? 'text-primary-5' : undefined}>
+                          {useWorktree ? 'Worktree' : 'No worktree'}
+                        </span>
+                      </StateLabel>
                     </StateItem>
                   ) : onMoveToWorktree ? (
-                    <StateItem onClick={onMoveToWorktree} title="Move session to a git worktree">
-                      <IconGitBranch size={14} stroke={2} className="text-ink-faint" />
-                      <StateLabel>Worktree</StateLabel>
+                    <StateItem onClick={onMoveToWorktree} title="Not in a worktree — click to move this session into one">
+                      <IconGitBranchDeleted size={14} stroke={2} />
+                      <StateLabel>No worktree</StateLabel>
                     </StateItem>
                   ) : null}
                 </div>
