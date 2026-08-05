@@ -40,6 +40,8 @@ export interface UseSessionOrchestrationReturn {
   handleSelectRepo: (workingDir: string) => void
   handleDeleteRepo: (workingDir: string) => Promise<void>
   handleNewSessionForRepo: (provider?: import('../types').CodingProvider) => void
+  /** Start a session in any repo, not just the active one (sidebar hover action). */
+  handleNewSessionInRepo: (workingDir: string, provider?: import('../types').CodingProvider) => void
   handleNewSessionFromArchive: (workingDir: string, context: string) => void
 }
 
@@ -134,18 +136,22 @@ export function useSessionOrchestration({
     }
   }, [sessions, activeSessionId, clearMessages, leaveSession, joinSession, setActiveSessionId, removeSession])
 
-  const handleNewSessionForRepo = useCallback((provider?: import('../types').CodingProvider) => {
-    if (!activeWorkingDir) return
-    const repo = repos.find(r => r.workingDir === activeWorkingDir)
+  const handleNewSessionInRepo = useCallback((dir: string, provider?: import('../types').CodingProvider) => {
+    const repo = repos.find(r => r.workingDir === dir)
     // Always use the repo root for new sessions — never a worktree path.
-    // The repo's workingDir is the canonical root; activeWorkingDir may be a
-    // worktree path if groupDir was missing on the active session.
-    const workingDir = repo?.workingDir ?? activeWorkingDir
+    // The repo's workingDir is the canonical root; the caller's dir may be a
+    // worktree path if groupDir was missing on the session it came from.
+    const workingDir = repo?.workingDir ?? dir
     const repoId = repo?.id ?? workingDir.split('/').pop() ?? 'session'
     clearMessages()
     leaveSession()
     wsCreateSession(`hub:${repoId}`, workingDir, useWorktreeRef.current, permissionModeRef.current, provider ?? providerRef?.current)
-  }, [activeWorkingDir, repos, clearMessages, leaveSession, wsCreateSession, permissionModeRef, useWorktreeRef, providerRef])
+  }, [repos, clearMessages, leaveSession, wsCreateSession, permissionModeRef, useWorktreeRef, providerRef])
+
+  const handleNewSessionForRepo = useCallback((provider?: import('../types').CodingProvider) => {
+    if (!activeWorkingDir) return
+    handleNewSessionInRepo(activeWorkingDir, provider)
+  }, [activeWorkingDir, handleNewSessionInRepo])
 
   const handleNewSessionFromArchive = useCallback((workingDir: string, context: string) => {
     // The archived workingDir may be a worktree path or an alternate clone path
@@ -172,6 +178,7 @@ export function useSessionOrchestration({
     handleSelectRepo,
     handleDeleteRepo,
     handleNewSessionForRepo,
+    handleNewSessionInRepo,
     handleNewSessionFromArchive,
   }
 }

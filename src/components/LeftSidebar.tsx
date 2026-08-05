@@ -118,11 +118,13 @@ interface Props {
   onDeleteSession: (id: string) => void
   /** Rename a session in the sidebar tree. */
   onRenameSession: (id: string, name: string) => void
+  /** Create a new session in a specific repo (the per-repo hover action). */
+  onNewSessionInRepo: (workingDir: string, provider?: import('../types').CodingProvider) => void
   /** Open a repo's latest session, or create a new one when a provider is chosen. */
   onOpenSession: (repo: Repo, provider?: import('../types').CodingProvider) => void
   /** Switch the active repo (expands its tree node). */
   onSelectRepo: (workingDir: string) => void
-  /** Remove a repo from the sidebar (does not delete the git repo). */
+  /** Close every session in a repo, dropping it from the sidebar. */
   onDeleteRepo: (workingDir: string) => void
   /** Open the settings modal. */
   onSettingsOpen: () => void
@@ -173,6 +175,7 @@ export function LeftSidebar({
   onSelectSession,
   onDeleteSession,
   onRenameSession,
+  onNewSessionInRepo,
   onOpenSession,
   onSelectRepo,
   onDeleteRepo,
@@ -445,6 +448,7 @@ export function LeftSidebar({
             onSelectSession={handleSelectSessionMobile}
             onDeleteSession={onDeleteSession}
             onRenameSession={onRenameSession}
+            onNewSession={(provider) => { onNewSessionInRepo(node.workingDir, provider) }}
             onSelectRepo={(wd) => { onSelectRepo(wd); if (isMobile) onMobileClose?.() }}
             onDeleteRepo={onDeleteRepo}
             onOpenDrawer={(wd, tab) => { onOpenDrawer(wd, tab); if (isMobile) onMobileClose?.() }}
