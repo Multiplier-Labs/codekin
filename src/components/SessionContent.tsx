@@ -52,8 +52,6 @@ export interface SessionContentProps {
   availableModels?: import('../types').ModelOption[]
   /** Coding provider of the active session — drives provider-specific UI (permission modes). */
   sessionProvider?: import('../types').CodingProvider
-  /** Cumulative token/cost usage for the active session (shown in the input bar). */
-  usage?: import('../types').SessionUsage | null
   hasUserMessages: boolean
   useWorktree: boolean
   onWorktreeChange: (v: boolean) => void
@@ -102,7 +100,6 @@ export function SessionContent({
   onModelChange,
   availableModels,
   sessionProvider,
-  usage,
   hasUserMessages,
   useWorktree,
   onWorktreeChange,
@@ -230,7 +227,6 @@ export function SessionContent({
         onModelChange={onModelChange}
         availableModels={availableModels}
         sessionProvider={sessionProvider}
-        usage={usage}
         isMobile={isMobile}
         showWorktreeToggle={!hasUserMessages}
         useWorktree={useWorktree}
