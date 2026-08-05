@@ -118,10 +118,8 @@ interface Props {
   onDeleteSession: (id: string) => void
   /** Rename a session in the sidebar tree. */
   onRenameSession: (id: string, name: string) => void
-  /** Create a new session in the active repo. */
-  onNewSession: (provider?: import('../types').CodingProvider) => void
-  /** Open (or create) a session for a specific repo, optionally with a name. */
-  onOpenSession: (repo: Repo, name?: string) => void
+  /** Open a repo's latest session, or create a new one when a provider is chosen. */
+  onOpenSession: (repo: Repo, provider?: import('../types').CodingProvider) => void
   /** Switch the active repo (expands its tree node). */
   onSelectRepo: (workingDir: string) => void
   /** Remove a repo from the sidebar (does not delete the git repo). */
@@ -175,7 +173,6 @@ export function LeftSidebar({
   onSelectSession,
   onDeleteSession,
   onRenameSession,
-  onNewSession,
   onOpenSession,
   onSelectRepo,
   onDeleteRepo,
@@ -365,7 +362,7 @@ export function LeftSidebar({
             <IconChevronLeft size={16} stroke={2} />
           </button>
         )}
-        <NewSessionButton groups={groups} token={token} onOpen={(repo) => { onOpenSession(repo); if (isMobile) onMobileClose?.() }} />
+        <NewSessionButton groups={groups} token={token} onOpen={(repo, provider) => { onOpenSession(repo, provider); if (isMobile) onMobileClose?.() }} />
       </div>
 
       {/* Scrollable nav tree */}
@@ -448,7 +445,6 @@ export function LeftSidebar({
             onSelectSession={handleSelectSessionMobile}
             onDeleteSession={onDeleteSession}
             onRenameSession={onRenameSession}
-            onNewSession={node.workingDir === activeWorkingDir ? onNewSession : undefined}
             onSelectRepo={(wd) => { onSelectRepo(wd); if (isMobile) onMobileClose?.() }}
             onDeleteRepo={onDeleteRepo}
             onOpenDrawer={(wd, tab) => { onOpenDrawer(wd, tab); if (isMobile) onMobileClose?.() }}

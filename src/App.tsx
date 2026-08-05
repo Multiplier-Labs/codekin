@@ -633,7 +633,6 @@ export default function App() {
         onSelectSession={(id) => { docsBrowser.close(); if (view === 'orchestrator') navigate(`/s/${id}`); handleSelectSession(id) }}
         onDeleteSession={handleDeleteSession}
         onRenameSession={renameSession}
-        onNewSession={handleNewSessionForRepo}
         onOpenSession={handleOpenSession}
         onSelectRepo={handleSelectRepo}
         onDeleteRepo={handleDeleteRepo}

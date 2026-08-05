@@ -62,9 +62,14 @@ export function useSessionOrchestration({
   const activeSession = activeSessionId ? sessions.find(s => s.id === activeSessionId) ?? null : null
   const activeWorkingDir = activeSession ? groupKey(activeSession) : null
 
-  const handleOpenSession = useCallback((repo: Repo) => {
+  /**
+   * Open a repo. Without a provider this joins the repo's most recent session
+   * if there is one; with a provider the caller has explicitly asked for a new
+   * session in it, so joining an existing one would discard that choice.
+   */
+  const handleOpenSession = useCallback((repo: Repo, provider?: import('../types').CodingProvider) => {
     const existing = sessions.filter(s => groupKey(s) === repo.workingDir)
-    if (existing.length > 0) {
+    if (!provider && existing.length > 0) {
       const latest = existing[existing.length - 1]
       clearMessages()
       leaveSession()
@@ -73,7 +78,7 @@ export function useSessionOrchestration({
     }
     clearMessages()
     leaveSession()
-    wsCreateSession(`hub:${repo.id}`, repo.workingDir, useWorktreeRef.current, permissionModeRef.current, providerRef?.current)
+    wsCreateSession(`hub:${repo.id}`, repo.workingDir, useWorktreeRef.current, permissionModeRef.current, provider ?? providerRef?.current)
   }, [sessions, joinSession, wsCreateSession, leaveSession, clearMessages, useWorktreeRef, permissionModeRef, providerRef])
 
   const handleSelectSession = useCallback((sessionId: string) => {
