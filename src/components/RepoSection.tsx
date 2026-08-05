@@ -1,47 +1,32 @@
 /**
- * RepoSection — one collapsible repo tree node in the left sidebar.
+ * RepoSection — one repo's sessions in the left sidebar.
  *
- * Shows sessions for a single repo with inline editing, archive preview,
- * and approvals panel. Extracted from LeftSidebar to reduce file size.
+ * The repo is a section label, not a tree row: sessions sit flush beneath it
+ * at one depth level, which is what buys back name width at the 160px minimum
+ * sidebar. Every row action lives behind a persistent overflow menu, so
+ * nothing is reachable only on hover.
+ *
+ * Docs, approvals and archived sessions no longer expand inside the tree —
+ * they live in the repo drawer, and this component only deep-links to them.
  */
 
-import { useState, useEffect, useRef, useLayoutEffect } from 'react'
+import { useState, useEffect } from 'react'
 import {
   IconPlus, IconShieldCheck, IconArchive, IconFileText,
-  IconChevronDown, IconChevronRight, IconRobot, IconSparkles, IconPencil, IconGitBranch, IconRobotFace,
+  IconRobot, IconSparkles, IconPencil, IconGitBranch, IconRobotFace, IconTrash,
 } from '@tabler/icons-react'
 import type { Session, CodingProvider } from '../types'
 import { PROVIDERS } from '../types'
-import { listArchivedSessions, type ArchivedSessionInfo } from '../lib/ccApi'
-import { ApprovalsPanel } from './ApprovalsPanel'
-import { DocsFilePicker } from './DocsFilePicker'
-
-const ARCHIVED_PREVIEW_LIMIT = 5
+import { RowMenu, type RowMenuItem } from './RowMenu'
+import type { RepoDrawerTab } from './RepoDrawer'
 
 // --------------------------------------------------------------------------
 // Helpers
 // --------------------------------------------------------------------------
 
-/** Small indicator for worktree sessions. */
-function WorktreeIcon({ session }: { session: Session }) {
-  if (!session.worktreePath) return null
-  const dir = session.worktreePath.split('/').pop() ?? session.worktreePath
-  return (
-    <span title={`Worktree: ${dir}`} className="flex-shrink-0 text-primary-6">
-      <IconGitBranch size={12} stroke={2} />
-    </span>
-  )
-}
-
 function sessionDisplayName(session: Session): string {
   const name = session.name || session.id.slice(0, 8)
   if (name.startsWith('hub:')) return 'new session'
-  return name
-}
-
-function archivedDisplayName(session: ArchivedSessionInfo): string {
-  const name = session.name || session.id.slice(0, 8)
-  if (name.startsWith('hub:')) return 'unnamed session'
   return name
 }
 
@@ -55,99 +40,53 @@ function compactAge(created: string): string {
   return `${Math.floor(hours / 24)}d`
 }
 
-function parseUtcDate(dateStr: string): Date {
-  if (!dateStr.includes('T') && !dateStr.includes('Z') && !dateStr.includes('+')) {
-    return new Date(dateStr.replace(' ', 'T') + 'Z')
-  }
-  return new Date(dateStr)
-}
-
-function archivedCompactAge(dateStr: string): string {
-  const seconds = Math.floor((Date.now() - parseUtcDate(dateStr).getTime()) / 1000)
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h`
-  return `${Math.floor(hours / 24)}d`
-}
-
 /**
- * Compact "+ New" button with a provider dropdown (Claude / OpenCode / Codex).
- * Uses fixed positioning so the menu is not clipped by the sidebar scroll
- * container; dismisses on click-outside or Escape.
+ * Exactly three status treatments, and only one of them animates:
+ * filled = running, amber pulsing = waiting for you, hollow ring = idle.
+ * Anything finer (queued, inactive) is carried by the tooltip, not by a
+ * fourth colour.
  */
-function NewSessionMenu({ onNewSession, isMobile }: {
-  onNewSession: (provider: CodingProvider) => void
-  isMobile?: boolean
-}) {
-  const [open, setOpen] = useState(false)
-  const buttonRef = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
+type SessionStatus = 'running' | 'waiting' | 'idle'
 
-  useLayoutEffect(() => {
-    if (!open || !buttonRef.current || !menuRef.current) return
-    const btn = buttonRef.current.getBoundingClientRect()
-    const menu = menuRef.current
-    const menuHeight = menu.offsetHeight
-    // Open below the button; flip above if it would overflow the viewport
-    const top = btn.bottom + menuHeight + 4 > window.innerHeight
-      ? btn.top - menuHeight - 4
-      : btn.bottom + 4
-    menu.style.top = `${top}px`
-    menu.style.left = `${btn.left}px`
-  }, [open])
-
-  useEffect(() => {
-    if (!open) return
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    function handleClickOutside(e: MouseEvent) {
-      const target = e.target as Node
-      if (buttonRef.current && !buttonRef.current.contains(target) &&
-          menuRef.current && !menuRef.current.contains(target)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [open])
-
+function StatusDot({ status, title }: { status: SessionStatus; title: string }) {
+  const shape = status === 'waiting'
+    ? 'bg-warning-5 animate-pulse'
+    : status === 'running'
+    ? 'bg-success-6'
+    : 'border border-ink-faint'
   return (
-    <div className={`pl-10 ${isMobile || open ? 'opacity-100' : 'opacity-0 group-hover/repo:opacity-100 focus-within:opacity-100'}`}>
-      <button
-        ref={buttonRef}
-        onClick={() => setOpen(!open)}
-        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-control text-body transition-colors ${
-          open ? 'bg-surface-raised text-ink' : 'text-ink-muted hover:text-ink hover:bg-surface-raised'
-        }`}
-        title="New session"
-      >
-        <IconPlus size={12} stroke={2} className="flex-shrink-0" />
-        <span>New session</span>
-        <IconChevronDown size={11} stroke={2} className={`flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-      {open && (
-        <div ref={menuRef} className="fixed z-50 min-w-36 rounded-floating border border-edge-strong bg-surface-raised py-1 shadow-floating">
-          {PROVIDERS.map(p => (
-            <button
-              key={p.id}
-              onClick={() => { setOpen(false); onNewSession(p.id) }}
-              className="w-full flex items-center gap-2 px-3 py-1 text-left text-body text-ink hover:bg-edge hover:text-ink transition-colors"
-              title={p.description}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+    <span className="inline-flex w-3 flex-shrink-0 items-center justify-center" title={title}>
+      <span className={`inline-block h-1.5 w-1.5 rounded-full ${shape}`} />
+    </span>
   )
+}
+
+/** Where a session came from — a separate glyph so origin stops competing with state. */
+function OriginGlyph({ source }: { source?: string }) {
+  const [Icon, label] = source === 'workflow'
+    ? [IconSparkles, 'Started by a workflow']
+    : source === 'webhook'
+    ? [IconRobot, 'Started by a webhook']
+    : source === 'orchestrator' || source === 'agent'
+    ? [IconRobotFace, 'Started by an agent']
+    : [null, '']
+  if (!Icon) return null
+  return (
+    <span className="flex-shrink-0 text-ink-faint" title={label}>
+      <Icon size={12} stroke={2} />
+    </span>
+  )
+}
+
+function sessionStatus(
+  session: Session,
+  waiting: boolean | undefined,
+  tentative: boolean,
+): [SessionStatus, string] {
+  if (waiting) return ['waiting', 'Waiting for input']
+  if (tentative) return ['running', 'Queued']
+  if (session.isProcessing) return ['running', 'Processing']
+  return ['idle', session.active ? 'Idle' : 'Inactive']
 }
 
 // --------------------------------------------------------------------------
@@ -169,23 +108,16 @@ export interface RepoSectionProps {
   activeSessionId: string | null
   waitingSessions: Record<string, boolean>
   tentativeQueues: Record<string, { text: string; files: File[] }[]>
-  token: string
-  archiveRefreshKey: number
   onSelectSession: (id: string) => void
   onDeleteSession: (id: string) => void
   onRenameSession: (id: string, name: string) => void
-  onNewSession?: (provider?: import('../types').CodingProvider) => void
+  onNewSession?: (provider?: CodingProvider) => void
   onSelectRepo: (workingDir: string) => void
   onDeleteRepo: (workingDir: string) => void
-  onViewArchivedSession: (id: string) => void
-  onBrowseDocs?: (workingDir: string) => void
-  docsPickerOpen?: boolean
-  docsPickerRepoDir?: string | null
-  docsPickerFiles?: { path: string; pinned: boolean }[]
-  docsPickerLoading?: boolean
-  onDocsPickerSelect?: (filePath: string) => void
-  onDocsPickerClose?: () => void
-  docsStarredDocs?: string[]
+  /** Open the repo drawer on a given tab. */
+  onOpenDrawer: (workingDir: string, tab: RepoDrawerTab) => void
+  /** Move the active session into a git worktree — only offered for the joined session. */
+  onMoveToWorktree?: () => void
   isMobile?: boolean
 }
 
@@ -199,54 +131,32 @@ export function RepoSection({
   activeSessionId,
   waitingSessions,
   tentativeQueues,
-  token,
-  archiveRefreshKey,
   onSelectSession,
   onDeleteSession,
   onRenameSession,
   onNewSession,
   onSelectRepo,
   onDeleteRepo,
-  onViewArchivedSession,
-  onBrowseDocs,
-  docsPickerOpen,
-  docsPickerRepoDir,
-  docsPickerFiles,
-  docsPickerLoading,
-  onDocsPickerSelect,
-  onDocsPickerClose,
-  docsStarredDocs,
+  onOpenDrawer,
+  onMoveToWorktree,
   isMobile,
 }: RepoSectionProps) {
   const [expanded, setExpanded] = useState(isActive || !!isMobile)
-  const [approvalsOpen, setApprovalsOpen] = useState(false)
-  const [archiveOpen, setArchiveOpen] = useState(false)
-  const [archiveExpanded, setArchiveExpanded] = useState(false)
-  const [archivedSessions, setArchivedSessions] = useState<ArchivedSessionInfo[]>([])
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
+  const [providerMenuOpen, setProviderMenuOpen] = useState(false)
 
   // Auto-expand when this repo becomes active
   useEffect(() => {
     if (isActive) setExpanded(true) // eslint-disable-line react-hooks/set-state-in-effect -- sync expansion with external active-repo state
   }, [isActive])
 
-  // Fetch archived sessions when archive section is opened
-  useEffect(() => {
-    if (!archiveOpen || !token) return
-    listArchivedSessions(token, node.workingDir).then(setArchivedSessions).catch(() => {})
-  }, [archiveOpen, token, node.workingDir, archiveRefreshKey])
-
-  const [statusDot, statusTitle] = node.hasTentative
-    ? ['bg-accent-6 animate-pulse', 'Queued']
-    : node.hasWaiting
-    ? ['bg-warning-5 animate-pulse', 'Waiting for input']
-    : node.hasActive
-    ? ['bg-success-6 animate-pulse', 'Processing']
-    : ['bg-ink-faint', 'Idle']
-
-  const visibleArchived = archiveExpanded ? archivedSessions : archivedSessions.slice(0, ARCHIVED_PREVIEW_LIMIT)
-  const hasMore = archivedSessions.length > ARCHIVED_PREVIEW_LIMIT
+  // The label carries the worst status among its children.
+  const [repoStatus, repoStatusTitle]: [SessionStatus, string] = node.hasWaiting
+    ? ['waiting', 'Waiting for input']
+    : node.hasActive || node.hasTentative
+    ? ['running', node.hasActive ? 'Processing' : 'Queued']
+    : ['idle', 'Idle']
 
   const startEditing = (s: Session) => {
     setEditingSessionId(s.id)
@@ -260,93 +170,60 @@ export function RepoSection({
     setEditingSessionId(null)
   }
 
+  const repoMenuItems: RowMenuItem[] = [
+    { label: 'Docs', icon: <IconFileText size={14} stroke={2} />, onSelect: () => onOpenDrawer(node.workingDir, 'docs') },
+    { label: 'Archived sessions', icon: <IconArchive size={14} stroke={2} />, onSelect: () => onOpenDrawer(node.workingDir, 'archive') },
+    { label: 'Approvals', icon: <IconShieldCheck size={14} stroke={2} />, onSelect: () => onOpenDrawer(node.workingDir, 'approvals') },
+    { label: 'Remove repo', icon: <IconTrash size={14} stroke={2} />, onSelect: () => onDeleteRepo(node.workingDir), danger: true, separated: true },
+  ]
+
   return (
-    <div className="group/repo">
-      {/* Repo header row — Slack-style section header */}
-      <div className="group flex items-center gap-1.5 px-2 py-1">
+    <div className="mb-1">
+      {/* Repo label — a section header, not a row */}
+      <div className="group/repo flex items-center gap-1.5 px-3 pt-2 pb-0.5">
         <button
           onClick={() => { setExpanded(!expanded); if (!isActive) onSelectRepo(node.workingDir) }}
-          className="density-row flex flex-1 items-center gap-2 min-w-0 rounded-control px-2 py-0.5 text-left transition-colors text-ink hover:text-ink"
+          aria-expanded={expanded}
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-control text-left text-micro font-medium uppercase tracking-wider text-ink-faint transition-colors hover:text-ink"
+          title={node.workingDir}
         >
-          {expanded
-            ? <IconChevronDown size={14} stroke={2.5} className="flex-shrink-0 text-ink-muted opacity-0 group-hover/repo:opacity-100 transition-opacity" />
-            : <IconChevronRight size={14} stroke={2.5} className="flex-shrink-0 text-ink-muted opacity-0 group-hover/repo:opacity-100 transition-opacity" />
-          }
-          <span className={`inline-block h-1.5 w-1.5 rounded-full flex-shrink-0 ${statusDot}`} title={statusTitle} />
-          <span className="truncate font-semibold tracking-wide text-body">{node.displayName}</span>
-          {!expanded && node.sessions.length > 1 && (
-            <span className="text-meta text-ink-faint flex-shrink-0">({node.sessions.length})</span>
+          <StatusDot status={repoStatus} title={repoStatusTitle} />
+          <span className="truncate">{node.displayName}</span>
+          {!expanded && node.sessions.length > 0 && (
+            <span className="flex-shrink-0 tabular-nums normal-case tracking-normal">({node.sessions.length})</span>
           )}
         </button>
-        {onBrowseDocs && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onBrowseDocs(node.workingDir) }}
-            className={`flex-shrink-0 rounded-control p-0.5 transition-colors opacity-0 group-hover:opacity-100 ${
-              docsPickerOpen && docsPickerRepoDir === node.workingDir ? 'text-primary-5 opacity-100!' : 'text-ink-muted hover:text-ink'
-            }`}
-            title="Browse docs"
-          >
-            <IconFileText size={14} stroke={2} />
-          </button>
-        )}
-        <button
-          onClick={() => setApprovalsOpen(!approvalsOpen)}
-          className={`flex-shrink-0 rounded-control p-0.5 transition-colors opacity-0 group-hover:opacity-100 ${
-            approvalsOpen ? 'text-primary-5 opacity-100!' : 'text-ink-muted hover:text-ink'
-          }`}
-          title="Repo approvals"
-        >
-          <IconShieldCheck size={16} stroke={2} />
-        </button>
-        <button
-          onClick={() => setArchiveOpen(!archiveOpen)}
-          className={`flex-shrink-0 rounded-control p-0.5 transition-colors opacity-0 group-hover:opacity-100 ${
-            archiveOpen ? 'text-primary-5 opacity-100!' : 'text-ink-muted hover:text-ink'
-          }`}
-          title="Archived sessions"
-        >
-          <IconArchive size={16} stroke={2} />
-        </button>
-        <span
-          onClick={e => { e.stopPropagation(); onDeleteRepo(node.workingDir) }}
-          className="cursor-pointer text-body text-transparent hover:text-error-5 group-hover:text-ink-faint flex-shrink-0 px-0.5"
-        >
-          ×
-        </span>
+        <RowMenu items={repoMenuItems} label={`Actions for ${node.displayName}`} />
       </div>
 
-      {/* Expanded: session list */}
+      {/* Sessions — flush beneath the label, one depth level */}
       {expanded && (
-        <div className="px-2 pb-1">
+        <div className="px-2">
           {node.sessions.map(s => {
             const isActiveSession = s.id === activeSessionId
             const isTentative = (tentativeQueues[s.id]?.length ?? 0) > 0
-            const [dotColor, dotTitle] = isTentative
-              ? ['bg-accent-6 animate-pulse', 'Queued']
-              : waitingSessions[s.id]
-              ? ['bg-warning-5 animate-pulse', 'Waiting for input']
-              : s.isProcessing ? ['bg-success-6 animate-pulse', 'Processing'] : s.active ? ['bg-ink-muted', 'Idle'] : ['bg-edge-strong', 'Inactive']
+            const [status, statusTitle] = sessionStatus(s, waitingSessions[s.id], isTentative)
             const isEditing = editingSessionId === s.id
 
-            return (
-              <div
-                key={s.id}
-                onClick={() => { if (!isEditing) onSelectSession(s.id) }}
-                className={`density-row group w-full flex items-center gap-2 pl-10 pr-2 py-1 text-left text-body transition-colors rounded-control cursor-pointer ${
-                  isActiveSession
-                    ? 'bg-accent-9/30 text-accent-2'
-                    : 'text-ink hover:bg-surface-raised hover:text-ink'
-                }`}
-              >
-                {s.source === 'workflow'
-                  ? <IconSparkles size={12} className={`flex-shrink-0 self-center ${dotColor.replace(/bg-/g, 'text-')}`} title={dotTitle} />
-                  : s.source === 'webhook'
-                  ? <IconRobot size={12} className={`flex-shrink-0 self-center ${dotColor.replace(/bg-/g, 'text-')}`} title={dotTitle} />
-                  : s.source === 'orchestrator' || s.source === 'agent'
-                  ? <IconRobotFace size={12} className={`flex-shrink-0 self-center ${dotColor.replace(/bg-/g, 'text-')}`} title={dotTitle} />
-                  : <span className="inline-flex items-center justify-center w-[12px] flex-shrink-0 self-center" title={dotTitle}><span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} /></span>
-                }
-                {isEditing ? (
+            const menuItems: RowMenuItem[] = [
+              { label: 'Rename', icon: <IconPencil size={14} stroke={2} />, onSelect: () => startEditing(s) },
+              // move_to_worktree acts on the joined session, so it is only
+              // offered for the session actually in view.
+              ...(isActiveSession && onMoveToWorktree && !s.worktreePath
+                ? [{ label: 'Move to worktree', icon: <IconGitBranch size={14} stroke={2} />, onSelect: onMoveToWorktree }]
+                : []),
+              {
+                label: 'Close & archive',
+                icon: <IconArchive size={14} stroke={2} />,
+                onSelect: () => onDeleteSession(s.id),
+                danger: true,
+                separated: true,
+              },
+            ]
+
+            if (isEditing) {
+              return (
+                <div key={s.id} className="density-row flex items-center gap-2 rounded-control px-2">
                   <input
                     autoFocus
                     value={editValue}
@@ -356,113 +233,73 @@ export function RepoSection({
                       if (e.key === 'Enter') commitRename()
                       if (e.key === 'Escape') setEditingSessionId(null)
                     }}
-                    onClick={e => e.stopPropagation()}
-                    className="flex-1 min-w-0 bg-surface border border-edge-strong rounded-control px-1 py-0 text-body text-ink outline-none focus:border-primary-6"
+                    className="min-w-0 flex-1 rounded-control border border-edge-strong bg-surface px-1 py-0 text-body text-ink outline-none focus:border-focus"
                   />
-                ) : (
-                  <span className="flex-1 truncate font-normal flex items-center gap-1">
-                    <WorktreeIcon session={s} />
-                    {s.provider === 'opencode' && (
-                      <span
-                        title="OpenCode session"
-                        className="text-micro px-1 py-0 rounded-control bg-edge-strong text-ink-muted font-medium leading-tight"
-                      >
-                        OC
-                      </span>
-                    )}
-                    {s.provider === 'codex' && (
-                      <span
-                        title="Codex session"
-                        className="text-micro px-1 py-0 rounded-control bg-edge-strong text-ink-muted font-medium leading-tight"
-                      >
-                        CX
-                      </span>
-                    )}
-                    {sessionDisplayName(s)}
-                  </span>
-                )}
-                {!isEditing && (
-                  <>
-                    <span className="text-meta text-ink-faint tabular-nums flex-shrink-0">{compactAge(s.created)}</span>
-                    <span
-                      onClick={e => { e.stopPropagation(); startEditing(s) }}
-                      className="cursor-pointer flex-shrink-0 text-transparent group-hover:text-ink-muted hover:text-ink! transition-colors"
-                      title="Rename session"
-                    >
-                      <IconPencil size={13} stroke={2} />
+                </div>
+              )
+            }
+
+            return (
+              <div
+                key={s.id}
+                className={`density-row flex w-full items-center gap-1.5 rounded-control pl-2 pr-1 transition-colors ${
+                  isActiveSession
+                    ? 'bg-accent-9/30 text-accent-2'
+                    : 'text-ink hover:bg-surface-raised'
+                }`}
+              >
+                <button
+                  onClick={() => onSelectSession(s.id)}
+                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-body"
+                >
+                  <StatusDot status={status} title={statusTitle} />
+                  <OriginGlyph source={s.source} />
+                  {s.worktreePath && (
+                    <span title={`Worktree: ${s.worktreePath.split('/').pop() ?? ''}`} className="flex-shrink-0 text-primary-6">
+                      <IconGitBranch size={12} stroke={2} />
                     </span>
-                    <span
-                      onClick={e => { e.stopPropagation(); onDeleteSession(s.id) }}
-                      className="cursor-pointer text-body text-transparent hover:text-error-5 group-hover:text-ink-faint flex-shrink-0"
-                    >
-                      ×
-                    </span>
-                  </>
-                )}
+                  )}
+                  {s.provider === 'opencode' && (
+                    <span title="OpenCode session" className="flex-shrink-0 rounded-control bg-edge-strong px-1 text-micro font-medium leading-tight text-ink-muted">OC</span>
+                  )}
+                  {s.provider === 'codex' && (
+                    <span title="Codex session" className="flex-shrink-0 rounded-control bg-edge-strong px-1 text-micro font-medium leading-tight text-ink-muted">CX</span>
+                  )}
+                  <span className="truncate">{sessionDisplayName(s)}</span>
+                </button>
+                <span className="flex-shrink-0 text-meta tabular-nums text-ink-faint">{compactAge(s.created)}</span>
+                <RowMenu items={menuItems} label={`Actions for ${sessionDisplayName(s)}`} />
               </div>
             )
           })}
 
-          {/* New session for this repo (visible on hover) */}
-          {onNewSession && <NewSessionMenu onNewSession={onNewSession} isMobile={isMobile} />}
-
-          {/* Inline docs picker */}
-          {docsPickerOpen && docsPickerRepoDir === node.workingDir && onDocsPickerSelect && onDocsPickerClose && (
-            <DocsFilePicker
-              files={docsPickerFiles ?? []}
-              loading={docsPickerLoading ?? false}
-              starredDocs={docsStarredDocs ?? []}
-              onSelect={onDocsPickerSelect}
-              onClose={onDocsPickerClose}
-            />
-          )}
-
-          {/* Inline approvals */}
-          {approvalsOpen && (
-            <div className="mt-1 border-t border-edge">
-              <ApprovalsPanel
-                token={token}
-                workingDir={node.workingDir}
-                visible={approvalsOpen}
-              />
-            </div>
-          )}
-
-          {/* Inline archived sessions */}
-          {archiveOpen && (
-            <div className="mt-1 border-t border-edge pt-1">
-              {archivedSessions.length === 0 ? (
-                <div className="pl-12 pr-2 py-1 text-body text-ink-muted">No archived sessions</div>
-              ) : (
-                <>
-                  {visibleArchived.map(s => (
+          {/* New session in this repo */}
+          {onNewSession && (
+            <div className="relative">
+              <button
+                onClick={() => setProviderMenuOpen(o => !o)}
+                aria-expanded={providerMenuOpen}
+                className="density-row flex w-full items-center gap-1.5 rounded-control pl-2 pr-1 text-left text-body text-ink-muted transition-colors hover:bg-surface-raised hover:text-ink"
+                title="New session in this repo"
+              >
+                <span className="inline-flex w-3 flex-shrink-0 items-center justify-center">
+                  <IconPlus size={12} stroke={2} />
+                </span>
+                <span className="truncate">New session</span>
+              </button>
+              {providerMenuOpen && (
+                <div className="absolute left-2 right-1 z-40 mt-0.5 rounded-floating border border-edge-strong bg-surface-raised py-1 shadow-floating">
+                  {PROVIDERS.map(p => (
                     <button
-                      key={s.id}
-                      onClick={() => onViewArchivedSession(s.id)}
-                      className="group w-full flex items-baseline gap-2 pl-12 pr-2 py-0.5 text-left text-body text-ink-muted hover:bg-surface-raised hover:text-ink transition-colors"
+                      key={p.id}
+                      onClick={() => { setProviderMenuOpen(false); onNewSession(p.id) }}
+                      className="flex w-full items-center gap-2 px-3 py-1 text-left text-body text-ink transition-colors hover:bg-edge"
+                      title={p.description}
                     >
-                      <IconArchive size={12} className="flex-shrink-0 self-center opacity-40" />
-                      <span className="flex-1 truncate">{archivedDisplayName(s)}</span>
-                      <span className="shrink-0 text-meta text-ink-faint tabular-nums">{archivedCompactAge(s.archivedAt)}</span>
+                      {p.label}
                     </button>
                   ))}
-                  {hasMore && !archiveExpanded && (
-                    <button
-                      onClick={() => setArchiveExpanded(true)}
-                      className="w-full pl-12 pr-2 py-0.5 text-left text-body text-ink-muted hover:text-ink transition-colors"
-                    >
-                      Show all {archivedSessions.length} archived...
-                    </button>
-                  )}
-                  {archiveExpanded && hasMore && (
-                    <button
-                      onClick={() => setArchiveExpanded(false)}
-                      className="w-full pl-12 pr-2 py-0.5 text-left text-body text-ink-muted hover:text-ink transition-colors"
-                    >
-                      Show less
-                    </button>
-                  )}
-                </>
+                </div>
               )}
             </div>
           )}

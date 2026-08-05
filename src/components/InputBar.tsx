@@ -3,13 +3,15 @@
  * inline slash-command autocomplete.
  *
  * Supports Enter to send, Shift+Enter for newline, Ctrl+C to interrupt,
- * Escape to blur. Height is user-draggable via a top handle and persisted
- * to localStorage.
+ * Escape to blur. The textarea sizes itself to its content, from one line up
+ * to 40% of the pane; the toolbar below it is one row, split into session
+ * state (left, unboxed monospace) and actions (right, exactly one filled).
  */
 
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { useOutsideClick } from '../hooks/useOutsideClick'
-import { IconSend, IconPaperclip, IconX, IconTerminal2, IconChevronDown, IconDots, IconGitBranch, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck } from '@tabler/icons-react'
+import { useAutoGrow } from '../hooks/useAutoGrow'
+import { IconPaperclip, IconX, IconTerminal2, IconChevronDown, IconDots, IconGitBranch, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck, IconCornerDownLeft } from '@tabler/icons-react'
 import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
@@ -32,39 +34,71 @@ function shortModelLabel(modelId: string, models: ModelOption[]): string {
 // Shared toolbar atoms — extracted to eliminate duplication across variants
 // ---------------------------------------------------------------------------
 
-/** Attach-files button with configurable size and rounding. */
-function AttachButton({ onClick, disabled, size = 16, rounded = 'rounded-control', className = '' }: {
-  onClick: () => void; disabled: boolean; size?: number; rounded?: string; className?: string
+/** Square icon action — one of the composer's right-hand controls. */
+function ToolbarAction({ onClick, disabled, title, accent = false, children }: {
+  onClick: () => void; disabled?: boolean; title: string; accent?: boolean; children: React.ReactNode
 }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`flex items-center justify-center ${rounded} p-1.5 text-ink-muted hover:text-ink hover:bg-edge transition-colors disabled:opacity-30 ${className}`}
-      title="Attach files"
+      className={`composer-row aspect-square flex items-center justify-center rounded-control text-ink-muted transition-colors disabled:opacity-30 ${
+        accent ? 'hover:text-accent-4 hover:bg-surface-raised' : 'hover:text-ink hover:bg-surface-raised'
+      }`}
+      title={title}
     >
-      <IconPaperclip size={size} stroke={2} />
+      {children}
     </button>
   )
 }
 
-/** Send button with configurable accent theme and size. */
-function SendButton({ onClick, disabled, hasContent, size = 16, rounded = 'rounded-control', accent = false, className = '' }: {
-  onClick: () => void; disabled: boolean; hasContent: boolean; size?: number; rounded?: string; accent?: boolean; className?: string
+/** Attach-files button. The picker only accepts images and markdown. */
+function AttachButton({ onClick, disabled, accent = false }: { onClick: () => void; disabled: boolean; accent?: boolean }) {
+  return (
+    <ToolbarAction onClick={onClick} disabled={disabled} title="Attach images or markdown" accent={accent}>
+      <IconPaperclip className="density-icon" stroke={2} />
+    </ToolbarAction>
+  )
+}
+
+/**
+ * The composer's only filled control. Labelled rather than icon-only, and
+ * sized from --row-h so touch density lifts it to 44px. Disabled state uses a
+ * muted fill instead of a faded primary, which is hard to find.
+ */
+function SendButton({ onClick, disabled, hasContent, accent = false }: {
+  onClick: () => void; disabled: boolean; hasContent: boolean; accent?: boolean
 }) {
+  const isDisabled = disabled || !hasContent
   const activeClass = accent
-    ? 'bg-accent-7 text-ink hover:bg-accent-6'
-    : 'bg-primary-8 text-on-primary hover:bg-primary-7'
+    ? 'bg-accent-5 text-ink-inverse hover:bg-accent-4'
+    : 'bg-primary-4 text-on-primary hover:bg-primary-3'
   return (
     <button
       onClick={onClick}
-      disabled={disabled || !hasContent}
-      className={`flex items-center justify-center ${rounded} p-1.5 transition-colors disabled:opacity-30 ${
-        hasContent ? activeClass : 'text-ink-muted'
-      } ${className}`}
+      disabled={isDisabled}
+      className={`composer-row flex items-center gap-2 rounded-control px-3.5 text-body font-bold transition-colors ${
+        isDisabled ? 'bg-edge-strong text-ink-faint' : activeClass
+      }`}
       title="Send (Enter)"
     >
-      <IconSend size={size} stroke={2} />
+      Send
+      <IconCornerDownLeft size={12} stroke={2} className="opacity-65" />
+    </button>
+  )
+}
+
+/** Unboxed session-state item: monospace, muted, no chip and no border. */
+function StateItem({ children, title, onClick, danger = false, innerRef }: {
+  children: React.ReactNode; title?: string; onClick?: () => void; danger?: boolean
+  innerRef?: React.Ref<HTMLButtonElement>
+}) {
+  const tone = danger ? 'text-warning-4' : 'text-ink-muted hover:text-ink'
+  const className = `flex items-center gap-1.5 font-mono text-meta whitespace-nowrap transition-colors ${tone}`
+  if (!onClick) return <span className={className} title={title}>{children}</span>
+  return (
+    <button ref={innerRef} onClick={onClick} className={className} title={title}>
+      {children}
     </button>
   )
 }
@@ -75,25 +109,16 @@ function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle,
   menuRef: React.RefObject<HTMLDivElement | null>
   onToggle: () => void; onSelect: (mode: PermissionMode) => void
 }) {
+  const mode = PERMISSION_MODES.find(m => m.id === currentMode)
+  const ModeIcon = PERMISSION_MODE_ICONS[mode?.icon ?? 'shield']
   return (
     <div className="relative" ref={menuRef}>
-      <button
-        onClick={onToggle}
-        className={`flex items-center gap-1 rounded-control px-2 py-1 text-meta font-medium transition-colors ${
-          currentMode === 'bypassPermissions'
-            ? 'text-error-5 hover:text-error-4 hover:bg-error-9/30'
-            : 'text-ink-muted hover:text-ink hover:bg-edge'
-        }`}
-        title="Permission mode"
-      >
-        {(() => {
-          const mode = PERMISSION_MODES.find(m => m.id === currentMode)
-          const ModeIcon = PERMISSION_MODE_ICONS[mode?.icon ?? 'shield']
-          return <ModeIcon size={14} stroke={2} />
-        })()}
-        <span className="hidden lg:inline">{PERMISSION_MODES.find(m => m.id === currentMode)?.label ?? currentMode}</span>
-        <IconChevronDown size={12} stroke={2} />
-      </button>
+      <StateItem onClick={onToggle} title="Permission mode" danger={!!mode?.dangerous}>
+        <ModeIcon size={14} stroke={2} />
+        {/* Label drops out on a narrow composer, not a narrow viewport */}
+        <span className="hidden @[34rem]:inline">{mode?.label ?? currentMode}</span>
+        <IconChevronDown size={12} stroke={2} className="opacity-70" />
+      </StateItem>
       {isOpen && (
         <div className="absolute bottom-full mb-1 left-0 z-50 min-w-[260px] rounded-floating border border-edge-strong bg-surface-raised shadow-floating py-1">
           {modes.map(m => {
@@ -200,14 +225,10 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
 
   return (
     <div className="relative" ref={menuRef}>
-      <button
-        onClick={onToggle}
-        className="flex items-center gap-1 rounded-control px-2 py-1 text-meta font-medium text-ink-muted hover:text-ink hover:bg-edge transition-colors"
-        title="Change model"
-      >
+      <StateItem onClick={onToggle} title="Change model">
         {shortModelLabel(currentModel, models)}
-        <IconChevronDown size={12} stroke={2} />
-      </button>
+        <IconChevronDown size={12} stroke={2} className="opacity-70" />
+      </StateItem>
       {isOpen && (
         <div className="absolute bottom-full mb-1 right-0 z-50 w-[260px] max-h-[360px] rounded-floating border border-edge-strong bg-surface-raised shadow-floating flex flex-col">
           <div className="p-2 border-b border-edge-strong">
@@ -268,11 +289,6 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
   )
 }
 
-const INPUT_HEIGHT_KEY = 'inputBarHeight'
-const DEFAULT_HEIGHT = 120
-const MIN_HEIGHT = 60
-const MAX_HEIGHT = 600
-
 /** Imperative handle for programmatic text insertion (e.g. from skill menu). */
 export interface InputBarHandle {
   insertText: (text: string) => void
@@ -315,7 +331,7 @@ interface InputBarProps {
   usage?: import('../types').SessionUsage | null
   /** Override the default placeholder text in the textarea. */
   placeholder?: string
-  /** When true, disables drag-to-resize and uses auto-height instead. */
+  /** Narrow-viewport hint — suppresses autofocus so the keyboard doesn't pop up. */
   isMobile?: boolean
   /** Show the worktree toggle (only before first message in a session). */
   showWorktreeToggle?: boolean
@@ -359,20 +375,12 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const mobileMenuRef = useRef<HTMLDivElement>(null)
   const permMenuRef = useRef<HTMLDivElement>(null)
   const modelMenuRef = useRef<HTMLDivElement>(null)
-  const MOBILE_HEIGHT = 100
-  const ORCH_HEIGHT_KEY = 'orchestratorInputBarHeight'
-  const ORCHESTRATOR_DEFAULT_HEIGHT = 90
-  const [height, setHeight] = useState(() => {
-    if (isMobile) return MOBILE_HEIGHT
-    const key = isOrchestrator ? ORCH_HEIGHT_KEY : INPUT_HEIGHT_KEY
-    const defaultH = isOrchestrator ? ORCHESTRATOR_DEFAULT_HEIGHT : DEFAULT_HEIGHT
-    const stored = localStorage.getItem(key)
-    return stored ? Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, parseInt(stored, 10))) : defaultH
-  })
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const prevWaiting = useRef(false)
-  const heightRef = useRef(height)
+
+  // Height follows content — no stored height, no drag handle.
+  useAutoGrow(textareaRef, value)
 
   useImperativeHandle(ref, () => ({
     insertText(text: string) {
@@ -393,25 +401,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   useOutsideClick(mobileMenuRef, mobileMenuOpen, useCallback(() => setMobileMenuOpen(false), []))
   useOutsideClick(permMenuRef, permMenuOpen, useCallback(() => setPermMenuOpen(false), []))
   useOutsideClick(modelMenuRef, modelMenuOpen, useCallback(() => setModelMenuOpen(false), []))
-
-  const onDragStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    const startY = e.clientY
-    const startHeight = heightRef.current
-
-    const onMouseMove = (ev: MouseEvent) => {
-      const newHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, startHeight + (startY - ev.clientY)))
-      heightRef.current = newHeight
-      setHeight(newHeight)
-      localStorage.setItem(isOrchestrator ? ORCH_HEIGHT_KEY : INPUT_HEIGHT_KEY, String(newHeight))
-    }
-    const onMouseUp = () => {
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
-    }
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
-  }, [isOrchestrator])
 
   const handleSend = useCallback(() => {
     if (!value.trim() && pendingFiles.length === 0) return
@@ -515,83 +504,85 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const hasSkills = !isOrchestrator && skillGroups && skillGroups.some(g => g.skills.length > 0)
   const hasSlashCommands = !isOrchestrator && slashCommands && slashCommands.length > 0
 
+  // Session state (left) and actions (right). The orchestrator variant is a
+  // filter over these plus an accent flag — not a second layout.
+  const showPermission = !isOrchestrator && !!currentPermissionMode && !!onPermissionModeChange
+  const showModel = !isOrchestrator && !!currentModel && !!onModelChange
+  const showUsage = !isOrchestrator && !!usage && (usage.inputTokens > 0 || usage.outputTokens > 0)
+  const showWorktree = !isOrchestrator && (!!worktreePath || (showWorktreeToggle && !!onWorktreeChange) || !!onMoveToWorktree)
+  // Anything beyond the permission chip folds into the overflow menu on a
+  // narrow composer; a dangerous mode must stay visible at every width.
+  const hasOverflow = showModel || showWorktree
+
   return (
-    <div className={`app-input-bar relative flex flex-col border-l bg-surface-raised ${isOrchestrator ? 'orchestrator-input-bar border-t border-edge' : 'border-t border-edge'}`} style={isMobile ? { minHeight: MOBILE_HEIGHT } : { height }}>
-      <DropZone onUpload={onAddFiles} disabled={disabled} />
+    <div className={`app-input-bar @container relative flex flex-col border-t border-edge bg-surface-raised ${isOrchestrator ? 'orchestrator-input-bar' : ''}`}>
+      {/* Measured column — matches the transcript's 44px gutter + 68ch prose */}
+      <div className="flex px-4 py-3">
+        <div className="w-11 flex-shrink-0" aria-hidden="true" />
+        <div className="relative flex min-w-0 flex-1 max-w-[68ch] flex-col gap-2.5">
+          <DropZone onUpload={onAddFiles} disabled={disabled} />
 
-      {/* Slash autocomplete popup */}
-      {slashMenuOpen && hasSlashCommands && (
-        <SlashAutocomplete
-          commands={slashCommands}
-          filter={slashFilter}
-          onSelect={handleSlashSelect}
-          onClose={() => setSlashMenuOpen(false)}
-        />
-      )}
+          {/* Slash autocomplete popup — anchored to the measured column */}
+          {slashMenuOpen && hasSlashCommands && (
+            <SlashAutocomplete
+              commands={slashCommands}
+              filter={slashFilter}
+              onSelect={handleSlashSelect}
+              onClose={() => setSlashMenuOpen(false)}
+            />
+          )}
 
-      {/* Drag handle — desktop only */}
-      {!isMobile && (
-        <div
-          className="h-1 flex-shrink-0 cursor-row-resize hover:bg-primary-7/40 active:bg-primary-7/60 transition-colors"
-          onMouseDown={onDragStart}
-        />
-      )}
+          {/* Pending file chips */}
+          {pendingFiles.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {pendingFiles.map((file, i) => (
+                <span
+                  key={`${file.name}-${i}`}
+                  className="flex items-center gap-1 rounded-control bg-edge-strong px-2 py-0.5 text-meta text-ink"
+                >
+                  <span className="max-w-[150px] truncate">{file.name}</span>
+                  <button
+                    onClick={() => onRemoveFile(i)}
+                    className="flex-shrink-0 rounded-control p-0.5 text-ink-muted hover:text-ink"
+                    title={`Remove ${file.name}`}
+                  >
+                    <IconX size={12} stroke={2} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
 
-      {/* Pending file chips */}
-      {pendingFiles.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 px-3 pt-1.5 flex-shrink-0">
-          {pendingFiles.map((file, i) => (
-            <span
-              key={`${file.name}-${i}`}
-              className="flex items-center gap-1 rounded-control bg-edge-strong px-2 py-0.5 text-meta text-ink"
-            >
-              <span className="max-w-[150px] truncate">{file.name}</span>
-              <button
-                onClick={() => onRemoveFile(i)}
-                className="flex-shrink-0 rounded-control p-0.5 text-ink-muted hover:text-ink"
-              >
-                <IconX size={12} stroke={2} />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
+          <div className="flex gap-2">
+            {isWaiting && (
+              <span className={`mt-1.5 h-2 w-2 flex-shrink-0 rounded-full animate-pulse ${isOrchestrator ? 'bg-accent-5' : 'bg-primary-5'}`} />
+            )}
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={value}
+              onChange={handleChange}
+              onKeyDown={handleKeyDown}
+              disabled={disabled}
+              autoFocus={!isMobile}
+              placeholder={placeholder ?? (isOrchestrator ? 'Ask the orchestrator...' : isWaiting ? 'Type response...' : 'What do you want to build?')}
+              // Mobile must stay 16px: font sizes under 16px trigger iOS Safari zoom-on-focus
+              className={`field-sizing-content max-h-[40vh] w-full flex-1 resize-none bg-transparent ${isMobile ? 'text-[16px]' : 'text-body'} text-ink placeholder:text-ink-muted outline-none disabled:opacity-50 overflow-y-auto`}
+            />
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/gif,image/webp,text/markdown,.md"
+              onChange={handleFileChange}
+              className="hidden"
+            />
+          </div>
 
-      {/* Worktree checkbox removed — use the footer button instead */}
-
-      {/* Textarea — full width */}
-      <div className="flex flex-1 min-h-0 gap-2 px-3 pt-2 pb-1">
-        {isWaiting && (
-          <span className={`mt-1 h-2 w-2 flex-shrink-0 rounded-full animate-pulse ${isOrchestrator ? 'bg-accent-5' : 'bg-primary-5'}`} />
-        )}
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          disabled={disabled}
-          autoFocus
-          placeholder={placeholder ?? (isOrchestrator ? 'Ask the orchestrator...' : isWaiting ? 'Type response...' : 'What do you want to build?')}
-          // Mobile must stay 16px: font sizes under 16px trigger iOS Safari zoom-on-focus
-          className={`flex-1 min-h-0 resize-none bg-transparent ${isMobile ? 'text-[16px]' : 'text-body'} leading-snug text-ink placeholder:text-ink-muted outline-none disabled:opacity-50 overflow-y-auto`}
-        />
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept="image/png,image/jpeg,image/gif,image/webp,text/markdown,.md"
-          onChange={handleFileChange}
-          className="hidden"
-        />
-      </div>
-
-      {/* Toolbar row — selectors left, action buttons right */}
-      <div className="flex flex-shrink-0 items-center justify-between px-3 pb-2 pt-0">
-        {/* Desktop default: permission + worktree | model + skills + attach + send */}
-        {!isMobile && !isOrchestrator && (
-          <>
-            <div className="flex items-center gap-1">
-              {currentPermissionMode && onPermissionModeChange && (
+          {/* One toolbar: session state left, actions right */}
+          <div className="flex items-center gap-3">
+            <div className="flex min-w-0 items-center gap-3.5">
+              {showPermission && (
                 <PermissionModeDropdown
                   currentMode={currentPermissionMode}
                   modes={visibleModes}
@@ -601,70 +592,118 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   onSelect={handlePermissionModeSelect}
                 />
               )}
-              {/* Worktree: indicator when active, toggle before first message, or move button mid-session */}
-              {worktreePath ? (
+              {showWorktree && (
+                <div className="hidden @[34rem]:flex">
+                  {worktreePath ? (
+                    <StateItem title={worktreePath}>
+                      <IconGitBranch size={14} stroke={2} className="text-ink-faint" />
+                      <span className="max-w-[140px] truncate">{worktreePath.split('/').pop()}</span>
+                    </StateItem>
+                  ) : showWorktreeToggle && onWorktreeChange ? (
+                    <StateItem
+                      onClick={() => onWorktreeChange(!useWorktree)}
+                      title={useWorktree ? 'Worktree enabled — session will use a git worktree' : 'Enable git worktree for this session'}
+                    >
+                      <IconGitBranch size={14} stroke={2} className={useWorktree ? 'text-primary-5' : 'text-ink-faint'} />
+                      <span className={useWorktree ? 'text-primary-5' : undefined}>Worktree</span>
+                    </StateItem>
+                  ) : onMoveToWorktree ? (
+                    <StateItem onClick={onMoveToWorktree} title="Move session to a git worktree">
+                      <IconGitBranch size={14} stroke={2} className="text-ink-faint" />
+                      <span>Worktree</span>
+                    </StateItem>
+                  ) : null}
+                </div>
+              )}
+              {showModel && (
+                <div className="hidden @[34rem]:flex">
+                  <ModelDropdown
+                    currentModel={currentModel}
+                    models={availableModels}
+                    isOpen={modelMenuOpen}
+                    menuRef={modelMenuRef}
+                    onToggle={() => { closeAllPopups('model'); setModelMenuOpen(!modelMenuOpen) }}
+                    onChange={(id) => { onModelChange(id); setModelMenuOpen(false) }}
+                  />
+                </div>
+              )}
+              {showUsage && (
                 <span
-                  className="flex items-center gap-1 rounded-control px-2 py-1 text-meta font-medium text-primary-5"
-                  title={worktreePath}
-                >
-                  <IconGitBranch size={14} stroke={2} />
-                  <span className="hidden lg:inline max-w-[120px] truncate">{worktreePath.split('/').pop()}</span>
-                </span>
-              ) : showWorktreeToggle && onWorktreeChange ? (
-                <button
-                  onClick={() => onWorktreeChange(!useWorktree)}
-                  className={`flex items-center gap-1 rounded-control px-2 py-1 text-meta font-medium transition-colors ${
-                    useWorktree
-                      ? 'text-primary-5 bg-primary-9/30 hover:bg-primary-9/50'
-                      : 'text-ink-muted hover:text-ink hover:bg-edge'
-                  }`}
-                  title={useWorktree ? 'Worktree enabled — session will use a git worktree' : 'Enable git worktree for this session'}
-                >
-                  <IconGitBranch size={14} stroke={2} />
-                  <span className="hidden lg:inline">Worktree</span>
-                </button>
-              ) : onMoveToWorktree ? (
-                <button
-                  onClick={onMoveToWorktree}
-                  className="flex items-center gap-1 rounded-control px-2 py-1 text-meta font-medium text-ink-muted hover:text-ink hover:bg-edge transition-colors"
-                  title="Move session to a git worktree"
-                >
-                  <IconGitBranch size={14} stroke={2} />
-                  <span className="hidden lg:inline">Worktree</span>
-                </button>
-              ) : null}
-            </div>
-            <div className="flex items-center gap-1">
-              {usage && (usage.inputTokens > 0 || usage.outputTokens > 0) && (
-                <span
-                  className="hidden md:inline px-2 py-1 text-micro text-ink-muted whitespace-nowrap"
+                  className="hidden @[44rem]:inline font-mono text-meta text-ink-faint whitespace-nowrap"
                   title={`Session usage — input: ${usage.inputTokens.toLocaleString()} tokens, output: ${usage.outputTokens.toLocaleString()} tokens${usage.costUsd ? `, cost: $${usage.costUsd.toFixed(4)}` : ''}`}
                 >
                   {formatUsageLabel(usage)}
                 </span>
               )}
-              {currentModel && onModelChange && (
-                <ModelDropdown
-                  currentModel={currentModel}
-                  models={availableModels}
-                  isOpen={modelMenuOpen}
-                  menuRef={modelMenuRef}
-                  onToggle={() => { closeAllPopups('model'); setModelMenuOpen(!modelMenuOpen) }}
-                  onChange={(id) => { onModelChange(id); setModelMenuOpen(false) }}
-                />
+            </div>
+
+            <div className="flex-1" />
+
+            <div className="flex items-center gap-1">
+              {/* Overflow — carries the state items that collapsed */}
+              {hasOverflow && (
+                <div className="relative @[34rem]:hidden" ref={mobileMenuRef}>
+                  <ToolbarAction onClick={() => setMobileMenuOpen(!mobileMenuOpen)} disabled={disabled} title="More options">
+                    <IconDots className="density-icon" stroke={2} />
+                  </ToolbarAction>
+                  {mobileMenuOpen && (
+                    <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[220px] rounded-floating border border-edge-strong bg-surface-raised shadow-floating py-1">
+                      {showWorktree && (
+                        <>
+                          <div className="px-3 py-1.5 text-meta text-ink-muted uppercase tracking-wider">Worktree</div>
+                          {worktreePath ? (
+                            <div className="px-3 py-2 text-body text-ink-muted truncate" title={worktreePath}>
+                              {worktreePath.split('/').pop()}
+                            </div>
+                          ) : showWorktreeToggle && onWorktreeChange ? (
+                            <button
+                              onClick={() => { onWorktreeChange(!useWorktree); setMobileMenuOpen(false) }}
+                              className="flex items-center gap-2 w-full text-left px-3 py-2 text-body text-ink hover:bg-edge transition-colors"
+                            >
+                              <IconGitBranch size={18} stroke={2} className={useWorktree ? 'text-primary-4' : 'text-ink-muted'} />
+                              {useWorktree ? 'Worktree enabled' : 'Use a worktree'}
+                              {useWorktree && <IconCheck size={14} stroke={2.5} className="ml-auto text-primary-4" />}
+                            </button>
+                          ) : onMoveToWorktree ? (
+                            <button
+                              onClick={() => { onMoveToWorktree(); setMobileMenuOpen(false) }}
+                              className="flex items-center gap-2 w-full text-left px-3 py-2 text-body text-ink hover:bg-edge transition-colors"
+                            >
+                              <IconGitBranch size={18} stroke={2} className="text-ink-muted" />
+                              Move to a worktree
+                            </button>
+                          ) : null}
+                          {showModel && <div className="my-1 border-t border-edge-strong" />}
+                        </>
+                      )}
+                      {showModel && (
+                        <>
+                          <div className="px-3 py-1.5 text-meta text-ink-muted uppercase tracking-wider">Model</div>
+                          {availableModels.map(m => (
+                            <button
+                              key={m.id}
+                              onClick={() => { onModelChange(m.id); setMobileMenuOpen(false) }}
+                              className={`w-full text-left px-3 py-2 text-body hover:bg-edge transition-colors ${m.id === currentModel ? 'text-primary-4' : 'text-ink'}`}
+                            >
+                              {m.label}
+                            </button>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
+
               {hasSkills && (
                 <div className="relative">
-                  <button
+                  <ToolbarAction
                     onClick={() => { closeAllPopups('skill'); setSkillMenuOpen(!skillMenuOpen) }}
                     disabled={disabled}
-                    className="flex items-center gap-1 rounded-control px-2 py-1 text-meta font-medium text-ink-muted hover:text-ink hover:bg-edge transition-colors disabled:opacity-30"
                     title="Claude Skills"
                   >
-                    <IconTerminal2 size={14} stroke={2} />
-                    <span className="hidden lg:inline">Skills</span>
-                    <IconChevronDown size={12} stroke={2} />
-                  </button>
+                    <IconTerminal2 className="density-icon" stroke={2} />
+                  </ToolbarAction>
                   {skillMenuOpen && (
                     <SkillMenu
                       groups={skillGroups ?? []}
@@ -678,128 +717,17 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   )}
                 </div>
               )}
-              <AttachButton onClick={handleFileSelect} disabled={disabled} size={16} rounded="rounded-control" />
-              <SendButton onClick={handleSend} disabled={disabled} hasContent={!!(value.trim() || pendingFiles.length > 0)} size={16} rounded="rounded-control" />
-            </div>
-          </>
-        )}
 
-        {/* Desktop orchestrator: attach + send only (accent theme) */}
-        {!isMobile && isOrchestrator && (
-          <>
-            <div className="flex-1" />
-            <div className="flex items-center gap-1.5">
-              <AttachButton onClick={handleFileSelect} disabled={disabled} size={16} rounded="rounded-full" className="hover:text-accent-4 hover:bg-accent-9/30" />
-              <SendButton onClick={handleSend} disabled={disabled} hasContent={!!(value.trim() || pendingFiles.length > 0)} size={16} rounded="rounded-full" accent className="px-3 py-1" />
+              <AttachButton onClick={handleFileSelect} disabled={disabled} accent={isOrchestrator} />
+              <SendButton
+                onClick={handleSend}
+                disabled={disabled}
+                hasContent={!!(value.trim() || pendingFiles.length > 0)}
+                accent={isOrchestrator}
+              />
             </div>
-          </>
-        )}
-
-        {/* Mobile default: context menu (...) + send */}
-        {isMobile && !isOrchestrator && (
-          <>
-            <div className="flex-1" />
-            <div className="flex items-center gap-1.5">
-              <div className="relative" ref={mobileMenuRef}>
-                <button
-                  onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                  disabled={disabled}
-                  className="flex items-center justify-center rounded-control min-w-[34px] min-h-[34px] p-1.5 text-ink hover:text-ink hover:bg-edge transition-colors disabled:opacity-30"
-                  title="More options"
-                >
-                  <IconDots size={24} stroke={2} />
-                </button>
-                {mobileMenuOpen && (
-                  <div className="absolute bottom-full mb-1 right-0 z-50 min-w-[220px] rounded-floating border border-edge-strong bg-surface-raised shadow-floating py-1">
-                    {currentPermissionMode && onPermissionModeChange && (
-                      <>
-                        <div className="px-3 py-1.5 text-meta text-ink-muted uppercase tracking-wider">Permissions</div>
-                        {visibleModes.map(m => {
-                          const ModeIcon = PERMISSION_MODE_ICONS[m.icon]
-                          const isActive = m.id === currentPermissionMode
-                          return (
-                            <button
-                              key={m.id}
-                              onClick={() => { handlePermissionModeSelect(m.id); setMobileMenuOpen(false) }}
-                              className={`w-full text-left px-3 py-2 text-body hover:bg-edge transition-colors flex items-center gap-2 ${
-                                m.dangerous ? 'hover:bg-error-9/20' : ''
-                              }`}
-                            >
-                              <ModeIcon
-                                size={16}
-                                stroke={2}
-                                className={m.dangerous ? 'text-error-5' : isActive ? 'text-primary-4' : 'text-ink-muted'}
-                              />
-                              <span className={m.dangerous ? 'text-error-5' : isActive ? 'text-primary-4' : 'text-ink'}>
-                                {m.label}
-                              </span>
-                              {isActive && <IconCheck size={14} stroke={2.5} className="ml-auto text-primary-4" />}
-                            </button>
-                          )
-                        })}
-                        <div className="my-1 border-t border-edge-strong" />
-                      </>
-                    )}
-                    {currentModel && onModelChange && (
-                      <>
-                        <div className="px-3 py-1.5 text-meta text-ink-muted uppercase tracking-wider">Model</div>
-                        {availableModels.map(m => (
-                          <button
-                            key={m.id}
-                            onClick={() => { onModelChange(m.id); setMobileMenuOpen(false) }}
-                            className={`w-full text-left px-3 py-2 text-body hover:bg-edge transition-colors ${m.id === currentModel ? 'text-primary-4' : 'text-ink'}`}
-                          >
-                            {m.label}
-                          </button>
-                        ))}
-                        <div className="my-1 border-t border-edge-strong" />
-                      </>
-                    )}
-                    {hasSkills && (
-                      <button
-                        onClick={() => { setMobileMenuOpen(false); setSkillMenuOpen(!skillMenuOpen) }}
-                        className="flex items-center gap-2 w-full text-left px-3 py-2 text-body text-ink hover:bg-edge transition-colors"
-                      >
-                        <IconTerminal2 size={18} stroke={2} className="text-ink-muted" />
-                        Skills
-                      </button>
-                    )}
-                    <button
-                      onClick={() => { setMobileMenuOpen(false); handleFileSelect() }}
-                      className="flex items-center gap-2 w-full text-left px-3 py-2 text-body text-ink hover:bg-edge transition-colors"
-                    >
-                      <IconPaperclip size={18} stroke={2} className="text-ink-muted" />
-                      Attach files
-                    </button>
-                  </div>
-                )}
-                {skillMenuOpen && (
-                  <SkillMenu
-                    groups={skillGroups ?? []}
-                    onSelectSkill={(command) => {
-                      setValue(command + ' ')
-                      setSkillMenuOpen(false)
-                      setTimeout(() => textareaRef.current?.focus(), 0)
-                    }}
-                    onClose={() => setSkillMenuOpen(false)}
-                  />
-                )}
-              </div>
-              <SendButton onClick={handleSend} disabled={disabled} hasContent={!!(value.trim() || pendingFiles.length > 0)} size={24} rounded="rounded-control" className="min-w-[34px] min-h-[34px]" />
-            </div>
-          </>
-        )}
-
-        {/* Mobile orchestrator: attach + send only (accent theme) */}
-        {isMobile && isOrchestrator && (
-          <>
-            <div className="flex-1" />
-            <div className="flex items-center gap-1.5">
-              <AttachButton onClick={handleFileSelect} disabled={disabled} size={24} rounded="rounded-full" className="min-w-[34px] min-h-[34px] hover:text-accent-4 hover:bg-accent-9/30" />
-              <SendButton onClick={handleSend} disabled={disabled} hasContent={!!(value.trim() || pendingFiles.length > 0)} size={24} rounded="rounded-full" accent className="min-w-[34px] min-h-[34px]" />
-            </div>
-          </>
-        )}
+          </div>
+        </div>
       </div>
     </div>
   )

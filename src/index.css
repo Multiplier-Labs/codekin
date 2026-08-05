@@ -44,19 +44,22 @@
   --color-accent-11: #0c282e;
   --color-accent-12: #07171a;
 
-  /* Neutral — teal-tinted grays */
-  --color-neutral-1: #dce4e5;
-  --color-neutral-2: #c6d4d5;
-  --color-neutral-3: #b8ccce;
-  --color-neutral-4: #94aeb1;
-  --color-neutral-5: #748d91;
-  --color-neutral-6: #5c7377;
-  --color-neutral-7: #465c60;
-  --color-neutral-8: #354a4e;
-  --color-neutral-9: #263a3e;
-  --color-neutral-10: #1a2c30;
-  --color-neutral-11: #101e21;
-  --color-neutral-12: #090e0f;
+  /* Neutral — teal-tinted grays.
+     Chroma is half the original tuning (design handoff 09, option 5b): same
+     lightness, same hue, less saturation, so the cool chrome reads quieter
+     against the warm .terminal-area content without touching contrast. */
+  --color-neutral-1: #dfe3e4;
+  --color-neutral-2: #cbd2d3;
+  --color-neutral-3: #c0cacb;
+  --color-neutral-4: #9eabad;
+  --color-neutral-5: #7e8a8c;
+  --color-neutral-6: #657173;
+  --color-neutral-7: #4f5a5c;
+  --color-neutral-8: #3e484a;
+  --color-neutral-9: #2f383a;
+  --color-neutral-10: #222a2c;
+  --color-neutral-11: #161d1e;
+  --color-neutral-12: #0b0d0e;
 
   /* Error — warm red */
   --color-error-1: #fef2f2;
@@ -102,6 +105,7 @@
 
   /* Font family */
   --font-sans: 'Lato', sans-serif;
+  --font-mono: 'Inconsolata', monospace;
 
   /* ── Elevation & radius ────────────────────────────────────────────────
      Three surface levels carry the layout structure:
@@ -444,7 +448,7 @@
   --color-primary-2:  #584528;
   --color-primary-3:  #775c35;
   --color-primary-4:  #977443;
-  --color-primary-5:  #8a6a3c; /* darkened for AA on cream (notification text) */
+  --color-primary-5:  #8a6a3c; /* 4.76:1 on --color-page (notification text); do not lighten */
   --color-primary-6:  #cba557;
   --color-primary-7:  #be9d5a;
   --color-primary-8:  #eccc8e;
@@ -457,8 +461,8 @@
   --color-accent-2:  #1e3c39;
   --color-accent-3:  #29524d;
   --color-accent-4:  #356b65;
-  --color-accent-5:  #356f69; /* darkened for AA on cream (links) */
-  --color-accent-6:  #3d7a72; /* darkened for AA on cream (tool names) */
+  --color-accent-5:  #356f69; /* 5.52:1 on --color-page (links); do not lighten */
+  --color-accent-6:  #3d7a72; /* 4.74:1 on --color-page (tool names); do not lighten */
   --color-accent-7:  #6cb7af;
   --color-accent-8:  #93ccc6;
   --color-accent-9:  #bae1dc;
@@ -496,7 +500,7 @@
   --color-success-2:  #1d3f2a;
   --color-success-3:  #275438;
   --color-success-4:  #326c48;
-  --color-success-5:  #327249; /* darkened for AA on cream (init banner) */
+  --color-success-5:  #327249; /* 5.51:1 on --color-page (init banner); do not lighten */
   --color-success-6:  #53a578;
   --color-success-7:  #66bb8e;
   --color-success-8:  #8ccfab;
@@ -577,6 +581,13 @@
 .density-icon {
   width: var(--icon-size);
   height: var(--icon-size);
+}
+
+/* The composer's action row needs a 32px floor on pointer (the density
+   default of 28px is too small for the primary action) while still growing
+   to 44px on touch. */
+.composer-row {
+  height: max(32px, var(--row-h));
 }
 
 /* Interactive elements that stay visually small but need a real target. */
