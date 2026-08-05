@@ -282,13 +282,15 @@
   --color-neutral-4:  #424040;
   --color-neutral-5:  #555350;
   --color-neutral-6:  #777571;
-  --color-neutral-7:  #c8c7c4;
-  /* Edges, not near-whites. At the inverted values these measured 1.05:1 and
-     1.11:1 against their own surface — borders that were not there. */
-  --color-neutral-8:  #d9d5cd;  /* border-edge-strong: 1.39:1 on surface */
-  --color-neutral-9:  #e7e3db;  /* border-edge: 1.22:1 on surface */
-  --color-neutral-10: #f8f6f2;
-  --color-neutral-11: #faf9f6;
+  /* The light ramp used to live in the top few percent of the lightness
+     range, so nothing separated from anything: border-edge measured 1.05:1
+     against its own surface and the sidebar was 1.03:1 from the content pane.
+     Steps 7-11 are spread out; step 12 (the content ground) stays white. */
+  --color-neutral-7:  #b5afa2;
+  --color-neutral-8:  #cac4b8;  /* border-edge-strong: 1.51:1 on surface */
+  --color-neutral-9:  #dbd6cb;  /* border-edge: 1.26:1 on surface */
+  --color-neutral-10: #eae7de;  /* raised: 1.08:1 on surface */
+  --color-neutral-11: #f2efe8;  /* surface: 1.12:1 on page */
   --color-neutral-12: #fdfcfa;
 
   /* Primary (amber/gold) — light tints as backgrounds, dark shades as text */
@@ -434,12 +436,12 @@
   --color-neutral-4:  #424040;
   --color-neutral-5:  #6b6964;
   --color-neutral-6:  #7c7a75;
-  --color-neutral-7:  #d5d0c6;
-  --color-neutral-8:  #e0dbd2;  /* border-edge-strong: 1.31:1 on surface */
-  --color-neutral-9:  #ebe7df;  /* border-edge: 1.17:1 on surface */
-  --color-neutral-10: #f7f5f0;
-  --color-neutral-11: #faf9f6;
-  --color-neutral-12: #fdf9f4;
+  --color-neutral-7:  #c2bcae;
+  --color-neutral-8:  #d0cabe;  /* border-edge-strong: 1.45:1 on surface */
+  --color-neutral-9:  #ded9cf;  /* border-edge: 1.25:1 on surface */
+  --color-neutral-10: #ece8e0;  /* raised: 1.08:1 on surface */
+  --color-neutral-11: #f4f1ea;  /* cards/composer: 1.08:1 on the pane */
+  --color-neutral-12: #fdf9f4;  /* the cream pane the AA overrides are set against */
 
   --color-primary-1:  #382c1a;
   --color-primary-2:  #584528;
@@ -521,14 +523,16 @@
 }
 
 /* Light mode sidebar text — dark text on light background */
+/* Sidebar text, darkened to stay ahead of the darker sidebar surface above:
+   ink 12.33:1, ink-muted 7.72:1, ink-faint 5.56:1. */
 [data-theme="light"] .app-left-sidebar,
 [data-theme="light"] .app-right-sidebar {
   --color-neutral-1: #1a1a1a;
-  --color-neutral-2: #2e2e2e;
-  --color-neutral-3: #3d3d3d;
-  --color-neutral-4: #555555;
-  --color-neutral-5: #707070;
-  --color-neutral-6: #8a8a8a;
+  --color-neutral-2: #2b2b2b;
+  --color-neutral-3: #383838;
+  --color-neutral-4: #4a4a4a;
+  --color-neutral-5: #5f5f5f;
+  --color-neutral-6: #737373;
 }
 
 /* ── Density ───────────────────────────────────────────────────────────────
