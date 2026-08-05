@@ -144,10 +144,10 @@ function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
   )
 }
 
-function UserMessage({ msg, fontSize, isMobile }: { msg: ChatMessage & { type: 'user' }; fontSize: number; isMobile?: boolean }) {
+function UserMessage({ msg, fontSize }: { msg: ChatMessage & { type: 'user' }; fontSize: number }) {
   return (
     <div
-      className={`user-bubble rounded-control border border-edge bg-surface px-3 py-2 text-ink whitespace-pre-wrap ${isMobile ? 'max-w-[95%]' : 'max-w-[80%]'}`}
+      className="user-bubble rounded-control border border-edge bg-surface px-3 py-2 text-ink whitespace-pre-wrap"
       style={{ fontSize: `${fontSize}px` }}
     >
       {formatUserText(msg.text)}
@@ -397,7 +397,7 @@ function ImageInline({ msg }: { msg: ChatMessage & { type: 'image' } }) {
 function TentativeMessage({ msg, fontSize }: { msg: ChatMessage & { type: 'tentative' }; fontSize: number }) {
   return (
     <div
-      className="max-w-[80%] rounded-control border-l-2 border-warning-6 bg-warning-11/20 px-3 py-2 text-ink-muted whitespace-pre-wrap"
+      className="rounded-control border-l-2 border-warning-6 bg-warning-11/20 px-3 py-2 text-ink-muted whitespace-pre-wrap"
       style={{ fontSize: `${fontSize}px` }}
     >
       <div className="mb-1 text-meta text-warning-5 uppercase tracking-wider">queued</div>
@@ -631,7 +631,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                   }
                   node = <SystemMessage msg={msg} />; break
                 case 'user':
-                  node = <UserMessage msg={msg} fontSize={fontSize} isMobile={isMobile} />; break
+                  node = <UserMessage msg={msg} fontSize={fontSize} />; break
                 case 'assistant':
                   node = <AssistantMessage msg={msg} fontSize={fontSize} variant={variant} />; break
                 case 'planning_mode':
