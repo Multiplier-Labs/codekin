@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-05
+
+### Added
+- **Goal Runs** — a durable, auditable act→verify→continue loop that wraps a coding session, surfaced as the "Loop Runs" page at `/loops`. A run drives a maker agent against a goal until a *deterministic* verifier (the loop's own verify commands, checked by exit code) passes, under turn and cost budgets, with readonly path constraints, a no-change nudge and debounced verification. Every turn is recorded in a per-run evidence ledger in `~/.codekin/goal-runs.db`. Includes `/api/goal-runs` (templates, runs, ledger, start, abort) and three shipped loop templates: CI Autorepair, Coverage Increase, Dependency Upgrade (#517)
+- **Maker–checker review pass** — when a loop spec names a `checker` provider, a passing verifier hands the diff to a second provider on its own review branch, so no model grades its own work; `approve` finalizes, `request_changes` feeds notes back to the maker, and an unparseable or escalated verdict routes to `awaiting_human` (#517)
+- **Deterministic finalization** — on success Codekin commits the verified tree, pushes the branch and opens a PR itself (recovering an already-open one) instead of trusting the agent's prose, recording the PR URL on the run (#517)
+- **Claude Opus 5 and Sonnet 5** — correct 5th-gen model IDs are probed (the generation uses dateless single-number IDs), both models are in the fallback lists, and new sessions default to Opus 5 (#520)
+- `POST /api/claude/models/refresh` to force model rediscovery without restarting the server (#521)
+
+### Changed
+- **Design system overhaul** (#522, #523, #526, #527, #528, #529, #530, #531, #532, #533, #534) — the visual layer is now token-driven end to end:
+  - **Five named type steps** (`text-micro` / `meta` / `body` / `title` / `head`) replace every hardcoded pixel size in `src/components`; the only exception is the 16px mobile composer textarea, which prevents iOS zoom-on-focus
+  - **Three surfaces** (page / `bg-surface` / `bg-surface-raised`) with a single `shadow-floating` and two radii (`rounded-control`, `rounded-floating`); the hardcoded sidebar background is gone
+  - **Semantic tokens as the only public API** — raw neutral steps and default Tailwind palette classes are migrated to `bg-page`/`text-ink*`/`border-edge*` and the intent families, enforced by a new ESLint guard on `src/components`
+  - **Density as one token** — `--row-h` / `--row-pad` / `--icon-size` / `--tap-min` with a `data-density="touch"` scope, replacing per-element `isMobile` sizing ternaries
+  - **Quieter transcript** — hanging timestamp gutter shared by every turn, consecutive tool calls collapsed into one summarised rail, real surfaces for user turns, and a centred `--measure` column (84ch) that the composer shares
+  - **Composer** — sizes to its content from a two-line minimum, drops the drag handle and its stored heights, becomes a card in the transcript column rather than a full-bleed band, and collapses session state to icons that expand on hover or focus; the token/cost indicator is gone
+  - **Sidebar** — one labelled New button plus per-repo new-session, repos as uppercase section labels with sessions flush beneath, per-row overflow menus that are reachable on touch, keyboard-navigable rows, three status treatments, and a resizable repo drawer that owns Docs / Archive / Approvals in a single scroll region
+  - **Settings** — archive retention and default permission mode become app-wide, with a skip-permissions warning and a global approved-pattern revoke-all
+- **Accessibility** — passive text steps lifted past WCAG AA in every scope (`ink-muted` 6.78:1, `ink-faint` 4.63:1 in dark chrome; light mode 9.78 / 7.28), the light ramp spread so surfaces and borders actually separate, worktree state carried by the glyph rather than by colour alone, and a legible Send fill in both polarities (#527, #532, #533)
+- Model probing is capped at 4 concurrent spawns (was 15) to stop tripping rate limits (#521)
+- "Remove repo" is now "Close sessions" — it archives the repo's sessions and never touches the repo (#534)
+
+### Fixed
+- Model discovery no longer evicts live models on a flaky probe — failures are classified by the CLI's result JSON (404/403 means the model is really gone, anything else is transient), retried once, and last-known-good models carry over (#521)
+- OpenCode reasoning no longer leaks into response text, including literal `<think>` tags and parts misclassified by the wrong REST endpoint (#514, #515, #516)
+- The default permission mode is read at session-creation time, so changing it in Settings applies without a reload (#523)
+- Picking a provider in the sidebar's two-step New menu now actually creates the session with that provider (#526)
+- The repo drawer opened with no width; it now has a persisted, drag-resizable width and takes over the viewport on mobile (#534)
+- Light mode no longer paints a hover fill on every sidebar button, which drew a second box inside an already highlighted row (#534)
+
+### Security
+- Validate every effective target path in `discard_changes`, including client-supplied `statuses` keys, before any git or fs call — prevents authenticated arbitrary file deletion (#519)
+- Dependency upgrades past new advisories: multer 2.2.0, body-parser 2.3.0, undici ^7.28.0, brace-expansion ^5.0.8, postcss ^8.5.23 (both trees), vite 8.1.5, dompurify 3.4.12, @babel/core 7.29.7
+
+### Tests
+- Cover `orchestrator-learning` (1% → ~96% lines) and `orchestrator-memory-router` (28% → 100%) (#518)
+
 ## [0.7.0] - 2026-06-13
 
 ### Added
