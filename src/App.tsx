@@ -113,10 +113,21 @@ export default function App() {
     getAgentName(settings.token).then(setAgentName).catch(() => {})
   }, [settings.token])
 
-  /** Permission mode ref for session orchestration (read at session creation time). */
-  const permissionModeRef = useRef<PermissionMode>(
-    (localStorage.getItem('claude-permission-mode') as PermissionMode) || 'acceptEdits'
-  )
+  /**
+   * The mode new sessions start in, read at session-creation time.
+   *
+   * Backed by localStorage rather than a mount-time snapshot: Settings and the
+   * repo drawer's approvals tab both write that key directly, and a cached ref
+   * would hand new sessions a mode the user had already changed.
+   */
+  const permissionModeRef = useMemo(() => ({
+    get current(): PermissionMode {
+      return (localStorage.getItem('claude-permission-mode') as PermissionMode | null) ?? 'acceptEdits'
+    },
+    set current(mode: PermissionMode) {
+      localStorage.setItem('claude-permission-mode', mode)
+    },
+  }), [])
 
   /** Provider ref for session orchestration (read at session creation time). */
   const providerRef = useRef<CodingProvider>(
