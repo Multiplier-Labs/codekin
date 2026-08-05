@@ -11,7 +11,7 @@
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { useOutsideClick } from '../hooks/useOutsideClick'
 import { useAutoGrow } from '../hooks/useAutoGrow'
-import { IconPaperclip, IconX, IconTerminal2, IconChevronDown, IconDots, IconGitBranch, IconGitBranchDeleted, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck, IconCornerDownLeft } from '@tabler/icons-react'
+import { IconPlus, IconX, IconTerminal2, IconChevronDown, IconDots, IconGitBranch, IconGitBranchDeleted, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck, IconCornerDownLeft } from '@tabler/icons-react'
 import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
@@ -51,11 +51,15 @@ function ToolbarAction({ onClick, disabled, title, accent = false, children }: {
   )
 }
 
-/** Attach-files button. The picker only accepts images and markdown. */
+/**
+ * Attach-files button. A `+` rather than a paperclip, matching the convention
+ * other LLM composers have settled on; the title still says what it takes,
+ * since the picker only accepts images and markdown.
+ */
 function AttachButton({ onClick, disabled, accent = false }: { onClick: () => void; disabled: boolean; accent?: boolean }) {
   return (
     <ToolbarAction onClick={onClick} disabled={disabled} title="Attach images or markdown" accent={accent}>
-      <IconPaperclip className="density-icon" stroke={2} />
+      <IconPlus className="density-icon" stroke={2} />
     </ToolbarAction>
   )
 }
