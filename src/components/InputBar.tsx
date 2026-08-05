@@ -75,7 +75,7 @@ function SendButton({ onClick, disabled, hasContent, accent = false }: {
   const isDisabled = disabled || !hasContent
   const activeClass = accent
     ? 'bg-accent-5 text-ink-inverse hover:bg-accent-4'
-    : 'bg-primary-4 text-on-primary hover:bg-primary-3'
+    : 'bg-primary-fill text-on-primary-fill hover:brightness-105'
   return (
     <button
       onClick={onClick}

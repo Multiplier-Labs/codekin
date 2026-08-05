@@ -156,6 +156,12 @@
   --color-ink-faint: var(--color-neutral-5);      /* de-emphasized metadata */
   --color-ink-inverse: var(--color-neutral-12);   /* text on intent-color fills (replaces text-white) */
   --color-on-primary: var(--color-primary-12);    /* text on gold (primary-8) fills */
+  /* The composer's Send fill. Named separately from the scale step because
+     the light scales are inverted: primary-4 is a light gold in dark mode but
+     a dark brown in light mode, which put dark text on a dark fill at 3.17:1.
+     Each polarity picks the step that is actually gold. */
+  --color-primary-fill: var(--color-primary-4);
+  --color-on-primary-fill: var(--color-primary-12);
   --color-focus: var(--color-accent-6);           /* focus rings and focused borders */
 }
 
@@ -277,8 +283,10 @@
   --color-neutral-5:  #555350;
   --color-neutral-6:  #777571;
   --color-neutral-7:  #c8c7c4;
-  --color-neutral-8:  #f0ede8;
-  --color-neutral-9:  #f5f3ee;
+  /* Edges, not near-whites. At the inverted values these measured 1.05:1 and
+     1.11:1 against their own surface — borders that were not there. */
+  --color-neutral-8:  #d9d5cd;  /* border-edge-strong: 1.39:1 on surface */
+  --color-neutral-9:  #e7e3db;  /* border-edge: 1.22:1 on surface */
   --color-neutral-10: #f8f6f2;
   --color-neutral-11: #faf9f6;
   --color-neutral-12: #fdfcfa;
@@ -298,6 +306,8 @@
   --color-primary-12: #fef8ec;
   /* The light scale is inverted, so "dark text on gold" is primary-1 here */
   --color-on-primary: var(--color-primary-1);
+  --color-primary-fill: var(--color-primary-8);   /* 8.81:1 with the text below */
+  --color-on-primary-fill: var(--color-primary-1);
 
   /* Secondary (terracotta) — inverted */
   --color-secondary-1:  #321d14;
@@ -379,12 +389,12 @@
   background-color: var(--color-primary-2);
 }
 
-[data-theme="light"] .app-right-sidebar {
-  background-color: var(--color-neutral-7);
-}
-
+/* The sidebars are level-1 surfaces; they used to borrow neutral-9/7 because
+   those were the only light steps with any weight, which coupled the chrome
+   background to the border colour. */
+[data-theme="light"] .app-right-sidebar,
 [data-theme="light"] .app-left-sidebar {
-  background-color: var(--color-neutral-9);
+  background-color: var(--color-surface);
 }
 
 [data-theme="light"] .app-left-sidebar button:hover {
@@ -405,26 +415,12 @@
 
 /* Settings section cards — stronger contrast in light mode */
 [data-theme="light"] .settings-section-card {
-  background-color: var(--color-neutral-12);
-  border-color: var(--color-neutral-7);
-}
-
-[data-theme="light"] .settings-section-card > div:first-child {
-  border-color: var(--color-neutral-7);
+  background-color: var(--color-page);
 }
 
 /* Workflow panel cards — match settings contrast in light mode */
 [data-theme="light"] .workflow-card {
-  background-color: var(--color-neutral-12);
-  border-color: var(--color-neutral-7);
-}
-
-[data-theme="light"] .workflow-card > div:first-child {
-  border-color: var(--color-neutral-7);
-}
-
-[data-theme="light"] .workflow-card .divide-edge > :not(:first-child) {
-  border-color: var(--color-neutral-7);
+  background-color: var(--color-page);
 }
 
 /* Terminal area overrides in light mode.
@@ -438,9 +434,9 @@
   --color-neutral-4:  #424040;
   --color-neutral-5:  #6b6964;
   --color-neutral-6:  #7c7a75;
-  --color-neutral-7:  #e4e2de;
-  --color-neutral-8:  #eeebe6;
-  --color-neutral-9:  #f3f1ec;
+  --color-neutral-7:  #d5d0c6;
+  --color-neutral-8:  #e0dbd2;  /* border-edge-strong: 1.31:1 on surface */
+  --color-neutral-9:  #ebe7df;  /* border-edge: 1.17:1 on surface */
   --color-neutral-10: #f7f5f0;
   --color-neutral-11: #faf9f6;
   --color-neutral-12: #fdf9f4;
