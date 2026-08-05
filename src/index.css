@@ -601,21 +601,21 @@
   height: max(32px, var(--row-h));
 }
 
-/* An empty composer is one line of text plus the toolbar (design handoff 6a).
-   This replaces the earlier two-line minimum — see the note in the PR; change
-   the two values below back to 46px / 2lh to restore it.
+/* An empty composer is two lines of text plus the toolbar. Handoff 6a asked
+   for one; two is the user's standing preference, since a one-line box reads
+   as a search field and prompts are rarely one line.
 
    The fallback is a separate @supports block rather than two min-height
    declarations, because the minifier drops the earlier one as dead — which
    would leave browsers without `lh` no minimum at all. */
 .composer-textarea {
-  min-height: 23px;
+  min-height: 46px;
 }
 
 @supports (height: 1lh) {
   /* Follows the textarea's real line-height: 14.5px body, 16px on mobile. */
   .composer-textarea {
-    min-height: 1lh;
+    min-height: 2lh;
   }
 }
 
