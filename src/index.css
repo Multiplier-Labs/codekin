@@ -595,7 +595,7 @@
    the window is. This is the single knob for both surfaces: set it to `100%`
    for a fluid full-width column instead. */
 :root {
-  --measure: 72ch;
+  --measure: 80ch;
 }
 
 /* The composer's action row needs a 32px floor on pointer (the density

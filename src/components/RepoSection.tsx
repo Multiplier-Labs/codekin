@@ -219,7 +219,7 @@ export function RepoSection({
 
             if (isEditing) {
               return (
-                <div key={s.id} className="density-row flex items-center gap-2 rounded-control px-2">
+                <div key={s.id} className="density-row flex items-center gap-2 rounded-control pl-6 pr-2">
                   <input
                     autoFocus
                     value={editValue}
@@ -238,7 +238,7 @@ export function RepoSection({
             return (
               <div
                 key={s.id}
-                className={`density-row flex w-full items-center gap-1.5 rounded-control pl-2 pr-1 transition-colors ${
+                className={`density-row flex w-full items-center gap-1.5 rounded-control pl-6 pr-1 transition-colors ${
                   isActiveSession
                     ? 'bg-accent-9/30 text-accent-2'
                     : 'text-ink hover:bg-surface-raised'
