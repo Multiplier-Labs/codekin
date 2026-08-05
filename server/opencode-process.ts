@@ -19,8 +19,9 @@
 import { EventEmitter } from 'events'
 import { spawn, type ChildProcess } from 'child_process'
 import { randomUUID } from 'crypto'
-import { readFileSync, existsSync, statSync } from 'fs'
+import { readFileSync, statSync } from 'fs'
 import { extname } from 'path'
+import { resolveAttachmentPath } from './attachment-paths.js'
 import type { ClaudeProcessEvents } from './claude-process.js'
 import { OPENCODE_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
 import type { PermissionMode, TaskItem } from './types.js'
@@ -1627,9 +1628,12 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         '.gif': 'image/gif', '.webp': 'image/webp',
         '.pdf': 'application/pdf',
       }
-      for (const filePath of filePaths) {
-        if (!existsSync(filePath)) {
-          console.warn(`[opencode] Attached file not found: ${filePath}`)
+      for (const rawPath of filePaths) {
+        // Only files inside the upload directory may be read — see
+        // resolveAttachmentPath. A client can forge this prefix with any path.
+        const filePath = resolveAttachmentPath(rawPath)
+        if (!filePath) {
+          console.warn(`[opencode] Rejected attachment outside the upload directory: ${rawPath}`)
           continue
         }
         const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024 // 10 MB
