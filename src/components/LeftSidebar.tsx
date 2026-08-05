@@ -449,7 +449,6 @@ export function LeftSidebar({
             onDeleteRepo={onDeleteRepo}
             onOpenDrawer={(wd, tab) => { onOpenDrawer(wd, tab); if (isMobile) onMobileClose?.() }}
             onMoveToWorktree={onMoveToWorktree}
-            isMobile={isMobile}
           />
         ))}
 

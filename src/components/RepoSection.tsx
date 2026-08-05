@@ -116,7 +116,6 @@ export interface RepoSectionProps {
   onOpenDrawer: (workingDir: string, tab: RepoDrawerTab) => void
   /** Move the active session into a git worktree — only offered for the joined session. */
   onMoveToWorktree?: () => void
-  isMobile?: boolean
 }
 
 // --------------------------------------------------------------------------
@@ -136,9 +135,8 @@ export function RepoSection({
   onDeleteRepo,
   onOpenDrawer,
   onMoveToWorktree,
-  isMobile,
 }: RepoSectionProps) {
-  const [expanded, setExpanded] = useState(isActive || !!isMobile)
+  const [expanded, setExpanded] = useState(true)
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
 
@@ -238,7 +236,7 @@ export function RepoSection({
             return (
               <div
                 key={s.id}
-                className={`density-row flex w-full items-center gap-1.5 rounded-control pl-6 pr-1 transition-colors ${
+                className={`row-reveal density-row flex w-full items-center gap-1.5 rounded-control pl-6 pr-2.5 transition-colors ${
                   isActiveSession
                     ? 'bg-accent-9/30 text-accent-2'
                     : 'text-ink hover:bg-surface-raised'
@@ -264,7 +262,7 @@ export function RepoSection({
                   <span className="truncate">{sessionDisplayName(s)}</span>
                 </button>
                 <span className="flex-shrink-0 text-meta tabular-nums text-ink-faint">{compactAge(s.created)}</span>
-                <RowMenu items={menuItems} label={`Actions for ${sessionDisplayName(s)}`} />
+                <RowMenu items={menuItems} label={`Actions for ${sessionDisplayName(s)}`} className="row-menu-reveal" />
               </div>
             )
           })}
