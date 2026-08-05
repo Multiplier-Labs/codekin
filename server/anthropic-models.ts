@@ -101,6 +101,33 @@ function labelFromId(id: string): string {
   return id
 }
 
+/**
+ * Preference order for model families at the same version. Consumers treat
+ * entry [0] of the discovered list as "the default model", so the list has to
+ * be ordered by preference, not by probe order or by release date — Fable is
+ * the newest family but is a specialised model, not the general default.
+ */
+const FAMILY_RANK: Record<string, number> = { opus: 0, sonnet: 1, fable: 2, haiku: 3 }
+
+/** Parse `claude-opus-4-8` → { family: 'opus', version: 4.8 } for ranking. */
+function rankKey(id: string): { family: number; version: number } {
+  const m = id.replace(/^claude-/, '').match(/^(\w+?)-(\d+)(?:-(\d+))?/)
+  if (!m) return { family: FAMILY_RANK.haiku + 1, version: 0 }
+  const family = FAMILY_RANK[m[1]] ?? Object.keys(FAMILY_RANK).length
+  // Ignore dated suffixes (haiku-4-5-20251001 → 4.5): a 4-digit third group is a date.
+  const minor = m[3] && m[3].length <= 2 ? Number(m[3]) : 0
+  return { family, version: Number(m[2]) + minor / 10 }
+}
+
+/** Newest version first; ties broken by family preference (opus > sonnet > fable > haiku). */
+function sortByPreference<T extends { id: string }>(models: T[]): T[] {
+  return [...models].sort((a, b) => {
+    const ka = rankKey(a.id)
+    const kb = rankKey(b.id)
+    return kb.version - ka.version || ka.family - kb.family || a.id.localeCompare(b.id)
+  })
+}
+
 // ---------------------------------------------------------------------------
 // Strategy 1: Anthropic API
 // ---------------------------------------------------------------------------
@@ -129,13 +156,11 @@ async function fetchViaApi(): Promise<ClaudeModelInfo[] | null> {
   const data = (await res.json()) as AnthropicModelsResponse
   if (!Array.isArray(data.data) || data.data.length === 0) return null
 
-  const models = data.data
-    .filter(m => m.id.startsWith('claude-') && !m.id.includes('embed'))
-    .sort((a, b) => {
-      if (a.created_at && b.created_at) return b.created_at.localeCompare(a.created_at)
-      return 0
-    })
-    .map(m => ({ id: m.id, label: m.display_name || labelFromId(m.id) }))
+  const models = sortByPreference(
+    data.data
+      .filter(m => m.id.startsWith('claude-') && !m.id.includes('embed'))
+      .map(m => ({ id: m.id, label: m.display_name || labelFromId(m.id) })),
+  )
 
   return models.length > 0 ? models : null
 }
@@ -262,7 +287,7 @@ async function fetchViaCli(): Promise<ClaudeModelInfo[] | null> {
     console.warn(`[model-probe] ${errors} probe(s) failed transiently after retry, ${carriedOver} model(s) carried over from previous run`)
   }
 
-  return models.length > 0 ? models : null
+  return models.length > 0 ? sortByPreference(models) : null
 }
 
 // ---------------------------------------------------------------------------

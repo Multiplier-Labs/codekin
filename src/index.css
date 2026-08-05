@@ -408,10 +408,6 @@
   background-color: color-mix(in srgb, var(--color-neutral-5) 18%, transparent);
 }
 
-[data-theme="light"] .app-thinking-badge {
-  background-color: color-mix(in srgb, var(--color-neutral-7) 90%, transparent);
-}
-
 /* Settings section cards — stronger contrast in light mode */
 [data-theme="light"] .settings-section-card {
   background-color: var(--color-page);

@@ -176,6 +176,9 @@ export function useChatSocket({
   const [isProcessing, setIsProcessing] = useState(false)
   const [tasks, setTasks] = useState<TaskItem[]>([])
   const [currentModel, setCurrentModel] = useState<string | null>(() => localStorage.getItem('claude-model') ?? null)
+  /** Mirror of currentModel for callbacks that must not re-create on every model change. */
+  const currentModelRef = useRef(currentModel)
+  useEffect(() => { currentModelRef.current = currentModel }, [currentModel])
   const [currentPermissionMode, setCurrentPermissionMode] = useState<PermissionMode>(() =>
     (localStorage.getItem('claude-permission-mode') as PermissionMode) || 'acceptEdits'
   )
@@ -476,11 +479,14 @@ export function useChatSocket({
   }, [send])
 
   const createSession = useCallback((name: string, workingDir: string, useWorktree?: boolean, permissionMode?: PermissionMode, provider?: import('../types').CodingProvider) => {
-    // Don't pass a model — the provider-specific model validation effect
-    // will call setModel with the correct provider-appropriate model after
-    // the session is created. Passing a cross-provider model (e.g. a Claude
-    // model to an OpenCode session) causes a spurious model message.
-    send({ type: 'create_session', name, workingDir, useWorktree, permissionMode, provider })
+    // Pass the model the picker is currently showing, so the CLI starts on it
+    // instead of on the server's own default (which the picker then flips to
+    // when the init message arrives). Only for Claude sessions and only for
+    // Claude model IDs — passing a cross-provider model (e.g. a Claude model
+    // to an OpenCode session) causes a spurious model message.
+    const model = currentModelRef.current
+    const carryModel = (provider ?? 'claude') === 'claude' && model?.startsWith('claude-') ? model : undefined
+    send({ type: 'create_session', name, workingDir, useWorktree, permissionMode, provider, model: carryModel })
   }, [send])
 
   const sendInput = useCallback((data: string, displayText?: string) => {
