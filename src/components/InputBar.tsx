@@ -530,10 +530,10 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
 
   return (
     <div className={`app-input-bar @container relative flex flex-col border-t border-edge bg-surface-raised ${isOrchestrator ? 'orchestrator-input-bar' : ''}`}>
-      {/* Measured column — shares the transcript's 44px gutter and --measure */}
-      <div className="flex px-4 py-3">
-        <div className="w-11 flex-shrink-0" aria-hidden="true" />
-        <div className="relative flex min-w-0 flex-1 max-w-[var(--measure)] flex-col gap-2.5">
+      {/* Shares the transcript's left edge and --measure. The transcript hangs
+          its timestamps in this same padding, so no spacer is needed here. */}
+      <div className="px-4 py-3 @[32rem]:px-12">
+        <div className="relative mx-auto flex w-full min-w-0 max-w-[var(--measure)] flex-col gap-2.5">
           <DropZone onUpload={onAddFiles} disabled={disabled} />
 
           {/* Slash autocomplete popup — anchored to the measured column */}

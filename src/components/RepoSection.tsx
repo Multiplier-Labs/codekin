@@ -176,7 +176,7 @@ export function RepoSection({
   return (
     <div className="mb-1">
       {/* Repo label — a section header, not a row */}
-      <div className="group/repo flex items-center gap-1.5 px-3 pt-2 pb-0.5">
+      <div className="group/repo flex items-center gap-1.5 px-[18px] pt-2 pb-1.5">
         <button
           onClick={() => { setExpanded(!expanded); if (!isActive) onSelectRepo(node.workingDir) }}
           aria-expanded={expanded}

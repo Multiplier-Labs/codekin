@@ -42,21 +42,32 @@ interface Props {
 }
 
 /**
- * Transcript row: fixed 44px left gutter (timestamp or empty spacer) + content
- * at the shared `--measure` width, which the composer also uses. The gutter is
- * a fixed pixel width, not `ch`, so rows with and without a timestamp share one
- * left edge.
+ * Transcript row: a centred column at --measure, with the timestamp — when the
+ * turn has one — hanging in the padding to its left rather than reserving a
+ * column of its own. Every turn therefore shares one left edge, and a run of
+ * turns without timestamps shows no dead margin.
+ *
+ * Below 32rem of pane width there is no padding to hang into, so the padding
+ * stays narrow and the timestamp falls back to the row's title.
  */
-function Row({ ts, children }: { ts?: string | null; children: React.ReactNode }) {
+function Row({ ts, children, isMobile }: { ts?: string | null; children: React.ReactNode; isMobile?: boolean }) {
   return (
-    <div className="flex px-4">
-      <div
-        className="w-11 flex-shrink-0 pr-2 pt-1 text-right text-meta text-ink-faint select-none"
-        style={{ fontFamily: "'Inconsolata', monospace" }}
-      >
-        {ts}
+    <div
+      className="px-4 @[32rem]:px-12"
+      // Only a fallback: at >=32rem the hanging timestamp is visible, and a
+      // tooltip covering the whole turn would be noise.
+      title={ts && isMobile ? ts : undefined}
+    >
+      <div className="relative mx-auto w-full min-w-0 max-w-[var(--measure)]">
+        {ts && (
+          <span
+            className="absolute -left-11 top-1 hidden w-11 pr-2 text-right font-mono text-meta text-ink-faint select-none @[32rem]:block"
+          >
+            {ts}
+          </span>
+        )}
+        {children}
       </div>
-      <div className="min-w-0 flex-1 max-w-[var(--measure)]">{children}</div>
     </div>
   )
 }
@@ -522,7 +533,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
       )}
       <div
         ref={containerRef}
-        className="chat-scroll flex-1 overflow-y-auto overflow-x-hidden min-h-0"
+        className="chat-scroll @container flex-1 overflow-y-auto overflow-x-hidden min-h-0"
         onScroll={checkScroll}
       >
         {variant === 'orchestrator' && messages.length === 0 && !activityLabel ? (
@@ -574,7 +585,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                 }
                 const taKey = run.groups[0]?.key || run.outputs[0]?.key || `ta-${startIdx}`
                 nodes.push(
-                  <Row key={taKey}>
+                  <Row key={taKey} isMobile={isMobile}>
                     <ToolActivity run={run} fontSize={fontSize} />
                   </Row>
                 )
@@ -595,7 +606,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                   }
                 }
                 nodes.push(
-                  <Row key={msg.key || i} ts={tsLabel}>
+                  <Row key={msg.key || i} ts={tsLabel} isMobile={isMobile}>
                     <AssistantMessage msg={msg} fontSize={fontSize} variant={variant} repeatCount={repeatCount} />
                   </Row>
                 )
@@ -627,14 +638,14 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
               }
               if (node) {
                 const rowKey = msg.type === 'tentative' ? (msg.key || `tentative-${msg.index}`) : (msg.key || i)
-                nodes.push(<Row key={rowKey} ts={tsLabel}>{node}</Row>)
+                nodes.push(<Row key={rowKey} ts={tsLabel} isMobile={isMobile}>{node}</Row>)
               }
               i++
             }
             return nodes
           })()}
           {activityLabel && (
-            <Row>
+            <Row isMobile={isMobile}>
               <ActivityIndicator label={activityLabel} variant={variant} />
             </Row>
           )}
