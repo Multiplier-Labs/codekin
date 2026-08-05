@@ -12,11 +12,10 @@
 
 import { useState, useEffect } from 'react'
 import {
-  IconPlus, IconShieldCheck, IconArchive, IconFileText,
+  IconShieldCheck, IconArchive, IconFileText,
   IconRobot, IconSparkles, IconPencil, IconGitBranch, IconRobotFace, IconTrash,
 } from '@tabler/icons-react'
-import type { Session, CodingProvider } from '../types'
-import { PROVIDERS } from '../types'
+import type { Session } from '../types'
 import { RowMenu, type RowMenuItem } from './RowMenu'
 import type { RepoDrawerTab } from './RepoDrawer'
 
@@ -111,7 +110,6 @@ export interface RepoSectionProps {
   onSelectSession: (id: string) => void
   onDeleteSession: (id: string) => void
   onRenameSession: (id: string, name: string) => void
-  onNewSession?: (provider?: CodingProvider) => void
   onSelectRepo: (workingDir: string) => void
   onDeleteRepo: (workingDir: string) => void
   /** Open the repo drawer on a given tab. */
@@ -134,7 +132,6 @@ export function RepoSection({
   onSelectSession,
   onDeleteSession,
   onRenameSession,
-  onNewSession,
   onSelectRepo,
   onDeleteRepo,
   onOpenDrawer,
@@ -144,7 +141,6 @@ export function RepoSection({
   const [expanded, setExpanded] = useState(isActive || !!isMobile)
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
-  const [providerMenuOpen, setProviderMenuOpen] = useState(false)
 
   // Auto-expand when this repo becomes active
   useEffect(() => {
@@ -273,36 +269,6 @@ export function RepoSection({
             )
           })}
 
-          {/* New session in this repo */}
-          {onNewSession && (
-            <div className="relative">
-              <button
-                onClick={() => setProviderMenuOpen(o => !o)}
-                aria-expanded={providerMenuOpen}
-                className="density-row flex w-full items-center gap-1.5 rounded-control pl-2 pr-1 text-left text-body text-ink-muted transition-colors hover:bg-surface-raised hover:text-ink"
-                title="New session in this repo"
-              >
-                <span className="inline-flex w-3 flex-shrink-0 items-center justify-center">
-                  <IconPlus size={12} stroke={2} />
-                </span>
-                <span className="truncate">New session</span>
-              </button>
-              {providerMenuOpen && (
-                <div className="absolute left-2 right-1 z-40 mt-0.5 rounded-floating border border-edge-strong bg-surface-raised py-1 shadow-floating">
-                  {PROVIDERS.map(p => (
-                    <button
-                      key={p.id}
-                      onClick={() => { setProviderMenuOpen(false); onNewSession(p.id) }}
-                      className="flex w-full items-center gap-2 px-3 py-1 text-left text-body text-ink transition-colors hover:bg-edge"
-                      title={p.description}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
     </div>
