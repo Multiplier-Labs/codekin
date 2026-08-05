@@ -533,11 +533,11 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const hasOverflow = showModel || showWorktree
 
   return (
-    <div className={`app-input-bar @container relative flex flex-col border-t border-edge bg-surface-raised ${isOrchestrator ? 'orchestrator-input-bar' : ''}`}>
-      {/* Shares the transcript's left edge and --measure. The transcript hangs
-          its timestamps in this same padding, so no spacer is needed here. */}
-      <div className="px-4 py-3 @[32rem]:px-12">
-        <div className="relative mx-auto flex w-full min-w-0 max-w-[var(--measure)] flex-col gap-2.5">
+    <div className={`app-input-bar @container relative flex flex-col ${isOrchestrator ? 'orchestrator-input-bar' : ''}`}>
+      {/* Exactly the transcript row's padding, so the card's edges land on the
+          prose edges at every width. Nothing here reads the pane width. */}
+      <div className="px-4 pb-3 pt-1 @[32rem]:px-12">
+        <div className="composer-card relative mx-auto flex w-full min-w-0 max-w-[var(--measure)] flex-col gap-2 rounded-control border border-edge bg-surface pt-2.5 pr-3 pb-2 pl-3">
           <DropZone onUpload={onAddFiles} disabled={disabled} />
 
           {/* Slash autocomplete popup — anchored to the measured column */}

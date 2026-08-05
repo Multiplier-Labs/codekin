@@ -399,10 +399,6 @@
   background-color: color-mix(in srgb, var(--color-neutral-5) 18%, transparent);
 }
 
-[data-theme="light"] .app-input-bar {
-  background-color: var(--color-neutral-10);
-}
-
 [data-theme="light"] .app-thinking-badge {
   background-color: color-mix(in srgb, var(--color-neutral-7) 90%, transparent);
 }
@@ -595,7 +591,7 @@
    the window is. This is the single knob for both surfaces: set it to `100%`
    for a fluid full-width column instead. */
 :root {
-  --measure: 80ch;
+  --measure: 84ch;
 }
 
 /* The composer's action row needs a 32px floor on pointer (the density
@@ -605,20 +601,21 @@
   height: max(32px, var(--row-h));
 }
 
-/* The composer opens at two lines: one line reads as a search field, and a
-   prompt is usually longer than that.
+/* An empty composer is one line of text plus the toolbar (design handoff 6a).
+   This replaces the earlier two-line minimum — see the note in the PR; change
+   the two values below back to 46px / 2lh to restore it.
 
    The fallback is a separate @supports block rather than two min-height
    declarations, because the minifier drops the earlier one as dead — which
    would leave browsers without `lh` no minimum at all. */
 .composer-textarea {
-  min-height: 46px;
+  min-height: 23px;
 }
 
 @supports (height: 1lh) {
   /* Follows the textarea's real line-height: 14.5px body, 16px on mobile. */
   .composer-textarea {
-    min-height: 2lh;
+    min-height: 1lh;
   }
 }
 
@@ -655,10 +652,12 @@ html, body, #root {
 
 /* ── Orchestrator variant — accent-themed agent chat ───────────────────── */
 
-/* Input bar top border glow */
-.orchestrator-input-bar {
-  border-top-color: var(--color-accent-7);
-  box-shadow: inset 0 2px 8px -4px color-mix(in srgb, var(--color-accent-7) 30%, transparent);
+/* Composer card — accent edge for the orchestrator variant. The composer is
+   a card in the transcript column, not a band across the pane, so the accent
+   lives on the card's own border rather than a full-width top edge. */
+.orchestrator-input-bar .composer-card {
+  border-color: var(--color-accent-7);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent-7) 25%, transparent);
 }
 
 /* Orchestrator badge pill */
@@ -678,8 +677,9 @@ html, body, #root {
   color: var(--color-accent-5);
 }
 
-[data-theme="light"] .orchestrator-input-bar {
-  box-shadow: inset 0 2px 8px -4px color-mix(in srgb, var(--color-accent-5) 20%, transparent);
+[data-theme="light"] .orchestrator-input-bar .composer-card {
+  border-color: var(--color-accent-5);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent-5) 20%, transparent);
 }
 
 /* ── Safe area insets for notched devices ──────────────────────────────── */
