@@ -98,23 +98,24 @@
   <section style="display:flex;flex-direction:column;gap:14px">
     <div style="display:flex;align-items:baseline;gap:14px">
       <span style="font-family:'Inconsolata',monospace;font-size:13px;color:#9e7335;font-weight:600">02</span>
-      <h2 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-0.01em;color:#dce4e5">Derive the theme scopes instead of re-typing them</h2>
+      <h2 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-0.01em;color:#dce4e5">Derive the theme scopes, keep the per-family ramps</h2>
     </div>
-    <p style="margin:0 0 12px;font-size:16px;line-height:1.6;color:#94aeb1;max-width:70ch;text-wrap:pretty">The terminal palette is described in the source as the base palette desaturated ~40% and shifted warm. That is a formula, but it ships as 84 hand-tuned hex values — so every future palette change has to be re-derived by hand in five places, and the drift shows up as the <code style="font-family:'Inconsolata',monospace;color:#74cbda">#11181a</code> patch and the four <code style="font-family:'Inconsolata',monospace;color:#74cbda">/* darkened for AA */</code> one-offs.</p>
+    <p style="margin:0 0 12px;font-size:16px;line-height:1.6;color:#94aeb1;max-width:70ch;text-wrap:pretty">The families are not redundant — their lightness ramps are individually tuned. What repeats mechanically is the <em>transform</em> applied to every family in each scope: desaturate and shift warm for the terminal, flip polarity for light mode, remove chroma for sidebar text. Encode those four transforms and the roughly 300 duplicated values disappear, while the seven ramps stay exactly as they are.</p>
     <div style="background:#101e21;border:1px solid #263a3e;border-radius:8px;padding:26px;display:flex;flex-direction:column;gap:20px">
-      <div style="font-family:'Inconsolata',monospace;font-size:13px;line-height:1.75;color:#94aeb1;white-space:pre-wrap;overflow-x:auto">Define lightness once, express every scope as two knobs.
+      <div style="font-family:'Inconsolata',monospace;font-size:13px;line-height:1.75;color:#94aeb1;white-space:pre-wrap;overflow-x:auto">One ramp per family, taken from the current hexes.
 
-<span style="color:#5c7377">/* one ramp, in oklch */</span>
---l-1: 0.92;  --l-5: 0.60;  --l-9: 0.24;  --l-12: 0.09;
---neutral-c: 0.014;   --neutral-h: 195;   <span style="color:#5c7377">/* chrome: teal-tinted */</span>
---color-neutral-5: oklch(var(--l-5) var(--neutral-c) var(--neutral-h));
+--neutral-l-5: 0.62;  --neutral-c: 0.014;  --neutral-h: 195;
+--color-neutral-5: oklch(var(--neutral-l-5) var(--neutral-c) var(--neutral-h));
 
-<span style="color:#5c7377">/* content area: same ramp, warm and desaturated — 2 lines, not 84 */</span>
+<span style="color:#5c7377">/* the scopes become transforms — a few lines each, not 84 */</span>
 .terminal-area { --neutral-c: 0.006; --neutral-h: 70; }
-
-<span style="color:#5c7377">/* light mode: flip the ramp, keep chroma and hue */</span>
-[data-theme="light"] { --l-1: 0.09; --l-5: 0.48; --l-12: 0.98; }</div>
-      <p style="margin:0;font-size:14px;line-height:1.6;color:#748d91;max-width:74ch">Because oklch lightness is perceptual, contrast holds across both polarities, which is what the manual AA darkening was compensating for. Same move for primary / accent / error / warning / success: one hue and chroma per family, shared lightness ramp.</p>
+.app-left-sidebar { --neutral-c: 0; }
+[data-theme="light"] { <span style="color:#5c7377">/* swap l-N with l-(13&minus;N), per family */</span> }</div>
+      <div style="border-left:2px solid #9e7335;padding-left:16px;display:flex;flex-direction:column;gap:8px">
+        <div style="font-family:'Inconsolata',monospace;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#f0c56e">corrected after implementation</div>
+        <p style="margin:0;font-size:14px;line-height:1.6;color:#94aeb1;max-width:74ch">An earlier version of this proposal called for a single lightness ramp shared across all seven families, and claimed the result would be pixel-neutral. Measurement disproved it: per-step lightness spread across the families reaches 0.21, and rebuilding from a median ramp gives worst-case ΔE around 11 — roughly five times the visible-difference threshold. A shared ramp is a repaint, not a refactor.</p>
+        <p style="margin:0;font-size:14px;line-height:1.6;color:#94aeb1;max-width:74ch">The four <code style="font-family:'Inconsolata',monospace;color:#74cbda">/* darkened for AA */</code> steps in the light terminal scope were also listed for deletion. They measure 4.74&ndash;5.52:1 on cream and two fall below 4.5:1 without them, so they stay — with the measured ratio written into the comment so a later pass has the evidence.</p>
+      </div>
     </div>
   </section>
 

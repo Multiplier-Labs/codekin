@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
+<link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@300..700&family=Lato:wght@300;400;700;900&display=swap" rel="stylesheet" />
+<style>
+  body { margin: 0; background: #090e0f; }
+  a { color: #6cb7af; text-decoration: none; }
+  a:hover { color: #93ccc6; }
+</style>
+</helmet>
+
+<section style="padding:56px 56px 80px;font-family:'Lato',sans-serif;background:#090e0f;display:flex;flex-direction:column;gap:44px">
+
+  <div style="display:flex;flex-direction:column;gap:18px;max-width:80ch">
+    <div style="display:flex;align-items:center;gap:12px;font-family:'Inconsolata',monospace;font-size:12.5px;letter-spacing:0.1em;text-transform:uppercase;color:#748d91">
+      <span style="width:8px;height:8px;border-radius:999px;background:#f0c56e"></span>
+      <span>src/components/InputBar.tsx</span>
+      <span style="color:#465c60">/</span>
+      <span>composer layout</span>
+    </div>
+    <h1 style="margin:0;font-size:38px;line-height:1.1;font-weight:900;letter-spacing:-0.02em;color:#dce4e5;max-width:24ch">The composer is a fixed box pretending to be a text field.</h1>
+    <p style="margin:0;font-size:16.5px;line-height:1.6;color:#94aeb1;text-wrap:pretty">It opens at a hardcoded 120px whether it holds nothing or ten lines, and the drag handle above it exists to compensate. Below that sits a toolbar where a destructive permission override, a passive token counter, and the send button are all the same 12px chip. Three directions, then the fixes that apply to all of them.</p>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:2px;background:#263a3e;border:1px solid #263a3e;border-radius:8px;overflow:hidden;max-width:1400px">
+    <div style="background:#101e21;padding:20px;display:flex;flex-direction:column;gap:7px">
+      <div style="font-family:'Inconsolata',monospace;font-size:12.5px;color:#f0c56e">height: 120px</div>
+      <div style="font-size:14px;line-height:1.5;color:#94aeb1">Fixed, persisted to <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">localStorage</code> under two keys, resized by a 4px drag strip. An empty composer costs 120px of transcript; a long prompt scrolls inside it.</div>
+    </div>
+    <div style="background:#101e21;padding:20px;display:flex;flex-direction:column;gap:7px">
+      <div style="font-family:'Inconsolata',monospace;font-size:12.5px;color:#f0c56e">4 toolbar branches</div>
+      <div style="font-size:14px;line-height:1.5;color:#94aeb1">desktop/mobile &times; default/orchestrator, each re-listing the same atoms. One row plus a config would do it.</div>
+    </div>
+    <div style="background:#101e21;padding:20px;display:flex;flex-direction:column;gap:7px">
+      <div style="font-family:'Inconsolata',monospace;font-size:12.5px;color:#f0c56e">7 chips, 1 shape</div>
+      <div style="font-size:14px;line-height:1.5;color:#94aeb1">Permission mode, worktree, usage, model, skills, attach, send all read as peers. Nothing distinguishes session state from an action.</div>
+    </div>
+    <div style="background:#101e21;padding:20px;display:flex;flex-direction:column;gap:7px">
+      <div style="font-family:'Inconsolata',monospace;font-size:12.5px;color:#e86060">28px send</div>
+      <div style="font-size:14px;line-height:1.5;color:#94aeb1">The primary action is a 16px icon in <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">p-1.5</code>, and 34px on mobile — under the 44px target it needs.</div>
+    </div>
+    <div style="background:#101e21;padding:20px;display:flex;flex-direction:column;gap:7px">
+      <div style="font-family:'Inconsolata',monospace;font-size:12.5px;color:#f0c56e">hidden lg:inline</div>
+      <div style="font-size:14px;line-height:1.5;color:#94aeb1">Labels drop out below 1024px viewport &mdash; but the sidebar is user-resizable, so the composer's own width is unrelated to that breakpoint.</div>
+    </div>
+    <div style="background:#101e21;padding:20px;display:flex;flex-direction:column;gap:7px">
+      <div style="font-family:'Inconsolata',monospace;font-size:12.5px;color:#f0c56e">full-bleed</div>
+      <div style="font-size:14px;line-height:1.5;color:#94aeb1">The input spans the whole pane while the transcript above it is measured. Typing and reading happen at different widths.</div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start">
+
+    <div id="1a" style="width:660px;display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-family:'Inconsolata',monospace;font-size:12px;font-weight:700;letter-spacing:0.08em;background:#977443;color:#1d170d;padding:3px 8px;border-radius:4px">1a</span>
+        <h2 style="margin:0;font-size:21px;font-weight:700;color:#dce4e5">Same shape, fixed</h2>
+      </div>
+      <p style="margin:0;font-size:15px;line-height:1.6;color:#94aeb1;min-height:4.8em">Keeps the current anatomy so the diff stays small. The box auto-grows, the toolbar splits into <em>state</em> on the left and <em>actions</em> on the right, and send becomes a real button. Lowest risk, and it is the one I would ship first.</p>
+      <div style="border:1px solid #333130;border-radius:8px;overflow:hidden;background:#0f0e0d">
+        <div style="padding:18px 20px 10px;font-size:14.5px;line-height:1.6;color:#93918c;font-style:italic">&hellip;transcript</div>
+        <div style="border-top:1px solid #333130;background:#1b1a18;padding:14px 20px 12px;display:flex;flex-direction:column;gap:12px">
+          <div style="max-width:68ch;font-size:14.5px;line-height:1.6;color:#e2e1de">Thread <code style="font-family:'Inconsolata',monospace;color:#deb769">webhookUrl</code> through <code style="font-family:'Inconsolata',monospace;color:#deb769">addRepoConfig</code> and render the setup result in the modal.<span style="display:inline-block;width:1.5px;height:16px;background:#deb769;vertical-align:-3px;margin-left:2px"></span></div>
+          <div style="display:flex;align-items:center;gap:14px">
+            <div style="display:flex;align-items:center;gap:14px;font-family:'Inconsolata',monospace;font-size:12.5px;color:#93918c">
+              <span style="display:flex;align-items:center;gap:6px;color:#e2bf5d"><span>&#9651;</span>Skip permissions</span>
+              <span style="display:flex;align-items:center;gap:6px"><span style="color:#777571">&#9095;</span>wt-cf801f5f</span>
+              <span style="color:#777571">Opus 4.6</span>
+            </div>
+            <div style="flex:1"></div>
+            <div style="display:flex;align-items:center;gap:4px">
+              <div style="width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#93918c;font-family:'Inconsolata',monospace;font-size:14px;cursor:pointer" style-hover="background:#272524;color:#e2e1de">&#9633;</div>
+              <div style="width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#93918c;font-family:'Inconsolata',monospace;font-size:14px;cursor:pointer" style-hover="background:#272524;color:#e2e1de">&#9741;</div>
+              <div style="height:32px;padding:0 14px;border-radius:6px;background:#deb769;color:#1d170d;font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px;cursor:pointer" style-hover="background:#eccc8e">Send<span style="font-family:'Inconsolata',monospace;font-size:12px;opacity:0.65">&#8629;</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:7px;font-size:14.5px;line-height:1.55;color:#94aeb1">
+        <li>Auto-grows from one line to 40% of the pane. The drag handle and both height keys are deleted.</li>
+        <li>Left group is session state, monospace and unboxed, matching the transcript rail. Right group is actions.</li>
+        <li>Send is labelled with its shortcut and reaches 32px; the toolbar is a 32px row, so touch only needs the density token.</li>
+        <li>Input shares the transcript's 68ch measure, so the caret starts where the text you are answering sits.</li>
+      </ul>
+    </div>
+
+    <div id="1b" style="width:660px;display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-family:'Inconsolata',monospace;font-size:12px;font-weight:700;letter-spacing:0.08em;background:#977443;color:#1d170d;padding:3px 8px;border-radius:4px">1b</span>
+        <h2 style="margin:0;font-size:21px;font-weight:700;color:#dce4e5">Context line above a card</h2>
+      </div>
+      <p style="margin:0;font-size:15px;line-height:1.6;color:#94aeb1;min-height:4.8em">Lifts the composer onto its own surface and moves session state to a line <em>above</em> it, read as a sentence rather than a row of chips. Answers &ldquo;where am I sending this, as whom, with what permissions&rdquo; before you type, not after.</p>
+      <div style="border:1px solid #333130;border-radius:8px;overflow:hidden;background:#0f0e0d">
+        <div style="padding:18px 20px 14px;font-size:14.5px;line-height:1.6;color:#93918c;font-style:italic">&hellip;transcript</div>
+        <div style="padding:0 20px 18px;display:flex;flex-direction:column;gap:8px">
+          <div style="max-width:68ch;display:flex;align-items:center;gap:8px;font-family:'Inconsolata',monospace;font-size:12.5px;line-height:1.45;color:#777571;padding:0 2px">
+            <span style="color:#93918c">codekin</span>
+            <span style="color:#424040">on</span>
+            <span style="color:#93918c">wt-cf801f5f</span>
+            <span style="color:#424040">&middot;</span>
+            <span style="color:#93918c">Opus 4.6</span>
+            <span style="color:#424040">&middot;</span>
+            <span style="color:#e2bf5d">skipping permissions</span>
+            <span style="flex:1"></span>
+            <span style="color:#555350">18.2k &middot; $0.41</span>
+          </div>
+          <div style="max-width:68ch;background:#1b1a18;border:1px solid #424040;border-radius:10px;padding:12px 12px 10px 16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 12px 28px -12px rgba(0,0,0,0.8)">
+            <div style="font-size:14.5px;line-height:1.6;color:#e2e1de">Thread <code style="font-family:'Inconsolata',monospace;color:#deb769">webhookUrl</code> through <code style="font-family:'Inconsolata',monospace;color:#deb769">addRepoConfig</code> and render the setup result in the modal.<span style="display:inline-block;width:1.5px;height:16px;background:#deb769;vertical-align:-3px;margin-left:2px"></span></div>
+            <div style="display:flex;align-items:center;gap:4px">
+              <div style="height:30px;padding:0 10px;border-radius:6px;display:flex;align-items:center;gap:7px;font-family:'Inconsolata',monospace;font-size:12.5px;color:#93918c;cursor:pointer" style-hover="background:#272524;color:#e2e1de"><span>&#9633;</span>Skills</div>
+              <div style="width:30px;height:30px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#93918c;font-family:'Inconsolata',monospace;font-size:14px;cursor:pointer" style-hover="background:#272524;color:#e2e1de">&#9741;</div>
+              <div style="flex:1"></div>
+              <div style="width:32px;height:32px;border-radius:999px;background:#deb769;color:#1d170d;display:flex;align-items:center;justify-content:center;font-family:'Inconsolata',monospace;font-size:13px;cursor:pointer" style-hover="background:#eccc8e">&#10148;</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:7px;font-size:14.5px;line-height:1.55;color:#94aeb1">
+        <li>Level-1 surface with a soft shadow, so the composer belongs to you and the transcript belongs to the model.</li>
+        <li>State becomes prose. &ldquo;codekin on wt-cf801f5f &middot; Opus 4.6 &middot; skipping permissions&rdquo; is scannable in one pass; each fragment is still a click target.</li>
+        <li>Usage moves to the end of that line where a metric belongs, instead of being the smallest text in the app.</li>
+        <li>Costs ~14px more vertical space than <a href="#1a">1a</a>, and the biggest diff of the three.</li>
+      </ul>
+    </div>
+
+    <div id="1c" style="width:660px;display:flex;flex-direction:column;gap:16px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-family:'Inconsolata',monospace;font-size:12px;font-weight:700;letter-spacing:0.08em;background:#977443;color:#1d170d;padding:3px 8px;border-radius:4px">1c</span>
+        <h2 style="margin:0;font-size:21px;font-weight:700;color:#dce4e5">One line until you need more</h2>
+      </div>
+      <p style="margin:0;font-size:15px;line-height:1.6;color:#94aeb1;min-height:4.8em">At rest the composer is a single row. The toolbar appears on focus or when there is content; everything else lives behind one overflow button. Maximum transcript, aimed at someone who has already set their model and permissions and is watching long runs.</p>
+      <div style="border:1px solid #333130;border-radius:8px;overflow:hidden;background:#0f0e0d">
+        <div style="padding:18px 20px 14px;display:flex;flex-direction:column;gap:14px">
+          <div style="font-size:14.5px;line-height:1.6;color:#93918c;font-style:italic">&hellip;transcript</div>
+          <div style="max-width:68ch;display:flex;gap:16px;font-family:'Inconsolata',monospace;font-size:12.5px;line-height:1.45">
+            <span style="width:44px;flex-shrink:0;text-align:right;color:#777571">20:02</span>
+            <span style="color:#777571">&#9656; &nbsp;2 tool calls&nbsp; <span style="color:#424040">&middot;</span> &nbsp;<span style="color:#93918c">Read, Edit</span></span>
+          </div>
+        </div>
+        <div style="border-top:1px solid #333130;background:#1b1a18;padding:10px 16px">
+          <div style="max-width:68ch;display:flex;align-items:center;gap:12px">
+            <span style="width:6px;height:6px;border-radius:999px;background:#deb769;flex-shrink:0"></span>
+            <span style="flex:1;font-size:14.5px;line-height:1.6;color:#93918c">Reply to Codekin&hellip;</span>
+            <span style="font-family:'Inconsolata',monospace;font-size:12.5px;color:#555350">Opus 4.6</span>
+            <div style="width:30px;height:30px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#93918c;font-family:'Inconsolata',monospace;font-size:15px;cursor:pointer" style-hover="background:#272524;color:#e2e1de">&#8943;</div>
+          </div>
+        </div>
+      </div>
+      <div style="border:1px solid #333130;border-radius:8px;overflow:hidden;background:#1b1a18;padding:12px 16px">
+        <div style="font-family:'Inconsolata',monospace;font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:#777571;margin-bottom:10px">focused</div>
+        <div style="max-width:68ch;display:flex;flex-direction:column;gap:10px">
+          <div style="font-size:14.5px;line-height:1.6;color:#e2e1de">Thread <code style="font-family:'Inconsolata',monospace;color:#deb769">webhookUrl</code> through <code style="font-family:'Inconsolata',monospace;color:#deb769">addRepoConfig</code>.<span style="display:inline-block;width:1.5px;height:16px;background:#deb769;vertical-align:-3px;margin-left:2px"></span></div>
+          <div style="display:flex;align-items:center;gap:14px;font-family:'Inconsolata',monospace;font-size:12.5px;color:#93918c">
+            <span style="color:#e2bf5d">&#9651; Skip permissions</span>
+            <span><span style="color:#777571">&#9095;</span> wt-cf801f5f</span>
+            <span style="flex:1"></span>
+            <div style="height:30px;padding:0 12px;border-radius:6px;background:#deb769;color:#1d170d;font-family:'Lato',sans-serif;font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px;cursor:pointer" style-hover="background:#eccc8e">Send<span style="font-family:'Inconsolata',monospace;font-size:12px;opacity:0.65">&#8629;</span></div>
+          </div>
+        </div>
+      </div>
+      <ul style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:7px;font-size:14.5px;line-height:1.55;color:#94aeb1">
+        <li>Returns roughly 70px of transcript at rest, which matters most on the laptop screens this is used from.</li>
+        <li>Risk: it hides state. Skip-permissions must stay visible even collapsed &mdash; that is the one chip that cannot move behind the <span style="font-family:'Inconsolata',monospace">&#8943;</span>.</li>
+        <li>The pulsing dot doubles as the waiting indicator, which it already is in the current build.</li>
+      </ul>
+    </div>
+
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px;border-top:1px solid #263a3e;padding-top:36px;max-width:1400px">
+    <h2 style="margin:0;font-size:24px;font-weight:700;color:#dce4e5">Do these whichever direction wins</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:2px;background:#263a3e;border:1px solid #263a3e;border-radius:8px;overflow:hidden">
+      <div style="background:#101e21;padding:20px;display:flex;flex-direction:column;gap:7px">
+        <div style="font-size:15.5px;font-weight:700;color:#c6d4d5">Auto-grow, delete the drag handle</div>
+        <div style="font-size:14px;line-height:1.55;color:#94aeb1">Min one line, max 40% of the pane, then scroll. Removes <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">height</code> state, two <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">localStorage</code> keys, the drag listeners, and the <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">MIN/MAX/DEFAULT</code> constants.</div>
+      </div>
+      <div style="background:#101e21;padding:20px;display:flex;flex-direction:column;gap:7px">
+        <div style="font-size:15.5px;font-weight:700;color:#c6d4d5">One toolbar, driven by config</div>
+        <div style="font-size:14px;line-height:1.55;color:#94aeb1">Collapse the four <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">isMobile / isOrchestrator</code> branches into a single row over an items array. Orchestrator becomes a filter and an accent, not a second layout.</div>
+      </div>
+      <div style="background:#101e21;padding:20px;display:flex;flex-direction:column;gap:7px">
+        <div style="font-size:15.5px;font-weight:700;color:#c6d4d5">Two registers, not seven chips</div>
+        <div style="font-size:14px;line-height:1.55;color:#94aeb1">Session state: monospace, unboxed, muted, left. Actions: 32px hit areas, right, exactly one filled. Dangerous permission modes get a warning treatment, not just red text.</div>
+      </div>
+      <div style="background:#101e21;padding:20px;display:flex;flex-direction:column;gap:7px">
+        <div style="font-size:15.5px;font-weight:700;color:#c6d4d5">Container queries, not <code style="font-family:'Inconsolata',monospace;font-size:13px">lg:</code></div>
+        <div style="font-size:14px;line-height:1.55;color:#94aeb1">The pane width depends on the resizable sidebar, so labels should drop on <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">@container</code> width. Never leave an unlabelled icon with no tooltip.</div>
+      </div>
+      <div style="background:#101e21;padding:20px;display:flex;flex-direction:column;gap:7px">
+        <div style="font-size:15.5px;font-weight:700;color:#c6d4d5">Match the transcript measure</div>
+        <div style="font-size:14px;line-height:1.55;color:#94aeb1">Same 68ch column and same left offset as the turns above it. Right now reading and writing happen at different widths on a wide display.</div>
+      </div>
+      <div style="background:#101e21;padding:20px;display:flex;flex-direction:column;gap:7px">
+        <div style="font-size:15.5px;font-weight:700;color:#c6d4d5">Say what attach accepts</div>
+        <div style="font-size:14px;line-height:1.55;color:#94aeb1">The input takes images and <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">.md</code> only, but the affordance says &ldquo;Attach files&rdquo;. Also drop the stray <code style="font-family:'Inconsolata',monospace;color:#c6d4d5">border-l</code> on the container &mdash; nothing sits to its left.</div>
+      </div>
+    </div>
+    <p style="margin:0;font-size:15px;line-height:1.6;color:#748d91;max-width:70ch;text-wrap:pretty">My recommendation is <a href="#1a">1a</a> now and <a href="#1c">1c</a> as a density preference later &mdash; they share the same toolbar model, so 1c is a collapse rule on top of 1a rather than a second implementation. Tell me which and I will put it into the main screen mock and add it to the handoff as task 07.</p>
+  </div>
+
+</section>
+</x-dc>
+</body>
+</html>
