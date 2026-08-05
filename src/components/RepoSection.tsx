@@ -251,7 +251,7 @@ export function RepoSection({
                   <StatusDot status={status} title={statusTitle} />
                   <OriginGlyph source={s.source} />
                   {s.worktreePath && (
-                    <span title={`Worktree: ${s.worktreePath.split('/').pop() ?? ''}`} className="flex-shrink-0 text-primary-6">
+                    <span title={`In a worktree: ${s.worktreePath.split('/').pop() ?? ''}`} className="flex-shrink-0 text-primary-5">
                       <IconGitBranch size={12} stroke={2} />
                     </span>
                   )}
