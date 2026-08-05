@@ -619,6 +619,24 @@
   }
 }
 
+/* A session row's overflow menu is revealed by hovering the row — but only
+   where hovering is possible. On a touch device it stays visible, because a
+   hover-only control is one that cannot be reached at all; that was the bug
+   handoff 08 set out to remove. It also stays visible while focused or open,
+   so keyboard traversal never loses it. */
+@media (hover: hover) {
+  .row-reveal .row-menu-reveal {
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+
+  .row-reveal:hover .row-menu-reveal,
+  .row-reveal:focus-within .row-menu-reveal,
+  .row-reveal .row-menu-reveal[aria-expanded='true'] {
+    opacity: 1;
+  }
+}
+
 /* Interactive elements that stay visually small but need a real target. */
 .tap-target {
   position: relative;
