@@ -3,7 +3,7 @@
  * inline slash-command autocomplete.
  *
  * Supports Enter to send, Shift+Enter for newline, Ctrl+C to interrupt,
- * Escape to blur. The textarea sizes itself to its content, from one line up
+ * Escape to blur. The textarea sizes itself to its content, from two lines up
  * to 40% of the pane; the toolbar below it is one row, split into session
  * state (left, unboxed monospace) and actions (right, exactly one filled).
  */
@@ -516,10 +516,10 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
 
   return (
     <div className={`app-input-bar @container relative flex flex-col border-t border-edge bg-surface-raised ${isOrchestrator ? 'orchestrator-input-bar' : ''}`}>
-      {/* Measured column — matches the transcript's 44px gutter + 68ch prose */}
+      {/* Measured column — shares the transcript's 44px gutter and --measure */}
       <div className="flex px-4 py-3">
         <div className="w-11 flex-shrink-0" aria-hidden="true" />
-        <div className="relative flex min-w-0 flex-1 max-w-[68ch] flex-col gap-2.5">
+        <div className="relative flex min-w-0 flex-1 max-w-[var(--measure)] flex-col gap-2.5">
           <DropZone onUpload={onAddFiles} disabled={disabled} />
 
           {/* Slash autocomplete popup — anchored to the measured column */}
@@ -559,7 +559,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
             )}
             <textarea
               ref={textareaRef}
-              rows={1}
+              rows={2}
               value={value}
               onChange={handleChange}
               onKeyDown={handleKeyDown}
@@ -567,7 +567,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               autoFocus={!isMobile}
               placeholder={placeholder ?? (isOrchestrator ? 'Ask the orchestrator...' : isWaiting ? 'Type response...' : 'What do you want to build?')}
               // Mobile must stay 16px: font sizes under 16px trigger iOS Safari zoom-on-focus
-              className={`field-sizing-content max-h-[40vh] w-full flex-1 resize-none bg-transparent ${isMobile ? 'text-[16px]' : 'text-body'} text-ink placeholder:text-ink-muted outline-none disabled:opacity-50 overflow-y-auto`}
+              className={`composer-textarea field-sizing-content max-h-[40vh] w-full flex-1 resize-none bg-transparent ${isMobile ? 'text-[16px]' : 'text-body'} text-ink placeholder:text-ink-muted outline-none disabled:opacity-50 overflow-y-auto`}
             />
             <input
               ref={fileInputRef}

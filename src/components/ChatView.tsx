@@ -43,8 +43,9 @@ interface Props {
 
 /**
  * Transcript row: fixed 44px left gutter (timestamp or empty spacer) + content
- * capped at a readable measure. The gutter uses a fixed pixel width, not `ch`,
- * so rows with and without a timestamp share one left edge.
+ * at the shared `--measure` width, which the composer also uses. The gutter is
+ * a fixed pixel width, not `ch`, so rows with and without a timestamp share one
+ * left edge.
  */
 function Row({ ts, children }: { ts?: string | null; children: React.ReactNode }) {
   return (
@@ -55,7 +56,7 @@ function Row({ ts, children }: { ts?: string | null; children: React.ReactNode }
       >
         {ts}
       </div>
-      <div className="min-w-0 flex-1 max-w-[68ch]">{children}</div>
+      <div className="min-w-0 flex-1 max-w-[var(--measure)]">{children}</div>
     </div>
   )
 }
