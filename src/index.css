@@ -583,11 +583,30 @@
   height: var(--icon-size);
 }
 
+/* The reading/writing column. The transcript and the composer share it so the
+   caret starts where the text you are answering sits.
+
+   Fluid by default: the column follows the pane, which follows the window and
+   the user's sidebar width. Give this a length (e.g. `68ch`) to cap line
+   length instead — it is the single knob for both surfaces. */
+:root {
+  --measure: 100%;
+}
+
 /* The composer's action row needs a 32px floor on pointer (the density
    default of 28px is too small for the primary action) while still growing
    to 44px on touch. */
 .composer-row {
   height: max(32px, var(--row-h));
+}
+
+/* The composer opens at two lines: one line reads as a search field, and a
+   prompt is usually longer than that. `lh` follows whatever line-height the
+   textarea actually has (14.5px body, 16px on mobile); the px value is the
+   fallback for browsers without it. */
+.composer-textarea {
+  min-height: 46px;
+  min-height: 2lh;
 }
 
 /* Interactive elements that stay visually small but need a real target. */
