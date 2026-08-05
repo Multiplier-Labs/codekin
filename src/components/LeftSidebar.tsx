@@ -14,12 +14,12 @@ import {
   IconChevronRight, IconChevronLeft, IconSparkles, IconX, IconRobotFace,
   IconRefresh,
 } from '@tabler/icons-react'
-import type { Session, Module, Repo, DocsPickerProps, MobileProps, ConnectionState } from '../types'
+import type { Session, Module, Repo, MobileProps, ConnectionState } from '../types'
 import type { RepoGroup } from '../hooks/useRepos'
 import AppIcon from './AppIcon'
 import { NewSessionButton } from './NewSessionButton'
 import { RepoSection, type RepoNode } from './RepoSection'
-import { ArchivedSessionsPanel } from './ArchivedSessionsPanel'
+import type { RepoDrawerTab } from './RepoDrawer'
 import { ModuleBrowser } from './ModuleBrowser'
 import { ConnectionPopup } from './ConnectionPopup'
 import { groupKey } from '../hooks/useSessionOrchestration'
@@ -90,8 +90,6 @@ interface Props {
   token: string
   /** Current color theme ('dark' | 'light'). */
   theme: string
-  /** User-configured font size in pixels. */
-  fontSize: number
   /** WebSocket connection state ('disconnected' | 'connecting' | 'connected'). */
   connState: string
   /** Whether Claude Code connection is disabled by the user. */
@@ -114,8 +112,6 @@ interface Props {
   view: string
   /** Agent display name for the orchestrator button. */
   agentName?: string
-  /** Incremented to force re-fetch of archived sessions. */
-  archiveRefreshKey: number
   /** Switch the active session to the given ID. */
   onSelectSession: (id: string) => void
   /** Delete a session by ID (with confirmation). */
@@ -124,8 +120,6 @@ interface Props {
   onRenameSession: (id: string, name: string) => void
   /** Create a new session in the active repo. */
   onNewSession: (provider?: import('../types').CodingProvider) => void
-  /** Create a new session seeded with context from an archived session. */
-  onNewSessionFromArchive: (workingDir: string, context: string) => void
   /** Open (or create) a session for a specific repo, optionally with a name. */
   onOpenSession: (repo: Repo, name?: string) => void
   /** Switch the active repo (expands its tree node). */
@@ -144,10 +138,10 @@ interface Props {
   onNavigateToLoops: () => void
   /** Navigate to the orchestrator view. */
   onNavigateToOrchestrator: () => void
-  /** Open the docs browser for a repo's documentation files. */
-  onBrowseDocs?: (workingDir: string) => void
-  /** State and callbacks for the docs file picker overlay. */
-  docsPicker?: DocsPickerProps
+  /** Open the repo drawer (docs / archive / approvals) for a repo. */
+  onOpenDrawer: (workingDir: string, tab: RepoDrawerTab) => void
+  /** Move the joined session into a git worktree. */
+  onMoveToWorktree?: () => void
   /** Mobile-specific layout props (drawer mode). */
   mobile?: MobileProps
 }
@@ -168,7 +162,6 @@ export function LeftSidebar({
   activeRepo,
   token,
   theme,
-  fontSize,
   connState,
   claudeDisabled,
   openCodeConnected,
@@ -179,12 +172,10 @@ export function LeftSidebar({
   codexDisabled,
   onToggleCodex,
   view,
-  archiveRefreshKey,
   onSelectSession,
   onDeleteSession,
   onRenameSession,
   onNewSession,
-  onNewSessionFromArchive,
   onOpenSession,
   onSelectRepo,
   onDeleteRepo,
@@ -195,8 +186,8 @@ export function LeftSidebar({
   onNavigateToWorkflows,
   onNavigateToLoops,
   onNavigateToOrchestrator,
-  onBrowseDocs,
-  docsPicker = {},
+  onOpenDrawer,
+  onMoveToWorktree,
   mobile = {},
 }: Props) {
   const { isMobile = false, mobileOpen = false, onMobileClose } = mobile
@@ -207,7 +198,6 @@ export function LeftSidebar({
   })
   const [modulesOpen, setModulesOpen] = useState(false)
   const [connPopupOpen, setConnPopupOpen] = useState(false)
-  const [archiveViewSessionId, setArchiveViewSessionId] = useState<string | null>(null)
   const modulesRef = useRef<HTMLDivElement>(null)
   const dragging = useRef(false)
   const startX = useRef(0)
@@ -446,14 +436,7 @@ export function LeftSidebar({
         {/* Divider between menu items and repo folders */}
         <div className="mx-3 my-1 border-t border-edge" />
 
-        {/* Section label for active sessions */}
-        {repoNodes.length > 0 && (
-          <div className="px-4 pt-1.5 pb-0.5 text-micro font-medium uppercase tracking-wider text-ink-faint">
-            Active sessions
-          </div>
-        )}
-
-        {/* Repo nodes */}
+        {/* Repo nodes — each repo is its own section label */}
         {repoNodes.map(node => (
           <RepoSection
             key={node.workingDir}
@@ -462,23 +445,14 @@ export function LeftSidebar({
             activeSessionId={activeSessionId}
             waitingSessions={waitingSessions}
             tentativeQueues={tentativeQueues}
-            token={token}
-            archiveRefreshKey={archiveRefreshKey}
             onSelectSession={handleSelectSessionMobile}
             onDeleteSession={onDeleteSession}
             onRenameSession={onRenameSession}
             onNewSession={node.workingDir === activeWorkingDir ? onNewSession : undefined}
             onSelectRepo={(wd) => { onSelectRepo(wd); if (isMobile) onMobileClose?.() }}
             onDeleteRepo={onDeleteRepo}
-            onViewArchivedSession={setArchiveViewSessionId}
-            onBrowseDocs={onBrowseDocs}
-            docsPickerOpen={docsPicker.open}
-            docsPickerRepoDir={docsPicker.repoDir}
-            docsPickerFiles={docsPicker.files}
-            docsPickerLoading={docsPicker.loading}
-            onDocsPickerSelect={docsPicker.onSelect}
-            onDocsPickerClose={docsPicker.onClose}
-            docsStarredDocs={docsPicker.starredDocs}
+            onOpenDrawer={(wd, tab) => { onOpenDrawer(wd, tab); if (isMobile) onMobileClose?.() }}
+            onMoveToWorktree={onMoveToWorktree}
             isMobile={isMobile}
           />
         ))}
@@ -491,16 +465,6 @@ export function LeftSidebar({
         )}
 
         {/* Archive viewer (triggered from repo sections) */}
-        <ArchivedSessionsPanel
-          token={token}
-          visible={archiveViewSessionId !== null}
-          fontSize={fontSize}
-          workingDir={activeWorkingDir}
-          refreshKey={archiveRefreshKey}
-          onNewSessionFromArchive={onNewSessionFromArchive}
-          initialViewId={archiveViewSessionId}
-          onClose={() => setArchiveViewSessionId(null)}
-        />
       </div>
 
       {/* Bottom toolbar */}

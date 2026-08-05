@@ -32,7 +32,7 @@ import { useOpenCodeCommands } from './hooks/useOpenCodeCommands'
 import { useProviderValidation } from './hooks/useProviderValidation'
 import { buildSlashCommandList, buildOpenCodeSlashCommandList } from './lib/slashCommands'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
-import { getQueueMessages, getAgentName } from './lib/ccApi'
+import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo } from './lib/ccApi'
 import { Settings } from './components/Settings'
 import { LeftSidebar } from './components/LeftSidebar'
 import { MobileTopBar } from './components/MobileTopBar'
@@ -45,6 +45,7 @@ import { DiffPanel } from './components/DiffPanel'
 import { OrchestratorContent } from './components/OrchestratorContent'
 import { DocsBrowserContent } from './components/DocsBrowserContent'
 import { SessionContent } from './components/SessionContent'
+import { RepoDrawer, type RepoDrawerTab } from './components/RepoDrawer'
 import type { PermissionMode, CodingProvider } from './types'
 import { useClaudeModelSync } from './hooks/useClaudeModelSync'
 
@@ -501,20 +502,45 @@ export default function App() {
   }, [clearMessages, leaveSession, joinSession])
 
   // Docs browser: handle browse docs from sidebar
-  const handleBrowseDocs = useCallback((workingDir: string) => {
-    if (docsBrowser.pickerOpen && docsBrowser.pickerRepoDir === workingDir) {
-      docsBrowser.closePicker()
-    } else {
-      docsBrowser.openPicker(workingDir, settings.token)
-    }
+  // --- Repo drawer (docs / archive / approvals) -------------------------
+  const [drawer, setDrawer] = useState<{ workingDir: string; tab: RepoDrawerTab } | null>(null)
+
+  const handleOpenDrawer = useCallback((workingDir: string, tab: RepoDrawerTab) => {
+    setDrawer(prev => (prev?.workingDir === workingDir && prev.tab === tab ? null : { workingDir, tab }))
+    // The docs tab reads the picker's file list, so make sure it is loaded.
+    if (tab === 'docs') docsBrowser.openPicker(workingDir, settings.token)
   }, [docsBrowser, settings.token])
 
-  // Docs browser: handle file selection from picker
-  const handleSelectDocFile = useCallback((filePath: string) => {
-    if (docsBrowser.pickerRepoDir) {
-      docsBrowser.openFile(docsBrowser.pickerRepoDir, filePath, settings.token)
-    }
+  const handleDrawerSelectDoc = useCallback((filePath: string) => {
+    if (drawer) docsBrowser.openFile(drawer.workingDir, filePath, settings.token)
+  }, [drawer, docsBrowser, settings.token])
+
+  // --- Command palette collections --------------------------------------
+  const paletteDocs = useMemo(
+    () => (docsBrowser.pickerRepoDir
+      ? docsBrowser.pickerFiles.map(f => ({
+          ...f,
+          repoDir: docsBrowser.pickerRepoDir as string,
+          starred: docsBrowser.starredDocs.includes(f.path),
+        }))
+      : []),
+    [docsBrowser.pickerFiles, docsBrowser.pickerRepoDir, docsBrowser.starredDocs],
+  )
+
+  const [paletteArchived, setPaletteArchived] = useState<ArchivedSessionInfo[]>([])
+  useEffect(() => {
+    if (!settings.token || !paletteOpen) return
+    listArchivedSessions(settings.token).then(setPaletteArchived).catch(() => {})
+  }, [settings.token, paletteOpen, archiveRefreshKey])
+
+  const handleOpenDocFromPalette = useCallback((path: string, repoDir: string) => {
+    docsBrowser.openFile(repoDir, path, settings.token)
   }, [docsBrowser, settings.token])
+
+  const handleOpenArchivedFromPalette = useCallback((id: string) => {
+    const found = paletteArchived.find(a => a.id === id)
+    if (found) setDrawer({ workingDir: found.groupDir ?? found.workingDir, tab: 'archive' })
+  }, [paletteArchived])
 
   // Sync data-theme attribute on <html> whenever the setting changes
   useEffect(() => {
@@ -584,7 +610,6 @@ export default function App() {
         activeRepo={activeRepo}
         token={settings.token}
         theme={settings.theme}
-        fontSize={settings.fontSize}
         connState={connState}
         claudeDisabled={claudeDisabled}
         openCodeConnected={openCodeConnected}
@@ -595,12 +620,10 @@ export default function App() {
         codexDisabled={codexDisabled}
         onToggleCodex={handleToggleCodex}
         view={view}
-        archiveRefreshKey={archiveRefreshKey}
         onSelectSession={(id) => { docsBrowser.close(); if (view === 'orchestrator') navigate(`/s/${id}`); handleSelectSession(id) }}
         onDeleteSession={handleDeleteSession}
         onRenameSession={renameSession}
         onNewSession={handleNewSessionForRepo}
-        onNewSessionFromArchive={handleNewSessionFromArchive}
         onOpenSession={handleOpenSession}
         onSelectRepo={handleSelectRepo}
         onDeleteRepo={handleDeleteRepo}
@@ -611,16 +634,8 @@ export default function App() {
         onNavigateToWorkflows={() => navigate('/workflows')}
         onNavigateToLoops={() => navigate('/loops')}
         onNavigateToOrchestrator={() => handleNavigateToOrchestrator()}
-        onBrowseDocs={handleBrowseDocs}
-        docsPicker={{
-          open: docsBrowser.pickerOpen,
-          repoDir: docsBrowser.pickerRepoDir,
-          files: docsBrowser.pickerFiles,
-          loading: docsBrowser.pickerLoading,
-          onSelect: handleSelectDocFile,
-          onClose: docsBrowser.closePicker,
-          starredDocs: docsBrowser.starredDocs,
-        }}
+        onOpenDrawer={handleOpenDrawer}
+        onMoveToWorktree={moveToWorktree}
         mobile={{
           isMobile,
           mobileOpen: mobileMenuOpen,
@@ -788,6 +803,24 @@ export default function App() {
         )}
       </div>
 
+      {/* Repo drawer — independent of the diff panel: own open state, own width */}
+      <RepoDrawer
+        token={settings.token}
+        workingDir={drawer?.workingDir ?? null}
+        repoName={(drawer?.workingDir ?? '').replace(/\/+$/, '').split('/').pop() ?? ''}
+        open={drawer !== null}
+        onClose={() => setDrawer(null)}
+        docsFiles={docsBrowser.pickerRepoDir === drawer?.workingDir ? docsBrowser.pickerFiles : []}
+        docsLoading={docsBrowser.pickerLoading}
+        starredDocs={docsBrowser.starredDocs}
+        onSelectDoc={handleDrawerSelectDoc}
+        archiveRefreshKey={archiveRefreshKey}
+        onViewArchivedSession={() => { /* the drawer owns the viewer */ }}
+        onNewSessionFromArchive={handleNewSessionFromArchive}
+        fontSize={settings.fontSize}
+        initialTab={drawer?.tab}
+      />
+
       {/* Diff viewer sidebar */}
       {activeSessionId && (
         <DiffPanel
@@ -810,6 +843,7 @@ export default function App() {
         onAutoWorktreeChange={setUseWorktree}
         agentName={agentName}
         onAgentNameChange={setAgentName}
+        repos={repos}
       />
       <CommandPalette
         open={paletteOpen}
@@ -822,6 +856,11 @@ export default function App() {
         onSendModule={handleSendModule}
         onOpenSettings={() => setSettingsOpen(true)}
         isMobile={isMobile}
+        docs={paletteDocs}
+        onSelectDoc={handleOpenDocFromPalette}
+        archivedSessions={paletteArchived}
+        onSelectArchived={handleOpenArchivedFromPalette}
+        activeWorkingDir={activeWorkingDir}
       />
     </div>
   )

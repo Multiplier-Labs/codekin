@@ -1,30 +1,90 @@
 /**
- * Approvals panel for the right sidebar.
+ * Approvals — the Approvals tab's content renderer.
  *
- * Displays per-repo auto-approved tools and bash commands with search,
- * collapsible groups, and revoke controls. Extracted from the Settings modal.
+ * Pure content: no header, no indent rail, no scroll container. `RepoDrawer`
+ * owns those.
+ *
+ * Two halves of one question (task 08, item 12): "what am I auto-approving"
+ * sits on top as the permission mode selector, "what have I already approved"
+ * below it, grouped by tool — one row per decision with a count and a
+ * revoke-all, instead of a flat list of patterns.
  */
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { IconChevronRight, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck, IconX } from '@tabler/icons-react'
 import { getRepoApprovals, removeRepoApproval, bulkRemoveRepoApprovals, type RepoApprovals } from '../lib/ccApi'
+import { PERMISSION_MODES, type PermissionMode } from '../types'
+
+const PERMISSION_MODE_KEY = 'claude-permission-mode'
+
+const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
+  shield: IconShieldCheck,
+  pencil: IconPencil,
+  map: IconMap2,
+  warning: IconAlertTriangle,
+}
+
+/** What `removeRepoApproval` / `bulkRemoveRepoApprovals` accept. */
+type RemovalTarget = { tool?: string; command?: string; pattern?: string }
+
+interface ApprovalGroup {
+  key: string
+  label: string
+  kind: 'tool' | 'bash'
+  rules: { id: string; label: string; target: RemovalTarget }[]
+}
 
 interface Props {
   token: string
   workingDir: string | null
-  visible: boolean
+  /** Defaults to true — the drawer only mounts the tab when it is showing. */
+  visible?: boolean
+  /** Filter text, when the host renders a filter row. */
+  filter?: string
 }
 
-export function ApprovalsPanel({ token, workingDir, visible }: Props) {
+/**
+ * Collapse the three flat rule lists into one decision per tool: every bash
+ * command and wildcard pattern folds into the group of its leading binary.
+ */
+function buildGroups(approvals: RepoApprovals): ApprovalGroup[] {
+  const tools: ApprovalGroup[] = [...approvals.tools].sort((a, b) => a.localeCompare(b)).map(tool => ({
+    key: `tool:${tool}`,
+    label: tool,
+    kind: 'tool' as const,
+    rules: [{ id: `tool:${tool}`, label: tool, target: { tool } }],
+  }))
+
+  const bash = new Map<string, ApprovalGroup>()
+  function addBash(raw: string, target: RemovalTarget) {
+    const prefix = raw.split(/\s+/)[0] || 'other'
+    let group = bash.get(prefix)
+    if (!group) {
+      group = { key: `bash:${prefix}`, label: prefix, kind: 'bash', rules: [] }
+      bash.set(prefix, group)
+    }
+    group.rules.push({ id: `${group.key}:${raw}`, label: raw, target })
+  }
+  for (const command of approvals.commands) addBash(command, { command })
+  for (const pattern of approvals.patterns) addBash(pattern, { pattern })
+
+  const bashGroups = [...bash.values()].sort((a, b) => a.label.localeCompare(b.label))
+  for (const group of bashGroups) group.rules.sort((a, b) => a.label.localeCompare(b.label))
+
+  return [...tools, ...bashGroups]
+}
+
+export function ApprovalsPanel({ token, workingDir, visible = true, filter = '' }: Props) {
   const [approvals, setApprovals] = useState<RepoApprovals | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
+  const [expanded, setExpanded] = useState(new Set<string>())
 
-  // Fetch when panel becomes visible or workingDir/token changes
   useEffect(() => {
     if (!visible || !workingDir || !token) return
     let cancelled = false
     setLoading(true) // eslint-disable-line react-hooks/set-state-in-effect -- data fetching
-    setError(false)  
+    setError(false)
     getRepoApprovals(token, workingDir)
       .then(data => { if (!cancelled) setApprovals(data) })
       .catch(() => { if (!cancelled) { setApprovals(null); setError(true) } })
@@ -32,376 +92,284 @@ export function ApprovalsPanel({ token, workingDir, visible }: Props) {
     return () => { cancelled = true }
   }, [visible, workingDir, token])
 
-  if (!visible) return null
-
-  async function handleRemove(opts: { tool?: string; command?: string; pattern?: string }) {
+  const reload = useCallback(() => {
     if (!workingDir || !token) return
-    try {
-      await removeRepoApproval(token, workingDir, opts)
-      const updated = await getRepoApprovals(token, workingDir)
-      setApprovals(updated)
-    } catch {
-      getRepoApprovals(token, workingDir)
-        .then(setApprovals)
-        .catch(() => {})
-    }
-  }
+    getRepoApprovals(token, workingDir)
+      .then(setApprovals)
+      .catch(() => { /* keep the last good list */ })
+  }, [token, workingDir])
 
-  async function handleRevokeMultiple(items: Array<{ tool?: string; command?: string; pattern?: string }>) {
-    if (!workingDir || !token || items.length === 0) return
-    try {
-      await bulkRemoveRepoApprovals(token, workingDir, items)
-      const updated = await getRepoApprovals(token, workingDir)
-      setApprovals(updated)
-    } catch {
-      getRepoApprovals(token, workingDir)
-        .then(setApprovals)
-        .catch(() => {})
-    }
-  }
+  const handleRemove = useCallback((target: RemovalTarget) => {
+    if (!workingDir || !token) return
+    removeRepoApproval(token, workingDir, target)
+      .catch((err: unknown) => { console.error('Failed to revoke approval:', err) })
+      .finally(reload)
+  }, [token, workingDir, reload])
 
-  if (!workingDir) {
-    return (
-      <div className="border-t border-edge/30 px-3 py-3">
-        <p className="text-body text-ink-muted">Select a session to manage approvals.</p>
-      </div>
-    )
-  }
+  const handleRemoveMany = useCallback((targets: RemovalTarget[]) => {
+    if (!workingDir || !token || targets.length === 0) return
+    bulkRemoveRepoApprovals(token, workingDir, targets)
+      .catch((err: unknown) => { console.error('Failed to revoke approvals:', err) })
+      .finally(reload)
+  }, [token, workingDir, reload])
 
-  if (loading) {
-    return (
-      <div className="border-t border-edge/30 px-3 py-3">
-        <p className="text-body text-ink-muted">Loading...</p>
-      </div>
-    )
-  }
-
-  if (error || !approvals) {
-    return (
-      <div className="border-t border-edge/30 px-3 py-3">
-        <p className="text-body text-ink-muted">Could not load approvals.</p>
-      </div>
-    )
-  }
-
-  const repoName = workingDir.split('/').pop() || workingDir
-
-  return (
-    <div className="border-t border-edge/30 flex flex-col min-h-0">
-      {/* Indented content to visually anchor under the repo */}
-      <div className="ml-3 border-l border-edge-strong/30 flex flex-col min-h-0">
-        {/* Header */}
-        <div className="flex items-center gap-2 px-3 py-1.5 flex-shrink-0">
-          <span className="text-body font-medium text-ink-muted uppercase tracking-wider flex-shrink-0">Approvals</span>
-          <span className="text-meta font-mono text-ink-faint truncate" title={workingDir}>{repoName}</span>
-        </div>
-        <ApprovalsContent
-          approvals={approvals}
-          onRemove={handleRemove}
-          onRevokeMultiple={handleRevokeMultiple}
-        />
-      </div>
-    </div>
-  )
-}
-
-/* ── Approvals Content ──────────────────────────────────────────── */
-
-function ApprovalsContent({ approvals, onRemove, onRevokeMultiple }: {
-  approvals: RepoApprovals
-  onRemove: (opts: { tool?: string; command?: string; pattern?: string }) => void
-  onRevokeMultiple: (items: Array<{ tool?: string; command?: string; pattern?: string }>) => void
-}) {
-  const [collapsedGroups, setCollapsedGroups] = useState(new Set(['__tools__', '__commands__', '__patterns__']))
-
-  const totalCount = approvals.tools.length + approvals.commands.length + approvals.patterns.length
-  const empty = totalCount === 0
-
-  function toggleGroup(key: string) {
-    setCollapsedGroups(prev => {
+  const toggleGroup = useCallback((key: string) => {
+    setExpanded(prev => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
       return next
     })
-  }
+  }, [])
 
-  const filteredTools = useMemo(
-    () => [...approvals.tools].sort(),
-    [approvals.tools],
-  )
+  const groups = useMemo(() => (approvals ? buildGroups(approvals) : []), [approvals])
 
-  const filteredPatterns = useMemo(
-    () => [...(approvals.patterns ?? [])].sort(),
-    [approvals.patterns],
-  )
+  const visibleGroups = useMemo(() => {
+    const needle = filter.trim().toLowerCase()
+    if (!needle) return groups
+    return groups
+      .map(g => g.label.toLowerCase().includes(needle)
+        ? g
+        : { ...g, rules: g.rules.filter(r => r.label.toLowerCase().includes(needle)) })
+      .filter(g => g.rules.length > 0)
+  }, [groups, filter])
 
-  const commandGroups = useMemo(() => {
-    return groupCommandsByPrefix(approvals.commands)
-  }, [approvals.commands])
+  if (!visible) return null
 
-  const commandGroupEntries = Object.entries(commandGroups)
-  const hasTools = filteredTools.length > 0
-  const hasPatterns = filteredPatterns.length > 0
-  const hasCommands = commandGroupEntries.length > 0
+  const ruleCount = groups.reduce((n, g) => n + g.rules.length, 0)
 
   return (
-    <>
-      {/* Header row */}
-      {!empty && (
-        <div className="flex-shrink-0 px-3 pb-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-meta text-ink-muted">
-              {totalCount} rule{totalCount !== 1 ? 's' : ''}
+    <div className="flex flex-col">
+      <PermissionModeControl />
+
+      {!workingDir ? (
+        <EmptyState
+          title="No repo selected"
+          body="Approvals are stored per repo. Pick a repo to see what it auto-approves."
+        />
+      ) : loading && !approvals ? (
+        <p className="px-3 py-6 text-center text-body text-ink-muted">Loading…</p>
+      ) : error || !approvals ? (
+        <p className="px-3 py-6 text-center text-body text-ink-muted">Could not load approvals.</p>
+      ) : ruleCount === 0 ? (
+        <EmptyState
+          title="Nothing auto-approved yet"
+          body="When you answer a permission prompt with “always allow”, the rule lands here and Claude stops asking for it in this repo."
+        />
+      ) : (
+        <>
+          <div className="flex items-center justify-between gap-2 px-3 py-1.5">
+            <span className="text-micro uppercase tracking-wider text-ink-faint">
+              {groups.length} tool{groups.length === 1 ? '' : 's'} · {ruleCount} rule{ruleCount === 1 ? '' : 's'}
             </span>
             <button
               onClick={() => {
-                const items: Array<{ tool?: string; command?: string; pattern?: string }> = [
-                  ...approvals.tools.map(t => ({ tool: t })),
-                  ...approvals.commands.map(c => ({ command: c })),
-                  ...(approvals.patterns ?? []).map(p => ({ pattern: p })),
-                ]
-                if (confirm(`Revoke all ${totalCount} approval rules?`)) {
-                  onRevokeMultiple(items)
+                if (window.confirm(`Revoke all ${ruleCount} approval rules for this repo?`)) {
+                  handleRemoveMany(groups.flatMap(g => g.rules.map(r => r.target)))
                 }
               }}
-              className="text-body text-ink-muted hover:text-error-5 transition-colors"
+              className="shrink-0 text-meta text-ink-muted transition-colors hover:text-error-5"
             >
-              Revoke All
+              Revoke all
             </button>
           </div>
-        </div>
+
+          {visibleGroups.length === 0 ? (
+            <EmptyState title="No matching approvals" body={`Nothing approved here matches "${filter.trim()}".`} />
+          ) : (
+            <div className="flex flex-col pb-1">
+              {visibleGroups.map(group => (
+                <ApprovalGroupRow
+                  key={group.key}
+                  group={group}
+                  expanded={expanded.has(group.key)}
+                  onToggle={() => { toggleGroup(group.key) }}
+                  onRemove={handleRemove}
+                  onRemoveMany={handleRemoveMany}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
-
-      {/* Scrollable list */}
-      <div className="overflow-y-auto min-h-0 flex-1 px-2 py-1 approvals-scroll">
-        {!hasTools && !hasPatterns && !hasCommands && (
-          <p className="text-body text-ink-faint py-2 text-center">
-            No auto-approval rules yet.
-          </p>
-        )}
-
-        <div className="space-y-2">
-          {hasPatterns && (
-            <ApprovalSection
-              title="Patterns"
-              count={filteredPatterns.length}
-              collapsed={collapsedGroups.has('__patterns__')}
-              onToggle={() => { toggleGroup('__patterns__'); }}
-              onRevokeAll={() => {
-                if (confirm(`Revoke all ${filteredPatterns.length} pattern approvals?`)) {
-                  onRevokeMultiple(filteredPatterns.map(p => ({ pattern: p })))
-                }
-              }}
-            >
-              <ul className="space-y-0.5">
-                {filteredPatterns.map(pattern => (
-                  <li key={pattern} className="group flex items-center justify-between rounded-md px-2 py-1 text-body text-ink hover:bg-surface-raised hover:text-ink transition-colors">
-                    <code className="truncate font-mono">{pattern}</code>
-                    <button
-                      onClick={() => { onRemove({ pattern }); }}
-                      className="ml-2 flex-shrink-0 text-ink-muted opacity-0 group-hover:opacity-100 hover:text-error-5 transition-all"
-                    >
-                      ×
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </ApprovalSection>
-          )}
-
-          {hasTools && (
-            <ApprovalSection
-              title="Tools"
-              count={filteredTools.length}
-              collapsed={collapsedGroups.has('__tools__')}
-              onToggle={() => { toggleGroup('__tools__'); }}
-              onRevokeAll={() => {
-                if (confirm(`Revoke all ${filteredTools.length} tool approvals?`)) {
-                  onRevokeMultiple(filteredTools.map(t => ({ tool: t })))
-                }
-              }}
-            >
-              <ul className="space-y-0.5">
-                {filteredTools.map(tool => (
-                  <li key={tool} className="group flex items-center justify-between rounded-md px-2 py-1 text-body text-ink hover:bg-surface-raised hover:text-ink transition-colors">
-                    <span className="truncate">{tool}</span>
-                    <button
-                      onClick={() => { onRemove({ tool }); }}
-                      className="ml-2 flex-shrink-0 text-ink-muted opacity-0 group-hover:opacity-100 hover:text-error-5 transition-all"
-                    >
-                      ×
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </ApprovalSection>
-          )}
-
-          {hasCommands && (
-            <ApprovalSection
-              title="Commands"
-              count={approvals.commands.length}
-              collapsed={collapsedGroups.has('__commands__')}
-              onToggle={() => { toggleGroup('__commands__'); }}
-              onRevokeAll={() => {
-                const all = approvals.commands
-                if (confirm(`Revoke all ${all.length} command approvals?`)) {
-                  onRevokeMultiple(all.map(c => ({ command: c })))
-                }
-              }}
-            >
-              <div className="space-y-1.5">
-                {commandGroupEntries.map(([prefix, cmds]) => (
-                  <CommandGroup
-                    key={prefix}
-                    prefix={prefix}
-                    commands={cmds}
-                    collapsed={collapsedGroups.has(`cmd:${prefix}`)}
-                    onToggle={() => { toggleGroup(`cmd:${prefix}`); }}
-                    onRemove={cmd => { onRemove({ command: cmd }); }}
-                    onRevokeAll={() => {
-                      if (confirm(`Revoke all ${cmds.length} "${prefix}" approvals?`)) {
-                        onRevokeMultiple(cmds.map(c => ({ command: c })))
-                      }
-                    }}
-                  />
-                ))}
-              </div>
-            </ApprovalSection>
-          )}
-        </div>
-      </div>
-    </>
-  )
-}
-
-/* ── Helpers ────────────────────────────────────────────────────── */
-
-function groupCommandsByPrefix(commands: string[]): Record<string, string[]> {
-  const groups: Record<string, string[]> = {}
-  for (const cmd of commands) {
-    const prefix = cmd.split(/\s+/)[0] || 'other'
-    if (!groups[prefix]) groups[prefix] = []
-    groups[prefix].push(cmd)
-  }
-  const sorted: Record<string, string[]> = {}
-  for (const key of Object.keys(groups).sort()) {
-    sorted[key] = groups[key].sort()
-  }
-  return sorted
-}
-
-function ApprovalSection({ title, count, collapsed, onToggle, onRevokeAll, children }: {
-  title: string
-  count: number
-  collapsed: boolean
-  onToggle: () => void
-  onRevokeAll: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-1">
-        <button
-          onClick={onToggle}
-          className="flex items-center gap-1.5 text-body text-ink-muted hover:text-ink transition-colors"
-        >
-          <svg
-            className={`w-2.5 h-2.5 transition-transform flex-shrink-0 ${collapsed ? '' : 'rotate-90'}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2.5}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
-          <span className="font-medium">{title}</span>
-          <span className="text-meta text-ink-muted">{count}</span>
-        </button>
-        {!collapsed && count > 1 && (
-          <button
-            onClick={onRevokeAll}
-            className="text-body text-ink-muted hover:text-error-5 transition-colors"
-          >
-            revoke all
-          </button>
-        )}
-      </div>
-      {!collapsed && children}
     </div>
   )
 }
 
-function CommandGroup({ prefix, commands, collapsed, onToggle, onRemove, onRevokeAll }: {
-  prefix: string
-  commands: string[]
-  collapsed: boolean
+/* ── Permission mode ────────────────────────────────────────────── */
+
+function readPermissionMode(): PermissionMode {
+  const stored = localStorage.getItem(PERMISSION_MODE_KEY)
+  return PERMISSION_MODES.some(m => m.id === stored) ? stored as PermissionMode : 'acceptEdits'
+}
+
+/**
+ * The other half of "what am I auto-approving". Writes the app-wide
+ * `claude-permission-mode` key that new sessions start from — in-flight
+ * sessions keep the mode they were started with.
+ */
+function PermissionModeControl() {
+  const [mode, setMode] = useState<PermissionMode>(readPermissionMode)
+  const [open, setOpen] = useState(false)
+
+  const current = PERMISSION_MODES.find(m => m.id === mode)
+  const CurrentIcon = PERMISSION_MODE_ICONS[current?.icon ?? 'shield']
+
+  const select = useCallback((next: PermissionMode) => {
+    const meta = PERMISSION_MODES.find(m => m.id === next)
+    // Dangerous modes accept every tool call — same guard as the composer.
+    if (meta?.dangerous) {
+      const confirmed = window.confirm(
+        `Warning: "${meta.label}" will accept ALL tool calls without asking.\n\n` +
+        'This includes file writes, bash commands, and web requests. ' +
+        'Only use this if you fully trust the task.\n\n' +
+        'Are you sure?'
+      )
+      if (!confirmed) return
+    }
+    localStorage.setItem(PERMISSION_MODE_KEY, next)
+    setMode(next)
+    setOpen(false)
+  }, [])
+
+  return (
+    <div className="border-b border-edge px-2 py-2">
+      <p className="px-1 pb-1 text-micro uppercase tracking-wider text-ink-faint">New sessions start in</p>
+      <button
+        onClick={() => { setOpen(o => !o) }}
+        aria-expanded={open}
+        title="Permission mode for new sessions"
+        className="density-row flex w-full items-center gap-2 rounded-control border border-edge-strong bg-surface-raised px-2 text-left transition-colors hover:border-focus"
+      >
+        <CurrentIcon size={14} stroke={2} className={current?.dangerous ? 'shrink-0 text-warning-4' : 'shrink-0 text-ink-muted'} />
+        <span className={`min-w-0 flex-1 truncate text-body ${current?.dangerous ? 'text-warning-4' : 'text-ink'}`}>
+          {current?.label ?? mode}
+        </span>
+        <IconChevronRight size={13} stroke={2} className={`shrink-0 text-ink-faint transition-transform ${open ? 'rotate-90' : ''}`} />
+      </button>
+      {open && (
+        <div className="mt-1 flex flex-col gap-0.5" role="group" aria-label="Permission mode">
+          {PERMISSION_MODES.map(m => {
+            const ModeIcon = PERMISSION_MODE_ICONS[m.icon]
+            const active = m.id === mode
+            return (
+              <button
+                key={m.id}
+                onClick={() => { select(m.id) }}
+                className={`flex w-full items-start gap-2 rounded-control px-2 py-1.5 text-left transition-colors ${
+                  m.dangerous ? 'hover:bg-error-9/20' : 'hover:bg-surface-raised'
+                }`}
+              >
+                <ModeIcon
+                  size={14}
+                  stroke={2}
+                  className={`mt-0.5 shrink-0 ${m.dangerous ? 'text-error-5' : active ? 'text-primary-4' : 'text-ink-muted'}`}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5">
+                    <span className={`truncate text-body ${active ? 'font-medium text-ink' : 'text-ink-muted'}`}>{m.label}</span>
+                    {active && <IconCheck size={12} stroke={2.5} className="shrink-0 text-primary-4" />}
+                  </span>
+                  <span className="mt-0.5 block text-micro text-ink-faint">{m.description}</span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── Groups ─────────────────────────────────────────────────────── */
+
+function ApprovalGroupRow({ group, expanded, onToggle, onRemove, onRemoveMany }: {
+  group: ApprovalGroup
+  expanded: boolean
   onToggle: () => void
-  onRemove: (cmd: string) => void
-  onRevokeAll: () => void
+  onRemove: (target: RemovalTarget) => void
+  onRemoveMany: (targets: RemovalTarget[]) => void
 }) {
-  if (commands.length === 1) {
+  const count = group.rules.length
+  const labelClass = group.kind === 'bash' ? 'font-mono' : ''
+
+  // A single rule is already one decision — no disclosure, revoke in place.
+  if (count === 1) {
+    const rule = group.rules[0]
     return (
-      <div className="group flex items-center justify-between rounded-md px-2 py-1 hover:bg-surface-raised transition-colors">
-        <code className="truncate font-mono text-body text-ink" title={commands[0]}>
-          $ {commands[0]}
-        </code>
-        <button
-          onClick={() => { onRemove(commands[0]); }}
-          className="ml-2 flex-shrink-0 text-ink-muted opacity-0 group-hover:opacity-100 hover:text-error-5 transition-all"
-        >
-          ×
-        </button>
+      <div className="group density-row flex items-center gap-2 rounded-control px-3 transition-colors hover:bg-surface-raised">
+        <span className={`min-w-0 flex-1 truncate text-body text-ink ${labelClass}`} title={rule.label}>
+          {group.kind === 'bash' ? `$ ${rule.label}` : rule.label}
+        </span>
+        <RevokeButton label={`Revoke ${rule.label}`} onClick={() => { onRemove(rule.target) }} />
       </div>
     )
   }
 
   return (
-    <div className="rounded-md overflow-hidden">
-      <div className="flex items-center justify-between px-2 py-0.5">
+    <div className="flex flex-col">
+      <div className="group density-row flex items-center gap-2 rounded-control px-3 transition-colors hover:bg-surface-raised">
         <button
           onClick={onToggle}
-          className="flex items-center gap-1 text-body text-ink-muted hover:text-ink transition-colors"
+          aria-expanded={expanded}
+          className="flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left"
         >
-          <svg
-            className={`w-2 h-2 transition-transform flex-shrink-0 ${collapsed ? '' : 'rotate-90'}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2.5}
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
-          <code className="font-mono font-medium">{prefix}</code>
-          <span className="text-meta text-ink-muted">{commands.length}</span>
+          <IconChevronRight
+            size={12}
+            stroke={2.5}
+            className={`shrink-0 text-ink-faint transition-transform ${expanded ? 'rotate-90' : ''}`}
+          />
+          <span className={`truncate text-body text-ink ${labelClass}`}>{group.label}</span>
+          <span className="shrink-0 rounded-control bg-surface-raised px-1.5 text-micro tabular-nums text-ink-faint">{count}</span>
         </button>
-        {!collapsed && (
-          <button
-            onClick={onRevokeAll}
-            className="text-body text-ink-muted hover:text-error-5 transition-colors"
-          >
-            revoke all
-          </button>
-        )}
+        <button
+          onClick={() => {
+            if (window.confirm(`Revoke all ${count} "${group.label}" approvals?`)) {
+              onRemoveMany(group.rules.map(r => r.target))
+            }
+          }}
+          className="shrink-0 text-meta text-ink-faint transition-colors hover:text-error-5"
+        >
+          Revoke all
+        </button>
       </div>
-      {!collapsed && (
-        <ul className="pl-3">
-          {commands.map(cmd => (
-            <li key={cmd} className="group flex items-center justify-between rounded-md px-2 py-1 hover:bg-surface-raised transition-colors">
-              <code className="truncate font-mono text-body text-ink" title={cmd}>
-                $ {cmd}
-              </code>
-              <button
-                onClick={() => { onRemove(cmd); }}
-                className="ml-2 flex-shrink-0 text-ink-muted opacity-0 group-hover:opacity-100 hover:text-error-5 transition-all"
-              >
-                ×
-              </button>
-            </li>
+      {expanded && (
+        <div className="flex flex-col pl-4">
+          {group.rules.map(rule => (
+            <div
+              key={rule.id}
+              className="group density-row flex items-center gap-2 rounded-control px-3 transition-colors hover:bg-surface-raised"
+            >
+              <span className="min-w-0 flex-1 truncate font-mono text-meta text-ink-muted" title={rule.label}>
+                {group.kind === 'bash' ? `$ ${rule.label}` : rule.label}
+              </span>
+              <RevokeButton label={`Revoke ${rule.label}`} onClick={() => { onRemove(rule.target) }} />
+            </div>
           ))}
-        </ul>
+        </div>
       )}
+    </div>
+  )
+}
+
+function RevokeButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className="tap-target shrink-0 rounded-control p-0.5 text-ink-faint opacity-0 transition-opacity hover:text-error-5 focus-visible:opacity-100 group-hover:opacity-100"
+    >
+      <IconX size={13} stroke={2} />
+    </button>
+  )
+}
+
+function EmptyState({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="px-4 py-8 text-center">
+      <p className="text-body font-medium text-ink-muted">{title}</p>
+      <p className="mt-1 text-meta text-ink-faint">{body}</p>
     </div>
   )
 }
