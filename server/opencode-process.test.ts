@@ -26,10 +26,24 @@ vi.mock('child_process', async (importOriginal) => {
   }
 })
 
+// Attachments are only read when they resolve inside SCREENSHOTS_DIR, so point
+// it at a throwaway directory the tests own.
+const uploadRoot = vi.hoisted(() => {
+  const { mkdtempSync: mkdtemp, realpathSync } = require('fs')
+  const { tmpdir: tmp } = require('os')
+  const { join: joinPath } = require('path')
+  return realpathSync(mkdtemp(joinPath(tmp(), 'codekin-uploads-')))
+})
+
+vi.mock('./config.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./config.js')>()),
+  SCREENSHOTS_DIR: uploadRoot,
+}))
+
 import { OpenCodeProcess, stopOpenCodeServer, permissionRulesetFor, OPENCODE_SYSTEM_CONTEXT, isVersionOlder, MIN_TESTED_OPENCODE_VERSION } from './opencode-process.js'
-import { writeFileSync, mkdtempSync, rmSync } from 'fs'
+import { writeFileSync, mkdtempSync, rmSync, symlinkSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { join, basename } from 'path'
 import { OPENCODE_CAPABILITIES } from './coding-process.js'
 
 describe('OpenCodeProcess', () => {
@@ -1666,7 +1680,8 @@ describe('OpenCodeProcess', () => {
     let dir: string
 
     beforeEach(() => {
-      dir = mkdtempSync(join(tmpdir(), 'codekin-attach-'))
+      // Inside the mocked upload directory — the containment check requires it.
+      dir = mkdtempSync(join(uploadRoot, 'codekin-attach-'))
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ;(ocp as any).alive = true
       setSessionId(ocp, 'oc-session-1')
@@ -1713,6 +1728,76 @@ describe('OpenCodeProcess', () => {
       const parts = sentParts()
       expect(parts.some((p) => p.type === 'file')).toBe(false)
       expect(parts.some((p) => p.type === 'text' && String(p.text).includes('unsupported binary format'))).toBe(true)
+    })
+
+    // A client can hand-write the attachment prefix with any path, so the
+    // server must refuse anything that is not a real upload.
+    describe('containment', () => {
+      let outside: string
+
+      beforeEach(() => {
+        outside = mkdtempSync(join(tmpdir(), 'codekin-outside-'))
+      })
+
+      afterEach(() => {
+        rmSync(outside, { recursive: true, force: true })
+      })
+
+      /** Every part's text, for asserting a secret never leaks into the turn. */
+      const allText = () => sentParts().map((p) => String(p.text ?? '')).join('\n')
+
+      it('does not read files outside the upload directory', () => {
+        const secret = join(outside, 'id_rsa')
+        writeFileSync(secret, 'PRIVATE KEY MATERIAL\n')
+
+        ocp.sendMessage(`[Attached files: ${secret}]\nread this`)
+
+        expect(allText()).not.toContain('PRIVATE KEY MATERIAL')
+        expect(sentParts().some((p) => p.type === 'file')).toBe(false)
+      })
+
+      it('does not follow symlinks that escape the upload directory', () => {
+        const secret = join(outside, 'secret.txt')
+        writeFileSync(secret, 'PRIVATE KEY MATERIAL\n')
+        const link = join(dir, 'innocent.txt')
+        symlinkSync(secret, link)
+
+        ocp.sendMessage(`[Attached files: ${link}]\nread this`)
+
+        expect(allText()).not.toContain('PRIVATE KEY MATERIAL')
+      })
+
+      it('does not escape the upload directory via traversal segments', () => {
+        const secret = join(outside, 'secret.txt')
+        writeFileSync(secret, 'PRIVATE KEY MATERIAL\n')
+        const traversal = join(dir, '..', '..', basename(outside), 'secret.txt')
+
+        ocp.sendMessage(`[Attached files: ${traversal}]\nread this`)
+
+        expect(allText()).not.toContain('PRIVATE KEY MATERIAL')
+      })
+
+      it('still sends the user text when an attachment is rejected', () => {
+        const secret = join(outside, 'secret.txt')
+        writeFileSync(secret, 'PRIVATE KEY MATERIAL\n')
+
+        ocp.sendMessage(`[Attached files: ${secret}]\nwhat does this say`)
+
+        expect(allText()).toContain('what does this say')
+      })
+
+      it('reads a legitimate upload while rejecting a forged sibling path', () => {
+        const secret = join(outside, 'secret.txt')
+        writeFileSync(secret, 'PRIVATE KEY MATERIAL\n')
+        const real = join(dir, 'notes.txt')
+        writeFileSync(real, 'legitimate upload\n')
+
+        ocp.sendMessage(`[Attached files: ${real}, ${secret}]\nreview`)
+
+        const text = allText()
+        expect(text).toContain('legitimate upload')
+        expect(text).not.toContain('PRIVATE KEY MATERIAL')
+      })
     })
   })
 })
