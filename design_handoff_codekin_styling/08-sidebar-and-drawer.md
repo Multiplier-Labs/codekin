@@ -42,8 +42,14 @@ never takes the diff below its minimum width — past that the drawer overlays a
    you. Only amber pulses. Drop `dotColor.replace('bg-','text-')` and pass a status token instead;
    origin (workflow / webhook / agent) becomes a separate leading glyph so it stops competing with
    state.
-4. One **"New"** button in the header for both flows: repo first, then provider, one menu. Deletes
-   two hand-rolled viewport-flip positioners.
+4. **One labelled "New" button in the header, replacing the bare `+` icon.** It serves both flows:
+   pick repo, then provider, in one menu. The current header `+` (`NewSessionButton`) and the
+   hover-revealed "New session" inside each repo (`NewSessionMenu`) are **both** removed — today
+   they have different labels, different menus, and two separate hand-rolled viewport-flip
+   positioners. One button, one menu, one positioner.
+
+   Visual target: the `+ New` pill in the 2c mock header — 26px tall, `bg-surface-raised`,
+   `rounded-control`, glyph plus the word "New". A bare icon is not the design.
 
 ### B. Structure (2c)
 
@@ -90,6 +96,9 @@ never takes the diff below its minimum width — past that the drawer overlays a
 
 ## Acceptance
 
+- The sidebar header shows a **labelled `+ New` button**, not a bare `+` icon. `NewSessionMenu` and
+  the per-repo "New session" affordance no longer exist; `rg -n 'NewSessionMenu' src` returns
+  nothing.
 - No sidebar control is reachable only on hover. Every row action is behind a persistent `⋯`.
 - Full keyboard traversal of the tree; no `<span onClick>` remains in either file.
 - Exactly three session status treatments; exactly one of them animates.

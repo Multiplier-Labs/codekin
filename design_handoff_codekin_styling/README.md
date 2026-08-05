@@ -44,6 +44,7 @@ as a prompt more or less verbatim.
 | 06 | `06-density.md` | `src/App.tsx`, `src/index.css`, components with `isMobile` ternaries | slight |
 | 07 | `07-composer.md` | `src/components/InputBar.tsx` | yes |
 | 08 | `08-sidebar-and-drawer.md` | `LeftSidebar.tsx`, `RepoSection.tsx`, new `RepoDrawer.tsx`, `Settings.tsx`, `CommandPalette.tsx` | yes, large |
+| 09 | `09-chrome-palette.md` | `src/index.css` only | yes — whole-app tone |
 
 **Standing decision:** the diff view (`DiffPanel.tsx`) is never folded into the sidebar or the repo
 drawer. It needs width neither can spare. Diff improvements are their own future task.
@@ -98,7 +99,8 @@ The proposal's target values are listed in each task file. Two global notes:
 - **Fonts stay as they are** — Lato for UI, Inconsolata for code and metadata. No font swap is
   proposed. The type problem is scale discipline, not typeface choice.
 - **Palette hues stay as they are.** The warm-content / cool-chrome split is a deliberate idea and
-  the tasks preserve it; task 02 only changes how it is expressed.
+  the tasks preserve it. Task 02 only changes how it is expressed; task 09 lowers the chrome's
+  saturation (`--neutral-c: 0.018 → 0.009`) without moving any hue.
 
 ## Assets
 
@@ -113,9 +115,11 @@ typographic glyphs for the Tabler icons the app already depends on (`✦` for `I
 ## Files in this bundle
 
 - `README.md` — this file
-- `01-type-scale.md` … `08-sidebar-and-drawer.md` — one Claude Code task each
+- `01-type-scale.md` … `09-chrome-palette.md` — one Claude Code task each
 - `Codekin Styling Proposal.dc.html` — the before/after visual reference
 - `Codekin Main Screen.dc.html` — the full main screen with every proposal applied
 - `Codekin Composer.dc.html` — the three composer directions; `1a` is the chosen one
 - `Codekin Sidebar.dc.html` — sidebar and repo-drawer directions; chosen: `1a` rows, `2c` structure,
   `3a` + `3c` panels, expanded across turn 4
+- `Codekin Palette.dc.html` — chrome palette options; chosen: `5b` (half chroma, same hue), with a
+  live playground card for further tuning
