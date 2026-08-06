@@ -2,6 +2,7 @@
   "name": "codekin-server",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "dependencies": {
     "better-sqlite3": "^12.9.0",
