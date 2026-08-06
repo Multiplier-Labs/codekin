@@ -175,6 +175,11 @@ const PROBE_CONCURRENCY = 4
 /** Delay before retrying probes that failed transiently. */
 const PROBE_RETRY_DELAY_MS = 5_000
 
+/** Shape every legitimate model ID takes. `execFile` passes an argument array
+ *  (no shell), so this is a tripwire against a future refactor feeding
+ *  user-supplied IDs into the probe, not a fix for a live injection. */
+const MODEL_ID_PATTERN = /^[a-zA-Z0-9._-]+$/
+
 type ProbeResult =
   | { status: 'available'; id: string }
   /** Definitive 404/403 — the model doesn't exist or this account can't use it. */
@@ -191,6 +196,10 @@ type ProbeResult =
  * only way to tell "model doesn't exist" (404) from "API had a bad moment".
  */
 function probeModel(modelId: string): Promise<ProbeResult> {
+  if (!MODEL_ID_PATTERN.test(modelId)) {
+    console.warn(`[model-probe] refusing to probe malformed model ID: ${modelId}`)
+    return Promise.resolve({ status: 'unavailable' })
+  }
   return new Promise(resolve => {
     const child = execFile(
       CLAUDE_BINARY,
@@ -358,19 +367,40 @@ export function triggerCliProbeIfNeeded(): void {
   probeInFlight = startCliProbe()
 }
 
+/** Minimum gap between two completed forced refreshes. Concurrent callers
+ *  already share one `probeInFlight` promise, so the cost that needs bounding
+ *  is *sequential* hammering: each finished probe spawns a fresh round of CLI
+ *  processes at ~$0.04 per live model. */
+const REFRESH_COOLDOWN_MS = 5 * 60 * 1000
+let lastRefreshAt = 0
+
+/**
+ * Milliseconds until another forced refresh is allowed, or 0 when one may run
+ * now. A refresh already in flight is not throttled — the caller just joins it.
+ */
+export function refreshCooldownRemainingMs(): number {
+  if (probeInFlight) return 0
+  return Math.max(0, lastRefreshAt + REFRESH_COOLDOWN_MS - Date.now())
+}
+
 /**
  * Force a rediscovery, bypassing the cache TTL, and return the fresh list.
  * The expired cache is kept (not cleared) so the probe's last-known-good
- * carry-over still works. Called by POST /api/claude/models/refresh.
+ * carry-over still works. Called by POST /api/claude/models/refresh, which
+ * gates on `refreshCooldownRemainingMs()` first.
  */
 export async function refreshAnthropicModels(): Promise<ClaudeModelInfo[]> {
   if (cache) cache.expiresAt = 0
 
   if (process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_API_KEY) {
+    // The API path costs nothing per call, but keep the clock honest so a
+    // later key-less refresh still sees a sane cooldown.
+    lastRefreshAt = Date.now()
     return fetchAnthropicModels()
   }
 
   if (!probeInFlight) probeInFlight = startCliProbe()
   await probeInFlight
+  lastRefreshAt = Date.now()
   return cache ? cache.models : FALLBACK_MODELS
 }

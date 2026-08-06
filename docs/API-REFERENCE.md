@@ -99,7 +99,11 @@ Force model rediscovery, bypassing the cache TTL.
 
 Deliberately `POST`-only and never called automatically: with CLI alias probing this spawns one `claude` process per candidate ID, costing roughly $0.04 per live model. Intended for manual invocation when a newly released model has not appeared yet.
 
+**Rate-limited.** A completed refresh starts a 5-minute cooldown; calls during it return `429` with a `Retry-After` header rather than probing again. The cooldown is global, not per-token, because the cost is. Requests arriving while a probe is already in flight are *not* rejected — they await the same probe, so they cost nothing extra.
+
 **Response:** `{ "models": [{ "id": "...", "label": "..." }, ...] }`
+
+**429 response:** `{ "error": "Model refresh is rate-limited; retry in 90s", "retryAfterSeconds": 90 }`
 
 ### `GET /api/codex/models`
 

@@ -70,10 +70,13 @@ function splitDocPath(path: string): { dir: string; file: string } {
  * treat it as UTC. Newer rows use unambiguous ISO 8601.
  */
 function parseUtcDate(dateStr: string): Date {
-  if (!dateStr.includes('T') && !dateStr.includes('Z') && !dateStr.includes('+')) {
-    return new Date(dateStr.replace(' ', 'T') + 'Z')
-  }
-  return new Date(dateStr)
+  const parsed =
+    !dateStr.includes('T') && !dateStr.includes('Z') && !dateStr.includes('+')
+      ? new Date(dateStr.replace(' ', 'T') + 'Z')
+      : new Date(dateStr)
+  // A missing or unparsable timestamp yields NaN, which poisons the archived
+  // sort comparator below (NaN - NaN is not a valid ordering). Sort those last.
+  return isNaN(parsed.getTime()) ? new Date(0) : parsed
 }
 
 /** Compact relative age, e.g. "12m", "3h", "5d". */

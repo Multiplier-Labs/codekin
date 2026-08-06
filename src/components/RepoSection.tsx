@@ -32,7 +32,10 @@ function sessionDisplayName(session: Session): string {
 }
 
 function compactAge(created: string): string {
-  const seconds = Math.floor((Date.now() - new Date(created).getTime()) / 1000)
+  const createdMs = new Date(created).getTime()
+  // An unparsable timestamp would render as "NaNs" — show nothing instead.
+  if (isNaN(createdMs)) return ''
+  const seconds = Math.floor((Date.now() - createdMs) / 1000)
   if (seconds < 60) return `${seconds}s`
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes}m`
