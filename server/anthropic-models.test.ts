@@ -415,6 +415,55 @@ describe('anthropic-models', () => {
       expect(models).toEqual([{ id: 'claude-opus-5', label: 'Opus 5' }])
       expect(mockExecFile).not.toHaveBeenCalled()
     })
+
+    it('only spawns probes for well-formed model IDs', async () => {
+      setExecFileImpl(new Set(['claude-fable-5']))
+      const mod = await loadFreshModule()
+      await mod.refreshAnthropicModels()
+
+      expect(mockExecFile).toHaveBeenCalled()
+      for (const call of mockExecFile.mock.calls) {
+        expect(call[1][2]).toMatch(/^[a-zA-Z0-9._-]+$/)
+      }
+    })
+  })
+
+  /* ---------------------------------------------------------------- */
+  /*  refreshCooldownRemainingMs — rate limit on forced rediscovery   */
+  /* ---------------------------------------------------------------- */
+
+  describe('refreshCooldownRemainingMs', () => {
+    it('allows a refresh before one has ever run', async () => {
+      const mod = await loadFreshModule()
+      expect(mod.refreshCooldownRemainingMs()).toBe(0)
+    })
+
+    it('blocks a second refresh until the cooldown elapses', async () => {
+      setExecFileImpl(new Set(['claude-fable-5']))
+      const mod = await loadFreshModule()
+      await mod.refreshAnthropicModels()
+
+      const remaining = mod.refreshCooldownRemainingMs()
+      expect(remaining).toBeGreaterThan(0)
+      expect(remaining).toBeLessThanOrEqual(5 * 60 * 1000)
+
+      vi.useFakeTimers()
+      vi.setSystemTime(Date.now() + 5 * 60 * 1000 + 1)
+      expect(mod.refreshCooldownRemainingMs()).toBe(0)
+    })
+
+    it('does not throttle callers joining a probe already in flight', async () => {
+      setExecFileImpl(new Set(['claude-fable-5']))
+      const mod = await loadFreshModule()
+      const first = mod.refreshAnthropicModels()
+
+      // A request arriving mid-probe awaits the same promise rather than
+      // spawning a second round, so it costs nothing and must not be rejected.
+      expect(mod.refreshCooldownRemainingMs()).toBe(0)
+
+      await first
+      expect(mod.refreshCooldownRemainingMs()).toBeGreaterThan(0)
+    })
   })
 
   /* ---------------------------------------------------------------- */

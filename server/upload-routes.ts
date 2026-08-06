@@ -189,8 +189,18 @@ export function createUploadRouter(
       cb(null, `${ts}-${safe}`)
     },
   })
-  const ALLOWED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'text/markdown']
-  const ALLOWED_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.md']
+  /** Allowed extension → the MIME type(s) it may be declared as. Checking the
+   *  two against each other (rather than against independent allowlists) closes
+   *  the gap where a `.png` declared as `text/markdown` passed both lists and
+   *  then skipped the magic-byte check below, which only covers binary MIMEs. */
+  const EXTENSION_MIME_TYPES: Record<string, string[]> = {
+    '.png': ['image/png'],
+    '.jpg': ['image/jpeg'],
+    '.jpeg': ['image/jpeg'],
+    '.gif': ['image/gif'],
+    '.webp': ['image/webp'],
+    '.md': ['text/markdown'],
+  }
   /** Binary MIME types that have detectable file signatures (magic bytes). */
   const BINARY_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
   const upload = multer({
@@ -198,11 +208,13 @@ export function createUploadRouter(
     limits: { fileSize: 20 * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
       const ext = extname(file.originalname).toLowerCase()
-      const extAllowed = ALLOWED_EXTENSIONS.includes(ext)
-      const mimeAllowed = ALLOWED_MIME_TYPES.includes(file.mimetype)
-      const allowed = extAllowed && mimeAllowed
-      if (!allowed) {
+      const allowedMimes = EXTENSION_MIME_TYPES[ext]
+      if (!allowedMimes) {
         cb(new Error(`File type not allowed: ${file.mimetype}`))
+        return
+      }
+      if (!allowedMimes.includes(file.mimetype)) {
+        cb(new Error(`File type mismatch: ${ext} declared as ${file.mimetype}`))
         return
       }
       cb(null, true)

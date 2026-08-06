@@ -18,7 +18,7 @@ import { homedir as osHomedir } from 'os'
 import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
 import { REPOS_ROOT, getAgentDisplayName } from './config.js'
-import { fetchAnthropicModels, refreshAnthropicModels } from './anthropic-models.js'
+import { fetchAnthropicModels, refreshAnthropicModels, refreshCooldownRemainingMs } from './anthropic-models.js'
 import { VALID_PROVIDERS, VALID_PERMISSION_MODES } from './types.js'
 import type { CodingProvider } from './coding-process.js'
 import type { PermissionMode } from './types.js'
@@ -156,10 +156,20 @@ export function createSessionRouter(
 
   // Force model rediscovery, bypassing the cache TTL. With CLI probing this
   // spawns one claude process per candidate ID (~$0.04 per live model), so it
-  // is deliberately POST-only and never called automatically.
+  // is deliberately POST-only, never called automatically, and rate-limited —
+  // the cost is global, so the cooldown is global rather than per-token.
   router.post('/api/claude/models/refresh', async (req, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const cooldownMs = refreshCooldownRemainingMs()
+    if (cooldownMs > 0) {
+      const retryAfter = Math.ceil(cooldownMs / 1000)
+      res.setHeader('Retry-After', String(retryAfter))
+      return res.status(429).json({
+        error: `Model refresh is rate-limited; retry in ${retryAfter}s`,
+        retryAfterSeconds: retryAfter,
+      })
+    }
     const models = await refreshAnthropicModels()
     res.json({ models })
   })

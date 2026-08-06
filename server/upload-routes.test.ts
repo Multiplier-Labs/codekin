@@ -300,4 +300,35 @@ describe('POST /api/upload — magic-byte validation (M2)', () => {
     const body = await res.json() as { error: string }
     expect(body.error).toContain('signature mismatch')
   })
+
+  // Both halves used to be checked against independent allowlists, so a binary
+  // payload could pick a text MIME to skip magic-byte validation entirely.
+  it('rejects a .png declared as text/markdown (extension/MIME mismatch)', async () => {
+    const res = await uploadFile('sneaky.png', 'text/markdown', VALID_JPEG)
+    expect(res.status).toBe(400)
+    const body = await res.json() as { error: string }
+    expect(body.error).toContain('mismatch')
+  })
+
+  it('rejects a .md declared as image/png', async () => {
+    const md = Buffer.from('# not an image\n')
+    const res = await uploadFile('notes.md', 'image/png', md)
+    expect(res.status).toBe(400)
+    const body = await res.json() as { error: string }
+    expect(body.error).toContain('mismatch')
+  })
+
+  it('rejects a disallowed extension outright', async () => {
+    const res = await uploadFile('payload.svg', 'image/png', Buffer.from('<svg/>'))
+    expect(res.status).toBe(400)
+    const body = await res.json() as { error: string }
+    expect(body.error).toContain('not allowed')
+  })
+
+  it('still accepts .jpg and .jpeg for image/jpeg', async () => {
+    for (const name of ['photo.jpg', 'photo.jpeg']) {
+      const res = await uploadFile(name, 'image/jpeg', VALID_JPEG)
+      expect(res.status).toBe(200)
+    }
+  })
 })
