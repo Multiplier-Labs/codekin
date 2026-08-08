@@ -11,7 +11,7 @@
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { useOutsideClick } from '../hooks/useOutsideClick'
 import { useAutoGrow } from '../hooks/useAutoGrow'
-import { IconPaperclip, IconX, IconTerminal2, IconChevronDown, IconDots, IconGitBranch, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck, IconCornerDownLeft } from '@tabler/icons-react'
+import { IconPlus, IconX, IconTerminal2, IconChevronDown, IconDots, IconGitBranch, IconGitBranchDeleted, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck, IconCornerDownLeft } from '@tabler/icons-react'
 import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
@@ -51,11 +51,15 @@ function ToolbarAction({ onClick, disabled, title, accent = false, children }: {
   )
 }
 
-/** Attach-files button. The picker only accepts images and markdown. */
+/**
+ * Attach-files button. A `+` rather than a paperclip, matching the convention
+ * other LLM composers have settled on; the title still says what it takes,
+ * since the picker only accepts images and markdown.
+ */
 function AttachButton({ onClick, disabled, accent = false }: { onClick: () => void; disabled: boolean; accent?: boolean }) {
   return (
     <ToolbarAction onClick={onClick} disabled={disabled} title="Attach images or markdown" accent={accent}>
-      <IconPaperclip className="density-icon" stroke={2} />
+      <IconPlus className="density-icon" stroke={2} />
     </ToolbarAction>
   )
 }
@@ -71,13 +75,13 @@ function SendButton({ onClick, disabled, hasContent, accent = false }: {
   const isDisabled = disabled || !hasContent
   const activeClass = accent
     ? 'bg-accent-5 text-ink-inverse hover:bg-accent-4'
-    : 'bg-primary-4 text-on-primary hover:bg-primary-3'
+    : 'bg-primary-fill text-on-primary-fill hover:brightness-105'
   return (
     <button
       onClick={onClick}
       disabled={isDisabled}
       className={`composer-row flex items-center gap-2 rounded-control px-3.5 text-body font-bold transition-colors ${
-        isDisabled ? 'bg-edge-strong text-ink-faint' : activeClass
+        isDisabled ? 'bg-edge-strong text-ink-muted' : activeClass
       }`}
       title="Send (Enter)"
     >
@@ -599,11 +603,11 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const hasOverflow = showModel || showWorktree
 
   return (
-    <div className={`app-input-bar @container relative flex flex-col border-t border-edge bg-surface-raised ${isOrchestrator ? 'orchestrator-input-bar' : ''}`}>
-      {/* Measured column — shares the transcript's 44px gutter and --measure */}
-      <div className="flex px-4 py-3">
-        <div className="w-11 flex-shrink-0" aria-hidden="true" />
-        <div className="relative flex min-w-0 flex-1 max-w-[var(--measure)] flex-col gap-2.5">
+    <div className={`app-input-bar @container relative flex flex-col ${isOrchestrator ? 'orchestrator-input-bar' : ''}`}>
+      {/* Exactly the transcript row's padding, so the card's edges land on the
+          prose edges at every width. Nothing here reads the pane width. */}
+      <div className="px-4 pb-3 pt-1 @[32rem]:px-12">
+        <div className="composer-card relative mx-auto flex w-full min-w-0 max-w-[var(--measure)] flex-col gap-2 rounded-control border border-edge bg-surface pt-2.5 pr-3 pb-2 pl-3">
           <DropZone onUpload={onAddFiles} disabled={disabled} />
 
           {/* Slash autocomplete popup — anchored to the measured column */}
@@ -663,8 +667,13 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
             />
           </div>
 
-          {/* One toolbar: session state left, actions right */}
+          {/* One toolbar: attach on the left rail, state and actions on the
+              right — the arrangement the reference composer uses. */}
           <div className="flex items-center gap-3">
+            <AttachButton onClick={handleFileSelect} disabled={disabled} accent={isOrchestrator} />
+
+            <div className="flex-1" />
+
             <div className="flex min-w-0 items-center gap-3.5">
               {showPermission && (
                 <PermissionModeDropdown
@@ -679,24 +688,32 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               {showWorktree && (
                 <div className="flex">
                   {worktreePath ? (
-                    <StateItem title={`Worktree: ${worktreePath}`}>
-                      <IconGitBranch size={14} stroke={2} className="text-ink-faint" />
+                    <StateItem title={`In a worktree: ${worktreePath}`}>
+                      <IconGitBranch size={14} stroke={2} className="text-primary-5" />
                       <StateLabel>
-                        <span className="inline-block max-w-[140px] truncate align-bottom">{worktreePath.split('/').pop()}</span>
+                        <span className="inline-block max-w-[140px] truncate align-bottom text-primary-5">{worktreePath.split('/').pop()}</span>
                       </StateLabel>
                     </StateItem>
                   ) : showWorktreeToggle && onWorktreeChange ? (
                     <StateItem
                       onClick={() => onWorktreeChange(!useWorktree)}
-                      title={useWorktree ? 'Worktree enabled — session will use a git worktree' : 'Enable git worktree for this session'}
+                      title={useWorktree
+                        ? 'This session will start in a git worktree — click to use the repo directly'
+                        : 'This session will run in the repo directly — click to use a git worktree'}
                     >
-                      <IconGitBranch size={14} stroke={2} className={useWorktree ? 'text-primary-5' : 'text-ink-faint'} />
-                      <StateLabel><span className={useWorktree ? 'text-primary-5' : undefined}>Worktree</span></StateLabel>
+                      {useWorktree
+                        ? <IconGitBranch size={14} stroke={2} className="text-primary-5" />
+                        : <IconGitBranchDeleted size={14} stroke={2} />}
+                      <StateLabel>
+                        <span className={useWorktree ? 'text-primary-5' : undefined}>
+                          {useWorktree ? 'Worktree' : 'No worktree'}
+                        </span>
+                      </StateLabel>
                     </StateItem>
                   ) : onMoveToWorktree ? (
-                    <StateItem onClick={onMoveToWorktree} title="Move session to a git worktree">
-                      <IconGitBranch size={14} stroke={2} className="text-ink-faint" />
-                      <StateLabel>Worktree</StateLabel>
+                    <StateItem onClick={onMoveToWorktree} title="Not in a worktree — click to move this session into one">
+                      <IconGitBranchDeleted size={14} stroke={2} />
+                      <StateLabel>No worktree</StateLabel>
                     </StateItem>
                   ) : null}
                 </div>
@@ -725,8 +742,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 </div>
               )}
             </div>
-
-            <div className="flex-1" />
 
             <div className="flex items-center gap-1">
               {/* Overflow — carries the state items that collapsed */}
@@ -807,7 +822,6 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 </div>
               )}
 
-              <AttachButton onClick={handleFileSelect} disabled={disabled} accent={isOrchestrator} />
               <SendButton
                 onClick={handleSend}
                 disabled={disabled}

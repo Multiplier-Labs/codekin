@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, chmodSync } from 'fs'
 import { homedir } from 'os'
 import { join, dirname } from 'path'
 import { randomBytes } from 'crypto'
@@ -107,8 +107,12 @@ export function saveWebhookConfig(updates: Partial<FullWebhookConfig>): void {
   // Ensure directory exists
   mkdirSync(dirname(CONFIG_FILE), { recursive: true })
 
-  // Atomic write: write to tmp file then rename
+  // Atomic write: write to tmp file then rename. The file holds the GitHub
+  // webhook secret, so it is owner-only — rename preserves the temp file's
+  // mode, and the post-rename chmod repairs files written by older versions
+  // under a permissive umask.
   const tmpFile = CONFIG_FILE + '.tmp'
-  writeFileSync(tmpFile, JSON.stringify(merged, null, 2) + '\n', 'utf-8')
+  writeFileSync(tmpFile, JSON.stringify(merged, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 })
   renameSync(tmpFile, CONFIG_FILE)
+  chmodSync(CONFIG_FILE, 0o600)
 }

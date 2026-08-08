@@ -265,6 +265,7 @@ export default function App() {
     handleSelectRepo,
     handleDeleteRepo,
     handleNewSessionForRepo,
+    handleNewSessionInRepo,
     handleNewSessionFromArchive,
   } = useSessionOrchestration({
     sessions,
@@ -642,7 +643,7 @@ export default function App() {
         onSelectSession={(id) => { docsBrowser.close(); if (view === 'orchestrator') navigate(`/s/${id}`); handleSelectSession(id) }}
         onDeleteSession={handleDeleteSession}
         onRenameSession={renameSession}
-        onNewSession={handleNewSessionForRepo}
+        onNewSessionInRepo={handleNewSessionInRepo}
         onOpenSession={handleOpenSession}
         onSelectRepo={handleSelectRepo}
         onDeleteRepo={handleDeleteRepo}
@@ -838,6 +839,7 @@ export default function App() {
         onNewSessionFromArchive={handleNewSessionFromArchive}
         fontSize={settings.fontSize}
         initialTab={drawer?.tab}
+        isMobile={isMobile}
       />
 
       {/* Diff viewer sidebar */}

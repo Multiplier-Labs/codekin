@@ -26,6 +26,7 @@ import { spawn, type ChildProcess } from 'child_process'
 import { createInterface, type Interface } from 'readline'
 import { existsSync } from 'fs'
 import { extname } from 'path'
+import { resolveAttachmentPath } from './attachment-paths.js'
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 import type { ClaudeProcessEvents } from './claude-process.js'
@@ -759,9 +760,12 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
     if (attachMatch) {
       textContent = content.slice(attachMatch[0].length)
       const imageExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp'])
-      for (const filePath of attachMatch[1].split(',').map(p => p.trim())) {
-        if (!existsSync(filePath)) {
-          console.warn(`[codex] Attached file not found: ${filePath}`)
+      for (const rawPath of attachMatch[1].split(',').map(p => p.trim())) {
+        // Only files inside the upload directory may be referenced — see
+        // resolveAttachmentPath. A client can forge this prefix with any path.
+        const filePath = resolveAttachmentPath(rawPath)
+        if (!filePath) {
+          console.warn(`[codex] Rejected attachment outside the upload directory: ${rawPath}`)
           continue
         }
         if (imageExts.has(extname(filePath).toLowerCase())) {

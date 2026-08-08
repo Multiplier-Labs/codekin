@@ -11,7 +11,7 @@
 
 import { useRef, useCallback, useEffect, useState } from 'react'
 import type { WsClientMessage, WsServerMessage, ConnectionState } from '../types'
-import { wsUrl, checkAuthSession, redirectToLogin } from '../lib/ccApi'
+import { openSocket, checkAuthSession, redirectToLogin } from '../lib/ccApi'
 
 /** How often to check whether the Authelia session is still valid (ms). */
 const AUTH_CHECK_INTERVAL_MS = 60_000
@@ -83,7 +83,7 @@ export function useWsConnection({
     cleanup()
     setConnState('connecting')
 
-    const ws = new WebSocket(wsUrl())
+    const ws = openSocket()
     wsRef.current = ws
 
     ws.onopen = () => {

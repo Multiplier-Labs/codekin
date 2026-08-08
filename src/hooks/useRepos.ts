@@ -9,8 +9,9 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import type { Repo, Skill, Module } from '../types'
+import { transport } from '../lib/transport'
 
-/** Extended repo data returned by the /cc/api/repos endpoint. */
+/** Extended repo data returned by the /api/repos endpoint. */
 export interface ApiRepo extends Repo {
   cloned: boolean
   description: string
@@ -39,7 +40,7 @@ export function useRepos(token?: string) {
   useEffect(() => {
     const headers: Record<string, string> = {}
     if (token) headers['Authorization'] = `Bearer ${token}`
-    fetch('/cc/api/repos', { headers })
+    transport.fetch('/api/repos', { headers })
       .then(res => {
         if (!res.ok) throw new Error(`Failed to load repos: ${res.status}`)
         return res.json() as Promise<{ groups: RepoGroup[]; globalSkills?: Skill[]; globalModules?: Module[]; ghMissing?: boolean }>

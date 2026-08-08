@@ -1,6 +1,6 @@
 {
   "name": "codekin",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "license": "MIT",
   "licenseNotes": "dompurify is dual-licensed (MPL-2.0 OR Apache-2.0); both are permissively compatible with MIT for library use. lightningcss (MPL-2.0) is a build-time-only dependency used by TailwindCSS and is not included in distributed artifacts.",
   "author": "multiplier-labs",
@@ -32,6 +32,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:hosted": "tsc -b && VITE_APP_MODE=hosted vite build --outDir dist-hosted",
+    "dev:hosted": "VITE_APP_MODE=hosted vite",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
@@ -48,7 +50,9 @@
   "overrides": {
     "undici": "^7.29.0",
     "brace-expansion": "^5.0.9",
+    "nanoid": "^3.3.18",
     "postcss": "^8.5.23",
+    "nanoid": "^3.3.17",
     "@babel/core": "^7.29.7",
     "eslint-plugin-react-hooks": {
       "eslint": "$eslint"
@@ -68,7 +72,7 @@
     "@vitejs/plugin-react": "^6.0.1",
     "@vitest/coverage-v8": "^4.1.2",
     "cmdk": "^1.1.1",
-    "dompurify": "^3.4.12",
+    "dompurify": "^3.4.13",
     "eslint": "^10.1.0",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",

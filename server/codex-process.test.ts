@@ -22,6 +22,20 @@ const spawnState = vi.hoisted(() => ({
   failNext: null as string | null,
 }))
 
+// Attachments are only referenced when they resolve inside SCREENSHOTS_DIR, so
+// point it at a throwaway directory the tests own.
+const uploadRoot = vi.hoisted(() => {
+  const { mkdtempSync: mkdtemp, realpathSync } = require('fs')
+  const { tmpdir: tmp } = require('os')
+  const { join: joinPath } = require('path')
+  return realpathSync(mkdtemp(joinPath(tmp(), 'codekin-uploads-')))
+})
+
+vi.mock('./config.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./config.js')>()),
+  SCREENSHOTS_DIR: uploadRoot,
+}))
+
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>()
   const { EventEmitter } = await import('events')
@@ -54,6 +68,9 @@ vi.mock('child_process', async (importOriginal) => {
 
 import { CodexProcess, fetchCodexModels, clearCodexModelCache } from './codex-process.js'
 import { CODEX_CAPABILITIES } from './coding-process.js'
+import { writeFileSync, mkdtempSync, rmSync, symlinkSync } from 'fs'
+import { tmpdir } from 'os'
+import { join, basename } from 'path'
 
 const tick = async () => {
   await new Promise<void>(r => setImmediate(r))
@@ -667,6 +684,104 @@ describe('CodexProcess', () => {
       expect(cxp.hadOutput()).toBe(false)
       await feed(proc, { method: 'thread/started', params: { thread: { id: 't' } } })
       expect(cxp.hadOutput()).toBe(true)
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Attachments
+  // -------------------------------------------------------------------------
+
+  describe('attachments', () => {
+    let dir: string
+    let outside: string
+
+    /** buildInput is private — exercised directly to skip the turn handshake. */
+    const build = (content: string): Array<Record<string, unknown>> =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (cxp as any).buildInput(content)
+
+    const allText = (parts: Array<Record<string, unknown>>) =>
+      parts.map((p) => String(p.text ?? '')).join('\n')
+
+    beforeEach(() => {
+      dir = mkdtempSync(join(uploadRoot, 'codekin-attach-'))
+      outside = mkdtempSync(join(tmpdir(), 'codekin-outside-'))
+    })
+
+    afterEach(() => {
+      rmSync(dir, { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
+    })
+
+    it('sends uploaded images as localImage parts', () => {
+      const img = join(dir, 'shot.png')
+      writeFileSync(img, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+
+      const parts = build(`[Attached files: ${img}]\nwhat is this`)
+
+      expect(parts.some((p) => p.type === 'localImage' && p.path === img)).toBe(true)
+    })
+
+    it('references uploaded non-image files by path in the text', () => {
+      const doc = join(dir, 'notes.txt')
+      writeFileSync(doc, 'hello\n')
+
+      const parts = build(`[Attached files: ${doc}]\nsummarize`)
+
+      expect(allText(parts)).toContain(doc)
+    })
+
+    // A client can hand-write the attachment prefix with any path, so the
+    // server must refuse anything that is not a real upload.
+    describe('containment', () => {
+      it('does not reference images outside the upload directory', () => {
+        const secret = join(outside, 'private.png')
+        writeFileSync(secret, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+
+        const parts = build(`[Attached files: ${secret}]\nlook`)
+
+        expect(parts.some((p) => p.type === 'localImage')).toBe(false)
+        expect(allText(parts)).not.toContain(secret)
+      })
+
+      it('does not reference text files outside the upload directory', () => {
+        const secret = join(outside, 'id_rsa')
+        writeFileSync(secret, 'PRIVATE KEY MATERIAL\n')
+
+        const parts = build(`[Attached files: ${secret}]\nread this`)
+
+        expect(allText(parts)).not.toContain(secret)
+      })
+
+      it('does not follow symlinks that escape the upload directory', () => {
+        const secret = join(outside, 'secret.png')
+        writeFileSync(secret, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+        const link = join(dir, 'innocent.png')
+        symlinkSync(secret, link)
+
+        const parts = build(`[Attached files: ${link}]\nlook`)
+
+        expect(parts.some((p) => p.type === 'localImage')).toBe(false)
+      })
+
+      it('does not escape the upload directory via traversal segments', () => {
+        const secret = join(outside, 'secret.png')
+        writeFileSync(secret, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+        const traversal = join(dir, '..', '..', basename(outside), 'secret.png')
+
+        const parts = build(`[Attached files: ${traversal}]\nlook`)
+
+        expect(parts.some((p) => p.type === 'localImage')).toBe(false)
+      })
+
+      it('still sends the user text when an attachment is rejected', () => {
+        const secret = join(outside, 'secret.png')
+        writeFileSync(secret, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+
+        const parts = build(`[Attached files: ${secret}]\nwhat is this`)
+
+        expect(allText(parts)).toContain('what is this')
+      })
     })
   })
 })

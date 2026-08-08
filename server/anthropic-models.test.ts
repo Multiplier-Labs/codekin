@@ -321,8 +321,8 @@ describe('anthropic-models', () => {
 
       const models = await mod.fetchAnthropicModels()
       expect(models).toEqual([
-        { id: 'claude-fable-5', label: 'Fable 5' },
         { id: 'claude-opus-5', label: 'Opus 5' },
+        { id: 'claude-fable-5', label: 'Fable 5' },
       ])
       expect(attempts.get('claude-opus-5')).toBe(2)
       // Definitive 404s are not retried.
@@ -352,10 +352,11 @@ describe('anthropic-models', () => {
 
       const models = await mod.fetchAnthropicModels()
       // opus-5 survives via carry-over from the previous run.
+      // Order is by preference (opus > sonnet > fable), not probe order.
       expect(models).toEqual([
-        { id: 'claude-fable-5', label: 'Fable 5' },
         { id: 'claude-opus-5', label: 'Opus 5' },
         { id: 'claude-sonnet-5', label: 'Sonnet 5' },
+        { id: 'claude-fable-5', label: 'Fable 5' },
       ])
     })
 
@@ -398,8 +399,8 @@ describe('anthropic-models', () => {
       setExecFileImpl(new Set(['claude-fable-5', 'claude-opus-5']))
       const models = await mod.refreshAnthropicModels()
       expect(models).toEqual([
-        { id: 'claude-fable-5', label: 'Fable 5' },
         { id: 'claude-opus-5', label: 'Opus 5' },
+        { id: 'claude-fable-5', label: 'Fable 5' },
       ])
     })
 
@@ -413,6 +414,96 @@ describe('anthropic-models', () => {
       const models = await mod.refreshAnthropicModels()
       expect(models).toEqual([{ id: 'claude-opus-5', label: 'Opus 5' }])
       expect(mockExecFile).not.toHaveBeenCalled()
+    })
+
+    it('only spawns probes for well-formed model IDs', async () => {
+      setExecFileImpl(new Set(['claude-fable-5']))
+      const mod = await loadFreshModule()
+      await mod.refreshAnthropicModels()
+
+      expect(mockExecFile).toHaveBeenCalled()
+      for (const call of mockExecFile.mock.calls) {
+        expect(call[1][2]).toMatch(/^[a-zA-Z0-9._-]+$/)
+      }
+    })
+  })
+
+  /* ---------------------------------------------------------------- */
+  /*  refreshCooldownRemainingMs — rate limit on forced rediscovery   */
+  /* ---------------------------------------------------------------- */
+
+  describe('refreshCooldownRemainingMs', () => {
+    it('allows a refresh before one has ever run', async () => {
+      const mod = await loadFreshModule()
+      expect(mod.refreshCooldownRemainingMs()).toBe(0)
+    })
+
+    it('blocks a second refresh until the cooldown elapses', async () => {
+      setExecFileImpl(new Set(['claude-fable-5']))
+      const mod = await loadFreshModule()
+      await mod.refreshAnthropicModels()
+
+      const remaining = mod.refreshCooldownRemainingMs()
+      expect(remaining).toBeGreaterThan(0)
+      expect(remaining).toBeLessThanOrEqual(5 * 60 * 1000)
+
+      vi.useFakeTimers()
+      vi.setSystemTime(Date.now() + 5 * 60 * 1000 + 1)
+      expect(mod.refreshCooldownRemainingMs()).toBe(0)
+    })
+
+    it('does not throttle callers joining a probe already in flight', async () => {
+      setExecFileImpl(new Set(['claude-fable-5']))
+      const mod = await loadFreshModule()
+      const first = mod.refreshAnthropicModels()
+
+      // A request arriving mid-probe awaits the same promise rather than
+      // spawning a second round, so it costs nothing and must not be rejected.
+      expect(mod.refreshCooldownRemainingMs()).toBe(0)
+
+      await first
+      expect(mod.refreshCooldownRemainingMs()).toBeGreaterThan(0)
+    })
+  })
+
+  /* ---------------------------------------------------------------- */
+  /*  Ordering — entry [0] is the default new sessions start on        */
+  /* ---------------------------------------------------------------- */
+
+  describe('ordering', () => {
+    it('ranks the newest general model first, not the probe order', async () => {
+      vi.useFakeTimers()
+      setExecFileImpl(new Set(['claude-fable-5', 'claude-opus-5', 'claude-sonnet-5', 'claude-opus-4-8']))
+      const mod = await loadFreshModule()
+      mod.triggerCliProbeIfNeeded()
+      await vi.waitFor(async () => {
+        expect(await mod.fetchAnthropicModels()).toHaveLength(4)
+      })
+
+      // Fable is probed first but is a specialised model — Opus 5 is the default.
+      expect((await mod.fetchAnthropicModels()).map((m: { id: string }) => m.id)).toEqual([
+        'claude-opus-5',
+        'claude-sonnet-5',
+        'claude-fable-5',
+        'claude-opus-4-8',
+      ])
+      expect(mod.getDefaultClaudeModel()).toBe('claude-opus-5')
+    })
+
+    it('sorts API results by preference rather than release date', async () => {
+      process.env.ANTHROPIC_API_KEY = 'sk-test'
+      mockFetch(() =>
+        jsonResponse({
+          data: [
+            { id: 'claude-fable-5', display_name: 'Fable 5', created_at: '2026-06-09' },
+            { id: 'claude-opus-5', display_name: 'Opus 5', created_at: '2026-04-01' },
+          ],
+        }),
+      )
+
+      const mod = await loadFreshModule()
+      const models = await mod.fetchAnthropicModels()
+      expect(models.map((m: { id: string }) => m.id)).toEqual(['claude-opus-5', 'claude-fable-5'])
     })
   })
 })

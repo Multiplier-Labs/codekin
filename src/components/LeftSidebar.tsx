@@ -118,13 +118,13 @@ interface Props {
   onDeleteSession: (id: string) => void
   /** Rename a session in the sidebar tree. */
   onRenameSession: (id: string, name: string) => void
-  /** Create a new session in the active repo. */
-  onNewSession: (provider?: import('../types').CodingProvider) => void
-  /** Open (or create) a session for a specific repo, optionally with a name. */
-  onOpenSession: (repo: Repo, name?: string) => void
+  /** Create a new session in a specific repo (the per-repo hover action). */
+  onNewSessionInRepo: (workingDir: string, provider?: import('../types').CodingProvider) => void
+  /** Open a repo's latest session, or create a new one when a provider is chosen. */
+  onOpenSession: (repo: Repo, provider?: import('../types').CodingProvider) => void
   /** Switch the active repo (expands its tree node). */
   onSelectRepo: (workingDir: string) => void
-  /** Remove a repo from the sidebar (does not delete the git repo). */
+  /** Close every session in a repo, dropping it from the sidebar. */
   onDeleteRepo: (workingDir: string) => void
   /** Open the settings modal. */
   onSettingsOpen: () => void
@@ -175,7 +175,7 @@ export function LeftSidebar({
   onSelectSession,
   onDeleteSession,
   onRenameSession,
-  onNewSession,
+  onNewSessionInRepo,
   onOpenSession,
   onSelectRepo,
   onDeleteRepo,
@@ -365,7 +365,7 @@ export function LeftSidebar({
             <IconChevronLeft size={16} stroke={2} />
           </button>
         )}
-        <NewSessionButton groups={groups} token={token} onOpen={(repo) => { onOpenSession(repo); if (isMobile) onMobileClose?.() }} />
+        <NewSessionButton groups={groups} token={token} onOpen={(repo, provider) => { onOpenSession(repo, provider); if (isMobile) onMobileClose?.() }} />
       </div>
 
       {/* Scrollable nav tree */}
@@ -434,7 +434,7 @@ export function LeftSidebar({
         </div>
 
         {/* Divider between menu items and repo folders */}
-        <div className="mx-3 my-1 border-t border-edge" />
+        <div className="mx-3 mt-3 mb-1 border-t border-edge" />
 
         {/* Repo nodes — each repo is its own section label */}
         {repoNodes.map(node => (
@@ -448,12 +448,11 @@ export function LeftSidebar({
             onSelectSession={handleSelectSessionMobile}
             onDeleteSession={onDeleteSession}
             onRenameSession={onRenameSession}
-            onNewSession={node.workingDir === activeWorkingDir ? onNewSession : undefined}
+            onNewSession={(provider) => { onNewSessionInRepo(node.workingDir, provider) }}
             onSelectRepo={(wd) => { onSelectRepo(wd); if (isMobile) onMobileClose?.() }}
             onDeleteRepo={onDeleteRepo}
             onOpenDrawer={(wd, tab) => { onOpenDrawer(wd, tab); if (isMobile) onMobileClose?.() }}
             onMoveToWorktree={onMoveToWorktree}
-            isMobile={isMobile}
           />
         ))}
 

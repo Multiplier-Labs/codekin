@@ -388,6 +388,12 @@ interface WebhookEvent {
 }
 ```
 
+**File permissions**: this file may hold the webhook `secret`, so Codekin writes
+it with mode `0600` (owner read/write only) and re-applies that mode on every
+save. If the file was created by a version before this was enforced, it may
+still be world-readable — check with `ls -l ~/.codekin/webhook-config.json`, and
+rotate the webhook secret if it was exposed on a host with other local users.
+
 ---
 
 ## Session Behavior

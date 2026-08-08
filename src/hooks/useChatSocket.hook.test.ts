@@ -366,6 +366,27 @@ describe('useChatSocket hook', () => {
       unmount()
     })
 
+    it('createSession carries the selected Claude model so the CLI starts on it', () => {
+      localStorage.setItem('claude-model', 'claude-opus-5')
+      const { result, unmount } = setupConnected()
+      act(() => result.current.createSession('My Session', '/home/dev'))
+      expect(sentMessages(MockWebSocket.latest()).pop()).toMatchObject({
+        type: 'create_session',
+        model: 'claude-opus-5',
+      })
+      localStorage.removeItem('claude-model')
+      unmount()
+    })
+
+    it('createSession omits the Claude model for non-Claude providers', () => {
+      localStorage.setItem('claude-model', 'claude-opus-5')
+      const { result, unmount } = setupConnected()
+      act(() => result.current.createSession('My Session', '/home/dev', false, undefined, 'codex'))
+      expect(sentMessages(MockWebSocket.latest()).pop()).not.toHaveProperty('model')
+      localStorage.removeItem('claude-model')
+      unmount()
+    })
+
     it('leaveSession sends leave_session and clears processing', () => {
       const { result, unmount } = setupConnected()
       act(() => result.current.leaveSession())
