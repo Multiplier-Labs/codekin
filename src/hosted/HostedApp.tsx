@@ -5,8 +5,11 @@
  * (src/App.tsx) is untouched by hosted mode.
  */
 
+import { useState } from 'react'
 import { LoginPage } from './LoginPage'
 import { MachinesPage } from './MachinesPage'
+import type { Machine } from './MachinesPage'
+import { MachineDetailPage } from './MachineDetailPage'
 import { PairPage } from './PairPage'
 import { useHostedAuth } from './useHostedAuth'
 
@@ -35,6 +38,7 @@ function PendingPage({ login, onLogout }: { login: string; onLogout: () => void 
 
 export default function HostedApp() {
   const { user, initialized, authError, logout } = useHostedAuth()
+  const [selected, setSelected] = useState<Machine | null>(null)
 
   // Latch not resolved yet — render the page background, no flash of login UI
   if (!initialized) {
@@ -53,5 +57,9 @@ export default function HostedApp() {
     return <PairPage />
   }
 
-  return <MachinesPage user={user} onLogout={() => void logout()} />
+  if (selected) {
+    return <MachineDetailPage machine={selected} onBack={() => { setSelected(null) }} />
+  }
+
+  return <MachinesPage user={user} onLogout={() => void logout()} onSelect={setSelected} />
 }

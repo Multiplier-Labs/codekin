@@ -1,14 +1,16 @@
 /**
  * Local connector: runs on a developer machine, holds an outbound
- * WebSocket to the hosted relay hub, and keeps the machine marked online.
+ * WebSocket to the hosted relay hub, keeps the machine marked online, and
+ * serves proxied REST requests against the local Codekin server.
  *
- * This phase is presence + heartbeat; REST/WS proxying to the local
- * Codekin server attaches to the same socket in later phases.
+ * Session streaming attaches to the same socket in a later phase.
  */
 
 import WebSocket from 'ws'
 import { envelope, parseEnvelope } from './relay-protocol.js'
-import type { ConnectorHello, ConnectorHelloAck, RelayError } from './relay-protocol.js'
+import type { ConnectorHello, ConnectorHelloAck, ProxyRequest, RelayError } from './relay-protocol.js'
+import { executeProxyRequest, resolveLocalTarget } from './connector-proxy.js'
+import type { FetchLike, LocalServerTarget } from './connector-proxy.js'
 
 export interface ConnectorOptions {
   /** Hosted relay origin, e.g. https://app.codekin.ai */
@@ -17,8 +19,14 @@ export interface ConnectorOptions {
   machineSecret: string
   connectorVersion: string
   localCodekinVersion?: string
+  /** Local Codekin server to proxy to; resolved from env/token file by default. */
+  localTarget?: LocalServerTarget
+  /** Injectable fetch, for tests. */
+  fetchImpl?: FetchLike
   /** Called on lifecycle events for CLI output. */
   onStatus?: (status: ConnectorStatus, detail?: string) => void
+  /** Called for each proxied request, for CLI output. */
+  onProxy?: (method: string, path: string, status: number | string) => void
 }
 
 export type ConnectorStatus =
@@ -49,8 +57,11 @@ export class RelayConnector {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private backoffMs = BACKOFF_MIN_MS
   private stopped = false
+  private localTarget: LocalServerTarget
 
-  constructor(private opts: ConnectorOptions) {}
+  constructor(private opts: ConnectorOptions) {
+    this.localTarget = opts.localTarget ?? resolveLocalTarget()
+  }
 
   start(): void {
     this.stopped = false
@@ -86,7 +97,7 @@ export class RelayConnector {
         machineSecret: this.opts.machineSecret,
         connectorVersion: this.opts.connectorVersion,
         localCodekinVersion: this.opts.localCodekinVersion,
-        capabilities: { restProxy: false, wsProxy: false, fileUpload: false, providers: [] },
+        capabilities: { restProxy: true, wsProxy: false, fileUpload: false, providers: [] },
       }
       ws.send(JSON.stringify(envelope('hello', hello)))
     })
@@ -104,6 +115,8 @@ export class RelayConnector {
           }
         }, HEARTBEAT_INTERVAL_MS)
         this.heartbeat.unref()
+      } else if (msg.kind === 'request') {
+        void this.handleProxyRequest(ws, msg.id, msg.payload as ProxyRequest)
       } else if (msg.kind === 'error') {
         const err = msg.payload as RelayError
         this.opts.onStatus?.('disconnected', `${err.code}: ${err.message}`)
@@ -127,6 +140,28 @@ export class RelayConnector {
     ws.on('error', () => {
       // close follows; reconnect is handled there
     })
+  }
+
+  /**
+   * Serve one proxied request. The allowlist check lives in
+   * executeProxyRequest, so a hub that asks for a disallowed path gets an
+   * error envelope back rather than a local call.
+   */
+  private async handleProxyRequest(ws: WebSocket, id: string | undefined, request: ProxyRequest): Promise<void> {
+    if (!id) return
+    const outcome = await executeProxyRequest(request, {
+      target: this.localTarget,
+      fetchImpl: this.opts.fetchImpl,
+    })
+    if (ws.readyState !== WebSocket.OPEN) return
+
+    if ('error' in outcome) {
+      this.opts.onProxy?.(request.method, request.path, outcome.error.code)
+      ws.send(JSON.stringify(envelope('error', outcome.error, { id })))
+      return
+    }
+    this.opts.onProxy?.(request.method, request.path, outcome.response.status)
+    ws.send(JSON.stringify(envelope('response', outcome.response, { id })))
   }
 
   private scheduleReconnect(): void {
