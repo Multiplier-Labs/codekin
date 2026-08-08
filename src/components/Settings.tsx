@@ -22,7 +22,7 @@ import {
   getQueueMessages, setQueueMessages as setQueueMessagesApi,
   setAgentName as setAgentNameApi,
   getIntegrationHealth, previewWebhookSetup, applyWebhookSetup, testWebhookDelivery,
-  getRepoApprovals, bulkRemoveRepoApprovals,
+  getRepoApprovals, bulkRemoveRepoApprovals, webhookEndpointUrl,
   type HealthCheckResult, type SetupPreview,
 } from '../lib/ccApi'
 import { FolderPicker } from './FolderPicker'
@@ -223,7 +223,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
 
   if (!open) return null
 
-  const webhookUrl = `${location.protocol}//${location.host}/cc/api/webhooks/github`
+  const webhookUrl = webhookEndpointUrl()
 
   async function handleVerify() {
     if (!tokenInput.trim()) return

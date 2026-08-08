@@ -12,7 +12,7 @@ import type { Repo } from '../types'
 import type { ApiRepo, RepoGroup } from '../hooks/useRepos'
 import { RepoList } from './RepoList'
 import { FolderPicker } from './FolderPicker'
-import { getReposPath, setReposPath as setReposPathApi } from '../lib/ccApi'
+import { cloneRepo, getReposPath, setReposPath as setReposPathApi } from '../lib/ccApi'
 
 interface Props {
   groups: RepoGroup[]
@@ -45,17 +45,7 @@ export function RepoSelector({ groups, token, ghMissing, onOpen, onRefreshRepos 
     if (!repo.cloned) {
       setCloning(repo.id)
       try {
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-        if (token) headers['Authorization'] = `Bearer ${token}`
-        const res = await fetch('/cc/api/clone', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ owner: repo.owner, name: repo.name }),
-        })
-        if (!res.ok) {
-          const data = await res.json() as { error?: string }
-          throw new Error(data.error || 'Clone failed')
-        }
+        await cloneRepo(token, repo.owner, repo.name)
         repo.cloned = true
       } catch {
         setCloning(null)
