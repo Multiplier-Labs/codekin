@@ -137,8 +137,10 @@ describe('connector hub', () => {
   })
 
   it('a second connection for the same machine replaces the first', async () => {
+    const firstStatuses: string[] = []
     const first = new RelayConnector({
       relayUrl, machineId, machineSecret, connectorVersion: '1',
+      onStatus: s => { firstStatuses.push(s) },
     })
     first.start()
     await waitFor(() => hub.isOnline(machineId))
@@ -149,6 +151,29 @@ describe('connector hub', () => {
     second.start()
     await waitFor(() => listMachines(db)[0].connector_version === '2')
     expect(hub.onlineCount).toBe(1)
+
+    // The replaced connector stands down instead of taking the slot back:
+    // two that both reconnect would trade it forever.
+    await waitFor(() => firstStatuses.includes('replaced'))
+    expect(firstStatuses).not.toContain('reconnect_scheduled')
+
+    second.stop()
+    first.stop()
+  })
+
+  it('the survivor keeps the machine online after a replacement', async () => {
+    const first = new RelayConnector({ relayUrl, machineId, machineSecret, connectorVersion: '1' })
+    first.start()
+    await waitFor(() => hub.isOnline(machineId))
+
+    const second = new RelayConnector({ relayUrl, machineId, machineSecret, connectorVersion: '2' })
+    second.start()
+    await waitFor(() => listMachines(db)[0].connector_version === '2')
+
+    // Give the loser time to have flapped, if it were going to
+    await new Promise(resolve => setTimeout(resolve, 500))
+    expect(hub.onlineCount).toBe(1)
+    expect(listMachines(db)[0].status).toBe('online')
 
     second.stop()
     first.stop()

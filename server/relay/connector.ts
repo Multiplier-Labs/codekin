@@ -15,6 +15,7 @@ import type {
   StreamClose,
   StreamData,
   StreamOpen,
+  LocalSessionSummary,
 } from './relay-protocol.js'
 import { executeProxyRequest, resolveLocalTarget } from './connector-proxy.js'
 import type { FetchLike, LocalServerTarget } from './connector-proxy.js'
@@ -50,12 +51,15 @@ export type ConnectorStatus =
   | 'auth_failed'
   | 'disconnected'
   | 'reconnect_scheduled'
+  | 'replaced'
   | 'stopped'
 
 const HEARTBEAT_INTERVAL_MS = 30_000
 const BACKOFF_MIN_MS = 1_000
 const BACKOFF_MAX_MS = 60_000
 const CLOSE_AUTH_FAILED = 4001
+/** The hub gave this machine's slot to a newer connection. */
+const CLOSE_REPLACED = 4009
 
 /** Convert the https:// relay origin to the wss:// connector endpoint. */
 export function connectorWsUrl(relayUrl: string): string {
@@ -109,6 +113,9 @@ export class RelayConnector {
     this.ws = ws
 
     ws.on('open', () => {
+      // Capabilities are re-advertised on every reconnect (spec §11.3).
+      // Session counts follow separately, because being reachable must not
+      // depend on the local server answering promptly (spec §11.4).
       const hello: ConnectorHello = {
         machineId: this.opts.machineId,
         machineSecret: this.opts.machineSecret,
@@ -132,6 +139,7 @@ export class RelayConnector {
           }
         }, HEARTBEAT_INTERVAL_MS)
         this.heartbeat.unref()
+        void this.advertiseSessions(ws)
       } else if (msg.kind === 'request') {
         void this.handleProxyRequest(ws, msg.id, msg.payload as ProxyRequest)
       } else if (msg.kind === 'stream_open') {
@@ -155,6 +163,13 @@ export class RelayConnector {
       if (code === CLOSE_AUTH_FAILED) {
         // Credential rejected — retrying would loop forever on a revoked machine
         this.opts.onStatus?.('auth_failed', reason.toString() || 'credential rejected')
+        this.stopped = true
+        return
+      }
+      if (code === CLOSE_REPLACED) {
+        // Another connector took this machine. Reconnecting would take it
+        // back, and the two would trade the slot forever — so stand down.
+        this.opts.onStatus?.('replaced', reason.toString() || 'another connector took over')
         this.stopped = true
         return
       }
@@ -188,6 +203,36 @@ export class RelayConnector {
     }
     this.opts.onProxy?.(request.method, request.path, outcome.response.status)
     ws.send(JSON.stringify(envelope('response', outcome.response, { id })))
+  }
+
+
+  /**
+   * Report local session counts once the socket is up. Best-effort: a local
+   * server that is down must not stop the connector from being reachable,
+   * since being reachable is how the user learns the machine is degraded.
+   */
+  private async advertiseSessions(ws: WebSocket): Promise<void> {
+    const sessions = await this.localSessionSummary()
+    if (!sessions || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify(envelope('event', { sessions })))
+  }
+
+  /** Count local sessions, or undefined when the local server did not answer. */
+  private async localSessionSummary(): Promise<LocalSessionSummary | undefined> {
+    const outcome = await executeProxyRequest(
+      { method: 'GET', path: '/api/sessions/list', principal: { userId: 'connector', role: 'owner', grants: {} } },
+      { target: this.localTarget, fetchImpl: this.opts.fetchImpl, timeoutMs: 3_000 },
+    )
+    if ('error' in outcome || !outcome.response.body) return undefined
+    try {
+      const parsed = JSON.parse(Buffer.from(outcome.response.body, 'base64').toString()) as {
+        sessions?: { active?: boolean }[]
+      }
+      if (!Array.isArray(parsed.sessions)) return undefined
+      return { total: parsed.sessions.length, active: parsed.sessions.filter(s => s.active).length }
+    } catch {
+      return undefined
+    }
   }
 
   /** Open a local session socket for a channel the hub asked for. */

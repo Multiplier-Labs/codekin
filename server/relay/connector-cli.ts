@@ -57,8 +57,14 @@ function main(): void {
   const version = packageVersion()
   const localTarget = resolveLocalTarget()
   console.log(`[connector] Proxying to local Codekin at ${localTarget.origin}`)
-  if (!localTarget.authToken) {
-    console.warn('[connector] No local auth token found — run `codekin setup` or set AUTH_TOKEN.')
+  if (localTarget.authToken) {
+    console.log(`[connector] Local auth token from ${localTarget.tokenSource ?? 'unknown source'}`)
+  } else {
+    console.warn(
+      '[connector] No local auth token found. Every proxied request will be refused with 401.\n' +
+        '[connector] Point AUTH_TOKEN_FILE at the token file your Codekin server uses ' +
+        '(check its process env), or set AUTH_TOKEN directly.',
+    )
   }
   if (!localTarget.browserOrigin) {
     console.log(
@@ -89,6 +95,11 @@ function main(): void {
           break
         case 'connected':
           console.log(`[connector] Online as "${detail ?? credential.machineId}"`)
+          break
+        case 'replaced':
+          console.error(`[connector] Another connector took this machine${suffix} — stopping.`)
+          console.error('[connector] Only one connector may serve a machine at a time.')
+          process.exitCode = 1
           break
         case 'auth_failed':
           console.error(`[connector] Credential rejected${suffix} — run \`codekin relay login\` to re-pair.`)

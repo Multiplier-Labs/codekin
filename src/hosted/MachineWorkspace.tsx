@@ -32,9 +32,14 @@ export function MachineWorkspace({ machine, transport, onExit }: MachineWorkspac
     }
   }, [transport])
 
+  // No wrapper element around App: `html, body, #root` are height:100% and
+  // App's root is `h-full`, so an intermediate box without a resolved height
+  // collapses the whole layout — the sidebar loses its width and the
+  // transcript stops scrolling. The exit button is `fixed`, so it needs no
+  // positioned parent and can sit alongside App rather than around it.
   return (
-    <div className="min-h-screen bg-page">
-      <Suspense fallback={<div className="min-h-screen bg-page" />}>
+    <>
+      <Suspense fallback={<div className="h-full bg-page" />}>
         <App />
       </Suspense>
 
@@ -45,6 +50,6 @@ export function MachineWorkspace({ machine, transport, onExit }: MachineWorkspac
       >
         ← <span className="font-mono">{machine.displayName}</span>
       </button>
-    </div>
+    </>
   )
 }

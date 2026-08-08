@@ -33,6 +33,8 @@ export function MachineDetailPage({ machine, onBack, onOpenWorkspace }: MachineD
   const [repoGroups, setRepoGroups] = useState<RepoGroup[]>([])
   const [state, setState] = useState<LoadState>('loading')
   const [error, setError] = useState<string | null>(null)
+  /** Relay error code behind a failure, when there is one. */
+  const [relayCode, setRelayCode] = useState<string | null>(null)
   const [sharing, setSharing] = useState<Session | null>(null)
 
   // Only a machine's owner may share its sessions; a guest sees just the
@@ -49,6 +51,7 @@ export function MachineDetailPage({ machine, onBack, onOpenWorkspace }: MachineD
     const load = async () => {
       setState('loading')
       setError(null)
+      setRelayCode(null)
       try {
         const [sessionsRes, reposRes] = await Promise.all([
           transport.fetch('/api/sessions/list'),
@@ -57,7 +60,10 @@ export function MachineDetailPage({ machine, onBack, onOpenWorkspace }: MachineD
         if (cancelled) return
 
         if (!sessionsRes.ok) {
-          const detail = (await sessionsRes.json().catch(() => null)) as { error?: string } | null
+          const detail = (await sessionsRes.json().catch(() => null)) as
+            | { error?: string; relayCode?: string }
+            | null
+          setRelayCode(detail?.relayCode ?? null)
           throw new Error(detail?.error ?? `Machine returned ${sessionsRes.status}`)
         }
 
@@ -116,10 +122,24 @@ export function MachineDetailPage({ machine, onBack, onOpenWorkspace }: MachineD
 
         {state === 'error' && (
           <div className="rounded-floating border border-edge bg-surface p-6">
-            <p className="mb-1 text-body text-ink">Could not reach this machine.</p>
+            <p className="mb-1 text-body text-ink">
+              {relayCode === 'local_unauthorized'
+                ? 'This machine’s connector is not authorized to its local Codekin server.'
+                : 'Could not reach this machine.'}
+            </p>
             <p className="text-meta text-ink-muted">{error}</p>
             <p className="mt-3 text-meta text-ink-faint">
-              Make sure <code className="font-mono">codekin relay connect</code> is running on it.
+              {relayCode === 'local_unauthorized' ? (
+                <>
+                  The connector is running, but holding the wrong token. Restart it with{' '}
+                  <code className="font-mono">AUTH_TOKEN_FILE</code> set to the token that machine’s
+                  server uses.
+                </>
+              ) : (
+                <>
+                  Make sure <code className="font-mono">codekin relay connect</code> is running on it.
+                </>
+              )}
             </p>
           </div>
         )}

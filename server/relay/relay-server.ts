@@ -23,6 +23,7 @@ import { createShareRouter } from './share-routes.js'
 import { ConnectorHub } from './connector-hub.js'
 import { BrowserHub } from './browser-hub.js'
 import { MAX_PROXY_BODY_BYTES } from './relay-protocol.js'
+import { pruneAuditEvents } from './audit.js'
 import type { SessionUser } from './relay-auth-routes.js'
 
 const config = loadRelayConfig()
@@ -109,7 +110,7 @@ app.get('/api/health', (_req, res) => {
 })
 
 app.use(createRelayAuthRouter({ db, config }))
-app.use(createMachineRouter(db))
+app.use(createMachineRouter(db, hub))
 app.use(createPairingRouter(db, config))
 app.use(createShareRouter(db))
 
@@ -124,6 +125,17 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
     res.status(500).json({ error: 'Internal server error' })
   }
 })
+
+// Audit retention (spec §12): prune daily, and once at boot so a lowered
+// retention setting takes effect without waiting a day.
+if (config.auditRetentionDays > 0) {
+  const prune = () => {
+    const removed = pruneAuditEvents(db, config.auditRetentionDays)
+    if (removed > 0) console.log(`[relay] Pruned ${removed} audit events older than ${config.auditRetentionDays} days`)
+  }
+  prune()
+  setInterval(prune, 24 * 60 * 60 * 1000).unref()
+}
 
 const server = createServer(app)
 
