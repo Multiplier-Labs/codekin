@@ -213,6 +213,48 @@ describe('CodexProcess', () => {
       cxp2.stop()
     })
 
+    it('falls back to a fresh thread when resume fails (no rollout on disk yet)', async () => {
+      const cxp2 = new CodexProcess('/tmp', { codexThreadId: 'thread-old' })
+      const errs: string[] = []
+      const inits: string[] = []
+      cxp2.on('error', (m) => errs.push(m))
+      cxp2.on('system_init', (m) => inits.push(m))
+      cxp2.start()
+      const proc = lastProc()
+      await tick()
+      const init = writes(proc).find(w => w.method === 'initialize')!
+      await feed(proc, { id: init.id, result: {} })
+      const resume = writes(proc).find(w => w.method === 'thread/resume')!
+      await feed(proc, { id: resume.id, error: { code: -32603, message: 'no rollout found for thread id thread-old' } })
+
+      const start = writes(proc).find(w => w.method === 'thread/start')!
+      expect(start).toBeDefined()
+      await feed(proc, { id: start.id, result: { thread: { id: 'thread-new' } } })
+
+      expect(cxp2.isReady()).toBe(true)
+      expect(cxp2.getSessionId()).toBe('thread-new')
+      expect(inits).toHaveLength(1)
+      expect(errs.join(' ')).toContain('starting a fresh thread')
+      cxp2.stop()
+    })
+
+    it('does not retry a fresh thread when resume fails on auth', async () => {
+      const cxp2 = new CodexProcess('/tmp', { codexThreadId: 'thread-old' })
+      const errs: string[] = []
+      cxp2.on('error', (m) => errs.push(m))
+      cxp2.start()
+      const proc = lastProc()
+      await tick()
+      const init = writes(proc).find(w => w.method === 'initialize')!
+      await feed(proc, { id: init.id, result: {} })
+      const resume = writes(proc).find(w => w.method === 'thread/resume')!
+      await feed(proc, { id: resume.id, error: { code: 401, message: 'unauthorized' } })
+
+      expect(writes(proc).find(w => w.method === 'thread/start')).toBeUndefined()
+      expect(errs.join(' ')).toContain('codex login')
+      cxp2.stop()
+    })
+
     it('maps bypassPermissions to never/danger-full-access', async () => {
       const cxp2 = new CodexProcess('/tmp', { permissionMode: 'bypassPermissions' })
       cxp2.on('error', () => {})

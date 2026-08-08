@@ -339,6 +339,34 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
     })
   }
 
+  /**
+   * Resume the stored thread, falling back to a fresh thread when it can't be
+   * resumed.
+   *
+   * Codex hands out a thread id from `thread/start` but only writes the thread's
+   * rollout file once the thread has run a turn. Any restart before that first
+   * turn — a model change, a carry-context provider switch (which defers the
+   * first message until the user types), a crash — leaves a thread id that
+   * `thread/resume` rejects with "no rollout found for thread id ...", and since
+   * the id is persisted, every subsequent restart fails the same way until
+   * auto-restart gives up. A fresh thread loses nothing in that case (no turn
+   * ran, so there is no context to carry) and keeps the session usable.
+   *
+   * Auth failures are rethrown — a fresh start would fail identically, and the
+   * caller turns them into the "run `codex login`" hint.
+   */
+  private async resumeOrStartFresh(params: Record<string, unknown>): Promise<unknown> {
+    try {
+      return await this.request('thread/resume', { threadId: this.threadId, ...params })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!this.alive || /unauthorized|not.*logged.*in|auth/i.test(msg)) throw err
+      this.emit('error', `Could not resume the previous Codex thread (${msg}) — starting a fresh thread.`)
+      this.threadId = null
+      return await this.request('thread/start', params)
+    }
+  }
+
   private async initialize(): Promise<void> {
     await this.request('initialize', {
       clientInfo: { name: 'codekin', title: 'Codekin', version: '1.0.0' },
@@ -354,7 +382,7 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
       ...(this.model ? { model: this.model } : {}),
     }
     const res = this.threadId
-      ? await this.request('thread/resume', { threadId: this.threadId, ...params })
+      ? await this.resumeOrStartFresh(params)
       : await this.request('thread/start', params)
 
     const data = res as { thread?: { id?: string }; model?: string }
