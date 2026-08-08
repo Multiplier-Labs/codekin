@@ -32,9 +32,12 @@ import type { SessionUser } from './relay-auth-routes.js'
 import { resolveMachineAccess } from './shares.js'
 import type { MachineAccess } from './shares.js'
 import { recordAuditEvent } from './audit.js'
+import { BROWSER_FRAME_LIMIT, RateLimiter, isBackedUp } from './rate-limit.js'
 
 const CLOSE_AUTH_FAILED = 4001
 const CLOSE_FORBIDDEN = 4003
+/** Sent when a client exceeds its frame budget or stops draining its socket. */
+const CLOSE_OVERLOADED = 4029
 
 /** A browser that hasn't sent hello within this window is dropped. */
 const HELLO_TIMEOUT_MS = 5_000
@@ -72,6 +75,8 @@ function toPrincipal(user: SessionUser, access: MachineAccess): RelayPrincipal {
 
 export class BrowserHub {
   private clients = new Set<BrowserClient>()
+  /** Per-user frame budget: one browser cannot flood a machine (spec §11.5). */
+  private frameLimiter = new RateLimiter(BROWSER_FRAME_LIMIT)
 
   constructor(
     private db: Database.Database,
@@ -135,6 +140,12 @@ export class BrowserHub {
             }),
           ),
         )
+        return
+      }
+
+      // Past hello, every frame costs the user a token.
+      if (!this.frameLimiter.tryConsume(client.user.id)) {
+        socket.close(CLOSE_OVERLOADED, 'frame rate limit exceeded')
         return
       }
 
@@ -230,6 +241,18 @@ export class BrowserHub {
 
     const error = this.connectors.openChannel(client.machineId, remoteId, (kind, payload) => {
       if (client.socket.readyState !== client.socket.OPEN) return
+      // A browser that stops draining would otherwise grow ws's buffer
+      // without bound; drop its channel rather than the hub's memory.
+      if (isBackedUp(client.socket)) {
+        client.channels.delete(localId)
+        this.connectors.closeChannel(client.machineId, remoteId, STREAM_CLOSE.normal, 'client too slow')
+        client.socket.send(
+          JSON.stringify(
+            envelope('stream_close', { code: STREAM_CLOSE.normal, reason: 'client too slow' }, { channelId: localId }),
+          ),
+        )
+        return
+      }
       client.socket.send(JSON.stringify(envelope(kind, payload, { channelId: localId })))
       if (kind === 'stream_close') {
         client.channels.delete(localId)
@@ -275,6 +298,7 @@ export class BrowserHub {
 
   /** Disconnect every browser socket (shutdown / tests). */
   close(): void {
+    this.frameLimiter.close()
     for (const client of this.clients) {
       for (const remoteId of client.channels.values()) {
         this.connectors.closeChannel(client.machineId, remoteId, STREAM_CLOSE.normal, 'relay shutting down')

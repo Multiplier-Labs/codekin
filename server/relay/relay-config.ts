@@ -24,6 +24,8 @@ export interface RelayConfig {
   allowedGithubLogins: string[]
   /** Data directory for the control-plane SQLite DB. */
   dataDir: string
+  /** Days to keep audit events; 0 disables pruning (spec §12). */
+  auditRetentionDays: number
   /** True when running behind TLS in production (secure cookies). */
   isProduction: boolean
 }
@@ -72,6 +74,7 @@ export function loadRelayConfig(opts: { envFile?: string; requireSecrets?: boole
       .map(s => s.trim())
       .filter(Boolean),
     dataDir,
+    auditRetentionDays: Math.max(0, parseInt(get('AUDIT_RETENTION_DAYS') || '90', 10) || 0),
     isProduction,
   }
 

@@ -130,6 +130,14 @@ function toSessionUser(row: UserRow): SessionUser {
   }
 }
 
+
+/** Calls the connector made to a given local path (it also polls sessions itself). */
+function callsFor(mock: ReturnType<typeof vi.fn>, path: string): { headers: Record<string, string> }[] {
+  return mock.mock.calls
+    .filter(call => String(call[0]).includes(path))
+    .map(call => call[1] as { headers: Record<string, string> })
+}
+
 describe('a shared-in user over the relay', () => {
   let db: Database.Database
   let hub: ConnectorHub
@@ -190,11 +198,15 @@ describe('a shared-in user over the relay', () => {
     const port = (server.address() as AddressInfo).port
     browserUrl = `ws://127.0.0.1:${port}/relay/browser`
 
-    localFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ sessions: [{ id: 's1', name: 'shared' }, { id: 's2', name: 'private' }] }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
+    // A fresh Response per call: a body can only be read once, and the
+    // connector polls the session list itself on connect.
+    localFetch = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ sessions: [{ id: 's1', name: 'shared' }, { id: 's2', name: 'private' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
     )
 
     connector = new RelayConnector({
@@ -344,7 +356,7 @@ describe('a shared-in user over the relay', () => {
     const err = await browser.waitForFrame(f => f.kind === 'error' && f.id === 'r1')
 
     expect(err.payload.code).toBe(RELAY_ERROR.notPermitted)
-    expect(localFetch).not.toHaveBeenCalled()
+    expect(callsFor(localFetch, '/api/repos')).toHaveLength(0)
     browser.close()
   })
 

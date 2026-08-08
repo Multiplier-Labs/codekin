@@ -22,6 +22,15 @@ import {
 import type { SessionPermission, ShareRole } from './shares.js'
 import { listAuditEvents, recordAuditEvent } from './audit.js'
 
+/** Upper bound on a single CSV export, so one request cannot read the table. */
+const MAX_EXPORT_ROWS = 500
+
+/** Quote a CSV cell, doubling embedded quotes per RFC 4180. */
+function csvCell(value: string | number): string {
+  const text = String(value)
+  return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
+}
+
 /** Resolve the permission set from either a role name or an explicit list. */
 function resolvePermissions(body: { role?: unknown; permissions?: unknown }): SessionPermission[] | null {
   if (typeof body.role === 'string') {
@@ -216,6 +225,47 @@ export function createShareRouter(db: Database.Database): Router {
     }
 
     res.json({ events: listAuditEvents(db, { actorUserId: user.id, limit }) })
+  })
+
+  /**
+   * CSV export of the same events the JSON endpoint would return, for
+   * offline retention (spec §12). Metadata is serialized as JSON in one
+   * column rather than flattened, so new keys never shift the schema.
+   */
+  router.get('/api/audit-events/export', requireActiveUser, (req, res) => {
+    const user = req.session.user!
+    const machineId = typeof req.query.machineId === 'string' ? req.query.machineId : undefined
+
+    if (machineId) {
+      const machine = db.prepare('SELECT owner_user_id FROM machines WHERE id = ?').get(machineId) as
+        | { owner_user_id: string }
+        | undefined
+      if (!machine || machine.owner_user_id !== user.id) {
+        res.status(403).json({ error: 'Only the machine owner can export its audit log' })
+        return
+      }
+    }
+
+    const events = listAuditEvents(db, {
+      machineId,
+      actorUserId: machineId ? undefined : user.id,
+      limit: MAX_EXPORT_ROWS,
+    })
+
+    const rows = [
+      'id,created_at,kind,actor_user_id,machine_id,local_session_id,ip,user_agent,metadata',
+      ...events.map(e =>
+        [
+          e.id, e.createdAt, e.kind, e.actorUserId ?? '', e.machineId ?? '',
+          e.localSessionId ?? '', e.ip ?? '', e.userAgent ?? '',
+          e.metadata ? JSON.stringify(e.metadata) : '',
+        ].map(csvCell).join(','),
+      ),
+    ]
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+    res.setHeader('Content-Disposition', 'attachment; filename="codekin-audit.csv"')
+    res.send(rows.join('\n') + '\n')
   })
 
   return router
