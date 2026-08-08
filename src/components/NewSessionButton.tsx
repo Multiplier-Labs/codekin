@@ -15,6 +15,7 @@ import { IconPlus, IconChevronLeft } from '@tabler/icons-react'
 import type { Repo, CodingProvider } from '../types'
 import { PROVIDERS } from '../types'
 import type { ApiRepo, RepoGroup } from '../hooks/useRepos'
+import { cloneRepo } from '../lib/ccApi'
 import { RepoList } from './RepoList'
 
 interface Props {
@@ -64,17 +65,7 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
     if (!repo.cloned) {
       setCloning(repo.id)
       try {
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-        if (token) headers['Authorization'] = `Bearer ${token}`
-        const res = await fetch('/cc/api/clone', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ owner: repo.owner, name: repo.name }),
-        })
-        if (!res.ok) {
-          const data = await res.json() as { error?: string }
-          throw new Error(data.error || 'Clone failed')
-        }
+        await cloneRepo(token, repo.owner, repo.name)
         repo.cloned = true
       } catch {
         setCloning(null)

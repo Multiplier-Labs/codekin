@@ -51,17 +51,9 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
   // Fetch dashboard stats
   const refreshStats = useCallback(async () => {
     if (!token) return
-    try {
-      const res = await fetch(`/cc/api/orchestrator/dashboard`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (res.ok) {
-        const data = await res.json() as { stats: DashboardStats }
-        setStats(data.stats)
-      }
-    } catch {
-      // Stats are optional — don't fail the view
-    }
+    // Stats are optional — getOrchestratorDashboard returns null instead of failing the view
+    const stats = await api.getOrchestratorDashboard<DashboardStats>(token)
+    if (stats) setStats(stats)
   }, [token])
 
   // Initialize session
