@@ -69,10 +69,24 @@ export interface BrowserHelloAck {
  * `machineId` from the socket's binding, so a client cannot retarget a
  * request at another machine mid-connection.
  */
+/**
+ * The caller's standing on a machine, attached by the hub to everything it
+ * forwards. The connector re-checks against this rather than trusting that
+ * the hub filtered correctly (spec §5.2).
+ */
+export interface RelayPrincipal {
+  userId: string
+  role: 'owner' | 'grantee'
+  /** Session id → permissions. Empty for owners. */
+  grants: Record<string, string[]>
+}
+
 export interface ProxyRequest {
   method: string
   /** Local server path including query string, e.g. '/api/sessions/list?x=1'. */
   path: string
+  /** Who is asking. Absent only from legacy frames, which are refused. */
+  principal?: RelayPrincipal
   /**
    * Content type of `body`. This is the only browser-supplied header that
    * crosses the relay — everything else (notably Authorization) is the
@@ -99,7 +113,10 @@ export interface ProxyResponse {
  * browser's id onto a hub-generated id before it reaches a connector, so
  * ids from one browser can never name another's channel.
  */
-export type StreamOpen = Record<string, never>
+export interface StreamOpen {
+  /** Who the channel belongs to, so the connector can police its frames. */
+  principal?: RelayPrincipal
+}
 
 /** Connector → browser once the local socket is open and authenticated. */
 export interface StreamReady {
@@ -133,6 +150,7 @@ export const RELAY_ERROR = {
   localUnreachable: 'local_unreachable',
   tooManyChannels: 'too_many_channels',
   unknownChannel: 'unknown_channel',
+  notPermitted: 'not_permitted',
 } as const
 
 /** Close codes on proxied stream channels, mirroring the local server's conventions. */

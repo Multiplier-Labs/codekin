@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { HostedRelayTransport } from '../lib/transport'
+import { ShareDialog } from './ShareDialog'
 import type { Session } from '../types'
 import type { Machine } from './MachinesPage'
 
@@ -32,6 +33,11 @@ export function MachineDetailPage({ machine, onBack, onOpenWorkspace }: MachineD
   const [repoGroups, setRepoGroups] = useState<RepoGroup[]>([])
   const [state, setState] = useState<LoadState>('loading')
   const [error, setError] = useState<string | null>(null)
+  const [sharing, setSharing] = useState<Session | null>(null)
+
+  // Only a machine's owner may share its sessions; a guest sees just the
+  // sessions already shared with them.
+  const isOwner = machine.access !== 'shared'
 
   useEffect(() => {
     const transport = new HostedRelayTransport(machine.id)
@@ -140,6 +146,14 @@ export function MachineDetailPage({ machine, onBack, onOpenWorkspace }: MachineD
                       <span className="ml-auto shrink-0 text-meta text-ink-muted">
                         {s.active ? 'running' : 'idle'}
                       </span>
+                      {isOwner && (
+                        <button
+                          onClick={() => { setSharing(s) }}
+                          className="shrink-0 rounded-control border border-edge px-2 py-1 text-meta text-ink-muted transition hover:text-ink"
+                        >
+                          Share
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -177,6 +191,15 @@ export function MachineDetailPage({ machine, onBack, onOpenWorkspace }: MachineD
           </>
         )}
       </main>
+
+      {sharing && (
+        <ShareDialog
+          machineId={machine.id}
+          sessionId={sharing.id}
+          sessionName={sharing.name}
+          onClose={() => { setSharing(null) }}
+        />
+      )}
     </div>
   )
 }

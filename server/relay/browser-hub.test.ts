@@ -12,11 +12,10 @@ import type Database from 'better-sqlite3'
 import { openControlPlaneDb, upsertUserFromGithub } from './control-plane-db.js'
 import { startPairing, approvePairing, completePairing } from './pairing.js'
 import { ConnectorHub } from './connector-hub.js'
-import { BrowserHub, canAccessMachine } from './browser-hub.js'
+import { BrowserHub } from './browser-hub.js'
 import { RelayConnector } from './connector.js'
 import { envelope, RELAY_ERROR } from './relay-protocol.js'
 import type { SessionUser } from './relay-auth-routes.js'
-import type { MachineRow } from './control-plane-db.js'
 
 function waitFor(condition: () => boolean, timeoutMs = 3000): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -269,22 +268,5 @@ describe('browser hub REST proxy', () => {
     await browser.open()
     browser.send('request', { method: 'GET', path: '/api/health' }, 'r1')
     expect(await browser.closeCode).toBe(4001)
-  })
-})
-
-describe('canAccessMachine', () => {
-  const machine = { id: 'm1', owner_user_id: 'u1' } as MachineRow
-  const active: SessionUser = {
-    id: 'u1', login: 'a', displayName: null, avatarUrl: null, role: 'owner', status: 'active',
-  }
-
-  it('allows the machine owner', () => {
-    expect(canAccessMachine(active, machine)).toBe(true)
-  })
-
-  it('refuses another user, a pending user, and an unknown machine', () => {
-    expect(canAccessMachine({ ...active, id: 'u2' }, machine)).toBe(false)
-    expect(canAccessMachine({ ...active, status: 'pending' }, machine)).toBe(false)
-    expect(canAccessMachine(active, undefined)).toBe(false)
   })
 })

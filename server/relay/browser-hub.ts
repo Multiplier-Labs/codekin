@@ -4,9 +4,9 @@
  * streams to the machine the socket is bound to.
  *
  * Authorization happens twice and deliberately: once here, where the socket
- * is bound to a single machine the signed-in user is allowed to reach
- * (owner-only at this stage; shares arrive in the sharing phase), and again
- * on the connector, which decides which local paths it will serve.
+ * is bound to a machine the signed-in user owns or holds a share on, and
+ * again on the connector, which re-derives what that user may do from the
+ * principal attached to every forwarded frame.
  */
 
 import { randomUUID } from 'crypto'
@@ -19,10 +19,19 @@ import {
   RELAY_ERROR,
   STREAM_CLOSE,
 } from './relay-protocol.js'
-import type { BrowserHello, ProxyRequest, RelayError, StreamClose, StreamData } from './relay-protocol.js'
+import type {
+  BrowserHello,
+  ProxyRequest,
+  RelayError,
+  RelayPrincipal,
+  StreamClose,
+  StreamData,
+} from './relay-protocol.js'
 import type { ConnectorHub } from './connector-hub.js'
 import type { SessionUser } from './relay-auth-routes.js'
-import type { MachineRow } from './control-plane-db.js'
+import { resolveMachineAccess } from './shares.js'
+import type { MachineAccess } from './shares.js'
+import { recordAuditEvent } from './audit.js'
 
 const CLOSE_AUTH_FAILED = 4001
 const CLOSE_FORBIDDEN = 4003
@@ -38,6 +47,8 @@ interface BrowserClient {
   machineId: string
   socket: WebSocket
   inflight: number
+  /** Standing on this machine, resolved at hello time. */
+  access: MachineAccess
   /**
    * Channel ids are namespaced per client: the browser names its channel,
    * the hub gives the connector a fresh id. One browser can therefore never
@@ -47,13 +58,16 @@ interface BrowserClient {
 }
 
 /**
- * Whether a user may reach a machine. Owner-only for now: the user who
- * paired the machine. Shares widen this in a later phase.
+ * The principal sent to the connector with every forwarded frame. Grants are
+ * resolved fresh per socket, so revoking a share takes effect on the next
+ * connection rather than living on in a cached token.
  */
-export function canAccessMachine(user: SessionUser, machine: MachineRow | undefined): boolean {
-  if (!machine) return false
-  if (user.status !== 'active') return false
-  return machine.owner_user_id === user.id
+function toPrincipal(user: SessionUser, access: MachineAccess): RelayPrincipal {
+  return {
+    userId: user.id,
+    role: access.kind === 'owner' ? 'owner' : 'grantee',
+    grants: access.kind === 'grantee' ? access.grants : {},
+  }
 }
 
 export class BrowserHub {
@@ -92,22 +106,32 @@ export class BrowserHub {
           socket.close(CLOSE_AUTH_FAILED, 'machineId required')
           return
         }
-        const machine = this.db
-          .prepare('SELECT * FROM machines WHERE id = ?')
-          .get(hello.machineId) as MachineRow | undefined
-        if (!canAccessMachine(user, machine)) {
+        const machineId = hello.machineId
+        const access = resolveMachineAccess(this.db, user, machineId)
+        if (access.kind === 'none') {
+          recordAuditEvent(this.db, {
+            kind: 'access_denied',
+            actorUserId: user.id,
+            machineId,
+            metadata: { stage: 'connect' },
+          })
           socket.close(CLOSE_FORBIDDEN, 'no access to this machine')
           return
         }
+        const machine = this.db
+          .prepare('SELECT display_name FROM machines WHERE id = ?')
+          .get(machineId) as { display_name: string }
 
-        client = { user, machineId: machine!.id, socket, inflight: 0, channels: new Map() }
+        client = { user, machineId, socket, inflight: 0, access, channels: new Map() }
         this.clients.add(client)
         socket.send(
           JSON.stringify(
             envelope('hello_ack', {
-              machineId: machine!.id,
-              displayName: machine!.display_name,
-              online: this.connectors.isOnline(machine!.id),
+              machineId,
+              displayName: machine.display_name,
+              online: this.connectors.isOnline(machineId),
+              role: access.kind,
+              grants: access.kind === 'grantee' ? access.grants : undefined,
             }),
           ),
         )
@@ -170,6 +194,7 @@ export class BrowserHub {
         path: request.path,
         contentType: typeof request.contentType === 'string' ? request.contentType : undefined,
         body: request.body,
+        principal: toPrincipal(client.user, client.access),
       })
       if (client.socket.readyState !== client.socket.OPEN) return
       if ('error' in outcome) {
@@ -196,6 +221,13 @@ export class BrowserHub {
     const remoteId = randomUUID()
     client.channels.set(localId, remoteId)
 
+    recordAuditEvent(this.db, {
+      kind: 'session_viewed',
+      actorUserId: client.user.id,
+      machineId: client.machineId,
+      metadata: { role: client.access.kind },
+    })
+
     const error = this.connectors.openChannel(client.machineId, remoteId, (kind, payload) => {
       if (client.socket.readyState !== client.socket.OPEN) return
       client.socket.send(JSON.stringify(envelope(kind, payload, { channelId: localId })))
@@ -203,7 +235,7 @@ export class BrowserHub {
         client.channels.delete(localId)
         this.connectors.closeChannel(client.machineId, remoteId)
       }
-    })
+    }, toPrincipal(client.user, client.access))
 
     if (error) {
       client.channels.delete(localId)
