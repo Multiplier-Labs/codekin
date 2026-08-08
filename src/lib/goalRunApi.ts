@@ -1,11 +1,14 @@
 /**
  * HTTP client for the Goal Run (loop) REST API.
  *
- * All calls go through /cc/api/goal-runs/ with Bearer token auth. Mirrors the
- * shapes returned by server/goal-run-routes.ts and server/goal-run-store.ts.
+ * All calls go through the active transport at /api/goal-runs/ with Bearer
+ * token auth. Mirrors the shapes returned by server/goal-run-routes.ts and
+ * server/goal-run-store.ts.
  */
 
-const BASE = '/cc/api/goal-runs'
+import { transport } from './transport'
+
+const BASE = '/api/goal-runs'
 
 async function fetchJson<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>
@@ -105,7 +108,7 @@ export async function listLoopTemplates(token: string, repoPath?: string): Promi
   const params = new URLSearchParams()
   if (repoPath) params.set('repoPath', repoPath)
   const qs = params.toString()
-  const res = await fetch(`${BASE}/templates${qs ? `?${qs}` : ''}`, { headers: headers(token) })
+  const res = await transport.fetch(`${BASE}/templates${qs ? `?${qs}` : ''}`, { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to list loop templates: ${res.status}`)
   const data = await fetchJson<{ templates: LoopTemplateInfo[] }>(res)
   return data.templates
@@ -125,7 +128,7 @@ export async function listGoalRuns(
   if (opts?.status) params.set('status', opts.status)
   if (opts?.limit) params.set('limit', String(opts.limit))
   const qs = params.toString()
-  const res = await fetch(`${BASE}/runs${qs ? `?${qs}` : ''}`, { headers: headers(token) })
+  const res = await transport.fetch(`${BASE}/runs${qs ? `?${qs}` : ''}`, { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to list goal runs: ${res.status}`)
   const data = await fetchJson<{ runs: GoalRun[] }>(res)
   return data.runs
@@ -133,7 +136,7 @@ export async function listGoalRuns(
 
 /** Fetch a single run with its evidence ledger (turns). */
 export async function getGoalRun(token: string, runId: string): Promise<GoalRunWithTurns> {
-  const res = await fetch(`${BASE}/runs/${runId}`, { headers: headers(token) })
+  const res = await transport.fetch(`${BASE}/runs/${runId}`, { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to get goal run: ${res.status}`)
   const data = await fetchJson<{ run: GoalRunWithTurns }>(res)
   return data.run
@@ -144,7 +147,7 @@ export async function startGoalRun(
   token: string,
   input: { kind: GoalRunKind; repo: string; branch: string; goal?: string },
 ): Promise<GoalRun> {
-  const res = await fetch(`${BASE}/runs`, {
+  const res = await transport.fetch(`${BASE}/runs`, {
     method: 'POST',
     headers: headers(token),
     body: JSON.stringify(input),
@@ -159,7 +162,7 @@ export async function startGoalRun(
 
 /** Abort an in-flight goal run. */
 export async function abortGoalRun(token: string, runId: string): Promise<void> {
-  const res = await fetch(`${BASE}/runs/${runId}/abort`, {
+  const res = await transport.fetch(`${BASE}/runs/${runId}/abort`, {
     method: 'POST',
     headers: headers(token),
   })
