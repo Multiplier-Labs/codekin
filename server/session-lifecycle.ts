@@ -13,13 +13,20 @@ import path from 'path'
 import { ClaudeProcess } from './claude-process.js'
 import { OpenCodeProcess } from './opencode-process.js'
 import { CodexProcess } from './codex-process.js'
-import type { CodingProcess } from './coding-process.js'
+import type { CodingProcess, CodingProvider } from './coding-process.js'
 import { ApprovalManager } from './approval-manager.js'
 import type { PromptRouter } from './prompt-router.js'
 import type { Session, WsServerMessage } from './types.js'
 import { PORT } from './config.js'
 import { deriveSessionToken } from './crypto-utils.js'
 import { evaluateRestart } from './session-restart-scheduler.js'
+
+/** How each provider's process is named in user-facing lifecycle messages. */
+const PROVIDER_LABELS: Record<CodingProvider, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+}
 
 /** Dependencies injected by SessionManager so SessionLifecycle can interact with session state. */
 export interface SessionLifecycleDeps {
@@ -382,6 +389,7 @@ export class SessionLifecycle {
       }
     }
 
+    const label = PROVIDER_LABELS[session.provider ?? 'claude']
     const action = evaluateRestart({
       restartCount: session.restartCount,
       lastRestartAt: session.lastRestartAt,
@@ -398,7 +406,7 @@ export class SessionLifecycle {
       const msg: WsServerMessage = {
         type: 'system_message',
         subtype: 'error',
-        text: `Claude process exited with non-retryable error (code=${action.exitCode}). This usually indicates a configuration or argument problem. Please check your session settings and restart manually.`,
+        text: `${label} process exited with non-retryable error (code=${action.exitCode}). This usually indicates a configuration or argument problem. Please check your session settings and restart manually.`,
       }
       this.deps.addToHistory(session, msg)
       this.deps.broadcast(session, msg)
@@ -411,8 +419,8 @@ export class SessionLifecycle {
         try { listener(sessionId, code, signal, false) } catch { /* listener error */ }
       }
       const text = sessionConflict
-        ? 'Claude process exited: session ID is already in use by another process. Please restart manually.'
-        : `Claude process exited: code=${code}, signal=${signal}`
+        ? `${label} process exited: session ID is already in use by another process. Please restart manually.`
+        : `${label} process exited: code=${code}, signal=${signal}`
       const msg: WsServerMessage = { type: 'system_message', subtype: 'exit', text }
       this.deps.addToHistory(session, msg)
       this.deps.broadcast(session, msg)
@@ -432,7 +440,7 @@ export class SessionLifecycle {
       const msg: WsServerMessage = {
         type: 'system_message',
         subtype: 'restart',
-        text: `Claude process exited unexpectedly (code=${code}, signal=${signal}). Restarting (attempt ${action.attempt}/${action.maxAttempts})...`,
+        text: `${label} process exited unexpectedly (code=${code}, signal=${signal}). Restarting (attempt ${action.attempt}/${action.maxAttempts})...`,
       }
       this.deps.addToHistory(session, msg)
       this.deps.broadcast(session, msg)
@@ -480,7 +488,7 @@ export class SessionLifecycle {
     const msg: WsServerMessage = {
       type: 'system_message',
       subtype: 'error',
-      text: `Claude process exited unexpectedly (code=${code}, signal=${signal}). Auto-restart disabled after ${action.maxAttempts} attempts. Please restart manually.`,
+      text: `${label} process exited unexpectedly (code=${code}, signal=${signal}). Auto-restart disabled after ${action.maxAttempts} attempts. Please restart manually.`,
     }
     this.deps.addToHistory(session, msg)
     this.deps.broadcast(session, msg)
