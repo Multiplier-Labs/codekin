@@ -148,7 +148,16 @@ const ENV_FILE_CANDIDATES = [
 ]
 
 /** Keys worth taking from an env file; anything else is the server's business. */
-const ENV_FILE_KEYS = ['AUTH_TOKEN', 'AUTH_TOKEN_FILE', 'PORT', 'CORS_ORIGIN']
+const ENV_FILE_KEYS = [
+  'AUTH_TOKEN',
+  'AUTH_TOKEN_FILE',
+  'PORT',
+  'CORS_ORIGIN',
+  // The connector-specific overrides belong here too: putting them in an env
+  // file is the whole point of not passing them on every invocation.
+  'RELAY_LOCAL_ORIGIN',
+  'CODEKIN_LOCAL_URL',
+]
 
 /**
  * Read `KEY=VALUE` and `export KEY=VALUE` lines, ignoring comments. Values
@@ -205,7 +214,15 @@ export function resolveLocalTarget(
 
   const port = parseInt(env.PORT || String(DEFAULT_LOCAL_PORT), 10)
   const origin = env.CODEKIN_LOCAL_URL || `http://127.0.0.1:${port}`
-  const browserOrigin = env.RELAY_LOCAL_ORIGIN || env.CORS_ORIGIN || undefined
+  // Process environment wins over env files as a whole, not key by key: an
+  // explicitly exported CORS_ORIGIN must not be silently overridden by a
+  // RELAY_LOCAL_ORIGIN that happens to sit in a file.
+  const browserOrigin =
+    processEnv.RELAY_LOCAL_ORIGIN ||
+    processEnv.CORS_ORIGIN ||
+    env.RELAY_LOCAL_ORIGIN ||
+    env.CORS_ORIGIN ||
+    undefined
 
   let authToken = env.AUTH_TOKEN ?? ''
   let tokenSource = authToken ? 'AUTH_TOKEN' : ''
