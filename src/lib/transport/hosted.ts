@@ -9,14 +9,42 @@
 
 import type { CodekinTransport } from './types'
 import { RelayConnection, RelayRequestError, decodeBody, encodeBody } from './relay-client'
+import { RelayWebSocket } from './relay-socket'
 
 /** Control-plane sign-in entry point. */
 const LOGIN_PATH = '/api/auth/github/start'
+
+/**
+ * Encode a request body for the relay envelope.
+ *
+ * Strings take the fast path; FormData/Blob/ArrayBuffer bodies (file uploads)
+ * are serialized through a throwaway Request, which also yields the multipart
+ * content type with its generated boundary. An explicit Content-Type from the
+ * caller wins, since that is what a direct fetch would have sent.
+ */
+async function encodeRequestBody(
+  init?: RequestInit,
+): Promise<{ body?: string; contentType?: string }> {
+  if (init?.body == null) return {}
+
+  const explicitType = new Headers(init.headers).get('content-type') ?? undefined
+  if (typeof init.body === 'string') {
+    return { body: encodeBody(init.body), contentType: explicitType }
+  }
+
+  const probe = new Request('http://relay.invalid/', { method: 'POST', body: init.body })
+  const bytes = new Uint8Array(await probe.arrayBuffer())
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return { body: btoa(binary), contentType: explicitType ?? probe.headers.get('content-type') ?? undefined }
+}
 
 export class HostedRelayTransport implements CodekinTransport {
   readonly machineId: string
   private connection: RelayConnection
   private redirecting = false
+  /** Channel ids only need to be unique within this connection. */
+  private nextChannel = 0
 
   constructor(machineId: string, connection?: RelayConnection) {
     this.machineId = machineId
@@ -35,10 +63,10 @@ export class HostedRelayTransport implements CodekinTransport {
 
   async fetch(path: string, init?: RequestInit): Promise<Response> {
     const method = (init?.method ?? 'GET').toUpperCase()
-    const body = typeof init?.body === 'string' ? encodeBody(init.body) : undefined
+    const { body, contentType } = await encodeRequestBody(init)
 
     try {
-      const proxied = await this.connection.request(method, path, body)
+      const proxied = await this.connection.request(method, path, body, contentType)
       const bytes = decodeBody(proxied.body)
       return new Response(bytes ? bytes.slice().buffer : null, {
         status: proxied.status,
@@ -70,12 +98,24 @@ export class HostedRelayTransport implements CodekinTransport {
     return res
   }
 
+  /**
+   * There is no browser-visible URL for a relayed session socket — the
+   * stream is a channel on the relay connection. Returned for display and
+   * diagnostics only.
+   */
   wsUrl(): string {
-    throw new Error('Session streaming over the hosted relay is not available yet')
+    return `relay://${this.machineId}`
   }
 
+  /**
+   * Open a session stream to the machine. The returned object behaves as a
+   * WebSocket for the members the app uses; the connector performs the local
+   * auth handshake, so the app's own `auth` frame is answered from the
+   * machine's cached `connected` reply.
+   */
   openSocket(): WebSocket {
-    throw new Error('Session streaming over the hosted relay is not available yet')
+    const channelId = `ch-${++this.nextChannel}`
+    return new RelayWebSocket(this.connection, channelId) as unknown as WebSocket
   }
 
   async checkAuthSession(): Promise<boolean> {

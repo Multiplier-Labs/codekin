@@ -10,8 +10,18 @@ import type { Settings } from '../types'
 
 const STORAGE_KEY = 'codekin-settings'
 
+/**
+ * Stand-in token for hosted mode. The browser has no local server token
+ * there — the connector authenticates to the local server on the machine —
+ * but the app still needs a non-empty token to leave setup mode and to fill
+ * the `auth` frame the connector answers locally.
+ */
+export const HOSTED_TOKEN_SENTINEL = 'hosted-relay'
+
+const isHosted = import.meta.env.VITE_APP_MODE === 'hosted'
+
 const defaults: Settings = {
-  token: '',
+  token: isHosted ? HOSTED_TOKEN_SENTINEL : '',
   fontSize: 16,
   theme: 'dark',
 }
@@ -22,13 +32,15 @@ function load(): Settings {
     const saved = raw ? JSON.parse(raw) as Partial<Settings> | null : null
     const base: Settings = {
       ...defaults,
-      token: saved?.token ?? defaults.token,
+      // In hosted mode the sentinel always wins: a token saved by a previous
+      // local session on the same origin would not authenticate anything.
+      token: isHosted ? HOSTED_TOKEN_SENTINEL : saved?.token ?? defaults.token,
       theme: saved?.theme === 'light' ? 'light' : 'dark',
     }
 
     // Check URL for ?token= parameter (e.g. shared invite links)
     const url = new URL(window.location.href)
-    const urlToken = url.searchParams.get('token')
+    const urlToken = isHosted ? null : url.searchParams.get('token')
     if (urlToken) {
       base.token = urlToken
       // Persist immediately so subsequent loads pick it up

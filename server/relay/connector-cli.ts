@@ -60,6 +60,12 @@ function main(): void {
   if (!localTarget.authToken) {
     console.warn('[connector] No local auth token found — run `codekin setup` or set AUTH_TOKEN.')
   }
+  if (!localTarget.browserOrigin) {
+    console.log(
+      '[connector] No RELAY_LOCAL_ORIGIN/CORS_ORIGIN set. Session streaming needs one if this ' +
+        "machine's Codekin server runs with NODE_ENV=production.",
+    )
+  }
 
   const connector = new RelayConnector({
     relayUrl: credential.url,
@@ -70,6 +76,10 @@ function main(): void {
     localTarget,
     onProxy: (method, path, status) => {
       console.log(`[connector] ${method} ${path} → ${status}`)
+    },
+    onStream: (event, channelId, detail) => {
+      const suffix = detail ? ` (${detail})` : ''
+      console.log(`[connector] session stream ${event} ${channelId}${suffix}`)
     },
     onStatus: (status, detail) => {
       const suffix = detail ? ` (${detail})` : ''

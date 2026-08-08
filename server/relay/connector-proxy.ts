@@ -19,25 +19,42 @@ import {
 import type { ProxyRequest, ProxyResponse, RelayError } from './relay-protocol.js'
 
 /**
- * Paths the hosted UI may reach, matched as prefixes against the path (query
- * string excluded). Read-only endpoints only for now; mutating routes join
- * the list as the hosted UI grows to need them.
+ * Paths the hosted UI may read, matched as prefixes against the path (query
+ * string excluded).
  */
 export const ALLOWED_GET_PREFIXES = [
+  '/auth-verify',
   '/api/health',
-  '/api/sessions/list',
-  '/api/sessions/archived',
+  '/api/sessions',
   '/api/repos',
   '/api/claude/models',
   '/api/codex/models',
   '/api/opencode/models',
-  '/api/orchestrator/status',
-  '/api/orchestrator/sessions',
-  '/api/orchestrator/dashboard',
+  '/api/opencode/commands',
+  '/api/settings',
+  '/api/approvals',
+  '/api/docs',
+  '/api/browse-dirs',
+  '/api/orchestrator',
+] as const
+
+/**
+ * Paths the hosted UI may change. Kept separate from the read list so that
+ * widening reads never silently widens writes — running a session needs
+ * these, browsing does not.
+ */
+export const ALLOWED_MUTATION_PREFIXES = [
+  '/auth-verify',
+  '/api/sessions',
+  '/api/settings',
+  '/api/approvals',
+  '/api/upload',
+  '/api/orchestrator',
 ] as const
 
 /** Methods that may be proxied at all. */
-const ALLOWED_METHODS = new Set(['GET', 'HEAD'])
+const READ_METHODS = new Set(['GET', 'HEAD'])
+const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
 /** Response headers worth forwarding; the rest are connector-local noise. */
 const FORWARDED_RESPONSE_HEADERS = ['content-type', 'content-length', 'cache-control', 'etag']
@@ -50,7 +67,8 @@ export interface ProxyDecision {
 /** Decide whether a proxied request may proceed to the local server. */
 export function checkProxyRequest(req: ProxyRequest): ProxyDecision {
   const method = (req.method || '').toUpperCase()
-  if (!ALLOWED_METHODS.has(method)) {
+  const isRead = READ_METHODS.has(method)
+  if (!isRead && !MUTATION_METHODS.has(method)) {
     return {
       allowed: false,
       error: { code: RELAY_ERROR.pathNotAllowed, message: `Method ${method || '(none)'} is not proxied` },
@@ -66,13 +84,12 @@ export function checkProxyRequest(req: ProxyRequest): ProxyDecision {
   }
 
   const pathname = req.path.split('?')[0]
-  const allowed = ALLOWED_GET_PREFIXES.some(
-    prefix => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  )
+  const prefixes: readonly string[] = isRead ? ALLOWED_GET_PREFIXES : ALLOWED_MUTATION_PREFIXES
+  const allowed = prefixes.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`))
   if (!allowed) {
     return {
       allowed: false,
-      error: { code: RELAY_ERROR.pathNotAllowed, message: `Path ${pathname} is not proxied` },
+      error: { code: RELAY_ERROR.pathNotAllowed, message: `${method} ${pathname} is not proxied` },
     }
   }
 
@@ -84,6 +101,13 @@ export interface LocalServerTarget {
   origin: string
   /** Bearer token for the local server, when one is configured. */
   authToken: string
+  /**
+   * Origin header to present on the local WebSocket. A production local
+   * server only accepts `Origin === CORS_ORIGIN` (cross-site hijacking
+   * defense); the connector is not a browser, so it has to be told which
+   * origin to claim. Left undefined in dev, where a missing Origin is fine.
+   */
+  browserOrigin?: string
 }
 
 const DEFAULT_LOCAL_PORT = 32352
@@ -91,10 +115,15 @@ const DEFAULT_LOCAL_PORT = 32352
 /**
  * Locate the local Codekin server and its auth token, using the same
  * sources as `codekin start`: env first, then ~/.config/codekin/token.
+ *
+ * `RELAY_LOCAL_ORIGIN` overrides the Origin presented on the local
+ * WebSocket; otherwise the server's own `CORS_ORIGIN` is used when the
+ * connector shares its environment.
  */
 export function resolveLocalTarget(env: NodeJS.ProcessEnv = process.env): LocalServerTarget {
   const port = parseInt(env.PORT || String(DEFAULT_LOCAL_PORT), 10)
   const origin = env.CODEKIN_LOCAL_URL || `http://127.0.0.1:${port}`
+  const browserOrigin = env.RELAY_LOCAL_ORIGIN || env.CORS_ORIGIN || undefined
 
   let authToken = env.AUTH_TOKEN ?? ''
   if (!authToken) {
@@ -109,7 +138,7 @@ export function resolveLocalTarget(env: NodeJS.ProcessEnv = process.env): LocalS
     }
   }
 
-  return { origin, authToken }
+  return { origin, authToken, browserOrigin }
 }
 
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>
@@ -141,6 +170,22 @@ export async function executeProxyRequest(
   if (opts.target.authToken) {
     headers.Authorization = `Bearer ${opts.target.authToken}`
   }
+  if (req.contentType) {
+    headers['Content-Type'] = req.contentType
+  }
+
+  let body: Buffer | undefined
+  if (req.body) {
+    body = Buffer.from(req.body, 'base64')
+    if (body.byteLength > MAX_PROXY_BODY_BYTES) {
+      return {
+        error: {
+          code: RELAY_ERROR.bodyTooLarge,
+          message: `Request of ${body.byteLength} bytes exceeds the relay limit`,
+        },
+      }
+    }
+  }
 
   const controller = new AbortController()
   const timer = setTimeout(() => { controller.abort() }, opts.timeoutMs ?? 20_000)
@@ -149,6 +194,7 @@ export async function executeProxyRequest(
     const res = await fetchImpl(`${opts.target.origin}${req.path}`, {
       method: req.method.toUpperCase(),
       headers,
+      body: body as unknown as BodyInit | undefined,
       signal: controller.signal,
     })
 

@@ -18,6 +18,7 @@ import {
   parseEnvelope,
   PROXY_REQUEST_TIMEOUT_MS,
   RELAY_ERROR,
+  STREAM_CLOSE,
 } from './relay-protocol.js'
 import type {
   ConnectorHello,
@@ -54,7 +55,14 @@ interface ConnectedMachine {
   lastActivity: number
   lastSeenWrite: number
   pending: Set<string>
+  channels: Set<string>
 }
+
+/** Frames a channel owner receives from the connector side. */
+export type ChannelListener = (
+  kind: 'event' | 'stream_data' | 'stream_close' | 'error',
+  payload: unknown,
+) => void
 
 /** What a proxied request resolves to: the machine's response, or a relay error. */
 export type ProxyOutcome = { response: ProxyResponse } | { error: RelayError }
@@ -62,6 +70,7 @@ export type ProxyOutcome = { response: ProxyResponse } | { error: RelayError }
 export class ConnectorHub {
   private machines = new Map<string, ConnectedMachine>()
   private pending = new Map<string, PendingRequest>()
+  private channelListeners = new Map<string, ChannelListener>()
   private idleTimer: ReturnType<typeof setInterval>
 
   constructor(private db: Database.Database) {
@@ -121,10 +130,15 @@ export class ConnectorHub {
       }
       if (msg.kind === 'ping') {
         socket.send(JSON.stringify(envelope('pong', {})))
-      } else if (msg.kind === 'response' || msg.kind === 'error') {
+      } else if (msg.kind === 'response') {
         this.settleResponse(machineId, msg.id, msg.kind, msg.payload)
+      } else if (msg.kind === 'error') {
+        // An error envelope answers either a request (id) or a channel.
+        if (msg.channelId) this.channelListeners.get(msg.channelId)?.(msg.kind, msg.payload)
+        else this.settleResponse(machineId, msg.id, msg.kind, msg.payload)
+      } else if (msg.kind === 'event' || msg.kind === 'stream_data' || msg.kind === 'stream_close') {
+        if (msg.channelId) this.channelListeners.get(msg.channelId)?.(msg.kind, msg.payload)
       }
-      // stream envelopes arrive in the session-streaming phase
     })
 
     socket.on('close', () => {
@@ -195,6 +209,38 @@ export class ConnectorHub {
     })
   }
 
+  /**
+   * Open a stream channel on a machine. The caller owns `channelId` and is
+   * responsible for closing the channel; frames from the connector arrive on
+   * `listener` until then.
+   */
+  openChannel(machineId: string, channelId: string, listener: ChannelListener): RelayError | null {
+    const machine = this.machines.get(machineId)
+    if (!machine) return { code: RELAY_ERROR.machineOffline, message: 'Machine is not connected' }
+
+    this.channelListeners.set(channelId, listener)
+    machine.channels.add(channelId)
+    machine.socket.send(JSON.stringify(envelope('stream_open', {}, { channelId })))
+    return null
+  }
+
+  /** Relay a browser frame onto an open channel. */
+  sendChannelData(machineId: string, channelId: string, data: string): void {
+    const machine = this.machines.get(machineId)
+    if (!machine || !machine.channels.has(channelId)) return
+    machine.socket.send(JSON.stringify(envelope('stream_data', { data }, { channelId })))
+  }
+
+  /** Close a channel and stop listening on it. */
+  closeChannel(machineId: string, channelId: string, code?: number, reason?: string): void {
+    this.channelListeners.delete(channelId)
+    const machine = this.machines.get(machineId)
+    if (!machine || !machine.channels.delete(channelId)) return
+    if (machine.socket.readyState === machine.socket.OPEN) {
+      machine.socket.send(JSON.stringify(envelope('stream_close', { code, reason }, { channelId })))
+    }
+  }
+
   /** Route a `response`/`error` envelope back to its waiting caller. */
   private settleResponse(machineId: string, id: string | undefined, kind: 'response' | 'error', payload: unknown): void {
     if (!id) return
@@ -215,9 +261,16 @@ export class ConnectorHub {
     entry.settle({ response: payload as ProxyResponse })
   }
 
+  /** Fail everything riding on a machine that just went away. */
   private failPending(machine: ConnectedMachine, reason: string): void {
     for (const id of [...machine.pending]) {
       this.pending.get(id)?.settle({ error: { code: RELAY_ERROR.machineOffline, message: reason } })
+    }
+    for (const channelId of [...machine.channels]) {
+      machine.channels.delete(channelId)
+      const listener = this.channelListeners.get(channelId)
+      this.channelListeners.delete(channelId)
+      listener?.('stream_close', { code: STREAM_CLOSE.machineGone, reason })
     }
   }
 
@@ -231,7 +284,10 @@ export class ConnectorHub {
     }
 
     const now = Date.now()
-    this.machines.set(machineId, { machineId, socket, lastActivity: now, lastSeenWrite: now, pending: new Set() })
+    this.machines.set(machineId, {
+      machineId, socket, lastActivity: now, lastSeenWrite: now,
+      pending: new Set(), channels: new Set(),
+    })
 
     this.db.prepare(
       `UPDATE machines SET status = 'online', last_seen_at = datetime('now'),

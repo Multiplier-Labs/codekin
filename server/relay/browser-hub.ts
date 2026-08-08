@@ -1,7 +1,7 @@
 /**
  * Browser hub: accepts authenticated WebSocket connections from the hosted
- * frontend at /relay/browser and routes proxied REST requests to the
- * machine the socket is bound to.
+ * frontend at /relay/browser and routes proxied REST requests and session
+ * streams to the machine the socket is bound to.
  *
  * Authorization happens twice and deliberately: once here, where the socket
  * is bound to a single machine the signed-in user is allowed to reach
@@ -9,10 +9,17 @@
  * on the connector, which decides which local paths it will serve.
  */
 
+import { randomUUID } from 'crypto'
 import type { WebSocket } from 'ws'
 import type Database from 'better-sqlite3'
-import { envelope, parseEnvelope, RELAY_ERROR } from './relay-protocol.js'
-import type { BrowserHello, ProxyRequest, RelayError } from './relay-protocol.js'
+import {
+  envelope,
+  parseEnvelope,
+  MAX_CHANNELS_PER_CLIENT,
+  RELAY_ERROR,
+  STREAM_CLOSE,
+} from './relay-protocol.js'
+import type { BrowserHello, ProxyRequest, RelayError, StreamClose, StreamData } from './relay-protocol.js'
 import type { ConnectorHub } from './connector-hub.js'
 import type { SessionUser } from './relay-auth-routes.js'
 import type { MachineRow } from './control-plane-db.js'
@@ -31,6 +38,12 @@ interface BrowserClient {
   machineId: string
   socket: WebSocket
   inflight: number
+  /**
+   * Channel ids are namespaced per client: the browser names its channel,
+   * the hub gives the connector a fresh id. One browser can therefore never
+   * name — or hijack — another's channel.
+   */
+  channels: Map<string, string>
 }
 
 /**
@@ -87,7 +100,7 @@ export class BrowserHub {
           return
         }
 
-        client = { user, machineId: machine!.id, socket, inflight: 0 }
+        client = { user, machineId: machine!.id, socket, inflight: 0, channels: new Map() }
         this.clients.add(client)
         socket.send(
           JSON.stringify(
@@ -107,13 +120,22 @@ export class BrowserHub {
       }
       if (msg.kind === 'request') {
         void this.forwardRequest(client, msg.id, msg.payload as ProxyRequest)
+      } else if (msg.kind === 'stream_open') {
+        this.openChannel(client, msg.channelId)
+      } else if (msg.kind === 'stream_data') {
+        this.forwardChannelData(client, msg.channelId, msg.payload as StreamData)
+      } else if (msg.kind === 'stream_close') {
+        this.closeChannel(client, msg.channelId, msg.payload as StreamClose)
       }
-      // stream envelopes arrive in the session-streaming phase
     })
 
     socket.on('close', () => {
       clearTimeout(helloTimeout)
-      if (client) this.clients.delete(client)
+      if (!client) return
+      for (const localId of [...client.channels.keys()]) {
+        this.closeChannel(client, localId, { reason: 'browser disconnected' })
+      }
+      this.clients.delete(client)
     })
 
     socket.on('error', () => {
@@ -140,11 +162,13 @@ export class BrowserHub {
 
     client.inflight += 1
     try {
-      // Only method/path/body cross the hub — the connector supplies the
-      // local credentials, so browser-sent headers are dropped here.
+      // Only method/path/body/contentType cross the hub — the connector
+      // supplies the local credentials, so any other browser-sent header is
+      // dropped here rather than forwarded.
       const outcome = await this.connectors.sendRequest(client.machineId, {
         method: request.method,
         path: request.path,
+        contentType: typeof request.contentType === 'string' ? request.contentType : undefined,
         body: request.body,
       })
       if (client.socket.readyState !== client.socket.OPEN) return
@@ -158,6 +182,60 @@ export class BrowserHub {
     }
   }
 
+  /** Open a session stream for this client on its bound machine. */
+  private openChannel(client: BrowserClient, localId: string | undefined): void {
+    if (!localId || client.channels.has(localId)) return
+    if (client.channels.size >= MAX_CHANNELS_PER_CLIENT) {
+      this.sendChannelError(client, localId, {
+        code: RELAY_ERROR.tooManyChannels,
+        message: 'Too many open sessions on this connection',
+      })
+      return
+    }
+
+    const remoteId = randomUUID()
+    client.channels.set(localId, remoteId)
+
+    const error = this.connectors.openChannel(client.machineId, remoteId, (kind, payload) => {
+      if (client.socket.readyState !== client.socket.OPEN) return
+      client.socket.send(JSON.stringify(envelope(kind, payload, { channelId: localId })))
+      if (kind === 'stream_close') {
+        client.channels.delete(localId)
+        this.connectors.closeChannel(client.machineId, remoteId)
+      }
+    })
+
+    if (error) {
+      client.channels.delete(localId)
+      this.sendChannelError(client, localId, error)
+    }
+  }
+
+  private forwardChannelData(client: BrowserClient, localId: string | undefined, payload: StreamData): void {
+    if (!localId) return
+    const remoteId = client.channels.get(localId)
+    if (!remoteId || typeof payload?.data !== 'string') return
+    this.connectors.sendChannelData(client.machineId, remoteId, payload.data)
+  }
+
+  private closeChannel(client: BrowserClient, localId: string | undefined, payload?: StreamClose): void {
+    if (!localId) return
+    const remoteId = client.channels.get(localId)
+    if (!remoteId) return
+    client.channels.delete(localId)
+    this.connectors.closeChannel(
+      client.machineId,
+      remoteId,
+      payload?.code ?? STREAM_CLOSE.normal,
+      payload?.reason,
+    )
+  }
+
+  private sendChannelError(client: BrowserClient, channelId: string, error: RelayError): void {
+    if (client.socket.readyState !== client.socket.OPEN) return
+    client.socket.send(JSON.stringify(envelope('error', error, { channelId })))
+  }
+
   private sendError(socket: WebSocket, id: string, error: RelayError): void {
     if (socket.readyState !== socket.OPEN) return
     socket.send(JSON.stringify(envelope('error', error, { id })))
@@ -166,6 +244,10 @@ export class BrowserHub {
   /** Disconnect every browser socket (shutdown / tests). */
   close(): void {
     for (const client of this.clients) {
+      for (const remoteId of client.channels.values()) {
+        this.connectors.closeChannel(client.machineId, remoteId, STREAM_CLOSE.normal, 'relay shutting down')
+      }
+      client.channels.clear()
       client.socket.close(1001, 'server shutting down')
     }
     this.clients.clear()

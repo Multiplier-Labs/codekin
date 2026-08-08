@@ -10,6 +10,8 @@ import { LoginPage } from './LoginPage'
 import { MachinesPage } from './MachinesPage'
 import type { Machine } from './MachinesPage'
 import { MachineDetailPage } from './MachineDetailPage'
+import { MachineWorkspace } from './MachineWorkspace'
+import { HostedRelayTransport, setTransport } from '../lib/transport'
 import { PairPage } from './PairPage'
 import { useHostedAuth } from './useHostedAuth'
 
@@ -39,6 +41,17 @@ function PendingPage({ login, onLogout }: { login: string; onLogout: () => void 
 export default function HostedApp() {
   const { user, initialized, authError, logout } = useHostedAuth()
   const [selected, setSelected] = useState<Machine | null>(null)
+  // Set when entering the workspace. Creating the transport here — in an
+  // event handler rather than during render — guarantees it is installed
+  // before the app mounts and issues its first call.
+  const [workspace, setWorkspace] = useState<HostedRelayTransport | null>(null)
+
+  const openWorkspace = (machine: Machine) => {
+    const transport = new HostedRelayTransport(machine.id)
+    transport.connect()
+    setTransport(transport)
+    setWorkspace(transport)
+  }
 
   // Latch not resolved yet — render the page background, no flash of login UI
   if (!initialized) {
@@ -57,8 +70,24 @@ export default function HostedApp() {
     return <PairPage />
   }
 
+  if (selected && workspace) {
+    return (
+      <MachineWorkspace
+        machine={selected}
+        transport={workspace}
+        onExit={() => { setWorkspace(null) }}
+      />
+    )
+  }
+
   if (selected) {
-    return <MachineDetailPage machine={selected} onBack={() => { setSelected(null) }} />
+    return (
+      <MachineDetailPage
+        machine={selected}
+        onBack={() => { setSelected(null) }}
+        onOpenWorkspace={() => { openWorkspace(selected) }}
+      />
+    )
   }
 
   return <MachinesPage user={user} onLogout={() => void logout()} onSelect={setSelected} />

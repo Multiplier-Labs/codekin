@@ -1,16 +1,24 @@
 /**
  * Local connector: runs on a developer machine, holds an outbound
- * WebSocket to the hosted relay hub, keeps the machine marked online, and
- * serves proxied REST requests against the local Codekin server.
- *
- * Session streaming attaches to the same socket in a later phase.
+ * WebSocket to the hosted relay hub, keeps the machine marked online,
+ * serves proxied REST requests, and bridges session streams to the local
+ * Codekin server.
  */
 
 import WebSocket from 'ws'
-import { envelope, parseEnvelope } from './relay-protocol.js'
-import type { ConnectorHello, ConnectorHelloAck, ProxyRequest, RelayError } from './relay-protocol.js'
+import { envelope, parseEnvelope, STREAM_CLOSE } from './relay-protocol.js'
+import type {
+  ConnectorHello,
+  ConnectorHelloAck,
+  ProxyRequest,
+  RelayError,
+  StreamClose,
+  StreamData,
+} from './relay-protocol.js'
 import { executeProxyRequest, resolveLocalTarget } from './connector-proxy.js'
 import type { FetchLike, LocalServerTarget } from './connector-proxy.js'
+import { StreamChannel } from './connector-stream.js'
+import type { WebSocketFactory } from './connector-stream.js'
 
 export interface ConnectorOptions {
   /** Hosted relay origin, e.g. https://app.codekin.ai */
@@ -23,10 +31,14 @@ export interface ConnectorOptions {
   localTarget?: LocalServerTarget
   /** Injectable fetch, for tests. */
   fetchImpl?: FetchLike
+  /** Injectable local WebSocket factory, for tests. */
+  socketFactory?: WebSocketFactory
   /** Called on lifecycle events for CLI output. */
   onStatus?: (status: ConnectorStatus, detail?: string) => void
   /** Called for each proxied request, for CLI output. */
   onProxy?: (method: string, path: string, status: number | string) => void
+  /** Called when a session stream opens or closes, for CLI output. */
+  onStream?: (event: 'open' | 'close', channelId: string, detail?: string) => void
 }
 
 export type ConnectorStatus =
@@ -58,6 +70,7 @@ export class RelayConnector {
   private backoffMs = BACKOFF_MIN_MS
   private stopped = false
   private localTarget: LocalServerTarget
+  private channels = new Map<string, StreamChannel>()
 
   constructor(private opts: ConnectorOptions) {
     this.localTarget = opts.localTarget ?? resolveLocalTarget()
@@ -71,6 +84,7 @@ export class RelayConnector {
   stop(): void {
     this.stopped = true
     this.clearTimers()
+    this.closeAllChannels('connector stopped')
     this.ws?.close(1000, 'connector stopped')
     this.ws = null
     this.opts.onStatus?.('stopped')
@@ -97,7 +111,7 @@ export class RelayConnector {
         machineSecret: this.opts.machineSecret,
         connectorVersion: this.opts.connectorVersion,
         localCodekinVersion: this.opts.localCodekinVersion,
-        capabilities: { restProxy: true, wsProxy: false, fileUpload: false, providers: [] },
+        capabilities: { restProxy: true, wsProxy: true, fileUpload: true, providers: [] },
       }
       ws.send(JSON.stringify(envelope('hello', hello)))
     })
@@ -117,6 +131,12 @@ export class RelayConnector {
         this.heartbeat.unref()
       } else if (msg.kind === 'request') {
         void this.handleProxyRequest(ws, msg.id, msg.payload as ProxyRequest)
+      } else if (msg.kind === 'stream_open') {
+        this.openChannel(ws, msg.channelId)
+      } else if (msg.kind === 'stream_data') {
+        if (msg.channelId) this.channels.get(msg.channelId)?.send((msg.payload as StreamData).data)
+      } else if (msg.kind === 'stream_close') {
+        this.closeChannel(msg.channelId, msg.payload as StreamClose)
       } else if (msg.kind === 'error') {
         const err = msg.payload as RelayError
         this.opts.onStatus?.('disconnected', `${err.code}: ${err.message}`)
@@ -126,6 +146,9 @@ export class RelayConnector {
     ws.on('close', (code: number, reason: Buffer) => {
       this.clearTimers()
       this.ws = null
+      // Local sockets outlive nothing: without the relay there is no browser
+      // on the other end, and a stale session would keep the CLI busy.
+      this.closeAllChannels('relay disconnected')
       if (code === CLOSE_AUTH_FAILED) {
         // Credential rejected — retrying would loop forever on a revoked machine
         this.opts.onStatus?.('auth_failed', reason.toString() || 'credential rejected')
@@ -162,6 +185,53 @@ export class RelayConnector {
     }
     this.opts.onProxy?.(request.method, request.path, outcome.response.status)
     ws.send(JSON.stringify(envelope('response', outcome.response, { id })))
+  }
+
+  /** Open a local session socket for a channel the hub asked for. */
+  private openChannel(ws: WebSocket, channelId: string | undefined): void {
+    if (!channelId || this.channels.has(channelId)) return
+
+    const send = (kind: 'event' | 'stream_data' | 'stream_close', payload: unknown) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(envelope(kind, payload, { channelId })))
+      }
+    }
+
+    const channel = new StreamChannel(
+      this.localTarget,
+      {
+        onReady: () => {
+          this.opts.onStream?.('open', channelId)
+          send('event', { status: 'open' })
+        },
+        onData: data => { send('stream_data', { data }) },
+        onClose: (code, reason) => {
+          this.channels.delete(channelId)
+          this.opts.onStream?.('close', channelId, `${code} ${reason}`)
+          send('stream_close', { code, reason })
+        },
+      },
+      this.opts.socketFactory,
+    )
+
+    this.channels.set(channelId, channel)
+    channel.open()
+  }
+
+  private closeChannel(channelId: string | undefined, payload?: StreamClose): void {
+    if (!channelId) return
+    const channel = this.channels.get(channelId)
+    if (!channel) return
+    this.channels.delete(channelId)
+    channel.close(payload?.code ?? STREAM_CLOSE.normal, payload?.reason ?? 'browser closed the channel')
+  }
+
+  /** Drop every local session socket (relay disconnect / shutdown). */
+  private closeAllChannels(reason: string): void {
+    for (const [channelId, channel] of this.channels) {
+      this.channels.delete(channelId)
+      channel.close(STREAM_CLOSE.normal, reason)
+    }
   }
 
   private scheduleReconnect(): void {
