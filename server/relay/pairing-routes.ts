@@ -17,7 +17,8 @@ import {
   completePairing,
   removeMachine,
 } from './pairing.js'
-import { requireActiveUser } from './relay-auth-routes.js'
+import { createRequireActiveUser } from './relay-auth-routes.js'
+import { getMachine } from './control-plane-db.js'
 import { recordAuditEvent } from './audit.js'
 import type { RelayConfig } from './relay-config.js'
 
@@ -26,6 +27,7 @@ export const POLL_INTERVAL_MS = 3_000
 
 export function createPairingRouter(db: Database.Database, config: RelayConfig): Router {
   const router = Router()
+  const requireActiveUser = createRequireActiveUser(db)
 
   router.post('/api/machines/pair/start', (req, res) => {
     const body = (req.body ?? {}) as { hostname?: unknown; platform?: unknown }
@@ -111,10 +113,38 @@ export function createPairingRouter(db: Database.Database, config: RelayConfig):
 
   router.delete('/api/machines/:machineId', requireActiveUser, (req, res) => {
     const machineId = typeof req.params.machineId === 'string' ? req.params.machineId : ''
+    const userId = req.session.user?.id ?? ''
+    const machine = getMachine(db, machineId)
+    if (!machine) {
+      res.status(404).json({ error: 'Machine not found' })
+      return
+    }
+    // Being able to name a machine is not authority over it: anyone holding a
+    // share reads its id from GET /api/machines, and removing it deletes the
+    // connector's credential. Only the owner may do that.
+    if (machine.owner_user_id !== userId) {
+      recordAuditEvent(db, {
+        kind: 'access_denied',
+        actorUserId: userId,
+        machineId,
+        ip: req.ip ?? null,
+        userAgent: req.get('user-agent') ?? null,
+        metadata: { action: 'machine_removed' },
+      })
+      res.status(403).json({ error: 'Only the machine owner can remove it' })
+      return
+    }
     if (!removeMachine(db, machineId)) {
       res.status(404).json({ error: 'Machine not found' })
       return
     }
+    recordAuditEvent(db, {
+      kind: 'machine_removed',
+      actorUserId: userId,
+      machineId,
+      ip: req.ip ?? null,
+      userAgent: req.get('user-agent') ?? null,
+    })
     res.json({ success: true })
   })
 

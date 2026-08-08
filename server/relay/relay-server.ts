@@ -14,9 +14,9 @@ import { WebSocketServer } from 'ws'
 import type { IncomingMessage } from 'http'
 import { join } from 'path'
 import { loadRelayConfig } from './relay-config.js'
-import { openControlPlaneDb } from './control-plane-db.js'
+import { openControlPlaneDb, getUserById } from './control-plane-db.js'
 import { SqliteSessionStore } from './sqlite-session-store.js'
-import { createRelayAuthRouter } from './relay-auth-routes.js'
+import { createRelayAuthRouter, toSessionUser } from './relay-auth-routes.js'
 import { createMachineRouter } from './machine-routes.js'
 import { createPairingRouter } from './pairing-routes.js'
 import { createShareRouter } from './share-routes.js'
@@ -153,6 +153,10 @@ const browserWss = new WebSocketServer(wssOptions)
  * WebSocket upgrades are not covered by the same-origin policy but do carry
  * cookies, so the Origin is checked explicitly — otherwise any site could
  * open an authenticated relay socket in a signed-in user's browser.
+ *
+ * Status comes from the database, not the session snapshot, for the same
+ * reason requireActiveUser re-reads it: a socket opened on a stale session
+ * would outlive the revocation by as long as the tab stays open.
  */
 function authenticateUpgrade(req: IncomingMessage): Promise<SessionUser | null> {
   const origin = req.headers.origin
@@ -162,7 +166,12 @@ function authenticateUpgrade(req: IncomingMessage): Promise<SessionUser | null> 
     const res = new ServerResponse(req) as unknown as express.Response
     sessionMiddleware(req as express.Request, res, () => {
       const user = (req as express.Request).session?.user
-      resolve(user && user.status === 'active' ? user : null)
+      if (!user) {
+        resolve(null)
+        return
+      }
+      const current = getUserById(db, user.id)
+      resolve(current && current.status === 'active' ? toSessionUser(current) : null)
     })
   })
 }

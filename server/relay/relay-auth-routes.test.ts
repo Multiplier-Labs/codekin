@@ -7,7 +7,7 @@ import type { Server } from 'http'
 import type Database from 'better-sqlite3'
 import { openControlPlaneDb } from './control-plane-db.js'
 import { SqliteSessionStore } from './sqlite-session-store.js'
-import { createRelayAuthRouter, requireActiveUser } from './relay-auth-routes.js'
+import { createRelayAuthRouter, createRequireActiveUser } from './relay-auth-routes.js'
 import type { RelayConfig } from './relay-config.js'
 
 const CONFIG: RelayConfig = {
@@ -68,7 +68,7 @@ describe('relay auth routes', () => {
       }),
     )
     app.use(createRelayAuthRouter({ db, config: CONFIG, fetchImpl }))
-    app.get('/api/protected', requireActiveUser, (_req, res) => res.json({ ok: true }))
+    app.get('/api/protected', createRequireActiveUser(db), (_req, res) => res.json({ ok: true }))
     await new Promise<void>(resolve => {
       server = app.listen(0, '127.0.0.1', () => {
         baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -134,6 +134,42 @@ describe('relay auth routes', () => {
 
     const prot = await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })
     expect(prot.status).toBe(403)
+  })
+
+  it('blocks a live session as soon as the user is disabled in the database', async () => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    const cookie = await login()
+    expect((await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })).status).toBe(200)
+
+    // Revocation happens in the users table; the 30-day rolling cookie the
+    // browser already holds must stop working on the very next request.
+    db.prepare("UPDATE users SET status = 'disabled' WHERE login = ?").run('alari76')
+
+    const prot = await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })
+    expect(prot.status).toBe(403)
+    expect((await prot.json() as { status: string }).status).toBe('disabled')
+  })
+
+  it('reflects a status change in /api/me without requiring a fresh login', async () => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    const cookie = await login()
+    db.prepare("UPDATE users SET status = 'disabled' WHERE login = ?").run('alari76')
+
+    // /api/me is unguarded, so it still serves the snapshot; the next guarded
+    // request is what refreshes it.
+    await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })
+    const me = (await (await fetch(`${baseUrl}/api/me`, { headers: { cookie } })).json()) as {
+      user: { status: string }
+    }
+    expect(me.user.status).toBe('disabled')
+  })
+
+  it('401s a live session whose user row was deleted', async () => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    const cookie = await login()
+    db.prepare('DELETE FROM users WHERE login = ?').run('alari76')
+
+    expect((await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })).status).toBe(401)
   })
 
   it('rejects a callback with a mismatched state', async () => {

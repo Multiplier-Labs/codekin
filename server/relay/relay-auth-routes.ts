@@ -14,8 +14,8 @@ import type { Request, Response } from 'express'
 import { randomBytes } from 'crypto'
 import type Database from 'better-sqlite3'
 import type { RelayConfig } from './relay-config.js'
-import { upsertUserFromGithub } from './control-plane-db.js'
-import type { GithubProfile, UserRole, UserStatus } from './control-plane-db.js'
+import { upsertUserFromGithub, getUserById } from './control-plane-db.js'
+import type { GithubProfile, UserRole, UserStatus, UserRow } from './control-plane-db.js'
 
 const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize'
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token'
@@ -175,14 +175,7 @@ export function createRelayAuthRouter({ db, config, fetchImpl = fetch }: AuthRou
 
       // Fresh session id after privilege change (session fixation)
       await regenerateSession(req)
-      req.session.user = {
-        id: user.id,
-        login: user.login,
-        displayName: user.display_name,
-        avatarUrl: user.avatar_url,
-        role: user.role,
-        status: user.status,
-      }
+      req.session.user = toSessionUser(user)
       await saveSession(req)
       res.redirect('/')
     })().catch(() => { failLogin(res, 'login_failed'); })
@@ -207,16 +200,45 @@ export function createRelayAuthRouter({ db, config, fetchImpl = fetch }: AuthRou
 /**
  * Guard for routes that require a signed-in, active user.
  * 401 when not signed in; 403 when signed in but pending/disabled.
+ *
+ * Role and status are re-read from the database on every request rather than
+ * taken from the session. The session holds a snapshot written at login and
+ * rolls for 30 days, so trusting it would leave a disabled user with working
+ * access until their cookie happened to expire. The refreshed row is written
+ * back to the session so downstream handlers and /api/me agree with the DB.
  */
-export function requireActiveUser(req: Request, res: Response, next: () => void): void {
-  const user = req.session.user
-  if (!user) {
-    res.status(401).json({ error: 'Unauthorized' })
-    return
+export function createRequireActiveUser(db: Database.Database) {
+  return function requireActiveUser(req: Request, res: Response, next: () => void): void {
+    const sessionUser = req.session.user
+    if (!sessionUser) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+    const current = getUserById(db, sessionUser.id)
+    if (!current) {
+      // The account was deleted out from under a live session.
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+    // Refresh before the status check, not after: a user who has just been
+    // disabled should see that in /api/me too, not a stale "active".
+    req.session.user = toSessionUser(current)
+    if (current.status !== 'active') {
+      res.status(403).json({ error: 'Access not granted', status: current.status })
+      return
+    }
+    next()
   }
-  if (user.status !== 'active') {
-    res.status(403).json({ error: 'Access not granted', status: user.status })
-    return
+}
+
+/** Project a user row down to what the session and /api/me carry. */
+export function toSessionUser(row: UserRow): SessionUser {
+  return {
+    id: row.id,
+    login: row.login,
+    displayName: row.display_name,
+    avatarUrl: row.avatar_url,
+    role: row.role,
+    status: row.status,
   }
-  next()
 }

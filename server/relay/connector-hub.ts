@@ -267,11 +267,40 @@ export class ConnectorHub {
     return null
   }
 
-  /** Relay a browser frame onto an open channel. */
+  /**
+   * Relay a browser frame onto an open channel.
+   *
+   * The mirror of the browser-side check in BrowserHub: a connector that has
+   * stopped draining accumulates its backlog in this process. The frame
+   * limiter caps how many frames a browser may send, not how large they are,
+   * so the byte ceiling has to be enforced here too — drop the channel rather
+   * than the hub's memory.
+   */
   sendChannelData(machineId: string, channelId: string, data: string): void {
     const machine = this.machines.get(machineId)
     if (!machine || !machine.channels.has(channelId)) return
+    if (isBackedUp(machine.socket)) {
+      this.dropChannel(machine, channelId, 'machine connection is congested')
+      return
+    }
     machine.socket.send(JSON.stringify(envelope('stream_data', { data }, { channelId })))
+  }
+
+  /**
+   * Tear down one channel from the hub's side and tell both ends.
+   * The listener's own cleanup calls back into closeChannel, which no-ops
+   * once the channel is gone from the machine.
+   */
+  private dropChannel(machine: ConnectedMachine, channelId: string, reason: string): void {
+    machine.channels.delete(channelId)
+    const listener = this.channelListeners.get(channelId)
+    this.channelListeners.delete(channelId)
+    if (machine.socket.readyState === machine.socket.OPEN) {
+      machine.socket.send(
+        JSON.stringify(envelope('stream_close', { code: STREAM_CLOSE.normal, reason }, { channelId })),
+      )
+    }
+    listener?.('stream_close', { code: STREAM_CLOSE.normal, reason })
   }
 
   /** Close a channel and stop listening on it. */
