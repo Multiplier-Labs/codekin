@@ -89,7 +89,10 @@ describe('connector hub', () => {
     })
     connector.start()
 
-    await waitFor(() => hub.isOnline(machineId))
+    // The hub marks the machine online when it reads hello, before it sends
+    // hello_ack — so isOnline alone does not mean the connector has seen the
+    // ack that makes it report 'connected'. Gate on both signals.
+    await waitFor(() => hub.isOnline(machineId) && statuses.includes('connected'))
     expect(statuses).toContain('connected')
     expect(listMachines(db)[0].status).toBe('online')
     expect(listMachines(db)[0].connector_version).toBe('0.8.0-test')
