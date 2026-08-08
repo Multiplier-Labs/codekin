@@ -156,6 +156,7 @@ export default function App() {
     restoreSession,
     currentModel,
     setModel,
+    setProvider,
     send: wsSend,
     disconnect: wsDisconnect,
     reconnect: wsReconnect,
@@ -330,6 +331,14 @@ export default function App() {
       localStorage.setItem('codex-model', model)
     }
   }, [setModel, activeSessionProvider])
+
+  // Switch the active session's coding provider; refresh the session list so
+  // provider-derived UI (model list, permission modes) follows immediately.
+  const handleProviderChange = useCallback((provider: CodingProvider, carryContext: boolean) => {
+    setProvider(provider, carryContext)
+    localStorage.setItem('codekin-provider', provider)
+    void refreshSessions()
+  }, [setProvider, refreshSessions])
 
   // Handle built-in slash commands locally (not sent to Claude)
   const handleBuiltinCommand = useCallback((command: string, args: string) => {
@@ -796,6 +805,7 @@ export default function App() {
             onModelChange={handleModelChange}
             availableModels={availableModels}
             sessionProvider={activeSessionProvider}
+            onProviderChange={handleProviderChange}
             hasUserMessages={messages.some(m => m.type === 'user')}
             useWorktree={useWorktree}
             onWorktreeChange={setUseWorktree}

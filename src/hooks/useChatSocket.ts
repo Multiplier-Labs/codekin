@@ -525,6 +525,12 @@ export function useChatSocket({
     send({ type: 'move_to_worktree' })
   }, [send])
 
+  /** Switch the session's coding provider. With carryContext, the server
+   *  distills the current transcript into a handoff for the new provider. */
+  const setProvider = useCallback((provider: import('../types').CodingProvider, carryContext?: boolean) => {
+    send({ type: 'set_provider', provider, carryContext })
+  }, [send])
+
   const setPermissionMode = useCallback((mode: PermissionMode) => {
     send({ type: 'set_permission_mode', permissionMode: mode })
     setCurrentPermissionMode(mode)
@@ -555,6 +561,7 @@ export function useChatSocket({
     reconnect,
     restoreSession,
     setModel,
+    setProvider,
     currentPermissionMode,
     setPermissionMode,
     moveToWorktree,

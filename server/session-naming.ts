@@ -44,8 +44,9 @@ export interface SessionNamingDeps {
 }
 
 /** Build a minimal env for claude -p that includes auth/config paths
- *  without leaking the full parent env (e.g. CODEKIN_* session vars). */
-function buildNamingEnv(): Record<string, string> {
+ *  without leaking the full parent env (e.g. CODEKIN_* session vars).
+ *  Shared with handoff distillation (handoff-manager.ts). */
+export function buildOneShotCliEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   // Core paths
   if (process.env.PATH) env.PATH = process.env.PATH
@@ -72,7 +73,7 @@ function generateNameViaCLI(prompt: string): Promise<string> {
     const proc = spawn(CLAUDE_BINARY, ['-p', '--max-turns', '1', '--model', 'haiku', '--tools', '', '--system-prompt', NAMING_SYSTEM_PROMPT], {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: tmpdir(),
-      env: buildNamingEnv(),
+      env: buildOneShotCliEnv(),
     })
 
     let stdout = ''

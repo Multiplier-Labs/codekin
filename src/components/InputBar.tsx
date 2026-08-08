@@ -174,6 +174,69 @@ function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle,
   )
 }
 
+/** Coding providers selectable in the provider switcher. */
+const PROVIDER_OPTIONS: { id: import('../types').CodingProvider; label: string }[] = [
+  { id: 'claude', label: 'Claude' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'opencode', label: 'OpenCode' },
+]
+
+const CARRY_CONTEXT_KEY = 'codekin.handoffCarryContext'
+
+/** Provider switcher dropdown with a carry-context (handoff) toggle. */
+function ProviderDropdown({ current, isOpen, menuRef, onToggle, onSelect }: {
+  current: import('../types').CodingProvider; isOpen: boolean
+  menuRef: React.RefObject<HTMLDivElement | null>
+  onToggle: () => void; onSelect: (provider: import('../types').CodingProvider, carryContext: boolean) => void
+}) {
+  const [carryContext, setCarryContext] = useState(() => localStorage.getItem(CARRY_CONTEXT_KEY) !== 'false')
+  const currentLabel = PROVIDER_OPTIONS.find(p => p.id === current)?.label ?? current
+
+  const toggleCarry = () => {
+    const next = !carryContext
+    setCarryContext(next)
+    localStorage.setItem(CARRY_CONTEXT_KEY, String(next))
+  }
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <StateItem onClick={onToggle} title="Switch coding agent">
+        {currentLabel}
+        <IconChevronDown size={12} stroke={2} className="opacity-70" />
+      </StateItem>
+      {isOpen && (
+        <div className="absolute bottom-full mb-1 right-0 z-50 w-[240px] rounded-floating border border-edge-strong bg-surface-raised shadow-floating py-1">
+          {PROVIDER_OPTIONS.map(p => (
+            <button
+              key={p.id}
+              onClick={() => { if (p.id !== current) onSelect(p.id, carryContext) }}
+              className={`flex w-full items-center gap-2 text-left px-3 py-1.5 text-body transition-colors hover:bg-edge ${p.id === current ? 'text-primary-4' : 'text-ink'}`}
+            >
+              {p.label}
+              {p.id === current && <IconCheck size={14} stroke={2.5} className="ml-auto text-primary-4" />}
+            </button>
+          ))}
+          <div className="mt-1 border-t border-edge-strong pt-1">
+            <button
+              onClick={toggleCarry}
+              className="flex w-full items-start gap-2 text-left px-3 py-1.5 transition-colors hover:bg-edge"
+              title="Distill this session into a handoff and share it with the new agent"
+            >
+              <span className={`mt-0.5 flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-control border ${carryContext ? 'border-primary-4 bg-primary-4' : 'border-edge-strong'}`}>
+                {carryContext && <IconCheck size={10} stroke={3} className="text-ink-inverse" />}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-body text-ink">Carry context</span>
+                <span className="block text-meta text-ink-muted">Hand off this session's context to the new agent</span>
+              </span>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** Model selector dropdown. */
 function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChange }: {
   currentModel: string; models: ModelOption[]; isOpen: boolean
@@ -344,6 +407,8 @@ interface InputBarProps {
   availableModels?: ModelOption[]
   /** Coding provider of the active session — filters provider-specific permission modes. */
   sessionProvider?: import('../types').CodingProvider
+  /** Called when the user switches the session's coding provider. Omit to hide the switcher. */
+  onProviderChange?: (provider: import('../types').CodingProvider, carryContext: boolean) => void
   /** Override the default placeholder text in the textarea. */
   placeholder?: string
   /** Narrow-viewport hint — suppresses autofocus so the keyboard doesn't pop up. */
@@ -366,7 +431,7 @@ interface InputBarProps {
   variant?: InputBarVariant
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, availableModels = [], sessionProvider, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
   const isOrchestrator = variant === 'orchestrator'
   // OpenCode and Codex have no equivalent of Claude's --dangerously-skip-permissions
   // flag; bypassPermissions already covers that use case for both.
@@ -376,20 +441,23 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  const [providerMenuOpen, setProviderMenuOpen] = useState(false)
   const [permMenuOpen, setPermMenuOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [slashMenuOpen, setSlashMenuOpen] = useState(false)
 
   /** Close all toolbar popups, optionally keeping one open. */
-  const closeAllPopups = useCallback((except?: 'skill' | 'model' | 'perm') => {
+  const closeAllPopups = useCallback((except?: 'skill' | 'model' | 'perm' | 'provider') => {
     if (except !== 'skill') setSkillMenuOpen(false)
     if (except !== 'model') setModelMenuOpen(false)
     if (except !== 'perm') setPermMenuOpen(false)
+    if (except !== 'provider') setProviderMenuOpen(false)
   }, [])
   const [slashFilter, setSlashFilter] = useState('')
   const mobileMenuRef = useRef<HTMLDivElement>(null)
   const permMenuRef = useRef<HTMLDivElement>(null)
   const modelMenuRef = useRef<HTMLDivElement>(null)
+  const providerMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const prevWaiting = useRef(false)
@@ -416,6 +484,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   useOutsideClick(mobileMenuRef, mobileMenuOpen, useCallback(() => setMobileMenuOpen(false), []))
   useOutsideClick(permMenuRef, permMenuOpen, useCallback(() => setPermMenuOpen(false), []))
   useOutsideClick(modelMenuRef, modelMenuOpen, useCallback(() => setModelMenuOpen(false), []))
+  useOutsideClick(providerMenuRef, providerMenuOpen, useCallback(() => setProviderMenuOpen(false), []))
 
   const handleSend = useCallback(() => {
     if (!value.trim() && pendingFiles.length === 0) return
@@ -523,6 +592,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   // filter over these plus an accent flag — not a second layout.
   const showPermission = !isOrchestrator && !!currentPermissionMode && !!onPermissionModeChange
   const showModel = !isOrchestrator && !!currentModel && !!onModelChange
+  const showProvider = !isOrchestrator && !!sessionProvider && !!onProviderChange
   const showWorktree = !isOrchestrator && (!!worktreePath || (showWorktreeToggle && !!onWorktreeChange) || !!onMoveToWorktree)
   // Anything beyond the permission chip folds into the overflow menu on a
   // narrow composer; a dangerous mode must stay visible at every width.
@@ -629,6 +699,17 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                       <StateLabel>Worktree</StateLabel>
                     </StateItem>
                   ) : null}
+                </div>
+              )}
+              {showProvider && (
+                <div className="flex">
+                  <ProviderDropdown
+                    current={sessionProvider}
+                    isOpen={providerMenuOpen}
+                    menuRef={providerMenuRef}
+                    onToggle={() => { closeAllPopups('provider'); setProviderMenuOpen(!providerMenuOpen) }}
+                    onSelect={(provider, carryContext) => { onProviderChange(provider, carryContext); setProviderMenuOpen(false) }}
+                  />
                 </div>
               )}
               {showModel && (
