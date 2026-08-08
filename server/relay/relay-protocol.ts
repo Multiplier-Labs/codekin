@@ -1,8 +1,6 @@
 /**
  * Relay wire protocol (spec §7): JSON envelopes over WebSocket, shared by
- * the hub, the connector, and the browser client. Stream kinds
- * (stream_open etc.) are declared for forward compatibility but unused
- * until the session-streaming phase.
+ * the hub, the connector, and the browser client.
  */
 
 export const RELAY_PROTOCOL_VERSION = 1
@@ -30,6 +28,16 @@ export interface RelayEnvelope<T = unknown> {
   payload: T
 }
 
+/**
+ * A machine's live session counts, re-advertised on every (re)connect so the
+ * hub's view survives a relay restart without waiting for a browser to ask
+ * (spec §11.3).
+ */
+export interface LocalSessionSummary {
+  total: number
+  active: number
+}
+
 /** Connector → hub, first message on the socket. */
 export interface ConnectorHello {
   machineId: string
@@ -42,6 +50,8 @@ export interface ConnectorHello {
     fileUpload: boolean
     providers: string[]
   }
+  /** Omitted when the local server could not be reached at connect time. */
+  sessions?: LocalSessionSummary
 }
 
 /** Hub → connector on successful auth. */
@@ -65,11 +75,6 @@ export interface BrowserHelloAck {
 }
 
 /**
- * A proxied REST call. Travels browser → hub → connector; the hub fills in
- * `machineId` from the socket's binding, so a client cannot retarget a
- * request at another machine mid-connection.
- */
-/**
  * The caller's standing on a machine, attached by the hub to everything it
  * forwards. The connector re-checks against this rather than trusting that
  * the hub filtered correctly (spec §5.2).
@@ -81,6 +86,11 @@ export interface RelayPrincipal {
   grants: Record<string, string[]>
 }
 
+/**
+ * A proxied REST call. Travels browser → hub → connector; the hub attaches
+ * the principal from the socket's binding, so a client cannot claim
+ * permissions it was not granted.
+ */
 export interface ProxyRequest {
   method: string
   /** Local server path including query string, e.g. '/api/sessions/list?x=1'. */

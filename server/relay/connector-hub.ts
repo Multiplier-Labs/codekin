@@ -21,8 +21,16 @@ import {
   STREAM_CLOSE,
 } from './relay-protocol.js'
 import { recordAuditEvent } from './audit.js'
+import {
+  MACHINE_FRAME_LIMIT,
+  MAX_CHANNELS_PER_MACHINE,
+  RateLimiter,
+  isBackedUp,
+} from './rate-limit.js'
+import { isConnectorOutdated } from './connector-version.js'
 import type {
   ConnectorHello,
+  LocalSessionSummary,
   ProxyRequest,
   ProxyResponse,
   RelayError,
@@ -45,6 +53,9 @@ const LAST_SEEN_WRITE_INTERVAL_MS = 60_000
 /** Cap on requests a single machine may have in flight, to bound hub memory. */
 const MAX_PENDING_PER_MACHINE = 64
 
+/** Sent when a machine exceeds its frame budget or stops draining its socket. */
+const CLOSE_OVERLOADED = 4029
+
 interface PendingRequest {
   machineId: string
   settle: (outcome: ProxyOutcome) => void
@@ -58,6 +69,11 @@ interface ConnectedMachine {
   lastSeenWrite: number
   pending: Set<string>
   channels: Set<string>
+  connectorVersion: string | null
+  /** True when the connector predates features the hub expects. */
+  outdated: boolean
+  /** Last session counts the connector advertised, if any. */
+  sessions: LocalSessionSummary | null
 }
 
 /** Frames a channel owner receives from the connector side. */
@@ -73,6 +89,8 @@ export class ConnectorHub {
   private machines = new Map<string, ConnectedMachine>()
   private pending = new Map<string, PendingRequest>()
   private channelListeners = new Map<string, ChannelListener>()
+  /** Per-machine frame budget, so one connector cannot flood the hub. */
+  private frameLimiter = new RateLimiter(MACHINE_FRAME_LIMIT)
   private idleTimer: ReturnType<typeof setInterval>
 
   constructor(private db: Database.Database) {
@@ -125,6 +143,11 @@ export class ConnectorHub {
         return
       }
 
+      if (!this.frameLimiter.tryConsume(machineId)) {
+        socket.close(CLOSE_OVERLOADED, 'frame rate limit exceeded')
+        return
+      }
+
       const machine = this.machines.get(machineId)
       if (machine) {
         machine.lastActivity = Date.now()
@@ -138,6 +161,10 @@ export class ConnectorHub {
         // An error envelope answers either a request (id) or a channel.
         if (msg.channelId) this.channelListeners.get(msg.channelId)?.(msg.kind, msg.payload)
         else this.settleResponse(machineId, msg.id, msg.kind, msg.payload)
+      } else if (msg.kind === 'event' && !msg.channelId) {
+        // Machine-level event: currently only the session summary (§11.3).
+        const payload = msg.payload as { sessions?: LocalSessionSummary }
+        if (machine && payload?.sessions) machine.sessions = payload.sessions
       } else if (msg.kind === 'event' || msg.kind === 'stream_data' || msg.kind === 'stream_close') {
         if (msg.channelId) this.channelListeners.get(msg.channelId)?.(msg.kind, msg.payload)
       }
@@ -225,6 +252,14 @@ export class ConnectorHub {
   ): RelayError | null {
     const machine = this.machines.get(machineId)
     if (!machine) return { code: RELAY_ERROR.machineOffline, message: 'Machine is not connected' }
+    if (machine.channels.size >= MAX_CHANNELS_PER_MACHINE) {
+      return { code: RELAY_ERROR.tooManyChannels, message: 'This machine is serving too many sessions' }
+    }
+    // A connector that has stopped draining is already in trouble; adding
+    // another stream would only grow the backlog.
+    if (isBackedUp(machine.socket)) {
+      return { code: RELAY_ERROR.tooManyChannels, message: 'Machine connection is congested' }
+    }
 
     this.channelListeners.set(channelId, listener)
     machine.channels.add(channelId)
@@ -292,9 +327,13 @@ export class ConnectorHub {
     }
 
     const now = Date.now()
+    const connectorVersion = hello.connectorVersion ?? null
     this.machines.set(machineId, {
       machineId, socket, lastActivity: now, lastSeenWrite: now,
       pending: new Set(), channels: new Set(),
+      connectorVersion,
+      outdated: isConnectorOutdated(connectorVersion),
+      sessions: hello.sessions ?? null,
     })
 
     this.db.prepare(
@@ -312,6 +351,10 @@ export class ConnectorHub {
       machineId,
       metadata: { connectorVersion: hello.connectorVersion ?? null },
     })
+
+    if (isConnectorOutdated(connectorVersion)) {
+      console.warn(`[relay] machine ${machineId} runs connector ${connectorVersion ?? 'unknown'}, which is outdated`)
+    }
 
     socket.send(
       JSON.stringify(
@@ -344,8 +387,19 @@ export class ConnectorHub {
   }
 
   /** Disconnect everything and stop timers (shutdown / tests). */
+  /** Whether a connected machine's connector is behind the supported version. */
+  isOutdated(machineId: string): boolean {
+    return this.machines.get(machineId)?.outdated ?? false
+  }
+
+  /** Session counts a machine advertised at connect time (spec §11.3). */
+  sessionSummary(machineId: string): LocalSessionSummary | null {
+    return this.machines.get(machineId)?.sessions ?? null
+  }
+
   close(): void {
     clearInterval(this.idleTimer)
+    this.frameLimiter.close()
     for (const machine of this.machines.values()) {
       this.failPending(machine, 'relay shutting down')
       machine.socket.close(1001, 'server shutting down')

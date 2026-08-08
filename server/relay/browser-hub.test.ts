@@ -76,6 +76,14 @@ class TestBrowser {
   }
 }
 
+
+/** Calls the connector made to a given local path (it also polls sessions itself). */
+function callsFor(mock: ReturnType<typeof vi.fn>, path: string): { headers: Record<string, string> }[] {
+  return mock.mock.calls
+    .filter(call => String(call[0]).includes(path))
+    .map(call => call[1] as { headers: Record<string, string> })
+}
+
 describe('browser hub REST proxy', () => {
   let db: Database.Database
   let hub: ConnectorHub
@@ -136,11 +144,15 @@ describe('browser hub REST proxy', () => {
     relayUrl = `http://127.0.0.1:${port}`
     browserUrl = `ws://127.0.0.1:${port}/relay/browser`
 
-    localFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ sessions: [{ id: 's1' }] }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
+    // A fresh Response per call: a body can only be read once, and the
+    // connector polls the session list itself on connect.
+    localFetch = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ sessions: [{ id: 's1' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
     )
   })
 
@@ -184,7 +196,7 @@ describe('browser hub REST proxy', () => {
       sessions: [{ id: 's1' }],
     })
     // The connector supplied the local credential; the browser never sees it
-    expect(localFetch.mock.calls[0][1].headers.Authorization).toBe('Bearer local-token')
+    expect(callsFor(localFetch, '/api/sessions/list')[0].headers.Authorization).toBe('Bearer local-token')
     browser.close()
   })
 
@@ -202,7 +214,7 @@ describe('browser hub REST proxy', () => {
     )
     await browser.waitForFrame(f => f.kind === 'response' && f.id === 'r1')
 
-    expect(localFetch.mock.calls[0][1].headers.Authorization).toBe('Bearer local-token')
+    expect(callsFor(localFetch, '/api/sessions/list')[0].headers.Authorization).toBe('Bearer local-token')
     browser.close()
   })
 
@@ -217,7 +229,7 @@ describe('browser hub REST proxy', () => {
     const err = await browser.waitForFrame(f => f.kind === 'error' && f.id === 'r1')
 
     expect(err.payload.code).toBe(RELAY_ERROR.pathNotAllowed)
-    expect(localFetch).not.toHaveBeenCalled()
+    expect(callsFor(localFetch, '/api/webhooks/events')).toHaveLength(0)
     browser.close()
   })
 
@@ -268,5 +280,20 @@ describe('browser hub REST proxy', () => {
     await browser.open()
     browser.send('request', { method: 'GET', path: '/api/health' }, 'r1')
     expect(await browser.closeCode).toBe(4001)
+  })
+
+  it('closes a socket that floods the hub with frames', async () => {
+    await startConnector()
+    const browser = new TestBrowser(browserUrl)
+    await browser.open()
+    browser.send('hello', { machineId })
+    await browser.waitForFrame(f => f.kind === 'hello_ack')
+
+    // Well past the per-user burst allowance (120)
+    for (let i = 0; i < 400; i++) {
+      browser.send('ping', {})
+    }
+
+    expect(await browser.closeCode).toBe(4029)
   })
 })
