@@ -5,7 +5,11 @@ import {
   executeProxyRequest,
   resolveLocalTarget,
 } from './connector-proxy.js'
+import { parseShellEnvFile } from './connector-proxy.js'
 import { RELAY_ERROR } from './relay-protocol.js'
+import { mkdtempSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 
 const target = { origin: 'http://127.0.0.1:32352', authToken: 'local-token' }
 
@@ -122,12 +126,12 @@ describe('executeProxyRequest', () => {
     expect('error' in outcome && outcome.error.code).toBe(RELAY_ERROR.localUnreachable)
   })
 
-  it('passes through a local 401 as a real response', async () => {
+  it('passes through a local error status that is not 401', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
+      new Response(JSON.stringify({ error: 'Boom' }), { status: 500 }),
     )
     const outcome = await executeProxyRequest(asOwner({ method: 'GET', path: '/api/health' }), { target, fetchImpl })
-    expect('response' in outcome && outcome.response.status).toBe(401)
+    expect('response' in outcome && outcome.response.status).toBe(500)
   })
 })
 
@@ -226,5 +230,72 @@ describe('resolveLocalTarget', () => {
 
     // Dev: no Origin at all, which a non-production server accepts
     expect(resolveLocalTarget({} as NodeJS.ProcessEnv).browserOrigin).toBeUndefined()
+  })
+})
+
+
+describe('local token discovery', () => {
+  it('parses plain, exported, quoted, and commented env lines', () => {
+    const parsed = parseShellEnvFile(
+      [
+        '# a comment',
+        'export AUTH_TOKEN_FILE=/etc/token',
+        'PORT="41000"',
+        "CORS_ORIGIN='https://example.test'",
+        '',
+        'malformed-line',
+      ].join('\n'),
+    )
+    expect(parsed).toEqual({
+      AUTH_TOKEN_FILE: '/etc/token',
+      PORT: '41000',
+      CORS_ORIGIN: 'https://example.test',
+    })
+  })
+
+  it('finds the token file a server was configured with in an env file', () => {
+    // The connector runs in a shell that never saw the server's pm2 env, so
+    // it has to read the same files the server was configured from.
+    const dir = mkdtempSync(join(tmpdir(), 'codekin-env-'))
+    const tokenPath = join(dir, 'legacy-token')
+    writeFileSync(tokenPath, 'legacy-secret\n')
+    const envFile = join(dir, 'env')
+    writeFileSync(envFile, `export AUTH_TOKEN_FILE=${tokenPath}\nexport CORS_ORIGIN=https://ui.test\n`)
+
+    const resolved = resolveLocalTarget({} as NodeJS.ProcessEnv, [envFile])
+
+    expect(resolved.authToken).toBe('legacy-secret')
+    expect(resolved.tokenSource).toBe(tokenPath)
+    expect(resolved.browserOrigin).toBe('https://ui.test')
+  })
+
+  it('lets the process environment win over an env file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codekin-env-'))
+    const envFile = join(dir, 'env')
+    writeFileSync(envFile, 'export AUTH_TOKEN=from-file\n')
+
+    const resolved = resolveLocalTarget({ AUTH_TOKEN: 'from-env' } as NodeJS.ProcessEnv, [envFile])
+    expect(resolved.authToken).toBe('from-env')
+    expect(resolved.tokenSource).toBe('AUTH_TOKEN')
+  })
+
+  it('reports no token source when nothing is configured', () => {
+    const resolved = resolveLocalTarget({ AUTH_TOKEN_FILE: '/definitely/not/here' } as NodeJS.ProcessEnv, [])
+    expect(resolved.authToken).toBe('')
+    expect(resolved.tokenSource).toBeUndefined()
+  })
+})
+
+describe('local 401', () => {
+  it('is reported as a connector token problem, not a passthrough response', async () => {
+    // The connector uses the machine's own token, so a 401 is never the
+    // browser user's doing — surfacing it as "unreachable" misdirects them.
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
+    )
+    const outcome = await executeProxyRequest(asOwner({ method: 'GET', path: '/api/sessions/list' }), { target, fetchImpl })
+
+    expect('error' in outcome && outcome.error.code).toBe(RELAY_ERROR.localUnauthorized)
+    expect('error' in outcome && outcome.error.message).toMatch(/AUTH_TOKEN_FILE/)
   })
 })
