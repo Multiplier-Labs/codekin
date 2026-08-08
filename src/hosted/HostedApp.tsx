@@ -7,6 +7,7 @@
 
 import { LoginPage } from './LoginPage'
 import { MachinesPage } from './MachinesPage'
+import { PairPage } from './PairPage'
 import { useHostedAuth } from './useHostedAuth'
 
 /** Shown to signed-in users whose access has not been granted (yet). */
@@ -46,6 +47,10 @@ export default function HostedApp() {
 
   if (user.status !== 'active') {
     return <PendingPage login={user.login} onLogout={() => void logout()} />
+  }
+
+  if (window.location.pathname === '/pair') {
+    return <PairPage />
   }
 
   return <MachinesPage user={user} onLogout={() => void logout()} />

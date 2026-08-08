@@ -67,7 +67,11 @@ export function MachinesPage({ user, onLogout }: MachinesPageProps) {
               <code className="rounded-control bg-surface-raised px-1.5 py-0.5 font-mono text-meta text-ink">
                 codekin relay login
               </code>{' '}
-              to pair it. (Coming in the next release.)
+              to pair it, then{' '}
+              <code className="rounded-control bg-surface-raised px-1.5 py-0.5 font-mono text-meta text-ink">
+                codekin relay connect
+              </code>{' '}
+              to bring it online.
             </p>
           </div>
         ) : (

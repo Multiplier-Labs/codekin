@@ -11,6 +11,7 @@
  *   codekin service status         Show service status
  *   codekin config                  Update settings
  *   codekin token                  Print access URL with auth token
+ *   codekin relay <cmd>            Hosted relay pairing + connector
  *   codekin upgrade                Upgrade to latest version
  *   codekin uninstall              Remove Codekin entirely
  */
@@ -115,6 +116,143 @@ function findFrontendDist() {
   const dist = join(PACKAGE_ROOT, 'dist')
   if (existsSync(dist)) return dist
   return null
+}
+
+// ---------------------------------------------------------------------------
+// Relay (hosted control plane pairing + connector)
+// ---------------------------------------------------------------------------
+
+const RELAY_CREDENTIAL_FILE = join(CONFIG_DIR, 'relay.json')
+const DEFAULT_RELAY_URL = 'https://app.codekin.ai'
+
+function readRelayCredential() {
+  if (!existsSync(RELAY_CREDENTIAL_FILE)) return null
+  try {
+    const parsed = JSON.parse(readFileSync(RELAY_CREDENTIAL_FILE, 'utf-8'))
+    if (parsed && parsed.url && parsed.machineId && parsed.machineSecret) return parsed
+    return null
+  } catch {
+    return null
+  }
+}
+
+function findConnectorScript() {
+  const compiled = join(PACKAGE_ROOT, 'server', 'dist', 'relay', 'connector-cli.js')
+  if (existsSync(compiled)) return { script: compiled, runner: process.execPath }
+  const ts = join(PACKAGE_ROOT, 'server', 'relay', 'connector-cli.ts')
+  if (existsSync(ts)) return { script: ts, runner: 'tsx' }
+  throw new Error('Connector script not found. Run npm run build in server/ first.')
+}
+
+async function cmdRelayLogin(args) {
+  const urlFlag = args.indexOf('--url')
+  const relayUrl = (urlFlag !== -1 && args[urlFlag + 1] ? args[urlFlag + 1] : DEFAULT_RELAY_URL).replace(/\/$/, '')
+
+  const existing = readRelayCredential()
+  if (existing) {
+    console.log(`Already paired with ${existing.url} (machine ${existing.machineId}).`)
+    console.log('Run `codekin relay logout` first to pair again.')
+    process.exit(1)
+  }
+
+  let start
+  try {
+    const res = await fetch(`${relayUrl}/api/machines/pair/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hostname: execSync('hostname').toString().trim(), platform: platform() }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    start = await res.json()
+  } catch (err) {
+    console.error(`Could not reach the relay at ${relayUrl}: ${err.message}`)
+    process.exit(1)
+  }
+
+  console.log('\nTo pair this machine, open:\n')
+  console.log(`    ${start.verificationUrl}\n`)
+  console.log(`and confirm the code: ${start.userCode}\n`)
+  console.log('Waiting for approval (Ctrl-C to cancel)...')
+
+  const pollMs = start.pollIntervalMs || 3000
+  for (;;) {
+    await new Promise((r) => setTimeout(r, pollMs))
+    let res
+    try {
+      res = await fetch(`${relayUrl}/api/machines/pair/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deviceCode: start.deviceCode }),
+      })
+    } catch {
+      continue // transient network error — keep polling until expiry
+    }
+    if (res.status === 202) continue
+    const data = await res.json().catch(() => ({}))
+    if (res.ok && data.status === 'complete') {
+      ensureConfigDir()
+      writeFileSync(
+        RELAY_CREDENTIAL_FILE,
+        JSON.stringify({ url: relayUrl, machineId: data.machineId, machineSecret: data.machineSecret }, null, 2) + '\n',
+      )
+      chmodSync(RELAY_CREDENTIAL_FILE, 0o600)
+      console.log(`\nPaired. Machine id: ${data.machineId}`)
+      console.log('Run `codekin relay connect` to bring this machine online.')
+      return
+    }
+    if (data.status === 'denied') {
+      console.error('\nPairing was denied in the hosted UI.')
+      process.exit(1)
+    }
+    if (data.status === 'expired') {
+      console.error('\nPairing request expired. Run `codekin relay login` again.')
+      process.exit(1)
+    }
+    console.error(`\nPairing failed (${data.status || res.status}).`)
+    process.exit(1)
+  }
+}
+
+function cmdRelayConnect() {
+  const credential = readRelayCredential()
+  if (!credential) {
+    console.error('Not paired. Run `codekin relay login` first.')
+    process.exit(1)
+  }
+  const { script, runner } = findConnectorScript()
+  console.log(`Connecting to ${credential.url} as machine ${credential.machineId}...`)
+  const result = spawnSync(runner, [script], {
+    env: { ...process.env, ...readEnvFile() },
+    stdio: 'inherit',
+  })
+  process.exit(result.status ?? 0)
+}
+
+async function cmdRelayStatus() {
+  const credential = readRelayCredential()
+  if (!credential) {
+    console.log('Not paired. Run `codekin relay login` to pair this machine.')
+    return
+  }
+  console.log(`Relay:      ${credential.url}`)
+  console.log(`Machine id: ${credential.machineId}`)
+  try {
+    const res = await fetch(`${credential.url}/api/health`)
+    const data = await res.json()
+    console.log(`Hub health: ${data.ok ? 'ok' : 'unhealthy'} (${data.machinesOnline ?? 0} machine(s) online)`)
+  } catch {
+    console.log('Hub health: unreachable')
+  }
+}
+
+function cmdRelayLogout() {
+  if (!existsSync(RELAY_CREDENTIAL_FILE)) {
+    console.log('Not paired; nothing to remove.')
+    return
+  }
+  rmSync(RELAY_CREDENTIAL_FILE)
+  console.log('Removed local pairing credential.')
+  console.log('To fully revoke this machine, also remove it in the hosted UI (Machines page).')
 }
 
 // ---------------------------------------------------------------------------
@@ -524,6 +662,20 @@ if (cmd === 'start') {
     process.exit(1)
   }
   serviceDispatch(action)
+} else if (cmd === 'relay') {
+  const action = args[1]
+  if (action === 'login') {
+    await cmdRelayLogin(args.slice(2))
+  } else if (action === 'connect') {
+    cmdRelayConnect()
+  } else if (action === 'status') {
+    await cmdRelayStatus()
+  } else if (action === 'logout') {
+    cmdRelayLogout()
+  } else {
+    console.error('Usage: codekin relay <login|connect|status|logout> [--url <relay-url>]')
+    process.exit(1)
+  }
 } else {
   console.log(`Codekin - Web UI for Claude Code
 
@@ -537,6 +689,10 @@ Usage:
   codekin service uninstall       Remove background service
   codekin service status          Show service status
   codekin token                   Print access URL with auth token
+  codekin relay login             Pair this machine with hosted Codekin
+  codekin relay connect           Run the relay connector (foreground)
+  codekin relay status            Show pairing + hub status
+  codekin relay logout            Remove the local pairing credential
   codekin upgrade                 Upgrade to latest version
   codekin uninstall               Remove Codekin entirely
 `)
