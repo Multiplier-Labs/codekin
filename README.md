@@ -53,18 +53,20 @@ codekin uninstall               # Remove Codekin entirely
 - **Multi-provider AI** — Use Claude Code, [OpenCode](https://github.com/nicepkg/opencode), or [OpenAI Codex](https://github.com/openai/codex) as the backend per session. OpenCode enables any LLM provider (OpenAI, Gemini, etc.) through a single interface; Codex unlocks ChatGPT-subscription OpenAI models — all with full streaming, tool events, plan mode, and permission control
 - **Multi-session terminal** — Open and switch between multiple coding sessions, one per repo
 - **Agent Joe** — AI orchestrator agent that spawns and manages up to 5 concurrent child sessions, with a dedicated chat UI, welcome screen, and color-coded sidebar status indicators. Resilient by design: realtime blocked-child notifications, a persistent notification outbox that replays when the orchestrator returns, pausable child timeouts, and ground-truth completion verification
+- **Goal Runs** — Durable act→verify→continue loops that run a coding agent against a goal until a *deterministic* verifier passes (your own build/test/lint commands, judged by exit code), under turn and cost budgets. An optional second provider reviews the diff before it lands, every turn is recorded in an evidence ledger, and a verified run is committed, pushed and opened as a PR by Codekin itself. Ships with CI Autorepair, Coverage Increase, and Dependency Upgrade templates
 - **Git worktrees** — Isolate sessions in dedicated worktree directories, with mid-session creation, auto-enable setting, and session context preservation
 - **Session archive** — Full retrieval and re-activation of archived sessions
 - **Repo browser** — Auto-discovers local repos and GitHub org repos
 - **Screenshot upload** — Drag-and-drop or paste images; the file path is sent to the AI so it can read them natively
 - **Skill browser** — Browse and invoke `/skills` defined in each repo's `.claude/skills/`, with inline slash-command autocomplete
 - **Diff viewer** — Side panel showing staged/unstaged file changes with per-file discard support
-- **Command palette** — `Ctrl+K` to quickly search repos, skills, and actions
+- **Command palette** — `Ctrl+K` to quickly search repos, sessions, skills, docs, archived sessions, and actions
 - **Approval management** — Persistent approval storage with per-permission revoking, permission mode selector, per-session tool pre-approvals, and `--dangerously-skip-permissions` mode for sandboxed environments
 - **Dynamic model discovery** — New Claude models appear automatically without code changes, discovered via the Anthropic API or CLI alias probing (works with both API-key and subscription auth)
 - **Connection status** — Real-time provider health indicators with disable/enable toggles for each backend
 - **Subscription & API key auth** — Works with both Claude subscription (OAuth) and API key authentication
-- **Mobile-friendly** — Responsive layout that works on phones and tablets
+- **Mobile-friendly** — Responsive layout that works on phones and tablets, with touch-sized controls
+- **Light & dark themes** — Both polarities are tuned against WCAG AA contrast, switchable in Settings
 - **Markdown browser** — Browse and view `.md` files directly in the UI
 - **AI Workflows** — Scheduled code and repository audits and maintenance, with support for custom workflows defined as Markdown files
 - **GitHub webhooks** — Automated bugfixing on CI failures and PR code review via webhook integration

@@ -74,13 +74,60 @@ Endpoints that accept a `model` field (e.g. session creation via WebSocket, work
 
 | Identifier | Label |
 |---|---|
+| `claude-opus-5` | Opus 5 |
+| `claude-sonnet-5` | Sonnet 5 |
 | `claude-opus-4-8` | Opus 4.8 |
+| `claude-fable-5` | Fable 5 |
 | `claude-opus-4-7` | Opus 4.7 |
 | `claude-opus-4-6` | Opus 4.6 |
 | `claude-sonnet-4-6` | Sonnet 4.6 |
 | `claude-haiku-4-5-20251001` | Haiku 4.5 |
 
-When `model` is omitted, the server default is used. The canonical list lives in `CLAUDE_MODELS` in `src/types.ts`.
+When `model` is omitted, the server default is used.
+
+This table is the **static fallback** list (`FALLBACK_MODELS` in `server/anthropic-models.ts`, mirrored by `CLAUDE_MODELS` in `src/types.ts`), used until dynamic discovery completes or when discovery fails. The live set is whatever `GET /api/claude/models` returns, so newly released models can appear without a code change.
+
+### `GET /api/claude/models`
+
+Return the discovered Claude model list. Results are cached, so a cache hit is cheap. Falls back to the static table above when discovery has not completed or has failed.
+
+**Response:** `{ "models": [{ "id": "claude-opus-5", "label": "Opus 5" }, ...] }`
+
+### `POST /api/claude/models/refresh`
+
+Force model rediscovery, bypassing the cache TTL.
+
+Deliberately `POST`-only and never called automatically: with CLI alias probing this spawns one `claude` process per candidate ID, costing roughly $0.04 per live model. Intended for manual invocation when a newly released model has not appeared yet.
+
+**Rate-limited.** A completed refresh starts a 5-minute cooldown; calls during it return `429` with a `Retry-After` header rather than probing again. The cooldown is global, not per-token, because the cost is. Requests arriving while a probe is already in flight are *not* rejected — they await the same probe, so they cost nothing extra.
+
+**Response:** `{ "models": [{ "id": "...", "label": "..." }, ...] }`
+
+**429 response:** `{ "error": "Model refresh is rate-limited; retry in 90s", "retryAfterSeconds": 90 }`
+
+### `GET /api/codex/models`
+
+Return the model list reported by the Codex app-server's `model/list` method. Cached for 10 minutes. Returns an empty `models` array when the Codex CLI is unavailable or not authenticated.
+
+**Response:** `{ "models": [{ "id": "gpt-5.5", "name": "...", "description": "...", "isDefault": true }, ...] }`
+
+### `GET /api/opencode/models`
+
+Return the models configured on the running OpenCode server, plus the per-provider default model IDs.
+
+**Query params:** `workingDir` (optional, defaults to the user's home directory)
+
+`workingDir` is resolved via `realpath` and then **bounds-checked**: it must equal — or be a descendant of — the user's home directory or the configured `REPOS_ROOT`. This mirrors the boundary enforced by `/api/browse-dirs` and `/api/sessions/create`. A path that cannot be resolved returns `400`; a path outside the allowed roots returns `403`.
+
+**Response:** `{ "models": [{ "id": "...", "name": "...", "providerID": "...", "providerName": "..." }, ...], "defaults": { "<providerID>": "<modelID>" } }`
+
+### `GET /api/opencode/commands`
+
+Return the slash commands, MCP prompts, and skills exposed by the running OpenCode server for the given directory. Backs OpenCode inline slash-command autocomplete.
+
+**Query params:** `workingDir` (optional, defaults to the user's home directory) — resolved and bounds-checked exactly as for `/api/opencode/models`.
+
+**Response:** `{ "commands": [{ "name": "...", "description": "...", "agent": "...", "model": "...", "source": "command" | "mcp" | "skill", "template": "..." }, ...] }`
 
 ---
 

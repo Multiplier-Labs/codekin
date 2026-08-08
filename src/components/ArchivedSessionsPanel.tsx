@@ -23,10 +23,12 @@ import type { ChatMessage } from '../types'
 function parseUtcDate(dateStr: string): Date {
   // SQLite datetime('now') returns 'YYYY-MM-DD HH:MM:SS' without timezone — treat as UTC.
   // New format uses ISO 8601 'YYYY-MM-DDTHH:MM:SSZ' which is unambiguous.
-  if (!dateStr.includes('T') && !dateStr.includes('Z') && !dateStr.includes('+')) {
-    return new Date(dateStr.replace(' ', 'T') + 'Z')
-  }
-  return new Date(dateStr)
+  const parsed =
+    !dateStr.includes('T') && !dateStr.includes('Z') && !dateStr.includes('+')
+      ? new Date(dateStr.replace(' ', 'T') + 'Z')
+      : new Date(dateStr)
+  // Guard NaN so callers get a stable ordering and a rendered age, not "NaNs".
+  return isNaN(parsed.getTime()) ? new Date(0) : parsed
 }
 
 function compactAge(dateStr: string): string {

@@ -17,6 +17,8 @@ export interface RowMenuItem {
   label: string
   icon?: React.ReactNode
   onSelect: () => void
+  /** Hover hint, e.g. a provider's description. */
+  title?: string
   /** Destructive actions render in the error colour. */
   danger?: boolean
   /** Draw a rule above this item — used to fence off destructive actions. */
@@ -29,12 +31,18 @@ interface Props {
   label: string
   /** Extra classes for the trigger button. */
   className?: string
+  /** Trigger content; defaults to the `⋯` glyph. */
+  trigger?: React.ReactNode
+  /** Replaces the default icon-button styling — for a full-width row trigger. */
+  triggerClassName?: string
+  /** Lets the host react to the menu opening (e.g. pin a hover-revealed row). */
+  onOpenChange?: (open: boolean) => void
 }
 
 const MENU_WIDTH = 200
 const VIEWPORT_MARGIN = 8
 
-export function RowMenu({ items, label, className = '' }: Props) {
+export function RowMenu({ items, label, className = '', trigger, triggerClassName, onOpenChange }: Props) {
   const [open, setOpen] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -56,6 +64,10 @@ export function RowMenu({ items, label, className = '' }: Props) {
     menu.style.top = `${top}px`
     menu.style.left = `${left}px`
   }, [open])
+
+  useEffect(() => {
+    onOpenChange?.(open)
+  }, [open, onOpenChange])
 
   useEffect(() => {
     if (!open) return
@@ -93,11 +105,11 @@ export function RowMenu({ items, label, className = '' }: Props) {
         aria-haspopup="menu"
         aria-expanded={open}
         title={label}
-        className={`tap-target flex-shrink-0 rounded-control p-0.5 transition-colors ${
+        className={`${triggerClassName ?? `tap-target flex-shrink-0 rounded-control p-0.5 transition-colors ${
           open ? 'text-ink bg-surface-raised' : 'text-ink-faint hover:text-ink hover:bg-surface-raised'
-        } ${className}`}
+        }`} ${className}`}
       >
-        <IconDots size={14} stroke={2} />
+        {trigger ?? <IconDots size={14} stroke={2} />}
       </button>
       {open && (
         <div
@@ -111,6 +123,7 @@ export function RowMenu({ items, label, className = '' }: Props) {
               {item.separated && i > 0 && <div className="my-1 border-t border-edge" />}
               <button
                 role="menuitem"
+                title={item.title}
                 onClick={(e) => { e.stopPropagation(); setOpen(false); item.onSelect() }}
                 className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-body transition-colors ${
                   item.danger

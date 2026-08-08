@@ -15,6 +15,12 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/cc/, ''),
         ws: true,
       },
+      // Hosted-mode dev (VITE_APP_MODE=hosted vite): control-plane API on the
+      // relay server. Unused in local mode, which only calls /cc/*.
+      '/api': {
+        target: 'http://127.0.0.1:32360',
+        changeOrigin: true,
+      },
     },
   },
 })

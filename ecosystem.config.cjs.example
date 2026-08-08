@@ -44,5 +44,16 @@ module.exports = {
       CORS_ORIGIN: 'https://your.host',
       NODE_ENV: 'production',
     },
+  }, {
+    // Hosted relay / control plane (app.codekin.ai). Reads the rest of its
+    // configuration (OAuth credentials, session secret, allowlist) from
+    // ~/.codekin-relay/env — see server/relay/relay-config.ts.
+    name: 'codekin-relay',
+    script: 'server/dist/relay/relay-server.js',
+    interpreter: '/path/to/node',
+    cwd: '/path/to/codekin',
+    env: {
+      NODE_ENV: 'production',
+    },
   }],
 }

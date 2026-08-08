@@ -42,21 +42,32 @@ interface Props {
 }
 
 /**
- * Transcript row: fixed 44px left gutter (timestamp or empty spacer) + content
- * at the shared `--measure` width, which the composer also uses. The gutter is
- * a fixed pixel width, not `ch`, so rows with and without a timestamp share one
- * left edge.
+ * Transcript row: a centred column at --measure, with the timestamp — when the
+ * turn has one — hanging in the padding to its left rather than reserving a
+ * column of its own. Every turn therefore shares one left edge, and a run of
+ * turns without timestamps shows no dead margin.
+ *
+ * Below 32rem of pane width there is no padding to hang into, so the padding
+ * stays narrow and the timestamp falls back to the row's title.
  */
-function Row({ ts, children }: { ts?: string | null; children: React.ReactNode }) {
+function Row({ ts, children, isMobile }: { ts?: string | null; children: React.ReactNode; isMobile?: boolean }) {
   return (
-    <div className="flex px-4">
-      <div
-        className="w-11 flex-shrink-0 pr-2 pt-1 text-right text-meta text-ink-faint select-none"
-        style={{ fontFamily: "'Inconsolata', monospace" }}
-      >
-        {ts}
+    <div
+      className="px-4 @[32rem]:px-12"
+      // Only a fallback: at >=32rem the hanging timestamp is visible, and a
+      // tooltip covering the whole turn would be noise.
+      title={ts && isMobile ? ts : undefined}
+    >
+      <div className="relative mx-auto w-full min-w-0 max-w-[var(--measure)]">
+        {ts && (
+          <span
+            className="absolute -left-11 top-1 hidden w-11 pr-2 text-right font-mono text-meta text-ink-faint select-none @[32rem]:block"
+          >
+            {ts}
+          </span>
+        )}
+        {children}
       </div>
-      <div className="min-w-0 flex-1 max-w-[var(--measure)]">{children}</div>
     </div>
   )
 }
@@ -133,10 +144,10 @@ function SystemMessage({ msg }: { msg: ChatMessage & { type: 'system' } }) {
   )
 }
 
-function UserMessage({ msg, fontSize, isMobile }: { msg: ChatMessage & { type: 'user' }; fontSize: number; isMobile?: boolean }) {
+function UserMessage({ msg, fontSize }: { msg: ChatMessage & { type: 'user' }; fontSize: number }) {
   return (
     <div
-      className={`user-bubble rounded-control border border-edge bg-surface px-3 py-2 text-ink whitespace-pre-wrap ${isMobile ? 'max-w-[95%]' : 'max-w-[80%]'}`}
+      className="user-bubble rounded-control border border-edge bg-surface px-3 py-2 text-ink whitespace-pre-wrap"
       style={{ fontSize: `${fontSize}px` }}
     >
       {formatUserText(msg.text)}
@@ -386,7 +397,7 @@ function ImageInline({ msg }: { msg: ChatMessage & { type: 'image' } }) {
 function TentativeMessage({ msg, fontSize }: { msg: ChatMessage & { type: 'tentative' }; fontSize: number }) {
   return (
     <div
-      className="max-w-[80%] rounded-control border-l-2 border-warning-6 bg-warning-11/20 px-3 py-2 text-ink-muted whitespace-pre-wrap"
+      className="rounded-control border-l-2 border-warning-6 bg-warning-11/20 px-3 py-2 text-ink-muted whitespace-pre-wrap"
       style={{ fontSize: `${fontSize}px` }}
     >
       <div className="mb-1 text-meta text-warning-5 uppercase tracking-wider">queued</div>
@@ -451,7 +462,7 @@ function ActivityIndicator({ label, variant = 'default' }: { label: string; vari
 
   return (
     <div className="pt-2">
-      <div className="app-thinking-badge inline-flex items-center gap-2 rounded-control bg-edge/80 px-3.5 py-2">
+      <div className="inline-flex items-center gap-2 rounded-control bg-edge/80 px-3.5 py-2">
         <svg
           className="h-4 w-4 animate-[spin_3s_linear_infinite]"
           xmlns="http://www.w3.org/2000/svg"
@@ -522,7 +533,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
       )}
       <div
         ref={containerRef}
-        className="chat-scroll flex-1 overflow-y-auto overflow-x-hidden min-h-0"
+        className="chat-scroll @container flex-1 overflow-y-auto overflow-x-hidden min-h-0"
         onScroll={checkScroll}
       >
         {variant === 'orchestrator' && messages.length === 0 && !activityLabel ? (
@@ -530,7 +541,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
         ) : (
         <div className="flex flex-col gap-[18px] py-4">
           {(() => {
-            let lastShownTs = 0
+            let lastShownLabel: string | null = null
             const nodes: React.ReactNode[] = []
 
             // Group consecutive tool_group + tool_output messages into ToolRuns
@@ -545,16 +556,21 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                 continue
               }
 
-              // Check for timestamps on user/assistant messages; shown in the
-              // fixed left gutter of the message's own row.
+              // Timestamps hang in the gutter beside user/assistant turns.
+              // Shown whenever the displayed minute changes rather than on a
+              // time threshold: the label only has minute resolution, so this
+              // is as often as it can be without repeating itself.
               let tsLabel: string | null = null
               const ts = (msg as ChatMessage & { ts?: number }).ts
-              if (ts && (msg.type === 'user' || msg.type === 'assistant') && ts - lastShownTs >= 60_000) {
-                lastShownTs = ts
+              if (ts && (msg.type === 'user' || msg.type === 'assistant')) {
                 const d = new Date(ts)
                 const hh = String(d.getHours()).padStart(2, '0')
                 const mm = String(d.getMinutes()).padStart(2, '0')
-                tsLabel = `${hh}:${mm}`
+                const label = `${hh}:${mm}`
+                if (label !== lastShownLabel) {
+                  lastShownLabel = label
+                  tsLabel = label
+                }
               }
 
               // Collect consecutive tool_group/tool_output/image into a single
@@ -574,7 +590,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                 }
                 const taKey = run.groups[0]?.key || run.outputs[0]?.key || `ta-${startIdx}`
                 nodes.push(
-                  <Row key={taKey}>
+                  <Row key={taKey} isMobile={isMobile}>
                     <ToolActivity run={run} fontSize={fontSize} />
                   </Row>
                 )
@@ -595,7 +611,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                   }
                 }
                 nodes.push(
-                  <Row key={msg.key || i} ts={tsLabel}>
+                  <Row key={msg.key || i} ts={tsLabel} isMobile={isMobile}>
                     <AssistantMessage msg={msg} fontSize={fontSize} variant={variant} repeatCount={repeatCount} />
                   </Row>
                 )
@@ -615,7 +631,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                   }
                   node = <SystemMessage msg={msg} />; break
                 case 'user':
-                  node = <UserMessage msg={msg} fontSize={fontSize} isMobile={isMobile} />; break
+                  node = <UserMessage msg={msg} fontSize={fontSize} />; break
                 case 'assistant':
                   node = <AssistantMessage msg={msg} fontSize={fontSize} variant={variant} />; break
                 case 'planning_mode':
@@ -627,14 +643,14 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
               }
               if (node) {
                 const rowKey = msg.type === 'tentative' ? (msg.key || `tentative-${msg.index}`) : (msg.key || i)
-                nodes.push(<Row key={rowKey} ts={tsLabel}>{node}</Row>)
+                nodes.push(<Row key={rowKey} ts={tsLabel} isMobile={isMobile}>{node}</Row>)
               }
               i++
             }
             return nodes
           })()}
           {activityLabel && (
-            <Row>
+            <Row isMobile={isMobile}>
               <ActivityIndicator label={activityLabel} variant={variant} />
             </Row>
           )}

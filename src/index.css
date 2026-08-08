@@ -147,10 +147,21 @@
   --color-edge: var(--color-neutral-9);           /* default borders */
   --color-edge-strong: var(--color-neutral-8);    /* emphasized borders */
   --color-ink: var(--color-neutral-2);            /* primary text */
-  --color-ink-muted: var(--color-neutral-5);      /* secondary text */
-  --color-ink-faint: var(--color-neutral-6);      /* de-emphasized metadata */
+  /* Both passive steps sit one stop brighter than they used to. At neutral-5
+     and -6 they measured 3.2–4.4:1 on their own surfaces — under AA, and
+     visibly washed out in the sidebar and composer. Now every scope clears
+     4.5:1: dark chrome 6.78 / 4.63, dark content 6.82 / 4.85, light 9.78 /
+     7.28, light content 9.78 / 5.21, light sidebar 7.08 / 4.70. */
+  --color-ink-muted: var(--color-neutral-4);      /* secondary text */
+  --color-ink-faint: var(--color-neutral-5);      /* de-emphasized metadata */
   --color-ink-inverse: var(--color-neutral-12);   /* text on intent-color fills (replaces text-white) */
   --color-on-primary: var(--color-primary-12);    /* text on gold (primary-8) fills */
+  /* The composer's Send fill. Named separately from the scale step because
+     the light scales are inverted: primary-4 is a light gold in dark mode but
+     a dark brown in light mode, which put dark text on a dark fill at 3.17:1.
+     Each polarity picks the step that is actually gold. */
+  --color-primary-fill: var(--color-primary-4);
+  --color-on-primary-fill: var(--color-primary-12);
   --color-focus: var(--color-accent-6);           /* focus rings and focused borders */
 }
 
@@ -271,11 +282,15 @@
   --color-neutral-4:  #424040;
   --color-neutral-5:  #555350;
   --color-neutral-6:  #777571;
-  --color-neutral-7:  #c8c7c4;
-  --color-neutral-8:  #f0ede8;
-  --color-neutral-9:  #f5f3ee;
-  --color-neutral-10: #f8f6f2;
-  --color-neutral-11: #faf9f6;
+  /* The light ramp used to live in the top few percent of the lightness
+     range, so nothing separated from anything: border-edge measured 1.05:1
+     against its own surface and the sidebar was 1.03:1 from the content pane.
+     Steps 7-11 are spread out; step 12 (the content ground) stays white. */
+  --color-neutral-7:  #b5afa2;
+  --color-neutral-8:  #cac4b8;  /* border-edge-strong: 1.51:1 on surface */
+  --color-neutral-9:  #dbd6cb;  /* border-edge: 1.26:1 on surface */
+  --color-neutral-10: #eae7de;  /* raised: 1.08:1 on surface */
+  --color-neutral-11: #f2efe8;  /* surface: 1.12:1 on page */
   --color-neutral-12: #fdfcfa;
 
   /* Primary (amber/gold) — light tints as backgrounds, dark shades as text */
@@ -293,6 +308,8 @@
   --color-primary-12: #fef8ec;
   /* The light scale is inverted, so "dark text on gold" is primary-1 here */
   --color-on-primary: var(--color-primary-1);
+  --color-primary-fill: var(--color-primary-8);   /* 8.81:1 with the text below */
+  --color-on-primary-fill: var(--color-primary-1);
 
   /* Secondary (terracotta) — inverted */
   --color-secondary-1:  #321d14;
@@ -374,56 +391,31 @@
   background-color: var(--color-primary-2);
 }
 
-[data-theme="light"] .app-right-sidebar {
-  background-color: var(--color-neutral-7);
-}
-
+/* The sidebars are level-1 surfaces; they used to borrow neutral-9/7 because
+   those were the only light steps with any weight, which coupled the chrome
+   background to the border colour. */
+[data-theme="light"] .app-right-sidebar,
 [data-theme="light"] .app-left-sidebar {
-  background-color: var(--color-neutral-9);
+  background-color: var(--color-surface);
 }
 
-[data-theme="light"] .app-left-sidebar button:hover {
-  background-color: color-mix(in srgb, var(--color-neutral-5) 18%, transparent);
-}
-
-[data-theme="light"] .app-new-session-btn:hover {
-  background-color: color-mix(in srgb, var(--color-neutral-5) 18%, transparent);
-}
+/* No blanket `button:hover` fill in the sidebar: rows and controls carry their
+   own hover:bg-surface-raised, and painting every nested button drew a second,
+   darker box inside an already-highlighted row. The spread light ramp gives
+   raised enough weight to read on its own. */
 
 [data-theme="light"] .app-session-tab:hover {
   background-color: color-mix(in srgb, var(--color-neutral-5) 18%, transparent);
 }
 
-[data-theme="light"] .app-input-bar {
-  background-color: var(--color-neutral-10);
-}
-
-[data-theme="light"] .app-thinking-badge {
-  background-color: color-mix(in srgb, var(--color-neutral-7) 90%, transparent);
-}
-
 /* Settings section cards — stronger contrast in light mode */
 [data-theme="light"] .settings-section-card {
-  background-color: var(--color-neutral-12);
-  border-color: var(--color-neutral-7);
-}
-
-[data-theme="light"] .settings-section-card > div:first-child {
-  border-color: var(--color-neutral-7);
+  background-color: var(--color-page);
 }
 
 /* Workflow panel cards — match settings contrast in light mode */
 [data-theme="light"] .workflow-card {
-  background-color: var(--color-neutral-12);
-  border-color: var(--color-neutral-7);
-}
-
-[data-theme="light"] .workflow-card > div:first-child {
-  border-color: var(--color-neutral-7);
-}
-
-[data-theme="light"] .workflow-card .divide-edge > :not(:first-child) {
-  border-color: var(--color-neutral-7);
+  background-color: var(--color-page);
 }
 
 /* Terminal area overrides in light mode.
@@ -437,12 +429,12 @@
   --color-neutral-4:  #424040;
   --color-neutral-5:  #6b6964;
   --color-neutral-6:  #7c7a75;
-  --color-neutral-7:  #e4e2de;
-  --color-neutral-8:  #eeebe6;
-  --color-neutral-9:  #f3f1ec;
-  --color-neutral-10: #f7f5f0;
-  --color-neutral-11: #faf9f6;
-  --color-neutral-12: #fdf9f4;
+  --color-neutral-7:  #c2bcae;
+  --color-neutral-8:  #d0cabe;  /* border-edge-strong: 1.45:1 on surface */
+  --color-neutral-9:  #ded9cf;  /* border-edge: 1.25:1 on surface */
+  --color-neutral-10: #ece8e0;  /* raised: 1.08:1 on surface */
+  --color-neutral-11: #f4f1ea;  /* cards/composer: 1.08:1 on the pane */
+  --color-neutral-12: #fdf9f4;  /* the cream pane the AA overrides are set against */
 
   --color-primary-1:  #382c1a;
   --color-primary-2:  #584528;
@@ -524,14 +516,16 @@
 }
 
 /* Light mode sidebar text — dark text on light background */
+/* Sidebar text, darkened to stay ahead of the darker sidebar surface above:
+   ink 12.33:1, ink-muted 7.72:1, ink-faint 5.56:1. */
 [data-theme="light"] .app-left-sidebar,
 [data-theme="light"] .app-right-sidebar {
   --color-neutral-1: #1a1a1a;
-  --color-neutral-2: #2e2e2e;
-  --color-neutral-3: #3d3d3d;
-  --color-neutral-4: #555555;
-  --color-neutral-5: #707070;
-  --color-neutral-6: #8a8a8a;
+  --color-neutral-2: #2b2b2b;
+  --color-neutral-3: #383838;
+  --color-neutral-4: #4a4a4a;
+  --color-neutral-5: #5f5f5f;
+  --color-neutral-6: #737373;
 }
 
 /* ── Density ───────────────────────────────────────────────────────────────
@@ -541,25 +535,25 @@
    branching on isMobile per element. Anything that must stay visually small
    (a status dot, a close X) gets a transparent hit area of --tap-min. */
 :root {
-  --row-h: 28px;
+  --row-h: 32px;
   --row-pad: 10px;
   --icon-size: 20px;
-  --tap-min: 28px;
+  --tap-min: 32px;
 }
 
 [data-density="touch"] {
-  --row-h: 44px;
+  --row-h: 48px;
   --row-pad: 12px;
   --icon-size: 24px;
-  --tap-min: 44px;
+  --tap-min: 48px;
 }
 
 @media (pointer: coarse) {
   :root {
-    --row-h: 44px;
+    --row-h: 48px;
     --row-pad: 12px;
     --icon-size: 24px;
-    --tap-min: 44px;
+    --tap-min: 48px;
   }
 }
 
@@ -586,11 +580,11 @@
 /* The reading/writing column. The transcript and the composer share it so the
    caret starts where the text you are answering sits.
 
-   Fluid by default: the column follows the pane, which follows the window and
-   the user's sidebar width. Give this a length (e.g. `68ch`) to cap line
-   length instead — it is the single knob for both surfaces. */
+   Capped and centred in the pane, so line length stays readable however wide
+   the window is. This is the single knob for both surfaces: set it to `100%`
+   for a fluid full-width column instead. */
 :root {
-  --measure: 100%;
+  --measure: 84ch;
 }
 
 /* The composer's action row needs a 32px floor on pointer (the density
@@ -600,8 +594,9 @@
   height: max(32px, var(--row-h));
 }
 
-/* The composer opens at two lines: one line reads as a search field, and a
-   prompt is usually longer than that.
+/* An empty composer is two lines of text plus the toolbar. Handoff 6a asked
+   for one; two is the user's standing preference, since a one-line box reads
+   as a search field and prompts are rarely one line.
 
    The fallback is a separate @supports block rather than two min-height
    declarations, because the minifier drops the earlier one as dead — which
@@ -614,6 +609,39 @@
   /* Follows the textarea's real line-height: 14.5px body, 16px on mobile. */
   .composer-textarea {
     min-height: 2lh;
+  }
+}
+
+/* A session row's overflow menu is revealed by hovering the row — but only
+   where hovering is possible. On a touch device it stays visible, because a
+   hover-only control is one that cannot be reached at all; that was the bug
+   handoff 08 set out to remove. It also stays visible while focused or open,
+   so keyboard traversal never loses it. */
+@media (hover: hover) {
+  .row-reveal .row-menu-reveal {
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+
+  .row-reveal:hover .row-menu-reveal,
+  .row-reveal:focus-within .row-menu-reveal,
+  .row-reveal .row-menu-reveal[aria-expanded='true'] {
+    opacity: 1;
+  }
+
+  /* Same contract one level up: a control revealed by hovering anywhere in a
+     repo section (its "New session" row), rather than by hovering one row. A
+     separate class pair, so a section hover does not also reveal every row's
+     overflow menu. */
+  .section-reveal .section-reveal-target {
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+
+  .section-reveal:hover .section-reveal-target,
+  .section-reveal:focus-within .section-reveal-target,
+  .section-reveal .section-reveal-target[aria-expanded='true'] {
+    opacity: 1;
   }
 }
 
@@ -650,10 +678,12 @@ html, body, #root {
 
 /* ── Orchestrator variant — accent-themed agent chat ───────────────────── */
 
-/* Input bar top border glow */
-.orchestrator-input-bar {
-  border-top-color: var(--color-accent-7);
-  box-shadow: inset 0 2px 8px -4px color-mix(in srgb, var(--color-accent-7) 30%, transparent);
+/* Composer card — accent edge for the orchestrator variant. The composer is
+   a card in the transcript column, not a band across the pane, so the accent
+   lives on the card's own border rather than a full-width top edge. */
+.orchestrator-input-bar .composer-card {
+  border-color: var(--color-accent-7);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent-7) 25%, transparent);
 }
 
 /* Orchestrator badge pill */
@@ -673,8 +703,9 @@ html, body, #root {
   color: var(--color-accent-5);
 }
 
-[data-theme="light"] .orchestrator-input-bar {
-  box-shadow: inset 0 2px 8px -4px color-mix(in srgb, var(--color-accent-5) 20%, transparent);
+[data-theme="light"] .orchestrator-input-bar .composer-card {
+  border-color: var(--color-accent-5);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent-5) 20%, transparent);
 }
 
 /* ── Safe area insets for notched devices ──────────────────────────────── */

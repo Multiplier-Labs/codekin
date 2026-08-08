@@ -6,8 +6,8 @@
  */
 
 import { useState, useCallback } from 'react'
+import { transport } from '../lib/transport'
 
-const BASE = '/cc'
 const STARRED_KEY = 'codekin-starred-docs'
 
 interface DocFile {
@@ -92,7 +92,7 @@ export function useDocsBrowser(): UseDocsBrowserReturn {
 
     try {
       const params = new URLSearchParams({ repo: repoDir })
-      const res = await fetch(`${BASE}/api/docs?${params}`, {
+      const res = await transport.fetch(`/api/docs?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) throw new Error(`Failed to list docs: ${res.status}`)
@@ -120,7 +120,7 @@ export function useDocsBrowser(): UseDocsBrowserReturn {
 
     try {
       const params = new URLSearchParams({ repo: repoDir, file: filePath })
-      const res = await fetch(`${BASE}/api/docs/file?${params}`, {
+      const res = await transport.fetch(`/api/docs/file?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) throw new Error(`Failed to load file: ${res.status}`)

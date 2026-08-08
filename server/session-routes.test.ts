@@ -46,6 +46,14 @@ vi.mock('./opencode-process.js', () => ({
   fetchOpenCodeModels: vi.fn(async () => ({ models: [] })),
 }))
 
+const mockRefreshModels = vi.hoisted(() => vi.fn(async () => [{ id: 'claude-opus-5', label: 'Opus 5' }]))
+const mockCooldownMs = vi.hoisted(() => vi.fn(() => 0))
+vi.mock('./anthropic-models.js', () => ({
+  fetchAnthropicModels: vi.fn(async () => []),
+  refreshAnthropicModels: mockRefreshModels,
+  refreshCooldownRemainingMs: mockCooldownMs,
+}))
+
 import { createSessionRouter } from './session-routes.js'
 import type { SessionManager } from './session-manager.js'
 
@@ -277,6 +285,45 @@ describe('createSessionRouter', () => {
       const body = await res.json()
       expect(body.dirs).toContain('sub1')
       expect(body.dirs).toContain('sub2')
+    })
+  })
+
+  describe('POST /api/claude/models/refresh', () => {
+    beforeEach(async () => {
+      mockRefreshModels.mockClear()
+      mockCooldownMs.mockReturnValue(0)
+      sessions = fakeSessions()
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+    })
+
+    it('refreshes when no cooldown is active', async () => {
+      const res = await fetch(`${server.baseUrl}/api/claude/models/refresh`, {
+        method: 'POST', headers: auth(),
+      })
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.models).toEqual([{ id: 'claude-opus-5', label: 'Opus 5' }])
+      expect(mockRefreshModels).toHaveBeenCalledTimes(1)
+    })
+
+    // Each refresh spawns a CLI probe per candidate ID (~$0.04 per live model),
+    // so a hammered endpoint costs real money.
+    it('returns 429 with Retry-After while the cooldown is active', async () => {
+      mockCooldownMs.mockReturnValue(90_000)
+      const res = await fetch(`${server.baseUrl}/api/claude/models/refresh`, {
+        method: 'POST', headers: auth(),
+      })
+      expect(res.status).toBe(429)
+      expect(res.headers.get('retry-after')).toBe('90')
+      const body = await res.json()
+      expect(body.retryAfterSeconds).toBe(90)
+      expect(mockRefreshModels).not.toHaveBeenCalled()
+    })
+
+    it('requires auth', async () => {
+      const res = await fetch(`${server.baseUrl}/api/claude/models/refresh`, { method: 'POST' })
+      expect(res.status).toBe(401)
+      expect(mockRefreshModels).not.toHaveBeenCalled()
     })
   })
 
