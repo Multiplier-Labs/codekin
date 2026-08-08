@@ -1,7 +1,8 @@
 /**
  * Entry point for `codekin relay connect`: loads the machine credential
  * from ~/.config/codekin/relay.json and runs the connector in the
- * foreground until Ctrl-C.
+ * foreground until Ctrl-C, serving proxied REST requests from the hosted
+ * app against the local Codekin server.
  */
 
 import { readFileSync, existsSync } from 'fs'
@@ -9,6 +10,7 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { fileURLToPath } from 'url'
 import { RelayConnector } from './connector.js'
+import { resolveLocalTarget } from './connector-proxy.js'
 
 export interface RelayCredential {
   url: string
@@ -53,12 +55,22 @@ function main(): void {
   }
 
   const version = packageVersion()
+  const localTarget = resolveLocalTarget()
+  console.log(`[connector] Proxying to local Codekin at ${localTarget.origin}`)
+  if (!localTarget.authToken) {
+    console.warn('[connector] No local auth token found — run `codekin setup` or set AUTH_TOKEN.')
+  }
+
   const connector = new RelayConnector({
     relayUrl: credential.url,
     machineId: credential.machineId,
     machineSecret: credential.machineSecret,
     connectorVersion: version,
     localCodekinVersion: version,
+    localTarget,
+    onProxy: (method, path, status) => {
+      console.log(`[connector] ${method} ${path} → ${status}`)
+    },
     onStatus: (status, detail) => {
       const suffix = detail ? ` (${detail})` : ''
       switch (status) {

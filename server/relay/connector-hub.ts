@@ -1,17 +1,30 @@
 /**
  * Connector hub: accepts outbound WebSocket connections from paired
  * machines at /relay/connector, authenticates the hello envelope against
- * machine credentials, and tracks online/offline state in the DB.
+ * machine credentials, tracks online/offline state in the DB, and routes
+ * proxied REST requests to a machine's socket.
  *
- * Later phases route browser request/stream envelopes through the sockets
- * held here; this phase is presence + heartbeat only.
+ * The hub does no policy of its own on request contents — the browser side
+ * decides who may talk to a machine, and the connector decides which paths
+ * it will serve.
  */
 
+import { randomUUID } from 'crypto'
 import type { WebSocket } from 'ws'
 import type Database from 'better-sqlite3'
 import { verifyMachineCredential } from './pairing.js'
-import { envelope, parseEnvelope } from './relay-protocol.js'
-import type { ConnectorHello } from './relay-protocol.js'
+import {
+  envelope,
+  parseEnvelope,
+  PROXY_REQUEST_TIMEOUT_MS,
+  RELAY_ERROR,
+} from './relay-protocol.js'
+import type {
+  ConnectorHello,
+  ProxyRequest,
+  ProxyResponse,
+  RelayError,
+} from './relay-protocol.js'
 
 /** Close codes mirroring the local server's WS conventions. */
 const CLOSE_AUTH_FAILED = 4001
@@ -26,15 +39,29 @@ const IDLE_TIMEOUT_MS = 90_000
 /** last_seen_at writes are throttled to at most one per interval. */
 const LAST_SEEN_WRITE_INTERVAL_MS = 60_000
 
+/** Cap on requests a single machine may have in flight, to bound hub memory. */
+const MAX_PENDING_PER_MACHINE = 64
+
+interface PendingRequest {
+  machineId: string
+  settle: (outcome: ProxyOutcome) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
 interface ConnectedMachine {
   machineId: string
   socket: WebSocket
   lastActivity: number
   lastSeenWrite: number
+  pending: Set<string>
 }
+
+/** What a proxied request resolves to: the machine's response, or a relay error. */
+export type ProxyOutcome = { response: ProxyResponse } | { error: RelayError }
 
 export class ConnectorHub {
   private machines = new Map<string, ConnectedMachine>()
+  private pending = new Map<string, PendingRequest>()
   private idleTimer: ReturnType<typeof setInterval>
 
   constructor(private db: Database.Database) {
@@ -94,14 +121,18 @@ export class ConnectorHub {
       }
       if (msg.kind === 'ping') {
         socket.send(JSON.stringify(envelope('pong', {})))
+      } else if (msg.kind === 'response' || msg.kind === 'error') {
+        this.settleResponse(machineId, msg.id, msg.kind, msg.payload)
       }
-      // request/response/stream envelopes arrive in later phases
+      // stream envelopes arrive in the session-streaming phase
     })
 
     socket.on('close', () => {
       clearTimeout(helloTimeout)
       if (machineId !== null && this.machines.get(machineId)?.socket === socket) {
+        const machine = this.machines.get(machineId)!
         this.machines.delete(machineId)
+        this.failPending(machine, 'connector disconnected')
         this.setStatus(machineId, 'offline')
       }
     })
@@ -111,16 +142,96 @@ export class ConnectorHub {
     })
   }
 
+  /**
+   * Send a proxied REST request to a machine and await its response.
+   *
+   * Never rejects: transport problems come back as a `RelayError` so callers
+   * can relay one consistent shape to the browser.
+   */
+  sendRequest(machineId: string, request: ProxyRequest, timeoutMs = PROXY_REQUEST_TIMEOUT_MS): Promise<ProxyOutcome> {
+    const machine = this.machines.get(machineId)
+    if (!machine) {
+      return Promise.resolve({
+        error: { code: RELAY_ERROR.machineOffline, message: 'Machine is not connected' },
+      })
+    }
+    if (machine.pending.size >= MAX_PENDING_PER_MACHINE) {
+      return Promise.resolve({
+        error: { code: RELAY_ERROR.badRequest, message: 'Too many requests in flight for this machine' },
+      })
+    }
+
+    const id = randomUUID()
+    return new Promise<ProxyOutcome>(resolve => {
+      let settled = false
+      const settle = (outcome: ProxyOutcome) => {
+        if (settled) return
+        settled = true
+        const entry = this.pending.get(id)
+        if (entry) clearTimeout(entry.timer)
+        this.pending.delete(id)
+        machine.pending.delete(id)
+        resolve(outcome)
+      }
+
+      const timer = setTimeout(() => {
+        settle({ error: { code: RELAY_ERROR.timeout, message: 'Machine did not respond in time' } })
+      }, timeoutMs)
+      timer.unref?.()
+
+      this.pending.set(id, { machineId, settle, timer })
+      machine.pending.add(id)
+
+      try {
+        machine.socket.send(JSON.stringify(envelope('request', request, { id })))
+      } catch (err) {
+        settle({
+          error: {
+            code: RELAY_ERROR.machineOffline,
+            message: `Could not reach machine: ${err instanceof Error ? err.message : String(err)}`,
+          },
+        })
+      }
+    })
+  }
+
+  /** Route a `response`/`error` envelope back to its waiting caller. */
+  private settleResponse(machineId: string, id: string | undefined, kind: 'response' | 'error', payload: unknown): void {
+    if (!id) return
+    const entry = this.pending.get(id)
+    // A response for another machine's id means a confused or hostile
+    // connector; drop it rather than letting it answer someone else's call.
+    if (!entry || entry.machineId !== machineId) return
+    if (kind === 'error') {
+      const err = payload as Partial<RelayError>
+      entry.settle({
+        error: {
+          code: typeof err.code === 'string' ? err.code : RELAY_ERROR.badRequest,
+          message: typeof err.message === 'string' ? err.message : 'Machine reported an error',
+        },
+      })
+      return
+    }
+    entry.settle({ response: payload as ProxyResponse })
+  }
+
+  private failPending(machine: ConnectedMachine, reason: string): void {
+    for (const id of [...machine.pending]) {
+      this.pending.get(id)?.settle({ error: { code: RELAY_ERROR.machineOffline, message: reason } })
+    }
+  }
+
   private registerMachine(machineId: string, socket: WebSocket, hello: Partial<ConnectorHello>): void {
     // A reconnect may race the old socket's close — the new connection wins.
     const existing = this.machines.get(machineId)
     if (existing && existing.socket !== socket) {
       existing.socket.close(CLOSE_REPLACED, 'replaced by new connection')
       this.machines.delete(machineId)
+      this.failPending(existing, 'connector reconnected')
     }
 
     const now = Date.now()
-    this.machines.set(machineId, { machineId, socket, lastActivity: now, lastSeenWrite: now })
+    this.machines.set(machineId, { machineId, socket, lastActivity: now, lastSeenWrite: now, pending: new Set() })
 
     this.db.prepare(
       `UPDATE machines SET status = 'online', last_seen_at = datetime('now'),
@@ -166,6 +277,7 @@ export class ConnectorHub {
   close(): void {
     clearInterval(this.idleTimer)
     for (const machine of this.machines.values()) {
+      this.failPending(machine, 'relay shutting down')
       machine.socket.close(1001, 'server shutting down')
     }
     this.machines.clear()

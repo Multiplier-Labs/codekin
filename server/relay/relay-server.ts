@@ -1,16 +1,17 @@
 /**
  * Hosted relay / control plane server entry point.
  *
- * Serves the control-plane REST API and the /relay/connector WebSocket on
+ * Serves the control-plane REST API, the /relay/connector WebSocket (paired
+ * machines) and the /relay/browser WebSocket (signed-in browsers) on
  * 127.0.0.1:<RELAY_PORT> behind nginx (app.codekin.ai). The hosted frontend
- * is static-served by nginx; /relay/browser (client streams) arrives in a
- * later phase.
+ * is static-served by nginx.
  */
 
 import express from 'express'
 import session from 'express-session'
-import { createServer } from 'http'
+import { createServer, ServerResponse } from 'http'
 import { WebSocketServer } from 'ws'
+import type { IncomingMessage } from 'http'
 import { join } from 'path'
 import { loadRelayConfig } from './relay-config.js'
 import { openControlPlaneDb } from './control-plane-db.js'
@@ -19,11 +20,15 @@ import { createRelayAuthRouter } from './relay-auth-routes.js'
 import { createMachineRouter } from './machine-routes.js'
 import { createPairingRouter } from './pairing-routes.js'
 import { ConnectorHub } from './connector-hub.js'
+import { BrowserHub } from './browser-hub.js'
+import { MAX_PROXY_BODY_BYTES } from './relay-protocol.js'
+import type { SessionUser } from './relay-auth-routes.js'
 
 const config = loadRelayConfig()
 const db = openControlPlaneDb(join(config.dataDir, 'control-plane.db'))
 const store = new SqliteSessionStore(db)
 const hub = new ConnectorHub(db)
+const browserHub = new BrowserHub(db, hub)
 
 const app = express()
 
@@ -73,27 +78,33 @@ app.use('/api/auth', ipRateLimiter(20, 60_000))
 app.use('/api/machines/pair/start', ipRateLimiter(10, 60_000))
 app.use('/api/machines/pair/complete', ipRateLimiter(60, 60_000))
 
-app.use(
-  session({
-    name: 'codekin_relay_sid',
-    secret: config.sessionSecret,
-    store,
-    resave: false,
-    saveUninitialized: false,
-    rolling: true,
-    cookie: {
-      httpOnly: true,
-      secure: config.isProduction,
-      // 'lax' is required for the OAuth return trip from github.com
-      sameSite: 'lax',
-      path: '/',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    },
-  }),
-)
+// Held in a const so WebSocket upgrades can reuse it to resolve the session.
+const sessionMiddleware = session({
+  name: 'codekin_relay_sid',
+  secret: config.sessionSecret,
+  store,
+  resave: false,
+  saveUninitialized: false,
+  rolling: true,
+  cookie: {
+    httpOnly: true,
+    secure: config.isProduction,
+    // 'lax' is required for the OAuth return trip from github.com
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 30 * 24 * 60 * 60 * 1000,
+  },
+})
+
+app.use(sessionMiddleware)
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'codekin-relay', machinesOnline: hub.onlineCount })
+  res.json({
+    ok: true,
+    service: 'codekin-relay',
+    machinesOnline: hub.onlineCount,
+    browserClients: browserHub.clientCount,
+  })
 })
 
 app.use(createRelayAuthRouter({ db, config }))
@@ -115,8 +126,32 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 const server = createServer(app)
 
 // Path-routed WebSocket upgrades (noServer — reject unknown paths).
-const connectorWss = new WebSocketServer({ noServer: true })
+// maxPayload bounds a single frame; base64 bodies expand by ~4/3.
+const wssOptions = { noServer: true, maxPayload: Math.ceil(MAX_PROXY_BODY_BYTES * 1.4) }
+const connectorWss = new WebSocketServer(wssOptions)
 connectorWss.on('connection', socket => { hub.handleConnection(socket); })
+
+const browserWss = new WebSocketServer(wssOptions)
+
+/**
+ * Resolve the express-session user for an upgrade request.
+ *
+ * WebSocket upgrades are not covered by the same-origin policy but do carry
+ * cookies, so the Origin is checked explicitly — otherwise any site could
+ * open an authenticated relay socket in a signed-in user's browser.
+ */
+function authenticateUpgrade(req: IncomingMessage): Promise<SessionUser | null> {
+  const origin = req.headers.origin
+  if (origin !== config.publicUrl) return Promise.resolve(null)
+
+  return new Promise(resolve => {
+    const res = new ServerResponse(req) as unknown as express.Response
+    sessionMiddleware(req as express.Request, res, () => {
+      const user = (req as express.Request).session?.user
+      resolve(user && user.status === 'active' ? user : null)
+    })
+  })
+}
 
 server.on('upgrade', (req, socket, head) => {
   const path = (req.url ?? '').split('?')[0]
@@ -124,9 +159,22 @@ server.on('upgrade', (req, socket, head) => {
     connectorWss.handleUpgrade(req, socket, head, ws => {
       connectorWss.emit('connection', ws, req)
     })
-  } else {
-    socket.destroy()
+    return
   }
+  if (path === '/relay/browser') {
+    void authenticateUpgrade(req).then(user => {
+      if (!user) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
+        socket.destroy()
+        return
+      }
+      browserWss.handleUpgrade(req, socket, head, ws => {
+        browserHub.handleConnection(ws, user)
+      })
+    })
+    return
+  }
+  socket.destroy()
 })
 
 server.listen(config.port, '127.0.0.1', () => {
@@ -135,6 +183,7 @@ server.listen(config.port, '127.0.0.1', () => {
 
 function shutdown() {
   console.log('[relay] Shutting down')
+  browserHub.close()
   hub.close()
   server.close(() => {
     store.close()

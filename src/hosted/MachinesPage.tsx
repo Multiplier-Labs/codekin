@@ -17,6 +17,7 @@ export interface Machine {
 interface MachinesPageProps {
   user: HostedUser
   onLogout: () => void
+  onSelect: (machine: Machine) => void
 }
 
 const STATUS_DOT: Record<Machine['status'], string> = {
@@ -25,7 +26,7 @@ const STATUS_DOT: Record<Machine['status'], string> = {
   offline: 'bg-ink-faint',
 }
 
-export function MachinesPage({ user, onLogout }: MachinesPageProps) {
+export function MachinesPage({ user, onLogout, onSelect }: MachinesPageProps) {
   const [machines, setMachines] = useState<Machine[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -77,14 +78,16 @@ export function MachinesPage({ user, onLogout }: MachinesPageProps) {
         ) : (
           <ul className="flex flex-col gap-2">
             {machines.map(m => (
-              <li
-                key={m.id}
-                className="flex items-center gap-3 rounded-control border border-edge bg-surface px-4 py-3"
-              >
-                <span className={`h-2 w-2 rounded-full ${STATUS_DOT[m.status]}`} />
-                <span className="text-body text-ink">{m.displayName}</span>
-                {m.hostname && <span className="text-meta text-ink-faint">{m.hostname}</span>}
-                <span className="ml-auto text-meta text-ink-muted">{m.status}</span>
+              <li key={m.id}>
+                <button
+                  onClick={() => { onSelect(m) }}
+                  className="flex w-full items-center gap-3 rounded-control border border-edge bg-surface px-4 py-3 text-left transition hover:bg-surface-raised"
+                >
+                  <span className={`h-2 w-2 rounded-full ${STATUS_DOT[m.status]}`} />
+                  <span className="text-body text-ink">{m.displayName}</span>
+                  {m.hostname && <span className="text-meta text-ink-faint">{m.hostname}</span>}
+                  <span className="ml-auto text-meta text-ink-muted">{m.status}</span>
+                </button>
               </li>
             ))}
           </ul>
