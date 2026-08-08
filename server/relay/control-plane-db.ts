@@ -96,12 +96,14 @@ CREATE TABLE IF NOT EXISTS machine_credentials (
 
 CREATE TABLE IF NOT EXISTS pairing_requests (
   code TEXT PRIMARY KEY,
-  requested_by_host TEXT,
+  device_code_hash TEXT NOT NULL,
+  hostname TEXT,
+  platform TEXT,
   status TEXT NOT NULL DEFAULT 'pending',
   approved_by_user_id TEXT REFERENCES users(id),
   machine_id TEXT REFERENCES machines(id),
   created_at TEXT DEFAULT (datetime('now')),
-  expires_at TEXT NOT NULL
+  expires_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS session_shares (
