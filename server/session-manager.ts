@@ -27,6 +27,7 @@ import path from 'path'
 import { promisify } from 'util'
 import type { WebSocket } from 'ws'
 import type { CodingProcess, CodingProvider } from './coding-process.js'
+import { buildHandoffInjection, generateHandoff } from './handoff-manager.js'
 import { PlanManager } from './plan-manager.js'
 import { SessionArchive } from './session-archive.js'
 import type { DiffFileStatus, DiffScope, Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
@@ -1288,10 +1289,17 @@ export class SessionManager {
     // --- Phase 2: determine message content (with context injection if needed) ---
     let messageToSend = data
 
-    // If we auto-started above and have no saved claudeSessionId, Claude CLI
-    // starts a fresh session without conversation history.  Inject a context
-    // summary so the new process has awareness of prior conversation.
-    if (!session.claudeSessionId) {
+    // A carry-context provider switch left a handoff waiting: inject it into
+    // the first message under the new provider (takes precedence over the
+    // display-buffer summary — it is built from the real transcript).
+    if (session.pendingHandoff) {
+      messageToSend = buildHandoffInjection(session.pendingHandoff) + '\n\n' + data
+      delete session.pendingHandoff
+      this.persistToDiskDebounced()
+    } else if (!session.claudeSessionId) {
+      // If we auto-started above and have no saved claudeSessionId, Claude CLI
+      // starts a fresh session without conversation history.  Inject a context
+      // summary so the new process has awareness of prior conversation.
       const context = this.buildSessionContext(session)
       if (context) {
         messageToSend = context + '\n\n' + data
@@ -1349,21 +1357,57 @@ export class SessionManager {
   }
 
   /** Update the provider for a session and restart with the new provider process. */
-  setProvider(sessionId: string, provider: CodingProvider): boolean {
+  setProvider(sessionId: string, provider: CodingProvider, carryContext = false): boolean {
     const session = this.sessions.get(sessionId)
     if (!session) return false
     if (session.provider === provider) return true
-    if (session.claudeProcess?.isAlive()) {
-      void session.coordinator.requestReconfigure(() => {
-        session.provider = provider
-        session.claudeSessionId = null
-        this.persistToDiskDebounced()
-      })
-    } else {
+
+    const doSwitch = () => {
       session.provider = provider
       session.claudeSessionId = null
       this.persistToDiskDebounced()
+      // Sidebar/provider-derived UI (model list, permission modes) keys off the
+      // session's provider — refresh clients.
+      this._globalBroadcast?.({ type: 'sessions_updated' })
     }
+    const finish = () => {
+      if (session.claudeProcess?.isAlive()) {
+        void session.coordinator.requestReconfigure(doSwitch)
+      } else {
+        doSwitch()
+      }
+    }
+
+    if (!carryContext) {
+      finish()
+      return true
+    }
+
+    // Capture source identity before the switch clears claudeSessionId.
+    const source = {
+      codekinSessionId: session.id,
+      provider: session.provider,
+      workingDir: session.worktreePath ?? session.workingDir,
+      harnessSessionId: session.claudeSessionId,
+    }
+    this.broadcastAndHistory(session, { type: 'system_message', subtype: 'notification', text: `Preparing handoff from ${session.provider} — distilling session context...` })
+    // When the rate-limit breaker is open, skip the claude -p distillation
+    // (it would hang until timeout) — generateHandoff falls back to the raw
+    // transcript extract.
+    const distill = this.isRateLimited() ? () => Promise.reject(new Error('rate limited')) : undefined
+    void generateHandoff(source, distill)
+      .then((handoff) => {
+        if (handoff) {
+          session.pendingHandoff = handoff
+          this.broadcastAndHistory(session, { type: 'system_message', subtype: 'notification', text: `Handoff ready${handoff.distilled ? '' : ' (raw transcript extract — distillation unavailable)'}. It will be shared with ${provider} on your next message.` })
+        } else {
+          this.broadcastAndHistory(session, { type: 'system_message', subtype: 'notification', text: 'No transcript found for handoff — falling back to the recent-history summary.' })
+        }
+      })
+      .catch((err: unknown) => {
+        console.warn(`[handoff] generation failed for session ${sessionId}:`, err instanceof Error ? err.message : err)
+      })
+      .finally(finish)
     return true
   }
 
