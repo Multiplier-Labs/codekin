@@ -17,6 +17,9 @@ import {
   RELAY_ERROR,
 } from './relay-protocol.js'
 import type { ProxyRequest, ProxyResponse, RelayError } from './relay-protocol.js'
+import { checkRestPolicy, filterSessionList, needsSessionListFilter } from './connector-policy.js'
+import type { ChannelPolicy } from './connector-policy.js'
+import type { GrantMap } from './shares.js'
 
 /**
  * Paths the hosted UI may read, matched as prefixes against the path (query
@@ -64,8 +67,27 @@ export interface ProxyDecision {
   error?: RelayError
 }
 
-/** Decide whether a proxied request may proceed to the local server. */
+/**
+ * Decide whether a proxied request may proceed to the local server.
+ *
+ * Two independent gates: the machine's own path allowlist (what may be
+ * proxied at all), and the caller's permissions (what this particular user
+ * may do). Both are checked here, on the machine.
+ */
 export function checkProxyRequest(req: ProxyRequest): ProxyDecision {
+  const principal = req.principal
+  if (!principal) {
+    return { allowed: false, error: { code: RELAY_ERROR.forbidden, message: 'Request carried no principal' } }
+  }
+  const permitted = checkRestPolicy(
+    { role: principal.role === 'owner' ? 'owner' : 'grantee', grants: principal.grants as GrantMap },
+    req.method || '',
+    req.path || '/',
+  )
+  if (!permitted.allowed) {
+    return { allowed: false, error: { code: RELAY_ERROR.notPermitted, message: permitted.reason ?? 'Not permitted' } }
+  }
+
   const method = (req.method || '').toUpperCase()
   const isRead = READ_METHODS.has(method)
   if (!isRead && !MUTATION_METHODS.has(method)) {
@@ -165,6 +187,11 @@ export async function executeProxyRequest(
   const decision = checkProxyRequest(req)
   if (!decision.allowed) return { error: decision.error! }
 
+  const policy: ChannelPolicy = {
+    role: req.principal?.role === 'grantee' ? 'grantee' : 'owner',
+    grants: (req.principal?.grants ?? {}) as GrantMap,
+  }
+
   const fetchImpl = opts.fetchImpl ?? fetch
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (opts.target.authToken) {
@@ -214,11 +241,25 @@ export async function executeProxyRequest(
       if (value !== null) responseHeaders[name] = value
     }
 
+    let payload = buffer
+    // A grantee may list sessions, but only the ones shared with them: the
+    // rest are filtered out here, before leaving the machine.
+    if (res.ok && needsSessionListFilter(policy, req.path)) {
+      const filtered = filterSessionList(policy, buffer.toString('utf-8'))
+      if (filtered === null) {
+        return {
+          error: { code: RELAY_ERROR.notPermitted, message: 'Session list could not be filtered for this user' },
+        }
+      }
+      payload = Buffer.from(filtered, 'utf-8')
+      delete responseHeaders['content-length']
+    }
+
     return {
       response: {
         status: res.status,
         headers: responseHeaders,
-        body: buffer.byteLength > 0 ? buffer.toString('base64') : undefined,
+        body: payload.byteLength > 0 ? payload.toString('base64') : undefined,
       },
     }
   } catch (err) {

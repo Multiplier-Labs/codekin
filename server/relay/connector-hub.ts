@@ -20,11 +20,13 @@ import {
   RELAY_ERROR,
   STREAM_CLOSE,
 } from './relay-protocol.js'
+import { recordAuditEvent } from './audit.js'
 import type {
   ConnectorHello,
   ProxyRequest,
   ProxyResponse,
   RelayError,
+  RelayPrincipal,
 } from './relay-protocol.js'
 
 /** Close codes mirroring the local server's WS conventions. */
@@ -148,6 +150,7 @@ export class ConnectorHub {
         this.machines.delete(machineId)
         this.failPending(machine, 'connector disconnected')
         this.setStatus(machineId, 'offline')
+        recordAuditEvent(this.db, { kind: 'machine_disconnected', machineId })
       }
     })
 
@@ -214,13 +217,18 @@ export class ConnectorHub {
    * responsible for closing the channel; frames from the connector arrive on
    * `listener` until then.
    */
-  openChannel(machineId: string, channelId: string, listener: ChannelListener): RelayError | null {
+  openChannel(
+    machineId: string,
+    channelId: string,
+    listener: ChannelListener,
+    principal?: RelayPrincipal,
+  ): RelayError | null {
     const machine = this.machines.get(machineId)
     if (!machine) return { code: RELAY_ERROR.machineOffline, message: 'Machine is not connected' }
 
     this.channelListeners.set(channelId, listener)
     machine.channels.add(channelId)
-    machine.socket.send(JSON.stringify(envelope('stream_open', {}, { channelId })))
+    machine.socket.send(JSON.stringify(envelope('stream_open', { principal }, { channelId })))
     return null
   }
 
@@ -299,6 +307,12 @@ export class ConnectorHub {
     const row = this.db.prepare('SELECT display_name FROM machines WHERE id = ?').get(machineId) as
       | { display_name: string }
       | undefined
+    recordAuditEvent(this.db, {
+      kind: 'machine_connected',
+      machineId,
+      metadata: { connectorVersion: hello.connectorVersion ?? null },
+    })
+
     socket.send(
       JSON.stringify(
         envelope('hello_ack', { machineId, displayName: row?.display_name ?? 'Machine' }),

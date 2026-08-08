@@ -12,6 +12,8 @@ export interface Machine {
   localCodekinVersion: string | null
   status: 'online' | 'offline' | 'degraded'
   lastSeenAt: string | null
+  /** 'shared' when reachable only through a session share. */
+  access?: 'owner' | 'shared'
 }
 
 interface MachinesPageProps {
@@ -86,6 +88,11 @@ export function MachinesPage({ user, onLogout, onSelect }: MachinesPageProps) {
                   <span className={`h-2 w-2 rounded-full ${STATUS_DOT[m.status]}`} />
                   <span className="text-body text-ink">{m.displayName}</span>
                   {m.hostname && <span className="text-meta text-ink-faint">{m.hostname}</span>}
+                  {m.access === 'shared' && (
+                    <span className="rounded-control border border-edge px-1.5 py-0.5 text-micro text-ink-muted">
+                      shared with you
+                    </span>
+                  )}
                   <span className="ml-auto text-meta text-ink-muted">{m.status}</span>
                 </button>
               </li>

@@ -18,6 +18,7 @@ import {
   removeMachine,
 } from './pairing.js'
 import { requireActiveUser } from './relay-auth-routes.js'
+import { recordAuditEvent } from './audit.js'
 import type { RelayConfig } from './relay-config.js'
 
 /** Suggested delay between CLI completion polls. */
@@ -87,6 +88,13 @@ export function createPairingRouter(db: Database.Database, config: RelayConfig):
       res.status(status).json({ error: result.reason })
       return
     }
+    recordAuditEvent(db, {
+      kind: 'machine_paired',
+      actorUserId: userId,
+      machineId: result.machineId,
+      ip: req.ip ?? null,
+      userAgent: req.get('user-agent') ?? null,
+    })
     res.json({ machineId: result.machineId })
   })
 

@@ -12,6 +12,8 @@
 import WebSocket from 'ws'
 import { STREAM_CLOSE } from './relay-protocol.js'
 import type { LocalServerTarget } from './connector-proxy.js'
+import { checkClientFrame, newChannelState, observeServerFrame } from './connector-policy.js'
+import type { ChannelPolicy, ChannelState } from './connector-policy.js'
 
 /** The local server drops sockets that do not authenticate promptly. */
 const LOCAL_HANDSHAKE_TIMEOUT_MS = 10_000
@@ -23,6 +25,8 @@ export interface StreamChannelCallbacks {
   onData: (data: string) => void
   /** The channel ended; no further callbacks follow. */
   onClose: (code: number, reason: string) => void
+  /** A browser frame the grant did not permit; it was not forwarded. */
+  onDenied?: (reason: string, permission?: string) => void
 }
 
 /** Convert the local server origin to its WebSocket URL. */
@@ -50,10 +54,14 @@ export class StreamChannel {
   private connectedFrame: string | null = null
   private handshakeTimer: ReturnType<typeof setTimeout> | null = null
 
+  private state: ChannelState = newChannelState()
+
   constructor(
     private target: LocalServerTarget,
     private callbacks: StreamChannelCallbacks,
     private createSocket: WebSocketFactory = (url, options) => new WebSocket(url, options),
+    /** Owner by default: an unshared channel belongs to the machine's owner. */
+    private policy: ChannelPolicy = { role: 'owner', grants: {} },
   ) {}
 
   /** Open the local socket and perform the local auth handshake. */
@@ -89,6 +97,9 @@ export class StreamChannel {
         this.callbacks.onReady()
         return
       }
+      // Remember what the server asked, so an approval answer can be
+      // classified against the tool it belongs to.
+      observeServerFrame(this.state, text)
       this.callbacks.onData(text)
     })
 
@@ -115,6 +126,15 @@ export class StreamChannel {
       if (this.connectedFrame) this.callbacks.onData(this.connectedFrame)
       return
     }
+
+    // The grant is enforced here, on the machine — the hub's own check is
+    // not trusted to have been correct or to have happened at all.
+    const decision = checkClientFrame(this.policy, this.state, data)
+    if (!decision.allowed) {
+      this.callbacks.onDenied?.(decision.reason ?? 'Not permitted', decision.permission)
+      return
+    }
+
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(data)
     }

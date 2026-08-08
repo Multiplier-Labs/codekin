@@ -6,7 +6,7 @@
  */
 
 import WebSocket from 'ws'
-import { envelope, parseEnvelope, STREAM_CLOSE } from './relay-protocol.js'
+import { envelope, parseEnvelope, RELAY_ERROR, STREAM_CLOSE } from './relay-protocol.js'
 import type {
   ConnectorHello,
   ConnectorHelloAck,
@@ -14,11 +14,14 @@ import type {
   RelayError,
   StreamClose,
   StreamData,
+  StreamOpen,
 } from './relay-protocol.js'
 import { executeProxyRequest, resolveLocalTarget } from './connector-proxy.js'
 import type { FetchLike, LocalServerTarget } from './connector-proxy.js'
 import { StreamChannel } from './connector-stream.js'
 import type { WebSocketFactory } from './connector-stream.js'
+import type { ChannelPolicy } from './connector-policy.js'
+import type { GrantMap } from './shares.js'
 
 export interface ConnectorOptions {
   /** Hosted relay origin, e.g. https://app.codekin.ai */
@@ -38,7 +41,7 @@ export interface ConnectorOptions {
   /** Called for each proxied request, for CLI output. */
   onProxy?: (method: string, path: string, status: number | string) => void
   /** Called when a session stream opens or closes, for CLI output. */
-  onStream?: (event: 'open' | 'close', channelId: string, detail?: string) => void
+  onStream?: (event: 'open' | 'close' | 'denied', channelId: string, detail?: string) => void
 }
 
 export type ConnectorStatus =
@@ -132,7 +135,7 @@ export class RelayConnector {
       } else if (msg.kind === 'request') {
         void this.handleProxyRequest(ws, msg.id, msg.payload as ProxyRequest)
       } else if (msg.kind === 'stream_open') {
-        this.openChannel(ws, msg.channelId)
+        this.openChannel(ws, msg.channelId, msg.payload as StreamOpen)
       } else if (msg.kind === 'stream_data') {
         if (msg.channelId) this.channels.get(msg.channelId)?.send((msg.payload as StreamData).data)
       } else if (msg.kind === 'stream_close') {
@@ -188,10 +191,24 @@ export class RelayConnector {
   }
 
   /** Open a local session socket for a channel the hub asked for. */
-  private openChannel(ws: WebSocket, channelId: string | undefined): void {
+  private openChannel(ws: WebSocket, channelId: string | undefined, open?: StreamOpen): void {
     if (!channelId || this.channels.has(channelId)) return
 
-    const send = (kind: 'event' | 'stream_data' | 'stream_close', payload: unknown) => {
+    const principal = open?.principal
+    if (!principal) {
+      ws.send(
+        JSON.stringify(
+          envelope('error', { code: RELAY_ERROR.forbidden, message: 'Channel carried no principal' }, { channelId }),
+        ),
+      )
+      return
+    }
+    const policy: ChannelPolicy = {
+      role: principal.role === 'owner' ? 'owner' : 'grantee',
+      grants: principal.grants as GrantMap,
+    }
+
+    const send = (kind: 'event' | 'stream_data' | 'stream_close' | 'error', payload: unknown) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify(envelope(kind, payload, { channelId })))
       }
@@ -210,8 +227,13 @@ export class RelayConnector {
           this.opts.onStream?.('close', channelId, `${code} ${reason}`)
           send('stream_close', { code, reason })
         },
+        onDenied: (reason, permission) => {
+          this.opts.onStream?.('denied', channelId, reason)
+          send('error', { code: RELAY_ERROR.notPermitted, message: reason, permission })
+        },
       },
       this.opts.socketFactory,
+      policy,
     )
 
     this.channels.set(channelId, channel)

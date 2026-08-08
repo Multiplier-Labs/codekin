@@ -19,6 +19,7 @@ import { SqliteSessionStore } from './sqlite-session-store.js'
 import { createRelayAuthRouter } from './relay-auth-routes.js'
 import { createMachineRouter } from './machine-routes.js'
 import { createPairingRouter } from './pairing-routes.js'
+import { createShareRouter } from './share-routes.js'
 import { ConnectorHub } from './connector-hub.js'
 import { BrowserHub } from './browser-hub.js'
 import { MAX_PROXY_BODY_BYTES } from './relay-protocol.js'
@@ -110,6 +111,7 @@ app.get('/api/health', (_req, res) => {
 app.use(createRelayAuthRouter({ db, config }))
 app.use(createMachineRouter(db))
 app.use(createPairingRouter(db, config))
+app.use(createShareRouter(db))
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' })
