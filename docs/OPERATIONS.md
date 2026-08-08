@@ -4,6 +4,7 @@ Operational reference for running Codekin in production. Covers the two runtime-
 
 - [WebSocket Rate Limiting](#websocket-rate-limiting) — per-IP connection caps and per-connection message rate limits.
 - [Workflow Restart-Resume & Orphan-Session Handling](#workflow-restart-resume--orphan-session-handling) — how the workflow engine recovers in-flight runs across server restarts and handles sessions that disappear mid-run.
+- [Hosted Relay](#hosted-relay-appcodekinai) — the control plane, the hosted frontend, and the per-machine connector.
 
 ---
 
@@ -308,3 +309,84 @@ There is no down-migration. Rolling back to a pre-#437 server build is safe — 
 - [`server/workflow-loader.ts`](../server/workflow-loader.ts) — `create_session` calls `ctx.recordSessionId(...)`, `run_prompt` pre-flight check + `resumed` handling, `waitForSessionResult` throws `SessionGoneError`, `loadMdWorkflows` wires the session resolver
 - [`server/workflow-engine.test.ts`](../server/workflow-engine.test.ts) — restart-resume and orphan-session test coverage
 - [`server/ws-server.ts`](../server/ws-server.ts) — the startup site that calls `engine.resumeInterrupted()`
+
+---
+
+## Hosted Relay (app.codekin.ai)
+
+The hosted relay lets a browser reach a developer machine's local Codekin
+server. It is two processes plus a static bundle:
+
+| Piece | Where | What it is |
+|---|---|---|
+| Control plane / hub | the host serving `app.codekin.ai`, port 32360 | `server/dist/relay/relay-server.js` behind nginx |
+| Hosted frontend | `/var/www/codekin-app` | `npm run build:hosted` output, static-served |
+| Connector | each developer machine | `server/dist/relay/connector-cli.js`, outbound only |
+
+Design and protocol are in
+[HOSTED-RELAY-CONTROL-PLANE-SPEC.md](HOSTED-RELAY-CONTROL-PLANE-SPEC.md); the
+build order is in
+[HOSTED-RELAY-IMPLEMENTATION-PLAN.md](HOSTED-RELAY-IMPLEMENTATION-PLAN.md).
+
+### Control plane configuration
+
+Read from `~/.codekin-relay/env` (or the process environment, which wins).
+The server refuses to boot if a required value is missing, so a
+misconfiguration fails at start rather than at first login.
+
+| Key | Required | Notes |
+|---|---|---|
+| `SESSION_SECRET` | yes | ≥ 32 chars; signs session cookies |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | yes | GitHub **OAuth App** credentials |
+| `OWNER_GITHUB_LOGIN` | yes | gets the owner role |
+| `ALLOWED_GITHUB_LOGINS` | no | comma-separated; others land in `pending` |
+| `PUBLIC_URL` | no | default `http://localhost:5173`; must match the OAuth callback host |
+| `RELAY_PORT` | no | default 32360, bound to 127.0.0.1 |
+| `AUDIT_RETENTION_DAYS` | no | default 90; `0` disables pruning |
+| `NODE_ENV=production` | recommended | required for `Secure` session cookies |
+
+The OAuth App's **Authorization callback URL** must be exactly
+`<PUBLIC_URL>/api/auth/github/callback`.
+
+### Deploying
+
+```bash
+git pull --ff-only
+npm run build:hosted && rsync -a --delete dist-hosted/ /var/www/codekin-app/
+cd server && npm run build
+pm2 restart codekin-relay    # or: pm2 start server/dist/relay/relay-server.js --name codekin-relay
+```
+
+`GET /api/health` reports `machinesOnline` and `browserClients`.
+
+### Connecting a machine
+
+```bash
+codekin relay login      # device-code pairing; approve at <PUBLIC_URL>/pair
+codekin relay connect    # foreground; run under pm2 to keep it up
+```
+
+The connector needs two things about the machine's *local* server, and finds
+them in the process environment, then `~/.codekin/env`, then
+`~/.config/codekin/env`:
+
+- **`AUTH_TOKEN` or `AUTH_TOKEN_FILE`** — the local server's bearer token. The
+  connector runs in a user's shell, which does not inherit the environment a
+  pm2- or systemd-managed server was started with, so an install whose token
+  lives outside `~/.config/codekin/token` must say where. Without it every
+  proxied request is refused and the UI reports `local_unauthorized`.
+- **`RELAY_LOCAL_ORIGIN`** (or `CORS_ORIGIN`) — a local server running with
+  `NODE_ENV=production` only accepts WebSockets whose `Origin` equals its
+  `CORS_ORIGIN`. The connector is not a browser, so it must be told which
+  origin to present. Without it REST works but session streaming closes with
+  4003.
+
+Only one connector may serve a machine at a time; a second one takes the slot
+and the first stops rather than fighting for it.
+
+### Limits
+
+Per user: 40 frames/s (burst 120), 4 stream channels, 16 in-flight requests.
+Per machine: 200 frames/s (burst 600), 32 channels, 64 in-flight requests.
+Bodies are capped at 8 MB. A peer that stops draining its socket past 8 MB of
+backlog has its channel closed rather than growing the hub's memory.
