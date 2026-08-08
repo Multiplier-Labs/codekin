@@ -201,17 +201,17 @@ describe('principal enforcement', () => {
 
 describe('resolveLocalTarget', () => {
   it('prefers AUTH_TOKEN and PORT from the environment', () => {
-    const resolved = resolveLocalTarget({ AUTH_TOKEN: 'env-token', PORT: '40000' } as NodeJS.ProcessEnv)
+    const resolved = resolveLocalTarget({ AUTH_TOKEN: 'env-token', PORT: '40000' } as NodeJS.ProcessEnv, [])
     expect(resolved).toMatchObject({ origin: 'http://127.0.0.1:40000', authToken: 'env-token' })
   })
 
   it('falls back to the default local port', () => {
-    const resolved = resolveLocalTarget({ AUTH_TOKEN: 'env-token', AUTH_TOKEN_FILE: '/nope' } as NodeJS.ProcessEnv)
+    const resolved = resolveLocalTarget({ AUTH_TOKEN: 'env-token', AUTH_TOKEN_FILE: '/nope' } as NodeJS.ProcessEnv, [])
     expect(resolved.origin).toBe('http://127.0.0.1:32352')
   })
 
   it('tolerates a missing token file', () => {
-    const resolved = resolveLocalTarget({ AUTH_TOKEN_FILE: '/definitely/not/here' } as NodeJS.ProcessEnv)
+    const resolved = resolveLocalTarget({ AUTH_TOKEN_FILE: '/definitely/not/here' } as NodeJS.ProcessEnv, [])
     expect(resolved.authToken).toBe('')
   })
 
@@ -221,15 +221,15 @@ describe('resolveLocalTarget', () => {
       resolveLocalTarget({
         RELAY_LOCAL_ORIGIN: 'https://explicit.example',
         CORS_ORIGIN: 'https://server.example',
-      } as NodeJS.ProcessEnv).browserOrigin,
+      } as NodeJS.ProcessEnv, []).browserOrigin,
     ).toBe('https://explicit.example')
 
     expect(
-      resolveLocalTarget({ CORS_ORIGIN: 'https://server.example' } as NodeJS.ProcessEnv).browserOrigin,
+      resolveLocalTarget({ CORS_ORIGIN: 'https://server.example' } as NodeJS.ProcessEnv, []).browserOrigin,
     ).toBe('https://server.example')
 
     // Dev: no Origin at all, which a non-production server accepts
-    expect(resolveLocalTarget({} as NodeJS.ProcessEnv).browserOrigin).toBeUndefined()
+    expect(resolveLocalTarget({} as NodeJS.ProcessEnv, []).browserOrigin).toBeUndefined()
   })
 })
 
@@ -267,6 +267,26 @@ describe('local token discovery', () => {
     expect(resolved.authToken).toBe('legacy-secret')
     expect(resolved.tokenSource).toBe(tokenPath)
     expect(resolved.browserOrigin).toBe('https://ui.test')
+  })
+
+  it('reads the connector Origin override from an env file too', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codekin-env-'))
+    const envFile = join(dir, 'env')
+    writeFileSync(envFile, 'export RELAY_LOCAL_ORIGIN=https://ui.test\n')
+
+    // Otherwise session streaming still needs the variable on every
+    // invocation, which is exactly what the env file exists to avoid.
+    expect(resolveLocalTarget({} as NodeJS.ProcessEnv, [envFile]).browserOrigin).toBe('https://ui.test')
+  })
+
+  it('does not let an env file override an exported process variable', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'codekin-env-'))
+    const envFile = join(dir, 'env')
+    writeFileSync(envFile, 'export RELAY_LOCAL_ORIGIN=https://from-file.test\n')
+
+    expect(
+      resolveLocalTarget({ CORS_ORIGIN: 'https://from-env.test' } as NodeJS.ProcessEnv, [envFile]).browserOrigin,
+    ).toBe('https://from-env.test')
   })
 
   it('lets the process environment win over an env file', () => {
