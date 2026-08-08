@@ -5,20 +5,23 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
+    "@types/express-session": "^1.19.0",
     "better-sqlite3": "^12.9.0",
     "express": "^5.1.0",
+    "express-session": "^1.19.0",
     "multer": "^2.0.0",
     "ws": "^8.21.0"
   },
   "scripts": {
     "build": "tsc",
+    "relay": "tsx relay/relay-server.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "overrides": {
     "vite": "^8.0.5",
     "postcss": "^8.5.23",
-    "nanoid": "^3.3.17"
+    "nanoid": "^3.3.18"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

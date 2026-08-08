@@ -19,6 +19,6 @@
     "composite": true,
     "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo"
   },
-  "include": ["*.ts"],
-  "exclude": ["node_modules", "dist", "*.test.ts", "vitest.config.ts"]
+  "include": ["*.ts", "relay/*.ts"],
+  "exclude": ["node_modules", "dist", "*.test.ts", "relay/*.test.ts", "vitest.config.ts"]
 }
