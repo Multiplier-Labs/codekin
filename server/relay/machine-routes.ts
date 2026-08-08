@@ -9,12 +9,13 @@
 import { Router } from 'express'
 import type Database from 'better-sqlite3'
 import { listMachines } from './control-plane-db.js'
-import { requireActiveUser } from './relay-auth-routes.js'
+import { createRequireActiveUser } from './relay-auth-routes.js'
 import { listSharesFor } from './shares.js'
 import type { ConnectorHub } from './connector-hub.js'
 
 export function createMachineRouter(db: Database.Database, hub?: ConnectorHub): Router {
   const router = Router()
+  const requireActiveUser = createRequireActiveUser(db)
 
   router.get('/api/machines', requireActiveUser, (req, res) => {
     const user = req.session.user!

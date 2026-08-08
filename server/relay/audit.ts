@@ -12,6 +12,7 @@ import { DEFAULT_ORG_ID } from './control-plane-db.js'
 
 export type AuditEventKind =
   | 'machine_paired'
+  | 'machine_removed'
   | 'machine_connected'
   | 'machine_disconnected'
   | 'session_shared'

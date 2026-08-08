@@ -8,7 +8,7 @@
 
 import { Router } from 'express'
 import type Database from 'better-sqlite3'
-import { requireActiveUser } from './relay-auth-routes.js'
+import { createRequireActiveUser } from './relay-auth-routes.js'
 import {
   SHARE_ROLES,
   deleteShare,
@@ -44,6 +44,7 @@ function resolvePermissions(body: { role?: unknown; permissions?: unknown }): Se
 
 export function createShareRouter(db: Database.Database): Router {
   const router = Router()
+  const requireActiveUser = createRequireActiveUser(db)
 
   /** Shares this user created, plus those granted to them. */
   router.get('/api/shares', requireActiveUser, (req, res) => {

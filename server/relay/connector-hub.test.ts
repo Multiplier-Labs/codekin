@@ -9,7 +9,8 @@ import { openControlPlaneDb, upsertUserFromGithub, listMachines } from './contro
 import { startPairing, approvePairing, completePairing } from './pairing.js'
 import { ConnectorHub } from './connector-hub.js'
 import { RelayConnector, connectorWsUrl } from './connector.js'
-import { envelope } from './relay-protocol.js'
+import { envelope, RELAY_ERROR } from './relay-protocol.js'
+import { MAX_BUFFERED_BYTES } from './rate-limit.js'
 
 function waitFor(condition: () => boolean, timeoutMs = 3000): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -33,6 +34,7 @@ describe('connector hub', () => {
   let relayUrl: string
   let machineId: string
   let machineSecret: string
+  let machineSocket: WebSocket | null = null
 
   beforeEach(async () => {
     db = openControlPlaneDb(':memory:')
@@ -52,7 +54,12 @@ describe('connector hub', () => {
     hub = new ConnectorHub(db)
     server = createServer()
     const wss = new WebSocketServer({ noServer: true })
-    wss.on('connection', socket => { hub.handleConnection(socket); })
+    wss.on('connection', socket => {
+      // Kept so a test can drive the hub's view of the machine socket,
+      // e.g. pretend its send buffer has backed up.
+      machineSocket = socket
+      hub.handleConnection(socket)
+    })
     server.on('upgrade', (req, socket, head) => {
       const path = (req.url ?? '').split('?')[0]
       if (path === '/relay/connector') {
@@ -69,8 +76,76 @@ describe('connector hub', () => {
 
   afterEach(async () => {
     hub.close()
+    machineSocket = null
     await new Promise<void>(resolve => server.close(() => { resolve() }))
     db.close()
+  })
+
+  /** Bring a connector online and hand back the hub-side socket. */
+  async function connectMachine(): Promise<{ connector: RelayConnector; socket: WebSocket }> {
+    const connector = new RelayConnector({
+      relayUrl,
+      machineId,
+      machineSecret,
+      connectorVersion: '0.8.0-test',
+      onStatus: () => {},
+    })
+    connector.start()
+    await waitFor(() => hub.isOnline(machineId) && machineSocket !== null)
+    return { connector, socket: machineSocket as WebSocket }
+  }
+
+  /** Make the hub see this socket as past its outbound byte ceiling. */
+  function forceBackedUp(socket: WebSocket): void {
+    Object.defineProperty(socket, 'bufferedAmount', {
+      value: MAX_BUFFERED_BYTES + 1,
+      configurable: true,
+    })
+  }
+
+  it('drops a channel instead of buffering for a connector that stopped draining', async () => {
+    const { connector, socket } = await connectMachine()
+    const frames: Array<{ kind: string; payload: unknown }> = []
+    expect(hub.openChannel(machineId, 'chan-1', (kind, payload) => { frames.push({ kind, payload }) })).toBeNull()
+
+    forceBackedUp(socket)
+    hub.sendChannelData(machineId, 'chan-1', 'x'.repeat(1024))
+
+    // The browser side is told the channel is gone, rather than the hub
+    // growing this socket's backlog without bound.
+    expect(frames).toHaveLength(1)
+    expect(frames[0].kind).toBe('stream_close')
+    expect((frames[0].payload as { reason: string }).reason).toBe('machine connection is congested')
+
+    // The channel is closed: further data for it is a no-op, and no second
+    // stream_close is emitted.
+    hub.sendChannelData(machineId, 'chan-1', 'more')
+    hub.closeChannel(machineId, 'chan-1')
+    expect(frames).toHaveLength(1)
+
+    connector.stop()
+  })
+
+  it('keeps relaying channel data while the connector is draining normally', async () => {
+    const { connector, socket } = await connectMachine()
+    const frames: Array<{ kind: string; payload: unknown }> = []
+    hub.openChannel(machineId, 'chan-2', (kind, payload) => { frames.push({ kind, payload }) })
+
+    expect(socket.bufferedAmount).toBeLessThan(MAX_BUFFERED_BYTES)
+    hub.sendChannelData(machineId, 'chan-2', 'hello')
+    expect(frames).toHaveLength(0)
+
+    connector.stop()
+  })
+
+  it('refuses to open a new channel on a congested connector', async () => {
+    const { connector, socket } = await connectMachine()
+    forceBackedUp(socket)
+
+    const error = hub.openChannel(machineId, 'chan-3', () => {})
+    expect(error?.code).toBe(RELAY_ERROR.tooManyChannels)
+
+    connector.stop()
   })
 
   it('converts the relay origin to the connector wss url', () => {

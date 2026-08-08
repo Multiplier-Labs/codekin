@@ -245,3 +245,18 @@ export function listMachines(db: Database.Database): MachineRow[] {
     .prepare('SELECT * FROM machines WHERE organization_id = ? ORDER BY created_at DESC')
     .all(DEFAULT_ORG_ID) as MachineRow[]
 }
+
+/** One machine by id, for ownership checks. */
+export function getMachine(db: Database.Database, machineId: string): MachineRow | undefined {
+  return db.prepare('SELECT * FROM machines WHERE id = ?').get(machineId) as MachineRow | undefined
+}
+
+/**
+ * Current row for a user, by id.
+ *
+ * Callers use this to re-check role and status against the database rather
+ * than trusting the copy stored in a session at login time.
+ */
+export function getUserById(db: Database.Database, userId: string): UserRow | undefined {
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as UserRow | undefined
+}

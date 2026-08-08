@@ -5,8 +5,9 @@ import session from 'express-session'
 import type { AddressInfo } from 'net'
 import type { Server } from 'http'
 import type Database from 'better-sqlite3'
-import { openControlPlaneDb, upsertUserFromGithub } from './control-plane-db.js'
+import { openControlPlaneDb, upsertUserFromGithub, listMachines } from './control-plane-db.js'
 import { createPairingRouter } from './pairing-routes.js'
+import { listAuditEvents } from './audit.js'
 import type { RelayConfig } from './relay-config.js'
 import type { SessionUser } from './relay-auth-routes.js'
 
@@ -19,6 +20,7 @@ describe('pairing routes', () => {
   let server: Server
   let baseUrl: string
   let activeUser: SessionUser
+  let otherUser: SessionUser
 
   beforeEach(async () => {
     db = openControlPlaneDb(':memory:')
@@ -36,12 +38,29 @@ describe('pairing routes', () => {
       status: row.status,
     }
 
+    // A second active member, to stand in for a share grantee: someone who
+    // is signed in and allowed, but owns none of the machines.
+    const otherRow = upsertUserFromGithub(
+      db,
+      { id: 2, login: 'grantee', name: null, email: null, avatarUrl: null },
+      { ownerGithubLogin: 'alari76', allowedGithubLogins: ['grantee'] },
+    )
+    otherUser = {
+      id: otherRow.id,
+      login: otherRow.login,
+      displayName: null,
+      avatarUrl: null,
+      role: otherRow.role,
+      status: otherRow.status,
+    }
+
     const app = express()
     app.use(express.json())
     app.use(session({ secret: 's'.repeat(32), resave: false, saveUninitialized: false }))
     // Test hook: mark the session as the active user when the header is set
     app.use((req, _res, next) => {
       if (req.headers['x-test-user'] === 'active') req.session.user = activeUser
+      if (req.headers['x-test-user'] === 'other') req.session.user = otherUser
       next()
     })
     app.use(createPairingRouter(db, CONFIG))
@@ -135,6 +154,57 @@ describe('pairing routes', () => {
       method: 'POST', headers: anon, body: JSON.stringify({ deviceCode }),
     })
     expect(res.status).toBe(403)
+  })
+
+  /** Pair a machine to the owning user and return its id. */
+  async function pairMachine(): Promise<string> {
+    const { userCode, deviceCode } = await startRequest()
+    await fetch(`${baseUrl}/api/machines/pair/approve`, {
+      method: 'POST', headers: asUser, body: JSON.stringify({ code: userCode, displayName: 'Dev box' }),
+    })
+    const completeRes = await fetch(`${baseUrl}/api/machines/pair/complete`, {
+      method: 'POST', headers: anon, body: JSON.stringify({ deviceCode }),
+    })
+    const complete = await completeRes.json() as { machineId: string }
+    return complete.machineId
+  }
+
+  it('refuses to delete a machine the caller does not own', async () => {
+    const machineId = await pairMachine()
+
+    const res = await fetch(`${baseUrl}/api/machines/${machineId}`, {
+      method: 'DELETE', headers: { 'x-test-user': 'other' },
+    })
+
+    expect(res.status).toBe(403)
+    // The machine must survive the attempt
+    expect(listMachines(db)).toHaveLength(1)
+
+    const denied = listAuditEvents(db, {}).find(e => e.kind === 'access_denied')
+    expect(denied?.actorUserId).toBe(otherUser.id)
+    expect(denied?.machineId).toBe(machineId)
+  })
+
+  it('records an audit event when the owner deletes their machine', async () => {
+    const machineId = await pairMachine()
+
+    const res = await fetch(`${baseUrl}/api/machines/${machineId}`, {
+      method: 'DELETE', headers: asUser,
+    })
+
+    expect(res.status).toBe(200)
+    expect(listMachines(db)).toHaveLength(0)
+
+    const removed = listAuditEvents(db, {}).find(e => e.kind === 'machine_removed')
+    expect(removed?.actorUserId).toBe(activeUser.id)
+    expect(removed?.machineId).toBe(machineId)
+  })
+
+  it('deleting an unknown machine is a 404, not a 403', async () => {
+    const res = await fetch(`${baseUrl}/api/machines/does-not-exist`, {
+      method: 'DELETE', headers: asUser,
+    })
+    expect(res.status).toBe(404)
   })
 
   it('unknown codes 404', async () => {
