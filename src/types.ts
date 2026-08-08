@@ -134,7 +134,7 @@ export type WsClientMessage =
   | { type: 'leave_session' }
   | { type: 'start_claude'; options?: Record<string, unknown> }
   | { type: 'set_model'; model: string }
-  | { type: 'set_provider'; provider: CodingProvider }
+  | { type: 'set_provider'; provider: CodingProvider; carryContext?: boolean }
   | { type: 'set_permission_mode'; permissionMode: PermissionMode }
   | { type: 'stop' }
   | { type: 'input'; data: string; displayText?: string }

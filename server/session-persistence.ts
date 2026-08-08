@@ -34,6 +34,8 @@ export interface PersistedSession {
   claudeSessionId: string | null
   wasActive?: boolean
   outputHistory: WsServerMessage[]
+  /** Handoff awaiting injection after a carry-context provider switch. */
+  pendingHandoff?: import('./handoff-manager.js').Handoff
 }
 
 export class SessionPersistence {
@@ -61,6 +63,7 @@ export class SessionPersistence {
       claudeSessionId: s.claudeSessionId,
       wasActive: s.claudeProcess?.isAlive() ?? false,
       outputHistory: s.outputHistory,
+      pendingHandoff: s.pendingHandoff,
     }))
 
     try {
@@ -126,6 +129,7 @@ export class SessionPersistence {
           // Restore claudeSessionId so Claude CLI resumes with full conversation
           // history from its own session storage (not just our 4000-char summary).
           claudeSessionId: s.claudeSessionId ?? null,
+          pendingHandoff: s.pendingHandoff,
           restartCount: 0,
           lastRestartAt: null,
           _isStarting: false,

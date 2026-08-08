@@ -212,7 +212,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           send({ type: 'error', message: `Invalid provider: ${msg.provider}` })
           break
         }
-        sessions.setProvider(sessionId, msg.provider)
+        sessions.setProvider(sessionId, msg.provider, msg.carryContext)
       }
       break
     }

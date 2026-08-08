@@ -8,6 +8,7 @@
 
 import type { WebSocket } from 'ws'
 import type { CodingProcess, CodingProvider } from './coding-process.js'
+import type { Handoff } from './handoff-manager.js'
 import type { PlanManager } from './plan-manager.js'
 import type { ProcessCoordinator } from './process-coordinator.js'
 
@@ -117,6 +118,10 @@ export interface Session {
   _leaveGraceTimer?: ReturnType<typeof setTimeout> | null
   /** Timestamp of last meaningful activity (input, prompt response, client join). Used by idle reaper. */
   _lastActivityAt: number
+  /** Handoff generated on a carry-context provider switch, awaiting injection
+   *  into the first user message under the new provider. Persisted so a server
+   *  restart between switch and first message doesn't lose it. */
+  pendingHandoff?: Handoff
   /** Plan mode state machine — owns the enter/review/approve lifecycle. */
   planManager: PlanManager
   /** Unified process lifecycle coordinator — serializes start/stop/restart
@@ -326,7 +331,7 @@ export type WsClientMessage =
   | { type: 'leave_session' }
   | { type: 'start_claude'; options?: Record<string, unknown> }
   | { type: 'set_model'; model: string }
-  | { type: 'set_provider'; provider: CodingProvider }
+  | { type: 'set_provider'; provider: CodingProvider; carryContext?: boolean }
   | { type: 'set_permission_mode'; permissionMode: PermissionMode }
   | { type: 'stop' }
   | { type: 'input'; data: string; displayText?: string }
