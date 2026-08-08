@@ -1,0 +1,48 @@
+# Hosted Codekin control plane + relay (app.codekin.ai).
+#
+# The hosted frontend is a static build (npm run build:hosted → dist-hosted/)
+# copied to /var/www/codekin-app. The relay server (server/relay) listens on
+# 127.0.0.1:32360 and owns /api; /relay carries the browser and connector
+# WebSockets in later phases. TLS is added by certbot --nginx.
+
+server {
+    listen 80;
+    server_name app.codekin.ai;
+
+    # Hosted frontend (static build)
+    location / {
+        root /var/www/codekin-app;
+        try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache";
+    }
+
+    location /assets/ {
+        root /var/www/codekin-app;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    # Control plane REST API
+    location /api/ {
+        proxy_pass http://127.0.0.1:32360;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 20m;
+    }
+
+    # Relay hub WebSockets (browser + connector)
+    location /relay/ {
+        proxy_pass http://127.0.0.1:32360;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
+    }
+}
