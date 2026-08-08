@@ -73,7 +73,12 @@ export interface ProxyRequest {
   method: string
   /** Local server path including query string, e.g. '/api/sessions/list?x=1'. */
   path: string
-  headers?: Record<string, string>
+  /**
+   * Content type of `body`. This is the only browser-supplied header that
+   * crosses the relay — everything else (notably Authorization) is the
+   * connector's to set, so a browser cannot forge local credentials.
+   */
+  contentType?: string
   /** base64-encoded request body, omitted when there is none. */
   body?: string
 }
@@ -85,12 +90,39 @@ export interface ProxyResponse {
   body?: string
 }
 
+/**
+ * Open a proxied session-stream channel: the connector opens the local
+ * Codekin WebSocket, performs the local `auth` handshake with its own
+ * token, and pipes frames opaquely from then on.
+ *
+ * Channel ids are scoped to the socket that created them; the hub maps a
+ * browser's id onto a hub-generated id before it reaches a connector, so
+ * ids from one browser can never name another's channel.
+ */
+export type StreamOpen = Record<string, never>
+
+/** Connector → browser once the local socket is open and authenticated. */
+export interface StreamReady {
+  status: 'open'
+}
+
+/** One frame in either direction, passed through without interpretation. */
+export interface StreamData {
+  /** The local Codekin protocol frame, verbatim JSON text. */
+  data: string
+}
+
+export interface StreamClose {
+  code?: number
+  reason?: string
+}
+
 export interface RelayError {
   code: string
   message: string
 }
 
-/** Error codes used on the request/response path (spec §7.4). */
+/** Error codes used on the request/response and stream paths (spec §7.4). */
 export const RELAY_ERROR = {
   machineOffline: 'machine_offline',
   forbidden: 'forbidden',
@@ -99,7 +131,21 @@ export const RELAY_ERROR = {
   bodyTooLarge: 'body_too_large',
   badRequest: 'bad_request',
   localUnreachable: 'local_unreachable',
+  tooManyChannels: 'too_many_channels',
+  unknownChannel: 'unknown_channel',
 } as const
+
+/** Close codes on proxied stream channels, mirroring the local server's conventions. */
+export const STREAM_CLOSE = {
+  /** The local server rejected the connector's credential. */
+  localAuthFailed: 4001,
+  /** The machine went offline while the channel was open. */
+  machineGone: 4002,
+  normal: 1000,
+} as const
+
+/** Channels a single browser socket may hold open at once. */
+export const MAX_CHANNELS_PER_CLIENT = 4
 
 /** Max size of a proxied request or response body, before base64 expansion. */
 export const MAX_PROXY_BODY_BYTES = 8 * 1024 * 1024

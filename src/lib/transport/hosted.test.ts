@@ -34,7 +34,7 @@ describe('fetch', () => {
 
     const res = await t.fetch('/api/sessions/list')
 
-    expect(request).toHaveBeenCalledWith('GET', '/api/sessions/list', undefined)
+    expect(request).toHaveBeenCalledWith('GET', '/api/sessions/list', undefined, undefined)
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toBe('application/json')
     expect(await res.json()).toEqual({ sessions: [] })
@@ -44,9 +44,15 @@ describe('fetch', () => {
     const request = vi.fn().mockResolvedValue({ status: 200, headers: {} })
     const t = new HostedRelayTransport('m1', fakeConnection(request))
 
-    await t.fetch('/api/sessions/create', { method: 'POST', body: '{"name":"x"}' })
+    await t.fetch('/api/sessions/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{"name":"x"}',
+    })
 
-    expect(request).toHaveBeenCalledWith('POST', '/api/sessions/create', base64('{"name":"x"}'))
+    expect(request).toHaveBeenCalledWith(
+      'POST', '/api/sessions/create', base64('{"name":"x"}'), 'application/json',
+    )
   })
 
   it('preserves a machine-level error status rather than masking it', async () => {
@@ -117,10 +123,23 @@ describe('authFetch', () => {
 })
 
 describe('streaming', () => {
-  it('reports that session streaming is not available yet', () => {
+  it('opens a distinct relay channel per socket', () => {
+    const openChannel = vi.fn()
+    const connection = { request: vi.fn(), connect: vi.fn(), close: vi.fn(), openChannel } as unknown as RelayConnection
+    const t = new HostedRelayTransport('m1', connection)
+
+    t.openSocket()
+    t.openSocket()
+
+    expect(openChannel).toHaveBeenCalledTimes(2)
+    const [firstId] = openChannel.mock.calls[0] as [string]
+    const [secondId] = openChannel.mock.calls[1] as [string]
+    expect(firstId).not.toBe(secondId)
+  })
+
+  it('reports a relay url for display', () => {
     const t = new HostedRelayTransport('m1', fakeConnection(vi.fn()))
-    expect(() => t.wsUrl()).toThrow(/not available yet/)
-    expect(() => t.openSocket()).toThrow(/not available yet/)
+    expect(t.wsUrl()).toBe('relay://m1')
   })
 })
 

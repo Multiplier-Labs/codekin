@@ -19,15 +19,32 @@ describe('checkProxyRequest', () => {
     expect(checkProxyRequest({ method: 'GET', path: '/api/sessions/archived/abc' }).allowed).toBe(true)
   })
 
-  it('refuses mutating methods', () => {
-    const decision = checkProxyRequest({ method: 'POST', path: '/api/sessions/list' })
+  it('allows the mutations the session UI performs', () => {
+    expect(checkProxyRequest({ method: 'POST', path: '/api/sessions/create' }).allowed).toBe(true)
+    expect(checkProxyRequest({ method: 'DELETE', path: '/api/sessions/abc' }).allowed).toBe(true)
+    expect(checkProxyRequest({ method: 'POST', path: '/api/upload' }).allowed).toBe(true)
+    expect(checkProxyRequest({ method: 'POST', path: '/api/approvals' }).allowed).toBe(true)
+  })
+
+  it('refuses mutations on read-only prefixes', () => {
+    // Readable, but not writable over the relay
+    expect(checkProxyRequest({ method: 'GET', path: '/api/repos' }).allowed).toBe(true)
+    const decision = checkProxyRequest({ method: 'POST', path: '/api/repos' })
+    expect(decision.allowed).toBe(false)
+    expect(decision.error?.code).toBe(RELAY_ERROR.pathNotAllowed)
+    expect(checkProxyRequest({ method: 'POST', path: '/api/docs' }).allowed).toBe(false)
+  })
+
+  it('refuses methods that are proxied for nothing', () => {
+    const decision = checkProxyRequest({ method: 'OPTIONS', path: '/api/sessions/list' })
     expect(decision.allowed).toBe(false)
     expect(decision.error?.code).toBe(RELAY_ERROR.pathNotAllowed)
   })
 
   it('refuses paths outside the allowlist', () => {
-    expect(checkProxyRequest({ method: 'GET', path: '/api/sessions/create' }).allowed).toBe(false)
-    expect(checkProxyRequest({ method: 'GET', path: '/api/docs/file' }).allowed).toBe(false)
+    expect(checkProxyRequest({ method: 'GET', path: '/api/webhooks/events' }).allowed).toBe(false)
+    expect(checkProxyRequest({ method: 'GET', path: '/api/clone' }).allowed).toBe(false)
+    expect(checkProxyRequest({ method: 'POST', path: '/api/integrations/github/pr-review/setup' }).allowed).toBe(false)
     // A prefix must match a whole segment, not a string prefix
     expect(checkProxyRequest({ method: 'GET', path: '/api/reposecret' }).allowed).toBe(false)
   })
@@ -67,9 +84,28 @@ describe('executeProxyRequest', () => {
 
   it('does not call the local server for a disallowed path', async () => {
     const fetchImpl = vi.fn()
-    const outcome = await executeProxyRequest({ method: 'DELETE', path: '/api/sessions/abc' }, { target, fetchImpl })
+    const outcome = await executeProxyRequest({ method: 'DELETE', path: '/api/webhooks/config' }, { target, fetchImpl })
     expect(fetchImpl).not.toHaveBeenCalled()
     expect('error' in outcome && outcome.error.code).toBe(RELAY_ERROR.pathNotAllowed)
+  })
+
+  it('forwards a request body and its content type', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }))
+    await executeProxyRequest(
+      {
+        method: 'POST',
+        path: '/api/sessions/create',
+        contentType: 'application/json',
+        body: Buffer.from('{"name":"x"}').toString('base64'),
+      },
+      { target, fetchImpl },
+    )
+
+    const init = fetchImpl.mock.calls[0][1] as { headers: Record<string, string>; body: Buffer }
+    expect(init.headers['Content-Type']).toBe('application/json')
+    expect(init.body.toString('utf-8')).toBe('{"name":"x"}')
+    // The local credential is still the connector's, never the browser's
+    expect(init.headers.Authorization).toBe('Bearer local-token')
   })
 
   it('reports an unreachable local server as a relay error, not an HTTP status', async () => {
@@ -101,5 +137,22 @@ describe('resolveLocalTarget', () => {
   it('tolerates a missing token file', () => {
     const resolved = resolveLocalTarget({ AUTH_TOKEN_FILE: '/definitely/not/here' } as NodeJS.ProcessEnv)
     expect(resolved.authToken).toBe('')
+  })
+
+  it('takes the local WebSocket Origin from RELAY_LOCAL_ORIGIN, then CORS_ORIGIN', () => {
+    // A production local server only accepts Origin === CORS_ORIGIN
+    expect(
+      resolveLocalTarget({
+        RELAY_LOCAL_ORIGIN: 'https://explicit.example',
+        CORS_ORIGIN: 'https://server.example',
+      } as NodeJS.ProcessEnv).browserOrigin,
+    ).toBe('https://explicit.example')
+
+    expect(
+      resolveLocalTarget({ CORS_ORIGIN: 'https://server.example' } as NodeJS.ProcessEnv).browserOrigin,
+    ).toBe('https://server.example')
+
+    // Dev: no Origin at all, which a non-production server accepts
+    expect(resolveLocalTarget({} as NodeJS.ProcessEnv).browserOrigin).toBeUndefined()
   })
 })

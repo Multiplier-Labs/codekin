@@ -39,6 +39,20 @@ interface Pending {
   timer: ReturnType<typeof setTimeout>
 }
 
+/** Callbacks for one proxied session stream. */
+export interface ChannelHandlers {
+  /** The machine's local socket is open and authenticated. */
+  onReady: () => void
+  /** A frame from the local server. */
+  onData: (data: string) => void
+  /** The channel ended — no further callbacks follow. */
+  onClose: (code: number, reason: string) => void
+  onError: (error: RelayErrorPayload) => void
+}
+
+/** Close code reported when the relay socket itself goes away. */
+const CLOSE_RELAY_GONE = 4002
+
 const REQUEST_TIMEOUT_MS = 35_000
 const BACKOFF_MIN_MS = 500
 const BACKOFF_MAX_MS = 15_000
@@ -63,6 +77,7 @@ export function browserRelayUrl(machineId: string): string {
 export class RelayConnection {
   private ws: WebSocket | null = null
   private pending = new Map<string, Pending>()
+  private channels = new Map<string, ChannelHandlers>()
   private queued: (() => void)[] = []
   private backoffMs = BACKOFF_MIN_MS
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -101,6 +116,7 @@ export class RelayConnection {
     ws.onclose = event => {
       this.ws = null
       this.failAllPending(new RelayRequestError('disconnected', 'Relay connection closed'))
+      this.failAllChannels('relay connection closed')
       if (this.closedByUs) {
         this.setState('closed')
         return
@@ -127,6 +143,7 @@ export class RelayConnection {
       this.reconnectTimer = null
     }
     this.failAllPending(new RelayRequestError('disconnected', 'Relay connection closed'))
+    this.failAllChannels('relay connection closed')
     this.ws?.close(1000, 'client closed')
     this.ws = null
     this.setState('closed')
@@ -136,7 +153,7 @@ export class RelayConnection {
    * Issue a proxied REST call. Requests made before the socket is ready are
    * queued rather than rejected, so callers need not await connection.
    */
-  request(method: string, path: string, body?: string): Promise<RelayProxyResponse> {
+  request(method: string, path: string, body?: string, contentType?: string): Promise<RelayProxyResponse> {
     return new Promise<RelayProxyResponse>((resolve, reject) => {
       const id = String(this.nextId++)
       const timer = setTimeout(() => {
@@ -152,7 +169,7 @@ export class RelayConnection {
             version: RELAY_PROTOCOL_VERSION,
             kind: 'request',
             id,
-            payload: { method, path, body },
+            payload: { method, path, body, contentType },
           }),
         )
       }
@@ -166,8 +183,41 @@ export class RelayConnection {
     })
   }
 
+  /**
+   * Open a session stream channel. The caller owns `channelId` (it is scoped
+   * to this connection) and must call `closeChannel` when done.
+   */
+  openChannel(channelId: string, handlers: ChannelHandlers): void {
+    this.channels.set(channelId, handlers)
+    this.sendOrQueue({ kind: 'stream_open', channelId, payload: {} })
+  }
+
+  /** Relay a frame onto an open channel. */
+  sendChannelData(channelId: string, data: string): void {
+    if (!this.channels.has(channelId)) return
+    this.sendOrQueue({ kind: 'stream_data', channelId, payload: { data } })
+  }
+
+  /** Close a channel; its handlers stop firing immediately. */
+  closeChannel(channelId: string, code?: number, reason?: string): void {
+    if (!this.channels.delete(channelId)) return
+    this.sendOrQueue({ kind: 'stream_close', channelId, payload: { code, reason } })
+  }
+
+  private sendOrQueue(frame: { kind: string; channelId?: string; id?: string; payload: unknown }): void {
+    const send = () => {
+      this.ws?.send(JSON.stringify({ version: RELAY_PROTOCOL_VERSION, ...frame }))
+    }
+    if (this.state === 'open' && this.ws?.readyState === WebSocket.OPEN) {
+      send()
+    } else {
+      this.queued.push(send)
+      this.connect()
+    }
+  }
+
   private handleMessage(raw: string): void {
-    let msg: { kind?: string; id?: string; payload?: unknown }
+    let msg: { kind?: string; id?: string; channelId?: string; payload?: unknown }
     try {
       msg = JSON.parse(raw) as typeof msg
     } catch {
@@ -185,6 +235,11 @@ export class RelayConnection {
       return
     }
 
+    if (msg.channelId) {
+      this.handleChannelFrame(msg.channelId, msg.kind, msg.payload)
+      return
+    }
+
     if (!msg.id) return
     const entry = this.pending.get(msg.id)
     if (!entry) return
@@ -198,6 +253,41 @@ export class RelayConnection {
     }
     if (msg.kind === 'response') {
       entry.resolve(msg.payload as RelayProxyResponse)
+    }
+  }
+
+  private handleChannelFrame(channelId: string, kind: string | undefined, payload: unknown): void {
+    const handlers = this.channels.get(channelId)
+    if (!handlers) return
+
+    if (kind === 'event' && (payload as { status?: string } | undefined)?.status === 'open') {
+      handlers.onReady()
+      return
+    }
+    if (kind === 'stream_data') {
+      const data = (payload as { data?: unknown }).data
+      if (typeof data === 'string') handlers.onData(data)
+      return
+    }
+    if (kind === 'stream_close') {
+      const close = payload as { code?: number; reason?: string }
+      this.channels.delete(channelId)
+      handlers.onClose(close.code ?? 1000, close.reason ?? 'closed')
+      return
+    }
+    if (kind === 'error') {
+      const err = payload as Partial<RelayErrorPayload>
+      const error = { code: err.code ?? 'relay_error', message: err.message ?? 'Relay error' }
+      this.channels.delete(channelId)
+      handlers.onError(error)
+      handlers.onClose(CLOSE_RELAY_GONE, error.message)
+    }
+  }
+
+  private failAllChannels(reason: string): void {
+    for (const [channelId, handlers] of [...this.channels]) {
+      this.channels.delete(channelId)
+      handlers.onClose(CLOSE_RELAY_GONE, reason)
     }
   }
 

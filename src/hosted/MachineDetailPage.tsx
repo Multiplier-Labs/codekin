@@ -1,8 +1,10 @@
 /**
- * Machine detail for the hosted app: the first view whose data comes from a
- * developer machine rather than the control plane. Sessions and repos are
- * fetched over the relay through a HostedRelayTransport bound to this
- * machine; opening a session lands in the session-streaming phase.
+ * Machine detail for the hosted app: a preflight view showing what the
+ * machine is doing before the full workspace is opened against it.
+ *
+ * Sessions and repos are fetched over the relay through a
+ * HostedRelayTransport bound to this machine, which also confirms the
+ * machine really answers before the workspace mounts.
  */
 
 import { useState, useEffect, useRef } from 'react'
@@ -18,11 +20,12 @@ interface RepoGroup {
 interface MachineDetailPageProps {
   machine: Machine
   onBack: () => void
+  onOpenWorkspace: () => void
 }
 
 type LoadState = 'loading' | 'ready' | 'error'
 
-export function MachineDetailPage({ machine, onBack }: MachineDetailPageProps) {
+export function MachineDetailPage({ machine, onBack, onOpenWorkspace }: MachineDetailPageProps) {
   const transportRef = useRef<HostedRelayTransport | null>(null)
   const [online, setOnline] = useState(machine.status === 'online')
   const [sessions, setSessions] = useState<Session[]>([])
@@ -93,6 +96,13 @@ export function MachineDetailPage({ machine, onBack }: MachineDetailPageProps) {
           aria-hidden
         />
         <span className="text-meta text-ink-muted">{online ? 'online' : 'unreachable'}</span>
+        <button
+          onClick={onOpenWorkspace}
+          disabled={state !== 'ready'}
+          className="ml-auto rounded-control border border-edge bg-primary-6 px-3 py-1.5 text-meta text-ink-inverse transition hover:bg-primary-7 disabled:opacity-50"
+        >
+          Open workspace
+        </button>
       </header>
 
       <main className="mx-auto flex max-w-3xl flex-col gap-6 p-6">
@@ -162,7 +172,7 @@ export function MachineDetailPage({ machine, onBack }: MachineDetailPageProps) {
             </section>
 
             <p className="text-meta text-ink-faint">
-              Opening a session from here arrives with hosted session streaming.
+              Open the workspace to work in these sessions from here.
             </p>
           </>
         )}
