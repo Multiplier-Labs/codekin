@@ -130,9 +130,64 @@ export interface LocalServerTarget {
    * origin to claim. Left undefined in dev, where a missing Origin is fine.
    */
   browserOrigin?: string
+  /** Where the token came from, for diagnostics. Undefined when none was found. */
+  tokenSource?: string
 }
 
 const DEFAULT_LOCAL_PORT = 32352
+
+/**
+ * Env files a Codekin install may keep its server configuration in. The
+ * connector runs in a user's shell, which does not inherit the environment
+ * the server was started with (pm2, systemd), so the same files the server
+ * is configured from are consulted here.
+ */
+const ENV_FILE_CANDIDATES = [
+  join(homedir(), '.codekin', 'env'),
+  join(homedir(), '.config', 'codekin', 'env'),
+]
+
+/** Keys worth taking from an env file; anything else is the server's business. */
+const ENV_FILE_KEYS = ['AUTH_TOKEN', 'AUTH_TOKEN_FILE', 'PORT', 'CORS_ORIGIN']
+
+/**
+ * Read `KEY=VALUE` and `export KEY=VALUE` lines, ignoring comments. Values
+ * may be quoted, as they commonly are in shell env files.
+ */
+export function parseShellEnvFile(content: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim().replace(/^export\s+/, '')
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eq = trimmed.indexOf('=')
+    if (eq < 1) continue
+    const key = trimmed.slice(0, eq).trim()
+    let value = trimmed.slice(eq + 1).trim()
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1)
+    }
+    out[key] = value
+  }
+  return out
+}
+
+/** Merge the env files' contribution, with process.env always winning. */
+function withEnvFiles(env: NodeJS.ProcessEnv, files = ENV_FILE_CANDIDATES): NodeJS.ProcessEnv {
+  const merged: NodeJS.ProcessEnv = { ...env }
+  for (const file of files) {
+    if (!existsSync(file)) continue
+    let parsed: Record<string, string>
+    try {
+      parsed = parseShellEnvFile(readFileSync(file, 'utf-8'))
+    } catch {
+      continue
+    }
+    for (const key of ENV_FILE_KEYS) {
+      if (!merged[key] && parsed[key]) merged[key] = parsed[key]
+    }
+  }
+  return merged
+}
 
 /**
  * Locate the local Codekin server and its auth token, using the same
@@ -142,17 +197,26 @@ const DEFAULT_LOCAL_PORT = 32352
  * WebSocket; otherwise the server's own `CORS_ORIGIN` is used when the
  * connector shares its environment.
  */
-export function resolveLocalTarget(env: NodeJS.ProcessEnv = process.env): LocalServerTarget {
+export function resolveLocalTarget(
+  processEnv: NodeJS.ProcessEnv = process.env,
+  envFiles = ENV_FILE_CANDIDATES,
+): LocalServerTarget {
+  const env = withEnvFiles(processEnv, envFiles)
+
   const port = parseInt(env.PORT || String(DEFAULT_LOCAL_PORT), 10)
   const origin = env.CODEKIN_LOCAL_URL || `http://127.0.0.1:${port}`
   const browserOrigin = env.RELAY_LOCAL_ORIGIN || env.CORS_ORIGIN || undefined
 
   let authToken = env.AUTH_TOKEN ?? ''
+  let tokenSource = authToken ? 'AUTH_TOKEN' : ''
   if (!authToken) {
+    // The default is where `codekin setup` writes a token, but an install
+    // configured before that existed points AUTH_TOKEN_FILE elsewhere.
     const tokenFile = env.AUTH_TOKEN_FILE || join(homedir(), '.config', 'codekin', 'token')
     if (existsSync(tokenFile)) {
       try {
         authToken = readFileSync(tokenFile, 'utf-8').trim()
+        tokenSource = tokenFile
       } catch {
         // Unreadable token file: proceed unauthenticated and let the local
         // server answer 401 rather than failing the whole connector.
@@ -160,7 +224,7 @@ export function resolveLocalTarget(env: NodeJS.ProcessEnv = process.env): LocalS
     }
   }
 
-  return { origin, authToken, browserOrigin }
+  return { origin, authToken, browserOrigin, tokenSource: tokenSource || undefined }
 }
 
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>
@@ -239,6 +303,21 @@ export async function executeProxyRequest(
     for (const name of FORWARDED_RESPONSE_HEADERS) {
       const value = res.headers.get(name)
       if (value !== null) responseHeaders[name] = value
+    }
+
+    // The connector authenticates with the machine's own token, so a 401 is
+    // never the browser user's fault — it means this connector is holding the
+    // wrong token. Saying so beats relaying "Unauthorized" to a UI that reads
+    // it as "machine unreachable".
+    if (res.status === 401) {
+      return {
+        error: {
+          code: RELAY_ERROR.localUnauthorized,
+          message:
+            'The local Codekin server rejected this connector\'s token. ' +
+            'Set AUTH_TOKEN_FILE (or AUTH_TOKEN) to the token that server uses, then restart the connector.',
+        },
+      }
     }
 
     let payload = buffer

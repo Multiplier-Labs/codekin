@@ -51,12 +51,15 @@ export type ConnectorStatus =
   | 'auth_failed'
   | 'disconnected'
   | 'reconnect_scheduled'
+  | 'replaced'
   | 'stopped'
 
 const HEARTBEAT_INTERVAL_MS = 30_000
 const BACKOFF_MIN_MS = 1_000
 const BACKOFF_MAX_MS = 60_000
 const CLOSE_AUTH_FAILED = 4001
+/** The hub gave this machine's slot to a newer connection. */
+const CLOSE_REPLACED = 4009
 
 /** Convert the https:// relay origin to the wss:// connector endpoint. */
 export function connectorWsUrl(relayUrl: string): string {
@@ -160,6 +163,13 @@ export class RelayConnector {
       if (code === CLOSE_AUTH_FAILED) {
         // Credential rejected — retrying would loop forever on a revoked machine
         this.opts.onStatus?.('auth_failed', reason.toString() || 'credential rejected')
+        this.stopped = true
+        return
+      }
+      if (code === CLOSE_REPLACED) {
+        // Another connector took this machine. Reconnecting would take it
+        // back, and the two would trade the slot forever — so stand down.
+        this.opts.onStatus?.('replaced', reason.toString() || 'another connector took over')
         this.stopped = true
         return
       }

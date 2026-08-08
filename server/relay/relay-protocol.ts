@@ -158,6 +158,7 @@ export const RELAY_ERROR = {
   bodyTooLarge: 'body_too_large',
   badRequest: 'bad_request',
   localUnreachable: 'local_unreachable',
+  localUnauthorized: 'local_unauthorized',
   tooManyChannels: 'too_many_channels',
   unknownChannel: 'unknown_channel',
   notPermitted: 'not_permitted',
