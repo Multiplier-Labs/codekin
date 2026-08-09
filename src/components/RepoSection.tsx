@@ -45,6 +45,25 @@ function compactAge(created: string): string {
 }
 
 /**
+ * The harness a session runs on, spelled out.
+ *
+ * Two-letter codes were tried and dropped: every harness name contains a C and
+ * all-caps share one x-height, so CC / CX / OC render as three near-identical
+ * rectangles at 11px. Spelled names differ in length, which is what the eye
+ * actually picks up, and there is nothing to learn. A session with no provider
+ * predates the field and is Claude by the same default the server applies.
+ */
+function harnessLabel(provider: Session['provider']): string {
+  return PROVIDERS.find(p => p.id === (provider ?? 'claude'))?.label ?? 'Claude'
+}
+
+/** Row tooltip: the harness, plus the pinned model where the session has one. */
+function harnessTitle(session: Session): string {
+  const harness = `${harnessLabel(session.provider)} session`
+  return session.model ? `${harness} · ${session.model}` : harness
+}
+
+/**
  * Exactly three status treatments, and only one of them animates:
  * filled = running, amber pulsing = waiting for you, hollow ring = idle.
  * Anything finer (queued, inactive) is carried by the tooltip, not by a
@@ -261,15 +280,24 @@ export function RepoSection({
                       <IconGitBranch size={12} stroke={2} />
                     </span>
                   )}
-                  {s.provider === 'opencode' && (
-                    <span title="OpenCode session" className="flex-shrink-0 rounded-control bg-edge-strong px-1 text-micro font-medium leading-tight text-ink-muted">OC</span>
-                  )}
-                  {s.provider === 'codex' && (
-                    <span title="Codex session" className="flex-shrink-0 rounded-control bg-edge-strong px-1 text-micro font-medium leading-tight text-ink-muted">CX</span>
-                  )}
                   <span className="truncate">{sessionDisplayName(s)}</span>
                 </button>
-                <span className="flex-shrink-0 text-meta tabular-nums text-ink-faint">{compactAge(s.created)}</span>
+                {/* Harness and age are both facts about the run rather than the
+                    title, so they read as one meta run pinned to the overflow
+                    menu. The harness sits one step ahead of the age — the same
+                    step on an active row, in accent rather than ink. */}
+                <span
+                  title={harnessTitle(s)}
+                  className="flex flex-shrink-0 items-center gap-1 font-mono text-micro leading-tight"
+                >
+                  <span className={`font-medium ${isActiveSession ? 'text-accent-3' : 'text-ink-muted'}`}>
+                    {harnessLabel(s.provider)}
+                  </span>
+                  <span className={isActiveSession ? 'text-accent-4' : 'text-ink-faint'}>·</span>
+                  <span className={`tabular-nums ${isActiveSession ? 'text-accent-4' : 'text-ink-faint'}`}>
+                    {compactAge(s.created)}
+                  </span>
+                </span>
                 <RowMenu items={menuItems} label={`Actions for ${sessionDisplayName(s)}`} className="row-menu-reveal" />
               </div>
             )

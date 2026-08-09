@@ -797,6 +797,7 @@ export class SessionManager {
       lastActivity: new Date(s._lastActivityAt).toISOString(),
       source: s.source,
       provider: s.provider,
+      model: s.model,
     }
   }
 

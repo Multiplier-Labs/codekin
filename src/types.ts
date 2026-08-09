@@ -52,9 +52,15 @@ export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermiss
  */
 export type CodingProvider = 'claude' | 'opencode' | 'codex'
 
-/** Provider metadata for the UI selector. */
+/**
+ * Provider metadata for the UI selector.
+ *
+ * `label` is the harness's name wherever a session is listed — the sidebar
+ * mark, the composer's agent control, the new-session menu. One spelling
+ * everywhere; the precise CLI name lives in `description`.
+ */
 export const PROVIDERS: { id: CodingProvider; label: string; description: string }[] = [
-  { id: 'claude', label: 'Claude Code', description: 'Anthropic Claude Code CLI' },
+  { id: 'claude', label: 'Claude', description: 'Anthropic Claude Code CLI' },
   { id: 'opencode', label: 'OpenCode', description: 'OpenCode server (multi-provider)' },
   { id: 'codex', label: 'Codex', description: 'OpenAI Codex CLI (ChatGPT subscription)' },
 ]
@@ -111,6 +117,8 @@ export interface Session {
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   /** Which AI provider powers this session. Defaults to 'claude'. */
   provider?: CodingProvider
+  /** Model pinned to this session, if one was chosen (shown in the sidebar row's tooltip). */
+  model?: string
 }
 
 /**
