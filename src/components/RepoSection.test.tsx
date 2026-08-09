@@ -119,10 +119,8 @@ describe('RepoSection', () => {
       { ...session, id: 'd4', provider: undefined } as Session,
     ]
     const container = render(<RepoSection {...props({ node: { ...node, sessions } })} />)
-    // No literal spaces around the middot — the run is a flex box and the
-    // breathing room is its gap.
     const marks = [...container.querySelectorAll('[title$="session"]')].map(el => el.textContent?.trim())
-    expect(marks).toEqual(['Claude·0s', 'Codex·0s', 'OpenCode·0s', 'Claude·0s'])
+    expect(marks).toEqual(['Claude', 'Codex', 'OpenCode', 'Claude'])
   })
 
   it('spells the marks from PROVIDERS rather than a second list', () => {
@@ -137,14 +135,36 @@ describe('RepoSection', () => {
     expect(container.querySelector('[title="Codex session · gpt-5.6-sol"]')).toBeTruthy()
   })
 
-  it('truncates the session name before the harness, which never shrinks', () => {
+  it('gives the title a line to itself, with the metadata on a second line', () => {
     const container = render(<RepoSection {...props()} />)
     const mark = container.querySelector('[title$="session"]')!
-    expect(mark.className).toContain('flex-shrink-0')
-    // The name is the row's only shrinkable part: min-w-0 next to a run that
-    // refuses to shrink. Scoped to the row, since the repo header truncates too.
-    const row = mark.parentElement!
-    expect(row.querySelector('.min-w-0 .truncate')?.textContent).toBe('fix sidebar')
+    const metaLine = mark.parentElement!
+    const row = metaLine.parentElement!
+
+    // Line one holds the title and the overflow menu, and nothing else — the
+    // title truncating at 60% while metadata rendered whole is what this
+    // layout exists to fix.
+    const titleLine = row.firstElementChild!
+    expect(titleLine).not.toBe(metaLine)
+    expect(titleLine.querySelector('.min-w-0 .truncate')?.textContent).toBe('fix sidebar')
+    expect(titleLine.textContent).not.toContain('Claude')
+
+    // Line two carries the harness and the age, and does not truncate.
+    expect(metaLine.textContent).toContain('Claude')
+    expect(metaLine.textContent).toContain('0s')
+    expect(metaLine.querySelector('.truncate')).toBeNull()
+  })
+
+  it('keeps the worktree a glyph on the meta line, never a spelled-out name', () => {
+    // Spelling the branch out is what pushed the metadata over one line in the
+    // first place; the name stays in the tooltip.
+    const onWorktree = { ...session, worktreePath: '/srv/repos/codekin-wt-c4121d7c' } as Session
+    const container = render(<RepoSection {...props({ node: { ...node, sessions: [onWorktree] } })} />)
+    const glyph = container.querySelector('[title^="In a worktree"]')!
+    expect(glyph.textContent).toBe('')
+    expect(glyph.querySelector('svg')).toBeTruthy()
+    // On the meta line, beside the harness — not up on the title line.
+    expect(glyph.parentElement).toBe(container.querySelector('[title$="session"]')!.parentElement)
   })
 
   it('creates the session with the provider chosen from the menu', () => {

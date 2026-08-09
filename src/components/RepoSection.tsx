@@ -261,44 +261,60 @@ export function RepoSection({
             }
 
             return (
+              // Two lines, because at 236px one cannot hold a real title and
+              // two metadata facts: the title truncated at about 60% while the
+              // metadata beside it rendered whole. Metadata gets its own line,
+              // and the title gets the width. The cost is roughly two fewer
+              // sessions visible with three repos open.
               <div
                 key={s.id}
-                className={`row-reveal density-row flex w-full items-center gap-1.5 rounded-control pl-6 pr-2.5 transition-colors ${
+                className={`row-reveal flex w-full flex-col gap-0.5 rounded-control py-1 pl-6 pr-2.5 transition-colors ${
                   isActiveSession
                     ? 'bg-accent-9/30 text-accent-2'
                     : 'text-ink hover:bg-surface-raised'
                 }`}
               >
-                <button
-                  onClick={() => onSelectSession(s.id)}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-body"
-                >
-                  <StatusDot status={status} title={statusTitle} />
-                  <OriginGlyph source={s.source} />
-                  {s.worktreePath && (
-                    <span title={`In a worktree: ${s.worktreePath.split('/').pop() ?? ''}`} className="flex-shrink-0 text-primary-5">
+                {/* Line one: status, title, overflow. The title is the only
+                    thing that flexes, and the ⋯ holds its slot on every row
+                    (it is revealed by opacity), so this line ends at a
+                    constant right edge. */}
+                <div className="flex w-full items-center gap-1.5">
+                  <button
+                    onClick={() => onSelectSession(s.id)}
+                    className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-body"
+                  >
+                    <StatusDot status={status} title={statusTitle} />
+                    <span className="truncate">{sessionDisplayName(s)}</span>
+                  </button>
+                  <RowMenu items={menuItems} label={`Actions for ${sessionDisplayName(s)}`} className="row-menu-reveal" />
+                </div>
+
+                {/* Line two: where it runs and how old it is. Indented just
+                    past the status dot. The harness sits one step ahead of the
+                    age — the same step on an active row, in accent rather than
+                    ink. */}
+                <div className="flex items-center gap-1 pl-[13px] font-mono text-meta leading-tight">
+                  {s.worktreePath ? (
+                    <span
+                      title={`In a worktree: ${s.worktreePath.split('/').pop() ?? ''}`}
+                      className={`flex-shrink-0 ${isActiveSession ? 'text-accent-3' : 'text-primary-5'}`}
+                    >
                       <IconGitBranch size={12} stroke={2} />
                     </span>
+                  ) : (
+                    <OriginGlyph source={s.source} />
                   )}
-                  <span className="truncate">{sessionDisplayName(s)}</span>
-                </button>
-                {/* Harness and age are both facts about the run rather than the
-                    title, so they read as one meta run pinned to the overflow
-                    menu. The harness sits one step ahead of the age — the same
-                    step on an active row, in accent rather than ink. */}
-                <span
-                  title={harnessTitle(s)}
-                  className="flex flex-shrink-0 items-center gap-1 font-mono text-micro leading-tight"
-                >
-                  <span className={`font-medium ${isActiveSession ? 'text-accent-3' : 'text-ink-muted'}`}>
+                  <span
+                    title={harnessTitle(s)}
+                    className={`text-micro font-medium ${isActiveSession ? 'text-accent-3' : 'text-ink-muted'}`}
+                  >
                     {harnessLabel(s.provider)}
                   </span>
                   <span className={isActiveSession ? 'text-accent-4' : 'text-ink-faint'}>·</span>
                   <span className={`tabular-nums ${isActiveSession ? 'text-accent-4' : 'text-ink-faint'}`}>
                     {compactAge(s.created)}
                   </span>
-                </span>
-                <RowMenu items={menuItems} label={`Actions for ${sessionDisplayName(s)}`} className="row-menu-reveal" />
+                </div>
               </div>
             )
           })}
