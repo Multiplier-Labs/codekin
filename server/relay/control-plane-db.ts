@@ -252,6 +252,13 @@ export function upsertUserFromGithub(
   return db.prepare('SELECT * FROM users WHERE id = ?').get(existing.id) as UserRow
 }
 
+/** All users in the default org, for the admin user-management view. */
+export function listUsers(db: Database.Database): UserRow[] {
+  return db
+    .prepare('SELECT * FROM users WHERE organization_id = ? ORDER BY login COLLATE NOCASE')
+    .all(DEFAULT_ORG_ID) as UserRow[]
+}
+
 /** List machines in the default org (MVP: all machines, newest first). */
 export function listMachines(db: Database.Database): MachineRow[] {
   return db

@@ -354,6 +354,33 @@ a takeover vector. Look up an id with `curl -s https://api.github.com/users/<log
 (the `id` field). The former `OWNER_GITHUB_LOGIN` / `ALLOWED_GITHUB_LOGINS`
 keys are ignored, and the server refuses to boot until the id keys replace them.
 
+### Managing access
+
+New users land in `pending` and see a request-access screen; an id in
+`ALLOWED_GITHUB_IDS` starts them `active`. To grant, revoke, or promote after
+the fact, an **owner or admin** uses the user-admin API (there is no UI yet):
+
+```bash
+# List users (id, login, role, status, isOwner)
+curl -s --cookie "codekin_relay_sid=…" https://app.codekin.ai/api/users
+
+# Revoke access immediately (also drops the user's open relay sockets)
+curl -X PATCH https://app.codekin.ai/api/users/<id> \
+  --cookie "codekin_relay_sid=…" -H 'Content-Type: application/json' \
+  -d '{"status":"disabled"}'
+
+# Re-enable, or (owner only) change role to admin/member/viewer
+curl -X PATCH https://app.codekin.ai/api/users/<id> \
+  --cookie … -H 'Content-Type: application/json' -d '{"status":"active"}'
+```
+
+`disabled` is the revocation path and is sticky — a login never re-activates a
+disabled user. The configured owner account cannot be changed here and no one
+may change their own access, so neither a mistake nor a hostile admin can lock
+the owner out or an admin lock themselves in. Only the owner may change roles;
+`owner` is not an assignable role (it follows `OWNER_GITHUB_ID`). Every change
+is written to the audit log as `user_updated`.
+
 ### Deploying
 
 ```bash
