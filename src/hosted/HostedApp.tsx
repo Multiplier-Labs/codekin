@@ -57,7 +57,7 @@ export default function HostedApp() {
   )
 
   const selectMachine = useCallback((machine: Machine) => {
-    const next = new HostedRelayTransport(machine.id)
+    const next = new HostedRelayTransport(machine.id, undefined, machine.displayName)
     next.connect()
     setTransport(next)
     setLocalTransport(next)
