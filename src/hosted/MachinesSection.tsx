@@ -47,6 +47,27 @@ export function MachinesSection({ currentMachineId, onSwitch, onDisconnect }: Ma
     return <p className="text-body text-ink-muted">Could not reach the relay to list your machines.</p>
   }
 
+  // Nothing paired yet — the two commands that fix that, since a bare empty
+  // list leaves a new user with no next step.
+  if (machines.length === 0) {
+    return (
+      <>
+        <p className="mb-2 text-body text-ink">No machines paired yet.</p>
+        <p className="text-meta text-ink-muted">
+          On a machine running Codekin, run{' '}
+          <code className="rounded-control bg-surface-raised px-1.5 py-0.5 font-mono text-meta text-ink">
+            codekin relay login
+          </code>{' '}
+          to pair it, then{' '}
+          <code className="rounded-control bg-surface-raised px-1.5 py-0.5 font-mono text-meta text-ink">
+            codekin relay connect
+          </code>{' '}
+          to bring it online.
+        </p>
+      </>
+    )
+  }
+
   const current = machines.find(m => m.id === currentMachineId)
 
   return (
