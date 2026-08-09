@@ -11,7 +11,7 @@
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { useOutsideClick } from '../hooks/useOutsideClick'
 import { useAutoGrow } from '../hooks/useAutoGrow'
-import { IconPlus, IconX, IconTerminal2, IconChevronDown, IconDots, IconGitBranch, IconGitBranchDeleted, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck, IconCornerDownLeft } from '@tabler/icons-react'
+import { IconPlus, IconX, IconTerminal2, IconChevronDown, IconChevronLeft, IconChevronRight, IconArrowRight, IconArrowsRightLeft, IconDots, IconGitBranch, IconGitBranchDeleted, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck, IconCornerDownLeft } from '@tabler/icons-react'
 import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
@@ -178,7 +178,7 @@ function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle,
   )
 }
 
-/** Coding providers selectable in the provider switcher. */
+/** Coding agents (harnesses) a session can run on. */
 const PROVIDER_OPTIONS: { id: import('../types').CodingProvider; label: string }[] = [
   { id: 'claude', label: 'Claude' },
   { id: 'codex', label: 'Codex' },
@@ -187,14 +187,17 @@ const PROVIDER_OPTIONS: { id: import('../types').CodingProvider; label: string }
 
 const CARRY_CONTEXT_KEY = 'codekin.handoffCarryContext'
 
-/** Provider switcher dropdown with a carry-context (handoff) toggle. */
-function ProviderDropdown({ current, isOpen, menuRef, onToggle, onSelect }: {
-  current: import('../types').CodingProvider; isOpen: boolean
-  menuRef: React.RefObject<HTMLDivElement | null>
-  onToggle: () => void; onSelect: (provider: import('../types').CodingProvider, carryContext: boolean) => void
+function providerLabel(provider: import('../types').CodingProvider): string {
+  return PROVIDER_OPTIONS.find(p => p.id === provider)?.label ?? provider
+}
+
+/** Handoff pane — the other harnesses, plus the carry-context toggle. */
+function HandoffPane({ current, onBack, onSelect }: {
+  current: import('../types').CodingProvider
+  onBack: () => void
+  onSelect: (provider: import('../types').CodingProvider, carryContext: boolean) => void
 }) {
   const [carryContext, setCarryContext] = useState(() => localStorage.getItem(CARRY_CONTEXT_KEY) !== 'false')
-  const currentLabel = PROVIDER_OPTIONS.find(p => p.id === current)?.label ?? current
 
   const toggleCarry = () => {
     const next = !carryContext
@@ -203,61 +206,78 @@ function ProviderDropdown({ current, isOpen, menuRef, onToggle, onSelect }: {
   }
 
   return (
-    <div className="relative" ref={menuRef}>
-      <StateItem onClick={onToggle} title="Switch coding agent">
-        {currentLabel}
-        <IconChevronDown size={12} stroke={2} className="opacity-70" />
-      </StateItem>
-      {isOpen && (
-        <div className="absolute bottom-full mb-1 right-0 z-50 w-[240px] rounded-floating border border-edge-strong bg-surface-raised shadow-floating py-1">
-          {PROVIDER_OPTIONS.map(p => (
-            <button
-              key={p.id}
-              onClick={() => { if (p.id !== current) onSelect(p.id, carryContext) }}
-              className={`flex w-full items-center gap-2 text-left px-3 py-1.5 text-body transition-colors hover:bg-edge ${p.id === current ? 'text-primary-4' : 'text-ink'}`}
-            >
-              {p.label}
-              {p.id === current && <IconCheck size={14} stroke={2.5} className="ml-auto text-primary-4" />}
-            </button>
-          ))}
-          <div className="mt-1 border-t border-edge-strong pt-1">
-            <button
-              onClick={toggleCarry}
-              className="flex w-full items-start gap-2 text-left px-3 py-1.5 transition-colors hover:bg-edge"
-              title="Distill this session into a handoff and share it with the new agent"
-            >
-              <span className={`mt-0.5 flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-control border ${carryContext ? 'border-primary-4 bg-primary-4' : 'border-edge-strong'}`}>
-                {carryContext && <IconCheck size={10} stroke={3} className="text-ink-inverse" />}
-              </span>
-              <span className="min-w-0">
-                <span className="block text-body text-ink">Carry context</span>
-                <span className="block text-meta text-ink-muted">Hand off this session's context to the new agent</span>
-              </span>
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+    <>
+      <div className="flex items-center gap-1.5 border-b border-edge-strong px-2 py-1.5">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1 rounded-control px-1 py-0.5 text-meta text-ink-muted transition-colors hover:bg-edge hover:text-ink"
+          title={`Back to ${providerLabel(current)} models`}
+        >
+          <IconChevronLeft size={14} stroke={2} />
+          Back
+        </button>
+        <span className="ml-auto text-meta text-ink-muted">Hand off to</span>
+      </div>
+      <div className="py-1">
+        {PROVIDER_OPTIONS.filter(p => p.id !== current).map(p => (
+          <button
+            key={p.id}
+            onClick={() => onSelect(p.id, carryContext)}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-body text-ink transition-colors hover:bg-edge"
+          >
+            {p.label}
+            <IconArrowRight size={14} stroke={2} className="ml-auto text-ink-faint" />
+          </button>
+        ))}
+      </div>
+      <div className="border-t border-edge-strong py-1">
+        <button
+          onClick={toggleCarry}
+          className="flex w-full items-start gap-2 px-3 py-1.5 text-left transition-colors hover:bg-edge"
+          title="Distill this session into a handoff and share it with the new agent"
+        >
+          <span className={`mt-0.5 flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-control border ${carryContext ? 'border-primary-4 bg-primary-4' : 'border-edge-strong'}`}>
+            {carryContext && <IconCheck size={10} stroke={3} className="text-ink-inverse" />}
+          </span>
+          <span className="min-w-0">
+            <span className="block text-body text-ink">Carry context</span>
+            <span className="block text-meta text-ink-muted">Hand off this session's context to the new agent</span>
+          </span>
+        </button>
+      </div>
+    </>
   )
 }
 
-/** Model selector dropdown. */
-function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChange }: {
-  currentModel: string; models: ModelOption[]; isOpen: boolean
+/**
+ * One control for both halves of "what is answering me": the harness and the
+ * model it runs. The menu lists only the current harness's models — switching
+ * harness is a session handoff, not a peer of picking a model, so it lives
+ * behind a CTA that opens a second pane.
+ */
+function AgentDropdown({ provider, currentModel, models, isOpen, menuRef, onToggle, onModelChange, onProviderChange }: {
+  provider?: import('../types').CodingProvider
+  currentModel?: string | null
+  models: ModelOption[]
+  isOpen: boolean
   menuRef: React.RefObject<HTMLDivElement | null>
-  onToggle: () => void; onChange: (model: string) => void
+  onToggle: () => void
+  onModelChange?: (model: string) => void
+  onProviderChange?: (provider: import('../types').CodingProvider, carryContext: boolean) => void
 }) {
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
+  const [showHandoff, setShowHandoff] = useState(false)
   const [prevIsOpen, setPrevIsOpen] = useState(isOpen)
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
   const RECENTS_KEY = 'codekin.recentModels'
 
-  // Reset active index when isOpen prop changes (React-recommended
+  // Reset transient menu state when isOpen prop changes (React-recommended
   // "adjusting state based on props" pattern — no useEffect needed)
   if (isOpen !== prevIsOpen) {
     setPrevIsOpen(isOpen)
     setActiveIndex(0)
+    setShowHandoff(false)
   }
 
   const getRecents = (): string[] => {
@@ -292,6 +312,11 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
     if (el) el.scrollIntoView({ block: 'nearest' })
   }, [activeIndex])
 
+  const selectModel = (id: string) => {
+    addRecent(id)
+    onModelChange?.(id)
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!visibleList.length) return
     if (e.key === 'ArrowDown') {
@@ -303,70 +328,114 @@ function ModelDropdown({ currentModel, models, isOpen, menuRef, onToggle, onChan
     } else if (e.key === 'Enter') {
       e.preventDefault()
       const m = visibleList[activeIndex]
-      if (m) { addRecent(m.id); onChange(m.id) }
+      if (m) selectModel(m.id)
     }
   }
 
+  const harnessLabel = provider ? providerLabel(provider) : null
+  const modelLabel = currentModel ? shortModelLabel(currentModel, models) : null
+  const canPickModel = !!onModelChange && models.length > 0
+
   return (
     <div className="relative" ref={menuRef}>
-      <StateItem onClick={onToggle} title="Change model">
-        {shortModelLabel(currentModel, models)}
+      <StateItem
+        onClick={onToggle}
+        title={`${harnessLabel ?? 'Agent'}${modelLabel ? ` · ${modelLabel}` : ''} — change model or hand off`}
+      >
+        {harnessLabel && <span className="text-ink">{harnessLabel}</span>}
+        {harnessLabel && modelLabel && <span className="opacity-40">·</span>}
+        {modelLabel}
         <IconChevronDown size={12} stroke={2} className="opacity-70" />
       </StateItem>
       {isOpen && (
-        <div className="absolute bottom-full mb-1 right-0 z-50 w-[260px] max-h-[360px] rounded-floating border border-edge-strong bg-surface-raised shadow-floating flex flex-col">
-          <div className="p-2 border-b border-edge-strong">
-            <input
-              autoFocus
-              value={query}
-              onChange={e => { setQuery(e.target.value); setActiveIndex(0) }}
-              onKeyDown={handleKeyDown}
-              placeholder="Search models..."
-              className="w-full bg-edge-strong text-body px-2 py-1.5 rounded-control outline-none text-ink placeholder:text-ink-muted"
+        <div className="absolute bottom-full mb-1 right-0 z-50 flex max-h-[380px] w-[280px] flex-col rounded-floating border border-edge-strong bg-surface-raised shadow-floating">
+          {showHandoff && provider && onProviderChange ? (
+            <HandoffPane
+              current={provider}
+              onBack={() => setShowHandoff(false)}
+              onSelect={onProviderChange}
             />
-          </div>
-
-          <div className="overflow-y-auto py-1">
-            {!query && recents.length > 0 && (
-              <div className="mb-1">
-                <div className="px-3 py-1 text-micro text-ink-muted">Recent</div>
-                {recents.map((id, idx) => {
-                  const m = models.find(x => x.id === id)
-                  if (!m) return null
-                  const index = idx
-                  return (
-                    <button
-                      key={m.id}
-                      ref={el => { itemRefs.current[index] = el }}
-                      onClick={() => { addRecent(m.id); onChange(m.id) }}
-                      className={`w-full text-left px-3 py-1.5 text-body transition-colors ${index === activeIndex ? 'bg-edge' : 'hover:bg-edge'} ${m.id === currentModel ? 'text-primary-4' : 'text-ink'}`}
-                    >
-                      {m.label}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-
-            <div>
-              {!query && (
-                <div className="px-3 py-1 text-micro text-ink-muted">All Models</div>
+          ) : (
+            <>
+              {canPickModel && (
+                <div className="border-b border-edge-strong p-2">
+                  <input
+                    autoFocus
+                    value={query}
+                    onChange={e => { setQuery(e.target.value); setActiveIndex(0) }}
+                    onKeyDown={handleKeyDown}
+                    placeholder={harnessLabel ? `Search ${harnessLabel} models...` : 'Search models...'}
+                    className="w-full bg-edge-strong text-body px-2 py-1.5 rounded-control outline-none text-ink placeholder:text-ink-muted"
+                  />
+                </div>
               )}
-              {allModelsFiltered.map((m, idx) => {
-                const baseIndex = (!query && recents.length > 0) ? recents.length : 0
-                const index = baseIndex + idx
-                return (
-                <button
-                  key={m.id}
-                  ref={el => { itemRefs.current[index] = el }}
-                  onClick={() => { addRecent(m.id); onChange(m.id) }}
-                  className={`w-full text-left px-3 py-1.5 text-body transition-colors ${index === activeIndex ? 'bg-edge' : 'hover:bg-edge'} ${m.id === currentModel ? 'text-primary-4' : 'text-ink'}`}
-                >
-                  {m.label}
-                </button>
-              )})}
-            </div>
-          </div>
+
+              <div className="overflow-y-auto py-1">
+                {!canPickModel && (
+                  <div className="px-3 py-2 text-meta text-ink-muted">
+                    No models available for {harnessLabel ?? 'this agent'}.
+                  </div>
+                )}
+                {canPickModel && !query && recents.length > 0 && (
+                  <div className="mb-1">
+                    <div className="px-3 py-1 text-micro text-ink-muted">Recent</div>
+                    {recents.map((id, idx) => {
+                      const m = models.find(x => x.id === id)
+                      if (!m) return null
+                      const index = idx
+                      return (
+                        <button
+                          key={m.id}
+                          ref={el => { itemRefs.current[index] = el }}
+                          onClick={() => selectModel(m.id)}
+                          className={`w-full text-left px-3 py-1.5 text-body transition-colors ${index === activeIndex ? 'bg-edge' : 'hover:bg-edge'} ${m.id === currentModel ? 'text-primary-4' : 'text-ink'}`}
+                        >
+                          {m.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {canPickModel && (
+                  <div>
+                    {!query && (
+                      <div className="px-3 py-1 text-micro text-ink-muted">
+                        {harnessLabel ? `${harnessLabel} models` : 'All Models'}
+                      </div>
+                    )}
+                    {allModelsFiltered.map((m, idx) => {
+                      const baseIndex = (!query && recents.length > 0) ? recents.length : 0
+                      const index = baseIndex + idx
+                      return (
+                      <button
+                        key={m.id}
+                        ref={el => { itemRefs.current[index] = el }}
+                        onClick={() => selectModel(m.id)}
+                        className={`w-full text-left px-3 py-1.5 text-body transition-colors ${index === activeIndex ? 'bg-edge' : 'hover:bg-edge'} ${m.id === currentModel ? 'text-primary-4' : 'text-ink'}`}
+                      >
+                        {m.label}
+                      </button>
+                    )})}
+                  </div>
+                )}
+              </div>
+
+              {provider && onProviderChange && (
+                <div className="border-t border-edge-strong p-1">
+                  <button
+                    onClick={() => setShowHandoff(true)}
+                    className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-body text-ink-muted transition-colors hover:bg-edge hover:text-ink"
+                    title="Move this session to another coding agent"
+                  >
+                    <IconArrowsRightLeft size={14} stroke={2} className="flex-shrink-0" />
+                    Hand off to another agent
+                    <IconChevronRight size={14} stroke={2} className="ml-auto flex-shrink-0 opacity-70" />
+                  </button>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -444,24 +513,21 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     : PERMISSION_MODES
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
-  const [modelMenuOpen, setModelMenuOpen] = useState(false)
-  const [providerMenuOpen, setProviderMenuOpen] = useState(false)
+  const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   const [permMenuOpen, setPermMenuOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [slashMenuOpen, setSlashMenuOpen] = useState(false)
 
   /** Close all toolbar popups, optionally keeping one open. */
-  const closeAllPopups = useCallback((except?: 'skill' | 'model' | 'perm' | 'provider') => {
+  const closeAllPopups = useCallback((except?: 'skill' | 'agent' | 'perm') => {
     if (except !== 'skill') setSkillMenuOpen(false)
-    if (except !== 'model') setModelMenuOpen(false)
+    if (except !== 'agent') setAgentMenuOpen(false)
     if (except !== 'perm') setPermMenuOpen(false)
-    if (except !== 'provider') setProviderMenuOpen(false)
   }, [])
   const [slashFilter, setSlashFilter] = useState('')
   const mobileMenuRef = useRef<HTMLDivElement>(null)
   const permMenuRef = useRef<HTMLDivElement>(null)
-  const modelMenuRef = useRef<HTMLDivElement>(null)
-  const providerMenuRef = useRef<HTMLDivElement>(null)
+  const agentMenuRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const prevWaiting = useRef(false)
@@ -487,8 +553,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   // Close dropdown menus on outside click
   useOutsideClick(mobileMenuRef, mobileMenuOpen, useCallback(() => setMobileMenuOpen(false), []))
   useOutsideClick(permMenuRef, permMenuOpen, useCallback(() => setPermMenuOpen(false), []))
-  useOutsideClick(modelMenuRef, modelMenuOpen, useCallback(() => setModelMenuOpen(false), []))
-  useOutsideClick(providerMenuRef, providerMenuOpen, useCallback(() => setProviderMenuOpen(false), []))
+  useOutsideClick(agentMenuRef, agentMenuOpen, useCallback(() => setAgentMenuOpen(false), []))
 
   const handleSend = useCallback(() => {
     if (!value.trim() && pendingFiles.length === 0) return
@@ -597,10 +662,13 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const showPermission = !isOrchestrator && !!currentPermissionMode && !!onPermissionModeChange
   const showModel = !isOrchestrator && !!currentModel && !!onModelChange
   const showProvider = !isOrchestrator && !!sessionProvider && !!onProviderChange
+  // Harness and model read as one fact ("what is answering me"), so they share
+  // one control; it appears as soon as either half is known.
+  const showAgent = showModel || showProvider
   const showWorktree = !isOrchestrator && (!!worktreePath || (showWorktreeToggle && !!onWorktreeChange) || !!onMoveToWorktree)
   // Anything beyond the permission chip folds into the overflow menu on a
   // narrow composer; a dangerous mode must stay visible at every width.
-  const hasOverflow = showModel || showWorktree
+  const hasOverflow = showAgent || showWorktree
 
   return (
     <div className={`app-input-bar @container relative flex flex-col ${isOrchestrator ? 'orchestrator-input-bar' : ''}`}>
@@ -668,7 +736,13 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
           </div>
 
           {/* One toolbar: attach on the left rail, state and actions on the
-              right — the arrangement the reference composer uses. */}
+              right — the arrangement the reference composer uses.
+
+              Below 34rem the worktree and agent items fold into the overflow
+              menu (they are `hidden @[34rem]:flex`, its button `@[34rem]:hidden`)
+              so each is reachable from exactly one place at any width. The
+              permission chip stays out of that trade: it is icon-only, and a
+              dangerous mode must be visible everywhere. */}
           <div className="flex items-center gap-3">
             <AttachButton onClick={handleFileSelect} disabled={disabled} accent={isOrchestrator} />
 
@@ -686,7 +760,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 />
               )}
               {showWorktree && (
-                <div className="flex">
+                <div className="hidden @[34rem]:flex">
                   {worktreePath ? (
                     <StateItem title={`In a worktree: ${worktreePath}`}>
                       <IconGitBranch size={14} stroke={2} className="text-primary-5" />
@@ -718,26 +792,17 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   ) : null}
                 </div>
               )}
-              {showProvider && (
-                <div className="flex">
-                  <ProviderDropdown
-                    current={sessionProvider}
-                    isOpen={providerMenuOpen}
-                    menuRef={providerMenuRef}
-                    onToggle={() => { closeAllPopups('provider'); setProviderMenuOpen(!providerMenuOpen) }}
-                    onSelect={(provider, carryContext) => { onProviderChange(provider, carryContext); setProviderMenuOpen(false) }}
-                  />
-                </div>
-              )}
-              {showModel && (
-                <div className="flex">
-                  <ModelDropdown
-                    currentModel={currentModel}
+              {showAgent && (
+                <div className="hidden @[34rem]:flex">
+                  <AgentDropdown
+                    provider={showProvider ? sessionProvider : undefined}
+                    currentModel={showModel ? currentModel : null}
                     models={availableModels}
-                    isOpen={modelMenuOpen}
-                    menuRef={modelMenuRef}
-                    onToggle={() => { closeAllPopups('model'); setModelMenuOpen(!modelMenuOpen) }}
-                    onChange={(id) => { onModelChange(id); setModelMenuOpen(false) }}
+                    isOpen={agentMenuOpen}
+                    menuRef={agentMenuRef}
+                    onToggle={() => { closeAllPopups('agent'); setAgentMenuOpen(!agentMenuOpen) }}
+                    onModelChange={showModel ? (id) => { onModelChange(id); setAgentMenuOpen(false) } : undefined}
+                    onProviderChange={showProvider ? (provider, carryContext) => { onProviderChange(provider, carryContext); setAgentMenuOpen(false) } : undefined}
                   />
                 </div>
               )}
@@ -777,12 +842,14 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                               Move to a worktree
                             </button>
                           ) : null}
-                          {showModel && <div className="my-1 border-t border-edge-strong" />}
+                          {showAgent && <div className="my-1 border-t border-edge-strong" />}
                         </>
                       )}
                       {showModel && (
                         <>
-                          <div className="px-3 py-1.5 text-meta text-ink-muted uppercase tracking-wider">Model</div>
+                          <div className="px-3 py-1.5 text-meta text-ink-muted uppercase tracking-wider">
+                            {sessionProvider ? `${providerLabel(sessionProvider)} model` : 'Model'}
+                          </div>
                           {availableModels.map(m => (
                             <button
                               key={m.id}
@@ -790,6 +857,25 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                               className={`w-full text-left px-3 py-2 text-body hover:bg-edge transition-colors ${m.id === currentModel ? 'text-primary-4' : 'text-ink'}`}
                             >
                               {m.label}
+                            </button>
+                          ))}
+                        </>
+                      )}
+                      {showProvider && (
+                        <>
+                          {showModel && <div className="my-1 border-t border-edge-strong" />}
+                          <div className="px-3 py-1.5 text-meta text-ink-muted uppercase tracking-wider">Hand off to</div>
+                          {PROVIDER_OPTIONS.filter(p => p.id !== sessionProvider).map(p => (
+                            <button
+                              key={p.id}
+                              onClick={() => {
+                                onProviderChange(p.id, localStorage.getItem(CARRY_CONTEXT_KEY) !== 'false')
+                                setMobileMenuOpen(false)
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-body text-ink transition-colors hover:bg-edge"
+                            >
+                              {p.label}
+                              <IconArrowRight size={14} stroke={2} className="ml-auto text-ink-faint" />
                             </button>
                           ))}
                         </>
