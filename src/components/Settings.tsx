@@ -57,6 +57,8 @@ interface Props {
   hostedMachineId?: string
   /** Hosted only: connect to another machine. Absent in the local build. */
   onSwitchMachine?: (machine: import('../hosted/machines').Machine) => void
+  /** Hosted only: leave the current machine and return to the picker. */
+  onDisconnectMachine?: () => void
 }
 
 /**
@@ -128,7 +130,7 @@ function StatusBadge({ status }: { status: string }) {
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
-export function Settings({ open, onClose, settings, onUpdate, isMobile = false, autoWorktree = false, onAutoWorktreeChange, agentName = 'Joe', onAgentNameChange, repos = [], hostedMachineId = '', onSwitchMachine }: Props) {
+export function Settings({ open, onClose, settings, onUpdate, isMobile = false, autoWorktree = false, onAutoWorktreeChange, agentName = 'Joe', onAgentNameChange, repos = [], hostedMachineId = '', onSwitchMachine, onDisconnectMachine }: Props) {
   const [tokenInput, setTokenInput] = useState(settings.token)
   const [verifying, setVerifying] = useState(false)
   const [status, setStatus] = useState<'idle' | 'valid' | 'invalid'>('idle')
@@ -320,6 +322,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                 <MachinesSection
                   currentMachineId={hostedMachineId}
                   onSwitch={machine => { onClose(); onSwitchMachine(machine) }}
+                  onDisconnect={onDisconnectMachine && (() => { onClose(); onDisconnectMachine() })}
                 />
               </Suspense>
             </SectionCard>

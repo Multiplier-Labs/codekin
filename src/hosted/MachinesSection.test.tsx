@@ -87,6 +87,27 @@ describe('MachinesSection', () => {
     expect(onSwitch).toHaveBeenCalledWith(other)
   })
 
+  it('offers to disconnect, naming the machine it would leave', async () => {
+    // The workspace has no exit button any more, so this is the only way back
+    // to the picker — it must be plain text, not a hover or a menu.
+    const onDisconnect = vi.fn()
+    stubMachines([machine()])
+    const container = await render(
+      <MachinesSection currentMachineId="m1" onSwitch={vi.fn()} onDisconnect={onDisconnect} />,
+    )
+    const button = [...container.querySelectorAll('button')]
+      .find(b => b.textContent?.startsWith('Disconnect'))
+    expect(button?.textContent).toBe('Disconnect from hatchery')
+    act(() => { button!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(onDisconnect).toHaveBeenCalled()
+  })
+
+  it('omits the disconnect action where there is nothing to disconnect from', async () => {
+    stubMachines([machine()])
+    const container = await render(<MachinesSection currentMachineId="m1" onSwitch={vi.fn()} />)
+    expect(container.textContent).not.toContain('Disconnect')
+  })
+
   it('says so when the relay cannot be reached, rather than showing an empty list', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
     const container = await render(<MachinesSection currentMachineId="m1" onSwitch={vi.fn()} />)
