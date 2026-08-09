@@ -5,13 +5,13 @@
  * (src/App.tsx) is untouched by hosted mode.
  */
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { LoginPage } from './LoginPage'
 import { MachinesPage } from './MachinesPage'
 import type { Machine } from './MachinesPage'
-import { MachineDetailPage } from './MachineDetailPage'
+import { MachineConnect } from './MachineConnect'
 import { MachineWorkspace } from './MachineWorkspace'
-import { HostedRelayTransport, setTransport } from '../lib/transport'
+import { HostedRelayTransport, LocalHttpTransport, setTransport } from '../lib/transport'
 import { PairPage } from './PairPage'
 import { useHostedAuth } from './useHostedAuth'
 
@@ -41,17 +41,34 @@ function PendingPage({ login, onLogout }: { login: string; onLogout: () => void 
 export default function HostedApp() {
   const { user, initialized, authError, logout } = useHostedAuth()
   const [selected, setSelected] = useState<Machine | null>(null)
-  // Set when entering the workspace. Creating the transport here — in an
-  // event handler rather than during render — guarantees it is installed
-  // before the app mounts and issues its first call.
-  const [workspace, setWorkspace] = useState<HostedRelayTransport | null>(null)
+  // The transport is created when a machine is picked and installed before
+  // the workspace mounts, so App's very first call already goes to the
+  // machine. `phase` gates the connect screen against the workspace.
+  const [transport, setLocalTransport] = useState<HostedRelayTransport | null>(null)
+  const [phase, setPhase] = useState<'connecting' | 'ready'>('connecting')
 
-  const openWorkspace = (machine: Machine) => {
-    const transport = new HostedRelayTransport(machine.id)
-    transport.connect()
-    setTransport(transport)
-    setWorkspace(transport)
+  const selectMachine = (machine: Machine) => {
+    const next = new HostedRelayTransport(machine.id)
+    next.connect()
+    setTransport(next)
+    setLocalTransport(next)
+    setPhase('connecting')
+    setSelected(machine)
   }
+
+  // Return to the machine list. The workspace owns its own teardown on
+  // unmount, so when it was showing (phase 'ready') we leave the transport to
+  // it; from the connect screen no workspace mounted, so drop the relay
+  // transport and restore a local one here.
+  const backToMachines = useCallback(() => {
+    if (phase === 'connecting') {
+      transport?.close()
+      setTransport(new LocalHttpTransport())
+    }
+    setSelected(null)
+    setLocalTransport(null)
+    setPhase('connecting')
+  }, [phase, transport])
 
   // Latch not resolved yet — render the page background, no flash of login UI
   if (!initialized) {
@@ -70,25 +87,19 @@ export default function HostedApp() {
     return <PairPage />
   }
 
-  if (selected && workspace) {
+  if (selected && transport) {
+    if (phase === 'ready') {
+      return <MachineWorkspace machine={selected} transport={transport} onExit={backToMachines} />
+    }
     return (
-      <MachineWorkspace
+      <MachineConnect
         machine={selected}
-        transport={workspace}
-        onExit={() => { setWorkspace(null) }}
+        transport={transport}
+        onBack={backToMachines}
+        onConnected={() => { setPhase('ready') }}
       />
     )
   }
 
-  if (selected) {
-    return (
-      <MachineDetailPage
-        machine={selected}
-        onBack={() => { setSelected(null) }}
-        onOpenWorkspace={() => { openWorkspace(selected) }}
-      />
-    )
-  }
-
-  return <MachinesPage user={user} onLogout={() => void logout()} onSelect={setSelected} />
+  return <MachinesPage user={user} onLogout={() => void logout()} onSelect={selectMachine} />
 }

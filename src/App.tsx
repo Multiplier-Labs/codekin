@@ -12,7 +12,8 @@
  * - SessionContent: the active chat session with diff panel and prompts
  */
 
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react'
+import { transport } from './lib/transport'
 import { useSettings } from './hooks/useSettings'
 import { useRepos } from './hooks/useRepos'
 import { useSessions } from './hooks/useSessions'
@@ -48,6 +49,11 @@ import { SessionContent } from './components/SessionContent'
 import { RepoDrawer, type RepoDrawerTab } from './components/RepoDrawer'
 import type { PermissionMode, CodingProvider } from './types'
 import { useClaudeModelSync } from './hooks/useClaudeModelSync'
+
+// Hosted-only: session sharing. Lazy so the class and its markup are code-split
+// out of the local build, which never renders it.
+const isHosted = import.meta.env.VITE_APP_MODE === 'hosted'
+const ShareDialog = lazy(() => import('./hosted/ShareDialog').then(m => ({ default: m.ShareDialog })))
 
 export default function App() {
   const { settings, updateSettings } = useSettings()
@@ -611,6 +617,12 @@ export default function App() {
   const activeSessionName = activeSession?.name ?? null
   const activeRepoName = activeRepo?.name ?? activeWorkingDir?.split('/').pop() ?? null
 
+  // Hosted mode shares the active session from the sidebar footer. The
+  // machine id comes from the installed relay transport; empty in local mode,
+  // where the Share control is never rendered.
+  const [shareOpen, setShareOpen] = useState(false)
+  const hostedMachineId = (transport as { machineId?: string }).machineId ?? ''
+
   // Session input change handler for extracted components
   const handleSessionInputChange = useCallback((sessionId: string, value: string) => {
     setSessionInputs(prev => ({ ...prev, [sessionId]: value }))
@@ -648,6 +660,7 @@ export default function App() {
         onSelectRepo={handleSelectRepo}
         onDeleteRepo={handleDeleteRepo}
         onSettingsOpen={() => setSettingsOpen(true)}
+        onShareSession={isHosted ? () => setShareOpen(true) : undefined}
         onUpdateTheme={(theme) => updateSettings({ theme: theme as 'dark' | 'light' })}
         onSendModule={handleSendModule}
         agentName={agentName}
@@ -883,6 +896,16 @@ export default function App() {
         onSelectArchived={handleOpenArchivedFromPalette}
         activeWorkingDir={activeWorkingDir}
       />
+      {isHosted && shareOpen && activeSession && (
+        <Suspense fallback={null}>
+          <ShareDialog
+            machineId={hostedMachineId}
+            sessionId={activeSession.id}
+            sessionName={activeSessionName ?? activeSession.id}
+            onClose={() => setShareOpen(false)}
+          />
+        </Suspense>
+      )}
     </div>
   )
 }
