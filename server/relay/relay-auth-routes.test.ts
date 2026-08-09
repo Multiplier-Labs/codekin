@@ -16,8 +16,8 @@ const CONFIG: RelayConfig = {
   githubClientId: 'client-id',
   githubClientSecret: 'client-secret',
   sessionSecret: 's'.repeat(32),
-  ownerGithubLogin: 'alari76',
-  allowedGithubLogins: ['alari76'],
+  ownerGithubId: 1,
+  allowedGithubIds: [1],
   dataDir: '/tmp',
   isProduction: false,
 }
@@ -134,6 +134,20 @@ describe('relay auth routes', () => {
 
     const prot = await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })
     expect(prot.status).toBe(403)
+  })
+
+  it('does not grant owner to a different GitHub account that claimed the owner login', async () => {
+    // GitHub releases renamed logins for re-registration; the numeric id is
+    // the identity, so the same login with a different id stays pending.
+    await start(githubFetchMock({ id: 31337, login: 'alari76' }))
+    const cookie = await login()
+
+    const me = (await (await fetch(`${baseUrl}/api/me`, { headers: { cookie } })).json()) as {
+      user: { role: string; status: string }
+    }
+    expect(me.user.role).toBe('member')
+    expect(me.user.status).toBe('pending')
+    expect((await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })).status).toBe(403)
   })
 
   it('blocks a live session as soon as the user is disabled in the database', async () => {

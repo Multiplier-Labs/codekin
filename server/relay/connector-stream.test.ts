@@ -178,7 +178,7 @@ describe('session streaming over the relay', () => {
     const ownerRow = upsertUserFromGithub(
       db,
       { id: 1, login: 'alari76', name: null, email: null, avatarUrl: null },
-      { ownerGithubLogin: 'alari76', allowedGithubLogins: [] },
+      { ownerGithubId: 1, allowedGithubIds: [] },
     )
     const owner: SessionUser = {
       id: ownerRow.id,

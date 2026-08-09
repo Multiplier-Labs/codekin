@@ -111,8 +111,8 @@ app.get('/api/health', (_req, res) => {
 
 app.use(createRelayAuthRouter({ db, config }))
 app.use(createMachineRouter(db, hub))
-app.use(createPairingRouter(db, config))
-app.use(createShareRouter(db))
+app.use(createPairingRouter(db, config, { connectorHub: hub, browserHub }))
+app.use(createShareRouter(db, browserHub))
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' })

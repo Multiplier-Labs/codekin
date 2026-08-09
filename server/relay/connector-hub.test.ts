@@ -41,7 +41,7 @@ describe('connector hub', () => {
     const userId = upsertUserFromGithub(
       db,
       { id: 1, login: 'alari76', name: null, email: null, avatarUrl: null },
-      { ownerGithubLogin: 'alari76', allowedGithubLogins: [] },
+      { ownerGithubId: 1, allowedGithubIds: [] },
     ).id
 
     const { userCode, deviceCode } = startPairing(db, { hostname: 'devbox', platform: 'linux' })
@@ -234,6 +234,28 @@ describe('connector hub', () => {
 
     second.stop()
     first.stop()
+  })
+
+  it('disconnectMachine drops the live socket and the connector does not retry', async () => {
+    const statuses: string[] = []
+    const connector = new RelayConnector({
+      relayUrl, machineId, machineSecret, connectorVersion: '1',
+      onStatus: status => { statuses.push(status) },
+    })
+    connector.start()
+    await waitFor(() => hub.isOnline(machineId))
+
+    // Unpairing deletes the credential, but credentials are only checked at
+    // connect time — the live socket must be dropped explicitly.
+    hub.disconnectMachine(machineId)
+
+    expect(hub.isOnline(machineId)).toBe(false)
+    // 4001 tells the connector its standing is gone; it must not reconnect.
+    await waitFor(() => statuses.includes('auth_failed') || statuses.includes('disconnected'))
+    await new Promise(resolve => setTimeout(resolve, 300))
+    expect(hub.isOnline(machineId)).toBe(false)
+
+    connector.stop()
   })
 
   it('the survivor keeps the machine online after a replacement', async () => {
