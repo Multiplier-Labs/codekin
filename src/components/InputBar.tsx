@@ -342,8 +342,11 @@ function AgentDropdown({ provider, currentModel, models, isOpen, menuRef, onTogg
         onClick={onToggle}
         title={`${harnessLabel ?? 'Agent'}${modelLabel ? ` · ${modelLabel}` : ''} — change model or hand off`}
       >
-        {harnessLabel && <span className="text-ink">{harnessLabel}</span>}
-        {harnessLabel && modelLabel && <span className="opacity-40">·</span>}
+        {/* Harness and model are one fact, so they carry one tone — the
+            separator included. StateItem's muted colour (and its hover
+            brightening) reaches all three. */}
+        {harnessLabel}
+        {harnessLabel && modelLabel && <span>·</span>}
         {modelLabel}
         <IconChevronDown size={12} stroke={2} className="opacity-70" />
       </StateItem>
