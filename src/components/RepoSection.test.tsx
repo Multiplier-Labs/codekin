@@ -11,6 +11,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { RepoSection, type RepoSectionProps, type RepoNode } from './RepoSection.js'
 import type { Session } from '../types.js'
+import { PROVIDERS } from '../types.js'
 
 let activeRoot: ReturnType<typeof createRoot> | null = null
 let activeContainer: HTMLElement | null = null
@@ -109,11 +110,48 @@ describe('RepoSection', () => {
     expect(onDeleteRepo).toHaveBeenCalledWith('/srv/repos/codekin')
   })
 
+  it('marks the harness on every session row, Claude included', () => {
+    const sessions: Session[] = [
+      { ...session, id: 'a1', provider: 'claude' } as Session,
+      { ...session, id: 'b2', provider: 'codex' } as Session,
+      { ...session, id: 'c3', provider: 'opencode' } as Session,
+      // Sessions created before the provider field existed default to Claude.
+      { ...session, id: 'd4', provider: undefined } as Session,
+    ]
+    const container = render(<RepoSection {...props({ node: { ...node, sessions } })} />)
+    // No literal spaces around the middot — the run is a flex box and the
+    // breathing room is its gap.
+    const marks = [...container.querySelectorAll('[title$="session"]')].map(el => el.textContent?.trim())
+    expect(marks).toEqual(['Claude·0s', 'Codex·0s', 'OpenCode·0s', 'Claude·0s'])
+  })
+
+  it('spells the marks from PROVIDERS rather than a second list', () => {
+    const container = render(<RepoSection {...props({ node: { ...node, sessions: [{ ...session, provider: 'opencode' } as Session] } })} />)
+    const mark = container.querySelector('[title="OpenCode session"]')
+    expect(mark?.textContent).toContain(PROVIDERS.find(p => p.id === 'opencode')!.label)
+  })
+
+  it('names the pinned model in the row tooltip when the session has one', () => {
+    const pinned = { ...session, provider: 'codex', model: 'gpt-5.6-sol' } as Session
+    const container = render(<RepoSection {...props({ node: { ...node, sessions: [pinned] } })} />)
+    expect(container.querySelector('[title="Codex session · gpt-5.6-sol"]')).toBeTruthy()
+  })
+
+  it('truncates the session name before the harness, which never shrinks', () => {
+    const container = render(<RepoSection {...props()} />)
+    const mark = container.querySelector('[title$="session"]')!
+    expect(mark.className).toContain('flex-shrink-0')
+    // The name is the row's only shrinkable part: min-w-0 next to a run that
+    // refuses to shrink. Scoped to the row, since the repo header truncates too.
+    const row = mark.parentElement!
+    expect(row.querySelector('.min-w-0 .truncate')?.textContent).toBe('fix sidebar')
+  })
+
   it('creates the session with the provider chosen from the menu', () => {
     const onNewSession = vi.fn()
     const container = render(<RepoSection {...props({ onNewSession })} />)
     click(findButton(container, 'New session'))
-    click(findButton(container, 'Claude Code'))
+    click(findButton(container, 'Claude'))
     expect(onNewSession).toHaveBeenCalledWith('claude')
   })
 })

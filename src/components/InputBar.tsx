@@ -16,7 +16,7 @@ import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
 import type { SlashCommand } from '../lib/slashCommands'
-import { PERMISSION_MODES, type PermissionMode, type ModelOption } from '../types'
+import { PERMISSION_MODES, PROVIDERS, type PermissionMode, type ModelOption } from '../types'
 
 const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
   shield: IconShieldCheck,
@@ -178,17 +178,11 @@ function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle,
   )
 }
 
-/** Coding agents (harnesses) a session can run on. */
-const PROVIDER_OPTIONS: { id: import('../types').CodingProvider; label: string }[] = [
-  { id: 'claude', label: 'Claude' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'opencode', label: 'OpenCode' },
-]
-
 const CARRY_CONTEXT_KEY = 'codekin.handoffCarryContext'
 
+/** One spelling per harness, shared with the sidebar mark — see PROVIDERS. */
 function providerLabel(provider: import('../types').CodingProvider): string {
-  return PROVIDER_OPTIONS.find(p => p.id === provider)?.label ?? provider
+  return PROVIDERS.find(p => p.id === provider)?.label ?? provider
 }
 
 /** Handoff pane — the other harnesses, plus the carry-context toggle. */
@@ -219,7 +213,7 @@ function HandoffPane({ current, onBack, onSelect }: {
         <span className="ml-auto text-meta text-ink-muted">Hand off to</span>
       </div>
       <div className="py-1">
-        {PROVIDER_OPTIONS.filter(p => p.id !== current).map(p => (
+        {PROVIDERS.filter(p => p.id !== current).map(p => (
           <button
             key={p.id}
             onClick={() => onSelect(p.id, carryContext)}
@@ -868,7 +862,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                         <>
                           {showModel && <div className="my-1 border-t border-edge-strong" />}
                           <div className="px-3 py-1.5 text-meta text-ink-muted uppercase tracking-wider">Hand off to</div>
-                          {PROVIDER_OPTIONS.filter(p => p.id !== sessionProvider).map(p => (
+                          {PROVIDERS.filter(p => p.id !== sessionProvider).map(p => (
                             <button
                               key={p.id}
                               onClick={() => {
