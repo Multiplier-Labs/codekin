@@ -1,22 +1,17 @@
-/** Machines list for the hosted app — the landing view after sign-in. */
+/**
+ * Machines list for the hosted app — first run, and after signing out of a
+ * machine on purpose.
+ *
+ * It is no longer the landing view on every visit: a remembered connection is
+ * reinstated straight into the workspace, and the list of machines is a
+ * section of Settings from there. See MachinesSection.
+ */
 
 import { useState, useEffect } from 'react'
 import type { HostedUser } from './useHostedAuth'
+import { fetchMachines, MACHINE_STATUS_DOT as STATUS_DOT, type Machine } from './machines'
 
-export interface Machine {
-  id: string
-  displayName: string
-  hostname: string | null
-  platform: string | null
-  connectorVersion: string | null
-  localCodekinVersion: string | null
-  status: 'online' | 'offline' | 'degraded'
-  lastSeenAt: string | null
-  /** 'shared' when reachable only through a session share. */
-  access?: 'owner' | 'shared'
-  /** True when the machine's connector is behind the supported version. */
-  connectorOutdated?: boolean
-}
+export type { Machine }
 
 interface MachinesPageProps {
   user: HostedUser
@@ -24,20 +19,13 @@ interface MachinesPageProps {
   onSelect: (machine: Machine) => void
 }
 
-const STATUS_DOT: Record<Machine['status'], string> = {
-  online: 'bg-success-7',
-  degraded: 'bg-warning-6',
-  offline: 'bg-ink-faint',
-}
-
 export function MachinesPage({ user, onLogout, onSelect }: MachinesPageProps) {
   const [machines, setMachines] = useState<Machine[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/machines', { credentials: 'include' })
-      .then(res => (res.ok ? res.json() as Promise<{ machines: Machine[] }> : Promise.reject(new Error(String(res.status)))))
-      .then(data => { setMachines(data.machines); })
+    fetchMachines()
+      .then(list => { setMachines(list); })
       .catch(() => { setMachines([]); })
       .finally(() => { setLoading(false); })
   }, [])

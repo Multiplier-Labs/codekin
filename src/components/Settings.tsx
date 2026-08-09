@@ -5,12 +5,12 @@
  * Handles auth token, theme, retention, repos path, and webhook config.
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, Suspense, lazy } from 'react'
 import {
   IconKey, IconPalette, IconBrandGithub, IconCopy, IconCheck,
   IconChevronDown, IconChevronRight, IconCircleCheckFilled, IconCircleXFilled,
   IconRobot, IconArchive, IconGitBranch, IconRefresh, IconAlertTriangle,
-  IconPlugConnected, IconPlayerPlay, IconWand, IconShieldLock,
+  IconPlugConnected, IconPlayerPlay, IconWand, IconShieldLock, IconServer2,
 } from '@tabler/icons-react'
 import type { Settings as SettingsType, PermissionMode, Repo } from '../types'
 import { PERMISSION_MODES } from '../types'
@@ -53,7 +53,17 @@ interface Props {
   onAgentNameChange?: (name: string) => void
   /** Repos used to aggregate app-wide approval counts. */
   repos?: Repo[]
+  /** Hosted only: machine this workspace is connected to. */
+  hostedMachineId?: string
+  /** Hosted only: connect to another machine. Absent in the local build. */
+  onSwitchMachine?: (machine: import('../hosted/machines').Machine) => void
 }
+
+/**
+ * Hosted only: the machine list, which used to be a separate view you landed
+ * on. Lazy so the local build never loads it.
+ */
+const MachinesSection = lazy(() => import('../hosted/MachinesSection').then(m => ({ default: m.MachinesSection })))
 
 // ---------------------------------------------------------------------------
 // Section header component
@@ -118,7 +128,7 @@ function StatusBadge({ status }: { status: string }) {
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
-export function Settings({ open, onClose, settings, onUpdate, isMobile = false, autoWorktree = false, onAutoWorktreeChange, agentName = 'Joe', onAgentNameChange, repos = [] }: Props) {
+export function Settings({ open, onClose, settings, onUpdate, isMobile = false, autoWorktree = false, onAutoWorktreeChange, agentName = 'Joe', onAgentNameChange, repos = [], hostedMachineId = '', onSwitchMachine }: Props) {
   const [tokenInput, setTokenInput] = useState(settings.token)
   const [verifying, setVerifying] = useState(false)
   const [status, setStatus] = useState<'idle' | 'valid' | 'invalid'>('idle')
@@ -301,6 +311,19 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
 
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+
+          {/* ── Machines (hosted only) ──
+              First, because it says which machine everything below applies to. */}
+          {onSwitchMachine && (
+            <SectionCard icon={<IconServer2 size={15} />} title="Machines">
+              <Suspense fallback={<p className="text-body text-ink-muted">Loading…</p>}>
+                <MachinesSection
+                  currentMachineId={hostedMachineId}
+                  onSwitch={machine => { onClose(); onSwitchMachine(machine) }}
+                />
+              </Suspense>
+            </SectionCard>
+          )}
 
           {/* ── Authentication ── */}
           <SectionCard icon={<IconKey size={15} />} title="Authentication">

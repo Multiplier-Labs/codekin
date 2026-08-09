@@ -55,7 +55,16 @@ import { useClaudeModelSync } from './hooks/useClaudeModelSync'
 const isHosted = import.meta.env.VITE_APP_MODE === 'hosted'
 const ShareDialog = lazy(() => import('./hosted/ShareDialog').then(m => ({ default: m.ShareDialog })))
 
-export default function App() {
+interface AppProps {
+  /**
+   * Hosted only: connect this workspace to a different machine. Supplied by
+   * MachineWorkspace and handed to Settings, which is where the machine list
+   * now lives. Undefined in the local build, which has no machines.
+   */
+  onSwitchMachine?: (machine: import('./hosted/machines').Machine) => void
+}
+
+export default function App({ onSwitchMachine }: AppProps = {}) {
   const { settings, updateSettings } = useSettings()
   const { groups, repos, globalSkills, globalModules, ghMissing, refresh: refreshRepos } = useRepos(settings.token)
   const { sessions, rename: renameSession, remove: removeSession, refresh: refreshSessions } = useSessions(settings.token)
@@ -878,6 +887,8 @@ export default function App() {
         agentName={agentName}
         onAgentNameChange={setAgentName}
         repos={repos}
+        hostedMachineId={hostedMachineId}
+        onSwitchMachine={onSwitchMachine}
       />
       <CommandPalette
         open={paletteOpen}
