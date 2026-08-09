@@ -108,6 +108,13 @@ describe('MachinesSection', () => {
     expect(container.textContent).not.toContain('Disconnect')
   })
 
+  it('gives a user with nothing paired the two commands that pair a machine', async () => {
+    stubMachines([])
+    const container = await render(<MachinesSection currentMachineId="" onSwitch={vi.fn()} />)
+    expect(container.textContent).toContain('No machines paired yet.')
+    expect(container.textContent).toContain('codekin relay login')
+  })
+
   it('says so when the relay cannot be reached, rather than showing an empty list', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
     const container = await render(<MachinesSection currentMachineId="m1" onSwitch={vi.fn()} />)

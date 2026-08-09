@@ -59,6 +59,16 @@ interface Props {
   onSwitchMachine?: (machine: import('../hosted/machines').Machine) => void
   /** Hosted only: leave the current machine and return to the picker. */
   onDisconnectMachine?: () => void
+  /**
+   * Hosted only: no machine is connected yet, so this is the whole app —
+   * only the Machines section, since every other setting lives on a machine
+   * and has nothing to read or write until one is chosen.
+   */
+  machinesOnly?: boolean
+  /** Shown beside the header in `machinesOnly` mode, where there is no sidebar. */
+  onSignOut?: () => void
+  /** Who is signed in, for the same header. */
+  signedInAs?: string
 }
 
 /**
@@ -130,7 +140,10 @@ function StatusBadge({ status }: { status: string }) {
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
-export function Settings({ open, onClose, settings, onUpdate, isMobile = false, autoWorktree = false, onAutoWorktreeChange, agentName = 'Joe', onAgentNameChange, repos = [], hostedMachineId = '', onSwitchMachine, onDisconnectMachine }: Props) {
+export function Settings({ open, onClose, settings, onUpdate, isMobile = false, autoWorktree = false, onAutoWorktreeChange, agentName = 'Joe', onAgentNameChange, repos = [], hostedMachineId = '', onSwitchMachine, onDisconnectMachine, machinesOnly = false, onSignOut, signedInAs }: Props) {
+  // Every fetch below reads from a machine. Without one connected there is
+  // nothing to ask, so the machines-only view does not ask.
+  const settingsLive = open && !machinesOnly
   const [tokenInput, setTokenInput] = useState(settings.token)
   const [verifying, setVerifying] = useState(false)
   const [status, setStatus] = useState<'idle' | 'valid' | 'invalid'>('idle')
@@ -175,9 +188,9 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
   // Re-read the app-wide default permission mode each time the modal opens —
   // the composer writes the same localStorage key when a session switches mode.
   useEffect(() => {
-    if (!open) return
+    if (!settingsLive) return
     setDefaultPermissionMode((localStorage.getItem(PERMISSION_MODE_KEY) as PermissionMode | null) ?? 'acceptEdits')
-  }, [open])
+  }, [settingsLive])
 
   // Stable list of repo working directories (the `repos` prop is a fresh array
   // on every parent render, so key on its contents instead of its identity).
@@ -186,7 +199,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
 
   // Aggregate auto-approval rules across every known repo.
   useEffect(() => {
-    if (!open || !settings.token || repoDirs.length === 0) return
+    if (!settingsLive || !settings.token || repoDirs.length === 0) return
     let cancelled = false
     setApprovalsLoading(true)
     setApprovalsError(false)
@@ -220,18 +233,18 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
       })
     }).finally(() => { if (!cancelled) setApprovalsLoading(false) })
     return () => { cancelled = true }
-  }, [open, settings.token, repoDirs, approvalsNonce])
+  }, [settingsLive, settings.token, repoDirs, approvalsNonce])
 
   // Fetch server-side settings when modal opens
   useEffect(() => {
-    if (!open || !settings.token) return
+    if (!settingsLive || !settings.token) return
     getRetentionDays(settings.token).then(setRetentionDays).catch(() => {})
     getReposPath(settings.token).then(setReposPath).catch(() => {})
     getWorktreePrefix(settings.token).then(setWorktreePrefix).catch(() => {})
     getQueueMessages(settings.token).then(setQueueMessages).catch(() => {})
     getWebhookConfig(settings.token).then(setWebhookConfig).catch(() => {})
     getWebhookEvents(settings.token).then(setWebhookEvents).catch(() => {})
-  }, [open, settings.token])
+  }, [settingsLive, settings.token])
 
   if (!open) return null
 
@@ -302,6 +315,44 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
 
   const activePermissionMode = PERMISSION_MODES.find(m => m.id === defaultPermissionMode)
   const dangerousDefault = activePermissionMode?.dangerous === true
+
+  // Hosted, nothing connected: Settings is the whole screen. No dimmed
+  // backdrop and no way to dismiss it — there is no app behind it yet, and
+  // the one thing to do here is pick a machine.
+  if (machinesOnly) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-page p-4 sm:items-center">
+        <div className="w-full max-w-2xl rounded-floating border border-edge-strong bg-surface-raised shadow-floating">
+          <div className="flex items-start justify-between gap-3 border-b border-edge px-6 pt-5 pb-4">
+            <div>
+              <h2 className="text-head font-semibold text-ink">Settings</h2>
+              <p className="mt-0.5 text-meta text-ink-muted">
+                Connect a machine to start working. Everything else lives on the machine.
+              </p>
+            </div>
+            {onSignOut && (
+              <div className="flex flex-shrink-0 items-center gap-3">
+                {signedInAs && <span className="text-meta text-ink-muted">{signedInAs}</span>}
+                <button
+                  onClick={onSignOut}
+                  className="rounded-control border border-edge px-3 py-1.5 text-meta text-ink-muted transition hover:bg-surface hover:text-ink"
+                >
+                  Sign out
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="px-6 py-5">
+            <SectionCard icon={<IconServer2 size={15} />} title="Machines">
+              <Suspense fallback={<p className="text-body text-ink-muted">Loading…</p>}>
+                <MachinesSection currentMachineId="" onSwitch={machine => { onSwitchMachine?.(machine) }} />
+              </Suspense>
+            </SectionCard>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className={`fixed inset-0 z-50 flex bg-black/60 ${isMobile ? 'items-end' : 'items-center justify-center'}`}>
