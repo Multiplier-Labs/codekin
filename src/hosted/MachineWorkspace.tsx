@@ -10,9 +10,9 @@
  */
 
 import { useEffect, Suspense, lazy } from 'react'
-import { LocalHttpTransport, setTransport } from '../lib/transport'
+import { LocalHttpTransport, setTransport, transport as activeTransport } from '../lib/transport'
 import type { HostedRelayTransport } from '../lib/transport'
-import type { Machine } from './MachinesPage'
+import type { Machine } from './machines'
 
 const App = lazy(() => import('../App.tsx'))
 
@@ -20,15 +20,20 @@ interface MachineWorkspaceProps {
   machine: Machine
   transport: HostedRelayTransport
   onExit: () => void
+  /** Connect to a different machine, from the Machines section of Settings. */
+  onSwitchMachine: (machine: Machine) => void
 }
 
-export function MachineWorkspace({ machine, transport, onExit }: MachineWorkspaceProps) {
+export function MachineWorkspace({ machine, transport, onExit, onSwitchMachine }: MachineWorkspaceProps) {
   useEffect(() => {
     return () => {
       transport.close()
       // Leave a working transport behind so any late call fails locally
-      // rather than against a closed relay connection.
-      setTransport(new LocalHttpTransport())
+      // rather than against a closed relay connection — but only if ours is
+      // still the installed one. Switching machines installs the next
+      // machine's transport before this teardown runs, and clobbering it here
+      // would point the new workspace's first calls at localhost.
+      if (activeTransport === transport) setTransport(new LocalHttpTransport())
     }
   }, [transport])
 
@@ -40,7 +45,7 @@ export function MachineWorkspace({ machine, transport, onExit }: MachineWorkspac
   return (
     <>
       <Suspense fallback={<div className="h-full bg-page" />}>
-        <App />
+        <App onSwitchMachine={onSwitchMachine} />
       </Suspense>
 
       <button

@@ -1,14 +1,15 @@
 /**
- * Root of the hosted (app.codekin.ai) build: auth gate → machines view.
+ * Root of the hosted (app.codekin.ai) build: auth gate → remembered machine
+ * → workspace, or the machine picker when there is nothing to restore.
  *
  * Selected by src/main.tsx when VITE_APP_MODE=hosted. The local app
  * (src/App.tsx) is untouched by hosted mode.
  */
 
-import { useState, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { LoginPage } from './LoginPage'
 import { MachinesPage } from './MachinesPage'
-import type { Machine } from './MachinesPage'
+import { decideRestore, fetchMachines, forgetMachine, lastMachineId, rememberMachine, type Machine } from './machines'
 import { MachineConnect } from './MachineConnect'
 import { MachineWorkspace } from './MachineWorkspace'
 import { HostedRelayTransport, LocalHttpTransport, setTransport } from '../lib/transport'
@@ -46,15 +47,50 @@ export default function HostedApp() {
   // machine. `phase` gates the connect screen against the workspace.
   const [transport, setLocalTransport] = useState<HostedRelayTransport | null>(null)
   const [phase, setPhase] = useState<'connecting' | 'ready'>('connecting')
+  // A remembered connection is reinstated before anything renders, so a reload
+  // returns to the chat rather than to the picker. Only the presence of the
+  // memory is known synchronously; resolving it takes one request.
+  const [restoring, setRestoring] = useState(
+    () => lastMachineId() !== null && window.location.pathname !== '/pair',
+  )
 
-  const selectMachine = (machine: Machine) => {
+  const selectMachine = useCallback((machine: Machine) => {
     const next = new HostedRelayTransport(machine.id)
     next.connect()
     setTransport(next)
     setLocalTransport(next)
     setPhase('connecting')
     setSelected(machine)
-  }
+    rememberMachine(machine.id)
+  }, [])
+
+  // Reconnect to the last machine on load. An offline one is skipped rather
+  // than dialled: the reload would land on a connect error instead of the
+  // chat, and the picker at least says what is available.
+  useEffect(() => {
+    if (!restoring) return
+    if (!user || user.status !== 'active') return
+
+    let cancelled = false
+
+    const restore = async () => {
+      const id = lastMachineId()
+      if (id) {
+        try {
+          const decision = decideRestore(await fetchMachines(), id)
+          if (cancelled) return
+          if (decision.action === 'connect') selectMachine(decision.machine)
+          else if (decision.action === 'forget') forgetMachine()
+        } catch {
+          // Fall through to the picker, which reports the failure itself.
+        }
+      }
+      if (!cancelled) setRestoring(false)
+    }
+
+    void restore()
+    return () => { cancelled = true }
+  }, [restoring, user, selectMachine])
 
   // Return to the machine list. The workspace owns its own teardown on
   // unmount, so when it was showing (phase 'ready') we leave the transport to
@@ -68,7 +104,18 @@ export default function HostedApp() {
     setSelected(null)
     setLocalTransport(null)
     setPhase('connecting')
+    // Leaving on purpose is also a decision not to be sent back next time.
+    forgetMachine()
   }, [phase, transport])
+
+  // Switching machines from Settings goes through the same connect gate a
+  // fresh pick does. Installing the new transport here means the outgoing
+  // workspace's teardown sees it is no longer the installed one and leaves it
+  // alone — see MachineWorkspace.
+  const switchMachine = useCallback((machine: Machine) => {
+    if (machine.id === selected?.id) return
+    selectMachine(machine)
+  }, [selected, selectMachine])
 
   // Latch not resolved yet — render the page background, no flash of login UI
   if (!initialized) {
@@ -87,9 +134,22 @@ export default function HostedApp() {
     return <PairPage />
   }
 
+  // Same blank page the auth latch uses: a remembered connection should not
+  // flash the picker on its way to the workspace.
+  if (restoring) {
+    return <div className="min-h-screen bg-page" />
+  }
+
   if (selected && transport) {
     if (phase === 'ready') {
-      return <MachineWorkspace machine={selected} transport={transport} onExit={backToMachines} />
+      return (
+        <MachineWorkspace
+          machine={selected}
+          transport={transport}
+          onExit={backToMachines}
+          onSwitchMachine={switchMachine}
+        />
+      )
     }
     return (
       <MachineConnect

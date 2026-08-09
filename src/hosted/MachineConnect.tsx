@@ -10,7 +10,7 @@
 
 import { useState, useEffect } from 'react'
 import type { HostedRelayTransport } from '../lib/transport'
-import type { Machine } from './MachinesPage'
+import type { Machine } from './machines'
 
 interface MachineConnectProps {
   machine: Machine
