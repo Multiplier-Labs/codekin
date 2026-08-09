@@ -143,6 +143,38 @@ describe('streaming', () => {
   })
 })
 
+describe('describeTarget', () => {
+  const originalLocation = globalThis.location
+
+  afterEach(() => {
+    Object.defineProperty(globalThis, 'location', {
+      value: originalLocation,
+      writable: true,
+      configurable: true,
+    })
+  })
+
+  function stubHost(host: string) {
+    Object.defineProperty(globalThis, 'location', {
+      value: { protocol: 'https:', host },
+      writable: true,
+      configurable: true,
+    })
+  }
+
+  it('names the machine and the control plane it is reached through', () => {
+    stubHost('app.codekin.ai')
+    const t = new HostedRelayTransport('m1', fakeConnection(vi.fn()), 'hatchery')
+    expect(t.describeTarget()).toEqual({ label: 'hatchery', detail: 'via app.codekin.ai' })
+  })
+
+  it('falls back to the machine id when no display name is given', () => {
+    stubHost('app.codekin.ai')
+    const t = new HostedRelayTransport('m1', fakeConnection(vi.fn()))
+    expect(t.describeTarget().label).toBe('m1')
+  })
+})
+
 describe('body coding', () => {
   it('round-trips utf-8 text', () => {
     const encoded = encodeBody('héllo — ünïcode')

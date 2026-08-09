@@ -7,7 +7,7 @@
  * Authelia. Session streaming (`openSocket`) lands in the next phase.
  */
 
-import type { CodekinTransport } from './types'
+import type { CodekinTransport, TransportTarget } from './types'
 import { RelayConnection, RelayRequestError, decodeBody, encodeBody } from './relay-client'
 import { RelayWebSocket } from './relay-socket'
 
@@ -41,13 +41,16 @@ async function encodeRequestBody(
 
 export class HostedRelayTransport implements CodekinTransport {
   readonly machineId: string
+  /** Machine name for display; falls back to the id when not supplied. */
+  readonly displayName: string
   private connection: RelayConnection
   private redirecting = false
   /** Channel ids only need to be unique within this connection. */
   private nextChannel = 0
 
-  constructor(machineId: string, connection?: RelayConnection) {
+  constructor(machineId: string, connection?: RelayConnection, displayName?: string) {
     this.machineId = machineId
+    this.displayName = displayName ?? machineId
     this.connection = connection ?? new RelayConnection({ machineId })
   }
 
@@ -142,5 +145,10 @@ export class HostedRelayTransport implements CodekinTransport {
    */
   externalUrl(path: string): string {
     return `${location.protocol}//${location.host}${path}`
+  }
+
+  /** The machine is reached through the control plane serving this page. */
+  describeTarget(): TransportTarget {
+    return { label: this.displayName, detail: `via ${location.host}` }
   }
 }
