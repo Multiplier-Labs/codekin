@@ -156,22 +156,25 @@ export function openControlPlaneDb(path: string): Database.Database {
 }
 
 export interface AccessPolicy {
-  ownerGithubLogin: string
-  allowedGithubLogins: string[]
+  ownerGithubId: number
+  allowedGithubIds: number[]
 }
 
 /**
- * Decide role and status for a GitHub login. The owner login gets the owner
- * role; allowlisted logins become active members; everyone else lands in
- * pending and sees the request-access screen.
- * Login comparison is case-insensitive (GitHub logins are).
+ * Decide role and status for an authenticated GitHub account. The owner id
+ * gets the owner role; allowlisted ids become active members; everyone else
+ * lands in pending and sees the request-access screen.
+ *
+ * Matching is by GitHub's immutable numeric user id, never by login: a login
+ * can be renamed and then re-registered by a stranger, and a login match
+ * would auto-activate whoever holds the name today with the access meant for
+ * whoever held it when the config was written.
  */
-export function resolveUserAccess(login: string, policy: AccessPolicy): { role: UserRole; status: UserStatus } {
-  const norm = login.toLowerCase()
-  if (norm === policy.ownerGithubLogin.toLowerCase()) {
+export function resolveUserAccess(githubId: number, policy: AccessPolicy): { role: UserRole; status: UserStatus } {
+  if (githubId > 0 && githubId === policy.ownerGithubId) {
     return { role: 'owner', status: 'active' }
   }
-  if (policy.allowedGithubLogins.some(l => l.toLowerCase() === norm)) {
+  if (policy.allowedGithubIds.includes(githubId)) {
     return { role: 'member', status: 'active' }
   }
   return { role: 'member', status: 'pending' }
@@ -198,7 +201,17 @@ export function upsertUserFromGithub(
   profile: GithubProfile,
   policy: AccessPolicy,
 ): UserRow {
-  const resolved = resolveUserAccess(profile.login, policy)
+  const resolved = resolveUserAccess(profile.id, policy)
+
+  // GitHub logins are unique among live accounts, so another row still
+  // holding this login is stale from before a rename. Clear it, or login
+  // lookups (share grants name grantees by login) could resolve to the
+  // wrong account.
+  db.prepare(
+    `UPDATE users SET login = 'formerly-' || login || '-' || github_id, updated_at = datetime('now')
+     WHERE lower(login) = lower(?) AND github_id != ?`,
+  ).run(profile.login, profile.id)
+
   const existing = db
     .prepare('SELECT * FROM users WHERE github_id = ?')
     .get(profile.id) as UserRow | undefined

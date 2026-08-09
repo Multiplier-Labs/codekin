@@ -1,5 +1,5 @@
 /** Tests for the pairing REST endpoints (auth boundaries + status codes). */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
 import session from 'express-session'
 import type { AddressInfo } from 'net'
@@ -10,6 +10,8 @@ import { createPairingRouter } from './pairing-routes.js'
 import { listAuditEvents } from './audit.js'
 import type { RelayConfig } from './relay-config.js'
 import type { SessionUser } from './relay-auth-routes.js'
+import type { ConnectorHub } from './connector-hub.js'
+import type { BrowserHub } from './browser-hub.js'
 
 const CONFIG = {
   publicUrl: 'https://app.example.com',
@@ -21,13 +23,17 @@ describe('pairing routes', () => {
   let baseUrl: string
   let activeUser: SessionUser
   let otherUser: SessionUser
+  const disconnectMachine = vi.fn()
+  const reauthorize = vi.fn()
 
   beforeEach(async () => {
+    disconnectMachine.mockClear()
+    reauthorize.mockClear()
     db = openControlPlaneDb(':memory:')
     const row = upsertUserFromGithub(
       db,
       { id: 1, login: 'alari76', name: null, email: null, avatarUrl: null },
-      { ownerGithubLogin: 'alari76', allowedGithubLogins: [] },
+      { ownerGithubId: 1, allowedGithubIds: [] },
     )
     activeUser = {
       id: row.id,
@@ -43,7 +49,7 @@ describe('pairing routes', () => {
     const otherRow = upsertUserFromGithub(
       db,
       { id: 2, login: 'grantee', name: null, email: null, avatarUrl: null },
-      { ownerGithubLogin: 'alari76', allowedGithubLogins: ['grantee'] },
+      { ownerGithubId: 1, allowedGithubIds: [2] },
     )
     otherUser = {
       id: otherRow.id,
@@ -63,7 +69,12 @@ describe('pairing routes', () => {
       if (req.headers['x-test-user'] === 'other') req.session.user = otherUser
       next()
     })
-    app.use(createPairingRouter(db, CONFIG))
+    app.use(
+      createPairingRouter(db, CONFIG, {
+        connectorHub: { disconnectMachine } as unknown as ConnectorHub,
+        browserHub: { reauthorize } as unknown as BrowserHub,
+      }),
+    )
     await new Promise<void>(resolve => {
       server = app.listen(0, '127.0.0.1', () => {
         baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -198,6 +209,26 @@ describe('pairing routes', () => {
     const removed = listAuditEvents(db, {}).find(e => e.kind === 'machine_removed')
     expect(removed?.actorUserId).toBe(activeUser.id)
     expect(removed?.machineId).toBe(machineId)
+  })
+
+  it('deleting a machine drops its live connector and browser sockets', async () => {
+    const machineId = await pairMachine()
+
+    await fetch(`${baseUrl}/api/machines/${machineId}`, { method: 'DELETE', headers: asUser })
+
+    expect(disconnectMachine).toHaveBeenCalledWith(machineId)
+    expect(reauthorize).toHaveBeenCalledWith({ machineId })
+  })
+
+  it('a refused machine deletion touches no live sockets', async () => {
+    const machineId = await pairMachine()
+
+    await fetch(`${baseUrl}/api/machines/${machineId}`, {
+      method: 'DELETE', headers: { 'x-test-user': 'other' },
+    })
+
+    expect(disconnectMachine).not.toHaveBeenCalled()
+    expect(reauthorize).not.toHaveBeenCalled()
   })
 
   it('deleting an unknown machine is a 404, not a 403', async () => {

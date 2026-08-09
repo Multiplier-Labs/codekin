@@ -169,8 +169,8 @@ export function createRelayAuthRouter({ db, config, fetchImpl = fetch }: AuthRou
         avatarUrl: gh.avatar_url,
       }
       const user = upsertUserFromGithub(db, profile, {
-        ownerGithubLogin: config.ownerGithubLogin,
-        allowedGithubLogins: config.allowedGithubLogins,
+        ownerGithubId: config.ownerGithubId,
+        allowedGithubIds: config.allowedGithubIds,
       })
 
       // Fresh session id after privilege change (session fixation)

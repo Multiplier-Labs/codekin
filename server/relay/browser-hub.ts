@@ -29,6 +29,7 @@ import type {
 } from './relay-protocol.js'
 import type { ConnectorHub } from './connector-hub.js'
 import type { SessionUser } from './relay-auth-routes.js'
+import { getUserById } from './control-plane-db.js'
 import { resolveMachineAccess } from './shares.js'
 import type { MachineAccess } from './shares.js'
 import { recordAuditEvent } from './audit.js'
@@ -41,6 +42,9 @@ const CLOSE_OVERLOADED = 4029
 
 /** A browser that hasn't sent hello within this window is dropped. */
 const HELLO_TIMEOUT_MS = 5_000
+
+/** How often every connected client's standing is re-checked against the DB. */
+const REAUTHORIZE_INTERVAL_MS = 60_000
 
 /** Requests a single browser socket may have in flight. */
 const MAX_INFLIGHT_PER_SOCKET = 16
@@ -77,11 +81,48 @@ export class BrowserHub {
   private clients = new Set<BrowserClient>()
   /** Per-user frame budget: one browser cannot flood a machine (spec §11.5). */
   private frameLimiter = new RateLimiter(BROWSER_FRAME_LIMIT)
+  private reauthorizeTimer: ReturnType<typeof setInterval>
 
   constructor(
     private db: Database.Database,
     private connectors: ConnectorHub,
-  ) {}
+  ) {
+    this.reauthorizeTimer = setInterval(() => { this.reauthorize(); }, REAUTHORIZE_INTERVAL_MS)
+    this.reauthorizeTimer.unref()
+  }
+
+  /**
+   * Re-resolve the standing of every matching client and drop those whose
+   * access changed. Access is otherwise resolved once at hello and would live
+   * as long as the tab: revoking a share, removing a machine, or disabling a
+   * user must not leave an already-open socket working from yesterday's
+   * answer. Revocation endpoints call this directly for the affected user or
+   * machine; the periodic sweep catches changes made straight in the DB.
+   *
+   * A client whose access merely changed shape (share permissions edited) is
+   * also dropped: its open channels carry the old principal, and a reconnect
+   * re-derives everything.
+   */
+  reauthorize(filter: { userId?: string; machineId?: string } = {}): void {
+    for (const client of [...this.clients]) {
+      if (filter.userId && client.user.id !== filter.userId) continue
+      if (filter.machineId && client.machineId !== filter.machineId) continue
+      const row = getUserById(this.db, client.user.id)
+      const access = row
+        ? resolveMachineAccess(this.db, row, client.machineId)
+        : ({ kind: 'none' } as const)
+      if (JSON.stringify(access) === JSON.stringify(client.access)) continue
+      if (access.kind === 'none') {
+        recordAuditEvent(this.db, {
+          kind: 'access_denied',
+          actorUserId: client.user.id,
+          machineId: client.machineId,
+          metadata: { stage: 'reauthorize' },
+        })
+      }
+      client.socket.close(CLOSE_FORBIDDEN, 'authorization changed')
+    }
+  }
 
   /** Number of connected browser sockets (for tests / health). */
   get clientCount(): number {
@@ -298,6 +339,7 @@ export class BrowserHub {
 
   /** Disconnect every browser socket (shutdown / tests). */
   close(): void {
+    clearInterval(this.reauthorizeTimer)
     this.frameLimiter.close()
     for (const client of this.clients) {
       for (const remoteId of client.channels.values()) {

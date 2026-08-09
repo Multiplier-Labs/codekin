@@ -224,7 +224,7 @@ One-time setup on this server (sudo steps run by the operator):
 4. `sudo mkdir -p /var/www/codekin-app && sudo chown dev:dev /var/www/codekin-app`.
 5. `~/.codekin-relay/env`: `RELAY_PORT=32360`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`,
    `SESSION_SECRET` (32+ random bytes), `PUBLIC_URL=https://app.codekin.ai`,
-   `OWNER_GITHUB_LOGIN=<owner>`.
+   `OWNER_GITHUB_ID=<owner's numeric GitHub id>`.
 6. pm2: `codekin-relay` app in the ecosystem file → `pm2 start ecosystem.config.cjs --only codekin-relay && pm2 save`.
 
 Per-deploy: `npm run build:hosted && rsync -a --delete dist-hosted/ /var/www/codekin-app/ && pm2 restart codekin-relay`.
