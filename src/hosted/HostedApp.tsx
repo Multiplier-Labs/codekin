@@ -144,7 +144,6 @@ export default function HostedApp() {
     if (phase === 'ready') {
       return (
         <MachineWorkspace
-          machine={selected}
           transport={transport}
           onExit={backToMachines}
           onSwitchMachine={switchMachine}

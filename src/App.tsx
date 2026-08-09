@@ -62,9 +62,14 @@ interface AppProps {
    * now lives. Undefined in the local build, which has no machines.
    */
   onSwitchMachine?: (machine: import('./hosted/machines').Machine) => void
+  /**
+   * Hosted only: leave this machine for the picker. Also handed to Settings —
+   * it replaced the floating exit button that used to sit over the transcript.
+   */
+  onDisconnectMachine?: () => void
 }
 
-export default function App({ onSwitchMachine }: AppProps = {}) {
+export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps = {}) {
   const { settings, updateSettings } = useSettings()
   const { groups, repos, globalSkills, globalModules, ghMissing, refresh: refreshRepos } = useRepos(settings.token)
   const { sessions, rename: renameSession, remove: removeSession, refresh: refreshSessions } = useSessions(settings.token)
@@ -889,6 +894,7 @@ export default function App({ onSwitchMachine }: AppProps = {}) {
         repos={repos}
         hostedMachineId={hostedMachineId}
         onSwitchMachine={onSwitchMachine}
+        onDisconnectMachine={onDisconnectMachine}
       />
       <CommandPalette
         open={paletteOpen}

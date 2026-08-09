@@ -19,9 +19,15 @@ interface MachinesSectionProps {
   currentMachineId: string
   /** Connect to another machine — tears down this workspace and opens theirs. */
   onSwitch: (machine: Machine) => void
+  /**
+   * Leave the machine entirely, back to the picker. The only way out now that
+   * the workspace has no floating exit button, so it is never hidden behind a
+   * hover or a menu.
+   */
+  onDisconnect?: () => void
 }
 
-export function MachinesSection({ currentMachineId, onSwitch }: MachinesSectionProps) {
+export function MachinesSection({ currentMachineId, onSwitch, onDisconnect }: MachinesSectionProps) {
   const [machines, setMachines] = useState<Machine[] | null>(null)
   const [failed, setFailed] = useState(false)
 
@@ -41,7 +47,10 @@ export function MachinesSection({ currentMachineId, onSwitch }: MachinesSectionP
     return <p className="text-body text-ink-muted">Could not reach the relay to list your machines.</p>
   }
 
+  const current = machines.find(m => m.id === currentMachineId)
+
   return (
+    <>
     <ul className="flex flex-col gap-1.5">
       {machines.map(m => {
         const isCurrent = m.id === currentMachineId
@@ -84,5 +93,20 @@ export function MachinesSection({ currentMachineId, onSwitch }: MachinesSectionP
         )
       })}
     </ul>
+
+    {onDisconnect && (
+      <div className="mt-3 border-t border-edge pt-3">
+        <button
+          onClick={onDisconnect}
+          className="rounded-control px-2 py-1 text-meta text-ink-muted transition hover:bg-surface hover:text-ink"
+        >
+          Disconnect{current ? ` from ${current.displayName}` : ''}
+        </button>
+        <p className="mt-1 px-2 text-micro text-ink-faint">
+          Returns to the machine list, and stops reconnecting here on reload.
+        </p>
+      </div>
+    )}
+    </>
   )
 }
