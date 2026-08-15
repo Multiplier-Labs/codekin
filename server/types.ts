@@ -147,6 +147,8 @@ export interface SessionInfo {
   lastActivity: string
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   provider?: CodingProvider
+  /** Model pinned to the session, if any — the sidebar row names it in its tooltip. */
+  model?: string
 }
 
 // ---------------------------------------------------------------------------

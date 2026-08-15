@@ -10,46 +10,45 @@
  */
 
 import { useEffect, Suspense, lazy } from 'react'
-import { LocalHttpTransport, setTransport } from '../lib/transport'
+import { LocalHttpTransport, setTransport, transport as activeTransport } from '../lib/transport'
 import type { HostedRelayTransport } from '../lib/transport'
-import type { Machine } from './MachinesPage'
+import type { Machine } from './machines'
 
 const App = lazy(() => import('../App.tsx'))
 
 interface MachineWorkspaceProps {
-  machine: Machine
   transport: HostedRelayTransport
+  /** Leave this machine for the picker — offered by the Machines section. */
   onExit: () => void
+  /** Connect to a different machine, from the Machines section of Settings. */
+  onSwitchMachine: (machine: Machine) => void
 }
 
-export function MachineWorkspace({ machine, transport, onExit }: MachineWorkspaceProps) {
+export function MachineWorkspace({ transport, onExit, onSwitchMachine }: MachineWorkspaceProps) {
   useEffect(() => {
     return () => {
       transport.close()
       // Leave a working transport behind so any late call fails locally
-      // rather than against a closed relay connection.
-      setTransport(new LocalHttpTransport())
+      // rather than against a closed relay connection — but only if ours is
+      // still the installed one. Switching machines installs the next
+      // machine's transport before this teardown runs, and clobbering it here
+      // would point the new workspace's first calls at localhost.
+      if (activeTransport === transport) setTransport(new LocalHttpTransport())
     }
   }, [transport])
 
   // No wrapper element around App: `html, body, #root` are height:100% and
   // App's root is `h-full`, so an intermediate box without a resolved height
   // collapses the whole layout — the sidebar loses its width and the
-  // transcript stops scrolling. The exit button is `fixed`, so it needs no
-  // positioned parent and can sit alongside App rather than around it.
+  // transcript stops scrolling.
+  //
+  // Nothing is rendered over the app any more. Which machine you are on, and
+  // leaving it, both live in the Machines section of Settings — a floating
+  // button for it sat on top of the transcript on every screen, to say
+  // something that changes once a session.
   return (
-    <>
-      <Suspense fallback={<div className="h-full bg-page" />}>
-        <App />
-      </Suspense>
-
-      <button
-        onClick={onExit}
-        title={`Connected to ${machine.displayName}`}
-        className="fixed bottom-3 left-3 z-50 flex items-center gap-2 rounded-control border border-edge-strong bg-surface-raised px-3 py-1.5 text-meta text-ink-muted shadow-floating transition hover:text-ink"
-      >
-        ← <span className="font-mono">{machine.displayName}</span>
-      </button>
-    </>
+    <Suspense fallback={<div className="h-full bg-page" />}>
+      <App onSwitchMachine={onSwitchMachine} onDisconnectMachine={onExit} />
+    </Suspense>
   )
 }

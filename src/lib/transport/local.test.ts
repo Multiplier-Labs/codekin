@@ -170,4 +170,10 @@ describe('URLs', () => {
     const t = new LocalHttpTransport()
     expect(t.externalUrl('/api/webhooks/github')).toBe('https://example.com/cc/api/webhooks/github')
   })
+
+  it('describeTarget names this page origin as a direct connection', () => {
+    stubLocation('https:', 'codekin.example.com')
+    const t = new LocalHttpTransport()
+    expect(t.describeTarget()).toEqual({ label: 'codekin.example.com', detail: 'Direct' })
+  })
 })

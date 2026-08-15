@@ -35,4 +35,15 @@ export interface CodekinTransport {
 
   /** Absolute browser-facing URL for a server path (display only, e.g. webhook setup). */
   externalUrl(path: string): string
+
+  /** Where this transport points, for display (connection popover). */
+  describeTarget(): TransportTarget
+}
+
+/** Human-readable description of a transport's endpoint. */
+export interface TransportTarget {
+  /** The machine or host the app is talking to, e.g. 'hatchery'. */
+  label: string
+  /** How it is reached, e.g. 'Direct' or 'via app.codekin.ai'. */
+  detail: string
 }

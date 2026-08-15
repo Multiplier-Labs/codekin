@@ -44,12 +44,12 @@ describe('access resolution', () => {
     owner = upsertUserFromGithub(
       db,
       { id: 1, login: 'owner', name: null, email: null, avatarUrl: null },
-      { ownerGithubLogin: 'owner', allowedGithubLogins: [] },
+      { ownerGithubId: 1, allowedGithubIds: [] },
     )
     guest = upsertUserFromGithub(
       db,
       { id: 2, login: 'guest', name: null, email: null, avatarUrl: null },
-      { ownerGithubLogin: 'owner', allowedGithubLogins: ['guest'] },
+      { ownerGithubId: 1, allowedGithubIds: [2] },
     )
 
     const { userCode, deviceCode } = startPairing(db, { hostname: 'box', platform: 'linux' })

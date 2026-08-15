@@ -426,6 +426,20 @@ export class ConnectorHub {
     return this.machines.get(machineId)?.sessions ?? null
   }
 
+  /**
+   * Forcibly drop a machine's connection (unpaired / credential revoked).
+   * Credentials are checked at connect time only, so without this a removed
+   * machine's live socket would keep serving until it next reconnected.
+   */
+  disconnectMachine(machineId: string, reason = 'machine removed'): void {
+    const machine = this.machines.get(machineId)
+    if (!machine) return
+    this.machines.delete(machineId)
+    this.failPending(machine, reason)
+    machine.socket.close(CLOSE_AUTH_FAILED, reason)
+    recordAuditEvent(this.db, { kind: 'machine_disconnected', machineId, metadata: { reason } })
+  }
+
   close(): void {
     clearInterval(this.idleTimer)
     this.frameLimiter.close()

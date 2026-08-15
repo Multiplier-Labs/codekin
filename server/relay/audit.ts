@@ -23,6 +23,7 @@ export type AuditEventKind =
   | 'approval_answered'
   | 'session_stopped'
   | 'access_denied'
+  | 'user_updated'
 
 export interface AuditEventInput {
   kind: AuditEventKind

@@ -21,11 +21,17 @@ import { createRequireActiveUser } from './relay-auth-routes.js'
 import { getMachine } from './control-plane-db.js'
 import { recordAuditEvent } from './audit.js'
 import type { RelayConfig } from './relay-config.js'
+import type { ConnectorHub } from './connector-hub.js'
+import type { BrowserHub } from './browser-hub.js'
 
 /** Suggested delay between CLI completion polls. */
 export const POLL_INTERVAL_MS = 3_000
 
-export function createPairingRouter(db: Database.Database, config: RelayConfig): Router {
+export function createPairingRouter(
+  db: Database.Database,
+  config: RelayConfig,
+  hubs: { connectorHub?: ConnectorHub; browserHub?: BrowserHub } = {},
+): Router {
   const router = Router()
   const requireActiveUser = createRequireActiveUser(db)
 
@@ -138,6 +144,10 @@ export function createPairingRouter(db: Database.Database, config: RelayConfig):
       res.status(404).json({ error: 'Machine not found' })
       return
     }
+    // The credential is gone from the DB, but credential checks happen at
+    // connect time — drop the live sockets too, on both sides of the relay.
+    hubs.connectorHub?.disconnectMachine(machineId)
+    hubs.browserHub?.reauthorize({ machineId })
     recordAuditEvent(db, {
       kind: 'machine_removed',
       actorUserId: userId,

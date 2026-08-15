@@ -45,6 +45,25 @@ function compactAge(created: string): string {
 }
 
 /**
+ * The harness a session runs on, spelled out.
+ *
+ * Two-letter codes were tried and dropped: every harness name contains a C and
+ * all-caps share one x-height, so CC / CX / OC render as three near-identical
+ * rectangles at 11px. Spelled names differ in length, which is what the eye
+ * actually picks up, and there is nothing to learn. A session with no provider
+ * predates the field and is Claude by the same default the server applies.
+ */
+function harnessLabel(provider: Session['provider']): string {
+  return PROVIDERS.find(p => p.id === (provider ?? 'claude'))?.label ?? 'Claude'
+}
+
+/** Row tooltip: the harness, plus the pinned model where the session has one. */
+function harnessTitle(session: Session): string {
+  const harness = `${harnessLabel(session.provider)} session`
+  return session.model ? `${harness} · ${session.model}` : harness
+}
+
+/**
  * Exactly three status treatments, and only one of them animates:
  * filled = running, amber pulsing = waiting for you, hollow ring = idle.
  * Anything finer (queued, inactive) is carried by the tooltip, not by a
@@ -242,35 +261,60 @@ export function RepoSection({
             }
 
             return (
+              // Two lines, because at 236px one cannot hold a real title and
+              // two metadata facts: the title truncated at about 60% while the
+              // metadata beside it rendered whole. Metadata gets its own line,
+              // and the title gets the width. The cost is roughly two fewer
+              // sessions visible with three repos open.
               <div
                 key={s.id}
-                className={`row-reveal density-row flex w-full items-center gap-1.5 rounded-control pl-6 pr-2.5 transition-colors ${
+                className={`row-reveal flex w-full flex-col gap-0.5 rounded-control py-1 pl-6 pr-2.5 transition-colors ${
                   isActiveSession
                     ? 'bg-accent-9/30 text-accent-2'
                     : 'text-ink hover:bg-surface-raised'
                 }`}
               >
-                <button
-                  onClick={() => onSelectSession(s.id)}
-                  className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-body"
-                >
-                  <StatusDot status={status} title={statusTitle} />
-                  <OriginGlyph source={s.source} />
-                  {s.worktreePath && (
-                    <span title={`In a worktree: ${s.worktreePath.split('/').pop() ?? ''}`} className="flex-shrink-0 text-primary-5">
+                {/* Line one: status, title, overflow. The title is the only
+                    thing that flexes, and the ⋯ holds its slot on every row
+                    (it is revealed by opacity), so this line ends at a
+                    constant right edge. */}
+                <div className="flex w-full items-center gap-1.5">
+                  <button
+                    onClick={() => onSelectSession(s.id)}
+                    className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-body"
+                  >
+                    <StatusDot status={status} title={statusTitle} />
+                    <span className="truncate">{sessionDisplayName(s)}</span>
+                  </button>
+                  <RowMenu items={menuItems} label={`Actions for ${sessionDisplayName(s)}`} className="row-menu-reveal" />
+                </div>
+
+                {/* Line two: where it runs and how old it is. Indented just
+                    past the status dot. The harness sits one step ahead of the
+                    age — the same step on an active row, in accent rather than
+                    ink. */}
+                <div className="flex items-center gap-1 pl-[13px] font-mono text-meta leading-tight">
+                  {s.worktreePath ? (
+                    <span
+                      title={`In a worktree: ${s.worktreePath.split('/').pop() ?? ''}`}
+                      className={`flex-shrink-0 ${isActiveSession ? 'text-accent-3' : 'text-primary-5'}`}
+                    >
                       <IconGitBranch size={12} stroke={2} />
                     </span>
+                  ) : (
+                    <OriginGlyph source={s.source} />
                   )}
-                  {s.provider === 'opencode' && (
-                    <span title="OpenCode session" className="flex-shrink-0 rounded-control bg-edge-strong px-1 text-micro font-medium leading-tight text-ink-muted">OC</span>
-                  )}
-                  {s.provider === 'codex' && (
-                    <span title="Codex session" className="flex-shrink-0 rounded-control bg-edge-strong px-1 text-micro font-medium leading-tight text-ink-muted">CX</span>
-                  )}
-                  <span className="truncate">{sessionDisplayName(s)}</span>
-                </button>
-                <span className="flex-shrink-0 text-meta tabular-nums text-ink-faint">{compactAge(s.created)}</span>
-                <RowMenu items={menuItems} label={`Actions for ${sessionDisplayName(s)}`} className="row-menu-reveal" />
+                  <span
+                    title={harnessTitle(s)}
+                    className={`text-micro font-medium ${isActiveSession ? 'text-accent-3' : 'text-ink-muted'}`}
+                  >
+                    {harnessLabel(s.provider)}
+                  </span>
+                  <span className={isActiveSession ? 'text-accent-4' : 'text-ink-faint'}>·</span>
+                  <span className={`tabular-nums ${isActiveSession ? 'text-accent-4' : 'text-ink-faint'}`}>
+                    {compactAge(s.created)}
+                  </span>
+                </div>
               </div>
             )
           })}
