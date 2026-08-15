@@ -27,6 +27,7 @@ interface Props {
 export function NewSessionButton({ groups, token, onOpen }: Props) {
   const [open, setOpen] = useState(false)
   const [cloning, setCloning] = useState<string | null>(null)
+  const [cloneError, setCloneError] = useState<string | null>(null)
   /** Second step — set once a repo is chosen. */
   const [pendingRepo, setPendingRepo] = useState<Repo | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -34,7 +35,12 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
 
   // Reset to step one whenever the menu closes
   useEffect(() => {
-    if (!open) setPendingRepo(null) // eslint-disable-line react-hooks/set-state-in-effect -- reset transient step state on close
+    if (!open) {
+      /* eslint-disable react-hooks/set-state-in-effect -- reset transient step state on close */
+      setPendingRepo(null)
+      setCloneError(null)
+      /* eslint-enable react-hooks/set-state-in-effect */
+    }
   }, [open])
 
   // Close on Escape or click outside
@@ -64,10 +70,15 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
     if (cloning) return
     if (!repo.cloned) {
       setCloning(repo.id)
+      setCloneError(null)
       try {
         await cloneRepo(token, repo.owner, repo.name)
         repo.cloned = true
-      } catch {
+      } catch (err) {
+        // Say why. A clone can fail for reasons only the machine knows (no
+        // access, disk, relay policy); silently returning to the list reads
+        // as the click not registering.
+        setCloneError(err instanceof Error ? err.message : 'Clone failed')
         setCloning(null)
         return
       }
@@ -137,6 +148,9 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
                   maxHeight="240px"
                   autoFocus
                 />
+                {cloneError && (
+                  <div className="mt-1 rounded-control bg-error-10/50 px-2 py-1.5 text-meta text-error-4">{cloneError}</div>
+                )}
               </div>
             </>
           )}

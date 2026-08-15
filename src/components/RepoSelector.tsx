@@ -24,6 +24,7 @@ interface Props {
 
 export function RepoSelector({ groups, token, ghMissing, onOpen, onRefreshRepos }: Props) {
   const [cloning, setCloning] = useState<string | null>(null)
+  const [cloneError, setCloneError] = useState<string | null>(null)
   const [reposPath, setReposPath] = useState('')
 
   useEffect(() => {
@@ -44,10 +45,14 @@ export function RepoSelector({ groups, token, ghMissing, onOpen, onRefreshRepos 
 
     if (!repo.cloned) {
       setCloning(repo.id)
+      setCloneError(null)
       try {
         await cloneRepo(token, repo.owner, repo.name)
         repo.cloned = true
-      } catch {
+      } catch (err) {
+        // Say why — a failed clone that just puts the list back looks like a
+        // dead click.
+        setCloneError(err instanceof Error ? err.message : 'Clone failed')
         setCloning(null)
         return
       }
@@ -86,12 +91,17 @@ export function RepoSelector({ groups, token, ghMissing, onOpen, onRefreshRepos 
         ) : totalRepos === 0 ? (
           <p className="text-center text-title text-ink-faint">No repositories configured</p>
         ) : (
-          <RepoList
-            groups={groups}
-            onSelect={handleSelect}
-            cloningId={cloning}
-            autoFocus
-          />
+          <>
+            <RepoList
+              groups={groups}
+              onSelect={handleSelect}
+              cloningId={cloning}
+              autoFocus
+            />
+            {cloneError && (
+              <div className="mt-2 rounded-control bg-error-10/50 px-3 py-2 text-meta text-error-4">{cloneError}</div>
+            )}
+          </>
         )}
 
         {/* Repos path setting */}

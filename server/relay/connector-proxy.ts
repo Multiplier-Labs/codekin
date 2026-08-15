@@ -53,6 +53,11 @@ export const ALLOWED_MUTATION_PREFIXES = [
   '/api/approvals',
   '/api/upload',
   '/api/orchestrator',
+  // Starting a session on a repo the machine has not cloned yet needs this;
+  // without it the hosted UI can list remote repos but never open one. Writes
+  // only inside the machine's repos root, and grantees never reach it (see
+  // GRANTEE_WRITE_PREFIXES).
+  '/api/clone',
 ] as const
 
 /** Methods that may be proxied at all. */
