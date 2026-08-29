@@ -398,7 +398,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
 
           {/* ── Authentication ── */}
           <SectionCard icon={<IconKey size={15} />} title="Authentication">
-            <label className="mb-1 block text-body text-ink-muted">Claude Code Web Token</label>
+            <label className="mb-1 block text-body text-ink-muted">Codekin access token</label>
             <div className="flex gap-2">
               <input
                 type="password"

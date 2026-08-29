@@ -189,7 +189,7 @@ export interface SessionUsage {
  * `webhook_event` and `workflow_event` are broadcast to all clients, not session-scoped.
  */
 export type WsServerMessage =
-  | { type: 'connected'; connectionId: string; claudeAvailable: boolean; claudeVersion: string; apiKeySet: boolean; codexAvailable?: boolean; codexAuthenticated?: boolean }
+  | { type: 'connected'; connectionId: string; claudeAvailable: boolean; claudeVersion: string; apiKeySet: boolean; codexAvailable?: boolean; codexAuthenticated?: boolean; openCodeAvailable?: boolean }
   | { type: 'session_created'; sessionId: string; sessionName: string; workingDir: string }
   | { type: 'session_joined'; sessionId: string; sessionName: string; workingDir: string; active: boolean; outputBuffer: WsServerMessage[]; model?: string; permissionMode?: PermissionMode; planState?: 'idle' | 'planning' | 'reviewing' }
   | { type: 'session_left' }

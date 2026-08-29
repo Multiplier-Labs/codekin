@@ -11,6 +11,8 @@
 import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { useOutsideClick } from '../hooks/useOutsideClick'
 import { useAutoGrow } from '../hooks/useAutoGrow'
+import { useAgentHealth } from '../hooks/useAgentHealth'
+import { providerAvailability } from '../lib/agentHealth'
 import { IconPlus, IconX, IconTerminal2, IconChevronDown, IconChevronLeft, IconChevronRight, IconArrowRight, IconArrowsRightLeft, IconDots, IconGitBranch, IconGitBranchDeleted, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck, IconCornerDownLeft } from '@tabler/icons-react'
 import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
@@ -191,6 +193,7 @@ function HandoffPane({ current, onBack, onSelect }: {
   onBack: () => void
   onSelect: (provider: import('../types').CodingProvider, carryContext: boolean) => void
 }) {
+  const health = useAgentHealth()
   const [carryContext, setCarryContext] = useState(() => localStorage.getItem(CARRY_CONTEXT_KEY) !== 'false')
 
   const toggleCarry = () => {
@@ -213,16 +216,24 @@ function HandoffPane({ current, onBack, onSelect }: {
         <span className="ml-auto text-meta text-ink-muted">Hand off to</span>
       </div>
       <div className="py-1">
-        {PROVIDERS.filter(p => p.id !== current).map(p => (
-          <button
-            key={p.id}
-            onClick={() => onSelect(p.id, carryContext)}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-body text-ink transition-colors hover:bg-edge"
-          >
-            {p.label}
-            <IconArrowRight size={14} stroke={2} className="ml-auto text-ink-faint" />
-          </button>
-        ))}
+        {PROVIDERS.filter(p => p.id !== current).map(p => {
+          const { available, hint } = providerAvailability(health, p.id)
+          return (
+            <button
+              key={p.id}
+              disabled={!available}
+              onClick={() => onSelect(p.id, carryContext)}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-body transition-colors ${
+                available ? 'text-ink hover:bg-edge' : 'cursor-not-allowed text-ink-faint'
+              }`}
+              title={hint ?? undefined}
+            >
+              {p.label}
+              {!available && <span className="truncate text-meta text-ink-faint">not installed</span>}
+              <IconArrowRight size={14} stroke={2} className="ml-auto text-ink-faint" />
+            </button>
+          )
+        })}
       </div>
       <div className="border-t border-edge-strong py-1">
         <button
