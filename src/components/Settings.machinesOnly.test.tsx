@@ -42,9 +42,14 @@ async function render(ui: React.ReactElement): Promise<HTMLElement> {
   return container
 }
 
-// The section is lazy in the app so the local build never pulls it in. Warm
-// the module here, or the first mount of the suite settles on the fallback.
-beforeAll(async () => { await import('../hosted/MachinesSection') })
+// The sections are lazy in the app so the local build never pulls them in.
+// Warm the modules here, or a mount settles on the fallback — and whether the
+// devices section's passkey fetch lands inside the settle window becomes a
+// race instead of a certainty.
+beforeAll(async () => {
+  await import('../hosted/MachinesSection')
+  await import('../hosted/DevicesSection')
+})
 
 afterEach(() => {
   if (activeRoot) act(() => activeRoot!.unmount())
@@ -91,7 +96,10 @@ describe('Settings — machines only', () => {
       <Settings open machinesOnly settings={settings} onUpdate={vi.fn()} onClose={vi.fn()} onSwitchMachine={vi.fn()} />,
     )
     const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
-    expect(calls.every(([url]) => String(url) === '/api/machines')).toBe(true)
+    // Control-plane requests (machine list, passkey list) are the relay's own
+    // business and fine while disconnected; machine-backed ones are not.
+    const controlPlane = new Set(['/api/machines', '/api/auth/passkeys'])
+    expect(calls.every(([url]) => controlPlane.has(String(url)))).toBe(true)
   })
 
   it('connects to the machine that is clicked', async () => {
