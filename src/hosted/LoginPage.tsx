@@ -16,6 +16,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   token_exchange_failed: 'GitHub did not accept the sign-in. Please try again.',
   profile_fetch_failed: 'Could not read your GitHub profile. Please try again.',
   login_failed: 'Sign-in failed. Please try again.',
+  access_not_allowed: 'This Codekin instance is private and your GitHub account is not allowed.',
 }
 
 export function LoginPage({ authError, onSignedIn }: LoginPageProps) {

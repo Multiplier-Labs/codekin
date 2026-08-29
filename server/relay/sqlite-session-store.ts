@@ -69,6 +69,26 @@ export class SqliteSessionStore extends Store {
     }
   }
 
+  /** Destroy every web session belonging to a user. Returns the number removed. */
+  destroyUserSessions(userId: string): number {
+    const rows = this.db.prepare('SELECT sid, sess FROM web_sessions').all() as Array<{ sid: string; sess: string }>
+    const ids: string[] = []
+    for (const row of rows) {
+      try {
+        const data = JSON.parse(row.sess) as { user?: { id?: unknown } }
+        if (data.user?.id === userId) ids.push(row.sid)
+      } catch {
+        // Corrupt sessions are ignored here and handled as invalid by get().
+      }
+    }
+    const remove = this.db.transaction((sessionIds: string[]) => {
+      const statement = this.db.prepare('DELETE FROM web_sessions WHERE sid = ?')
+      for (const sid of sessionIds) statement.run(sid)
+    })
+    remove(ids)
+    return ids.length
+  }
+
   touch(sid: string, session: SessionData, callback?: (err?: unknown) => void): void {
     try {
       const expire = Date.now() + this.ttlMs(session)

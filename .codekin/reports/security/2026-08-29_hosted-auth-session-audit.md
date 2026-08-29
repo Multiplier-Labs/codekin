@@ -1,0 +1,107 @@
+# Hosted Authentication and Session Security Audit
+
+**Date:** 2026-08-29  
+**Scope:** `app.codekin.ai` account admission, browser sessions, relay authorization, and isolation of local GitHub repositories  
+**Anchor:** `9384465` (`wt/eb64f6dc`)  
+**Method:** Static review of the hosted relay and connector, review of prior audit findings, and unauthenticated checks against the production deployment
+
+## Executive summary
+
+At the audit anchor, new account creation was **not blocked**. Any GitHub user could complete OAuth and receive a `pending` database row. The remediation rejects new identities whose immutable numeric GitHub ID is outside `OWNER_GITHUB_ID` and `ALLOWED_GITHUB_IDS`, before inserting a user.
+
+The main repository boundary is structurally sound: the GitHub OAuth token requests only identity scopes and is discarded after profile lookup; repository access occurs through a paired local connector. A browser must own the paired machine or have a session-specific share, and the connector independently enforces the path and session permission policy before using the local machine token.
+
+Existing sessions are not fully revocable. Disabling an account blocks later protected REST requests and later WebSocket upgrades, but an already-open WebSocket remains authorized. Likewise, deleting or expiring a share does not affect a socket that already cached the grant. These are material gaps for the stated requirement that an existing session must not retain access after revocation.
+
+## Findings
+
+| ID | Severity | Finding | Status |
+|---|---|---|---|
+| HSA-01 | High | Account disablement does not terminate already-open browser WebSockets | Fixed in PR #566/#567 |
+| HSA-02 | High | Share revocation/expiry does not affect already-open browser WebSockets | Fixed in PR #566; expiry bound tightened in #577 |
+| HSA-03 | Medium | Removing an ID from the allowlist does not revoke an active account | Mitigated by admin revocation in PR #567 |
+| HSA-04 | Low | OAuth creates pending accounts instead of rejecting non-allowlisted identities before persistence | Fixed in PR #577 |
+| HSA-05 | Low | No explicit server-side session inventory or “log out all sessions” control exists | Partially fixed in PR #577 |
+
+### HSA-01 — Account disablement does not terminate open WebSockets — High
+
+`authenticateUpgrade` re-reads the user row and prevents a disabled user from opening a new browser WebSocket. `createRequireActiveUser` similarly re-checks every protected REST request. After upgrade, however, `BrowserHub` stores the `SessionUser` on the client and does not re-check user status per frame or subscribe to account revocation. A WebSocket opened while the user was active can therefore remain connected and continue forwarding REST envelopes and session-stream frames after the account is disabled.
+
+This is particularly important because the cookie has a rolling 30-day lifetime and an open WebSocket is not automatically constrained by cookie expiry. The previous remediation addressed stale cookies and new upgrades, but not live connections.
+
+**Recommendation:** add a central user-revocation operation that deletes all of the user's server-side sessions and instructs `BrowserHub` to close every socket for that user. For defense in depth, re-resolve current account and grant state before privileged requests/channel actions or use a short-lived authorization snapshot with forced refresh.
+
+### HSA-02 — Share revocation/expiry is not live — High
+
+Machine access is resolved once during the browser `hello` frame and cached as `client.access`. Every later REST request and stream channel derives its connector principal from that cached grant. Deleting a share or reaching `expires_at` updates database state only; the already-open browser socket retains the old permissions until it reconnects.
+
+This enables continued viewing of and interaction with another person's coding session—and therefore repository content—after the owner believes access was revoked. This was documented as Medium in the 2026-08-08 audit. Given the explicit requirement that access to other people's repositories be promptly revocable, this audit rates it High.
+
+**Recommendation:** inject `BrowserHub` into share mutation routes and close/re-authorize affected sockets immediately on deletion, permission reduction, or expiry. Also re-resolve grants when opening a channel and before forwarding a request, so expiry does not depend on a timer firing exactly on time.
+
+### HSA-03 — Allowlist removal does not deactivate existing users — Medium
+
+`upsertUserFromGithub` only upgrades `pending` users to `active`; it deliberately never demotes an existing active user when their numeric ID disappears from `ALLOWED_GITHUB_IDS`. Therefore changing the environment allowlist is not itself a revocation operation. PR #567 added an owner/admin endpoint that disables a user and immediately reauthorizes their live sockets.
+
+**Recommendation:** document clearly that allowlist removal alone is not sufficient and use the owner/admin user-management endpoint to disable access.
+
+### HSA-04 — Non-allowlisted OAuth users are persisted as pending — Low
+
+The callback fetches the GitHub profile and email, calls `upsertUserFromGithub`, and only afterward relies on `pending` status to block protected resources. This means public signup is open at the identity-record level even though application access is gated. Production's OAuth start endpoint is publicly reachable and issues a correctly protected session cookie.
+
+**Recommendation:** if the intended policy is “no new accounts,” reject non-allowlisted GitHub logins before inserting a user. Avoid requesting/storing email for rejected users unless there is a documented access-request workflow and retention policy. Retain rate limiting and add cleanup/limits for abandoned OAuth sessions and pending users.
+
+### HSA-05 — No global session revocation control — Low
+
+Sessions are server-side SQLite records keyed by a signed, host-only cookie and roll for 30 days. Logout destroys the current session, but there is no user-facing session list, per-device revocation, or logout-all operation. A copied cookie remains useful until it expires or its session-store row is removed manually. Cookie signing prevents forgery, not replay.
+
+**Recommendation:** add session metadata (user ID, creation time, last use, user agent, approximate IP), session inventory, and logout-all/per-session deletion. Rotate the session ID after other privilege changes and define a shorter absolute lifetime in addition to rolling inactivity expiry.
+
+## Controls verified
+
+- Production issues `codekin_relay_sid` with `HttpOnly`, `Secure`, `SameSite=Lax`, host-only scope, and a 30-day expiry.
+- OAuth uses 128-bit random state, saves it before redirect, and regenerates the session after successful authentication to prevent fixation.
+- The production callback is fixed to `https://app.codekin.ai/api/auth/github/callback`.
+- GitHub OAuth requests `read:user user:email`, not repository scope, and the access token is discarded after profile retrieval.
+- Protected REST routes re-read user status from the database.
+- Browser WebSocket upgrades require an exact `Origin` match and an active database user.
+- Machine listing and WebSocket hello enforce owner-or-share access.
+- The connector independently limits proxy paths, filters session lists for grantees, and checks every session-stream action against the granted session permissions.
+- Browser-supplied authorization headers are discarded; only the connector injects the local Codekin bearer token.
+- Machine credentials and pairing device codes are stored as SHA-256 hashes; machine deletion revokes the stored credentials.
+- Session fixation, cross-site WebSocket hijacking, direct object access to unrelated machines, and browser access to the local bearer token were not identified in the reviewed paths.
+
+## Production observations
+
+On 2026-08-29, unauthenticated checks confirmed:
+
+- `/api/me` returns no authenticated user.
+- `/api/machines` returns `401` without a session.
+- `/api/auth/github/start` remains public and redirects to GitHub OAuth.
+- Its cookie includes `HttpOnly; Secure; SameSite=Lax`.
+- The service sends `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: same-origin`.
+
+These checks cannot reveal the production value of `ALLOWED_GITHUB_IDS`, prove session-secret handling on the host, or safely complete OAuth as a non-allowlisted test identity.
+
+## Verification limitations
+
+The fixes were dynamically verified against the in-process relay and connector test harness, not deployed production. The production observations above remain unauthenticated and non-destructive. A staging smoke test should still exercise OAuth rejection and keep a real browser socket open while disabling a test user and revoking a share before production rollout.
+
+## Remediation implemented
+
+PR #577 was extended with the runtime fixes after the initial audit:
+
+- New GitHub identities outside `OWNER_GITHUB_ID` and `ALLOWED_GITHUB_IDS` are rejected before user insertion.
+- PR #566/#567 immediately reauthorizes sockets after user, machine, or share revocation. PR #577 tightens the background reauthorization bound from 60 seconds to five seconds for direct database changes and share expiry.
+- Share creation/update/deletion triggers immediate revalidation. Any grant change forces reconnection so connector channels cannot retain a previously broader permission snapshot.
+- `POST /api/auth/logout-all` destroys every server-side web session for the current user and disconnects their live browser sockets.
+- The hosted login page gives a specific private-instance message for rejected GitHub accounts.
+
+Post-remediation verification:
+
+```text
+Test Files  20 passed (20)
+Tests       209 passed (209)
+```
+
+Both the root production build (`tsc -b && vite build`) and server TypeScript build pass. The remaining portion of HSA-05 is product-facing session inventory/per-device management; global revocation is now available server-side.
