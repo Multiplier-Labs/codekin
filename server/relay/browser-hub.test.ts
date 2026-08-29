@@ -12,7 +12,7 @@ import type Database from 'better-sqlite3'
 import { openControlPlaneDb, upsertUserFromGithub } from './control-plane-db.js'
 import { startPairing, approvePairing, completePairing, removeMachine } from './pairing.js'
 import { ConnectorHub } from './connector-hub.js'
-import { BrowserHub } from './browser-hub.js'
+import { BrowserHub, accessFingerprint } from './browser-hub.js'
 import { RelayConnector } from './connector.js'
 import { envelope, RELAY_ERROR } from './relay-protocol.js'
 import type { SessionUser } from './relay-auth-routes.js'
@@ -334,5 +334,37 @@ describe('browser hub REST proxy', () => {
     }
 
     expect(await browser.closeCode).toBe(4029)
+  })
+})
+
+describe('accessFingerprint', () => {
+  it('is blind to the order grants and permissions come back in', () => {
+    // Same standing, different iteration order: the periodic sweep must read
+    // this as "nothing changed" rather than closing a healthy socket.
+    const a = { kind: 'grantee', grants: { s1: ['read', 'write'], s2: ['read'] } } as const
+    const b = { kind: 'grantee', grants: { s2: ['read'], s1: ['write', 'read'] } } as const
+    expect(accessFingerprint(a)).toBe(accessFingerprint(b))
+  })
+
+  it('separates every standing that actually differs', () => {
+    const grantee = { kind: 'grantee', grants: { s1: ['read'] } } as const
+    const widened = { kind: 'grantee', grants: { s1: ['read', 'write'] } } as const
+    const extraSession = { kind: 'grantee', grants: { s1: ['read'], s2: ['read'] } } as const
+
+    const prints = [
+      accessFingerprint({ kind: 'owner' }),
+      accessFingerprint({ kind: 'none' }),
+      accessFingerprint(grantee),
+      accessFingerprint(widened),
+      accessFingerprint(extraSession),
+    ]
+    expect(new Set(prints).size).toBe(prints.length)
+  })
+
+  it('does not confuse a session id with the permissions it carries', () => {
+    // A naive join on a separator would collide these two.
+    const a = { kind: 'grantee', grants: { 'a:read': [] } } as const
+    const b = { kind: 'grantee', grants: { a: ['read'] } } as const
+    expect(accessFingerprint(a)).not.toBe(accessFingerprint(b))
   })
 })

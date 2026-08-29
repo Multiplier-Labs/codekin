@@ -178,7 +178,14 @@ export function createRelayAuthRouter({ db, config, fetchImpl = fetch, store, di
       const existing = db.prepare('SELECT id, status FROM users WHERE github_id = ?').get(profile.id) as
         | { id: string; status: UserStatus }
         | undefined
-      if (!existing && !isGithubAccountAllowed(profile.id, accessPolicy)) {
+      // Admission is by allowlist, and a row that never got past `pending` is
+      // not an admission: it is the residue of a login the policy already
+      // refused. Gating on `!existing` alone would grandfather those rows in
+      // forever, so an identity the allowlist rejects can never accumulate a
+      // standing exemption by having knocked once. An `active` or `disabled`
+      // row is a real decision someone made, and is left to upsert to honour.
+      const provisional = !existing || existing.status === 'pending'
+      if (provisional && !isGithubAccountAllowed(profile.id, accessPolicy)) {
         await destroySession(req)
         failLogin(res, 'access_not_allowed')
         return
