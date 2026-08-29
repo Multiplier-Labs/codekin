@@ -17,8 +17,6 @@ import { createServer } from 'http'
 import { WebSocketServer, WebSocket } from 'ws'
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
-import { homedir } from 'os'
-import { execFileSync } from 'child_process'
 import { createHash, randomUUID, timingSafeEqual } from 'crypto'
 import { verifySessionToken } from './crypto-utils.js'
 import { SessionManager } from './session-manager.js'
@@ -37,6 +35,7 @@ import { GoalRunController } from './goal-run-controller.js'
 import { createGoalRunRouter } from './goal-run-routes.js'
 import { createRunsRouter } from './runs-routes.js'
 import { RunStore } from './run-store.js'
+import { HARNESSES } from './harness-registry.js'
 import { CommitEventHandler } from './commit-event-handler.js'
 import { jsonParse } from './json-parse.js'
 import { createMessageRateLimiter } from './ws-rate-limit.js'
@@ -54,7 +53,7 @@ import { createOrchestratorRouter } from './orchestrator-routes.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, isOrchestratorSession } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
 import { getOrchestratorOutbox } from './orchestrator-outbox.js'
-import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, CLAUDE_BINARY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR } from './config.js'
+import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR } from './config.js'
 
 // ---------------------------------------------------------------------------
 // CLI args (legacy bare-metal compat) and auth setup
@@ -115,68 +114,26 @@ function extractToken(req: express.Request): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Startup checks
+// Startup checks — one probe per registered harness (see harness-registry.ts)
 // ---------------------------------------------------------------------------
-let claudeAvailable = false
-let claudeVersion = ''
-const apiKeyEnvSet = !!(process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_CODE_API_KEY)
-
-try {
-  claudeVersion = execFileSync(CLAUDE_BINARY, ['--version'], { timeout: 5000 }).toString().trim()
-  claudeAvailable = true
-  console.log(`Claude CLI found: ${claudeVersion}`)
-} catch {
-  console.warn('Claude CLI not found or not working')
-}
-
-// Detect whether the Claude CLI has valid auth (API key OR subscription/OAuth).
-// Subscription users won't have ANTHROPIC_API_KEY set but can still use the CLI.
-let apiKeySet = apiKeyEnvSet
-if (claudeAvailable && !apiKeyEnvSet) {
-  try {
-    const authJson = execFileSync(CLAUDE_BINARY, ['auth', 'status'], { timeout: 5000 }).toString()
-    const auth = jsonParse(authJson) as Record<string, unknown>
-    if (auth.loggedIn) {
-      apiKeySet = true
-      console.log(`Claude CLI authenticated via ${String(auth.authMethod || 'unknown method')}`)
-    }
-  } catch {
-    // auth status check failed — fall through to warning
+const harnessProbes = new Map(HARNESSES.map((h) => {
+  const probe = h.probe()
+  if (!probe.available) {
+    console.warn(`${h.label} CLI not found — ${h.installHint}`)
+  } else {
+    console.log(`${h.label} CLI found: ${probe.version}`)
+    if (!probe.authenticated) console.warn(`${h.label} CLI found but not authenticated — ${h.installHint}`)
   }
-}
+  return [h.id, probe] as const
+}))
 
-if (!apiKeySet) {
-  console.warn('No API key or subscription auth detected (ANTHROPIC_API_KEY, CLAUDE_CODE_API_KEY, or Claude subscription)')
-}
-
-// Detect the OpenAI Codex CLI and its auth state. Codex authenticates via
-// `codex login` (ChatGPT subscription OAuth) which writes ~/.codex/auth.json;
-// the app-server reuses it with automatic token refresh.
-let codexAvailable = false
-let codexAuthenticated = false
-try {
-  const codexVersion = execFileSync(process.env.CODEX_BINARY || 'codex', ['--version'], { timeout: 5000 }).toString().trim()
-  codexAvailable = true
-  console.log(`Codex CLI found: ${codexVersion}`)
-  const codexHome = process.env.CODEX_HOME || join(homedir(), '.codex')
-  codexAuthenticated = existsSync(join(codexHome, 'auth.json')) || !!process.env.OPENAI_API_KEY
-  if (!codexAuthenticated) {
-    console.warn('Codex CLI found but not authenticated — run `codex login` on this host to enable it')
-  }
-} catch {
-  // Codex CLI not installed — provider stays hidden in the UI
-}
-
-// Detect the OpenCode CLI. It had no startup probe at all — the only harness
-// whose absence the UI could not know about.
-let openCodeAvailable = false
-try {
-  execFileSync(process.env.OPENCODE_BINARY || 'opencode', ['--version'], { timeout: 5000 })
-  openCodeAvailable = true
-  console.log('OpenCode CLI found')
-} catch {
-  // OpenCode CLI not installed
-}
+// Legacy names, consumed by the `connected` frame and /api/health.
+const claudeAvailable = harnessProbes.get('claude')?.available ?? false
+const claudeVersion = harnessProbes.get('claude')?.version ?? ''
+const apiKeySet = harnessProbes.get('claude')?.authenticated ?? false
+const codexAvailable = harnessProbes.get('codex')?.available ?? false
+const codexAuthenticated = harnessProbes.get('codex')?.authenticated ?? false
+const openCodeAvailable = harnessProbes.get('opencode')?.available ?? false
 
 // ---------------------------------------------------------------------------
 // Core services
