@@ -10,7 +10,7 @@ import {
   IconKey, IconPalette, IconBrandGithub, IconCopy, IconCheck,
   IconChevronDown, IconChevronRight, IconCircleCheckFilled, IconCircleXFilled,
   IconRobot, IconArchive, IconGitBranch, IconRefresh, IconAlertTriangle,
-  IconPlugConnected, IconPlayerPlay, IconWand, IconShieldLock, IconServer2,
+  IconPlugConnected, IconPlayerPlay, IconWand, IconShieldLock, IconServer2, IconDevices,
 } from '@tabler/icons-react'
 import type { Settings as SettingsType, PermissionMode, Repo } from '../types'
 import { PERMISSION_MODES } from '../types'
@@ -76,6 +76,7 @@ interface Props {
  * on. Lazy so the local build never loads it.
  */
 const MachinesSection = lazy(() => import('../hosted/MachinesSection').then(m => ({ default: m.MachinesSection })))
+const DevicesSection = lazy(() => import('../hosted/DevicesSection').then(m => ({ default: m.DevicesSection })))
 
 // ---------------------------------------------------------------------------
 // Section header component
@@ -348,6 +349,13 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                 <MachinesSection currentMachineId="" onSwitch={machine => { onSwitchMachine?.(machine) }} />
               </Suspense>
             </SectionCard>
+            <div className="mt-4">
+              <SectionCard icon={<IconDevices size={15} />} title="Devices & passkeys">
+                <Suspense fallback={<p className="text-body text-ink-muted">Loading…</p>}>
+                  <DevicesSection />
+                </Suspense>
+              </SectionCard>
+            </div>
           </div>
         </div>
       </div>
@@ -375,6 +383,15 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                   onSwitch={machine => { onClose(); onSwitchMachine(machine) }}
                   onDisconnect={onDisconnectMachine && (() => { onClose(); onDisconnectMachine() })}
                 />
+              </Suspense>
+            </SectionCard>
+          )}
+
+          {/* ── Devices & passkeys (hosted only) ── */}
+          {onSwitchMachine && (
+            <SectionCard icon={<IconDevices size={15} />} title="Devices & passkeys">
+              <Suspense fallback={<p className="text-body text-ink-muted">Loading…</p>}>
+                <DevicesSection />
               </Suspense>
             </SectionCard>
           )}

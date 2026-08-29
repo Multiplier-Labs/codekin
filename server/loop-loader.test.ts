@@ -63,9 +63,17 @@ Add tests.`
     expect(t.spec.completionPolicy).toBe('pr') // defaulted
   })
 
-  it('rejects an unknown kind', () => {
-    const md = VALID.replace('kind: ci-autorepair', 'kind: world-domination')
-    expect(() => parseLoopTemplate(md, 'x.md', 'builtin')).toThrow(/kind must be one of/)
+  it('accepts a custom (non-built-in) kind — kinds are an open set', () => {
+    const md = VALID.replace('kind: ci-autorepair', 'kind: flaky-e2e.quarantine')
+    const t = parseLoopTemplate(md, 'x.md', 'repo')
+    expect(t.kind).toBe('flaky-e2e.quarantine')
+  })
+
+  it('rejects a kind that is not a safe slug', () => {
+    for (const bad of ['kind: World Domination', 'kind: UPPER', 'kind: ../escape', `kind: ${'x'.repeat(65)}`]) {
+      const md = VALID.replace('kind: ci-autorepair', bad)
+      expect(() => parseLoopTemplate(md, 'x.md', 'builtin')).toThrow(/kind must be a lowercase slug/)
+    }
   })
 
   it('rejects an unknown provider', () => {

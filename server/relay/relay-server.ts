@@ -21,6 +21,8 @@ import { createMachineRouter } from './machine-routes.js'
 import { createPairingRouter } from './pairing-routes.js'
 import { createShareRouter } from './share-routes.js'
 import { createUserRouter } from './user-routes.js'
+import { createDeviceLinkRouter } from './device-link-routes.js'
+import { createWebauthnRouter } from './webauthn-routes.js'
 import { ConnectorHub } from './connector-hub.js'
 import { BrowserHub } from './browser-hub.js'
 import { MAX_PROXY_BODY_BYTES } from './relay-protocol.js'
@@ -115,6 +117,8 @@ app.use(createMachineRouter(db, hub))
 app.use(createPairingRouter(db, config, { connectorHub: hub, browserHub }))
 app.use(createShareRouter(db, browserHub))
 app.use(createUserRouter(db, config, browserHub))
+app.use(createDeviceLinkRouter(db, config))
+app.use(createWebauthnRouter(db, config))
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' })
