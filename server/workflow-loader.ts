@@ -35,6 +35,7 @@ import { execFileSync } from 'child_process'
 import { dirname, isAbsolute, join, resolve, sep } from 'path'
 import { REPOS_ROOT } from './config.js'
 import { fileURLToPath } from 'url'
+import { splitFrontmatter, parseFlatFrontmatter } from './frontmatter.js'
 import type { WorkflowEngine, WorkflowRun } from './workflow-engine.js'
 import { SessionGoneError } from './workflow-engine.js'
 import type { SessionManager } from './session-manager.js'
@@ -87,18 +88,11 @@ function assertSafeRelativePath(value: string, field: string, sourcePath: string
 
 /** Parse a workflow MD file into a WorkflowDef. Throws if required fields are missing or unsafe. */
 function parseMdWorkflow(content: string, sourcePath: string): WorkflowDef {
-  const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/m)
-  if (!fmMatch) throw new Error(`No frontmatter found in ${sourcePath}`)
+  const split = splitFrontmatter(content)
+  if (!split) throw new Error(`No frontmatter found in ${sourcePath}`)
 
-  const frontmatter = fmMatch[1]
-  const prompt = fmMatch[2].trim()
-
-  const meta: Record<string, string> = {}
-  for (const line of frontmatter.split('\n')) {
-    const sep = line.indexOf(': ')
-    if (sep === -1) continue
-    meta[line.slice(0, sep).trim()] = line.slice(sep + 2).trim()
-  }
+  const prompt = split.body.trim()
+  const meta = parseFlatFrontmatter(split.frontmatter)
 
   const required = ['kind', 'name', 'sessionPrefix', 'outputDir', 'filenameSuffix', 'commitMessage']
   for (const key of required) {
