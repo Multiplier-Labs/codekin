@@ -40,6 +40,7 @@ import {
 } from './verifier-runner.js'
 import { matchesAnyGlob } from './glob-match.js'
 import { defaultFinalizer, type FinalizerApi } from './goal-run-finalizer.js'
+import { AGENT_ALLOWED_TOOLS, READONLY_AGENT_ALLOWED_TOOLS } from './agent-allowlist.js'
 
 // ---------------------------------------------------------------------------
 // Injected dependencies
@@ -49,6 +50,8 @@ interface CreateOpts {
   provider?: LoopProvider
   model?: string
   source?: 'agent'
+  /** Tool patterns pre-approved for the session (headless runs must not block on routine dev commands). */
+  allowedTools?: string[]
 }
 
 interface HistoryMsg {
@@ -71,6 +74,9 @@ export interface SessionHost {
   stopClaude(sessionId: string): void
   get(sessionId: string): SessionView | undefined
   onSessionResult(listener: (sessionId: string, isError: boolean) => void): () => void
+  onSessionPrompt(
+    listener: (sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void,
+  ): () => void
 }
 
 /** The verifier surface — defaults to the real implementations. */
@@ -108,7 +114,11 @@ interface RunCtx {
   readonlyStrikes: number
   /** Re-entrancy guard — one maker result is processed at a time per run. */
   processing: boolean
+  /** Prompt requestIds already recorded in the ledger (one `blocked` row per prompt). */
+  notedPromptIds: Set<string>
   dispose: () => void
+  /** Unregister the blocked-prompt listener. */
+  promptDispose: () => void
   /** Live checker session, set only while a maker–checker review is in flight. */
   checkerSessionId: string | null
   checkerProcessing: boolean
@@ -136,6 +146,7 @@ export class GoalRunController {
       provider: run.spec.maker.provider,
       model: run.spec.maker.model,
       source: 'agent',
+      allowedTools: AGENT_ALLOWED_TOOLS,
     })
     const worktree = await this.host.createWorktree(session.id, run.repo, run.branch)
     const cwd = worktree ?? run.repo
@@ -153,7 +164,9 @@ export class GoalRunController {
       lastVerifyPassed: false,
       readonlyStrikes: 0,
       processing: false,
+      notedPromptIds: new Set(),
       dispose: () => {},
+      promptDispose: () => {},
       checkerSessionId: null,
       checkerProcessing: false,
       checkerDispose: () => {},
@@ -161,6 +174,9 @@ export class GoalRunController {
     ctx.dispose = this.host.onSessionResult((sid, isError) => {
       if (sid !== ctx.makerSessionId) return
       void this.onMakerResult(ctx, isError)
+    })
+    ctx.promptDispose = this.host.onSessionPrompt((sid, promptType, toolName, requestId) => {
+      this.onSessionBlocked(ctx, sid, promptType, toolName, requestId)
     })
     this.active.set(run.id, ctx)
 
@@ -200,6 +216,44 @@ export class GoalRunController {
     if (run.status === 'succeeded' || run.status === 'failed' || run.status === 'aborted') return false
     this.store.patchRun(runId, { status: 'aborted', completedAt: new Date().toISOString() })
     return true
+  }
+
+  /**
+   * A maker/checker tool call fell through the allowlist and is waiting on a
+   * human. Goal-run sessions are exempt from last-client-leave auto-deny (like
+   * orchestrator children), so without this the run would sit in `running` with
+   * nobody the wiser. Mark it `blocked` and record the prompt in the ledger —
+   * the status resolves back into the loop when the prompt is answered (the
+   * next session result patches the status), or the PromptRouter timeout denies
+   * it and the loop continues on the denial.
+   */
+  private onSessionBlocked(
+    ctx: RunCtx,
+    sessionId: string,
+    promptType: 'permission' | 'question',
+    toolName: string | undefined,
+    requestId: string | undefined,
+  ): void {
+    const role: 'maker' | 'checker' | null =
+      sessionId === ctx.makerSessionId ? 'maker' : sessionId === ctx.checkerSessionId ? 'checker' : null
+    if (!role) return
+    const run = this.store.getRun(ctx.runId)
+    if (!run || !this.active.has(ctx.runId)) return
+
+    // One ledger row per prompt — prompts re-broadcast on client join.
+    const dedupKey = requestId ?? `${sessionId}:${toolName ?? promptType}`
+    if (!ctx.notedPromptIds.has(dedupKey)) {
+      ctx.notedPromptIds.add(dedupKey)
+      const what = promptType === 'question' ? 'a question' : `approval for ${toolName ?? 'a tool'}`
+      this.store.appendTurn({
+        runId: ctx.runId,
+        turnIndex: ctx.turnCount,
+        role,
+        outputTail: `Blocked: the ${role} session is waiting on ${what}. Open the session to respond.`,
+        costUsd: totalCost(ctx),
+      })
+    }
+    this.store.patchRun(ctx.runId, { status: 'blocked' })
   }
 
   private async onMakerResult(ctx: RunCtx, isError: boolean): Promise<void> {
@@ -330,6 +384,7 @@ export class GoalRunController {
       provider: checker.provider,
       model: checker.model,
       source: 'agent',
+      allowedTools: READONLY_AGENT_ALLOWED_TOOLS,
     })
     await this.host.createWorktree(session.id, run.repo, `${run.branch}-review`, run.branch)
     ctx.checkerSessionId = session.id
@@ -455,7 +510,35 @@ export class GoalRunController {
   private teardown(ctx: RunCtx): void {
     this.disposeChecker(ctx)
     ctx.dispose()
+    ctx.promptDispose()
     this.active.delete(ctx.runId)
+  }
+
+  /**
+   * Boot-time recovery: any run persisted in a non-terminal status has lost its
+   * listeners and sessions to the restart and can never progress. Mark each one
+   * `failed` with a ledger row saying why, so the UI shows an honest outcome
+   * instead of a run stuck in `running` forever. (True resume — reattaching to
+   * a restarted maker session — is future work; this guarantees the ledger
+   * never lies.) Returns the ids of the runs that were failed.
+   */
+  failInterrupted(): string[] {
+    const interrupted: string[] = []
+    for (const status of ['queued', 'running', 'verifying', 'checking', 'blocked'] as const) {
+      for (const run of this.store.listRuns({ status })) {
+        if (this.active.has(run.id)) continue
+        this.store.appendTurn({
+          runId: run.id,
+          turnIndex: run.turnCount,
+          role: 'verifier',
+          outputTail: 'Run interrupted by a server restart before completing.',
+          costUsd: run.costUsd,
+        })
+        this.store.patchRun(run.id, { status: 'failed', completedAt: new Date().toISOString() })
+        interrupted.push(run.id)
+      }
+    }
+    return interrupted
   }
 }
 
