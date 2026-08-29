@@ -115,6 +115,23 @@ export class CodekinApi {
     return this.request('POST', '/api/workflows/runs', { kind, input })
   }
 
+  // --- trust ----------------------------------------------------------------
+
+  getTrustLevel(opts: { action: string; category: string; severity?: string; repo?: string }): Promise<unknown> {
+    const params = new URLSearchParams({ action: opts.action, category: opts.category })
+    if (opts.severity) params.set('severity', opts.severity)
+    if (opts.repo) params.set('repo', opts.repo)
+    return this.request('GET', `/api/orchestrator/trust/level?${params.toString()}`)
+  }
+
+  recordTrustApproval(opts: { action: string; category: string; repo?: string }): Promise<unknown> {
+    return this.request('POST', '/api/orchestrator/trust/approve', opts)
+  }
+
+  recordTrustRejection(opts: { action: string; category: string; repo?: string }): Promise<unknown> {
+    return this.request('POST', '/api/orchestrator/trust/reject', opts)
+  }
+
   // --- reports --------------------------------------------------------------
 
   listReports(): Promise<unknown> {

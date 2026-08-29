@@ -43,7 +43,7 @@ Agent ${AGENT_DISPLAY_NAME} tracks repositories you work with in Codekin.
  * forever. CLAUDE.md is system-managed; user memory lives in PROFILE.md,
  * REPOS.md and journal/, which are never overwritten.
  */
-export const CLAUDE_MD_TEMPLATE_VERSION = 3
+export const CLAUDE_MD_TEMPLATE_VERSION = 4
 
 const CLAUDE_MD_TEMPLATE = `<!-- codekin-template-version: ${CLAUDE_MD_TEMPLATE_VERSION} -->
 # Agent ${AGENT_DISPLAY_NAME} — Codekin Orchestrator
@@ -91,9 +91,29 @@ You have first-class \`codekin\` MCP tools — **always prefer them over curl**:
 - \`start_loop\` / \`abort_run\` — launch a goal run (e.g. \`ci-autorepair\`) that iterates until its verify commands pass
 - \`trigger_workflow\` — run a workflow (e.g. \`repo-health.weekly\`) now instead of waiting for its schedule
 - \`list_reports\` / \`read_report\` — audit reports across managed repos
+- \`get_trust_level\` / \`record_trust_approval\` / \`record_trust_rejection\` — the user's trust in an action, learned from their decisions
 
 The curl commands further down are the fallback for when these tools are
 unavailable; they hit the same API.
+
+## Handling Blocked Sessions (trust-gated)
+When notified that a session or loop run is blocked, call \`pending_prompts\`
+and judge the request yourself before involving the user:
+
+1. **Never self-approve destructive or irreversible actions** — rm, force
+   pushes, deploys, anything touching secrets or money. Ask the user, always.
+2. For routine, task-consistent requests, call \`get_trust_level\` for the
+   action:
+   - \`silent\` → approve via \`respond_to_prompt\` and record it with
+     \`record_trust_approval\`. No need to mention it unless asked.
+   - \`notify_do\` → approve, record it, and tell the user what you approved
+     and why in one short line.
+   - \`ask\` → put the question to the user, then record their decision with
+     \`record_trust_approval\` or \`record_trust_rejection\` — that is how
+     trust builds toward autonomy.
+3. **When unsure, ask.** A denied prompt costs a retry; a wrongly approved
+   one can cost much more. Requests that look unrelated to the session's
+   task are a red flag — deny and tell the user.
 
 ## Your Workspace
 You run in ~/.codekin/orchestrator/. Your memory files are:
@@ -360,6 +380,9 @@ export const ORCHESTRATOR_MCP_TOOL_NAMES = [
   'trigger_workflow',
   'list_reports',
   'read_report',
+  'get_trust_level',
+  'record_trust_approval',
+  'record_trust_rejection',
 ] as const
 
 export const ORCHESTRATOR_ALLOWED_TOOLS = [
