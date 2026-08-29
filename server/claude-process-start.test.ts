@@ -30,7 +30,9 @@ type CP = any
 
 function makeFakeProc() {
   const proc = new EventEmitter() as CP
-  proc.stdin = { writable: true, write: vi.fn(() => true), once: vi.fn() }
+  // stdin is an EventEmitter so tests can deliver the async 'error' events
+  // (EPIPE) that a real socket emits after the peer goes away.
+  proc.stdin = Object.assign(new EventEmitter(), { writable: true, write: vi.fn(() => true) })
   proc.stdout = new PassThrough()
   proc.stderr = new EventEmitter()
   proc.kill = vi.fn()
@@ -182,6 +184,32 @@ describe('ClaudeProcess.start() — process event handlers', () => {
       fakeProc.stderr.emit('data', Buffer.from('   '))
 
       expect(errors).toHaveLength(0)
+    })
+
+    it('flags a resume whose conversation the CLI no longer has', () => {
+      const gone = '0867baa2-cd6e-458e-bb3a-17150fb5ed9d'
+      const cp = new ClaudeProcess('/tmp', { sessionId: gone, resume: true }) as CP
+      cp.start()
+      cp.on('error', () => { /* stderr is also surfaced to the session */ })
+      expect(cp.hasResumeNotFound()).toBe(false)
+
+      fakeProc.stderr.emit('data', Buffer.from(`No conversation found with session ID: ${gone}`))
+
+      expect(cp.hasResumeNotFound()).toBe(true)
+    })
+  })
+
+  describe('process stdin', () => {
+    // EPIPE arrives as an async stream 'error' event, not a throw. Unlistened,
+    // Node re-raises it as an uncaught exception and kills the server.
+    it('absorbs an async EPIPE from stdin', () => {
+      const cp = new ClaudeProcess('/tmp') as CP
+      cp.start()
+
+      const err = new Error('write EPIPE') as NodeJS.ErrnoException
+      err.code = 'EPIPE'
+      expect(fakeProc.stdin.listenerCount('error')).toBeGreaterThan(0)
+      expect(() => fakeProc.stdin.emit('error', err)).not.toThrow()
     })
   })
 
