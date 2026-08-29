@@ -24,6 +24,11 @@ export type AuditEventKind =
   | 'session_stopped'
   | 'access_denied'
   | 'user_updated'
+  | 'device_link_created'
+  | 'device_linked'
+  | 'passkey_registered'
+  | 'passkey_login'
+  | 'passkey_removed'
 
 export interface AuditEventInput {
   kind: AuditEventKind

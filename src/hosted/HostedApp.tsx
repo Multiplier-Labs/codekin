@@ -13,6 +13,7 @@ import { MachineConnect } from './MachineConnect'
 import { MachineWorkspace } from './MachineWorkspace'
 import { HostedRelayTransport, LocalHttpTransport, setTransport } from '../lib/transport'
 import { PairPage } from './PairPage'
+import { LinkClaimPage } from './LinkClaimPage'
 import { useHostedAuth } from './useHostedAuth'
 import { Settings } from '../components/Settings'
 import { useSettings } from '../hooks/useSettings'
@@ -41,7 +42,7 @@ function PendingPage({ login, onLogout }: { login: string; onLogout: () => void 
 }
 
 export default function HostedApp() {
-  const { user, initialized, authError, logout } = useHostedAuth()
+  const { user, initialized, authError, logout, refresh } = useHostedAuth()
   const { settings, updateSettings } = useSettings()
   const [selected, setSelected] = useState<Machine | null>(null)
   // The transport is created when a machine is picked and installed before
@@ -53,7 +54,7 @@ export default function HostedApp() {
   // returns to the chat rather than to Settings. Only the presence of the
   // memory is known synchronously; resolving it takes one request.
   const [restoring, setRestoring] = useState(
-    () => lastMachineId() !== null && window.location.pathname !== '/pair',
+    () => lastMachineId() !== null && !['/pair', '/link'].includes(window.location.pathname),
   )
 
   const selectMachine = useCallback((machine: Machine) => {
@@ -119,13 +120,19 @@ export default function HostedApp() {
     selectMachine(machine)
   }, [selected, selectMachine])
 
+  // Before the auth gate: claiming a device-link QR is exactly the case where
+  // this browser is not signed in yet.
+  if (window.location.pathname === '/link') {
+    return <LinkClaimPage />
+  }
+
   // Latch not resolved yet — render the page background, no flash of login UI
   if (!initialized) {
     return <div className="min-h-screen bg-page" />
   }
 
   if (!user) {
-    return <LoginPage authError={authError} />
+    return <LoginPage authError={authError} onSignedIn={() => void refresh()} />
   }
 
   if (user.status !== 'active') {
