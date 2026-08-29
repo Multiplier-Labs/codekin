@@ -68,6 +68,22 @@ describe('parsePath', () => {
     // The regex is loose ([a-f0-9-]+), so short hex strings match
     expect(parsePath('/s/abc123').sessionId).toBe('abc123')
   })
+
+  it('routes /automations to the automations view with no tab preselected', () => {
+    const result = parsePath('/automations')
+    expect(result.view).toBe('automations')
+    expect(result.automationsTab).toBeNull()
+  })
+
+  it('maps the legacy /workflows and /loops routes to automations tabs', () => {
+    expect(parsePath('/workflows')).toMatchObject({ view: 'automations', automationsTab: 'workflows' })
+    expect(parsePath('/loops/')).toMatchObject({ view: 'automations', automationsTab: 'loops' })
+  })
+
+  it('keeps orchestrator routes untouched', () => {
+    expect(parsePath('/joe').view).toBe('orchestrator')
+    expect(parsePath('/orchestrator/').view).toBe('orchestrator')
+  })
 })
 
 describe('useRouter', () => {

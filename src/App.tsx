@@ -38,8 +38,7 @@ import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSess
 import { Settings } from './components/Settings'
 import { LeftSidebar } from './components/LeftSidebar'
 import { MobileTopBar } from './components/MobileTopBar'
-import { WorkflowsView } from './components/WorkflowsView'
-import { LoopRunsView } from './components/LoopRunsView'
+import { AutomationsView } from './components/AutomationsView'
 import { CommandPalette } from './components/CommandPalette'
 import type { InputBarHandle } from './components/InputBar'
 import { RepoSelector } from './components/RepoSelector'
@@ -75,7 +74,13 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   const { groups, repos, globalSkills, globalModules, ghMissing, refresh: refreshRepos } = useRepos(settings.token)
   const { sessions, rename: renameSession, remove: removeSession, refresh: refreshSessions } = useSessions(settings.token)
   const { queues: tentativeQueues, addToQueue, clearQueue } = useTentativeQueue()
-  const { sessionId: urlSessionId, view, navigate } = useRouter()
+  const { sessionId: urlSessionId, view, automationsTab, path: routePath, navigate } = useRouter()
+
+  // Canonicalize the pre-unification routes: /workflows and /loops render the
+  // Automations view (with the matching tab); the URL becomes /automations.
+  useEffect(() => {
+    if (view === 'automations' && routePath !== '/automations') navigate('/automations', true)
+  }, [view, routePath, navigate])
   const docsBrowser = useDocsBrowser()
   const isMobile = useIsMobile()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -683,8 +688,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
         onUpdateTheme={(theme) => updateSettings({ theme: theme as 'dark' | 'light' })}
         onSendModule={handleSendModule}
         agentName={agentName}
-        onNavigateToWorkflows={() => navigate('/workflows')}
-        onNavigateToLoops={() => navigate('/loops')}
+        onNavigateToAutomations={() => navigate('/automations')}
         onNavigateToOrchestrator={() => handleNavigateToOrchestrator()}
         onOpenDrawer={handleOpenDrawer}
         onMoveToWorktree={moveToWorktree}
@@ -752,19 +756,10 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
             disabled={!settings.token}
             agentName={agentName}
           />
-        ) : view === 'workflows' ? (
-          <WorkflowsView
+        ) : view === 'automations' ? (
+          <AutomationsView
             token={settings.token}
-            onNavigateToSession={(sessionId) => {
-              clearMessages()
-              leaveSession()
-              joinSession(sessionId)
-              navigate(`/s/${sessionId}`)
-            }}
-          />
-        ) : view === 'loops' ? (
-          <LoopRunsView
-            token={settings.token}
+            initialTab={automationsTab ?? undefined}
             onNavigateToSession={(sessionId) => {
               clearMessages()
               leaveSession()
