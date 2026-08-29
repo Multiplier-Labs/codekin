@@ -20,6 +20,7 @@ That sentence carries two design principles that govern everything below:
 
 - **Act on signal, not on wall-clock.** Every trigger should trace back to something that actually changed: a commit, a threshold breach, a pending OS patch. Wall-clock cadence survives only as a fallback sweep. A quiet fleet means a quiet Joe.
 - **Low-maintenance by construction.** Discovery over configuration: Joe finds repos, processes, and services itself and *proposes* the registry; the human confirms rather than authors. Defaults over tuning; self-adjusting cadence via the existing trust ladder rather than settings sprawl. Adding an asset to Joe's care should be one confirmation, not a config file.
+- **Stability from one robust core.** All firing — timers and signals alike — goes through a single durable, crash-recoverable trigger engine (§6) with idempotent dispatch and a self-watchdog, instead of today's dozen scattered interval loops and in-memory events. A supervisor that can silently stall is worse than no supervisor.
 
 ## 2. Current state (verified against the code)
 
@@ -162,11 +163,54 @@ Host *changes* are where autonomy must be earned, not assumed. Mapped onto Joe's
 
 The hard floor codifies existing operator feedback (a pm2 restart kills live sessions) as policy, not memory. Every executed action lands in the run ledger with the exact commands and output — auditable like any other run.
 
+**Sudo-free by default.** Joe runs with the Codekin server user's privileges and no more. All host probes are read-only commands that work unprivileged (`df`, `free`, `apt list --upgradable`, reading `/var/run/reboot-required`, `pm2 jlist`, systemd status queries). Routine-execute covers only actions the unprivileged user can already perform (its own pm2 processes, its own log/cache directories). Anything that would need root — package upgrades, cert renewal via certbot, system service changes — is **propose-only**: Joe prepares the exact commands and the human runs them. A narrowly scoped sudoers rule for a specific action class is a deliberate operator opt-in, never a default, never something Joe requests to have configured.
+
 ### 5.3 Multi-machine, honestly scoped
 
 Today Codekin manages one host, and Phase E below targets exactly that. But "multiple machines" is in the value proposition, and the hosted relay already gives Codekin a machine-aware topology (`machinesOnline` in the relay health model). The forward path: the probe layer is written against a `MachineTarget` abstraction (local shell today; relay-connected machine later), so extending to N machines is a transport change, not a redesign. Explicitly out of scope for now: agentless SSH probing of arbitrary servers.
 
-## 6. Fit with the automation unification plan
+## 6. Proposal part 4 — One robust trigger engine
+
+Everything above ultimately reduces to "something fires, a gate decides, a run happens." Today that firing layer is the weakest part of the codebase, and it is where "operates in a super stable way" is won or lost.
+
+### 6.1 What triggering looks like today
+
+- **~12 independent timer loops** across the server (`workflow-engine` 60 s cron tick, `orchestrator-monitor` 15-min poll + aging timer, outbox 60 s flusher, commit-event dedup cleanup, session-archive cleanup, approval persist debounce, …). Each has its own start/stop lifecycle and no shared liveness story; a silently dead interval is invisible until someone notices reports stopped appearing.
+- **Timers are durable but have no catch-up policy.** `cron_schedules.next_run_at` survives restarts (good), but after downtime every overdue schedule fires simultaneously on the first tick — a thundering herd of Claude sessions with no concurrency cap.
+- **Signals are ephemeral.** Commit events, webhook events, and `workflow_event`s ride an in-memory `EventEmitter`; a crash between receipt and action loses them. Joe's notification outbox is the one durable exception — and it proves the pattern works.
+- **Three cron implementations** (engine parser, route validator, and the harness `CronCreate` Joe is prompted to use) that can disagree on edge cases.
+
+### 6.2 The trigger engine
+
+One engine, two input classes, one dispatcher — all state in `runs.db`:
+
+```
+TriggerEngine
+├─ timers    — generalized cron_schedules: anything periodic registers here,
+│             including the monitor sweep, outbox flush, probe ticks
+├─ signals   — durable table; producers INSERT (commit event, probe breach,
+│             webhook, goal-run event), dispatcher consumes with lease + ack
+└─ dispatcher — single loop: due timers + pending signals → gate → dispatch → ack
+```
+
+The robustness properties, each a deliberate guarantee:
+
+1. **Durable timers with an explicit catch-up policy.** Per timer: `catchUp: 'collapse'` (missed fires merge into one, the default) or `'skip'` (wait for the next natural slot). Overdue fires after downtime dispatch with jitter and under the concurrency cap — no herd.
+2. **At-least-once signals with acknowledgment.** Producers write the signal row first, then processing happens; the dispatcher takes a short lease, and a crash mid-processing means lease expiry and redelivery — never loss. Stale signals expire by TTL instead of firing surprisingly hours later.
+3. **Idempotent dispatch.** Every dispatch has a natural key — `(timerId, targetSha)` for repo workflows, `(signalId)` for events — checked against the run ledger. Redelivery of an already-handled signal is a no-op. This is what makes at-least-once safe rather than duplicate-spawning.
+4. **Single-flight and backpressure.** Per-repo and global concurrency caps enforced at dispatch (today only `commit-review` has one, in the wrong layer); overflow queues in priority order (signal > timer) rather than dropping or stampeding.
+5. **A trigger ledger.** Every decision is recorded with its reason: `fired`, `held: repo dormant`, `held: concurrency`, `collapsed: 3 missed fires`, `deduped`. The Automations UI can finally answer "why didn't this run?" — and "why did it?"
+6. **Self-watchdog.** The dispatcher writes a heartbeat row every tick; one independent, trivially simple check (surfaced in the existing health/environment UI and as a Joe notification) flags a stalled engine. The engine reports its own sickness — the low-maintenance principle applied to the machinery itself.
+7. **Crash-recovery invariant: no trigger state lives only in memory.** Boot = read tables, resume. This already holds for schedules; the signals table extends it to events, and folding the scattered periodic loops into registered timers extends it to the housekeeping no one currently watches.
+8. **One cron implementation.** A single vetted parser module (either the existing hand-rolled one consolidated and edge-case-tested, or a small dependency like `croner`) used by engine, validation, and anything Joe schedules.
+
+Producers stay decoupled: the commit-event handler, webhook handler, and future `DeploymentMonitor` just INSERT signals. Gates stay pluggable: the activity gate (§3.2), concurrency, and trust checks all run in the dispatcher, in one place, before any session spawns.
+
+### 6.3 Migration without a big bang
+
+The engine is an extraction, not a rewrite: `cron_schedules` already has the right shape and becomes the `timers` table; the outbox already proves the durable-queue-with-flusher pattern and becomes a signal consumer; the cron tick's body becomes the dispatcher. Existing stacks migrate producer-by-producer (cron workflows first, then commit events, then probes), each step shippable and revertible.
+
+## 7. Fit with the automation unification plan
 
 This slots into the approved `Automation = trigger × recipe × policy` primitive by adding one trigger type:
 
@@ -176,23 +220,24 @@ trigger = schedule | event | goal | delegation | signal   ← new: threshold bre
 
 A diagnostic child or a maintenance action is then just a `signal`-triggered run through the shared engine — exactly the Phase 3 "Joe on top" shape. Nothing here creates a fourth automation stack; one monitor emits signals for apps *and* hosts, and the existing machinery runs them. The unified Automations view gains a "Fleet" dimension (repos / apps / machines) over the same run ledger.
 
-## 7. Phasing
+## 8. Phasing
 
 | Phase | Content | Size | Value |
 | --- | --- | --- | --- |
-| **A** | Pre-dispatch gate: SHA-based change detection on successful runs, dormant-skip before dispatch, `last_skipped_at` surfacing. Fixes the sliding-window bug. Engine-only. | S | Immediate: no more no-op runs, no more silently missed commits |
+| **A0** | Trigger engine core: generalize `cron_schedules` → timers with catch-up policy + jitter, dispatcher with concurrency caps, trigger ledger, heartbeat watchdog, single cron module | M | The stability substrate everything else rides on |
+| **A** | Pre-dispatch gate: SHA-based change detection on successful runs, dormant-skip before dispatch, held-reason surfacing (via the trigger ledger). Fixes the sliding-window bug. | S | Immediate: no more no-op runs, no more silently missed commits |
 | **B** | Repo Activity Index + tiers + event-driven bumps + UI badges + Joe MCP tool + retire `checkPassiveRepos` | M | Joe knows which repos are alive; cadence follows reality |
-| **C** | Deployment registry with pm2/nginx discovery + `DeploymentMonitor` probes (http/pm2/log/disk) + samples table + threshold → Joe notification | M | Joe watches production; first non-repo value surface |
+| **C** | Signals table + first producers (commit events, webhooks) migrate to durable at-least-once delivery; deployment registry with pm2/nginx discovery + `DeploymentMonitor` probes (http/pm2/log/disk) + samples table + breach → signal → Joe notification | M–L | Events can no longer be lost; Joe watches production |
 | **D** | Signal-triggered diagnostic children + incident reports + security probes + deployment-aware security audit | M–L | Full loop: detect → diagnose → propose fix, under trust |
-| **E** | Host probe family + trust-laddered maintenance (observe → propose → routine-execute, hard floor) + weekly host digest | M | The machine itself is under care; hand maintenance shrinks |
+| **E** | Host probe family (sudo-free) + trust-laddered maintenance (observe → propose → routine-execute, hard floor) + weekly host digest | M | The machine itself is under care; hand maintenance shrinks |
 
-Phases A and B are independent of the unification work and can start now. C–E compose with unification Phase 3 but don't block on it (the monitor can notify Joe directly first, migrating to `signal` runs when the shared engine absorbs delegation). Each phase reduces — never adds to — the operator's recurring workload; that is the acceptance test for "not needing much maintenance."
+A0 and A ship together as the first PR series; B is independent of the unification work and can follow immediately. C–E compose with unification Phase 3 but don't block on it (the monitor can notify Joe directly first, migrating to `signal` runs when the shared engine absorbs delegation). Each phase reduces — never adds to — the operator's recurring workload; that is the acceptance test for "not needing much maintenance."
 
-## 8. Open questions
+## 9. Open questions
 
 1. **Tier thresholds** — are 7/30 days right, and should they be per-repo configurable from day one or global first?
 2. **Cooling-tier semantics** — throttle (proposed) vs. hold-until-next-activity? Throttle is gentler for repos with slow-but-real cadence.
-3. **Probe execution identity** — host probes run as the Codekin server user; `apt` visibility is fine read-only, but "routine-execute" actions like cert renewal may need scoped sudo rules. Define the sudoers surface in Phase E, or keep routine-execute sudo-free initially?
+3. ~~Probe execution identity~~ — **resolved**: sudo-free by default (§5.2). Probes and routine-execute stay within the unprivileged Codekin user; root-requiring actions are propose-only; scoped sudoers rules are operator opt-in only.
 4. **Baseline learning** — latency/error-rate baselines: fixed thresholds first (proposed), or learned p95 from the samples table once it has a week of data?
 5. **Where deployments are configured** — Settings UI section, or `.codekin/deployments.json` per repo, or both (repo file as source, UI as editor)? Discovery makes this less pressing but the storage answer is still needed.
 6. **Host digest channel** — weekly digest as a Joe chat notification, a committed report in `.codekin/reports/host/`, or both?
