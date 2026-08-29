@@ -112,7 +112,12 @@ app.get('/api/health', (_req, res) => {
   })
 })
 
-app.use(createRelayAuthRouter({ db, config }))
+app.use(createRelayAuthRouter({
+  db,
+  config,
+  store,
+  disconnectUser: (userId, reason) => { browserHub.disconnectUser(userId, reason) },
+}))
 app.use(createMachineRouter(db, hub))
 app.use(createPairingRouter(db, config, { connectorHub: hub, browserHub }))
 app.use(createShareRouter(db, browserHub))
