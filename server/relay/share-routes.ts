@@ -136,6 +136,9 @@ export function createShareRouter(db: Database.Database, browserHub?: BrowserHub
       permissions,
       expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : null,
     })
+    if (share.granteeUserId) {
+      browserHub?.reauthorize({ userId: share.granteeUserId, machineId: share.machineId })
+    }
 
     recordAuditEvent(db, {
       kind: 'session_shared',

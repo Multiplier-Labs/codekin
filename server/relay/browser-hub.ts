@@ -44,7 +44,7 @@ const CLOSE_OVERLOADED = 4029
 const HELLO_TIMEOUT_MS = 5_000
 
 /** How often every connected client's standing is re-checked against the DB. */
-const REAUTHORIZE_INTERVAL_MS = 60_000
+const REAUTHORIZE_INTERVAL_MS = 5_000
 
 /** Requests a single browser socket may have in flight. */
 const MAX_INFLIGHT_PER_SOCKET = 16
@@ -121,6 +121,13 @@ export class BrowserHub {
         })
       }
       client.socket.close(CLOSE_FORBIDDEN, 'authorization changed')
+    }
+  }
+
+  /** Close every live browser socket for a user (global logout/revocation). */
+  disconnectUser(userId: string, reason = 'access revoked'): void {
+    for (const client of [...this.clients]) {
+      if (client.user.id === userId) client.socket.close(CLOSE_FORBIDDEN, reason)
     }
   }
 
