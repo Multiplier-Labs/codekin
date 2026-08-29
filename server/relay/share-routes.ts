@@ -20,6 +20,7 @@ import {
   upsertShare,
 } from './shares.js'
 import type { SessionPermission, ShareRole } from './shares.js'
+import type { BrowserHub } from './browser-hub.js'
 import { listAuditEvents, recordAuditEvent } from './audit.js'
 
 /** Upper bound on a single CSV export, so one request cannot read the table. */
@@ -42,7 +43,7 @@ function resolvePermissions(body: { role?: unknown; permissions?: unknown }): Se
   return permissions.length > 0 ? permissions : null
 }
 
-export function createShareRouter(db: Database.Database): Router {
+export function createShareRouter(db: Database.Database, browserHub?: BrowserHub): Router {
   const router = Router()
   const requireActiveUser = createRequireActiveUser(db)
 
@@ -125,6 +126,7 @@ export function createShareRouter(db: Database.Database): Router {
       permissions,
       expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : null,
     })
+    browserHub?.revalidateMachine(share.machineId, share.granteeUserId ?? undefined)
 
     recordAuditEvent(db, {
       kind: 'session_shared',
@@ -165,6 +167,7 @@ export function createShareRouter(db: Database.Database): Router {
       permissions,
       typeof body.expiresAt === 'string' ? body.expiresAt : body.expiresAt === null ? null : undefined,
     )
+    browserHub?.revalidateMachine(share.machineId, share.granteeUserId ?? undefined)
 
     recordAuditEvent(db, {
       kind: 'session_shared',
@@ -192,6 +195,7 @@ export function createShareRouter(db: Database.Database): Router {
     }
 
     deleteShare(db, share.id)
+    browserHub?.revalidateMachine(share.machineId, share.granteeUserId ?? undefined)
     recordAuditEvent(db, {
       kind: 'session_unshared',
       actorUserId: user.id,

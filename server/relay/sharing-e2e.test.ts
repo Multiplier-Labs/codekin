@@ -360,20 +360,55 @@ describe('a shared-in user over the relay', () => {
     browser.close()
   })
 
-  it('cuts off access as soon as the share is revoked', async () => {
+  it('cuts off an already-open socket as soon as the share is revoked', async () => {
     const created = share([...SHARE_ROLES.editor])
-    const first = new TestBrowser(browserUrl)
-    await first.open()
-    first.send('hello', { machineId })
-    await first.waitForFrame(f => f.kind === 'hello_ack')
-    first.close()
+    const browser = new TestBrowser(browserUrl)
+    await browser.open()
+    browser.send('hello', { machineId })
+    await browser.waitForFrame(f => f.kind === 'hello_ack')
 
     deleteShare(db, created.id)
+    browserHub.revalidateMachine(machineId, guest.id)
+    expect(await browser.closeCode).toBe(4003)
+  })
 
-    const second = new TestBrowser(browserUrl)
-    await second.open()
-    second.send('hello', { machineId })
-    expect(await second.closeCode).toBe(4003)
+  it('cuts off an open socket when its share expires', async () => {
+    const created = share([...SHARE_ROLES.viewer])
+    const browser = new TestBrowser(browserUrl)
+    await browser.open()
+    browser.send('hello', { machineId })
+    await browser.waitForFrame(f => f.kind === 'hello_ack')
+
+    db.prepare('UPDATE session_shares SET expires_at = ? WHERE id = ?').run(new Date(0).toISOString(), created.id)
+    browserHub.revalidateAll()
+    expect(await browser.closeCode).toBe(4003)
+  })
+
+  it('forces reconnect when permissions on an open socket are reduced', async () => {
+    const created = share([...SHARE_ROLES.editor])
+    const browser = new TestBrowser(browserUrl)
+    await browser.open()
+    browser.send('hello', { machineId })
+    await browser.waitForFrame(f => f.kind === 'hello_ack')
+
+    db.prepare('UPDATE session_shares SET permissions = ? WHERE id = ?').run(
+      JSON.stringify(SHARE_ROLES.viewer),
+      created.id,
+    )
+    browserHub.revalidateMachine(machineId, guest.id)
+    expect(await browser.closeCode).toBe(4003)
+  })
+
+  it('cuts off an open socket when the account is disabled', async () => {
+    share([...SHARE_ROLES.viewer])
+    const browser = new TestBrowser(browserUrl)
+    await browser.open()
+    browser.send('hello', { machineId })
+    await browser.waitForFrame(f => f.kind === 'hello_ack')
+
+    db.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").run(guest.id)
+    browserHub.revalidateAll()
+    expect(await browser.closeCode).toBe(4003)
   })
 
   it('still gives the owner unrestricted access', async () => {

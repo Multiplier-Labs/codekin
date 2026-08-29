@@ -14,7 +14,7 @@ import { WebSocketServer } from 'ws'
 import type { IncomingMessage } from 'http'
 import { join } from 'path'
 import { loadRelayConfig } from './relay-config.js'
-import { openControlPlaneDb, getUserById } from './control-plane-db.js'
+import { openControlPlaneDb, getUserById, reconcileUserAllowlist } from './control-plane-db.js'
 import { SqliteSessionStore } from './sqlite-session-store.js'
 import { createRelayAuthRouter, toSessionUser } from './relay-auth-routes.js'
 import { createMachineRouter } from './machine-routes.js'
@@ -29,6 +29,11 @@ import type { SessionUser } from './relay-auth-routes.js'
 const config = loadRelayConfig()
 const db = openControlPlaneDb(join(config.dataDir, 'control-plane.db'))
 const store = new SqliteSessionStore(db)
+const revokedAtStartup = reconcileUserAllowlist(db, {
+  ownerGithubLogin: config.ownerGithubLogin,
+  allowedGithubLogins: config.allowedGithubLogins,
+})
+for (const userId of revokedAtStartup) store.destroyUserSessions(userId)
 const hub = new ConnectorHub(db)
 const browserHub = new BrowserHub(db, hub)
 
@@ -109,10 +114,15 @@ app.get('/api/health', (_req, res) => {
   })
 })
 
-app.use(createRelayAuthRouter({ db, config }))
+app.use(createRelayAuthRouter({
+  db,
+  config,
+  store,
+  disconnectUser: (userId, reason) => { browserHub.disconnectUser(userId, reason) },
+}))
 app.use(createMachineRouter(db, hub))
 app.use(createPairingRouter(db, config))
-app.use(createShareRouter(db))
+app.use(createShareRouter(db, browserHub))
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' })

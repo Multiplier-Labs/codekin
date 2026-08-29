@@ -33,6 +33,7 @@ import { resolveMachineAccess } from './shares.js'
 import type { MachineAccess } from './shares.js'
 import { recordAuditEvent } from './audit.js'
 import { BROWSER_FRAME_LIMIT, RateLimiter, isBackedUp } from './rate-limit.js'
+import { getUserById } from './control-plane-db.js'
 
 const CLOSE_AUTH_FAILED = 4001
 const CLOSE_FORBIDDEN = 4003
@@ -44,6 +45,9 @@ const HELLO_TIMEOUT_MS = 5_000
 
 /** Requests a single browser socket may have in flight. */
 const MAX_INFLIGHT_PER_SOCKET = 16
+
+/** Bound how long a passive open socket may retain revoked access. */
+const ACCESS_REVALIDATE_INTERVAL_MS = 5_000
 
 interface BrowserClient {
   user: SessionUser
@@ -77,11 +81,57 @@ export class BrowserHub {
   private clients = new Set<BrowserClient>()
   /** Per-user frame budget: one browser cannot flood a machine (spec §11.5). */
   private frameLimiter = new RateLimiter(BROWSER_FRAME_LIMIT)
+  private accessTimer: ReturnType<typeof setInterval>
 
   constructor(
     private db: Database.Database,
     private connectors: ConnectorHub,
-  ) {}
+  ) {
+    this.accessTimer = setInterval(() => { this.revalidateAll(); }, ACCESS_REVALIDATE_INTERVAL_MS)
+    this.accessTimer.unref()
+  }
+
+  /** Re-read account and grant state, closing sockets that no longer have access. */
+  revalidateAll(): void {
+    for (const client of [...this.clients]) this.revalidateClient(client)
+  }
+
+  /** Immediately apply a share mutation to matching live sockets. */
+  revalidateMachine(machineId: string, userId?: string): void {
+    for (const client of [...this.clients]) {
+      if (client.machineId === machineId && (!userId || client.user.id === userId)) {
+        this.revalidateClient(client)
+      }
+    }
+  }
+
+  /** Close all sockets for a user, used by logout-all and account revocation. */
+  disconnectUser(userId: string, reason = 'access revoked'): void {
+    for (const client of [...this.clients]) {
+      if (client.user.id === userId) client.socket.close(CLOSE_FORBIDDEN, reason)
+    }
+  }
+
+  private revalidateClient(client: BrowserClient): boolean {
+    const current = getUserById(this.db, client.user.id)
+    const access = current ? resolveMachineAccess(this.db, current, client.machineId) : { kind: 'none' as const }
+    if (!current || access.kind === 'none') {
+      client.socket.close(CLOSE_FORBIDDEN, 'access revoked')
+      return false
+    }
+    // Connector streams capture their principal when opened. Reconnect on
+    // any grant change so an old channel cannot retain broader permissions.
+    if (JSON.stringify(access) !== JSON.stringify(client.access)) {
+      client.socket.close(CLOSE_FORBIDDEN, 'access changed; reconnect required')
+      return false
+    }
+    client.user = {
+      id: current.id, login: current.login, displayName: current.display_name,
+      avatarUrl: current.avatar_url, role: current.role, status: current.status,
+    }
+    client.access = access
+    return true
+  }
 
   /** Number of connected browser sockets (for tests / health). */
   get clientCount(): number {
@@ -144,6 +194,7 @@ export class BrowserHub {
       }
 
       // Past hello, every frame costs the user a token.
+      if (!this.revalidateClient(client)) return
       if (!this.frameLimiter.tryConsume(client.user.id)) {
         socket.close(CLOSE_OVERLOADED, 'frame rate limit exceeded')
         return
@@ -298,6 +349,7 @@ export class BrowserHub {
 
   /** Disconnect every browser socket (shutdown / tests). */
   close(): void {
+    clearInterval(this.accessTimer)
     this.frameLimiter.close()
     for (const client of this.clients) {
       for (const remoteId of client.channels.values()) {

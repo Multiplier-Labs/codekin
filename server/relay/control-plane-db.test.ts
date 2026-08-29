@@ -7,6 +7,7 @@ import {
   upsertUserFromGithub,
   listMachines,
   DEFAULT_ORG_ID,
+  reconcileUserAllowlist,
 } from './control-plane-db.js'
 
 const POLICY = { ownerGithubLogin: 'alari76', allowedGithubLogins: ['alari76', 'teammate'] }
@@ -98,6 +99,20 @@ describe('listMachines', () => {
   it('returns an empty list on a fresh database', () => {
     const db = openControlPlaneDb(':memory:')
     expect(listMachines(db)).toEqual([])
+    db.close()
+  })
+})
+
+describe('reconcileUserAllowlist', () => {
+  it('demotes active users removed from the allowlist but preserves disabled users', () => {
+    const db = openControlPlaneDb(':memory:')
+    const removed = upsertUserFromGithub(db, profile({ id: 2, login: 'teammate' }), POLICY)
+    const disabled = upsertUserFromGithub(db, profile({ id: 3, login: 'disabled' }), POLICY)
+    db.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").run(disabled.id)
+
+    expect(reconcileUserAllowlist(db, { ...POLICY, allowedGithubLogins: [] })).toEqual([removed.id])
+    expect((db.prepare('SELECT status FROM users WHERE id = ?').get(removed.id) as { status: string }).status).toBe('pending')
+    expect((db.prepare('SELECT status FROM users WHERE id = ?').get(disabled.id) as { status: string }).status).toBe('disabled')
     db.close()
   })
 })

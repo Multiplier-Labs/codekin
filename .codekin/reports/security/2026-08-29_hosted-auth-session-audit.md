@@ -17,11 +17,11 @@ Existing sessions are not fully revocable. Disabling an account blocks later pro
 
 | ID | Severity | Finding | Status |
 |---|---|---|---|
-| HSA-01 | High | Account disablement does not terminate already-open browser WebSockets | Open |
-| HSA-02 | High | Share revocation/expiry does not affect already-open browser WebSockets | Open, previously known |
-| HSA-03 | Medium | Removing a login from the allowlist does not revoke an active account | By design, operationally risky |
-| HSA-04 | Low | OAuth creates pending accounts instead of rejecting non-allowlisted identities before persistence | Open |
-| HSA-05 | Low | No explicit server-side session inventory or “log out all sessions” control exists | Open |
+| HSA-01 | High | Account disablement does not terminate already-open browser WebSockets | Fixed in PR #577 |
+| HSA-02 | High | Share revocation/expiry does not affect already-open browser WebSockets | Fixed in PR #577 |
+| HSA-03 | Medium | Removing a login from the allowlist does not revoke an active account | Fixed in PR #577 |
+| HSA-04 | Low | OAuth creates pending accounts instead of rejecting non-allowlisted identities before persistence | Fixed in PR #577 |
+| HSA-05 | Low | No explicit server-side session inventory or “log out all sessions” control exists | Partially fixed in PR #577 |
 
 ### HSA-01 — Account disablement does not terminate open WebSockets — High
 
@@ -85,4 +85,24 @@ These checks cannot reveal the production value of `ALLOWED_GITHUB_LOGINS`, prov
 
 ## Verification limitations
 
-The repository dependencies were not installed in this worktree, so the targeted Vitest suite could not run (`vitest: not found`). The reviewed authorization behavior has existing unit and end-to-end coverage, and the prior 2026-08-08 audit recorded a green relay suite, but this audit does not claim a fresh dynamic authenticated test against production. A controlled staging test should keep a WebSocket open while disabling a test user and revoking a share, then verify that repository/session frames stop immediately once HSA-01 and HSA-02 are remediated.
+The fixes were dynamically verified against the in-process relay and connector test harness, not deployed production. The production observations above remain unauthenticated and non-destructive. A staging smoke test should still exercise OAuth rejection and keep a real browser socket open while disabling a test user and revoking a share before production rollout.
+
+## Remediation implemented
+
+PR #577 was extended with the runtime fixes after the initial audit:
+
+- GitHub identities outside `OWNER_GITHUB_LOGIN` and `ALLOWED_GITHUB_LOGINS` are rejected before user insertion. Existing disallowed identities are also rejected and have stored sessions disconnected.
+- Existing active users removed from the allowlist are demoted at control-plane startup and all of their stored sessions are destroyed.
+- `BrowserHub` re-resolves the database user and machine grants on every incoming frame and every five seconds for passive connections. Disabled/deleted users and revoked/expired shares receive WebSocket close code 4003.
+- Share creation/update/deletion triggers immediate revalidation. Any grant change forces reconnection so connector channels cannot retain a previously broader permission snapshot.
+- `POST /api/auth/logout-all` destroys every server-side web session for the current user and disconnects their live browser sockets.
+- The hosted login page gives a specific private-instance message for rejected GitHub accounts.
+
+Post-remediation verification:
+
+```text
+Test Files  14 passed (14)
+Tests       154 passed (154)
+```
+
+Both the root production build (`tsc -b && vite build`) and server TypeScript build pass. The remaining portion of HSA-05 is product-facing session inventory/per-device management; global revocation is now available server-side.

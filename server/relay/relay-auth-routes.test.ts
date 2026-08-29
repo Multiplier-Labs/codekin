@@ -51,6 +51,7 @@ describe('relay auth routes', () => {
   let store: SqliteSessionStore
   let server: Server
   let baseUrl: string
+  const disconnectUser = vi.fn()
 
   async function start(fetchImpl: typeof fetch) {
     db = openControlPlaneDb(':memory:')
@@ -67,7 +68,7 @@ describe('relay auth routes', () => {
         cookie: { httpOnly: true, sameSite: 'lax', maxAge: 60_000 },
       }),
     )
-    app.use(createRelayAuthRouter({ db, config: CONFIG, fetchImpl }))
+    app.use(createRelayAuthRouter({ db, config: CONFIG, fetchImpl, store, disconnectUser }))
     app.get('/api/protected', createRequireActiveUser(db), (_req, res) => res.json({ ok: true }))
     await new Promise<void>(resolve => {
       server = app.listen(0, '127.0.0.1', () => {
@@ -123,17 +124,17 @@ describe('relay auth routes', () => {
     expect(prot.status).toBe(200)
   })
 
-  it('signs in a non-allowlisted user as pending and blocks protected routes with 403', async () => {
+  it('rejects a non-allowlisted user without creating an account', async () => {
     await start(githubFetchMock({ id: 2, login: 'stranger' }))
-    const cookie = await login()
-
-    const me = (await (await fetch(`${baseUrl}/api/me`, { headers: { cookie } })).json()) as {
-      user: { status: string }
-    }
-    expect(me.user.status).toBe('pending')
-
-    const prot = await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })
-    expect(prot.status).toBe(403)
+    const startRes = await fetch(`${baseUrl}/api/auth/github/start`, { redirect: 'manual' })
+    const location = new URL(startRes.headers.get('location') ?? '')
+    const cbRes = await fetch(
+      `${baseUrl}/api/auth/github/callback?code=abc&state=${location.searchParams.get('state') ?? ''}`,
+      { redirect: 'manual', headers: { cookie: cookieOf(startRes) } },
+    )
+    expect(cbRes.headers.get('location')).toBe('/?auth_error=access_not_allowed')
+    const count = db.prepare('SELECT COUNT(*) AS count FROM users').get() as { count: number }
+    expect(count.count).toBe(0)
   })
 
   it('blocks a live session as soon as the user is disabled in the database', async () => {
@@ -205,5 +206,17 @@ describe('relay auth routes', () => {
     await fetch(`${baseUrl}/api/auth/logout`, { method: 'POST', headers: { cookie } })
     const me = (await (await fetch(`${baseUrl}/api/me`, { headers: { cookie } })).json()) as { user: null }
     expect(me.user).toBeNull()
+  })
+
+  it('logout-all destroys every session for the user and disconnects live sockets', async () => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    const first = await login()
+    const second = await login()
+
+    const res = await fetch(`${baseUrl}/api/auth/logout-all`, { method: 'POST', headers: { cookie: first } })
+    expect(res.status).toBe(200)
+    expect((await res.json() as { destroyed: number }).destroyed).toBe(2)
+    expect((await fetch(`${baseUrl}/api/me`, { headers: { cookie: second } }).then(r => r.json()) as { user: null }).user).toBeNull()
+    expect(disconnectUser).toHaveBeenCalledWith(expect.any(String), 'all sessions logged out')
   })
 })

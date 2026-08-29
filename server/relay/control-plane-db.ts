@@ -177,6 +177,29 @@ export function resolveUserAccess(login: string, policy: AccessPolicy): { role: 
   return { role: 'member', status: 'pending' }
 }
 
+/** Whether a GitHub identity may create a hosted Codekin account. */
+export function isGithubLoginAllowed(login: string, policy: AccessPolicy): boolean {
+  return resolveUserAccess(login, policy).status === 'active'
+}
+
+/** Apply the configured allowlist to existing accounts at startup. */
+export function reconcileUserAllowlist(db: Database.Database, policy: AccessPolicy): string[] {
+  const users = db.prepare('SELECT id, login, status FROM users').all() as Array<{
+    id: string
+    login: string
+    status: UserStatus
+  }>
+  const revoked: string[] = []
+  const demote = db.prepare("UPDATE users SET status = 'pending', updated_at = datetime('now') WHERE id = ?")
+  for (const user of users) {
+    if (user.status === 'active' && !isGithubLoginAllowed(user.login, policy)) {
+      demote.run(user.id)
+      revoked.push(user.id)
+    }
+  }
+  return revoked
+}
+
 export interface GithubProfile {
   id: number
   login: string

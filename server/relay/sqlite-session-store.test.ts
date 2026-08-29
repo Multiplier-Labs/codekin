@@ -80,4 +80,15 @@ describe('SqliteSessionStore', () => {
     })
     expect(await get(store, 'sid1')).toBeNull()
   })
+
+  it('destroys all and only sessions belonging to one user', async () => {
+    await set(store, 'u1-a', { ...sessionData(60_000), user: { id: 'u1' } } as SessionData)
+    await set(store, 'u1-b', { ...sessionData(60_000), user: { id: 'u1' } } as SessionData)
+    await set(store, 'u2', { ...sessionData(60_000), user: { id: 'u2' } } as SessionData)
+
+    expect(store.destroyUserSessions('u1')).toBe(2)
+    expect(await get(store, 'u1-a')).toBeNull()
+    expect(await get(store, 'u1-b')).toBeNull()
+    expect(await get(store, 'u2')).not.toBeNull()
+  })
 })
