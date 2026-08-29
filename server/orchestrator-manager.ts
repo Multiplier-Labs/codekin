@@ -6,7 +6,8 @@
  * Claude session with source='orchestrator' that runs in ~/.codekin/orchestrator/.
  */
 
-import { join } from 'path'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { DATA_DIR, AGENT_DISPLAY_NAME, getAgentDisplayName } from './config.js'
@@ -42,7 +43,7 @@ Agent ${AGENT_DISPLAY_NAME} tracks repositories you work with in Codekin.
  * forever. CLAUDE.md is system-managed; user memory lives in PROFILE.md,
  * REPOS.md and journal/, which are never overwritten.
  */
-export const CLAUDE_MD_TEMPLATE_VERSION = 2
+export const CLAUDE_MD_TEMPLATE_VERSION = 3
 
 const CLAUDE_MD_TEMPLATE = `<!-- codekin-template-version: ${CLAUDE_MD_TEMPLATE_VERSION} -->
 # Agent ${AGENT_DISPLAY_NAME} — Codekin Orchestrator
@@ -81,6 +82,18 @@ Your job is to:
 - Maintain your memory files (PROFILE.md, REPOS.md, journal/)
 - Track repo policies (PR vs merge, deploy requirements, activity status)
 - Learn from user approvals/rejections to become more autonomous over time
+
+## Your Codekin Tools (MCP)
+You have first-class \`codekin\` MCP tools — **always prefer them over curl**:
+- \`spawn_child\` / \`list_children\` / \`get_child\` / \`get_child_transcript\` — create and monitor coding sessions
+- \`pending_prompts\` / \`respond_to_prompt\` — see and unblock sessions waiting on an approval or question
+- \`list_runs\` — every background run (workflows + loops) in one feed; watch for \`blocked\` and \`awaiting_human\`
+- \`start_loop\` / \`abort_run\` — launch a goal run (e.g. \`ci-autorepair\`) that iterates until its verify commands pass
+- \`trigger_workflow\` — run a workflow (e.g. \`repo-health.weekly\`) now instead of waiting for its schedule
+- \`list_reports\` / \`read_report\` — audit reports across managed repos
+
+The curl commands further down are the fallback for when these tools are
+unavailable; they hit the same API.
 
 ## Your Workspace
 You run in ~/.codekin/orchestrator/. Your memory files are:
@@ -329,6 +342,60 @@ Your greeting should:
 - Keep it concise — 3-5 short paragraphs max
 `
 
+/**
+ * The Codekin MCP tools granted to the orchestrator. Must match the tool
+ * names registered in codekin-mcp-server.ts — this list is what pre-approves
+ * them, so a tool missing here silently blocks on manual approval.
+ */
+export const ORCHESTRATOR_MCP_TOOL_NAMES = [
+  'spawn_child',
+  'list_children',
+  'get_child',
+  'get_child_transcript',
+  'pending_prompts',
+  'respond_to_prompt',
+  'list_runs',
+  'start_loop',
+  'abort_run',
+  'trigger_workflow',
+  'list_reports',
+  'read_report',
+] as const
+
+export const ORCHESTRATOR_ALLOWED_TOOLS = [
+  'Bash(curl:*)',
+  'CronCreate',
+  'CronDelete',
+  'CronList',
+  ...ORCHESTRATOR_MCP_TOOL_NAMES.map((t) => `mcp__codekin__${t}`),
+]
+
+/**
+ * Register the first-party Codekin MCP server for the orchestrator by writing
+ * `.mcp.json` into its workspace — the CLI picks it up natively, and the
+ * spawned server inherits CODEKIN_PORT / CODEKIN_AUTH_TOKEN from the session
+ * environment. Other servers a user added to the file are preserved.
+ *
+ * No-op (with a log) when the compiled server file is absent — e.g. a dev
+ * checkout running from source that has never built server/dist.
+ */
+export function ensureOrchestratorMcpConfig(serverJsPath?: string): void {
+  const resolved = serverJsPath ?? join(dirname(fileURLToPath(import.meta.url)), 'codekin-mcp-server.js')
+  if (!existsSync(resolved)) {
+    console.warn(`[orchestrator] Codekin MCP server not found at ${resolved} — Joe falls back to curl`)
+    return
+  }
+  const configPath = join(ORCHESTRATOR_DIR, '.mcp.json')
+  let config: { mcpServers?: Record<string, unknown> } = {}
+  try {
+    if (existsSync(configPath)) config = JSON.parse(readFileSync(configPath, 'utf-8')) as typeof config
+  } catch {
+    // Malformed file — rebuild it; the codekin entry is system-managed.
+  }
+  config.mcpServers = { ...config.mcpServers, codekin: { command: process.execPath, args: [resolved] } }
+  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8')
+}
+
 /** Ensure the orchestrator workspace directory exists with starter files. */
 export function ensureOrchestratorDir(): void {
   // Create directories
@@ -352,6 +419,9 @@ export function ensureOrchestratorDir(): void {
   if (readTemplateVersion(claudeMdPath) < CLAUDE_MD_TEMPLATE_VERSION) {
     writeFileSync(claudeMdPath, CLAUDE_MD_TEMPLATE, 'utf-8')
   }
+
+  // Register the first-party Codekin MCP server (typed tools over the API).
+  ensureOrchestratorMcpConfig()
 }
 
 /** Parse the template version stamp from a seeded CLAUDE.md; 0 when absent. */
@@ -390,15 +460,13 @@ export function ensureOrchestratorRunning(sessions: SessionManager): string {
   ensureOrchestratorDir()
   const stableId = getOrCreateOrchestratorId()
 
-  const ORCHESTRATOR_ALLOWED_TOOLS = ['Bash(curl:*)', 'CronCreate', 'CronDelete', 'CronList']
-
   // Check if session already exists
   const existing = sessions.get(stableId)
   if (existing) {
-    // Ensure allowedTools is up-to-date (may be missing if the session was
-    // created before CronCreate/Delete/List were added, or lost during
-    // a persistence round-trip).
-    if (!existing.allowedTools || existing.allowedTools.length === 0) {
+    // Ensure allowedTools is up-to-date. Any entry missing from the persisted
+    // session triggers a refresh — a session created before the MCP tools (or
+    // the Cron tools) were granted must pick them up, not keep its old list.
+    if (ORCHESTRATOR_ALLOWED_TOOLS.some((t) => !existing.allowedTools?.includes(t))) {
       existing.allowedTools = ORCHESTRATOR_ALLOWED_TOOLS
       sessions.persistToDisk()
     }
