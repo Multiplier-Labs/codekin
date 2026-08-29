@@ -149,6 +149,9 @@ export async function fetchCodexModels(): Promise<{ models: CodexModelInfo[] }> 
     }
     proc.on('error', () => { done([]) })
     proc.on('close', () => { done([]) })
+    // EPIPE from a probe that died mid-handshake arrives as a stream 'error'
+    // event, not a throw — unlistened, it would crash the server.
+    proc.stdin?.on('error', () => { done([]) })
 
     const rl = createInterface({ input: proc.stdout! })
     const write = (msg: Record<string, unknown>) => {
@@ -291,6 +294,16 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
       this.emit('error', hint)
       this.cleanupTimers()
       this.emit('exit', 1, null)
+    })
+
+    // A write to a child that has already closed its end fails asynchronously
+    // with EPIPE, delivered as a stream 'error' event rather than a throw the
+    // writer can catch. Without a listener Node re-raises it as an uncaught
+    // exception and takes the whole server down — which is exactly what the
+    // best-effort turn/interrupt in stop() triggers during shutdown.
+    this.proc.stdin?.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EPIPE') return
+      this.emit('error', `Failed to write to Codex: ${err.message}`)
     })
 
     this.proc.stderr?.on('data', (chunk: Buffer) => {
