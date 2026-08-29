@@ -11,10 +11,14 @@ import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { DATA_DIR, AGENT_DISPLAY_NAME, getAgentDisplayName } from './config.js'
+import { getDefaultClaudeModel } from './anthropic-models.js'
 import type { SessionManager } from './session-manager.js'
 
 export const ORCHESTRATOR_DIR = join(DATA_DIR, 'orchestrator')
 const SESSION_ID_FILE = join(ORCHESTRATOR_DIR, '.session-id')
+
+/** Archive settings key holding the user's explicit model choice for the agent. */
+const MODEL_SETTING_KEY = 'agent_model'
 
 const PROFILE_TEMPLATE = `# User Profile
 
@@ -475,6 +479,23 @@ export function isOrchestratorSession(source: string | undefined): boolean {
 }
 
 /**
+ * The model the orchestrator runs on. An explicit choice (made from the chat
+ * composer) wins; otherwise the agent tracks the latest known Claude model, so
+ * it never gets stranded on whatever was newest when the session was created.
+ */
+export function getOrchestratorModel(sessions: SessionManager): string {
+  return sessions.archive.getSetting(MODEL_SETTING_KEY, '') || getDefaultClaudeModel()
+}
+
+/**
+ * Persist the orchestrator's model choice. The session itself is recreated on
+ * demand, so the preference has to live outside it.
+ */
+export function setOrchestratorModel(sessions: SessionManager, model: string): void {
+  sessions.archive.setSetting(MODEL_SETTING_KEY, model)
+}
+
+/**
  * Ensure the orchestrator session exists and is running.
  * Creates it if missing, starts Claude if not alive.
  * Returns the orchestrator session ID.
@@ -482,6 +503,8 @@ export function isOrchestratorSession(source: string | undefined): boolean {
 export function ensureOrchestratorRunning(sessions: SessionManager): string {
   ensureOrchestratorDir()
   const stableId = getOrCreateOrchestratorId()
+
+  const model = getOrchestratorModel(sessions)
 
   // Check if session already exists
   const existing = sessions.get(stableId)
@@ -495,6 +518,13 @@ export function ensureOrchestratorRunning(sessions: SessionManager): string {
     }
     // Session exists — start Claude if not alive
     if (!existing.claudeProcess?.isAlive()) {
+      // Adopt the stored/latest model on the way back up. Only safe while the
+      // process is down: a live process is already bound to its --model flag,
+      // and setModel() is the path that restarts it.
+      if (existing.model !== model) {
+        existing.model = model
+        sessions.persistToDisk()
+      }
       console.log('[orchestrator] Restarting orchestrator Claude process')
       sessions.startClaude(stableId)
     }
@@ -509,6 +539,7 @@ export function ensureOrchestratorRunning(sessions: SessionManager): string {
     id: stableId,
     permissionMode: 'acceptEdits',
     allowedTools: ORCHESTRATOR_ALLOWED_TOOLS,
+    model,
   })
 
   // Start Claude

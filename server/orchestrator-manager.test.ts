@@ -26,6 +26,10 @@ vi.mock('./config.js', () => ({
   getAgentDisplayName: () => 'TestAgent',
 }))
 
+vi.mock('./anthropic-models.js', () => ({
+  getDefaultClaudeModel: () => 'claude-latest-test',
+}))
+
 import {
   ORCHESTRATOR_DIR,
   ensureOrchestratorDir,
@@ -34,17 +38,23 @@ import {
   ensureOrchestratorRunning,
   ensureOrchestratorMcpConfig,
   getOrchestratorSessionId,
+  getOrchestratorModel,
+  setOrchestratorModel,
   readTemplateVersion,
   CLAUDE_MD_TEMPLATE_VERSION,
   ORCHESTRATOR_ALLOWED_TOOLS,
 } from './orchestrator-manager.js'
 
-function fakeSessionManager(existingSession?: any) {
+function fakeSessionManager(existingSession?: any, settings: Record<string, string> = {}) {
   return {
     get: vi.fn((id: string) => existingSession && existingSession.id === id ? existingSession : undefined),
     create: vi.fn((_name: string, _dir: string, opts?: any) => ({ id: opts?.id ?? 'new-id', ...opts })),
     startClaude: vi.fn(),
     persistToDisk: vi.fn(),
+    archive: {
+      getSetting: vi.fn((key: string, fallback = '') => settings[key] ?? fallback),
+      setSetting: vi.fn((key: string, value: string) => { settings[key] = value }),
+    },
   } as any
 }
 
@@ -213,9 +223,62 @@ describe('ensureOrchestratorRunning', () => {
         id: 'test-uuid-1234',
         permissionMode: 'acceptEdits',
         allowedTools: ORCHESTRATOR_ALLOWED_TOOLS,
+        model: 'claude-latest-test',
       }),
     )
     expect(sm.startClaude).toHaveBeenCalledWith('test-uuid-1234')
+  })
+
+  it('creates the session with the stored model when one was chosen', () => {
+    mockExistsSync.mockReturnValue(false)
+
+    const sm = fakeSessionManager(undefined, { agent_model: 'claude-sonnet-5' })
+    ensureOrchestratorRunning(sm)
+
+    expect(sm.create).toHaveBeenCalledWith(
+      'Agent TestAgent',
+      '/tmp/test-data/orchestrator',
+      expect.objectContaining({ model: 'claude-sonnet-5' }),
+    )
+  })
+
+  it('adopts the stored model when restarting a stopped session', () => {
+    mockExistsSync.mockImplementation((p: string) =>
+      typeof p === 'string' && p.endsWith('.session-id') ? true : false,
+    )
+    mockReadFileSync.mockReturnValue('test-uuid-1234')
+
+    const session = {
+      id: 'test-uuid-1234',
+      model: 'claude-opus-4-7',
+      allowedTools: ['Bash(curl:*)', 'CronCreate', 'CronDelete', 'CronList'],
+      claudeProcess: { isAlive: () => false },
+    }
+    const sm = fakeSessionManager(session, { agent_model: 'claude-sonnet-5' })
+    ensureOrchestratorRunning(sm)
+
+    expect(session.model).toBe('claude-sonnet-5')
+    expect(sm.persistToDisk).toHaveBeenCalled()
+    expect(sm.startClaude).toHaveBeenCalledWith('test-uuid-1234')
+  })
+
+  it('leaves a live session on the model its process was started with', () => {
+    mockExistsSync.mockImplementation((p: string) =>
+      typeof p === 'string' && p.endsWith('.session-id') ? true : false,
+    )
+    mockReadFileSync.mockReturnValue('test-uuid-1234')
+
+    const session = {
+      id: 'test-uuid-1234',
+      model: 'claude-opus-4-7',
+      allowedTools: ['Bash(curl:*)', 'CronCreate', 'CronDelete', 'CronList'],
+      claudeProcess: { isAlive: () => true },
+    }
+    const sm = fakeSessionManager(session, { agent_model: 'claude-sonnet-5' })
+    ensureOrchestratorRunning(sm)
+
+    expect(session.model).toBe('claude-opus-4-7')
+    expect(sm.startClaude).not.toHaveBeenCalled()
   })
 
   it('restarts Claude when session exists but process not alive', () => {
@@ -317,6 +380,25 @@ describe('ensureOrchestratorMcpConfig', () => {
     ensureOrchestratorMcpConfig('/opt/dist/codekin-mcp-server.js')
 
     expect(mockWriteFileSync).not.toHaveBeenCalled()
+  })
+})
+
+describe('orchestrator model preference', () => {
+  it('falls back to the latest known Claude model when unset', () => {
+    const sm = fakeSessionManager()
+    expect(getOrchestratorModel(sm)).toBe('claude-latest-test')
+  })
+
+  it('returns the stored choice when set', () => {
+    const sm = fakeSessionManager(undefined, { agent_model: 'claude-opus-5' })
+    expect(getOrchestratorModel(sm)).toBe('claude-opus-5')
+  })
+
+  it('round-trips a saved choice', () => {
+    const sm = fakeSessionManager()
+    setOrchestratorModel(sm, 'claude-fable-5')
+    expect(sm.archive.setSetting).toHaveBeenCalledWith('agent_model', 'claude-fable-5')
+    expect(getOrchestratorModel(sm)).toBe('claude-fable-5')
   })
 })
 

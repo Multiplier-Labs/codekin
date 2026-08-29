@@ -110,6 +110,14 @@ Agent Joe is a `ClaudeProcess` session with:
 - `permissionMode: 'acceptEdits'` (it needs to read reports, write memory, spawn sessions)
 - Working directory: `~/.codekin/orchestrator/` (its own workspace)
 
+**Model**: picked from the model control in Joe's composer, exactly as in a
+regular session. Because Joe's session is recreated on demand, the choice is
+stored outside it — archive setting `agent_model`, written by the `set_model`
+WebSocket handler and read by `ensureOrchestratorRunning`. With no explicit
+choice, Joe tracks the latest known Claude model (`getDefaultClaudeModel()`),
+so it is never stranded on whatever was newest the day its session was created.
+A model change restarts Joe's CLI process, like it does for a session.
+
 Methods exposed by `SessionManager`:
 ```typescript
 // In session-manager.ts

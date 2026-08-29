@@ -668,7 +668,10 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   // Session state (left) and actions (right). The orchestrator variant is a
   // filter over these plus an accent flag — not a second layout.
   const showPermission = !isOrchestrator && !!currentPermissionMode && !!onPermissionModeChange
-  const showModel = !isOrchestrator && !!currentModel && !!onModelChange
+  // The orchestrator keeps its model picker — it is one agent, so "what is
+  // answering me" is as much a question there as in a session. Its harness is
+  // fixed to Claude, so only the model half of the control applies.
+  const showModel = !!currentModel && !!onModelChange
   const showProvider = !isOrchestrator && !!sessionProvider && !!onProviderChange
   // Harness and model read as one fact ("what is answering me"), so they share
   // one control; it appears as soon as either half is known.

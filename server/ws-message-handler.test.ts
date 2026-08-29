@@ -4,6 +4,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // Mock config so REPOS_ROOT covers test paths
 vi.mock('./config.js', () => ({ REPOS_ROOT: '/projects' }))
 
+// The orchestrator manager reads DATA_DIR from the (mocked) config at import
+// time, so stub it out — only the two model helpers are used here.
+const setOrchestratorModelMock = vi.hoisted(() => vi.fn())
+vi.mock('./orchestrator-manager.js', () => ({
+  isOrchestratorSession: (source: string | undefined) => source === 'orchestrator',
+  setOrchestratorModel: setOrchestratorModelMock,
+}))
+
 // Mock fs.realpathSync — defaults to identity (no real filesystem); individual
 // tests can override the implementation to simulate symlink canonicalization.
 const realpathSyncMock = vi.fn((p: string) => p)
@@ -446,6 +454,22 @@ describe('handleWsMessage', () => {
       handleWsMessage({ type: 'set_model', model: 'claude-sonnet-4-6' } as WsClientMessage, ctx)
 
       expect(ctx.sessions.setModel).not.toHaveBeenCalled()
+    })
+
+    it('does not persist a preference for an ordinary session', () => {
+      handleWsMessage({ type: 'set_model', model: 'claude-sonnet-4-6' } as WsClientMessage, ctx)
+
+      expect(setOrchestratorModelMock).not.toHaveBeenCalled()
+    })
+
+    it('persists the choice when the session is the orchestrator', () => {
+      const orchestrator = mockSession({ source: 'orchestrator' })
+      ;(ctx.sessions.get as ReturnType<typeof vi.fn>).mockReturnValue(orchestrator)
+
+      handleWsMessage({ type: 'set_model', model: 'claude-opus-5' } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setModel).toHaveBeenCalledWith('sess-1', 'claude-opus-5')
+      expect(setOrchestratorModelMock).toHaveBeenCalledWith(ctx.sessions, 'claude-opus-5')
     })
   })
 
