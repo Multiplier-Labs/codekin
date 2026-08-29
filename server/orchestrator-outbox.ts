@@ -71,6 +71,10 @@ export class OrchestratorOutbox {
     if (!orchestratorId) return 0
     const session = sessions.get(orchestratorId)
     if (!session?.claudeProcess?.isAlive()) return 0
+    // Never inject mid-turn: input sent while the orchestrator is processing
+    // lands inside its active turn and derails it. Hold the digest for the
+    // next flush tick instead.
+    if (session.isProcessing) return 0
 
     const count = this.items.length
     const digest = this.buildDigest()

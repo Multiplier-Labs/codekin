@@ -20,10 +20,12 @@ import { sendOrchestratorNotification, type NotificationOutbox } from './orchest
 function makeSessions(opts: {
   exists: boolean
   alive: boolean
+  isProcessing?: boolean
 }) {
   const sentInputs: Array<{ id: string; data: string }> = []
   const session = opts.exists
     ? {
+        isProcessing: opts.isProcessing ?? false,
         claudeProcess: opts.alive
           ? { isAlive: vi.fn(() => true) }
           : { isAlive: vi.fn(() => false) },
@@ -62,6 +64,21 @@ describe('sendOrchestratorNotification', () => {
         'Session: testagent:fix/foo (abc)\n' +
         'Status: completed\nBranch: fix/foo',
     )
+  })
+
+  it('queues to the outbox instead of injecting mid-turn (A5)', () => {
+    const sessions = makeSessions({ exists: true, alive: true, isProcessing: true })
+    const outbox = makeOutbox()
+    const ok = sendOrchestratorNotification(sessions, {
+      parentSessionId: 'parent-id',
+      label: 'ACTION',
+      title: 'busy parent',
+      body: 'must not be interrupted',
+    }, outbox)
+
+    expect(ok).toBe(true)
+    expect(sessions.sendInput).not.toHaveBeenCalled()
+    expect(outbox.enqueue).toHaveBeenCalledWith({ label: 'ACTION', title: 'busy parent', body: 'must not be interrupted' })
   })
 
   it('queues to the outbox and returns true when the parent session is missing', () => {

@@ -19,12 +19,13 @@ vi.mock('./orchestrator-manager.js', () => ({
 
 import { OrchestratorOutbox } from './orchestrator-outbox.js'
 
-function makeSessions(opts: { alive?: boolean; rateLimited?: boolean } = {}) {
-  const { alive = true, rateLimited = false } = opts
+function makeSessions(opts: { alive?: boolean; rateLimited?: boolean; isProcessing?: boolean } = {}) {
+  const { alive = true, rateLimited = false, isProcessing = false } = opts
   const sentInputs: Array<{ id: string; data: string }> = []
   return {
     isRateLimited: vi.fn(() => rateLimited),
     get: vi.fn(() => ({
+      isProcessing,
       claudeProcess: { isAlive: vi.fn(() => alive) },
     })),
     sendInput: vi.fn((id: string, data: string) => { sentInputs.push({ id, data }) }),
@@ -108,6 +109,18 @@ describe('OrchestratorOutbox', () => {
     const sessions = makeSessions({ alive: false })
     expect(outbox.flush(sessions)).toBe(0)
     expect(outbox.size()).toBe(1)
+  })
+
+  it('flush holds the digest while the orchestrator is mid-turn (A5)', () => {
+    const outbox = new OrchestratorOutbox(filePath)
+    outbox.enqueue({ label: 'ACTION', title: 't', body: 'b' })
+    const sessions = makeSessions({ isProcessing: true })
+
+    expect(outbox.flush(sessions)).toBe(0)
+    expect(sessions.sendInput).not.toHaveBeenCalled()
+
+    // Next tick after the turn ends: delivered.
+    expect(outbox.flush(makeSessions())).toBe(1)
   })
 
   it('flush delivers a single-item digest with the original label', () => {
