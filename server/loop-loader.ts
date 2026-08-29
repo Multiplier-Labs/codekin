@@ -66,8 +66,17 @@ export interface LoopTemplateInfo {
   source: 'builtin' | 'repo'
 }
 
-const KINDS: readonly GoalRunKind[] = ['ci-autorepair', 'coverage-increase', 'dependency-upgrade']
 const PROVIDERS: readonly LoopProvider[] = ['claude', 'opencode', 'codex']
+
+/**
+ * Kinds are an open set (any template file can introduce one) but must be safe
+ * slugs: they appear in session names, branch names, and API paths.
+ */
+const KIND_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/
+
+export function isValidLoopKind(kind: unknown): boolean {
+  return typeof kind === 'string' && KIND_PATTERN.test(kind)
+}
 const POLICIES: readonly CompletionPolicy[] = ['pr', 'merge', 'commit-only']
 
 // ---------------------------------------------------------------------------
@@ -119,8 +128,8 @@ function parsePositiveNumber(value: unknown, field: string, sourcePath: string):
 /** Build a validated GoalRunSpec + kind/name from parsed frontmatter. */
 function specFromFrontmatter(fm: Record<string, unknown>, sourcePath: string): { kind: GoalRunKind; name: string; spec: GoalRunSpec } {
   const kind = fm.kind
-  if (typeof kind !== 'string' || !KINDS.includes(kind as GoalRunKind)) {
-    fail(sourcePath, `kind must be one of ${KINDS.join(', ')}`)
+  if (typeof kind !== 'string' || !isValidLoopKind(kind)) {
+    fail(sourcePath, 'kind must be a lowercase slug (letters, digits, ".", "_", "-"; max 64 chars)')
   }
   const name = fm.name
   if (typeof name !== 'string' || !name.trim()) fail(sourcePath, 'name is required')
@@ -148,7 +157,7 @@ function specFromFrontmatter(fm: Record<string, unknown>, sourcePath: string): {
     maxCostUsd: parsePositiveNumber(fm.maxCostUsd, 'maxCostUsd', sourcePath),
     completionPolicy: policy as CompletionPolicy,
   }
-  return { kind: kind as GoalRunKind, name, spec }
+  return { kind, name, spec }
 }
 
 /** Parse a loop MD file into a LoopTemplate. Throws on malformed/unsafe input. */

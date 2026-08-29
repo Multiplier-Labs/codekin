@@ -11,6 +11,7 @@ import { execFile } from 'child_process'
 import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
 import { getAgentDisplayName } from './config.js'
+import { AGENT_ALLOWED_TOOLS } from './agent-allowlist.js'
 import {
   sendOrchestratorNotification,
   type OrchestratorNotifyArgs,
@@ -124,38 +125,10 @@ const MAX_RETAINED_CHILDREN = 100    // hard cap on total entries
 const MAX_NOTIFIED_PROMPT_IDS = 500  // cap on the blocked-prompt dedup set
 
 /**
- * Default allowed tools for agent child sessions. Covers standard dev
- * operations without granting arbitrary shell access. Destructive commands
- * (rm, sudo, docker, git reset/clean, git push --force) are intentionally
- * excluded — they fall through to manual approval.
+ * Default allowed tools for agent child sessions — the shared headless-agent
+ * allowlist, re-exported under the historical name for existing importers.
  */
-export const AGENT_CHILD_ALLOWED_TOOLS = [
-  // File operations (scoped to working dir by acceptEdits mode)
-  'Read', 'Glob', 'Grep', 'Write', 'Edit',
-  // Git operations (branch, commit, push, PR workflow)
-  'Bash(git:*)',
-  // GitHub CLI (create PRs, check runs, etc.)
-  'Bash(gh:*)',
-  // API calls (status reporting back to orchestrator)
-  'Bash(curl:*)',
-  // Package managers
-  'Bash(npm:*)', 'Bash(npx:*)', 'Bash(yarn:*)', 'Bash(pnpm:*)', 'Bash(bun:*)',
-  // Build / lint / test tools
-  'Bash(node:*)', 'Bash(tsc:*)', 'Bash(eslint:*)', 'Bash(prettier:*)',
-  'Bash(cargo:*)', 'Bash(go:*)', 'Bash(make:*)', 'Bash(pip:*)',
-  // Python toolchain (linting/tests in Python repos)
-  'Bash(python3:*)', 'Bash(pytest:*)',
-  // Text/data processing (read-only or scoped to working dir)
-  'Bash(sed:*)', 'Bash(rg:*)', 'Bash(jq:*)',
-  // Non-destructive file management (no rm — deletion still needs approval)
-  'Bash(mkdir:*)', 'Bash(cp:*)', 'Bash(mv:*)', 'Bash(touch:*)',
-  // Safe filesystem inspection (read-only)
-  'Bash(ls:*)', 'Bash(cat:*)', 'Bash(wc:*)',
-  'Bash(head:*)', 'Bash(tail:*)', 'Bash(sort:*)', 'Bash(diff:*)',
-  'Bash(basename:*)', 'Bash(dirname:*)',
-  'Bash(realpath:*)', 'Bash(tree:*)', 'Bash(pwd:*)',
-  'Bash(which:*)', 'Bash(file:*)',
-]
+export const AGENT_CHILD_ALLOWED_TOOLS = AGENT_ALLOWED_TOOLS
 
 // ---------------------------------------------------------------------------
 // Manager

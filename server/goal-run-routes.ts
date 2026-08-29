@@ -16,20 +16,20 @@
 import { Router } from 'express'
 import type { Request, Response } from 'express'
 import { resolveRepoPathInRoot } from './config.js'
-import type { GoalRunKind, GoalRunStatus } from './goal-run-store.js'
+import type { GoalRunStatus } from './goal-run-store.js'
 import { GoalRunStore } from './goal-run-store.js'
 import { GoalRunController } from './goal-run-controller.js'
-import { listLoopTemplates, loadLoopTemplate, buildGoalRunInput } from './loop-loader.js'
+import { listLoopTemplates, loadLoopTemplate, buildGoalRunInput, isValidLoopKind } from './loop-loader.js'
 
 type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
 
-const KINDS: readonly GoalRunKind[] = ['ci-autorepair', 'coverage-increase', 'dependency-upgrade']
 const STATUSES: readonly GoalRunStatus[] = [
   'queued',
   'running',
   'verifying',
   'checking',
+  'blocked',
   'awaiting_human',
   'succeeded',
   'failed',
@@ -80,14 +80,14 @@ export function createGoalRunRouter(
     const kind = typeof req.query.kind === 'string' ? req.query.kind : undefined
     const status = typeof req.query.status === 'string' ? req.query.status : undefined
     const limit = typeof req.query.limit === 'string' ? req.query.limit : undefined
-    if (kind && !KINDS.includes(kind as GoalRunKind)) {
+    if (kind && !isValidLoopKind(kind)) {
       return res.status(400).json({ error: `Invalid kind: ${kind}` })
     }
     if (status && !STATUSES.includes(status as GoalRunStatus)) {
       return res.status(400).json({ error: `Invalid status: ${status}` })
     }
     const runs = store.listRuns({
-      kind: kind as GoalRunKind | undefined,
+      kind,
       status: status as GoalRunStatus | undefined,
       limit: limit ? Math.min(Math.max(parseInt(limit, 10) || 50, 1), 500) : 50,
     })
@@ -102,8 +102,8 @@ export function createGoalRunRouter(
 
   router.post('/runs', async (req: Request<Record<string, string>, unknown, StartRunBody>, res) => {
     const { kind, repo, branch, goal } = req.body
-    if (!kind || !KINDS.includes(kind as GoalRunKind)) {
-      return res.status(400).json({ error: `Missing or invalid kind (expected one of ${KINDS.join(', ')})` })
+    if (typeof kind !== 'string' || !isValidLoopKind(kind)) {
+      return res.status(400).json({ error: 'Missing or invalid kind (expected a lowercase slug matching a loop template)' })
     }
     if (!repo || !branch) {
       return res.status(400).json({ error: 'Missing required fields: repo, branch' })
@@ -113,7 +113,7 @@ export function createGoalRunRouter(
       return res.status(400).json({ error: 'Invalid repo: must be an existing directory under the configured repos root' })
     }
 
-    const template = loadLoopTemplate(kind as GoalRunKind, resolvedRepo)
+    const template = loadLoopTemplate(kind, resolvedRepo)
     if (!template) return res.status(404).json({ error: `No loop template found for kind: ${kind}` })
 
     try {
