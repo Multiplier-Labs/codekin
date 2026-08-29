@@ -324,10 +324,11 @@ export class OrchestratorMonitor {
     if (!orchestratorId) return
 
     const session = this.sessions.get(orchestratorId)
-    if (!session?.claudeProcess?.isAlive()) {
-      // Orchestrator not running — hand the notification to the persistent
-      // outbox so it is replayed (as a digest) when the session comes back,
-      // instead of rotting in the in-memory buffer forever.
+    if (!session?.claudeProcess?.isAlive() || session.isProcessing) {
+      // Orchestrator not running, or mid-turn (injecting now would derail
+      // its active turn — audit item A5): hand the notification to the
+      // persistent outbox, whose flusher retries under the same idle gate,
+      // instead of letting it rot in the in-memory buffer.
       getOrchestratorOutbox().enqueue({
         label: notification.severity.toUpperCase(),
         title: notification.title,

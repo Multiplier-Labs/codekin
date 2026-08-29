@@ -40,6 +40,11 @@ export interface NotificationOutbox {
  * Returns true when delivered immediately OR queued in the outbox for
  * replay (the outbox owns delivery from that point on). Returns false only
  * when queueing itself failed.
+ *
+ * Delivery is gated on the parent being idle: input sent while it is
+ * mid-turn lands inside the active turn and derails it (audit item A5).
+ * A busy parent gets the notification via the outbox's next flush tick,
+ * which applies the same idle gate.
  */
 export function sendOrchestratorNotification(
   sessions: SessionManager,
@@ -47,13 +52,13 @@ export function sendOrchestratorNotification(
   outbox: NotificationOutbox = getOrchestratorOutbox(),
 ): boolean {
   const session = sessions.get(args.parentSessionId)
-  if (session?.claudeProcess?.isAlive()) {
+  if (session?.claudeProcess?.isAlive() && !session.isProcessing) {
     const message = `[Agent ${getAgentDisplayName()} Notification — ${args.label}]\n${args.title}\n${args.body}`
     sessions.sendInput(args.parentSessionId, message)
     return true
   }
 
-  // Parent unreachable — queue for replay when the orchestrator comes back.
+  // Parent unreachable or mid-turn — queue for replay by the outbox flusher.
   try {
     outbox.enqueue({ label: args.label, title: args.title, body: args.body })
     return true
