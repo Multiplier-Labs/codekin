@@ -12,7 +12,7 @@ import {
   IconBook, IconSettings as IconSettingsGear,
   IconLogout, IconSun, IconMoon,
   IconChevronRight, IconChevronLeft, IconSparkles, IconX, IconRobotFace,
-  IconRefresh, IconShare,
+  IconShare,
 } from '@tabler/icons-react'
 import type { Session, Module, Repo, MobileProps, ConnectionState } from '../types'
 import type { RepoGroup } from '../hooks/useRepos'
@@ -137,10 +137,8 @@ interface Props {
   onUpdateTheme: (theme: string) => void
   /** Send a module's content to the active session as context. */
   onSendModule: (mod: Module) => void
-  /** Navigate to the workflows view. */
-  onNavigateToWorkflows: () => void
-  /** Navigate to the loop runs view. */
-  onNavigateToLoops: () => void
+  /** Navigate to the Automations view (workflows + loop runs). */
+  onNavigateToAutomations: () => void
   /** Navigate to the orchestrator view. */
   onNavigateToOrchestrator: () => void
   /** Open the repo drawer (docs / archive / approvals) for a repo. */
@@ -189,8 +187,7 @@ export function LeftSidebar({
   onUpdateTheme,
   onSendModule,
   agentName = 'Joe',
-  onNavigateToWorkflows,
-  onNavigateToLoops,
+  onNavigateToAutomations,
   onNavigateToOrchestrator,
   onOpenDrawer,
   onMoveToWorktree,
@@ -390,26 +387,15 @@ export function LeftSidebar({
         {/* Menu items (Slack-style, above repo folders) */}
         <div className="px-2 py-1">
           <button
-            onClick={() => { onNavigateToWorkflows(); if (isMobile) onMobileClose?.() }}
+            onClick={() => { onNavigateToAutomations(); if (isMobile) onMobileClose?.() }}
             className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-control text-body transition-colors ${
-              view === 'workflows'
+              view === 'automations'
                 ? 'bg-accent-9/30 text-accent-2'
                 : 'text-ink hover:text-ink hover:bg-surface-raised'
             }`}
           >
             <IconSparkles size={16} stroke={2} className="flex-shrink-0" />
-            <span className="flex-1 text-left">AI Workflows</span>
-          </button>
-          <button
-            onClick={() => { onNavigateToLoops(); if (isMobile) onMobileClose?.() }}
-            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-control text-body transition-colors ${
-              view === 'loops'
-                ? 'bg-accent-9/30 text-accent-2'
-                : 'text-ink hover:text-ink hover:bg-surface-raised'
-            }`}
-          >
-            <IconRefresh size={16} stroke={2} className="flex-shrink-0" />
-            <span className="flex-1 text-left">Loop Runs</span>
+            <span className="flex-1 text-left">Automations</span>
           </button>
           <button
             onClick={() => { onNavigateToOrchestrator(); if (isMobile) onMobileClose?.() }}

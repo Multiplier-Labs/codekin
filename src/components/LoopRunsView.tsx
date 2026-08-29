@@ -57,15 +57,17 @@ function roleBadge(role: GoalRunTurn['role']): string {
 interface Props {
   /** Auth token for REST API calls. */
   token: string
+  /** Run to open the detail pane on at mount (e.g. from the Automations attention banner). */
+  initialSelectedRunId?: string
   /** Navigate the main app to a session (e.g. the run's maker session). */
   onNavigateToSession?: (sessionId: string) => void
 }
 
 /** Loop Runs management page — list of goal runs, per-run evidence ledger, and a start form. */
-export function LoopRunsView({ token, onNavigateToSession }: Props) {
+export function LoopRunsView({ token, initialSelectedRunId, onNavigateToSession }: Props) {
   const [runs, setRuns] = useState<GoalRun[]>([])
   const [templates, setTemplates] = useState<LoopTemplateInfo[]>([])
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(initialSelectedRunId ?? null)
   const [detail, setDetail] = useState<GoalRunWithTurns | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)

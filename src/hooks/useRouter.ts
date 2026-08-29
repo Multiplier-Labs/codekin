@@ -11,24 +11,32 @@ import { useState, useCallback, useEffect } from 'react'
 interface RouteState {
   path: string
   sessionId: string | null
-  view: 'chat' | 'workflows' | 'orchestrator' | 'loops'
+  view: 'chat' | 'automations' | 'orchestrator'
+  /** Which Automations tab a legacy deep link asked for (/workflows, /loops). */
+  automationsTab: 'workflows' | 'loops' | null
 }
 
 export function parsePath(pathname: string): RouteState {
   if (pathname === '/joe' || pathname === '/joe/' || pathname === '/orchestrator' || pathname === '/orchestrator/') {
-    return { path: pathname, sessionId: null, view: 'orchestrator' }
+    return { path: pathname, sessionId: null, view: 'orchestrator', automationsTab: null }
   }
+  if (pathname === '/automations' || pathname === '/automations/') {
+    return { path: pathname, sessionId: null, view: 'automations', automationsTab: null }
+  }
+  // Legacy routes from before the unified Automations view — same view,
+  // with the matching tab preselected. App canonicalizes the URL.
   if (pathname === '/workflows' || pathname === '/workflows/') {
-    return { path: pathname, sessionId: null, view: 'workflows' }
+    return { path: pathname, sessionId: null, view: 'automations', automationsTab: 'workflows' }
   }
   if (pathname === '/loops' || pathname === '/loops/') {
-    return { path: pathname, sessionId: null, view: 'loops' }
+    return { path: pathname, sessionId: null, view: 'automations', automationsTab: 'loops' }
   }
   const match = pathname.match(/^\/s\/([a-f0-9-]+)\/?$/)
   return {
     path: pathname,
     sessionId: match ? match[1] : null,
     view: 'chat',
+    automationsTab: null,
   }
 }
 
