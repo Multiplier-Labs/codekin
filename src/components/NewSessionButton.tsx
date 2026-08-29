@@ -16,6 +16,8 @@ import type { Repo, CodingProvider } from '../types'
 import { PROVIDERS } from '../types'
 import type { ApiRepo, RepoGroup } from '../hooks/useRepos'
 import { cloneRepo } from '../lib/ccApi'
+import { providerAvailability } from '../lib/agentHealth'
+import { useAgentHealth } from '../hooks/useAgentHealth'
 import { RepoList } from './RepoList'
 
 interface Props {
@@ -25,6 +27,7 @@ interface Props {
 }
 
 export function NewSessionButton({ groups, token, onOpen }: Props) {
+  const health = useAgentHealth()
   const [open, setOpen] = useState(false)
   const [cloning, setCloning] = useState<string | null>(null)
   const [cloneError, setCloneError] = useState<string | null>(null)
@@ -122,16 +125,23 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
                 </div>
               </div>
               <div className="px-2 pb-2">
-                {PROVIDERS.map(p => (
-                  <button
-                    key={p.id}
-                    onClick={() => { setOpen(false); onOpen(pendingRepo, p.id) }}
-                    className="density-row flex w-full items-center rounded-control px-2 text-left text-body text-ink transition-colors hover:bg-edge"
-                    title={p.description}
-                  >
-                    {p.label}
-                  </button>
-                ))}
+                {PROVIDERS.map(p => {
+                  const { available, hint } = providerAvailability(health, p.id)
+                  return (
+                    <button
+                      key={p.id}
+                      disabled={!available}
+                      onClick={() => { setOpen(false); onOpen(pendingRepo, p.id) }}
+                      className={`density-row flex w-full items-center gap-2 rounded-control px-2 text-left text-body transition-colors ${
+                        available ? 'text-ink hover:bg-edge' : 'cursor-not-allowed text-ink-faint'
+                      }`}
+                      title={hint ?? p.description}
+                    >
+                      <span>{p.label}</span>
+                      {hint && <span className="truncate text-meta text-ink-faint">{available ? hint : 'not installed'}</span>}
+                    </button>
+                  )
+                })}
               </div>
             </>
           ) : (

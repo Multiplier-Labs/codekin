@@ -167,6 +167,17 @@ try {
   // Codex CLI not installed — provider stays hidden in the UI
 }
 
+// Detect the OpenCode CLI. It had no startup probe at all — the only harness
+// whose absence the UI could not know about.
+let openCodeAvailable = false
+try {
+  execFileSync(process.env.OPENCODE_BINARY || 'opencode', ['--version'], { timeout: 5000 })
+  openCodeAvailable = true
+  console.log('OpenCode CLI found')
+} catch {
+  // OpenCode CLI not installed
+}
+
 // ---------------------------------------------------------------------------
 // Core services
 // ---------------------------------------------------------------------------
@@ -560,7 +571,7 @@ wss.on('connection', (ws: WebSocket, req) => {
       }
       authenticated = true
       clearTimeout(authTimeout)
-      send({ type: 'connected', connectionId, claudeAvailable, claudeVersion, apiKeySet, codexAvailable, codexAuthenticated })
+      send({ type: 'connected', connectionId, claudeAvailable, claudeVersion, apiKeySet, codexAvailable, codexAuthenticated, openCodeAvailable })
 
       // Notify client if a newer version is available
       void getUpdateNotification().then(text => {

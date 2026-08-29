@@ -19,6 +19,8 @@ import {
 import type { Session, CodingProvider } from '../types'
 import { PROVIDERS } from '../types'
 import { RowMenu, type RowMenuItem } from './RowMenu'
+import { providerAvailability } from '../lib/agentHealth'
+import { useAgentHealth } from '../hooks/useAgentHealth'
 import type { RepoDrawerTab } from './RepoDrawer'
 
 // --------------------------------------------------------------------------
@@ -163,6 +165,7 @@ export function RepoSection({
   onOpenDrawer,
   onMoveToWorktree,
 }: RepoSectionProps) {
+  const health = useAgentHealth()
   const [expanded, setExpanded] = useState(true)
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -335,9 +338,9 @@ export function RepoSection({
                   <span className="truncate">New session</span>
                 </>
               }
-              items={PROVIDERS.map(p => ({
+              items={PROVIDERS.filter(p => providerAvailability(health, p.id).available).map(p => ({
                 label: p.label,
-                title: p.description,
+                title: providerAvailability(health, p.id).hint ?? p.description,
                 onSelect: () => { onNewSession(p.id) },
               }))}
             />

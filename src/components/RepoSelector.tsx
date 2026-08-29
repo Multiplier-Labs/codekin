@@ -71,7 +71,7 @@ export function RepoSelector({ groups, token, ghMissing, onOpen, onRefreshRepos 
           <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-edge-strong/50">
             <IconGitBranch size={24} stroke={1.5} className="text-ink" />
           </div>
-          <h2 className="text-head font-medium text-ink">Choose a repository to start a Claude Code session</h2>
+          <h2 className="text-head font-medium text-ink">Choose a repository to start a session</h2>
         </div>
 
         {ghMissing ? (

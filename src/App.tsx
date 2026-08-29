@@ -34,6 +34,7 @@ import { useProviderValidation } from './hooks/useProviderValidation'
 import { buildSlashCommandList, buildOpenCodeSlashCommandList } from './lib/slashCommands'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { emitWorkflowEvent } from './lib/workflowEvents'
+import { setAgentHealth } from './lib/agentHealth'
 import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo } from './lib/ccApi'
 import { Settings } from './components/Settings'
 import { LeftSidebar } from './components/LeftSidebar'
@@ -231,6 +232,17 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
         // Server-pushed workflow progress — forwarded so useWorkflows can
         // refresh on events instead of fast-polling.
         emitWorkflowEvent(msg)
+      } else if (msg.type === 'connected') {
+        // Startup probes: which agent CLIs exist and are signed in on the
+        // host. Provider pickers derive availability from this.
+        setAgentHealth({
+          claudeAvailable: msg.claudeAvailable,
+          claudeAuthenticated: msg.apiKeySet,
+          claudeVersion: msg.claudeVersion,
+          codexAvailable: msg.codexAvailable ?? false,
+          codexAuthenticated: msg.codexAuthenticated ?? false,
+          openCodeAvailable: msg.openCodeAvailable ?? false,
+        })
       }
     },
   })
