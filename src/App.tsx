@@ -260,8 +260,13 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   const [claudeDisabled, setClaudeDisabled] = useState(false)
   const [openCodeDisabled, setOpenCodeDisabled] = useState(false)
   const [codexDisabled, setCodexDisabled] = useState(false)
-  // Derive the active session's provider (falls back to the default for new sessions)
-  const activeSessionProvider = sessions.find(s => s.id === activeSessionId)?.provider ?? currentProvider
+  // Derive the active session's provider (falls back to the default for new
+  // sessions). The orchestrator session is not in `sessions`, and it always
+  // runs on Claude — without this the fallback would hand it another
+  // provider's model list.
+  const activeSessionProvider = view === 'orchestrator'
+    ? 'claude'
+    : sessions.find(s => s.id === activeSessionId)?.provider ?? currentProvider
 
   const activeOpenCodeWd = activeSessionProvider === 'opencode'
     ? sessions.find(s => s.id === activeSessionId)?.workingDir
@@ -763,6 +768,9 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
             slashCommands={allCommands}
             currentModel={currentModel}
             onModelChange={handleModelChange}
+            /* Claude models, not availableModels: the orchestrator always runs
+               on Claude, while availableModels follows the default provider. */
+            availableModels={claudeModels}
             currentPermissionMode={currentPermissionMode}
             onPermissionModeChange={handlePermissionModeChange}
             disabled={!settings.token}

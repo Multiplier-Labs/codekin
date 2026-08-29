@@ -39,6 +39,8 @@ export interface OrchestratorContentProps {
   slashCommands: SlashCommand[]
   currentModel: string | null
   onModelChange: (model: string) => void
+  /** Claude models offered in the composer — the orchestrator is Claude-only. */
+  availableModels?: import('../types').ModelOption[]
   currentPermissionMode: PermissionMode
   onPermissionModeChange: (mode: PermissionMode) => void
   disabled: boolean
@@ -68,6 +70,7 @@ export function OrchestratorContent({
   slashCommands,
   currentModel,
   onModelChange,
+  availableModels,
   currentPermissionMode,
   onPermissionModeChange,
   disabled,
@@ -127,6 +130,7 @@ export function OrchestratorContent({
             onValueChange={() => {}}
             currentModel={currentModel}
             onModelChange={onModelChange}
+            availableModels={availableModels}
             isMobile={isMobile}
             currentPermissionMode={currentPermissionMode}
             onPermissionModeChange={onPermissionModeChange}
