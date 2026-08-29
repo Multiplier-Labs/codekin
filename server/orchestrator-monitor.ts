@@ -10,6 +10,7 @@ import { readdirSync, statSync, existsSync } from 'fs'
 import { join } from 'path'
 import type { SessionManager } from './session-manager.js'
 import type { WorkflowEngine, WorkflowEvent } from './workflow-engine.js'
+import type { GoalRunEvent } from './goal-run-store.js'
 import { scanRepoReports } from './orchestrator-reports.js'
 import { OrchestratorMemory } from './orchestrator-memory.js'
 import { runAgingCycle, getPendingOutcomeAssessments } from './orchestrator-learning.js'
@@ -36,6 +37,8 @@ export interface OrchestratorNotification {
 // ---------------------------------------------------------------------------
 
 const POLL_INTERVAL_MS = 15 * 60 * 1000  // 15 minutes
+/** Cap on the goal-run notification dedup set (oldest entries dropped). */
+const MAX_NOTED_GOAL_RUN_STATES = 500
 const PASSIVE_THRESHOLD_DAYS = 30
 
 export class OrchestratorMonitor {
@@ -44,6 +47,8 @@ export class OrchestratorMonitor {
   private agingTimer: ReturnType<typeof setInterval> | null = null
   private notifications: OrchestratorNotification[] = []
   private seenReports = new Set<string>()
+  /** (runId:status) pairs already notified — see handleGoalRunEvent. */
+  private notedGoalRunStates = new Set<string>()
   private memory: OrchestratorMemory | null = null
 
   constructor(sessions: SessionManager) {
@@ -240,6 +245,51 @@ export class OrchestratorMonitor {
     // Notify on successful runs that produce reports
     if (event.eventType === 'run_succeeded') {
       // Report was likely written — next poll will pick it up as a new report
+    }
+  }
+
+  /**
+   * Goal-run (loop) events, bridged from the GoalRunStore listener in
+   * ws-server. The supervisor cares about exactly the states where a run
+   * stops making progress on its own: `blocked` (a tool call waiting on
+   * approval — actionable right now via pending_prompts/respond_to_prompt),
+   * `awaiting_human` (escalated), and `failed`.
+   *
+   * Deduped per (runId, status): `blocked` re-emits on every prompt
+   * re-broadcast, and one nudge per state is enough — the first notification
+   * already points at pending_prompts, which lists whatever is waiting.
+   */
+  handleGoalRunEvent(event: GoalRunEvent): void {
+    if (event.eventType !== 'run_status' || !event.status) return
+    if (event.status !== 'blocked' && event.status !== 'awaiting_human' && event.status !== 'failed') return
+    const key = `${event.runId}:${event.status}`
+    if (this.notedGoalRunStates.has(key)) return
+    this.notedGoalRunStates.add(key)
+    if (this.notedGoalRunStates.size > MAX_NOTED_GOAL_RUN_STATES) {
+      for (const k of this.notedGoalRunStates) {
+        this.notedGoalRunStates.delete(k)
+        if (this.notedGoalRunStates.size <= MAX_NOTED_GOAL_RUN_STATES) break
+      }
+    }
+
+    if (event.status === 'blocked') {
+      this.addNotification({
+        severity: 'action',
+        title: `Loop run blocked: ${event.kind}`,
+        body: `Goal run ${event.runId} is waiting on a tool approval or question. Use pending_prompts to see it and respond_to_prompt to unblock it.`,
+      })
+    } else if (event.status === 'awaiting_human') {
+      this.addNotification({
+        severity: 'action',
+        title: `Loop run needs a decision: ${event.kind}`,
+        body: `Goal run ${event.runId} escalated to a human checkpoint. Use list_runs to inspect it and tell the user what happened.`,
+      })
+    } else {
+      this.addNotification({
+        severity: 'alert',
+        title: `Loop run failed: ${event.kind}`,
+        body: `Goal run ${event.runId} failed (budget exhausted, error, or restart). Use list_runs to inspect its evidence ledger.`,
+      })
     }
   }
 

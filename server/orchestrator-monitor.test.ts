@@ -5,7 +5,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { hasEnabledWorkflowForRepo, discoverRepoPathsUnder } from './orchestrator-monitor.js'
+import { hasEnabledWorkflowForRepo, discoverRepoPathsUnder, OrchestratorMonitor } from './orchestrator-monitor.js'
+import type { SessionManager } from './session-manager.js'
 import type { ReviewRepoConfig } from './workflow-config.js'
 
 const make = (overrides: Partial<ReviewRepoConfig>): ReviewRepoConfig => ({
@@ -99,5 +100,53 @@ describe('discoverRepoPathsUnder', () => {
     mkdirSync(join(root, 'org'))
     writeFileSync(join(root, 'org', 'notes.txt'), 'hi')
     expect(discoverRepoPathsUnder(root)).toEqual([])
+  })
+})
+
+describe('handleGoalRunEvent', () => {
+  // isRateLimited: true short-circuits delivery — notifications stay in the
+  // buffer where getAll() can observe them, without touching fs or the outbox.
+  const fakeSessions = { isRateLimited: () => true } as unknown as SessionManager
+
+  function monitor(): OrchestratorMonitor {
+    return new OrchestratorMonitor(fakeSessions)
+  }
+
+  it('notifies once (severity action) when a run blocks, pointing at pending_prompts', () => {
+    const m = monitor()
+    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'ci-autorepair', status: 'blocked' })
+    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'ci-autorepair', status: 'blocked' })
+
+    const all = m.getAll()
+    expect(all).toHaveLength(1)
+    expect(all[0].severity).toBe('action')
+    expect(all[0].title).toContain('ci-autorepair')
+    expect(all[0].body).toContain('pending_prompts')
+  })
+
+  it('notifies separately for a later state of the same run', () => {
+    const m = monitor()
+    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'ci-autorepair', status: 'blocked' })
+    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'ci-autorepair', status: 'failed' })
+
+    const all = m.getAll()
+    expect(all).toHaveLength(2)
+    expect(all[1].severity).toBe('alert')
+  })
+
+  it('ignores progress states and ledger events', () => {
+    const m = monitor()
+    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'k', status: 'running' })
+    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'k', status: 'succeeded' })
+    m.handleGoalRunEvent({ eventType: 'turn', runId: 'r1', kind: 'k' })
+    expect(m.getAll()).toHaveLength(0)
+  })
+
+  it('notifies on awaiting_human with a decision prompt', () => {
+    const m = monitor()
+    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r2', kind: 'coverage-increase', status: 'awaiting_human' })
+    const all = m.getAll()
+    expect(all).toHaveLength(1)
+    expect(all[0].title).toContain('needs a decision')
   })
 })
