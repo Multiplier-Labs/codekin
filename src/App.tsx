@@ -33,6 +33,7 @@ import { useOpenCodeCommands } from './hooks/useOpenCodeCommands'
 import { useProviderValidation } from './hooks/useProviderValidation'
 import { buildSlashCommandList, buildOpenCodeSlashCommandList } from './lib/slashCommands'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
+import { emitWorkflowEvent } from './lib/workflowEvents'
 import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo } from './lib/ccApi'
 import { Settings } from './components/Settings'
 import { LeftSidebar } from './components/LeftSidebar'
@@ -221,6 +222,10 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
         if (tool === 'edit' || tool === 'write' || tool === 'patch') {
           setHasFileChanges(true)
         }
+      } else if (msg.type === 'workflow_event') {
+        // Server-pushed workflow progress — forwarded so useWorkflows can
+        // refresh on events instead of fast-polling.
+        emitWorkflowEvent(msg)
       }
     },
   })
