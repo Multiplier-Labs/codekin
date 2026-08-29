@@ -50,6 +50,9 @@ export class OrchestratorMonitor {
   /** (runId:status) pairs already notified — see handleGoalRunEvent. */
   private notedGoalRunStates = new Set<string>()
   private memory: OrchestratorMemory | null = null
+  private engine: WorkflowEngine | null = null
+  /** True once a stall alert has been sent — reset when the heartbeat recovers. */
+  private engineStallNotified = false
 
   constructor(sessions: SessionManager) {
     this.sessions = sessions
@@ -57,6 +60,7 @@ export class OrchestratorMonitor {
 
   /** Connect to the workflow engine for event-driven notifications. */
   setEngine(engine: WorkflowEngine): void {
+    this.engine = engine
     engine.on('workflow_event', (event: WorkflowEvent) => {
       this.handleWorkflowEvent(event)
     })
@@ -172,7 +176,37 @@ export class OrchestratorMonitor {
     // Check for passive repos
     this.checkPassiveRepos(repoPaths)
 
-    // initial scan complete
+    // Check the trigger engine's heartbeat
+    this.checkEngineHeartbeat()
+  }
+
+  /**
+   * Watchdog for the workflow dispatch loop. The engine writes a heartbeat row on
+   * every 60s tick; if it hasn't for 5+ minutes the interval has died or the
+   * process is wedged — something the engine cannot report about itself.
+   * Alerts once per stall, re-arming when the heartbeat recovers.
+   */
+  private checkEngineHeartbeat(): void {
+    if (!this.engine) return
+    try {
+      const health = this.engine.getEngineHealth()
+      // A null heartbeat means the scheduler was never started (e.g. disabled) — not a stall.
+      if (!health.lastTickAt) return
+
+      const stale = Date.now() - new Date(health.lastTickAt).getTime() > 5 * 60_000
+      if (stale && !this.engineStallNotified) {
+        this.engineStallNotified = true
+        this.addNotification({
+          severity: 'alert',
+          title: 'Workflow trigger engine stalled',
+          body: `The workflow dispatch loop last ticked at ${health.lastTickAt}. Scheduled workflows are not firing — the server likely needs attention.`,
+        })
+      } else if (!stale) {
+        this.engineStallNotified = false
+      }
+    } catch (err) {
+      console.error('[orchestrator-monitor] Engine heartbeat check error:', err)
+    }
   }
 
   /** Check for reports we haven't seen before. */

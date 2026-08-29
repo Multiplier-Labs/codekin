@@ -63,6 +63,11 @@ export interface CronSchedule {
   enabled: boolean
   lastRunAt: string | null
   nextRunAt: string | null
+  catchUp?: 'collapse' | 'skip'
+  lastReviewedSha?: string | null
+  lastHeldAt?: string | null
+  lastHeldReason?: string | null
+  heldCount?: number
 }
 
 export interface ReviewRepoConfig {

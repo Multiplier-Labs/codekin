@@ -17,6 +17,20 @@ Workflow runs are triggered by cron schedules configured per-repo via the workfl
 
 ---
 
+## Trigger Dispatch
+
+Scheduled runs pass through pre-dispatch gates before any run row or session is created. Each decision — fired or held, with its reason — is recorded in a trigger ledger (`GET /api/workflows/trigger-ledger`, optionally filtered by `scheduleId`), and the most recent hold is surfaced on the schedule (`lastHeldAt` / `lastHeldReason` / `heldCount`).
+
+The gates, in order:
+
+1. **Catch-up policy** — each schedule has `catchUp: 'collapse' | 'skip'` (default `collapse`, settable via `PATCH /api/workflows/schedules/:id`). `collapse` fires once no matter how many slots were missed during downtime; `skip` abandons a fire time missed by more than 10 minutes and waits for the next natural slot.
+2. **Single-flight** — a schedule whose previous run (same kind + repo) is still active is held and retried a few minutes later, never stacked.
+3. **Change detection** — the engine records the repo's HEAD sha when a run *succeeds* (`lastReviewedSha`). A scheduled fire where HEAD hasn't moved since is held: nothing new to review. Failed and skipped runs do not advance the anchor, so their commits are re-examined on the next fire. Manual triggers (`POST /api/workflows/schedules/:id/trigger`) bypass all gates but are still ledgered.
+
+Dispatches are capped per 60-second tick (backlog staggers across ticks instead of stampeding after downtime), and the loop writes a heartbeat on every tick — `GET /api/workflows/engine-health` returns `{ lastTickAt, tickCount, stale }`, and the orchestrator monitor raises an alert notification if the heartbeat goes stale.
+
+---
+
 ## MD File Format
 
 Workflow definitions are Markdown files with YAML frontmatter. The frontmatter contains configuration metadata; the body is the prompt sent verbatim to Claude.

@@ -9,10 +9,16 @@
 import Database from 'better-sqlite3'
 import { existsSync, chmodSync } from 'fs'
 import { randomUUID } from 'crypto'
+import { execFileSync } from 'child_process'
 import { EventEmitter } from 'events'
 import { jsonParse } from './json-parse.js'
 import type { RunLifecycleStatus } from './run-status.js'
 import { defaultRunsDbPath, legacyDbPath, migrateLegacyTables } from './run-db.js'
+import { nextCronMatch } from './cron.js'
+
+// Re-exported so existing importers (tests, routes) keep working after the
+// parser moved to the shared cron module.
+export { cronMatchesDate, nextCronMatch, isValidCron } from './cron.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -134,7 +140,26 @@ export interface CronSchedule {
   lastRunAt: string | null
   /** Pre-computed ISO timestamp of the next fire time (avoids re-parsing on every tick). */
   nextRunAt: string | null
+  /**
+   * What to do with a fire time missed by more than the grace window (e.g. server downtime):
+   * `collapse` (default) — fire once now, however many slots were missed; `skip` — wait for
+   * the next natural slot.
+   */
+  catchUp: 'collapse' | 'skip'
+  /** HEAD sha at dispatch of the last *successful* run — the change-detection anchor. */
+  lastReviewedSha: string | null
+  /** ISO timestamp of the most recent held (withheld) dispatch. */
+  lastHeldAt: string | null
+  /** Why the most recent dispatch was held. */
+  lastHeldReason: string | null
+  /** Total number of held dispatches over the schedule's lifetime. */
+  heldCount: number
 }
+
+/** Caller-supplied fields for `upsertSchedule` — trigger bookkeeping columns are engine-managed. */
+export type CronScheduleUpsert =
+  Omit<CronSchedule, 'lastRunAt' | 'nextRunAt' | 'catchUp' | 'lastReviewedSha' | 'lastHeldAt' | 'lastHeldReason' | 'heldCount'>
+  & { catchUp?: 'collapse' | 'skip' }
 
 /** Event emitted via the `workflow_event` EventEmitter channel for real-time UI updates. */
 export interface WorkflowEvent {
@@ -203,72 +228,39 @@ interface WorkflowDefinition {
 }
 
 // ---------------------------------------------------------------------------
-// Cron expression parser (supports standard 5-field cron)
+// Trigger decisions
 // ---------------------------------------------------------------------------
 
-function parseCronField(field: string, min: number, max: number): number[] {
-  const values: number[] = []
-  for (const part of field.split(',')) {
-    const stepMatch = part.match(/^(.+)\/(\d+)$/)
-    const step = stepMatch ? parseInt(stepMatch[2], 10) : 1
-    // Defensive guard — `step <= 0` would make the loops below never advance
-    // (or run backwards), pinning the scheduler. Any caller that reaches this
-    // branch with a zero/negative step has bypassed isValidCron, so refuse loudly.
-    if (!Number.isFinite(step) || step <= 0) {
-      throw new Error(`Invalid cron step value: ${stepMatch?.[2]} (must be > 0)`)
-    }
-    const range = stepMatch ? stepMatch[1] : part
-
-    if (range === '*') {
-      for (let i = min; i <= max; i += step) values.push(i)
-    } else if (range.includes('-')) {
-      const [start, end] = range.split('-').map(Number)
-      for (let i = start; i <= end; i += step) values.push(i)
-    } else {
-      values.push(parseInt(range, 10))
-    }
-  }
-  return values
+/** One row of the trigger ledger — a record of why a schedule did or didn't fire. */
+export interface TriggerLedgerEntry {
+  id: number
+  scheduleId: string | null
+  kind: string
+  /** `fired` — a run was started. `held` — the dispatch was withheld (see `reason`). */
+  decision: 'fired' | 'held'
+  reason: string
+  runId: string | null
+  headSha: string | null
+  createdAt: string
 }
 
-export function cronMatchesDate(expression: string, date: Date): boolean {
-  const parts = expression.trim().split(/\s+/)
-  if (parts.length !== 5) return false
+/** Liveness snapshot of the dispatch loop, written on every tick. */
+export interface EngineHealth {
+  lastTickAt: string | null
+  tickCount: number
+}
 
+/** Resolve a repo's current HEAD sha; `null` when unavailable (missing repo, not a git dir). */
+export type HeadShaResolver = (repoPath: string) => string | null
+
+function defaultHeadShaResolver(repoPath: string): string | null {
   try {
-    const [minF, hourF, domF, monF, dowF] = parts
-    const minute = parseCronField(minF, 0, 59)
-    const hour = parseCronField(hourF, 0, 23)
-    const dom = parseCronField(domF, 1, 31)
-    const month = parseCronField(monF, 1, 12)
-    const dow = parseCronField(dowF, 0, 6)
-
-    return (
-      minute.includes(date.getMinutes()) &&
-      hour.includes(date.getHours()) &&
-      dom.includes(date.getDate()) &&
-      month.includes(date.getMonth() + 1) &&
-      dow.includes(date.getDay())
-    )
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoPath, timeout: 5000 })
+      .toString().trim()
+    return sha || null
   } catch {
-    // Malformed expression (e.g. step 0). Treat as never-matching so a bad
-    // legacy schedule cannot pin the scheduler in a tight loop.
-    return false
+    return null
   }
-}
-
-/** Compute the next matching minute for a cron expression after `after`. */
-function nextCronMatch(expression: string, after: Date): Date {
-  const d = new Date(after)
-  d.setSeconds(0, 0)
-  d.setMinutes(d.getMinutes() + 1)
-  // Search up to 366 days ahead
-  for (let i = 0; i < 366 * 24 * 60; i++) {
-    if (cronMatchesDate(expression, d)) return d
-    d.setMinutes(d.getMinutes() + 1)
-  }
-  // Fallback: 24h from now
-  return new Date(after.getTime() + 86400000)
 }
 
 // ---------------------------------------------------------------------------
@@ -337,6 +329,18 @@ export class WorkflowEngine extends EventEmitter {
   private activeAbortControllers = new Map<string, AbortController>()
   private cronTimer: ReturnType<typeof setInterval> | null = null
   private sessionResolver: SessionResolver | null = null
+  /** Runs started by the dispatcher — lets run-success update the schedule's lastReviewedSha. */
+  private dispatchIndex = new Map<string, { scheduleId: string; headSha: string | null }>()
+  private headShaResolver: HeadShaResolver = defaultHeadShaResolver
+
+  /** Max dispatches per tick — staggers a backlog after downtime instead of stampeding. */
+  static readonly MAX_DISPATCH_PER_TICK = 3
+  /** Retry delay when a dispatch is held because the previous run is still active. */
+  static readonly CONCURRENCY_RETRY_MS = 5 * 60_000
+  /** For catchUp 'skip': a fire time missed by more than this is abandoned to the next slot. */
+  static readonly CATCH_UP_GRACE_MS = 10 * 60_000
+  /** Trigger-ledger rows older than this are pruned when the scheduler starts. */
+  static readonly LEDGER_RETENTION_MS = 30 * 24 * 60 * 60_000
 
   constructor(dbPath?: string, legacyPath?: string) {
     super()
@@ -394,9 +398,27 @@ export class WorkflowEngine extends EventEmitter {
         next_run_at TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS trigger_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        schedule_id TEXT,
+        kind TEXT NOT NULL,
+        decision TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        run_id TEXT,
+        head_sha TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS engine_heartbeat (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        last_tick_at TEXT NOT NULL,
+        tick_count INTEGER NOT NULL DEFAULT 0
+      );
+
       CREATE INDEX IF NOT EXISTS idx_runs_kind ON workflow_runs(kind);
       CREATE INDEX IF NOT EXISTS idx_runs_status ON workflow_runs(status);
       CREATE INDEX IF NOT EXISTS idx_steps_run_id ON workflow_steps(run_id);
+      CREATE INDEX IF NOT EXISTS idx_trigger_ledger_schedule ON trigger_ledger(schedule_id, created_at);
     `)
   }
 
@@ -414,6 +436,14 @@ export class WorkflowEngine extends EventEmitter {
       `ALTER TABLE workflow_runs ADD COLUMN last_step_at TEXT`,
       // most recently running step key — tells resume where the work stopped.
       `ALTER TABLE workflow_runs ADD COLUMN current_step_key TEXT`,
+      // catch-up policy for missed fire times ('collapse' default when NULL).
+      `ALTER TABLE cron_schedules ADD COLUMN catch_up TEXT`,
+      // HEAD sha at dispatch of the last successful run — pre-dispatch change gate anchor.
+      `ALTER TABLE cron_schedules ADD COLUMN last_reviewed_sha TEXT`,
+      // most recent held (withheld) dispatch: when and why.
+      `ALTER TABLE cron_schedules ADD COLUMN last_held_at TEXT`,
+      `ALTER TABLE cron_schedules ADD COLUMN last_held_reason TEXT`,
+      `ALTER TABLE cron_schedules ADD COLUMN held_count INTEGER`,
     ]
     for (const sql of additions) {
       try {
@@ -455,8 +485,18 @@ export class WorkflowEngine extends EventEmitter {
   // Run management
   // -------------------------------------------------------------------------
 
-  /** Create and immediately start executing a workflow run. */
-  async startRun(kind: string, input: Record<string, unknown> = {}): Promise<WorkflowRun> {
+  /**
+   * Create and immediately start executing a workflow run.
+   * `dispatch` links the run back to the schedule that fired it (set by the scheduler and
+   * `triggerSchedule`) so a successful run can advance the schedule's `lastReviewedSha`.
+   * It is registered before execution begins — no window where a fast run could finish
+   * without the link in place.
+   */
+  async startRun(
+    kind: string,
+    input: Record<string, unknown> = {},
+    dispatch?: { scheduleId: string; headSha: string | null },
+  ): Promise<WorkflowRun> {
     const definition = this.workflows.get(kind)
     if (!definition) throw new Error(`Unknown workflow kind: ${kind}`)
 
@@ -486,6 +526,8 @@ export class WorkflowEngine extends EventEmitter {
         VALUES (?, ?, ?, 'pending')
       `).run(randomUUID(), run.id, step.key)
     }
+
+    if (dispatch) this.dispatchIndex.set(run.id, dispatch)
 
     this.emitEvent('run_queued', run)
 
@@ -603,6 +645,15 @@ export class WorkflowEngine extends EventEmitter {
       run.completedAt = new Date().toISOString()
       this.db.prepare(`UPDATE workflow_runs SET status = 'succeeded', output = ?, completed_at = ? WHERE id = ?`)
         .run(JSON.stringify(lastOutput), run.completedAt, run.id)
+
+      // Advance the change-detection anchor only on success — a failed or skipped
+      // run must not move it, or its commits would never be re-examined.
+      const dispatch = this.dispatchIndex.get(run.id)
+      if (dispatch?.headSha) {
+        this.db.prepare(`UPDATE cron_schedules SET last_reviewed_sha = ? WHERE id = ?`)
+          .run(dispatch.headSha, dispatch.scheduleId)
+      }
+
       this.emitEvent('run_succeeded', run)
 
     } catch (err) {
@@ -634,6 +685,7 @@ export class WorkflowEngine extends EventEmitter {
 
     } finally {
       this.activeAbortControllers.delete(run.id)
+      this.dispatchIndex.delete(run.id)
       if (definition.afterRun) {
         try {
           await definition.afterRun(run)
@@ -735,24 +787,52 @@ export class WorkflowEngine extends EventEmitter {
   // Cron scheduling
   // -------------------------------------------------------------------------
 
+  private rowToSchedule(row: Record<string, unknown>): CronSchedule {
+    return {
+      id: row.id as string,
+      kind: row.kind as string,
+      cronExpression: row.cron_expression as string,
+      input: jsonParse(row.input as string) as Record<string, unknown>,
+      enabled: !!(row.enabled as number),
+      lastRunAt: row.last_run_at as string | null,
+      nextRunAt: row.next_run_at as string | null,
+      catchUp: row.catch_up === 'skip' ? 'skip' : 'collapse',
+      lastReviewedSha: (row.last_reviewed_sha as string | null) ?? null,
+      lastHeldAt: (row.last_held_at as string | null) ?? null,
+      lastHeldReason: (row.last_held_reason as string | null) ?? null,
+      heldCount: (row.held_count as number | null) ?? 0,
+    }
+  }
+
   /** Create or update a cron schedule. Pre-computes `nextRunAt` from the expression. */
-  upsertSchedule(schedule: Omit<CronSchedule, 'lastRunAt' | 'nextRunAt'>): CronSchedule {
+  upsertSchedule(schedule: CronScheduleUpsert): CronSchedule {
     const nextRun = schedule.enabled ? nextCronMatch(schedule.cronExpression, new Date()).toISOString() : null
 
     const existing = this.db.prepare(`SELECT id FROM cron_schedules WHERE id = ?`).get(schedule.id)
     if (existing) {
+      // COALESCE keeps the stored catch-up policy when the caller doesn't specify one,
+      // and the trigger bookkeeping columns (last_reviewed_sha, held_*) are never touched here.
       this.db.prepare(`
-        UPDATE cron_schedules SET kind = ?, cron_expression = ?, input = ?, enabled = ?, next_run_at = ?
+        UPDATE cron_schedules SET kind = ?, cron_expression = ?, input = ?, enabled = ?, next_run_at = ?, catch_up = COALESCE(?, catch_up)
         WHERE id = ?
-      `).run(schedule.kind, schedule.cronExpression, JSON.stringify(schedule.input), schedule.enabled ? 1 : 0, nextRun, schedule.id)
+      `).run(schedule.kind, schedule.cronExpression, JSON.stringify(schedule.input), schedule.enabled ? 1 : 0, nextRun, schedule.catchUp ?? null, schedule.id)
     } else {
       this.db.prepare(`
-        INSERT INTO cron_schedules (id, kind, cron_expression, input, enabled, next_run_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(schedule.id, schedule.kind, schedule.cronExpression, JSON.stringify(schedule.input), schedule.enabled ? 1 : 0, nextRun)
+        INSERT INTO cron_schedules (id, kind, cron_expression, input, enabled, next_run_at, catch_up)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(schedule.id, schedule.kind, schedule.cronExpression, JSON.stringify(schedule.input), schedule.enabled ? 1 : 0, nextRun, schedule.catchUp ?? null)
     }
 
-    return { ...schedule, lastRunAt: null, nextRunAt: nextRun }
+    return {
+      ...schedule,
+      catchUp: schedule.catchUp ?? 'collapse',
+      lastRunAt: null,
+      nextRunAt: nextRun,
+      lastReviewedSha: null,
+      lastHeldAt: null,
+      lastHeldReason: null,
+      heldCount: 0,
+    }
   }
 
   /** Delete a cron schedule by ID. Returns true if a row was deleted. */
@@ -763,37 +843,161 @@ export class WorkflowEngine extends EventEmitter {
 
   /** List all cron schedules (enabled and disabled). */
   listSchedules(): CronSchedule[] {
-    return (this.db.prepare(`SELECT * FROM cron_schedules`).all() as Record<string, unknown>[]).map(row => ({
-      id: row.id as string,
-      kind: row.kind as string,
-      cronExpression: row.cron_expression as string,
-      input: jsonParse(row.input as string) as Record<string, unknown>,
-      enabled: !!(row.enabled as number),
-      lastRunAt: row.last_run_at as string | null,
-      nextRunAt: row.next_run_at as string | null,
-    }))
+    return (this.db.prepare(`SELECT * FROM cron_schedules`).all() as Record<string, unknown>[])
+      .map(row => this.rowToSchedule(row))
   }
 
   /** Fetch a single cron schedule by ID. Returns `null` if not found. */
   getSchedule(id: string): CronSchedule | null {
     const row = this.db.prepare(`SELECT * FROM cron_schedules WHERE id = ?`).get(id) as Record<string, unknown> | undefined
     if (!row) return null
-    return {
-      id: row.id as string,
-      kind: row.kind as string,
-      cronExpression: row.cron_expression as string,
-      input: jsonParse(row.input as string) as Record<string, unknown>,
-      enabled: !!(row.enabled as number),
-      lastRunAt: row.last_run_at as string | null,
-      nextRunAt: row.next_run_at as string | null,
-    }
+    return this.rowToSchedule(row)
   }
 
-  /** Trigger a schedule immediately, creating a new run. */
+  /**
+   * Trigger a schedule immediately, creating a new run. Manual triggers bypass the
+   * dispatch gates (explicit human intent), but are still recorded in the trigger
+   * ledger and still advance `lastReviewedSha` on success.
+   */
   async triggerSchedule(id: string): Promise<WorkflowRun> {
     const schedule = this.getSchedule(id)
     if (!schedule) throw new Error(`Schedule not found: ${id}`)
-    return this.startRun(schedule.kind, schedule.input)
+    const repoPath = typeof schedule.input.repoPath === 'string' ? schedule.input.repoPath : null
+    const headSha = repoPath ? this.headShaResolver(repoPath) : null
+    const run = await this.startRun(schedule.kind, schedule.input, { scheduleId: id, headSha })
+    this.recordTrigger({ scheduleId: id, kind: schedule.kind, decision: 'fired', reason: 'manual trigger (gates bypassed)', runId: run.id, headSha })
+    return run
+  }
+
+  // -------------------------------------------------------------------------
+  // Trigger dispatch
+  // -------------------------------------------------------------------------
+
+  /** Override HEAD-sha resolution (tests). Pass `null` to restore the git default. */
+  setHeadShaResolver(resolver: HeadShaResolver | null) {
+    this.headShaResolver = resolver ?? defaultHeadShaResolver
+  }
+
+  private recordTrigger(entry: { scheduleId: string | null; kind: string; decision: 'fired' | 'held'; reason: string; runId?: string | null; headSha?: string | null }) {
+    this.db.prepare(`
+      INSERT INTO trigger_ledger (schedule_id, kind, decision, reason, run_id, head_sha, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(entry.scheduleId, entry.kind, entry.decision, entry.reason, entry.runId ?? null, entry.headSha ?? null, new Date().toISOString())
+  }
+
+  /** List trigger-ledger entries, newest first, optionally for one schedule. */
+  listTriggerLedger(opts?: { scheduleId?: string; limit?: number }): TriggerLedgerEntry[] {
+    const { sql, params } = buildListQuery('trigger_ledger', {
+      filters: opts?.scheduleId ? [{ column: 'schedule_id', value: opts.scheduleId }] : [],
+      orderBy: 'id DESC',
+      limit: opts?.limit ?? 100,
+    })
+    return (this.db.prepare(sql).all(...params) as Record<string, unknown>[]).map(row => ({
+      id: row.id as number,
+      scheduleId: row.schedule_id as string | null,
+      kind: row.kind as string,
+      decision: row.decision as 'fired' | 'held',
+      reason: row.reason as string,
+      runId: row.run_id as string | null,
+      headSha: row.head_sha as string | null,
+      createdAt: row.created_at as string,
+    }))
+  }
+
+  /** Liveness snapshot of the dispatch loop — `lastTickAt` is written on every tick. */
+  getEngineHealth(): EngineHealth {
+    const row = this.db.prepare(`SELECT last_tick_at, tick_count FROM engine_heartbeat WHERE id = 1`).get() as Record<string, unknown> | undefined
+    return {
+      lastTickAt: (row?.last_tick_at as string | null) ?? null,
+      tickCount: (row?.tick_count as number | null) ?? 0,
+    }
+  }
+
+  /** Withhold a dispatch: record why, bump held bookkeeping, and set the retry/next time. */
+  private holdSchedule(schedule: CronSchedule, reason: string, nextRunAt: string, now: Date) {
+    console.log(`[workflow] Cron held: ${schedule.id} (${schedule.kind}) — ${reason}`)
+    this.db.prepare(`
+      UPDATE cron_schedules SET last_held_at = ?, last_held_reason = ?, held_count = COALESCE(held_count, 0) + 1, next_run_at = ?
+      WHERE id = ?
+    `).run(now.toISOString(), reason, nextRunAt, schedule.id)
+    this.recordTrigger({ scheduleId: schedule.id, kind: schedule.kind, decision: 'held', reason })
+  }
+
+  /**
+   * One pass of the dispatch loop. Public so tests (and a future signal consumer)
+   * can drive it directly; production calls it from the 60s interval.
+   */
+  dispatchTick(now: Date = new Date()) {
+    // Heartbeat first — proves the loop is alive even on ticks where nothing is due.
+    this.db.prepare(`
+      INSERT INTO engine_heartbeat (id, last_tick_at, tick_count) VALUES (1, ?, 1)
+      ON CONFLICT(id) DO UPDATE SET last_tick_at = excluded.last_tick_at, tick_count = tick_count + 1
+    `).run(now.toISOString())
+
+    const due = this.listSchedules()
+      .filter(s => s.enabled && s.nextRunAt && new Date(s.nextRunAt) <= now)
+      .sort((a, b) => a.nextRunAt!.localeCompare(b.nextRunAt!))
+
+    let dispatched = 0
+    for (const schedule of due) {
+      // Backlog stagger: anything beyond the cap stays due and is picked up next tick.
+      if (dispatched >= WorkflowEngine.MAX_DISPATCH_PER_TICK) break
+      if (this.evaluateAndDispatch(schedule, now)) dispatched++
+    }
+  }
+
+  /** Run one due schedule through the gates. Returns true if a run was dispatched. */
+  private evaluateAndDispatch(schedule: CronSchedule, now: Date): boolean {
+    const nextSlot = () => nextCronMatch(schedule.cronExpression, now).toISOString()
+    const repoPath = typeof schedule.input.repoPath === 'string' ? schedule.input.repoPath : null
+
+    if (
+      schedule.catchUp === 'skip' &&
+      now.getTime() - new Date(schedule.nextRunAt!).getTime() > WorkflowEngine.CATCH_UP_GRACE_MS
+    ) {
+      this.holdSchedule(schedule, 'missed fire window (catch-up: skip)', nextSlot(), now)
+      return false
+    }
+
+    // Single-flight per repo+kind: never stack a second run on one still going.
+    if (repoPath) {
+      const active = [
+        ...this.listRuns({ kind: schedule.kind, status: 'running', limit: 100 }),
+        ...this.listRuns({ kind: schedule.kind, status: 'queued', limit: 100 }),
+      ]
+      if (active.some(r => r.input.repoPath === repoPath)) {
+        const retryAt = new Date(now.getTime() + WorkflowEngine.CONCURRENCY_RETRY_MS).toISOString()
+        this.holdSchedule(schedule, 'previous run still active', retryAt, now)
+        return false
+      }
+    }
+
+    // Change gate: HEAD unchanged since the last successful run → nothing to review.
+    // A null sha (missing repo, git error) falls through to dispatch so the failure
+    // surfaces loudly in the run history instead of being silently held.
+    const headSha = repoPath ? this.headShaResolver(repoPath) : null
+    if (headSha && schedule.lastReviewedSha === headSha) {
+      this.holdSchedule(schedule, 'no new commits since last successful run', nextSlot(), now)
+      return false
+    }
+
+    console.log(`[workflow] Cron triggered: ${schedule.id} (${schedule.kind})`)
+    this.db.prepare(`UPDATE cron_schedules SET last_run_at = ?, next_run_at = ? WHERE id = ?`)
+      .run(now.toISOString(), nextSlot(), schedule.id)
+
+    // Pass last run timestamp so the in-run validate_repo check keeps working as a
+    // belt-and-suspenders behind the sha gate.
+    const runInput = schedule.lastRunAt
+      ? { ...schedule.input, sinceTimestamp: schedule.lastRunAt }
+      : schedule.input
+    this.startRun(schedule.kind, runInput, { scheduleId: schedule.id, headSha })
+      .then(run => {
+        this.recordTrigger({ scheduleId: schedule.id, kind: schedule.kind, decision: 'fired', reason: 'schedule due', runId: run.id, headSha })
+      })
+      .catch(err => {
+        console.error(`[workflow] Cron trigger failed for ${schedule.id}:`, err)
+      })
+    return true
   }
 
   /** Start the cron polling loop (checks every 60s). */
@@ -801,27 +1005,17 @@ export class WorkflowEngine extends EventEmitter {
     if (this.cronTimer) return
     console.log('[workflow] Cron scheduler started')
 
+    // Prune old ledger rows once per process start, not per tick.
+    const cutoff = new Date(Date.now() - WorkflowEngine.LEDGER_RETENTION_MS).toISOString()
+    this.db.prepare(`DELETE FROM trigger_ledger WHERE created_at < ?`).run(cutoff)
+
     const tick = () => {
-      const now = new Date()
-      const schedules = this.listSchedules().filter(s => s.enabled && s.nextRunAt)
-
-      for (const schedule of schedules) {
-        if (new Date(schedule.nextRunAt!) <= now) {
-          console.log(`[workflow] Cron triggered: ${schedule.id} (${schedule.kind})`)
-
-          // Update last/next run times
-          const nextRun = nextCronMatch(schedule.cronExpression, now).toISOString()
-          this.db.prepare(`UPDATE cron_schedules SET last_run_at = ?, next_run_at = ? WHERE id = ?`)
-            .run(now.toISOString(), nextRun, schedule.id)
-
-          // Pass last run timestamp so assessment workflows can skip if no changes
-          const runInput = schedule.lastRunAt
-            ? { ...schedule.input, sinceTimestamp: schedule.lastRunAt }
-            : schedule.input
-          this.startRun(schedule.kind, runInput).catch(err => {
-            console.error(`[workflow] Cron trigger failed for ${schedule.id}:`, err)
-          })
-        }
+      try {
+        this.dispatchTick()
+      } catch (err) {
+        // The loop must survive any single bad tick (corrupt row, git hiccup) —
+        // a dead interval is invisible; a logged error is not.
+        console.error('[workflow] Dispatch tick failed:', err)
       }
     }
 

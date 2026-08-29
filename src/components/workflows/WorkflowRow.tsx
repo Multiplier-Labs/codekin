@@ -57,6 +57,12 @@ export function WorkflowRow({
   const eventDriven = isEventDriven(repo.kind ?? '')
   const paused = schedule ? !schedule.enabled : false
   const lastRun = recentRuns[0]
+  // A hold is only worth showing while it's the latest trigger decision —
+  // once a newer run exists, the run's own status badge tells the story.
+  const held = schedule?.lastHeldAt && schedule.lastHeldReason
+    && (!lastRun || schedule.lastHeldAt > lastRun.createdAt)
+    ? { at: schedule.lastHeldAt, reason: schedule.lastHeldReason }
+    : null
 
   return (
     <div>
@@ -76,6 +82,14 @@ export function WorkflowRow({
         {modelLabel(repo.model) && (
           <span className="text-meta text-ink-muted bg-edge rounded-control px-1.5 py-0.5 shrink-0">
             {modelLabel(repo.model)}
+          </span>
+        )}
+        {held && (
+          <span
+            className="text-meta text-ink-faint min-w-0 truncate"
+            title={`Held ${formatTime(held.at)}: ${held.reason}`}
+          >
+            held: {held.reason}
           </span>
         )}
         {lastRun && (
