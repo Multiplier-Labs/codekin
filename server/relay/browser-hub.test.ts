@@ -10,7 +10,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import type { AddressInfo } from 'net'
 import type Database from 'better-sqlite3'
 import { openControlPlaneDb, upsertUserFromGithub } from './control-plane-db.js'
-import { startPairing, approvePairing, completePairing } from './pairing.js'
+import { startPairing, approvePairing, completePairing, removeMachine } from './pairing.js'
 import { ConnectorHub } from './connector-hub.js'
 import { BrowserHub } from './browser-hub.js'
 import { RelayConnector } from './connector.js'
@@ -102,7 +102,7 @@ describe('browser hub REST proxy', () => {
     const ownerRow = upsertUserFromGithub(
       db,
       { id: 1, login: 'alari76', name: null, email: null, avatarUrl: null },
-      { ownerGithubLogin: 'alari76', allowedGithubLogins: [] },
+      { ownerGithubId: 1, allowedGithubIds: [] },
     )
     owner = {
       id: ownerRow.id,
@@ -273,6 +273,45 @@ describe('browser hub REST proxy', () => {
     await browser.open()
     browser.send('hello', { machineId: otherMachine })
     expect(await browser.closeCode).toBe(4003)
+  })
+
+  it('reauthorize drops an open socket once the user is disabled in the database', async () => {
+    const browser = new TestBrowser(browserUrl)
+    await browser.open()
+    browser.send('hello', { machineId })
+    await browser.waitForFrame(f => f.kind === 'hello_ack')
+
+    // Access was resolved at hello; disabling the user must not leave the
+    // already-open socket working.
+    db.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").run(owner.id)
+    browserHub.reauthorize()
+
+    expect(await browser.closeCode).toBe(4003)
+  })
+
+  it('reauthorize drops an open socket once its machine is removed', async () => {
+    const browser = new TestBrowser(browserUrl)
+    await browser.open()
+    browser.send('hello', { machineId })
+    await browser.waitForFrame(f => f.kind === 'hello_ack')
+
+    removeMachine(db, machineId)
+    browserHub.reauthorize({ machineId })
+
+    expect(await browser.closeCode).toBe(4003)
+  })
+
+  it('reauthorize keeps sockets whose access is unchanged', async () => {
+    const browser = new TestBrowser(browserUrl)
+    await browser.open()
+    browser.send('hello', { machineId })
+    await browser.waitForFrame(f => f.kind === 'hello_ack')
+
+    browserHub.reauthorize()
+
+    browser.send('ping', {})
+    await browser.waitForFrame(f => f.kind === 'pong')
+    browser.close()
   })
 
   it('closes the socket when the first frame is not hello', async () => {

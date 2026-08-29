@@ -118,6 +118,31 @@ CREATE TABLE IF NOT EXISTS session_shares (
   expires_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS device_link_requests (
+  id TEXT PRIMARY KEY,
+  code_hash TEXT NOT NULL UNIQUE,
+  created_by_user_id TEXT NOT NULL REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at INTEGER NOT NULL,
+  claimed_at TEXT,
+  claimed_ip TEXT,
+  claimed_user_agent TEXT
+);
+
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  credential_id TEXT NOT NULL UNIQUE,
+  public_key TEXT NOT NULL,
+  counter INTEGER NOT NULL DEFAULT 0,
+  transports TEXT,
+  label TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_user ON webauthn_credentials(user_id);
+
 CREATE TABLE IF NOT EXISTS audit_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   organization_id TEXT NOT NULL,
@@ -156,48 +181,33 @@ export function openControlPlaneDb(path: string): Database.Database {
 }
 
 export interface AccessPolicy {
-  ownerGithubLogin: string
-  allowedGithubLogins: string[]
+  ownerGithubId: number
+  allowedGithubIds: number[]
 }
 
 /**
- * Decide role and status for a GitHub login. The owner login gets the owner
- * role; allowlisted logins become active members; everyone else lands in
- * pending and sees the request-access screen.
- * Login comparison is case-insensitive (GitHub logins are).
+ * Decide role and status for an authenticated GitHub account. The owner id
+ * gets the owner role; allowlisted ids become active members; everyone else
+ * lands in pending and sees the request-access screen.
+ *
+ * Matching is by GitHub's immutable numeric user id, never by login: a login
+ * can be renamed and then re-registered by a stranger, and a login match
+ * would auto-activate whoever holds the name today with the access meant for
+ * whoever held it when the config was written.
  */
-export function resolveUserAccess(login: string, policy: AccessPolicy): { role: UserRole; status: UserStatus } {
-  const norm = login.toLowerCase()
-  if (norm === policy.ownerGithubLogin.toLowerCase()) {
+export function resolveUserAccess(githubId: number, policy: AccessPolicy): { role: UserRole; status: UserStatus } {
+  if (githubId > 0 && githubId === policy.ownerGithubId) {
     return { role: 'owner', status: 'active' }
   }
-  if (policy.allowedGithubLogins.some(l => l.toLowerCase() === norm)) {
+  if (policy.allowedGithubIds.includes(githubId)) {
     return { role: 'member', status: 'active' }
   }
   return { role: 'member', status: 'pending' }
 }
 
 /** Whether a GitHub identity may create a hosted Codekin account. */
-export function isGithubLoginAllowed(login: string, policy: AccessPolicy): boolean {
-  return resolveUserAccess(login, policy).status === 'active'
-}
-
-/** Apply the configured allowlist to existing accounts at startup. */
-export function reconcileUserAllowlist(db: Database.Database, policy: AccessPolicy): string[] {
-  const users = db.prepare('SELECT id, login, status FROM users').all() as Array<{
-    id: string
-    login: string
-    status: UserStatus
-  }>
-  const revoked: string[] = []
-  const demote = db.prepare("UPDATE users SET status = 'pending', updated_at = datetime('now') WHERE id = ?")
-  for (const user of users) {
-    if (user.status === 'active' && !isGithubLoginAllowed(user.login, policy)) {
-      demote.run(user.id)
-      revoked.push(user.id)
-    }
-  }
-  return revoked
+export function isGithubAccountAllowed(githubId: number, policy: AccessPolicy): boolean {
+  return resolveUserAccess(githubId, policy).status === 'active'
 }
 
 export interface GithubProfile {
@@ -221,7 +231,17 @@ export function upsertUserFromGithub(
   profile: GithubProfile,
   policy: AccessPolicy,
 ): UserRow {
-  const resolved = resolveUserAccess(profile.login, policy)
+  const resolved = resolveUserAccess(profile.id, policy)
+
+  // GitHub logins are unique among live accounts, so another row still
+  // holding this login is stale from before a rename. Clear it, or login
+  // lookups (share grants name grantees by login) could resolve to the
+  // wrong account.
+  db.prepare(
+    `UPDATE users SET login = 'formerly-' || login || '-' || github_id, updated_at = datetime('now')
+     WHERE lower(login) = lower(?) AND github_id != ?`,
+  ).run(profile.login, profile.id)
+
   const existing = db
     .prepare('SELECT * FROM users WHERE github_id = ?')
     .get(profile.id) as UserRow | undefined
@@ -260,6 +280,13 @@ export function upsertUserFromGithub(
   ).run(profile.login, profile.name, profile.email, profile.avatarUrl, role, status, existing.id)
 
   return db.prepare('SELECT * FROM users WHERE id = ?').get(existing.id) as UserRow
+}
+
+/** All users in the default org, for the admin user-management view. */
+export function listUsers(db: Database.Database): UserRow[] {
+  return db
+    .prepare('SELECT * FROM users WHERE organization_id = ? ORDER BY login COLLATE NOCASE')
+    .all(DEFAULT_ORG_ID) as UserRow[]
 }
 
 /** List machines in the default org (MVP: all machines, newest first). */

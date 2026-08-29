@@ -14,7 +14,7 @@ import type { Request, Response } from 'express'
 import { randomBytes } from 'crypto'
 import type Database from 'better-sqlite3'
 import type { RelayConfig } from './relay-config.js'
-import { upsertUserFromGithub, getUserById, isGithubLoginAllowed } from './control-plane-db.js'
+import { upsertUserFromGithub, getUserById, isGithubAccountAllowed } from './control-plane-db.js'
 import type { GithubProfile, UserRole, UserStatus, UserRow } from './control-plane-db.js'
 import type { SqliteSessionStore } from './sqlite-session-store.js'
 
@@ -51,13 +51,13 @@ function sessionCallback(resolve: () => void, reject: (err: Error) => void) {
   }
 }
 
-function saveSession(req: Request): Promise<void> {
+export function saveSession(req: Request): Promise<void> {
   return new Promise((resolve, reject) => {
     req.session.save(sessionCallback(resolve, reject))
   })
 }
 
-function regenerateSession(req: Request): Promise<void> {
+export function regenerateSession(req: Request): Promise<void> {
   return new Promise((resolve, reject) => {
     req.session.regenerate(sessionCallback(resolve, reject))
   })
@@ -172,22 +172,20 @@ export function createRelayAuthRouter({ db, config, fetchImpl = fetch, store, di
         avatarUrl: gh.avatar_url,
       }
       const accessPolicy = {
-        ownerGithubLogin: config.ownerGithubLogin,
-        allowedGithubLogins: config.allowedGithubLogins,
+        ownerGithubId: config.ownerGithubId,
+        allowedGithubIds: config.allowedGithubIds,
       }
       const existing = db.prepare('SELECT id, status FROM users WHERE github_id = ?').get(profile.id) as
         | { id: string; status: UserStatus }
         | undefined
-      if (!isGithubLoginAllowed(profile.login, accessPolicy)) {
-        if (existing) store?.destroyUserSessions(existing.id)
-        if (existing) disconnectUser?.(existing.id, 'account is not allowlisted')
+      if (!existing && !isGithubAccountAllowed(profile.id, accessPolicy)) {
         await destroySession(req)
         failLogin(res, 'access_not_allowed')
         return
       }
       const user = upsertUserFromGithub(db, profile, {
-        ownerGithubLogin: config.ownerGithubLogin,
-        allowedGithubLogins: config.allowedGithubLogins,
+        ownerGithubId: config.ownerGithubId,
+        allowedGithubIds: config.allowedGithubIds,
       })
 
       // Fresh session id after privilege change (session fixation)

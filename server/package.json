@@ -5,6 +5,7 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
+    "@simplewebauthn/server": "^13.3.3",
     "@types/express-session": "^1.19.0",
     "better-sqlite3": "^12.9.0",
     "express": "^5.1.0",

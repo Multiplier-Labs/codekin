@@ -1,9 +1,11 @@
 /**
- * ConnectionPopup — shows status of Claude Code, OpenCode, and Codex connections
- * with toggle buttons to temporarily disable/enable each.
+ * ConnectionPopup — shows which machine the app is talking to, plus the status
+ * of the Claude Code, OpenCode, and Codex connections on it, with toggle
+ * buttons to temporarily disable/enable each.
  */
 
 import { useRef, useEffect } from 'react'
+import { transport } from '../lib/transport'
 import type { ConnectionState } from '../types'
 
 interface Props {
@@ -76,11 +78,27 @@ export function ConnectionPopup({
     ? 'Disabled'
     : codexConnected === true ? 'Connected' : codexConnected === false ? 'Run `codex login` on the host' : 'Not configured'
 
+  // Where this browser is pointed: the local host, or the paired machine and
+  // the control plane it is reached through.
+  const target = transport.describeTarget()
+
   return (
     <div
       ref={ref}
-      className="absolute bottom-full left-0 mb-2 w-56 rounded-floating border border-edge-strong bg-surface-raised shadow-floating z-50"
+      className="absolute bottom-full left-0 mb-2 w-64 rounded-floating border border-edge-strong bg-surface-raised shadow-floating z-50"
     >
+      <div className="px-3 py-2 border-b border-edge">
+        <div className="text-micro font-medium uppercase tracking-wider text-ink-muted">
+          Connected to
+        </div>
+        <div className="mt-0.5 flex items-baseline gap-1.5">
+          <span className="font-mono text-body text-ink truncate" title={target.label}>
+            {target.label}
+          </span>
+          <span className="text-micro text-ink-muted flex-shrink-0">{target.detail}</span>
+        </div>
+      </div>
+
       <div className="px-3 py-2 border-b border-edge text-micro font-medium uppercase tracking-wider text-ink-muted">
         Connections
       </div>

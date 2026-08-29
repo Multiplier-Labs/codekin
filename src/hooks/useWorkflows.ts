@@ -1,12 +1,16 @@
 /**
  * React hook for workflow engine data.
  *
- * Provides runs, schedules, and config state with auto-polling
- * and action helpers (trigger, cancel, refresh, addRepo, removeRepo).
- * Polls at 5s when any run is active, 15s otherwise.
+ * Provides runs, schedules, and config state with action helpers (trigger,
+ * cancel, refresh, addRepo, removeRepo). Updates are push-driven: the server
+ * broadcasts `workflow_event` on every run/step transition and the hook
+ * refreshes on each one (debounced — step events arrive in bursts). A slow
+ * poll remains as the safety net for missed events (page hidden during a
+ * socket drop, server restarted mid-run).
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { subscribeWorkflowEvents } from '../lib/workflowEvents'
 import {
   listRuns,
   listSchedules,
@@ -24,8 +28,10 @@ import {
   type WebhookSetupResult,
 } from '../lib/workflowApi'
 
-const POLL_FAST_MS = 5_000
-const POLL_SLOW_MS = 15_000
+/** Safety-net poll interval — push events are the primary update signal. */
+const POLL_FALLBACK_MS = 60_000
+/** Collapse a burst of step events into one refresh. */
+const EVENT_DEBOUNCE_MS = 300
 
 interface UseWorkflowsResult {
   runs: WorkflowRun[]
@@ -70,17 +76,24 @@ export function useWorkflows(token: string): UseWorkflowsResult {
     }
   }, [token])
 
-  // Adaptive polling: fast when runs are active, slow otherwise
-  const hasActiveRuns = runs.some(r => r.status === 'running' || r.status === 'queued')
-  const intervalMs = hasActiveRuns ? POLL_FAST_MS : POLL_SLOW_MS
-
+  // Push-driven updates: refresh on every workflow_event (debounced against
+  // step-event bursts), with a slow poll as the safety net for missed events.
   useEffect(() => {
     void refresh()
-    pollRef.current = setInterval(refresh, intervalMs)
+    pollRef.current = setInterval(refresh, POLL_FALLBACK_MS)
+    let debounce: ReturnType<typeof setTimeout> | null = null
+    const unsubscribe = subscribeWorkflowEvents((event) => {
+      // The channel carries both engines; loop events belong to LoopRunsView.
+      if (event.engine === 'loop') return
+      if (debounce) clearTimeout(debounce)
+      debounce = setTimeout(() => { void refresh() }, EVENT_DEBOUNCE_MS)
+    })
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
+      if (debounce) clearTimeout(debounce)
+      unsubscribe()
     }
-  }, [refresh, intervalMs])
+  }, [refresh])
 
   const triggerRun = useCallback(async (kind: string, input?: Record<string, unknown>) => {
     try {

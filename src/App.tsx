@@ -33,6 +33,7 @@ import { useOpenCodeCommands } from './hooks/useOpenCodeCommands'
 import { useProviderValidation } from './hooks/useProviderValidation'
 import { buildSlashCommandList, buildOpenCodeSlashCommandList } from './lib/slashCommands'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
+import { emitWorkflowEvent } from './lib/workflowEvents'
 import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo } from './lib/ccApi'
 import { Settings } from './components/Settings'
 import { LeftSidebar } from './components/LeftSidebar'
@@ -55,7 +56,21 @@ import { useClaudeModelSync } from './hooks/useClaudeModelSync'
 const isHosted = import.meta.env.VITE_APP_MODE === 'hosted'
 const ShareDialog = lazy(() => import('./hosted/ShareDialog').then(m => ({ default: m.ShareDialog })))
 
-export default function App() {
+interface AppProps {
+  /**
+   * Hosted only: connect this workspace to a different machine. Supplied by
+   * MachineWorkspace and handed to Settings, which is where the machine list
+   * now lives. Undefined in the local build, which has no machines.
+   */
+  onSwitchMachine?: (machine: import('./hosted/machines').Machine) => void
+  /**
+   * Hosted only: leave this machine for the picker. Also handed to Settings —
+   * it replaced the floating exit button that used to sit over the transcript.
+   */
+  onDisconnectMachine?: () => void
+}
+
+export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps = {}) {
   const { settings, updateSettings } = useSettings()
   const { groups, repos, globalSkills, globalModules, ghMissing, refresh: refreshRepos } = useRepos(settings.token)
   const { sessions, rename: renameSession, remove: removeSession, refresh: refreshSessions } = useSessions(settings.token)
@@ -207,6 +222,10 @@ export default function App() {
         if (tool === 'edit' || tool === 'write' || tool === 'patch') {
           setHasFileChanges(true)
         }
+      } else if (msg.type === 'workflow_event') {
+        // Server-pushed workflow progress — forwarded so useWorkflows can
+        // refresh on events instead of fast-polling.
+        emitWorkflowEvent(msg)
       }
     },
   })
@@ -878,6 +897,9 @@ export default function App() {
         agentName={agentName}
         onAgentNameChange={setAgentName}
         repos={repos}
+        hostedMachineId={hostedMachineId}
+        onSwitchMachine={onSwitchMachine}
+        onDisconnectMachine={onDisconnectMachine}
       />
       <CommandPalette
         open={paletteOpen}

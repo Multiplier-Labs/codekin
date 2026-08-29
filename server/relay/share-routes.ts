@@ -8,6 +8,7 @@
 
 import { Router } from 'express'
 import type Database from 'better-sqlite3'
+import type { BrowserHub } from './browser-hub.js'
 import { createRequireActiveUser } from './relay-auth-routes.js'
 import {
   SHARE_ROLES,
@@ -20,7 +21,6 @@ import {
   upsertShare,
 } from './shares.js'
 import type { SessionPermission, ShareRole } from './shares.js'
-import type { BrowserHub } from './browser-hub.js'
 import { listAuditEvents, recordAuditEvent } from './audit.js'
 
 /** Upper bound on a single CSV export, so one request cannot read the table. */
@@ -96,13 +96,23 @@ export function createShareRouter(db: Database.Database, browserHub?: BrowserHub
       res.status(400).json({ error: 'granteeLogin is required' })
       return
     }
-    const grantee = db
+    const granteeMatches = db
       .prepare('SELECT id, status FROM users WHERE lower(login) = lower(?)')
-      .get(body.granteeLogin) as { id: string; status: string } | undefined
-    if (!grantee) {
+      .all(body.granteeLogin) as Array<{ id: string; status: string }>
+    if (granteeMatches.length === 0) {
       res.status(404).json({ error: 'No such user has signed in yet' })
       return
     }
+    // Logins are mutable: after a GitHub rename, two rows can hold the same
+    // login until the current holder signs in again (which clears the stale
+    // one). Refusing beats granting access to whichever row came back first.
+    if (granteeMatches.length > 1) {
+      res.status(409).json({
+        error: 'More than one account has used that login; ask the intended user to sign in again, then retry',
+      })
+      return
+    }
+    const grantee = granteeMatches[0]
     if (grantee.id === user.id) {
       res.status(400).json({ error: 'You already own this session' })
       return
@@ -126,7 +136,9 @@ export function createShareRouter(db: Database.Database, browserHub?: BrowserHub
       permissions,
       expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : null,
     })
-    browserHub?.revalidateMachine(share.machineId, share.granteeUserId ?? undefined)
+    if (share.granteeUserId) {
+      browserHub?.reauthorize({ userId: share.granteeUserId, machineId: share.machineId })
+    }
 
     recordAuditEvent(db, {
       kind: 'session_shared',
@@ -167,7 +179,11 @@ export function createShareRouter(db: Database.Database, browserHub?: BrowserHub
       permissions,
       typeof body.expiresAt === 'string' ? body.expiresAt : body.expiresAt === null ? null : undefined,
     )
-    browserHub?.revalidateMachine(share.machineId, share.granteeUserId ?? undefined)
+    // A connected grantee is working from the permissions resolved at hello;
+    // drop their sockets so a reconnect picks up the narrowed grant.
+    if (share.granteeUserId) {
+      browserHub?.reauthorize({ userId: share.granteeUserId, machineId: share.machineId })
+    }
 
     recordAuditEvent(db, {
       kind: 'session_shared',
@@ -195,7 +211,11 @@ export function createShareRouter(db: Database.Database, browserHub?: BrowserHub
     }
 
     deleteShare(db, share.id)
-    browserHub?.revalidateMachine(share.machineId, share.granteeUserId ?? undefined)
+    // Revocation must reach sockets that are already open, not just the next
+    // connection attempt.
+    if (share.granteeUserId) {
+      browserHub?.reauthorize({ userId: share.granteeUserId, machineId: share.machineId })
+    }
     recordAuditEvent(db, {
       kind: 'session_unshared',
       actorUserId: user.id,

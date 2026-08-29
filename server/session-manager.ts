@@ -797,6 +797,7 @@ export class SessionManager {
       lastActivity: new Date(s._lastActivityAt).toISOString(),
       source: s.source,
       provider: s.provider,
+      model: s.model,
     }
   }
 
@@ -875,10 +876,12 @@ export class SessionManager {
           session._leaveGraceTimer = null
           // Re-check: if still no clients after grace period, auto-deny
           if (session.clients.size === 0) {
-            // Orchestrator-managed child sessions are NOT auto-denied: the
-            // orchestrator is notified of pending prompts (onSessionPrompt)
-            // and can respond via the API. A user briefly opening and closing
-            // the child's tab must not kill its pending approvals. The 5-min
+            // Agent sessions (orchestrator children and goal-run maker/checker
+            // sessions) are NOT auto-denied: both watchers subscribe to
+            // onSessionPrompt — the orchestrator notifies its parent and can
+            // respond via the API; the goal-run controller marks its run
+            // `blocked` in the ledger. A user briefly opening and closing the
+            // session's tab must not kill its pending approvals. The 5-min
             // approval timeout in PromptRouter remains the backstop.
             if (session.source === 'agent') {
               const pending = session.pendingControlRequests.size + session.pendingToolApprovals.size

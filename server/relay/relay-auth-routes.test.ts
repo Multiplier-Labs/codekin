@@ -16,8 +16,8 @@ const CONFIG: RelayConfig = {
   githubClientId: 'client-id',
   githubClientSecret: 'client-secret',
   sessionSecret: 's'.repeat(32),
-  ownerGithubLogin: 'alari76',
-  allowedGithubLogins: ['alari76'],
+  ownerGithubId: 1,
+  allowedGithubIds: [1],
   dataDir: '/tmp',
   isProduction: false,
 }
@@ -126,6 +126,21 @@ describe('relay auth routes', () => {
 
   it('rejects a non-allowlisted user without creating an account', async () => {
     await start(githubFetchMock({ id: 2, login: 'stranger' }))
+    const startRes = await fetch(`${baseUrl}/api/auth/github/start`, { redirect: 'manual' })
+    const location = new URL(startRes.headers.get('location') ?? '')
+    const cbRes = await fetch(
+      `${baseUrl}/api/auth/github/callback?code=abc&state=${location.searchParams.get('state') ?? ''}`,
+      { redirect: 'manual', headers: { cookie: cookieOf(startRes) } },
+    )
+    expect(cbRes.headers.get('location')).toBe('/?auth_error=access_not_allowed')
+    const count = db.prepare('SELECT COUNT(*) AS count FROM users').get() as { count: number }
+    expect(count.count).toBe(0)
+  })
+
+  it('does not grant owner to a different GitHub account that claimed the owner login', async () => {
+    // GitHub releases renamed logins for re-registration; the numeric id is
+    // the identity, so the same login with a different id is rejected.
+    await start(githubFetchMock({ id: 31337, login: 'alari76' }))
     const startRes = await fetch(`${baseUrl}/api/auth/github/start`, { redirect: 'manual' })
     const location = new URL(startRes.headers.get('location') ?? '')
     const cbRes = await fetch(

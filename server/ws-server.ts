@@ -374,6 +374,12 @@ app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestrat
 // Goal Run (loop) router — durable act→verify→continue loops with an evidence ledger.
 const goalRunStore = new GoalRunStore()
 const goalRunController = new GoalRunController(sessions, goalRunStore)
+// Runs left non-terminal by the previous process can never progress — fail them
+// honestly at boot instead of leaving them stuck in `running` forever.
+const interruptedGoalRuns = goalRunController.failInterrupted()
+if (interruptedGoalRuns.length) {
+  console.log(`[goal-runs] Failed ${interruptedGoalRuns.length} run(s) interrupted by restart: ${interruptedGoalRuns.join(', ')}`)
+}
 app.use('/api/goal-runs', createGoalRunRouter(verifyToken, extractToken, goalRunStore, goalRunController))
 
 // --- SPA fallback: serve index.html for non-API routes (client-side routing) ---
@@ -643,6 +649,26 @@ server.listen(port, '0.0.0.0', () => {
         runId: event.runId,
         kind: event.kind,
         stepKey: event.stepKey,
+        status: event.status,
+      }
+      const data = JSON.stringify(msg)
+      for (const ws of wss.clients) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(data)
+        }
+      }
+    })
+
+    // Broadcast goal-run (loop) events on the same channel, tagged with
+    // engine:'loop' so clients can tell the two apart. One push stream for
+    // all background runs.
+    goalRunStore.setEventListener((event) => {
+      const msg: WsServerMessage = {
+        type: 'workflow_event',
+        engine: 'loop',
+        eventType: event.eventType,
+        runId: event.runId,
+        kind: event.kind,
         status: event.status,
       }
       const data = JSON.stringify(msg)

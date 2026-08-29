@@ -7,7 +7,7 @@
 
 ## Executive summary
 
-New account creation is **not blocked**. Any GitHub user can complete OAuth and a row is inserted in the `users` table. A login not named by `OWNER_GITHUB_LOGIN` or `ALLOWED_GITHUB_LOGINS` receives `status = pending`; protected REST routes and new browser WebSocket connections then refuse access. This currently prevents a newly created, non-allowlisted account from reaching a machine or repository, but it still permits unbounded pending-account creation and retention of the GitHub profile/email collected during OAuth.
+At the audit anchor, new account creation was **not blocked**. Any GitHub user could complete OAuth and receive a `pending` database row. The remediation rejects new identities whose immutable numeric GitHub ID is outside `OWNER_GITHUB_ID` and `ALLOWED_GITHUB_IDS`, before inserting a user.
 
 The main repository boundary is structurally sound: the GitHub OAuth token requests only identity scopes and is discarded after profile lookup; repository access occurs through a paired local connector. A browser must own the paired machine or have a session-specific share, and the connector independently enforces the path and session permission policy before using the local machine token.
 
@@ -17,9 +17,9 @@ Existing sessions are not fully revocable. Disabling an account blocks later pro
 
 | ID | Severity | Finding | Status |
 |---|---|---|---|
-| HSA-01 | High | Account disablement does not terminate already-open browser WebSockets | Fixed in PR #577 |
-| HSA-02 | High | Share revocation/expiry does not affect already-open browser WebSockets | Fixed in PR #577 |
-| HSA-03 | Medium | Removing a login from the allowlist does not revoke an active account | Fixed in PR #577 |
+| HSA-01 | High | Account disablement does not terminate already-open browser WebSockets | Fixed in PR #566/#567 |
+| HSA-02 | High | Share revocation/expiry does not affect already-open browser WebSockets | Fixed in PR #566; expiry bound tightened in #577 |
+| HSA-03 | Medium | Removing an ID from the allowlist does not revoke an active account | Mitigated by admin revocation in PR #567 |
 | HSA-04 | Low | OAuth creates pending accounts instead of rejecting non-allowlisted identities before persistence | Fixed in PR #577 |
 | HSA-05 | Low | No explicit server-side session inventory or “log out all sessions” control exists | Partially fixed in PR #577 |
 
@@ -41,9 +41,9 @@ This enables continued viewing of and interaction with another person's coding s
 
 ### HSA-03 — Allowlist removal does not deactivate existing users — Medium
 
-`upsertUserFromGithub` only upgrades `pending` users to `active`; it deliberately never demotes an existing active user when their login disappears from `ALLOWED_GITHUB_LOGINS`. Therefore changing the environment allowlist is not a revocation operation. Operators must update the database status to `disabled`, and even that currently leaves HSA-01's live-socket window.
+`upsertUserFromGithub` only upgrades `pending` users to `active`; it deliberately never demotes an existing active user when their numeric ID disappears from `ALLOWED_GITHUB_IDS`. Therefore changing the environment allowlist is not itself a revocation operation. PR #567 added an owner/admin endpoint that disables a user and immediately reauthorizes their live sockets.
 
-**Recommendation:** provide an authenticated owner/admin user-management endpoint or CLI with an atomic “disable user” operation that changes status, removes server-side sessions, and closes live sockets. Document clearly that allowlist removal alone is not sufficient, or change login reconciliation to fail closed.
+**Recommendation:** document clearly that allowlist removal alone is not sufficient and use the owner/admin user-management endpoint to disable access.
 
 ### HSA-04 — Non-allowlisted OAuth users are persisted as pending — Low
 
@@ -81,7 +81,7 @@ On 2026-08-29, unauthenticated checks confirmed:
 - Its cookie includes `HttpOnly; Secure; SameSite=Lax`.
 - The service sends `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and `Referrer-Policy: same-origin`.
 
-These checks cannot reveal the production value of `ALLOWED_GITHUB_LOGINS`, prove session-secret handling on the host, or safely complete OAuth as a non-allowlisted test identity. The code's default behavior is nevertheless unambiguous: unknown GitHub identities are created as pending accounts.
+These checks cannot reveal the production value of `ALLOWED_GITHUB_IDS`, prove session-secret handling on the host, or safely complete OAuth as a non-allowlisted test identity.
 
 ## Verification limitations
 
@@ -91,9 +91,8 @@ The fixes were dynamically verified against the in-process relay and connector t
 
 PR #577 was extended with the runtime fixes after the initial audit:
 
-- GitHub identities outside `OWNER_GITHUB_LOGIN` and `ALLOWED_GITHUB_LOGINS` are rejected before user insertion. Existing disallowed identities are also rejected and have stored sessions disconnected.
-- Existing active users removed from the allowlist are demoted at control-plane startup and all of their stored sessions are destroyed.
-- `BrowserHub` re-resolves the database user and machine grants on every incoming frame and every five seconds for passive connections. Disabled/deleted users and revoked/expired shares receive WebSocket close code 4003.
+- New GitHub identities outside `OWNER_GITHUB_ID` and `ALLOWED_GITHUB_IDS` are rejected before user insertion.
+- PR #566/#567 immediately reauthorizes sockets after user, machine, or share revocation. PR #577 tightens the background reauthorization bound from 60 seconds to five seconds for direct database changes and share expiry.
 - Share creation/update/deletion triggers immediate revalidation. Any grant change forces reconnection so connector channels cannot retain a previously broader permission snapshot.
 - `POST /api/auth/logout-all` destroys every server-side web session for the current user and disconnects their live browser sockets.
 - The hosted login page gives a specific private-instance message for rejected GitHub accounts.
@@ -101,8 +100,8 @@ PR #577 was extended with the runtime fixes after the initial audit:
 Post-remediation verification:
 
 ```text
-Test Files  14 passed (14)
-Tests       154 passed (154)
+Test Files  20 passed (20)
+Tests       209 passed (209)
 ```
 
 Both the root production build (`tsc -b && vite build`) and server TypeScript build pass. The remaining portion of HSA-05 is product-facing session inventory/per-device management; global revocation is now available server-side.

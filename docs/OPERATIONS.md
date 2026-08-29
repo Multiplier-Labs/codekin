@@ -338,8 +338,8 @@ misconfiguration fails at start rather than at first login.
 |---|---|---|
 | `SESSION_SECRET` | yes | ≥ 32 chars; signs session cookies |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | yes | GitHub **OAuth App** credentials |
-| `OWNER_GITHUB_LOGIN` | yes | gets the owner role |
-| `ALLOWED_GITHUB_LOGINS` | no | comma-separated; others land in `pending` |
+| `OWNER_GITHUB_ID` | yes | numeric GitHub user id; gets the owner role |
+| `ALLOWED_GITHUB_IDS` | no | comma-separated numeric ids; others land in `pending` |
 | `PUBLIC_URL` | no | default `http://localhost:5173`; must match the OAuth callback host |
 | `RELAY_PORT` | no | default 32360, bound to 127.0.0.1 |
 | `AUDIT_RETENTION_DAYS` | no | default 90; `0` disables pruning |
@@ -347,6 +347,39 @@ misconfiguration fails at start rather than at first login.
 
 The OAuth App's **Authorization callback URL** must be exactly
 `<PUBLIC_URL>/api/auth/github/callback`.
+
+Access is keyed by GitHub's immutable numeric user id, not by login: logins
+can be renamed and re-registered by strangers, so a login-keyed allowlist is
+a takeover vector. Look up an id with `curl -s https://api.github.com/users/<login>`
+(the `id` field). The former `OWNER_GITHUB_LOGIN` / `ALLOWED_GITHUB_LOGINS`
+keys are ignored, and the server refuses to boot until the id keys replace them.
+
+### Managing access
+
+New users land in `pending` and see a request-access screen; an id in
+`ALLOWED_GITHUB_IDS` starts them `active`. To grant, revoke, or promote after
+the fact, an **owner or admin** uses the user-admin API (there is no UI yet):
+
+```bash
+# List users (id, login, role, status, isOwner)
+curl -s --cookie "codekin_relay_sid=…" https://app.codekin.ai/api/users
+
+# Revoke access immediately (also drops the user's open relay sockets)
+curl -X PATCH https://app.codekin.ai/api/users/<id> \
+  --cookie "codekin_relay_sid=…" -H 'Content-Type: application/json' \
+  -d '{"status":"disabled"}'
+
+# Re-enable, or (owner only) change role to admin/member/viewer
+curl -X PATCH https://app.codekin.ai/api/users/<id> \
+  --cookie … -H 'Content-Type: application/json' -d '{"status":"active"}'
+```
+
+`disabled` is the revocation path and is sticky — a login never re-activates a
+disabled user. The configured owner account cannot be changed here and no one
+may change their own access, so neither a mistake nor a hostile admin can lock
+the owner out or an admin lock themselves in. Only the owner may change roles;
+`owner` is not an assignable role (it follows `OWNER_GITHUB_ID`). Every change
+is written to the audit log as `user_updated`.
 
 ### Deploying
 

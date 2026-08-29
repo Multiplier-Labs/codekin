@@ -12,7 +12,7 @@ import {
   removeMachine,
 } from './pairing.js'
 
-const POLICY = { ownerGithubLogin: 'alari76', allowedGithubLogins: [] }
+const POLICY = { ownerGithubId: 1, allowedGithubIds: [] }
 
 describe('pairing lifecycle', () => {
   let db: Database.Database

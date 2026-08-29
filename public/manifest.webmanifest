@@ -1,0 +1,17 @@
+{
+  "name": "Codekin",
+  "short_name": "Codekin",
+  "description": "Web terminal for your coding agents",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0d0e",
+  "theme_color": "#0b0d0e",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

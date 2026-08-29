@@ -4,7 +4,7 @@
  * with Authelia providing the outer auth session.
  */
 
-import type { CodekinTransport } from './types'
+import type { CodekinTransport, TransportTarget } from './types'
 
 /** Base path for the Codekin server REST API (proxied by nginx/Vite). */
 const BASE = '/cc'
@@ -76,6 +76,11 @@ export class LocalHttpTransport implements CodekinTransport {
 
   externalUrl(path: string): string {
     return `${location.protocol}//${location.host}${BASE}${path}`
+  }
+
+  /** The server is behind this page's own origin, so that is the target. */
+  describeTarget(): TransportTarget {
+    return { label: location.host, detail: 'Direct' }
   }
 
   /**

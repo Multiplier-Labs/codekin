@@ -36,6 +36,7 @@ describe('checkProxyRequest', () => {
     expect(checkProxyRequest(asOwner({ method: 'DELETE', path: '/api/sessions/abc' })).allowed).toBe(true)
     expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/upload' })).allowed).toBe(true)
     expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/approvals' })).allowed).toBe(true)
+    expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/clone' })).allowed).toBe(true)
   })
 
   it('refuses mutations on read-only prefixes', () => {
@@ -154,6 +155,14 @@ describe('principal enforcement', () => {
       expect(decision.error?.code).toBe(RELAY_ERROR.notPermitted)
     }
     expect(checkProxyRequest({ method: 'POST', path: '/api/sessions/create', principal }).allowed).toBe(false)
+  })
+
+  it('keeps cloning owner-only', () => {
+    const decision = checkProxyRequest({
+      method: 'POST', path: '/api/clone', principal: grantee({ 's1': ['view', 'upload_file'] }),
+    })
+    expect(decision.allowed).toBe(false)
+    expect(decision.error?.code).toBe(RELAY_ERROR.notPermitted)
   })
 
   it('gates uploads on the upload_file permission', () => {

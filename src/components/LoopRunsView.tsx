@@ -21,6 +21,7 @@ import {
   type LoopTemplateInfo,
 } from '../lib/goalRunApi'
 import { formatTime } from '../lib/workflowHelpers'
+import { subscribeWorkflowEvents } from '../lib/workflowEvents'
 
 const TERMINAL: ReadonlySet<GoalRunStatus> = new Set(['succeeded', 'failed', 'aborted', 'awaiting_human'])
 
@@ -35,6 +36,7 @@ function statusBadge(status: GoalRunStatus): string {
     case 'failed': return 'bg-error-8 text-error-2'
     case 'aborted': return 'bg-warning-8 text-warning-2'
     case 'awaiting_human': return 'bg-warning-7 text-warning-1'
+    case 'blocked': return 'bg-warning-7 text-warning-1 animate-pulse'
     case 'running': return 'bg-accent-8 text-accent-2 animate-pulse'
     case 'verifying': return 'bg-accent-8 text-accent-2 animate-pulse'
     case 'checking': return 'bg-primary-8 text-primary-2 animate-pulse'
@@ -88,12 +90,22 @@ export function LoopRunsView({ token, onNavigateToSession }: Props) {
     return () => { cancelled = true }
   }, [token])
 
-  // Poll the runs list while any run is still active.
+  // Push-driven updates: refresh on every loop run event (debounced against
+  // turn bursts), with a slow poll as the safety net for missed events.
   useEffect(() => {
-    if (!runs.some((r) => isActive(r.status))) return
-    const id = setInterval(() => { void refreshRuns() }, 4000)
-    return () => { clearInterval(id) }
-  }, [runs, refreshRuns])
+    const poll = setInterval(() => { void refreshRuns() }, 60_000)
+    let debounce: ReturnType<typeof setTimeout> | null = null
+    const unsubscribe = subscribeWorkflowEvents((event) => {
+      if (event.engine !== 'loop') return
+      if (debounce) clearTimeout(debounce)
+      debounce = setTimeout(() => { void refreshRuns() }, 300)
+    })
+    return () => {
+      clearInterval(poll)
+      if (debounce) clearTimeout(debounce)
+      unsubscribe()
+    }
+  }, [refreshRuns])
 
   // Fetch detail on selection (a stale detail is hidden by the id guard at render).
   useEffect(() => {
@@ -105,14 +117,14 @@ export function LoopRunsView({ token, onNavigateToSession }: Props) {
     return () => { cancelled = true }
   }, [selectedRunId, token])
 
-  // Poll detail while the selected run is active.
+  // Re-fetch detail when the runs list updates and the selected run is still
+  // active — the list itself is push-driven, so the detail rides the same
+  // events. The stale `detail.status` at the final transition still reads as
+  // active, which is exactly what triggers the closing fetch.
   useEffect(() => {
     if (!selectedRunId || !detail || !isActive(detail.status)) return
-    const id = setInterval(() => {
-      getGoalRun(token, selectedRunId).then(setDetail).catch(() => {})
-    }, 3000)
-    return () => { clearInterval(id) }
-  }, [selectedRunId, detail, token])
+    getGoalRun(token, selectedRunId).then(setDetail).catch(() => {})
+  }, [runs]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAbort = useCallback(async (runId: string) => {
     try {
@@ -387,7 +399,7 @@ function StartLoopModal({
     setSubmitting(true)
     try {
       const run = await startGoalRun(token, {
-        kind: kind as GoalRun['kind'],
+        kind,
         repo: repo.trim(),
         branch: branch.trim(),
         goal: goal.trim() || undefined,

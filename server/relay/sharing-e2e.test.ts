@@ -159,12 +159,12 @@ describe('a shared-in user over the relay', () => {
     owner = upsertUserFromGithub(
       db,
       { id: 1, login: 'owner', name: null, email: null, avatarUrl: null },
-      { ownerGithubLogin: 'owner', allowedGithubLogins: [] },
+      { ownerGithubId: 1, allowedGithubIds: [] },
     )
     guest = upsertUserFromGithub(
       db,
       { id: 2, login: 'guest', name: null, email: null, avatarUrl: null },
-      { ownerGithubLogin: 'owner', allowedGithubLogins: ['guest'] },
+      { ownerGithubId: 1, allowedGithubIds: [2] },
     )
     connectingUser = toSessionUser(guest)
 
@@ -368,7 +368,7 @@ describe('a shared-in user over the relay', () => {
     await browser.waitForFrame(f => f.kind === 'hello_ack')
 
     deleteShare(db, created.id)
-    browserHub.revalidateMachine(machineId, guest.id)
+    browserHub.reauthorize({ machineId, userId: guest.id })
     expect(await browser.closeCode).toBe(4003)
   })
 
@@ -380,7 +380,7 @@ describe('a shared-in user over the relay', () => {
     await browser.waitForFrame(f => f.kind === 'hello_ack')
 
     db.prepare('UPDATE session_shares SET expires_at = ? WHERE id = ?').run(new Date(0).toISOString(), created.id)
-    browserHub.revalidateAll()
+    browserHub.reauthorize()
     expect(await browser.closeCode).toBe(4003)
   })
 
@@ -395,7 +395,7 @@ describe('a shared-in user over the relay', () => {
       JSON.stringify(SHARE_ROLES.viewer),
       created.id,
     )
-    browserHub.revalidateMachine(machineId, guest.id)
+    browserHub.reauthorize({ machineId, userId: guest.id })
     expect(await browser.closeCode).toBe(4003)
   })
 
@@ -407,7 +407,7 @@ describe('a shared-in user over the relay', () => {
     await browser.waitForFrame(f => f.kind === 'hello_ack')
 
     db.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").run(guest.id)
-    browserHub.revalidateAll()
+    browserHub.reauthorize()
     expect(await browser.closeCode).toBe(4003)
   })
 
