@@ -12,6 +12,7 @@ import type { Repo } from '../types'
 import type { ApiRepo, RepoGroup } from '../hooks/useRepos'
 import { RepoList } from './RepoList'
 import { FolderPicker } from './FolderPicker'
+import { EnvironmentChecklist } from './EnvironmentChecklist'
 import { cloneRepo, getReposPath, setReposPath as setReposPathApi } from '../lib/ccApi'
 
 interface Props {
@@ -74,22 +75,11 @@ export function RepoSelector({ groups, token, ghMissing, onOpen, onRefreshRepos 
           <h2 className="text-head font-medium text-ink">Choose a repository to start a session</h2>
         </div>
 
-        {ghMissing ? (
-          <div className="rounded-control border border-warning-5/30 bg-warning-5/10 px-4 py-3 text-body text-ink">
-            <p className="mb-2 font-medium text-warning-4">GitHub CLI (gh) not found</p>
-            <p className="text-ink-muted">The repo browser needs <code className="rounded-control bg-edge-strong px-1 py-0.5 text-ink">gh</code> to list and clone your repositories.</p>
-            <p className="mt-2 text-ink-muted">
-              Install it:{' '}
-              <a href="https://cli.github.com" target="_blank" rel="noreferrer" className="text-warning-4 underline underline-offset-2 hover:text-warning-3">
-                https://cli.github.com
-              </a>
-            </p>
-            <p className="mt-1 text-ink-muted">
-              Then run: <code className="rounded-control bg-edge-strong px-1 py-0.5 text-ink">gh auth login</code>
-            </p>
-          </div>
-        ) : totalRepos === 0 ? (
-          <p className="text-center text-title text-ink-faint">No repositories configured</p>
+        {/* Live environment checks — agents, gh, repos — with fixes inline. */}
+        <EnvironmentChecklist ghMissing={ghMissing ?? false} repoCount={totalRepos} />
+
+        {totalRepos === 0 ? (
+          <p className="text-center text-title text-ink-faint">No repositories yet</p>
         ) : (
           <>
             <RepoList
