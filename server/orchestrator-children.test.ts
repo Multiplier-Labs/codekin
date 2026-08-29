@@ -15,6 +15,7 @@ vi.mock('./orchestrator-outbox.js', () => ({
 }))
 
 import { OrchestratorChildManager, AGENT_CHILD_ALLOWED_TOOLS, type ChildSessionRequest } from './orchestrator-children.js'
+import { RunStore } from './run-store.js'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1050,6 +1051,59 @@ describe('OrchestratorChildManager', () => {
 
       expect(child.status).toBe('blocked')
       expect(manager.activeCount()).toBe(1)
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // unified run store persistence
+  // -------------------------------------------------------------------------
+
+  describe('run store persistence', () => {
+    let runStore: RunStore
+
+    beforeEach(() => {
+      sessions = makeMockSessions()
+      runStore = new RunStore(':memory:')
+      manager = new OrchestratorChildManager(sessions, {
+        exec: vi.fn(async () => '[{"number": 1}]'),
+        runStore,
+      })
+    })
+
+    afterEach(() => {
+      runStore.close()
+    })
+
+    it('persists a spawned child as an agent run with a spawn ledger entry', async () => {
+      const child = await manager.spawn(makeRequest())
+
+      const run = runStore.getRun(child.id)
+      expect(run).toMatchObject({
+        engine: 'agent',
+        kind: 'child',
+        status: 'running',
+        title: 'Fix the login bug',
+        repo: '/repos/myproject',
+        branch: 'fix/login-bug',
+        sessionIds: [child.id],
+      })
+      expect(runStore.listLedger(child.id)[0].summary).toContain('Spawned')
+    })
+
+    it('persists a blocked transition with a ledger note when a prompt fires', async () => {
+      const child = await manager.spawn(makeRequest())
+      for (const l of sessions._promptListeners) l(child.id, 'permission', 'Bash', 'req-1')
+
+      expect(runStore.getRun(child.id)?.status).toBe('blocked')
+      expect(runStore.listLedger(child.id).some((e) => e.summary.includes('approval for Bash'))).toBe(true)
+    })
+
+    it('persists a spawn failure as a failed run', async () => {
+      sessions.startClaude.mockImplementation(() => { throw new Error('no CLI') })
+      const child = await manager.spawn(makeRequest())
+
+      expect(child.status).toBe('failed')
+      expect(runStore.getRun(child.id)).toMatchObject({ status: 'failed', error: 'no CLI' })
     })
   })
 })

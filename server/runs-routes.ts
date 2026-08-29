@@ -11,6 +11,7 @@
 import { Router } from 'express'
 import type { Request, Response } from 'express'
 import type { GoalRunStore } from './goal-run-store.js'
+import type { RunStore } from './run-store.js'
 import type { WorkflowEngine } from './workflow-engine.js'
 import { mergeRuns, type UnifiedRun } from './unified-runs.js'
 import { TERMINAL_RUN_STATUSES, type RunLifecycleStatus } from './run-status.js'
@@ -18,7 +19,7 @@ import { TERMINAL_RUN_STATUSES, type RunLifecycleStatus } from './run-status.js'
 type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
 
-const ENGINES = ['workflow', 'loop'] as const
+const ENGINES = ['workflow', 'loop', 'agent'] as const
 
 export function createRunsRouter(
   verifyToken: VerifyFn,
@@ -26,6 +27,8 @@ export function createRunsRouter(
   /** Lazy — the workflow engine may not be initialized (quiet mode, init failure). */
   getEngine: () => WorkflowEngine | null,
   goalRuns: GoalRunStore,
+  /** Unified store — orchestrator children (engine 'agent') live here. */
+  runStore?: RunStore,
 ): Router {
   const router = Router()
 
@@ -45,10 +48,11 @@ export function createRunsRouter(
       return res.status(400).json({ error: `Invalid engine: ${engine}` })
     }
 
-    const workflowRuns = engine === 'loop' ? [] : (getEngine()?.listRuns({ limit }) ?? [])
-    const goalRunRows = engine === 'workflow' ? [] : goalRuns.listRuns({ limit })
+    const workflowRuns = engine && engine !== 'workflow' ? [] : (getEngine()?.listRuns({ limit }) ?? [])
+    const goalRunRows = engine && engine !== 'loop' ? [] : goalRuns.listRuns({ limit })
+    const storedRuns = engine && engine !== 'agent' ? [] : (runStore?.listRuns({ engine: 'agent', limit }) ?? [])
 
-    let runs: UnifiedRun[] = mergeRuns(workflowRuns, goalRunRows, limit)
+    let runs: UnifiedRun[] = mergeRuns(workflowRuns, goalRunRows, limit, storedRuns)
     if (status) runs = runs.filter((r) => r.status === status)
     res.json({ runs })
   })

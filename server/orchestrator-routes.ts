@@ -12,6 +12,7 @@ import { getOrCreateOrchestratorId } from './orchestrator-manager.js'
 import { OrchestratorMemory } from './orchestrator-memory.js'
 import { OrchestratorChildManager } from './orchestrator-children.js'
 import type { OrchestratorMonitor } from './orchestrator-monitor.js'
+import type { RunStore } from './run-store.js'
 import { createSessionRouter } from './orchestrator-session-router.js'
 import { createMemoryRouter } from './orchestrator-memory-router.js'
 import { createLearningRouter } from './orchestrator-learning-router.js'
@@ -28,10 +29,11 @@ export function createOrchestratorRouter(
   verifyTokenOrSessionToken?: VerifySessionFn,
   injectedMemory?: OrchestratorMemory,
   injectedChildren?: OrchestratorChildManager,
+  runStore?: RunStore,
 ): Router {
   const router = Router()
   const memory = injectedMemory ?? new OrchestratorMemory()
-  const children = injectedChildren ?? new OrchestratorChildManager(sessions)
+  const children = injectedChildren ?? new OrchestratorChildManager(sessions, { runStore })
 
   /**
    * Verify that the request is authorized — accepts either the master auth

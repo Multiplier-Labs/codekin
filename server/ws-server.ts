@@ -36,6 +36,7 @@ import { GoalRunStore } from './goal-run-store.js'
 import { GoalRunController } from './goal-run-controller.js'
 import { createGoalRunRouter } from './goal-run-routes.js'
 import { createRunsRouter } from './runs-routes.js'
+import { RunStore } from './run-store.js'
 import { CommitEventHandler } from './commit-event-handler.js'
 import { jsonParse } from './json-parse.js'
 import { createMessageRateLimiter } from './ws-rate-limit.js'
@@ -369,9 +370,16 @@ app.use(createDocsRouter(verifyToken, extractToken))
 // Workflow router — commitEventHandler is set after engine init, but the
 // router closure captures the variable reference so it will resolve correctly.
 app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessions, commitEventState))
+// Unified run store — orchestrator children persist here as engine:'agent'
+// runs. Children orphaned by the previous process are failed honestly at boot.
+const runStore = new RunStore()
+const interruptedAgentRuns = runStore.failInterrupted('agent')
+if (interruptedAgentRuns.length) {
+  console.log(`[run-store] Failed ${interruptedAgentRuns.length} agent run(s) interrupted by restart`)
+}
 // Orchestrator router — monitorRef is populated after workflow engine init
 const orchestratorMonitorRef: { current: OrchestratorMonitor | null } = { current: null }
-app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken))
+app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, undefined, runStore))
 // Goal Run (loop) router — durable act→verify→continue loops with an evidence ledger.
 const goalRunStore = new GoalRunStore()
 const goalRunController = new GoalRunController(sessions, goalRunStore)
@@ -389,7 +397,7 @@ app.use('/api/runs', createRunsRouter(verifyToken, extractToken, () => {
   } catch {
     return null
   }
-}, goalRunStore))
+}, goalRunStore, runStore))
 
 // --- SPA fallback: serve index.html for non-API routes (client-side routing) ---
 if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
@@ -677,6 +685,24 @@ server.listen(port, '0.0.0.0', () => {
       const msg: WsServerMessage = {
         type: 'workflow_event',
         engine: 'loop',
+        eventType: event.eventType,
+        runId: event.runId,
+        kind: event.kind,
+        status: event.status,
+      }
+      const data = JSON.stringify(msg)
+      for (const ws of wss.clients) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(data)
+        }
+      }
+    })
+
+    // Agent (orchestrator-child) run events on the same channel.
+    runStore.setEventListener((event) => {
+      const msg: WsServerMessage = {
+        type: 'workflow_event',
+        engine: event.engine,
         eventType: event.eventType,
         runId: event.runId,
         kind: event.kind,

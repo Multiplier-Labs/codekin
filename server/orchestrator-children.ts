@@ -12,6 +12,8 @@ import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
 import { getAgentDisplayName } from './config.js'
 import { AGENT_ALLOWED_TOOLS } from './agent-allowlist.js'
+import type { RunStore } from './run-store.js'
+import type { RunLifecycleStatus } from './run-status.js'
 import {
   sendOrchestratorNotification,
   type OrchestratorNotifyArgs,
@@ -147,11 +149,14 @@ export class OrchestratorChildManager {
    */
   private timeoutControllers = new Map<string, { pause(): void; resume(): void }>()
   private exec: ExecFn
+  /** Unified run store — children persist as engine:'agent' runs when set. */
+  private runStore: RunStore | null
 
-  constructor(sessions: SessionManager, opts?: { notify?: ChildNotifyFn; exec?: ExecFn }) {
+  constructor(sessions: SessionManager, opts?: { notify?: ChildNotifyFn; exec?: ExecFn; runStore?: RunStore }) {
     this.sessions = sessions
     this.notify = opts?.notify ?? ((args) => sendOrchestratorNotification(sessions, args))
     this.exec = opts?.exec ?? defaultExec
+    this.runStore = opts?.runStore ?? null
     // Push a realtime notification to the parent orchestrator whenever one of
     // our children blocks on a tool approval or question. Without this, a
     // blocked child would silently sit until its timeout killed it.
@@ -184,6 +189,7 @@ export class OrchestratorChildManager {
     const dedupKey = requestId ?? `${sessionId}:${toolName ?? 'unknown'}`
     if (this.notifiedPromptIds.has(dedupKey)) return
     this.notifiedPromptIds.add(dedupKey)
+    this.persistRun(child, `Blocked: waiting on ${promptType === 'question' ? 'a question' : `approval for ${toolName ?? 'a tool'}`}.`)
     if (this.notifiedPromptIds.size > MAX_NOTIFIED_PROMPT_IDS) {
       // Drop oldest entries (Set preserves insertion order)
       for (const id of this.notifiedPromptIds) {
@@ -296,6 +302,47 @@ export class OrchestratorChildManager {
   }
 
   /**
+   * Sync a child's current state into the unified run store (no-op without
+   * one). The child's session id doubles as the run id; status maps onto the
+   * shared vocabulary (starting→queued, completed→succeeded,
+   * timed_out→failed with the error preserved). `note` adds a ledger entry.
+   */
+  private persistRun(child: ChildSession, note?: string): void {
+    if (!this.runStore) return
+    try {
+      const statusMap: Record<ChildStatus, RunLifecycleStatus> = {
+        starting: 'queued',
+        running: 'running',
+        blocked: 'blocked',
+        completed: 'succeeded',
+        failed: 'failed',
+        timed_out: 'failed',
+      }
+      if (!this.runStore.getRun(child.id)) {
+        this.runStore.createRun({
+          id: child.id,
+          engine: 'agent',
+          kind: 'child',
+          title: child.request.task.slice(0, 200),
+          repo: child.request.repo,
+          branch: child.request.branchName,
+          spec: { ...child.request },
+          sessionIds: [child.id],
+        })
+      }
+      this.runStore.patchRun(child.id, {
+        status: statusMap[child.status],
+        error: child.status === 'timed_out' ? (child.error ?? 'timed out') : child.error,
+        completedAt: child.completedAt,
+      })
+      if (note) this.runStore.appendLedger(child.id, { summary: note })
+    } catch (err) {
+      // Persistence must never break child management.
+      console.error('[orchestrator-child] Failed to persist run state:', err)
+    }
+  }
+
+  /**
    * Spawn a child session to implement a task in a target repo.
    * Returns the child session info or throws if at capacity.
    */
@@ -322,6 +369,7 @@ export class OrchestratorChildManager {
       worktreePath: null,
     }
     this.children.set(sessionId, child)
+    this.persistRun(child, `Spawned in ${request.repo} on branch ${request.branchName}.`)
 
     try {
       // Create the session
@@ -353,6 +401,7 @@ export class OrchestratorChildManager {
       // Start Claude
       this.sessions.startClaude(sessionId)
       child.status = 'running'
+      this.persistRun(child)
 
       // Build and send the task prompt, including worktree failure context
       const prompt = this.buildPrompt(request, worktreeFailed)
@@ -366,6 +415,7 @@ export class OrchestratorChildManager {
       child.status = 'failed'
       child.error = err instanceof Error ? err.message : String(err)
       child.completedAt = new Date().toISOString()
+      this.persistRun(child, 'Spawn failed.')
       this.notifyTerminal(child)
       return child
     }
@@ -642,6 +692,7 @@ export class OrchestratorChildManager {
           // act. Keep monitoring; the next result/exit event re-evaluates.
           if (session.pendingToolApprovals.size > 0 || session.pendingControlRequests.size > 0) {
             child.status = 'blocked'
+            this.persistRun(child)
             pause()
             return
           }
@@ -649,7 +700,10 @@ export class OrchestratorChildManager {
           // The prompt (if any) was answered — restart the working clock so
           // post-approval work draws from the remaining working budget.
           resume()
-          if (child.status === 'blocked') child.status = 'running'
+          if (child.status === 'blocked') {
+            child.status = 'running'
+            this.persistRun(child)
+          }
 
           verifying = true
           void (async () => {
@@ -718,6 +772,9 @@ export class OrchestratorChildManager {
       // handleClaudeResult should have already done this, but edge cases
       // (nudge race, missed result event) can leave the flag stuck.
       this.sessions.clearProcessingFlag(child.id)
+      // Every terminal path (completed, failed, timed_out) funnels through
+      // here — one persist captures the final status, error, and outcome.
+      this.persistRun(child, `Finished: ${child.status}${child.error ? ` — ${child.error}` : ''}`)
       // Push-notify the parent orchestrator so it learns about the terminal
       // state immediately, instead of waiting for the 30-minute polling cron.
       this.notifyTerminal(child)

@@ -19,7 +19,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { IconSparkles, IconRefresh, IconAlertTriangle, IconListDetails, IconExternalLink } from '@tabler/icons-react'
+import { IconSparkles, IconRefresh, IconAlertTriangle, IconListDetails, IconExternalLink, IconRobotFace } from '@tabler/icons-react'
 import { WorkflowsView } from './WorkflowsView'
 import { LoopRunsView } from './LoopRunsView'
 import { listGoalRuns, type GoalRun } from '../lib/goalRunApi'
@@ -130,8 +130,11 @@ export function AutomationsView({ token, initialTab, onNavigateToSession }: Prop
 
   const openFeedRow = useCallback((run: UnifiedRun) => {
     if (run.engine === 'loop') openLoopRun(run.id)
-    else setTab('workflows')
-  }, [openLoopRun])
+    else if (run.engine === 'agent') {
+      // An orchestrator child — its session IS the detail view.
+      if (run.sessionId) onNavigateToSession?.(run.sessionId)
+    } else setTab('workflows')
+  }, [openLoopRun, onNavigateToSession])
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -201,8 +204,10 @@ export function AutomationsView({ token, initialTab, onNavigateToSession }: Prop
                     >
                       {run.engine === 'loop'
                         ? <IconRefresh size={15} stroke={2} className="flex-shrink-0 text-ink-faint" />
-                        : <IconSparkles size={15} stroke={2} className="flex-shrink-0 text-ink-faint" />}
-                      <span className="truncate text-body font-medium text-ink">{run.kind}</span>
+                        : run.engine === 'agent'
+                          ? <IconRobotFace size={15} stroke={2} className="flex-shrink-0 text-ink-faint" />
+                          : <IconSparkles size={15} stroke={2} className="flex-shrink-0 text-ink-faint" />}
+                      <span className="truncate text-body font-medium text-ink">{run.engine === 'agent' && run.title ? run.title : run.kind}</span>
                       {repoName(run.repo) && <span className="truncate text-meta text-ink-muted">{repoName(run.repo)}</span>}
                       {run.branch && <span className="truncate text-meta text-ink-faint">{run.branch}</span>}
                       <span className="ml-auto flex flex-shrink-0 items-center gap-2">

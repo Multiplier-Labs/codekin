@@ -83,8 +83,9 @@ export function useWorkflows(token: string): UseWorkflowsResult {
     pollRef.current = setInterval(refresh, POLL_FALLBACK_MS)
     let debounce: ReturnType<typeof setTimeout> | null = null
     const unsubscribe = subscribeWorkflowEvents((event) => {
-      // The channel carries both engines; loop events belong to LoopRunsView.
-      if (event.engine === 'loop') return
+      // The channel carries every engine; only workflow events (which have
+      // no engine tag, historically) concern this hook.
+      if (event.engine && event.engine !== 'workflow') return
       if (debounce) clearTimeout(debounce)
       debounce = setTimeout(() => { void refresh() }, EVENT_DEBOUNCE_MS)
     })
