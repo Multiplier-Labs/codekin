@@ -670,8 +670,10 @@ server.listen(port, '0.0.0.0', () => {
 
     // Broadcast goal-run (loop) events on the same channel, tagged with
     // engine:'loop' so clients can tell the two apart. One push stream for
-    // all background runs.
+    // all background runs. The orchestrator monitor rides the same listener
+    // so the supervisor hears blocked/awaiting_human/failed loops.
     goalRunStore.setEventListener((event) => {
+      orchestratorMonitorRef.current?.handleGoalRunEvent(event)
       const msg: WsServerMessage = {
         type: 'workflow_event',
         engine: 'loop',
