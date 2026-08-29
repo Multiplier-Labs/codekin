@@ -50,13 +50,13 @@ function sessionCallback(resolve: () => void, reject: (err: Error) => void) {
   }
 }
 
-function saveSession(req: Request): Promise<void> {
+export function saveSession(req: Request): Promise<void> {
   return new Promise((resolve, reject) => {
     req.session.save(sessionCallback(resolve, reject))
   })
 }
 
-function regenerateSession(req: Request): Promise<void> {
+export function regenerateSession(req: Request): Promise<void> {
   return new Promise((resolve, reject) => {
     req.session.regenerate(sessionCallback(resolve, reject))
   })
