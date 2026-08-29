@@ -7,13 +7,12 @@
  */
 
 import Database from 'better-sqlite3'
-import { existsSync, mkdirSync, chmodSync } from 'fs'
-import { homedir } from 'os'
-import { join } from 'path'
+import { existsSync, chmodSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
 import { jsonParse } from './json-parse.js'
 import type { RunLifecycleStatus } from './run-status.js'
+import { defaultRunsDbPath, legacyDbPath, migrateLegacyTables } from './run-db.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -339,16 +338,17 @@ export class WorkflowEngine extends EventEmitter {
   private cronTimer: ReturnType<typeof setInterval> | null = null
   private sessionResolver: SessionResolver | null = null
 
-  constructor(dbPath?: string) {
+  constructor(dbPath?: string, legacyPath?: string) {
     super()
-    const dir = join(homedir(), '.codekin')
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-    const resolvedPath = dbPath ?? join(dir, 'workflows.db')
+    const resolvedPath = dbPath ?? defaultRunsDbPath()
     this.db = new Database(resolvedPath, { fileMustExist: false })
     if (resolvedPath !== ':memory:' && existsSync(resolvedPath)) chmodSync(resolvedPath, 0o600)
     this.db.pragma('journal_mode = WAL')
     this.createTables()
     this.migrateSchema()
+    // Carry rows over from the pre-unification workflows.db (one-time, per table).
+    const resolvedLegacy = legacyPath ?? (dbPath === undefined ? legacyDbPath('workflows.db') : undefined)
+    if (resolvedLegacy) migrateLegacyTables(this.db, resolvedLegacy, ['workflow_runs', 'workflow_steps', 'cron_schedules'])
   }
 
   private createTables() {
