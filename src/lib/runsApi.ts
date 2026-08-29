@@ -21,9 +21,10 @@ export type UnifiedRunStatus =
 
 export interface UnifiedRun {
   id: string
-  engine: 'workflow' | 'loop'
+  engine: 'workflow' | 'loop' | 'agent'
   kind: string
   status: UnifiedRunStatus
+  title: string | null
   rawStatus: string
   repo: string | null
   branch: string | null
@@ -37,7 +38,7 @@ export interface UnifiedRun {
 
 export async function listUnifiedRuns(
   token: string,
-  opts?: { limit?: number; engine?: 'workflow' | 'loop'; status?: UnifiedRunStatus },
+  opts?: { limit?: number; engine?: 'workflow' | 'loop' | 'agent'; status?: UnifiedRunStatus },
 ): Promise<UnifiedRun[]> {
   const params = new URLSearchParams()
   if (opts?.limit) params.set('limit', String(opts.limit))
