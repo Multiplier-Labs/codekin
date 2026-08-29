@@ -659,6 +659,26 @@ server.listen(port, '0.0.0.0', () => {
       }
     })
 
+    // Broadcast goal-run (loop) events on the same channel, tagged with
+    // engine:'loop' so clients can tell the two apart. One push stream for
+    // all background runs.
+    goalRunStore.setEventListener((event) => {
+      const msg: WsServerMessage = {
+        type: 'workflow_event',
+        engine: 'loop',
+        eventType: event.eventType,
+        runId: event.runId,
+        kind: event.kind,
+        status: event.status,
+      }
+      const data = JSON.stringify(msg)
+      for (const ws of wss.clients) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(data)
+        }
+      }
+    })
+
     // Sync cron schedules with config and start scheduler
     syncSchedules(sessions)
     engine.startCronScheduler()
