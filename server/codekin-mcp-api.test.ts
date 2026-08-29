@@ -75,6 +75,17 @@ describe('CodekinApi', () => {
     })
   })
 
+  it('maps the trust tools to the trust endpoints', async () => {
+    await api.getTrustLevel({ action: 'Bash(npm test)', category: 'tool-approval', severity: 'low', repo: '/r' })
+    expect(last().path).toBe('/api/orchestrator/trust/level?action=Bash%28npm+test%29&category=tool-approval&severity=low&repo=%2Fr')
+
+    await api.recordTrustApproval({ action: 'a', category: 'c', repo: '/r' })
+    expect(last()).toMatchObject({ method: 'POST', path: '/api/orchestrator/trust/approve', body: { action: 'a', category: 'c', repo: '/r' } })
+
+    await api.recordTrustRejection({ action: 'a', category: 'c' })
+    expect(last()).toMatchObject({ method: 'POST', path: '/api/orchestrator/trust/reject', body: { action: 'a', category: 'c' } })
+  })
+
   it('surfaces non-2xx responses as errors with status and body', async () => {
     await expect(api.readReport('boom')).rejects.toThrow(/500.*kaput/s)
   })

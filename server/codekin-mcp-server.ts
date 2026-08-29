@@ -132,6 +132,39 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
   )
 
   server.registerTool(
+    'get_trust_level',
+    {
+      description:
+        "How much the user trusts an action, from their approval history: 'ask' (get the user), 'notify_do' (do it, then tell them), or 'silent' (just do it). Consult before answering a blocked session's prompt.",
+      inputSchema: {
+        action: z.string().describe('The action, e.g. the blocked tool invocation pattern'),
+        category: z.string().describe("Action family, e.g. 'tool-approval', 'deploy', 'schedule-change'"),
+        severity: z.enum(['low', 'medium', 'high']).optional(),
+        repo: z.string().optional().describe('Repo path for repo-scoped trust'),
+      },
+    },
+    (args) => run(() => api.getTrustLevel(args)),
+  )
+
+  server.registerTool(
+    'record_trust_approval',
+    {
+      description: 'Record that an action was approved (by the user, or by you within trust). Builds toward notify_do/silent for that action.',
+      inputSchema: { action: z.string(), category: z.string(), repo: z.string().optional() },
+    },
+    (args) => run(() => api.recordTrustApproval(args)),
+  )
+
+  server.registerTool(
+    'record_trust_rejection',
+    {
+      description: 'Record that an action was rejected. Resets that action\'s trust to ask — always record user rejections.',
+      inputSchema: { action: z.string(), category: z.string(), repo: z.string().optional() },
+    },
+    (args) => run(() => api.recordTrustRejection(args)),
+  )
+
+  server.registerTool(
     'list_reports',
     { description: 'List audit reports (.codekin/reports/) across managed repos.', inputSchema: {} },
     () => run(() => api.listReports()),
