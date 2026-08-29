@@ -65,6 +65,26 @@ interface BrowserClient {
 }
 
 /**
+ * A stable string for "the standing this socket holds", used to tell a real
+ * authorization change from a re-read that resolved to the same answer.
+ *
+ * Comparing the objects by `JSON.stringify` would fold key order into the
+ * result: the grant map is built by iterating shares ordered on a
+ * second-granularity timestamp, so two shares created in the same second have
+ * no guaranteed order, and a reshuffle would read as a permission change and
+ * close a socket that nothing had happened to — every five seconds, forever.
+ * Sorting both the session ids and each permission list makes the comparison
+ * depend on the grant itself and nothing else.
+ */
+export function accessFingerprint(access: MachineAccess): string {
+  if (access.kind !== 'grantee') return access.kind
+  const grants = Object.keys(access.grants)
+    .sort()
+    .map(sessionId => [sessionId, [...access.grants[sessionId]].sort()] as const)
+  return JSON.stringify(['grantee', grants])
+}
+
+/**
  * The principal sent to the connector with every forwarded frame. Grants are
  * resolved fresh per socket, so revoking a share takes effect on the next
  * connection rather than living on in a cached token.
@@ -111,7 +131,7 @@ export class BrowserHub {
       const access = row
         ? resolveMachineAccess(this.db, row, client.machineId)
         : ({ kind: 'none' } as const)
-      if (JSON.stringify(access) === JSON.stringify(client.access)) continue
+      if (accessFingerprint(access) === accessFingerprint(client.access)) continue
       if (access.kind === 'none') {
         recordAuditEvent(this.db, {
           kind: 'access_denied',

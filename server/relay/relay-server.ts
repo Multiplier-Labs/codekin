@@ -121,7 +121,7 @@ app.use(createRelayAuthRouter({
 app.use(createMachineRouter(db, hub))
 app.use(createPairingRouter(db, config, { connectorHub: hub, browserHub }))
 app.use(createShareRouter(db, browserHub))
-app.use(createUserRouter(db, config, browserHub))
+app.use(createUserRouter(db, config, browserHub, store))
 app.use(createDeviceLinkRouter(db, config))
 app.use(createWebauthnRouter(db, config))
 

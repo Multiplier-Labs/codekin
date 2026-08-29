@@ -137,6 +137,44 @@ describe('relay auth routes', () => {
     expect(count.count).toBe(0)
   })
 
+  it('keeps rejecting a non-allowlisted identity that already has a pending row', async () => {
+    await start(githubFetchMock({ id: 2, login: 'stranger' }))
+    // A `pending` row is the residue of a login the policy already refused, not
+    // an admission — it must not become a standing exemption from the gate.
+    db.prepare(
+      `INSERT INTO users (id, organization_id, github_id, login, role, status)
+       VALUES ('u-stranger', 'org-default', 2, 'stranger', 'member', 'pending')`,
+    ).run()
+
+    const startRes = await fetch(`${baseUrl}/api/auth/github/start`, { redirect: 'manual' })
+    const location = new URL(startRes.headers.get('location') ?? '')
+    const cbRes = await fetch(
+      `${baseUrl}/api/auth/github/callback?code=abc&state=${location.searchParams.get('state') ?? ''}`,
+      { redirect: 'manual', headers: { cookie: cookieOf(startRes) } },
+    )
+    expect(cbRes.headers.get('location')).toBe('/?auth_error=access_not_allowed')
+    expect(
+      (db.prepare('SELECT status FROM users WHERE github_id = 2').get() as { status: string }).status,
+    ).toBe('pending')
+  })
+
+  it('still admits a manually activated user who is not in the allowlist', async () => {
+    await start(githubFetchMock({ id: 77, login: 'manual' }))
+    // The escape hatch: an operator who activated someone by hand is making a
+    // real decision, and an env allowlist that omits them must not undo it.
+    db.prepare(
+      `INSERT INTO users (id, organization_id, github_id, login, role, status)
+       VALUES ('u-manual', 'org-default', 77, 'manual', 'member', 'active')`,
+    ).run()
+
+    const cookie = await login()
+    const me = (await (await fetch(`${baseUrl}/api/me`, { headers: { cookie } })).json()) as {
+      user: { login: string; status: string }
+    }
+    expect(me.user.login).toBe('manual')
+    expect(me.user.status).toBe('active')
+  })
+
   it('does not grant owner to a different GitHub account that claimed the owner login', async () => {
     // GitHub releases renamed logins for re-registration; the numeric id is
     // the identity, so the same login with a different id is rejected.
