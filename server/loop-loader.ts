@@ -38,6 +38,7 @@ import { existsSync, readdirSync, readFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { parse as parseYaml } from 'yaml'
+import { splitFrontmatter } from './frontmatter.js'
 import type {
   CompletionPolicy,
   CreateGoalRunInput,
@@ -162,17 +163,17 @@ function specFromFrontmatter(fm: Record<string, unknown>, sourcePath: string): {
 
 /** Parse a loop MD file into a LoopTemplate. Throws on malformed/unsafe input. */
 export function parseLoopTemplate(content: string, sourcePath: string, source: 'builtin' | 'repo'): LoopTemplate {
-  const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/)
-  if (!fmMatch) fail(sourcePath, 'no YAML frontmatter found')
+  const split = splitFrontmatter(content)
+  if (!split) fail(sourcePath, 'no YAML frontmatter found')
 
   let parsed: unknown
   try {
-    parsed = parseYaml(fmMatch[1])
+    parsed = parseYaml(split.frontmatter)
   } catch (err) {
     fail(sourcePath, `frontmatter is not valid YAML: ${err instanceof Error ? err.message : String(err)}`)
   }
   const fm = asRecord(parsed, sourcePath)
-  const goal = fmMatch[2].trim()
+  const goal = split.body.trim()
   if (!goal) fail(sourcePath, 'body (goal text) is empty')
 
   const { kind, name, spec } = specFromFrontmatter(fm, sourcePath)
