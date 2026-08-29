@@ -5,13 +5,15 @@
   "license": "MIT",
   "type": "module",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@simplewebauthn/server": "^13.3.3",
     "@types/express-session": "^1.19.0",
     "better-sqlite3": "^12.9.0",
     "express": "^5.1.0",
     "express-session": "^1.19.0",
     "multer": "^2.0.0",
-    "ws": "^8.21.0"
+    "ws": "^8.21.0",
+    "zod": "^4.5.2"
   },
   "scripts": {
     "build": "tsc",

@@ -32,9 +32,11 @@ import {
   getOrCreateOrchestratorId,
   isOrchestratorSession,
   ensureOrchestratorRunning,
+  ensureOrchestratorMcpConfig,
   getOrchestratorSessionId,
   readTemplateVersion,
   CLAUDE_MD_TEMPLATE_VERSION,
+  ORCHESTRATOR_ALLOWED_TOOLS,
 } from './orchestrator-manager.js'
 
 function fakeSessionManager(existingSession?: any) {
@@ -99,7 +101,7 @@ describe('ensureOrchestratorDir', () => {
     expect(mockWriteFileSync).toHaveBeenCalledTimes(3)
   })
 
-  it('does not overwrite existing files when CLAUDE.md is current', () => {
+  it('leaves seed files and a current CLAUDE.md alone (only the system-managed .mcp.json is rewritten)', () => {
     // All paths exist and CLAUDE.md carries the current template version
     mockExistsSync.mockReturnValue(true)
     mockReadFileSync.mockReturnValue(
@@ -109,7 +111,8 @@ describe('ensureOrchestratorDir', () => {
     ensureOrchestratorDir()
 
     expect(mockMkdirSync).not.toHaveBeenCalled()
-    expect(mockWriteFileSync).not.toHaveBeenCalled()
+    const writtenPaths = mockWriteFileSync.mock.calls.map((c: any[]) => c[0])
+    expect(writtenPaths).toEqual(['/tmp/test-data/orchestrator/.mcp.json'])
   })
 
   it('refreshes CLAUDE.md when its template version is stale, leaving seed files alone', () => {
@@ -120,7 +123,7 @@ describe('ensureOrchestratorDir', () => {
     ensureOrchestratorDir()
 
     const writtenPaths = mockWriteFileSync.mock.calls.map((c: any[]) => c[0])
-    expect(writtenPaths).toEqual(['/tmp/test-data/orchestrator/CLAUDE.md'])
+    expect(writtenPaths).toEqual(['/tmp/test-data/orchestrator/CLAUDE.md', '/tmp/test-data/orchestrator/.mcp.json'])
     const written = mockWriteFileSync.mock.calls[0][1] as string
     expect(written).toContain(`<!-- codekin-template-version: ${CLAUDE_MD_TEMPLATE_VERSION} -->`)
   })
@@ -209,7 +212,7 @@ describe('ensureOrchestratorRunning', () => {
         source: 'orchestrator',
         id: 'test-uuid-1234',
         permissionMode: 'acceptEdits',
-        allowedTools: ['Bash(curl:*)', 'CronCreate', 'CronDelete', 'CronList'],
+        allowedTools: ORCHESTRATOR_ALLOWED_TOOLS,
       }),
     )
     expect(sm.startClaude).toHaveBeenCalledWith('test-uuid-1234')
@@ -249,7 +252,25 @@ describe('ensureOrchestratorRunning', () => {
     const sm = fakeSessionManager(session)
     ensureOrchestratorRunning(sm)
 
-    expect(session.allowedTools).toEqual(['Bash(curl:*)', 'CronCreate', 'CronDelete', 'CronList'])
+    expect(session.allowedTools).toEqual(ORCHESTRATOR_ALLOWED_TOOLS)
+    expect(sm.persistToDisk).toHaveBeenCalled()
+  })
+
+  it('grants the MCP tools to a session persisted before they existed', () => {
+    mockExistsSync.mockImplementation((p: string) =>
+      typeof p === 'string' && p.endsWith('.session-id') ? true : false,
+    )
+    mockReadFileSync.mockReturnValue('test-uuid-1234')
+
+    const session = {
+      id: 'test-uuid-1234',
+      allowedTools: ['Bash(curl:*)', 'CronCreate', 'CronDelete', 'CronList'],
+      claudeProcess: { isAlive: () => true },
+    }
+    const sm = fakeSessionManager(session)
+    ensureOrchestratorRunning(sm)
+
+    expect(session.allowedTools).toContain('mcp__codekin__spawn_child')
     expect(sm.persistToDisk).toHaveBeenCalled()
   })
 
@@ -273,6 +294,29 @@ describe('ensureOrchestratorRunning', () => {
     }
     const sm2 = fakeSessionManager(session)
     expect(ensureOrchestratorRunning(sm2)).toBe('test-uuid-1234')
+  })
+})
+
+describe('ensureOrchestratorMcpConfig', () => {
+  it('writes the codekin entry, preserving other servers in an existing config', () => {
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue(JSON.stringify({ mcpServers: { bookgraph: { url: 'https://x' } } }))
+
+    ensureOrchestratorMcpConfig('/opt/dist/codekin-mcp-server.js')
+
+    const [path, content] = mockWriteFileSync.mock.calls[0] as [string, string]
+    expect(path).toBe('/tmp/test-data/orchestrator/.mcp.json')
+    const parsed = JSON.parse(content) as { mcpServers: Record<string, { command?: string; args?: string[]; url?: string }> }
+    expect(parsed.mcpServers.codekin.args).toEqual(['/opt/dist/codekin-mcp-server.js'])
+    expect(parsed.mcpServers.bookgraph.url).toBe('https://x')
+  })
+
+  it('skips (with no write) when the compiled server file is missing', () => {
+    mockExistsSync.mockReturnValue(false)
+
+    ensureOrchestratorMcpConfig('/opt/dist/codekin-mcp-server.js')
+
+    expect(mockWriteFileSync).not.toHaveBeenCalled()
   })
 })
 

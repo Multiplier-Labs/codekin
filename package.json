@@ -40,12 +40,14 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "better-sqlite3": "^12.9.0",
     "express": "^5.1.0",
     "file-type": "^22.0.1",
     "multer": "^2.0.0",
     "ws": "^8.21.0",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "zod": "^4.5.2"
   },
   "overrides": {
     "undici": "^7.29.0",
