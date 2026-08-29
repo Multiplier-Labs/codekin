@@ -12,6 +12,7 @@ import type { RelayConfig } from './relay-config.js'
 import type { UserRole } from './control-plane-db.js'
 import type { SessionUser } from './relay-auth-routes.js'
 import type { BrowserHub } from './browser-hub.js'
+import { SqliteSessionStore } from './sqlite-session-store.js'
 
 const CONFIG = { ownerGithubId: 1 } as RelayConfig
 
@@ -34,7 +35,22 @@ describe('user admin routes', () => {
   let ownerId: string
   let adminId: string
   let memberId: string
+  let store: SqliteSessionStore
   const reauthorize = vi.fn()
+
+  /** Park a stored cookie row for a user, as a real login would. */
+  function seedSession(sid: string, userId: string): void {
+    db.prepare('INSERT INTO web_sessions (sid, sess, expire) VALUES (?, ?, ?)').run(
+      sid,
+      JSON.stringify({ cookie: {}, user: { id: userId } }),
+      Date.now() + 86_400_000,
+    )
+  }
+
+  function storedSids(): string[] {
+    return (db.prepare('SELECT sid FROM web_sessions ORDER BY sid').all() as Array<{ sid: string }>)
+      .map(r => r.sid)
+  }
 
   beforeEach(async () => {
     reauthorize.mockClear()
@@ -66,7 +82,8 @@ describe('user admin routes', () => {
       if (who === 'member') req.session.user = sessionUser(db, memberId)
       next()
     })
-    app.use(createUserRouter(db, CONFIG, { reauthorize } as unknown as BrowserHub))
+    store = new SqliteSessionStore(db)
+    app.use(createUserRouter(db, CONFIG, { reauthorize } as unknown as BrowserHub, store))
     await new Promise<void>(resolve => {
       server = app.listen(0, '127.0.0.1', () => {
         baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -77,6 +94,7 @@ describe('user admin routes', () => {
 
   afterEach(async () => {
     await new Promise<void>(resolve => server.close(() => { resolve() }))
+    store.close()
     db.close()
   })
 
@@ -178,5 +196,39 @@ describe('user admin routes', () => {
     expect(res.status).toBe(200)
     expect(reauthorize).not.toHaveBeenCalled()
     expect(listAuditEvents(db, {}).some(e => e.kind === 'user_updated')).toBe(false)
+  })
+
+  it('destroys the target\'s stored cookies when they lose active status', async () => {
+    seedSession('member-a', memberId)
+    seedSession('member-b', memberId)
+    seedSession('admin-a', adminId)
+
+    const res = await patch('owner', memberId, { status: 'disabled' })
+    expect(res.status).toBe(200)
+
+    // Both of the member's cookies are gone; the admin's is untouched.
+    expect(storedSids()).toEqual(['admin-a'])
+    const event = listAuditEvents(db, {}).find(e => e.kind === 'user_updated')!
+    expect((event.metadata as { destroyedSessions: number }).destroyedSessions).toBe(2)
+  })
+
+  it('does not revive old cookies when a disabled user is re-activated', async () => {
+    seedSession('member-a', memberId)
+    expect((await patch('owner', memberId, { status: 'disabled' })).status).toBe(200)
+    expect(storedSids()).toEqual([])
+
+    // Re-enabling grants access again, but only to a session established after
+    // the fact — the cookies the revocation cut off stay dead.
+    expect((await patch('owner', memberId, { status: 'active' })).status).toBe(200)
+    expect(getUserById(db, memberId)!.status).toBe('active')
+    expect(storedSids()).toEqual([])
+  })
+
+  it('keeps stored cookies when the change is a demotion, not a revocation', async () => {
+    seedSession('member-a', memberId)
+    const res = await patch('owner', memberId, { role: 'viewer' as UserRole })
+    expect(res.status).toBe(200)
+    // Still active: the account is not revoked, so the session survives.
+    expect(storedSids()).toEqual(['member-a'])
   })
 })

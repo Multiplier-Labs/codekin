@@ -20,6 +20,10 @@ import type { UserRole, UserStatus, UserRow } from './control-plane-db.js'
 import { recordAuditEvent } from './audit.js'
 import type { BrowserHub } from './browser-hub.js'
 import type { RelayConfig } from './relay-config.js'
+import type { SqliteSessionStore } from './sqlite-session-store.js'
+
+/** The slice of the session store this router needs (kept narrow for tests). */
+type SessionRevoker = Pick<SqliteSessionStore, 'destroyUserSessions'>
 
 /** Roles allowed to administer other users. */
 const MANAGER_ROLES: UserRole[] = ['owner', 'admin']
@@ -59,6 +63,7 @@ export function createUserRouter(
   db: Database.Database,
   config: RelayConfig,
   browserHub?: BrowserHub,
+  store?: SessionRevoker,
 ): Router {
   const router = Router()
   const requireActiveUser = createRequireActiveUser(db)
@@ -145,6 +150,16 @@ export function createUserRouter(
     // hello — drop it so a disabled or demoted user stops immediately.
     browserHub?.reauthorize({ userId: target.id })
 
+    // Losing active status must also burn the stored cookies. requireActiveUser
+    // already refuses them while the account is down, but the rows survive a
+    // 30-day rolling lifetime: leaving them in place means re-activating the
+    // account silently revives every cookie ever issued to it, including any
+    // the revocation was meant to cut off.
+    let destroyedSessions = 0
+    if (nextStatus !== 'active') {
+      destroyedSessions = store?.destroyUserSessions(target.id) ?? 0
+    }
+
     recordAuditEvent(db, {
       kind: 'user_updated',
       actorUserId: actor.id,
@@ -157,6 +172,7 @@ export function createUserRouter(
         role: nextRole,
         previousStatus: target.status,
         previousRole: target.role,
+        destroyedSessions,
       },
     })
 

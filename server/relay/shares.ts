@@ -199,7 +199,9 @@ export function listSharesBy(db: Database.Database, userId: string): SessionShar
 export function listSharesFor(db: Database.Database, userId: string, now = new Date()): SessionShare[] {
   return (
     db
-      .prepare('SELECT * FROM session_shares WHERE grantee_user_id = ? ORDER BY created_at DESC')
+      // `created_at` is second-granular, so it alone leaves same-second rows in
+      // an order SQLite does not promise; `id` breaks the tie deterministically.
+      .prepare('SELECT * FROM session_shares WHERE grantee_user_id = ? ORDER BY created_at DESC, id DESC')
       .all(userId) as SessionShareRow[]
   )
     .map(toShare)
