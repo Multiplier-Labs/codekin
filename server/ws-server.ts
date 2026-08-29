@@ -28,13 +28,14 @@ import { loadWebhookConfig } from './webhook-config.js'
 import { WebhookHandler } from './webhook-handler.js'
 import { createWebhookRateLimiter } from './webhook-rate-limiter.js'
 import { StepflowHandler, loadStepflowConfig } from './stepflow-handler.js'
-import { initWorkflowEngine, shutdownWorkflowEngine, type WorkflowEvent } from './workflow-engine.js'
+import { initWorkflowEngine, getWorkflowEngine, shutdownWorkflowEngine, type WorkflowEvent } from './workflow-engine.js'
 import { generate404Page, generate500Page } from './error-page.js'
 import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
 import { GoalRunStore } from './goal-run-store.js'
 import { GoalRunController } from './goal-run-controller.js'
 import { createGoalRunRouter } from './goal-run-routes.js'
+import { createRunsRouter } from './runs-routes.js'
 import { CommitEventHandler } from './commit-event-handler.js'
 import { jsonParse } from './json-parse.js'
 import { createMessageRateLimiter } from './ws-rate-limit.js'
@@ -381,6 +382,14 @@ if (interruptedGoalRuns.length) {
   console.log(`[goal-runs] Failed ${interruptedGoalRuns.length} run(s) interrupted by restart: ${interruptedGoalRuns.join(', ')}`)
 }
 app.use('/api/goal-runs', createGoalRunRouter(verifyToken, extractToken, goalRunStore, goalRunController))
+// Unified run read model — both engines' runs in one shape for the Automations feed.
+app.use('/api/runs', createRunsRouter(verifyToken, extractToken, () => {
+  try {
+    return getWorkflowEngine()
+  } catch {
+    return null
+  }
+}, goalRunStore))
 
 // --- SPA fallback: serve index.html for non-API routes (client-side routing) ---
 if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
