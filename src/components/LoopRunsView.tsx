@@ -67,7 +67,7 @@ interface Props {
 export function LoopRunsView({ token, initialSelectedRunId, onNavigateToSession }: Props) {
   const [runs, setRuns] = useState<GoalRun[]>([])
   const [templates, setTemplates] = useState<LoopTemplateInfo[]>([])
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(initialSelectedRunId ?? null)
+  const [selectedRunId, setSelectedRunId] = useState(initialSelectedRunId ?? null)
   const [detail, setDetail] = useState<GoalRunWithTurns | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
