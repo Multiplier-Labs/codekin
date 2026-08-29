@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { IconQrcode, IconFingerprint, IconX } from '@tabler/icons-react'
+import { IconQrcode, IconFingerprint, IconX, IconLogout } from '@tabler/icons-react'
 import { toDataURL } from 'qrcode'
 import {
   startDeviceLink,
@@ -25,6 +25,7 @@ import {
   isPasskeyCancel,
   type Passkey,
 } from './passkeys'
+import { signOutEverywhere, describeSignOutResult } from './sessions'
 
 interface ActiveLink extends DeviceLinkStart {
   qrDataUrl: string
@@ -214,12 +215,89 @@ function PasskeysPanel() {
   )
 }
 
-export function DevicesSection() {
+/**
+ * Global sign-out.
+ *
+ * Deliberately two-step: this ends every session including the current one, so
+ * a stray click would sign the user out of the tab they are working in. On
+ * success the page is reloaded rather than the local state patched — the relay
+ * socket and machine connection are both dead by then, and a fresh boot lands
+ * on the login screen instead of an app wired to a session that no longer
+ * exists.
+ */
+function SignOutEverywherePanel({ reload }: { reload?: () => void }) {
+  const goToLogin = reload ?? (() => { window.location.assign('/') })
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState<string | null>(null)
+
+  const run = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const { destroyed } = await signOutEverywhere()
+      setDone(describeSignOutResult(destroyed))
+      goToLogin()
+    } catch {
+      setError('Could not sign out everywhere. Try again.')
+      setBusy(false)
+      setConfirming(false)
+    }
+  }
+
+  if (done) {
+    return <p className="text-body text-ink-muted">{done}</p>
+  }
+
+  return (
+    <div>
+      {confirming ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => void run()}
+            disabled={busy}
+            className="flex items-center gap-2 rounded-control border border-error-7/60 px-3 py-2 text-body text-error-4 transition hover:bg-surface-raised disabled:opacity-50"
+          >
+            <IconLogout size={16} />
+            {busy ? 'Signing out…' : 'Yes, sign out everywhere'}
+          </button>
+          <button
+            onClick={() => { setConfirming(false) }}
+            disabled={busy}
+            className="rounded-control px-2 py-1 text-meta text-ink-faint transition hover:text-ink-muted disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => { setConfirming(true) }}
+          className="flex items-center gap-2 rounded-control border border-edge px-3 py-2 text-body text-ink transition hover:bg-surface-raised"
+        >
+          <IconLogout size={16} />
+          Sign out everywhere
+        </button>
+      )}
+      <p className="mt-1.5 text-micro text-ink-faint">
+        Ends every session on every device, including this one. Use this if a device was lost or
+        you think someone else has your session. Passkeys and linked devices are left alone —
+        remove those above if the device itself is gone.
+      </p>
+      {error && <p className="mt-2 text-meta text-error-4">{error}</p>}
+    </div>
+  )
+}
+
+export function DevicesSection({ reload }: { /** Injectable for tests, which cannot navigate. */ reload?: () => void } = {}) {
   return (
     <div className="flex flex-col gap-4">
       <LinkDevicePanel />
       <div className="border-t border-edge pt-4">
         <PasskeysPanel />
+      </div>
+      <div className="border-t border-edge pt-4">
+        <SignOutEverywherePanel reload={reload} />
       </div>
     </div>
   )
