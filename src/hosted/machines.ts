@@ -77,3 +77,20 @@ export const MACHINE_STATUS_DOT: Record<Machine['status'], string> = {
   degraded: 'bg-warning-6',
   offline: 'bg-ink-faint',
 }
+
+/**
+ * Mint a pre-approved pairing token for the install-command funnel. The
+ * token goes into the one-line installer (`--pair <token>`) or
+ * `codekin relay login --code <token>`; the machine that runs it becomes
+ * paired to this account with no further approval. Single-use, 10-minute TTL.
+ */
+export async function precreatePairing(): Promise<{ pairingToken: string; expiresAt: number }> {
+  const res = await fetch('/api/machines/pair/precreate', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  })
+  if (!res.ok) throw new Error(String(res.status))
+  return (await res.json()) as { pairingToken: string; expiresAt: number }
+}

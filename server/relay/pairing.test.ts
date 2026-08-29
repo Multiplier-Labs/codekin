@@ -8,6 +8,7 @@ import {
   approvePairing,
   denyPairing,
   completePairing,
+  precreatePairing,
   verifyMachineCredential,
   removeMachine,
 } from './pairing.js'
@@ -30,6 +31,40 @@ describe('pairing lifecycle', () => {
   afterEach(() => {
     db.close()
     vi.useRealTimers()
+  })
+
+  it('precreate mints a pre-approved token the installer claims in one step, with hostname backfill', () => {
+    const pre = precreatePairing(db, userId)
+
+    const complete = completePairing(db, pre.pairingToken, { hostname: 'fresh-laptop', platform: 'darwin' })
+    expect(complete.status).toBe('complete')
+    if (complete.status !== 'complete') return
+    expect(complete.machineId).toBe(pre.machineId)
+    expect(verifyMachineCredential(db, complete.machineId, complete.machineSecret)).toBe(true)
+
+    // The machine row was created blind at precreate — the claim named it.
+    const machines = listMachines(db)
+    expect(machines[0].hostname).toBe('fresh-laptop')
+    expect(machines[0].display_name).toBe('fresh-laptop')
+
+    // Single use — a stolen token replay mints nothing.
+    expect(completePairing(db, pre.pairingToken)).toEqual({ status: 'not_found' })
+  })
+
+  it('a precreated token honors the explicit display name and the pairing TTL', () => {
+    vi.useFakeTimers()
+    const pre = precreatePairing(db, userId, 'Build server')
+
+    vi.advanceTimersByTime(11 * 60 * 1000)
+    expect(completePairing(db, pre.pairingToken)).toEqual({ status: 'expired' })
+
+    vi.useRealTimers()
+    const fresh = precreatePairing(db, userId, 'Build server')
+    const complete = completePairing(db, fresh.pairingToken, { hostname: 'ci-01' })
+    expect(complete.status).toBe('complete')
+    const named = listMachines(db).find((m) => m.id === fresh.machineId)
+    expect(named?.display_name).toBe('Build server')
+    expect(named?.hostname).toBe('ci-01')
   })
 
   it('start issues an unambiguous user code and a device code', () => {
