@@ -10,9 +10,8 @@
 
 import { existsSync } from 'fs'
 import path from 'path'
-import { ClaudeProcess } from './claude-process.js'
-import { OpenCodeProcess } from './opencode-process.js'
-import { CodexProcess } from './codex-process.js'
+import type { ClaudeProcess } from './claude-process.js'
+import { getHarness } from './harness-registry.js'
 import type { CodingProcess, CodingProvider } from './coding-process.js'
 import { ApprovalManager } from './approval-manager.js'
 import type { PromptRouter } from './prompt-router.js'
@@ -147,51 +146,21 @@ export class SessionLifecycle {
     } else if (process.env.CLAUDE_PROJECT_DIR) {
       extraEnv.CLAUDE_PROJECT_DIR = process.env.CLAUDE_PROJECT_DIR
     }
-    // When claudeSessionId exists, the session has run before and a JSONL file
-    // exists on disk.  Use --resume (not --session-id) to continue it — --session-id
-    // creates a *new* session and fails with "already in use" if the JSONL exists.
+    // Whether this session has run before (a CLI-side transcript exists) —
+    // used below to carry the task list into the new process.
     const resume = !!session.claudeSessionId
 
     // Build comprehensive allowedTools from session-level overrides + registry approvals
     const repoDir = session.groupDir ?? session.workingDir
     const registryPatterns = this.deps.approvalManager.getAllowedToolsForRepo(repoDir)
     const mergedAllowedTools = [...new Set([...(session.allowedTools || []), ...registryPatterns])]
-    let cp: CodingProcess
-    if (session.provider === 'opencode') {
-      // Recent assistant text already shown to the user — lets the resumed
-      // process skip re-emitting messages during missed-history hydration.
-      const recentOutputText = session.outputHistory
-        .filter((m): m is { type: 'output'; data: string } => m.type === 'output')
-        .slice(-100)
-        .map((m) => m.data)
-        .join('')
-      cp = new OpenCodeProcess(session.workingDir, {
-        sessionId: sessionId,
-        opencodeSessionId: session.claudeSessionId || undefined,
-        model: session.model,
-        extraEnv,
-        permissionMode: session.permissionMode,
-        recentOutputText,
-      })
-    } else if (session.provider === 'codex') {
-      cp = new CodexProcess(session.workingDir, {
-        sessionId: sessionId,
-        codexThreadId: session.claudeSessionId || undefined,
-        model: session.model,
-        extraEnv,
-        permissionMode: session.permissionMode,
-      })
-    } else {
-      cp = new ClaudeProcess(session.workingDir, {
-        sessionId: session.claudeSessionId || undefined,
-        extraEnv,
-        model: session.model,
-        permissionMode: session.permissionMode,
-        resume,
-        allowedTools: mergedAllowedTools,
-        addDirs: session.addDirs,
-      })
-    }
+
+    // Per-harness construction lives in the registry (harness-registry.ts).
+    const cp: CodingProcess = getHarness(session.provider).createProcess(session, {
+      sessionId,
+      extraEnv,
+      mergedAllowedTools,
+    })
 
     this.wireClaudeEvents(cp, session, sessionId)
 
