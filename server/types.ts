@@ -319,7 +319,7 @@ export type WsServerMessage =
   | { type: 'todo_update'; tasks: TaskItem[] }
   | { type: 'session_name_update'; sessionId: string; name: string }
   | { type: 'webhook_event'; event: string; repo: string; branch: string; workflow: string; conclusion: string; status: string; sessionId?: string }
-  | { type: 'workflow_event'; eventType: string; runId: string; kind: string; stepKey?: string; status?: string; payload?: unknown }
+  | { type: 'workflow_event'; eventType: string; runId: string; kind: string; stepKey?: string; status?: string; payload?: unknown; engine?: 'workflow' | 'loop' }
   | { type: 'worktree_created'; worktreePath: string; workingDir: string }
   | { type: 'sessions_updated' }
   | { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary; branch: string; scope: DiffScope }

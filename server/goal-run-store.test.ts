@@ -163,4 +163,41 @@ describe('GoalRunStore', () => {
       expect(store.listTurns(a.id)).toHaveLength(1)
     })
   })
+
+  describe('events', () => {
+    it('emits run_status on a status patch, with the run kind attached', () => {
+      const events: unknown[] = []
+      store.setEventListener((e) => events.push(e))
+      const run = store.createRun(makeInput())
+
+      store.patchRun(run.id, { status: 'running' })
+      expect(events).toEqual([{ eventType: 'run_status', runId: run.id, kind: 'ci-autorepair', status: 'running' }])
+    })
+
+    it('does not emit for patches that leave status unchanged', () => {
+      const events: unknown[] = []
+      store.setEventListener((e) => events.push(e))
+      const run = store.createRun(makeInput())
+
+      store.patchRun(run.id, { turnCount: 3, costUsd: 1.2 })
+      expect(events).toHaveLength(0)
+    })
+
+    it('emits turn on appendTurn', () => {
+      const events: unknown[] = []
+      store.setEventListener((e) => events.push(e))
+      const run = store.createRun(makeInput())
+
+      store.appendTurn({ runId: run.id, turnIndex: 1, role: 'verifier' })
+      expect(events).toEqual([{ eventType: 'turn', runId: run.id, kind: 'ci-autorepair' }])
+    })
+
+    it('a throwing listener does not break the mutation', () => {
+      store.setEventListener(() => { throw new Error('listener boom') })
+      const run = store.createRun(makeInput())
+
+      expect(() => store.patchRun(run.id, { status: 'running' })).not.toThrow()
+      expect(store.getRun(run.id)?.status).toBe('running')
+    })
+  })
 })

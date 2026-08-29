@@ -169,6 +169,19 @@ export interface ListRunsOptions {
   limit?: number
 }
 
+/**
+ * Emitted on every persisted state change: a status transition (`run_status`)
+ * or a new evidence-ledger row (`turn`). The store is the choke point every
+ * mutation flows through — controller, abort route, and boot-time
+ * `failInterrupted` all emit without knowing about the listener.
+ */
+export interface GoalRunEvent {
+  eventType: 'run_status' | 'turn'
+  runId: string
+  kind: GoalRunKind
+  status?: GoalRunStatus
+}
+
 // ---------------------------------------------------------------------------
 // Row shapes (as stored)
 // ---------------------------------------------------------------------------
@@ -223,6 +236,7 @@ const PATCH_COLUMNS: Record<keyof GoalRunPatch, string> = {
 
 export class GoalRunStore {
   private db: Database.Database
+  private eventListener: ((event: GoalRunEvent) => void) | null = null
 
   constructor(dbPath?: string) {
     const dir = join(homedir(), '.codekin')
@@ -325,6 +339,28 @@ export class GoalRunStore {
     return (this.db.prepare(sql).all(...params) as GoalRunRow[]).map(mapRun)
   }
 
+  /**
+   * Register the (single) listener for run events. The listener must not
+   * throw its way into store mutations — errors are caught and logged.
+   */
+  setEventListener(listener: (event: GoalRunEvent) => void): void {
+    this.eventListener = listener
+  }
+
+  private emit(event: GoalRunEvent): void {
+    if (!this.eventListener) return
+    try {
+      this.eventListener(event)
+    } catch (err) {
+      console.error('[goal-run-store] Event listener threw:', err)
+    }
+  }
+
+  private kindOf(runId: string): GoalRunKind | null {
+    const row = this.db.prepare(`SELECT kind FROM goal_runs WHERE id = ?`).get(runId) as { kind: string } | undefined
+    return row?.kind ?? null
+  }
+
   /** Apply a partial update. Only whitelisted columns are written. No-op for an empty patch. */
   patchRun(id: string, patch: GoalRunPatch): void {
     const sets: string[] = []
@@ -338,6 +374,10 @@ export class GoalRunStore {
     if (!sets.length) return
     params.push(id)
     this.db.prepare(`UPDATE goal_runs SET ${sets.join(', ')} WHERE id = ?`).run(...params)
+    if (patch.status !== undefined) {
+      const kind = this.kindOf(id)
+      if (kind !== null) this.emit({ eventType: 'run_status', runId: id, kind, status: patch.status })
+    }
   }
 
   appendTurn(input: AppendTurnInput): GoalRunTurn {
@@ -363,6 +403,8 @@ export class GoalRunStore {
         createdAt,
       )
     const row = this.db.prepare(`SELECT * FROM goal_run_turns WHERE id = ?`).get(id) as GoalRunTurnRow
+    const kind = this.kindOf(input.runId)
+    if (kind !== null) this.emit({ eventType: 'turn', runId: input.runId, kind })
     return mapTurn(row)
   }
 
