@@ -120,6 +120,9 @@ sidebar — open one to answer a `blocked` prompt or watch the agent work.
 
 ## Storage
 
-SQLite at `~/.codekin/goal-runs.db` (WAL, `0600`): `goal_runs` (one row per
+SQLite at `~/.codekin/runs.db` (WAL, `0600`), shared with the workflow engine —
+one runs database for all background automation. Rows from the pre-unification
+`~/.codekin/goal-runs.db` are copied over automatically on first boot (the
+legacy file is left in place). Tables: `goal_runs` (one row per
 run) and `goal_run_turns` (the evidence ledger — diff stat, verify command,
 exit code, output tail, checker verdict, cost per action).

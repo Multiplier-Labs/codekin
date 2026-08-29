@@ -205,6 +205,11 @@ export function resolveUserAccess(githubId: number, policy: AccessPolicy): { rol
   return { role: 'member', status: 'pending' }
 }
 
+/** Whether a GitHub identity may create a hosted Codekin account. */
+export function isGithubAccountAllowed(githubId: number, policy: AccessPolicy): boolean {
+  return resolveUserAccess(githubId, policy).status === 'active'
+}
+
 export interface GithubProfile {
   id: number
   login: string

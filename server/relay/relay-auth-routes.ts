@@ -14,8 +14,9 @@ import type { Request, Response } from 'express'
 import { randomBytes } from 'crypto'
 import type Database from 'better-sqlite3'
 import type { RelayConfig } from './relay-config.js'
-import { upsertUserFromGithub, getUserById } from './control-plane-db.js'
+import { upsertUserFromGithub, getUserById, isGithubAccountAllowed } from './control-plane-db.js'
 import type { GithubProfile, UserRole, UserStatus, UserRow } from './control-plane-db.js'
+import type { SqliteSessionStore } from './sqlite-session-store.js'
 
 const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize'
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token'
@@ -78,9 +79,11 @@ export interface AuthRouterDeps {
   config: RelayConfig
   /** Injectable for tests; defaults to global fetch. */
   fetchImpl?: typeof fetch
+  store?: SqliteSessionStore
+  disconnectUser?: (userId: string, reason: string) => void
 }
 
-export function createRelayAuthRouter({ db, config, fetchImpl = fetch }: AuthRouterDeps): Router {
+export function createRelayAuthRouter({ db, config, fetchImpl = fetch, store, disconnectUser }: AuthRouterDeps): Router {
   const router = Router()
 
   router.get('/api/auth/github/start', (req, res, next) => {
@@ -168,6 +171,18 @@ export function createRelayAuthRouter({ db, config, fetchImpl = fetch }: AuthRou
         email,
         avatarUrl: gh.avatar_url,
       }
+      const accessPolicy = {
+        ownerGithubId: config.ownerGithubId,
+        allowedGithubIds: config.allowedGithubIds,
+      }
+      const existing = db.prepare('SELECT id, status FROM users WHERE github_id = ?').get(profile.id) as
+        | { id: string; status: UserStatus }
+        | undefined
+      if (!existing && !isGithubAccountAllowed(profile.id, accessPolicy)) {
+        await destroySession(req)
+        failLogin(res, 'access_not_allowed')
+        return
+      }
       const user = upsertUserFromGithub(db, profile, {
         ownerGithubId: config.ownerGithubId,
         allowedGithubIds: config.allowedGithubIds,
@@ -188,6 +203,26 @@ export function createRelayAuthRouter({ db, config, fetchImpl = fetch }: AuthRou
         res.json({ success: true })
       })
       .catch(next)
+  })
+
+  router.post('/api/auth/logout-all', (req, res, next) => {
+    const userId = req.session.user?.id
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+    try {
+      const destroyed = store?.destroyUserSessions(userId) ?? 0
+      disconnectUser?.(userId, 'all sessions logged out')
+      destroySession(req)
+        .then(() => {
+          res.clearCookie('codekin_relay_sid')
+          res.json({ success: true, destroyed })
+        })
+        .catch(next)
+    } catch (err) {
+      next(err)
+    }
   })
 
   router.get('/api/me', (req, res) => {

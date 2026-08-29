@@ -16,11 +16,11 @@
  */
 
 import Database from 'better-sqlite3'
-import { existsSync, mkdirSync, chmodSync } from 'fs'
-import { homedir } from 'os'
-import { join } from 'path'
+import { existsSync, chmodSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { jsonParse } from './json-parse.js'
+import type { RunLifecycleStatus } from './run-status.js'
+import { defaultRunsDbPath, legacyDbPath, migrateLegacyTables } from './run-db.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -47,16 +47,10 @@ export type GoalRunKind = string
  * - `failed`         — budget exhausted or unrecoverable error
  * - `aborted`        — cancelled by the user
  */
-export type GoalRunStatus =
-  | 'queued'
-  | 'running'
-  | 'verifying'
-  | 'checking'
-  | 'blocked'
-  | 'awaiting_human'
-  | 'succeeded'
-  | 'failed'
-  | 'aborted'
+export type GoalRunStatus = Extract<
+  RunLifecycleStatus,
+  'queued' | 'running' | 'verifying' | 'checking' | 'blocked' | 'awaiting_human' | 'succeeded' | 'failed' | 'aborted'
+>
 
 export type CompletionPolicy = 'pr' | 'merge' | 'commit-only'
 
@@ -238,15 +232,16 @@ export class GoalRunStore {
   private db: Database.Database
   private eventListener: ((event: GoalRunEvent) => void) | null = null
 
-  constructor(dbPath?: string) {
-    const dir = join(homedir(), '.codekin')
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-    const resolvedPath = dbPath ?? join(dir, 'goal-runs.db')
+  constructor(dbPath?: string, legacyPath?: string) {
+    const resolvedPath = dbPath ?? defaultRunsDbPath()
     this.db = new Database(resolvedPath, { fileMustExist: false })
     if (resolvedPath !== ':memory:' && existsSync(resolvedPath)) chmodSync(resolvedPath, 0o600)
     this.db.pragma('journal_mode = WAL')
     this.createTables()
     this.migrateSchema()
+    // Carry rows over from the pre-unification goal-runs.db (one-time, per table).
+    const resolvedLegacy = legacyPath ?? (dbPath === undefined ? legacyDbPath('goal-runs.db') : undefined)
+    if (resolvedLegacy) migrateLegacyTables(this.db, resolvedLegacy, ['goal_runs', 'goal_run_turns'])
   }
 
   /** Additive, idempotent column migrations for databases created before a column existed. */
