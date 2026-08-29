@@ -67,6 +67,7 @@ vi.mock('child_process', async (importOriginal) => {
 })
 
 import { SessionManager } from './session-manager.js'
+import { seedUtilityProbe, resetUtilityProbeCache } from './utility-agent.js'
 import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync } from 'fs'
 import { EventEmitter } from 'node:events'
 
@@ -150,6 +151,19 @@ describe('SessionManager', () => {
 
   beforeEach(() => {
     sm = new SessionManager()
+    // Session naming runs through the utility agent, which only spawns a
+    // harness whose probe reports available+authenticated. Real probes shell
+    // out with execFileSync (not the mocked spawn), so on a host without the
+    // CLIs installed — CI — nothing would be spawned at all. Seed the cache:
+    // claude is the one usable one-shot harness under test.
+    resetUtilityProbeCache()
+    seedUtilityProbe('claude', { available: true, version: 'test', authenticated: true })
+    seedUtilityProbe('codex', { available: false, version: '', authenticated: false })
+    seedUtilityProbe('opencode', { available: false, version: '', authenticated: false })
+  })
+
+  afterEach(() => {
+    resetUtilityProbeCache()
   })
 
   describe('CRUD', () => {

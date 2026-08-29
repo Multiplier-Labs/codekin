@@ -42,6 +42,20 @@ export interface CreateProcessContext {
   mergedAllowedTools: string[]
 }
 
+export interface OneShotOptions {
+  prompt: string
+  systemPrompt?: string
+  /** Prefer a small/cheap model where the harness lets us pick one. */
+  fast?: boolean
+}
+
+/** A fully-resolved one-shot invocation: binary + args + what to pipe to stdin. */
+export interface OneShotCommand {
+  binary: string
+  args: string[]
+  stdin: string
+}
+
 export interface HarnessDefinition {
   id: CodingProvider
   label: string
@@ -51,6 +65,11 @@ export interface HarnessDefinition {
   probe(): HarnessProbe
   /** Build (but do not start) the session's process. */
   createProcess(session: Session, ctx: CreateProcessContext): CodingProcess
+  /**
+   * Resolve a non-interactive single-prompt invocation (session naming,
+   * handoff distillation — see utility-agent.ts). Pure: callers execute it.
+   */
+  oneShotCommand(opts: OneShotOptions): OneShotCommand
 }
 
 function tryVersion(binary: string): string | null {
@@ -80,6 +99,12 @@ const claude: HarnessDefinition = {
     }
     return { available: true, version, authenticated }
   },
+  oneShotCommand(opts) {
+    const args = ['-p', '--max-turns', '1', '--tools', '']
+    if (opts.systemPrompt) args.push('--system-prompt', opts.systemPrompt)
+    if (opts.fast) args.push('--model', 'haiku')
+    return { binary: CLAUDE_BINARY, args, stdin: opts.prompt }
+  },
   createProcess(session, ctx) {
     return new ClaudeProcess(session.workingDir, {
       sessionId: session.claudeSessionId || undefined,
@@ -105,6 +130,12 @@ const opencode: HarnessDefinition = {
     return version === null
       ? { available: false, version: '', authenticated: false }
       : { available: true, version, authenticated: true }
+  },
+  oneShotCommand(opts) {
+    // `opencode run --pure` prints the reply and loads no plugins. It has no
+    // separate system-prompt channel, so the system prompt leads the message.
+    const text = opts.systemPrompt ? `${opts.systemPrompt}\n\n${opts.prompt}` : opts.prompt
+    return { binary: process.env.OPENCODE_BINARY || 'opencode', args: ['run', '--pure', text], stdin: '' }
   },
   createProcess(session, ctx) {
     // Recent assistant text already shown to the user — lets the resumed
@@ -135,6 +166,12 @@ const codex: HarnessDefinition = {
     const codexHome = process.env.CODEX_HOME || join(homedir(), '.codex')
     const authenticated = existsSync(join(codexHome, 'auth.json')) || !!process.env.OPENAI_API_KEY
     return { available: true, version, authenticated }
+  },
+  oneShotCommand(opts) {
+    // `codex exec` reads instructions from stdin when no prompt argument is
+    // given. No system-prompt channel either — it leads the piped text.
+    const text = opts.systemPrompt ? `${opts.systemPrompt}\n\n${opts.prompt}` : opts.prompt
+    return { binary: process.env.CODEX_BINARY || 'codex', args: ['exec'], stdin: text }
   },
   createProcess(session, ctx) {
     return new CodexProcess(session.workingDir, {
