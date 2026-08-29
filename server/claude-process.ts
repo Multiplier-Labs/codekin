@@ -103,6 +103,15 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
    */
   private _sessionConflict = false
 
+  /**
+   * Set when stderr reports that `--resume` targeted a conversation the CLI has
+   * no transcript for. Unlike a hung resume, the CLI still writes a `result` /
+   * `error_during_execution` line to stdout before exiting, so `hadOutput()`
+   * looks healthy and the no-output heuristic never fires. Without this flag the
+   * session keeps resuming the same dead ID until auto-restart gives up.
+   */
+  private _resumeNotFound = false
+
   /** Cumulative token counts across all result events in this process's lifetime. */
   private cumulativeInputTokens = 0
   private cumulativeOutputTokens = 0
@@ -258,6 +267,15 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
 
     this.alive = true
 
+    // A stdin write to a child that has already closed its end fails
+    // asynchronously with EPIPE, which surfaces as a stream 'error' event rather
+    // than a throw the writer can catch. Without a listener Node re-raises it as
+    // an uncaught exception and takes the whole server down.
+    this.proc.stdin!.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EPIPE') return
+      console.error(`[claude stdin error] session=${this.sessionId} ${err.message}`)
+    })
+
     // Startup timeout: kill the process if no stdout output is received within 60s.
     // Cleared as soon as any valid JSON line arrives (see handleLine).
     this.startupTimer = setTimeout(() => {
@@ -277,6 +295,9 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       if (text) {
         if (/Session ID \S+ is already in use/.test(text)) {
           this._sessionConflict = true
+        }
+        if (/No conversation found with session ID/i.test(text)) {
+          this._resumeNotFound = true
         }
         this.emit('error', `[stderr] ${text.slice(0, 500)}`)
       }
@@ -882,6 +903,11 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
   /** True if the process produced at least one valid JSON event before exiting. */
   hadOutput(): boolean {
     return this._receivedOutput
+  }
+
+  /** True if `--resume` named a conversation the CLI has no transcript for. */
+  hasResumeNotFound(): boolean {
+    return this._resumeNotFound
   }
 
   /** True if spawn() itself failed (ENOENT, EACCES) — process never started. */

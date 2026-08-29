@@ -139,6 +139,7 @@ function fakeClaudeProcess(alive = true) {
     hasSessionConflict: vi.fn(() => false),
     hadOutput: vi.fn(() => true),
     hasSpawnFailed: vi.fn(() => false),
+    hasResumeNotFound: vi.fn(() => false),
     waitForExit: vi.fn(() => Promise.resolve()),
     emit: vi.fn(),
   } as any
@@ -3721,6 +3722,27 @@ describe('SessionManager', () => {
       expect(session.claudeSessionId).toBeNull()
       expect((session as any)._noOutputExitCount).toBe(0)
 
+      vi.useRealTimers()
+    })
+
+    // The CLI prints "No conversation found" to stderr but still writes a
+    // result event to stdout, so hadOutput() is true and the no-output
+    // heuristic never fires. Every retry then resumes the same dead ID.
+    it('clears claudeSessionId on the first "no conversation found" exit, despite output', () => {
+      vi.useFakeTimers()
+      const s = sm.create('resume-gone-test', '/tmp')
+      const session = sm.get(s.id)!
+      ;(session as any).claudeSessionId = 'deleted-transcript'
+      ;(session as any).restartCount = 0
+
+      const cp = fakeClaudeProcess(false)
+      cp.hadOutput.mockReturnValue(true)
+      cp.hasSpawnFailed.mockReturnValue(false)
+      cp.hasResumeNotFound.mockReturnValue(true)
+
+      ;(sm as any).handleClaudeExit(cp, session, s.id, 1, null)
+
+      expect(session.claudeSessionId).toBeNull()
       vi.useRealTimers()
     })
   })

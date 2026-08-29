@@ -289,10 +289,11 @@ export class SessionLifecycle {
     // as a non-restartable exit (same as stopped-by-user).
     // ClaudeProcess has diagnostic methods (hasSessionConflict, hadOutput, hasSpawnFailed)
     // that OpenCodeProcess does not. Duck-type check via property existence.
-    const proc = exitedProcess as CodingProcess & Partial<Pick<ClaudeProcess, 'hasSessionConflict' | 'hadOutput' | 'hasSpawnFailed'>>
+    const proc = exitedProcess as CodingProcess & Partial<Pick<ClaudeProcess, 'hasSessionConflict' | 'hadOutput' | 'hasSpawnFailed' | 'hasResumeNotFound'>>
     const sessionConflict = proc.hasSessionConflict ? proc.hasSessionConflict() : false
     const producedOutput = proc.hadOutput ? proc.hadOutput() : true
     const spawnFailed = proc.hasSpawnFailed ? proc.hasSpawnFailed() : false
+    const resumeNotFound = proc.hasResumeNotFound ? proc.hasResumeNotFound() : false
 
     // If the process exited without ever producing stdout output, --resume
     // likely hung on a broken/stale session.  But one failure could be transient
@@ -302,7 +303,15 @@ export class SessionLifecycle {
     // Exception: if spawn() itself failed (ENOENT/EACCES), the process never
     // started — the session data on disk is fine, so preserve the ID and don't
     // count it.
-    if (spawnFailed) {
+    // "No conversation found" is the unambiguous case: the transcript is gone,
+    // so every retry with that ID fails the same way.  The CLI still writes a
+    // result event to stdout before exiting, so hadOutput() is true and the
+    // no-output heuristic below never fires — clear the ID on the first hit.
+    if (resumeNotFound && session.claudeSessionId) {
+      console.warn(`[restart] Session ${sessionId} resumed a conversation the CLI no longer has — clearing claudeSessionId to force fresh session`)
+      session.claudeSessionId = null
+      session._noOutputExitCount = 0
+    } else if (spawnFailed) {
       console.warn(`[restart] Session ${sessionId} spawn failed (binary not found) — preserving claudeSessionId for retry`)
     } else if (!producedOutput && session.claudeSessionId) {
       session._noOutputExitCount = (session._noOutputExitCount ?? 0) + 1

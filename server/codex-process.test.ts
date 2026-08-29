@@ -9,7 +9,7 @@ import { EventEmitter } from 'events'
 import { PassThrough } from 'stream'
 
 interface MockProc extends EventEmitter {
-  stdin: { write: ReturnType<typeof vi.fn>; writable: boolean; end: ReturnType<typeof vi.fn> }
+  stdin: EventEmitter & { write: ReturnType<typeof vi.fn>; writable: boolean; end: ReturnType<typeof vi.fn> }
   stdout: PassThrough
   stderr: PassThrough
   kill: ReturnType<typeof vi.fn>
@@ -44,7 +44,9 @@ vi.mock('child_process', async (importOriginal) => {
     ...actual,
     spawn: vi.fn(() => {
       const proc = Object.assign(new EventEmitter(), {
-        stdin: { write: vi.fn(), writable: true, end: vi.fn() },
+        // stdin is an EventEmitter so tests can deliver the async 'error'
+        // events (EPIPE) that a real socket emits after the peer goes away.
+        stdin: Object.assign(new EventEmitter(), { write: vi.fn(), writable: true, end: vi.fn() }),
         stdout: new PassThrough(),
         stderr: new PassThrough(),
         kill: vi.fn(),
@@ -660,6 +662,26 @@ describe('CodexProcess', () => {
       const interrupt = writes(proc).find(w => w.method === 'turn/interrupt')!
       expect(interrupt.params).toMatchObject({ threadId: 'thread-1', turnId: 'turn-9' })
       expect(proc.kill).toHaveBeenCalledWith('SIGTERM')
+    })
+
+    // A write to a child that already closed its end fails asynchronously, so
+    // the try/catch around stdin.write() never sees it. Unlistened, Node
+    // re-raises the stream error and takes the whole server down.
+    it('absorbs an async EPIPE from stdin instead of letting it go unhandled', async () => {
+      const proc = await handshake(cxp)
+      const err = new Error('write EPIPE') as NodeJS.ErrnoException
+      err.code = 'EPIPE'
+      expect(proc.stdin.listenerCount('error')).toBeGreaterThan(0)
+      expect(() => proc.stdin.emit('error', err)).not.toThrow()
+      expect(errors).toEqual([])
+    })
+
+    it('reports non-EPIPE stdin errors instead of swallowing them', async () => {
+      const proc = await handshake(cxp)
+      const err = new Error('boom') as NodeJS.ErrnoException
+      err.code = 'ECONNRESET'
+      proc.stdin.emit('error', err)
+      expect(errors).toEqual(['Failed to write to Codex: boom'])
     })
 
     it('settles pending requests and emits exit when the process closes mid-handshake', async () => {
