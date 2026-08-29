@@ -358,6 +358,24 @@ describe('workflow routes', () => {
   })
 
   // -------------------------------------------------------------------------
+  // POST /runs/:runId/cancel (+ /abort alias)
+  // -------------------------------------------------------------------------
+
+  describe('stop verbs', () => {
+    it('cancels via /cancel', async () => {
+      const res = await fetch(`${harness.baseUrl}/runs/run-1/cancel`, { method: 'POST', headers: authHeader() })
+      expect(res.status).toBe(200)
+      expect(mocks.cancelRun).toHaveBeenCalledWith('run-1')
+    })
+
+    it('accepts /abort as an alias for /cancel', async () => {
+      const res = await fetch(`${harness.baseUrl}/runs/run-1/abort`, { method: 'POST', headers: authHeader() })
+      expect(res.status).toBe(200)
+      expect(mocks.cancelRun).toHaveBeenCalledWith('run-1')
+    })
+  })
+
+  // -------------------------------------------------------------------------
   // POST /runs
   // -------------------------------------------------------------------------
 

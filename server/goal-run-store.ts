@@ -21,6 +21,7 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { jsonParse } from './json-parse.js'
+import type { RunLifecycleStatus } from './run-status.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -47,16 +48,10 @@ export type GoalRunKind = string
  * - `failed`         — budget exhausted or unrecoverable error
  * - `aborted`        — cancelled by the user
  */
-export type GoalRunStatus =
-  | 'queued'
-  | 'running'
-  | 'verifying'
-  | 'checking'
-  | 'blocked'
-  | 'awaiting_human'
-  | 'succeeded'
-  | 'failed'
-  | 'aborted'
+export type GoalRunStatus = Extract<
+  RunLifecycleStatus,
+  'queued' | 'running' | 'verifying' | 'checking' | 'blocked' | 'awaiting_human' | 'succeeded' | 'failed' | 'aborted'
+>
 
 export type CompletionPolicy = 'pr' | 'merge' | 'commit-only'
 

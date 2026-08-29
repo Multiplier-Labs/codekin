@@ -354,14 +354,18 @@ export function createWorkflowRouter(
     }
   })
 
-  router.post('/runs/:runId/cancel', (req, res) => {
+  // /cancel is canonical here; /abort is accepted as an alias so both engines
+  // answer to both stop verbs (loops say abort — see run-status.ts).
+  const cancelHandler = (req: Request<{ runId: string }>, res: Response) => {
     const engine = getEngine(res)
     if (!engine) return
 
     const canceled = engine.cancelRun(req.params.runId)
     if (!canceled) return res.status(404).json({ error: 'Run not found or not active' })
     res.json({ success: true })
-  })
+  }
+  router.post('/runs/:runId/cancel', cancelHandler)
+  router.post('/runs/:runId/abort', cancelHandler)
 
   // -------------------------------------------------------------------------
   // Schedules

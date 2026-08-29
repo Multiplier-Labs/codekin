@@ -125,11 +125,15 @@ export function createGoalRunRouter(
     }
   })
 
-  router.post('/runs/:id/abort', (req, res) => {
+  // /abort is canonical here; /cancel is accepted as an alias so both engines
+  // answer to both stop verbs (workflows say cancel — see run-status.ts).
+  const abortHandler = (req: Request<{ id: string }>, res: Response) => {
     const aborted = controller.abortRun(req.params.id)
     if (!aborted) return res.status(404).json({ error: 'Run not found or already finished' })
     res.json({ success: true })
-  })
+  }
+  router.post('/runs/:id/abort', abortHandler)
+  router.post('/runs/:id/cancel', abortHandler)
 
   return router
 }
