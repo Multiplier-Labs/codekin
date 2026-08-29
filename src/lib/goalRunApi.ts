@@ -25,13 +25,15 @@ function headers(token: string): HeadersInit {
 // Types (mirroring server/goal-run-store.ts)
 // ---------------------------------------------------------------------------
 
-export type GoalRunKind = 'ci-autorepair' | 'coverage-increase' | 'dependency-upgrade'
+/** Open set — any kind with a loadable template (built-in or repo-defined) is valid. */
+export type GoalRunKind = string
 
 export type GoalRunStatus =
   | 'queued'
   | 'running'
   | 'verifying'
   | 'checking'
+  | 'blocked'
   | 'awaiting_human'
   | 'succeeded'
   | 'failed'

@@ -26,7 +26,13 @@ import { jsonParse } from './json-parse.js'
 // Types
 // ---------------------------------------------------------------------------
 
-export type GoalRunKind = 'ci-autorepair' | 'coverage-increase' | 'dependency-upgrade'
+/**
+ * The kind of a goal run — the template identifier it was started from. An open
+ * set: any kind with a loadable template (built-in or `{repo}/.codekin/loops/`)
+ * is valid, so repos can define their own loops. Kind strings are validated as
+ * slugs (`isValidLoopKind` in loop-loader) at template parse and run start.
+ */
+export type GoalRunKind = string
 
 /**
  * Lifecycle status of a goal run.
@@ -34,6 +40,8 @@ export type GoalRunKind = 'ci-autorepair' | 'coverage-increase' | 'dependency-up
  * - `running`        — maker is working a turn
  * - `verifying`      — deterministic verify commands are executing
  * - `checking`       — second-provider checker is reviewing the diff
+ * - `blocked`        — a maker/checker tool call is waiting on human approval;
+ *                      resolves back to the loop when answered (non-terminal)
  * - `awaiting_human` — escalated to a human checkpoint (budget, constraint, or escalate verdict)
  * - `succeeded`      — verified green, constraints satisfied, completion policy met
  * - `failed`         — budget exhausted or unrecoverable error
@@ -44,6 +52,7 @@ export type GoalRunStatus =
   | 'running'
   | 'verifying'
   | 'checking'
+  | 'blocked'
   | 'awaiting_human'
   | 'succeeded'
   | 'failed'
@@ -375,7 +384,7 @@ export class GoalRunStore {
 function mapRun(row: GoalRunRow): GoalRun {
   return {
     id: row.id,
-    kind: row.kind as GoalRunKind,
+    kind: row.kind,
     status: row.status as GoalRunStatus,
     goal: row.goal,
     spec: jsonParse(row.spec) as GoalRunSpec,

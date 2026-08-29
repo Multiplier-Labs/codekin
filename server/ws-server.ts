@@ -374,6 +374,12 @@ app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestrat
 // Goal Run (loop) router — durable act→verify→continue loops with an evidence ledger.
 const goalRunStore = new GoalRunStore()
 const goalRunController = new GoalRunController(sessions, goalRunStore)
+// Runs left non-terminal by the previous process can never progress — fail them
+// honestly at boot instead of leaving them stuck in `running` forever.
+const interruptedGoalRuns = goalRunController.failInterrupted()
+if (interruptedGoalRuns.length) {
+  console.log(`[goal-runs] Failed ${interruptedGoalRuns.length} run(s) interrupted by restart: ${interruptedGoalRuns.join(', ')}`)
+}
 app.use('/api/goal-runs', createGoalRunRouter(verifyToken, extractToken, goalRunStore, goalRunController))
 
 // --- SPA fallback: serve index.html for non-API routes (client-side routing) ---

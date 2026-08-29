@@ -35,6 +35,7 @@ function statusBadge(status: GoalRunStatus): string {
     case 'failed': return 'bg-error-8 text-error-2'
     case 'aborted': return 'bg-warning-8 text-warning-2'
     case 'awaiting_human': return 'bg-warning-7 text-warning-1'
+    case 'blocked': return 'bg-warning-7 text-warning-1 animate-pulse'
     case 'running': return 'bg-accent-8 text-accent-2 animate-pulse'
     case 'verifying': return 'bg-accent-8 text-accent-2 animate-pulse'
     case 'checking': return 'bg-primary-8 text-primary-2 animate-pulse'
@@ -387,7 +388,7 @@ function StartLoopModal({
     setSubmitting(true)
     try {
       const run = await startGoalRun(token, {
-        kind: kind as GoalRun['kind'],
+        kind,
         repo: repo.trim(),
         branch: branch.trim(),
         goal: goal.trim() || undefined,

@@ -19,13 +19,16 @@ class FakeHost implements SessionHost {
   stopped: string[] = []
   worktreePath = '/wt/feat'
   private listeners: ((sessionId: string, isError: boolean) => void)[] = []
+  private promptListeners: ((sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void)[] = []
   private nextId = 1
   lastSessionId = ''
   createdIds: string[] = []
+  createOpts: (Record<string, unknown> | undefined)[] = []
 
-  create(): { id: string } {
+  create(_name?: string, _dir?: string, opts?: Record<string, unknown>): { id: string } {
     this.lastSessionId = `sess-${this.nextId++}`
     this.createdIds.push(this.lastSessionId)
+    this.createOpts.push(opts)
     return { id: this.lastSessionId }
   }
   createWorktree(): Promise<string | null> {
@@ -48,6 +51,18 @@ class FakeHost implements SessionHost {
     return () => {
       this.listeners = this.listeners.filter((l) => l !== listener)
     }
+  }
+  onSessionPrompt(
+    listener: (sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void,
+  ): () => void {
+    this.promptListeners.push(listener)
+    return () => {
+      this.promptListeners = this.promptListeners.filter((l) => l !== listener)
+    }
+  }
+  /** Simulate a session blocking on a tool approval or question. */
+  firePrompt(sessionId: string, toolName = 'Bash', requestId = `req-${sessionId}`, promptType: 'permission' | 'question' = 'permission'): void {
+    for (const l of [...this.promptListeners]) l(sessionId, promptType, toolName, requestId)
   }
   /** Simulate the maker (first created session) turn ending. */
   async fire(isError = false): Promise<void> {
@@ -332,6 +347,72 @@ describe('GoalRunController', () => {
       expect(aborted).toBe(true)
       expect(store.getRun(run.id)?.status).toBe('aborted')
       expect(host.stopped).toHaveLength(0)
+    })
+  })
+
+  describe('session allowlists', () => {
+    it('creates the maker with the headless-agent allowlist', async () => {
+      await controller.startRun(input(spec()))
+      const tools = host.createOpts[0]?.allowedTools as string[]
+      expect(tools).toContain('Bash(npm:*)')
+      expect(tools).toContain('Write')
+    })
+
+    it('creates the checker with a read-only allowlist', async () => {
+      await controller.startRun(input(spec({ checker: { provider: 'opencode' } })))
+      await host.fire() // verify passes → checker spawns
+      const tools = host.createOpts[1]?.allowedTools as string[]
+      expect(tools).toContain('Read')
+      expect(tools).not.toContain('Write')
+      expect(tools).not.toContain('Edit')
+    })
+  })
+
+  describe('blocked prompts', () => {
+    it('marks the run blocked with one ledger row when the maker waits on approval', async () => {
+      const run = await controller.startRun(input(spec()))
+      host.firePrompt('sess-1', 'Bash', 'req-1')
+      host.firePrompt('sess-1', 'Bash', 'req-1') // re-broadcast on client join — deduped
+
+      expect(store.getRun(run.id)?.status).toBe('blocked')
+      const rows = store.listTurns(run.id).filter((t) => t.outputTail?.startsWith('Blocked:'))
+      expect(rows).toHaveLength(1)
+      expect(rows[0].role).toBe('maker')
+      expect(rows[0].outputTail).toContain('Bash')
+    })
+
+    it('resumes the loop when the prompt is answered and the turn completes', async () => {
+      const run = await controller.startRun(input(spec()))
+      host.firePrompt('sess-1')
+      expect(store.getRun(run.id)?.status).toBe('blocked')
+
+      verifier.queue = [FAIL]
+      await host.fire() // answered → turn ends → verify fails → loop continues
+      expect(store.getRun(run.id)?.status).toBe('running')
+    })
+
+    it('ignores prompts from unrelated sessions', async () => {
+      const run = await controller.startRun(input(spec()))
+      host.firePrompt('sess-other')
+      expect(store.getRun(run.id)?.status).toBe('running')
+    })
+  })
+
+  describe('failInterrupted', () => {
+    it('fails persisted non-terminal runs and leaves terminal + active runs alone', async () => {
+      const stuck = store.createRun(input(spec()))
+      store.patchRun(stuck.id, { status: 'verifying' })
+      const done = store.createRun(input(spec()))
+      store.patchRun(done.id, { status: 'succeeded', completedAt: new Date().toISOString() })
+      const live = await controller.startRun(input(spec()))
+
+      const failed = controller.failInterrupted()
+      expect(failed).toEqual([stuck.id])
+      expect(store.getRun(stuck.id)?.status).toBe('failed')
+      expect(store.getRun(stuck.id)?.completedAt).not.toBeNull()
+      expect(store.listTurns(stuck.id).some((t) => t.outputTail?.includes('server restart'))).toBe(true)
+      expect(store.getRun(done.id)?.status).toBe('succeeded')
+      expect(store.getRun(live.id)?.status).toBe('running')
     })
   })
 })
