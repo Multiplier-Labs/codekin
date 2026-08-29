@@ -10,6 +10,7 @@ import type { Request, Response } from 'express'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { getWorkflowEngine } from './workflow-engine.js'
+import { isValidCron } from './cron.js'
 import {
   loadWorkflowConfig,
   addReviewRepo,
@@ -59,6 +60,7 @@ interface PatchScheduleBody {
   cronExpression?: string
   input?: Record<string, unknown>
   enabled?: boolean
+  catchUp?: 'collapse' | 'skip'
 }
 
 interface AddRepoBody extends Partial<ReviewRepoConfig> {
@@ -157,36 +159,8 @@ async function autoSetupPrWebhook(repoPath: string, webhookUrl: string): Promise
 type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
 
-/** Validate a 5-field cron expression. Returns true if the format is valid. */
-export function isValidCron(expr: string): boolean {
-  const parts = expr.trim().split(/\s+/)
-  if (parts.length !== 5) return false
-  const ranges = [
-    [0, 59],  // minute
-    [0, 23],  // hour
-    [1, 31],  // day of month
-    [1, 12],  // month
-    [0, 6],   // day of week
-  ]
-  return parts.every((part, i) => {
-    const [min, max] = ranges[i]
-    return part.split(',').every(segment => {
-      const stepMatch = segment.match(/^(.+)\/(\d+)$/)
-      if (stepMatch) {
-        const step = parseInt(stepMatch[2], 10)
-        if (isNaN(step) || step < 1) return false
-      }
-      const range = stepMatch ? stepMatch[1] : segment
-      if (range === '*') return true
-      if (range.includes('-')) {
-        const [a, b] = range.split('-').map(Number)
-        return !isNaN(a) && !isNaN(b) && a >= min && b <= max && a <= b
-      }
-      const n = parseInt(range, 10)
-      return !isNaN(n) && n >= min && n <= max
-    })
-  })
-}
+// Validation lives in the shared cron module; re-exported here for existing importers.
+export { isValidCron } from './cron.js'
 
 /**
  * Sync cron schedules with the current workflow config.
@@ -378,6 +352,29 @@ export function createWorkflowRouter(
     res.json({ schedules: engine.listSchedules() })
   })
 
+  /**
+   * Dispatch-loop liveness. `stale` means the heartbeat is older than three tick
+   * intervals — the scheduler interval has died or the process is wedged.
+   */
+  router.get('/engine-health', (_req, res) => {
+    const engine = getEngine(res)
+    if (!engine) return
+
+    const health = engine.getEngineHealth()
+    const stale = !health.lastTickAt || Date.now() - new Date(health.lastTickAt).getTime() > 3 * 60_000
+    res.json({ ...health, stale })
+  })
+
+  /** Trigger ledger — why schedules did or didn't fire, newest first. */
+  router.get('/trigger-ledger', (req, res) => {
+    const engine = getEngine(res)
+    if (!engine) return
+
+    const scheduleId = typeof req.query.scheduleId === 'string' ? req.query.scheduleId : undefined
+    const limit = Math.min(parseInt(String(req.query.limit ?? '100'), 10) || 100, 500)
+    res.json({ entries: engine.listTriggerLedger({ scheduleId, limit }) })
+  })
+
   router.post('/schedules', (req: Request<Record<string, string>, unknown, UpsertScheduleBody>, res) => {
     const engine = getEngine(res)
     if (!engine) return
@@ -410,6 +407,9 @@ export function createWorkflowRouter(
     if (req.body.cronExpression !== undefined && !isValidCron(req.body.cronExpression)) {
       return res.status(400).json({ error: 'Invalid cron expression' })
     }
+    if (req.body.catchUp !== undefined && req.body.catchUp !== 'collapse' && req.body.catchUp !== 'skip') {
+      return res.status(400).json({ error: "Invalid catchUp: must be 'collapse' or 'skip'" })
+    }
 
     const schedule = engine.upsertSchedule({
       id: existing.id,
@@ -417,6 +417,7 @@ export function createWorkflowRouter(
       cronExpression: req.body.cronExpression ?? existing.cronExpression,
       input: req.body.input ?? existing.input,
       enabled: req.body.enabled ?? existing.enabled,
+      catchUp: req.body.catchUp,
     })
     res.json({ schedule })
   })
