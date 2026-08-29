@@ -147,7 +147,29 @@ Substrate consolidation implied: one SQLite store, one scheduler (the workflow c
 
 **Phase 3 — Joe on top.** Joe's child-spawning migrates to creating delegation-triggered runs; the dashboard becomes a view over the run ledger; trust records (open item B5) finally get a place to act — auto-approving the `blocked` inbox within trust level. Joe's chat becomes the conversational way to author recipes and launch runs.
 
-### 2.6 Open questions for discussion
+### 2.6 Making Joe more powerful with MCP
+
+There is a proven local pattern to follow. Three sibling projects expose domain knowledge as MCP servers, and the integration model was designed with Codekin in mind:
+
+- **BookGraph** — read-only research MCP over Streamable HTTP (7 tools: passage search, knowledge graph, cross-book synthesis…), shipped 2026-08-25. Its design record (`bookgraph/docs/codekin-bookgraph-mcp-integration.md`) is explicitly a Codekin integration spec, and its key architectural decision applies verbatim here: **Codekin does not proxy MCP; each harness inherits its provider-native MCP configuration** (user-scope `claude mcp`, Codex config, OpenCode config), so one HTTP MCP server serves all three harnesses with zero protocol work in Codekin.
+- **Erwin Analytics** — ships `apps/mcp-server` with per-token auth (`McpAuthContext`), token-usage logging, and an audit log that **redacts free-text args before storage** — the governance pattern an autonomous agent's tool calls need.
+- **TubeGraph** — same shape; its deployment gotcha is instructive: headless tokens must live in `~/.profile`, not `~/.bashrc`, because non-interactive shells (exactly what Codekin spawns) skip the latter.
+
+**Why Joe gets none of this today.** BookGraph and TubeGraph are already registered user-scope on this machine, so Joe's Claude process inherits them — but Joe's allowlist is `['Bash(curl:*)', 'CronCreate', 'CronDelete', 'CronList']` (`orchestrator-manager.ts:393`) and the child allowlist has no `mcp__*` patterns either, so every MCP call stalls on an approval prompt with no one watching. This is open audit item B3 in concrete form. (Joe and children being Claude-only, §2.2 #6, also means MCP inheritance for Codex/OpenCode children is moot until the harness registry lands.)
+
+**Spec recommendations:**
+
+**M1 — Replace curl-driving with a Codekin MCP server.** Joe's entire control surface today is string-built `curl` commands against Codekin's REST API, taught via a prompt template. Wrap that API (spawn/monitor children, list runs, respond to prompts, memory/trust/learning ops, read reports) in a first-party MCP server and put `mcp__codekin__*` in Joe's allowlist. Typed tools instead of shell strings resolves B3 outright, is self-describing (less prompt template to maintain and version), works identically across harnesses when Joe's children stop being Claude-only, and the same server can later be exposed to external clients (Claude Desktop, a phone agent) as the remote-control story.
+
+**M2 — MCP grants as policy, gated by trust.** Extend the allowlist vocabulary already present in `ChildSessionRequest.allowedTools` and the unified `policy.tools` (§2.3) with `mcp__<server>__*` patterns. Read-only servers (BookGraph, TubeGraph, Erwin's query tools) are grantable by default; write-capable MCP tools sit behind trust levels — giving the never-wired trust records (open item B5) their first real job.
+
+**M3 — A connections surface in Codekin.** The BookGraph doc's one unbuilt ask: "give Codekin a connection-management surface." A Settings/onboarding section that lists MCP servers per harness, health-checks them (list tools), and toggles availability for Joe and for automation runs. Recipes then declare requirements (`mcp: [erwin]`) and the run engine checks availability before starting, the same way it should check harness availability (N2).
+
+**M4 — Audit every MCP call into the evidence ledger.** Adopt Erwin's pattern: log tool name, redacted args, and child/run attribution into the unified run ledger, so an autonomous Joe consulting external systems stays reviewable.
+
+**What Joe concretely gains:** Erwin Analytics tools let Joe ground triage in product reality ("error rate on X spiked; opening a goal run") instead of only repo signals; BookGraph/TubeGraph give planning children citable engineering guidance when writing specs and reviews; and the Codekin MCP server turns Joe from a curl-scripted operator into a properly tool-equipped supervisor.
+
+### 2.7 Open questions for discussion
 
 1. **Naming.** "Automations" is the working title above; alternatives: "Runs", "Agents", "Jobs". Whatever is chosen should also settle the Loop-Runs/GoalRun/loop-loader triple-name and the four meanings of "workflow".
 2. **Do workflows and loops merge at the recipe level or only at the view level?** The spec above argues recipe-level (a workflow is a 1-turn loop); the cheaper alternative — shared view over two engines — preserves the code but ossifies the duplication.
