@@ -13,6 +13,7 @@ import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
 import { jsonParse } from './json-parse.js'
+import type { RunLifecycleStatus } from './run-status.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,7 +28,7 @@ import { jsonParse } from './json-parse.js'
  * - `canceled`  — `cancelRun()` was called and the AbortSignal fired
  * - `skipped`   — a step threw `WorkflowSkipped` (e.g. no code changes since last run)
  */
-export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled' | 'skipped'
+export type RunStatus = Extract<RunLifecycleStatus, 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled' | 'skipped'>
 
 /**
  * Throw this from any workflow step to cleanly skip a run without marking it as failed.
