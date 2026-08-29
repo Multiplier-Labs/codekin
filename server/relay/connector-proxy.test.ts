@@ -39,6 +39,16 @@ describe('checkProxyRequest', () => {
     expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/clone' })).allowed).toBe(true)
   })
 
+  it('allows the reads and mutations the Automations views perform', () => {
+    expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/runs?limit=100' })).allowed).toBe(true)
+    expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/workflows/runs?limit=50' })).allowed).toBe(true)
+    expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/workflows/config' })).allowed).toBe(true)
+    expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/goal-runs/templates' })).allowed).toBe(true)
+    expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/workflows/runs' })).allowed).toBe(true)
+    expect(checkProxyRequest(asOwner({ method: 'DELETE', path: '/api/workflows/config/repos/r1' })).allowed).toBe(true)
+    expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/goal-runs/runs/g1/abort' })).allowed).toBe(true)
+  })
+
   it('refuses mutations on read-only prefixes', () => {
     // Readable, but not writable over the relay
     expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/repos' })).allowed).toBe(true)
@@ -46,6 +56,8 @@ describe('checkProxyRequest', () => {
     expect(decision.allowed).toBe(false)
     expect(decision.error?.code).toBe(RELAY_ERROR.pathNotAllowed)
     expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/docs' })).allowed).toBe(false)
+    // The unified run read model has no writes, so it is not in the write list
+    expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/runs' })).allowed).toBe(false)
   })
 
   it('refuses methods that are proxied for nothing', () => {

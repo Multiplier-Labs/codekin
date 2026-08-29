@@ -39,6 +39,12 @@ export const ALLOWED_GET_PREFIXES = [
   '/api/docs',
   '/api/browse-dirs',
   '/api/orchestrator',
+  // The Automations views (workflows, loops, and the unified run read model)
+  // are owner-only surfaces that are otherwise unreachable over the relay —
+  // without these the hosted UI renders the page and then fails every fetch.
+  '/api/workflows',
+  '/api/goal-runs',
+  '/api/runs',
 ] as const
 
 /**
@@ -58,6 +64,10 @@ export const ALLOWED_MUTATION_PREFIXES = [
   // only inside the machine's repos root, and grantees never reach it (see
   // GRANTEE_WRITE_PREFIXES).
   '/api/clone',
+  // Triggering, cancelling and configuring automations. `/api/runs` stays out:
+  // it is a read model, so widening it here would grant nothing.
+  '/api/workflows',
+  '/api/goal-runs',
 ] as const
 
 /** Methods that may be proxied at all. */
