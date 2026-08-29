@@ -147,11 +147,51 @@ function findConnectorScript() {
 async function cmdRelayLogin(args) {
   const urlFlag = args.indexOf('--url')
   const relayUrl = (urlFlag !== -1 && args[urlFlag + 1] ? args[urlFlag + 1] : DEFAULT_RELAY_URL).replace(/\/$/, '')
+  const codeFlag = args.indexOf('--code')
+  const pairingToken = codeFlag !== -1 ? args[codeFlag + 1] : null
 
   const existing = readRelayCredential()
   if (existing) {
     console.log(`Already paired with ${existing.url} (machine ${existing.machineId}).`)
     console.log('Run `codekin relay logout` first to pair again.')
+    process.exit(1)
+  }
+
+  // Browser-first pairing: a token minted in the hosted UI claims directly —
+  // no verification URL, no polling.
+  if (pairingToken) {
+    let res
+    try {
+      res = await fetch(`${relayUrl}/api/machines/pair/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          deviceCode: pairingToken,
+          hostname: execSync('hostname').toString().trim(),
+          platform: platform(),
+        }),
+      })
+    } catch (err) {
+      console.error(`Could not reach the relay at ${relayUrl}: ${err.message}`)
+      process.exit(1)
+    }
+    const data = await res.json().catch(() => ({}))
+    if (res.ok && data.status === 'complete') {
+      ensureConfigDir()
+      writeFileSync(
+        RELAY_CREDENTIAL_FILE,
+        JSON.stringify({ url: relayUrl, machineId: data.machineId, machineSecret: data.machineSecret }, null, 2) + '\n',
+      )
+      chmodSync(RELAY_CREDENTIAL_FILE, 0o600)
+      console.log(`Paired. Machine id: ${data.machineId}`)
+      console.log('Run `codekin relay connect` to bring this machine online.')
+      return
+    }
+    if (data.status === 'expired') {
+      console.error('Pairing token expired — generate a fresh install command in the hosted UI.')
+    } else {
+      console.error(`Pairing failed (${data.status || res.status}). Generate a fresh install command in the hosted UI.`)
+    }
     process.exit(1)
   }
 
@@ -673,7 +713,7 @@ if (cmd === 'start') {
   } else if (action === 'logout') {
     cmdRelayLogout()
   } else {
-    console.error('Usage: codekin relay <login|connect|status|logout> [--url <relay-url>]')
+    console.error('Usage: codekin relay <login|connect|status|logout> [--url <relay-url>] [--code <pairing-token>]')
     process.exit(1)
   }
 } else {

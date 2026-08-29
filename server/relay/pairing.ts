@@ -140,6 +140,39 @@ export function approvePairing(
   return { ok: true, machineId }
 }
 
+export interface PrecreatePairingResult {
+  /** The claim secret embedded in the install command (the device code). */
+  pairingToken: string
+  userCode: string
+  machineId: string
+  expiresAt: number
+}
+
+/**
+ * Browser-first pairing (the install-command funnel): an authenticated user
+ * mints a pre-approved pairing in one step, and the installer claims it with
+ * the token — no poll, no approval round-trip. Authorization is possession
+ * of the token: it was created by a signed-in user seconds earlier, is
+ * single-use (claim moves it to 'claimed'), and expires with the normal TTL.
+ * Hostname/platform are unknown until claim time; completePairing backfills
+ * them onto the machine row.
+ */
+export function precreatePairing(
+  db: Database.Database,
+  createdByUserId: string,
+  displayName?: string,
+): PrecreatePairingResult {
+  const started = startPairing(db, {})
+  const approved = approvePairing(db, started.userCode, createdByUserId, displayName)
+  if (!approved.ok) throw new Error(`precreate approval failed: ${approved.reason}`)
+  return {
+    pairingToken: started.deviceCode,
+    userCode: started.userCode,
+    machineId: approved.machineId,
+    expiresAt: started.expiresAt,
+  }
+}
+
 export function denyPairing(
   db: Database.Database,
   userCode: string,
@@ -165,7 +198,11 @@ export type CompletePairingResult =
  * credential, stores only its hash, and returns the secret exactly once
  * (the request moves to 'claimed' so a replay cannot mint a second secret).
  */
-export function completePairing(db: Database.Database, deviceCode: string): CompletePairingResult {
+export function completePairing(
+  db: Database.Database,
+  deviceCode: string,
+  claimInfo?: { hostname?: string; platform?: string },
+): CompletePairingResult {
   const row = db
     .prepare('SELECT * FROM pairing_requests WHERE device_code_hash = ?')
     .get(sha256Hex(deviceCode)) as PairingRequestRow | undefined
@@ -183,6 +220,16 @@ export function completePairing(db: Database.Database, deviceCode: string): Comp
     'INSERT INTO machine_credentials (id, machine_id, secret_hash) VALUES (?, ?, ?)',
   ).run(randomUUID(), machineId, sha256Hex(machineSecret))
   db.prepare(`UPDATE pairing_requests SET status = 'claimed' WHERE code = ?`).run(row.code)
+
+  // Precreated pairings (install-command funnel) know nothing about the
+  // machine until it claims — backfill what the device reports.
+  if (row.hostname === null && claimInfo?.hostname) {
+    db.prepare(
+      `UPDATE machines SET hostname = ?, platform = ?,
+        display_name = CASE WHEN display_name = 'Unnamed machine' THEN ? ELSE display_name END
+       WHERE id = ?`,
+    ).run(claimInfo.hostname, claimInfo.platform ?? null, claimInfo.hostname, machineId)
+  }
   return { status: 'complete', machineId, machineSecret }
 }
 
