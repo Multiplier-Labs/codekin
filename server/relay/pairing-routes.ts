@@ -15,6 +15,7 @@ import {
   approvePairing,
   denyPairing,
   completePairing,
+  precreatePairing,
   removeMachine,
 } from './pairing.js'
 import { createRequireActiveUser } from './relay-auth-routes.js'
@@ -49,13 +50,32 @@ export function createPairingRouter(
     })
   })
 
+  // Browser-first pairing for the install-command funnel: a signed-in user
+  // mints a pre-approved pairing token, embeds it in the one-line installer
+  // command, and the installer claims it via pair/complete — no approval
+  // round-trip. Single-use, normal TTL.
+  router.post('/api/machines/pair/precreate', requireActiveUser, (req, res) => {
+    const body = (req.body ?? {}) as { displayName?: unknown }
+    const displayName = typeof body.displayName === 'string' ? body.displayName.slice(0, 64) : undefined
+    const userId = req.session.user?.id ?? ''
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+    const result = precreatePairing(db, userId, displayName)
+    res.json({ pairingToken: result.pairingToken, machineId: result.machineId, expiresAt: result.expiresAt })
+  })
+
   router.post('/api/machines/pair/complete', (req, res) => {
-    const body = (req.body ?? {}) as { deviceCode?: unknown }
+    const body = (req.body ?? {}) as { deviceCode?: unknown; hostname?: unknown; platform?: unknown }
     if (typeof body.deviceCode !== 'string' || !body.deviceCode) {
       res.status(400).json({ error: 'deviceCode required' })
       return
     }
-    const result = completePairing(db, body.deviceCode)
+    const result = completePairing(db, body.deviceCode, {
+      hostname: typeof body.hostname === 'string' ? body.hostname.slice(0, 128) : undefined,
+      platform: typeof body.platform === 'string' ? body.platform.slice(0, 32) : undefined,
+    })
     switch (result.status) {
       case 'pending':
         res.status(202).json({ status: 'pending' })

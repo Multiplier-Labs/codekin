@@ -13,6 +13,7 @@
 import { useState, useEffect } from 'react'
 import { IconCheck } from '@tabler/icons-react'
 import { fetchMachines, MACHINE_STATUS_DOT, type Machine } from './machines'
+import { InstallCommand } from './InstallCommand'
 
 interface MachinesSectionProps {
   /** Machine the workspace is currently connected to. */
@@ -47,14 +48,16 @@ export function MachinesSection({ currentMachineId, onSwitch, onDisconnect }: Ma
     return <p className="text-body text-ink-muted">Could not reach the relay to list your machines.</p>
   }
 
-  // Nothing paired yet — the two commands that fix that, since a bare empty
-  // list leaves a new user with no next step.
+  // Nothing paired yet — the install-command generator is the funnel's first
+  // step (a bare empty list leaves a new user with no next step, and the old
+  // copy presumed Codekin was already installed somewhere).
   if (machines.length === 0) {
     return (
       <>
         <p className="mb-2 text-body text-ink">No machines paired yet.</p>
-        <p className="text-meta text-ink-muted">
-          On a machine running Codekin, run{' '}
+        <InstallCommand />
+        <p className="mt-3 text-meta text-ink-muted">
+          Or, on a machine already running Codekin: run{' '}
           <code className="rounded-control bg-surface-raised px-1.5 py-0.5 font-mono text-meta text-ink">
             codekin relay login
           </code>{' '}

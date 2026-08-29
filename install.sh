@@ -121,6 +121,35 @@ install_service() {
 }
 
 # ---------------------------------------------------------------------------
+# Pairing (hosted funnel): connect this machine to app.codekin.ai in the same
+# run, using a token minted in the hosted UI:
+#   curl -fsSL codekin.ai/install.sh | bash -s -- --pair <token> [--relay <url>]
+# ---------------------------------------------------------------------------
+
+PAIR_TOKEN=""
+RELAY_URL=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --pair)  PAIR_TOKEN="${2:-}"; shift 2 ;;
+    --relay) RELAY_URL="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
+pair_relay() {
+  [ -n "$PAIR_TOKEN" ] || return 0
+  info "Pairing this machine with the hosted relay..."
+  # shellcheck disable=SC2086
+  if codekin relay login --code "$PAIR_TOKEN" ${RELAY_URL:+--url "$RELAY_URL"}; then
+    success "Machine paired."
+    info "Bring it online with: codekin relay connect"
+  else
+    warn "Pairing failed — generate a fresh install command in the hosted UI and run:"
+    warn "  codekin relay login --code <token>"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -135,6 +164,7 @@ check_github
 install_codekin
 run_setup
 install_service
+pair_relay
 
 echo ""
 success "Installation complete!"
