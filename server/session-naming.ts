@@ -7,10 +7,9 @@
  * with exponential back-off.
  */
 
-import { spawn } from 'node:child_process'
-import { tmpdir } from 'node:os'
 import type { Session, WsServerMessage } from './types.js'
-import { CLAUDE_BINARY } from './config.js'
+import type { CodingProvider } from './coding-process.js'
+import { runUtilityPrompt } from './utility-agent.js'
 
 /** Max naming retry attempts before giving up. */
 const MAX_NAMING_ATTEMPTS = 5
@@ -43,66 +42,20 @@ export interface SessionNamingDeps {
   isRateLimited(): boolean
 }
 
-/** Build a minimal env for claude -p that includes auth/config paths
- *  without leaking the full parent env (e.g. CODEKIN_* session vars).
- *  Shared with handoff distillation (handoff-manager.ts). */
-export function buildOneShotCliEnv(): Record<string, string> {
-  const env: Record<string, string> = {}
-  // Core paths
-  if (process.env.PATH) env.PATH = process.env.PATH
-  if (process.env.HOME) env.HOME = process.env.HOME
-  // XDG dirs — Claude CLI uses these for config/credential resolution
-  for (const key of ['XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME']) {
-    if (process.env[key]) env[key] = process.env[key]!
-  }
-  // SHELL and TERM for proper subprocess behavior
-  if (process.env.SHELL) env.SHELL = process.env.SHELL
-  if (process.env.TERM) env.TERM = process.env.TERM
-  // Suppress Node.js warnings in child
-  env.NODE_NO_WARNINGS = '1'
-  return env
-}
-
-/** Generate a session name by spawning `claude -p` in one-shot mode. */
-function generateNameViaCLI(prompt: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    // Run in tmpdir so no project CLAUDE.md/hooks/skills get auto-loaded —
-    // those would inject unrelated context and the model ends up responding
-    // to that instead of the naming prompt. --tools "" disables tools so the
-    // model can't burn its single turn on a tool call.
-    const proc = spawn(CLAUDE_BINARY, ['-p', '--max-turns', '1', '--model', 'haiku', '--tools', '', '--system-prompt', NAMING_SYSTEM_PROMPT], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: tmpdir(),
-      env: buildOneShotCliEnv(),
-    })
-
-    let stdout = ''
-    let stderr = ''
-    proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
-    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
-
-    const timer = setTimeout(() => {
-      proc.kill('SIGTERM')
-      reject(new Error('claude -p timed out'))
-    }, CLI_TIMEOUT_MS)
-
-    proc.on('close', (code) => {
-      clearTimeout(timer)
-      if (code === 0 && stdout.trim()) {
-        resolve(stdout.trim())
-      } else {
-        reject(new Error(`claude -p exited with code ${code}: ${stderr.trim()}`))
-      }
-    })
-
-    proc.on('error', (err) => {
-      clearTimeout(timer)
-      reject(err)
-    })
-
-    proc.stdin.write(prompt)
-    proc.stdin.end()
-  })
+/**
+ * Generate a session name via a one-shot utility prompt. Runs through the
+ * harness registry (utility-agent.ts): the session's own harness first —
+ * the naming call bills the quota the user chose — then any other usable
+ * agent. No hardcoded vendor (audit N3).
+ */
+function generateNameViaCLI(prompt: string, prefer?: CodingProvider): Promise<string> {
+  return runUtilityPrompt({
+    prompt,
+    systemPrompt: NAMING_SYSTEM_PROMPT,
+    fast: true,
+    prefer,
+    timeoutMs: CLI_TIMEOUT_MS,
+  }).then((r) => r.text)
 }
 
 export class SessionNaming {
@@ -178,7 +131,7 @@ export class SessionNaming {
         `Assistant response (truncated): ${latestContext.slice(0, 1500)}`,
       ].join('\n')
 
-      const text = await generateNameViaCLI(prompt)
+      const text = await generateNameViaCLI(prompt, session.provider)
 
       if (!this.deps.hasSession(sessionId)) return
       if (!session.name.startsWith('hub:')) return

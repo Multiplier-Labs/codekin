@@ -13,13 +13,11 @@
  * See docs/SESSION-HANDOFF-SPEC.md.
  */
 
-import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'fs'
-import { tmpdir } from 'node:os'
 import { join } from 'path'
 import type { CodingProvider } from './coding-process.js'
-import { CLAUDE_BINARY, DATA_DIR } from './config.js'
-import { buildOneShotCliEnv } from './session-naming.js'
+import { DATA_DIR } from './config.js'
+import { runUtilityPrompt } from './utility-agent.js'
 import { findTranscript, readCondensed } from './transcript-readers.js'
 
 /** Chars of condensed transcript fed to the distiller (≈20k tokens). */
@@ -76,38 +74,9 @@ export interface HandoffSource {
 export type DistillFn = (systemPrompt: string, prompt: string) => Promise<string>
 
 function distillViaCli(systemPrompt: string, prompt: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    // tmpdir cwd: prevent project CLAUDE.md/hooks from loading into the
-    // distillation turn. Tools disabled — the transcript extract is the input.
-    const proc = spawn(CLAUDE_BINARY, ['-p', '--max-turns', '1', '--tools', '', '--system-prompt', systemPrompt], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: tmpdir(),
-      env: buildOneShotCliEnv(),
-    })
-
-    let stdout = ''
-    let stderr = ''
-    proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
-    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
-
-    const timer = setTimeout(() => {
-      proc.kill('SIGTERM')
-      reject(new Error('handoff distillation timed out'))
-    }, DISTILL_TIMEOUT_MS)
-
-    proc.on('close', (code) => {
-      clearTimeout(timer)
-      if (code === 0 && stdout.trim()) resolve(stdout.trim())
-      else reject(new Error(`claude -p exited with code ${code}: ${stderr.trim().slice(0, 500)}`))
-    })
-    proc.on('error', (err) => {
-      clearTimeout(timer)
-      reject(err)
-    })
-
-    proc.stdin.write(prompt)
-    proc.stdin.end()
-  })
+  // Through the utility agent (audit N3): any usable harness distills — a
+  // Codex-only host no longer silently needs a Claude install for handoffs.
+  return runUtilityPrompt({ prompt, systemPrompt, timeoutMs: DISTILL_TIMEOUT_MS }).then((r) => r.text)
 }
 
 /**

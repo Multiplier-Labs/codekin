@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { SessionNaming, type SessionNamingDeps } from './session-naming.js'
+import { seedUtilityProbe, resetUtilityProbeCache } from './utility-agent.js'
 import { EventEmitter } from 'node:events'
 
 // Mock child_process.spawn
@@ -60,6 +61,12 @@ function fakeSession(overrides: Record<string, any> = {}): any {
 describe('SessionNaming', () => {
   beforeEach(() => {
     mockSpawn.mockReset()
+    // Probes shell out via the mocked child_process — seed the utility-agent
+    // cache so claude is the (only) usable one-shot harness under test.
+    resetUtilityProbeCache()
+    seedUtilityProbe('claude', { available: true, version: 'test', authenticated: true })
+    seedUtilityProbe('codex', { available: false, version: '', authenticated: false })
+    seedUtilityProbe('opencode', { available: false, version: '', authenticated: false })
   })
 
   afterEach(() => {
@@ -181,7 +188,7 @@ describe('SessionNaming', () => {
     expect(deps.rename).toHaveBeenCalledWith('s1', 'Fix Login Page Styling')
     expect(mockSpawn).toHaveBeenCalledWith(
       'claude',
-      ['-p', '--max-turns', '1', '--model', 'haiku', '--tools', '', '--system-prompt', expect.any(String)],
+      ['-p', '--max-turns', '1', '--tools', '', '--system-prompt', expect.any(String), '--model', 'haiku'],
       expect.objectContaining({
         stdio: ['pipe', 'pipe', 'pipe'],
         cwd: expect.any(String),
