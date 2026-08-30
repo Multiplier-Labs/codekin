@@ -11,7 +11,7 @@ import { resolve as pathResolve } from 'path'
 import type { WebSocket } from 'ws'
 import { getDefaultClaudeModel, triggerCliProbeIfNeeded } from './anthropic-models.js'
 import { REPOS_ROOT } from './config.js'
-import { isOrchestratorSession, setOrchestratorModel } from './orchestrator-manager.js'
+import { isOrchestratorSession, setOrchestratorModel, setOrchestratorProvider } from './orchestrator-manager.js'
 import type { SessionManager } from './session-manager.js'
 import { VALID_PERMISSION_MODES, VALID_PROVIDERS } from './types.js'
 import type { WsClientMessage, WsServerMessage } from './types.js'
@@ -121,6 +121,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           active: session.claudeProcess?.isAlive() ?? false,
           outputBuffer: session.outputHistory.slice(-500),
           model: session.model,
+          provider: session.provider,
           permissionMode: session.permissionMode,
           planState: session.planManager.state,
         })
@@ -219,6 +220,11 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           break
         }
         sessions.setProvider(sessionId, msg.provider, msg.carryContext)
+        // The orchestrator's harness is a standing preference, not a per-session
+        // one — its session is recreated on demand, so persist the choice.
+        if (isOrchestratorSession(sessions.get(sessionId)?.source)) {
+          setOrchestratorProvider(sessions, msg.provider)
+        }
       }
       break
     }

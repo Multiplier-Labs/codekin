@@ -104,18 +104,31 @@ interface OrchestratorSession {
 
 ### 3.2 Reusing Existing Infrastructure
 
-Agent Joe is a `ClaudeProcess` session with:
-- A dedicated `CLAUDE.md` (the Agent Joe system prompt — see §8)
+Agent Joe is a standard coding-process session with:
+- A dedicated system prompt (see §8) written as both `CLAUDE.md` (read by
+  Claude Code) and `AGENTS.md` (read by Codex and OpenCode)
 - `source: 'orchestrator'` in `CreateSessionOptions`
 - `permissionMode: 'acceptEdits'` (it needs to read reports, write memory, spawn sessions)
 - Working directory: `~/.codekin/orchestrator/` (its own workspace)
+
+**Harness**: Joe is agent-agnostic — any provider the session layer supports
+(`claude` / `codex` / `opencode`) can host it, picked from the agent control in
+Joe's composer exactly as in a regular session. The choice persists as archive
+setting `agent_provider` (written by the `set_provider` WebSocket handler, read
+by `ensureOrchestratorRunning`), with `claude` as the default. Switching the
+harness clears the stored model — a model belongs to the harness it was picked
+on — and drops the old harness's transcript link on the next cold start.
+Caveat: the first-party Codekin MCP server is registered via `.mcp.json`, which
+only Claude Code reads natively; on other harnesses Joe falls back to the
+documented curl commands against the same API.
 
 **Model**: picked from the model control in Joe's composer, exactly as in a
 regular session. Because Joe's session is recreated on demand, the choice is
 stored outside it — archive setting `agent_model`, written by the `set_model`
 WebSocket handler and read by `ensureOrchestratorRunning`. With no explicit
-choice, Joe tracks the latest known Claude model (`getDefaultClaudeModel()`),
-so it is never stranded on whatever was newest the day its session was created.
+choice, a Claude-hosted Joe tracks the latest known Claude model
+(`getDefaultClaudeModel()`), so it is never stranded on whatever was newest the
+day its session was created; other harnesses use their own defaults.
 A model change restarts Joe's CLI process, like it does for a session.
 
 Methods exposed by `SessionManager`:

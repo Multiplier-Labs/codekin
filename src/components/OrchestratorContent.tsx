@@ -39,8 +39,10 @@ export interface OrchestratorContentProps {
   slashCommands: SlashCommand[]
   currentModel: string | null
   onModelChange: (model: string) => void
-  /** Claude models offered in the composer — the orchestrator is Claude-only. */
+  /** Models for the orchestrator's current harness — Joe is agent-agnostic. */
   availableModels?: import('../types').ModelOption[]
+  sessionProvider?: import('../types').CodingProvider
+  onProviderChange?: (provider: import('../types').CodingProvider, carryContext: boolean) => void
   currentPermissionMode: PermissionMode
   onPermissionModeChange: (mode: PermissionMode) => void
   disabled: boolean
@@ -71,6 +73,8 @@ export function OrchestratorContent({
   currentModel,
   onModelChange,
   availableModels,
+  sessionProvider,
+  onProviderChange,
   currentPermissionMode,
   onPermissionModeChange,
   disabled,
@@ -131,6 +135,8 @@ export function OrchestratorContent({
             currentModel={currentModel}
             onModelChange={onModelChange}
             availableModels={availableModels}
+            sessionProvider={sessionProvider}
+            onProviderChange={onProviderChange}
             isMobile={isMobile}
             currentPermissionMode={currentPermissionMode}
             onPermissionModeChange={onPermissionModeChange}

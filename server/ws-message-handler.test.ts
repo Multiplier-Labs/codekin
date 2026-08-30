@@ -7,9 +7,11 @@ vi.mock('./config.js', () => ({ REPOS_ROOT: '/projects' }))
 // The orchestrator manager reads DATA_DIR from the (mocked) config at import
 // time, so stub it out — only the two model helpers are used here.
 const setOrchestratorModelMock = vi.hoisted(() => vi.fn())
+const setOrchestratorProviderMock = vi.hoisted(() => vi.fn())
 vi.mock('./orchestrator-manager.js', () => ({
   isOrchestratorSession: (source: string | undefined) => source === 'orchestrator',
   setOrchestratorModel: setOrchestratorModelMock,
+  setOrchestratorProvider: setOrchestratorProviderMock,
 }))
 
 // Mock fs.realpathSync — defaults to identity (no real filesystem); individual
@@ -470,6 +472,34 @@ describe('handleWsMessage', () => {
 
       expect(ctx.sessions.setModel).toHaveBeenCalledWith('sess-1', 'claude-opus-5')
       expect(setOrchestratorModelMock).toHaveBeenCalledWith(ctx.sessions, 'claude-opus-5')
+    })
+  })
+
+  /* ---- set_provider ---- */
+
+  describe('set_provider', () => {
+    it('switches the provider for an ordinary session without persisting a preference', () => {
+      handleWsMessage({ type: 'set_provider', provider: 'codex' } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setProvider).toHaveBeenCalledWith('sess-1', 'codex', undefined)
+      expect(setOrchestratorProviderMock).not.toHaveBeenCalled()
+    })
+
+    it('rejects an unknown provider', () => {
+      handleWsMessage({ type: 'set_provider', provider: 'gemini' } as unknown as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setProvider).not.toHaveBeenCalled()
+      expect(ctx.sent[0].type).toBe('error')
+    })
+
+    it('persists the harness choice when the session is the orchestrator', () => {
+      const orchestrator = mockSession({ source: 'orchestrator' })
+      ;(ctx.sessions.get as ReturnType<typeof vi.fn>).mockReturnValue(orchestrator)
+
+      handleWsMessage({ type: 'set_provider', provider: 'opencode', carryContext: true } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setProvider).toHaveBeenCalledWith('sess-1', 'opencode', true)
+      expect(setOrchestratorProviderMock).toHaveBeenCalledWith(ctx.sessions, 'opencode')
     })
   })
 

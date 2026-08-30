@@ -176,6 +176,8 @@ export function useChatSocket({
   const [isProcessing, setIsProcessing] = useState(false)
   const [tasks, setTasks] = useState<TaskItem[]>([])
   const [currentModel, setCurrentModel] = useState<string | null>(() => localStorage.getItem('claude-model') ?? null)
+  /** Provider of the currently joined session, synced from session_joined. */
+  const [sessionProvider, setSessionProvider] = useState<import('../types').CodingProvider | null>(null)
   /** Mirror of currentModel for callbacks that must not re-create on every model change. */
   const currentModelRef = useRef(currentModel)
   useEffect(() => { currentModelRef.current = currentModel }, [currentModel])
@@ -345,11 +347,12 @@ export function useChatSocket({
         setRenderSessionId(msg.sessionId)
         setIsProcessing(false)
         setThinkingSummary(null)
-        // Sync model and permission mode from server state
+        // Sync model, provider, and permission mode from server state
         if (msg.model) {
           setCurrentModel(msg.model)
           localStorage.setItem('claude-model', msg.model)
         }
+        setSessionProvider(msg.provider ?? null)
         if (msg.permissionMode) {
           setCurrentPermissionMode(msg.permissionMode)
           localStorage.setItem('claude-permission-mode', msg.permissionMode)
@@ -535,6 +538,9 @@ export function useChatSocket({
    *  distills the current transcript into a handoff for the new provider. */
   const setProvider = useCallback((provider: import('../types').CodingProvider, carryContext?: boolean) => {
     send({ type: 'set_provider', provider, carryContext })
+    // Optimistic — the server confirms via sessions_updated, but the composer
+    // control should reflect the choice immediately.
+    setSessionProvider(provider)
   }, [send])
 
   const setPermissionMode = useCallback((mode: PermissionMode) => {
@@ -555,6 +561,7 @@ export function useChatSocket({
     activePrompt,
     promptQueueSize,
     currentModel,
+    sessionProvider,
     send,
     joinSession,
     createSession,

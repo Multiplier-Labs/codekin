@@ -182,6 +182,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     clearMessages,
     restoreSession,
     currentModel,
+    sessionProvider,
     setModel,
     setProvider,
     send: wsSend,
@@ -261,11 +262,11 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   const [openCodeDisabled, setOpenCodeDisabled] = useState(false)
   const [codexDisabled, setCodexDisabled] = useState(false)
   // Derive the active session's provider (falls back to the default for new
-  // sessions). The orchestrator session is not in `sessions`, and it always
-  // runs on Claude — without this the fallback would hand it another
-  // provider's model list.
+  // sessions). The orchestrator session is not in the sidebar sessions list,
+  // so its provider comes from the session_joined sync — without this the
+  // fallback would hand it another provider's model list.
   const activeSessionProvider = view === 'orchestrator'
-    ? 'claude'
+    ? sessionProvider ?? 'claude'
     : sessions.find(s => s.id === activeSessionId)?.provider ?? currentProvider
 
   const activeOpenCodeWd = activeSessionProvider === 'opencode'
@@ -768,9 +769,16 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
             slashCommands={allCommands}
             currentModel={currentModel}
             onModelChange={handleModelChange}
-            /* Claude models, not availableModels: the orchestrator always runs
-               on Claude, while availableModels follows the default provider. */
-            availableModels={claudeModels}
+            /* Provider-aware: the orchestrator is agent-agnostic, so the model
+               list follows whichever harness it currently runs on. */
+            availableModels={availableModels}
+            sessionProvider={activeSessionProvider}
+            /* Deliberately not handleProviderChange: switching Joe's harness
+               must not change the default provider for new sessions. */
+            onProviderChange={(provider, carryContext) => {
+              setProvider(provider, carryContext)
+              void refreshSessions()
+            }}
             currentPermissionMode={currentPermissionMode}
             onPermissionModeChange={handlePermissionModeChange}
             disabled={!settings.token}
