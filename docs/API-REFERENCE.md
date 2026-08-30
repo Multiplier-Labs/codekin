@@ -608,8 +608,9 @@ List runs. Query: `state`, `repo`, `active=1`, `limit`.
 
 ### `GET /api/loops/runs/:id`
 
-One run plus its stages, evaluations, interventions, artifact metadata, and
-the current event-sequence cursor.
+One run plus its stages, evaluations, the completion scorecard (every
+criterion in the frozen recipe with its latest status and evidence),
+interventions, artifact metadata, and the current event-sequence cursor.
 
 **Response:** `{ "run": LoopRunDetail }`
 

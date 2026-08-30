@@ -51,6 +51,7 @@ const STATES: readonly LoopRunState[] = [
   'paused',
   'canceling',
   'finalizing',
+  'monitoring_ci',
   'recovering',
   'done',
 ]
@@ -243,11 +244,26 @@ export function createLoopRouter(
   router.get('/runs/:id', (req, res) => {
     const run = store.getRun(req.params.id)
     if (!run) return res.status(404).json({ error: 'Run not found' })
+    const evaluations = store.listEvaluations(run.id)
+    // Completion scorecard: every criterion in the frozen recipe with its
+    // latest result — 'pending' means it has not been evaluated yet.
+    const scorecard = run.recipe.evaluators.map((e) => {
+      const last = evaluations.filter((ev) => ev.evaluatorId === e.id).at(-1)
+      return {
+        id: e.id,
+        type: e.type,
+        required: e.required,
+        status: last?.status ?? ('pending' as const),
+        summary: last?.summary ?? null,
+        evidenceArtifactIds: last?.evidenceArtifactIds ?? [],
+      }
+    })
     res.json({
       run: {
         ...run,
         stages: store.listStages(run.id),
-        evaluations: store.listEvaluations(run.id),
+        evaluations,
+        scorecard,
         interventions: store.listInterventions(run.id),
         artifacts: store.listArtifacts(run.id),
         lastSequence: store.lastSequence(run.id),
