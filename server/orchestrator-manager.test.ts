@@ -30,6 +30,13 @@ vi.mock('./anthropic-models.js', () => ({
   getDefaultClaudeModel: () => 'claude-latest-test',
 }))
 
+// Startup-greeting delivery path — ensureOrchestratorRunning enqueues into the
+// outbox whenever it (re)starts the agent process.
+const outboxEnqueueMock = vi.hoisted(() => vi.fn())
+vi.mock('./orchestrator-outbox.js', () => ({
+  getOrchestratorOutbox: () => ({ enqueue: outboxEnqueueMock }),
+}))
+
 import {
   ORCHESTRATOR_DIR,
   ensureOrchestratorDir,
@@ -269,6 +276,30 @@ describe('ensureOrchestratorRunning', () => {
     expect(session.model).toBe('claude-sonnet-5')
     expect(sm.persistToDisk).toHaveBeenCalled()
     expect(sm.startClaude).toHaveBeenCalledWith('test-uuid-1234')
+  })
+
+  it('queues a startup greeting when creating or restarting, but not when already alive', () => {
+    // Create path
+    mockExistsSync.mockReturnValue(false)
+    ensureOrchestratorRunning(fakeSessionManager())
+    expect(outboxEnqueueMock).toHaveBeenCalledTimes(1)
+    expect(outboxEnqueueMock.mock.calls[0][0]).toMatchObject({ label: 'STARTUP' })
+
+    // Restart path (process dead)
+    outboxEnqueueMock.mockClear()
+    mockExistsSync.mockImplementation((p: string) =>
+      typeof p === 'string' && p.endsWith('.session-id') ? true : false,
+    )
+    mockReadFileSync.mockReturnValue('test-uuid-1234')
+    const dead = { id: 'test-uuid-1234', allowedTools: [], claudeProcess: { isAlive: () => false } }
+    ensureOrchestratorRunning(fakeSessionManager(dead))
+    expect(outboxEnqueueMock).toHaveBeenCalledTimes(1)
+
+    // Already alive → no greeting
+    outboxEnqueueMock.mockClear()
+    const alive = { id: 'test-uuid-1234', allowedTools: [], claudeProcess: { isAlive: () => true } }
+    ensureOrchestratorRunning(fakeSessionManager(alive))
+    expect(outboxEnqueueMock).not.toHaveBeenCalled()
   })
 
   it('creates the session on the stored harness, with no Claude model override', () => {

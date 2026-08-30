@@ -19,7 +19,7 @@ import { tryGetDeploymentMonitor, discoverPm2Processes } from './deployment-moni
 type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
 
-const PROBE_TYPES = new Set(['http', 'pm2', 'disk'])
+const PROBE_TYPES = new Set(['http', 'pm2', 'disk', 'host'])
 
 /** Structural validation of a probe entry; returns an error string or null. */
 function validateProbe(probe: unknown): string | null {
