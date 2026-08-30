@@ -45,6 +45,18 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
   private sessions: SessionManager
   private dedup: WebhookDedup
   private ghHealthy = false
+  /**
+   * Durable-queue publisher (the trigger engine's enqueueSignal, injected).
+   * When set, accepted PR events are enqueued as `pr-review` signals instead
+   * of being processed fire-and-forget — a crash between the 202 and the
+   * review session spawning no longer loses the event. Without it (tests,
+   * engine unavailable) the legacy inline path runs unchanged.
+   */
+  private signalPublisher: ((input: { kind: string; payload?: Record<string, unknown>; dedupeKey?: string; ttlMs?: number }) => void) | null = null
+
+  setSignalPublisher(publish: ((input: { kind: string; payload?: Record<string, unknown>; dedupeKey?: string; ttlMs?: number }) => void) | null): void {
+    this.signalPublisher = publish
+  }
 
   constructor(config: FullWebhookConfig, sessions: SessionManager) {
     super('webhook', PROCESSING_TIMEOUT_MS)
@@ -538,15 +550,61 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     this.recordEvent(webhookEvent)
     this.dedup.recordProcessed(eventId, idempotencyKey)
 
-    // Process asynchronously
-    this.processPrReviewAsync(payload, webhookEvent, sessionId).catch(err => {
-      console.error('[webhook] PR review async processing error:', err)
-      this.updateEventStatus(eventId, 'error', String(err))
-    })
+    // Durable path: enqueue and let the dispatcher deliver (at-least-once,
+    // survives a crash before the session spawns). Falls back to the legacy
+    // inline path when no publisher is wired or the enqueue itself fails.
+    let queued = false
+    if (this.signalPublisher) {
+      try {
+        this.signalPublisher({
+          kind: 'pr-review',
+          payload: { payload, webhookEvent, sessionId } as unknown as Record<string, unknown>,
+          dedupeKey: `pr-review::${idempotencyKey}`,
+          ttlMs: 60 * 60 * 1000,
+        })
+        queued = true
+      } catch (err) {
+        console.error('[webhook] Failed to enqueue pr-review signal, processing inline:', err)
+      }
+    }
+    if (!queued) {
+      this.processPrReviewAsync(payload, webhookEvent, sessionId).catch(err => {
+        console.error('[webhook] PR review async processing error:', err)
+        this.updateEventStatus(eventId, 'error', String(err))
+      })
+    }
 
     return {
       statusCode: 202,
       body: { accepted: true, eventId, status: 'processing', sessionId },
+    }
+  }
+
+  /**
+   * Consume a queued `pr-review` signal. Redelivery-safe: the session id was
+   * pre-allocated at acceptance, so an existing session means the spawn
+   * already happened and the redelivery is a no-op. A rejection (transient gh
+   * failure before any session exists) propagates so the queue retries it.
+   */
+  async processQueuedPrReview(raw: Record<string, unknown>): Promise<void> {
+    const { payload, webhookEvent, sessionId } = raw as unknown as {
+      payload: PullRequestPayload
+      webhookEvent: WebhookEvent
+      sessionId: string
+    }
+    if (!payload || !webhookEvent || !sessionId) {
+      // Malformed signal — acking (returning) is correct; retrying can't fix it.
+      console.error('[webhook] Malformed pr-review signal payload, dropping')
+      return
+    }
+    if (this.sessions.get(sessionId)) return
+
+    try {
+      await this.processPrReviewAsync(payload, webhookEvent, sessionId)
+    } catch (err) {
+      console.error('[webhook] Queued PR review processing error:', err)
+      this.updateEventStatus(webhookEvent.id, 'error', String(err))
+      throw err
     }
   }
 

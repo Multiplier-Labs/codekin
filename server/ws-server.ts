@@ -725,6 +725,12 @@ server.listen(port, '0.0.0.0', () => {
       if (!handler) throw new Error('Commit event handler not available')
       await handler.handle(payload as unknown as import('./commit-event-handler.js').CommitEvent)
     })
+
+    // Accepted PR webhook events ride the same durable queue: the webhook
+    // handler enqueues after its filter chain, and the spawn happens here —
+    // redelivery-safe via the pre-allocated session id.
+    webhookHandler.setSignalPublisher((input) => { engine.enqueueSignal(input) })
+    engine.registerSignalHandler('pr-review', (payload) => webhookHandler.processQueuedPrReview(payload))
     if (authToken) {
       const serverUrl = `http://localhost:${port}`
       ensureHookConfig(authToken, serverUrl)
