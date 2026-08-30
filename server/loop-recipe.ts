@@ -110,6 +110,11 @@ export interface LoopRecipe {
   description?: string
   agent: { provider: LoopProviderSpec; model?: string }
   workspace: { strategy: 'worktree'; protectedPaths: string[] }
+  /**
+   * When required, the maker produces an explicit plan artifact before
+   * touching files; guided mode gates execution on plan approval.
+   */
+  plan: { required: boolean }
   evaluators: EvaluatorConfig[]
   budgets: LoopBudgets
   policy: { mode: LoopMode }
@@ -313,6 +318,15 @@ function parseBudgets(value: unknown, sourcePath: string): LoopBudgets {
   }
 }
 
+function parsePlan(value: unknown, sourcePath: string): LoopRecipe['plan'] {
+  if (value === undefined) return { required: false }
+  const obj = asRecord(value, 'plan', sourcePath)
+  rejectUnknown(obj, ['required'], 'plan', sourcePath)
+  const required = obj.required ?? false
+  if (typeof required !== 'boolean') fail(sourcePath, 'plan.required must be a boolean')
+  return { required }
+}
+
 function parsePolicy(value: unknown, sourcePath: string): LoopRecipe['policy'] {
   if (value === undefined) return { mode: 'guarded' }
   const obj = asRecord(value, 'policy', sourcePath)
@@ -362,7 +376,7 @@ export function parseLoopRecipe(content: string, sourcePath: string, source: 'bu
   const fm = asRecord(parsed, 'frontmatter', sourcePath)
   rejectUnknown(
     fm,
-    ['apiVersion', 'kind', 'metadata', 'agent', 'workspace', 'evaluators', 'budgets', 'policy', 'completion'],
+    ['apiVersion', 'kind', 'metadata', 'agent', 'workspace', 'plan', 'evaluators', 'budgets', 'policy', 'completion'],
     'recipe',
     sourcePath,
   )
@@ -384,6 +398,7 @@ export function parseLoopRecipe(content: string, sourcePath: string, source: 'bu
     description: optionalString(metadata.description, 'metadata.description', sourcePath),
     agent: parseAgent(fm.agent, sourcePath),
     workspace: parseWorkspace(fm.workspace, sourcePath),
+    plan: parsePlan(fm.plan, sourcePath),
     evaluators: parseEvaluators(fm.evaluators, sourcePath),
     budgets: parseBudgets(fm.budgets, sourcePath),
     policy: parsePolicy(fm.policy, sourcePath),
@@ -392,6 +407,62 @@ export function parseLoopRecipe(content: string, sourcePath: string, source: 'bu
   }
   const contentHash = createHash('sha256').update(normalizedForHash(withoutHash)).digest('hex')
   return { ...withoutHash, source, contentHash }
+}
+
+// ---------------------------------------------------------------------------
+// Start-time overrides
+// ---------------------------------------------------------------------------
+
+export interface RecipeOverrides {
+  mode?: LoopMode
+  budgets?: { turns?: number; costUsd?: number; wallTimeMinutes?: number; noProgressAttempts?: number }
+  planRequired?: boolean
+}
+
+/**
+ * Apply the wizard's control-step overrides (mode, budgets, plan gate) to a
+ * recipe. Returns a NEW recipe with a recomputed content hash — the run
+ * freezes exactly what will execute, so "started from ci-autorepair with a
+ * doubled budget" is distinguishable from the stock recipe. Throws on invalid
+ * values; unknown keys are rejected by the caller's body validation.
+ */
+export function withOverrides(recipe: LoopRecipe, overrides: RecipeOverrides): LoopRecipe {
+  if (overrides.mode !== undefined && !MODES.includes(overrides.mode)) {
+    throw new Error(`Invalid mode override: ${overrides.mode}`)
+  }
+  const budgets = { ...recipe.budgets }
+  const b = overrides.budgets
+  if (b) {
+    for (const [key, value] of Object.entries(b)) {
+      if (value === undefined) continue
+      if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+        throw new Error(`Invalid budget override ${key}: must be a positive number`)
+      }
+    }
+    if (b.turns !== undefined) budgets.turns = b.turns
+    if (b.costUsd !== undefined) budgets.costUsd = b.costUsd
+    if (b.wallTimeMinutes !== undefined) budgets.wallTimeMs = b.wallTimeMinutes * 60 * 1000
+    if (b.noProgressAttempts !== undefined) budgets.noProgressAttempts = b.noProgressAttempts
+  }
+  if (overrides.planRequired !== undefined && typeof overrides.planRequired !== 'boolean') {
+    throw new Error('Invalid planRequired override: must be a boolean')
+  }
+  const next: Omit<LoopRecipe, 'contentHash' | 'source'> = {
+    apiVersion: recipe.apiVersion,
+    id: recipe.id,
+    name: recipe.name,
+    description: recipe.description,
+    agent: recipe.agent,
+    workspace: recipe.workspace,
+    plan: overrides.planRequired === undefined ? recipe.plan : { required: overrides.planRequired },
+    evaluators: recipe.evaluators,
+    budgets,
+    policy: { mode: overrides.mode ?? recipe.policy.mode },
+    completion: recipe.completion,
+    outcome: recipe.outcome,
+  }
+  const contentHash = createHash('sha256').update(normalizedForHash(next)).digest('hex')
+  return { ...next, source: recipe.source, contentHash }
 }
 
 // ---------------------------------------------------------------------------

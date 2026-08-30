@@ -45,6 +45,7 @@ import type { LoopProvider, LoopRecipe } from './loop-recipe.js'
 export type LoopRunState =
   | 'created'            // row exists, nothing started
   | 'preflight'          // validating repo/branch/recipe before spending
+  | 'planning'           // maker is producing the plan artifact (no file edits yet)
   | 'executing'          // maker session is working
   | 'evaluating'         // evaluators are running
   | 'reviewing'          // rubric reviewer is running
@@ -58,7 +59,7 @@ export type LoopRunState =
 
 export type LoopRunOutcome = 'completed' | 'completed_with_warnings' | 'failed' | 'canceled'
 
-export type LoopStageKind = 'preflight' | 'act' | 'evaluate' | 'review' | 'finalize'
+export type LoopStageKind = 'preflight' | 'plan' | 'act' | 'evaluate' | 'review' | 'finalize'
 export type LoopStageStatus = 'running' | 'succeeded' | 'failed' | 'canceled'
 
 export type LoopActorType = 'user' | 'system' | 'agent'
@@ -79,6 +80,8 @@ export interface LoopRun {
   goal: string
   repo: string
   branch: string
+  /** Branch the worktree was created from (repo default when null). */
+  baseBranch: string | null
   baseSha: string | null
   /** Resolved provider — `auto` never survives into a run row. */
   provider: LoopProvider
@@ -102,6 +105,7 @@ export interface CreateLoopRunInput {
   goal: string
   repo: string
   branch: string
+  baseBranch?: string | null
   provider: LoopProvider
   model?: string | null
   id?: string
@@ -234,6 +238,7 @@ interface RunRow {
   goal: string
   repo: string
   branch: string
+  base_branch: string | null
   base_sha: string | null
   provider: string
   model: string | null
@@ -306,6 +311,7 @@ export class LoopStore {
         goal             TEXT NOT NULL,
         repo             TEXT NOT NULL,
         branch           TEXT NOT NULL,
+        base_branch      TEXT,
         base_sha         TEXT,
         provider         TEXT NOT NULL,
         model            TEXT,
@@ -423,8 +429,8 @@ export class LoopStore {
     const id = input.id ?? randomUUID()
     this.db
       .prepare(
-        `INSERT INTO loop_runs (id, recipe_id, recipe_hash, recipe, goal, repo, branch, provider, model, state, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', ?)`,
+        `INSERT INTO loop_runs (id, recipe_id, recipe_hash, recipe, goal, repo, branch, base_branch, provider, model, state, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'created', ?)`,
       )
       .run(
         id,
@@ -434,6 +440,7 @@ export class LoopStore {
         input.goal,
         input.repo,
         input.branch,
+        input.baseBranch ?? null,
         input.provider,
         input.model ?? null,
         new Date().toISOString(),
@@ -854,6 +861,7 @@ function mapRun(row: RunRow): LoopRun {
     goal: row.goal,
     repo: row.repo,
     branch: row.branch,
+    baseBranch: row.base_branch,
     baseSha: row.base_sha,
     provider: row.provider as LoopProvider,
     model: row.model,

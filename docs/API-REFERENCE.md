@@ -566,6 +566,13 @@ overrides). Query: `repoPath` (optional).
 
 **Response:** `{ "recipes": LoopRecipeInfo[] }`
 
+### `GET /api/loops/branches?repoPath=<path>`
+
+Local branches of a cloned repo plus the detected default — the wizard's
+base-branch picker.
+
+**Response:** `{ "branches": string[], "defaultBranch": string | null }`
+
 ### `POST /api/loops/recipes/validate`
 
 Validate recipe markdown without saving it.
@@ -578,8 +585,12 @@ Validate recipe markdown without saving it.
 Resolve the exact effective run configuration (frozen recipe, resolved
 provider, default branch, outcome) without starting anything.
 
-**Request:** `{ "recipeId": string, "repo": string, "branch"?: string, "goal"?: string }`
-**Response:** `{ "effective": { recipe, repo, branch, goal, provider, model } }`
+**Request:** `{ "recipeId": string, "repo": string, "branch"?: string, "baseBranch"?: string, "goal"?: string, "overrides"?: { mode?, planRequired?, budgets?: { turns?, costUsd?, wallTimeMinutes?, noProgressAttempts? } } }`
+
+Overrides are applied to the recipe before it freezes — the run records the
+modified recipe under a recomputed content hash.
+
+**Response:** `{ "effective": { recipe, repo, branch, baseBranch, goal, provider, model } }`
 
 ### `POST /api/loops/runs`
 
@@ -624,9 +635,9 @@ state.
 ### `POST /api/loops/runs/:id/steer`
 
 Queue an operator instruction, delivered to the maker at the next safe
-boundary.
+boundary. With `revisePlan`, the maker is asked to revise its plan first.
 
-**Request:** `{ "instruction": string }`
+**Request:** `{ "instruction": string, "revisePlan"?: boolean }`
 
 ### `POST /api/loops/runs/:id/interventions/:interventionId/resolve`
 

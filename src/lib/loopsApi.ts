@@ -26,6 +26,7 @@ function headers(token: string): HeadersInit {
 export type LoopRunState =
   | 'created'
   | 'preflight'
+  | 'planning'
   | 'executing'
   | 'evaluating'
   | 'reviewing'
@@ -53,6 +54,7 @@ export interface LoopRun {
   goal: string
   repo: string
   branch: string
+  baseBranch: string | null
   baseSha: string | null
   provider: string
   model: string | null
@@ -73,7 +75,7 @@ export interface LoopStage {
   id: string
   runId: string
   stageIndex: number
-  kind: 'preflight' | 'act' | 'evaluate' | 'review' | 'finalize'
+  kind: 'preflight' | 'plan' | 'act' | 'evaluate' | 'review' | 'finalize'
   status: 'running' | 'succeeded' | 'failed' | 'canceled'
   startedAt: string
   completedAt: string | null
@@ -131,6 +133,14 @@ export interface LoopEvent<T = unknown> {
 }
 
 export interface LoopRunDetail extends LoopRun {
+  /** The recipe frozen at run start (subset the UI renders). */
+  recipe: {
+    name: string
+    plan: { required: boolean }
+    budgets: { turns: number; costUsd: number; wallTimeMs?: number; noProgressAttempts: number }
+    policy: { mode: 'guided' | 'guarded' | 'autonomous' }
+    completion: { action: 'pull-request' | 'commit-only' }
+  }
   stages: LoopStage[]
   evaluations: LoopEvaluation[]
   interventions: LoopIntervention[]
@@ -189,14 +199,62 @@ export async function getLoopRunEvents(
   return (await res.json()) as { events: LoopEvent[]; lastSequence: number }
 }
 
-export async function startLoopRun(
-  token: string,
-  input: { recipeId: string; repo: string; branch?: string; goal?: string },
-): Promise<LoopRun> {
+export interface RecipeOverrides {
+  mode?: 'guided' | 'guarded' | 'autonomous'
+  budgets?: { turns?: number; costUsd?: number; wallTimeMinutes?: number; noProgressAttempts?: number }
+  planRequired?: boolean
+}
+
+export interface StartLoopInput {
+  recipeId: string
+  repo: string
+  branch?: string
+  baseBranch?: string
+  goal?: string
+  overrides?: RecipeOverrides
+}
+
+export interface EffectiveLoopConfig {
+  recipe: {
+    id: string
+    name: string
+    description?: string
+    plan: { required: boolean }
+    evaluators: Array<{ id: string; type: string; command?: string | string[]; required: boolean }>
+    budgets: { turns: number; costUsd: number; wallTimeMs?: number; noProgressAttempts: number }
+    policy: { mode: 'guided' | 'guarded' | 'autonomous' }
+    completion: { action: 'pull-request' | 'commit-only' }
+    workspace: { protectedPaths: string[] }
+    contentHash: string
+  }
+  repo: string
+  branch: string
+  baseBranch: string | null
+  goal: string
+  provider: string
+  model: string | null
+}
+
+/** The wizard's confirmation screen: exactly what would run, before spending. */
+export async function preflightLoopRun(token: string, input: StartLoopInput): Promise<EffectiveLoopConfig> {
+  const res = await transport.fetch(`${BASE}/runs/preflight`, { method: 'POST', headers: headers(token), body: JSON.stringify(input) })
+  const data = (await res.json()) as { effective?: EffectiveLoopConfig; error?: string }
+  if (!res.ok || !data.effective) throw new Error(data.error ?? `Preflight failed: ${res.status}`)
+  return data.effective
+}
+
+export async function startLoopRun(token: string, input: StartLoopInput): Promise<LoopRun> {
   const res = await transport.fetch(`${BASE}/runs`, { method: 'POST', headers: headers(token), body: JSON.stringify(input) })
   const data = (await res.json()) as { run?: LoopRun; error?: string }
   if (!res.ok || !data.run) throw new Error(data.error ?? `Failed to start loop run: ${res.status}`)
   return data.run
+}
+
+/** Local branches of a cloned repo, with the detected default. */
+export async function listLoopBranches(token: string, repoPath: string): Promise<{ branches: string[]; defaultBranch: string | null }> {
+  const res = await transport.fetch(`${BASE}/branches?repoPath=${encodeURIComponent(repoPath)}`, { headers: headers(token) })
+  if (!res.ok) throw new Error(`Failed to list branches: ${res.status}`)
+  return (await res.json()) as { branches: string[]; defaultBranch: string | null }
 }
 
 // ---------------------------------------------------------------------------
@@ -215,16 +273,25 @@ export const pauseLoopRun = (token: string, runId: string) => control(token, run
 export const resumeLoopRun = (token: string, runId: string) => control(token, runId, 'resume')
 export const cancelLoopRun = (token: string, runId: string) => control(token, runId, 'cancel')
 
-export async function steerLoopRun(token: string, runId: string, instruction: string): Promise<void> {
+export async function steerLoopRun(token: string, runId: string, instruction: string, revisePlan = false): Promise<void> {
   const res = await transport.fetch(`${BASE}/runs/${encodeURIComponent(runId)}/steer`, {
     method: 'POST',
     headers: headers(token),
-    body: JSON.stringify({ instruction }),
+    body: JSON.stringify({ instruction, revisePlan }),
   })
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string }
     throw new Error(data.error ?? `Failed to steer loop run: ${res.status}`)
   }
+}
+
+/** Artifact body (plan text, evaluator output, review) as text. */
+export async function getLoopArtifactBody(token: string, runId: string, artifactId: string): Promise<string> {
+  const res = await transport.fetch(`${BASE}/runs/${encodeURIComponent(runId)}/artifacts/${encodeURIComponent(artifactId)}`, {
+    headers: headers(token),
+  })
+  if (!res.ok) throw new Error(`Failed to fetch artifact: ${res.status}`)
+  return res.text()
 }
 
 export async function resolveLoopIntervention(

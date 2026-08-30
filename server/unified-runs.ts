@@ -89,7 +89,7 @@ export function loopLifecycleStatus(run: LoopRun): RunLifecycleStatus {
       return 'paused'
     case 'canceling':
       return 'canceled'
-    default: // executing, finalizing, recovering
+    default: // planning, executing, finalizing, recovering
       return 'running'
   }
 }

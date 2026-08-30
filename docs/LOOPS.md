@@ -10,8 +10,14 @@ implemented today (Phase 1: durable engine core).
 ## Core loop
 
 ```text
-preflight → act → evaluate → (review) → decide → … → finalize
+preflight → (plan) → act → evaluate → (review) → decide → … → finalize
 ```
+
+- **plan** — with `plan.required`, the maker produces an explicit plan
+  artifact before touching any files. Guided mode gates execution on plan
+  approval (approve / revise-with-note / stop); other modes record the plan
+  and proceed. Steering with "revise plan first" asks for a plan revision at
+  the next boundary.
 
 - **act** — a maker session (claude / codex / opencode) works in an isolated
   git worktree on the run's branch.
@@ -88,6 +94,8 @@ agent:
 workspace:
   strategy: worktree
   protectedPaths: [".github/workflows/**"]
+plan:
+  required: false           # true: explicit plan artifact before any edits
 evaluators:
   - id: tests
     type: command
@@ -136,10 +144,15 @@ pings; clients reconcile against `GET /runs/:id/events?after=<sequence>`.
 
 ## UI
 
-The Loops tab in Automations is an interim run list + control surface (start,
-pause/resume/stop, steer, intervention cards, evaluator scorecard). The full
-control plane — wizard with repo/branch pickers, four-tab run workspace,
-timeline — is Phase 2 of the spec.
+The Loops tab in Automations is the operations home: a summary strip (active,
+needs attention, 7-day outcomes and spend) over Needs attention → Active →
+Recent sections, with the selected run's workspace beside it (Overview with
+inline intervention cards, plan, evaluator scorecard, budget bars; Timeline
+over the event log). "New loop" opens a four-step wizard — repository picker
+(cloned repos), base-branch picker, recipe + outcome, mode/plan/budget
+controls, and a preflight screen showing the exact effective configuration
+before anything is spent. Start-time overrides freeze into the run's recipe
+under a recomputed content hash.
 
 ## Storage
 

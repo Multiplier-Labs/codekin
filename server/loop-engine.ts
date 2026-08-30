@@ -86,7 +86,7 @@ export interface LoopEvaluatorApi {
   getDiffSummary(cwd: string): Promise<string>
   getDiff(cwd: string): Promise<string>
   getChangedFiles(cwd: string): Promise<string[]>
-  revParseHead(repo: string): Promise<string>
+  revParseHead(repo: string, ref?: string): Promise<string>
 }
 
 const defaultEvaluatorApi: LoopEvaluatorApi = {
@@ -94,7 +94,7 @@ const defaultEvaluatorApi: LoopEvaluatorApi = {
   getDiffSummary,
   getDiff,
   getChangedFiles,
-  revParseHead: async (repo) => (await execGit(['rev-parse', 'HEAD'], repo)).trim(),
+  revParseHead: async (repo, ref) => (await execGit(['rev-parse', ref ?? 'HEAD'], repo)).trim(),
 }
 
 export interface StartLoopRunInput {
@@ -102,6 +102,8 @@ export interface StartLoopRunInput {
   goal: string
   repo: string
   branch: string
+  /** Branch the worktree is created from; repo default branch when omitted. */
+  baseBranch?: string | null
   provider: LoopProvider
   model?: string | null
 }
@@ -117,6 +119,8 @@ const EXTENSION_FRACTION = 0.5
 
 /** Counters that survive restarts — serialized into loop_checkpoints. */
 interface CheckpointState {
+  /** 'planning' until the plan is produced (and approved in guided mode). */
+  phase: 'planning' | 'acting'
   turnCount: number
   makerCostUsd: number
   reviewCostUsd: number
@@ -133,6 +137,9 @@ interface RunCtx extends CheckpointState {
   cwd: string
   makerSessionId: string | null
   reviewSessionId: string | null
+  /** Length of the maker's assistant text when the current prompt was sent —
+   * lets the plan handler read only the reply to that prompt. */
+  assistantTextOffset: number
   /** Rubric evaluators still to run in this evaluate cycle. */
   pendingRubrics: RubricEvaluatorConfig[]
   /** Commands that passed in this cycle (context for the rubric prompt). */
@@ -149,6 +156,7 @@ interface RunCtx extends CheckpointState {
 
 function freshCheckpointState(): CheckpointState {
   return {
+    phase: 'acting',
     turnCount: 0,
     makerCostUsd: 0,
     reviewCostUsd: 0,
@@ -190,6 +198,7 @@ export class LoopEngine {
       goal: input.goal,
       repo: input.repo,
       branch: input.branch,
+      baseBranch: input.baseBranch ?? null,
       provider: input.provider,
       model: input.model ?? null,
     })
@@ -199,6 +208,8 @@ export class LoopEngine {
     if (!ok) return this.store.getRun(run.id) ?? run
 
     const ctx = this.buildCtx(run.id, run.repo, freshCheckpointState())
+    if (input.recipe.plan.required) ctx.phase = 'planning'
+    this.checkpoint(ctx)
     this.active.set(run.id, ctx)
     await this.beginActing(ctx, this.store.getRun(run.id) ?? run, null)
     return this.store.getRun(run.id) ?? run
@@ -214,7 +225,7 @@ export class LoopEngine {
     const stage = this.store.createStage(run.id, 'preflight')
     try {
       if (!existsSync(run.repo)) throw new Error(`repository path does not exist: ${run.repo}`)
-      const baseSha = await this.evaluator.revParseHead(run.repo)
+      const baseSha = await this.evaluator.revParseHead(run.repo, run.baseBranch ?? undefined)
       this.store.patchRun(run.id, { baseSha, startedAt: new Date().toISOString() })
       this.store.completeStage(stage.id, 'succeeded')
       this.store.appendEvent({ runId: run.id, type: 'preflight_completed', stageId: stage.id, payload: { baseSha } })
@@ -243,7 +254,7 @@ export class LoopEngine {
     if (resumeCwd) {
       ctx.cwd = resumeCwd
     } else {
-      const worktree = await this.host.createWorktree(session.id, run.repo, run.branch)
+      const worktree = await this.host.createWorktree(session.id, run.repo, run.branch, run.baseBranch ?? undefined)
       ctx.cwd = worktree ?? run.repo
     }
     this.store.patchRun(run.id, { makerSessionId: session.id, worktreePath: ctx.cwd })
@@ -259,10 +270,20 @@ export class LoopEngine {
     )
     this.armWallTimer(ctx, run)
 
-    this.setState(run.id, 'executing')
+    const planning = ctx.phase === 'planning'
+    this.setState(run.id, planning ? 'planning' : 'executing')
+    if (planning) this.store.createStage(run.id, 'plan')
     this.host.startClaude(session.id)
-    this.host.sendInput(session.id, buildMakerPrompt(run, this.remaining(ctx, run), resumeNote, this.drainSteers(ctx)))
-    this.store.appendEvent({ runId: run.id, type: 'maker_started', payload: { sessionId: session.id, resumed: resumeNote !== null } })
+    ctx.assistantTextOffset = 0
+    const prompt = planning
+      ? buildPlanningPrompt(run, resumeNote, this.drainSteers(ctx))
+      : buildMakerPrompt(run, this.remaining(ctx, run), resumeNote, this.drainSteers(ctx))
+    this.host.sendInput(session.id, prompt)
+    this.store.appendEvent({
+      runId: run.id,
+      type: 'maker_started',
+      payload: { sessionId: session.id, resumed: resumeNote !== null, phase: ctx.phase },
+    })
   }
 
   private buildCtx(runId: string, cwd: string, state: CheckpointState): RunCtx {
@@ -272,6 +293,7 @@ export class LoopEngine {
       cwd,
       makerSessionId: null,
       reviewSessionId: null,
+      assistantTextOffset: 0,
       pendingRubrics: [],
       passedCommands: [],
       processing: false,
@@ -332,7 +354,14 @@ export class LoopEngine {
         return
       }
 
-      // 5. Protected paths: violation re-prompts; repeats escalate.
+      // 5. Planning phase: capture the plan artifact and route — no
+      // evaluation until the maker is executing.
+      if (ctx.phase === 'planning') {
+        this.onPlanProduced(ctx, run)
+        return
+      }
+
+      // 6. Protected paths: violation re-prompts; repeats escalate.
       const changedFiles = await this.evaluator.getChangedFiles(ctx.cwd)
       const protectedPaths = run.recipe.workspace.protectedPaths
       const violations = protectedPaths.length ? changedFiles.filter((f) => matchesAnyGlob(f, protectedPaths)) : []
@@ -356,17 +385,87 @@ export class LoopEngine {
       }
       ctx.protectedStrikes = 0
 
-      // 6. No changes yet: a clean tree must not masquerade as success.
+      // 7. No changes yet: a clean tree must not masquerade as success.
       if (changedFiles.length === 0) {
         this.sendMakerFeedback(ctx, run, 'No file changes detected yet. Make the changes required to achieve the outcome.')
         return
       }
 
-      // 7. Evaluate.
+      // 8. Evaluate.
       await this.evaluate(ctx, run)
     } finally {
       ctx.processing = false
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Planning
+  // -------------------------------------------------------------------------
+
+  /**
+   * The maker replied to the planning prompt. Retain the plan as an artifact,
+   * then gate on approval (guided) or proceed straight to execution.
+   */
+  private onPlanProduced(ctx: RunCtx, run: LoopRun): void {
+    const history = this.host.get(ctx.makerSessionId ?? '')?.outputHistory ?? []
+    const full = extractAssistantText(history)
+    const planText = (full.slice(ctx.assistantTextOffset).trim() || full.trim()) || '(the maker produced no plan text)'
+
+    const stage = this.store.listStages(run.id).filter((s) => s.kind === 'plan' && s.status === 'running').at(-1)
+    if (stage) this.store.completeStage(stage.id, 'succeeded')
+    const artifactHash = this.artifacts.put(planText)
+    const artifact = this.store.addArtifact({
+      runId: run.id,
+      kind: 'plan',
+      label: `plan (turn ${ctx.turnCount})`,
+      contentHash: artifactHash,
+      sizeBytes: Buffer.byteLength(planText),
+    })
+    this.store.appendEvent({
+      runId: run.id,
+      type: 'plan_created',
+      stageId: stage?.id,
+      actor: { type: 'agent', id: 'maker' },
+      payload: { artifactId: artifact.id },
+    })
+
+    if (run.recipe.policy.mode === 'guided') {
+      this.createEngineIntervention(ctx, run, {
+        purpose: 'plan-approval',
+        title: `Approve the plan for "${run.recipe.name}"?`,
+        body: planText.slice(0, 4000),
+        options: ['approve', 'revise', 'stop'],
+      })
+      return
+    }
+    this.proceedToActing(ctx, run)
+  }
+
+  /** Same session continues from plan to execution. */
+  private proceedToActing(ctx: RunCtx, run: LoopRun): void {
+    ctx.phase = 'acting'
+    this.checkpoint(ctx)
+    const remaining = this.remaining(ctx, run)
+    this.sendMakerFeedback(
+      ctx,
+      run,
+      [
+        'The plan is recorded. Execute it now.',
+        `- Make the smallest changes that achieve the outcome; follow your plan and note deviations.`,
+        `- Evaluators run after each of your turns; failures come back as feedback.`,
+        `- Remaining budget: ${remaining.turns} turns, $${remaining.costUsd.toFixed(2)}.`,
+      ].join('\n'),
+    )
+  }
+
+  /** Latest retained plan text, for regenerated context after a wait state. */
+  private latestPlanText(runId: string): string | null {
+    const plan = this.store
+      .listArtifacts(runId)
+      .filter((a) => a.kind === 'plan')
+      .at(-1)
+    if (!plan) return null
+    return this.artifacts.get(plan.contentHash)?.toString() ?? null
   }
 
   /** Run the command evaluators in order (short-circuit on required failure). */
@@ -825,6 +924,29 @@ export class LoopEngine {
     }
 
     switch (resolved.purpose) {
+      case 'plan-approval': {
+        if (choice === 'approve') {
+          ctx.phase = 'acting'
+          this.checkpoint(ctx)
+          const plan = this.latestPlanText(run.id)
+          await this.resumeActing(
+            ctx,
+            run,
+            `Your plan was approved${note ? ` with this note: ${note}` : ''}. Execute it now.${plan ? `\n\nApproved plan:\n${plan}` : ''}`,
+          )
+        } else if (choice === 'revise') {
+          const plan = this.latestPlanText(run.id)
+          await this.resumeActing(
+            ctx,
+            run,
+            `The operator requested plan revisions${note ? `: ${note}` : ''}.${plan ? `\n\nPrevious plan:\n${plan}` : ''}`,
+          )
+        } else {
+          this.teardown(ctx)
+          this.finishRun(run.id, 'canceled', `Stopped at plan approval.${note ? ` Note: ${note}` : ''}`)
+        }
+        return true
+      }
       case 'completion-approval': {
         if (choice === 'approve') {
           // finalizeRun stops the maker itself; no fresh session needed.
@@ -937,10 +1059,13 @@ export class LoopEngine {
    * boundary (mid-turn injection interleaves unpredictably across providers);
    * for a waiting run it is delivered on resume.
    */
-  steer(runId: string, instruction: string): boolean {
+  steer(runId: string, instruction: string, revisePlan = false): boolean {
     const run = this.store.getRun(runId)
     if (!run || run.state === 'done') return false
-    this.store.appendEvent({ runId, type: 'steer_received', actor: { type: 'user' }, payload: { instruction } })
+    this.store.appendEvent({ runId, type: 'steer_received', actor: { type: 'user' }, payload: { instruction, revisePlan } })
+    if (revisePlan) {
+      instruction = `Before continuing, revise your plan to account for this, state the revised plan, then follow it: ${instruction}`
+    }
     const ctx = this.active.get(runId)
     if (ctx) {
       ctx.steerQueue.push(instruction)
@@ -1098,6 +1223,7 @@ export class LoopEngine {
 
   private checkpoint(ctx: RunCtx): void {
     const state: CheckpointState & { steerQueue?: string[] } = {
+      phase: ctx.phase,
       turnCount: ctx.turnCount,
       makerCostUsd: ctx.makerCostUsd,
       reviewCostUsd: ctx.reviewCostUsd,
@@ -1156,6 +1282,34 @@ export function buildMakerPrompt(
     `- Make the smallest change that achieves the outcome. Do not weaken or delete tests to pass evaluation.`,
     `- Evaluators run after each of your turns; failures come back to you as feedback.`,
     `- Remaining budget: ${remaining.turns} turns, $${remaining.costUsd.toFixed(2)}.`,
+  )
+  if (resumeNote) lines.push('', `## Note`, resumeNote)
+  if (steers) lines.push('', steers)
+  return lines.join('\n')
+}
+
+export function buildPlanningPrompt(run: LoopRun, resumeNote: string | null, steers: string | null): string {
+  const commands = run.recipe.evaluators.filter((e) => e.type === 'command')
+  const lines = [
+    `# Loop Run: ${run.recipe.name} — Planning`,
+    '',
+    `## Outcome`,
+    run.goal,
+    '',
+    `## Acceptance (these evaluators must eventually pass)`,
+    ...commands.map((c) => `- \`${displayCommand(c.command)}\`${c.required ? '' : ' (optional)'}`),
+  ]
+  if (run.recipe.workspace.protectedPaths.length) {
+    lines.push('', `## Paths that must NOT change`, ...run.recipe.workspace.protectedPaths.map((g) => `- \`${g}\``))
+  }
+  lines.push(
+    '',
+    `## Your task — plan only`,
+    `Investigate the repository as needed, then reply with a concrete implementation plan BEFORE modifying any files:`,
+    `- numbered steps, each naming the files you expect to touch;`,
+    `- how the change will be verified against the evaluators above;`,
+    `- risks or open questions, if any.`,
+    `Do NOT modify any files yet. End your reply with the plan.`,
   )
   if (resumeNote) lines.push('', `## Note`, resumeNote)
   if (steers) lines.push('', steers)

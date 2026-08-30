@@ -171,6 +171,7 @@ function recipeFromYaml(opts: {
   noProgressAttempts?: number
   protectedPaths?: string[]
   retryMaxAttempts?: number
+  planRequired?: boolean
 } = {}): LoopRecipe {
   const md = `---
 apiVersion: codekin.dev/v2
@@ -179,6 +180,7 @@ metadata: { id: ci-repair, name: Repair CI }
 agent: { provider: claude }
 workspace:
   protectedPaths: [${(opts.protectedPaths ?? []).map((p) => JSON.stringify(p)).join(', ')}]
+plan: { required: ${opts.planRequired ?? false} }
 evaluators:
   - id: tests
     type: command
@@ -577,6 +579,96 @@ describe('LoopEngine', () => {
       expect(summary.resumed).toContain(runId)
       expect(store.getRun(runId)!.outcome).toBe('completed')
       expect(finalizer.calls.length).toBe(2) // idempotent by design
+    })
+  })
+
+  describe('plan stage', () => {
+    it('guarded mode: plan is captured as an artifact, then the same session executes', async () => {
+      const run = await engine.startRun(input(recipeFromYaml({ planRequired: true })))
+      expect(store.getRun(run.id)!.state).toBe('planning')
+      const maker = host.get(store.getRun(run.id)!.makerSessionId!)!
+      expect(maker.inputs[0]).toContain('plan only')
+      expect(maker.inputs[0]).toContain('Do NOT modify any files yet')
+
+      maker.outputHistory.push({ type: 'output', data: '1. Fix the flaky mock in x.test.ts\n2. Run the suite' })
+      host.emitResult(maker.id)
+      await settle()
+
+      // Plan retained, same session moved on to execution.
+      const plans = store.listArtifacts(run.id).filter((a) => a.kind === 'plan')
+      expect(plans).toHaveLength(1)
+      expect(store.getRun(run.id)!.state).toBe('executing')
+      expect(maker.inputs.at(-1)).toContain('Execute it now')
+      expect(store.listStages(run.id).map((s) => s.kind)).toContain('plan')
+
+      // Next turn evaluates and completes as usual.
+      host.emitResult(maker.id)
+      await settle()
+      expect(store.getRun(run.id)!.outcome).toBe('completed')
+    })
+
+    it('guided mode gates on plan approval; approve resumes with the plan in context', async () => {
+      const run = await engine.startRun(input(recipeFromYaml({ planRequired: true, mode: 'guided' })))
+      const maker = host.get(store.getRun(run.id)!.makerSessionId!)!
+      maker.outputHistory.push({ type: 'output', data: 'Step 1: edit parser.ts' })
+      host.emitResult(maker.id)
+      await settle()
+
+      expect(store.getRun(run.id)!.state).toBe('awaiting_approval')
+      const [iv] = store.listInterventions(run.id, 'pending')
+      expect(iv.purpose).toBe('plan-approval')
+      expect(iv.body).toContain('Step 1: edit parser.ts')
+      expect(iv.options).toEqual(['approve', 'revise', 'stop'])
+
+      expect(await engine.resolveIntervention(iv.id, 'approve')).toBe(true)
+      await settle()
+      const resumed = store.getRun(run.id)!
+      expect(resumed.state).toBe('executing')
+      const fresh = host.get(resumed.makerSessionId!)!
+      expect(fresh.inputs[0]).toContain('plan was approved')
+      expect(fresh.inputs[0]).toContain('Step 1: edit parser.ts')
+    })
+
+    it('guided revise returns to planning with the note and previous plan', async () => {
+      const run = await engine.startRun(input(recipeFromYaml({ planRequired: true, mode: 'guided' })))
+      const maker = host.get(store.getRun(run.id)!.makerSessionId!)!
+      maker.outputHistory.push({ type: 'output', data: 'Plan v1' })
+      host.emitResult(maker.id)
+      await settle()
+      const [iv] = store.listInterventions(run.id, 'pending')
+
+      expect(await engine.resolveIntervention(iv.id, 'revise', 'cover the edge case too')).toBe(true)
+      await settle()
+      const revised = store.getRun(run.id)!
+      expect(revised.state).toBe('planning')
+      const fresh = host.get(revised.makerSessionId!)!
+      expect(fresh.inputs[0]).toContain('plan only')
+      expect(fresh.inputs[0]).toContain('cover the edge case too')
+      expect(fresh.inputs[0]).toContain('Plan v1')
+    })
+
+    it('planning survives a restart and resumes in the planning phase', async () => {
+      const run = await engine.startRun(input(recipeFromYaml({ planRequired: true })))
+      expect(store.getRun(run.id)!.state).toBe('planning')
+
+      const freshEngine = new LoopEngine(host, store, new LoopArtifactStore(join(root, 'artifacts')), evalApi, finalizer)
+      const summary = await freshEngine.recoverAll()
+      expect(summary.resumed).toContain(run.id)
+      const resumed = store.getRun(run.id)!
+      expect(resumed.state).toBe('planning')
+      expect(host.get(resumed.makerSessionId!)!.inputs[0]).toContain('plan only')
+    })
+
+    it('steer with revisePlan asks for a plan revision at the next boundary', async () => {
+      const recipe = recipeFromYaml()
+      evalApi.commandQueue = [fail(recipe.evaluators[0] as CommandEvaluatorConfig)]
+      const run = await engine.startRun(input(recipe))
+      engine.steer(run.id, 'use the config-level fix', true)
+      host.emitResult(store.getRun(run.id)!.makerSessionId!)
+      await settle()
+      const maker = host.get(store.getRun(run.id)!.makerSessionId!)!
+      expect(maker.inputs.at(-1)).toContain('revise your plan')
+      expect(maker.inputs.at(-1)).toContain('use the config-level fix')
     })
   })
 
