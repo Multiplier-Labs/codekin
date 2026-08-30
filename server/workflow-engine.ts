@@ -250,6 +250,31 @@ export interface EngineHealth {
   tickCount: number
 }
 
+/**
+ * A durable event in the `signals` table. Producers INSERT (commit event,
+ * probe breach, webhook); the dispatcher consumes with a lease and marks
+ * `done` only after the handler resolves — a crash mid-processing means lease
+ * expiry and redelivery, never loss (at-least-once).
+ */
+export interface Signal {
+  id: number
+  kind: string
+  payload: Record<string, unknown>
+  dedupeKey: string | null
+  status: 'pending' | 'processing' | 'done' | 'failed' | 'expired'
+  attempts: number
+  createdAt: string
+  processedAt: string | null
+  error: string | null
+}
+
+/**
+ * Consumes one signal. Resolve = acknowledged (signal marked done). Reject =
+ * the signal stays leased and is redelivered after lease expiry, up to the
+ * attempt cap — so handlers must be idempotent.
+ */
+export type SignalHandler = (payload: Record<string, unknown>, signal: Signal) => Promise<void>
+
 /** Resolve a repo's current HEAD sha; `null` when unavailable (missing repo, not a git dir). */
 export type HeadShaResolver = (repoPath: string) => string | null
 
@@ -340,6 +365,7 @@ export class WorkflowEngine extends EventEmitter {
   private dispatchIndex = new Map<string, { scheduleId: string; headSha: string | null }>()
   private headShaResolver: HeadShaResolver = defaultHeadShaResolver
   private activityResolver: ActivityResolver | null = null
+  private signalHandlers = new Map<string, SignalHandler>()
 
   /** Max dispatches per tick — staggers a backlog after downtime instead of stampeding. */
   static readonly MAX_DISPATCH_PER_TICK = 3
@@ -351,6 +377,14 @@ export class WorkflowEngine extends EventEmitter {
   static readonly COOLING_MIN_INTERVAL_MS = 7 * 24 * 60 * 60_000
   /** Trigger-ledger rows older than this are pruned when the scheduler starts. */
   static readonly LEDGER_RETENTION_MS = 30 * 24 * 60 * 60_000
+  /** How long a signal handler may hold a lease before the signal is redelivered. */
+  static readonly SIGNAL_LEASE_MS = 5 * 60_000
+  /** Delivery attempts before a signal is marked failed instead of retried. */
+  static readonly SIGNAL_MAX_ATTEMPTS = 3
+  /** Default lifetime of an unprocessed signal — stale events must not fire hours late. */
+  static readonly SIGNAL_DEFAULT_TTL_MS = 24 * 60 * 60_000
+  /** Max signals consumed per tick — the same backlog-stagger idea as schedule dispatch. */
+  static readonly MAX_SIGNALS_PER_TICK = 10
 
   constructor(dbPath?: string, legacyPath?: string) {
     super()
@@ -425,10 +459,26 @@ export class WorkflowEngine extends EventEmitter {
         tick_count INTEGER NOT NULL DEFAULT 0
       );
 
+      CREATE TABLE IF NOT EXISTS signals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL,
+        payload TEXT NOT NULL DEFAULT '{}',
+        dedupe_key TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        lease_expires_at TEXT,
+        expires_at TEXT,
+        created_at TEXT NOT NULL,
+        processed_at TEXT,
+        error TEXT
+      );
+
       CREATE INDEX IF NOT EXISTS idx_runs_kind ON workflow_runs(kind);
       CREATE INDEX IF NOT EXISTS idx_runs_status ON workflow_runs(status);
       CREATE INDEX IF NOT EXISTS idx_steps_run_id ON workflow_steps(run_id);
       CREATE INDEX IF NOT EXISTS idx_trigger_ledger_schedule ON trigger_ledger(schedule_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status, id);
+      CREATE INDEX IF NOT EXISTS idx_signals_dedupe ON signals(dedupe_key, status);
     `)
   }
 
@@ -928,6 +978,117 @@ export class WorkflowEngine extends EventEmitter {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Durable signals (at-least-once)
+  // -------------------------------------------------------------------------
+
+  /** Register the consumer for a signal kind. One handler per kind. */
+  registerSignalHandler(kind: string, handler: SignalHandler) {
+    this.signalHandlers.set(kind, handler)
+  }
+
+  /**
+   * Durably enqueue a signal. With a `dedupeKey`, an already-pending (or
+   * in-flight) signal carrying the same key absorbs the enqueue — the caller
+   * learns via `deduped` and nothing is inserted.
+   */
+  enqueueSignal(input: { kind: string; payload?: Record<string, unknown>; dedupeKey?: string; ttlMs?: number }): { id: number; deduped: boolean } {
+    if (input.dedupeKey) {
+      const existing = this.db.prepare(
+        `SELECT id FROM signals WHERE dedupe_key = ? AND status IN ('pending', 'processing')`,
+      ).get(input.dedupeKey) as { id: number } | undefined
+      if (existing) return { id: existing.id, deduped: true }
+    }
+
+    const now = new Date()
+    const expiresAt = new Date(now.getTime() + (input.ttlMs ?? WorkflowEngine.SIGNAL_DEFAULT_TTL_MS)).toISOString()
+    const info = this.db.prepare(`
+      INSERT INTO signals (kind, payload, dedupe_key, status, expires_at, created_at)
+      VALUES (?, ?, ?, 'pending', ?, ?)
+    `).run(input.kind, JSON.stringify(input.payload ?? {}), input.dedupeKey ?? null, expiresAt, now.toISOString())
+    return { id: Number(info.lastInsertRowid), deduped: false }
+  }
+
+  /** List signals newest-first, optionally by status. */
+  listSignals(opts?: { status?: Signal['status']; limit?: number }): Signal[] {
+    const { sql, params } = buildListQuery('signals', {
+      filters: opts?.status ? [{ column: 'status', value: opts.status }] : [],
+      orderBy: 'id DESC',
+      limit: opts?.limit ?? 100,
+    })
+    return (this.db.prepare(sql).all(...params) as Record<string, unknown>[]).map(row => this.rowToSignal(row))
+  }
+
+  private rowToSignal(row: Record<string, unknown>): Signal {
+    return {
+      id: row.id as number,
+      kind: row.kind as string,
+      payload: jsonParse(row.payload as string) as Record<string, unknown>,
+      dedupeKey: row.dedupe_key as string | null,
+      status: row.status as Signal['status'],
+      attempts: row.attempts as number,
+      createdAt: row.created_at as string,
+      processedAt: row.processed_at as string | null,
+      error: row.error as string | null,
+    }
+  }
+
+  /**
+   * One consumption pass: expire stale pending signals, fail or reclaim broken
+   * leases, then deliver a batch of pending signals to their handlers. Called
+   * from `dispatchTick` before schedule dispatch (signals outrank timers).
+   */
+  private processSignals(now: Date) {
+    const nowIso = now.toISOString()
+
+    // Stale pending signals must not fire surprisingly late — expire them.
+    const expired = this.db.prepare(
+      `UPDATE signals SET status = 'expired', processed_at = ? WHERE status = 'pending' AND expires_at < ?`,
+    ).run(nowIso, nowIso)
+    if (expired.changes > 0) {
+      this.recordTrigger({ scheduleId: null, kind: 'signal', decision: 'held', reason: `${expired.changes} signal(s) expired unprocessed` })
+    }
+
+    // Broken leases: exhausted attempts → failed; otherwise back to pending for redelivery.
+    const failed = this.db.prepare(
+      `UPDATE signals SET status = 'failed', processed_at = ? WHERE status = 'processing' AND lease_expires_at < ? AND attempts >= ?`,
+    ).run(nowIso, nowIso, WorkflowEngine.SIGNAL_MAX_ATTEMPTS)
+    if (failed.changes > 0) {
+      this.recordTrigger({ scheduleId: null, kind: 'signal', decision: 'held', reason: `${failed.changes} signal(s) failed after ${WorkflowEngine.SIGNAL_MAX_ATTEMPTS} attempts` })
+    }
+    this.db.prepare(
+      `UPDATE signals SET status = 'pending', lease_expires_at = NULL WHERE status = 'processing' AND lease_expires_at < ?`,
+    ).run(nowIso)
+
+    // Deliver a batch. Signals whose kind has no registered handler stay
+    // pending — the consumer may simply not have booted yet; TTL bounds the wait.
+    const rows = this.db.prepare(`SELECT * FROM signals WHERE status = 'pending' ORDER BY id LIMIT ?`)
+      .all(WorkflowEngine.MAX_SIGNALS_PER_TICK) as Record<string, unknown>[]
+    for (const row of rows) {
+      const handler = this.signalHandlers.get(row.kind as string)
+      if (!handler) continue
+
+      const lease = new Date(now.getTime() + WorkflowEngine.SIGNAL_LEASE_MS).toISOString()
+      this.db.prepare(`UPDATE signals SET status = 'processing', attempts = attempts + 1, lease_expires_at = ? WHERE id = ?`)
+        .run(lease, row.id)
+      const signal = this.rowToSignal({ ...row, attempts: (row.attempts as number) + 1 })
+
+      handler(signal.payload, signal)
+        .then(() => {
+          // Ack only after the handler resolves — the at-least-once guarantee.
+          this.db.prepare(`UPDATE signals SET status = 'done', processed_at = ?, error = NULL WHERE id = ?`)
+            .run(new Date().toISOString(), signal.id)
+          this.recordTrigger({ scheduleId: null, kind: `signal:${signal.kind}`, decision: 'fired', reason: 'signal processed' })
+        })
+        .catch((err: unknown) => {
+          // Leave the signal leased; lease expiry redelivers it. Record the error for diagnosis.
+          const msg = err instanceof Error ? err.message : String(err)
+          console.error(`[workflow] Signal handler error (${signal.kind} #${signal.id}, attempt ${signal.attempts}):`, msg)
+          this.db.prepare(`UPDATE signals SET error = ? WHERE id = ?`).run(msg, signal.id)
+        })
+    }
+  }
+
   /** Withhold a dispatch: record why, bump held bookkeeping, and set the retry/next time. */
   private holdSchedule(schedule: CronSchedule, reason: string, nextRunAt: string, now: Date) {
     console.log(`[workflow] Cron held: ${schedule.id} (${schedule.kind}) — ${reason}`)
@@ -948,6 +1109,9 @@ export class WorkflowEngine extends EventEmitter {
       INSERT INTO engine_heartbeat (id, last_tick_at, tick_count) VALUES (1, ?, 1)
       ON CONFLICT(id) DO UPDATE SET last_tick_at = excluded.last_tick_at, tick_count = tick_count + 1
     `).run(now.toISOString())
+
+    // Signals outrank timers: an event that already happened beats a wall-clock guess.
+    this.processSignals(now)
 
     const due = this.listSchedules()
       .filter(s => s.enabled && s.nextRunAt && new Date(s.nextRunAt) <= now)
@@ -1044,9 +1208,10 @@ export class WorkflowEngine extends EventEmitter {
     if (this.cronTimer) return
     console.log('[workflow] Cron scheduler started')
 
-    // Prune old ledger rows once per process start, not per tick.
+    // Prune old ledger rows and settled signals once per process start, not per tick.
     const cutoff = new Date(Date.now() - WorkflowEngine.LEDGER_RETENTION_MS).toISOString()
     this.db.prepare(`DELETE FROM trigger_ledger WHERE created_at < ?`).run(cutoff)
+    this.db.prepare(`DELETE FROM signals WHERE status IN ('done', 'expired', 'failed') AND created_at < ?`).run(cutoff)
 
     const tick = () => {
       try {

@@ -44,6 +44,16 @@ There is no polling loop: records refresh lazily when read (15-minute freshness 
 
 Dispatches are capped per 60-second tick (backlog staggers across ticks instead of stampeding after downtime), and the loop writes a heartbeat on every tick — `GET /api/workflows/engine-health` returns `{ lastTickAt, tickCount, stale }`, and the orchestrator monitor raises an alert notification if the heartbeat goes stale.
 
+## Durable Signals
+
+Events flow through a durable queue in the same database rather than in-memory emitters, so a crash between receipt and action can delay an event but never lose it:
+
+- **Producers INSERT** — `POST /api/workflows/commit-event` (the git post-commit hook) enqueues a `commit-event` signal and returns immediately; probe breaches and future producers use the same path. A `dedupeKey` absorbs duplicates while an equivalent signal is still queued.
+- **The dispatcher consumes with a lease** — each tick delivers a batch (signals outrank timers) by marking the signal `processing` with a 5-minute lease and invoking the registered handler. Only a resolved handler acks the signal as `done`; a rejection or crash leaves the lease to expire, and the signal is redelivered — **at-least-once**, so handlers must be idempotent (the commit-review filter chain already is).
+- **Bounded retries and lifetime** — 3 attempts before a signal is marked `failed`; unconsumed signals expire after their TTL (default 24 h) instead of firing surprisingly late. Both outcomes are recorded in the trigger ledger.
+
+`GET /api/workflows/signals?status=&limit=` lists the queue, newest first.
+
 ---
 
 ## MD File Format

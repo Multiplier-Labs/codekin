@@ -209,7 +209,10 @@ export function createWorkflowRouter(
   verifyToken: VerifyFn,
   extractToken: ExtractFn,
   sessions?: SessionManager,
-  commitEventState?: { handler: CommitEventHandler | undefined },
+  // Kept for signature compatibility — commit events now flow through the
+  // engine's durable signal queue rather than dispatching inline.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _commitEventState?: { handler: CommitEventHandler | undefined },
 ): Router {
   const router = Router()
 
@@ -231,15 +234,10 @@ export function createWorkflowRouter(
   // without touching the other routes.
   // -------------------------------------------------------------------------
 
-  router.post('/commit-event', async (req: Request<Record<string, string>, unknown, CommitEventBody>, res) => {
+  router.post('/commit-event', (req: Request<Record<string, string>, unknown, CommitEventBody>, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) {
       return res.status(401).json({ error: 'Unauthorized' })
-    }
-
-    const handler = commitEventState?.handler
-    if (!handler) {
-      return res.status(503).json({ error: 'Commit event handler not available' })
     }
 
     const { repoPath, branch, commitHash, commitMessage, author } = req.body
@@ -250,15 +248,22 @@ export function createWorkflowRouter(
       return res.status(400).json({ error: 'Invalid repoPath: must be an existing directory under the configured repos root' })
     }
 
-    const result = await handler.handle({
-      repoPath,
-      branch,
-      commitHash,
-      commitMessage,
-      author: author || 'unknown',
+    // Durably enqueue instead of processing inline: the event survives a crash
+    // between receipt and run creation, and the dispatcher delivers it with
+    // at-least-once semantics. The hook script is fire-and-forget either way.
+    let engine
+    try {
+      engine = getWorkflowEngine()
+    } catch {
+      return res.status(503).json({ error: 'Workflow engine not available' })
+    }
+    const result = engine.enqueueSignal({
+      kind: 'commit-event',
+      payload: { repoPath, branch, commitHash, commitMessage, author: author || 'unknown' },
+      dedupeKey: `commit-event::${repoPath}::${commitHash}`,
+      ttlMs: 60 * 60 * 1000,
     })
-
-    res.status(result.accepted ? 202 : 200).json(result)
+    res.status(202).json({ queued: !result.deduped, deduped: result.deduped, signalId: result.id })
   })
 
   // Apply master auth to all remaining routes
@@ -387,6 +392,16 @@ export function createWorkflowRouter(
     const scheduleId = typeof req.query.scheduleId === 'string' ? req.query.scheduleId : undefined
     const limit = Math.min(parseInt(String(req.query.limit ?? '100'), 10) || 100, 500)
     res.json({ entries: engine.listTriggerLedger({ scheduleId, limit }) })
+  })
+
+  /** Durable signal queue, newest first — pending/processing/done/failed/expired. */
+  router.get('/signals', (req, res) => {
+    const engine = getEngine(res)
+    if (!engine) return
+
+    const status = typeof req.query.status === 'string' ? req.query.status as import('./workflow-engine.js').Signal['status'] : undefined
+    const limit = Math.min(parseInt(String(req.query.limit ?? '100'), 10) || 100, 500)
+    res.json({ signals: engine.listSignals({ status, limit }) })
   })
 
   router.post('/schedules', (req: Request<Record<string, string>, unknown, UpsertScheduleBody>, res) => {

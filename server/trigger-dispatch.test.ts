@@ -210,6 +210,84 @@ describe('trigger dispatch', () => {
     })
   })
 
+  describe('durable signals', () => {
+    it('delivers a signal to its handler and acks it as done', async () => {
+      const seen: unknown[] = []
+      engine.registerSignalHandler('test-signal', async (payload) => { seen.push(payload) })
+
+      const { id, deduped } = engine.enqueueSignal({ kind: 'test-signal', payload: { n: 1 } })
+      expect(deduped).toBe(false)
+
+      engine.dispatchTick(dueAt(0))
+      await settle()
+
+      expect(seen).toEqual([{ n: 1 }])
+      const signal = engine.listSignals().find(s => s.id === id)!
+      expect(signal.status).toBe('done')
+      expect(signal.attempts).toBe(1)
+      const fired = engine.listTriggerLedger().find(e => e.kind === 'signal:test-signal')
+      expect(fired?.decision).toBe('fired')
+    })
+
+    it('absorbs duplicate enqueues while a signal with the same dedupe key is pending', () => {
+      const first = engine.enqueueSignal({ kind: 'test-signal', dedupeKey: 'k1' })
+      const second = engine.enqueueSignal({ kind: 'test-signal', dedupeKey: 'k1' })
+      expect(second).toEqual({ id: first.id, deduped: true })
+      expect(engine.listSignals({ status: 'pending' })).toHaveLength(1)
+    })
+
+    it('redelivers after lease expiry when the handler rejects, then acks on success', async () => {
+      let calls = 0
+      engine.registerSignalHandler('flaky', async () => {
+        calls++
+        if (calls === 1) throw new Error('transient')
+      })
+      const { id } = engine.enqueueSignal({ kind: 'flaky' })
+
+      const t0 = dueAt(0)
+      engine.dispatchTick(t0)
+      await settle()
+      expect(engine.listSignals().find(s => s.id === id)?.status).toBe('processing')
+      expect(engine.listSignals().find(s => s.id === id)?.error).toBe('transient')
+
+      // Lease (5 min) expires → reclaimed and redelivered on the next tick.
+      engine.dispatchTick(new Date(t0.getTime() + 6 * 60_000))
+      await settle()
+      const signal = engine.listSignals().find(s => s.id === id)!
+      expect(calls).toBe(2)
+      expect(signal.status).toBe('done')
+      expect(signal.attempts).toBe(2)
+    })
+
+    it('fails a signal after the attempt cap instead of retrying forever', async () => {
+      engine.registerSignalHandler('doomed', async () => { throw new Error('always') })
+      const { id } = engine.enqueueSignal({ kind: 'doomed' })
+
+      let t = dueAt(0)
+      for (let i = 0; i < WorkflowEngine.SIGNAL_MAX_ATTEMPTS + 1; i++) {
+        engine.dispatchTick(t)
+        await settle()
+        t = new Date(t.getTime() + WorkflowEngine.SIGNAL_LEASE_MS + 60_000)
+      }
+
+      const signal = engine.listSignals().find(s => s.id === id)!
+      expect(signal.status).toBe('failed')
+      expect(signal.attempts).toBe(WorkflowEngine.SIGNAL_MAX_ATTEMPTS)
+    })
+
+    it('expires an unconsumed signal after its TTL instead of firing it late', async () => {
+      // No handler registered for this kind — it waits, then expires.
+      const { id } = engine.enqueueSignal({ kind: 'orphan', ttlMs: 60_000 })
+
+      const t0 = dueAt(0)
+      engine.dispatchTick(t0)
+      expect(engine.listSignals().find(s => s.id === id)?.status).toBe('pending')
+
+      engine.dispatchTick(new Date(t0.getTime() + 2 * 60_000))
+      expect(engine.listSignals().find(s => s.id === id)?.status).toBe('expired')
+    })
+  })
+
   it('writes a heartbeat on every tick', () => {
     const t1 = dueAt(0)
     engine.dispatchTick(t1)
