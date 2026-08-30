@@ -178,6 +178,29 @@ export async function listSchedules(token: string): Promise<CronSchedule[]> {
   return data.schedules
 }
 
+export interface TriggerLedgerEntry {
+  id: number
+  scheduleId: string | null
+  kind: string
+  decision: 'fired' | 'held'
+  reason: string
+  runId: string | null
+  headSha: string | null
+  createdAt: string
+}
+
+/** Trigger ledger — why schedules and signals did or didn't fire, newest first. */
+export async function listTriggerLedger(token: string, opts?: { scheduleId?: string; limit?: number }): Promise<TriggerLedgerEntry[]> {
+  const params = new URLSearchParams()
+  if (opts?.scheduleId) params.set('scheduleId', opts.scheduleId)
+  if (opts?.limit) params.set('limit', String(opts.limit))
+  const qs = params.toString()
+  const res = await transport.fetch(`${BASE}/trigger-ledger${qs ? `?${qs}` : ''}`, { headers: headers(token) })
+  if (!res.ok) throw new Error(`Failed to list trigger ledger: ${res.status}`)
+  const data = await fetchJson<{ entries: TriggerLedgerEntry[] }>(res)
+  return data.entries
+}
+
 export type ActivityTier = 'active' | 'cooling' | 'dormant'
 
 export interface RepoActivity {
