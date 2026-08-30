@@ -19,7 +19,7 @@ import Database from 'better-sqlite3'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { request as httpsRequest } from 'https'
-import { existsSync, chmodSync } from 'fs'
+import { existsSync, chmodSync, statSync, openSync, readSync, closeSync } from 'fs'
 import { defaultRunsDbPath } from './run-db.js'
 import { jsonParse } from './json-parse.js'
 import {
@@ -30,6 +30,7 @@ import {
   type HttpProbeConfig,
   type Pm2ProbeConfig,
   type DiskProbeConfig,
+  type LogProbeConfig,
   type HostProbeConfigRef,
 } from './deployment-config.js'
 import { runHostProbe } from './host-probe.js'
@@ -66,6 +67,7 @@ export interface ProbeRunners {
   http: (probe: HttpProbeConfig) => Promise<ProbeResult>
   pm2: (probe: Pm2ProbeConfig, previous: ProbeMetrics | null) => Promise<ProbeResult>
   disk: (probe: DiskProbeConfig) => Promise<ProbeResult>
+  log: (probe: LogProbeConfig, previous: ProbeMetrics | null) => Promise<ProbeResult>
   host: (probe: HostProbeConfigRef) => Promise<ProbeResult>
 }
 
@@ -77,31 +79,42 @@ const CERT_WARN_DAYS = 14
 const DEFAULT_MIN_FREE_PCT = 10
 /** Breach signals expire fast — a stale alert is worse than none. */
 const BREACH_SIGNAL_TTL_MS = 60 * 60 * 1000
+/** Latency breach = above `factor × learned p95`, but never below the floor (jitter guard). */
+const LATENCY_BASELINE_FACTOR = 4
+const LATENCY_BASELINE_FLOOR_MS = 750
+const LATENCY_BASELINE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+/** Healthy samples required before the baseline is trusted (~a day at 5-min cadence). */
+const DEFAULT_BASELINE_MIN_SAMPLES = 288
 
 // ---------------------------------------------------------------------------
 // Default probe runners (all sudo-free)
 // ---------------------------------------------------------------------------
 
 /** Days until the TLS certificate of `url` expires, or `null` when unavailable. */
-function certDaysRemaining(url: string, timeoutMs: number): Promise<number | null> {
+/** TLS details of `url`: certificate days-remaining and negotiated protocol. */
+function tlsInfo(url: string, timeoutMs: number): Promise<{ certDays: number | null; protocol: string | null }> {
   return new Promise((resolve) => {
     try {
       const req = httpsRequest(url, { method: 'HEAD', timeout: timeoutMs }, (res) => {
         const socket = res.socket as import('tls').TLSSocket
         const cert = typeof socket.getPeerCertificate === 'function' ? socket.getPeerCertificate() : null
+        const protocol = typeof socket.getProtocol === 'function' ? socket.getProtocol() : null
         res.resume()
-        if (!cert || !cert.valid_to) return resolve(null)
+        if (!cert || !cert.valid_to) return resolve({ certDays: null, protocol })
         const days = Math.floor((new Date(cert.valid_to).getTime() - Date.now()) / (24 * 60 * 60 * 1000))
-        resolve(Number.isFinite(days) ? days : null)
+        resolve({ certDays: Number.isFinite(days) ? days : null, protocol })
       })
-      req.on('timeout', () => { req.destroy(); resolve(null) })
-      req.on('error', () => resolve(null))
+      req.on('timeout', () => { req.destroy(); resolve({ certDays: null, protocol: null }) })
+      req.on('error', () => resolve({ certDays: null, protocol: null }))
       req.end()
     } catch {
-      resolve(null)
+      resolve({ certDays: null, protocol: null })
     }
   })
 }
+
+/** Protocols at or above the floor; anything else negotiated is a breach. */
+const TLS_PROTOCOL_FLOOR = new Set(['TLSv1.2', 'TLSv1.3'])
 
 /** Exported for tests (stubbed global fetch). */
 export async function runHttpProbe(probe: HttpProbeConfig): Promise<ProbeResult> {
@@ -137,10 +150,14 @@ export async function runHttpProbe(probe: HttpProbeConfig): Promise<ProbeResult>
   }
 
   if (probe.checkTls && probe.url.startsWith('https:')) {
-    const days = await certDaysRemaining(probe.url, timeoutMs)
-    metrics.certDays = days
-    if (days !== null && days < CERT_WARN_DAYS) {
-      breaches.push(`TLS certificate expires in ${days} day(s)`)
+    const tls = await tlsInfo(probe.url, timeoutMs)
+    metrics.certDays = tls.certDays
+    metrics.tlsProtocol = tls.protocol
+    if (tls.certDays !== null && tls.certDays < CERT_WARN_DAYS) {
+      breaches.push(`TLS certificate expires in ${tls.certDays} day(s)`)
+    }
+    if (tls.protocol !== null && !TLS_PROTOCOL_FLOOR.has(tls.protocol)) {
+      breaches.push(`TLS protocol below floor: ${tls.protocol} (require TLSv1.2+)`)
     }
   }
 
@@ -209,6 +226,72 @@ async function runPm2Probe(probe: Pm2ProbeConfig, previous: ProbeMetrics | null)
   return { ok: breaches.length === 0, breaches, events, metrics }
 }
 
+/** Bounded read of `[start, start+length)` from a file. */
+function readWindow(path: string, start: number, length: number): string {
+  const fd = openSync(path, 'r')
+  try {
+    const buf = Buffer.alloc(length)
+    const read = readSync(fd, buf, 0, length, start)
+    return buf.toString('utf-8', 0, read)
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/** Never scan more than this per window — bounds memory on runaway logs. */
+const LOG_MAX_READ_BYTES = 5 * 1024 * 1024
+
+/**
+ * Error-rate log probe. The read offset travels in the sample metrics
+ * (`fileOffset`), so the state is exactly as durable as the samples table:
+ * the first sample (and the first after a restart gap or a probe error)
+ * baselines at EOF and never scans history; a shrunken file means rotation
+ * and the scan restarts from 0. Exported for tests.
+ */
+export async function runLogProbe(probe: LogProbeConfig, previous: ProbeMetrics | null): Promise<ProbeResult> {
+  const maxErrors = probe.maxErrorsPerWindow ?? 10
+  const breaches: string[] = []
+  const metrics: ProbeMetrics = { errorCount: null, fileOffset: null, fileSize: null }
+
+  let pattern: RegExp
+  try {
+    pattern = new RegExp(probe.errorPattern ?? '\\b(error|exception|fatal)\\b', 'i')
+  } catch {
+    breaches.push(`invalid errorPattern: ${probe.errorPattern}`)
+    return { ok: false, breaches, events: [], metrics }
+  }
+
+  try {
+    const size = statSync(probe.path).size
+    metrics.fileSize = size
+    const prevOffset = typeof previous?.fileOffset === 'number' ? previous.fileOffset : null
+
+    if (prevOffset === null) {
+      // No prior offset — baseline at EOF; counting starts next window.
+      metrics.fileOffset = size
+      metrics.errorCount = 0
+    } else {
+      let start = size < prevOffset ? 0 : prevOffset // shrunk = rotated/truncated
+      if (size - start > LOG_MAX_READ_BYTES) {
+        start = size - LOG_MAX_READ_BYTES
+        metrics.truncatedScan = 1
+      }
+      const count = start >= size
+        ? 0
+        : readWindow(probe.path, start, size - start).split('\n').filter(l => pattern.test(l)).length
+      metrics.errorCount = count
+      metrics.fileOffset = size
+      if (count > maxErrors) {
+        breaches.push(`${count} error line(s) in the last window (threshold ${maxErrors}) in ${probe.path}`)
+      }
+    }
+  } catch (err) {
+    breaches.push(`log probe failed: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  return { ok: breaches.length === 0, breaches, events: [], metrics }
+}
+
 async function runDiskProbe(probe: DiskProbeConfig): Promise<ProbeResult> {
   const minFree = probe.minFreePct ?? DEFAULT_MIN_FREE_PCT
   const breaches: string[] = []
@@ -232,7 +315,7 @@ async function runDiskProbe(probe: DiskProbeConfig): Promise<ProbeResult> {
   return { ok: breaches.length === 0, breaches, events: [], metrics }
 }
 
-const DEFAULT_RUNNERS: ProbeRunners = { http: runHttpProbe, pm2: runPm2Probe, disk: runDiskProbe, host: runHostProbe }
+const DEFAULT_RUNNERS: ProbeRunners = { http: runHttpProbe, pm2: runPm2Probe, disk: runDiskProbe, log: runLogProbe, host: runHostProbe }
 
 // ---------------------------------------------------------------------------
 // Monitor
@@ -244,11 +327,16 @@ export class DeploymentMonitor {
   private publish: SignalPublisher
   private loadConfig: () => ReturnType<typeof loadDeployments>
 
+  /** Healthy-sample count required before the learned latency baseline engages. */
+  private baselineMinSamples: number
+
   constructor(opts: {
     publish: SignalPublisher
     dbPath?: string
     runners?: Partial<ProbeRunners>
     loadConfig?: () => ReturnType<typeof loadDeployments>
+    /** Test hook — lower the healthy-sample requirement for the latency baseline. */
+    baselineMinSamples?: number
   }) {
     const resolvedPath = opts.dbPath ?? defaultRunsDbPath()
     this.db = new Database(resolvedPath, { fileMustExist: false })
@@ -270,6 +358,25 @@ export class DeploymentMonitor {
     this.runners = { ...DEFAULT_RUNNERS, ...opts.runners }
     this.publish = opts.publish
     this.loadConfig = opts.loadConfig ?? loadDeployments
+    this.baselineMinSamples = opts.baselineMinSamples ?? DEFAULT_BASELINE_MIN_SAMPLES
+  }
+
+  /**
+   * Learned p95 latency for one http probe from its last 7 days of *healthy*
+   * samples (breached samples would poison the baseline with outage numbers).
+   * `null` until enough history exists — no learning, no false alarms.
+   */
+  latencyBaselineP95(probeKey: string, now: Date = new Date()): number | null {
+    const cutoff = new Date(now.getTime() - LATENCY_BASELINE_WINDOW_MS).toISOString()
+    const rows = this.db.prepare(
+      `SELECT metrics FROM deployment_samples WHERE probe_key = ? AND ok = 1 AND created_at > ? ORDER BY id DESC LIMIT 3000`,
+    ).all(probeKey, cutoff) as Record<string, unknown>[]
+    const latencies = rows
+      .map(r => (jsonParse(r.metrics as string) as ProbeMetrics).latencyMs)
+      .filter((v): v is number => typeof v === 'number')
+      .sort((a, b) => a - b)
+    if (latencies.length < this.baselineMinSamples) return null
+    return latencies[Math.min(latencies.length - 1, Math.floor(latencies.length * 0.95))]
   }
 
   close(): void {
@@ -300,13 +407,33 @@ export class DeploymentMonitor {
     const key = probeKey(deployment, probe)
     const previous = this.latestSample(key)
 
-    const result: ProbeResult = probe.type === 'http'
+    let result: ProbeResult = probe.type === 'http'
       ? await this.runners.http(probe)
       : probe.type === 'pm2'
         ? await this.runners.pm2(probe, previous?.metrics ?? null)
         : probe.type === 'disk'
           ? await this.runners.disk(probe)
-          : await this.runners.host(probe)
+          : probe.type === 'log'
+            ? await this.runners.log(probe, previous?.metrics ?? null)
+            : await this.runners.host(probe)
+
+    // Learned latency baseline: once enough healthy history exists, a response
+    // far above the probe's own p95 is a breach even when the status is fine.
+    // Fixed thresholds first, learning second — per the plan's open question.
+    if (probe.type === 'http' && typeof result.metrics.latencyMs === 'number') {
+      const baseline = this.latencyBaselineP95(key, now)
+      if (baseline !== null) {
+        result.metrics.latencyBaselineP95 = baseline
+        const threshold = Math.max(baseline * LATENCY_BASELINE_FACTOR, LATENCY_BASELINE_FLOOR_MS)
+        if (result.metrics.latencyMs > threshold) {
+          result = {
+            ...result,
+            ok: false,
+            breaches: [...result.breaches, `latency ${result.metrics.latencyMs}ms above learned baseline (p95 ${baseline}ms, threshold ${Math.round(threshold)}ms)`],
+          }
+        }
+      }
+    }
 
     this.db.prepare(`
       INSERT INTO deployment_samples (deployment_id, probe_key, probe_type, ok, breaches, metrics, created_at)

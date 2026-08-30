@@ -46,6 +46,13 @@ export interface DiskProbeConfig {
   minFreePct?: number
 }
 
+export interface LogProbeConfig {
+  type: 'log'
+  path: string
+  errorPattern?: string
+  maxErrorsPerWindow?: number
+}
+
 export interface HostProbeConfig {
   type: 'host'
   minMemAvailablePct?: number
@@ -54,7 +61,7 @@ export interface HostProbeConfig {
   alertOnRebootRequired?: boolean
 }
 
-export type ProbeConfig = HttpProbeConfig | Pm2ProbeConfig | DiskProbeConfig | HostProbeConfig
+export type ProbeConfig = HttpProbeConfig | Pm2ProbeConfig | DiskProbeConfig | LogProbeConfig | HostProbeConfig
 
 export interface DeploymentSample {
   id: number

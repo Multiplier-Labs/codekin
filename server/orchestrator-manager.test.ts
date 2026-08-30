@@ -44,6 +44,7 @@ import {
   isOrchestratorSession,
   ensureOrchestratorRunning,
   ensureOrchestratorMcpConfig,
+  ensureCodexMcpConfig,
   getOrchestratorSessionId,
   getOrchestratorModel,
   setOrchestratorModel,
@@ -123,7 +124,7 @@ describe('ensureOrchestratorDir', () => {
     expect(mockWriteFileSync).toHaveBeenCalledTimes(4)
   })
 
-  it('leaves seed files and a current CLAUDE.md alone (only the system-managed .mcp.json is rewritten)', () => {
+  it('leaves seed files and a current CLAUDE.md alone (only the system-managed MCP configs are rewritten)', () => {
     // All paths exist and CLAUDE.md carries the current template version
     mockExistsSync.mockReturnValue(true)
     mockReadFileSync.mockReturnValue(
@@ -134,7 +135,10 @@ describe('ensureOrchestratorDir', () => {
 
     expect(mockMkdirSync).not.toHaveBeenCalled()
     const writtenPaths = mockWriteFileSync.mock.calls.map((c: any[]) => c[0])
-    expect(writtenPaths).toEqual(['/tmp/test-data/orchestrator/.mcp.json'])
+    expect(writtenPaths).toEqual([
+      '/tmp/test-data/orchestrator/.mcp.json',
+      '/tmp/test-data/orchestrator/opencode.json',
+    ])
   })
 
   it('refreshes CLAUDE.md and AGENTS.md when their template version is stale, leaving seed files alone', () => {
@@ -149,6 +153,7 @@ describe('ensureOrchestratorDir', () => {
       '/tmp/test-data/orchestrator/CLAUDE.md',
       '/tmp/test-data/orchestrator/AGENTS.md',
       '/tmp/test-data/orchestrator/.mcp.json',
+      '/tmp/test-data/orchestrator/opencode.json',
     ])
     const written = mockWriteFileSync.mock.calls[0][1] as string
     expect(written).toContain(`<!-- codekin-template-version: ${CLAUDE_MD_TEMPLATE_VERSION} -->`)
@@ -455,6 +460,50 @@ describe('ensureOrchestratorMcpConfig', () => {
 
     ensureOrchestratorMcpConfig('/opt/dist/codekin-mcp-server.js')
 
+    expect(mockWriteFileSync).not.toHaveBeenCalled()
+  })
+
+  it('also writes opencode.json with the codekin entry (OpenCode-hosted agent)', () => {
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue(JSON.stringify({ mcp: { other: { type: 'remote' } } }))
+
+    ensureOrchestratorMcpConfig('/opt/dist/codekin-mcp-server.js')
+
+    const opencodeCall = mockWriteFileSync.mock.calls.find((c: any[]) => (c[0] as string).endsWith('opencode.json'))!
+    expect(opencodeCall[0]).toBe('/tmp/test-data/orchestrator/opencode.json')
+    const parsed = JSON.parse(opencodeCall[1] as string) as { $schema: string; mcp: Record<string, { type?: string; command?: string[]; enabled?: boolean }> }
+    expect(parsed.mcp.codekin.type).toBe('local')
+    expect(parsed.mcp.codekin.command?.[1]).toBe('/opt/dist/codekin-mcp-server.js')
+    expect(parsed.mcp.other.type).toBe('remote')
+  })
+})
+
+describe('ensureCodexMcpConfig', () => {
+  it('appends an mcp_servers.codekin section when absent, preserving existing content', () => {
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue('model = "gpt-5.6"\n')
+
+    ensureCodexMcpConfig('/opt/dist/codekin-mcp-server.js', '/home/u/.codex/config.toml')
+
+    const [path, content] = mockWriteFileSync.mock.calls[0] as [string, string]
+    expect(path).toBe('/home/u/.codex/config.toml')
+    expect(content.startsWith('model = "gpt-5.6"\n')).toBe(true)
+    expect(content).toContain('[mcp_servers.codekin]')
+    expect(content).toContain('/opt/dist/codekin-mcp-server.js')
+  })
+
+  it('leaves the config alone when a codekin section already exists', () => {
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue('[mcp_servers.codekin]\ncommand = "custom"\n')
+
+    ensureCodexMcpConfig('/opt/dist/codekin-mcp-server.js', '/home/u/.codex/config.toml')
+
+    expect(mockWriteFileSync).not.toHaveBeenCalled()
+  })
+
+  it('does nothing when the compiled server is missing', () => {
+    mockExistsSync.mockReturnValue(false)
+    ensureCodexMcpConfig('/opt/dist/codekin-mcp-server.js', '/home/u/.codex/config.toml')
     expect(mockWriteFileSync).not.toHaveBeenCalled()
   })
 })

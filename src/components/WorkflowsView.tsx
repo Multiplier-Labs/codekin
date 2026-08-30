@@ -12,8 +12,9 @@ import {
   IconCalendarEvent, IconArrowRight,
 } from '@tabler/icons-react'
 import { useWorkflows } from '../hooks/useWorkflows'
-import { getRun } from '../lib/workflowApi'
-import type { WorkflowRun, WorkflowRunWithSteps, CronSchedule, ReviewRepoConfig } from '../lib/workflowApi'
+import { getRun, listTriggerLedger } from '../lib/workflowApi'
+import { kindLabel, formatTime } from '../lib/workflowHelpers'
+import type { WorkflowRun, WorkflowRunWithSteps, CronSchedule, ReviewRepoConfig, TriggerLedgerEntry } from '../lib/workflowApi'
 import { AddWorkflowModal } from './AddWorkflowModal'
 import { EditWorkflowModal } from './EditWorkflowModal'
 import { RepoGroup } from './workflows/RepoGroup'
@@ -40,6 +41,8 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
   const [showAddForm, setShowAddForm] = useState(false)
   const [editingRepo, setEditingRepo] = useState<ReviewRepoConfig | null>(null)
   const [showActivity, setShowActivity] = useState(false)
+  const [showTriggerLog, setShowTriggerLog] = useState(false)
+  const [triggerLog, setTriggerLog] = useState<TriggerLedgerEntry[]>([])
 
   const detailLoading = selectedRunId !== null && (runDetail === null || runDetail.id !== selectedRunId)
 
@@ -94,6 +97,17 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
   const handleToggleRun = useCallback((runId: string) => {
     setSelectedRunId(prev => prev === runId ? null : runId)
   }, [])
+
+  // Trigger ledger: fetched when the panel opens, refreshed as runs change
+  // (each run implies at least one new ledger entry).
+  useEffect(() => {
+    if (!showTriggerLog) return
+    let cancelled = false
+    listTriggerLedger(token, { limit: 50 })
+      .then(entries => { if (!cancelled) setTriggerLog(entries) })
+      .catch(() => { if (!cancelled) setTriggerLog([]) })
+    return () => { cancelled = true }
+  }, [showTriggerLog, runs, token])
 
   const handleDeleteSchedule = useCallback(async (id: string) => {
     try {
@@ -215,6 +229,43 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
             )}
           </div>
         )}
+
+        {/* Trigger log — why schedules and signals did or didn't fire */}
+        <div className="mt-6">
+          <button
+            onClick={() => setShowTriggerLog(!showTriggerLog)}
+            className="flex items-center gap-2 text-body font-medium text-ink hover:text-ink transition-colors mb-2"
+          >
+            {showTriggerLog
+              ? <IconChevronDown size={14} stroke={2} />
+              : <IconArrowRight size={14} stroke={2} />
+            }
+            Trigger log
+            <span className="text-meta text-ink-muted font-normal">why runs did (or didn&apos;t) fire</span>
+          </button>
+
+          {showTriggerLog && (
+            <div className="workflow-card rounded-control border border-edge bg-surface-raised/30 py-1 divide-y divide-edge">
+              {triggerLog.length === 0 && (
+                <div className="px-3 py-2 text-meta text-ink-muted">No trigger decisions recorded yet.</div>
+              )}
+              {triggerLog.map(entry => (
+                <div key={entry.id} className="flex items-center gap-3 px-3 py-1.5">
+                  <span className={`shrink-0 rounded-control px-1.5 py-0.5 text-micro ${
+                    entry.decision === 'fired' ? 'bg-success-7 text-success-2' : 'bg-edge-strong text-ink-muted'
+                  }`}>
+                    {entry.decision}
+                  </span>
+                  <span className="shrink-0 text-meta text-ink">{kindLabel(entry.kind)}</span>
+                  <span className="min-w-0 truncate text-meta text-ink-muted" title={entry.reason}>{entry.reason}</span>
+                  <span className="ml-auto shrink-0 whitespace-nowrap text-meta tabular-nums text-ink-faint">
+                    {formatTime(entry.createdAt)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Custom workflow guide */}
         <CustomWorkflowGuide />

@@ -19,7 +19,7 @@ import { tryGetDeploymentMonitor, discoverPm2Processes } from './deployment-moni
 type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
 
-const PROBE_TYPES = new Set(['http', 'pm2', 'disk', 'host'])
+const PROBE_TYPES = new Set(['http', 'pm2', 'disk', 'log', 'host'])
 
 /** Structural validation of a probe entry; returns an error string or null. */
 function validateProbe(probe: unknown): string | null {
@@ -29,6 +29,7 @@ function validateProbe(probe: unknown): string | null {
   if (p.type === 'http' && (typeof p.url !== 'string' || !/^https?:\/\//.test(p.url))) return 'http probe requires an http(s) url'
   if (p.type === 'pm2' && (typeof p.processName !== 'string' || !p.processName)) return 'pm2 probe requires processName'
   if (p.type === 'disk' && (typeof p.path !== 'string' || !p.path.startsWith('/'))) return 'disk probe requires an absolute path'
+  if (p.type === 'log' && (typeof p.path !== 'string' || !p.path.startsWith('/'))) return 'log probe requires an absolute path'
   return null
 }
 

@@ -151,6 +151,47 @@ describe('DeploymentMonitor', () => {
     expect(published[0].payload).toMatchObject({ event: 'restarted (3 → 4)' })
   })
 
+  it('learns a p95 latency baseline from healthy samples and breaches far above it', async () => {
+    published = []
+    let latency = 100
+    monitor = new DeploymentMonitor({
+      dbPath: ':memory:',
+      publish: (input) => published.push(input),
+      loadConfig: makeConfig,
+      baselineMinSamples: 10,
+      runners: {
+        http: async () => ({ ok: true, breaches: [], events: [], metrics: { status: 200, latencyMs: latency } }),
+      },
+    })
+
+    // Build history: 12 healthy samples at ~100ms.
+    for (let i = 0; i < 12; i++) {
+      await monitor.sampleAll(new Date(NOW.getTime() + i * 5 * 60_000))
+    }
+    const key = 'app-1::http:https://example.test/health'
+    expect(monitor.latencyBaselineP95(key, NOW)).toBe(100)
+
+    // A 900ms response (over max(4×100, 750)) breaches even though status is 200.
+    latency = 900
+    await monitor.sampleAll(new Date(NOW.getTime() + 13 * 5 * 60_000))
+    const sample = monitor.latestSample(key)!
+    expect(sample.ok).toBe(false)
+    expect(sample.breaches[0]).toContain('above learned baseline')
+    expect(sample.metrics.latencyBaselineP95).toBe(100)
+    expect(published.map(p => p.kind)).toEqual(['probe-breach'])
+
+    // Below the 750ms floor never breaches, even at >4× baseline.
+    latency = 500
+    await monitor.sampleAll(new Date(NOW.getTime() + 14 * 5 * 60_000))
+    expect(monitor.latestSample(key)!.ok).toBe(true)
+  })
+
+  it('reports no baseline until enough healthy history exists', async () => {
+    makeMonitor([okResult({ status: 200, latencyMs: 50 })])
+    await monitor.sampleAll(NOW)
+    expect(monitor.latencyBaselineP95('app-1::http:https://example.test/health', NOW)).toBeNull()
+  })
+
   it('returns sample history newest-first and prunes by retention', async () => {
     makeMonitor([okResult({ status: 200 })])
     await monitor.sampleAll(NOW)

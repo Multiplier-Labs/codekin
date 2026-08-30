@@ -34,12 +34,15 @@ Deployments live in `~/.codekin/deployments.json`:
 
 | Type | Samples | Breach conditions |
 | --- | --- | --- |
-| `http` | status, latency, TLS days-remaining (`checkTls`), security headers (`checkHeaders`) | non-expected status (default: ≥400), unreachable/timeout, certificate < 14 days, missing HSTS/CSP headers |
+| `http` | status, latency (+ learned p95 baseline), TLS days-remaining and protocol (`checkTls`), security headers (`checkHeaders`) | non-expected status (default: ≥400), unreachable/timeout, certificate < 14 days, TLS protocol below 1.2, missing HSTS/CSP headers, latency > 4× learned p95 (min 750 ms; engages after ~a day of healthy samples) |
 | `pm2` | status, restart count, memory | process missing, status ≠ `online`, memory > `memoryLimitMb`; a restart-count increase publishes a one-off event |
 | `disk` | free % | free % < `minFreePct` (default 10) |
+| `log` | new error-pattern lines per window (`errorPattern` regex, default error/exception/fatal) | more than `maxErrorsPerWindow` (default 10) new matches since the last sample; missing file / bad pattern |
 | `host` | memory available %, load per core, apt upgradable/security counts (cached 6h), reboot-required | memory < `minMemAvailablePct` (10), load/core > `maxLoadPerCore` (3), pending security updates, reboot required |
 
-Probe *failures* (pm2 absent, `df` unparseable) are breaches too — a broken probe is visible, never silent.
+Probe *failures* (pm2 absent, `df` unparseable, log file missing) are breaches too — a broken probe is visible, never silent.
+
+The log probe's read offset travels in the sample metrics, making its state exactly as durable as the samples table: the first sample baselines at end-of-file (history is never scanned), a shrunken file is treated as rotation, and reads are capped at 5 MB per window.
 
 ## Sampling & signals
 
