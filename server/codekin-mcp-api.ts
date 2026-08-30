@@ -119,6 +119,18 @@ export class CodekinApi {
     return this.request('GET', '/api/workflows/repo-activity')
   }
 
+  // --- deployments ----------------------------------------------------------
+
+  listDeployments(): Promise<unknown> {
+    return this.request('GET', '/api/deployments')
+  }
+
+  getDeploymentSamples(probeKey: string, limit?: number): Promise<unknown> {
+    const params = new URLSearchParams({ probeKey })
+    if (limit) params.set('limit', String(limit))
+    return this.request('GET', `/api/deployments/samples?${params.toString()}`)
+  }
+
   // --- trust ----------------------------------------------------------------
 
   getTrustLevel(opts: { action: string; category: string; severity?: string; repo?: string }): Promise<unknown> {

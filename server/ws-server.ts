@@ -28,6 +28,8 @@ import { createWebhookRateLimiter } from './webhook-rate-limiter.js'
 import { StepflowHandler, loadStepflowConfig } from './stepflow-handler.js'
 import { initWorkflowEngine, getWorkflowEngine, shutdownWorkflowEngine, type WorkflowEvent } from './workflow-engine.js'
 import { initRepoActivityIndex, shutdownRepoActivityIndex } from './repo-activity.js'
+import { initDeploymentMonitor, shutdownDeploymentMonitor } from './deployment-monitor.js'
+import { createDeploymentRouter } from './deployment-routes.js'
 import { generate404Page, generate500Page } from './error-page.js'
 import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
@@ -339,6 +341,8 @@ app.use(createDocsRouter(verifyToken, extractToken))
 // Workflow router — commitEventHandler is set after engine init, but the
 // router closure captures the variable reference so it will resolve correctly.
 app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessions, commitEventState))
+// Deployment registry + monitor (probes, samples, discovery)
+app.use('/api/deployments', createDeploymentRouter(verifyToken, extractToken))
 // Unified run store — orchestrator children persist here as engine:'agent'
 // runs. Children orphaned by the previous process are failed honestly at boot.
 const runStore = new RunStore()
@@ -726,6 +730,38 @@ server.listen(port, '0.0.0.0', () => {
     // are still delivered when the monitor is running.
     const monitor = new OrchestratorMonitor(sessions)
     monitor.setEngine(engine)
+
+    // Deployment monitor: deterministic probes sampled on the engine tick;
+    // breaches/recoveries flow through the durable signal queue into Joe's
+    // notification stream. No LLM in the probe path.
+    const deploymentMonitor = initDeploymentMonitor({
+      publish: (input) => { engine.enqueueSignal(input) },
+    })
+    deploymentMonitor.pruneSamples()
+    engine.registerTickTask('deployment-probes', 5 * 60_000, () => deploymentMonitor.sampleAll())
+
+    engine.registerSignalHandler('probe-breach', async (payload) => {
+      const breaches = Array.isArray(payload.breaches) ? payload.breaches.join('; ') : 'unknown breach'
+      monitor.notify(
+        'alert',
+        `Probe breach: ${String(payload.deploymentName)}`,
+        `${String(payload.probeKey)} — ${breaches}. Metrics: ${JSON.stringify(payload.metrics)}. Investigate if unexpected.`,
+      )
+    })
+    engine.registerSignalHandler('probe-recovered', async (payload) => {
+      monitor.notify(
+        'info',
+        `Probe recovered: ${String(payload.deploymentName)}`,
+        `${String(payload.probeKey)} is healthy again.`,
+      )
+    })
+    engine.registerSignalHandler('probe-event', async (payload) => {
+      monitor.notify(
+        'action',
+        `Deployment event: ${String(payload.deploymentName)}`,
+        `${String(payload.probeKey)} — ${String(payload.event)}. Worth a look if no deploy explains it.`,
+      )
+    })
     if (ORCHESTRATOR_MONITOR) {
       monitor.start()
     } else {
@@ -751,6 +787,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   console.log(`${signal} received, shutting down...`)
   shutdownWorkflowEngine()
   shutdownRepoActivityIndex()
+  shutdownDeploymentMonitor()
   goalRunStore.close()
   commitEventState.handler?.shutdown()
   webhookHandler.shutdown()

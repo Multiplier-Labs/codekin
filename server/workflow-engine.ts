@@ -366,6 +366,8 @@ export class WorkflowEngine extends EventEmitter {
   private headShaResolver: HeadShaResolver = defaultHeadShaResolver
   private activityResolver: ActivityResolver | null = null
   private signalHandlers = new Map<string, SignalHandler>()
+  /** Periodic housekeeping folded onto the dispatch tick — no extra interval loops. */
+  private tickTasks = new Map<string, { intervalMs: number; fn: () => void | Promise<void>; lastRunAt: number; running: boolean }>()
 
   /** Max dispatches per tick — staggers a backlog after downtime instead of stampeding. */
   static readonly MAX_DISPATCH_PER_TICK = 3
@@ -988,6 +990,16 @@ export class WorkflowEngine extends EventEmitter {
   }
 
   /**
+   * Register a periodic task driven by the dispatch tick (60s resolution) —
+   * the alternative to scattering new `setInterval` loops around the codebase.
+   * Runs are non-overlapping (a slow pass skips ticks) and a throwing task is
+   * logged, never fatal to the loop. First run happens on the next tick.
+   */
+  registerTickTask(name: string, intervalMs: number, fn: () => void | Promise<void>) {
+    this.tickTasks.set(name, { intervalMs, fn, lastRunAt: 0, running: false })
+  }
+
+  /**
    * Durably enqueue a signal. With a `dedupeKey`, an already-pending (or
    * in-flight) signal carrying the same key absorbs the enqueue — the caller
    * learns via `deduped` and nothing is inserted.
@@ -1122,6 +1134,17 @@ export class WorkflowEngine extends EventEmitter {
       // Backlog stagger: anything beyond the cap stays due and is picked up next tick.
       if (dispatched >= WorkflowEngine.MAX_DISPATCH_PER_TICK) break
       if (this.evaluateAndDispatch(schedule, now)) dispatched++
+    }
+
+    // Registered periodic tasks ride the same tick and heartbeat.
+    for (const [name, task] of this.tickTasks) {
+      if (task.running || now.getTime() - task.lastRunAt < task.intervalMs) continue
+      task.lastRunAt = now.getTime()
+      task.running = true
+      Promise.resolve()
+        .then(task.fn)
+        .catch((err: unknown) => console.error(`[workflow] Tick task '${name}' failed:`, err))
+        .finally(() => { task.running = false })
     }
   }
 
