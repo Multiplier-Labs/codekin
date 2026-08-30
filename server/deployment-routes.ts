@@ -76,6 +76,7 @@ export function createDeploymentRouter(verifyToken: VerifyFn, extractToken: Extr
       name: String(body.name),
       repoPath: body.repoPath,
       enabled: body.enabled !== false,
+      autoDiagnose: body.autoDiagnose === true,
       probes: body.probes ?? [],
     })
     res.json({ config })

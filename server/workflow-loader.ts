@@ -40,6 +40,8 @@ import type { WorkflowEngine, WorkflowRun } from './workflow-engine.js'
 import { SessionGoneError } from './workflow-engine.js'
 import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
+import { loadDeployments } from './deployment-config.js'
+import { tryGetDeploymentMonitor } from './deployment-monitor.js'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -254,6 +256,35 @@ export function isWorkflowReportsBranch(branch: string): boolean {
 // Workflow registration
 // ---------------------------------------------------------------------------
 
+/**
+ * XML-delimited live-deployment context for security audits. Empty string when
+ * the repo has no linked, monitored deployment (or the monitor isn't up).
+ */
+function buildDeploymentContext(repoPath: string): string {
+  try {
+    const deployments = loadDeployments().deployments.filter(d => d.enabled && d.repoPath === repoPath)
+    if (deployments.length === 0) return ''
+    const monitor = tryGetDeploymentMonitor()
+    const samples = monitor?.latestSamples() ?? []
+
+    const lines: string[] = ['<deployment-status>']
+    for (const d of deployments) {
+      lines.push(`Deployment "${d.name}" (${d.id}):`)
+      const own = samples.filter(s => s.deploymentId === d.id)
+      if (own.length === 0) lines.push('- no probe samples yet')
+      for (const s of own) {
+        const state = s.ok ? 'ok' : `BREACHED: ${s.breaches.join('; ')}`
+        lines.push(`- ${s.probeKey} — ${state} — ${JSON.stringify(s.metrics)} (${s.createdAt})`)
+      }
+    }
+    lines.push('</deployment-status>', '', 'This repository has live monitored deployment(s); the audit should cover the deployed surface (TLS posture, security headers, exposed endpoints, resource pressure) alongside the code. Current probe state above.', '', '')
+    return lines.join('\n')
+  } catch (err) {
+    console.error('[workflow] Failed to build deployment context:', err)
+    return ''
+  }
+}
+
 function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def: WorkflowDef) {
   engine.registerWorkflow({
     kind: def.kind,
@@ -370,9 +401,17 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
               ].join('\n')
             }
 
+            // Security audits become deployment-aware when the repo has a
+            // linked, monitored deployment: the prompt receives current probe
+            // state so the audit covers the live surface, not just the code.
+            let deploymentContext = ''
+            if (def.kind.startsWith('security-audit')) {
+              deploymentContext = buildDeploymentContext(repoPath)
+            }
+
             // Prepend the guard to suppress Claude's CLAUDE.md-driven file-write
             // behavior, which otherwise creates a duplicate report file.
-            const prompt = `${WORKFLOW_PROMPT_GUARD}\n\n${commitContext}${userPrompt}`
+            const prompt = `${WORKFLOW_PROMPT_GUARD}\n\n${commitContext}${deploymentContext}${userPrompt}`
 
             if (repoOverride) {
               console.log(`[workflow:${def.kind}] Using per-repo prompt override from ${repoPath}`)
