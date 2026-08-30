@@ -100,7 +100,8 @@ function certDaysRemaining(url: string, timeoutMs: number): Promise<number | nul
   })
 }
 
-async function runHttpProbe(probe: HttpProbeConfig): Promise<ProbeResult> {
+/** Exported for tests (stubbed global fetch). */
+export async function runHttpProbe(probe: HttpProbeConfig): Promise<ProbeResult> {
   const timeoutMs = probe.timeoutMs ?? DEFAULT_HTTP_TIMEOUT_MS
   const breaches: string[] = []
   const metrics: ProbeMetrics = { status: null, latencyMs: null, certDays: null }
@@ -116,6 +117,15 @@ async function runHttpProbe(probe: HttpProbeConfig): Promise<ProbeResult> {
     const statusOk = probe.expectStatus !== undefined ? res.status === probe.expectStatus : res.status < 400
     if (!statusOk) {
       breaches.push(`http ${res.status}${probe.expectStatus !== undefined ? ` (expected ${probe.expectStatus})` : ''}`)
+    }
+    // Security-header posture of the live surface (opt-in, https only).
+    if (probe.checkHeaders && probe.url.startsWith('https:')) {
+      const hsts = res.headers.get('strict-transport-security') !== null
+      const csp = res.headers.get('content-security-policy') !== null
+      metrics.hsts = hsts ? 1 : 0
+      metrics.csp = csp ? 1 : 0
+      if (!hsts) breaches.push('missing Strict-Transport-Security header')
+      if (!csp) breaches.push('missing Content-Security-Policy header')
     }
   } catch (err) {
     metrics.latencyMs = Date.now() - started

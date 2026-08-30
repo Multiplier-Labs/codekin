@@ -15,6 +15,8 @@ const mockRealpathSync = vi.hoisted(() => vi.fn((p: string) => p))
 vi.mock('child_process', () => ({
   execSync: (...args: any[]) => mockExecSync(...args),
   execFileSync: (...args: any[]) => mockExecFileSync(...args),
+  // Imported (via deployment-monitor) at module load; not exercised here.
+  execFile: vi.fn(),
 }))
 
 vi.mock('fs', async (importOriginal) => {

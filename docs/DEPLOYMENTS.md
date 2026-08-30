@@ -34,7 +34,7 @@ Deployments live in `~/.codekin/deployments.json`:
 
 | Type | Samples | Breach conditions |
 | --- | --- | --- |
-| `http` | status, latency, TLS days-remaining (`checkTls`) | non-expected status (default: ≥400), unreachable/timeout, certificate < 14 days |
+| `http` | status, latency, TLS days-remaining (`checkTls`), security headers (`checkHeaders`) | non-expected status (default: ≥400), unreachable/timeout, certificate < 14 days, missing HSTS/CSP headers |
 | `pm2` | status, restart count, memory | process missing, status ≠ `online`, memory > `memoryLimitMb`; a restart-count increase publishes a one-off event |
 | `disk` | free % | free % < `minFreePct` (default 10) |
 
@@ -45,6 +45,19 @@ Probe *failures* (pm2 absent, `df` unparseable) are breaches too — a broken pr
 Sampling rides the trigger engine's tick (`registerTickTask`, every 5 minutes) — no dedicated interval loop. Samples persist to the `deployment_samples` table in `runs.db` (30-day retention, pruned at boot).
 
 Breach detection fires on **transitions**, not on every breached sample: `ok → breached` publishes a `probe-breach` signal (once), `breached → ok` publishes `probe-recovered`. Both flow through the durable signal queue (at-least-once, deduped while pending) and land in the orchestrator's notifications. The orchestrator can then inspect current state (`list_deployments`) and history (`get_deployment_samples`) before deciding whether to act.
+
+## Incident response
+
+A breach always notifies the orchestrator, which can inspect state and spawn a diagnostic child under its normal trust rules. Additionally, a deployment with **`"autoDiagnose": true`** (operator opt-in, requires `repoPath`) spawns the diagnostic child automatically the moment a breach signal is processed:
+
+- The child receives the breach evidence (probe, breaches, metrics, recent sample history) inline in its task.
+- It investigates — logs, recent commits/merges, deploy correlation — and writes an incident report to `.codekin/reports/incidents/<date>_<deployment>.md`, landing it as a PR. A clear low-risk fix may be implemented on the same branch; anything else becomes a "Proposed remediation" section.
+- **Hard constraints**: the child diagnoses, it never operates — no service restarts, no host changes, no edits to monitoring config. Those remain operator-approved actions.
+- A 6-hour per-probe cooldown prevents a flapping probe from spawning children repeatedly; the concurrent-children cap (5) applies as everywhere.
+
+The orchestrator is told when an auto-diagnosis starts (and when it can't — e.g. at the children cap), so there is never a silent parallel investigation.
+
+Security audits are deployment-aware: when a repo with a linked, monitored deployment runs its `security-audit` workflow, the prompt receives current probe state (`<deployment-status>` block), so the audit covers the live surface — TLS posture, headers, resource pressure — alongside the code.
 
 ## API
 

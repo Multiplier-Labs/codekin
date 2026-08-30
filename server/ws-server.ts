@@ -30,6 +30,9 @@ import { initWorkflowEngine, getWorkflowEngine, shutdownWorkflowEngine, type Wor
 import { initRepoActivityIndex, shutdownRepoActivityIndex } from './repo-activity.js'
 import { initDeploymentMonitor, shutdownDeploymentMonitor } from './deployment-monitor.js'
 import { createDeploymentRouter } from './deployment-routes.js'
+import { OrchestratorChildManager } from './orchestrator-children.js'
+import { loadDeployments } from './deployment-config.js'
+import { buildIncidentTask, incidentBranchName, DIAGNOSE_COOLDOWN_MS, type BreachPayload } from './incident-response.js'
 import { generate404Page, generate500Page } from './error-page.js'
 import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
@@ -53,7 +56,7 @@ import { createWebhookSetupRouter } from './webhook-setup-routes.js'
 import { createUploadRouter } from './upload-routes.js'
 import { createDocsRouter } from './docs-routes.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
-import { ensureOrchestratorRunning, getOrchestratorSessionId, isOrchestratorSession } from './orchestrator-manager.js'
+import { ensureOrchestratorRunning, getOrchestratorSessionId, isOrchestratorSession, getOrCreateOrchestratorId } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
 import { getOrchestratorOutbox } from './orchestrator-outbox.js'
 import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR } from './config.js'
@@ -352,7 +355,10 @@ if (interruptedAgentRuns.length) {
 }
 // Orchestrator router — monitorRef is populated after workflow engine init
 const orchestratorMonitorRef: { current: OrchestratorMonitor | null } = { current: null }
-app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, undefined, runStore))
+// Child manager is created here (not router-internal) so the deployment
+// breach handler can spawn diagnostic children through the same instance.
+const childManager = new OrchestratorChildManager(sessions, { runStore })
+app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, childManager, runStore))
 // Goal Run (loop) router — durable act→verify→continue loops with an evidence ledger.
 const goalRunStore = new GoalRunStore()
 const goalRunController = new GoalRunController(sessions, goalRunStore)
@@ -740,6 +746,50 @@ server.listen(port, '0.0.0.0', () => {
     deploymentMonitor.pruneSamples()
     engine.registerTickTask('deployment-probes', 5 * 60_000, () => deploymentMonitor.sampleAll())
 
+    // Auto-diagnosis cooldown per probe — a flapping probe must not spawn a
+    // child on every breach transition.
+    const lastDiagnoseAt = new Map<string, number>()
+
+    /**
+     * When the breached deployment opted into autoDiagnose (and links a repo),
+     * spawn a diagnostic child with the breach evidence. Failures here must
+     * never reject the signal — the alert notification already went out, and a
+     * redelivery would duplicate it.
+     */
+    async function maybeAutoDiagnose(payload: BreachPayload): Promise<void> {
+      try {
+        const deployment = loadDeployments().deployments.find(d => d.id === payload.deploymentId)
+        if (!deployment?.autoDiagnose || !deployment.repoPath) return
+
+        const now = Date.now()
+        const last = lastDiagnoseAt.get(payload.probeKey) ?? 0
+        if (now - last < DIAGNOSE_COOLDOWN_MS) return
+        lastDiagnoseAt.set(payload.probeKey, now)
+
+        const samples = deploymentMonitor.listSamples({ probeKey: payload.probeKey, limit: 12 })
+        const child = await childManager.spawn({
+          repo: deployment.repoPath,
+          task: buildIncidentTask(payload, samples, new Date(now)),
+          branchName: incidentBranchName(deployment.id, new Date(now)),
+          completionPolicy: 'pr',
+          deployAfter: false,
+          useWorktree: true,
+          parentSessionId: getOrCreateOrchestratorId(),
+        })
+        monitor.notify(
+          'info',
+          `Diagnosing ${deployment.name} automatically`,
+          `Spawned diagnostic child ${child.id} into ${deployment.repoPath} for ${payload.probeKey}. It will write an incident report and open a PR; you'll be notified when it finishes.`,
+        )
+      } catch (err) {
+        monitor.notify(
+          'action',
+          `Auto-diagnosis failed to start: ${payload.deploymentName}`,
+          `Could not spawn a diagnostic child for ${payload.probeKey}: ${err instanceof Error ? err.message : String(err)}. Investigate the breach manually.`,
+        )
+      }
+    }
+
     engine.registerSignalHandler('probe-breach', async (payload) => {
       const breaches = Array.isArray(payload.breaches) ? payload.breaches.join('; ') : 'unknown breach'
       monitor.notify(
@@ -747,6 +797,7 @@ server.listen(port, '0.0.0.0', () => {
         `Probe breach: ${String(payload.deploymentName)}`,
         `${String(payload.probeKey)} — ${breaches}. Metrics: ${JSON.stringify(payload.metrics)}. Investigate if unexpected.`,
       )
+      await maybeAutoDiagnose(payload as unknown as BreachPayload)
     })
     engine.registerSignalHandler('probe-recovered', async (payload) => {
       monitor.notify(

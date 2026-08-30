@@ -24,6 +24,8 @@ export interface HttpProbeConfig {
   timeoutMs?: number
   /** Also check TLS certificate days-remaining (https URLs). */
   checkTls?: boolean
+  /** Also check security headers (HSTS, CSP) on https responses. */
+  checkHeaders?: boolean
 }
 
 export interface Pm2ProbeConfig {
@@ -48,6 +50,13 @@ export interface DeploymentConfig {
   /** Optional link back to the source repo (connects incidents to recent merges). */
   repoPath?: string
   enabled: boolean
+  /**
+   * Operator opt-in: spawn a diagnostic child session automatically when a
+   * probe breaches (requires `repoPath`). The child investigates and writes an
+   * incident report; it never touches the running system. Default false —
+   * without it, breaches only notify the orchestrator.
+   */
+  autoDiagnose?: boolean
   probes: ProbeConfig[]
 }
 
