@@ -7,6 +7,7 @@
  */
 
 import { join, dirname } from 'path'
+import { homedir } from 'os'
 import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { randomUUID } from 'crypto'
@@ -430,6 +431,8 @@ export function ensureOrchestratorMcpConfig(serverJsPath?: string): void {
     console.warn(`[orchestrator] Codekin MCP server not found at ${resolved} — Joe falls back to curl`)
     return
   }
+
+  // Claude Code reads .mcp.json from the workspace.
   const configPath = join(ORCHESTRATOR_DIR, '.mcp.json')
   let config: { mcpServers?: Record<string, unknown> } = {}
   try {
@@ -439,6 +442,57 @@ export function ensureOrchestratorMcpConfig(serverJsPath?: string): void {
   }
   config.mcpServers = { ...config.mcpServers, codekin: { command: process.execPath, args: [resolved] } }
   writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8')
+
+  // OpenCode reads opencode.json from the project directory — same server,
+  // its config shape. User-added entries are preserved like above.
+  const opencodePath = join(ORCHESTRATOR_DIR, 'opencode.json')
+  let opencodeConfig: { $schema?: string; mcp?: Record<string, unknown> } = {}
+  try {
+    if (existsSync(opencodePath)) opencodeConfig = JSON.parse(readFileSync(opencodePath, 'utf-8')) as typeof opencodeConfig
+  } catch {
+    // Malformed — rebuild.
+  }
+  opencodeConfig.$schema ??= 'https://opencode.ai/config.json'
+  opencodeConfig.mcp = {
+    ...opencodeConfig.mcp,
+    codekin: { type: 'local', command: [process.execPath, resolved], enabled: true },
+  }
+  writeFileSync(opencodePath, `${JSON.stringify(opencodeConfig, null, 2)}\n`, 'utf-8')
+}
+
+/**
+ * Register the Codekin MCP server for the Codex CLI, which only reads the
+ * global ~/.codex/config.toml (no per-project MCP config). Strictly
+ * append-only: when no `[mcp_servers.codekin]` section exists, one is
+ * appended; existing user content is never parsed or rewritten, and an
+ * existing section (even user-modified) is left alone. Called only when the
+ * orchestrator actually runs on codex — no global config is touched for a
+ * Claude- or OpenCode-hosted agent.
+ */
+export function ensureCodexMcpConfig(serverJsPath?: string, configPath?: string): void {
+  const resolved = serverJsPath ?? join(dirname(fileURLToPath(import.meta.url)), 'codekin-mcp-server.js')
+  if (!existsSync(resolved)) return
+  const codexConfigPath = configPath ?? join(homedir(), '.codex', 'config.toml')
+
+  try {
+    const existing = existsSync(codexConfigPath) ? readFileSync(codexConfigPath, 'utf-8') : ''
+    if (existing.includes('[mcp_servers.codekin]')) return
+
+    const dir = dirname(codexConfigPath)
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    const section = [
+      '',
+      '# Added by Codekin — first-party MCP tools for the orchestrator agent.',
+      '[mcp_servers.codekin]',
+      `command = ${JSON.stringify(process.execPath)}`,
+      `args = [${JSON.stringify(resolved)}]`,
+      '',
+    ].join('\n')
+    writeFileSync(codexConfigPath, existing + section, 'utf-8')
+    console.log(`[orchestrator] Registered codekin MCP server in ${codexConfigPath}`)
+  } catch (err) {
+    console.error('[orchestrator] Failed to register codex MCP config:', err)
+  }
 }
 
 /** Ensure the orchestrator workspace directory exists with starter files. */
@@ -571,6 +625,10 @@ export function ensureOrchestratorRunning(sessions: SessionManager): string {
 
   const model = getOrchestratorModel(sessions) || undefined
   const provider = getOrchestratorProvider(sessions)
+
+  // Codex reads MCP servers only from its global config — register there when
+  // (and only when) the agent actually runs on codex.
+  if (provider === 'codex') ensureCodexMcpConfig()
 
   // Check if session already exists
   const existing = sessions.get(stableId)
