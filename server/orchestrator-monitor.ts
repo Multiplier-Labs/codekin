@@ -144,9 +144,19 @@ export class OrchestratorMonitor {
     }
   }
 
-  /** Get all notifications (including delivered). */
+  /**
+   * Get all notifications (including delivered), newest first.
+   *
+   * Timestamps only have millisecond resolution, so two notifications raised
+   * in the same tick compare equal; the insertion index breaks the tie so the
+   * later one still sorts first instead of the order flipping depending on
+   * which side of a millisecond boundary the pair happened to land.
+   */
   getAll(): OrchestratorNotification[] {
-    return [...this.notifications].sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+    return this.notifications
+      .map((notification, index) => ({ notification, index }))
+      .sort((a, b) => b.notification.timestamp.localeCompare(a.notification.timestamp) || b.index - a.index)
+      .map(({ notification }) => notification)
   }
 
   // -------------------------------------------------------------------------
