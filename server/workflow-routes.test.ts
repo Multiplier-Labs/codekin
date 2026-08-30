@@ -29,6 +29,8 @@ const mocks = vi.hoisted(() => ({
   getSchedule: vi.fn(() => null as unknown),
   triggerSchedule: vi.fn(async () => ({ id: 'triggered-run', kind: 'code-review.daily' })),
   hasWorkflow: vi.fn(() => true),
+  enqueueSignal: vi.fn(() => ({ id: 7, deduped: false })),
+  listSignals: vi.fn(() => [] as unknown[]),
 
   // Workflow config
   workflowConfig: { reviewRepos: [] as Record<string, unknown>[] },
@@ -82,6 +84,8 @@ vi.mock('./workflow-engine.js', () => ({
       getSchedule: mocks.getSchedule,
       triggerSchedule: mocks.triggerSchedule,
       hasWorkflow: mocks.hasWorkflow,
+      enqueueSignal: mocks.enqueueSignal,
+      listSignals: mocks.listSignals,
     }
   },
 }))
@@ -824,7 +828,7 @@ describe('workflow routes', () => {
       expect(body.error).toMatch(/Missing required fields/)
     })
 
-    it('dispatches to the handler on happy path (202 on accepted)', async () => {
+    it('durably enqueues a signal on happy path (202, no inline dispatch)', async () => {
       const res = await fetch(`${harness.baseUrl}/commit-event`, {
         method: 'POST',
         headers: authHeader(),
@@ -837,20 +841,21 @@ describe('workflow routes', () => {
         }),
       })
       expect(res.status).toBe(202)
-      const body = await res.json() as { accepted: boolean; runId: string }
-      expect(body.accepted).toBe(true)
-      expect(body.runId).toBe('r-42')
-      expect(harness.commitEventState.handler!.handle).toHaveBeenCalledWith(expect.objectContaining({
-        repoPath: '/p',
-        branch: 'main',
-        commitHash: 'abc1234',
-        commitMessage: 'fix: something',
-        author: 'alice',
-      }))
+      const body = await res.json() as { queued: boolean; deduped: boolean; signalId: number }
+      expect(body.queued).toBe(true)
+      expect(body.signalId).toBe(7)
+      expect(mocks.enqueueSignal).toHaveBeenCalledWith({
+        kind: 'commit-event',
+        payload: { repoPath: '/p', branch: 'main', commitHash: 'abc1234', commitMessage: 'fix: something', author: 'alice' },
+        dedupeKey: 'commit-event::/p::abc1234',
+        ttlMs: 60 * 60 * 1000,
+      })
+      // The route never processes inline — delivery is the dispatcher's job.
+      expect(harness.commitEventState.handler!.handle).not.toHaveBeenCalled()
     })
 
-    it('returns 200 when the handler rejects (accepted=false)', async () => {
-      harness.commitEventState.handler!.handle.mockResolvedValueOnce({ accepted: false, reason: 'duplicate' })
+    it('reports dedup when the same commit is already queued', async () => {
+      mocks.enqueueSignal.mockReturnValueOnce({ id: 7, deduped: true })
       const res = await fetch(`${harness.baseUrl}/commit-event`, {
         method: 'POST',
         headers: authHeader(),
@@ -858,10 +863,10 @@ describe('workflow routes', () => {
           repoPath: '/p', branch: 'main', commitHash: 'h', commitMessage: 'x',
         }),
       })
-      expect(res.status).toBe(200)
-      const body = await res.json() as { accepted: boolean; reason: string }
-      expect(body.accepted).toBe(false)
-      expect(body.reason).toBe('duplicate')
+      expect(res.status).toBe(202)
+      const body = await res.json() as { queued: boolean; deduped: boolean }
+      expect(body.queued).toBe(false)
+      expect(body.deduped).toBe(true)
     })
 
     it('defaults author to "unknown" when omitted', async () => {
@@ -872,7 +877,9 @@ describe('workflow routes', () => {
           repoPath: '/p', branch: 'main', commitHash: 'h', commitMessage: 'x',
         }),
       })
-      expect(harness.commitEventState.handler!.handle).toHaveBeenCalledWith(expect.objectContaining({ author: 'unknown' }))
+      expect(mocks.enqueueSignal).toHaveBeenCalledWith(
+        expect.objectContaining({ payload: expect.objectContaining({ author: 'unknown' }) }),
+      )
     })
 
     it('returns 400 when repoPath is outside repos root', async () => {
@@ -893,7 +900,7 @@ describe('workflow routes', () => {
       expect(harness.commitEventState.handler!.handle).not.toHaveBeenCalled()
     })
 
-    it('returns 503 when no commit event handler is configured', async () => {
+    it('still queues (202) when no commit event handler is configured — the queue holds until a consumer registers', async () => {
       await harness.close()
       harness = await startServer({ withCommitHandler: false })
       const res = await fetch(`${harness.baseUrl}/commit-event`, {
@@ -903,6 +910,19 @@ describe('workflow routes', () => {
           repoPath: '/p', branch: 'main', commitHash: 'h', commitMessage: 'x',
         }),
       })
+      expect(res.status).toBe(202)
+    })
+
+    it('returns 503 when the engine is not initialized', async () => {
+      mocks.engineAvailable = false
+      const res = await fetch(`${harness.baseUrl}/commit-event`, {
+        method: 'POST',
+        headers: authHeader(),
+        body: JSON.stringify({
+          repoPath: '/p', branch: 'main', commitHash: 'h', commitMessage: 'x',
+        }),
+      })
+      mocks.engineAvailable = true
       expect(res.status).toBe(503)
     })
   })

@@ -705,6 +705,15 @@ server.listen(port, '0.0.0.0', () => {
 
     // Initialize commit event handler and sync git hooks
     commitEventState.handler = new CommitEventHandler()
+
+    // Consume commit-event signals from the durable queue. Rejection (handler
+    // not ready) leaves the signal leased; the engine redelivers after lease
+    // expiry — the handler's own filter chain and dedup make this idempotent.
+    engine.registerSignalHandler('commit-event', async (payload) => {
+      const handler = commitEventState.handler
+      if (!handler) throw new Error('Commit event handler not available')
+      await handler.handle(payload as unknown as import('./commit-event-handler.js').CommitEvent)
+    })
     if (authToken) {
       const serverUrl = `http://localhost:${port}`
       ensureHookConfig(authToken, serverUrl)
