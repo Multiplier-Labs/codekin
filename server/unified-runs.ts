@@ -79,6 +79,7 @@ export function loopLifecycleStatus(run: LoopRun): RunLifecycleStatus {
     case 'preflight':
       return 'queued'
     case 'evaluating':
+    case 'monitoring_ci':
       return 'verifying'
     case 'reviewing':
       return 'checking'

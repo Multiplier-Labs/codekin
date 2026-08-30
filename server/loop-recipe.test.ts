@@ -117,8 +117,37 @@ Do the thing.
     expect(() => mutate('id: ci-repair', 'id: "Bad Id!"')).toThrow(/metadata\.id/)
   })
 
-  it('rejects evaluator types that are not implemented yet', () => {
-    expect(() => mutate('type: rubric', 'type: composite')).toThrow(/not available yet/)
+  it('rejects unknown evaluator types', () => {
+    expect(() => mutate('type: rubric', 'type: vibes')).toThrow(/not a known evaluator type/)
+  })
+
+  it('parses every Phase 3 evaluator type with defaults and validates composite refs', () => {
+    const md = `---
+apiVersion: codekin.dev/v2
+kind: LoopRecipe
+metadata: { id: full, name: Full }
+agent: { provider: claude }
+evaluators:
+  - { id: tests, type: test-report, command: npx vitest run, parser: vitest }
+  - { id: scope, type: diff-policy, maxChangedLines: 500, forbidPaths: ["dist/**"] }
+  - { id: report, type: artifact, path: "reports/out.md", minBytes: 10 }
+  - { id: signoff, type: human, title: "Does the output read well?" }
+  - { id: checks, type: ci, checks: ["test-and-lint"], timeout: 30m }
+  - { id: gate, type: composite, op: all, of: [tests, scope] }
+budgets: { turns: 5, costUsd: 2 }
+---
+Goal.
+`
+    const r = parse(md)
+    expect(r.evaluators.map((e) => e.type)).toEqual(['test-report', 'diff-policy', 'artifact', 'human', 'ci', 'composite'])
+    expect(r.evaluators[0]).toMatchObject({ parser: 'vitest', timeoutMs: 600_000, retryMaxAttempts: 1 })
+    expect(r.evaluators[1]).toMatchObject({ noTestWeakening: true, secretScan: true, maxChangedFiles: undefined })
+    expect(r.evaluators[4]).toMatchObject({ timeoutMs: 30 * 60_000 })
+
+    expect(() => parse(md.replace('of: [tests, scope]', 'of: [nope]'))).toThrow(/unknown evaluator "nope"/)
+    expect(() => parse(md.replace('of: [tests, scope]', 'of: [gate]'))).toThrow(/cannot reference itself/)
+    expect(() => parse(md.replace('parser: vitest', 'parser: junit-xml'))).toThrow(/reportPath is required/)
+    expect(() => parse(md.replace('path: "reports/out.md"', 'path: "../escape.md"'))).toThrow(/relative path/)
   })
 
   it('requires at least one required command evaluator as the deterministic gate', () => {

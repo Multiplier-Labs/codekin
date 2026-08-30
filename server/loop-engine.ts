@@ -31,6 +31,10 @@ import { matchesAnyGlob } from './glob-match.js'
 import { AGENT_ALLOWED_TOOLS, READONLY_AGENT_ALLOWED_TOOLS } from './agent-allowlist.js'
 import {
   runCommandEvaluator,
+  runTestReportEvaluator,
+  analyzeDiffPolicy,
+  checkArtifactRequirement,
+  failureFingerprint,
   getDiffSummary,
   getDiff,
   getChangedFiles,
@@ -40,7 +44,17 @@ import {
   type CommandEvaluationOutcome,
 } from './loop-evaluators.js'
 import { defaultLoopFinalizer, type LoopFinalizerApi } from './loop-finalizer.js'
-import { resolveRubricProvider, type LoopProvider, type LoopRecipe, type RubricEvaluatorConfig, type CommandEvaluatorConfig } from './loop-recipe.js'
+import {
+  resolveRubricProvider,
+  type LoopProvider,
+  type LoopRecipe,
+  type RubricEvaluatorConfig,
+  type CommandEvaluatorConfig,
+  type TestReportEvaluatorConfig,
+  type CompositeEvaluatorConfig,
+  type HumanEvaluatorConfig,
+  type CiEvaluatorConfig,
+} from './loop-recipe.js'
 import type { LoopRun, LoopRunOutcome, LoopRunState, LoopStore } from './loop-store.js'
 import type { LoopArtifactStore } from './loop-artifacts.js'
 
@@ -83,6 +97,7 @@ export interface SessionHost {
 /** Evaluator + git surface — defaults to the real implementations. */
 export interface LoopEvaluatorApi {
   runCommandEvaluator: typeof runCommandEvaluator
+  runTestReportEvaluator: typeof runTestReportEvaluator
   getDiffSummary(cwd: string): Promise<string>
   getDiff(cwd: string): Promise<string>
   getChangedFiles(cwd: string): Promise<string[]>
@@ -91,6 +106,7 @@ export interface LoopEvaluatorApi {
 
 const defaultEvaluatorApi: LoopEvaluatorApi = {
   runCommandEvaluator,
+  runTestReportEvaluator,
   getDiffSummary,
   getDiff,
   getChangedFiles,
@@ -107,6 +123,36 @@ export interface StartLoopRunInput {
   provider: LoopProvider
   model?: string | null
 }
+
+/** Remote CI surface — defaults to `gh pr checks`; injectable for tests. */
+export interface LoopCiApi {
+  /** Status of the checks reported at the branch's PR. */
+  checkStatus(cwd: string, branch: string): Promise<Array<{ name: string; status: 'pending' | 'pass' | 'fail' }>>
+}
+
+const defaultCiApi: LoopCiApi = {
+  async checkStatus(cwd, branch) {
+    const { execFile } = await import('child_process')
+    const { promisify } = await import('util')
+    const out = await promisify(execFile)('gh', ['pr', 'checks', branch, '--json', 'name,bucket'], { cwd, timeout: 30_000 }).then(
+      (r) => r.stdout,
+      (err: unknown) => {
+        // `gh pr checks` exits 8 while checks are pending but still prints the JSON.
+        const e = err as { stdout?: string }
+        if (typeof e.stdout === 'string' && e.stdout.trim().startsWith('[')) return e.stdout
+        throw err
+      },
+    )
+    const rows = JSON.parse(out) as Array<{ name: string; bucket: string }>
+    return rows.map((r) => ({
+      name: r.name,
+      status: r.bucket === 'pass' || r.bucket === 'skipping' ? 'pass' : r.bucket === 'pending' ? 'pending' : 'fail',
+    }))
+  },
+}
+
+/** How often remote CI is polled while monitoring. */
+const CI_POLL_MS = 30_000
 
 /** Max consecutive protected-path violations before escalating to a human. */
 const MAX_PROTECTED_STRIKES = 2
@@ -130,6 +176,8 @@ interface CheckpointState {
   noProgressCount: number
   protectedStrikes: number
   budgetExtensions: number
+  /** Human sign-offs still owed in this completion attempt. */
+  pendingHumanIds: string[]
 }
 
 interface RunCtx extends CheckpointState {
@@ -151,6 +199,7 @@ interface RunCtx extends CheckpointState {
   steerQueue: string[]
   notedPromptIds: Set<string>
   wallTimer: NodeJS.Timeout | null
+  ciTimer: NodeJS.Timeout | null
   disposers: (() => void)[]
 }
 
@@ -165,6 +214,7 @@ function freshCheckpointState(): CheckpointState {
     noProgressCount: 0,
     protectedStrikes: 0,
     budgetExtensions: 0,
+    pendingHumanIds: [],
   }
 }
 
@@ -181,6 +231,7 @@ export class LoopEngine {
     private readonly artifacts: LoopArtifactStore,
     private readonly evaluator: LoopEvaluatorApi = defaultEvaluatorApi,
     private readonly finalizer: LoopFinalizerApi = defaultLoopFinalizer,
+    private readonly ci: LoopCiApi = defaultCiApi,
   ) {}
 
   activeRunIds(): string[] {
@@ -303,6 +354,7 @@ export class LoopEngine {
       steerQueue: [],
       notedPromptIds: new Set(),
       wallTimer: null,
+      ciTimer: null,
       disposers: [],
     }
   }
@@ -474,23 +526,46 @@ export class LoopEngine {
     const stage = this.store.createStage(run.id, 'evaluate')
     const diffSummary = await this.evaluator.getDiffSummary(ctx.cwd)
 
-    const commands = run.recipe.evaluators.filter((e): e is CommandEvaluatorConfig => e.type === 'command')
     const rubrics = run.recipe.evaluators.filter((e): e is RubricEvaluatorConfig => e.type === 'rubric')
 
     ctx.passedCommands = []
     const fingerprints: string[] = []
     let requiredFailure: CommandEvaluationOutcome | null = null
 
-    for (const config of commands) {
-      const outcome = await this.runCommandWithRetry(ctx, run, stage.id, config)
-      if (outcome.status === 'pass') {
-        ctx.passedCommands.push(outcome.command)
+    // Deterministic locals run in recipe order; the first required failure
+    // short-circuits — it is what the maker needs to see next. Rubric, human,
+    // ci, and composite evaluators are handled after this gate.
+    for (const config of run.recipe.evaluators) {
+      let outcome: CommandEvaluationOutcome
+      if (config.type === 'command' || config.type === 'test-report') {
+        outcome = await this.runDeterministicWithRetry(ctx, run, stage.id, config)
+        if (outcome.status === 'pass') ctx.passedCommands.push(outcome.command)
+      } else if (config.type === 'diff-policy') {
+        const diff = await this.evaluator.getDiff(ctx.cwd)
+        const changedFiles = await this.evaluator.getChangedFiles(ctx.cwd)
+        const violations = analyzeDiffPolicy(config, diff, changedFiles)
+        outcome = this.recordLocalEvaluation(ctx, run, stage.id, config.id, {
+          pass: violations.length === 0,
+          summary: violations.length ? `diff policy: ${violations.length} violation(s)` : 'diff policy: clean',
+          detail: violations.map((v) => `[${v.rule}] ${v.detail}`).join('\n') || 'no violations',
+          classification: 'policy',
+        })
+      } else if (config.type === 'artifact') {
+        const check = checkArtifactRequirement(config, ctx.cwd)
+        outcome = this.recordLocalEvaluation(ctx, run, stage.id, config.id, {
+          pass: check.ok,
+          summary: check.ok ? `required artifact present: ${check.detail}` : `required artifact missing: ${check.detail}`,
+          detail: check.detail,
+          classification: 'policy',
+        })
+      } else {
         continue
       }
+      if (outcome.status === 'pass') continue
       if (outcome.fingerprint) fingerprints.push(outcome.fingerprint)
       if (config.required) {
         requiredFailure = outcome
-        break // first required failure is what the maker needs to see next
+        break
       }
     }
 
@@ -511,20 +586,75 @@ export class LoopEngine {
       await this.startNextRubric(ctx, run)
       return
     }
-    this.completionGate(ctx, run)
+    this.startHumanEvaluations(ctx, run)
   }
 
-  private async runCommandWithRetry(
+  /** Record a synchronous deterministic check (diff-policy, artifact) uniformly. */
+  private recordLocalEvaluation(
     ctx: RunCtx,
     run: LoopRun,
     stageId: string,
-    config: CommandEvaluatorConfig,
+    evaluatorId: string,
+    result: { pass: boolean; summary: string; detail: string; classification: 'policy' },
+  ): CommandEvaluationOutcome {
+    const artifactHash = this.artifacts.put(result.detail)
+    const artifact = this.store.addArtifact({
+      runId: run.id,
+      kind: 'report',
+      label: `${evaluatorId} (turn ${ctx.turnCount})`,
+      contentHash: artifactHash,
+      sizeBytes: Buffer.byteLength(result.detail),
+    })
+    const fingerprint = result.pass ? null : failureFingerprint(evaluatorId, null, result.detail)
+    this.store.addEvaluation({
+      runId: run.id,
+      stageId,
+      evaluatorId,
+      status: result.pass ? 'pass' : 'fail',
+      classification: result.pass ? null : result.classification,
+      summary: result.summary,
+      fingerprint,
+      retryable: false,
+      durationMs: 0,
+      costUsd: null,
+      evidenceArtifactIds: [artifact.id],
+    })
+    this.store.appendEvent({
+      runId: run.id,
+      type: 'evaluation_completed',
+      stageId,
+      payload: { evaluatorId, status: result.pass ? 'pass' : 'fail', summary: result.summary, artifactId: artifact.id },
+    })
+    return {
+      evaluatorId,
+      status: result.pass ? 'pass' : 'fail',
+      classification: result.pass ? null : result.classification,
+      summary: result.summary,
+      outputTail: result.detail,
+      fullOutput: result.detail,
+      command: evaluatorId,
+      exitCode: result.pass ? 0 : 1,
+      fingerprint,
+      retryable: false,
+      durationMs: 0,
+      timedOut: false,
+    }
+  }
+
+  private async runDeterministicWithRetry(
+    ctx: RunCtx,
+    run: LoopRun,
+    stageId: string,
+    config: CommandEvaluatorConfig | TestReportEvaluatorConfig,
   ): Promise<CommandEvaluationOutcome> {
     let outcome: CommandEvaluationOutcome
     let attemptsLeft = Math.max(1, config.retryMaxAttempts)
     do {
       const attempt = this.store.createAttempt(stageId, run.id)
-      outcome = await this.evaluator.runCommandEvaluator(config, ctx.cwd)
+      outcome =
+        config.type === 'command'
+          ? await this.evaluator.runCommandEvaluator(config, ctx.cwd)
+          : await this.evaluator.runTestReportEvaluator(config, ctx.cwd)
       const artifactHash = this.artifacts.put(outcome.fullOutput)
       const artifact = this.store.addArtifact({
         runId: run.id,
@@ -597,8 +727,9 @@ export class LoopEngine {
       ctx,
       run,
       [
-        `Evaluation failed.`,
-        `Command: \`${failure.command}\``,
+        `Evaluation failed: ${failure.summary}`,
+        // For local policy checks the "command" is just the evaluator id — noise.
+        failure.command !== failure.evaluatorId ? `Command: \`${failure.command}\`` : '',
         failure.outputTail ? `\nOutput:\n${failure.outputTail}` : '',
         `\nFix the cause and continue. Do not modify tests to make them pass.${replanNudge}`,
       ]
@@ -614,7 +745,7 @@ export class LoopEngine {
   private async startNextRubric(ctx: RunCtx, run: LoopRun): Promise<void> {
     const config = ctx.pendingRubrics.shift()
     if (!config) {
-      this.completionGate(ctx, run)
+      this.startHumanEvaluations(ctx, run)
       return
     }
     this.setState(run.id, 'reviewing')
@@ -732,6 +863,120 @@ export class LoopEngine {
   }
 
   // -------------------------------------------------------------------------
+  // Human sign-off evaluators
+  // -------------------------------------------------------------------------
+
+  /**
+   * After deterministic + rubric evaluators pass, each `human` evaluator asks
+   * for an explicit sign-off (pass / waive / fail). One completion attempt
+   * asks once per evaluator; a later cycle (after new changes) asks again.
+   */
+  private startHumanEvaluations(ctx: RunCtx, run: LoopRun): void {
+    ctx.pendingHumanIds = run.recipe.evaluators.filter((e): e is HumanEvaluatorConfig => e.type === 'human').map((e) => e.id)
+    this.nextHumanEvaluation(ctx, run)
+  }
+
+  private nextHumanEvaluation(ctx: RunCtx, run: LoopRun): void {
+    const evaluatorId = ctx.pendingHumanIds[0]
+    if (evaluatorId === undefined) {
+      void this.afterEvaluationsComplete(ctx, run)
+      return
+    }
+    const config = run.recipe.evaluators.find((e): e is HumanEvaluatorConfig => e.type === 'human' && e.id === evaluatorId)
+    if (!config) {
+      ctx.pendingHumanIds = ctx.pendingHumanIds.slice(1)
+      this.nextHumanEvaluation(ctx, run)
+      return
+    }
+    this.createEngineIntervention(ctx, run, {
+      purpose: `human-evaluation:${config.id}`,
+      title: config.title,
+      body: `Evaluator "${config.id}" needs your sign-off. Waiving keeps the run green but qualifies the outcome; failing sends your note back to the agent.`,
+      options: ['pass', 'waive', 'fail'],
+    })
+  }
+
+  /** Record a human verdict as an evaluation row (its own review stage). */
+  private recordHumanEvaluation(run: LoopRun, evaluatorId: string, status: 'pass' | 'waived' | 'fail', note?: string): void {
+    const stage = this.store.createStage(run.id, 'review')
+    this.store.addEvaluation({
+      runId: run.id,
+      stageId: stage.id,
+      evaluatorId,
+      status,
+      classification: null,
+      summary: `human sign-off: ${status}${note ? ` — ${note}` : ''}`,
+      fingerprint: null,
+      retryable: false,
+      durationMs: 0,
+      costUsd: null,
+      evidenceArtifactIds: [],
+    })
+    this.store.completeStage(stage.id, status === 'fail' ? 'failed' : 'succeeded')
+  }
+
+  // -------------------------------------------------------------------------
+  // Composite evaluators
+  // -------------------------------------------------------------------------
+
+  /**
+   * Composites fold other evaluators' latest results (waived counts toward
+   * pass, with the warning it already carries). A failing required composite
+   * behaves like any required failure: feedback and another cycle.
+   */
+  private evaluateComposites(run: LoopRun): { ok: boolean; failure?: string } {
+    const composites = run.recipe.evaluators.filter((e): e is CompositeEvaluatorConfig => e.type === 'composite')
+    if (!composites.length) return { ok: true }
+    const latest = new Map<string, string>()
+    for (const ev of this.store.listEvaluations(run.id)) latest.set(ev.evaluatorId, ev.status)
+    let failure: string | undefined
+    for (const config of composites) {
+      const passes = config.of.map((id) => {
+        const status = latest.get(id)
+        return status === 'pass' || status === 'waived'
+      })
+      const ok = config.op === 'all' ? passes.every(Boolean) : passes.some(Boolean)
+      const detail = config.of.map((id) => `${id}=${latest.get(id) ?? 'not-evaluated'}`).join(', ')
+      const stage = this.store.createStage(run.id, 'evaluate')
+      this.store.addEvaluation({
+        runId: run.id,
+        stageId: stage.id,
+        evaluatorId: config.id,
+        status: ok ? 'pass' : 'fail',
+        classification: ok ? null : 'policy',
+        summary: `composite ${config.op}(${config.of.join(', ')}): ${ok ? 'pass' : 'fail'} (${detail})`,
+        fingerprint: null,
+        retryable: false,
+        durationMs: 0,
+        costUsd: null,
+        evidenceArtifactIds: [],
+      })
+      this.store.completeStage(stage.id, ok ? 'succeeded' : 'failed')
+      this.store.appendEvent({
+        runId: run.id,
+        type: 'evaluation_completed',
+        stageId: stage.id,
+        payload: { evaluatorId: config.id, status: ok ? 'pass' : 'fail', summary: detail },
+      })
+      if (!ok && config.required && !failure) failure = `composite "${config.id}" requires ${config.op} of [${detail}]`
+    }
+    return failure ? { ok: false, failure } : { ok: true }
+  }
+
+  /** All rubric + human gates cleared: settle composites, then the completion gate. */
+  private async afterEvaluationsComplete(ctx: RunCtx, run: LoopRun): Promise<void> {
+    const composite = this.evaluateComposites(run)
+    if (!composite.ok) {
+      const feedback = `Evaluation failed.\n${composite.failure ?? 'A required composite evaluator failed.'}\nFix the cause and continue.`
+      // After a human intervention the maker session is gone — restart it.
+      if (ctx.makerSessionId) this.sendMakerFeedback(ctx, run, feedback)
+      else await this.resumeActing(ctx, run, feedback)
+      return
+    }
+    this.completionGate(ctx, run)
+  }
+
+  // -------------------------------------------------------------------------
   // Completion
   // -------------------------------------------------------------------------
 
@@ -764,9 +1009,126 @@ export class LoopEngine {
     this.store.patchRun(run.id, { prUrl: result.prUrl })
     this.store.appendEvent({ runId: run.id, type: 'finalized', stageId: stage.id, payload: { prUrl: result.prUrl, note: result.note } })
 
+    // With ci evaluators and an actual PR, completion waits for the remote
+    // checks — a red check re-enters the loop instead of ending the run.
+    const ciConfigs = run.recipe.evaluators.filter((e): e is CiEvaluatorConfig => e.type === 'ci')
+    if (ciConfigs.length && run.recipe.completion.action === 'pull-request' && result.prUrl) {
+      this.startCiMonitoring(ctx, run)
+      return
+    }
+
     const warnings = this.collectWarnings(run, result.clean)
+    if (ciConfigs.length && !result.prUrl) warnings.push('ci evaluators were skipped: no PR was opened')
     this.finishRun(run.id, warnings.length ? 'completed_with_warnings' : 'completed', warnings.length ? warnings.join('; ') : result.note)
   }
+
+  // -------------------------------------------------------------------------
+  // Remote CI monitoring
+  // -------------------------------------------------------------------------
+
+  /**
+   * Poll the PR's checks until every ci evaluator concludes. Green finishes
+   * the run; a required red feeds the failing checks back to the maker (the
+   * next pass re-pushes and monitoring restarts); silence past the timeout
+   * asks the operator. Restart-safe: `monitoring_ci` recovery re-enters here
+   * (the timeout window restarts — acceptable for a poll loop).
+   */
+  private startCiMonitoring(ctx: RunCtx, run: LoopRun): void {
+    this.setState(run.id, 'monitoring_ci', 'Waiting for remote CI checks on the PR.')
+    const stage = this.store.createStage(run.id, 'ci')
+    const configs = run.recipe.evaluators.filter((e): e is CiEvaluatorConfig => e.type === 'ci')
+    const startedAt = Date.now()
+    const timeoutMs = Math.max(...configs.map((c) => c.timeoutMs))
+    this.active.set(run.id, ctx)
+
+    const poll = async (): Promise<void> => {
+      ctx.ciTimer = null
+      const current = this.store.getRun(run.id)
+      if (!current || current.state !== 'monitoring_ci' || !this.active.has(run.id)) return
+      let checks: Array<{ name: string; status: 'pending' | 'pass' | 'fail' }>
+      try {
+        checks = await this.ci.checkStatus(ctx.cwd, run.branch)
+      } catch (err) {
+        // Transient `gh` failures should not kill the watch.
+        this.store.appendEvent({ runId: run.id, type: 'ci_poll_error', stageId: stage.id, payload: { error: errMsg(err) } })
+        checks = []
+      }
+
+      const settled: Array<{ config: CiEvaluatorConfig; failed: string[]; ok: boolean }> = []
+      let anyPending = checks.length === 0
+      for (const config of configs) {
+        const relevant = config.checks.length ? checks.filter((c) => config.checks.includes(c.name)) : checks
+        const missing = config.checks.filter((name) => !checks.some((c) => c.name === name))
+        if (relevant.some((c) => c.status === 'pending') || missing.length || relevant.length === 0) {
+          anyPending = true
+          continue
+        }
+        const failed = relevant.filter((c) => c.status === 'fail').map((c) => c.name)
+        settled.push({ config, failed, ok: failed.length === 0 })
+      }
+
+      if (!anyPending && settled.length === configs.length) {
+        for (const { config, failed, ok } of settled) {
+          this.store.addEvaluation({
+            runId: run.id,
+            stageId: stage.id,
+            evaluatorId: config.id,
+            status: ok ? 'pass' : 'fail',
+            classification: ok ? null : 'code',
+            summary: ok ? 'remote CI checks green' : `remote CI failed: ${failed.join(', ')}`,
+            fingerprint: ok ? null : failureFingerprint(config.id, null, failed.sort().join(',')),
+            retryable: false,
+            durationMs: Date.now() - startedAt,
+            costUsd: null,
+            evidenceArtifactIds: [],
+          })
+          this.store.appendEvent({
+            runId: run.id,
+            type: 'ci_concluded',
+            stageId: stage.id,
+            payload: { evaluatorId: config.id, ok, failed },
+          })
+        }
+        const requiredFailure = settled.find((s) => !s.ok && s.config.required)
+        if (requiredFailure) {
+          this.store.completeStage(stage.id, 'failed')
+          if (this.budgetExhausted(ctx, run)) {
+            this.onBudgetBoundary(ctx, run)
+            return
+          }
+          await this.resumeActing(
+            ctx,
+            run,
+            `Remote CI checks failed on the PR: ${requiredFailure.failed.join(', ')}. Investigate the CI failure, fix the cause, and continue — the loop will re-evaluate and update the PR.`,
+          )
+          return
+        }
+        this.store.completeStage(stage.id, 'succeeded')
+        const warnings = this.collectWarnings(run, true)
+        this.teardown(ctx)
+        this.finishRun(run.id, warnings.length ? 'completed_with_warnings' : 'completed', warnings.length ? warnings.join('; ') : 'Remote CI green.')
+        return
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        this.store.completeStage(stage.id, 'failed')
+        this.createEngineIntervention(ctx, run, {
+          purpose: 'ci-timeout',
+          title: `CI checks did not conclude within ${Math.round(timeoutMs / 60000)} minutes`,
+          body: 'Keep waiting (restarts the window), finish with the CI outcome unresolved (qualified result), or stop the run.',
+          options: ['keep-waiting', 'finish', 'stop'],
+        })
+        return
+      }
+
+      ctx.ciTimer = setTimeout(() => void poll(), this.ciPollMs)
+      ctx.ciTimer.unref?.()
+    }
+    void poll()
+  }
+
+  /** @internal Poll cadence — overridable in tests. */
+  ciPollMs = CI_POLL_MS
 
   /** Anything that qualifies an otherwise-green result. */
   private collectWarnings(run: LoopRun, finalizeClean: boolean): string[] {
@@ -923,7 +1285,37 @@ export class LoopEngine {
       return true
     }
 
+    if (resolved.purpose.startsWith('human-evaluation:')) {
+      const evaluatorId = resolved.purpose.slice('human-evaluation:'.length)
+      ctx.pendingHumanIds = ctx.pendingHumanIds.filter((id) => id !== evaluatorId)
+      this.checkpoint(ctx)
+      if (choice === 'fail') {
+        this.recordHumanEvaluation(run, evaluatorId, 'fail', note)
+        await this.resumeActing(
+          ctx,
+          run,
+          `The human sign-off "${evaluatorId}" failed.${note ? ` Feedback: ${note}` : ''} Address this and continue.`,
+        )
+        return true
+      }
+      this.recordHumanEvaluation(run, evaluatorId, choice === 'waive' ? 'waived' : 'pass', note)
+      this.nextHumanEvaluation(ctx, run)
+      return true
+    }
+
     switch (resolved.purpose) {
+      case 'ci-timeout': {
+        if (choice === 'keep-waiting') {
+          this.startCiMonitoring(ctx, run)
+        } else if (choice === 'finish') {
+          this.teardown(ctx)
+          this.finishRun(run.id, 'completed_with_warnings', 'Completed with remote CI still unresolved (operator decision).')
+        } else {
+          this.teardown(ctx)
+          this.finishRun(run.id, 'canceled', `Stopped while waiting on CI.${note ? ` Note: ${note}` : ''}`)
+        }
+        return true
+      }
       case 'plan-approval': {
         if (choice === 'approve') {
           ctx.phase = 'acting'
@@ -1121,6 +1513,11 @@ export class LoopEngine {
           resumed.push(run.id)
           continue
         }
+        if (run.state === 'monitoring_ci') {
+          this.startCiMonitoring(ctx, run) // the poll window restarts; the checks are remote state
+          resumed.push(run.id)
+          continue
+        }
         await this.resumeActing(ctx, run, 'Codekin restarted while this run was in flight. Reassess the current state of the worktree and continue toward the outcome.')
         resumed.push(run.id)
       } catch (err) {
@@ -1232,6 +1629,7 @@ export class LoopEngine {
       noProgressCount: ctx.noProgressCount,
       protectedStrikes: ctx.protectedStrikes,
       budgetExtensions: ctx.budgetExtensions,
+      pendingHumanIds: ctx.pendingHumanIds,
     }
     if (ctx.steerQueue.length) state.steerQueue = [...ctx.steerQueue]
     this.store.saveCheckpoint(ctx.runId, state)
@@ -1243,6 +1641,10 @@ export class LoopEngine {
 
   private teardown(ctx: RunCtx): void {
     this.clearWallTimer(ctx)
+    if (ctx.ciTimer) {
+      clearTimeout(ctx.ciTimer)
+      ctx.ciTimer = null
+    }
     for (const dispose of ctx.disposers) dispose()
     ctx.disposers = []
     this.active.delete(ctx.runId)

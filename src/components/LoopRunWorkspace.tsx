@@ -84,6 +84,8 @@ function describeEvent(event: LoopEvent): string {
     case 'cancel_requested': return 'Stop requested'
     case 'state_changed': return `→ ${String(p.state)}${p.reason ? ` (${String(p.reason)})` : ''}`
     case 'finalized': return String(p.note ?? 'Finalized')
+    case 'ci_concluded': return p.ok ? `CI checks green (${String(p.evaluatorId)})` : `CI checks failed: ${(p.failed as string[] | undefined)?.join(', ') ?? ''}`
+    case 'ci_poll_error': return `CI poll error (transient): ${String(p.error ?? '')}`
     case 'run_completed': return `Run ${String(p.outcome)}: ${String(p.reason ?? '')}`
     case 'recovery_started': return `Recovering after a restart (was ${String(p.fromState)})`
     default: return event.type
@@ -272,7 +274,35 @@ export function LoopRunWorkspace({ token, detail, onAct, onNavigateToSession }: 
               </div>
             )}
 
-            {/* Evaluations scorecard */}
+            {/* Completion scorecard — every criterion in the frozen recipe. */}
+            {detail.scorecard.length > 0 && (
+              <div>
+                <h3 className="mb-1 text-meta font-medium text-ink-muted">Acceptance scorecard</h3>
+                <ul className="flex flex-wrap gap-1.5">
+                  {detail.scorecard.map((entry) => (
+                    <li
+                      key={entry.id}
+                      title={entry.summary ?? 'not evaluated yet'}
+                      className={`flex items-center gap-1.5 rounded-control border px-2 py-1 text-meta ${
+                        entry.status === 'pass'
+                          ? 'border-success-8 text-success-2'
+                          : entry.status === 'waived' || entry.status === 'warning'
+                            ? 'border-warning-8 text-warning-2'
+                            : entry.status === 'fail' || entry.status === 'error'
+                              ? 'border-error-8 text-error-2'
+                              : 'border-edge text-ink-muted'
+                      }`}
+                    >
+                      <span className="font-medium">{entry.id}</span>
+                      <span className="text-micro text-ink-faint">{entry.type}{entry.required ? '' : ' · optional'}</span>
+                      <span className="text-micro">{entry.status}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Evaluation history */}
             {detail.evaluations.length > 0 && (
               <div>
                 <h3 className="mb-1 text-meta font-medium text-ink-muted">Evaluations</h3>

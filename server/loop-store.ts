@@ -54,12 +54,13 @@ export type LoopRunState =
   | 'paused'             // durably parked; resume continues from checkpoint
   | 'canceling'          // cancel requested, tearing down
   | 'finalizing'         // landing the verified tree (commit/push/PR)
+  | 'monitoring_ci'      // waiting on remote CI checks at the pushed PR
   | 'recovering'         // reconciling after a restart
   | 'done'
 
 export type LoopRunOutcome = 'completed' | 'completed_with_warnings' | 'failed' | 'canceled'
 
-export type LoopStageKind = 'preflight' | 'plan' | 'act' | 'evaluate' | 'review' | 'finalize'
+export type LoopStageKind = 'preflight' | 'plan' | 'act' | 'evaluate' | 'review' | 'finalize' | 'ci'
 export type LoopStageStatus = 'running' | 'succeeded' | 'failed' | 'canceled'
 
 export type LoopActorType = 'user' | 'system' | 'agent'

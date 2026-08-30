@@ -13,10 +13,10 @@
  * run freezes the normalized recipe + hash it was started from, so a later
  * edit to the file never changes what a past run claims it executed.
  *
- * Phase 1 executes `command` and `rubric` evaluators. Other §7 evaluator
- * types (test-report, diff-policy, artifact, ci, human, composite) arrive in
- * Phase 3 and are rejected at validation until then — accepting a field the
- * engine ignores would be a silent lie.
+ * All §7 evaluator types are supported: `command`, `test-report`,
+ * `diff-policy`, `artifact`, `rubric`, `human`, `ci`, and `composite`. At
+ * least one required command/test-report evaluator anchors every recipe — a
+ * loop must have a deterministic gate.
  *
  * Example:
  *
@@ -90,7 +90,84 @@ export interface RubricEvaluatorConfig {
   required: boolean
 }
 
-export type EvaluatorConfig = CommandEvaluatorConfig | RubricEvaluatorConfig
+export type TestReportParser = 'vitest' | 'tap' | 'junit-xml'
+
+/** Like `command`, but the output is parsed into failing tests — better feedback and stabler fingerprints. */
+export interface TestReportEvaluatorConfig {
+  id: string
+  type: 'test-report'
+  command: string | string[]
+  parser: TestReportParser
+  /** File the report is written to (required for junit-xml), relative to the worktree. */
+  reportPath?: string
+  timeoutMs: number
+  required: boolean
+  retryMaxAttempts: number
+}
+
+/** Deterministic policy checks over the diff itself. */
+export interface DiffPolicyEvaluatorConfig {
+  id: string
+  type: 'diff-policy'
+  maxChangedFiles?: number
+  maxChangedLines?: number
+  /** Globs that must not appear among changed files (on top of workspace.protectedPaths). */
+  forbidPaths: string[]
+  /** Flag skipped/only'd tests and deleted test files. */
+  noTestWeakening: boolean
+  /** Flag likely credentials in added lines. */
+  secretScan: boolean
+  required: boolean
+}
+
+/** Require a file the run must produce (report, screenshot, artifact). */
+export interface ArtifactEvaluatorConfig {
+  id: string
+  type: 'artifact'
+  /** Path relative to the worktree; glob allowed. */
+  path: string
+  minBytes: number
+  required: boolean
+}
+
+/** Explicit human sign-off, resolved as an intervention: pass / waive / fail. */
+export interface HumanEvaluatorConfig {
+  id: string
+  type: 'human'
+  /** The question the human answers. */
+  title: string
+  required: boolean
+}
+
+/** Wait for named remote CI checks at the pushed PR; red checks feed back to the maker. */
+export interface CiEvaluatorConfig {
+  id: string
+  type: 'ci'
+  /** Check names to wait for; empty = all reported checks. */
+  checks: string[]
+  /** How long to wait before escalating. */
+  timeoutMs: number
+  required: boolean
+}
+
+/** all/any over other evaluators' results in the same cycle. */
+export interface CompositeEvaluatorConfig {
+  id: string
+  type: 'composite'
+  op: 'all' | 'any'
+  of: string[]
+  required: boolean
+}
+
+export type EvaluatorConfig =
+  | CommandEvaluatorConfig
+  | RubricEvaluatorConfig
+  | TestReportEvaluatorConfig
+  | DiffPolicyEvaluatorConfig
+  | ArtifactEvaluatorConfig
+  | HumanEvaluatorConfig
+  | CiEvaluatorConfig
+  | CompositeEvaluatorConfig
 
 export interface LoopBudgets {
   /** Hard cap on maker turns. */
@@ -147,7 +224,9 @@ export function isValidRecipeId(id: unknown): id is string {
 }
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 10 * 60 * 1000
+const DEFAULT_CI_TIMEOUT_MS = 20 * 60 * 1000
 const DEFAULT_NO_PROGRESS_ATTEMPTS = 3
+const TEST_REPORT_PARSERS: readonly TestReportParser[] = ['vitest', 'tap', 'junit-xml']
 
 // ---------------------------------------------------------------------------
 // Validation helpers
@@ -287,7 +366,98 @@ function parseEvaluator(value: unknown, index: number, sourcePath: string): Eval
     }
   }
 
-  fail(sourcePath, `${field}.type "${type}" is not available yet — Phase 1 supports: command, rubric`)
+  if (type === 'test-report') {
+    rejectUnknown(obj, ['id', 'type', 'command', 'parser', 'reportPath', 'timeout', 'required', 'retry'], field, sourcePath)
+    const command = obj.command
+    if (Array.isArray(command)) stringArray(command, `${field}.command`, sourcePath)
+    else if (typeof command !== 'string' || !command.trim()) {
+      fail(sourcePath, `${field}.command must be a shell string or an argv array`)
+    }
+    const parser = requiredString(obj.parser, `${field}.parser`, sourcePath)
+    if (!TEST_REPORT_PARSERS.includes(parser as TestReportParser)) {
+      fail(sourcePath, `${field}.parser must be one of ${TEST_REPORT_PARSERS.join(', ')}`)
+    }
+    const reportPath = optionalString(obj.reportPath, `${field}.reportPath`, sourcePath)
+    if (parser === 'junit-xml' && !reportPath) fail(sourcePath, `${field}.reportPath is required for the junit-xml parser`)
+    if (reportPath?.startsWith('/') || reportPath?.includes('..')) {
+      fail(sourcePath, `${field}.reportPath must be a plain relative path inside the worktree`)
+    }
+    let retryMaxAttempts = 1
+    if (obj.retry !== undefined) {
+      const retry = asRecord(obj.retry, `${field}.retry`, sourcePath)
+      rejectUnknown(retry, ['maxAttempts'], `${field}.retry`, sourcePath)
+      retryMaxAttempts = positiveNumber(retry.maxAttempts, `${field}.retry.maxAttempts`, sourcePath)
+    }
+    return {
+      id,
+      type: 'test-report',
+      command: command as string | string[],
+      parser: parser as TestReportParser,
+      reportPath,
+      timeoutMs: obj.timeout === undefined ? DEFAULT_COMMAND_TIMEOUT_MS : parseDurationMs(obj.timeout, `${field}.timeout`, sourcePath),
+      required,
+      retryMaxAttempts,
+    }
+  }
+
+  if (type === 'diff-policy') {
+    rejectUnknown(obj, ['id', 'type', 'maxChangedFiles', 'maxChangedLines', 'forbidPaths', 'noTestWeakening', 'secretScan', 'required'], field, sourcePath)
+    const boolOr = (value: unknown, name: string, dflt: boolean): boolean => {
+      if (value === undefined) return dflt
+      if (typeof value !== 'boolean') fail(sourcePath, `${name} must be a boolean`)
+      return value
+    }
+    return {
+      id,
+      type: 'diff-policy',
+      maxChangedFiles: obj.maxChangedFiles === undefined ? undefined : positiveNumber(obj.maxChangedFiles, `${field}.maxChangedFiles`, sourcePath),
+      maxChangedLines: obj.maxChangedLines === undefined ? undefined : positiveNumber(obj.maxChangedLines, `${field}.maxChangedLines`, sourcePath),
+      forbidPaths: obj.forbidPaths === undefined ? [] : stringArray(obj.forbidPaths, `${field}.forbidPaths`, sourcePath),
+      noTestWeakening: boolOr(obj.noTestWeakening, `${field}.noTestWeakening`, true),
+      secretScan: boolOr(obj.secretScan, `${field}.secretScan`, true),
+      required,
+    }
+  }
+
+  if (type === 'artifact') {
+    rejectUnknown(obj, ['id', 'type', 'path', 'minBytes', 'required'], field, sourcePath)
+    const path = requiredString(obj.path, `${field}.path`, sourcePath)
+    if (path.startsWith('/') || path.includes('..')) fail(sourcePath, `${field}.path must be a plain relative path inside the worktree`)
+    return {
+      id,
+      type: 'artifact',
+      path,
+      minBytes: obj.minBytes === undefined ? 1 : positiveNumber(obj.minBytes, `${field}.minBytes`, sourcePath),
+      required,
+    }
+  }
+
+  if (type === 'human') {
+    rejectUnknown(obj, ['id', 'type', 'title', 'required'], field, sourcePath)
+    return { id, type: 'human', title: requiredString(obj.title, `${field}.title`, sourcePath), required }
+  }
+
+  if (type === 'ci') {
+    rejectUnknown(obj, ['id', 'type', 'checks', 'timeout', 'required'], field, sourcePath)
+    return {
+      id,
+      type: 'ci',
+      checks: obj.checks === undefined ? [] : stringArray(obj.checks, `${field}.checks`, sourcePath),
+      timeoutMs: obj.timeout === undefined ? DEFAULT_CI_TIMEOUT_MS : parseDurationMs(obj.timeout, `${field}.timeout`, sourcePath),
+      required,
+    }
+  }
+
+  if (type === 'composite') {
+    rejectUnknown(obj, ['id', 'type', 'op', 'of', 'required'], field, sourcePath)
+    const op = requiredString(obj.op, `${field}.op`, sourcePath)
+    if (op !== 'all' && op !== 'any') fail(sourcePath, `${field}.op must be all or any`)
+    const of = stringArray(obj.of, `${field}.of`, sourcePath)
+    if (!of.length) fail(sourcePath, `${field}.of must list at least one evaluator id`)
+    return { id, type: 'composite', op, of, required }
+  }
+
+  fail(sourcePath, `${field}.type "${type}" is not a known evaluator type`)
 }
 
 function parseEvaluators(value: unknown, sourcePath: string): EvaluatorConfig[] {
@@ -298,8 +468,17 @@ function parseEvaluators(value: unknown, sourcePath: string): EvaluatorConfig[] 
     if (ids.has(e.id)) fail(sourcePath, `duplicate evaluator id "${e.id}"`)
     ids.add(e.id)
   }
-  if (!parsed.some((e) => e.type === 'command' && e.required)) {
-    fail(sourcePath, 'at least one required command evaluator is needed — a loop must have a deterministic gate')
+  if (!parsed.some((e) => (e.type === 'command' || e.type === 'test-report') && e.required)) {
+    fail(sourcePath, 'at least one required command or test-report evaluator is needed — a loop must have a deterministic gate')
+  }
+  for (const e of parsed) {
+    if (e.type !== 'composite') continue
+    for (const ref of e.of) {
+      if (!ids.has(ref)) fail(sourcePath, `composite "${e.id}" references unknown evaluator "${ref}"`)
+      if (ref === e.id) fail(sourcePath, `composite "${e.id}" cannot reference itself`)
+      const target = parsed.find((p) => p.id === ref)
+      if (target?.type === 'composite') fail(sourcePath, `composite "${e.id}" cannot reference another composite ("${ref}")`)
+    }
   }
   return parsed
 }

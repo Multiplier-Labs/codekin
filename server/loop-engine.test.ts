@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -143,6 +143,10 @@ class FakeEval implements LoopEvaluatorApi {
   runCommandEvaluator = async (config: CommandEvaluatorConfig): Promise<CommandEvaluationOutcome> => {
     this.commandCalls += 1
     return this.commandQueue.shift() ?? pass(config)
+  }
+  runTestReportEvaluator = async (config: { id: string; command: string | string[] }): Promise<CommandEvaluationOutcome> => {
+    this.commandCalls += 1
+    return this.commandQueue.shift() ?? pass(config as CommandEvaluatorConfig)
   }
   getDiffSummary = async () => this.diffSummary
   getDiff = async () => this.diffText
@@ -669,6 +673,204 @@ describe('LoopEngine', () => {
       const maker = host.get(store.getRun(run.id)!.makerSessionId!)!
       expect(maker.inputs.at(-1)).toContain('revise your plan')
       expect(maker.inputs.at(-1)).toContain('use the config-level fix')
+    })
+  })
+
+  describe('phase 3 evaluators', () => {
+    /** Recipe with an arbitrary evaluator block (YAML list entries). */
+    function recipeWithEvaluators(evaluatorYaml: string, mode = 'guarded'): LoopRecipe {
+      const md = `---
+apiVersion: codekin.dev/v2
+kind: LoopRecipe
+metadata: { id: ci-repair, name: Repair CI }
+agent: { provider: claude }
+evaluators:
+${evaluatorYaml}
+budgets: { turns: 6, costUsd: 10 }
+policy: { mode: ${mode} }
+---
+Fix the failing CI.
+`
+      return parseLoopRecipe(md, '/x/ci-repair.md', 'builtin')
+    }
+
+    it('diff-policy failure is fed back with the violations', async () => {
+      const recipe = recipeWithEvaluators(
+        ['  - { id: tests, type: command, command: npm test }', '  - { id: scope, type: diff-policy, forbidPaths: ["dist/**"] }'].join('\n'),
+      )
+      evalApi.changedFiles = ['src/x.ts', 'dist/bundle.js']
+      const runId = await startAndTurn(recipe)
+      const run = store.getRun(runId)!
+      expect(run.state).toBe('executing') // fed back, not completed
+      const maker = host.get(run.makerSessionId!)!
+      expect(maker.inputs.at(-1)).toContain('forbidden-path')
+      const scope = store.listEvaluations(runId).find((e) => e.evaluatorId === 'scope')
+      expect(scope).toMatchObject({ status: 'fail', classification: 'policy' })
+    })
+
+    it('artifact evaluator requires the file to exist in the worktree', async () => {
+      const recipe = recipeWithEvaluators(
+        ['  - { id: tests, type: command, command: npm test }', '  - { id: report, type: artifact, path: "out/report.md" }'].join('\n'),
+      )
+      const runId = await startAndTurn(recipe)
+      expect(store.getRun(runId)!.state).toBe('executing')
+      expect(host.get(store.getRun(runId)!.makerSessionId!)!.inputs.at(-1)).toContain('required artifact missing')
+
+      // Produce the artifact in the worktree → next cycle completes.
+      const cwd = store.getRun(runId)!.worktreePath!
+      mkdirSync(join(cwd, 'out'), { recursive: true })
+      const { writeFileSync } = await import('fs')
+      writeFileSync(join(cwd, 'out', 'report.md'), '# report body')
+      evalApi.diffSummary = ' 2 files changed'
+      host.emitResult(store.getRun(runId)!.makerSessionId!)
+      await settle()
+      expect(store.getRun(runId)!.outcome).toBe('completed')
+    })
+
+    it('human evaluator gates completion; waive completes with warnings; fail feeds back', async () => {
+      const recipe = recipeWithEvaluators(
+        ['  - { id: tests, type: command, command: npm test }', '  - { id: signoff, type: human, title: "Read well?" }'].join('\n'),
+      )
+      const runId = await startAndTurn(recipe)
+      expect(store.getRun(runId)!.state).toBe('awaiting_approval')
+      const [iv] = store.listInterventions(runId, 'pending')
+      expect(iv.purpose).toBe('human-evaluation:signoff')
+      expect(iv.options).toEqual(['pass', 'waive', 'fail'])
+      expect(finalizer.calls).toHaveLength(0)
+
+      // fail → note goes back to the maker
+      expect(await engine.resolveIntervention(iv.id, 'fail', 'tighten the wording')).toBe(true)
+      await settle()
+      const run = store.getRun(runId)!
+      expect(run.state).toBe('executing')
+      expect(host.get(run.makerSessionId!)!.inputs[0]).toContain('tighten the wording')
+
+      // next cycle → waive → completed with warnings
+      evalApi.diffSummary = ' 2 files changed'
+      host.emitResult(run.makerSessionId!)
+      await settle()
+      const [iv2] = store.listInterventions(runId, 'pending')
+      expect(await engine.resolveIntervention(iv2.id, 'waive')).toBe(true)
+      await settle()
+      const done = store.getRun(runId)!
+      expect(done.outcome).toBe('completed_with_warnings')
+      expect(done.stateReason).toContain('signoff')
+    })
+
+    it('a required composite over a failed optional evaluator blocks completion', async () => {
+      const recipe = recipeWithEvaluators(
+        [
+          '  - { id: tests, type: command, command: npm test }',
+          '  - { id: lint, type: command, command: npm run lint, required: false }',
+          '  - { id: gate, type: composite, op: all, of: [tests, lint] }',
+        ].join('\n'),
+      )
+      const tests = recipe.evaluators[0] as CommandEvaluatorConfig
+      const lint = recipe.evaluators[1] as CommandEvaluatorConfig
+      evalApi.commandQueue = [pass(tests), fail(lint, 'lint-fp')]
+      const runId = await startAndTurn(recipe)
+      const run = store.getRun(runId)!
+      expect(run.state).toBe('executing')
+      expect(host.get(run.makerSessionId!)!.inputs.at(-1)).toContain('composite "gate"')
+      expect(store.listEvaluations(runId).find((e) => e.evaluatorId === 'gate')?.status).toBe('fail')
+
+      evalApi.diffSummary = ' 2 files changed'
+      host.emitResult(run.makerSessionId!)
+      await settle()
+      expect(store.getRun(runId)!.outcome).toBe('completed')
+    })
+
+    describe('ci monitoring', () => {
+      function ciRecipe(): LoopRecipe {
+        return recipeWithEvaluators(
+          ['  - { id: tests, type: command, command: npm test }', '  - { id: checks, type: ci, checks: ["test-and-lint"], timeout: 1m }'].join('\n'),
+        )
+      }
+
+      it('green checks finish the run after finalize', async () => {
+        const ci = { checkStatus: vi.fn(async () => [{ name: 'test-and-lint', status: 'pass' as const }]) }
+        engine = new LoopEngine(host, store, new LoopArtifactStore(join(root, 'artifacts')), evalApi, finalizer, ci)
+        engine.ciPollMs = 5
+        const runId = await startAndTurn(ciRecipe())
+        await settle()
+        const run = store.getRun(runId)!
+        expect(run.outcome).toBe('completed')
+        expect(run.stateReason).toContain('CI green')
+        expect(store.listEvaluations(runId).find((e) => e.evaluatorId === 'checks')?.status).toBe('pass')
+        expect(ci.checkStatus).toHaveBeenCalled()
+      })
+
+      it('a red required check feeds back into the loop and the next pass completes', async () => {
+        let calls = 0
+        const ci = {
+          checkStatus: vi.fn(async () => [{ name: 'test-and-lint', status: (calls++ === 0 ? 'fail' : 'pass') as 'fail' | 'pass' }]),
+        }
+        engine = new LoopEngine(host, store, new LoopArtifactStore(join(root, 'artifacts')), evalApi, finalizer, ci)
+        engine.ciPollMs = 5
+        const runId = await startAndTurn(ciRecipe())
+        await settle()
+
+        // Red CI → maker restarted with the failing check names.
+        const run = store.getRun(runId)!
+        expect(run.state).toBe('executing')
+        const maker = host.get(run.makerSessionId!)!
+        expect(maker.inputs[0]).toContain('Remote CI checks failed')
+        expect(maker.inputs[0]).toContain('test-and-lint')
+
+        evalApi.diffSummary = ' 2 files changed'
+        host.emitResult(run.makerSessionId!)
+        await settle(10)
+        expect(store.getRun(runId)!.outcome).toBe('completed')
+        expect(finalizer.calls).toHaveLength(2)
+      })
+
+      it('pending checks past the timeout ask the operator; finish yields a qualified outcome', async () => {
+        const ci = { checkStatus: vi.fn(async () => [{ name: 'test-and-lint', status: 'pending' as const }]) }
+        engine = new LoopEngine(host, store, new LoopArtifactStore(join(root, 'artifacts')), evalApi, finalizer, ci)
+        engine.ciPollMs = 5
+        const recipe = recipeWithEvaluators(
+          ['  - { id: tests, type: command, command: npm test }', '  - { id: checks, type: ci, timeout: 1s }'].join('\n'),
+        )
+        const runId = await startAndTurn(recipe)
+        await new Promise((r) => setTimeout(r, 1100))
+        await settle()
+
+        expect(store.getRun(runId)!.state).toBe('awaiting_approval')
+        const [iv] = store.listInterventions(runId, 'pending')
+        expect(iv.purpose).toBe('ci-timeout')
+        expect(await engine.resolveIntervention(iv.id, 'finish')).toBe(true)
+        expect(store.getRun(runId)!.outcome).toBe('completed_with_warnings')
+      })
+
+      it('recovery re-enters CI monitoring after a restart', async () => {
+        const ci = { checkStatus: vi.fn(async () => [{ name: 'test-and-lint', status: 'pass' as const }]) }
+        const slowCi = { checkStatus: vi.fn(async () => [{ name: 'test-and-lint', status: 'pending' as const }]) }
+        engine = new LoopEngine(host, store, new LoopArtifactStore(join(root, 'artifacts')), evalApi, finalizer, slowCi)
+        engine.ciPollMs = 5
+        const runId = await startAndTurn(ciRecipe())
+        await settle()
+        expect(store.getRun(runId)!.state).toBe('monitoring_ci')
+
+        const freshEngine = new LoopEngine(host, store, new LoopArtifactStore(join(root, 'artifacts')), evalApi, finalizer, ci)
+        freshEngine.ciPollMs = 5
+        const summary = await freshEngine.recoverAll()
+        expect(summary.resumed).toContain(runId)
+        await settle(10)
+        expect(store.getRun(runId)!.outcome).toBe('completed')
+      })
+    })
+
+    it('run detail scorecard covers every criterion including pending ones', async () => {
+      const recipe = recipeWithEvaluators(
+        ['  - { id: tests, type: command, command: npm test }', '  - { id: signoff, type: human, title: "OK?" }'].join('\n'),
+      )
+      const tests = recipe.evaluators[0] as CommandEvaluatorConfig
+      evalApi.commandQueue = [fail(tests)]
+      const runId = await startAndTurn(recipe)
+      // Scorecard is computed by the routes layer from the same data; verify the parts here.
+      const evaluations = store.listEvaluations(runId)
+      expect(evaluations.find((e) => e.evaluatorId === 'tests')?.status).toBe('fail')
+      expect(evaluations.find((e) => e.evaluatorId === 'signoff')).toBeUndefined() // pending
     })
   })
 

@@ -21,20 +21,30 @@ preflight → (plan) → act → evaluate → (review) → decide → … → fi
 
 - **act** — a maker session (claude / codex / opencode) works in an isolated
   git worktree on the run's branch.
-- **evaluate** — command evaluators (your own build/test/lint commands, judged
-  by exit code) run in order after every maker turn. Failures are fed back to
-  the maker; transient environment errors (timeout, spawn failure) retry per
-  the recipe's `retry` policy.
+- **evaluate** — deterministic evaluators run in recipe order after every
+  maker turn: `command` (exit code), `test-report` (same, plus failing tests
+  parsed from vitest/TAP/JUnit-XML output — better feedback, stabler
+  no-progress fingerprints), `diff-policy` (change-size caps, forbidden
+  paths, secret scan, test-weakening heuristics), and `artifact` (a file the
+  run must produce). Failures are fed back to the maker; transient
+  environment errors retry per the recipe's `retry` policy.
 - **review** — rubric evaluators put an independent model — always a
   *different provider* than the maker — over the diff. It answers with
   `approve` / `request_changes` / `escalate`; an unparseable verdict escalates
-  rather than silently passing.
+  rather than silently passing. `human` evaluators then ask for an explicit
+  sign-off (pass / waive / fail — failing sends your note back to the agent),
+  and `composite` evaluators fold other results (`all`/`any`).
 - **decide** — deterministic code, not the model. The maker never decides
   whether its own acceptance criteria passed. The decision order is: user
   cancel/pause → budgets → protected paths → no-change nudge → evaluation →
   no-progress detection → review → completion.
 - **finalize** — Codekin itself commits the verified tree and, per the
   completion action, pushes and opens a PR. Auto-merge does not exist.
+- **monitoring_ci** — with a `ci` evaluator, completion waits for the named
+  remote checks at the PR. A red required check re-enters the loop (the maker
+  investigates, fixes, and the PR is updated) within budget; checks that
+  never conclude escalate to the operator (keep waiting / finish qualified /
+  stop).
 
 ## Durability
 
@@ -52,7 +62,9 @@ turn. On restart Codekin reconciles instead of failing runs:
 Execution **state** and terminal **outcome** are separate fields: a run ends
 `done` + `completed` / `completed_with_warnings` / `failed` / `canceled`.
 Waived or failed-optional evaluators qualify the outcome — a run never shows
-an unqualified green with a skipped check.
+an unqualified green with a skipped check. The run detail carries a
+**completion scorecard**: every criterion in the frozen recipe with its
+latest status (`pending` when not yet evaluated) and its evidence artifacts.
 
 ## Controls
 
@@ -125,9 +137,10 @@ what a past run claims it executed. Recipes load from:
   (`ci-autorepair`, `coverage-increase`, `dependency-upgrade`);
 - per-repo overrides: `{repo}/.codekin/loops/*.md` (same id wins).
 
-Evaluator types beyond `command` and `rubric` (test-report, diff-policy,
-artifact, ci, human, composite) arrive with the Phase 3 evaluator platform
-and are rejected at validation until then.
+All spec §7 evaluator types are available: `command`, `test-report`,
+`diff-policy`, `artifact`, `rubric`, `human`, `ci`, and `composite`. Every
+recipe needs at least one required `command` or `test-report` evaluator — the
+deterministic gate.
 
 ## Evidence
 

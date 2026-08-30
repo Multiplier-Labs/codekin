@@ -35,6 +35,7 @@ export type LoopRunState =
   | 'paused'
   | 'canceling'
   | 'finalizing'
+  | 'monitoring_ci'
   | 'recovering'
   | 'done'
 
@@ -75,7 +76,7 @@ export interface LoopStage {
   id: string
   runId: string
   stageIndex: number
-  kind: 'preflight' | 'plan' | 'act' | 'evaluate' | 'review' | 'finalize'
+  kind: 'preflight' | 'plan' | 'act' | 'evaluate' | 'review' | 'finalize' | 'ci'
   status: 'running' | 'succeeded' | 'failed' | 'canceled'
   startedAt: string
   completedAt: string | null
@@ -132,6 +133,15 @@ export interface LoopEvent<T = unknown> {
   payload: T
 }
 
+export interface LoopScorecardEntry {
+  id: string
+  type: string
+  required: boolean
+  status: 'pending' | 'pass' | 'fail' | 'warning' | 'error' | 'waived'
+  summary: string | null
+  evidenceArtifactIds: string[]
+}
+
 export interface LoopRunDetail extends LoopRun {
   /** The recipe frozen at run start (subset the UI renders). */
   recipe: {
@@ -143,6 +153,8 @@ export interface LoopRunDetail extends LoopRun {
   }
   stages: LoopStage[]
   evaluations: LoopEvaluation[]
+  /** Every criterion in the frozen recipe with its latest result. */
+  scorecard: LoopScorecardEntry[]
   interventions: LoopIntervention[]
   artifacts: LoopArtifact[]
   lastSequence: number
