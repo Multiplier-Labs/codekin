@@ -309,6 +309,21 @@ describe('trigger dispatch', () => {
       await settle()
       expect(runs).toHaveLength(2)
     })
+
+    it('unregisterTickTask stops further runs', async () => {
+      const runs: number[] = []
+      engine.registerTickTask('temp', 60_000, () => { runs.push(1) })
+
+      const t0 = dueAt(0)
+      engine.dispatchTick(t0)
+      await settle()
+      expect(runs).toHaveLength(1)
+
+      engine.unregisterTickTask('temp')
+      engine.dispatchTick(new Date(t0.getTime() + 5 * 60_000))
+      await settle()
+      expect(runs).toHaveLength(1)
+    })
   })
 
   it('writes a heartbeat on every tick', () => {

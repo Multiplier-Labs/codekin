@@ -999,6 +999,11 @@ export class WorkflowEngine extends EventEmitter {
     this.tickTasks.set(name, { intervalMs, fn, lastRunAt: 0, running: false })
   }
 
+  /** Remove a registered tick task. An in-flight run finishes; no further runs start. */
+  unregisterTickTask(name: string) {
+    this.tickTasks.delete(name)
+  }
+
   /**
    * Durably enqueue a signal. With a `dedupeKey`, an already-pending (or
    * in-flight) signal carrying the same key absorbs the enqueue — the caller

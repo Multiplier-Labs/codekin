@@ -166,6 +166,24 @@ describe('OrchestratorOutbox', () => {
     expect(raw).toEqual([])
   })
 
+  it('rides the engine tick when an engine is provided, and unregisters on stop', () => {
+    const outbox = new OrchestratorOutbox(filePath)
+    const sessions = makeSessions()
+    const engine = { registerTickTask: vi.fn(), unregisterTickTask: vi.fn() }
+
+    outbox.startFlusher(sessions, 1234, engine)
+    expect(engine.registerTickTask).toHaveBeenCalledWith('orchestrator-outbox-flush', 1234, expect.any(Function))
+
+    // No interval was created — the tick task is the only driver.
+    outbox.enqueue({ label: 'INFO', title: 't', body: 'b' })
+    const tickFn = engine.registerTickTask.mock.calls[0][2] as () => void
+    tickFn()
+    expect(sessions.sendInput).toHaveBeenCalledTimes(1)
+
+    outbox.stopFlusher()
+    expect(engine.unregisterTickTask).toHaveBeenCalledWith('orchestrator-outbox-flush')
+  })
+
   it('startFlusher periodically flushes and stopFlusher stops it', () => {
     vi.useFakeTimers()
     try {
