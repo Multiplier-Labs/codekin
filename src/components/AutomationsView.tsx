@@ -19,15 +19,16 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { IconSparkles, IconRefresh, IconAlertTriangle, IconListDetails, IconExternalLink, IconRobotFace } from '@tabler/icons-react'
+import { IconSparkles, IconRefresh, IconAlertTriangle, IconListDetails, IconExternalLink, IconRobotFace, IconServer } from '@tabler/icons-react'
 import { WorkflowsView } from './WorkflowsView'
 import { LoopRunsView } from './LoopRunsView'
+import { DeploymentsView } from './DeploymentsView'
 import { listGoalRuns, type GoalRun } from '../lib/goalRunApi'
 import { listUnifiedRuns, type UnifiedRun, type UnifiedRunStatus } from '../lib/runsApi'
 import { subscribeWorkflowEvents } from '../lib/workflowEvents'
 import { formatTime } from '../lib/workflowHelpers'
 
-export type AutomationsTab = 'all' | 'workflows' | 'loops'
+export type AutomationsTab = 'all' | 'workflows' | 'loops' | 'deployments'
 
 interface Props {
   /** Auth token for REST API calls. */
@@ -42,6 +43,7 @@ const TABS: { id: AutomationsTab; label: string; icon: typeof IconSparkles }[] =
   { id: 'all', label: 'All runs', icon: IconListDetails },
   { id: 'workflows', label: 'Workflows', icon: IconSparkles },
   { id: 'loops', label: 'Loops', icon: IconRefresh },
+  { id: 'deployments', label: 'Deployments', icon: IconServer },
 ]
 
 /** Badge classes for the unified status vocabulary. */
@@ -238,6 +240,8 @@ export function AutomationsView({ token, initialTab, onNavigateToSession }: Prop
           </div>
         ) : tab === 'workflows' ? (
           <WorkflowsView token={token} onNavigateToSession={onNavigateToSession} />
+        ) : tab === 'deployments' ? (
+          <DeploymentsView token={token} />
         ) : (
           <LoopRunsView
             key={focusRunId ?? 'loops'}
