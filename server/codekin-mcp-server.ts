@@ -123,7 +123,7 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
       description: 'List background runs (workflows and loops) newest-first in one unified shape. Filter by engine or status.',
       inputSchema: {
         engine: z.enum(['workflow', 'loop']).optional(),
-        status: z.string().optional().describe('e.g. running, blocked, awaiting_human, succeeded, failed'),
+        status: z.string().optional().describe('e.g. running, blocked, paused, succeeded, failed'),
         limit: z.number().int().positive().optional(),
       },
     },
@@ -134,12 +134,12 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
     'start_loop',
     {
       description:
-        'Start a goal run (act → verify → continue loop) from a loop template. The loop iterates until its verify commands pass, then lands the change per the template\'s completion policy.',
+        'Start a loop run from a recipe (act → evaluate → continue loop). The run iterates until its evaluators pass, then lands the change per the recipe\'s completion action.',
       inputSchema: {
-        kind: z.string().describe('Loop template kind, e.g. ci-autorepair'),
+        recipeId: z.string().describe('Loop recipe id, e.g. ci-autorepair'),
         repo: z.string().describe('Absolute repo path'),
-        branch: z.string().describe('Branch for the maker to work on'),
-        goal: z.string().optional().describe('Override the template\'s default goal text'),
+        branch: z.string().optional().describe('Branch for the agent to work on (default: generated loop/<recipe>-<timestamp>)'),
+        goal: z.string().optional().describe('Override the recipe\'s default outcome text'),
       },
     },
     (args) => run(() => api.startLoop(args)),
@@ -147,7 +147,7 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
 
   server.registerTool(
     'abort_run',
-    { description: 'Abort an in-flight goal run.', inputSchema: { runId: z.string() } },
+    { description: 'Cancel an in-flight loop run.', inputSchema: { runId: z.string() } },
     ({ runId }) => run(() => api.abortRun(runId)),
   )
 

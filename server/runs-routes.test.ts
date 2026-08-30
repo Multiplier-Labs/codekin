@@ -3,7 +3,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import express from 'express'
 import type { Server } from 'http'
 import type { AddressInfo } from 'net'
-import { GoalRunStore } from './goal-run-store.js'
+import { LoopStore } from './loop-store.js'
+import { parseLoopRecipe } from './loop-recipe.js'
 import type { WorkflowEngine, WorkflowRun } from './workflow-engine.js'
 import { createRunsRouter } from './runs-routes.js'
 import type { UnifiedRun } from './unified-runs.js'
@@ -25,18 +26,28 @@ const fakeEngine = { listRuns: () => [workflowRun] } as unknown as WorkflowEngin
 
 let server: Server
 let baseUrl = ''
-let store: GoalRunStore
+let store: LoopStore
+
+const recipe = parseLoopRecipe(
+  `---
+apiVersion: codekin.dev/v2
+kind: LoopRecipe
+metadata: { id: ci-autorepair, name: CI Autorepair }
+agent: { provider: claude }
+evaluators:
+  - { id: tests, type: command, command: npm test }
+budgets: { turns: 5, costUsd: 2 }
+---
+Green checks.
+`,
+  '/x.md',
+  'builtin',
+)
 
 beforeAll(async () => {
-  store = new GoalRunStore(':memory:')
-  const run = store.createRun({
-    kind: 'ci-autorepair',
-    goal: 'g',
-    spec: { maker: { provider: 'claude' }, checker: null, verify: ['npm test'], maxTurns: 5, maxCostUsd: 2, completionPolicy: 'pr' },
-    repo: '/repo',
-    branch: 'fix/ci',
-  })
-  store.patchRun(run.id, { status: 'aborted' })
+  store = new LoopStore(':memory:')
+  const run = store.createRun({ recipe, goal: 'g', repo: '/repo', branch: 'loop/ci', provider: 'claude' })
+  store.patchRun(run.id, { state: 'done', outcome: 'canceled' })
 
   const app = express()
   app.use(
@@ -71,7 +82,7 @@ describe('GET /api/runs', () => {
     expect(res.status).toBe(401)
   })
 
-  it('returns both engines merged, with loop aborted canonicalized', async () => {
+  it('returns both engines merged, with the loop outcome folded to lifecycle status', async () => {
     const res = await get()
     const { runs } = (await res.json()) as { runs: UnifiedRun[] }
     expect(runs).toHaveLength(2)
@@ -94,7 +105,7 @@ describe('GET /api/runs', () => {
     const res = await get('?status=canceled')
     const { runs } = (await res.json()) as { runs: UnifiedRun[] }
     expect(runs).toHaveLength(1)
-    expect(runs[0].rawStatus).toBe('aborted')
+    expect(runs[0].rawStatus).toBe('canceled')
   })
 
   it('serves loop runs alone when the workflow engine is unavailable', async () => {

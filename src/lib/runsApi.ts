@@ -14,6 +14,7 @@ export type UnifiedRunStatus =
   | 'checking'
   | 'blocked'
   | 'awaiting_human'
+  | 'paused'
   | 'succeeded'
   | 'failed'
   | 'canceled'

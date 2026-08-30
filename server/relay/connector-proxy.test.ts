@@ -43,10 +43,10 @@ describe('checkProxyRequest', () => {
     expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/runs?limit=100' })).allowed).toBe(true)
     expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/workflows/runs?limit=50' })).allowed).toBe(true)
     expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/workflows/config' })).allowed).toBe(true)
-    expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/goal-runs/templates' })).allowed).toBe(true)
+    expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/loops/recipes' })).allowed).toBe(true)
     expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/workflows/runs' })).allowed).toBe(true)
     expect(checkProxyRequest(asOwner({ method: 'DELETE', path: '/api/workflows/config/repos/r1' })).allowed).toBe(true)
-    expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/goal-runs/runs/g1/abort' })).allowed).toBe(true)
+    expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/loops/runs/g1/cancel' })).allowed).toBe(true)
   })
 
   it('refuses mutations on read-only prefixes', () => {

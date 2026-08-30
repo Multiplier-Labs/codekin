@@ -1,7 +1,7 @@
 /**
  * Shared tool allowlists for autonomous agent sessions.
  *
- * Both orchestrator child sessions and goal-run maker sessions run headless:
+ * Both orchestrator child sessions and loop-run maker sessions run headless:
  * a tool call that falls through to manual approval blocks the session until a
  * human notices. These curated lists cover standard dev operations without
  * granting arbitrary shell access, so a headless agent can do real work while
@@ -39,7 +39,7 @@ export const AGENT_ALLOWED_TOOLS = [
 ]
 
 /**
- * Allowed tools for review-only agent sessions (e.g. a goal-run checker).
+ * Allowed tools for review-only agent sessions (e.g. a loop-run rubric reviewer).
  * Reading and inspection only — a reviewer that suddenly needs Write has left
  * its mandate, and that is exactly the moment a human should be asked.
  */

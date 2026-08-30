@@ -876,10 +876,10 @@ export class SessionManager {
           session._leaveGraceTimer = null
           // Re-check: if still no clients after grace period, auto-deny
           if (session.clients.size === 0) {
-            // Agent sessions (orchestrator children and goal-run maker/checker
+            // Agent sessions (orchestrator children and loop-run maker/reviewer
             // sessions) are NOT auto-denied: both watchers subscribe to
             // onSessionPrompt — the orchestrator notifies its parent and can
-            // respond via the API; the goal-run controller marks its run
+            // respond via the API; the loop engine marks its run
             // `blocked` in the ledger. A user briefly opening and closing the
             // session's tab must not kill its pending approvals. The 5-min
             // approval timeout in PromptRouter remains the backstop.

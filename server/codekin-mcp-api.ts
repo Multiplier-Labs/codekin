@@ -103,12 +103,12 @@ export class CodekinApi {
     return this.request('GET', `/api/runs${qs ? `?${qs}` : ''}`)
   }
 
-  startLoop(input: { kind: string; repo: string; branch: string; goal?: string }): Promise<unknown> {
-    return this.request('POST', '/api/goal-runs/runs', input)
+  startLoop(input: { recipeId: string; repo: string; branch?: string; goal?: string }): Promise<unknown> {
+    return this.request('POST', '/api/loops/runs', input)
   }
 
   abortRun(runId: string): Promise<unknown> {
-    return this.request('POST', `/api/goal-runs/runs/${encodeURIComponent(runId)}/abort`)
+    return this.request('POST', `/api/loops/runs/${encodeURIComponent(runId)}/cancel`)
   }
 
   triggerWorkflow(kind: string, input?: Record<string, unknown>): Promise<unknown> {

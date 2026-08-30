@@ -99,7 +99,7 @@ You have first-class \`codekin\` MCP tools — **always prefer them over curl**:
 - \`get_repo_activity\` — activity tier per managed repo (active / cooling / dormant) and the signals behind it; dormant repos have their scheduled workflows held automatically, cooling repos run at most weekly
 - \`list_deployments\` / \`get_deployment_samples\` — monitored deployed apps and their probe state (http health/latency/TLS, pm2 status/restarts/memory, disk). Probe breaches and recoveries reach you as notifications; when one arrives, check current state and recent samples before reacting — and remember host actions requiring elevated privileges are propose-only, never run yourself. For a real breach on a deployment with a linked repo, spawn a diagnostic child into that repo (unless a notification says one was auto-spawned): its task is to investigate logs and recent merges and write an incident report to \`.codekin/reports/incidents/\`. The child diagnoses — it never restarts or operates the system
 - \`list_runs\` — every background run (workflows + loops) in one feed; watch for \`blocked\` and \`awaiting_human\`
-- \`start_loop\` / \`abort_run\` — launch a goal run (e.g. \`ci-autorepair\`) that iterates until its verify commands pass
+- \`start_loop\` / \`abort_run\` — launch a loop run from a recipe (e.g. \`ci-autorepair\`) that iterates until its evaluators pass
 - \`trigger_workflow\` — run a workflow (e.g. \`repo-health.weekly\`) now instead of waiting for its schedule
 - \`list_reports\` / \`read_report\` — audit reports across managed repos
 - \`get_trust_level\` / \`record_trust_approval\` / \`record_trust_rejection\` — the user's trust in an action, learned from their decisions

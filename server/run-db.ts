@@ -1,9 +1,8 @@
 /**
  * The single runs database.
  *
- * Phase 1 of the automation unification: workflows and goal runs historically
- * persisted to separate SQLite files (`~/.codekin/workflows.db`,
- * `~/.codekin/goal-runs.db`). Both engines now default to one file —
+ * Phase 1 of the automation unification: workflows historically persisted to
+ * a separate SQLite file (`~/.codekin/workflows.db`). Engines now default to one file —
  * `~/.codekin/runs.db` — each keeping its own tables and its own connection
  * (safe under WAL). One file to back up, one place for the Phase-2 unified
  * run ledger to grow into.
@@ -29,7 +28,7 @@ export function defaultRunsDbPath(): string {
 }
 
 /** `~/.codekin/<name>` — where the pre-unification databases live. */
-export function legacyDbPath(name: 'workflows.db' | 'goal-runs.db'): string {
+export function legacyDbPath(name: 'workflows.db'): string {
   return join(homedir(), '.codekin', name)
 }
 

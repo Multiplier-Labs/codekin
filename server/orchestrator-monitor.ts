@@ -10,7 +10,7 @@ import { readdirSync, statSync, existsSync } from 'fs'
 import { join } from 'path'
 import type { SessionManager } from './session-manager.js'
 import type { WorkflowEngine, WorkflowEvent } from './workflow-engine.js'
-import type { GoalRunEvent } from './goal-run-store.js'
+import type { LoopEvent } from './loop-store.js'
 import { scanRepoReports } from './orchestrator-reports.js'
 import { OrchestratorMemory } from './orchestrator-memory.js'
 import { runAgingCycle, getPendingOutcomeAssessments } from './orchestrator-learning.js'
@@ -39,8 +39,8 @@ export interface OrchestratorNotification {
 
 const POLL_INTERVAL_MS = 15 * 60 * 1000  // 15 minutes
 const AGING_INTERVAL_MS = 6 * 60 * 60 * 1000  // aging cycle checked every 6 hours
-/** Cap on the goal-run notification dedup set (oldest entries dropped). */
-const MAX_NOTED_GOAL_RUN_STATES = 500
+/** Cap on the loop-event notification dedup set (oldest entries dropped). */
+const MAX_NOTED_LOOP_EVENTS = 500
 
 export class OrchestratorMonitor {
   private sessions: SessionManager
@@ -48,8 +48,8 @@ export class OrchestratorMonitor {
   private agingTimer: ReturnType<typeof setInterval> | null = null
   private notifications: OrchestratorNotification[] = []
   private seenReports = new Set<string>()
-  /** (runId:status) pairs already notified — see handleGoalRunEvent. */
-  private notedGoalRunStates = new Set<string>()
+  /** (runId:event) keys already notified — see handleLoopEvent. */
+  private notedLoopEvents = new Set<string>()
   private memory: OrchestratorMemory | null = null
   private engine: WorkflowEngine | null = null
   /** True once a stall alert has been sent — reset when the heartbeat recovers. */
@@ -331,48 +331,58 @@ export class OrchestratorMonitor {
   }
 
   /**
-   * Goal-run (loop) events, bridged from the GoalRunStore listener in
-   * ws-server. The supervisor cares about exactly the states where a run
-   * stops making progress on its own: `blocked` (a tool call waiting on
-   * approval — actionable right now via pending_prompts/respond_to_prompt),
-   * `awaiting_human` (escalated), and `failed`.
+   * Loop events, bridged from the LoopStore listener in ws-server. The
+   * supervisor cares about exactly the moments where a run stops making
+   * progress on its own:
    *
-   * Deduped per (runId, status): `blocked` re-emits on every prompt
-   * re-broadcast, and one nudge per state is enough — the first notification
-   * already points at pending_prompts, which lists whatever is waiting.
+   *   - `intervention_created` — a pending human decision (approval, budget
+   *     extension, or escalation);
+   *   - `session_blocked` — a maker/reviewer tool call waiting on approval,
+   *     actionable right now via pending_prompts/respond_to_prompt;
+   *   - `run_completed` with outcome `failed`.
+   *
+   * Deduped per (runId, event key): `session_blocked` re-emits per prompt,
+   * and one nudge per situation is enough.
    */
-  handleGoalRunEvent(event: GoalRunEvent): void {
-    if (event.eventType !== 'run_status' || !event.status) return
-    if (event.status !== 'blocked' && event.status !== 'awaiting_human' && event.status !== 'failed') return
-    const key = `${event.runId}:${event.status}`
-    if (this.notedGoalRunStates.has(key)) return
-    this.notedGoalRunStates.add(key)
-    if (this.notedGoalRunStates.size > MAX_NOTED_GOAL_RUN_STATES) {
-      for (const k of this.notedGoalRunStates) {
-        this.notedGoalRunStates.delete(k)
-        if (this.notedGoalRunStates.size <= MAX_NOTED_GOAL_RUN_STATES) break
+  handleLoopEvent(event: LoopEvent): void {
+    const payload = (event.payload ?? {}) as Record<string, unknown>
+    let key: string
+    let notification: { severity: 'action' | 'alert'; title: string; body: string }
+
+    if (event.type === 'intervention_created') {
+      key = `${event.runId}:intervention:${String(payload.interventionId ?? '')}`
+      notification = {
+        severity: 'action',
+        title: `Loop run needs a decision: ${String(payload.title ?? 'intervention pending')}`,
+        body: `Loop run ${event.runId} is waiting on a decision (${String(payload.purpose ?? 'intervention')}). Use list_runs to inspect it and tell the user what is needed.`,
       }
+    } else if (event.type === 'session_blocked') {
+      key = `${event.runId}:blocked:${String(payload.requestId ?? payload.toolName ?? '')}`
+      notification = {
+        severity: 'action',
+        title: `Loop run blocked`,
+        body: `Loop run ${event.runId} has a session waiting on a tool approval or question. Use pending_prompts to see it and respond_to_prompt to unblock it.`,
+      }
+    } else if (event.type === 'run_completed' && payload.outcome === 'failed') {
+      key = `${event.runId}:failed`
+      notification = {
+        severity: 'alert',
+        title: `Loop run failed`,
+        body: `Loop run ${event.runId} failed: ${String(payload.reason ?? 'see the run events')}. Use list_runs to inspect it.`,
+      }
+    } else {
+      return
     }
 
-    if (event.status === 'blocked') {
-      this.addNotification({
-        severity: 'action',
-        title: `Loop run blocked: ${event.kind}`,
-        body: `Goal run ${event.runId} is waiting on a tool approval or question. Use pending_prompts to see it and respond_to_prompt to unblock it.`,
-      })
-    } else if (event.status === 'awaiting_human') {
-      this.addNotification({
-        severity: 'action',
-        title: `Loop run needs a decision: ${event.kind}`,
-        body: `Goal run ${event.runId} escalated to a human checkpoint. Use list_runs to inspect it and tell the user what happened.`,
-      })
-    } else {
-      this.addNotification({
-        severity: 'alert',
-        title: `Loop run failed: ${event.kind}`,
-        body: `Goal run ${event.runId} failed (budget exhausted, error, or restart). Use list_runs to inspect its evidence ledger.`,
-      })
+    if (this.notedLoopEvents.has(key)) return
+    this.notedLoopEvents.add(key)
+    if (this.notedLoopEvents.size > MAX_NOTED_LOOP_EVENTS) {
+      for (const k of this.notedLoopEvents) {
+        this.notedLoopEvents.delete(k)
+        if (this.notedLoopEvents.size <= MAX_NOTED_LOOP_EVENTS) break
+      }
     }
+    this.addNotification(notification)
   }
 
   /** Add a notification. */

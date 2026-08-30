@@ -38,9 +38,10 @@ import { runDependencyAuditSweep } from './dependency-audit.js'
 import { generate404Page, generate500Page } from './error-page.js'
 import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
-import { GoalRunStore } from './goal-run-store.js'
-import { GoalRunController } from './goal-run-controller.js'
-import { createGoalRunRouter } from './goal-run-routes.js'
+import { LoopStore } from './loop-store.js'
+import { LoopEngine } from './loop-engine.js'
+import { LoopArtifactStore } from './loop-artifacts.js'
+import { createLoopRouter } from './loop-routes.js'
 import { createRunsRouter } from './runs-routes.js'
 import { RunStore } from './run-store.js'
 import { HARNESSES } from './harness-registry.js'
@@ -61,7 +62,7 @@ import { createOrchestratorRouter } from './orchestrator-routes.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, isOrchestratorSession, getOrCreateOrchestratorId } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
 import { getOrchestratorOutbox } from './orchestrator-outbox.js'
-import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR } from './config.js'
+import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR, DATA_DIR } from './config.js'
 
 // ---------------------------------------------------------------------------
 // CLI args (legacy bare-metal compat) and auth setup
@@ -361,24 +362,26 @@ const orchestratorMonitorRef: { current: OrchestratorMonitor | null } = { curren
 // breach handler can spawn diagnostic children through the same instance.
 const childManager = new OrchestratorChildManager(sessions, { runStore })
 app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, childManager, runStore))
-// Goal Run (loop) router — durable act→verify→continue loops with an evidence ledger.
-const goalRunStore = new GoalRunStore()
-const goalRunController = new GoalRunController(sessions, goalRunStore)
-// Runs left non-terminal by the previous process can never progress — fail them
-// honestly at boot instead of leaving them stuck in `running` forever.
-const interruptedGoalRuns = goalRunController.failInterrupted()
-if (interruptedGoalRuns.length) {
-  console.log(`[goal-runs] Failed ${interruptedGoalRuns.length} run(s) interrupted by restart: ${interruptedGoalRuns.join(', ')}`)
-}
-app.use('/api/goal-runs', createGoalRunRouter(verifyToken, extractToken, goalRunStore, goalRunController))
-// Unified run read model — both engines' runs in one shape for the Automations feed.
+// Loops 2.0 — durable, event-sourced outcome loops (docs/LOOPS-REWRITE-SPEC.md).
+const loopStore = new LoopStore()
+const loopArtifacts = new LoopArtifactStore(join(DATA_DIR, 'loop-artifacts'))
+const loopEngine = new LoopEngine(sessions, loopStore, loopArtifacts)
+// Reconcile runs interrupted by the restart: durable wait states stay waiting,
+// in-flight runs resume at a stage boundary in their surviving worktree.
+void loopEngine.recoverAll().then(({ resumed, waiting, failed }) => {
+  if (resumed.length || waiting.length || failed.length) {
+    console.log(`[loops] Recovery: resumed ${resumed.length}, left waiting ${waiting.length}, failed ${failed.length}`)
+  }
+}).catch((err) => console.error('[loops] Recovery failed:', err))
+app.use('/api/loops', createLoopRouter(verifyToken, extractToken, loopStore, loopEngine, loopArtifacts))
+// Unified run read model — all engines' runs in one shape for the Automations feed.
 app.use('/api/runs', createRunsRouter(verifyToken, extractToken, () => {
   try {
     return getWorkflowEngine()
   } catch {
     return null
   }
-}, goalRunStore, runStore))
+}, loopStore, runStore))
 
 // --- SPA fallback: serve index.html for non-API routes (client-side routing) ---
 if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
@@ -657,19 +660,22 @@ server.listen(port, '0.0.0.0', () => {
       }
     })
 
-    // Broadcast goal-run (loop) events on the same channel, tagged with
-    // engine:'loop' so clients can tell the two apart. One push stream for
-    // all background runs. The orchestrator monitor rides the same listener
-    // so the supervisor hears blocked/awaiting_human/failed loops.
-    goalRunStore.setEventListener((event) => {
-      orchestratorMonitorRef.current?.handleGoalRunEvent(event)
+    // Broadcast loop events on the same channel, tagged with engine:'loop' so
+    // clients can tell the engines apart. The WS message is a ping — the
+    // append-only event log behind GET /api/loops/runs/:id/events is the
+    // source of truth a client reconciles against (resume with ?after=seq).
+    // The orchestrator monitor rides the same listener so the supervisor
+    // hears interventions, blocked sessions, and failures.
+    loopStore.setEventListener((event) => {
+      orchestratorMonitorRef.current?.handleLoopEvent(event)
+      const run = loopStore.getRun(event.runId)
       const msg: WsServerMessage = {
         type: 'workflow_event',
         engine: 'loop',
-        eventType: event.eventType,
+        eventType: event.type,
         runId: event.runId,
-        kind: event.kind,
-        status: event.status,
+        kind: run?.recipeId ?? '',
+        status: run?.state,
       }
       const data = JSON.stringify(msg)
       for (const ws of wss.clients) {
@@ -880,7 +886,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
   shutdownWorkflowEngine()
   shutdownRepoActivityIndex()
   shutdownDeploymentMonitor()
-  goalRunStore.close()
+  loopStore.close()
   commitEventState.handler?.shutdown()
   webhookHandler.shutdown()
   stepflowHandler.shutdown()
