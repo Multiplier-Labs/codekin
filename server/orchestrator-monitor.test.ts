@@ -124,6 +124,7 @@ describe('handleGoalRunEvent', () => {
     expect(all[0].body).toContain('pending_prompts')
   })
 
+  // getAll() is newest-first, so the later 'failed' notification leads.
   it('notifies separately for a later state of the same run', () => {
     const m = monitor()
     m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'ci-autorepair', status: 'blocked' })
@@ -131,7 +132,19 @@ describe('handleGoalRunEvent', () => {
 
     const all = m.getAll()
     expect(all).toHaveLength(2)
-    expect(all[1].severity).toBe('alert')
+    expect(all.map(n => n.severity)).toEqual(['alert', 'action'])
+  })
+
+  /** Regression: the pair used to flip order when it straddled a millisecond
+   * tick, because equal timestamps fell back to insertion order. */
+  it('keeps newest-first order when notifications cross a millisecond boundary', () => {
+    const m = monitor()
+    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'ci-autorepair', status: 'blocked' })
+    const until = Date.now() + 2
+    while (Date.now() < until) { /* busy-wait past a millisecond tick */ }
+    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'ci-autorepair', status: 'failed' })
+
+    expect(m.getAll().map(n => n.severity)).toEqual(['alert', 'action'])
   })
 
   it('ignores progress states and ledger events', () => {
