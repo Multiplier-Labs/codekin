@@ -5,7 +5,7 @@
  * captured signal publisher.
  */
 import { describe, it, expect, afterEach } from 'vitest'
-import { DeploymentMonitor, type ProbeResult, type ProbeMetrics } from './deployment-monitor.js'
+import { DeploymentMonitor, parsePm2Jlist, type ProbeResult, type ProbeMetrics } from './deployment-monitor.js'
 import type { DeploymentsFile } from './deployment-config.js'
 
 const NOW = new Date('2026-08-30T12:00:00.000Z')
@@ -24,6 +24,27 @@ function makeConfig(): DeploymentsFile {
     }],
   }
 }
+
+describe('parsePm2Jlist', () => {
+  const JSON_LIST = '[{"name":"codekin","pm2_env":{"status":"online","restart_time":3}}]'
+
+  it('parses clean output', () => {
+    expect(parsePm2Jlist(JSON_LIST)[0].name).toBe('codekin')
+  })
+
+  it('parses output preceded by a warning banner with ANSI color codes', () => {
+    // Real-world shape: pm2 prints an out-of-date banner on stdout before the
+    // JSON when the daemon predates the CLI (e.g. after a node upgrade).
+    const banner = '\x1b[31m\x1b[1m>>>> In-memory PM2 is out-of-date, do:\x1b[22m\x1b[39m\n'
+      + '\x1b[31m\x1b[1m>>>> $ pm2 update\x1b[22m\x1b[39m\n'
+      + 'In memory PM2 version: 5.3.0\nLocal PM2 version: 6.0.8\n'
+    expect(parsePm2Jlist(banner + JSON_LIST)[0].pm2_env?.status).toBe('online')
+  })
+
+  it('throws (instead of returning garbage) when no JSON array is present', () => {
+    expect(() => parsePm2Jlist('some error text')).toThrow(/no JSON array/)
+  })
+})
 
 describe('DeploymentMonitor', () => {
   let monitor: DeploymentMonitor
