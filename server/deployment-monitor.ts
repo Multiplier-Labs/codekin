@@ -30,7 +30,9 @@ import {
   type HttpProbeConfig,
   type Pm2ProbeConfig,
   type DiskProbeConfig,
+  type HostProbeConfigRef,
 } from './deployment-config.js'
+import { runHostProbe } from './host-probe.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -64,6 +66,7 @@ export interface ProbeRunners {
   http: (probe: HttpProbeConfig) => Promise<ProbeResult>
   pm2: (probe: Pm2ProbeConfig, previous: ProbeMetrics | null) => Promise<ProbeResult>
   disk: (probe: DiskProbeConfig) => Promise<ProbeResult>
+  host: (probe: HostProbeConfigRef) => Promise<ProbeResult>
 }
 
 /** Durable-queue publisher — the trigger engine's enqueueSignal, injected. */
@@ -208,7 +211,7 @@ async function runDiskProbe(probe: DiskProbeConfig): Promise<ProbeResult> {
   return { ok: breaches.length === 0, breaches, events: [], metrics }
 }
 
-const DEFAULT_RUNNERS: ProbeRunners = { http: runHttpProbe, pm2: runPm2Probe, disk: runDiskProbe }
+const DEFAULT_RUNNERS: ProbeRunners = { http: runHttpProbe, pm2: runPm2Probe, disk: runDiskProbe, host: runHostProbe }
 
 // ---------------------------------------------------------------------------
 // Monitor
@@ -280,7 +283,9 @@ export class DeploymentMonitor {
       ? await this.runners.http(probe)
       : probe.type === 'pm2'
         ? await this.runners.pm2(probe, previous?.metrics ?? null)
-        : await this.runners.disk(probe)
+        : probe.type === 'disk'
+          ? await this.runners.disk(probe)
+          : await this.runners.host(probe)
 
     this.db.prepare(`
       INSERT INTO deployment_samples (deployment_id, probe_key, probe_type, ok, breaches, metrics, created_at)

@@ -33,6 +33,7 @@ import { createDeploymentRouter } from './deployment-routes.js'
 import { OrchestratorChildManager } from './orchestrator-children.js'
 import { loadDeployments } from './deployment-config.js'
 import { buildIncidentTask, incidentBranchName, DIAGNOSE_COOLDOWN_MS, type BreachPayload } from './incident-response.js'
+import { buildHostDigest } from './host-probe.js'
 import { generate404Page, generate500Page } from './error-page.js'
 import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
@@ -745,6 +746,22 @@ server.listen(port, '0.0.0.0', () => {
     })
     deploymentMonitor.pruneSamples()
     engine.registerTickTask('deployment-probes', 5 * 60_000, () => deploymentMonitor.sampleAll())
+
+    // Weekly host digest: checked hourly on the tick, sent when a week has
+    // passed since the last one. The timestamp persists in archive settings so
+    // a restart doesn't re-send (tick-task state is in-memory).
+    const HOST_DIGEST_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000
+    engine.registerTickTask('host-digest', 60 * 60_000, () => {
+      const last = sessions.archive.getSetting('host_digest_last_at', '')
+      if (last && Date.now() - new Date(last).getTime() < HOST_DIGEST_INTERVAL_MS) return
+
+      const samples = deploymentMonitor.latestSamples()
+      const hostSample = samples.find(s => s.probeType === 'host')
+      if (!hostSample) return // no host probe configured — nothing to digest
+
+      sessions.archive.setSetting('host_digest_last_at', new Date().toISOString())
+      monitor.notify('info', 'Weekly host digest', buildHostDigest(hostSample, samples))
+    })
 
     // Auto-diagnosis cooldown per probe — a flapping probe must not spawn a
     // child on every breach transition.

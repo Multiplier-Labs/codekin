@@ -15,6 +15,7 @@ import { getDefaultClaudeModel } from './anthropic-models.js'
 import type { SessionManager } from './session-manager.js'
 import { VALID_PROVIDERS } from './types.js'
 import type { CodingProvider } from './coding-process.js'
+import { getOrchestratorOutbox } from './orchestrator-outbox.js'
 
 export const ORCHESTRATOR_DIR = join(DATA_DIR, 'orchestrator')
 const SESSION_ID_FILE = join(ORCHESTRATOR_DIR, '.session-id')
@@ -50,7 +51,7 @@ Agent ${AGENT_DISPLAY_NAME} tracks repositories you work with in Codekin.
  * forever. CLAUDE.md is system-managed; user memory lives in PROFILE.md,
  * REPOS.md and journal/, which are never overwritten.
  */
-export const CLAUDE_MD_TEMPLATE_VERSION = 7
+export const CLAUDE_MD_TEMPLATE_VERSION = 8
 
 const CLAUDE_MD_TEMPLATE = `<!-- codekin-template-version: ${CLAUDE_MD_TEMPLATE_VERSION} -->
 # Agent ${AGENT_DISPLAY_NAME} — Codekin Orchestrator
@@ -363,12 +364,21 @@ Users can manage trust directly in chat:
 8. Greet the user with a brief, friendly status update
 
 ### Greeting Guidelines
+When you come online you receive a \`[STARTUP]\` notification — respond to it
+with a brief welcome message, without waiting for the user to speak first.
 Your greeting should:
-- Briefly introduce yourself and what you do — including setting up AI workflows to audit code repositories
-- Mention any pending reports or notable findings if they exist
-- End with a **specific, actionable next step** — not a generic "what would you like to do?"
-  For example: "Want me to audit your repositories and propose audit workflows for the most recently active ones?"
-- Keep it concise — 3-5 short paragraphs max
+- Briefly introduce yourself and outline what you can do, in one compact list:
+  triage audit reports and schedule AI workflows (which follow repo activity —
+  dormant repos pause automatically), watch deployed apps and this host
+  (probes for http health, pm2 processes, disk, memory, load, pending
+  updates), investigate incidents and write incident reports, spawn coding
+  sessions for implementation work, and learn trust from the user's decisions
+- Mention any pending reports, breaches, or notable findings if they exist
+- End with a **specific, actionable next step** — not a generic "what would
+  you like to do?" For example: "Want me to audit your repositories and
+  propose audit workflows for the most recently active ones?"
+- Keep it concise — 3-5 short paragraphs max; skip capabilities that aren't
+  relevant yet (e.g. deployments when none are registered)
 `
 
 /**
@@ -534,6 +544,23 @@ export function setOrchestratorProvider(sessions: SessionManager, provider: Codi
 }
 
 /**
+ * Queue the startup greeting prompt through the durable outbox — delivered
+ * once the agent process is alive and idle, so no readiness timing games.
+ * Queued only when the process is actually (re)started, not on every ensure.
+ */
+function queueStartupGreeting(): void {
+  try {
+    getOrchestratorOutbox().enqueue({
+      label: 'STARTUP',
+      title: 'You just came online',
+      body: 'Follow your On Startup steps, then greet the user per your Greeting Guidelines: a brief welcome outlining what you can do, anything pending that needs their attention, and one specific suggested next step.',
+    })
+  } catch (err) {
+    console.error('[orchestrator] Failed to queue startup greeting:', err)
+  }
+}
+
+/**
  * Ensure the orchestrator session exists and is running.
  * Creates it if missing, starts Claude if not alive.
  * Returns the orchestrator session ID.
@@ -574,6 +601,7 @@ export function ensureOrchestratorRunning(sessions: SessionManager): string {
       if (dirty) sessions.persistToDisk()
       console.log(`[orchestrator] Restarting orchestrator process (${provider})`)
       sessions.startClaude(stableId)
+      queueStartupGreeting()
     }
     return stableId
   }
@@ -590,8 +618,9 @@ export function ensureOrchestratorRunning(sessions: SessionManager): string {
     provider,
   })
 
-  // Start Claude
+  // Start the agent process
   sessions.startClaude(stableId)
+  queueStartupGreeting()
   return stableId
 }
 

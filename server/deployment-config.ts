@@ -42,7 +42,20 @@ export interface DiskProbeConfig {
   minFreePct?: number
 }
 
-export type ProbeConfig = HttpProbeConfig | Pm2ProbeConfig | DiskProbeConfig
+/**
+ * Host probe config lives in host-probe.ts; re-declared here structurally to
+ * keep this module dependency-free. `type: 'host'` monitors the machine
+ * itself: memory, load, pending updates, reboot-required — all sudo-free.
+ */
+export interface HostProbeConfigRef {
+  type: 'host'
+  minMemAvailablePct?: number
+  maxLoadPerCore?: number
+  alertOnSecurityUpdates?: boolean
+  alertOnRebootRequired?: boolean
+}
+
+export type ProbeConfig = HttpProbeConfig | Pm2ProbeConfig | DiskProbeConfig | HostProbeConfigRef
 
 export interface DeploymentConfig {
   id: string
@@ -66,7 +79,10 @@ export interface DeploymentsFile {
 
 /** Stable identity of one probe within a deployment — the sample/breach-state key. */
 export function probeKey(deployment: DeploymentConfig, probe: ProbeConfig): string {
-  const target = probe.type === 'http' ? probe.url : probe.type === 'pm2' ? probe.processName : probe.path
+  const target = probe.type === 'http' ? probe.url
+    : probe.type === 'pm2' ? probe.processName
+    : probe.type === 'disk' ? probe.path
+    : 'system'
   return `${deployment.id}::${probe.type}:${target}`
 }
 

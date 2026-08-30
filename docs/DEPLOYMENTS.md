@@ -37,6 +37,7 @@ Deployments live in `~/.codekin/deployments.json`:
 | `http` | status, latency, TLS days-remaining (`checkTls`), security headers (`checkHeaders`) | non-expected status (default: ≥400), unreachable/timeout, certificate < 14 days, missing HSTS/CSP headers |
 | `pm2` | status, restart count, memory | process missing, status ≠ `online`, memory > `memoryLimitMb`; a restart-count increase publishes a one-off event |
 | `disk` | free % | free % < `minFreePct` (default 10) |
+| `host` | memory available %, load per core, apt upgradable/security counts (cached 6h), reboot-required | memory < `minMemAvailablePct` (10), load/core > `maxLoadPerCore` (3), pending security updates, reboot required |
 
 Probe *failures* (pm2 absent, `df` unparseable) are breaches too — a broken probe is visible, never silent.
 
@@ -45,6 +46,22 @@ Probe *failures* (pm2 absent, `df` unparseable) are breaches too — a broken pr
 Sampling rides the trigger engine's tick (`registerTickTask`, every 5 minutes) — no dedicated interval loop. Samples persist to the `deployment_samples` table in `runs.db` (30-day retention, pruned at boot).
 
 Breach detection fires on **transitions**, not on every breached sample: `ok → breached` publishes a `probe-breach` signal (once), `breached → ok` publishes `probe-recovered`. Both flow through the durable signal queue (at-least-once, deduped while pending) and land in the orchestrator's notifications. The orchestrator can then inspect current state (`list_deployments`) and history (`get_deployment_samples`) before deciding whether to act.
+
+## Host monitoring & the maintenance ladder
+
+The `host` probe treats the machine itself as a monitored asset. Register it on any deployment (conventionally a dedicated `"host"` entry):
+
+```json
+{ "id": "host", "name": "This machine", "enabled": true, "probes": [{ "type": "host" }, { "type": "disk", "path": "/" }] }
+```
+
+Maintenance autonomy follows the trust ladder from the expansion plan, and this phase implements the first two rungs:
+
+- **Observe** — breaches and metrics flow to the orchestrator like any probe.
+- **Propose** — breaches that need privileges to fix carry the exact operator-run command in their text (e.g. `sudo apt-get update && sudo apt-get upgrade`, or a reboot window). The orchestrator relays and tracks; it never executes.
+- **Routine-execute** is deliberately not implemented: the pre-approved action-class list starts empty, and the hard floor (restarts, reboots, anything touching live sessions) always requires a human regardless of trust.
+
+A **weekly host digest** (memory, load, pending updates, reboot state, deployment-probe health) is delivered to the orchestrator as a notification; the last-sent timestamp persists across restarts. No digest is sent when no host probe is configured.
 
 ## Incident response
 
