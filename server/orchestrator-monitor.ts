@@ -101,6 +101,14 @@ export class OrchestratorMonitor {
     }
   }
 
+  /**
+   * Queue a notification from outside the monitor's own checks (e.g. a
+   * deployment probe breach delivered via the signal queue).
+   */
+  notify(severity: OrchestratorNotification['severity'], title: string, body: string): void {
+    this.addNotification({ severity, title, body })
+  }
+
   /** Get pending (undelivered) notifications. */
   getPending(): OrchestratorNotification[] {
     return this.notifications.filter(n => !n.delivered)

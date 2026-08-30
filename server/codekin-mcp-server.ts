@@ -99,6 +99,25 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
   )
 
   server.registerTool(
+    'list_deployments',
+    {
+      description:
+        'Monitored deployments with each probe\'s latest sample (http status/latency/TLS, pm2 status/restarts/memory, disk free). Breaches arrive as notifications; use this for current state.',
+      inputSchema: {},
+    },
+    () => run(() => api.listDeployments()),
+  )
+
+  server.registerTool(
+    'get_deployment_samples',
+    {
+      description: 'Sample history for one probe (newest first) — use to see when a breach started or whether a metric is trending.',
+      inputSchema: { probeKey: z.string().describe('Probe key from list_deployments'), limit: z.number().int().positive().optional() },
+    },
+    ({ probeKey, limit }) => run(() => api.getDeploymentSamples(probeKey, limit)),
+  )
+
+  server.registerTool(
     'list_runs',
     {
       description: 'List background runs (workflows and loops) newest-first in one unified shape. Filter by engine or status.',

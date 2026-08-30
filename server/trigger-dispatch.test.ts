@@ -288,6 +288,29 @@ describe('trigger dispatch', () => {
     })
   })
 
+  describe('tick tasks', () => {
+    it('runs a registered task at its interval, non-overlapping, and survives task errors', async () => {
+      const runs: number[] = []
+      engine.registerTickTask('probe', 5 * 60_000, () => { runs.push(1) })
+      engine.registerTickTask('broken', 5 * 60_000, () => { throw new Error('task boom') })
+
+      const t0 = dueAt(0)
+      engine.dispatchTick(t0)
+      await settle()
+      expect(runs).toHaveLength(1)
+
+      // One minute later: not due yet.
+      engine.dispatchTick(new Date(t0.getTime() + 60_000))
+      await settle()
+      expect(runs).toHaveLength(1)
+
+      // Past the interval: due again — and the broken task didn't kill the loop.
+      engine.dispatchTick(new Date(t0.getTime() + 6 * 60_000))
+      await settle()
+      expect(runs).toHaveLength(2)
+    })
+  })
+
   it('writes a heartbeat on every tick', () => {
     const t1 = dueAt(0)
     engine.dispatchTick(t1)
