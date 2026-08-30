@@ -40,6 +40,8 @@ import {
   getOrchestratorSessionId,
   getOrchestratorModel,
   setOrchestratorModel,
+  getOrchestratorProvider,
+  setOrchestratorProvider,
   readTemplateVersion,
   CLAUDE_MD_TEMPLATE_VERSION,
   ORCHESTRATOR_ALLOWED_TOOLS,
@@ -108,7 +110,10 @@ describe('ensureOrchestratorDir', () => {
     expect(writtenPaths).toContain('/tmp/test-data/orchestrator/PROFILE.md')
     expect(writtenPaths).toContain('/tmp/test-data/orchestrator/REPOS.md')
     expect(writtenPaths).toContain('/tmp/test-data/orchestrator/CLAUDE.md')
-    expect(mockWriteFileSync).toHaveBeenCalledTimes(3)
+    // AGENTS.md carries the same instructions for harnesses that read it
+    // (Codex, OpenCode) — the orchestrator is agent-agnostic.
+    expect(writtenPaths).toContain('/tmp/test-data/orchestrator/AGENTS.md')
+    expect(mockWriteFileSync).toHaveBeenCalledTimes(4)
   })
 
   it('leaves seed files and a current CLAUDE.md alone (only the system-managed .mcp.json is rewritten)', () => {
@@ -125,15 +130,19 @@ describe('ensureOrchestratorDir', () => {
     expect(writtenPaths).toEqual(['/tmp/test-data/orchestrator/.mcp.json'])
   })
 
-  it('refreshes CLAUDE.md when its template version is stale, leaving seed files alone', () => {
+  it('refreshes CLAUDE.md and AGENTS.md when their template version is stale, leaving seed files alone', () => {
     mockExistsSync.mockReturnValue(true)
-    // Unstamped (pre-versioning) CLAUDE.md → version 0 → stale
+    // Unstamped (pre-versioning) instruction files → version 0 → stale
     mockReadFileSync.mockReturnValue('# Agent — old template without a stamp')
 
     ensureOrchestratorDir()
 
     const writtenPaths = mockWriteFileSync.mock.calls.map((c: any[]) => c[0])
-    expect(writtenPaths).toEqual(['/tmp/test-data/orchestrator/CLAUDE.md', '/tmp/test-data/orchestrator/.mcp.json'])
+    expect(writtenPaths).toEqual([
+      '/tmp/test-data/orchestrator/CLAUDE.md',
+      '/tmp/test-data/orchestrator/AGENTS.md',
+      '/tmp/test-data/orchestrator/.mcp.json',
+    ])
     const written = mockWriteFileSync.mock.calls[0][1] as string
     expect(written).toContain(`<!-- codekin-template-version: ${CLAUDE_MD_TEMPLATE_VERSION} -->`)
   })
@@ -258,6 +267,42 @@ describe('ensureOrchestratorRunning', () => {
     ensureOrchestratorRunning(sm)
 
     expect(session.model).toBe('claude-sonnet-5')
+    expect(sm.persistToDisk).toHaveBeenCalled()
+    expect(sm.startClaude).toHaveBeenCalledWith('test-uuid-1234')
+  })
+
+  it('creates the session on the stored harness, with no Claude model override', () => {
+    mockExistsSync.mockReturnValue(false)
+
+    const sm = fakeSessionManager(undefined, { agent_provider: 'codex' })
+    ensureOrchestratorRunning(sm)
+
+    expect(sm.create).toHaveBeenCalledWith(
+      'Agent TestAgent',
+      '/tmp/test-data/orchestrator',
+      expect.objectContaining({ provider: 'codex', model: undefined }),
+    )
+  })
+
+  it('adopts the stored harness when restarting a stopped session and drops the old transcript link', () => {
+    mockExistsSync.mockImplementation((p: string) =>
+      typeof p === 'string' && p.endsWith('.session-id') ? true : false,
+    )
+    mockReadFileSync.mockReturnValue('test-uuid-1234')
+
+    const session = {
+      id: 'test-uuid-1234',
+      model: 'claude-opus-4-7',
+      provider: 'claude',
+      claudeSessionId: 'old-claude-jsonl',
+      allowedTools: ['Bash(curl:*)', 'CronCreate', 'CronDelete', 'CronList'],
+      claudeProcess: { isAlive: () => false },
+    }
+    const sm = fakeSessionManager(session, { agent_provider: 'opencode' })
+    ensureOrchestratorRunning(sm)
+
+    expect(session.provider).toBe('opencode')
+    expect(session.claudeSessionId).toBeNull()
     expect(sm.persistToDisk).toHaveBeenCalled()
     expect(sm.startClaude).toHaveBeenCalledWith('test-uuid-1234')
   })
@@ -398,6 +443,43 @@ describe('orchestrator model preference', () => {
     const sm = fakeSessionManager()
     setOrchestratorModel(sm, 'claude-fable-5')
     expect(sm.archive.setSetting).toHaveBeenCalledWith('agent_model', 'claude-fable-5')
+    expect(getOrchestratorModel(sm)).toBe('claude-fable-5')
+  })
+
+  it('applies no model override on a non-Claude harness when unset', () => {
+    const sm = fakeSessionManager(undefined, { agent_provider: 'codex' })
+    expect(getOrchestratorModel(sm)).toBe('')
+  })
+})
+
+describe('orchestrator provider preference', () => {
+  it('defaults to claude when unset or invalid', () => {
+    expect(getOrchestratorProvider(fakeSessionManager())).toBe('claude')
+    expect(getOrchestratorProvider(fakeSessionManager(undefined, { agent_provider: 'gemini' }))).toBe('claude')
+  })
+
+  it('round-trips a saved choice', () => {
+    const sm = fakeSessionManager()
+    setOrchestratorProvider(sm, 'codex')
+    expect(getOrchestratorProvider(sm)).toBe('codex')
+  })
+
+  it('ignores an invalid provider', () => {
+    const sm = fakeSessionManager()
+    setOrchestratorProvider(sm, 'gemini' as any)
+    expect(sm.archive.setSetting).not.toHaveBeenCalled()
+  })
+
+  it('clears the stored model when the harness changes — the model belonged to the old one', () => {
+    const sm = fakeSessionManager(undefined, { agent_model: 'claude-fable-5' })
+    setOrchestratorProvider(sm, 'opencode')
+    expect(sm.archive.setSetting).toHaveBeenCalledWith('agent_model', '')
+    expect(getOrchestratorModel(sm)).toBe('')
+  })
+
+  it('keeps the stored model when re-selecting the same harness', () => {
+    const sm = fakeSessionManager(undefined, { agent_model: 'claude-fable-5', agent_provider: 'claude' })
+    setOrchestratorProvider(sm, 'claude')
     expect(getOrchestratorModel(sm)).toBe('claude-fable-5')
   })
 })

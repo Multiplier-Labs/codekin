@@ -13,12 +13,15 @@ import { randomUUID } from 'crypto'
 import { DATA_DIR, AGENT_DISPLAY_NAME, getAgentDisplayName } from './config.js'
 import { getDefaultClaudeModel } from './anthropic-models.js'
 import type { SessionManager } from './session-manager.js'
+import { VALID_PROVIDERS } from './types.js'
+import type { CodingProvider } from './coding-process.js'
 
 export const ORCHESTRATOR_DIR = join(DATA_DIR, 'orchestrator')
 const SESSION_ID_FILE = join(ORCHESTRATOR_DIR, '.session-id')
 
 /** Archive settings key holding the user's explicit model choice for the agent. */
 const MODEL_SETTING_KEY = 'agent_model'
+const PROVIDER_SETTING_KEY = 'agent_provider'
 
 const PROFILE_TEMPLATE = `# User Profile
 
@@ -442,11 +445,15 @@ export function ensureOrchestratorDir(): void {
     if (!existsSync(path)) writeFileSync(path, content, 'utf-8')
   }
 
-  // CLAUDE.md is system-managed: refresh it whenever the embedded template
-  // version is older than the current one (or missing entirely).
-  const claudeMdPath = join(ORCHESTRATOR_DIR, 'CLAUDE.md')
-  if (readTemplateVersion(claudeMdPath) < CLAUDE_MD_TEMPLATE_VERSION) {
-    writeFileSync(claudeMdPath, CLAUDE_MD_TEMPLATE, 'utf-8')
+  // The agent instructions are system-managed: refresh whenever the embedded
+  // template version is newer than the seeded copy (or the copy is missing).
+  // Written twice because the orchestrator is harness-agnostic — Claude Code
+  // reads CLAUDE.md, while Codex and OpenCode read AGENTS.md.
+  for (const filename of ['CLAUDE.md', 'AGENTS.md']) {
+    const path = join(ORCHESTRATOR_DIR, filename)
+    if (readTemplateVersion(path) < CLAUDE_MD_TEMPLATE_VERSION) {
+      writeFileSync(path, CLAUDE_MD_TEMPLATE, 'utf-8')
+    }
   }
 
   // Register the first-party Codekin MCP server (typed tools over the API).
@@ -482,11 +489,14 @@ export function isOrchestratorSession(source: string | undefined): boolean {
 
 /**
  * The model the orchestrator runs on. An explicit choice (made from the chat
- * composer) wins; otherwise the agent tracks the latest known Claude model, so
- * it never gets stranded on whatever was newest when the session was created.
+ * composer) wins; otherwise a Claude orchestrator tracks the latest known
+ * Claude model (so it never gets stranded on whatever was newest at creation),
+ * and any other harness uses its own default (empty string = no override).
  */
 export function getOrchestratorModel(sessions: SessionManager): string {
-  return sessions.archive.getSetting(MODEL_SETTING_KEY, '') || getDefaultClaudeModel()
+  const stored = sessions.archive.getSetting(MODEL_SETTING_KEY, '')
+  if (stored) return stored
+  return getOrchestratorProvider(sessions) === 'claude' ? getDefaultClaudeModel() : ''
 }
 
 /**
@@ -498,6 +508,29 @@ export function setOrchestratorModel(sessions: SessionManager, model: string): v
 }
 
 /**
+ * The harness the orchestrator runs on. The agent is harness-agnostic — any
+ * provider the session layer supports (claude / codex / opencode) can host it;
+ * `claude` is only the default, not a requirement.
+ */
+export function getOrchestratorProvider(sessions: SessionManager): CodingProvider {
+  const stored = sessions.archive.getSetting(PROVIDER_SETTING_KEY, '') as CodingProvider
+  return VALID_PROVIDERS.has(stored) ? stored : 'claude'
+}
+
+/**
+ * Persist the orchestrator's harness choice. A stored model belongs to the
+ * harness it was picked on, so switching clears it — the new harness starts on
+ * its own default until the user picks a model from the composer.
+ */
+export function setOrchestratorProvider(sessions: SessionManager, provider: CodingProvider): void {
+  if (!VALID_PROVIDERS.has(provider)) return
+  if (getOrchestratorProvider(sessions) !== provider) {
+    sessions.archive.setSetting(MODEL_SETTING_KEY, '')
+  }
+  sessions.archive.setSetting(PROVIDER_SETTING_KEY, provider)
+}
+
+/**
  * Ensure the orchestrator session exists and is running.
  * Creates it if missing, starts Claude if not alive.
  * Returns the orchestrator session ID.
@@ -506,7 +539,8 @@ export function ensureOrchestratorRunning(sessions: SessionManager): string {
   ensureOrchestratorDir()
   const stableId = getOrCreateOrchestratorId()
 
-  const model = getOrchestratorModel(sessions)
+  const model = getOrchestratorModel(sessions) || undefined
+  const provider = getOrchestratorProvider(sessions)
 
   // Check if session already exists
   const existing = sessions.get(stableId)
@@ -518,16 +552,24 @@ export function ensureOrchestratorRunning(sessions: SessionManager): string {
       existing.allowedTools = ORCHESTRATOR_ALLOWED_TOOLS
       sessions.persistToDisk()
     }
-    // Session exists — start Claude if not alive
+    // Session exists — start the agent process if not alive
     if (!existing.claudeProcess?.isAlive()) {
-      // Adopt the stored/latest model on the way back up. Only safe while the
-      // process is down: a live process is already bound to its --model flag,
-      // and setModel() is the path that restarts it.
+      // Adopt the stored model/provider on the way back up. Only safe while
+      // the process is down: a live process is already bound to its flags, and
+      // setModel()/setProvider() are the paths that restart it.
+      let dirty = false
       if (existing.model !== model) {
         existing.model = model
-        sessions.persistToDisk()
+        dirty = true
       }
-      console.log('[orchestrator] Restarting orchestrator Claude process')
+      if (existing.provider !== provider) {
+        existing.provider = provider
+        // The harness session transcript belongs to the previous provider.
+        existing.claudeSessionId = null
+        dirty = true
+      }
+      if (dirty) sessions.persistToDisk()
+      console.log(`[orchestrator] Restarting orchestrator process (${provider})`)
       sessions.startClaude(stableId)
     }
     return stableId
@@ -535,13 +577,14 @@ export function ensureOrchestratorRunning(sessions: SessionManager): string {
 
   // Create the session
   const displayName = getAgentDisplayName()
-  console.log(`[orchestrator] Creating Agent ${displayName} session`)
+  console.log(`[orchestrator] Creating Agent ${displayName} session (${provider})`)
   sessions.create(`Agent ${displayName}`, ORCHESTRATOR_DIR, {
     source: 'orchestrator',
     id: stableId,
     permissionMode: 'acceptEdits',
     allowedTools: ORCHESTRATOR_ALLOWED_TOOLS,
     model,
+    provider,
   })
 
   // Start Claude
