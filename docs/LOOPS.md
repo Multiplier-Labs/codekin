@@ -120,9 +120,21 @@ run's own evidence suggests lessons scoped to the recipe: retry allowances
 for evaluators that hit transient environment errors, budget adjustments when
 runs finish near a cap or die at the boundary, standing review guidance when
 the reviewer pushes back repeatedly, outcome wording when protected paths
-kept getting touched. Suggestions start as `suggested` and are approved or
-rejected by you (workspace panel or `POST /lessons/:id/approve|reject`) —
-agents never rewrite recipes or policies. Approved lessons are injected into
+kept getting touched.
+
+With `policy.reflection: model`, a read-only model pass additionally reviews
+the finished run — the frozen recipe, the trajectory (evaluations,
+interventions, verdicts, notable events), and the repository — and proposes
+lessons in a strict `LESSON: <category> | <text>` format (categories:
+evaluator, context, plan, classification, budget). The output is parsed
+deterministically: unknown categories are dropped, at most five lessons
+survive, duplicates are skipped, and the full reflection text is retained as
+an artifact. Its session is read-only, time-capped, and its cost is added to
+the run's total. The default (`heuristics`) keeps reflection free.
+
+Either way, suggestions start as `suggested` and are approved or rejected by
+you (workspace panel or `POST /lessons/:id/approve|reject`) — agents never
+rewrite recipes or policies. Approved lessons are injected into
 future runs' prompts (visible as a `lessons_applied` event), and
 `GET /recipes/:id/stats` groups run outcomes by frozen recipe hash so recipe
 versions can be compared A/B.
@@ -160,6 +172,7 @@ budgets:
   wallTime: 90m
 policy:
   mode: guarded              # guided | guarded | autonomous
+  reflection: heuristics     # or model: a read-only model pass proposes lessons
 completion:
   action: pull-request       # or commit-only; auto-merge does not exist
 ---

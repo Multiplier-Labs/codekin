@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { LoopEngine, buildMakerPrompt, type SessionHost, type LoopEvaluatorApi, type StartLoopRunInput } from './loop-engine.js'
+import { LoopEngine, buildMakerPrompt, parseReflectionLessons, type SessionHost, type LoopEvaluatorApi, type StartLoopRunInput } from './loop-engine.js'
 import { LoopStore } from './loop-store.js'
 import { LoopArtifactStore } from './loop-artifacts.js'
 import { parseLoopRecipe, type LoopRecipe } from './loop-recipe.js'
@@ -1090,6 +1090,112 @@ Fix the failing CI.
       expect(workerSessions()).toHaveLength(0)
       expect(maker.inputs.at(-1)).toContain('Execute it now') // sequential fallback
     })
+  })
+
+  describe('model reflection', () => {
+    function reflectiveRecipe(): LoopRecipe {
+      const md = `---
+apiVersion: codekin.dev/v2
+kind: LoopRecipe
+metadata: { id: ci-repair, name: Repair CI }
+agent: { provider: claude }
+evaluators:
+  - { id: tests, type: command, command: npm test }
+budgets: { turns: 6, costUsd: 10 }
+policy: { mode: guarded, reflection: model }
+---
+Fix the failing CI.
+`
+      return parseLoopRecipe(md, '/x/ci-repair.md', 'builtin')
+    }
+
+    function reflectionSession() {
+      return [...host.sessions.values()].find((s) => s.name.endsWith(':reflect'))
+    }
+
+    it('spawns a read-only reflection session after completion and stores parsed lessons + evidence', async () => {
+      const runId = await startAndTurn(reflectiveRecipe())
+      expect(store.getRun(runId)!.outcome).toBe('completed')
+      await settle()
+
+      const reflect = reflectionSession()
+      expect(reflect).toBeDefined()
+      expect(reflect!.allowedTools).not.toContain('Write')
+      expect(reflect!.inputs[0]).toContain('suggest improvements to the RECIPE')
+      expect(reflect!.inputs[0]).toContain('evaluation tests: pass')
+
+      reflect!.outputHistory.push({ type: 'usage', costUsd: 0.05 })
+      reflect!.outputHistory.push({
+        type: 'output',
+        data: [
+          'Thinking about it…',
+          'LESSON: budget | Lower the turn budget to 8; runs finish in 2.',
+          'LESSON: nonsense | Not a valid category.',
+          'LESSON: evaluator | Add a lint evaluator; style issues slipped through.',
+          'LESSON: evaluator | Add a lint evaluator; style issues slipped through.',
+        ].join('\n'),
+      })
+      host.emitResult(reflect!.id)
+      await settle()
+
+      const lessons = store.listLessons('ci-repair', 'suggested')
+      const texts = lessons.map((l) => l.text)
+      expect(texts).toContain('Lower the turn budget to 8; runs finish in 2.')
+      expect(texts).toContain('Add a lint evaluator; style issues slipped through.')
+      expect(texts.filter((t) => t.includes('lint evaluator'))).toHaveLength(1) // deduped
+      expect(lessons.every((l) => l.kind !== 'nonsense')).toBe(true)
+
+      const events = store.listEvents(runId).filter((e) => e.type === 'reflection_completed')
+      expect(events).toHaveLength(1)
+      expect((events[0].payload as { suggested: number }).suggested).toBe(2)
+      expect(store.listArtifacts(runId).some((a) => a.kind === 'reflection')).toBe(true)
+      expect(store.getRun(runId)!.costUsd).toBeCloseTo(0.05)
+      expect(reflect!.stopped).toBe(true)
+    })
+
+    it('NO LESSONS reflections store the artifact but suggest nothing', async () => {
+      const runId = await startAndTurn(reflectiveRecipe())
+      await settle()
+      const reflect = reflectionSession()!
+      reflect.outputHistory.push({ type: 'output', data: 'NO LESSONS' })
+      host.emitResult(reflect.id)
+      await settle()
+      expect(store.listLessons('ci-repair')).toHaveLength(0)
+      expect((store.listEvents(runId).find((e) => e.type === 'reflection_completed')!.payload as { suggested: number }).suggested).toBe(0)
+    })
+
+    it('reflection sessions that never conclude are stopped at the timeout', async () => {
+      engine.reflectionTimeoutMs = 30
+      const runId = await startAndTurn(reflectiveRecipe())
+      await new Promise((r) => setTimeout(r, 60))
+      await settle()
+      const reflect = reflectionSession()!
+      expect(reflect.stopped).toBe(true)
+      expect(store.listEvents(runId).some((e) => e.type === 'reflection_timeout')).toBe(true)
+      expect(store.listLessons('ci-repair')).toHaveLength(0)
+    })
+
+    it('the default heuristics-only policy spawns no reflection session', async () => {
+      await startAndTurn(recipeFromYaml())
+      await settle()
+      expect(reflectionSession()).toBeUndefined()
+    })
+  })
+
+  it('parseReflectionLessons enforces format, categories, dedupe, and the cap', () => {
+    const text = [
+      'preamble LESSON: budget | inline mention does not count? actually anchored per-line:',
+      'LESSON: budget | one',
+      'LESSON: PLAN | two',
+      'LESSON: vibes | three',
+      'LESSON: context |    ',
+      ...Array.from({ length: 10 }, (_, i) => `LESSON: evaluator | filler ${i}`),
+    ].join('\n')
+    const lessons = parseReflectionLessons(text)
+    expect(lessons).toHaveLength(5) // capped
+    expect(lessons[0]).toEqual({ category: 'budget', text: 'one' })
+    expect(lessons[1]).toEqual({ category: 'plan', text: 'two' })
+    expect(lessons.some((l) => (l.category as string) === 'vibes')).toBe(false)
   })
 
   it('buildMakerPrompt lists evaluators, protected paths, and remaining budget', () => {

@@ -1820,7 +1820,15 @@ export class LoopEngine {
       this.disposeReview(ctx)
       this.teardown(ctx)
     }
-    if (outcome !== 'canceled') this.reflect(runId)
+    if (outcome !== 'canceled') {
+      this.reflect(runId)
+      const finished = this.store.getRun(runId)
+      if (finished?.recipe.policy.reflection === 'model') {
+        this.modelReflect(finished).catch((err: unknown) => {
+          console.error(`[loop-engine] Model reflection for run ${runId} failed:`, err)
+        })
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -1883,6 +1891,103 @@ export class LoopEngine {
   /** Approved lessons for a recipe — injected into maker/planning prompts. */
   private approvedLessons(run: LoopRun): string[] {
     return this.store.listLessons(run.recipeId, 'approved').map((l) => l.text)
+  }
+
+  /** Reflection sessions that outlive this cap are stopped — post-run work must never linger. */
+  reflectionTimeoutMs = 5 * 60 * 1000
+
+  /**
+   * Model-based reflection (spec §11, opt-in via `policy.reflection: model`):
+   * a read-only session reviews the finished run's recipe and trajectory and
+   * proposes lessons in a strict `LESSON: <category> | <text>` format. Output
+   * is parsed deterministically, capped, deduped, and lands as `suggested`
+   * next to the free heuristics — approval stays with the operator, always.
+   * The full reflection text is retained as an artifact for evidence.
+   */
+  private modelReflect(run: LoopRun): Promise<void> {
+    return new Promise((resolve) => {
+      const cwd = run.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : run.repo
+      if (!existsSync(cwd)) {
+        resolve()
+        return
+      }
+      const session = this.host.create(`loop:${run.recipeId}:reflect`, cwd, {
+        provider: run.provider,
+        model: run.model ?? undefined,
+        source: 'agent',
+        allowedTools: READONLY_AGENT_ALLOWED_TOOLS,
+      })
+      let done = false
+      let dispose = () => {}
+      const timer = setTimeout(() => {
+        if (done) return
+        done = true
+        dispose()
+        this.host.stopClaude(session.id)
+        this.store.appendEvent({ runId: run.id, type: 'reflection_timeout', payload: { sessionId: session.id } })
+        resolve()
+      }, this.reflectionTimeoutMs)
+      timer.unref?.()
+
+      dispose = this.host.onSessionResult((sid, isError) => {
+        if (sid !== session.id || done) return
+        done = true
+        clearTimeout(timer)
+        dispose()
+        const history = this.host.get(session.id)?.outputHistory ?? []
+        const costUsd = readCumulativeCost(history)
+        this.host.stopClaude(session.id)
+        const text = extractAssistantText(history)
+
+        if (!isError && text.trim()) {
+          const artifactHash = this.artifacts.put(text)
+          const artifact = this.store.addArtifact({
+            runId: run.id,
+            kind: 'reflection',
+            label: 'model reflection',
+            contentHash: artifactHash,
+            sizeBytes: Buffer.byteLength(text),
+          })
+          const existing = new Set(this.store.listLessons(run.recipeId).map((l) => l.text))
+          const suggested: string[] = []
+          for (const lesson of parseReflectionLessons(text)) {
+            if (existing.has(lesson.text)) continue
+            existing.add(lesson.text)
+            const row = this.store.addLesson({ recipeId: run.recipeId, sourceRunId: run.id, kind: lesson.category, text: lesson.text })
+            suggested.push(row.id)
+          }
+          if (costUsd > 0) this.store.patchRun(run.id, { costUsd: run.costUsd + costUsd })
+          this.store.appendEvent({
+            runId: run.id,
+            type: 'reflection_completed',
+            actor: { type: 'agent', id: 'reflection' },
+            payload: { suggested: suggested.length, artifactId: artifact.id, costUsd },
+          })
+        } else {
+          this.store.appendEvent({ runId: run.id, type: 'reflection_completed', payload: { suggested: 0, error: isError } })
+        }
+        resolve()
+      })
+
+      this.host.startClaude(session.id)
+      this.host.sendInput(session.id, buildReflectionPrompt(run, this.trajectorySummary(run)))
+    })
+  }
+
+  /** Condensed, factual trajectory for the reflection prompt — evidence, not chat. */
+  private trajectorySummary(run: LoopRun): string {
+    const lines: string[] = []
+    const evaluations = this.store.listEvaluations(run.id)
+    for (const ev of evaluations.slice(-30)) lines.push(`evaluation ${ev.evaluatorId}: ${ev.status} — ${ev.summary}`)
+    for (const iv of this.store.listInterventions(run.id)) {
+      lines.push(`intervention (${iv.purpose}): ${iv.title} → ${iv.resolution?.choice ?? iv.status}${iv.resolution?.note ? ` (${iv.resolution.note})` : ''}`)
+    }
+    const notable = this.store
+      .listEvents(run.id, 0, 1000)
+      .filter((e) => ['protected_path_violation', 'budget_boundary', 'wall_time_exceeded', 'integration_conflict', 'session_blocked'].includes(e.type))
+    for (const e of notable.slice(-15)) lines.push(`event ${e.type}: ${JSON.stringify(e.payload)}`)
+    lines.push(`final: ${run.outcome ?? 'unknown'} after ${run.turnCount} turns, $${run.costUsd.toFixed(2)}${run.stateReason ? ` — ${run.stateReason}` : ''}`)
+    return lines.join('\n')
   }
 
   // -------------------------------------------------------------------------
@@ -2061,6 +2166,70 @@ export function buildPlanningPrompt(run: LoopRun, resumeNote: string | null, ste
   if (lessons.length) lines.push('', `## Lessons from previous runs (operator-approved)`, ...lessons.map((l) => `- ${l}`))
   if (resumeNote) lines.push('', `## Note`, resumeNote)
   if (steers) lines.push('', steers)
+  return lines.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Model reflection (pure)
+// ---------------------------------------------------------------------------
+
+export const REFLECTION_CATEGORIES = ['evaluator', 'context', 'plan', 'classification', 'budget'] as const
+export type ReflectionCategory = (typeof REFLECTION_CATEGORIES)[number]
+
+/** Cap on lessons accepted from one reflection pass. */
+const MAX_REFLECTION_LESSONS = 5
+
+/**
+ * Parse `LESSON: <category> | <text>` lines. Unknown categories and malformed
+ * lines are dropped; at most MAX_REFLECTION_LESSONS survive — the model
+ * proposes, deterministic code decides what is even eligible for review.
+ */
+export function parseReflectionLessons(text: string): Array<{ category: ReflectionCategory; text: string }> {
+  const lessons: Array<{ category: ReflectionCategory; text: string }> = []
+  for (const m of text.matchAll(/^LESSON:\s*([a-z-]+)\s*\|\s*(.+)$/gim)) {
+    const category = m[1].toLowerCase()
+    const body = m[2].trim()
+    if (!REFLECTION_CATEGORIES.includes(category as ReflectionCategory)) continue
+    if (!body || body.length > 500) continue
+    if (lessons.some((l) => l.text === body)) continue
+    lessons.push({ category: category as ReflectionCategory, text: body })
+    if (lessons.length >= MAX_REFLECTION_LESSONS) break
+  }
+  return lessons
+}
+
+export function buildReflectionPrompt(run: LoopRun, trajectory: string): string {
+  const evaluators = run.recipe.evaluators.map((e) => `  - ${e.id} (${e.type}${e.required ? '' : ', optional'})`)
+  const lines = [
+    `# Loop Run Reflection: ${run.recipe.name}`,
+    '',
+    `A loop run just finished. Review how it went and suggest improvements to the RECIPE — not to the code it produced.`,
+    '',
+    `## Outcome pursued`,
+    run.goal,
+    '',
+    `## Recipe`,
+    `- mode: ${run.recipe.policy.mode}; budgets: ${run.recipe.budgets.turns} turns, $${run.recipe.budgets.costUsd}`,
+    `- evaluators:`,
+    ...evaluators,
+  ]
+  if (run.recipe.workspace.protectedPaths.length) {
+    lines.push(`- protected paths: ${run.recipe.workspace.protectedPaths.join(', ')}`)
+  }
+  lines.push(
+    '',
+    `## What actually happened`,
+    trajectory,
+    '',
+    `## Your job`,
+    `Suggest at most ${MAX_REFLECTION_LESSONS} high-confidence lessons that would make FUTURE runs of this recipe succeed faster or more safely. Only suggest what this run's evidence supports. You may inspect the repository read-only.`,
+    `Categories: evaluator (a missing or misconfigured check), context (repo knowledge the agent lacked), plan (a better plan pattern), classification (a command or failure classified wrongly), budget (limits mis-sized).`,
+    '',
+    `## Required format`,
+    `One line per lesson, nothing else on those lines:`,
+    '`LESSON: <category> | <one concrete, self-contained sentence>`',
+    `If the run's evidence supports no lesson, reply exactly: NO LESSONS`,
+  )
   return lines.join('\n')
 }
 
