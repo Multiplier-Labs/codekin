@@ -19,7 +19,7 @@ import Database from 'better-sqlite3'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { request as httpsRequest } from 'https'
-import { existsSync, chmodSync } from 'fs'
+import { existsSync, chmodSync, statSync, openSync, readSync, closeSync } from 'fs'
 import { defaultRunsDbPath } from './run-db.js'
 import { jsonParse } from './json-parse.js'
 import {
@@ -30,6 +30,7 @@ import {
   type HttpProbeConfig,
   type Pm2ProbeConfig,
   type DiskProbeConfig,
+  type LogProbeConfig,
   type HostProbeConfigRef,
 } from './deployment-config.js'
 import { runHostProbe } from './host-probe.js'
@@ -66,6 +67,7 @@ export interface ProbeRunners {
   http: (probe: HttpProbeConfig) => Promise<ProbeResult>
   pm2: (probe: Pm2ProbeConfig, previous: ProbeMetrics | null) => Promise<ProbeResult>
   disk: (probe: DiskProbeConfig) => Promise<ProbeResult>
+  log: (probe: LogProbeConfig, previous: ProbeMetrics | null) => Promise<ProbeResult>
   host: (probe: HostProbeConfigRef) => Promise<ProbeResult>
 }
 
@@ -209,6 +211,72 @@ async function runPm2Probe(probe: Pm2ProbeConfig, previous: ProbeMetrics | null)
   return { ok: breaches.length === 0, breaches, events, metrics }
 }
 
+/** Bounded read of `[start, start+length)` from a file. */
+function readWindow(path: string, start: number, length: number): string {
+  const fd = openSync(path, 'r')
+  try {
+    const buf = Buffer.alloc(length)
+    const read = readSync(fd, buf, 0, length, start)
+    return buf.toString('utf-8', 0, read)
+  } finally {
+    closeSync(fd)
+  }
+}
+
+/** Never scan more than this per window — bounds memory on runaway logs. */
+const LOG_MAX_READ_BYTES = 5 * 1024 * 1024
+
+/**
+ * Error-rate log probe. The read offset travels in the sample metrics
+ * (`fileOffset`), so the state is exactly as durable as the samples table:
+ * the first sample (and the first after a restart gap or a probe error)
+ * baselines at EOF and never scans history; a shrunken file means rotation
+ * and the scan restarts from 0. Exported for tests.
+ */
+export async function runLogProbe(probe: LogProbeConfig, previous: ProbeMetrics | null): Promise<ProbeResult> {
+  const maxErrors = probe.maxErrorsPerWindow ?? 10
+  const breaches: string[] = []
+  const metrics: ProbeMetrics = { errorCount: null, fileOffset: null, fileSize: null }
+
+  let pattern: RegExp
+  try {
+    pattern = new RegExp(probe.errorPattern ?? '\\b(error|exception|fatal)\\b', 'i')
+  } catch {
+    breaches.push(`invalid errorPattern: ${probe.errorPattern}`)
+    return { ok: false, breaches, events: [], metrics }
+  }
+
+  try {
+    const size = statSync(probe.path).size
+    metrics.fileSize = size
+    const prevOffset = typeof previous?.fileOffset === 'number' ? previous.fileOffset : null
+
+    if (prevOffset === null) {
+      // No prior offset — baseline at EOF; counting starts next window.
+      metrics.fileOffset = size
+      metrics.errorCount = 0
+    } else {
+      let start = size < prevOffset ? 0 : prevOffset // shrunk = rotated/truncated
+      if (size - start > LOG_MAX_READ_BYTES) {
+        start = size - LOG_MAX_READ_BYTES
+        metrics.truncatedScan = 1
+      }
+      const count = start >= size
+        ? 0
+        : readWindow(probe.path, start, size - start).split('\n').filter(l => pattern.test(l)).length
+      metrics.errorCount = count
+      metrics.fileOffset = size
+      if (count > maxErrors) {
+        breaches.push(`${count} error line(s) in the last window (threshold ${maxErrors}) in ${probe.path}`)
+      }
+    }
+  } catch (err) {
+    breaches.push(`log probe failed: ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  return { ok: breaches.length === 0, breaches, events: [], metrics }
+}
+
 async function runDiskProbe(probe: DiskProbeConfig): Promise<ProbeResult> {
   const minFree = probe.minFreePct ?? DEFAULT_MIN_FREE_PCT
   const breaches: string[] = []
@@ -232,7 +300,7 @@ async function runDiskProbe(probe: DiskProbeConfig): Promise<ProbeResult> {
   return { ok: breaches.length === 0, breaches, events: [], metrics }
 }
 
-const DEFAULT_RUNNERS: ProbeRunners = { http: runHttpProbe, pm2: runPm2Probe, disk: runDiskProbe, host: runHostProbe }
+const DEFAULT_RUNNERS: ProbeRunners = { http: runHttpProbe, pm2: runPm2Probe, disk: runDiskProbe, log: runLogProbe, host: runHostProbe }
 
 // ---------------------------------------------------------------------------
 // Monitor
@@ -306,7 +374,9 @@ export class DeploymentMonitor {
         ? await this.runners.pm2(probe, previous?.metrics ?? null)
         : probe.type === 'disk'
           ? await this.runners.disk(probe)
-          : await this.runners.host(probe)
+          : probe.type === 'log'
+            ? await this.runners.log(probe, previous?.metrics ?? null)
+            : await this.runners.host(probe)
 
     this.db.prepare(`
       INSERT INTO deployment_samples (deployment_id, probe_key, probe_type, ok, breaches, metrics, created_at)

@@ -42,6 +42,16 @@ export interface DiskProbeConfig {
   minFreePct?: number
 }
 
+export interface LogProbeConfig {
+  type: 'log'
+  /** Absolute path of the log file to watch. */
+  path: string
+  /** Regex matched per line. Default: error | exception | fatal (case-insensitive). */
+  errorPattern?: string
+  /** Breach when more matches than this arrive within one sampling window. Default 10. */
+  maxErrorsPerWindow?: number
+}
+
 /**
  * Host probe config lives in host-probe.ts; re-declared here structurally to
  * keep this module dependency-free. `type: 'host'` monitors the machine
@@ -55,7 +65,7 @@ export interface HostProbeConfigRef {
   alertOnRebootRequired?: boolean
 }
 
-export type ProbeConfig = HttpProbeConfig | Pm2ProbeConfig | DiskProbeConfig | HostProbeConfigRef
+export type ProbeConfig = HttpProbeConfig | Pm2ProbeConfig | DiskProbeConfig | LogProbeConfig | HostProbeConfigRef
 
 export interface DeploymentConfig {
   id: string
@@ -81,7 +91,7 @@ export interface DeploymentsFile {
 export function probeKey(deployment: DeploymentConfig, probe: ProbeConfig): string {
   const target = probe.type === 'http' ? probe.url
     : probe.type === 'pm2' ? probe.processName
-    : probe.type === 'disk' ? probe.path
+    : probe.type === 'disk' || probe.type === 'log' ? probe.path
     : 'system'
   return `${deployment.id}::${probe.type}:${target}`
 }

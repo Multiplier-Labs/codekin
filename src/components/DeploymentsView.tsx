@@ -25,6 +25,7 @@ function probeLabel(probe: ProbeConfig): string {
     case 'http': return probe.url
     case 'pm2': return `pm2: ${probe.processName}`
     case 'disk': return `disk: ${probe.path}`
+    case 'log': return `log: ${probe.path}`
     case 'host': return 'host: memory · load · updates · reboot'
   }
 }
@@ -33,7 +34,7 @@ function probeLabel(probe: ProbeConfig): string {
 function sampleFor(deployment: Deployment, probe: ProbeConfig): DeploymentSample | undefined {
   const target = probe.type === 'http' ? probe.url
     : probe.type === 'pm2' ? probe.processName
-    : probe.type === 'disk' ? probe.path
+    : probe.type === 'disk' || probe.type === 'log' ? probe.path
     : 'system'
   return deployment.latestSamples.find(s => s.probeKey === `${deployment.id}::${probe.type}:${target}`)
 }
@@ -57,6 +58,8 @@ function metricsSummary(sample: DeploymentSample): string {
     }
     case 'disk':
       return m.freePct != null ? `${m.freePct}% free` : ''
+    case 'log':
+      return m.errorCount != null ? `${m.errorCount} error line(s)/window` : 'baselining'
     case 'host': {
       const parts = []
       if (m.memAvailablePct != null) parts.push(`mem ${m.memAvailablePct}%`)
@@ -136,13 +139,15 @@ function DeploymentEditor({ initial, onSave, onClose }: {
       probe = { type: 'pm2', processName: probeTarget }
     } else if (probeType === 'disk' && probeTarget.startsWith('/')) {
       probe = { type: 'disk', path: probeTarget }
+    } else if (probeType === 'log' && probeTarget.startsWith('/')) {
+      probe = { type: 'log', path: probeTarget }
     } else if (probeType === 'host') {
       probe = { type: 'host' }
     }
     if (!probe) {
       setError(probeType === 'http' ? 'http probe needs an http(s) URL'
         : probeType === 'pm2' ? 'pm2 probe needs a process name'
-        : 'disk probe needs an absolute path')
+        : `${probeType} probe needs an absolute path`)
       return
     }
     setError(null)
@@ -216,13 +221,14 @@ function DeploymentEditor({ initial, onSave, onClose }: {
                 <option value="http">http</option>
                 <option value="pm2">pm2</option>
                 <option value="disk">disk</option>
+                <option value="log">log</option>
                 <option value="host">host</option>
               </select>
               {probeType !== 'host' && (
                 <input
                   value={probeTarget}
                   onChange={(e) => { setProbeTarget(e.target.value) }}
-                  placeholder={probeType === 'http' ? 'https://…/health' : probeType === 'pm2' ? 'process name' : '/mount/path'}
+                  placeholder={probeType === 'http' ? 'https://…/health' : probeType === 'pm2' ? 'process name' : probeType === 'log' ? '/var/log/app.log' : '/mount/path'}
                   className={inputClass}
                   onKeyDown={(e) => { if (e.key === 'Enter') addProbe() }}
                 />
