@@ -12,6 +12,7 @@
 
 import { useState, useEffect } from 'react'
 import {
+  IconGitFork,
   IconPlayerPause,
   IconPlayerPlay,
   IconSquare,
@@ -25,11 +26,15 @@ import {
   resumeLoopRun,
   cancelLoopRun,
   steerLoopRun,
+  forkLoopRun,
   resolveLoopIntervention,
   getLoopRunEvents,
   getLoopArtifactBody,
+  listLoopLessons,
+  resolveLoopLesson,
   type LoopRunDetail,
   type LoopEvent,
+  type LoopLesson,
 } from '../lib/loopsApi'
 import { formatTime } from '../lib/workflowHelpers'
 import { stateBadge, ACTIVE_LOOP_STATES } from '../lib/loopHelpers'
@@ -86,6 +91,14 @@ function describeEvent(event: LoopEvent): string {
     case 'finalized': return String(p.note ?? 'Finalized')
     case 'ci_concluded': return p.ok ? `CI checks green (${String(p.evaluatorId)})` : `CI checks failed: ${(p.failed as string[] | undefined)?.join(', ') ?? ''}`
     case 'ci_poll_error': return `CI poll error (transient): ${String(p.error ?? '')}`
+    case 'workers_started': return `Parallel workstreams started (${(p.streams as unknown[] | undefined)?.length ?? '?'})`
+    case 'worker_completed': return `Workstream ${String(p.name)}: ${p.ok ? 'done' : String(p.note)}`
+    case 'integration_completed': return `Workstreams integrated: ${(p.merged as string[] | undefined)?.join(', ') ?? ''}`
+    case 'integration_conflict': return `Integration conflict on ${String(p.branch)}`
+    case 'forked_from': return `Forked from run ${String(p.sourceRunId)} (turn ${String(p.atTurn)})`
+    case 'fork_created': return `Fork created: run ${String(p.forkRunId)}`
+    case 'lesson_suggested': return `Lesson suggested: ${String(p.text)}`
+    case 'lessons_applied': return `${String(p.count)} approved lesson(s) applied to the prompt`
     case 'run_completed': return `Run ${String(p.outcome)}: ${String(p.reason ?? '')}`
     case 'recovery_started': return `Recovering after a restart (was ${String(p.fromState)})`
     default: return event.type
@@ -99,14 +112,17 @@ interface Props {
   detail: LoopRunDetail
   onAct: (fn: () => Promise<void>) => Promise<void>
   onNavigateToSession?: (sessionId: string) => void
+  /** Select the fork after it is created. */
+  onForked?: (runId: string) => void
 }
 
-export function LoopRunWorkspace({ token, detail, onAct, onNavigateToSession }: Props) {
+export function LoopRunWorkspace({ token, detail, onAct, onNavigateToSession, onForked }: Props) {
   const [tab, setTab] = useState<'overview' | 'timeline'>('overview')
   const [steerText, setSteerText] = useState('')
   const [steerRevisePlan, setSteerRevisePlan] = useState(false)
   const [noteById, setNoteById] = useState<Record<string, string>>({})
   const [planText, setPlanText] = useState<string | null>(null)
+  const [lessons, setLessons] = useState<LoopLesson[]>([])
   const [events, setEvents] = useState<LoopEvent[]>([])
   const [showNoise, setShowNoise] = useState(false)
 
@@ -123,6 +139,16 @@ export function LoopRunWorkspace({ token, detail, onAct, onNavigateToSession }: 
       .catch(() => {})
     return () => { cancelled = true }
   }, [token, detail.id, planArtifact?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Suggested lessons for this recipe surface once the run has ended.
+  useEffect(() => {
+    if (detail.state !== 'done') return
+    let cancelled = false
+    listLoopLessons(token, detail.recipeId, 'suggested')
+      .then((list) => { if (!cancelled) setLessons(list) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [token, detail.recipeId, detail.state])
 
   // Timeline: fetch the gap whenever the run's cursor moves past what we hold.
   useEffect(() => {
@@ -170,6 +196,20 @@ export function LoopRunWorkspace({ token, detail, onAct, onNavigateToSession }: 
           {detail.state !== 'done' && (
             <button onClick={() => { void onAct(() => cancelLoopRun(token, detail.id)) }} className="flex items-center gap-1 rounded-control border border-error-8 px-2 py-1 text-meta text-error-3 hover:bg-error-10/40 transition-colors">
               <IconSquare size={13} stroke={2} /> Stop
+            </button>
+          )}
+          {detail.worktreePath != null && (
+            <button
+              onClick={() => {
+                void onAct(async () => {
+                  const fork = await forkLoopRun(token, detail.id)
+                  onForked?.(fork.id)
+                })
+              }}
+              title="Start a new run from this run's current worktree state (uncommitted work included)"
+              className="flex items-center gap-1 rounded-control border border-edge px-2 py-1 text-meta text-ink-muted hover:bg-surface-raised transition-colors"
+            >
+              <IconGitFork size={13} stroke={2} /> Fork
             </button>
           )}
           {detail.makerSessionId != null && onNavigateToSession && (
@@ -229,6 +269,42 @@ export function LoopRunWorkspace({ token, detail, onAct, onNavigateToSession }: 
                 </div>
               </div>
             ))}
+
+            {/* Suggested lessons (reflection) — approve into future runs or reject. */}
+            {detail.state === 'done' && lessons.length > 0 && (
+              <div className="rounded-control border border-edge p-3">
+                <h3 className="mb-1 text-meta font-medium text-ink-muted">Suggested lessons for {detail.recipeId}</h3>
+                <ul className="flex flex-col gap-2">
+                  {lessons.map((lesson) => (
+                    <li key={lesson.id} className="flex items-start gap-2">
+                      <span className="min-w-0 flex-1 text-meta text-ink">{lesson.text}</span>
+                      <button
+                        onClick={() => {
+                          void onAct(async () => {
+                            await resolveLoopLesson(token, lesson.id, 'approve')
+                            setLessons((l) => l.filter((x) => x.id !== lesson.id))
+                          })
+                        }}
+                        className="flex-shrink-0 rounded-control border border-success-8 px-2 py-0.5 text-micro text-success-3 hover:bg-success-10/40 transition-colors"
+                      >
+                        approve
+                      </button>
+                      <button
+                        onClick={() => {
+                          void onAct(async () => {
+                            await resolveLoopLesson(token, lesson.id, 'reject')
+                            setLessons((l) => l.filter((x) => x.id !== lesson.id))
+                          })
+                        }}
+                        className="flex-shrink-0 rounded-control border border-edge px-2 py-0.5 text-micro text-ink-muted hover:bg-surface-raised transition-colors"
+                      >
+                        reject
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {/* Steer */}
             {detail.state !== 'done' && (

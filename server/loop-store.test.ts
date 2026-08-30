@@ -218,6 +218,29 @@ describe('LoopStore interventions', () => {
   })
 })
 
+describe('LoopStore lessons', () => {
+  let store: LoopStore
+  beforeEach(() => {
+    store = makeStore()
+  })
+  afterEach(() => store.close())
+
+  it('lessons resolve once and filter by recipe and status', () => {
+    const run = makeRun(store)
+    const a = store.addLesson({ recipeId: 'ci-repair', sourceRunId: run.id, kind: 'budget', text: 'Raise turns.' })
+    store.addLesson({ recipeId: 'ci-repair', sourceRunId: run.id, kind: 'retry-policy', text: 'Add retries.' })
+    store.addLesson({ recipeId: 'other', sourceRunId: run.id, kind: 'budget', text: 'Unrelated.' })
+
+    expect(store.resolveLesson(a.id, 'approved')?.status).toBe('approved')
+    expect(store.resolveLesson(a.id, 'rejected')).toBeNull() // guarded
+
+    expect(store.listLessons('ci-repair')).toHaveLength(2)
+    expect(store.listLessons('ci-repair', 'approved').map((l) => l.text)).toEqual(['Raise turns.'])
+    expect(store.listLessons(undefined, 'suggested')).toHaveLength(2)
+    expect(store.getLesson('nope')).toBeNull()
+  })
+})
+
 describe('v1 table cleanup', () => {
   it('drops leftover goal_runs tables on open', () => {
     const dir = mkdtempSync(join(tmpdir(), 'codekin-loopdb-'))

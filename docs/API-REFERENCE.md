@@ -640,6 +640,28 @@ boundary. With `revisePlan`, the maker is asked to revise its plan first.
 
 **Request:** `{ "instruction": string, "revisePlan"?: boolean }`
 
+### `POST /api/loops/runs/:id/fork`
+
+Fork a run into a new one starting from its current worktree state
+(uncommitted work included). `409` when no recoverable worktree exists.
+
+**Response:** `{ "run": LoopRun }`
+
+### `GET /api/loops/lessons?recipeId=&status=`
+
+Reflection suggestions (`suggested` / `approved` / `rejected`).
+
+### `POST /api/loops/lessons/:lessonId/approve` · `/reject`
+
+Resolve a suggested lesson; approved lessons join future runs' prompts.
+
+### `GET /api/loops/recipes/:id/stats`
+
+Run outcomes grouped by frozen recipe content hash — A/B comparison across
+recipe versions.
+
+**Response:** `{ "recipeId": string, "versions": [{ recipeHash, runs, succeeded, failed, canceled, avgTurns, avgCostUsd, firstRunAt, lastRunAt }] }`
+
 ### `POST /api/loops/runs/:id/interventions/:interventionId/resolve`
 
 Resolve a pending intervention. `choice` must be one of the intervention's

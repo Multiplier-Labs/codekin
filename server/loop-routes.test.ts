@@ -39,6 +39,7 @@ const engine = {
   cancel: vi.fn(() => false),
   steer: vi.fn(() => true),
   resolveIntervention: vi.fn(async () => true),
+  forkRun: vi.fn(async () => null),
 } as unknown as LoopEngine
 
 let server: Server
@@ -255,6 +256,49 @@ describe('branches and overrides', () => {
       body: JSON.stringify({ recipeId: 'my-loop', repo: repoDir, overrides: { budgets: { turns: -2 } } }),
     })
     expect(bad.status).toBe(400)
+  })
+})
+
+describe('lessons, stats, fork', () => {
+  it('lists and resolves lessons over REST', async () => {
+    const run = store.createRun({ recipe, goal: 'g', repo: repoDir, branch: 'lb', provider: 'claude' })
+    const lesson = store.addLesson({ recipeId: 'my-loop', sourceRunId: run.id, kind: 'budget', text: 'Raise the cap.' })
+
+    const list = await fetch(`${baseUrl}/lessons?recipeId=my-loop&status=suggested`, { headers: auth })
+    expect(((await list.json()) as { lessons: unknown[] }).lessons).toHaveLength(1)
+
+    const approve = await fetch(`${baseUrl}/lessons/${lesson.id}/approve`, { method: 'POST', headers: auth })
+    expect(approve.status).toBe(200)
+    const again = await fetch(`${baseUrl}/lessons/${lesson.id}/reject`, { method: 'POST', headers: auth })
+    expect(again.status).toBe(409)
+  })
+
+  it('recipe stats group runs by frozen recipe hash', async () => {
+    const runA = store.createRun({ recipe, goal: 'g', repo: repoDir, branch: 's1', provider: 'claude' })
+    store.patchRun(runA.id, { state: 'done', outcome: 'completed', turnCount: 4, costUsd: 2 })
+    const altered = { ...recipe, contentHash: 'f'.repeat(64) }
+    const runB = store.createRun({ recipe: altered, goal: 'g', repo: repoDir, branch: 's2', provider: 'claude' })
+    store.patchRun(runB.id, { state: 'done', outcome: 'failed' })
+
+    const res = await fetch(`${baseUrl}/recipes/my-loop/stats`, { headers: auth })
+    const body = (await res.json()) as { versions: Array<{ recipeHash: string; runs: number; succeeded: number; failed: number; avgTurns: number | null }> }
+    expect(body.versions.length).toBeGreaterThanOrEqual(2)
+    const original = body.versions.find((v) => v.recipeHash === recipe.contentHash)!
+    const alteredStats = body.versions.find((v) => v.recipeHash === 'f'.repeat(64))!
+    expect(original.succeeded).toBeGreaterThanOrEqual(1)
+    expect(alteredStats.failed).toBe(1)
+  })
+
+  it('fork delegates to the engine and 404s on unknown runs', async () => {
+    const missing = await fetch(`${baseUrl}/runs/nope/fork`, { method: 'POST', headers: auth })
+    expect(missing.status).toBe(404)
+
+    const run = store.createRun({ recipe, goal: 'g', repo: repoDir, branch: 'fk', provider: 'claude' })
+    const forked = store.createRun({ recipe, goal: 'g', repo: repoDir, branch: 'fk-fork', provider: 'claude' })
+    ;(engine.forkRun as ReturnType<typeof vi.fn>).mockResolvedValueOnce(forked)
+    const res = await fetch(`${baseUrl}/runs/${run.id}/fork`, { method: 'POST', headers: auth })
+    expect(res.status).toBe(200)
+    expect(((await res.json()) as { run: { id: string } }).run.id).toBe(forked.id)
   })
 })
 

@@ -217,7 +217,7 @@ export function LoopsView({ token, initialSelectedRunId, onNavigateToSession }: 
             Select a run — or start a new loop — to see its plan, evidence, and controls.
           </div>
         ) : (
-          <LoopRunWorkspace token={token} detail={detail} onAct={act} onNavigateToSession={onNavigateToSession} />
+          <LoopRunWorkspace token={token} detail={detail} onAct={act} onNavigateToSession={onNavigateToSession} onForked={setSelectedRunId} />
         )}
       </div>
 

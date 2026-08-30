@@ -60,7 +60,7 @@ export type LoopRunState =
 
 export type LoopRunOutcome = 'completed' | 'completed_with_warnings' | 'failed' | 'canceled'
 
-export type LoopStageKind = 'preflight' | 'plan' | 'act' | 'evaluate' | 'review' | 'finalize' | 'ci'
+export type LoopStageKind = 'preflight' | 'plan' | 'act' | 'evaluate' | 'review' | 'finalize' | 'ci' | 'integrate'
 export type LoopStageStatus = 'running' | 'succeeded' | 'failed' | 'canceled'
 
 export type LoopActorType = 'user' | 'system' | 'agent'
@@ -216,6 +216,23 @@ export interface LoopIntervention {
   /** Allowed responses, e.g. ["approve", "reject"]. */
   options: string[]
   resolution: { choice: string; note?: string } | null
+  createdAt: string
+  resolvedAt: string | null
+}
+
+export type LessonStatus = 'suggested' | 'approved' | 'rejected'
+
+export interface LoopLesson {
+  id: string
+  /** Recipe the lesson applies to (future runs of it see approved lessons). */
+  recipeId: string
+  /** Run whose evidence produced the suggestion. */
+  sourceRunId: string
+  /** Suggestion category, e.g. 'retry-policy', 'budget', 'review-guidance'. */
+  kind: string
+  /** The lesson text — injected into future prompts once approved. */
+  text: string
+  status: LessonStatus
   createdAt: string
   resolvedAt: string | null
 }
@@ -411,6 +428,18 @@ export class LoopStore {
         resolved_at TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS loop_lessons (
+        id            TEXT PRIMARY KEY,
+        recipe_id     TEXT NOT NULL,
+        source_run_id TEXT NOT NULL REFERENCES loop_runs(id),
+        kind          TEXT NOT NULL,
+        text          TEXT NOT NULL,
+        status        TEXT NOT NULL DEFAULT 'suggested',
+        created_at    TEXT NOT NULL,
+        resolved_at   TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_loop_lessons_recipe ON loop_lessons(recipe_id, status);
       CREATE INDEX IF NOT EXISTS idx_loop_runs_state ON loop_runs(state);
       CREATE INDEX IF NOT EXISTS idx_loop_runs_repo ON loop_runs(repo);
       CREATE INDEX IF NOT EXISTS idx_loop_stages_run ON loop_stages(run_id);
@@ -830,6 +859,50 @@ export class LoopStore {
     return rows.map(mapIntervention)
   }
 
+  // -------------------------------------------------------------------------
+  // Lessons
+  // -------------------------------------------------------------------------
+
+  addLesson(input: { recipeId: string; sourceRunId: string; kind: string; text: string }): LoopLesson {
+    const id = randomUUID()
+    const createdAt = new Date().toISOString()
+    this.db
+      .prepare(`INSERT INTO loop_lessons (id, recipe_id, source_run_id, kind, text, status, created_at) VALUES (?, ?, ?, ?, ?, 'suggested', ?)`)
+      .run(id, input.recipeId, input.sourceRunId, input.kind, input.text, createdAt)
+    return { id, recipeId: input.recipeId, sourceRunId: input.sourceRunId, kind: input.kind, text: input.text, status: 'suggested', createdAt, resolvedAt: null }
+  }
+
+  /** Guarded like interventions: only a pending ('suggested') lesson resolves. */
+  resolveLesson(id: string, status: 'approved' | 'rejected'): LoopLesson | null {
+    const result = this.db
+      .prepare(`UPDATE loop_lessons SET status = ?, resolved_at = ? WHERE id = ? AND status = 'suggested'`)
+      .run(status, new Date().toISOString(), id)
+    if (result.changes === 0) return null
+    return this.getLesson(id)
+  }
+
+  getLesson(id: string): LoopLesson | null {
+    const row = this.db.prepare(`SELECT * FROM loop_lessons WHERE id = ?`).get(id) as LessonRow | undefined
+    return row ? mapLesson(row) : null
+  }
+
+  listLessons(recipeId?: string, status?: LessonStatus): LoopLesson[] {
+    const clauses: string[] = []
+    const params: unknown[] = []
+    if (recipeId) {
+      clauses.push('recipe_id = ?')
+      params.push(recipeId)
+    }
+    if (status) {
+      clauses.push('status = ?')
+      params.push(status)
+    }
+    let sql = `SELECT * FROM loop_lessons`
+    if (clauses.length) sql += ` WHERE ${clauses.join(' AND ')}`
+    sql += ` ORDER BY created_at DESC, rowid DESC`
+    return (this.db.prepare(sql).all(...params) as LessonRow[]).map(mapLesson)
+  }
+
   close(): void {
     this.db.close()
   }
@@ -890,6 +963,30 @@ function mapEvent(row: EventRow): LoopEvent {
     ...(row.stage_id ? { stageId: row.stage_id } : {}),
     ...(row.attempt_id ? { attemptId: row.attempt_id } : {}),
     payload: jsonParse(row.payload),
+  }
+}
+
+interface LessonRow {
+  id: string
+  recipe_id: string
+  source_run_id: string
+  kind: string
+  text: string
+  status: string
+  created_at: string
+  resolved_at: string | null
+}
+
+function mapLesson(row: LessonRow): LoopLesson {
+  return {
+    id: row.id,
+    recipeId: row.recipe_id,
+    sourceRunId: row.source_run_id,
+    kind: row.kind,
+    text: row.text,
+    status: row.status as LessonStatus,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at,
   }
 }
 

@@ -90,6 +90,43 @@ no-progress detector compares diff summaries and normalized failure
 fingerprints across evaluate cycles — producing more text is not progress —
 and escalates after `budgets.noProgressAttempts` identical failures.
 
+## Parallel workstreams
+
+With `workers.maxParallel > 1` (requires `plan.required`), the planning prompt
+lets the maker declare independent WORKSTREAM blocks — a name, disjoint path
+scopes, and a task each. Validation is deterministic and conservative: fewer
+than two streams, missing scopes, or overlapping scope prefixes all fall back
+to sequential execution. Valid streams fan out to child maker sessions in
+child worktrees branched off the run branch; each child's work is committed
+engine-side (never dependent on the model remembering to commit) and
+scope-checked against its declared globs. A separate `integrate` stage merges
+the surviving branches with `--no-ff` — a merge conflict aborts the merge and
+escalates to the operator; nothing resolves conflicts silently. The main
+maker session handles all post-integration repairs sequentially.
+
+## Forking
+
+Fork (button in the workspace, `POST /runs/:id/fork`) starts a new run from a
+run's *current worktree state* — uncommitted work included, captured with
+`git stash create` so the source tree is never disturbed. The fork gets the
+same frozen recipe and goal, fresh budgets, and a context note carrying the
+source's plan and latest evaluation; both runs record the relationship as
+events.
+
+## Lessons
+
+After a run ends (except canceled), a deterministic reflection pass over the
+run's own evidence suggests lessons scoped to the recipe: retry allowances
+for evaluators that hit transient environment errors, budget adjustments when
+runs finish near a cap or die at the boundary, standing review guidance when
+the reviewer pushes back repeatedly, outcome wording when protected paths
+kept getting touched. Suggestions start as `suggested` and are approved or
+rejected by you (workspace panel or `POST /lessons/:id/approve|reject`) —
+agents never rewrite recipes or policies. Approved lessons are injected into
+future runs' prompts (visible as a `lessons_applied` event), and
+`GET /recipes/:id/stats` groups run outcomes by frozen recipe hash so recipe
+versions can be compared A/B.
+
 ## Recipes
 
 A recipe is Markdown + YAML frontmatter, reviewable in git:
