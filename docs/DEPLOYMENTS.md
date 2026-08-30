@@ -34,7 +34,7 @@ Deployments live in `~/.codekin/deployments.json`:
 
 | Type | Samples | Breach conditions |
 | --- | --- | --- |
-| `http` | status, latency, TLS days-remaining (`checkTls`), security headers (`checkHeaders`) | non-expected status (default: ≥400), unreachable/timeout, certificate < 14 days, missing HSTS/CSP headers |
+| `http` | status, latency (+ learned p95 baseline), TLS days-remaining and protocol (`checkTls`), security headers (`checkHeaders`) | non-expected status (default: ≥400), unreachable/timeout, certificate < 14 days, TLS protocol below 1.2, missing HSTS/CSP headers, latency > 4× learned p95 (min 750 ms; engages after ~a day of healthy samples) |
 | `pm2` | status, restart count, memory | process missing, status ≠ `online`, memory > `memoryLimitMb`; a restart-count increase publishes a one-off event |
 | `disk` | free % | free % < `minFreePct` (default 10) |
 | `log` | new error-pattern lines per window (`errorPattern` regex, default error/exception/fatal) | more than `maxErrorsPerWindow` (default 10) new matches since the last sample; missing file / bad pattern |
