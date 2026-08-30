@@ -847,7 +847,8 @@ server.listen(port, '0.0.0.0', () => {
     // Replay notifications queued while the orchestrator was down. The
     // flusher only delivers when the orchestrator session is alive and the
     // rate-limit circuit breaker is closed, so it is safe to run always.
-    getOrchestratorOutbox().startFlusher(sessions)
+    // Engine-driven: rides the dispatch tick instead of its own interval.
+    getOrchestratorOutbox().startFlusher(sessions, undefined, engine)
 
     console.log('[workflow] Workflow engine ready')
   } catch (err) {

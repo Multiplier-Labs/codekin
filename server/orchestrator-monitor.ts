@@ -38,6 +38,7 @@ export interface OrchestratorNotification {
 // ---------------------------------------------------------------------------
 
 const POLL_INTERVAL_MS = 15 * 60 * 1000  // 15 minutes
+const AGING_INTERVAL_MS = 6 * 60 * 60 * 1000  // aging cycle checked every 6 hours
 /** Cap on the goal-run notification dedup set (oldest entries dropped). */
 const MAX_NOTED_GOAL_RUN_STATES = 500
 
@@ -53,6 +54,9 @@ export class OrchestratorMonitor {
   private engine: WorkflowEngine | null = null
   /** True once a stall alert has been sent — reset when the heartbeat recovers. */
   private engineStallNotified = false
+  private started = false
+  /** Poll holds off until the initial report scan lands (no boot-time false "new report" spam). */
+  private initialScanDone = false
 
   constructor(sessions: SessionManager) {
     this.sessions = sessions
@@ -71,13 +75,27 @@ export class OrchestratorMonitor {
     this.memory = memory
   }
 
-  /** Start the periodic poll. */
+  /**
+   * Start the periodic poll. When an engine is attached (setEngine), the poll
+   * and aging cycles register as engine tick tasks — they ride the dispatch
+   * loop's clock and heartbeat instead of owning setInterval loops (the one
+   * observable liveness story). Without an engine (standalone/tests), the
+   * legacy intervals run.
+   */
   start(): void {
-    if (this.pollTimer) return
+    if (this.started) return
+    this.started = true
     console.log('[orchestrator-monitor] Starting proactive monitor (poll every 15m)')
 
-    // Initial scan to populate seen reports
-    void this.initialScan()
+    // Initial scan to populate seen reports; poll() holds off until it lands
+    // so boot-time reports are never announced as new.
+    void this.initialScan().then(() => { this.initialScanDone = true })
+
+    if (this.engine) {
+      this.engine.registerTickTask('orchestrator-poll', POLL_INTERVAL_MS, () => this.poll())
+      this.engine.registerTickTask('orchestrator-aging', AGING_INTERVAL_MS, () => { this.runAgingAndAssessments() })
+      return
+    }
 
     this.pollTimer = setInterval(() => {
       void this.poll()
@@ -86,11 +104,16 @@ export class OrchestratorMonitor {
     // Run aging cycle daily (check every 6 hours)
     this.agingTimer = setInterval(() => {
       this.runAgingAndAssessments()
-    }, 6 * 60 * 60 * 1000)
+    }, AGING_INTERVAL_MS)
   }
 
   /** Stop the monitor. */
   stop(): void {
+    this.started = false
+    if (this.engine) {
+      this.engine.unregisterTickTask('orchestrator-poll')
+      this.engine.unregisterTickTask('orchestrator-aging')
+    }
     if (this.pollTimer) {
       clearInterval(this.pollTimer)
       this.pollTimer = null
@@ -168,6 +191,10 @@ export class OrchestratorMonitor {
 
   /** Periodic poll — check for new reports and idle repos. */
   private async poll(): Promise<void> {
+    // Engine-driven polls can fire within a minute of boot — wait for the
+    // initial scan so pre-existing reports aren't announced as new.
+    if (!this.initialScanDone) return
+
     // Skip the entire poll if the rate-limit circuit breaker is open. This
     // is the dominant source of background API calls; continuing to poke
     // the orchestrator session during a cooldown just deepens the hole.

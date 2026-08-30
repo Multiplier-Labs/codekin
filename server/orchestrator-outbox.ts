@@ -31,6 +31,8 @@ export class OrchestratorOutbox {
   private items: OutboxItem[] = []
   private filePath: string
   private flushTimer: ReturnType<typeof setInterval> | null = null
+  /** Set when the flush is engine-driven (registerTickTask) rather than interval-driven. */
+  private tickEngine: { registerTickTask: (name: string, intervalMs: number, fn: () => void) => void; unregisterTickTask: (name: string) => void } | null = null
 
   constructor(filePath = join(DATA_DIR, 'orchestrator', 'outbox.json')) {
     this.filePath = filePath
@@ -87,9 +89,19 @@ export class OrchestratorOutbox {
   }
 
   /** Start a background timer that periodically attempts a flush. */
-  startFlusher(sessions: SessionManager, intervalMs = FLUSH_INTERVAL_MS): void {
-    if (this.flushTimer) return
-    this.flushTimer = setInterval(() => {
+  /**
+   * Start the periodic flush. With `engine`, the flush rides the trigger
+   * engine's tick (registerTickTask) instead of owning a setInterval — one
+   * clock, one liveness story. Without it, the legacy interval runs.
+   */
+  startFlusher(
+    sessions: SessionManager,
+    intervalMs = FLUSH_INTERVAL_MS,
+    engine?: { registerTickTask: (name: string, intervalMs: number, fn: () => void) => void; unregisterTickTask: (name: string) => void },
+  ): void {
+    if (this.flushTimer || this.tickEngine) return
+
+    const doFlush = () => {
       try {
         const delivered = this.flush(sessions)
         if (delivered > 0) {
@@ -98,12 +110,24 @@ export class OrchestratorOutbox {
       } catch (err) {
         console.error('[orchestrator-outbox] flush error:', err)
       }
-    }, intervalMs)
+    }
+
+    if (engine) {
+      this.tickEngine = engine
+      engine.registerTickTask('orchestrator-outbox-flush', intervalMs, doFlush)
+      return
+    }
+
+    this.flushTimer = setInterval(doFlush, intervalMs)
     if (this.flushTimer.unref) this.flushTimer.unref()
   }
 
   /** Stop the background flusher. */
   stopFlusher(): void {
+    if (this.tickEngine) {
+      this.tickEngine.unregisterTickTask('orchestrator-outbox-flush')
+      this.tickEngine = null
+    }
     if (this.flushTimer) {
       clearInterval(this.flushTimer)
       this.flushTimer = null
