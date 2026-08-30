@@ -193,6 +193,33 @@ describe('file discovery', () => {
   })
 })
 
+describe('withOverrides', () => {
+  it('applies mode/budget/plan overrides and recomputes the hash', async () => {
+    const { withOverrides } = await import('./loop-recipe.js')
+    const base = parse(VALID)
+    const next = withOverrides(base, {
+      mode: 'guided',
+      budgets: { turns: 20, wallTimeMinutes: 30 },
+      planRequired: true,
+    })
+    expect(next.policy.mode).toBe('guided')
+    expect(next.budgets).toEqual({ turns: 20, costUsd: 5, wallTimeMs: 30 * 60_000, noProgressAttempts: 3 })
+    expect(next.plan.required).toBe(true)
+    expect(next.contentHash).not.toBe(base.contentHash)
+    // No overrides that change anything → same hash as a no-op application.
+    expect(withOverrides(base, {}).contentHash).toBe(base.contentHash)
+    // Base is untouched.
+    expect(base.policy.mode).toBe('guarded')
+  })
+
+  it('rejects invalid override values', async () => {
+    const { withOverrides } = await import('./loop-recipe.js')
+    const base = parse(VALID)
+    expect(() => withOverrides(base, { mode: 'yolo' as never })).toThrow(/Invalid mode/)
+    expect(() => withOverrides(base, { budgets: { turns: -1 } })).toThrow(/positive number/)
+  })
+})
+
 describe('built-in recipes', () => {
   it('every shipped recipe parses under strict validation', () => {
     const recipes = loadBuiltinRecipes(true) // strict: any parse error throws

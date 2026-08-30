@@ -212,6 +212,52 @@ describe('runs and events', () => {
   })
 })
 
+describe('branches and overrides', () => {
+  it('lists local branches with the detected default', async () => {
+    const { execFileSync } = await import('child_process')
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repoDir })
+    git('init', '-b', 'main')
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '--allow-empty', '-m', 'init')
+    git('branch', 'develop')
+
+    const res = await fetch(`${baseUrl}/branches?repoPath=${encodeURIComponent(repoDir)}`, { headers: auth })
+    const body = await res.json()
+    expect(res.status).toBe(200)
+    expect(body.branches.sort()).toEqual(['develop', 'main'])
+    expect(body.defaultBranch).toBe('main') // no origin — falls back to well-known names
+
+    const bad = await fetch(`${baseUrl}/branches?repoPath=${encodeURIComponent(join(tmpRoot, 'nope'))}`, { headers: auth })
+    expect(bad.status).toBe(400)
+  })
+
+  it('preflight applies control-step overrides to the frozen recipe', async () => {
+    const res = await fetch(`${baseUrl}/runs/preflight`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({
+        recipeId: 'my-loop',
+        repo: repoDir,
+        baseBranch: 'develop',
+        overrides: { mode: 'guided', budgets: { turns: 9 }, planRequired: true },
+      }),
+    })
+    const body = await res.json()
+    expect(res.status).toBe(200)
+    expect(body.effective.recipe.policy.mode).toBe('guided')
+    expect(body.effective.recipe.budgets.turns).toBe(9)
+    expect(body.effective.recipe.plan.required).toBe(true)
+    expect(body.effective.baseBranch).toBe('develop')
+    expect(body.effective.recipe.contentHash).not.toBe(recipe.contentHash)
+
+    const bad = await fetch(`${baseUrl}/runs/preflight`, {
+      method: 'POST',
+      headers: jsonHeaders,
+      body: JSON.stringify({ recipeId: 'my-loop', repo: repoDir, overrides: { budgets: { turns: -2 } } }),
+    })
+    expect(bad.status).toBe(400)
+  })
+})
+
 describe('controls', () => {
   it('pause/resume/steer succeed; cancel maps a refusal to 409', async () => {
     expect((await fetch(`${baseUrl}/runs/r/pause`, { method: 'POST', headers: auth })).status).toBe(200)
@@ -226,7 +272,7 @@ describe('controls', () => {
       body: JSON.stringify({ instruction: 'go left' }),
     })
     expect(steer.status).toBe(200)
-    expect(engine.steer).toHaveBeenCalledWith('r', 'go left')
+    expect(engine.steer).toHaveBeenCalledWith('r', 'go left', false)
   })
 
   it('resolving an intervention checks run scoping and choice presence', async () => {

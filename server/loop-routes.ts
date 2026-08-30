@@ -28,7 +28,10 @@ import {
   loadLoopRecipe,
   parseLoopRecipe,
   resolveAgentProvider,
+  withOverrides,
+  type RecipeOverrides,
 } from './loop-recipe.js'
+import { execFile } from 'child_process'
 import type { LoopEngine } from './loop-engine.js'
 import type { LoopRunState, LoopStore } from './loop-store.js'
 import type { LoopArtifactStore } from './loop-artifacts.js'
@@ -39,6 +42,7 @@ type ExtractFn = (req: Request) => string | undefined
 const STATES: readonly LoopRunState[] = [
   'created',
   'preflight',
+  'planning',
   'executing',
   'evaluating',
   'reviewing',
@@ -55,7 +59,10 @@ interface StartRunBody {
   recipeId?: string
   repo?: string
   branch?: string
+  baseBranch?: string
   goal?: string
+  /** Wizard control-step overrides, applied to the recipe before it freezes. */
+  overrides?: RecipeOverrides
 }
 
 /** loop/<recipeId>-<yyyymmdd-hhmmss> — a start without a branch name still lands somewhere sane. */
@@ -64,25 +71,60 @@ function defaultBranch(recipeId: string): string {
   return `loop/${recipeId}-${stamp}`
 }
 
-/** Resolve + validate the { recipeId, repo, branch } triple shared by preflight and start. */
+/** Resolve + validate the shared start/preflight inputs, applying any overrides. */
 function resolveStart(body: StartRunBody):
   | { error: string }
-  | { recipe: NonNullable<ReturnType<typeof loadLoopRecipe>>; repo: string; branch: string; goal: string } {
-  const { recipeId, repo, branch, goal } = body
+  | { recipe: NonNullable<ReturnType<typeof loadLoopRecipe>>; repo: string; branch: string; baseBranch: string | null; goal: string } {
+  const { recipeId, repo, branch, baseBranch, goal, overrides } = body
   if (typeof recipeId !== 'string' || !isValidRecipeId(recipeId)) {
     return { error: 'Missing or invalid recipeId (expected a lowercase slug matching a loop recipe)' }
   }
   if (!repo) return { error: 'Missing required field: repo' }
   const resolvedRepo = resolveRepoPathInRoot(repo)
   if (!resolvedRepo) return { error: 'Invalid repo: must be an existing directory under the configured repos root' }
-  const recipe = loadLoopRecipe(recipeId, resolvedRepo)
+  let recipe = loadLoopRecipe(recipeId, resolvedRepo)
   if (!recipe) return { error: `No loop recipe found for id: ${recipeId}` }
+  if (overrides !== undefined) {
+    if (typeof overrides !== 'object' || overrides === null) return { error: 'overrides must be an object' }
+    try {
+      recipe = withOverrides(recipe, overrides)
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Invalid overrides' }
+    }
+  }
   return {
     recipe,
     repo: resolvedRepo,
     branch: branch && branch.trim() ? branch.trim() : defaultBranch(recipeId),
+    baseBranch: baseBranch && baseBranch.trim() ? baseBranch.trim() : null,
     goal: goal && goal.trim() ? goal.trim() : recipe.outcome,
   }
+}
+
+/**
+ * Local branches of a repo plus the detected default — the wizard's
+ * base-branch picker. Argv-only git, path constrained to the repos root.
+ */
+function listBranches(repoPath: string): Promise<{ branches: string[]; defaultBranch: string | null }> {
+  const git = (args: string[]) =>
+    new Promise<string>((resolve, reject) => {
+      execFile('git', args, { cwd: repoPath, timeout: 10_000 }, (err, stdout) => {
+        if (err) reject(err instanceof Error ? err : new Error(String(err)))
+        else resolve(stdout)
+      })
+    })
+  return (async () => {
+    const out = await git(['for-each-ref', '--format=%(refname:short)', 'refs/heads'])
+    const branches = out.split('\n').map((b) => b.trim()).filter(Boolean)
+    let def: string | null
+    try {
+      const head = (await git(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).trim()
+      def = head.replace(/^origin\//, '') || null
+    } catch {
+      def = branches.find((b) => b === 'main') ?? branches.find((b) => b === 'master') ?? null
+    }
+    return { branches, defaultBranch: def }
+  })()
 }
 
 export function createLoopRouter(
@@ -115,6 +157,18 @@ export function createLoopRouter(
     res.json({ recipes: listLoopRecipes(resolved || undefined) })
   })
 
+  /** Base-branch picker data for the wizard. */
+  router.get('/branches', (req, res) => {
+    const repoPath = req.query.repoPath as string | undefined
+    const resolved = repoPath ? resolveRepoPathInRoot(repoPath) : undefined
+    if (!resolved) {
+      return res.status(400).json({ error: 'Invalid repoPath: must be an existing directory under the configured repos root' })
+    }
+    listBranches(resolved)
+      .then((result) => res.json(result))
+      .catch((err: unknown) => res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to list branches' }))
+  })
+
   router.post('/recipes/validate', (req: Request<Record<string, string>, unknown, { content?: string }>, res) => {
     const { content } = req.body
     if (typeof content !== 'string' || !content.trim()) {
@@ -142,6 +196,7 @@ export function createLoopRouter(
         recipe: resolved.recipe,
         repo: resolved.repo,
         branch: resolved.branch,
+        baseBranch: resolved.baseBranch,
         goal: resolved.goal,
         provider,
         model: resolved.recipe.agent.model ?? null,
@@ -158,6 +213,7 @@ export function createLoopRouter(
         goal: resolved.goal,
         repo: resolved.repo,
         branch: resolved.branch,
+        baseBranch: resolved.baseBranch,
         provider: resolveAgentProvider(resolved.recipe.agent.provider),
         model: resolved.recipe.agent.model ?? null,
       })
@@ -238,12 +294,12 @@ export function createLoopRouter(
     res.json({ success: true })
   })
 
-  router.post('/runs/:id/steer', (req: Request<{ id: string }, unknown, { instruction?: string }>, res) => {
-    const { instruction } = req.body
+  router.post('/runs/:id/steer', (req: Request<{ id: string }, unknown, { instruction?: string; revisePlan?: boolean }>, res) => {
+    const { instruction, revisePlan } = req.body
     if (typeof instruction !== 'string' || !instruction.trim()) {
       return res.status(400).json({ error: 'Missing required field: instruction' })
     }
-    if (!engine.steer(req.params.id, instruction.trim())) {
+    if (!engine.steer(req.params.id, instruction.trim(), revisePlan === true)) {
       return res.status(409).json({ error: 'Run not found or already finished' })
     }
     res.json({ success: true })
