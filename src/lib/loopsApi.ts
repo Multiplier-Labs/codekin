@@ -76,7 +76,7 @@ export interface LoopStage {
   id: string
   runId: string
   stageIndex: number
-  kind: 'preflight' | 'plan' | 'act' | 'evaluate' | 'review' | 'finalize' | 'ci'
+  kind: 'preflight' | 'plan' | 'act' | 'evaluate' | 'review' | 'finalize' | 'ci' | 'integrate'
   status: 'running' | 'succeeded' | 'failed' | 'canceled'
   startedAt: string
   completedAt: string | null
@@ -295,6 +295,44 @@ export async function steerLoopRun(token: string, runId: string, instruction: st
     const data = (await res.json().catch(() => ({}))) as { error?: string }
     throw new Error(data.error ?? `Failed to steer loop run: ${res.status}`)
   }
+}
+
+export interface LoopLesson {
+  id: string
+  recipeId: string
+  sourceRunId: string
+  kind: string
+  text: string
+  status: 'suggested' | 'approved' | 'rejected'
+  createdAt: string
+  resolvedAt: string | null
+}
+
+/** Reflection suggestions for a recipe; approved ones join future run prompts. */
+export async function listLoopLessons(token: string, recipeId?: string, status?: LoopLesson['status']): Promise<LoopLesson[]> {
+  const params = new URLSearchParams()
+  if (recipeId) params.set('recipeId', recipeId)
+  if (status) params.set('status', status)
+  const qs = params.toString()
+  const res = await transport.fetch(`${BASE}/lessons${qs ? `?${qs}` : ''}`, { headers: headers(token) })
+  if (!res.ok) throw new Error(`Failed to list lessons: ${res.status}`)
+  return ((await res.json()) as { lessons: LoopLesson[] }).lessons
+}
+
+export async function resolveLoopLesson(token: string, lessonId: string, action: 'approve' | 'reject'): Promise<void> {
+  const res = await transport.fetch(`${BASE}/lessons/${encodeURIComponent(lessonId)}/${action}`, { method: 'POST', headers: headers(token) })
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(data.error ?? `Failed to ${action} lesson: ${res.status}`)
+  }
+}
+
+/** Fork a run into a new one starting from its current worktree state. */
+export async function forkLoopRun(token: string, runId: string): Promise<LoopRun> {
+  const res = await transport.fetch(`${BASE}/runs/${encodeURIComponent(runId)}/fork`, { method: 'POST', headers: headers(token) })
+  const data = (await res.json()) as { run?: LoopRun; error?: string }
+  if (!res.ok || !data.run) throw new Error(data.error ?? `Failed to fork run: ${res.status}`)
+  return data.run
 }
 
 /** Artifact body (plan text, evaluator output, review) as text. */

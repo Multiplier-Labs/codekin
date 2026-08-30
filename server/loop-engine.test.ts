@@ -152,6 +152,18 @@ class FakeEval implements LoopEvaluatorApi {
   getDiff = async () => this.diffText
   getChangedFiles = async () => this.changedFiles
   revParseHead = async () => 'base-sha-1'
+
+  gitCalls: Array<{ args: string[]; cwd: string }> = []
+  /** Optional override; default: stash create → sha, worker diff → in-scope file, else ''. */
+  gitHandler: ((args: string[], cwd: string) => string) | null = null
+  git = async (args: string[], cwd: string): Promise<string> => {
+    this.gitCalls.push({ args, cwd })
+    if (this.gitHandler) return this.gitHandler(args, cwd)
+    if (args[0] === 'stash' && args[1] === 'create') return 'stash-sha-42\n'
+    if (args[0] === 'rev-parse') return 'head-sha\n'
+    if (args[0] === 'diff') return 'src/x.ts\n'
+    return ''
+  }
 }
 
 class FakeFinalizer implements LoopFinalizerApi {
@@ -871,6 +883,212 @@ Fix the failing CI.
       const evaluations = store.listEvaluations(runId)
       expect(evaluations.find((e) => e.evaluatorId === 'tests')?.status).toBe('fail')
       expect(evaluations.find((e) => e.evaluatorId === 'signoff')).toBeUndefined() // pending
+    })
+  })
+
+  describe('phase 4: lessons and reflection', () => {
+    it('completion near the cost cap suggests a budget lesson, deduped across runs', async () => {
+      const recipe = recipeFromYaml({ costUsd: 5 })
+      const run = await engine.startRun(input(recipe))
+      const maker = host.get(store.getRun(run.id)!.makerSessionId!)!
+      maker.outputHistory.push({ type: 'usage', costUsd: 4.5 }) // 90% of the cap
+      host.emitResult(maker.id)
+      await settle()
+      expect(store.getRun(run.id)!.outcome).toBe('completed')
+      const lessons = store.listLessons('ci-repair', 'suggested')
+      expect(lessons.some((l) => l.kind === 'budget' && l.text.includes('cost cap'))).toBe(true)
+
+      // A second identical run must not duplicate the suggestion.
+      const before = store.listLessons('ci-repair').length
+      const second = await engine.startRun(input(recipeFromYaml({ costUsd: 5 })))
+      const maker2 = host.get(store.getRun(second.id)!.makerSessionId!)!
+      maker2.outputHistory.push({ type: 'usage', costUsd: 4.5 })
+      host.emitResult(maker2.id)
+      await settle()
+      expect(store.getRun(second.id)!.outcome).toBe('completed')
+      expect(store.listLessons('ci-repair').length).toBe(before)
+    })
+
+    it('transient env errors without retry allowance suggest a retry-policy lesson', async () => {
+      const recipe = recipeFromYaml()
+      const tests = recipe.evaluators[0] as CommandEvaluatorConfig
+      evalApi.commandQueue = [envError(tests)]
+      const runId = await startAndTurn(recipe)
+      // env error is not retried (maxAttempts 1) → treated as failure feedback; finish the run
+      evalApi.diffSummary = ' 2 files changed'
+      host.emitResult(store.getRun(runId)!.makerSessionId!)
+      await settle()
+      expect(store.listLessons('ci-repair', 'suggested').some((l) => l.kind === 'retry-policy')).toBe(true)
+    })
+
+    it('approved lessons are injected into the next run prompt; suggested/rejected are not', async () => {
+      const seed = await startAndTurn(recipeFromYaml())
+      expect(store.getRun(seed)!.outcome).toBe('completed')
+      const a = store.addLesson({ recipeId: 'ci-repair', sourceRunId: seed, kind: 'budget', text: 'Approved wisdom here.' })
+      const b = store.addLesson({ recipeId: 'ci-repair', sourceRunId: seed, kind: 'budget', text: 'Rejected noise here.' })
+      store.resolveLesson(a.id, 'approved')
+      store.resolveLesson(b.id, 'rejected')
+
+      const run = await engine.startRun(input(recipeFromYaml()))
+      const maker = host.get(store.getRun(run.id)!.makerSessionId!)!
+      expect(maker.inputs[0]).toContain('Approved wisdom here.')
+      expect(maker.inputs[0]).not.toContain('Rejected noise here.')
+      expect(store.listEvents(run.id).some((e) => e.type === 'lessons_applied')).toBe(true)
+    })
+  })
+
+  describe('phase 4: fork', () => {
+    it('forks from the source worktree state with fresh budgets and linked events', async () => {
+      const recipe = recipeFromYaml({ mode: 'guided' })
+      const sourceId = await startAndTurn(recipe) // parked at completion approval
+      const source = store.getRun(sourceId)!
+
+      const fork = await engine.forkRun(sourceId)
+      expect(fork).not.toBeNull()
+      expect(fork!.id).not.toBe(sourceId)
+      expect(fork!.recipeHash).toBe(source.recipeHash)
+      expect(fork!.baseSha).toBe('stash-sha-42') // captured uncommitted state
+      expect(fork!.branch).toContain('-fork-')
+      expect(fork!.turnCount).toBe(0)
+      expect(fork!.state).toBe('executing')
+
+      // stash create ran in the source worktree and the index was restored
+      const calls = evalApi.gitCalls.map((c) => c.args[0] + (c.args[1] ? `:${c.args[1]}` : ''))
+      expect(calls).toContain('stash:create')
+      expect(calls).toContain('reset')
+
+      expect(store.listEvents(fork!.id).some((e) => e.type === 'forked_from')).toBe(true)
+      expect(store.listEvents(sourceId).some((e) => e.type === 'fork_created')).toBe(true)
+      const forkMaker = host.get(fork!.makerSessionId!)!
+      expect(forkMaker.inputs[0]).toContain(`forked from run ${sourceId}`)
+    })
+
+    it('refuses to fork a run without a worktree', async () => {
+      const run = store.createRun({ recipe: recipeFromYaml(), goal: 'g', repo, branch: 'b', provider: 'claude' })
+      expect(await engine.forkRun(run.id)).toBeNull()
+    })
+  })
+
+  describe('phase 4: parallel workstreams', () => {
+    const PLAN_WITH_STREAMS = [
+      '1. Split the work.',
+      'WORKSTREAM: backend',
+      'SCOPE: server/**',
+      'TASK: Move the handlers.',
+      'WORKSTREAM: frontend',
+      'SCOPE: src/**',
+      'TASK: Update the components.',
+    ].join('\n')
+
+    function workersRecipe(): LoopRecipe {
+      const md = `---
+apiVersion: codekin.dev/v2
+kind: LoopRecipe
+metadata: { id: ci-repair, name: Repair CI }
+agent: { provider: claude }
+plan: { required: true }
+workers: { maxParallel: 2 }
+evaluators:
+  - { id: tests, type: command, command: npm test }
+budgets: { turns: 8, costUsd: 10 }
+---
+Fix the failing CI.
+`
+      return parseLoopRecipe(md, '/x/ci-repair.md', 'builtin')
+    }
+
+    async function planAndFanOut(): Promise<string> {
+      const run = await engine.startRun(input(workersRecipe()))
+      const maker = host.get(store.getRun(run.id)!.makerSessionId!)!
+      expect(maker.inputs[0]).toContain('WORKSTREAM')
+      maker.outputHistory.push({ type: 'output', data: PLAN_WITH_STREAMS })
+      host.emitResult(maker.id)
+      await settle(10)
+      return run.id
+    }
+
+    function workerSessions() {
+      return [...host.sessions.values()].filter((s) => s.name.includes(':worker:'))
+    }
+
+    it('fans out disjoint workstreams, scope-checks, integrates, evaluates, completes', async () => {
+      const runId = await planAndFanOut()
+      const workers = workerSessions()
+      expect(workers).toHaveLength(2)
+      expect(workers[0].inputs[0]).toContain('ONLY modify files matching')
+
+      // Both children finish; engine commits + scope-checks (fake git returns src/x.ts — in scope for frontend...
+      // give each worker in-scope diffs via the handler keyed on cwd.
+      evalApi.gitHandler = (args, cwd) => {
+        if (args[0] === 'diff') return cwd.includes(workers[0].id) ? 'server/api.ts\n' : 'src/App.tsx\n'
+        return ''
+      }
+      host.emitResult(workers[0].id)
+      await settle(10)
+      host.emitResult(workers[1].id)
+      await settle(15)
+
+      const run = store.getRun(runId)!
+      expect(run.outcome).toBe('completed')
+      expect(run.turnCount).toBe(3) // plan turn + two workers
+      const types = store.listEvents(runId).map((e) => e.type)
+      expect(types).toContain('workers_started')
+      expect(types.filter((t) => t === 'worker_completed')).toHaveLength(2)
+      expect(types).toContain('integration_completed')
+      const merges = evalApi.gitCalls.filter((c) => c.args[0] === 'merge')
+      expect(merges).toHaveLength(2)
+      expect(store.listStages(runId).map((s) => s.kind)).toContain('integrate')
+    })
+
+    it('a scope violation drops that workstream and reports it for sequential follow-up', async () => {
+      const runId = await planAndFanOut()
+      const workers = workerSessions()
+      evalApi.gitHandler = (args, cwd) => {
+        if (args[0] === 'diff') return cwd.includes(workers[0].id) ? 'server/api.ts\n' : 'server/rogue.ts\n' // frontend worker leaves scope
+        return ''
+      }
+      host.emitResult(workers[0].id)
+      await settle(10)
+      host.emitResult(workers[1].id)
+      await settle(15)
+
+      const run = store.getRun(runId)!
+      expect(run.state).toBe('executing') // integrated partial + feedback for the rest
+      const maker = host.get(run.makerSessionId!)!
+      expect(maker.inputs.at(-1)).toContain('dropped')
+      expect(maker.inputs.at(-1)).toContain('frontend')
+      expect(evalApi.gitCalls.filter((c) => c.args[0] === 'merge')).toHaveLength(1)
+    })
+
+    it('an integration conflict aborts the merge and escalates', async () => {
+      const runId = await planAndFanOut()
+      const workers = workerSessions()
+      evalApi.gitHandler = (args, cwd) => {
+        if (args[0] === 'diff') return cwd.includes(workers[0].id) ? 'server/api.ts\n' : 'src/App.tsx\n'
+        if (args[0] === 'merge' && args.includes('--no-ff')) throw new Error('CONFLICT (content)')
+        return ''
+      }
+      host.emitResult(workers[0].id)
+      await settle(10)
+      host.emitResult(workers[1].id)
+      await settle(15)
+
+      expect(store.getRun(runId)!.state).toBe('awaiting_approval')
+      expect(store.listInterventions(runId, 'pending')[0].body).toContain('merge conflict')
+      expect(evalApi.gitCalls.some((c) => c.args[0] === 'merge' && c.args[1] === '--abort')).toBe(true)
+    })
+
+    it('overlapping scopes refuse parallelism and run sequentially', async () => {
+      const run = await engine.startRun(input(workersRecipe()))
+      const maker = host.get(store.getRun(run.id)!.makerSessionId!)!
+      maker.outputHistory.push({
+        type: 'output',
+        data: ['WORKSTREAM: a', 'SCOPE: src/**', 'TASK: x', 'WORKSTREAM: b', 'SCOPE: src/lib/**', 'TASK: y'].join('\n'),
+      })
+      host.emitResult(maker.id)
+      await settle()
+      expect(workerSessions()).toHaveLength(0)
+      expect(maker.inputs.at(-1)).toContain('Execute it now') // sequential fallback
     })
   })
 

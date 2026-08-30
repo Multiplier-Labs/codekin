@@ -321,6 +321,76 @@ export function createLoopRouter(
     res.json({ success: true })
   })
 
+  /** Fork a run into a new one starting from its current worktree state. */
+  router.post('/runs/:id/fork', async (req, res) => {
+    const source = store.getRun(req.params.id)
+    if (!source) return res.status(404).json({ error: 'Run not found' })
+    try {
+      const fork = await engine.forkRun(req.params.id)
+      if (!fork) return res.status(409).json({ error: 'Run has no recoverable worktree to fork from' })
+      res.json({ run: fork })
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Fork failed' })
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // Lessons — reflection suggestions, approved by a human, never auto-applied
+  // -------------------------------------------------------------------------
+
+  router.get('/lessons', (req, res) => {
+    const recipeId = typeof req.query.recipeId === 'string' ? req.query.recipeId : undefined
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined
+    if (status && !['suggested', 'approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: `Invalid status: ${status}` })
+    }
+    res.json({ lessons: store.listLessons(recipeId, status as 'suggested' | 'approved' | 'rejected' | undefined) })
+  })
+
+  router.post('/lessons/:lessonId/approve', (req, res) => {
+    const lesson = store.resolveLesson(req.params.lessonId, 'approved')
+    if (!lesson) return res.status(409).json({ error: 'Lesson not found or already resolved' })
+    res.json({ lesson })
+  })
+
+  router.post('/lessons/:lessonId/reject', (req, res) => {
+    const lesson = store.resolveLesson(req.params.lessonId, 'rejected')
+    if (!lesson) return res.status(409).json({ error: 'Lesson not found or already resolved' })
+    res.json({ lesson })
+  })
+
+  // -------------------------------------------------------------------------
+  // Recipe-version stats — A/B comparison by content hash
+  // -------------------------------------------------------------------------
+
+  router.get('/recipes/:id/stats', (req, res) => {
+    if (!isValidRecipeId(req.params.id)) return res.status(400).json({ error: 'Invalid recipe id' })
+    const runs = store.listRuns({ limit: 500 }).filter((r) => r.recipeId === req.params.id)
+    const byHash = new Map<string, typeof runs>()
+    for (const run of runs) {
+      const bucket = byHash.get(run.recipeHash) ?? []
+      bucket.push(run)
+      byHash.set(run.recipeHash, bucket)
+    }
+    const versions = [...byHash.entries()].map(([hash, group]) => {
+      const done = group.filter((r) => r.state === 'done')
+      const succeeded = done.filter((r) => r.outcome === 'completed' || r.outcome === 'completed_with_warnings')
+      return {
+        recipeHash: hash,
+        runs: group.length,
+        succeeded: succeeded.length,
+        failed: done.filter((r) => r.outcome === 'failed').length,
+        canceled: done.filter((r) => r.outcome === 'canceled').length,
+        avgTurns: done.length ? done.reduce((sum, r) => sum + r.turnCount, 0) / done.length : null,
+        avgCostUsd: done.length ? done.reduce((sum, r) => sum + r.costUsd, 0) / done.length : null,
+        firstRunAt: group[group.length - 1]?.createdAt ?? null,
+        lastRunAt: group[0]?.createdAt ?? null,
+      }
+    })
+    versions.sort((a, b) => (b.lastRunAt ?? '').localeCompare(a.lastRunAt ?? ''))
+    res.json({ recipeId: req.params.id, versions })
+  })
+
   router.post(
     '/runs/:id/interventions/:interventionId/resolve',
     async (req: Request<{ id: string; interventionId: string }, unknown, { choice?: string; note?: string }>, res) => {

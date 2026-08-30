@@ -102,6 +102,8 @@ export interface LoopEvaluatorApi {
   getDiff(cwd: string): Promise<string>
   getChangedFiles(cwd: string): Promise<string[]>
   revParseHead(repo: string, ref?: string): Promise<string>
+  /** Raw git (argv-only) in a working directory — worktree capture, worker commits, integration merges. */
+  git(args: string[], cwd: string): Promise<string>
 }
 
 const defaultEvaluatorApi: LoopEvaluatorApi = {
@@ -111,6 +113,7 @@ const defaultEvaluatorApi: LoopEvaluatorApi = {
   getDiff,
   getChangedFiles,
   revParseHead: async (repo, ref) => (await execGit(['rev-parse', ref ?? 'HEAD'], repo)).trim(),
+  git: (args, cwd) => execGit(args, cwd),
 }
 
 export interface StartLoopRunInput {
@@ -198,6 +201,8 @@ interface RunCtx extends CheckpointState {
   cancelRequested: boolean
   steerQueue: string[]
   notedPromptIds: Set<string>
+  /** Live parallel-worker sessions (stopped on teardown). */
+  workerSessionIds: string[]
   wallTimer: NodeJS.Timeout | null
   ciTimer: NodeJS.Timeout | null
   disposers: (() => void)[]
@@ -326,9 +331,13 @@ export class LoopEngine {
     if (planning) this.store.createStage(run.id, 'plan')
     this.host.startClaude(session.id)
     ctx.assistantTextOffset = 0
+    const lessons = this.approvedLessons(run)
+    if (lessons.length) {
+      this.store.appendEvent({ runId: run.id, type: 'lessons_applied', payload: { count: lessons.length } })
+    }
     const prompt = planning
-      ? buildPlanningPrompt(run, resumeNote, this.drainSteers(ctx))
-      : buildMakerPrompt(run, this.remaining(ctx, run), resumeNote, this.drainSteers(ctx))
+      ? buildPlanningPrompt(run, resumeNote, this.drainSteers(ctx), lessons)
+      : buildMakerPrompt(run, this.remaining(ctx, run), resumeNote, this.drainSteers(ctx), lessons)
     this.host.sendInput(session.id, prompt)
     this.store.appendEvent({
       runId: run.id,
@@ -353,6 +362,7 @@ export class LoopEngine {
       cancelRequested: false,
       steerQueue: [],
       notedPromptIds: new Set(),
+      workerSessionIds: [],
       wallTimer: null,
       ciTimer: null,
       disposers: [],
@@ -493,10 +503,15 @@ export class LoopEngine {
     this.proceedToActing(ctx, run)
   }
 
-  /** Same session continues from plan to execution. */
+  /** Same session continues from plan to execution — unless the plan fanned out workstreams. */
   private proceedToActing(ctx: RunCtx, run: LoopRun): void {
     ctx.phase = 'acting'
     this.checkpoint(ctx)
+    const streams = this.plannedWorkstreams(run)
+    if (streams) {
+      void this.runWorkers(ctx, run, streams)
+      return
+    }
     const remaining = this.remaining(ctx, run)
     this.sendMakerFeedback(
       ctx,
@@ -508,6 +523,184 @@ export class LoopEngine {
         `- Remaining budget: ${remaining.turns} turns, $${remaining.costUsd.toFixed(2)}.`,
       ].join('\n'),
     )
+  }
+
+  // -------------------------------------------------------------------------
+  // Scoped parallel workers + deterministic integration
+  // -------------------------------------------------------------------------
+
+  /**
+   * Workstreams the plan declared, when they are provably independent —
+   * validated in deterministic code, never trusted from the model: at least
+   * two streams, every stream scoped, and scopes pairwise disjoint by literal
+   * prefix (conservative — overlapping prefixes fall back to sequential).
+   */
+  private plannedWorkstreams(run: LoopRun): Workstream[] | null {
+    if (run.recipe.workers.maxParallel <= 1) return null
+    const plan = this.latestPlanText(run.id)
+    if (!plan) return null
+    const streams = parseWorkstreams(plan)
+    if (streams.length < 2 || !workstreamScopesDisjoint(streams)) return null
+    return streams.slice(0, 8)
+  }
+
+  /**
+   * Fan the plan's workstreams out to child maker sessions in child worktrees
+   * branched off the run branch (after committing the pre-worker state), then
+   * integrate deterministically: each child's work is committed engine-side,
+   * scope-checked against its declared globs, and merged with `--no-ff`. Any
+   * merge conflict aborts the merge and escalates — no model resolves it
+   * silently. The main maker session handles all post-integration repairs
+   * sequentially.
+   */
+  private async runWorkers(ctx: RunCtx, run: LoopRun, streams: Workstream[]): Promise<void> {
+    this.setState(run.id, 'executing', `Running ${streams.length} parallel workstreams.`)
+    const stage = this.store.createStage(run.id, 'act')
+    try {
+      // Children branch from a committed state so no work-in-progress is lost.
+      await this.evaluator.git(['add', '-A'], ctx.cwd)
+      await this.evaluator.git(['commit', '--allow-empty', '-m', 'loop: pre-workstream state'], ctx.cwd)
+    } catch (err) {
+      this.store.completeStage(stage.id, 'failed')
+      this.sendMakerFeedback(ctx, run, `Could not prepare the worktree for parallel workstreams (${errMsg(err)}). Execute the plan sequentially instead.`)
+      return
+    }
+    this.store.appendEvent({
+      runId: run.id,
+      type: 'workers_started',
+      stageId: stage.id,
+      payload: { streams: streams.map((w) => ({ name: w.name, scopes: w.scopes })), maxParallel: run.recipe.workers.maxParallel },
+    })
+
+    const results: Array<{ stream: Workstream; branch: string; ok: boolean; note: string }> = []
+    const queue = streams.map((stream, i) => ({ stream, i }))
+    const runNext = async (): Promise<void> => {
+      const item = queue.shift()
+      if (!item) return
+      results.push(await this.runOneWorker(ctx, run, item.stream, item.i))
+      await runNext()
+    }
+    // A bounded pool: maxParallel lanes each drain the shared queue.
+    await Promise.all(Array.from({ length: Math.min(run.recipe.workers.maxParallel, streams.length) }, () => runNext()))
+
+    if (!this.active.has(run.id)) return // canceled/paused mid-flight
+    const usable = results.filter((r) => r.ok)
+    if (!usable.length) {
+      this.store.completeStage(stage.id, 'failed')
+      this.sendMakerFeedback(
+        ctx,
+        run,
+        `All parallel workstreams failed or violated their scopes:\n${results.map((r) => `- ${r.stream.name}: ${r.note}`).join('\n')}\nExecute the plan sequentially instead.`,
+      )
+      return
+    }
+    this.store.completeStage(stage.id, 'succeeded')
+    await this.integrateWorkers(ctx, run, results)
+  }
+
+  private runOneWorker(ctx: RunCtx, run: LoopRun, stream: Workstream, index: number): Promise<{ stream: Workstream; branch: string; ok: boolean; note: string }> {
+    return new Promise((resolve) => {
+      const branch = `${run.branch}-w${index}`
+      const finish = async (isError: boolean, sessionId: string, cwd: string | null): Promise<void> => {
+        ctx.workerSessionIds = ctx.workerSessionIds.filter((id) => id !== sessionId)
+        ctx.turnCount += 1
+        ctx.makerCostUsd += readCumulativeCost(this.host.get(sessionId)?.outputHistory ?? [])
+        this.store.patchRun(run.id, { turnCount: ctx.turnCount, costUsd: this.totalCost(ctx) })
+        this.host.stopClaude(sessionId)
+        let ok = false
+        let note: string
+        if (isError || !cwd) {
+          note = 'worker session errored'
+        } else {
+          try {
+            // Deterministic commit of whatever the child produced — the merge
+            // never depends on the model remembering to commit.
+            await this.evaluator.git(['add', '-A'], cwd)
+            await this.evaluator.git(['commit', '-m', `loop worker: ${stream.name}`], cwd).catch(() => {})
+            const changed = (await this.evaluator.git(['diff', '--name-only', `${run.branch}...HEAD`], cwd))
+              .split('\n')
+              .map((l) => l.trim())
+              .filter(Boolean)
+            const violations = changed.filter((f) => !matchesAnyGlob(f, stream.scopes))
+            if (!changed.length) note = 'no changes produced'
+            else if (violations.length) note = `changed files outside its scope: ${violations.join(', ')}`
+            else {
+              ok = true
+              note = `${changed.length} file(s) within scope`
+            }
+          } catch (err) {
+            note = `could not inspect worker result: ${errMsg(err)}`
+          }
+        }
+        this.store.appendEvent({
+          runId: run.id,
+          type: 'worker_completed',
+          actor: { type: 'agent', id: `worker:${stream.name}` },
+          payload: { name: stream.name, branch, ok, note },
+        })
+        resolve({ stream, branch, ok, note })
+      }
+
+      void (async () => {
+        const session = this.host.create(`loop:${run.recipeId}:worker:${stream.name}`, run.repo, {
+          provider: run.provider,
+          model: run.model ?? undefined,
+          source: 'agent',
+          allowedTools: AGENT_ALLOWED_TOOLS,
+        })
+        ctx.workerSessionIds.push(session.id)
+        const cwd = await this.host.createWorktree(session.id, run.repo, branch, run.branch)
+        if (!cwd) {
+          await finish(true, session.id, null)
+          return
+        }
+        const dispose = this.host.onSessionResult((sid, isError) => {
+          if (sid !== session.id) return
+          dispose()
+          void finish(isError, session.id, cwd)
+        })
+        ctx.disposers.push(dispose)
+        this.host.startClaude(session.id)
+        this.host.sendInput(session.id, buildWorkerPrompt(run, stream))
+      })()
+    })
+  }
+
+  private async integrateWorkers(
+    ctx: RunCtx,
+    run: LoopRun,
+    results: Array<{ stream: Workstream; branch: string; ok: boolean; note: string }>,
+  ): Promise<void> {
+    const stage = this.store.createStage(run.id, 'integrate')
+    const merged: string[] = []
+    const skipped = results.filter((r) => !r.ok).map((r) => `${r.stream.name} (${r.note})`)
+    for (const result of results.filter((r) => r.ok)) {
+      try {
+        await this.evaluator.git(['merge', '--no-ff', '-m', `loop: integrate ${result.stream.name}`, result.branch], ctx.cwd)
+        merged.push(result.stream.name)
+      } catch (err) {
+        await this.evaluator.git(['merge', '--abort'], ctx.cwd).catch(() => {})
+        this.store.completeStage(stage.id, 'failed')
+        this.store.appendEvent({ runId: run.id, type: 'integration_conflict', stageId: stage.id, payload: { branch: result.branch, error: errMsg(err) } })
+        this.escalate(
+          ctx,
+          run,
+          `Integrating workstream "${result.stream.name}" (branch ${result.branch}) hit a merge conflict. Continue to let the agent integrate the remaining branches manually, or stop.`,
+        )
+        return
+      }
+    }
+    this.store.completeStage(stage.id, 'succeeded')
+    this.store.appendEvent({ runId: run.id, type: 'integration_completed', stageId: stage.id, payload: { merged, skipped } })
+    if (skipped.length) {
+      this.sendMakerFeedback(
+        ctx,
+        run,
+        `Workstreams integrated: ${merged.join(', ')}. These were dropped and still need doing sequentially: ${skipped.join('; ')}.`,
+      )
+      return
+    }
+    await this.evaluate(ctx, run)
   }
 
   /** Latest retained plan text, for regenerated context after a wait state. */
@@ -1320,6 +1513,11 @@ export class LoopEngine {
         if (choice === 'approve') {
           ctx.phase = 'acting'
           this.checkpoint(ctx)
+          const streams = this.plannedWorkstreams(run)
+          if (streams) {
+            void this.runWorkers(ctx, run, streams)
+            return true
+          }
           const plan = this.latestPlanText(run.id)
           await this.resumeActing(
             ctx,
@@ -1590,7 +1788,13 @@ export class LoopEngine {
   private sendMakerFeedback(ctx: RunCtx, run: LoopRun, message: string): void {
     const steers = this.drainSteers(ctx)
     const full = steers ? `${steers}\n\n${message}` : message
-    if (ctx.makerSessionId) this.host.sendInput(ctx.makerSessionId, full)
+    // No live maker (post-intervention or worker-only phase): restart one at
+    // the stage boundary with the feedback as its context.
+    if (!ctx.makerSessionId) {
+      void this.resumeActing(ctx, run, full)
+      return
+    }
+    this.host.sendInput(ctx.makerSessionId, full)
     this.setState(run.id, 'executing')
   }
 
@@ -1616,6 +1820,130 @@ export class LoopEngine {
       this.disposeReview(ctx)
       this.teardown(ctx)
     }
+    if (outcome !== 'canceled') this.reflect(runId)
+  }
+
+  // -------------------------------------------------------------------------
+  // Reflection → suggested lessons (spec §11)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Deterministic reflection over the finished run's own evidence — no model
+   * call. Each finding becomes a `suggested` lesson scoped to the recipe; a
+   * user approves it into future runs' context or rejects it. Nothing here
+   * ever rewrites a recipe or policy.
+   */
+  private reflect(runId: string): void {
+    const run = this.store.getRun(runId)
+    if (!run) return
+    const evaluations = this.store.listEvaluations(runId)
+    const events = this.store.listEvents(runId, 0, 1000)
+    const existing = new Set(this.store.listLessons(run.recipeId).map((l) => l.text))
+    const suggest = (kind: string, text: string) => {
+      if (existing.has(text)) return
+      existing.add(text)
+      const lesson = this.store.addLesson({ recipeId: run.recipeId, sourceRunId: runId, kind, text })
+      this.store.appendEvent({ runId, type: 'lesson_suggested', payload: { lessonId: lesson.id, kind, text } })
+    }
+
+    // Transient environment errors on evaluators without a retry allowance.
+    for (const ev of evaluations) {
+      if (ev.status !== 'error' || ev.classification !== 'environment') continue
+      const config = run.recipe.evaluators.find((e) => e.id === ev.evaluatorId)
+      if (config && (config.type === 'command' || config.type === 'test-report') && config.retryMaxAttempts <= 1) {
+        suggest('retry-policy', `Evaluator "${ev.evaluatorId}" hit a transient environment error; consider retry: { maxAttempts: 2 }.`)
+      }
+    }
+
+    // Budget pressure: finished close to (or at) a cap.
+    if (run.outcome === 'completed' || run.outcome === 'completed_with_warnings') {
+      if (run.turnCount >= Math.ceil(run.recipe.budgets.turns * 0.8)) {
+        suggest('budget', `Runs complete near the turn cap (${run.turnCount}/${run.recipe.budgets.turns}); consider raising budgets.turns.`)
+      }
+      if (run.costUsd >= run.recipe.budgets.costUsd * 0.8) {
+        suggest('budget', `Runs complete near the cost cap ($${run.costUsd.toFixed(2)}/$${run.recipe.budgets.costUsd}); consider raising budgets.costUsd.`)
+      }
+    }
+    if (run.outcome === 'failed' && (run.stateReason?.includes('budget') ?? false)) {
+      suggest('budget', `A run failed at the budget boundary (${run.stateReason ?? ''}); consider larger budgets or a narrower outcome.`)
+    }
+
+    // Recurring reviewer pushback → the rubric wants standing guidance.
+    const requestChanges = events.filter((e) => e.type === 'review_verdict' && (e.payload as { verdict?: string }).verdict === 'request_changes')
+    if (requestChanges.length >= 2) {
+      suggest('review-guidance', `The reviewer requested changes ${requestChanges.length}× in one run; consider adding standing instructions to the rubric evaluator.`)
+    }
+
+    // Protected paths kept getting touched → the outcome should name them.
+    if (events.some((e) => e.type === 'protected_path_violation')) {
+      suggest('outcome-guidance', `The agent modified protected paths; consider naming them explicitly in the outcome prompt.`)
+    }
+  }
+
+  /** Approved lessons for a recipe — injected into maker/planning prompts. */
+  private approvedLessons(run: LoopRun): string[] {
+    return this.store.listLessons(run.recipeId, 'approved').map((l) => l.text)
+  }
+
+  // -------------------------------------------------------------------------
+  // Checkpoint fork
+  // -------------------------------------------------------------------------
+
+  /**
+   * Fork a run into a new one that starts from the source's current worktree
+   * state — including uncommitted work, captured via `git stash create` (which
+   * writes a commit without touching the tree). The fork gets fresh budgets,
+   * the source's frozen recipe and goal, and a context note carrying the
+   * source plan; both runs record the relationship as events.
+   */
+  async forkRun(runId: string): Promise<LoopRun | null> {
+    const source = this.store.getRun(runId)
+    if (!source || !source.worktreePath || !existsSync(source.worktreePath)) return null
+    const cwd = source.worktreePath
+
+    let sha: string
+    try {
+      await this.evaluator.git(['add', '-A'], cwd)
+      sha = (await this.evaluator.git(['stash', 'create'], cwd)).trim()
+    } finally {
+      await this.evaluator.git(['reset'], cwd).catch(() => {})
+    }
+    if (!sha) sha = (await this.evaluator.git(['rev-parse', 'HEAD'], cwd)).trim()
+
+    const forkBranch = `${source.branch}-fork-${Date.now().toString(36)}`
+    const fork = this.store.createRun({
+      recipe: source.recipe,
+      goal: source.goal,
+      repo: source.repo,
+      branch: forkBranch,
+      // The capture commit is the literal start point for the fork's worktree.
+      baseBranch: sha,
+      provider: source.provider,
+      model: source.model,
+    })
+    this.store.patchRun(fork.id, { baseSha: sha, startedAt: new Date().toISOString() })
+    this.store.appendEvent({ runId: fork.id, type: 'forked_from', actor: { type: 'user' }, payload: { sourceRunId: source.id, atTurn: source.turnCount, sha } })
+    this.store.appendEvent({ runId: source.id, type: 'fork_created', actor: { type: 'user' }, payload: { forkRunId: fork.id, branch: forkBranch } })
+
+    const ctx = this.buildCtx(fork.id, source.repo, freshCheckpointState())
+    if (source.recipe.plan.required) ctx.phase = 'planning'
+    this.checkpoint(ctx)
+    this.active.set(fork.id, ctx)
+    const sourcePlan = this.latestPlanText(source.id)
+    const lastEval = this.store.listEvaluations(source.id).at(-1)
+    await this.beginActing(
+      ctx,
+      this.store.getRun(fork.id) ?? fork,
+      [
+        `This run was forked from run ${source.id} at turn ${source.turnCount}; the worktree starts from that run's exact state.`,
+        `Explore a different approach than the source run.`,
+        sourcePlan ? `\nSource run's plan:\n${sourcePlan}` : '',
+        lastEval ? `\nSource run's latest evaluation: ${lastEval.summary}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    )
+    return this.store.getRun(fork.id)
   }
 
   private checkpoint(ctx: RunCtx): void {
@@ -1640,6 +1968,8 @@ export class LoopEngine {
   }
 
   private teardown(ctx: RunCtx): void {
+    for (const sid of ctx.workerSessionIds) this.host.stopClaude(sid)
+    ctx.workerSessionIds = []
     this.clearWallTimer(ctx)
     if (ctx.ciTimer) {
       clearTimeout(ctx.ciTimer)
@@ -1660,6 +1990,7 @@ export function buildMakerPrompt(
   remaining: { turns: number; costUsd: number },
   resumeNote: string | null,
   steers: string | null,
+  lessons: string[] = [],
 ): string {
   const commands = run.recipe.evaluators.filter((e) => e.type === 'command')
   const lines = [
@@ -1685,12 +2016,13 @@ export function buildMakerPrompt(
     `- Evaluators run after each of your turns; failures come back to you as feedback.`,
     `- Remaining budget: ${remaining.turns} turns, $${remaining.costUsd.toFixed(2)}.`,
   )
+  if (lessons.length) lines.push('', `## Lessons from previous runs (operator-approved)`, ...lessons.map((l) => `- ${l}`))
   if (resumeNote) lines.push('', `## Note`, resumeNote)
   if (steers) lines.push('', steers)
   return lines.join('\n')
 }
 
-export function buildPlanningPrompt(run: LoopRun, resumeNote: string | null, steers: string | null): string {
+export function buildPlanningPrompt(run: LoopRun, resumeNote: string | null, steers: string | null, lessons: string[] = []): string {
   const commands = run.recipe.evaluators.filter((e) => e.type === 'command')
   const lines = [
     `# Loop Run: ${run.recipe.name} — Planning`,
@@ -1713,9 +2045,98 @@ export function buildPlanningPrompt(run: LoopRun, resumeNote: string | null, ste
     `- risks or open questions, if any.`,
     `Do NOT modify any files yet. End your reply with the plan.`,
   )
+  if (run.recipe.workers.maxParallel > 1) {
+    lines.push(
+      '',
+      `## Optional: parallel workstreams (up to ${run.recipe.workers.maxParallel})`,
+      `If — and only if — the work splits into truly independent parts that touch disjoint paths, declare them at the end of the plan, one block each:`,
+      '```',
+      'WORKSTREAM: <short-name>',
+      'SCOPE: <comma-separated path globs this stream may touch>',
+      'TASK: <what this stream does>',
+      '```',
+      `Scopes must not overlap. When in doubt, declare none — sequential execution is the default.`,
+    )
+  }
+  if (lessons.length) lines.push('', `## Lessons from previous runs (operator-approved)`, ...lessons.map((l) => `- ${l}`))
   if (resumeNote) lines.push('', `## Note`, resumeNote)
   if (steers) lines.push('', steers)
   return lines.join('\n')
+}
+
+// ---------------------------------------------------------------------------
+// Workstreams (pure)
+// ---------------------------------------------------------------------------
+
+export interface Workstream {
+  name: string
+  /** Globs the stream may touch — enforced deterministically after the fact. */
+  scopes: string[]
+  task: string
+}
+
+/**
+ * Parse WORKSTREAM blocks out of a plan:
+ *
+ *   WORKSTREAM: backend
+ *   SCOPE: server/**
+ *   TASK: Move the API handlers ...
+ *
+ * Anything malformed is dropped — a plan without valid streams simply runs
+ * sequentially.
+ */
+export function parseWorkstreams(planText: string): Workstream[] {
+  const streams: Workstream[] = []
+  const blocks = planText.split(/^WORKSTREAM:\s*/m).slice(1)
+  for (const block of blocks) {
+    const newline = block.indexOf('\n')
+    const name = (newline === -1 ? block : block.slice(0, newline)).trim()
+    const body = newline === -1 ? '' : block.slice(newline + 1)
+    const scopeMatch = /^SCOPE:\s*(.+)$/m.exec(body)
+    const taskMatch = /^TASK:\s*([\s\S]*)$/m.exec(body)
+    if (!name || !scopeMatch || !taskMatch) continue
+    const scopes = scopeMatch[1].split(',').map((g) => g.trim()).filter(Boolean)
+    const task = taskMatch[1].trim()
+    if (scopes.length && task) streams.push({ name, scopes, task })
+  }
+  return streams
+}
+
+/**
+ * Conservative disjointness: compare the literal prefixes (up to the first
+ * glob character) across streams — if any prefix contains another, the
+ * streams could touch the same files and parallelism is refused.
+ */
+export function workstreamScopesDisjoint(streams: Workstream[]): boolean {
+  const prefixes = streams.map((s) => s.scopes.map((g) => g.split(/[*?[]/)[0]))
+  for (let i = 0; i < streams.length; i++) {
+    for (let j = i + 1; j < streams.length; j++) {
+      for (const a of prefixes[i]) {
+        for (const b of prefixes[j]) {
+          if (a.startsWith(b) || b.startsWith(a)) return false
+        }
+      }
+    }
+  }
+  return true
+}
+
+export function buildWorkerPrompt(run: LoopRun, stream: Workstream): string {
+  return [
+    `# Loop Workstream: ${stream.name} (${run.recipe.name})`,
+    '',
+    `## Overall outcome`,
+    run.goal,
+    '',
+    `## Your workstream`,
+    stream.task,
+    '',
+    `## Hard constraints`,
+    `- You may ONLY modify files matching: ${stream.scopes.join(', ')}`,
+    `- Other workstreams run in parallel on the rest of the codebase — do not touch anything outside your scope.`,
+    `- Make the smallest change that completes your workstream. Do not weaken or delete tests.`,
+    `- You have ONE working session; finish the workstream in it. Your changes are committed and integrated automatically.`,
+  ].join('\n')
 }
 
 export function buildPrTitle(run: LoopRun): string {

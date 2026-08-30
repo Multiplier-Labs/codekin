@@ -192,6 +192,12 @@ export interface LoopRecipe {
    * touching files; guided mode gates execution on plan approval.
    */
   plan: { required: boolean }
+  /**
+   * maxParallel > 1 lets the plan declare independent WORKSTREAM blocks with
+   * disjoint path scopes; the engine fans them out to child worktrees and
+   * integrates deterministically. Requires plan.required.
+   */
+  workers: { maxParallel: number }
   evaluators: EvaluatorConfig[]
   budgets: LoopBudgets
   policy: { mode: LoopMode }
@@ -506,6 +512,15 @@ function parsePlan(value: unknown, sourcePath: string): LoopRecipe['plan'] {
   return { required }
 }
 
+function parseWorkers(value: unknown, sourcePath: string): LoopRecipe['workers'] {
+  if (value === undefined) return { maxParallel: 1 }
+  const obj = asRecord(value, 'workers', sourcePath)
+  rejectUnknown(obj, ['maxParallel'], 'workers', sourcePath)
+  const maxParallel = obj.maxParallel === undefined ? 1 : positiveNumber(obj.maxParallel, 'workers.maxParallel', sourcePath)
+  if (!Number.isInteger(maxParallel) || maxParallel > 8) fail(sourcePath, 'workers.maxParallel must be an integer between 1 and 8')
+  return { maxParallel }
+}
+
 function parsePolicy(value: unknown, sourcePath: string): LoopRecipe['policy'] {
   if (value === undefined) return { mode: 'guarded' }
   const obj = asRecord(value, 'policy', sourcePath)
@@ -555,7 +570,7 @@ export function parseLoopRecipe(content: string, sourcePath: string, source: 'bu
   const fm = asRecord(parsed, 'frontmatter', sourcePath)
   rejectUnknown(
     fm,
-    ['apiVersion', 'kind', 'metadata', 'agent', 'workspace', 'plan', 'evaluators', 'budgets', 'policy', 'completion'],
+    ['apiVersion', 'kind', 'metadata', 'agent', 'workspace', 'plan', 'workers', 'evaluators', 'budgets', 'policy', 'completion'],
     'recipe',
     sourcePath,
   )
@@ -578,11 +593,15 @@ export function parseLoopRecipe(content: string, sourcePath: string, source: 'bu
     agent: parseAgent(fm.agent, sourcePath),
     workspace: parseWorkspace(fm.workspace, sourcePath),
     plan: parsePlan(fm.plan, sourcePath),
+    workers: parseWorkers(fm.workers, sourcePath),
     evaluators: parseEvaluators(fm.evaluators, sourcePath),
     budgets: parseBudgets(fm.budgets, sourcePath),
     policy: parsePolicy(fm.policy, sourcePath),
     completion: parseCompletion(fm.completion, sourcePath),
     outcome,
+  }
+  if (withoutHash.workers.maxParallel > 1 && !withoutHash.plan.required) {
+    fail(sourcePath, 'workers.maxParallel > 1 requires plan.required: true — workstreams are declared in the plan')
   }
   const contentHash = createHash('sha256').update(normalizedForHash(withoutHash)).digest('hex')
   return { ...withoutHash, source, contentHash }
@@ -634,6 +653,7 @@ export function withOverrides(recipe: LoopRecipe, overrides: RecipeOverrides): L
     agent: recipe.agent,
     workspace: recipe.workspace,
     plan: overrides.planRequired === undefined ? recipe.plan : { required: overrides.planRequired },
+    workers: recipe.workers,
     evaluators: recipe.evaluators,
     budgets,
     policy: { mode: overrides.mode ?? recipe.policy.mode },
