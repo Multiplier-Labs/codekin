@@ -97,7 +97,7 @@ describe('useWorkflows push-driven refresh', () => {
     unmount()
   })
 
-  it('ignores loop-engine events — those belong to LoopRunsView', async () => {
+  it('ignores loop-engine events — those belong to LoopsView', async () => {
     const { unmount } = renderHook(() => useWorkflows('tok'))
     await flush()
     expect(listRuns).toHaveBeenCalledTimes(1)

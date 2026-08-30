@@ -1,128 +1,150 @@
-# Loop Runs (Goal Runs)
+# Loops
 
-A loop run wraps a coding session in a durable **act → verify → continue/stop**
-loop: an agent (the *maker*) works toward a goal in an isolated worktree, a
-deterministic verifier runs shell commands after every turn, and the loop
-continues — feeding failures back to the maker — until the verifier passes,
-a budget is exhausted, or a human needs to decide. Every step is recorded in an
-evidence ledger, so a run is auditable after the fact.
+Loops are Codekin's durable control plane for outcome-driven agent work: you
+state an outcome and acceptance criteria (a **recipe**), and Codekin runs a
+coding agent in checkpointed stages until the criteria pass, a human decision
+is needed, or a budget boundary is reached. The full design rationale lives in
+[LOOPS-REWRITE-SPEC.md](./LOOPS-REWRITE-SPEC.md); this page documents what is
+implemented today (Phase 1: durable engine core).
 
-Loop runs differ from [AI Workflows](WORKFLOWS.md) in shape: a workflow is a
-scheduled one-shot session that produces a report; a loop run is goal-driven
-and iterates until a machine-checkable condition holds.
+## Core loop
 
-## Lifecycle
-
-```
-queued → running ⇄ verifying ⇄ checking → succeeded
-              ⇅                              failed
-           blocked                           aborted
-                                             awaiting_human
+```text
+preflight → act → evaluate → (review) → decide → … → finalize
 ```
 
-| Status | Meaning |
-|---|---|
-| `queued` | Created; maker session not yet started. |
-| `running` | The maker is working a turn. |
-| `verifying` | The verify commands are executing against the worktree. |
-| `checking` | The checker (second provider) is reviewing the diff. |
-| `blocked` | A maker/checker tool call is waiting on human approval or a question. Non-terminal: answer the prompt (open the session from the sidebar) and the loop resumes; unanswered prompts are denied by the router timeout and the loop continues on the denial. |
-| `awaiting_human` | Escalated to a human checkpoint — repeated readonly violations, a checker `escalate` verdict, or an unparseable verdict. Terminal. |
-| `succeeded` | Verifier green (and checker approval, if configured); changes landed per the completion policy. |
-| `failed` | Turn/cost budget exhausted, unrecoverable error, or the run was interrupted by a server restart. |
-| `aborted` | Cancelled by the user. |
+- **act** — a maker session (claude / codex / opencode) works in an isolated
+  git worktree on the run's branch.
+- **evaluate** — command evaluators (your own build/test/lint commands, judged
+  by exit code) run in order after every maker turn. Failures are fed back to
+  the maker; transient environment errors (timeout, spawn failure) retry per
+  the recipe's `retry` policy.
+- **review** — rubric evaluators put an independent model — always a
+  *different provider* than the maker — over the diff. It answers with
+  `approve` / `request_changes` / `escalate`; an unparseable verdict escalates
+  rather than silently passing.
+- **decide** — deterministic code, not the model. The maker never decides
+  whether its own acceptance criteria passed. The decision order is: user
+  cancel/pause → budgets → protected paths → no-change nudge → evaluation →
+  no-progress detection → review → completion.
+- **finalize** — Codekin itself commits the verified tree and, per the
+  completion action, pushes and opens a PR. Auto-merge does not exist.
 
-**Restarts.** In-flight runs do not survive a server restart: at boot, any run
-persisted in a non-terminal status is marked `failed` with a
-"interrupted by a server restart" row in its ledger. (Reattaching to a live
-maker session after a restart is future work — until then the ledger is honest
-rather than optimistic.)
+## Durability
 
-## Turn mechanics
+Every transition is an append-only row in `loop_events` (monotonic sequence
+per run) and orchestration counters are checkpointed after every decided
+turn. On restart Codekin reconciles instead of failing runs:
 
-Each maker turn ends with a session result, which triggers:
+- `paused` and `awaiting_approval` runs are left waiting (they hold no
+  process);
+- in-flight runs resume at a stage boundary — a fresh session in the
+  surviving worktree with a regenerated context prompt (provider sessions are
+  not resumed in-provider);
+- a run whose worktree is gone fails honestly with a reason.
 
-1. **Budgets** — the run fails once `maxTurns` or `maxCostUsd` is reached.
-2. **Readonly enforcement** — files matching `readonly` globs must not change;
-   a violation re-prompts the maker, and repeated violations escalate.
-3. **No-change nudge** — a clean tree is not success; the maker is re-prompted.
-4. **Verify (debounced)** — the `verify` commands run in order in the worktree
-   (10 min per command); the run skips re-verifying when the diff is unchanged.
-   Failures are fed back to the maker as the next turn's input.
-5. **Checker review (optional)** — when the spec names a `checker`, a second
-   provider reviews the diff read-only and must end its reply with
-   `VERDICT: approve | request_changes | escalate`.
-6. **Finalization** — on success Codekin (not the agent) commits the verified
-   tree and, per `completionPolicy`, pushes and opens a PR. Auto-merge is never
-   performed.
+Execution **state** and terminal **outcome** are separate fields: a run ends
+`done` + `completed` / `completed_with_warnings` / `failed` / `canceled`.
+Waived or failed-optional evaluators qualify the outcome — a run never shows
+an unqualified green with a skipped check.
 
-## Tool allowlists
+## Controls
 
-Maker sessions are created with the shared headless-agent allowlist
-(`server/agent-allowlist.ts`) — git, gh, package managers, build/test tools,
-non-destructive file operations. Destructive commands (`rm`, `sudo`,
-`git push --force`, …) still require approval; a run waiting on one shows as
-`blocked`. Checker sessions get a read-only subset (no Write/Edit) — a reviewer
-that needs to write has left its mandate.
+Every control appends an auditable event:
 
-## Templates
+- **Pause** — parks the run durably at the next safe boundary; **Resume**
+  continues in the same worktree with a fresh session.
+- **Stop** — cancels now; the worktree is kept for inspection.
+- **Steer** — queue an operator instruction; it reaches the maker at the next
+  safe boundary (mid-turn injection is not attempted).
+- **Interventions** — when the run cannot decide safely it parks in
+  `awaiting_approval` with a pending intervention card: completion approval
+  (guided mode), budget extension (extend adds 50% of the original budget),
+  or escalation (repeated protected-path violations, no-progress, reviewer
+  escalation). Resolving the card continues or ends the run.
 
-A loop template is a markdown file with YAML frontmatter (spec) and a body
-(default goal text):
+## Budgets and no-progress
 
-```markdown
+`budgets.turns` and `budgets.costUsd` are hard caps; `budgets.wallTime` is
+optional. At a boundary the run *asks* for a bounded extension (guided /
+guarded modes) or stops with a partial result (autonomous mode). The
+no-progress detector compares diff summaries and normalized failure
+fingerprints across evaluate cycles — producing more text is not progress —
+and escalates after `budgets.noProgressAttempts` identical failures.
+
+## Recipes
+
+A recipe is Markdown + YAML frontmatter, reviewable in git:
+
+```yaml
 ---
-kind: flaky-e2e
-name: Flaky E2E Quarantine
-maker:
-  provider: claude
-checker:            # optional — omit for a single-provider loop
-  provider: opencode
-verify:
-  - npm test
-  - npm run lint
-readonly:           # optional
-  - .github/workflows/**
-maxTurns: 12
-maxCostUsd: 5
-completionPolicy: pr   # pr | merge | commit-only (defaults to pr)
+apiVersion: codekin.dev/v2
+kind: LoopRecipe
+metadata:
+  id: ci-autorepair
+  name: CI Autorepair
+agent:
+  provider: auto            # resolves at run start; recorded on the run
+workspace:
+  strategy: worktree
+  protectedPaths: [".github/workflows/**"]
+evaluators:
+  - id: tests
+    type: command
+    command: npm test        # shell string (trusted repo code) or argv array
+    timeout: 15m
+    retry: { maxAttempts: 2 }
+  - id: review
+    type: rubric
+    provider: different-from-maker
+budgets:
+  turns: 12
+  costUsd: 5
+  wallTime: 90m
+policy:
+  mode: guarded              # guided | guarded | autonomous
+completion:
+  action: pull-request       # or commit-only; auto-merge does not exist
 ---
-Find the flaky e2e test on this branch, fix the root cause...
+The outcome prompt (markdown body) goes here.
 ```
 
-Templates are read from two places:
+Validation is strict — unknown fields fail. The parsed recipe is normalized,
+content-hashed, and frozen into every run, so editing the file never changes
+what a past run claims it executed. Recipes load from:
 
-- **Built-ins** shipped with the package (`server/loops/*.md`):
-  `ci-autorepair`, `coverage-increase`, `dependency-upgrade`.
-- **Per-repo templates** in `{repo}/.codekin/loops/*.md`. A repo template with
-  the same `kind` overrides the built-in; a repo template with a **new kind is
-  a first-class loop** — kinds are an open set, validated only as lowercase
-  slugs (letters, digits, `.`, `_`, `-`, max 64 chars).
+- built-ins shipped with the package: `server/loops/*.md`
+  (`ci-autorepair`, `coverage-increase`, `dependency-upgrade`);
+- per-repo overrides: `{repo}/.codekin/loops/*.md` (same id wins).
+
+Evaluator types beyond `command` and `rubric` (test-report, diff-policy,
+artifact, ci, human, composite) arrive with the Phase 3 evaluator platform
+and are rejected at validation until then.
+
+## Evidence
+
+Full evaluator output is retained as content-addressed artifacts
+(`~/.codekin/loop-artifacts/`), referenced from structured `loop_evaluations`
+rows; the maker sees only a tail as feedback. Reviews are artifacts too.
 
 ## API
 
-All endpoints require the master Bearer token.
-
-| Endpoint | Description |
-|---|---|
-| `GET /api/goal-runs/templates?repoPath=` | Available templates (built-ins + repo). |
-| `GET /api/goal-runs/runs?kind=&status=&limit=` | List runs, newest first. |
-| `GET /api/goal-runs/runs/:id` | One run plus its turn-by-turn evidence ledger. |
-| `POST /api/goal-runs/runs` | Start a run: `{ kind, repo, branch, goal? }`. `goal` overrides the template's default goal text. |
-| `POST /api/goal-runs/runs/:id/abort` | Abort an in-flight (or restart-orphaned) run. |
+Mounted at `/api/loops` (master Bearer token). See
+[API-REFERENCE.md](./API-REFERENCE.md#loops) for the endpoint list. Live
+updates ride the shared `workflow_event` WS channel (`engine: 'loop'`) as
+pings; clients reconcile against `GET /runs/:id/events?after=<sequence>`.
 
 ## UI
 
-The **Loop Runs** sidebar entry (`/loops`) lists runs with live status, spend
-vs budget, and turn count; a run's detail view shows the evidence ledger. The
-maker and checker are ordinary sessions (`source: agent`) and appear in the
-sidebar — open one to answer a `blocked` prompt or watch the agent work.
+The Loops tab in Automations is an interim run list + control surface (start,
+pause/resume/stop, steer, intervention cards, evaluator scorecard). The full
+control plane — wizard with repo/branch pickers, four-tab run workspace,
+timeline — is Phase 2 of the spec.
 
 ## Storage
 
-SQLite at `~/.codekin/runs.db` (WAL, `0600`), shared with the workflow engine —
-one runs database for all background automation. Rows from the pre-unification
-`~/.codekin/goal-runs.db` are copied over automatically on first boot (the
-legacy file is left in place). Tables: `goal_runs` (one row per
-run) and `goal_run_turns` (the evidence ledger — diff stat, verify command,
-exit code, output tail, checker verdict, cost per action).
+Tables in the shared `~/.codekin/runs.db`: `loop_runs`, `loop_stages`,
+`loop_attempts`, `loop_events`, `loop_checkpoints`, `loop_evaluations`,
+`loop_artifacts` (metadata), `loop_interventions`. The v1 `goal_runs` /
+`goal_run_turns` tables are dropped on first open — v1 had no users and no
+history worth preserving (spec §12).

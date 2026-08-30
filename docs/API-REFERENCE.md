@@ -553,6 +553,90 @@ Remove a repo workflow configuration.
 
 ---
 
+## Loops
+
+Loops 2.0 — durable, event-sourced outcome loops (see [LOOPS.md](./LOOPS.md)
+and [LOOPS-REWRITE-SPEC.md](./LOOPS-REWRITE-SPEC.md)). All routes are mounted
+at the `/api/loops/` prefix and require the master Bearer token.
+
+### `GET /api/loops/recipes`
+
+List recipes visible to a repo (built-ins plus `{repo}/.codekin/loops/*.md`
+overrides). Query: `repoPath` (optional).
+
+**Response:** `{ "recipes": LoopRecipeInfo[] }`
+
+### `POST /api/loops/recipes/validate`
+
+Validate recipe markdown without saving it.
+
+**Request:** `{ "content": string }`
+**Response:** `{ "valid": true, "recipe": LoopRecipe }` or `{ "valid": false, "error": string }`
+
+### `POST /api/loops/runs/preflight`
+
+Resolve the exact effective run configuration (frozen recipe, resolved
+provider, default branch, outcome) without starting anything.
+
+**Request:** `{ "recipeId": string, "repo": string, "branch"?: string, "goal"?: string }`
+**Response:** `{ "effective": { recipe, repo, branch, goal, provider, model } }`
+
+### `POST /api/loops/runs`
+
+Start a run. `branch` defaults to `loop/<recipeId>-<timestamp>`; `goal`
+defaults to the recipe's outcome prompt.
+
+**Request:** same shape as preflight.
+**Response:** `{ "run": LoopRun }`
+
+### `GET /api/loops/runs`
+
+List runs. Query: `state`, `repo`, `active=1`, `limit`.
+
+**Response:** `{ "runs": LoopRun[] }`
+
+### `GET /api/loops/runs/:id`
+
+One run plus its stages, evaluations, interventions, artifact metadata, and
+the current event-sequence cursor.
+
+**Response:** `{ "run": LoopRunDetail }`
+
+### `GET /api/loops/runs/:id/events?after=<sequence>`
+
+The append-only event log — the source of truth clients reconcile against
+after a WS reconnect. Events carry `{ runId, sequence, type, at, actor,
+stageId?, attemptId?, payload }`.
+
+**Response:** `{ "events": LoopEvent[], "lastSequence": number }`
+
+### `GET /api/loops/runs/:id/artifacts/:artifactId`
+
+An artifact body (evaluator output, review text) as `text/plain`, with
+`X-Artifact-Kind` / `X-Artifact-Label` headers.
+
+### `POST /api/loops/runs/:id/pause` · `/resume` · `/cancel`
+
+Pause after the current safe boundary / resume a paused run in its surviving
+worktree / stop now (worktree kept). `409` when the run is not in an eligible
+state.
+
+### `POST /api/loops/runs/:id/steer`
+
+Queue an operator instruction, delivered to the maker at the next safe
+boundary.
+
+**Request:** `{ "instruction": string }`
+
+### `POST /api/loops/runs/:id/interventions/:interventionId/resolve`
+
+Resolve a pending intervention. `choice` must be one of the intervention's
+offered options; `note` becomes guidance to the maker where applicable.
+
+**Request:** `{ "choice": string, "note"?: string }`
+
+---
+
 ## Orchestrator (Agent Joe)
 
 All orchestrator routes are mounted at the `/api/orchestrator/` prefix.

@@ -16,7 +16,7 @@ Facts the plan builds on, from a code audit (2026-08-08):
 - The WebSocket half is a clean seam: `wsUrl()` in `src/lib/ccApi.ts:461` is the only WS URL
   construction, called from exactly one place (`src/hooks/useWsConnection.ts:86`).
 - The REST half is **not** centralized: four `BASE` constants (`src/lib/ccApi.ts:10`,
-  `src/lib/workflowApi.ts:7`, `src/lib/goalRunApi.ts:8`, `src/hooks/useDocsBrowser.ts:10`) plus
+  `src/lib/workflowApi.ts:7`, `src/lib/loopsApi.ts`, `src/hooks/useDocsBrowser.ts:10`) plus
   four raw `fetch('/cc/...')` calls (`src/hooks/useRepos.ts:42`,
   `src/components/NewSessionButton.tsx:69`, `src/components/RepoSelector.tsx:50`,
   `src/components/OrchestratorView.tsx:55`).

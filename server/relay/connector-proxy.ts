@@ -43,7 +43,7 @@ export const ALLOWED_GET_PREFIXES = [
   // are owner-only surfaces that are otherwise unreachable over the relay —
   // without these the hosted UI renders the page and then fails every fetch.
   '/api/workflows',
-  '/api/goal-runs',
+  '/api/loops',
   '/api/runs',
 ] as const
 
@@ -67,7 +67,7 @@ export const ALLOWED_MUTATION_PREFIXES = [
   // Triggering, cancelling and configuring automations. `/api/runs` stays out:
   // it is a read model, so widening it here would grant nothing.
   '/api/workflows',
-  '/api/goal-runs',
+  '/api/loops',
 ] as const
 
 /** Methods that may be proxied at all. */

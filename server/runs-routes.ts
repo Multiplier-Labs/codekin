@@ -10,7 +10,7 @@
 
 import { Router } from 'express'
 import type { Request, Response } from 'express'
-import type { GoalRunStore } from './goal-run-store.js'
+import type { LoopStore } from './loop-store.js'
 import type { RunStore } from './run-store.js'
 import type { WorkflowEngine } from './workflow-engine.js'
 import { mergeRuns, type UnifiedRun } from './unified-runs.js'
@@ -26,7 +26,7 @@ export function createRunsRouter(
   extractToken: ExtractFn,
   /** Lazy — the workflow engine may not be initialized (quiet mode, init failure). */
   getEngine: () => WorkflowEngine | null,
-  goalRuns: GoalRunStore,
+  loops: LoopStore,
   /** Unified store — orchestrator children (engine 'agent') live here. */
   runStore?: RunStore,
 ): Router {
@@ -49,10 +49,10 @@ export function createRunsRouter(
     }
 
     const workflowRuns = engine && engine !== 'workflow' ? [] : (getEngine()?.listRuns({ limit }) ?? [])
-    const goalRunRows = engine && engine !== 'loop' ? [] : goalRuns.listRuns({ limit })
+    const loopRuns = engine && engine !== 'loop' ? [] : loops.listRuns({ limit })
     const storedRuns = engine && engine !== 'agent' ? [] : (runStore?.listRuns({ engine: 'agent', limit }) ?? [])
 
-    let runs: UnifiedRun[] = mergeRuns(workflowRuns, goalRunRows, limit, storedRuns)
+    let runs: UnifiedRun[] = mergeRuns(workflowRuns, loopRuns, limit, storedRuns)
     if (status) runs = runs.filter((r) => r.status === status)
     res.json({ runs })
   })

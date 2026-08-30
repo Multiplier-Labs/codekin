@@ -1,5 +1,5 @@
 /** Tests for OrchestratorMonitor lifecycle — engine-driven tick registration vs legacy intervals —
- * plus the passive-repo notifier predicate, repo discovery, and goal-run event notifications. */
+ * plus the passive-repo notifier predicate, repo discovery, and loop event notifications. */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
@@ -165,7 +165,7 @@ describe('discoverRepoPathsUnder', () => {
   })
 })
 
-describe('handleGoalRunEvent', () => {
+describe('handleLoopEvent', () => {
   // isRateLimited: true short-circuits delivery — notifications stay in the
   // buffer where getAll() can observe them, without touching fs or the outbox.
   const fakeSessions = { isRateLimited: () => true } as unknown as SessionManager
@@ -174,23 +174,25 @@ describe('handleGoalRunEvent', () => {
     return new OrchestratorMonitor(fakeSessions)
   }
 
-  it('notifies once (severity action) when a run blocks, pointing at pending_prompts', () => {
+  const base = { runId: 'r1', sequence: 1, at: '2026-08-30T12:00:00.000Z', actor: { type: 'system' as const } }
+
+  it('notifies once (severity action) when a session blocks, pointing at pending_prompts', () => {
     const m = monitor()
-    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'ci-autorepair', status: 'blocked' })
-    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'ci-autorepair', status: 'blocked' })
+    const blocked = { ...base, type: 'session_blocked', payload: { requestId: 'req-1', toolName: 'Bash' } }
+    m.handleLoopEvent(blocked)
+    m.handleLoopEvent(blocked)
 
     const all = m.getAll()
     expect(all).toHaveLength(1)
     expect(all[0].severity).toBe('action')
-    expect(all[0].title).toContain('ci-autorepair')
     expect(all[0].body).toContain('pending_prompts')
   })
 
   // getAll() is newest-first, so the later 'failed' notification leads.
-  it('notifies separately for a later state of the same run', () => {
+  it('notifies separately for a later event of the same run', () => {
     const m = monitor()
-    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'ci-autorepair', status: 'blocked' })
-    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'ci-autorepair', status: 'failed' })
+    m.handleLoopEvent({ ...base, type: 'session_blocked', payload: { requestId: 'req-1' } })
+    m.handleLoopEvent({ ...base, sequence: 2, type: 'run_completed', payload: { outcome: 'failed', reason: 'budget exhausted' } })
 
     const all = m.getAll()
     expect(all).toHaveLength(2)
@@ -201,27 +203,34 @@ describe('handleGoalRunEvent', () => {
    * tick, because equal timestamps fell back to insertion order. */
   it('keeps newest-first order when notifications cross a millisecond boundary', () => {
     const m = monitor()
-    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'ci-autorepair', status: 'blocked' })
+    m.handleLoopEvent({ ...base, type: 'session_blocked', payload: { requestId: 'req-1' } })
     const until = Date.now() + 2
     while (Date.now() < until) { /* busy-wait past a millisecond tick */ }
-    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'ci-autorepair', status: 'failed' })
+    m.handleLoopEvent({ ...base, sequence: 2, type: 'run_completed', payload: { outcome: 'failed' } })
 
     expect(m.getAll().map(n => n.severity)).toEqual(['alert', 'action'])
   })
 
-  it('ignores progress states and ledger events', () => {
+  it('ignores progress events and non-failure completions', () => {
     const m = monitor()
-    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'k', status: 'running' })
-    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r1', kind: 'k', status: 'succeeded' })
-    m.handleGoalRunEvent({ eventType: 'turn', runId: 'r1', kind: 'k' })
+    m.handleLoopEvent({ ...base, type: 'state_changed', payload: { state: 'executing' } })
+    m.handleLoopEvent({ ...base, sequence: 2, type: 'evaluation_completed', payload: { status: 'fail' } })
+    m.handleLoopEvent({ ...base, sequence: 3, type: 'run_completed', payload: { outcome: 'completed' } })
+    m.handleLoopEvent({ ...base, sequence: 4, type: 'run_completed', payload: { outcome: 'canceled' } })
     expect(m.getAll()).toHaveLength(0)
   })
 
-  it('notifies on awaiting_human with a decision prompt', () => {
+  it('notifies on a pending intervention with its decision title', () => {
     const m = monitor()
-    m.handleGoalRunEvent({ eventType: 'run_status', runId: 'r2', kind: 'coverage-increase', status: 'awaiting_human' })
+    m.handleLoopEvent({
+      ...base,
+      runId: 'r2',
+      type: 'intervention_created',
+      payload: { interventionId: 'iv-1', purpose: 'escalation', title: 'Approve completion of "Coverage Increase"?' },
+    })
     const all = m.getAll()
     expect(all).toHaveLength(1)
     expect(all[0].title).toContain('needs a decision')
+    expect(all[0].title).toContain('Coverage Increase')
   })
 })

@@ -8,11 +8,11 @@
  *                model (GET /api/runs): every workflow and loop run in one
  *                list, one status vocabulary.
  *   Workflows  — the existing WorkflowsView (recipes, schedules, config).
- *   Loops      — the existing LoopRunsView (evidence ledger, start form).
+ *   Loops      — the Loops 2.0 run list + control surface (LoopsView).
  *
- * Above the tabs, a needs-attention banner surfaces loop runs that are
- * `blocked` (a tool call waiting on approval) or `awaiting_human`
- * (escalated) — the only run states that stall silently without a human.
+ * Above the tabs, a needs-attention banner surfaces loop runs waiting on a
+ * human decision (`awaiting_approval` — a pending intervention), the only
+ * run state that stalls silently without one.
  *
  * Everything refreshes push-first off the shared workflow_event channel with
  * a slow poll as the safety net.
@@ -21,9 +21,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { IconSparkles, IconRefresh, IconAlertTriangle, IconListDetails, IconExternalLink, IconRobotFace, IconServer } from '@tabler/icons-react'
 import { WorkflowsView } from './WorkflowsView'
-import { LoopRunsView } from './LoopRunsView'
+import { LoopsView } from './LoopsView'
 import { DeploymentsView } from './DeploymentsView'
-import { listGoalRuns, type GoalRun } from '../lib/goalRunApi'
+import { listLoopRuns, type LoopRun } from '../lib/loopsApi'
 import { listUnifiedRuns, type UnifiedRun, type UnifiedRunStatus } from '../lib/runsApi'
 import { subscribeWorkflowEvents } from '../lib/workflowEvents'
 import { formatTime } from '../lib/workflowHelpers'
@@ -71,7 +71,7 @@ function repoName(path: string | null): string | null {
 
 export function AutomationsView({ token, initialTab, onNavigateToSession }: Props) {
   const [tab, setTab] = useState<AutomationsTab>(initialTab ?? 'all')
-  const [attention, setAttention] = useState<GoalRun[]>([])
+  const [attention, setAttention] = useState<LoopRun[]>([])
   const [feed, setFeed] = useState<UnifiedRun[]>([])
   const [feedError, setFeedError] = useState<string | null>(null)
   /** Run to preselect in the Loops tab after a row click. */
@@ -79,13 +79,12 @@ export function AutomationsView({ token, initialTab, onNavigateToSession }: Prop
 
   const refresh = useCallback(async () => {
     try {
-      const [runs, blocked, awaiting] = await Promise.all([
+      const [runs, awaiting] = await Promise.all([
         listUnifiedRuns(token, { limit: 100 }),
-        listGoalRuns(token, { status: 'blocked', limit: 20 }),
-        listGoalRuns(token, { status: 'awaiting_human', limit: 20 }),
+        listLoopRuns(token, { state: 'awaiting_approval', limit: 20 }),
       ])
       setFeed(runs)
-      setAttention([...blocked, ...awaiting])
+      setAttention(awaiting)
       setFeedError(null)
     } catch (err) {
       setFeedError(err instanceof Error ? err.message : 'Failed to load runs')
@@ -98,13 +97,12 @@ export function AutomationsView({ token, initialTab, onNavigateToSession }: Prop
     let cancelled = false
     Promise.all([
       listUnifiedRuns(token, { limit: 100 }),
-      listGoalRuns(token, { status: 'blocked', limit: 20 }),
-      listGoalRuns(token, { status: 'awaiting_human', limit: 20 }),
+      listLoopRuns(token, { state: 'awaiting_approval', limit: 20 }),
     ])
-      .then(([runs, blocked, awaiting]) => {
+      .then(([runs, awaiting]) => {
         if (cancelled) return
         setFeed(runs)
-        setAttention([...blocked, ...awaiting])
+        setAttention(awaiting)
       })
       .catch(() => {})
     return () => { cancelled = true }
@@ -173,10 +171,10 @@ export function AutomationsView({ token, initialTab, onNavigateToSession }: Prop
                   className="flex w-full items-center gap-2 rounded-control px-1 py-0.5 text-left text-body text-warning-2 hover:bg-warning-9/30 transition-colors"
                 >
                   <IconAlertTriangle size={14} stroke={2} className="flex-shrink-0" />
-                  <span className="font-medium">{run.kind}</span>
+                  <span className="font-medium">{run.recipeId}</span>
                   <span className="truncate text-ink-muted">{run.branch}</span>
                   <span className="ml-auto flex-shrink-0 text-meta">
-                    {run.status === 'blocked' ? 'waiting on approval' : 'needs a decision'} · {formatTime(run.createdAt)}
+                    {run.stateReason ?? 'needs a decision'} · {formatTime(run.createdAt)}
                   </span>
                 </button>
               </li>
@@ -243,7 +241,7 @@ export function AutomationsView({ token, initialTab, onNavigateToSession }: Prop
         ) : tab === 'deployments' ? (
           <DeploymentsView token={token} />
         ) : (
-          <LoopRunsView
+          <LoopsView
             key={focusRunId ?? 'loops'}
             token={token}
             initialSelectedRunId={focusRunId ?? undefined}

@@ -1,25 +1,28 @@
 /**
- * Deterministic finalization for a verified GoalRun.
+ * Deterministic finalization for a passing loop run.
  *
- * When the deterministic verifier passes, Codekin — not the maker agent — lands
- * the verified tree. We commit any uncommitted changes (so what passed
- * verification is exactly what ships), then, per the completion policy, push the
- * branch and open a pull request, capturing the PR URL.
+ * When evaluation passes (and any required approval is granted), Codekin —
+ * not the maker agent — lands the verified tree: commit any uncommitted
+ * changes (so what passed evaluation is exactly what ships), then per the
+ * completion action push the branch and open a pull request.
  *
  * Push / PR failures are *reported* in the returned note but never thrown:
- * verification already passed, so the run still succeeds — the branch is sitting
- * locally and a human can push it by hand. The controller surfaces the note in
- * the evidence ledger and leaves `prUrl` null so "succeeded but no PR" is visible
- * rather than silently mistaken for "merged-ready".
+ * evaluation already passed, so the run still completes — the branch sits
+ * locally and a human can push it by hand. `prUrl` stays null so "completed
+ * but no PR" is visible rather than mistaken for "merge-ready".
  *
- * All git/gh shell-outs run as fixed argv arrays (no shell interpolation) and are
- * injectable for tests.
+ * Finalization is safe to re-run after a crash: a clean tree commits nothing,
+ * push is idempotent, and an already-open PR for the branch is recovered
+ * rather than duplicated.
+ *
+ * All git/gh shell-outs run as fixed argv arrays (no shell interpolation) and
+ * are injectable for tests.
  */
 
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { execGit } from './diff-manager.js'
-import type { CompletionPolicy } from './goal-run-store.js'
+import type { CompletionAction } from './loop-recipe.js'
 
 const execFileAsync = promisify(execFile)
 const GH_TIMEOUT_MS = 30_000
@@ -29,21 +32,23 @@ export interface FinalizeOptions {
   cwd: string
   /** Branch the maker worked on (the PR head). */
   branch: string
-  policy: CompletionPolicy
+  action: CompletionAction
   /** PR / commit title. */
   title: string
-  /** PR body (ignored for non-'pr' policies). */
+  /** PR body (ignored for non-PR actions). */
   body: string
 }
 
 export interface FinalizeResult {
-  /** The opened PR URL, or null when no PR was opened (policy or failure). */
+  /** The opened (or recovered) PR URL, or null when none. */
   prUrl: string | null
-  /** Human-readable outcome recorded in the evidence ledger. */
+  /** Human-readable outcome recorded in the event stream. */
   note: string
+  /** False when a step after evaluation failed (commit/push/PR) — qualifies the outcome. */
+  clean: boolean
 }
 
-export interface FinalizerApi {
+export interface LoopFinalizerApi {
   finalize(opts: FinalizeOptions): Promise<FinalizeResult>
 }
 
@@ -59,54 +64,49 @@ let gitRunner: CmdRunner = realGit
 let ghRunner: CmdRunner = realGh
 
 /** @internal Test-only: override the git/gh runners. */
-export function _setFinalizerRunners(git: CmdRunner, gh: CmdRunner): void {
+export function _setLoopFinalizerRunners(git: CmdRunner, gh: CmdRunner): void {
   gitRunner = git
   ghRunner = gh
 }
 
 /** @internal Test-only: restore the real git/gh runners. */
-export function _resetFinalizerRunners(): void {
+export function _resetLoopFinalizerRunners(): void {
   gitRunner = realGit
   ghRunner = realGh
 }
 
-export const defaultFinalizer: FinalizerApi = {
+export const defaultLoopFinalizer: LoopFinalizerApi = {
   async finalize(opts: FinalizeOptions): Promise<FinalizeResult> {
-    const { cwd, branch, policy, title, body } = opts
+    const { cwd, branch, action, title, body } = opts
 
     try {
       await commitIfDirty(cwd, title)
     } catch (err) {
-      return { prUrl: null, note: `Verification passed; commit failed: ${errMsg(err)}` }
+      return { prUrl: null, note: `Evaluation passed; commit failed: ${errMsg(err)}`, clean: false }
     }
 
-    if (policy === 'commit-only') {
-      return { prUrl: null, note: 'Verification passed; changes committed locally (no push).' }
+    if (action === 'commit-only') {
+      return { prUrl: null, note: 'Evaluation passed; changes committed locally (no push).', clean: true }
     }
 
     try {
       await gitRunner(['push', '-u', 'origin', branch], cwd)
     } catch (err) {
-      return { prUrl: null, note: `Verification passed; committed but push failed: ${errMsg(err)}` }
+      return { prUrl: null, note: `Evaluation passed; committed but push failed: ${errMsg(err)}`, clean: false }
     }
 
-    if (policy === 'merge') {
-      return { prUrl: null, note: `Verification passed; pushed branch ${branch} (no PR).` }
-    }
-
-    // policy === 'pr'
     try {
       const out = await ghRunner(['pr', 'create', '--head', branch, '--title', title, '--body', body], cwd)
       const prUrl = extractPrUrl(out)
       return prUrl
-        ? { prUrl, note: `Verification passed; opened PR: ${prUrl}` }
-        : { prUrl: null, note: `Verification passed; pushed branch ${branch} (PR URL not parsed).` }
+        ? { prUrl, note: `Evaluation passed; opened PR: ${prUrl}`, clean: true }
+        : { prUrl: null, note: `Evaluation passed; pushed branch ${branch} (PR URL not parsed).`, clean: false }
     } catch (err) {
-      // A PR may already exist for this branch (e.g. a re-run on the same branch);
-      // recover its URL rather than reporting a failure.
+      // A PR may already exist for this branch (a re-run, or finalize re-running
+      // after a crash) — recover its URL rather than reporting a failure.
       const existing = await existingPrUrl(branch, cwd)
-      if (existing) return { prUrl: existing, note: `Verification passed; PR already open: ${existing}` }
-      return { prUrl: null, note: `Verification passed; branch pushed but PR creation failed: ${errMsg(err)}` }
+      if (existing) return { prUrl: existing, note: `Evaluation passed; PR already open: ${existing}`, clean: true }
+      return { prUrl: null, note: `Evaluation passed; branch pushed but PR creation failed: ${errMsg(err)}`, clean: false }
     }
   },
 }
