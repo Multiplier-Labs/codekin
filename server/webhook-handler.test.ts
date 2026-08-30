@@ -352,6 +352,72 @@ describe('WebhookHandler', () => {
     })
   })
 
+  describe('pr-review durable signal path', () => {
+    function makePrBody(overrides: Record<string, unknown> = {}): Buffer {
+      return Buffer.from(JSON.stringify({
+        action: 'opened',
+        pull_request: {
+          number: 7,
+          title: 'Add feature',
+          body: 'desc',
+          draft: false,
+          html_url: 'https://github.com/acme/widget/pull/7',
+          user: { login: 'alice' },
+          head: { sha: 'abc123', ref: 'feat/x' },
+          base: { ref: 'main' },
+        },
+        repository: { full_name: 'acme/widget', name: 'widget' },
+        sender: { login: 'alice' },
+        ...overrides,
+      }))
+    }
+
+    it('enqueues a pr-review signal on acceptance instead of processing inline', async () => {
+      await handler.checkHealth()
+      const publish = vi.fn()
+      handler.setSignalPublisher(publish)
+
+      const body = makePrBody()
+      const result = await handler.handleWebhook(body, makeHeaders(body, { event: 'pull_request' }))
+
+      expect(result.statusCode).toBe(202)
+      expect(result.body.accepted).toBe(true)
+      expect(publish).toHaveBeenCalledTimes(1)
+      const input = publish.mock.calls[0][0] as { kind: string; dedupeKey: string; payload: Record<string, unknown> }
+      expect(input.kind).toBe('pr-review')
+      expect(input.dedupeKey).toMatch(/^pr-review::/)
+      expect(input.payload.sessionId).toBe(result.body.sessionId)
+      // Inline processing did not run — no session was created at accept time.
+      expect(sessions.create).not.toHaveBeenCalled()
+    })
+
+    it('falls back to inline processing when the publisher throws', async () => {
+      await handler.checkHealth()
+      handler.setSignalPublisher(() => { throw new Error('engine down') })
+
+      const body = makePrBody()
+      const result = await handler.handleWebhook(body, makeHeaders(body, { event: 'pull_request' }))
+
+      // Accepted either way; the inline path runs async and is not asserted
+      // further here (it exercises the gh mocks like the legacy path).
+      expect(result.statusCode).toBe(202)
+    })
+
+    it('processQueuedPrReview is a no-op when the pre-allocated session already exists (redelivery)', async () => {
+      ;(sessions.get as ReturnType<typeof vi.fn>).mockReturnValue({ id: 's-1' })
+      await handler.processQueuedPrReview({
+        payload: { pull_request: { number: 7 }, repository: { full_name: 'acme/widget', name: 'widget' } },
+        webhookEvent: { id: 'e1' },
+        sessionId: 's-1',
+      })
+      expect(sessions.create).not.toHaveBeenCalled()
+    })
+
+    it('processQueuedPrReview drops malformed signals without throwing', async () => {
+      await expect(handler.processQueuedPrReview({})).resolves.toBeUndefined()
+    })
+  })
+
   describe('event history', () => {
     it('getEvents returns a copy of events', async () => {
       await handler.checkHealth()
