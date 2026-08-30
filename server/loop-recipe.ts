@@ -200,7 +200,12 @@ export interface LoopRecipe {
   workers: { maxParallel: number }
   evaluators: EvaluatorConfig[]
   budgets: LoopBudgets
-  policy: { mode: LoopMode }
+  /**
+   * reflection 'model' adds a read-only model pass over each finished run
+   * that proposes lessons (still operator-approved); 'heuristics' (default)
+   * keeps reflection deterministic and free.
+   */
+  policy: { mode: LoopMode; reflection: 'heuristics' | 'model' }
   completion: { action: CompletionAction }
   /** Default outcome prompt (the markdown body). */
   outcome: string
@@ -522,14 +527,18 @@ function parseWorkers(value: unknown, sourcePath: string): LoopRecipe['workers']
 }
 
 function parsePolicy(value: unknown, sourcePath: string): LoopRecipe['policy'] {
-  if (value === undefined) return { mode: 'guarded' }
+  if (value === undefined) return { mode: 'guarded', reflection: 'heuristics' }
   const obj = asRecord(value, 'policy', sourcePath)
-  rejectUnknown(obj, ['mode'], 'policy', sourcePath)
+  rejectUnknown(obj, ['mode', 'reflection'], 'policy', sourcePath)
   const mode = obj.mode ?? 'guarded'
   if (typeof mode !== 'string' || !MODES.includes(mode as LoopMode)) {
     fail(sourcePath, `policy.mode must be one of ${MODES.join(', ')}`)
   }
-  return { mode: mode as LoopMode }
+  const reflection = obj.reflection ?? 'heuristics'
+  if (reflection !== 'heuristics' && reflection !== 'model') {
+    fail(sourcePath, `policy.reflection must be heuristics or model`)
+  }
+  return { mode: mode as LoopMode, reflection }
 }
 
 function parseCompletion(value: unknown, sourcePath: string): LoopRecipe['completion'] {
@@ -656,7 +665,7 @@ export function withOverrides(recipe: LoopRecipe, overrides: RecipeOverrides): L
     workers: recipe.workers,
     evaluators: recipe.evaluators,
     budgets,
-    policy: { mode: overrides.mode ?? recipe.policy.mode },
+    policy: { mode: overrides.mode ?? recipe.policy.mode, reflection: recipe.policy.reflection },
     completion: recipe.completion,
     outcome: recipe.outcome,
   }
