@@ -24,8 +24,23 @@ Scheduled runs pass through pre-dispatch gates before any run row or session is 
 The gates, in order:
 
 1. **Catch-up policy** — each schedule has `catchUp: 'collapse' | 'skip'` (default `collapse`, settable via `PATCH /api/workflows/schedules/:id`). `collapse` fires once no matter how many slots were missed during downtime; `skip` abandons a fire time missed by more than 10 minutes and waits for the next natural slot.
-2. **Single-flight** — a schedule whose previous run (same kind + repo) is still active is held and retried a few minutes later, never stacked.
-3. **Change detection** — the engine records the repo's HEAD sha when a run *succeeds* (`lastReviewedSha`). A scheduled fire where HEAD hasn't moved since is held: nothing new to review. Failed and skipped runs do not advance the anchor, so their commits are re-examined on the next fire. Manual triggers (`POST /api/workflows/schedules/:id/trigger`) bypass all gates but are still ledgered.
+2. **Activity tier** — the Repo Activity Index (below) classifies each repo; `dormant` repos have scheduled fires held until they wake, and `cooling` repos run at most weekly regardless of configured cadence. Unknown activity fails open.
+3. **Single-flight** — a schedule whose previous run (same kind + repo) is still active is held and retried a few minutes later, never stacked.
+4. **Change detection** — the engine records the repo's HEAD sha when a run *succeeds* (`lastReviewedSha`). A scheduled fire where HEAD hasn't moved since is held: nothing new to review. Failed and skipped runs do not advance the anchor, so their commits are re-examined on the next fire. Manual triggers (`POST /api/workflows/schedules/:id/trigger`) bypass all gates but are still ledgered.
+
+## Repo Activity Index
+
+Every configured repo carries an activity record aggregating four cheap local signals: the last commit (`git log -1`, no network), the most recent Codekin session activity in that repo, commit events from the post-commit hook, and PR events from the GitHub webhook stack. The freshest signal decides the tier:
+
+| Tier | Definition | Effect on scheduled workflows |
+| --- | --- | --- |
+| `active` | any signal within 7 days | full configured cadence |
+| `cooling` | 7–30 days | throttled to at most one run per week |
+| `dormant` | 30+ days | held entirely until activity resumes |
+
+There is no polling loop: records refresh lazily when read (15-minute freshness window) and commit/PR events bump them in real time, so reactivation is automatic — any new signal restores `active` and the next scheduled fire dispatches normally. The orchestrator monitor sweeps the index on its poll and notifies the agent when a repo goes dormant or wakes up.
+
+`GET /api/workflows/repo-activity` returns the records (also exposed to the orchestrator as the `get_repo_activity` MCP tool); the Automations view shows the tier badge on each repo group.
 
 Dispatches are capped per 60-second tick (backlog staggers across ticks instead of stampeding after downtime), and the loop writes a heartbeat on every tick — `GET /api/workflows/engine-health` returns `{ lastTickAt, tickCount, stale }`, and the orchestrator monitor raises an alert notification if the heartbeat goes stale.
 

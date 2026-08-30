@@ -89,6 +89,16 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
   )
 
   server.registerTool(
+    'get_repo_activity',
+    {
+      description:
+        'Activity tiers for configured repos (active / cooling / dormant) with the signals behind them — last commit, session, commit event, PR event. Dormant repos have their scheduled workflows held; cooling repos are throttled to weekly.',
+      inputSchema: {},
+    },
+    () => run(() => api.getRepoActivity()),
+  )
+
+  server.registerTool(
     'list_runs',
     {
       description: 'List background runs (workflows and loops) newest-first in one unified shape. Filter by engine or status.',

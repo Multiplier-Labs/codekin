@@ -115,6 +115,10 @@ export class CodekinApi {
     return this.request('POST', '/api/workflows/runs', { kind, input })
   }
 
+  getRepoActivity(): Promise<unknown> {
+    return this.request('GET', '/api/workflows/repo-activity')
+  }
+
   // --- trust ----------------------------------------------------------------
 
   getTrustLevel(opts: { action: string; category: string; severity?: string; repo?: string }): Promise<unknown> {

@@ -24,6 +24,7 @@ import type { WsServerMessage } from './types.js'
 import type { WebhookConfig, WebhookEvent, WebhookEventStatus, WorkflowRunPayload, FailureContext, PullRequestPayload, PullRequestContext } from './webhook-types.js'
 import type { FullWebhookConfig } from './webhook-config.js'
 import { WebhookDedup, computeIdempotencyKey, computePrIdempotencyKey } from './webhook-dedup.js'
+import { tryGetRepoActivityIndex } from './repo-activity.js'
 import { checkGhHealth, fetchFailedLogs, fetchJobs, fetchAnnotations, fetchCommitMessage, fetchPRTitle } from './webhook-github.js'
 import { fetchPrDiff, fetchPrFiles, fetchPrCommits, fetchPrReviewComments, fetchPrReviews, fetchExistingReviewComment } from './webhook-pr-github.js'
 import { buildPrReviewPrompt } from './webhook-pr-prompt.js'
@@ -446,6 +447,14 @@ export class WebhookHandler extends WebhookHandlerBase<WebhookEvent, WebhookEven
     const pr = payload.pull_request
     if (!pr) {
       return { statusCode: 400, body: { error: 'Missing pull_request in payload' } }
+    }
+
+    // Any PR event is repo activity — bump the index (resolved via origin
+    // remotes of configured repos) before the filters decide about a review.
+    try {
+      tryGetRepoActivityIndex()?.recordPrEventBySlug(payload.repository.full_name)
+    } catch (err) {
+      console.error('[webhook] Activity bump failed:', err)
     }
 
     // --- Closed/merged handling (cleanup, no review) ---

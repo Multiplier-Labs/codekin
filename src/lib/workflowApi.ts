@@ -178,6 +178,28 @@ export async function listSchedules(token: string): Promise<CronSchedule[]> {
   return data.schedules
 }
 
+export type ActivityTier = 'active' | 'cooling' | 'dormant'
+
+export interface RepoActivity {
+  repoPath: string
+  lastCommitAt: string | null
+  lastCommitSha: string | null
+  lastSessionAt: string | null
+  lastCommitEventAt: string | null
+  lastPrEventAt: string | null
+  lastSignalAt: string | null
+  tier: ActivityTier
+  updatedAt: string
+}
+
+/** Fetch activity tiers for configured review repos. */
+export async function listRepoActivity(token: string): Promise<RepoActivity[]> {
+  const res = await transport.fetch(`${BASE}/repo-activity`, { headers: headers(token) })
+  if (!res.ok) throw new Error(`Failed to list repo activity: ${res.status}`)
+  const data = await fetchJson<{ repos: RepoActivity[] }>(res)
+  return data.repos
+}
+
 /** Manually trigger a scheduled workflow, creating a new run. */
 export async function triggerSchedule(token: string, id: string): Promise<WorkflowRun> {
   const res = await transport.fetch(`${BASE}/schedules/${id}/trigger`, {

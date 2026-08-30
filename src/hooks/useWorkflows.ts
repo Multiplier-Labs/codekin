@@ -14,6 +14,7 @@ import { subscribeWorkflowEvents } from '../lib/workflowEvents'
 import {
   listRuns,
   listSchedules,
+  listRepoActivity,
   getConfig,
   triggerRun as apiTriggerRun,
   cancelRun as apiCancelRun,
@@ -23,6 +24,7 @@ import {
   patchRepoConfig,
   type WorkflowRun,
   type CronSchedule,
+  type RepoActivity,
   type WorkflowConfig,
   type ReviewRepoConfig,
   type WebhookSetupResult,
@@ -36,6 +38,7 @@ const EVENT_DEBOUNCE_MS = 300
 interface UseWorkflowsResult {
   runs: WorkflowRun[]
   schedules: CronSchedule[]
+  repoActivity: RepoActivity[]
   config: WorkflowConfig | null
   loading: boolean
   error: string | null
@@ -53,6 +56,7 @@ export function useWorkflows(token: string): UseWorkflowsResult {
   const [runs, setRuns] = useState<WorkflowRun[]>([])
   const [schedules, setSchedules] = useState<CronSchedule[]>([])
   const [config, setConfig] = useState<WorkflowConfig | null>(null)
+  const [repoActivity, setRepoActivity] = useState<RepoActivity[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -60,14 +64,17 @@ export function useWorkflows(token: string): UseWorkflowsResult {
   const refresh = useCallback(async () => {
     if (!token) return
     try {
-      const [runsData, schedulesData, configData] = await Promise.all([
+      const [runsData, schedulesData, configData, activityData] = await Promise.all([
         listRuns(token, { limit: 50 }),
         listSchedules(token),
         getConfig(token),
+        // Non-fatal: an older server (or uninitialized index) just means no badges.
+        listRepoActivity(token).catch(() => [] as RepoActivity[]),
       ])
       setRuns(runsData)
       setSchedules(schedulesData)
       setConfig(configData)
+      setRepoActivity(activityData)
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load workflow data')
@@ -144,5 +151,5 @@ export function useWorkflows(token: string): UseWorkflowsResult {
     await refresh()
   }, [token, refresh])
 
-  return { runs, schedules, config, loading, error, refresh, triggerRun, cancelRun, triggerSchedule, addRepo, removeRepo, updateRepo, toggleScheduleEnabled }
+  return { runs, schedules, repoActivity, config, loading, error, refresh, triggerRun, cancelRun, triggerSchedule, addRepo, removeRepo, updateRepo, toggleScheduleEnabled }
 }

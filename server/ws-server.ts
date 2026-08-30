@@ -27,6 +27,7 @@ import { WebhookHandler } from './webhook-handler.js'
 import { createWebhookRateLimiter } from './webhook-rate-limiter.js'
 import { StepflowHandler, loadStepflowConfig } from './stepflow-handler.js'
 import { initWorkflowEngine, getWorkflowEngine, shutdownWorkflowEngine, type WorkflowEvent } from './workflow-engine.js'
+import { initRepoActivityIndex, shutdownRepoActivityIndex } from './repo-activity.js'
 import { generate404Page, generate500Page } from './error-page.js'
 import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
@@ -684,6 +685,20 @@ server.listen(port, '0.0.0.0', () => {
       }
     })
 
+    // Repo activity index: aggregates commits, session activity, and hook/webhook
+    // events per repo; the dispatch gate consults it (dormant hold / cooling throttle).
+    const activityIndex = initRepoActivityIndex({
+      sessionActivity: (repoPath) => {
+        let latest: string | null = null
+        for (const s of sessions.list()) {
+          const belongs = s.groupDir === repoPath || s.workingDir === repoPath || s.workingDir.startsWith(`${repoPath}/`)
+          if (belongs && s.lastActivity && (!latest || s.lastActivity > latest)) latest = s.lastActivity
+        }
+        return latest
+      },
+    })
+    engine.setActivityResolver((repoPath) => activityIndex.getFresh(repoPath))
+
     // Sync cron schedules with config and start scheduler
     syncSchedules(sessions)
     engine.startCronScheduler()
@@ -726,6 +741,7 @@ server.listen(port, '0.0.0.0', () => {
 async function gracefulShutdown(signal: string): Promise<void> {
   console.log(`${signal} received, shutting down...`)
   shutdownWorkflowEngine()
+  shutdownRepoActivityIndex()
   goalRunStore.close()
   commitEventState.handler?.shutdown()
   webhookHandler.shutdown()
