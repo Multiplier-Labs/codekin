@@ -153,6 +153,27 @@ interface Pm2Process {
   monit?: { memory?: number }
 }
 
+/**
+ * Parse `pm2 jlist` output tolerantly. pm2 sometimes prints warning banners on
+ * stdout *before* the JSON (e.g. "In-memory PM2 is out-of-date" after a node
+ * upgrade), including ANSI color codes — so scan for the line the JSON array
+ * actually starts on instead of trusting the whole stream. Exported for tests.
+ */
+export function parsePm2Jlist(stdout: string): Pm2Process[] {
+  const trimmed = stdout.trim()
+  try {
+    return JSON.parse(trimmed) as Pm2Process[]
+  } catch {
+    // Banner noise ahead of the payload — the array starts at the last line
+    // beginning with '[' (ANSI escapes also contain '[', so match line starts).
+    const start = trimmed.lastIndexOf('\n[')
+    if (start >= 0) {
+      return JSON.parse(trimmed.slice(start + 1)) as Pm2Process[]
+    }
+    throw new Error('pm2 jlist output contained no JSON array')
+  }
+}
+
 async function runPm2Probe(probe: Pm2ProbeConfig, previous: ProbeMetrics | null): Promise<ProbeResult> {
   const breaches: string[] = []
   const events: string[] = []
@@ -160,7 +181,7 @@ async function runPm2Probe(probe: Pm2ProbeConfig, previous: ProbeMetrics | null)
 
   try {
     const { stdout } = await execFileAsync('pm2', ['jlist'], { timeout: 15_000, maxBuffer: 10 * 1024 * 1024 })
-    const list = JSON.parse(stdout) as Pm2Process[]
+    const list = parsePm2Jlist(stdout)
     const proc = list.find(p => p.name === probe.processName)
     if (!proc) {
       breaches.push(`pm2 process '${probe.processName}' not found`)
@@ -396,7 +417,7 @@ export async function discoverPm2Processes(): Promise<DiscoveredProcess[]> {
   )
   try {
     const { stdout } = await execFileAsync('pm2', ['jlist'], { timeout: 15_000, maxBuffer: 10 * 1024 * 1024 })
-    const list = JSON.parse(stdout) as Pm2Process[]
+    const list = parsePm2Jlist(stdout)
     return list
       .filter((p): p is Pm2Process & { name: string } => !!p.name)
       .map(p => ({
@@ -404,8 +425,10 @@ export async function discoverPm2Processes(): Promise<DiscoveredProcess[]> {
         status: p.pm2_env?.status ?? 'unknown',
         alreadyConfigured: configured.has(p.name),
       }))
-  } catch {
-    // pm2 absent or errored — nothing to propose.
+  } catch (err) {
+    // pm2 absent or errored — nothing to propose, but say so in the logs
+    // rather than failing silently.
+    console.error('[deployment-monitor] pm2 discovery failed:', err instanceof Error ? err.message : err)
     return []
   }
 }
