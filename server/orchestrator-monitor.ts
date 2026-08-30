@@ -16,6 +16,7 @@ import { OrchestratorMemory } from './orchestrator-memory.js'
 import { runAgingCycle, getPendingOutcomeAssessments } from './orchestrator-learning.js'
 import { getOrchestratorSessionId } from './orchestrator-manager.js'
 import { getOrchestratorOutbox } from './orchestrator-outbox.js'
+import { tryGetRepoActivityIndex } from './repo-activity.js'
 import { REPOS_ROOT, getAgentDisplayName } from './config.js'
 import { loadWorkflowConfig, type ReviewRepoConfig } from './workflow-config.js'
 
@@ -39,7 +40,6 @@ export interface OrchestratorNotification {
 const POLL_INTERVAL_MS = 15 * 60 * 1000  // 15 minutes
 /** Cap on the goal-run notification dedup set (oldest entries dropped). */
 const MAX_NOTED_GOAL_RUN_STATES = 500
-const PASSIVE_THRESHOLD_DAYS = 30
 
 export class OrchestratorMonitor {
   private sessions: SessionManager
@@ -173,8 +173,8 @@ export class OrchestratorMonitor {
     // Check for new reports
     this.checkNewReports(repoPaths)
 
-    // Check for passive repos
-    this.checkPassiveRepos(repoPaths)
+    // Sweep the activity index and notify on tier transitions
+    this.checkRepoActivity(repoPaths)
 
     // Check the trigger engine's heartbeat
     this.checkEngineHeartbeat()
@@ -232,36 +232,39 @@ export class OrchestratorMonitor {
     }
   }
 
-  /** Check for repos that haven't had recent commits. */
-  private checkPassiveRepos(repoPaths: string[]): void {
-    const now = Date.now()
+  /**
+   * Sweep the repo activity index for configured repos and notify on tier
+   * transitions. Replaces the old `.git/HEAD`-mtime "looks passive" heuristic —
+   * the index aggregates commits, sessions, commit events, and PR events, and
+   * its dormant tier actually holds scheduled dispatches (workflow-engine
+   * activity gate), so the notification describes something real.
+   */
+  private checkRepoActivity(repoPaths: string[]): void {
+    const index = tryGetRepoActivityIndex()
+    if (!index) return
+
     const reviewRepos = loadWorkflowConfig().reviewRepos
+    const configured = repoPaths.filter(p => hasEnabledWorkflowForRepo(p, reviewRepos))
 
-    for (const repoPath of repoPaths) {
-      try {
-        if (!hasEnabledWorkflowForRepo(repoPath, reviewRepos)) continue
-
-        const gitDir = join(repoPath, '.git')
-        if (!existsSync(gitDir)) continue
-
-        // Use HEAD ref's mtime as a proxy for last commit time
-        const headFile = join(gitDir, 'HEAD')
-        if (!existsSync(headFile)) continue
-
-        const headStat = statSync(headFile)
-        const daysSinceActivity = Math.floor((now - headStat.mtime.getTime()) / (24 * 60 * 60 * 1000))
-
-        if (daysSinceActivity >= PASSIVE_THRESHOLD_DAYS) {
-          const repoName = repoPath.split('/').pop() ?? repoPath
+    try {
+      for (const transition of index.sweep(configured)) {
+        const repoName = transition.repoPath.split('/').pop() ?? transition.repoPath
+        if (transition.to === 'dormant') {
           this.addNotification({
             severity: 'info',
-            title: `${repoName} looks passive`,
-            body: `No activity in ${daysSinceActivity} days. Consider de-scheduling workflows to save resources.`,
+            title: `${repoName} went dormant`,
+            body: `No commits, sessions, or PR events in 30+ days. Its scheduled workflows are held until activity resumes — no action needed unless that's a surprise.`,
+          })
+        } else if (transition.from === 'dormant') {
+          this.addNotification({
+            severity: 'info',
+            title: `${repoName} woke up`,
+            body: `New activity after a dormant spell — its scheduled workflows resume on their next fire.`,
           })
         }
-      } catch {
-        // Skip repos we can't stat
       }
+    } catch (err) {
+      console.error('[orchestrator-monitor] Activity sweep error:', err)
     }
   }
 

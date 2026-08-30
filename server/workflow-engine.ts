@@ -253,6 +253,13 @@ export interface EngineHealth {
 /** Resolve a repo's current HEAD sha; `null` when unavailable (missing repo, not a git dir). */
 export type HeadShaResolver = (repoPath: string) => string | null
 
+/**
+ * Resolve a repo's activity tier for the dispatch gate; `null` (or a throw)
+ * means "unknown" and the gate fails open. Backed by the RepoActivityIndex —
+ * typed structurally here so the engine has no import dependency on it.
+ */
+export type ActivityResolver = (repoPath: string) => { tier: 'active' | 'cooling' | 'dormant' } | null
+
 function defaultHeadShaResolver(repoPath: string): string | null {
   try {
     const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoPath, timeout: 5000 })
@@ -332,6 +339,7 @@ export class WorkflowEngine extends EventEmitter {
   /** Runs started by the dispatcher — lets run-success update the schedule's lastReviewedSha. */
   private dispatchIndex = new Map<string, { scheduleId: string; headSha: string | null }>()
   private headShaResolver: HeadShaResolver = defaultHeadShaResolver
+  private activityResolver: ActivityResolver | null = null
 
   /** Max dispatches per tick — staggers a backlog after downtime instead of stampeding. */
   static readonly MAX_DISPATCH_PER_TICK = 3
@@ -339,6 +347,8 @@ export class WorkflowEngine extends EventEmitter {
   static readonly CONCURRENCY_RETRY_MS = 5 * 60_000
   /** For catchUp 'skip': a fire time missed by more than this is abandoned to the next slot. */
   static readonly CATCH_UP_GRACE_MS = 10 * 60_000
+  /** In the 'cooling' tier, scheduled runs are spaced at least this far apart. */
+  static readonly COOLING_MIN_INTERVAL_MS = 7 * 24 * 60 * 60_000
   /** Trigger-ledger rows older than this are pruned when the scheduler starts. */
   static readonly LEDGER_RETENTION_MS = 30 * 24 * 60 * 60_000
 
@@ -878,6 +888,11 @@ export class WorkflowEngine extends EventEmitter {
     this.headShaResolver = resolver ?? defaultHeadShaResolver
   }
 
+  /** Connect the repo activity index to the dispatch gate. Without one, the gate is open. */
+  setActivityResolver(resolver: ActivityResolver | null) {
+    this.activityResolver = resolver
+  }
+
   private recordTrigger(entry: { scheduleId: string | null; kind: string; decision: 'fired' | 'held'; reason: string; runId?: string | null; headSha?: string | null }) {
     this.db.prepare(`
       INSERT INTO trigger_ledger (schedule_id, kind, decision, reason, run_id, head_sha, created_at)
@@ -957,6 +972,30 @@ export class WorkflowEngine extends EventEmitter {
     ) {
       this.holdSchedule(schedule, 'missed fire window (catch-up: skip)', nextSlot(), now)
       return false
+    }
+
+    // Activity gate: dormant repos hold until they wake; cooling repos are
+    // throttled to a weekly rhythm. Unknown activity (no resolver, resolver
+    // error) fails open — a broken index must never silence workflows.
+    if (repoPath && this.activityResolver) {
+      let activity: { tier: 'active' | 'cooling' | 'dormant' } | null = null
+      try {
+        activity = this.activityResolver(repoPath)
+      } catch (err) {
+        console.error(`[workflow] Activity resolver error for ${repoPath}:`, err)
+      }
+      if (activity?.tier === 'dormant') {
+        this.holdSchedule(schedule, 'repo dormant — held until activity resumes', nextSlot(), now)
+        return false
+      }
+      if (
+        activity?.tier === 'cooling' &&
+        schedule.lastRunAt &&
+        now.getTime() - new Date(schedule.lastRunAt).getTime() < WorkflowEngine.COOLING_MIN_INTERVAL_MS
+      ) {
+        this.holdSchedule(schedule, 'repo cooling — throttled to weekly cadence', nextSlot(), now)
+        return false
+      }
     }
 
     // Single-flight per repo+kind: never stack a second run on one still going.

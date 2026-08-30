@@ -11,6 +11,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { getWorkflowEngine } from './workflow-engine.js'
 import { isValidCron } from './cron.js'
+import { tryGetRepoActivityIndex } from './repo-activity.js'
 import {
   loadWorkflowConfig,
   addReviewRepo,
@@ -363,6 +364,19 @@ export function createWorkflowRouter(
     const health = engine.getEngineHealth()
     const stale = !health.lastTickAt || Date.now() - new Date(health.lastTickAt).getTime() > 3 * 60_000
     res.json({ ...health, stale })
+  })
+
+  /**
+   * Repo activity tiers for configured review repos (lazy-refreshed). Backs the
+   * UI badges and Joe's `get_repo_activity` MCP tool.
+   */
+  router.get('/repo-activity', (_req, res) => {
+    const index = tryGetRepoActivityIndex()
+    if (!index) {
+      return res.status(503).json({ error: 'Repo activity index not available' })
+    }
+    const repoPaths = [...new Set(loadWorkflowConfig().reviewRepos.map(r => r.repoPath))]
+    res.json({ repos: repoPaths.map(p => index.getFresh(p)) })
   })
 
   /** Trigger ledger — why schedules did or didn't fire, newest first. */

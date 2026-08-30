@@ -33,7 +33,7 @@ interface Props {
 
 /** Workflows management page — shows configured workflows grouped by repo, with inline run history and activity feed. */
 export function WorkflowsView({ token, onNavigateToSession }: Props) {
-  const { runs, schedules, config, error, cancelRun, triggerSchedule, addRepo, removeRepo, updateRepo, toggleScheduleEnabled } = useWorkflows(token)
+  const { runs, schedules, repoActivity, config, error, cancelRun, triggerSchedule, addRepo, removeRepo, updateRepo, toggleScheduleEnabled } = useWorkflows(token)
 
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [runDetail, setRunDetail] = useState<WorkflowRunWithSteps | null>(null)
@@ -169,6 +169,7 @@ export function WorkflowsView({ token, onNavigateToSession }: Props) {
                 key={repoPath}
                 repoPath={repoPath}
                 workflows={workflows}
+                activityTier={repoActivity.find(a => a.repoPath === repoPath)?.tier}
                 scheduleMap={scheduleMap}
                 runsPerRepo={runsPerRepo}
                 selectedRunId={selectedRunId}

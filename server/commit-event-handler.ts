@@ -16,6 +16,7 @@
 
 import { getWorkflowEngine } from './workflow-engine.js'
 import { loadWorkflowConfig } from './workflow-config.js'
+import { tryGetRepoActivityIndex } from './repo-activity.js'
 import { getWorkflowCommitPrefixes, isWorkflowReportsBranch } from './workflow-loader.js'
 
 // ---------------------------------------------------------------------------
@@ -85,6 +86,14 @@ export class CommitEventHandler {
    * Returns accepted=true if a workflow run was dispatched.
    */
   async handle(event: CommitEvent): Promise<CommitEventResult> {
+    // A commit is repo activity regardless of what the filters below decide,
+    // so bump the activity index before any of them can reject the event.
+    try {
+      tryGetRepoActivityIndex()?.recordCommitEvent(event.repoPath)
+    } catch (err) {
+      console.error('[commit-event] Activity bump failed:', err)
+    }
+
     // Sanitize user-supplied fields before any filter checks or downstream use
     const branch = sanitizeCommitField(event.branch, 200)
     const commitMessage = sanitizeCommitField(event.commitMessage, 500)

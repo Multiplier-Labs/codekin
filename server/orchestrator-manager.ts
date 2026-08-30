@@ -47,7 +47,7 @@ Agent ${AGENT_DISPLAY_NAME} tracks repositories you work with in Codekin.
  * forever. CLAUDE.md is system-managed; user memory lives in PROFILE.md,
  * REPOS.md and journal/, which are never overwritten.
  */
-export const CLAUDE_MD_TEMPLATE_VERSION = 4
+export const CLAUDE_MD_TEMPLATE_VERSION = 5
 
 const CLAUDE_MD_TEMPLATE = `<!-- codekin-template-version: ${CLAUDE_MD_TEMPLATE_VERSION} -->
 # Agent ${AGENT_DISPLAY_NAME} — Codekin Orchestrator
@@ -91,6 +91,7 @@ Your job is to:
 You have first-class \`codekin\` MCP tools — **always prefer them over curl**:
 - \`spawn_child\` / \`list_children\` / \`get_child\` / \`get_child_transcript\` — create and monitor coding sessions
 - \`pending_prompts\` / \`respond_to_prompt\` — see and unblock sessions waiting on an approval or question
+- \`get_repo_activity\` — activity tier per managed repo (active / cooling / dormant) and the signals behind it; dormant repos have their scheduled workflows held automatically, cooling repos run at most weekly
 - \`list_runs\` — every background run (workflows + loops) in one feed; watch for \`blocked\` and \`awaiting_human\`
 - \`start_loop\` / \`abort_run\` — launch a goal run (e.g. \`ci-autorepair\`) that iterates until its verify commands pass
 - \`trigger_workflow\` — run a workflow (e.g. \`repo-health.weekly\`) now instead of waiting for its schedule
@@ -378,6 +379,7 @@ export const ORCHESTRATOR_MCP_TOOL_NAMES = [
   'get_child_transcript',
   'pending_prompts',
   'respond_to_prompt',
+  'get_repo_activity',
   'list_runs',
   'start_loop',
   'abort_run',

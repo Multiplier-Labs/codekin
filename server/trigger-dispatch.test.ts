@@ -164,6 +164,52 @@ describe('trigger dispatch', () => {
     expect(engine.getSchedule('sched-1')?.lastHeldReason).toBe('missed fire window (catch-up: skip)')
   })
 
+  describe('activity gate', () => {
+    it('holds dormant repos and re-opens when they wake', async () => {
+      let tier: 'active' | 'cooling' | 'dormant' = 'dormant'
+      engine.setActivityResolver(() => ({ tier }))
+
+      engine.dispatchTick(dueAt())
+      await settle()
+      expect(engine.listRuns({ kind: 'test-wf' })).toHaveLength(0)
+      expect(engine.getSchedule('sched-1')?.lastHeldReason).toBe('repo dormant — held until activity resumes')
+
+      tier = 'active'
+      engine.dispatchTick(dueAt(4 * 60_000))
+      await settle()
+      expect(engine.listRuns({ kind: 'test-wf' })).toHaveLength(1)
+    })
+
+    it('throttles cooling repos to the weekly interval', async () => {
+      engine.setActivityResolver(() => ({ tier: 'cooling' }))
+
+      // First fire: no lastRunAt yet → cooling does not block.
+      engine.dispatchTick(dueAt())
+      await settle()
+      expect(engine.listRuns({ kind: 'test-wf' })).toHaveLength(1)
+
+      // A day later: inside the weekly interval → held.
+      engine.setHeadShaResolver(() => 'sha2')
+      engine.dispatchTick(dueAt(24 * 60 * 60_000))
+      await settle()
+      expect(engine.listRuns({ kind: 'test-wf' })).toHaveLength(1)
+      expect(engine.getSchedule('sched-1')?.lastHeldReason).toBe('repo cooling — throttled to weekly cadence')
+
+      // Past the weekly interval → fires.
+      engine.dispatchTick(dueAt(8 * 24 * 60 * 60_000))
+      await settle()
+      expect(engine.listRuns({ kind: 'test-wf' })).toHaveLength(2)
+    })
+
+    it('fails open when the resolver throws', async () => {
+      engine.setActivityResolver(() => { throw new Error('index broken') })
+
+      engine.dispatchTick(dueAt())
+      await settle()
+      expect(engine.listRuns({ kind: 'test-wf' })).toHaveLength(1)
+    })
+  })
+
   it('writes a heartbeat on every tick', () => {
     const t1 = dueAt(0)
     engine.dispatchTick(t1)
