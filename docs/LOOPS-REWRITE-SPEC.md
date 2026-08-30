@@ -3,8 +3,9 @@
 **Status:** proposal
 
 **Date:** 2026-08-30
-**Scope:** replace the current Goal Runs/Loop Runs experience and evolve its
-engine without breaking existing `.codekin/loops/*.md` templates.
+**Scope:** replace the current Goal Runs/Loop Runs experience and engine
+outright. The v1 implementation has no active users and no run history worth
+preserving, so backwards compatibility is a non-requirement.
 
 ## 1. Decision summary
 
@@ -26,7 +27,8 @@ This is not a visual refresh of the evidence ledger. The rewrite adds:
 9. risk-, time-, token-, cost-, and no-progress-based controls.
 
 The current maker → shell verifier → optional checker loop remains a valid
-simple recipe and is the compatibility path, not the final product model.
+simple recipe *shape*, but nothing about the v1 implementation — engine, API,
+schema, or UI — is preserved.
 
 ## 2. Why rewrite it
 
@@ -44,9 +46,13 @@ The current implementation is a sound first vertical slice:
 
 The UI, however, exposes only a template picker, free-text repo and branch,
 optional goal override, a flat run list, and turn rows. The engine marks all
-in-flight work failed after a Codekin restart. A turn is the main unit of state,
+in-flight work aborted after a Codekin restart. A turn is the main unit of state,
 plans are implicit in chat, verification is only an ordered command list, and
 the user can only open the maker session or abort.
+
+None of this is in active use: there are no historical runs or third-party
+templates to preserve, which is why replacement is cheaper and safer than
+evolution.
 
 ### Resulting product problems
 
@@ -327,12 +333,11 @@ completion:
 
 Required design rules:
 
-- command evaluators use argument arrays internally; shell strings remain a v1
-  compatibility input and are visibly labeled as trusted repository code;
+- command evaluators use argument arrays internally; shell strings are accepted
+  as authoring convenience and visibly labeled as trusted repository code;
 - secrets are references, never embedded recipe values;
 - provider `auto` resolves at run start and the resolution is recorded;
-- unknown fields fail validation; recipe versions are immutable once referenced;
-- v1 templates normalize into a v2 linear recipe automatically.
+- unknown fields fail validation; recipe versions are immutable once referenced.
 
 ## 7. Evaluation and decision policy
 
@@ -456,7 +461,8 @@ default.
 
 ## 9. API and events
 
-Introduce `/api/loops/v2`; retain `/api/goal-runs` during migration.
+Introduce `/api/loops`; `/api/goal-runs` is removed in the same release, with
+no dual-API window.
 
 Minimum REST surface:
 
@@ -535,58 +541,53 @@ rewrite recipes, policies, prompts, or their own evaluator. Show subsequent
 runs whether an approved lesson was used and support A/B comparison by recipe
 version.
 
-## 12. Compatibility and migration
+## 12. Replacement plan
 
-### v1 normalization
+v1 is deleted, not migrated:
 
-Map current fields as follows:
-
-| v1 | v2 |
-|---|---|
-| Markdown body / goal override | outcome prompt / run input |
-| maker | agent |
-| checker | rubric evaluator with different-provider constraint |
-| verify[] | required command evaluators |
-| readonly[] | protected paths |
-| maxTurns / maxCostUsd | budgets.turns / budgets.costUsd |
-| completionPolicy | completion.action |
-| evidence turn | imported timeline event + artifact |
-
-Existing runs remain readable in a legacy detail renderer. Existing templates
-appear as “v1 compatible”; users can preview the normalized form and save a v2
-copy. Do not rewrite repository files automatically.
+- remove the v1 engine (`goal-run-controller`, `goal-run-finalizer`), store,
+  routes (`/api/goal-runs`), and `LoopRunsView` as their v2 equivalents ship;
+- drop the `goal_runs` and `goal_run_turns` tables — the v2 schema is created
+  fresh in its final shape, free of additive-migration constraints;
+- rewrite the built-in templates (`ci-autorepair`, `coverage-increase`,
+  `dependency-upgrade`) directly in recipe v2 format. The conceptual mapping
+  when rewriting: maker → agent, checker → rubric evaluator with a
+  different-provider constraint, verify[] → required command evaluators,
+  readonly[] → protected paths, maxTurns/maxCostUsd → budgets,
+  completionPolicy → completion.action;
+- no normalization layer, no legacy run renderer, no dual-API window.
 
 ### Delivery phases
 
-**Phase 0 — instrumentation and vocabulary**
+**Phase 1 — durable engine core**
 
-- Add event envelope, stage labels, error classification, and telemetry to v1.
-- Measure start-to-first-action, attention latency, recovery rate, iterations,
-  evaluator outcomes, cost, and completion/PR/CI results.
+- Run/stage/attempt/event/checkpoint schema, leases, idempotency keys, and
+  startup recovery; sequential execution only.
+- Recipe v2 loader with strict validation; command evaluators with structured
+  results and artifacts.
+- Event envelope, `/api/loops` REST surface, and resumable event stream.
 
-**Phase 1 — usable control plane**
+**Phase 2 — usable control plane**
 
-- New home, wizard, run workspace, inline intervention cards, pause/steer.
-- Recipe discovery based on selected repo and real branch/repo pickers.
-- Structured evaluator results and artifacts while v1 engine still executes.
-
-**Phase 2 — durable engine**
-
-- Stage/attempt/event/checkpoint schema, leases, idempotency, startup recovery.
-- Plan artifact and plan approval/revision.
-- Retry policies, no-progress detection, wall-time/token budgets.
+- New home, wizard with real repo/branch pickers and recipe discovery, run
+  workspace, inline intervention cards.
+- Pause, resume, steer, cancel; plan artifact and plan approval/revision.
 
 **Phase 3 — evaluator platform and CI**
 
-- test parsers, diff policy, rubric, artifact, human, composite, remote CI.
-- completion scorecard and qualified outcomes.
+- Retry policies, error classification, no-progress detection, wall-time and
+  token budgets.
+- Test parsers, diff policy, rubric, artifact, human, composite, remote CI.
+- Completion scorecard and qualified outcomes.
 
 **Phase 4 — controlled concurrency and learning**
 
 - scoped parallel child worktrees and deterministic integration.
 - checkpoint forks, run comparison, approved lessons, recipe experiments.
 
-Each phase ships behind `loopsV2`; Phase 2 must be stable before parallel work.
+Each phase ships behind `loopsV2` and ends in a runnable vertical slice (Phase
+1 is exercisable via API before the UI exists). Phase 1 must be stable before
+parallel work.
 
 ## 13. Success metrics
 
@@ -631,8 +632,8 @@ loops rather than outcomes.
 8. Identical failures with no material progress trigger replan and eventually a
    bounded human decision rather than consuming the entire budget silently.
 9. The completion report links every acceptance criterion to retained evidence.
-10. Existing v1 recipes run through normalization with equivalent safety and
-    completion behavior, and old run histories remain viewable.
+10. Once `loopsV2` is the default, no v1 code path (engine, routes, tables,
+    views) remains reachable.
 
 ## 15. Explicit non-goals for the first release
 
