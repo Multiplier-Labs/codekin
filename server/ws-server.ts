@@ -34,6 +34,7 @@ import { OrchestratorChildManager } from './orchestrator-children.js'
 import { loadDeployments } from './deployment-config.js'
 import { buildIncidentTask, incidentBranchName, DIAGNOSE_COOLDOWN_MS, type BreachPayload } from './incident-response.js'
 import { buildHostDigest } from './host-probe.js'
+import { runDependencyAuditSweep } from './dependency-audit.js'
 import { generate404Page, generate500Page } from './error-page.js'
 import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
@@ -834,6 +835,22 @@ server.listen(port, '0.0.0.0', () => {
         'action',
         `Deployment event: ${String(payload.deploymentName)}`,
         `${String(payload.probeKey)} — ${String(payload.event)}. Worth a look if no deploy explains it.`,
+      )
+    })
+
+    // Dependency audits: activity-triggered (manifests changed since the last
+    // audited commit), swept every 6h on the tick. High/critical exposure
+    // reaches Joe; remediation stays operator/child-run.
+    engine.registerTickTask('dependency-audit', 6 * 60 * 60_000, () =>
+      runDependencyAuditSweep({ publish: (input) => { engine.enqueueSignal(input) } }))
+    engine.registerSignalHandler('dependency-audit', async (payload) => {
+      const counts = payload.counts as { critical?: number; high?: number } | undefined
+      const critical = counts?.critical ?? 0
+      const high = counts?.high ?? 0
+      monitor.notify(
+        critical > 0 ? 'alert' : 'action',
+        `Dependency vulnerabilities: ${String(payload.repoName)}`,
+        `npm audit after a dependency change found ${critical} critical / ${high} high (prod deps). Triage: spawn a child to run 'npm audit' in ${String(payload.repoPath)}, review the advisories, and apply safe upgrades via PR.`,
       )
     })
     if (ORCHESTRATOR_MONITOR) {
