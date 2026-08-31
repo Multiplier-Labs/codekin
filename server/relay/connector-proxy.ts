@@ -45,6 +45,9 @@ export const ALLOWED_GET_PREFIXES = [
   '/api/workflows',
   '/api/loops',
   '/api/runs',
+  // Same for the Deployments tab: listing the registry, reading probe samples
+  // and discovering what the machine runs all happen over REST.
+  '/api/deployments',
 ] as const
 
 /**
@@ -68,6 +71,9 @@ export const ALLOWED_MUTATION_PREFIXES = [
   // it is a read model, so widening it here would grant nothing.
   '/api/workflows',
   '/api/loops',
+  // Adding, editing and removing monitored deployments. Owner-only like the
+  // rest of this list — grantees never reach it (see GRANTEE_WRITE_PREFIXES).
+  '/api/deployments',
 ] as const
 
 /** Methods that may be proxied at all. */
