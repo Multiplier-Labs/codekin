@@ -49,6 +49,15 @@ describe('checkProxyRequest', () => {
     expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/loops/runs/g1/cancel' })).allowed).toBe(true)
   })
 
+  it('allows the reads and mutations the Deployments tab performs', () => {
+    expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/deployments' })).allowed).toBe(true)
+    expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/deployments/discover' })).allowed).toBe(true)
+    expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/deployments/samples?limit=50' })).allowed).toBe(true)
+    expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/deployments' })).allowed).toBe(true)
+    expect(checkProxyRequest(asOwner({ method: 'PATCH', path: '/api/deployments/d1' })).allowed).toBe(true)
+    expect(checkProxyRequest(asOwner({ method: 'DELETE', path: '/api/deployments/d1' })).allowed).toBe(true)
+  })
+
   it('refuses mutations on read-only prefixes', () => {
     // Readable, but not writable over the relay
     expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/repos' })).allowed).toBe(true)
@@ -161,7 +170,7 @@ describe('principal enforcement', () => {
     const principal = grantee({ 's1': ['view', 'send_prompt'] })
     expect(checkProxyRequest({ method: 'GET', path: '/api/sessions/list', principal }).allowed).toBe(true)
     // Machine-wide reads and writes stay with the owner
-    for (const path of ['/api/repos', '/api/settings/retention', '/api/docs', '/api/approvals']) {
+    for (const path of ['/api/repos', '/api/settings/retention', '/api/docs', '/api/approvals', '/api/deployments']) {
       const decision = checkProxyRequest({ method: 'GET', path, principal })
       expect(decision.allowed).toBe(false)
       expect(decision.error?.code).toBe(RELAY_ERROR.notPermitted)
