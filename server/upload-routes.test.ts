@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
 import type { AddressInfo } from 'net'
 import type { Server } from 'http'
-import { mkdtempSync, symlinkSync, rmSync } from 'fs'
+import { mkdtempSync, symlinkSync, rmSync, realpathSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -17,6 +17,7 @@ import { tmpdir } from 'os'
 const mocks = vi.hoisted(() => ({
   realpathThrows: false,
   screenshotsDir: '',
+  execFileCalls: [] as { file: string; args: string[] }[],
 }))
 
 vi.mock('./config.js', async (importOriginal) => {
@@ -37,6 +38,25 @@ vi.mock('fs', async (importOriginal) => {
       if (mocks.realpathThrows) throw new Error('ENOENT: no such file or directory')
       return actual.realpathSync(p)
     }) as typeof actual.realpathSync,
+  }
+})
+
+// The clone route ends in `gh repo clone`. Left unmocked, the happy-path test
+// below spawns the real binary and waits on the network inside vitest's 5s
+// budget — which times out on a loaded CI runner. Stub the subprocess so the
+// route's path-boundary logic is what the test actually exercises.
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>()
+  return {
+    ...actual,
+    execFile: ((file: string, args: string[], ...rest: unknown[]) => {
+      mocks.execFileCalls.push({ file, args })
+      const cb = rest.find(a => typeof a === 'function') as
+        | ((err: Error | null, stdout: string, stderr: string) => void)
+        | undefined
+      setImmediate(() => cb?.(null, '', ''))
+      return undefined as unknown as ReturnType<typeof actual.execFile>
+    }) as unknown as typeof actual.execFile,
   }
 })
 
@@ -129,7 +149,10 @@ describe('POST /api/clone — symlink escape (C1)', () => {
 
   beforeEach(async () => {
     mocks.realpathThrows = false
-    tmpRoot = mkdtempSync(join(tmpdir(), 'codekin-symtest-'))
+    mocks.execFileCalls = []
+    // Canonicalize: the route realpaths its repos root, so the paths it reports
+    // back are canonical even where tmpdir() itself is a symlink (e.g. macOS).
+    tmpRoot = realpathSync(mkdtempSync(join(tmpdir(), 'codekin-symtest-')))
     const app = express()
     app.use(express.json())
     app.use(createUploadRouter(
@@ -206,8 +229,16 @@ describe('POST /api/clone — symlink escape (C1)', () => {
       headers: { Authorization: `Bearer ${AUTH_TOKEN}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ owner: 'valid-owner', name: 'myrepo' }),
     })
-    // Boundary check passes; clone itself may fail (no gh credentials) — not 400
+    // Boundary check passes, so the route reaches the (stubbed) clone.
     expect(res.status).not.toBe(400)
+    expect(res.status).toBe(200)
+    const body = await res.json() as { success: boolean; path: string }
+    expect(body.success).toBe(true)
+    expect(body.path).toBe(join(tmpRoot, 'valid-owner', 'myrepo'))
+    // ...and it clones into the owner-namespaced dir, not the root.
+    expect(mocks.execFileCalls).toEqual([
+      { file: 'gh', args: ['repo', 'clone', 'valid-owner/myrepo', join(tmpRoot, 'valid-owner', 'myrepo')] },
+    ])
   })
 })
 
