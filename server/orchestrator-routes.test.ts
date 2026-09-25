@@ -44,6 +44,7 @@ vi.mock('./orchestrator-learning.js', () => ({
 // Avoid pulling in real config / repos-root resolution
 vi.mock('./config.js', () => ({
   REPOS_ROOT: '/tmp/repos',
+  DATA_DIR: '/tmp/codekin-test',
   resolveRepoPathInRoot: vi.fn(() => '/tmp/repos/something'),
   getAgentDisplayName: vi.fn(() => 'Joe'),
 }))

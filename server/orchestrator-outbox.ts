@@ -11,7 +11,7 @@ import { dirname, join } from 'path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { DATA_DIR, getAgentDisplayName } from './config.js'
-import { getOrchestratorSessionId } from './orchestrator-manager.js'
+import { getOrchestratorSessionId } from './orchestrator-identity.js'
 import type { SessionManager } from './session-manager.js'
 
 export interface OutboxItem {
