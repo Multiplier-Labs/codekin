@@ -996,172 +996,13 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
 
     switch (type) {
       // Delta events carry the actual streaming text content
-      case 'message.part.delta': {
-        if (!this.isOwnSession(properties)) break
-        const field = properties.field as string | undefined
-        const delta = properties.delta as string | undefined
-        if (process.env.CODEKIN_DEBUG_SSE) {
-          console.log(`[opencode-sse] delta field=${field} len=${delta?.length ?? 0} text=${delta?.slice(0, 80)}`)
-        }
-        if (field === 'text' && delta) {
-          this.receivedDeltas = true
-          const partID = properties.partID as string | undefined
-
-          // OpenCode streams BOTH reasoning and visible-text parts as
-          // `field=text` deltas; the only discriminator is the partID. Route
-          // based on the known part kind. Legacy `inReasoningPhase` (set by
-          // part.updated type=reasoning on versions that emit it) still wins.
-          if (this.inReasoningPhase) {
-            this.appendReasoningDelta(delta)
-            break
-          }
-          const kind = partID ? this.partKinds.get(partID) : undefined
-          if (kind === 'reasoning') {
-            this.appendReasoningDelta(delta)
-            break
-          }
-          if (kind === 'other') {
-            // tool/step parts shouldn't stream visible text — ignore.
-            break
-          }
-          if (kind === 'text' || !partID) {
-            this.emitTextDelta(delta)
-            break
-          }
-
-          // Unknown partID: some providers (e.g. Kimi/ollama-cloud) never emit
-          // message.part.updated, so the part type isn't known from the stream.
-          // Buffer this part's deltas and resolve its kind via a REST lookup;
-          // the buffer is flushed (or dropped, if reasoning) once classified.
-          const buf = this.partDeltaBuffers.get(partID)
-          if (buf) buf.push(delta)
-          else this.partDeltaBuffers.set(partID, [delta])
-          const messageID = properties.messageID as string | undefined
-          if (messageID) {
-            this.lastDeltaMessageId = messageID
-            void this.classifyPart(messageID, partID)
-          }
-        } else if (field === 'reasoning' && delta) {
-          // Some providers send reasoning on a dedicated `field=reasoning`
-          // stream — always hidden from the transcript.
-          this.appendReasoningDelta(delta)
-        }
+      case 'message.part.delta':
+        if (this.isOwnSession(properties)) this.handlePartDelta(properties)
         break
-      }
 
-      case 'message.part.updated': {
-        const part = properties.part as OpenCodeMessagePart | undefined
-        if (!part) break
-
-        // Only process events for our session. Subagent child sessions get
-        // their tool activity surfaced (text/reasoning is internal to the
-        // subagent and would pollute the main transcript).
-        if (!this.isOwnSession(properties)) {
-          if (evtSessionID && this.childSessionIds.has(evtSessionID) && part.type === 'tool') {
-            this.handleChildToolPart(part)
-          }
-          break
-        }
-
-        if (process.env.CODEKIN_DEBUG_SSE) {
-          console.log(`[opencode-sse] part.updated type=${part.type} len=${part.text?.length ?? 0} text=${part.text?.slice(0, 80)} receivedDeltas=${this.receivedDeltas} emittedPartText=${this.emittedPartText}`)
-        }
-
-        switch (part.type) {
-          case 'text': {
-            // A text part.updated signals that text deltas are now actual
-            // response text, not reasoning. Clear the reasoning phase flag.
-            if (this.inReasoningPhase) {
-              this.inReasoningPhase = false
-            }
-            // Record the kind so streaming deltas for this partID route
-            // correctly without a REST lookup (and flush any buffered ones).
-            if (part.id) this.recordPartKind(part.id, 'text')
-            // Text may arrive via message.part.delta (streaming) or as full
-            // content here (OpenCode >=1.4 message.updated). Only emit if we
-            // haven't already streamed it via delta events or emitted it from
-            // an earlier message.part.updated event.
-            if (part.text && !this.receivedDeltas && !this.emittedPartText) {
-              this.emittedPartText = true
-              // Strip user echo prefix if the full text starts with the last input
-              let text = part.text
-              if (this.lastUserInput && text.startsWith(this.lastUserInput)) {
-                text = text.slice(this.lastUserInput.length)
-              }
-              if (text) this.emit('text', text)
-            }
-            break
-          }
-
-          case 'reasoning': {
-            // A reasoning part.updated signals that subsequent text deltas
-            // are reasoning content, not visible text. Set the phase flag so
-            // the delta handler routes them to the reasoning buffer.
-            this.inReasoningPhase = true
-            // Record the kind so streaming deltas for this partID are routed
-            // to the reasoning buffer (and flush any buffered ones).
-            if (part.id) this.recordPartKind(part.id, 'reasoning')
-            // OpenCode uses 'text' field, not 'content'. Reasoning may be
-            // empty or encrypted (e.g. OpenAI models). Only emit if present.
-            const content = part.text || ''
-            if (content.length > 20 && !this.emittedReasoningSummary) {
-              this.emittedReasoningSummary = true
-              const match = content.match(/^(.+?[.!?\n])/)
-              const summary = match && match[1].length <= 120
-                ? match[1].replace(/\n/g, ' ').trim()
-                : content.slice(0, 80).trim()
-              this.emit('thinking', summary)
-            }
-            break
-          }
-
-          case 'tool': {
-            // Tool state is an object {status, input, output, time, ...}, not a string
-            const toolName = part.tool || 'unknown'
-            const status = part.state?.status
-            if (status === 'running') {
-              const inputStr = part.state?.input ? summarizeToolInput(toolName, part.state.input) : undefined
-              this.emit('tool_active', toolName, inputStr)
-              // Detect task/todo tool calls and emit todo_update
-              if (part.state?.input && this.handleTaskTool(toolName, part.state.input)) {
-                this.emit('todo_update', Array.from(this.tasks.values(), t => ({ ...t })))
-              }
-            } else if (status === 'completed') {
-              // Also check for task tools at completion (some providers only
-              // populate input at this stage, not during 'running')
-              if (part.state?.input && this.handleTaskTool(toolName, part.state.input)) {
-                this.emit('todo_update', Array.from(this.tasks.values(), t => ({ ...t })))
-              }
-              const output = part.state?.output
-              const summary = output ? output.slice(0, 200) : undefined
-              this.emit('tool_done', toolName, summary)
-              if (output) {
-                const truncated = output.length > 2000
-                  ? output.slice(0, 2000) + `\n… (truncated, ${output.length} chars total)`
-                  : output
-                this.emit('tool_output', truncated, false)
-              }
-            } else if (status === 'error') {
-              const errMsg = part.state?.error || 'unknown'
-              this.emit('tool_done', toolName, `Error: ${errMsg}`)
-              this.emit('tool_output', errMsg, true)
-            }
-            // 'pending' status — tool call parsed but not yet executing; no action needed
-            break
-          }
-
-          case 'step-finish': {
-            // Agentic iteration boundary — any buffered text below the echo
-            // threshold belongs to the finished step; flush it now instead of
-            // holding it until turn end.
-            this.flushDeltaBuffer()
-            break
-          }
-
-          // step-start is an agentic iteration boundary — no mapping needed
-        }
+      case 'message.part.updated':
+        this.handlePartUpdated(properties)
         break
-      }
 
       case 'session.status': {
         if (!this.isOwnSession(properties)) break
@@ -1181,101 +1022,33 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
         break
       }
 
-      case 'permission.asked': {
-        if (!this.isOwnSession(properties)) break
-
-        const requestId = properties.id as string | undefined
-        if (!requestId) {
-          console.error('[opencode] permission.asked event missing required id field')
-          break
-        }
-        // Real format: properties.permission is the type (e.g. "external_directory"),
-        // properties.metadata has details (filepath, parentDir), properties.patterns
-        // has the glob patterns being requested. No direct tool name — use permission type.
-        const permissionType = properties.permission as string || 'unknown'
-        const metadata = properties.metadata as Record<string, unknown> || {}
-        const patterns = properties.patterns as string[] || []
-        const input: Record<string, unknown> = {
-          permission: permissionType,
-          ...metadata,
-          patterns,
-        }
-
-        // Auto-approve for headless sessions (webhook/workflow)
-        if (this.permissionMode === 'bypassPermissions' || this.permissionMode === 'dangerouslySkipPermissions') {
-          void this.replyToPermission(requestId, 'always')
-          return
-        }
-
-        // Emit as control_request for SessionManager to handle
-        this.emit('control_request', requestId, permissionType, input)
+      case 'permission.asked':
+        if (this.isOwnSession(properties)) this.handlePermissionAsked(properties)
         break
-      }
 
       // message.completed signals that the model has finished its response
-      case 'message.completed': {
-        if (!this.isOwnSession(properties)) break
-        this.completeTurn()
+      case 'message.completed':
+        if (this.isOwnSession(properties)) this.completeTurn()
         break
-      }
 
       // session.updated may carry idle status in some OpenCode versions.
       // session.created/session.updated also announce subagent child sessions
       // (parentID = our session) which we track to surface their tool activity.
       case 'session.created':
-      case 'session.updated': {
-        const session = (properties.info ?? properties.session) as Record<string, unknown> | undefined
-        const sessId = session?.id as string | undefined
-        const parentID = session?.parentID as string | undefined
-        if (sessId && parentID && parentID === this.opencodeSessionId && !this.childSessionIds.has(sessId)) {
-          this.childSessionIds.add(sessId)
-          const title = typeof session?.title === 'string' && session.title ? session.title : 'subagent'
-          this.emit('tool_active', 'Task', title)
-        }
-        if (!this.isOwnSession(properties)) break
-        // Guard: a session object for a different session (e.g. a child) must
-        // not complete our turn even if it reports idle.
-        if (sessId && sessId !== this.opencodeSessionId) break
-        const sessionStatus = session?.status
-        const sType = typeof sessionStatus === 'string' ? sessionStatus : (sessionStatus as { type?: string } | undefined)?.type
-        if (sType === 'idle') {
-          this.completeTurn()
-        }
+      case 'session.updated':
+        this.handleSessionInfoEvent(properties)
         break
-      }
 
       // OpenCode >=1.4 sends session.idle as a standalone event (not nested in session.status)
-      case 'session.idle': {
-        if (!this.isOwnSession(properties)) break
-        this.completeTurn()
+      case 'session.idle':
+        if (this.isOwnSession(properties)) this.completeTurn()
         break
-      }
 
       // OpenCode >=1.4 sends message.updated with full message info including parts.
       // Extract parts and process them like message.part.updated events.
-      case 'message.updated': {
-        if (!this.isOwnSession(properties)) break
-        const info = properties.info as {
-          id?: string
-          role?: string
-          parts?: OpenCodeMessagePart[]
-          cost?: number
-          tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } }
-        } | undefined
-        if (!info || info.role !== 'assistant') break
-        this.trackUsage(info)
-        if (!info.parts) break
-        if (process.env.CODEKIN_DEBUG_SSE) {
-          console.log(`[opencode-sse] message.updated parts=${info.parts.length} types=${info.parts.map(p => p.type).join(',')}`)
-          for (const p of info.parts) {
-            console.log(`[opencode-sse]   part type=${p.type} text=${p.text?.slice(0, 120)}`)
-          }
-        }
-        for (const part of info.parts) {
-          this.handleSSEEvent({ type: 'message.part.updated', properties: { ...properties, part } })
-        }
+      case 'message.updated':
+        if (this.isOwnSession(properties)) this.handleMessageUpdated(properties)
         break
-      }
 
       default:
         // Log unhandled session-scoped events for debugging (skip noisy ones)
@@ -1285,6 +1058,270 @@ export class OpenCodeProcess extends EventEmitter<ClaudeProcessEvents> implement
           }
         }
         break
+    }
+  }
+
+  /**
+   * A streaming delta for one message part.
+   *
+   * OpenCode streams BOTH reasoning and visible-text parts as `field=text`
+   * deltas; the only discriminator is the partID. Deltas are routed by the
+   * part's recorded kind, and buffered pending a REST lookup for providers
+   * that never announce the part via message.part.updated.
+   */
+  private handlePartDelta(properties: Record<string, unknown>): void {
+    const field = properties.field as string | undefined
+    const delta = properties.delta as string | undefined
+    if (process.env.CODEKIN_DEBUG_SSE) {
+      console.log(`[opencode-sse] delta field=${field} len=${delta?.length ?? 0} text=${delta?.slice(0, 80)}`)
+    }
+
+    if (field === 'reasoning' && delta) {
+      // Some providers send reasoning on a dedicated `field=reasoning`
+      // stream — always hidden from the transcript.
+      this.appendReasoningDelta(delta)
+      return
+    }
+    if (field !== 'text' || !delta) return
+
+    this.receivedDeltas = true
+    const partID = properties.partID as string | undefined
+
+    // Legacy `inReasoningPhase` (set by part.updated type=reasoning on
+    // versions that emit it) wins over the per-part kind.
+    if (this.inReasoningPhase) {
+      this.appendReasoningDelta(delta)
+      return
+    }
+    const kind = partID ? this.partKinds.get(partID) : undefined
+    if (kind === 'reasoning') {
+      this.appendReasoningDelta(delta)
+      return
+    }
+    // tool/step parts shouldn't stream visible text — ignore.
+    if (kind === 'other') return
+    if (kind === 'text' || !partID) {
+      this.emitTextDelta(delta)
+      return
+    }
+
+    // Unknown partID: some providers (e.g. Kimi/ollama-cloud) never emit
+    // message.part.updated, so the part type isn't known from the stream.
+    // Buffer this part's deltas and resolve its kind via a REST lookup;
+    // the buffer is flushed (or dropped, if reasoning) once classified.
+    const buf = this.partDeltaBuffers.get(partID)
+    if (buf) buf.push(delta)
+    else this.partDeltaBuffers.set(partID, [delta])
+    const messageID = properties.messageID as string | undefined
+    if (messageID) {
+      this.lastDeltaMessageId = messageID
+      void this.classifyPart(messageID, partID)
+    }
+  }
+
+  /**
+   * A message part reached a new state. Dispatches on part type; subagent
+   * child sessions get only their tool activity surfaced, since their text and
+   * reasoning are internal and would pollute the main transcript.
+   */
+  private handlePartUpdated(properties: Record<string, unknown>): void {
+    const part = properties.part as OpenCodeMessagePart | undefined
+    if (!part) return
+
+    if (!this.isOwnSession(properties)) {
+      const evtSessionID = properties.sessionID as string | undefined
+      if (evtSessionID && this.childSessionIds.has(evtSessionID) && part.type === 'tool') {
+        this.handleChildToolPart(part)
+      }
+      return
+    }
+
+    if (process.env.CODEKIN_DEBUG_SSE) {
+      console.log(`[opencode-sse] part.updated type=${part.type} len=${part.text?.length ?? 0} text=${part.text?.slice(0, 80)} receivedDeltas=${this.receivedDeltas} emittedPartText=${this.emittedPartText}`)
+    }
+
+    switch (part.type) {
+      case 'text':
+        this.handleTextPart(part)
+        break
+      case 'reasoning':
+        this.handleReasoningPart(part)
+        break
+      case 'tool':
+        this.handleToolPart(part)
+        break
+      case 'step-finish':
+        // Agentic iteration boundary — any buffered text below the echo
+        // threshold belongs to the finished step; flush it now instead of
+        // holding it until turn end.
+        this.flushDeltaBuffer()
+        break
+      // step-start is an agentic iteration boundary — no mapping needed
+    }
+  }
+
+  /** A visible-text part: ends any reasoning phase and emits non-streamed text. */
+  private handleTextPart(part: OpenCodeMessagePart): void {
+    // A text part.updated signals that text deltas are now actual
+    // response text, not reasoning. Clear the reasoning phase flag.
+    if (this.inReasoningPhase) {
+      this.inReasoningPhase = false
+    }
+    // Record the kind so streaming deltas for this partID route
+    // correctly without a REST lookup (and flush any buffered ones).
+    if (part.id) this.recordPartKind(part.id, 'text')
+    // Text may arrive via message.part.delta (streaming) or as full
+    // content here (OpenCode >=1.4 message.updated). Only emit if we
+    // haven't already streamed it via delta events or emitted it from
+    // an earlier message.part.updated event.
+    if (part.text && !this.receivedDeltas && !this.emittedPartText) {
+      this.emittedPartText = true
+      // Strip user echo prefix if the full text starts with the last input
+      let text = part.text
+      if (this.lastUserInput && text.startsWith(this.lastUserInput)) {
+        text = text.slice(this.lastUserInput.length)
+      }
+      if (text) this.emit('text', text)
+    }
+  }
+
+  /** A reasoning part: enters the reasoning phase and emits a one-off summary. */
+  private handleReasoningPart(part: OpenCodeMessagePart): void {
+    // A reasoning part.updated signals that subsequent text deltas
+    // are reasoning content, not visible text. Set the phase flag so
+    // the delta handler routes them to the reasoning buffer.
+    this.inReasoningPhase = true
+    // Record the kind so streaming deltas for this partID are routed
+    // to the reasoning buffer (and flush any buffered ones).
+    if (part.id) this.recordPartKind(part.id, 'reasoning')
+    // OpenCode uses 'text' field, not 'content'. Reasoning may be
+    // empty or encrypted (e.g. OpenAI models). Only emit if present.
+    const content = part.text || ''
+    if (content.length > 20 && !this.emittedReasoningSummary) {
+      this.emittedReasoningSummary = true
+      const match = content.match(/^(.+?[.!?\n])/)
+      const summary = match && match[1].length <= 120
+        ? match[1].replace(/\n/g, ' ').trim()
+        : content.slice(0, 80).trim()
+      this.emit('thinking', summary)
+    }
+  }
+
+  /** A tool part: maps OpenCode's tool state object onto tool_* events. */
+  private handleToolPart(part: OpenCodeMessagePart): void {
+    // Tool state is an object {status, input, output, time, ...}, not a string
+    const toolName = part.tool || 'unknown'
+    const status = part.state?.status
+    if (status === 'running') {
+      const inputStr = part.state?.input ? summarizeToolInput(toolName, part.state.input) : undefined
+      this.emit('tool_active', toolName, inputStr)
+      // Detect task/todo tool calls and emit todo_update
+      if (part.state?.input && this.handleTaskTool(toolName, part.state.input)) {
+        this.emit('todo_update', Array.from(this.tasks.values(), t => ({ ...t })))
+      }
+    } else if (status === 'completed') {
+      // Also check for task tools at completion (some providers only
+      // populate input at this stage, not during 'running')
+      if (part.state?.input && this.handleTaskTool(toolName, part.state.input)) {
+        this.emit('todo_update', Array.from(this.tasks.values(), t => ({ ...t })))
+      }
+      const output = part.state?.output
+      const summary = output ? output.slice(0, 200) : undefined
+      this.emit('tool_done', toolName, summary)
+      if (output) {
+        const truncated = output.length > 2000
+          ? output.slice(0, 2000) + `\n… (truncated, ${output.length} chars total)`
+          : output
+        this.emit('tool_output', truncated, false)
+      }
+    } else if (status === 'error') {
+      const errMsg = part.state?.error || 'unknown'
+      this.emit('tool_done', toolName, `Error: ${errMsg}`)
+      this.emit('tool_output', errMsg, true)
+    }
+    // 'pending' status — tool call parsed but not yet executing; no action needed
+  }
+
+  /**
+   * OpenCode asked for a permission decision. Headless sessions auto-approve;
+   * everyone else routes through SessionManager's approval UI.
+   */
+  private handlePermissionAsked(properties: Record<string, unknown>): void {
+    const requestId = properties.id as string | undefined
+    if (!requestId) {
+      console.error('[opencode] permission.asked event missing required id field')
+      return
+    }
+    // Real format: properties.permission is the type (e.g. "external_directory"),
+    // properties.metadata has details (filepath, parentDir), properties.patterns
+    // has the glob patterns being requested. No direct tool name — use permission type.
+    const permissionType = properties.permission as string || 'unknown'
+    const metadata = properties.metadata as Record<string, unknown> || {}
+    const patterns = properties.patterns as string[] || []
+    const input: Record<string, unknown> = {
+      permission: permissionType,
+      ...metadata,
+      patterns,
+    }
+
+    // Auto-approve for headless sessions (webhook/workflow)
+    if (this.permissionMode === 'bypassPermissions' || this.permissionMode === 'dangerouslySkipPermissions') {
+      void this.replyToPermission(requestId, 'always')
+      return
+    }
+
+    // Emit as control_request for SessionManager to handle
+    this.emit('control_request', requestId, permissionType, input)
+  }
+
+  /**
+   * session.created / session.updated. Registers subagent child sessions so
+   * their tool activity can be surfaced, and completes the turn when the event
+   * carries idle status (some OpenCode versions report idle only here).
+   */
+  private handleSessionInfoEvent(properties: Record<string, unknown>): void {
+    const session = (properties.info ?? properties.session) as Record<string, unknown> | undefined
+    const sessId = session?.id as string | undefined
+    const parentID = session?.parentID as string | undefined
+    if (sessId && parentID && parentID === this.opencodeSessionId && !this.childSessionIds.has(sessId)) {
+      this.childSessionIds.add(sessId)
+      const title = typeof session?.title === 'string' && session.title ? session.title : 'subagent'
+      this.emit('tool_active', 'Task', title)
+    }
+    if (!this.isOwnSession(properties)) return
+    // Guard: a session object for a different session (e.g. a child) must
+    // not complete our turn even if it reports idle.
+    if (sessId && sessId !== this.opencodeSessionId) return
+    const sessionStatus = session?.status
+    const sType = typeof sessionStatus === 'string' ? sessionStatus : (sessionStatus as { type?: string } | undefined)?.type
+    if (sType === 'idle') {
+      this.completeTurn()
+    }
+  }
+
+  /**
+   * OpenCode >=1.4 message.updated, carrying the full message including every
+   * part. Tracks usage, then replays each part through the part.updated path.
+   */
+  private handleMessageUpdated(properties: Record<string, unknown>): void {
+    const info = properties.info as {
+      id?: string
+      role?: string
+      parts?: OpenCodeMessagePart[]
+      cost?: number
+      tokens?: { input?: number; output?: number; reasoning?: number; cache?: { read?: number; write?: number } }
+    } | undefined
+    if (!info || info.role !== 'assistant') return
+    this.trackUsage(info)
+    if (!info.parts) return
+    if (process.env.CODEKIN_DEBUG_SSE) {
+      console.log(`[opencode-sse] message.updated parts=${info.parts.length} types=${info.parts.map(p => p.type).join(',')}`)
+      for (const p of info.parts) {
+        console.log(`[opencode-sse]   part type=${p.type} text=${p.text?.slice(0, 120)}`)
+      }
+    }
+    for (const part of info.parts) {
+      this.handlePartUpdated({ ...properties, part })
     }
   }
 
