@@ -13,7 +13,7 @@ vi.mock('./config.js', () => ({
 }))
 
 const getOrchestratorSessionIdMock = vi.fn<() => string | null>(() => 'orch-id')
-vi.mock('./orchestrator-manager.js', () => ({
+vi.mock('./orchestrator-identity.js', () => ({
   getOrchestratorSessionId: (...args: unknown[]) => getOrchestratorSessionIdMock(...args as []),
 }))
 

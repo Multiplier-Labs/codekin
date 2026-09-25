@@ -10,16 +10,18 @@ import { join, dirname } from 'path'
 import { homedir } from 'os'
 import { fileURLToPath } from 'url'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
-import { randomUUID } from 'crypto'
-import { DATA_DIR, AGENT_DISPLAY_NAME, getAgentDisplayName } from './config.js'
+import { AGENT_DISPLAY_NAME, getAgentDisplayName } from './config.js'
 import { getDefaultClaudeModel } from './anthropic-models.js'
 import type { SessionManager } from './session-manager.js'
 import { VALID_PROVIDERS } from './types.js'
 import type { CodingProvider } from './coding-process.js'
+import { ORCHESTRATOR_DIR, getOrCreateOrchestratorId } from './orchestrator-identity.js'
 import { getOrchestratorOutbox } from './orchestrator-outbox.js'
 
-export const ORCHESTRATOR_DIR = join(DATA_DIR, 'orchestrator')
-const SESSION_ID_FILE = join(ORCHESTRATOR_DIR, '.session-id')
+// Identity (stable ID + workspace dir) lives in orchestrator-identity.ts so the
+// outbox can resolve the session ID without importing this module — see the
+// note there. Re-exported here because this is where callers expect to find it.
+export { ORCHESTRATOR_DIR, getOrCreateOrchestratorId, getOrchestratorSessionId } from './orchestrator-identity.js'
 
 /** Archive settings key holding the user's explicit model choice for the agent. */
 const MODEL_SETTING_KEY = 'agent_model'
@@ -538,17 +540,6 @@ export function readTemplateVersion(path: string): number {
   }
 }
 
-/** Get or create a stable session UUID that persists across restarts. */
-export function getOrCreateOrchestratorId(): string {
-  if (existsSync(SESSION_ID_FILE)) {
-    const id = readFileSync(SESSION_ID_FILE, 'utf-8').trim()
-    if (id) return id
-  }
-  const id = randomUUID()
-  writeFileSync(SESSION_ID_FILE, id, 'utf-8')
-  return id
-}
-
 /** Check if a session is the orchestrator session. */
 export function isOrchestratorSession(source: string | undefined): boolean {
   return source === 'orchestrator'
@@ -682,13 +673,3 @@ export function ensureOrchestratorRunning(sessions: SessionManager): string {
   return stableId
 }
 
-/**
- * Get the orchestrator session ID if it exists, or null.
- */
-export function getOrchestratorSessionId(sessions: SessionManager): string | null {
-  const stableId = existsSync(SESSION_ID_FILE)
-    ? readFileSync(SESSION_ID_FILE, 'utf-8').trim()
-    : null
-  if (!stableId) return null
-  return sessions.get(stableId) ? stableId : null
-}
