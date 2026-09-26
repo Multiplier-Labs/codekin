@@ -68,14 +68,6 @@ export const PROVIDERS: { id: CodingProvider; label: string; description: string
 /** Model option for UI selectors. */
 export interface ModelOption { id: string; label: string }
 
-/** Static models for the OpenAI Codex CLI. Used as fallback before dynamic discovery completes. */
-export const CODEX_MODELS: ModelOption[] = [
-  { id: 'gpt-6-astra', label: 'GPT-6 Astra' },
-  { id: 'gpt-6-sol', label: 'GPT-6 Sol' },
-  { id: 'gpt-6-luna', label: 'GPT-6 Luna' },
-  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
-]
-
 /** Static models for Claude Code CLI. Used as fallback before dynamic discovery completes. */
 export const CLAUDE_MODELS: ModelOption[] = [
   { id: 'claude-opus-5-5', label: 'Opus 5.5' },
