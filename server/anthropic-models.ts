@@ -29,10 +29,12 @@ export interface ClaudeModelInfo {
 /** Hardcoded fallback used until dynamic discovery completes.
  *  Per https://platform.claude.com/docs/en/about-claude/models/overview */
 export const FALLBACK_MODELS: ClaudeModelInfo[] = [
+  { id: 'claude-opus-5-5', label: 'Opus 5.5' },
+  { id: 'claude-fable-5-1', label: 'Fable 5.1' },
   { id: 'claude-opus-5', label: 'Opus 5' },
   { id: 'claude-sonnet-5', label: 'Sonnet 5' },
-  { id: 'claude-opus-4-8', label: 'Opus 4.8' },
   { id: 'claude-fable-5', label: 'Fable 5' },
+  { id: 'claude-opus-4-8', label: 'Opus 4.8' },
   { id: 'claude-opus-4-7', label: 'Opus 4.7' },
   { id: 'claude-opus-4-6', label: 'Opus 4.6' },
   { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
@@ -50,19 +52,31 @@ const CANDIDATE_MODEL_IDS: string[] = [
   // 5th-generation IDs are dateless and single-number — `claude-opus-5`, NOT
   // `claude-opus-5-0`. The `-0` guesses probed here originally never matched
   // anything, which is why Opus 5 stayed invisible in the UI.
-  // Fable family (GA 2026-06-09).
+  //
+  // Point releases *do* get a minor segment (`claude-fable-5-1`,
+  // `claude-opus-5-5`), and they are only ever discovered if enumerated here —
+  // there is no wildcard probe. Fable 5.1 and Opus 5.5 both shipped while this
+  // list held whole-number 5th-gen IDs plus `-6` lookaheads only, so neither
+  // could appear in the UI. Keep one or two point-release guesses per live
+  // family: an ID that doesn't exist 404s in ~2.5s at zero token cost.
+  // Fable family (5 GA 2026-06-09, 5.1 GA 2026-09-01).
   'claude-fable-5',
+  'claude-fable-5-1',
+  'claude-fable-5-2',
   'claude-fable-6',
-  // Opus family (4.6/4.7/4.8 and 5 are live; probe ahead for new releases)
+  // Opus family (4.6/4.7/4.8, 5 and 5.5 are live; probe ahead for new releases)
   'claude-opus-4-6',
   'claude-opus-4-7',
   'claude-opus-4-8',
   'claude-opus-5',
+  'claude-opus-5-5',
+  'claude-opus-5-6',
   'claude-opus-6',
   // Sonnet family (4.6 and 5 are live; probe ahead)
   'claude-sonnet-4-6',
   'claude-sonnet-4-7',
   'claude-sonnet-5',
+  'claude-sonnet-5-1',
   'claude-sonnet-6',
   // Haiku family (currently 4.5 is latest — note dated suffix; probe ahead)
   'claude-haiku-4-5-20251001',
@@ -211,11 +225,25 @@ function probeModel(modelId: string): Promise<ProbeResult> {
           const result = JSON.parse(stdout) as {
             is_error?: boolean
             api_error_status?: number | null
+            result?: string
             modelUsage?: Record<string, unknown>
           }
           if (result.is_error || err) {
             const status = result.api_error_status
-            resolve(status === 404 || status === 403 ? { status: 'unavailable' } : { status: 'error' })
+            if (status === 404 || status === 403) {
+              resolve({ status: 'unavailable' })
+              return
+            }
+            // A model newer than the installed CLI is rejected with a 400 whose
+            // message names the version needed. That is permanent for this
+            // binary, not a bad moment — retrying it wastes a probe round and
+            // buries the one thing the operator can act on.
+            if (status === 400 && /does not support this model/i.test(result.result ?? '')) {
+              console.warn(`[model-probe] ${modelId} needs a newer Claude CLI — ${result.result?.trim()}`)
+              resolve({ status: 'unavailable' })
+              return
+            }
+            resolve({ status: 'error' })
             return
           }
           const id = Object.keys(result.modelUsage ?? {})[0]
