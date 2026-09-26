@@ -329,6 +329,38 @@ describe('anthropic-models', () => {
       expect(attempts.get('claude-sonnet-4-6')).toBe(1)
     })
 
+    it('treats a "CLI too old for this model" 400 as unavailable, not transient', async () => {
+      vi.useFakeTimers()
+      // The live shape of this failure: the CLI exits non-zero with a 400 whose
+      // message names the version required. Permanent for this binary — so it
+      // must not eat a retry round the way a 529 does.
+      const attempts = new Map<string, number>()
+      mockExecFile.mockImplementation((_bin: string, args: string[], _opts: any, cb: ExecCallback) => {
+        const modelId = args[2]
+        attempts.set(modelId, (attempts.get(modelId) ?? 0) + 1)
+        queueMicrotask(() => {
+          if (modelId === 'claude-fable-5-1') {
+            cb(new Error('exit 1'), JSON.stringify({
+              is_error: true,
+              api_error_status: 400,
+              result: "API Error: 400 Claude Code 2.1.220 does not support this model; version 2.1.251 or newer is required. Run 'claude update'.",
+              modelUsage: {},
+            }))
+          } else if (modelId === 'claude-opus-5') cb(...okProbe(modelId))
+          else cb(...notFoundProbe())
+        })
+        return { unref: vi.fn() }
+      })
+
+      const mod = await loadFreshModule()
+      mod.triggerCliProbeIfNeeded()
+      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(6_000)
+
+      expect(await mod.fetchAnthropicModels()).toEqual([{ id: 'claude-opus-5', label: 'Opus 5' }])
+      expect(attempts.get('claude-fable-5-1')).toBe(1)
+    })
+
     it('keeps last-known-good models when a probe keeps failing transiently', async () => {
       vi.useFakeTimers()
       // First run: fable-5 and opus-5 both exist.

@@ -74,10 +74,12 @@ Endpoints that accept a `model` field (e.g. session creation via WebSocket, work
 
 | Identifier | Label |
 |---|---|
+| `claude-opus-5-5` | Opus 5.5 |
+| `claude-fable-5-1` | Fable 5.1 |
 | `claude-opus-5` | Opus 5 |
 | `claude-sonnet-5` | Sonnet 5 |
-| `claude-opus-4-8` | Opus 4.8 |
 | `claude-fable-5` | Fable 5 |
+| `claude-opus-4-8` | Opus 4.8 |
 | `claude-opus-4-7` | Opus 4.7 |
 | `claude-opus-4-6` | Opus 4.6 |
 | `claude-sonnet-4-6` | Sonnet 4.6 |
@@ -91,13 +93,15 @@ This table is the **static fallback** list (`FALLBACK_MODELS` in `server/anthrop
 
 Return the discovered Claude model list. Results are cached, so a cache hit is cheap. Falls back to the static table above when discovery has not completed or has failed.
 
-**Response:** `{ "models": [{ "id": "claude-opus-5", "label": "Opus 5" }, ...] }`
+**Response:** `{ "models": [{ "id": "claude-opus-5-5", "label": "Opus 5.5" }, ...] }`
 
 ### `POST /api/claude/models/refresh`
 
 Force model rediscovery, bypassing the cache TTL.
 
 Deliberately `POST`-only and never called automatically: with CLI alias probing this spawns one `claude` process per candidate ID, costing roughly $0.04 per live model. Intended for manual invocation when a newly released model has not appeared yet.
+
+A candidate the installed CLI is too old to run is rejected by the API with a `400` naming the version required. It is dropped from the list (not retried as a transient failure) and the required version is logged as `[model-probe] <id> needs a newer Claude CLI — …`. If a released model is missing, check that log line before anything else: the fix is `claude update`, not a refresh.
 
 **Rate-limited.** A completed refresh starts a 5-minute cooldown; calls during it return `429` with a `Retry-After` header rather than probing again. The cooldown is global, not per-token, because the cost is. Requests arriving while a probe is already in flight are *not* rejected — they await the same probe, so they cost nothing extra.
 
@@ -109,7 +113,7 @@ Deliberately `POST`-only and never called automatically: with CLI alias probing 
 
 Return the model list reported by the Codex app-server's `model/list` method. Cached for 10 minutes. Returns an empty `models` array when the Codex CLI is unavailable or not authenticated.
 
-**Response:** `{ "models": [{ "id": "gpt-5.5", "name": "...", "description": "...", "isDefault": true }, ...] }`
+**Response:** `{ "models": [{ "id": "gpt-6-astra", "name": "...", "description": "...", "isDefault": true }, ...] }`
 
 ### `GET /api/opencode/models`
 

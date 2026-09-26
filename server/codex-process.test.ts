@@ -112,7 +112,7 @@ describe('CodexProcess', () => {
     spawnState.failNext = null
     clearCodexModelCache()
     vi.clearAllMocks()
-    cxp = new CodexProcess('/tmp', { sessionId: 'test-session-id', model: 'gpt-5.5' })
+    cxp = new CodexProcess('/tmp', { sessionId: 'test-session-id', model: 'gpt-6-astra' })
     errors = []
     cxp.on('error', (msg) => errors.push(msg))
   })
@@ -205,7 +205,7 @@ describe('CodexProcess', () => {
         cwd: '/tmp',
         approvalPolicy: 'on-request',
         sandbox: 'workspace-write',
-        model: 'gpt-5.5',
+        model: 'gpt-6-astra',
       })
     })
 
@@ -216,7 +216,7 @@ describe('CodexProcess', () => {
       expect(cxp.isAlive()).toBe(true)
       expect(cxp.isReady()).toBe(true)
       expect(cxp.getSessionId()).toBe('thread-1')
-      expect(inits).toEqual(['gpt-5.5'])
+      expect(inits).toEqual(['gpt-6-astra'])
     })
 
     it('uses thread/resume when a codexThreadId is provided', async () => {
@@ -835,16 +835,16 @@ describe('fetchCodexModels', () => {
       id: 2,
       result: {
         data: [
-          { id: 'gpt-5.5', displayName: 'GPT-5.5', description: 'Frontier', isDefault: true },
-          { id: 'gpt-5.4-mini', displayName: 'GPT-5.4 Mini', description: 'Fast', isDefault: false },
+          { id: 'gpt-6-astra', displayName: 'GPT-6 Astra', description: 'Frontier', isDefault: true },
+          { id: 'gpt-6-luna', displayName: 'GPT-6 Luna', description: 'Fast', isDefault: false },
         ],
       },
     }) + '\n')
     await tickLocal()
     const result = await promise
     expect(result.models).toEqual([
-      { id: 'gpt-5.5', name: 'GPT-5.5', description: 'Frontier', isDefault: true },
-      { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', description: 'Fast', isDefault: false },
+      { id: 'gpt-6-astra', name: 'GPT-6 Astra', description: 'Frontier', isDefault: true },
+      { id: 'gpt-6-luna', name: 'GPT-6 Luna', description: 'Fast', isDefault: false },
     ])
     expect(proc.kill).toHaveBeenCalledWith('SIGTERM')
   })

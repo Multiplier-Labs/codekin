@@ -121,7 +121,8 @@ const MODEL_CACHE_TTL_MS = 10 * 60 * 1000
  * Fetch the available Codex models by spawning a short-lived app-server and
  * calling model/list. Results reflect what the host's auth allows. Returns an
  * empty array when the binary is missing or not authenticated. Cached for
- * 10 minutes (the list only changes on CLI upgrade or auth change).
+ * 10 minutes (the list usually changes on CLI upgrade, auth change, or
+ * provider-side rollout).
  */
 export async function fetchCodexModels(): Promise<{ models: CodexModelInfo[] }> {
   if (modelCache && Date.now() - modelCache.fetchedAt < MODEL_CACHE_TTL_MS) {
@@ -192,7 +193,7 @@ export interface CodexProcessOptions {
   sessionId?: string
   /** Codex's own thread ID (used for resume — returned by getSessionId()). */
   codexThreadId?: string
-  /** Codex model ID (e.g. 'gpt-5.5'). Omit to use the CLI default. */
+  /** Codex model ID (e.g. 'gpt-6-astra'). Omit to use the CLI default. */
   model?: string
   /** Additional environment variables (CODEKIN_SESSION_ID, etc.). */
   extraEnv?: Record<string, string>
