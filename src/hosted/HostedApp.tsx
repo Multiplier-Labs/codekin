@@ -1,6 +1,8 @@
 /**
  * Root of the hosted (app.codekin.ai) build: auth gate → remembered machine
- * → workspace, or Settings (machines only) when there is nothing to restore.
+ * → workspace. With nothing to restore: the focused "Connect your computer"
+ * surface for an account without a usable machine, otherwise Settings
+ * (machines only).
  *
  * Selected by src/main.tsx when VITE_APP_MODE=hosted. The local app
  * (src/App.tsx) is untouched by hosted mode.
@@ -8,7 +10,9 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { LoginPage } from './LoginPage'
-import { decideRestore, fetchMachines, forgetMachine, lastMachineId, rememberMachine, type Machine } from './machines'
+import { decideRestore, fetchMachines, forgetMachine, isUsableMachine, lastMachineId, rememberMachine, type Machine } from './machines'
+import { useMachineSetup } from './useMachineSetup'
+import { ConnectComputer } from './ConnectComputer'
 import { MachineConnect } from './MachineConnect'
 import { MachineWorkspace } from './MachineWorkspace'
 import { HostedRelayTransport, LocalHttpTransport, setTransport } from '../lib/transport'
@@ -17,6 +21,7 @@ import { LinkClaimPage } from './LinkClaimPage'
 import { useHostedAuth } from './useHostedAuth'
 import { Settings } from '../components/Settings'
 import { useSettings } from '../hooks/useSettings'
+import type { Settings as SettingsValues } from '../types'
 
 /** Shown to signed-in users whose access has not been granted (yet). */
 function PendingPage({ login, onLogout }: { login: string; onLogout: () => void }) {
@@ -38,6 +43,57 @@ function PendingPage({ login, onLogout }: { login: string; onLogout: () => void 
         </button>
       </div>
     </div>
+  )
+}
+
+/**
+ * Home screen when no machine is connected. Decides once, on the first
+ * successful machine list, whether this is a first run (no usable machine):
+ * if so the first-run surface stays put while setup progresses — a machine
+ * coming online is announced there with an Open button, rather than the page
+ * jumping to Settings under the user.
+ */
+function HostedHome({ settings, onUpdate, onOpen, onSignOut, signedInAs }: {
+  settings: SettingsValues
+  onUpdate: (patch: Partial<SettingsValues>) => void
+  onOpen: (machine: Machine) => void
+  onSignOut: () => void
+  signedInAs: string
+}) {
+  const setup = useMachineSetup({ pollWhileEmpty: true })
+  const [firstRun, setFirstRun] = useState<boolean | null>(null)
+  const [view, setView] = useState<'setup' | 'account'>('setup')
+
+  // Latch during render (React's "adjust state while rendering" pattern).
+  if (firstRun === null && setup.machines !== null) {
+    setFirstRun(!setup.machines.some(isUsableMachine))
+  }
+
+  if (firstRun !== false && view === 'setup') {
+    return (
+      <ConnectComputer
+        setup={setup}
+        onOpen={onOpen}
+        onAccount={() => { setView('account') }}
+        onSignOut={onSignOut}
+        signedInAs={signedInAs}
+      />
+    )
+  }
+
+  return (
+    <Settings
+      open
+      machinesOnly
+      settings={settings}
+      onUpdate={onUpdate}
+      onClose={() => { /* nothing to close to — this is the whole screen */ }}
+      onSwitchMachine={onOpen}
+      onSignOut={onSignOut}
+      signedInAs={signedInAs}
+      machineSetup={setup}
+      onBack={firstRun ? () => { setView('setup') } : undefined}
+    />
   )
 }
 
@@ -169,17 +225,14 @@ export default function HostedApp() {
     )
   }
 
-  // Not connected to anything: land in Settings, where the machine list lives
-  // once you are connected too. One place to manage the connection, whichever
-  // side of it you are on.
+  // Not connected to anything: first run gets the focused setup surface;
+  // otherwise land in Settings, where the machine list lives once you are
+  // connected too.
   return (
-    <Settings
-      open
-      machinesOnly
+    <HostedHome
       settings={settings}
       onUpdate={updateSettings}
-      onClose={() => { /* nothing to close to — this is the whole screen */ }}
-      onSwitchMachine={selectMachine}
+      onOpen={selectMachine}
       onSignOut={() => void logout()}
       signedInAs={user.displayName ?? user.login}
     />

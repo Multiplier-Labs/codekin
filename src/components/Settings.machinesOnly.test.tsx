@@ -140,6 +140,7 @@ describe('Settings — machines only', () => {
     )
     expect(container.textContent).toContain('No machines paired yet.')
     expect(container.textContent).toContain('codekin relay login')
-    expect(container.textContent).toContain('codekin relay connect')
+    // The installed service runs the connector itself now; no separate connect step.
+    expect(container.textContent).toContain('Add computer')
   })
 })

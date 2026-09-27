@@ -69,6 +69,13 @@ interface Props {
   onSignOut?: () => void
   /** Who is signed in, for the same header. */
   signedInAs?: string
+  /**
+   * Hosted `machinesOnly` mode: list/setup state owned by the hosted home
+   * screen, so an install command shown there survives the switch here.
+   */
+  machineSetup?: import('../hosted/useMachineSetup').MachineSetup
+  /** Hosted `machinesOnly` mode: return to the first-run setup surface. */
+  onBack?: () => void
 }
 
 /**
@@ -141,7 +148,7 @@ function StatusBadge({ status }: { status: string }) {
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
-export function Settings({ open, onClose, settings, onUpdate, isMobile = false, autoWorktree = false, onAutoWorktreeChange, agentName = 'Joe', onAgentNameChange, repos = [], hostedMachineId = '', onSwitchMachine, onDisconnectMachine, machinesOnly = false, onSignOut, signedInAs }: Props) {
+export function Settings({ open, onClose, settings, onUpdate, isMobile = false, autoWorktree = false, onAutoWorktreeChange, agentName = 'Joe', onAgentNameChange, repos = [], hostedMachineId = '', onSwitchMachine, onDisconnectMachine, machinesOnly = false, onSignOut, signedInAs, machineSetup, onBack }: Props) {
   // Every fetch below reads from a machine. Without one connected there is
   // nothing to ask, so the machines-only view does not ask.
   const settingsLive = open && !machinesOnly
@@ -326,7 +333,15 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
         <div className="w-full max-w-2xl rounded-floating border border-edge-strong bg-surface-raised shadow-floating">
           <div className="flex items-start justify-between gap-3 border-b border-edge px-6 pt-5 pb-4">
             <div>
-              <h2 className="text-head font-semibold text-ink">Settings</h2>
+              {onBack && (
+                <button
+                  onClick={onBack}
+                  className="-ml-2 mb-1 rounded-control px-2 py-0.5 text-meta text-ink-muted transition hover:bg-surface hover:text-ink"
+                >
+                  ← Back to setup
+                </button>
+              )}
+              <h2 className="text-head font-semibold text-ink">{onBack ? 'Account' : 'Settings'}</h2>
               <p className="mt-0.5 text-meta text-ink-muted">
                 Connect a machine to start working. Everything else lives on the machine.
               </p>
@@ -346,7 +361,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
           <div className="px-6 py-5">
             <SectionCard icon={<IconServer2 size={15} />} title="Machines">
               <Suspense fallback={<p className="text-body text-ink-muted">Loading…</p>}>
-                <MachinesSection currentMachineId="" onSwitch={machine => { onSwitchMachine?.(machine) }} />
+                <MachinesSection currentMachineId="" onSwitch={machine => { onSwitchMachine?.(machine) }} setup={machineSetup} />
               </Suspense>
             </SectionCard>
             <div className="mt-4">

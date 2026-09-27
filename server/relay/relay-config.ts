@@ -32,6 +32,25 @@ export interface RelayConfig {
   auditRetentionDays: number
   /** True when running behind TLS in production (secure cookies). */
   isProduction: boolean
+  /**
+   * Where people without access can ask for it (RELAY_ACCESS_REQUEST_URL):
+   * an https:// page or a mailto: address. Shown on the sign-in page.
+   */
+  accessRequestUrl?: string
+}
+
+/** Accept only https: and mailto: URLs for the public access-request link. */
+export function parseAccessRequestUrl(raw: string): string | undefined {
+  const value = raw.trim()
+  if (!value) return undefined
+  try {
+    const url = new URL(value)
+    if (url.protocol === 'https:' || url.protocol === 'mailto:') return url.toString()
+  } catch {
+    // fall through
+  }
+  console.warn('[relay-config] Ignoring RELAY_ACCESS_REQUEST_URL: must be an https: or mailto: URL')
+  return undefined
 }
 
 /** Parse a KEY=VALUE env file. Ignores blank lines and # comments. */
@@ -82,6 +101,7 @@ export function loadRelayConfig(opts: { envFile?: string; requireSecrets?: boole
     dataDir,
     auditRetentionDays: Math.max(0, parseInt(get('AUDIT_RETENTION_DAYS') || '90', 10) || 0),
     isProduction,
+    accessRequestUrl: parseAccessRequestUrl(get('RELAY_ACCESS_REQUEST_URL')),
   }
 
   if (requireSecrets) {

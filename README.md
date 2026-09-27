@@ -9,7 +9,18 @@ Web UI for [Claude Code](https://github.com/anthropics/claude-code), [OpenCode](
 
 ![Codekin screenshot](docs/screenshot.png)
 
-## Install
+## Quick start (hosted)
+
+Codekin runs coding agents on your own computer; the hosted app at [app.codekin.ai](https://app.codekin.ai) is how you reach them from a browser, phone or tablet.
+
+1. Open [https://app.codekin.ai](https://app.codekin.ai) and sign in with GitHub. Access is currently by invitation.
+2. On **Connect your computer**, generate the install command and run it in a terminal on the computer you want to code on (macOS or Linux; Windows isn't supported yet). The command is valid for 10 minutes and works once.
+3. The installer sets up Codekin as a background service and pairs it with your account. The page updates by itself as the computer goes from *waiting for installation* to *paired* to *online*.
+4. Click **Open**. You'll need at least one coding agent (Claude Code, Codex or OpenCode) installed and signed in on that computer.
+
+Prefer to run everything yourself, without the hosted relay? Use the self-hosted install below.
+
+## Install (self-hosted)
 
 **Prerequisites:**
 - macOS or Linux

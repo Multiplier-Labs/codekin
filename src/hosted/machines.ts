@@ -20,6 +20,19 @@ export interface Machine {
   access?: 'owner' | 'shared'
   /** True when the machine's connector is behind the supported version. */
   connectorOutdated?: boolean
+  /**
+   * Created by an install command that has not been run yet. Such a machine
+   * has never connected; the UI shows it as "waiting for installation", not
+   * as an ordinary offline machine.
+   */
+  setupPending?: boolean
+  /** When the pending install command stops working (epoch ms); null otherwise. */
+  pairingExpiresAt?: number | null
+}
+
+/** A machine that has finished setup — something you could actually open. */
+export function isUsableMachine(machine: Machine): boolean {
+  return !machine.setupPending
 }
 
 /** Machine the user was last connected to, so a reload returns them to it. */
@@ -78,21 +91,81 @@ export const MACHINE_STATUS_DOT: Record<Machine['status'], string> = {
   offline: 'bg-ink-faint',
 }
 
+/** A failed relay call, carrying the HTTP status and the relay's error code. */
+export class RelayRequestError extends Error {
+  readonly status: number
+  readonly code: string | null
+  constructor(status: number, code: string | null) {
+    super(code ?? String(status))
+    this.status = status
+    this.code = code
+  }
+}
+
+async function relayError(res: Response): Promise<RelayRequestError> {
+  let code: string | null = null
+  try {
+    const body = (await res.json()) as { error?: unknown }
+    if (typeof body.error === 'string') code = body.error
+  } catch {
+    // Not JSON — the status alone has to do.
+  }
+  return new RelayRequestError(res.status, code)
+}
+
+/** A freshly minted install command's secret half. Never persisted. */
+export interface Pairing {
+  pairingToken: string
+  machineId: string
+  expiresAt: number
+}
+
 /**
  * Mint a pre-approved pairing token for the install-command funnel. The
  * token goes into the one-line installer or `codekin relay login`, both via
  * the CODEKIN_PAIR_TOKEN environment variable; the machine that runs it becomes
  * paired to this account with no further approval. Single-use, 10-minute TTL.
+ *
+ * `replaceMachineId` regenerates: the relay discards that still-unclaimed
+ * machine and its token first, so regenerating never piles up pending rows.
+ * The token cannot be fetched again later — callers keep it in component
+ * memory only (never storage or the URL).
  */
-export async function precreatePairing(): Promise<{ pairingToken: string; expiresAt: number }> {
+export async function precreatePairing(opts: { replaceMachineId?: string } = {}): Promise<Pairing> {
   const res = await fetch('/api/machines/pair/precreate', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: '{}',
+    body: JSON.stringify(opts.replaceMachineId ? { replaceMachineId: opts.replaceMachineId } : {}),
   })
-  if (!res.ok) throw new Error(String(res.status))
-  return (await res.json()) as { pairingToken: string; expiresAt: number }
+  if (!res.ok) throw await relayError(res)
+  return (await res.json()) as Pairing
+}
+
+/** Remove a machine (owner only). This also revokes its connector's credential. */
+export async function removeMachine(machineId: string): Promise<void> {
+  const res = await fetch(`/api/machines/${encodeURIComponent(machineId)}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  })
+  if (!res.ok) throw await relayError(res)
+}
+
+/** User-facing text for a failed install-command generation. */
+export function pairingErrorMessage(err: unknown): string {
+  if (err instanceof RelayRequestError) {
+    if (err.status === 429) return 'Too many install commands in a short time. Wait a minute, then try again.'
+    if (err.status === 401) return 'Your session has ended. Reload the page and sign in again.'
+    if (err.code === 'machine_already_paired') return 'That computer has already been paired, so its command cannot be replaced.'
+    if (err.code === 'machine_not_found') return 'That setup no longer exists. Generate a new install command.'
+  }
+  return 'Could not generate an install command. Try again.'
+}
+
+/** "9 min" while there is time, whole seconds in the last minute. */
+export function formatTimeLeft(ms: number): string {
+  if (ms > 60_000) return `${Math.ceil(ms / 60_000)} min`
+  return `${Math.max(0, Math.ceil(ms / 1000))} s`
 }
 
 /** The relay the installer and CLI use when no URL is given. */

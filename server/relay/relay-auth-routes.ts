@@ -17,6 +17,7 @@ import type { RelayConfig } from './relay-config.js'
 import { upsertUserFromGithub, getUserById, isGithubAccountAllowed } from './control-plane-db.js'
 import type { GithubProfile, UserRole, UserStatus, UserRow } from './control-plane-db.js'
 import type { SqliteSessionStore } from './sqlite-session-store.js'
+import { validateReturnTo } from './return-to.js'
 
 const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize'
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token'
@@ -37,6 +38,8 @@ declare module 'express-session' {
   interface SessionData {
     user?: SessionUser
     oauthState?: string
+    /** Validated same-origin path to land on after the OAuth round trip. */
+    oauthReturnTo?: string
   }
 }
 
@@ -86,9 +89,25 @@ export interface AuthRouterDeps {
 export function createRelayAuthRouter({ db, config, fetchImpl = fetch, store, disconnectUser }: AuthRouterDeps): Router {
   const router = Router()
 
+  // Public, unauthenticated: what the sign-in page may say before OAuth.
+  // Admission is always by allowlist (owner + ALLOWED_GITHUB_IDS), so the
+  // instance is invitation-only; the access-request route is optional config.
+  // Nothing here depends on who is asking, so it cannot reveal whether a
+  // particular GitHub account is allowlisted.
+  router.get('/api/auth/config', (_req, res) => {
+    res.json({
+      inviteOnly: true,
+      ...(config.accessRequestUrl ? { accessUrl: config.accessRequestUrl } : {}),
+    })
+  })
+
   router.get('/api/auth/github/start', (req, res, next) => {
     const state = randomBytes(16).toString('hex')
     req.session.oauthState = state
+    // Kept server-side next to the state, never round-tripped through GitHub.
+    const returnTo = validateReturnTo(req.query.returnTo)
+    if (returnTo) req.session.oauthReturnTo = returnTo
+    else delete req.session.oauthReturnTo
     // Explicit save before the redirect: the default lifecycle may not flush
     // the session in time, and a lost state fails every callback.
     saveSession(req)
@@ -114,6 +133,9 @@ export function createRelayAuthRouter({ db, config, fetchImpl = fetch, store, di
         return
       }
       delete req.session.oauthState
+      // Read before regenerateSession() wipes it; re-validated on the way out.
+      const returnTo = validateReturnTo(req.session.oauthReturnTo) ?? '/'
+      delete req.session.oauthReturnTo
 
       // Exchange the code for an access token
       const tokenRes = await fetchImpl(GITHUB_TOKEN_URL, {
@@ -199,7 +221,7 @@ export function createRelayAuthRouter({ db, config, fetchImpl = fetch, store, di
       await regenerateSession(req)
       req.session.user = toSessionUser(user)
       await saveSession(req)
-      res.redirect('/')
+      res.redirect(returnTo)
     })().catch(() => { failLogin(res, 'login_failed'); })
   })
 
