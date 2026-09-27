@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en" data-theme="dark" data-scheme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -10,8 +10,11 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Codekin" />
     <title>Codekin</title>
+    <!-- Classic blocking script (not a module) so the saved theme applies
+         before first paint; a file rather than inline to satisfy the CSP. -->
+    <script src="/theme-init.js"></script>
   </head>
-  <body class="bg-neutral-12 text-neutral-2">
+  <body class="bg-page text-ink">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -3,14 +3,14 @@
  *
  * Shows all repos that have active sessions as collapsible tree nodes.
  * The active repo is expanded and shows its sessions and a Workflows link.
- * Bottom section: app settings, theme toggle, logout, connection status.
+ * Bottom section: app settings, theme menu, logout, connection status.
  * Resizable via drag handle on the right edge; collapsible to icon-only strip.
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   IconBook, IconSettings as IconSettingsGear,
-  IconLogout, IconSun, IconMoon,
+  IconLogout,
   IconChevronRight, IconChevronLeft, IconSparkles, IconX, IconRobotFace,
   IconShare,
 } from '@tabler/icons-react'
@@ -22,6 +22,8 @@ import { RepoSection, type RepoNode } from './RepoSection'
 import type { RepoDrawerTab } from './RepoDrawer'
 import { ModuleBrowser } from './ModuleBrowser'
 import { ConnectionPopup } from './ConnectionPopup'
+import { ThemeMenu } from './ThemeMenu'
+import type { ThemeId } from '../themes/registry'
 import { groupKey } from '../hooks/useSessionOrchestration'
 
 const SIDEBAR_WIDTH_KEY = 'codekin-left-sidebar-width'
@@ -88,8 +90,8 @@ interface Props {
   activeRepo: Repo | null
   /** Auth token for API requests (file uploads, repo fetches). */
   token: string
-  /** Current color theme ('dark' | 'light'). */
-  theme: string
+  /** Current color theme. */
+  theme: ThemeId
   /** WebSocket connection state ('disconnected' | 'connecting' | 'connected'). */
   connState: string
   /** Whether Claude Code connection is disabled by the user. */
@@ -133,8 +135,8 @@ interface Props {
    * where there is nothing to share and no Share control is shown.
    */
   onShareSession?: () => void
-  /** Toggle or set the color theme. */
-  onUpdateTheme: (theme: string) => void
+  /** Set the color theme. */
+  onUpdateTheme: (theme: ThemeId) => void
   /** Send a module's content to the active session as context. */
   onSendModule: (mod: Module) => void
   /** Navigate to the Automations view (workflows + loop runs). */
@@ -301,13 +303,12 @@ export function LeftSidebar({
               <IconShare size={14} stroke={2} />
             </button>
           )}
-          <button
-            onClick={() => onUpdateTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="rounded-control p-1.5 text-ink hover:bg-surface-raised hover:text-ink"
-            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {theme === 'dark' ? <IconSun size={14} stroke={2} /> : <IconMoon size={14} stroke={2} />}
-          </button>
+          <ThemeMenu
+            theme={theme}
+            onSelect={onUpdateTheme}
+            buttonClassName="rounded-control p-1.5 text-ink hover:bg-surface-raised hover:text-ink"
+            iconSize={14}
+          />
           <div className="relative">
             <button
               onClick={() => setConnPopupOpen(o => !o)}
@@ -512,13 +513,12 @@ export function LeftSidebar({
             </button>
           )}
           <div className="flex-1" />
-          <button
-            onClick={() => onUpdateTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="density-icon-btn px-1.5 py-1 rounded-control text-ink hover:bg-surface-raised hover:text-ink transition-colors"
-            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {theme === 'dark' ? <IconSun className="density-icon" stroke={2} /> : <IconMoon className="density-icon" stroke={2} />}
-          </button>
+          <ThemeMenu
+            theme={theme}
+            onSelect={onUpdateTheme}
+            buttonClassName="density-icon-btn px-1.5 py-1 rounded-control text-ink hover:bg-surface-raised hover:text-ink transition-colors"
+            iconClassName="density-icon"
+          />
           <button
             onClick={() => { window.location.href = '/authelia/logout' }}
             className="density-icon-btn px-1.5 py-1 rounded-control text-ink hover:bg-surface-raised hover:text-ink transition-colors"
