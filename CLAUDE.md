@@ -55,7 +55,7 @@ The visual system is token-driven; an ESLint guard enforces most of this in `src
 - **Density via tokens**, not per-element `isMobile` ternaries: rows read `var(--row-h)`,
   `var(--row-pad)`, `var(--icon-size)`; touch mode is set once via `data-density="touch"` on the
   app shell.
-- Eight color themes (`src/themes/registry.ts`, spec in `docs/THEME-SELECTOR-SPEC.md`).
+- Nine color themes (`src/themes/registry.ts`, spec in `docs/THEME-SELECTOR-SPEC.md`).
   `data-theme` selects the palette; `data-scheme` (`dark`/`light`) carries polarity rules — put
   layout/contrast tweaks on `[data-scheme=…]`, never on one theme id. Dark and Light live in
   `src/index.css` (check the `.terminal-area` scope too); the rest are generated into

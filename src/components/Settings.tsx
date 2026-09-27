@@ -488,7 +488,7 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
               {/* ─ Appearance ─ */}
               <div>
                 <label id="settings-theme-label" className="mb-1.5 block text-body text-ink-muted">Theme</label>
-                <div role="radiogroup" aria-labelledby="settings-theme-label" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div role="radiogroup" aria-labelledby="settings-theme-label" className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {THEMES.map(t => {
                     const selected = settings.theme === t.id
                     return (

@@ -10,7 +10,8 @@
     contrast: ['dark', '#000000'],
     solarized: ['light', '#fdf6e3'],
     dracula: ['dark', '#21222c'],
-    gruvbox: ['dark', '#1d2021']
+    gruvbox: ['dark', '#1d2021'],
+    matrix: ['dark', '#000000']
   };
   try {
     var saved = JSON.parse(localStorage.getItem('codekin-settings') || '{}');
