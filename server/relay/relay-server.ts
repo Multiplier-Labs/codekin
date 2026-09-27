@@ -27,6 +27,7 @@ import { ConnectorHub } from './connector-hub.js'
 import { BrowserHub } from './browser-hub.js'
 import { MAX_PROXY_BODY_BYTES } from './relay-protocol.js'
 import { pruneAuditEvents } from './audit.js'
+import { sweepOrphanMachines } from './pairing.js'
 import type { SessionUser } from './relay-auth-routes.js'
 
 const config = loadRelayConfig()
@@ -147,6 +148,16 @@ if (config.auditRetentionDays > 0) {
   prune()
   setInterval(prune, 24 * 60 * 60 * 1000).unref()
 }
+
+// Install commands that were never run leave a machine row behind. Sweep the
+// ones whose pairing expired unclaimed (GET /api/machines also sweeps lazily).
+// Machines that have ever held a credential are never touched.
+const sweepOrphans = () => {
+  const removed = sweepOrphanMachines(db)
+  if (removed.length > 0) console.log(`[relay] Swept ${removed.length} unclaimed machine(s) with expired pairing`)
+}
+sweepOrphans()
+setInterval(sweepOrphans, 5 * 60 * 1000).unref()
 
 const server = createServer(app)
 

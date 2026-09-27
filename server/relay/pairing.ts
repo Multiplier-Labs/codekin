@@ -254,3 +254,116 @@ export function removeMachine(db: Database.Database, machineId: string): boolean
     return result.changes > 0
   })()
 }
+
+/**
+ * Setup state of a machine row created before any connector claimed it (by
+ * the install-command funnel, or an approved device-code request).
+ */
+export interface MachineSetupState {
+  /** True once any credential row has been minted for the machine. */
+  hasCredential: boolean
+  /**
+   * Expiry of the latest approved-but-unclaimed, unexpired pairing linked to
+   * the machine, or null when there is none.
+   */
+  pendingPairingExpiresAt: number | null
+}
+
+/**
+ * Setup state for every machine that has a credential or a live linked
+ * pairing, in two queries rather than two per machine. Machines absent from
+ * the map have neither.
+ */
+export function getMachineSetupStates(
+  db: Database.Database,
+  now = Date.now(),
+): Map<string, MachineSetupState> {
+  const states = new Map<string, MachineSetupState>()
+  const credentialed = db
+    .prepare('SELECT DISTINCT machine_id FROM machine_credentials')
+    .all() as Array<{ machine_id: string }>
+  for (const row of credentialed) {
+    states.set(row.machine_id, { hasCredential: true, pendingPairingExpiresAt: null })
+  }
+  const pending = db
+    .prepare(
+      `SELECT machine_id, MAX(expires_at) AS expires_at FROM pairing_requests
+       WHERE machine_id IS NOT NULL AND status = 'approved' AND expires_at > ?
+       GROUP BY machine_id`,
+    )
+    .all(now) as Array<{ machine_id: string; expires_at: number }>
+  for (const row of pending) {
+    const state = states.get(row.machine_id) ?? { hasCredential: false, pendingPairingExpiresAt: null }
+    state.pendingPairingExpiresAt = row.expires_at
+    states.set(row.machine_id, state)
+  }
+  return states
+}
+
+/**
+ * True while a machine is waiting for its installer: it has never held a
+ * credential and a pre-approved pairing for it is still claimable.
+ */
+export function isSetupPending(state: MachineSetupState | undefined): boolean {
+  return !!state && !state.hasCredential && state.pendingPairingExpiresAt !== null
+}
+
+/** True when a credential has ever been minted for the machine. */
+export function machineHasEverHadCredential(db: Database.Database, machineId: string): boolean {
+  return (
+    db.prepare('SELECT 1 FROM machine_credentials WHERE machine_id = ? LIMIT 1').get(machineId) !== undefined
+  )
+}
+
+/**
+ * Remove a machine that never finished setup and invalidate every pairing
+ * linked to it. The pairing is expired (not just unlinked) so an installer
+ * still holding the old token hears "expired — generate a fresh command"
+ * rather than an unexplained not-found.
+ *
+ * Refuses (returns false) for a machine that has ever held a credential:
+ * setup cleanup must never be able to revoke a working machine.
+ */
+export function discardUnclaimedMachine(db: Database.Database, machineId: string, now = Date.now()): boolean {
+  return db.transaction(() => {
+    if (machineHasEverHadCredential(db, machineId)) return false
+    db.prepare(
+      `UPDATE pairing_requests SET expires_at = MIN(expires_at, ?)
+       WHERE machine_id = ? AND status IN ('pending', 'approved')`,
+    ).run(now, machineId)
+    return removeMachine(db, machineId)
+  })()
+}
+
+/**
+ * Delete machines left behind by pairings nobody claimed: never held a
+ * credential, and every linked pairing request is past its expiry without
+ * having been claimed. A machine with no linked pairing at all is left
+ * alone — its origin is unknown, so it is not provably an orphan.
+ *
+ * Returns the ids of the removed machines.
+ */
+export function sweepOrphanMachines(db: Database.Database, now = Date.now()): string[] {
+  const candidates = db
+    .prepare(
+      `SELECT m.id FROM machines m
+       WHERE NOT EXISTS (SELECT 1 FROM machine_credentials c WHERE c.machine_id = m.id)
+         AND EXISTS (SELECT 1 FROM pairing_requests p WHERE p.machine_id = m.id)
+         AND NOT EXISTS (
+           SELECT 1 FROM pairing_requests p
+           WHERE p.machine_id = m.id AND (p.status = 'claimed' OR p.expires_at > ?)
+         )`,
+    )
+    .all(now) as Array<{ id: string }>
+
+  const removed: string[] = []
+  for (const { id } of candidates) {
+    try {
+      if (discardUnclaimedMachine(db, id, now)) removed.push(id)
+    } catch (err) {
+      // e.g. a foreign-key reference from a share row; leave it for the owner
+      console.warn(`[relay] Could not sweep unclaimed machine ${id}:`, err)
+    }
+  }
+  return removed
+}

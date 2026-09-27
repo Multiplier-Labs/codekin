@@ -11,6 +11,10 @@ import {
   precreatePairing,
   verifyMachineCredential,
   removeMachine,
+  getMachineSetupStates,
+  isSetupPending,
+  sweepOrphanMachines,
+  discardUnclaimedMachine,
 } from './pairing.js'
 
 const POLICY = { ownerGithubId: 1, allowedGithubIds: [] }
@@ -139,5 +143,95 @@ describe('pairing lifecycle', () => {
     expect(listMachines(db)).toHaveLength(0)
     expect(verifyMachineCredential(db, complete.machineId, complete.machineSecret)).toBe(false)
     expect(removeMachine(db, complete.machineId)).toBe(false)
+  })
+})
+
+describe('unclaimed machine hygiene', () => {
+  let db: Database.Database
+  let userId: string
+
+  beforeEach(() => {
+    db = openControlPlaneDb(':memory:')
+    userId = upsertUserFromGithub(
+      db,
+      { id: 1, login: 'alari76', name: null, email: null, avatarUrl: null },
+      POLICY,
+    ).id
+  })
+
+  afterEach(() => {
+    db.close()
+    vi.useRealTimers()
+  })
+
+  it('reports a precreated machine as setup-pending until its installer claims it', () => {
+    const pre = precreatePairing(db, userId)
+    const before = getMachineSetupStates(db).get(pre.machineId)
+    expect(isSetupPending(before)).toBe(true)
+    expect(before?.pendingPairingExpiresAt).toBe(pre.expiresAt)
+
+    completePairing(db, pre.pairingToken, { hostname: 'laptop' })
+    const after = getMachineSetupStates(db).get(pre.machineId)
+    expect(after).toEqual({ hasCredential: true, pendingPairingExpiresAt: null })
+    expect(isSetupPending(after)).toBe(false)
+  })
+
+  it('an expired, unclaimed precreate is no longer setup-pending and is swept', () => {
+    vi.useFakeTimers()
+    const pre = precreatePairing(db, userId)
+    // Still claimable: the sweep leaves it alone
+    expect(sweepOrphanMachines(db)).toEqual([])
+
+    vi.advanceTimersByTime(11 * 60 * 1000)
+    expect(isSetupPending(getMachineSetupStates(db).get(pre.machineId))).toBe(false)
+    expect(sweepOrphanMachines(db)).toEqual([pre.machineId])
+    expect(listMachines(db)).toHaveLength(0)
+    // The stale token still reads as expired, not as an unexplained miss
+    expect(completePairing(db, pre.pairingToken)).toEqual({ status: 'expired' })
+  })
+
+  it('never sweeps a machine that has held a credential, even long after its pairing expired', () => {
+    vi.useFakeTimers()
+    const pre = precreatePairing(db, userId)
+    const complete = completePairing(db, pre.pairingToken, { hostname: 'laptop' })
+    expect(complete.status).toBe('complete')
+    // A revoked credential still counts as "had one"
+    db.prepare(`UPDATE machine_credentials SET revoked_at = datetime('now')`).run()
+
+    vi.advanceTimersByTime(24 * 60 * 60 * 1000)
+    expect(sweepOrphanMachines(db)).toEqual([])
+    expect(listMachines(db)).toHaveLength(1)
+  })
+
+  it('never sweeps a machine with no linked pairing request', () => {
+    db.prepare(
+      `INSERT INTO machines (id, organization_id, owner_user_id, display_name, status)
+       VALUES ('legacy', 'org-default', ?, 'Legacy', 'offline')`,
+    ).run(userId)
+    expect(sweepOrphanMachines(db, Date.now() + 365 * 24 * 60 * 60 * 1000)).toEqual([])
+    expect(listMachines(db)).toHaveLength(1)
+  })
+
+  it('sweeps a device-code approval whose CLI never came back', () => {
+    vi.useFakeTimers()
+    const { userCode } = startPairing(db, { hostname: 'devbox' })
+    const approved = approvePairing(db, userCode, userId)
+    if (!approved.ok) throw new Error('expected approval')
+    vi.advanceTimersByTime(11 * 60 * 1000)
+    expect(sweepOrphanMachines(db)).toEqual([approved.machineId])
+  })
+
+  it('discardUnclaimedMachine invalidates the pending token immediately', () => {
+    const pre = precreatePairing(db, userId)
+    expect(discardUnclaimedMachine(db, pre.machineId)).toBe(true)
+    expect(listMachines(db)).toHaveLength(0)
+    expect(completePairing(db, pre.pairingToken)).toEqual({ status: 'expired' })
+  })
+
+  it('discardUnclaimedMachine refuses a machine that has been claimed', () => {
+    const pre = precreatePairing(db, userId)
+    completePairing(db, pre.pairingToken)
+    expect(discardUnclaimedMachine(db, pre.machineId)).toBe(false)
+    expect(listMachines(db)).toHaveLength(1)
   })
 })
