@@ -58,6 +58,9 @@ import { createWebhookRouter } from './webhook-routes.js'
 import { createWebhookSetupRouter } from './webhook-setup-routes.js'
 import { createUploadRouter } from './upload-routes.js'
 import { createDocsRouter } from './docs-routes.js'
+import { EmbeddedConnectorSupervisor, createRelayStatusRouter, embeddedConnectorDisabled } from './relay/embedded-connector.js'
+import { resolveLocalTarget } from './relay/connector-proxy.js'
+import { codekinPackageVersion } from './relay/relay-credential.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, isOrchestratorSession, getOrCreateOrchestratorId } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
@@ -344,6 +347,26 @@ app.use(createWebhookSetupRouter(verifyToken, extractToken, () => loadWebhookCon
 app.use(createUploadRouter(verifyToken, extractToken, () => sessions.archive.getSetting('repos_path', '')))
 app.use(createDocsRouter(verifyToken, extractToken))
 
+// Hosted relay connector, run in-process when this machine holds a managed
+// relay credential (written by the installer / `codekin relay login`). The
+// target is this very process, so it uses our own port and auth token rather
+// than guessing them from env files like the standalone connector must.
+const relayConnector = new EmbeddedConnectorSupervisor({
+  version: codekinPackageVersion(),
+  disabled: embeddedConnectorDisabled(),
+  localTarget: () => {
+    const target = resolveLocalTarget()
+    return {
+      ...target,
+      origin: process.env.CODEKIN_LOCAL_URL || `http://127.0.0.1:${port}`,
+      authToken,
+      tokenSource: 'server process',
+      browserOrigin: target.browserOrigin || CORS_ORIGIN,
+    }
+  },
+})
+app.use(createRelayStatusRouter(verifyToken, extractToken, relayConnector))
+
 // Workflow router — commitEventHandler is set after engine init, but the
 // router closure captures the variable reference so it will resolve correctly.
 app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessions, commitEventState))
@@ -586,6 +609,9 @@ wss.on('close', () => clearInterval(heartbeat))
 
 server.listen(port, '0.0.0.0', () => {
   console.log(`Codekin WebSocket server listening on port ${port}`)
+
+  // Start after listening, so the connector's first proxied call lands.
+  relayConnector.start()
 
   // Check for newer version on npm (non-blocking)
   void checkForUpdates()
@@ -883,6 +909,7 @@ server.listen(port, '0.0.0.0', () => {
 // Graceful shutdown — wait for Claude processes to release session locks
 async function gracefulShutdown(signal: string): Promise<void> {
   console.log(`${signal} received, shutting down...`)
+  relayConnector.stop()
   shutdownWorkflowEngine()
   shutdownRepoActivityIndex()
   shutdownDeploymentMonitor()
