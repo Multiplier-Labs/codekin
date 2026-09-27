@@ -57,7 +57,7 @@ codekin uninstall               # Remove Codekin entirely
 - **Loops** — Durable, event-sourced outcome loops that run a coding agent until *deterministic* evaluators pass (your own build/test/lint commands, judged by exit code), under turn/cost/wall-time budgets with no-progress detection. An independent second provider reviews the diff before it lands, every transition is an auditable event with retained evidence artifacts, runs survive server restarts (pause/resume/steer included), and a passing run is committed, pushed and opened as a PR by Codekin itself. Ships with CI Autorepair, Coverage Increase, and Dependency Upgrade recipes
 - **Git worktrees** — Isolate sessions in dedicated worktree directories, with mid-session creation, auto-enable setting, and session context preservation
 - **Session archive** — Full retrieval and re-activation of archived sessions
-- **Repo browser** — Auto-discovers local repos and GitHub org repos
+- **Repo browser** — Auto-discovers Git checkouts under your repositories root (flat `~/repos/project` or owner-namespaced `~/repos/owner/project`), no GitHub CLI required; with an authenticated `gh`, also lists your personal and org GitHub repos, matches them to existing checkouts by remote URL, and clones the rest on demand
 - **Screenshot upload** — Drag-and-drop or paste images; the file path is sent to the AI so it can read them natively
 - **Skill browser** — Browse and invoke `/skills` defined in each repo's `.claude/skills/`, with inline slash-command autocomplete
 - **Diff viewer** — Side panel showing staged/unstaged file changes with per-file discard support

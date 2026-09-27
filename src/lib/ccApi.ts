@@ -417,8 +417,13 @@ export function webhookEndpointUrl(): string {
   return transport.externalUrl('/api/webhooks/github')
 }
 
-/** Clone a GitHub repo on the server. Throws with the server's error message on failure. */
-export async function cloneRepo(token: string | undefined, owner: string, name: string): Promise<void> {
+/**
+ * Clone a GitHub repo on the server. Resolves to the checkout's path — which
+ * may be an existing checkout elsewhere under the repos root rather than a
+ * fresh clone — or null if the server didn't say. Throws with the server's
+ * error message on failure.
+ */
+export async function cloneRepo(token: string | undefined, owner: string, name: string): Promise<string | null> {
   const cloneHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
   if (token) cloneHeaders['Authorization'] = `Bearer ${token}`
   const res = await transport.fetch('/api/clone', {
@@ -430,6 +435,8 @@ export async function cloneRepo(token: string | undefined, owner: string, name: 
     const data = await jsonBody<{ error?: string }>(res)
     throw new Error(data.error || 'Clone failed')
   }
+  const data = await jsonBody<{ path?: unknown }>(res).catch(() => ({ path: undefined }))
+  return typeof data.path === 'string' && data.path ? data.path : null
 }
 
 /** Fetch orchestrator dashboard stats. Returns null on any failure — stats are optional. */

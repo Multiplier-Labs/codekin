@@ -16,6 +16,7 @@ import { promisify } from 'util'
 import { homedir } from 'os'
 import { parse as parseYaml } from 'yaml'
 import { SCREENSHOTS_DIR, REPOS_ROOT, GH_ORGS } from './config.js'
+import { discoverLocalRepos, githubSlugFromKey, normalizeRemoteUrl, type LocalRepo } from './local-repos.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -124,38 +125,165 @@ function isExecTimeout(err: unknown): boolean {
 
 /**
  * Local on-disk path for a repo, namespaced by owner to prevent collisions
- * between ownerA/foo and ownerB/foo.
+ * between ownerA/foo and ownerB/foo. This is where clone-on-demand puts a
+ * repo; an existing checkout elsewhere under the root is found by
+ * `discoverLocalRepos` and matched by remote URL instead.
  */
 export function localRepoPath(reposRoot: string, owner: string, name: string): string {
   return join(reposRoot, owner, name)
 }
 
-async function fetchGhRepos(owner: string, reposRoot: string) {
+/** Max repos listed per GitHub owner (`gh repo list` paginates internally). */
+export const GH_REPO_LIST_LIMIT = 1000
+
+/**
+ * State of the optional GitHub CLI integration.
+ * - `ok`: `gh` is installed and signed in
+ * - `missing`: `gh` binary not found
+ * - `unauthenticated`: `gh` is installed but not signed in (`gh auth login`)
+ * - `error`: anything else (network, timeout, rate limit)
+ */
+export type GhStatus = 'ok' | 'missing' | 'unauthenticated' | 'error'
+
+/** Classify a failed `gh` invocation. Exported for tests. */
+export function classifyGhError(err: unknown): { status: Exclude<GhStatus, 'ok'>; message: string } {
+  if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+    return { status: 'missing', message: 'GitHub CLI (gh) not found' }
+  }
+  if (isExecTimeout(err)) {
+    return { status: 'error', message: 'GitHub CLI timed out' }
+  }
+  const stderr = (err as { stderr?: unknown } | null)?.stderr
+  const stderrText = typeof stderr === 'string' ? stderr : ''
+  const messageText = err instanceof Error ? err.message : String(err)
+  if (/gh auth login|not logged in|authentication required|bad credentials|HTTP 401/i.test(`${stderrText}\n${messageText}`)) {
+    return { status: 'unauthenticated', message: 'GitHub CLI is not signed in' }
+  }
+  const firstLine = (stderrText.trim() || messageText).trim().split('\n')[0].slice(0, 200)
+  return { status: 'error', message: firstLine || 'GitHub CLI failed' }
+}
+
+/** A repo as returned by /api/repos. */
+export interface ApiRepoEntry {
+  id: string
+  name: string
+  owner: string
+  path: string
+  workingDir: string
+  cloned: boolean
+  description: string
+  url: string
+  skills: ReturnType<typeof scanSkills>
+  modules: ReturnType<typeof scanModules>
+  tags: string[]
+}
+
+/** A group of repos as returned by /api/repos. */
+export interface ApiRepoGroup {
+  owner: string
+  /** `github` for an owner listed via `gh`; `local` for on-disk checkouts not matched to one. */
+  source: 'github' | 'local'
+  repos: ApiRepoEntry[]
+  /** Set when this owner's listing failed; other groups are unaffected. */
+  error?: string
+}
+
+/** Display label of the group holding checkouts not matched to a listed GitHub repo. */
+export const LOCAL_GROUP_OWNER = 'Local'
+
+export interface GhListedRepo { name: string; url: string; description?: string }
+
+async function listGhRepos(owner: string): Promise<GhListedRepo[]> {
   const { stdout } = await execFileAsync('gh', [
     'repo', 'list', owner,
     '--json', 'name,url,description',
-    '--limit', '100',
-  ], { env: ghEnv, timeout: GH_TIMEOUT_MS })
+    '--limit', String(GH_REPO_LIST_LIMIT),
+  ], { env: ghEnv, timeout: GH_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 })
   const parsed: unknown = JSON.parse(stdout)
-  const repos = parsed as Array<{ name: string; url: string; description?: string }>
-  repos.sort((a, b) => a.name.localeCompare(b.name))
-  return repos.map((r) => {
-    const repoPath = localRepoPath(reposRoot, owner, r.name)
-    const cloned = existsSync(repoPath)
-    return {
-      id: r.name,
-      name: r.name,
-      owner,
-      path: repoPath,
-      workingDir: repoPath,
-      cloned,
-      description: r.description || '',
-      url: r.url,
-      skills: cloned ? scanSkills(join(repoPath, '.claude', 'skills')) : [],
-      modules: cloned ? scanModules(join(repoPath, '.claude', 'modules')) : [],
-      tags: [],
-    }
+  if (!Array.isArray(parsed)) return []
+  return (parsed as GhListedRepo[]).slice().sort((a, b) => a.name.localeCompare(b.name))
+}
+
+function withSkills(repo: Omit<ApiRepoEntry, 'skills' | 'modules'>): ApiRepoEntry {
+  return {
+    ...repo,
+    skills: repo.cloned ? scanSkills(join(repo.path, '.claude', 'skills')) : [],
+    modules: repo.cloned ? scanModules(join(repo.path, '.claude', 'modules')) : [],
+  }
+}
+
+/**
+ * Merge GitHub listings with on-disk checkouts. A GitHub repo is `cloned` when
+ * a discovered checkout's origin matches its URL (https/ssh forms, `.git`
+ * suffix) — using that checkout's actual path, so a flat `root/project` is
+ * never cloned a second time — or, failing that, when the owner-namespaced
+ * clone path exists. Checkouts not claimed by any GitHub repo go into a
+ * trailing "Local" group. Exported for tests.
+ */
+export function mergeRepoGroups(
+  reposRoot: string,
+  ghOwners: Array<{ owner: string; repos?: GhListedRepo[]; error?: string }>,
+  localRepos: LocalRepo[],
+): ApiRepoGroup[] {
+  const byRemote = new Map<string, LocalRepo>()
+  const byPath = new Map<string, LocalRepo>()
+  for (const local of localRepos) {
+    byPath.set(local.path, local)
+    if (!local.remoteKey) continue
+    // Prefer the owner-namespaced checkout when the same remote is on disk twice.
+    const slug = githubSlugFromKey(local.remoteKey)
+    const canonical = slug !== null && localRepoPath(reposRoot, slug.owner, slug.name).toLowerCase() === local.path.toLowerCase()
+    if (!byRemote.has(local.remoteKey) || canonical) byRemote.set(local.remoteKey, local)
+  }
+  const claimed = new Set<string>()
+
+  const groups: ApiRepoGroup[] = ghOwners.map(({ owner, repos, error }) => {
+    const entries = (repos ?? []).map((r) => {
+      const key = normalizeRemoteUrl(r.url)
+      const nestedPath = localRepoPath(reposRoot, owner, r.name)
+      const match = (key ? byRemote.get(key) : undefined) ?? byPath.get(nestedPath)
+      if (match) claimed.add(match.path)
+      const path = match ? match.path : nestedPath
+      return withSkills({
+        id: r.name,
+        name: r.name,
+        owner,
+        path,
+        workingDir: path,
+        cloned: match ? true : existsSync(nestedPath),
+        description: r.description || '',
+        url: r.url,
+        tags: [],
+      })
+    })
+    const group: ApiRepoGroup = { owner, source: 'github', repos: entries }
+    if (error) group.error = error
+    return group
   })
+
+  const unclaimed = localRepos.filter((l) => !claimed.has(l.path))
+  if (unclaimed.length > 0) {
+    groups.push({
+      owner: LOCAL_GROUP_OWNER,
+      source: 'local',
+      repos: unclaimed.map((l) => {
+        const slug = githubSlugFromKey(l.remoteKey)
+        return withSkills({
+          // relPath keeps ids unique between a flat and a nested checkout of the same name.
+          id: l.relPath,
+          name: l.name,
+          owner: slug?.owner ?? '',
+          path: l.path,
+          workingDir: l.path,
+          cloned: true,
+          description: l.relPath !== l.name ? l.relPath : (l.remoteKey ?? 'no remote'),
+          url: slug ? `https://github.com/${slug.owner}/${slug.name}` : (l.originUrl ?? ''),
+          tags: [],
+        })
+      }),
+    })
+  }
+  return groups
 }
 
 // ---------------------------------------------------------------------------
@@ -282,14 +410,31 @@ export function createUploadRouter(
     const globalSkills = scanSkills(GLOBAL_SKILLS_DIR)
     const globalModules = scanModules(GLOBAL_MODULES_DIR)
 
+    // Local checkouts are discovered independently of gh, so they are listed
+    // even when gh is missing, signed out, or failing. gh is enrichment.
+    const localRepos = discoverLocalRepos(reposRoot)
+
+    let ghStatus: GhStatus = 'ok'
+    let ghError: string | undefined
+    const ghOwners: Array<{ owner: string; repos?: GhListedRepo[]; error?: string }> = []
+
+    let username: string | null = null
     try {
-      // Get current user login
       const { stdout: userJson } = await execFileAsync('gh', ['api', 'user', '--jq', '.login'], { env: ghEnv, timeout: GH_TIMEOUT_MS })
-      const username = userJson.trim()
+      username = userJson.trim() || null
+      if (!username) {
+        ghStatus = 'unauthenticated'
+        ghError = 'GitHub CLI is not signed in'
+      }
+    } catch (err) {
+      const classified = classifyGhError(err)
+      ghStatus = classified.status
+      ghError = classified.message
+      if (ghStatus !== 'missing') console.warn(`[repos] gh api user failed (${ghStatus}): ${classified.message}`)
+    }
 
-      const groups: Array<{ owner: string; repos: Awaited<ReturnType<typeof fetchGhRepos>> }> = []
-
-      // Fetch org repos — use configured GH_ORG or auto-detect from gh CLI
+    if (username) {
+      // Org repos — use configured GH_ORGS or auto-detect from gh CLI
       let orgs = GH_ORGS
       if (orgs.length === 0) {
         try {
@@ -299,33 +444,31 @@ export function createUploadRouter(
           // Auto-detection failed (incl. timeout) — continue without org repos
         }
       }
-      for (const org of orgs) {
-        const orgRepos = await fetchGhRepos(org, reposRoot)
-        groups.push({ owner: org, repos: orgRepos })
-      }
-
-      // Fetch user repos
-      const userRepos = await fetchGhRepos(username, reposRoot)
-      groups.push({ owner: username, repos: userRepos })
-
-      res.json({ groups, globalSkills, globalModules, reposPath: reposRoot })
-    } catch (err) {
-      console.error('Failed to list repos from GitHub:', err)
-      const ghMissing = err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT'
-      if (ghMissing) {
-        console.error('GitHub CLI (gh) not found. Install it: https://cli.github.com')
-        // Return skills/modules even when gh is unavailable
-        res.json({ groups: [], globalSkills, globalModules, ghMissing, reposPath: reposRoot })
-        return
-      }
-      if (isExecTimeout(err)) {
-        // Surface upstream slowness as 504 so the client can retry/back off
-        // instead of seeing skills+modules with no repos and assuming success.
-        res.status(504).json({ error: 'GitHub CLI timed out', globalSkills, globalModules, reposPath: reposRoot })
-        return
-      }
-      res.json({ groups: [], globalSkills, globalModules, ghMissing, reposPath: reposRoot })
+      const owners = [...orgs, username]
+      // Per-owner isolation: an SSO-enforced org or a rate-limited listing
+      // marks only its own group, instead of emptying every group.
+      const results = await Promise.allSettled(owners.map((o) => listGhRepos(o)))
+      results.forEach((result, i) => {
+        if (result.status === 'fulfilled') {
+          ghOwners.push({ owner: owners[i], repos: result.value })
+        } else {
+          const { message } = classifyGhError(result.reason)
+          console.warn(`[repos] gh repo list ${owners[i]} failed: ${message}`)
+          ghOwners.push({ owner: owners[i], error: message })
+        }
+      })
     }
+
+    res.json({
+      groups: mergeRepoGroups(reposRoot, ghOwners, localRepos),
+      globalSkills,
+      globalModules,
+      reposPath: reposRoot,
+      ghStatus,
+      ...(ghError ? { ghError } : {}),
+      // Back-compat: older clients read only this flag.
+      ghMissing: ghStatus === 'missing',
+    })
   })
 
   // --- Clone a repo ---
@@ -404,6 +547,14 @@ export function createUploadRouter(
     }
     if (existsSync(dest)) {
       res.json({ success: true, path: dest })
+      return
+    }
+    // Never clone a duplicate: a checkout of this repo may already exist
+    // elsewhere under the root (e.g. a flat `root/name`), matched by remote.
+    const wantKey = normalizeRemoteUrl(`https://github.com/${owner}/${name}`)
+    const existing = discoverLocalRepos(reposRoot).find((l) => l.remoteKey === wantKey)
+    if (existing) {
+      res.json({ success: true, path: existing.path })
       return
     }
     // Ensure the owner-namespaced parent directory exists — git clone does not

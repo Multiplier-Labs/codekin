@@ -29,6 +29,7 @@ import {
   setWorktreePrefix,
   getAgentName,
   setAgentName,
+  cloneRepo,
 } from './ccApi'
 
 const mockFetch = vi.fn()
@@ -178,6 +179,23 @@ describe('deleteSession', () => {
   it('throws on non-ok response', async () => {
     mockFetch.mockResolvedValue(jsonResponse({}, 404))
     await expect(deleteSession('tok', 's1')).rejects.toThrow('Failed to delete session: 404')
+  })
+})
+
+describe('cloneRepo', () => {
+  it('resolves to the server-reported path (which may be an existing checkout)', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ success: true, path: '/r/project' }, 200))
+    await expect(cloneRepo('tok', 'me', 'project')).resolves.toBe('/r/project')
+  })
+
+  it('resolves to null when the server omits the path', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ success: true }, 200))
+    await expect(cloneRepo('tok', 'me', 'project')).resolves.toBeNull()
+  })
+
+  it('throws the server error on failure', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ error: 'Clone failed: nope' }, 500))
+    await expect(cloneRepo('tok', 'me', 'project')).rejects.toThrow('Clone failed: nope')
   })
 })
 
