@@ -1,8 +1,8 @@
 # Codekin Setup Guide (Advanced / Self-Hosted)
 
-> **Standard users**: If you just want to install and run Codekin, see [INSTALL-DISTRIBUTION.md](./INSTALL-DISTRIBUTION.md). This guide is for advanced/self-hosted bare-metal deployments with nginx, Authelia, and systemd.
+> **New users**: Start with [Getting started](./GETTING-STARTED.md) for hosted or local installation and your first session. This guide covers an advanced nginx, Authelia, and systemd deployment.
 
-Codekin is a web UI for managing multiple Claude Code terminal sessions. It connects via WebSocket and provides repo browsing, skill discovery, and screenshot uploads.
+Codekin is a web UI for Claude Code, Codex, and OpenCode sessions. It connects via WebSocket and provides repo browsing, skill discovery, and screenshot uploads.
 
 ## Architecture
 
@@ -45,8 +45,7 @@ npm install
 
 ## 2. Environment Variables
 
-Secrets and configuration are stored in a single file and sourced from `~/.bashrc`.
-Session naming uses the Claude CLI (`claude -p`), so no separate API keys are needed.
+The systemd unit below reads `~/.config/codekin/env` directly. Use plain `KEY=value` lines in that file, without `export` or shell commands. Session naming uses the Claude CLI (`claude -p`), so no separate API key is needed for naming.
 
 ```bash
 # Create the codekin config directory
@@ -59,8 +58,9 @@ nano ~/.config/codekin/env
 Contents of `~/.config/codekin/env`:
 
 ```bash
-# Add environment variables here as needed.
-# Webhook-specific vars are configured in Step 10.
+AUTH_TOKEN_FILE=/home/YOUR_USER/.config/codekin/token
+CORS_ORIGIN=https://YOUR_DOMAIN
+# Add other environment variables as needed.
 ```
 
 Key server environment variables (see `server/config.ts` for the full list):
@@ -77,31 +77,14 @@ Key server environment variables (see `server/config.ts` for the full list):
 | `CODEKIN_AUTO_RESTORE_SESSIONS` | `false` | Auto-restart Claude processes that were alive at previous shutdown (`true` to opt in) |
 | `CODEKIN_ORCHESTRATOR_MONITOR` | `false` | Run the orchestrator proactive monitor (15-minute polling) (`true` to opt in) |
 
-Source it from `~/.bashrc` so it's available to all shells and systemd user services:
-
-```bash
-echo 'source ~/.config/codekin/env' >> ~/.bashrc
-source ~/.config/codekin/env
-```
-
-To add a new env var later:
-
-```bash
-echo 'export NEW_VAR="value"' >> ~/.config/codekin/env
-source ~/.config/codekin/env
-# Then restart any services that need it:
-sudo systemctl restart codekin
-```
-
-> **Note**: The systemd services run as your user with `WorkingDirectory=/home/YOUR_USER`, so they inherit env vars from the user's shell profile.
+After changing this file, restart the system service with `sudo systemctl restart codekin`. A systemd service does not read your interactive shell's `~/.bashrc`.
 
 ## 3. Configure codekin
 
 ### Generate a token
 
 ```bash
-mkdir -p ~/.config/codekin
-openssl rand -hex 32 > ~/.config/codekin/token
+codekin setup
 ```
 
 ### Create systemd service
@@ -238,11 +221,11 @@ Add the webhook env vars to `~/.config/codekin/env` (see [step 2](#2-environment
 
 ```bash
 cat >> ~/.config/codekin/env << 'EOF'
-export GITHUB_WEBHOOK_SECRET="your-webhook-secret-here"
-export GITHUB_WEBHOOK_ENABLED=true
+GITHUB_WEBHOOK_SECRET=your-webhook-secret-here
+GITHUB_WEBHOOK_ENABLED=true
 # Optional overrides:
-# export GITHUB_WEBHOOK_MAX_SESSIONS=3
-# export GITHUB_WEBHOOK_LOG_LINES=200
+# GITHUB_WEBHOOK_MAX_SESSIONS=3
+# GITHUB_WEBHOOK_LOG_LINES=200
 EOF
 ```
 
@@ -255,7 +238,6 @@ openssl rand -hex 32
 Reload and restart:
 
 ```bash
-source ~/.config/codekin/env
 sudo systemctl restart codekin
 ```
 
