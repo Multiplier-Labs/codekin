@@ -90,6 +90,16 @@ const THEMES = [
     keys: { primary: '#fabd2f', secondary: '#d3869b', accent: '#83a598', error: '#fb4934', warning: '#fe8019', success: '#b8bb26' },
     syntax: { keyword: '#fb4934', builtin: '#fabd2f', function: '#8ec07c', string: '#b8bb26', number: '#d3869b', comment: '#928374', variable: '#83a598', regexp: '#fe8019', meta: '#8ec07c', selector: '#fabd2f', deletion: '#fb4934' },
   },
+  {
+    // Old-school phosphor terminal: green on black. Chrome and text stay
+    // green; status keeps red/amber so errors and warnings still stand out.
+    id: 'matrix',
+    label: 'Matrix',
+    scheme: 'dark',
+    neutral: ramp('#c8ffd4 #33ff66 #2ee65c #26c24d #1fa340 #188032 #135c27 #10491f #0c3818 #082610 #041208 #000000'),
+    keys: { primary: '#00ff41', secondary: '#9dff5c', accent: '#5cffc8', error: '#ff4545', warning: '#ffb000', success: '#00ff41' },
+    syntax: { keyword: '#00ff41', builtin: '#7dffb0', function: '#c8ff5c', string: '#9cff9c', number: '#d4ff7a', comment: '#1fa340', variable: '#5cffc8', regexp: '#ffb000', meta: '#2ee65c', selector: '#00ff41', deletion: '#ff4545' },
+  },
 ]
 
 /** Step whose lightness is pinned to the key color (text-*-5 is the common text step). */

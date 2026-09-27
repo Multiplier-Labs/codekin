@@ -1,7 +1,7 @@
 # Theme Selector
 
 **Status**: Implemented
-**Goal**: Replace the binary dark/light toggle with a theme selector offering eight
+**Goal**: Replace the binary dark/light toggle with a theme selector offering nine
 pre-defined color themes. Today's Dark and Light modes become themes 1 and 2, unchanged.
 Themes change **color only** — fonts, the type scale, radii, shadow geometry and
 density are shared by every theme.
@@ -66,12 +66,13 @@ Each theme declares a **scheme** (`dark` or `light`) that drives native UI
 | 6 | `solarized` | Solarized Light | light | Solarized base3/base2 grounds, base02 ink, Solarized accents. |
 | 7 | `dracula` | Dracula | dark | Dracula background and foreground; purple primary, pink secondary, cyan accent. |
 | 8 | `gruvbox` | Gruvbox | dark | Gruvbox dark (hard) grounds, cream ink; yellow primary, blue accent. |
+| 9 | `matrix` | Matrix | dark | Old-school phosphor terminal: green on black, green chrome and text. Error stays red and warning amber so status still reads. |
 
-Solarized ships as the light variant: the dark side is already well covered (five dark
+Solarized ships as the light variant: the dark side is already well covered (six dark
 themes), and Solarized Light reads clearly differently from Paper (cooler accents,
 yellower ground).
 
-Themes 3–8 use **one palette throughout**. Dark and Light keep their distinct, warmer
+Themes 3–9 use **one palette throughout**. Dark and Light keep their distinct, warmer
 `.terminal-area` palette; the new themes do not define one.
 
 **Fidelity vs. contrast.** Where a canonical palette color fails a contrast floor, the
@@ -127,7 +128,7 @@ public/theme-init.js          # pre-paint: applies the saved theme before first 
 scripts/generate-themes.mjs   # theme sources + generator → src/themes/palettes.css
 src/index.css                 # Dark (@theme) and Light palettes, scheme rules, hljs rules
 src/themes/
-  palettes.css                # GENERATED: themes 3–8 (ramps + syntax tokens)
+  palettes.css                # GENERATED: themes 3–9 (ramps + syntax tokens)
   registry.ts                 # THEMES, ThemeId, isThemeId, getTheme, applyTheme
   color.ts                    # OKLCH conversion, gamut mapping, WCAG contrast
   cssVars.ts                  # reads flat custom-property blocks (generator + tests)
@@ -232,7 +233,7 @@ frozen at their hand-tuned values (their measured ratios are documented in
 
 ## 7. UI
 
-- **Settings → Preferences → Theme**: a grid of theme cards (4 across, 2 on narrow
+- **Settings → Preferences → Theme**: a grid of theme cards (3 across, 2 on narrow
   widths), each with a `ThemeSwatch` preview, the label, and a Dark/Light hint (omitted
   where the label already says it). It is a `radiogroup`; the selected card gets a
   `border-focus` ring and a check. Selection applies immediately.
@@ -276,6 +277,6 @@ active one, so it uses inline styles rather than tokens.
 2. **Semantic tokens in override scopes** — `--color-page`, `--color-ink`, etc. are
    declared on `:root`, so they resolve against the root ramps even inside
    `.terminal-area` and the sidebars (custom properties compute where declared). This
-   predates this work and does not affect themes 3–8, which have a single scope. If Dark
+   predates this work and does not affect themes 3–9, which have a single scope. If Dark
    and Light ever need semantic tokens to follow their scoped ramps, Tailwind's
    `@theme inline` is the fix.

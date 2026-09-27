@@ -94,7 +94,7 @@ describe('useSettings', () => {
       unmount()
     })
 
-    it.each(['dark', 'light', 'midnight', 'paper', 'contrast', 'solarized', 'dracula', 'gruvbox'])('restores saved theme %s', (theme) => {
+    it.each(['dark', 'light', 'midnight', 'paper', 'contrast', 'solarized', 'dracula', 'gruvbox', 'matrix'])('restores saved theme %s', (theme) => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ token: '', theme }))
       const { result, unmount } = renderHook(() => useSettings())
       expect(result.current.settings.theme).toBe(theme)

@@ -8,7 +8,7 @@
  * color, picker previews); registry.test.ts keeps them in step with the CSS.
  */
 
-export const THEME_IDS = ['dark', 'light', 'midnight', 'paper', 'contrast', 'solarized', 'dracula', 'gruvbox'] as const
+export const THEME_IDS = ['dark', 'light', 'midnight', 'paper', 'contrast', 'solarized', 'dracula', 'gruvbox', 'matrix'] as const
 
 export type ThemeId = typeof THEME_IDS[number]
 
@@ -43,6 +43,7 @@ export const THEMES: readonly ThemeDefinition[] = [
   { id: 'solarized', label: 'Solarized Light', scheme: 'light', swatches: { page: '#fdf6e3', surface: '#eee8d5', ink: '#073642', primary: '#876d34', accent: '#2976b0' } },
   { id: 'dracula', label: 'Dracula', scheme: 'dark', swatches: { page: '#21222c', surface: '#282a36', ink: '#f8f8f2', primary: '#bd93f9', accent: '#8be9fd' } },
   { id: 'gruvbox', label: 'Gruvbox', scheme: 'dark', swatches: { page: '#1d2021', surface: '#282828', ink: '#ebdbb2', primary: '#fabd2f', accent: '#83a598' } },
+  { id: 'matrix', label: 'Matrix', scheme: 'dark', swatches: { page: '#000000', surface: '#041208', ink: '#33ff66', primary: '#00ff41', accent: '#5cffc8' } },
 ]
 
 export const DEFAULT_THEME: ThemeId = 'dark'
