@@ -111,7 +111,7 @@ export class EmbeddedConnectorSupervisor {
     if (this.timer) return
     this.check()
     this.timer = setInterval(() => { this.check() }, this.opts.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS)
-    this.timer.unref?.()
+    this.timer.unref()
   }
 
   stop(): void {
