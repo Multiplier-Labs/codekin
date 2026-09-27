@@ -321,7 +321,7 @@ server. It is two processes plus a static bundle:
 |---|---|---|
 | Control plane / hub | the host serving `app.codekin.ai`, port 32360 | `server/dist/relay/relay-server.js` behind nginx |
 | Hosted frontend | `/var/www/codekin-app` | `npm run build:hosted` output, static-served |
-| Connector | each developer machine | `server/dist/relay/connector-cli.js`, outbound only |
+| Connector | each developer machine | runs inside the local Codekin server for managed pairings (`server/dist/relay/embedded-connector.js`); `server/dist/relay/connector-cli.js` standalone otherwise. Outbound only |
 
 Design and protocol are in
 [HOSTED-RELAY-CONTROL-PLANE-SPEC.md](HOSTED-RELAY-CONTROL-PLANE-SPEC.md); the
@@ -394,13 +394,56 @@ pm2 restart codekin-relay    # or: pm2 start server/dist/relay/relay-server.js -
 
 ### Connecting a machine
 
+The normal path is the command generated in the hosted app (Settings →
+Machines), which installs Codekin and pairs the machine in one run:
+
 ```bash
-codekin relay login      # device-code pairing; approve at <PUBLIC_URL>/pair
-codekin relay connect    # foreground; run under pm2 to keep it up
+curl -fsSL https://codekin.ai/install.sh | CODEKIN_PAIR_TOKEN=<token> bash
+# already installed:
+CODEKIN_PAIR_TOKEN=<token> codekin relay login
 ```
 
-The connector needs two things about the machine's *local* server, and finds
-them in the process environment, then `~/.codekin/env`, then
+Both write `~/.config/codekin/relay.json` with `"managed": true`. For a
+managed credential **the local Codekin server runs the connector itself**
+(`server/relay/embedded-connector.ts`): it stays up for as long as the
+Codekin service does, across terminal closes and reboots, with no separate
+process. The server re-stats `relay.json` every 5 s, so a pairing made after
+it started, a `codekin relay logout`, or a re-pair to another machine takes
+effect without a restart. Because it runs inside the server, it already knows
+the local port, auth token and `CORS_ORIGIN` — none of the connector
+environment below is needed.
+
+```bash
+codekin relay status     # mode, embedded connector state, hub health
+curl -H "Authorization: Bearer $(cat ~/.config/codekin/token)" \
+  http://127.0.0.1:32352/api/relay/status
+# → { "paired": true, "managed": true, "state": "connected", "machineId": "…", "relayUrl": "…" }
+```
+
+`state` is one of `connecting`, `connected`, `disconnected` (retrying),
+`replaced`, `auth_failed`, `unmanaged`, `disabled`, `unpaired`, `stopped`.
+`replaced` and `auth_failed` are terminal for that credential — the server
+logs why and waits for `relay.json` to change instead of reconnecting.
+
+**Unmanaged (self-supervised) connectors.** A credential without the
+`managed` field — every pairing made before it existed, or
+`codekin relay login --unmanaged` — is ignored by the server, so hosts that
+already run the connector under pm2 keep working unchanged:
+
+```bash
+codekin relay login --unmanaged   # device-code pairing; approve at <PUBLIC_URL>/pair
+codekin relay connect             # foreground; run under pm2 to keep it up
+```
+
+To switch such a host to the embedded connector, stop the pm2 connector, add
+`"managed": true` to `relay.json` (the server picks it up within 5 s). To keep
+a managed credential but run the connector yourself, set
+`CODEKIN_RELAY_CONNECTOR=off` in the server's environment and use
+`codekin relay connect --foreground` (without `--foreground`, `connect` exits
+and points at the service for managed credentials).
+
+The standalone connector needs two things about the machine's *local* server,
+and finds them in the process environment, then `~/.codekin/env`, then
 `~/.config/codekin/env`:
 
 - **`AUTH_TOKEN` or `AUTH_TOKEN_FILE`** — the local server's bearer token. The
@@ -415,7 +458,20 @@ them in the process environment, then `~/.codekin/env`, then
   4003.
 
 Only one connector may serve a machine at a time; a second one takes the slot
-and the first stops rather than fighting for it.
+and the first stops rather than fighting for it. Running both the embedded and
+a standalone connector for one machine therefore leaves one of them
+`replaced`.
+
+### Unfinished setups
+
+Generating an install command creates the machine row immediately. Until an
+installer claims the token, `GET /api/machines` reports it with
+`setupPending: true` and `pairingExpiresAt`. Regenerating passes
+`replaceMachineId` to `POST /api/machines/pair/precreate`, which removes the
+old row and expires its token. Rows whose pairing expired unclaimed are swept
+every 5 minutes (and before each machine listing); a machine that has ever
+held a credential is never swept. Precreate is limited to 10 per user per
+minute and audited as `machine_pairing_created`.
 
 ### Limits
 

@@ -5,8 +5,17 @@
 Codekin is distributed as an npm package with a one-liner install script, modelled on Ollama's approach. The goal is that a single command installs everything, sets up a persistent background service, and hands the user a URL with an auth token — no manual process management, no nginx, no Docker required.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Multiplier-Labs/codekin/main/install.sh | bash
+curl -fsSL https://codekin.ai/install.sh | bash
 ```
+
+`https://codekin.ai/install.sh` is a 302 redirect to
+`https://raw.githubusercontent.com/Multiplier-Labs/codekin/main/install.sh`,
+so **the installer users run is whatever is on `main`** (after GitHub's raw
+CDN cache, a few minutes) — not the npm release. The npm package it installs
+is the latest *published* release. A change that needs both (e.g. the script
+relying on a new server feature) must degrade gracefully while `main` is ahead
+of npm. Always use the `https://` URL: without a scheme curl's first request
+is plain HTTP, and the response is piped straight into `bash`.
 
 ## How It Works
 
@@ -34,6 +43,9 @@ Installed globally via npm, the `codekin` command manages the local server:
 | `codekin service uninstall` | Remove the background service |
 | `codekin service status` | Show whether the service is running |
 | `codekin token` | Print the current access URL with auth token |
+| `codekin relay login` | Pair with hosted Codekin (`CODEKIN_PAIR_TOKEN` / `--code`, or device-code flow); `--unmanaged` to run the connector yourself |
+| `codekin relay status` | Pairing mode, embedded connector state, hub health |
+| `codekin relay logout` | Remove the local pairing credential |
 
 ### Service: user-level, no sudo
 
@@ -63,11 +75,23 @@ The token is embedded in the access URL: `http://localhost:32352?token=<token>`
 The curl-pipe-bash script handles bootstrapping on a fresh machine:
 
 1. **Check Node.js ≥20** — installs via nvm if missing
-2. **Check Claude Code CLI** — warns and exits if not installed, since auth must be done interactively
-3. **`npm install -g codekin`**
-4. **`codekin setup`** — generates auth token and writes config
-5. **`codekin service install`** — installs and starts the background service
-6. **Print access URL** — `http://localhost:32352?token=<token>`
+2. **Check coding agents** — needs at least one of `claude`, `codex`, `opencode`; lists what it found, and exits with install hints for each if none is present
+3. **Hosted pairing** (only with `CODEKIN_PAIR_TOKEN`, or the legacy `--pair <token>`) — claims the token *before* the slow steps so a long `npm install` cannot outlive its 10-minute TTL, and writes `~/.config/codekin/relay.json` with `managed: true`. An existing credential counts as already paired. A failed claim does not stop the local install
+4. **`npm install -g codekin`**
+5. **`codekin setup`** — generates auth token and writes config
+6. **`codekin service install`** — installs and starts the background service; for a managed pairing the service also runs the hosted-relay connector
+7. **Finish** — without pairing, prints the local access hints. With pairing, polls the local `GET /api/relay/status` for up to 30 s and ends with "Your machine is online — return to Codekin in your browser" or the specific reason it is not (pairing failed, older server without the embedded connector, service not responding, …)
+
+The hosted app generates:
+
+```bash
+curl -fsSL https://codekin.ai/install.sh | CODEKIN_PAIR_TOKEN=<token> bash
+```
+
+The token is passed in the environment, not as an argument, so it is not
+visible in `ps`; the script also removes it from the environment of every
+later child process. `--relay <url>` (or `CODEKIN_RELAY_URL`) selects a
+non-default relay.
 
 The script is idempotent: re-running it upgrades codekin and restarts the service.
 
@@ -143,6 +167,7 @@ All configuration is via environment variables. Defaults suit a local install; o
 | `SCREENSHOTS_DIR` | `~/.codekin/screenshots` | Directory for uploaded file storage |
 | `CODEKIN_AUTO_RESTORE_SESSIONS` | `false` | Auto-restart Claude processes that were alive at previous shutdown (`true` to opt in) |
 | `CODEKIN_ORCHESTRATOR_MONITOR` | `false` | Run the orchestrator proactive monitor (15-minute polling) (`true` to opt in) |
+| `CODEKIN_RELAY_CONNECTOR` | on | `off` stops the server from running the hosted-relay connector for a managed pairing |
 
 For webhook-specific environment variables (`GITHUB_WEBHOOK_SECRET`, `GITHUB_WEBHOOK_ENABLED`, etc.), see the [webhook setup section in SETUP.md](./SETUP.md#10-configure-github-webhooks-optional).
 
@@ -152,6 +177,7 @@ For webhook-specific environment variables (`GITHUB_WEBHOOK_SECRET`, `GITHUB_WEB
 ~/.config/codekin/
   env          # environment variables for the service (PORT, REPOS_ROOT, etc.)
   token        # auth token
+  relay.json   # hosted-relay pairing credential (mode 600), if paired
 
 ~/.codekin/
   sessions/    # persisted session data
