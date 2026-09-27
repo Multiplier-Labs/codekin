@@ -24,11 +24,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build frontend
-        run: npm run build
-
+      # Before the build: `npm run build` runs `tsc -b`, which also typechecks
+      # the server project, and the relay needs server-only packages
+      # (express-session, @simplewebauthn/server). Matches ci.yml.
       - name: Install server dependencies
         run: npm ci --prefix server
+
+      - name: Build frontend
+        run: npm run build
 
       - name: Compile server TypeScript
         run: npx tsc -p server/tsconfig.json
