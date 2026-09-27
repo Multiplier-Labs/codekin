@@ -53,7 +53,7 @@ describe('relay auth routes', () => {
   let baseUrl: string
   const disconnectUser = vi.fn()
 
-  async function start(fetchImpl: typeof fetch) {
+  async function start(fetchImpl: typeof fetch, config: RelayConfig = CONFIG) {
     db = openControlPlaneDb(':memory:')
     store = new SqliteSessionStore(db)
     const app = express()
@@ -68,7 +68,7 @@ describe('relay auth routes', () => {
         cookie: { httpOnly: true, sameSite: 'lax', maxAge: 60_000 },
       }),
     )
-    app.use(createRelayAuthRouter({ db, config: CONFIG, fetchImpl, store, disconnectUser }))
+    app.use(createRelayAuthRouter({ db, config, fetchImpl, store, disconnectUser }))
     app.get('/api/protected', createRequireActiveUser(db), (_req, res) => res.json({ ok: true }))
     await new Promise<void>(resolve => {
       server = app.listen(0, '127.0.0.1', () => {
@@ -271,5 +271,79 @@ describe('relay auth routes', () => {
     expect((await res.json() as { destroyed: number }).destroyed).toBe(2)
     expect((await fetch(`${baseUrl}/api/me`, { headers: { cookie: second } }).then(r => r.json()) as { user: null }).user).toBeNull()
     expect(disconnectUser).toHaveBeenCalledWith(expect.any(String), 'all sessions logged out')
+  })
+
+  /** Start → callback with an optional returnTo; returns the callback's Location. */
+  async function loginVia(startQuery: string): Promise<string | null> {
+    const startRes = await fetch(`${baseUrl}/api/auth/github/start${startQuery}`, { redirect: 'manual' })
+    const location = new URL(startRes.headers.get('location') ?? '')
+    // The destination stays server-side: it is not handed to GitHub.
+    expect(location.search).not.toContain('pair')
+    const cbRes = await fetch(
+      `${baseUrl}/api/auth/github/callback?code=abc&state=${location.searchParams.get('state') ?? ''}`,
+      { redirect: 'manual', headers: { cookie: cookieOf(startRes) } },
+    )
+    expect(cbRes.status).toBe(302)
+    return cbRes.headers.get('location')
+  }
+
+  it('returns to the pairing approval page a sign-in started from', async () => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    const dest = await loginVia(`?returnTo=${encodeURIComponent('/pair?code=ABCD-EF23')}`)
+    expect(dest).toBe('/pair?code=ABCD-EF23')
+  })
+
+  it.each([
+    '//evil.example',
+    '/\\evil.example',
+    'https://evil.example/pair',
+    'javascript:alert(1)',
+    '%2F%2Fevil.example',
+    '/pair?code=ABCD&next=//evil.example',
+    '/link',
+  ])('ignores a hostile or unknown returnTo %j and lands on /', async (raw) => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    expect(await loginVia(`?returnTo=${encodeURIComponent(raw)}`)).toBe('/')
+  })
+
+  it('ignores a returnTo given as an array', async () => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    expect(await loginVia('?returnTo=/pair&returnTo=//evil.example')).toBe('/')
+  })
+
+  it('does not carry a returnTo from an earlier sign-in attempt', async () => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    const first = await fetch(`${baseUrl}/api/auth/github/start?returnTo=%2Fpair`, { redirect: 'manual' })
+    const cookie = cookieOf(first)
+    const second = await fetch(`${baseUrl}/api/auth/github/start`, { redirect: 'manual', headers: { cookie } })
+    const state = new URL(second.headers.get('location') ?? '').searchParams.get('state') ?? ''
+    const cbRes = await fetch(`${baseUrl}/api/auth/github/callback?code=abc&state=${state}`, {
+      redirect: 'manual',
+      headers: { cookie },
+    })
+    expect(cbRes.headers.get('location')).toBe('/')
+  })
+
+  it('still rejects a non-allowlisted user to the login screen, whatever the returnTo', async () => {
+    await start(githubFetchMock({ id: 2, login: 'stranger' }))
+    expect(await loginVia(`?returnTo=${encodeURIComponent('/pair?code=ABCD-EF23')}`)).toBe('/?auth_error=access_not_allowed')
+  })
+
+  it('publishes invite-only admission without an access route by default', async () => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    const res = await fetch(`${baseUrl}/api/auth/config`)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ inviteOnly: true })
+  })
+
+  it('publishes the configured access-request route, identically for everyone', async () => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }), { ...CONFIG, accessRequestUrl: 'https://codekin.ai/access' })
+    const anonymous = await (await fetch(`${baseUrl}/api/auth/config`)).json()
+    expect(anonymous).toEqual({ inviteOnly: true, accessUrl: 'https://codekin.ai/access' })
+    // A signed-in (allowlisted) caller gets the same answer: nothing about
+    // any particular account is revealed.
+    const cookie = await login()
+    const signedIn = await (await fetch(`${baseUrl}/api/auth/config`, { headers: { cookie } })).json()
+    expect(signedIn).toEqual(anonymous)
   })
 })

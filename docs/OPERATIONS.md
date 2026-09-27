@@ -343,6 +343,7 @@ misconfiguration fails at start rather than at first login.
 | `PUBLIC_URL` | no | default `http://localhost:5173`; must match the OAuth callback host |
 | `RELAY_PORT` | no | default 32360, bound to 127.0.0.1 |
 | `AUDIT_RETENTION_DAYS` | no | default 90; `0` disables pruning |
+| `RELAY_ACCESS_REQUEST_URL` | no | `https:` or `mailto:` link shown on the sign-in page ("Request access") and on the not-allowed error; served by `GET /api/auth/config` |
 | `NODE_ENV=production` | recommended | required for `Secure` session cookies |
 
 The OAuth App's **Authorization callback URL** must be exactly
