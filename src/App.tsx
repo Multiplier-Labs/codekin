@@ -34,7 +34,8 @@ import { useProviderValidation } from './hooks/useProviderValidation'
 import { buildSlashCommandList, buildOpenCodeSlashCommandList } from './lib/slashCommands'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { emitWorkflowEvent } from './lib/workflowEvents'
-import { setAgentHealth } from './lib/agentHealth'
+import { setAgentHealth, getAgentHealth, resolveDefaultProvider, PROVIDER_STORAGE_KEY } from './lib/agentHealth'
+import { useAgentHealth } from './hooks/useAgentHealth'
 import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo } from './lib/ccApi'
 import { Settings } from './components/Settings'
 import { LeftSidebar } from './components/LeftSidebar'
@@ -72,7 +73,11 @@ interface AppProps {
 
 export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps = {}) {
   const { settings, updateSettings } = useSettings()
-  const { groups, repos, globalSkills, globalModules, ghMissing, refresh: refreshRepos } = useRepos(settings.token)
+  const {
+    groups, repos, globalSkills, globalModules,
+    loading: reposLoading, error: reposError, ghStatus, ghError,
+    refresh: refreshRepos,
+  } = useRepos(settings.token)
   const { sessions, rename: renameSession, remove: removeSession, refresh: refreshSessions } = useSessions(settings.token)
   const { queues: tentativeQueues, addToQueue, clearQueue } = useTentativeQueue()
   const { sessionId: urlSessionId, view, automationsTab, path: routePath, navigate } = useRouter()
@@ -156,10 +161,17 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     },
   }), [])
 
-  /** Provider ref for session orchestration (read at session creation time). */
-  const providerRef = useRef<CodingProvider>(
-    (localStorage.getItem('codekin-provider') as CodingProvider) || 'claude'
-  )
+  /**
+   * Default provider for new sessions, read at session-creation time. Resolved
+   * against live agent health so a fresh browser whose implicit default
+   * (Claude) isn't installed or signed in starts with a healthy agent instead
+   * (audit N6). A saved, installed choice is respected.
+   */
+  const providerRef = useMemo(() => ({
+    get current(): CodingProvider {
+      return resolveDefaultProvider(getAgentHealth(), localStorage.getItem(PROVIDER_STORAGE_KEY))
+    },
+  }), [])
 
   const inputBarRef = useRef<InputBarHandle>(null)
   const [sessionInputs, setSessionInputs] = useState<Record<string, string>>({})
@@ -255,8 +267,11 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   }, [setPermissionMode])
 
   // Provider is per-session; default for new sessions is persisted to localStorage
-  const [currentProvider] = useState<CodingProvider>(
-    (localStorage.getItem('codekin-provider') as CodingProvider) || 'claude'
+  const agentHealth = useAgentHealth()
+  const [storedProvider] = useState(() => localStorage.getItem(PROVIDER_STORAGE_KEY))
+  const currentProvider = useMemo(
+    () => resolveDefaultProvider(agentHealth, storedProvider),
+    [agentHealth, storedProvider],
   )
   const [claudeDisabled, setClaudeDisabled] = useState(false)
   const [openCodeDisabled, setOpenCodeDisabled] = useState(false)
@@ -385,7 +400,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   // provider-derived UI (model list, permission modes) follows immediately.
   const handleProviderChange = useCallback((provider: CodingProvider, carryContext: boolean) => {
     setProvider(provider, carryContext)
-    localStorage.setItem('codekin-provider', provider)
+    localStorage.setItem(PROVIDER_STORAGE_KEY, provider)
     void refreshSessions()
   }, [setProvider, refreshSessions])
 
@@ -874,7 +889,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
             claudeDisabled={activeSessionProvider === 'claude' && claudeDisabled}
           />
         ) : (
-          <RepoSelector groups={groups} token={settings.token} ghMissing={ghMissing} onOpen={handleOpenSession} onRefreshRepos={refreshRepos} />
+          <RepoSelector groups={groups} token={settings.token} ghStatus={ghStatus} ghError={ghError} loading={reposLoading} error={reposError} onOpen={handleOpenSession} onRefreshRepos={refreshRepos} />
         )}
       </div>
 

@@ -9,7 +9,7 @@
 import { useState, useEffect } from 'react'
 import { IconGitBranch } from '@tabler/icons-react'
 import type { Repo } from '../types'
-import type { ApiRepo, RepoGroup } from '../hooks/useRepos'
+import type { ApiRepo, GhStatus, RepoGroup } from '../hooks/useRepos'
 import { RepoList } from './RepoList'
 import { FolderPicker } from './FolderPicker'
 import { EnvironmentChecklist } from './EnvironmentChecklist'
@@ -18,12 +18,18 @@ import { cloneRepo, getReposPath, setReposPath as setReposPathApi } from '../lib
 interface Props {
   groups: RepoGroup[]
   token?: string
-  ghMissing?: boolean
+  /** State of the optional GitHub CLI on the host. */
+  ghStatus?: GhStatus
+  ghError?: string | null
+  /** The repository list is being fetched. */
+  loading?: boolean
+  /** The repository fetch failed (network, timeout) — distinct from "no repositories". */
+  error?: string | null
   onOpen: (repo: Repo) => void
   onRefreshRepos?: () => void
 }
 
-export function RepoSelector({ groups, token, ghMissing, onOpen, onRefreshRepos }: Props) {
+export function RepoSelector({ groups, token, ghStatus = 'unknown', ghError, loading, error, onOpen, onRefreshRepos }: Props) {
   const [cloning, setCloning] = useState<string | null>(null)
   const [cloneError, setCloneError] = useState<string | null>(null)
   const [reposPath, setReposPath] = useState('')
@@ -48,8 +54,10 @@ export function RepoSelector({ groups, token, ghMissing, onOpen, onRefreshRepos 
       setCloning(repo.id)
       setCloneError(null)
       try {
-        await cloneRepo(token, repo.owner, repo.name)
+        const path = await cloneRepo(token, repo.owner, repo.name)
         repo.cloned = true
+        // The server may point at an existing checkout rather than a fresh clone.
+        if (path) { repo.path = path; repo.workingDir = path }
       } catch (err) {
         // Say why — a failed clone that just puts the list back looks like a
         // dead click.
@@ -76,10 +84,51 @@ export function RepoSelector({ groups, token, ghMissing, onOpen, onRefreshRepos 
         </div>
 
         {/* Live environment checks — agents, gh, repos — with fixes inline. */}
-        <EnvironmentChecklist ghMissing={ghMissing ?? false} repoCount={totalRepos} />
+        <EnvironmentChecklist
+          ghStatus={ghStatus}
+          ghError={ghError}
+          repoCount={totalRepos}
+          reposLoading={loading}
+          reposError={error}
+        />
+
+        {/* Loading, fetch failure, and a genuinely empty root are different
+            situations with different next actions — never collapse them into
+            "No repositories yet". */}
+        {error && (
+          <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-control bg-error-10/50 px-3 py-2 text-meta text-error-4">
+            <span className="min-w-0">
+              {error}
+              {totalRepos > 0 ? ' — showing the last loaded list.' : '.'}
+            </span>
+            {onRefreshRepos && (
+              <button
+                type="button"
+                onClick={onRefreshRepos}
+                disabled={loading}
+                className="flex-shrink-0 rounded-control border border-error-6 px-2 py-0.5 text-meta text-error-4 hover:bg-error-10 disabled:cursor-wait disabled:opacity-60"
+              >
+                {loading ? 'Retrying…' : 'Retry'}
+              </button>
+            )}
+          </div>
+        )}
 
         {totalRepos === 0 ? (
-          <p className="text-center text-title text-ink-faint">No repositories yet</p>
+          error ? null : loading ? (
+            <p className="text-center text-body text-ink-faint">Loading repositories…</p>
+          ) : (
+            <div className="text-center">
+              <p className="text-title text-ink-faint">No repositories yet</p>
+              <p className="mt-1 text-meta text-ink-faint">
+                Git checkouts under the repositories path below appear here
+                {ghStatus === 'ok' ? '.' : ' — connect the GitHub CLI to also list and clone GitHub repos.'}
+              </p>
+              {groups.filter(g => g.error).map(g => (
+                <p key={g.owner} className="mt-1 text-meta text-warning-4">Couldn't list {g.owner}: {g.error}</p>
+              ))}
+            </div>
+          )
         ) : (
           <>
             <RepoList
