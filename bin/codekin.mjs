@@ -144,11 +144,38 @@ function findConnectorScript() {
   throw new Error('Connector script not found. Run npm run build in server/ first.')
 }
 
+/**
+ * Persist the machine credential. `managed: true` tells the local Codekin
+ * server to run the connector itself (server/relay/embedded-connector.ts);
+ * `--unmanaged` leaves that to the user (`codekin relay connect`, pm2, ...).
+ * The installer writes the same shape — keep the two in sync.
+ */
+function writeRelayCredential(relayUrl, data, managed) {
+  ensureConfigDir()
+  const credential = { url: relayUrl, machineId: data.machineId, machineSecret: data.machineSecret }
+  if (managed) credential.managed = true
+  writeFileSync(RELAY_CREDENTIAL_FILE, JSON.stringify(credential, null, 2) + '\n', { mode: 0o600 })
+  chmodSync(RELAY_CREDENTIAL_FILE, 0o600)
+}
+
+function printPairedNextSteps(managed) {
+  if (managed) {
+    console.log('The Codekin service brings this machine online within a few seconds.')
+    console.log("If the service isn't running, start it with `codekin service install` (or `codekin start`).")
+    console.log('Check with: codekin relay status')
+  } else {
+    console.log('Run `codekin relay connect` to bring this machine online.')
+  }
+}
+
 async function cmdRelayLogin(args) {
   const urlFlag = args.indexOf('--url')
   const relayUrl = (urlFlag !== -1 && args[urlFlag + 1] ? args[urlFlag + 1] : DEFAULT_RELAY_URL).replace(/\/$/, '')
   const codeFlag = args.indexOf('--code')
-  const pairingToken = codeFlag !== -1 ? args[codeFlag + 1] : null
+  // The pairing token is a bearer secret: prefer the environment, which
+  // (unlike argv) is not visible in `ps` or kept in shell history.
+  const pairingToken = (codeFlag !== -1 ? args[codeFlag + 1] : null) || process.env.CODEKIN_PAIR_TOKEN || null
+  const managed = !args.includes('--unmanaged')
 
   const existing = readRelayCredential()
   if (existing) {
@@ -177,14 +204,9 @@ async function cmdRelayLogin(args) {
     }
     const data = await res.json().catch(() => ({}))
     if (res.ok && data.status === 'complete') {
-      ensureConfigDir()
-      writeFileSync(
-        RELAY_CREDENTIAL_FILE,
-        JSON.stringify({ url: relayUrl, machineId: data.machineId, machineSecret: data.machineSecret }, null, 2) + '\n',
-      )
-      chmodSync(RELAY_CREDENTIAL_FILE, 0o600)
+      writeRelayCredential(relayUrl, data, managed)
       console.log(`Paired. Machine id: ${data.machineId}`)
-      console.log('Run `codekin relay connect` to bring this machine online.')
+      printPairedNextSteps(managed)
       return
     }
     if (data.status === 'expired') {
@@ -230,14 +252,9 @@ async function cmdRelayLogin(args) {
     if (res.status === 202) continue
     const data = await res.json().catch(() => ({}))
     if (res.ok && data.status === 'complete') {
-      ensureConfigDir()
-      writeFileSync(
-        RELAY_CREDENTIAL_FILE,
-        JSON.stringify({ url: relayUrl, machineId: data.machineId, machineSecret: data.machineSecret }, null, 2) + '\n',
-      )
-      chmodSync(RELAY_CREDENTIAL_FILE, 0o600)
+      writeRelayCredential(relayUrl, data, managed)
       console.log(`\nPaired. Machine id: ${data.machineId}`)
-      console.log('Run `codekin relay connect` to bring this machine online.')
+      printPairedNextSteps(managed)
       return
     }
     if (data.status === 'denied') {
@@ -253,11 +270,18 @@ async function cmdRelayLogin(args) {
   }
 }
 
-function cmdRelayConnect() {
+function cmdRelayConnect(args) {
   const credential = readRelayCredential()
   if (!credential) {
     console.error('Not paired. Run `codekin relay login` first.')
     process.exit(1)
+  }
+  if (credential.managed === true && !args.includes('--foreground')) {
+    console.log('This machine is paired in managed mode: the Codekin service already runs the relay connector.')
+    console.log('Check it with: codekin relay status')
+    console.log('To run the connector in this terminal instead, set CODEKIN_RELAY_CONNECTOR=off for the')
+    console.log('service (otherwise the two will take turns replacing each other) and use --foreground.')
+    process.exit(0)
   }
   const { script, runner } = findConnectorScript()
   console.log(`Connecting to ${credential.url} as machine ${credential.machineId}...`)
@@ -268,6 +292,42 @@ function cmdRelayConnect() {
   process.exit(result.status ?? 0)
 }
 
+/**
+ * Ask the local Codekin server for its embedded connector state
+ * (GET /api/relay/status). Returns null when the server is unreachable or
+ * predates the endpoint.
+ */
+async function fetchLocalRelayStatus() {
+  const env = readEnvFile()
+  let token = env.AUTH_TOKEN || null
+  if (!token && env.AUTH_TOKEN_FILE && existsSync(env.AUTH_TOKEN_FILE)) {
+    token = readFileSync(env.AUTH_TOKEN_FILE, 'utf-8').trim()
+  }
+  token = token || readToken()
+  try {
+    const res = await fetch(`http://127.0.0.1:${getPort()}/api/relay/status`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: AbortSignal.timeout(2000),
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+const RELAY_STATE_LABELS = {
+  connected: 'online',
+  connecting: 'connecting',
+  disconnected: 'disconnected (retrying)',
+  replaced: 'stopped — another connector took over this machine',
+  auth_failed: 'stopped — the relay rejected this credential (re-pair)',
+  unmanaged: 'not run by the service (unmanaged credential; use `codekin relay connect`)',
+  disabled: 'disabled (CODEKIN_RELAY_CONNECTOR=off)',
+  unpaired: 'service has not seen a credential yet',
+  stopped: 'stopped',
+}
+
 async function cmdRelayStatus() {
   const credential = readRelayCredential()
   if (!credential) {
@@ -276,6 +336,14 @@ async function cmdRelayStatus() {
   }
   console.log(`Relay:      ${credential.url}`)
   console.log(`Machine id: ${credential.machineId}`)
+  console.log(`Mode:       ${credential.managed === true ? 'managed (connector runs inside the Codekin service)' : 'unmanaged (run `codekin relay connect` yourself)'}`)
+  const local = await fetchLocalRelayStatus()
+  if (local) {
+    const label = RELAY_STATE_LABELS[local.state] || local.state
+    console.log(`Connector:  ${label}${local.detail ? ` (${local.detail})` : ''}`)
+  } else if (credential.managed === true) {
+    console.log('Connector:  unknown — the local Codekin service is not reachable or is older than this CLI')
+  }
   try {
     const res = await fetch(`${credential.url}/api/health`)
     const data = await res.json()
@@ -292,7 +360,8 @@ function cmdRelayLogout() {
   }
   rmSync(RELAY_CREDENTIAL_FILE)
   console.log('Removed local pairing credential.')
-  console.log('To fully revoke this machine, also remove it in the hosted UI (Machines page).')
+  console.log('The Codekin service stops its relay connector within a few seconds.')
+  console.log('To fully revoke this machine, also remove it in the hosted app under Settings → Machines.')
 }
 
 // ---------------------------------------------------------------------------
@@ -707,13 +776,16 @@ if (cmd === 'start') {
   if (action === 'login') {
     await cmdRelayLogin(args.slice(2))
   } else if (action === 'connect') {
-    cmdRelayConnect()
+    cmdRelayConnect(args.slice(2))
   } else if (action === 'status') {
     await cmdRelayStatus()
   } else if (action === 'logout') {
     cmdRelayLogout()
   } else {
-    console.error('Usage: codekin relay <login|connect|status|logout> [--url <relay-url>] [--code <pairing-token>]')
+    console.error('Usage: codekin relay <login|connect|status|logout>')
+    console.error('  login   [--url <relay-url>] [--code <pairing-token>] [--unmanaged]')
+    console.error('          (the pairing token may also be passed as CODEKIN_PAIR_TOKEN)')
+    console.error('  connect [--foreground]')
     process.exit(1)
   }
 } else {
@@ -730,8 +802,8 @@ Usage:
   codekin service status          Show service status
   codekin token                   Print access URL with auth token
   codekin relay login             Pair this machine with hosted Codekin
-  codekin relay connect           Run the relay connector (foreground)
-  codekin relay status            Show pairing + hub status
+  codekin relay connect           Run the relay connector (unmanaged pairings)
+  codekin relay status            Show pairing, connector + hub status
   codekin relay logout            Remove the local pairing credential
   codekin upgrade                 Upgrade to latest version
   codekin uninstall               Remove Codekin entirely
