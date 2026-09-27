@@ -26,6 +26,8 @@ import {
   type HealthCheckResult, type SetupPreview,
 } from '../lib/ccApi'
 import { FolderPicker } from './FolderPicker'
+import { ThemeSwatch } from './ThemeSwatch'
+import { THEMES } from '../themes/registry'
 
 /** localStorage key holding the permission mode new sessions start with. */
 const PERMISSION_MODE_KEY = 'claude-permission-mode'
@@ -484,34 +486,35 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
               <div className="border-t border-edge" />
 
               {/* ─ Appearance ─ */}
-              <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-                {/* Theme */}
-                <div>
-                  <label className="mb-1.5 block text-body text-ink-muted">Theme</label>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => onUpdate({ theme: 'dark' })}
-                      className={`rounded-control px-4 py-1.5 text-body font-medium transition-colors ${
-                        settings.theme !== 'light'
-                          ? 'bg-primary-8 text-on-primary'
-                          : 'border border-edge bg-surface-raised text-ink hover:bg-edge'
-                      }`}
-                    >
-                      Dark
-                    </button>
-                    <button
-                      onClick={() => onUpdate({ theme: 'light' })}
-                      className={`rounded-control px-4 py-1.5 text-body font-medium transition-colors ${
-                        settings.theme === 'light'
-                          ? 'bg-primary-8 text-on-primary'
-                          : 'border border-edge bg-surface-raised text-ink hover:bg-edge'
-                      }`}
-                    >
-                      Light
-                    </button>
-                  </div>
+              <div>
+                <label id="settings-theme-label" className="mb-1.5 block text-body text-ink-muted">Theme</label>
+                <div role="radiogroup" aria-labelledby="settings-theme-label" className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {THEMES.map(t => {
+                    const selected = settings.theme === t.id
+                    return (
+                      <button
+                        key={t.id}
+                        role="radio"
+                        aria-checked={selected}
+                        onClick={() => { onUpdate({ theme: t.id }) }}
+                        className={`flex flex-col gap-1.5 rounded-control border bg-surface p-1.5 text-left transition-colors ${
+                          selected ? 'border-focus ring-1 ring-focus' : 'border-edge hover:border-edge-strong'
+                        }`}
+                      >
+                        <ThemeSwatch theme={t} />
+                        <span className="flex items-center gap-1 px-0.5">
+                          <span className="flex-1 truncate text-meta text-ink">{t.label}</span>
+                          {selected
+                            ? <IconCheck size={13} stroke={2} className="flex-shrink-0 text-focus" />
+                            : t.label.toLowerCase() !== t.scheme && <span className="text-micro text-ink-faint">{t.scheme === 'dark' ? 'Dark' : 'Light'}</span>}
+                        </span>
+                      </button>
+                    )
+                  })}
                 </div>
+              </div>
 
+              <div className="grid grid-cols-2 gap-x-6 gap-y-4">
                 {/* Archived Session Retention */}
                 <div>
                   <label className="mb-1.5 block text-body text-ink-muted">

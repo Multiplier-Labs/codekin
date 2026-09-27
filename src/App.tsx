@@ -50,6 +50,7 @@ import { DocsBrowserContent } from './components/DocsBrowserContent'
 import { SessionContent } from './components/SessionContent'
 import { RepoDrawer, type RepoDrawerTab } from './components/RepoDrawer'
 import type { PermissionMode, CodingProvider } from './types'
+import { applyTheme } from './themes/registry'
 import { useClaudeModelSync } from './hooks/useClaudeModelSync'
 
 // Hosted-only: session sharing. Lazy so the class and its markup are code-split
@@ -625,9 +626,9 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     if (found) setDrawer({ workingDir: found.groupDir ?? found.workingDir, tab: 'archive' })
   }, [paletteArchived])
 
-  // Sync data-theme attribute on <html> whenever the setting changes
+  // Sync data-theme / data-scheme on <html> whenever the setting changes
   useEffect(() => {
-    document.documentElement.dataset.theme = settings.theme
+    applyTheme(settings.theme)
   }, [settings.theme])
 
   // Derive session name for mobile top bar
@@ -718,7 +719,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
         onDeleteRepo={handleDeleteRepo}
         onSettingsOpen={() => setSettingsOpen(true)}
         onShareSession={isHosted ? () => setShareOpen(true) : undefined}
-        onUpdateTheme={(theme) => updateSettings({ theme: theme as 'dark' | 'light' })}
+        onUpdateTheme={(theme) => { updateSettings({ theme }) }}
         onSendModule={handleSendModule}
         agentName={agentName}
         onNavigateToAutomations={() => navigate('/automations')}
@@ -949,6 +950,8 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
         onSendSkill={handleSendSkill}
         onSendModule={handleSendModule}
         onOpenSettings={() => setSettingsOpen(true)}
+        theme={settings.theme}
+        onSelectTheme={(theme) => { updateSettings({ theme }) }}
         isMobile={isMobile}
         docs={paletteDocs}
         onSelectDoc={handleOpenDocFromPalette}

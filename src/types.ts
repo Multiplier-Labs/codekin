@@ -5,6 +5,8 @@
  * chat UI message types, and plugin/skill configuration.
  */
 
+import type { ThemeId } from './themes/registry'
+
 /** A slash-command skill available in a repo (loaded from .claude/skills/). */
 export interface Skill {
   id: string
@@ -295,7 +297,7 @@ export type ConnectionState = 'disconnected' | 'connecting' | 'connected'
 export interface Settings {
   token: string
   fontSize: number
-  theme: 'dark' | 'light'
+  theme: ThemeId
 }
 
 /** Docs picker state passed through LeftSidebar → RepoSection. */

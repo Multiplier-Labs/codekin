@@ -87,10 +87,17 @@ describe('useSettings', () => {
       unmount()
     })
 
-    it('defaults theme to dark when saved theme is not light', () => {
+    it('defaults theme to dark when saved theme is unknown', () => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ token: '', theme: 'blue' }))
       const { result, unmount } = renderHook(() => useSettings())
       expect(result.current.settings.theme).toBe('dark')
+      unmount()
+    })
+
+    it.each(['dark', 'light', 'midnight', 'paper', 'contrast', 'solarized', 'dracula', 'gruvbox'])('restores saved theme %s', (theme) => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ token: '', theme }))
+      const { result, unmount } = renderHook(() => useSettings())
+      expect(result.current.settings.theme).toBe(theme)
       unmount()
     })
   })

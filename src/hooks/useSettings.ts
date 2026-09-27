@@ -7,6 +7,7 @@
 
 import { useState, useCallback } from 'react'
 import type { Settings } from '../types'
+import { DEFAULT_THEME, isThemeId } from '../themes/registry'
 
 const STORAGE_KEY = 'codekin-settings'
 
@@ -23,7 +24,7 @@ const isHosted = import.meta.env.VITE_APP_MODE === 'hosted'
 const defaults: Settings = {
   token: isHosted ? HOSTED_TOKEN_SENTINEL : '',
   fontSize: 16,
-  theme: 'dark',
+  theme: DEFAULT_THEME,
 }
 
 function load(): Settings {
@@ -35,7 +36,7 @@ function load(): Settings {
       // In hosted mode the sentinel always wins: a token saved by a previous
       // local session on the same origin would not authenticate anything.
       token: isHosted ? HOSTED_TOKEN_SENTINEL : saved?.token ?? defaults.token,
-      theme: saved?.theme === 'light' ? 'light' : 'dark',
+      theme: isThemeId(saved?.theme) ? saved.theme : DEFAULT_THEME,
     }
 
     // Check URL for ?token= parameter (e.g. shared invite links)
