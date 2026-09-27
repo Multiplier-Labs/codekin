@@ -1,5 +1,7 @@
 # Codekin Distribution & Installation
 
+> For a first installation and session, use [Getting started](./GETTING-STARTED.md). This document covers packaging, the installer internals, releases, and manual deployment.
+
 ## Overview
 
 Codekin is distributed as an npm package with a one-liner install script, modelled on Ollama's approach. The goal is that a single command installs everything, sets up a persistent background service, and hands the user a URL with an auth token — no manual process management, no nginx, no Docker required.
@@ -64,7 +66,7 @@ Both read configuration from:
 
 ### Auth Token
 
-On first run (`codekin setup`), a random 32-byte hex token is generated and saved to `~/.config/codekin/token`. The server reads it via `AUTH_TOKEN_FILE` (already supported in `server/config.ts`).
+On first run (`codekin setup`), a random token is generated and saved to `~/.config/codekin/token`. The server reads it via `AUTH_TOKEN_FILE` (already supported in `server/config.ts`).
 
 The token is embedded in the access URL: `http://localhost:32352?token=<token>`
 

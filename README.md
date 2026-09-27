@@ -7,16 +7,19 @@
 
 Web UI for [Claude Code](https://github.com/anthropics/claude-code), [OpenCode](https://github.com/nicepkg/opencode), and [OpenAI Codex](https://github.com/openai/codex) sessions — multi-provider AI coding with multi-session support, WebSocket streaming, file uploads, and slash-command skills.
 
+Codekin runs the coding agent and accesses repositories **on the computer where you install it**. Use the hosted app to reach that computer from another device, or open the local UI directly for a self-hosted setup. See [Getting started](docs/GETTING-STARTED.md) for a first-session walkthrough and troubleshooting.
+
 ![Codekin screenshot](docs/screenshot.png)
 
 ## Quick start (hosted)
 
 Codekin runs coding agents on your own computer; the hosted app at [app.codekin.ai](https://app.codekin.ai) is how you reach them from a browser, phone or tablet.
 
-1. Open [https://app.codekin.ai](https://app.codekin.ai) and sign in with GitHub. Access is currently by invitation.
-2. On **Connect your computer**, generate the install command and run it in a terminal on the computer you want to code on (macOS or Linux; Windows isn't supported yet). The command is valid for 10 minutes and works once.
-3. The installer sets up Codekin as a background service and pairs it with your account. The page updates by itself as the computer goes from *waiting for installation* to *paired* to *online*.
-4. Click **Open**. You'll need at least one coding agent (Claude Code, Codex or OpenCode) installed and signed in on that computer.
+1. Install and sign in to at least one supported coding agent on your macOS or Linux computer: [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), or [OpenCode](https://opencode.ai). Windows isn't supported yet.
+2. Open [app.codekin.ai](https://app.codekin.ai) and sign in with GitHub. Access is currently by invitation.
+3. On **Connect your computer**, copy the generated install command and run it in a terminal **on that computer**. The pairing command expires after 10 minutes and can be used once.
+4. Wait for the computer to show **online**, then click **Open**. Keep the computer awake and connected while using Codekin remotely.
+5. Use **New** to choose a repository and a coding agent. Local Git checkouts under `~/repos` appear automatically; the GitHub CLI is optional for listing and cloning GitHub repositories.
 
 Prefer to run everything yourself, without the hosted relay? Use the self-hosted install below.
 
@@ -24,11 +27,11 @@ Prefer to run everything yourself, without the hosted relay? Use the self-hosted
 
 **Prerequisites:**
 - macOS or Linux
-- Node.js v20+ (the install script can install this for you via nvm)
+- Node.js v20+ (the install script can install this via nvm)
 - At least one supported coding agent CLI, installed and authenticated:
   - [Claude Code CLI](https://github.com/anthropics/claude-code) (`claude`)
   - [OpenAI Codex CLI](https://github.com/openai/codex) (`codex login`) to use ChatGPT-subscription OpenAI models
-  - [OpenCode](https://github.com/nicepkg/opencode) for multi-provider LLM support
+  - [OpenCode](https://opencode.ai) with a configured provider
 
 **One-liner:**
 
@@ -38,12 +41,14 @@ curl -fsSL https://codekin.ai/install.sh | bash
 
 This will:
 1. Install Node.js 20+ if needed (via nvm)
-2. Install the `codekin` npm package globally
-3. Generate an auth token
-4. Install and start a persistent background service
-5. Print your access URL
+2. Check for a supported coding agent CLI (installation stops with instructions if none is found)
+3. Install the `codekin` npm package globally
+4. Generate a local access token and install and start a background service
+5. Print your local access URL
 
-Open the printed URL in your browser, enter your Codekin Web token when prompted, and you're ready to go.
+Open the printed `http://localhost:32352?token=...` URL **on the installed computer**. The token is in that URL; if you open the address without it, paste the token in the Settings prompt. Run `codekin token` to print the URL again. For another device, use the hosted setup above rather than a `localhost` link.
+
+The installer checks GitHub CLI (`gh`) but does not require it. Existing local Git checkouts work without GitHub authentication. Continue with [your first session](docs/GETTING-STARTED.md#3-start-your-first-session).
 
 ## Usage
 
@@ -108,16 +113,18 @@ This removes the background service, config files, and the npm package.
 
 ## Configuration
 
-All configuration lives in `~/.config/codekin/env`. Edit this file to override defaults, then restart the service with `codekin service install`.
+The installed service reads environment variables from `~/.config/codekin/env`. Edit that file to override defaults, then apply changes with `codekin service install`. The local access token is stored separately in `~/.config/codekin/token`; keep it private.
 
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `32352` | Server port |
 | `REPOS_ROOT` | `~/repos` | Root directory scanned for local repositories |
 
+You can also change **Repositories Path** in the app's Settings or first-session screen without restarting the service. See [Getting started](docs/GETTING-STARTED.md#no-repositories-appear).
+
 ## Manual / Advanced Setup
 
-For remote servers, custom nginx, or other advanced setups, see [docs/INSTALL-DISTRIBUTION.md](docs/INSTALL-DISTRIBUTION.md).
+For the installation internals and manual deployments, see [Installation and distribution](docs/INSTALL-DISTRIBUTION.md). For nginx and Authelia deployment, see the [advanced setup guide](docs/SETUP.md).
 
 ## Contributing
 
