@@ -58,10 +58,15 @@ export function RepoList({ groups, selectedId, onSelect, cloningId, maxHeight = 
           <p className="px-3 py-3 text-body text-ink-muted text-center">No matching repos</p>
         ) : (
           filteredGroups.map((group) => (
-            <div key={group.owner}>
+            <div key={`${group.source ?? 'github'}:${group.owner}`}>
               <div className="sticky top-0 z-10 bg-edge-strong backdrop-blur-sm px-3 py-1.5 text-body font-medium uppercase tracking-wider text-ink-muted border-b border-edge-strong">
                 {group.owner}
               </div>
+              {group.error && (
+                <p className="border-b border-edge-strong px-3 py-2 text-meta text-warning-4">
+                  Couldn't list {group.owner}: {group.error}
+                </p>
+              )}
               {group.repos.map((repo) => {
                 const isCloning = cloningId === repo.id
                 const isSelected = selectedId === repo.id

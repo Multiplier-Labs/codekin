@@ -75,8 +75,10 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
       setCloning(repo.id)
       setCloneError(null)
       try {
-        await cloneRepo(token, repo.owner, repo.name)
+        const path = await cloneRepo(token, repo.owner, repo.name)
         repo.cloned = true
+        // The server may point at an existing checkout rather than a fresh clone.
+        if (path) { repo.path = path; repo.workingDir = path }
       } catch (err) {
         // Say why. A clone can fail for reasons only the machine knows (no
         // access, disk, relay policy); silently returning to the list reads
