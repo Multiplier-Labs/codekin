@@ -133,6 +133,16 @@ function isDirectory(p: string): boolean {
  * a linked worktree's `commondir` back to the shared repository.
  */
 export function resolveGitConfigPath(dotGit: string): string | null {
+  return resolveGitDir(dotGit)?.configPath ?? null
+}
+
+/**
+ * Resolve the checkout's config path and whether it is a linked worktree
+ * (its gitdir has a `commondir`). Codekin creates session worktrees as
+ * siblings of the repo (`<project>-wt-<id>`), so these must be told apart
+ * from real checkouts.
+ */
+function resolveGitDir(dotGit: string): { configPath: string; linkedWorktree: boolean } | null {
   let gitDir: string
   try {
     const st = statSync(dotGit)
@@ -152,13 +162,17 @@ export function resolveGitConfigPath(dotGit: string): string | null {
   }
 
   // A linked worktree's gitdir holds a `commondir` pointing at the main .git.
+  let linkedWorktree = false
   try {
     const common = readFileSync(join(gitDir, 'commondir'), 'utf-8').trim()
-    if (common) gitDir = isAbsolute(common) ? common : resolve(gitDir, common)
+    if (common) {
+      gitDir = isAbsolute(common) ? common : resolve(gitDir, common)
+      linkedWorktree = true
+    }
   } catch {
     // Not a linked worktree — config lives in gitDir itself.
   }
-  return join(gitDir, 'config')
+  return { configPath: join(gitDir, 'config'), linkedWorktree }
 }
 
 /** True when `dir` contains a `.git` directory or file. */
@@ -171,12 +185,14 @@ function hasDotGit(dir: string): boolean {
   }
 }
 
-function readLocalRepo(root: string, dir: string): LocalRepo {
-  const configPath = resolveGitConfigPath(join(dir, '.git'))
+function readLocalRepo(root: string, dir: string): LocalRepo | null {
+  const resolved = resolveGitDir(join(dir, '.git'))
+  // Linked worktrees are working copies of a repo listed elsewhere, not projects.
+  if (resolved?.linkedWorktree) return null
   let originUrl: string | null = null
-  if (configPath) {
+  if (resolved) {
     try {
-      originUrl = parseOriginUrl(readFileSync(configPath, 'utf-8'))
+      originUrl = parseOriginUrl(readFileSync(resolved.configPath, 'utf-8'))
     } catch {
       // Unreadable config — still a checkout, just without a remote.
     }
@@ -193,7 +209,8 @@ function readLocalRepo(root: string, dir: string): LocalRepo {
 /**
  * Scan `root` for Git checkouts, flat and owner-namespaced. A directory that is
  * itself a checkout is not descended into (its subfolders are its contents,
- * not more projects). Hidden directories and node_modules are skipped.
+ * not more projects). Hidden directories, node_modules, and linked worktrees
+ * are skipped.
  * Results are sorted by relative path. Never throws — an unreadable root
  * yields an empty list.
  */
@@ -215,7 +232,8 @@ export function discoverLocalRepos(root: string, maxDepth: number = LOCAL_DISCOV
       // Symlinked directories count (stat follows them); depth bounds any loop.
       if (!entry.isDirectory() && !(entry.isSymbolicLink() && isDirectory(child))) continue
       if (hasDotGit(child)) {
-        found.push(readLocalRepo(root, child))
+        const repo = readLocalRepo(root, child)
+        if (repo) found.push(repo)
       } else if (depth < maxDepth) {
         walk(child, depth + 1)
       }

@@ -125,8 +125,8 @@ describe('discoverLocalRepos', () => {
     writeFileSync(join(wt, '.git'), `gitdir: ${wtGitDir}\n`)
 
     expect(resolveGitConfigPath(join(wt, '.git'))).toBe(join(main, '.git', 'config'))
-    const found = discoverLocalRepos(root).find((r) => r.name === 'feature-wt')
-    expect(found?.remoteKey).toBe('github.com/acme/main')
+    // Worktrees (e.g. Codekin's `<project>-wt-<id>` siblings) are not projects.
+    expect(discoverLocalRepos(root).map((r) => r.name)).toEqual(['main'])
   })
 
   it('handles a relative gitdir (submodule-style)', () => {
