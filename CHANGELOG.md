@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-27
+
+### Added
+- **Color themes** — the dark/light toggle becomes a theme selector with nine themes: Dark and Light (unchanged) plus Midnight, Paper, High Contrast, Solarized Light, Dracula, Gruvbox and Matrix. Pick one from the Settings grid, the sidebar palette menu or the command palette. Themes change color only, and every added theme is tested against contrast floors. The saved theme now applies before first paint, removing the dark flash light-mode users saw on load (#638, #640)
+- **Hosted access at [app.codekin.ai](https://app.codekin.ai)** — reach the agents on your own computer from any browser, phone or tablet through an authenticated relay: frontend transport abstraction (#544), control plane with GitHub sign-in (#545), machine pairing and the relay connector (#546), the REST API (#547) and session streaming (#549) over the relay, session sharing with ACLs and an audit log (#550), and relay hardening — backpressure, rate limits, retention (#552)
+- **Hosted setup and accounts** — open straight into the workspace (#558), restore the connection on reload and manage machines from Settings (#562, #563, #564), a one-line install-and-pair command (#596), a persistent embedded connector and an installer that works with any supported agent (#635), a focused first-run setup with resumable machine setup and safe return after sign-in (#636), sign out everywhere (#586), owner/admin user management (#567), and cloning a repo the machine doesn't have yet (#569)
+- **Device linking and passkeys** — bring a phone onto the hosted app by scanning a QR code, then sign in with Face ID or a fingerprint via WebAuthn passkeys (#573)
+- **Cross-harness session handoff** — switch a session to another agent (Claude Code, Codex, OpenCode) and carry its context across (#548)
+- **Loops 2.0** — a durable engine core replaces v1 (#620); a control plane with a plan stage, setup wizard, run workspace and operations home (#621); an evaluator platform with remote CI and a completion scorecard (#622); parallel workstreams, checkpoint forks, lessons and version stats (#623); and model-based reflection (#624). Goal runs emit events on the shared push channel (#578)
+- **Automations view** — workflows, loops and Agent Joe's runs in one place with a needs-attention banner (#582), backed by a single run database and a merged All-runs feed (#581, #585, #591), a trigger log explaining why runs did or didn't fire (#618), and live workflow events in the UI (#576)
+- **Trigger engine** — pre-dispatch gates, a trigger ledger and a heartbeat (#602), a repo activity index that gates dispatch by tier (#603), and durable at-least-once signals (#605) that accepted PR webhook events now ride (#614)
+- **Deployment and host monitoring** — a deployment registry with deterministic probes and breach signals to Joe (#606), auto-diagnosed incident response and security probes (#607), an error-rate log probe (#612), a learned p95 latency baseline and TLS protocol floor (#616), host probes with propose-tier maintenance, a weekly digest and a startup greeting (#608), `npm audit` on dependency changes (#617), and a Deployments tab in Automations (#610)
+- **Agent Joe** — a first-party Codekin MCP server (#587), also registered for OpenCode and Codex (#619); Joe runs on any supported agent with a persisted choice and `AGENTS.md` (#604), picks its model from the composer (#599), hears loop run events (#588), and handles prompts according to their trust level (#590)
+- **Composer and sidebar** — one control for agent and model (#559, #560), the agent marked on every session row (#561), two-line session rows (#565), agent availability in every provider picker (#592), and the connection target in the connections popover (#568)
+- **First-run environment checklist** on the landing screen (#593)
+- Point-release model discovery: Fable 5.1, Opus 5.5 and GPT-6 (#631)
+- Background AI utilities such as session naming no longer depend on a single hardcoded vendor (#597)
+
+### Changed
+- One harness registry on the server, with one definition per agent (#595)
+- A shared run-status vocabulary with stop-verb aliases (#580), and one frontmatter splitter with YAML-first workflow parsing (#579)
+- The monitor poll and outbox flusher run on the engine's dispatch tick (#615)
+- The OpenCode SSE event dispatcher is split into focused handlers (#629)
+- The server's TypeScript target matches the app's (#540)
+
+### Fixed
+- New sessions start on the selected model, and the light-mode thinking badge is easier to read (#537)
+- Codex sessions whose thread has no rollout yet can be recovered (#551)
+- Goal runs work headless: allowlist, blocked status, restart recovery and open kinds (#574)
+- Agent Joe no longer loops on a stale resume, and a stdin `EPIPE` no longer kills the server (#594); notifications are never injected mid-turn (#589); the outbox/manager module-init cycle is broken (#628); the monitor lists newest-first deterministically (#613)
+- Local repositories are discovered without the GitHub CLI, and the landing screen reports readiness truthfully (#634)
+- The hosted UI reaches workflows, loops, the run read model (#598) and the Deployments tab (#625); hosted workspace layout and connector diagnostics (#554); connector overrides are read from env files (#555)
+- Deployment probes tolerate pm2 warning banners printed before its JSON (#609)
+
+### Security
+- Attachment paths are confined to the upload directory and webhook config mode is hardened (#538); model refresh is rate-limited and upload/date validation tightened (#542)
+- Relay authorization: machine ownership enforced with live revocation (#557), authorization bound to immutable GitHub ids with live sockets revoked (#566), hosted access revoked immediately (#577), and stored sessions destroyed on revocation with the pending gate closed (#583)
+- Dependency fixes: critical/high CVEs in the workflows lock file (#627), and multer 2.4.0 (#630)
+
 ## [0.8.0] - 2026-08-05
 
 ### Added
