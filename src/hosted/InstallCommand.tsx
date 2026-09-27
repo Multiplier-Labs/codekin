@@ -12,7 +12,7 @@
 
 import { useState } from 'react'
 import { IconCopy, IconCheck, IconTerminal2 } from '@tabler/icons-react'
-import { precreatePairing } from './machines'
+import { precreatePairing, installCommands } from './machines'
 
 function CopyBlock({ label, command }: { label: string; command: string }) {
   const [copied, setCopied] = useState(false)
@@ -74,16 +74,16 @@ export function InstallCommand() {
     )
   }
 
-  const origin = window.location.origin
+  const commands = installCommands(token, window.location.origin)
   return (
     <div className="mt-3">
       <CopyBlock
         label="On a new machine — installs Codekin and pairs it with this account:"
-        command={`curl -fsSL codekin.ai/install.sh | bash -s -- --pair ${token} --relay ${origin}`}
+        command={commands.install}
       />
       <CopyBlock
         label="Already running Codekin? Pair it directly:"
-        command={`codekin relay login --code ${token} --url ${origin}`}
+        command={commands.login}
       />
       <p className="mt-2 text-meta text-ink-faint">
         Single use · expires in {minutesLeft} min ·{' '}
