@@ -14,14 +14,15 @@ Web UI for [Claude Code](https://github.com/anthropics/claude-code), [OpenCode](
 **Prerequisites:**
 - macOS or Linux
 - Node.js v20+ (the install script can install this for you via nvm)
-- [Claude Code CLI](https://github.com/anthropics/claude-code) installed and authenticated (`claude` must be in your PATH)
-- *(Optional)* [OpenCode](https://github.com/nicepkg/opencode) installed for multi-provider LLM support
-- *(Optional)* [OpenAI Codex CLI](https://github.com/openai/codex) installed and authenticated (`codex login`) to use ChatGPT-subscription OpenAI models
+- At least one supported coding agent CLI, installed and authenticated:
+  - [Claude Code CLI](https://github.com/anthropics/claude-code) (`claude`)
+  - [OpenAI Codex CLI](https://github.com/openai/codex) (`codex login`) to use ChatGPT-subscription OpenAI models
+  - [OpenCode](https://github.com/nicepkg/opencode) for multi-provider LLM support
 
 **One-liner:**
 
 ```bash
-curl -fsSL codekin.ai/install.sh | bash
+curl -fsSL https://codekin.ai/install.sh | bash
 ```
 
 This will:
@@ -83,7 +84,7 @@ This checks npm for the latest version, installs it, and restarts the background
 Alternatively, re-run the install script:
 
 ```bash
-curl -fsSL codekin.ai/install.sh | bash
+curl -fsSL https://codekin.ai/install.sh | bash
 ```
 
 ## Uninstall

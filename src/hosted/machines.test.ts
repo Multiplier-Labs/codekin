@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
   decideRestore, forgetMachine, lastMachineId, rememberMachine,
-  LAST_MACHINE_KEY, type Machine,
+  LAST_MACHINE_KEY, type Machine, installCommands,
 } from './machines'
 
 function machine(overrides: Partial<Machine> = {}): Machine {
@@ -71,5 +71,22 @@ describe('decideRestore', () => {
 
   it('forgets when the account has no machines at all', () => {
     expect(decideRestore([], 'm1')).toEqual({ action: 'forget' })
+  })
+})
+
+describe('installCommands', () => {
+  it('fetches the installer over https and passes the token via the environment', () => {
+    const { install, login } = installCommands('tok123', 'https://app.codekin.ai')
+    expect(install).toBe('curl -fsSL https://codekin.ai/install.sh | CODEKIN_PAIR_TOKEN=tok123 bash')
+    expect(login).toBe('CODEKIN_PAIR_TOKEN=tok123 codekin relay login')
+    // The token is never an argument (visible in `ps`)
+    expect(install).not.toContain('--pair')
+    expect(login).not.toContain('--code')
+  })
+
+  it('names a non-default relay explicitly', () => {
+    const { install, login } = installCommands('tok', 'https://relay.example.com')
+    expect(install).toBe('curl -fsSL https://codekin.ai/install.sh | CODEKIN_PAIR_TOKEN=tok bash -s -- --relay https://relay.example.com')
+    expect(login).toBe('CODEKIN_PAIR_TOKEN=tok codekin relay login --url https://relay.example.com')
   })
 })

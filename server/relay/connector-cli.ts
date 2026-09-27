@@ -3,49 +3,20 @@
  * from ~/.config/codekin/relay.json and runs the connector in the
  * foreground until Ctrl-C, serving proxied REST requests from the hosted
  * app against the local Codekin server.
+ *
+ * Machines paired with a managed credential (what the installer and
+ * `codekin relay login` write) do not need this: the local Codekin server
+ * runs the same connector in-process (embedded-connector.ts). This entry
+ * point remains for unmanaged setups that supervise the connector themselves
+ * (e.g. under pm2) and for `codekin relay connect --foreground`.
  */
 
-import { readFileSync, existsSync } from 'fs'
-import { homedir } from 'os'
-import { join } from 'path'
-import { fileURLToPath } from 'url'
 import { RelayConnector } from './connector.js'
 import { resolveLocalTarget } from './connector-proxy.js'
+import { readRelayCredential, codekinPackageVersion } from './relay-credential.js'
 
-export interface RelayCredential {
-  url: string
-  machineId: string
-  machineSecret: string
-}
-
-const RELAY_CREDENTIAL_FILE = join(homedir(), '.config', 'codekin', 'relay.json')
-
-export function readRelayCredential(): RelayCredential | null {
-  if (!existsSync(RELAY_CREDENTIAL_FILE)) return null
-  try {
-    const parsed = JSON.parse(readFileSync(RELAY_CREDENTIAL_FILE, 'utf-8')) as Partial<RelayCredential>
-    if (
-      typeof parsed.url === 'string' &&
-      typeof parsed.machineId === 'string' &&
-      typeof parsed.machineSecret === 'string'
-    ) {
-      return parsed as RelayCredential
-    }
-    return null
-  } catch {
-    return null
-  }
-}
-
-function packageVersion(): string {
-  try {
-    const pkgPath = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'package.json')
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version?: string }
-    return pkg.version ?? 'unknown'
-  } catch {
-    return 'unknown'
-  }
-}
+export { readRelayCredential } from './relay-credential.js'
+export type { RelayCredential } from './relay-credential.js'
 
 function main(): void {
   const credential = readRelayCredential()
@@ -54,7 +25,7 @@ function main(): void {
     process.exit(1)
   }
 
-  const version = packageVersion()
+  const version = codekinPackageVersion()
   const localTarget = resolveLocalTarget()
   console.log(`[connector] Proxying to local Codekin at ${localTarget.origin}`)
   if (localTarget.authToken) {

@@ -80,8 +80,8 @@ export const MACHINE_STATUS_DOT: Record<Machine['status'], string> = {
 
 /**
  * Mint a pre-approved pairing token for the install-command funnel. The
- * token goes into the one-line installer (`--pair <token>`) or
- * `codekin relay login --code <token>`; the machine that runs it becomes
+ * token goes into the one-line installer or `codekin relay login`, both via
+ * the CODEKIN_PAIR_TOKEN environment variable; the machine that runs it becomes
  * paired to this account with no further approval. Single-use, 10-minute TTL.
  */
 export async function precreatePairing(): Promise<{ pairingToken: string; expiresAt: number }> {
@@ -93,4 +93,21 @@ export async function precreatePairing(): Promise<{ pairingToken: string; expire
   })
   if (!res.ok) throw new Error(String(res.status))
   return (await res.json()) as { pairingToken: string; expiresAt: number }
+}
+
+/** The relay the installer and CLI use when no URL is given. */
+export const DEFAULT_RELAY_URL = 'https://app.codekin.ai'
+
+/**
+ * The two copy-paste commands for a pairing token. The token travels as an
+ * environment variable (CODEKIN_PAIR_TOKEN) rather than an argument so it is
+ * not visible in the process list while the installer runs, and the script is
+ * fetched over https so nothing can be injected before a redirect.
+ */
+export function installCommands(token: string, origin: string): { install: string; login: string } {
+  const custom = origin.replace(/\/$/, '') !== DEFAULT_RELAY_URL
+  return {
+    install: `curl -fsSL https://codekin.ai/install.sh | CODEKIN_PAIR_TOKEN=${token} bash${custom ? ` -s -- --relay ${origin}` : ''}`,
+    login: `CODEKIN_PAIR_TOKEN=${token} codekin relay login${custom ? ` --url ${origin}` : ''}`,
+  }
 }
