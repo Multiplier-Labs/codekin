@@ -19,7 +19,9 @@ Settings is a modal (`src/components/Settings.tsx`, ~1,100 lines) that has outgr
 A routed view at **`/settings/<section>`**, built the way `/automations` is (see `App.tsx`,
 `navigate()`):
 
-- **Desktop:** a left section nav and the section content, at full height, within the app shell.
+- **Desktop:** a left section nav and the section content, taking the whole window. The session
+  sidebar (and the mobile top bar) is not shown while Settings is open — Settings is a page of its
+  own, not a panel beside the session tree; Close returns to the session.
 - **Mobile:** the section list, then a section page with a back button (list → detail).
 
 Sections are grouped by **what they apply to**:
