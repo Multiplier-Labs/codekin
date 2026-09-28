@@ -14,7 +14,7 @@
 
 import { Router } from 'express'
 import type Database from 'better-sqlite3'
-import { createRequireActiveUser, isOperator } from './relay-auth-routes.js'
+import { createRequireActiveUser, createRequireRecentAuth, isOperator } from './relay-auth-routes.js'
 import { getUserById, listUsers } from './control-plane-db.js'
 import type { UserStatus, UserRow } from './control-plane-db.js'
 import { recordAuditEvent } from './audit.js'
@@ -60,7 +60,8 @@ export function createUserRouter(
   store?: SessionRevoker,
 ): Router {
   const router = Router()
-  const requireActiveUser = createRequireActiveUser(db)
+  const requireActiveUser = createRequireActiveUser(db, config)
+  const requireRecentAuth = createRequireRecentAuth(db)
 
   const requireOperator = (actorId: string): boolean => {
     const actor = getUserById(db, actorId)
@@ -78,7 +79,7 @@ export function createUserRouter(
   })
 
   /** Change an account's platform status and/or workspace-creation permission. */
-  router.patch('/api/users/:id', requireActiveUser, (req, res) => {
+  router.patch('/api/users/:id', requireActiveUser, requireRecentAuth, (req, res) => {
     const actor = req.session.user!
     if (!requireOperator(actor.id)) {
       recordAuditEvent(db, {

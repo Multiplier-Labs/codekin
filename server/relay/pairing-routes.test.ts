@@ -1,4 +1,5 @@
 /** Tests for the pairing REST endpoints (auth boundaries + status codes). */
+import { signInFully } from './__fixtures__/auth.js'
 import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
@@ -64,8 +65,8 @@ describe('pairing routes', () => {
     app.use(session({ secret: 's'.repeat(32), resave: false, saveUninitialized: false }))
     // Test hook: mark the session as the active user when the header is set
     app.use((req, _res, next) => {
-      if (req.headers['x-test-user'] === 'active') req.session.user = activeUser
-      if (req.headers['x-test-user'] === 'other') req.session.user = otherUser
+      if (req.headers['x-test-user'] === 'active') { req.session.user = activeUser; signInFully(db, req.session, req.session.user.id) }
+      if (req.headers['x-test-user'] === 'other') { req.session.user = otherUser; signInFully(db, req.session, req.session.user.id) }
       next()
     })
     app.use(
@@ -320,7 +321,7 @@ describe('pairing routes: precreate rate limit', () => {
     app.use(session({ secret: 's'.repeat(32), resave: false, saveUninitialized: false }))
     app.use((req, _res, next) => {
       const idx = Number(req.headers['x-test-user'])
-      if (users[idx]) req.session.user = users[idx]
+      if (users[idx]) { req.session.user = users[idx]; signInFully(db, req.session, req.session.user.id) }
       next()
     })
     app.use(createPairingRouter(db, CONFIG, {}, { precreateLimit: { limit: 2, windowMs: 60_000 } }))

@@ -87,9 +87,14 @@ export class SqliteSessionStore extends Store {
     }
   }
 
-  /** Destroy every web session belonging to a user. Returns the number removed. */
-  destroyUserSessions(userId: string): number {
-    return this.db.prepare('DELETE FROM web_sessions WHERE user_id = ?').run(userId).changes
+  /**
+   * Destroy every web session belonging to a user, optionally sparing one
+   * (the session making a security change). Returns the number removed.
+   */
+  destroyUserSessions(userId: string, exceptSid?: string): number {
+    return this.db
+      .prepare('DELETE FROM web_sessions WHERE user_id = ? AND sid IS NOT ?')
+      .run(userId, exceptSid ?? null).changes
   }
 
   /**

@@ -170,10 +170,15 @@ export class BrowserHub {
     client.socket.close(CLOSE_FORBIDDEN, reason)
   }
 
-  /** Close every live browser socket for a user (global logout/revocation). */
-  disconnectUser(userId: string, reason = 'access revoked'): void {
+  /**
+   * Close every live browser socket for a user (global logout/revocation),
+   * optionally sparing those of one web session.
+   */
+  disconnectUser(userId: string, reason = 'access revoked', exceptSessionId?: string): void {
     for (const client of [...this.clients]) {
-      if (client.user.id === userId) this.revoke(client, reason)
+      if (client.user.id !== userId) continue
+      if (exceptSessionId !== undefined && client.sessionId === exceptSessionId) continue
+      this.revoke(client, reason)
     }
   }
 

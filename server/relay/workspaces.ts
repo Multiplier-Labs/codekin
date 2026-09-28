@@ -157,6 +157,10 @@ export function createWorkspace(db: Database.Database, name: string, ownerUserId
   return getWorkspace(db, id) as WorkspaceRow
 }
 
+export function setRequireMfa(db: Database.Database, workspaceId: string, required: boolean): void {
+  db.prepare('UPDATE workspaces SET require_mfa = ? WHERE id = ? AND deleted_at IS NULL').run(required ? 1 : 0, workspaceId)
+}
+
 export function renameWorkspace(db: Database.Database, workspaceId: string, name: string): void {
   db.prepare('UPDATE workspaces SET name = ? WHERE id = ? AND deleted_at IS NULL').run(name, workspaceId)
 }
@@ -186,13 +190,17 @@ export interface WorkspaceMember {
   status: MembershipStatus
   /** Platform status; a disabled account has no standing anywhere. */
   accountStatus: UserRow['status']
+  /** Has a second factor (authenticator app or passkey). */
+  mfaEnabled: boolean
   joinedAt: string
 }
 
 export function listMembers(db: Database.Database, workspaceId: string): WorkspaceMember[] {
   const rows = db
     .prepare(
-      `SELECT m.user_id, m.role, m.status, m.created_at, u.login, u.display_name, u.avatar_url, u.status AS account_status
+      `SELECT m.user_id, m.role, m.status, m.created_at, u.login, u.display_name, u.avatar_url, u.status AS account_status,
+              (EXISTS (SELECT 1 FROM user_totp t WHERE t.user_id = u.id AND t.confirmed_at IS NOT NULL)
+               OR EXISTS (SELECT 1 FROM webauthn_credentials c WHERE c.user_id = u.id)) AS mfa_enabled
        FROM workspace_memberships m JOIN users u ON u.id = m.user_id
        WHERE m.workspace_id = ? ORDER BY u.login COLLATE NOCASE`,
     )
@@ -205,6 +213,7 @@ export function listMembers(db: Database.Database, workspaceId: string): Workspa
     display_name: string | null
     avatar_url: string | null
     account_status: UserRow['status']
+    mfa_enabled: number
   }>
   return rows.map(r => ({
     userId: r.user_id,
@@ -214,6 +223,7 @@ export function listMembers(db: Database.Database, workspaceId: string): Workspa
     role: r.role,
     status: r.status,
     accountStatus: r.account_status,
+    mfaEnabled: r.mfa_enabled === 1,
     joinedAt: r.created_at,
   }))
 }

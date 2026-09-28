@@ -283,6 +283,30 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
       CREATE INDEX idx_workspace_invitations_workspace ON workspace_invitations(workspace_id);
     `)
   },
+
+  // 4: two-factor authentication. TOTP secrets are stored encrypted
+  // (secret_enc, AES-256-GCM under MFA_ENCRYPTION_KEY); an unconfirmed row is
+  // an enrollment in progress. Recovery codes are stored hashed, one row each
+  // so consuming one is a single conditional UPDATE.
+  db => {
+    db.exec(`
+      CREATE TABLE user_totp (
+        user_id TEXT PRIMARY KEY REFERENCES users(id),
+        secret_enc TEXT NOT NULL,
+        confirmed_at TEXT,
+        last_used_step INTEGER,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE user_recovery_codes (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id),
+        code_hash TEXT NOT NULL,
+        used_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      CREATE INDEX idx_user_recovery_codes_user ON user_recovery_codes(user_id);
+    `)
+  },
 ]
 
 function runMigrations(db: Database.Database): void {

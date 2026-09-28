@@ -110,25 +110,42 @@ describe('relay auth routes', () => {
     return newCookie
   }
 
-  it('signs in an allowlisted user as active and serves /api/me', async () => {
-    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+  it('signs in an allowlisted member as active and serves /api/me', async () => {
+    await start(githubFetchMock({ id: 2, login: 'teammate' }), { ...CONFIG, allowedGithubIds: [1, 2] })
     const cookie = await login()
 
     const meRes = await fetch(`${baseUrl}/api/me`, { headers: { cookie } })
     const me = (await meRes.json()) as {
       user: { login: string; status: string }
+      authLevel: string
       workspaces: Array<{ id: string; role: string }>
       isOperator: boolean
-      canCreateWorkspaces: boolean
     }
-    expect(me.user.login).toBe('alari76')
+    expect(me.user.login).toBe('teammate')
     expect(me.user.status).toBe('active')
-    expect(me.workspaces).toEqual([expect.objectContaining({ id: 'org-default', role: 'owner' })])
-    expect(me.isOperator).toBe(true)
-    expect(me.canCreateWorkspaces).toBe(true)
+    expect(me.authLevel).toBe('full')
+    expect(me.workspaces).toEqual([expect.objectContaining({ id: 'org-default', role: 'member' })])
+    expect(me.isOperator).toBe(false)
 
     const prot = await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })
     expect(prot.status).toBe(200)
+  })
+
+  it('sends the operator to 2FA enrollment when they have no second factor', async () => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    const cookie = await login()
+    const me = (await (await fetch(`${baseUrl}/api/me`, { headers: { cookie } })).json()) as {
+      authLevel: string
+      workspaces: unknown[]
+      mfa: { required: boolean }
+    }
+    expect(me.authLevel).toBe('enrollment_required')
+    expect(me.mfa.required).toBe(true)
+    // Nothing about the account's workspaces until sign-in is complete.
+    expect(me.workspaces).toEqual([])
+    const prot = await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })
+    expect(prot.status).toBe(401)
+    expect(await prot.json()).toEqual({ error: 'mfa_required', authLevel: 'enrollment_required' })
   })
 
   it('rejects a non-allowlisted user without creating an account', async () => {
@@ -198,13 +215,13 @@ describe('relay auth routes', () => {
   })
 
   it('blocks a live session as soon as the user is disabled in the database', async () => {
-    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    await start(githubFetchMock({ id: 2, login: 'teammate' }), { ...CONFIG, allowedGithubIds: [1, 2] })
     const cookie = await login()
     expect((await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })).status).toBe(200)
 
     // Revocation happens in the users table; the 30-day rolling cookie the
     // browser already holds must stop working on the very next request.
-    db.prepare("UPDATE users SET status = 'disabled' WHERE login = ?").run('alari76')
+    db.prepare("UPDATE users SET status = 'disabled' WHERE login = ?").run('teammate')
 
     const prot = await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })
     expect(prot.status).toBe(403)

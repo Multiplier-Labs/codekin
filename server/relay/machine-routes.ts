@@ -16,10 +16,11 @@ import { createRequireWorkspace } from './workspace-routes.js'
 import { listSharesFor } from './shares.js'
 import { getMachineSetupStates, isSetupPending, sweepOrphanMachines } from './pairing.js'
 import type { ConnectorHub } from './connector-hub.js'
+import type { RelayConfig } from './relay-config.js'
 
-export function createMachineRouter(db: Database.Database, hub?: ConnectorHub): Router {
+export function createMachineRouter(db: Database.Database, hub?: ConnectorHub, config?: Pick<RelayConfig, 'ownerGithubId'>): Router {
   const router = Router()
-  const requireActiveUser = createRequireActiveUser(db)
+  const requireActiveUser = createRequireActiveUser(db, config)
   const requireWorkspace = createRequireWorkspace(db)
 
   router.get('/api/machines', requireActiveUser, requireWorkspace, (req, res) => {

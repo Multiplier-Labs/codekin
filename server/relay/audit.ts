@@ -43,6 +43,13 @@ export type AuditEventKind =
   | 'invitation_revoked'
   | 'invitation_accepted'
   | 'invitation_rejected'
+  | 'mfa_verified'
+  | 'mfa_failed'
+  | 'mfa_enabled'
+  | 'mfa_disabled'
+  | 'mfa_recovery_codes_regenerated'
+  | 'mfa_reset'
+  | 'workspace_security_updated'
 
 export interface AuditEventInput {
   kind: AuditEventKind

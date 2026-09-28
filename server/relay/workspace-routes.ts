@@ -15,7 +15,8 @@ import { Router } from 'express'
 import type { Request, Response, NextFunction } from 'express'
 import type Database from 'better-sqlite3'
 import type { RelayConfig } from './relay-config.js'
-import { canCreateWorkspaces, createRequireActiveUser } from './relay-auth-routes.js'
+import { canCreateWorkspaces, createRequireActiveUser, ensureRecentAuth } from './relay-auth-routes.js'
+import { hasSecondFactor } from './mfa.js'
 import { BOOTSTRAP_WORKSPACE_ID, getUserById, listMachines } from './control-plane-db.js'
 import type { WorkspaceRole } from './control-plane-db.js'
 import {
@@ -32,6 +33,7 @@ import {
   normalizeWorkspaceName,
   removeMember,
   renameWorkspace,
+  setRequireMfa,
   transferMachine,
   updateMember,
 } from './workspaces.js'
@@ -90,7 +92,7 @@ export interface WorkspaceRouterDeps {
 
 export function createWorkspaceRouter({ db, config, browserHub, connectorHub }: WorkspaceRouterDeps): Router {
   const router = Router()
-  const requireActiveUser = createRequireActiveUser(db)
+  const requireActiveUser = createRequireActiveUser(db, config)
 
   const audit = (req: Request) => ({ ip: req.ip ?? null, userAgent: req.get('user-agent') ?? null })
   /** Behind requireActiveUser, so always a signed-in id. */
@@ -149,6 +151,7 @@ export function createWorkspaceRouter({ db, config, browserHub, connectorHub }: 
     })
   })
 
+  /** Rename, and/or require 2FA of every member (`requireMfa`). */
   router.patch('/api/workspaces/:id', requireActiveUser, (req, res) => {
     const membership = memberOf(req, res)
     if (!membership) return
@@ -156,7 +159,43 @@ export function createWorkspaceRouter({ db, config, browserHub, connectorHub }: 
       forbid(res)
       return
     }
-    const name = normalizeWorkspaceName((req.body as { name?: unknown }).name)
+    const body = req.body as { name?: unknown; requireMfa?: unknown }
+    if (body.requireMfa !== undefined) {
+      if (typeof body.requireMfa !== 'boolean') {
+        res.status(400).json({ error: 'requireMfa must be a boolean' })
+        return
+      }
+      const workspace = getWorkspace(db, membership.workspaceId)
+      if (workspace && body.requireMfa !== (workspace.require_mfa === 1)) {
+        // Turning it on: the owner must already meet the bar they set.
+        if (body.requireMfa && !hasSecondFactor(db, membership.userId)) {
+          res.status(409).json({ error: 'enroll_first' })
+          return
+        }
+        // Turning it off lowers everyone's protection: a fresh check first.
+        if (!body.requireMfa && !ensureRecentAuth(db, req, res)) return
+        setRequireMfa(db, membership.workspaceId, body.requireMfa)
+        if (body.requireMfa) {
+          // Members without a factor drop to enrollment on their next request;
+          // their open machine sockets end now.
+          for (const member of listMembers(db, membership.workspaceId)) {
+            if (!member.mfaEnabled) browserHub?.disconnectUser(member.userId, 'two-factor authentication required')
+          }
+        }
+        recordAuditEvent(db, {
+          kind: 'workspace_security_updated',
+          workspaceId: membership.workspaceId,
+          actorUserId: membership.userId,
+          ...audit(req),
+          metadata: { requireMfa: body.requireMfa },
+        })
+      }
+      if (body.name === undefined) {
+        res.json({ workspace: { id: membership.workspaceId, requireMfa: body.requireMfa } })
+        return
+      }
+    }
+    const name = normalizeWorkspaceName(body.name)
     if (!name) {
       res.status(400).json({ error: 'name must be 1–64 characters' })
       return
@@ -185,6 +224,7 @@ export function createWorkspaceRouter({ db, config, browserHub, connectorHub }: 
       res.status(400).json({ error: 'The default workspace cannot be deleted' })
       return
     }
+    if (!ensureRecentAuth(db, req, res)) return
     const machineIds = deleteWorkspace(db, membership.workspaceId)
     for (const machineId of machineIds) browserHub?.reauthorize({ machineId })
     recordAuditEvent(db, {
@@ -253,6 +293,8 @@ export function createWorkspaceRouter({ db, config, browserHub, connectorHub }: 
       return
     }
 
+    // Granting admin or owner (ownership transfer included) needs a fresh check.
+    if (nextRole !== undefined && isPrivilegedRole(nextRole) && nextRole !== target.role && !ensureRecentAuth(db, req, res)) return
     const result = updateMember(db, actor.workspaceId, targetId, {
       role: nextRole,
       status: body.status as MembershipStatus | undefined,

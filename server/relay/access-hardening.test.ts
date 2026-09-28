@@ -5,6 +5,7 @@
  * reproduced against the pre-fix code.
  */
 
+import { signInFully } from './__fixtures__/auth.js'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { EventEmitter } from 'events'
 import express from 'express'
@@ -107,7 +108,7 @@ describe('hosted access hardening (Phase 0)', () => {
     app.use(createMutationOriginGuard(PUBLIC_URL))
     app.use(session({ secret: 'test-secret-test-secret-test-secret', store, resave: false, saveUninitialized: false }))
     app.post('/test/login/:id', (req, res) => {
-      req.session.user = toSessionUser(getUserById(db, String(req.params.id))!)
+      { req.session.user = toSessionUser(getUserById(db, String(req.params.id))!); signInFully(db, req.session, req.session.user.id) }
       req.session.authenticatedAt = Date.now()
       res.json({ sid: req.sessionID })
     })
@@ -307,7 +308,7 @@ describe('hosted access hardening (Phase 0)', () => {
 describe('control-plane migrations', () => {
   it('tracks the schema version and backfills session owners', () => {
     const db = openControlPlaneDb(':memory:')
-    expect(db.pragma('user_version', { simple: true })).toBe(3)
+    expect(db.pragma('user_version', { simple: true })).toBe(4)
     const columns = (db.prepare('PRAGMA table_info(web_sessions)').all() as Array<{ name: string }>).map(c => c.name)
     expect(columns).toContain('user_id')
     db.close()
@@ -330,7 +331,7 @@ describe('control-plane migrations', () => {
     db.close()
     // Re-opening is a no-op once the version is recorded.
     const again = openControlPlaneDb(path)
-    expect(again.pragma('user_version', { simple: true })).toBe(3)
+    expect(again.pragma('user_version', { simple: true })).toBe(4)
     again.close()
     rmSync(dir, { recursive: true, force: true })
   })

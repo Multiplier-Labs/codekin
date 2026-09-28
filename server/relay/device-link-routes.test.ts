@@ -1,4 +1,5 @@
 /** Tests for the device-link REST endpoints (auth boundaries + session minting). */
+import { signInFully } from './__fixtures__/auth.js'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import express from 'express'
 import session from 'express-session'
@@ -41,7 +42,7 @@ describe('device link routes', () => {
     app.use(session({ secret: 's'.repeat(32), resave: false, saveUninitialized: false }))
     // Test hook: mark the session as the active user when the header is set
     app.use((req, _res, next) => {
-      if (req.headers['x-test-user'] === 'active') req.session.user = activeUser
+      if (req.headers['x-test-user'] === 'active') { req.session.user = activeUser; signInFully(db, req.session, req.session.user.id) }
       next()
     })
     app.use(createDeviceLinkRouter(db, CONFIG))

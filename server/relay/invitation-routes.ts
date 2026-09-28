@@ -14,7 +14,7 @@ import { Router } from 'express'
 import type { Request, Response } from 'express'
 import type Database from 'better-sqlite3'
 import type { RelayConfig } from './relay-config.js'
-import { createRequireActiveUser, saveSession } from './relay-auth-routes.js'
+import { createRequireActiveUser, ensureRecentAuth, saveSession } from './relay-auth-routes.js'
 import { can, getActiveMembership } from './workspaces.js'
 import type { Membership } from './workspaces.js'
 import {
@@ -51,7 +51,7 @@ export interface InvitationRouterDeps {
 
 export function createInvitationRouter({ db, config, fetchImpl = fetch }: InvitationRouterDeps): Router {
   const router = Router()
-  const requireActiveUser = createRequireActiveUser(db)
+  const requireActiveUser = createRequireActiveUser(db, config)
 
   const audit = (req: Request) => ({ ip: req.ip ?? null, userAgent: req.get('user-agent') ?? null })
   const linkFor = (token: string) => `${config.publicUrl}/invite#${token}`
@@ -115,6 +115,7 @@ export function createInvitationRouter({ db, config, fetchImpl = fetch }: Invita
         res.status(403).json({ error: 'Only an owner can invite an admin' })
         return
       }
+      if (role === 'admin' && !ensureRecentAuth(db, req, res)) return
 
       const email = typeof body.email === 'string' ? body.email.trim() : ''
       const githubLogin = typeof body.githubLogin === 'string' ? body.githubLogin.trim().replace(/^@/, '') : ''
@@ -229,6 +230,7 @@ export function createInvitationRouter({ db, config, fetchImpl = fetch }: Invita
       res.status(403).json({ error: 'Only an owner can invite an admin' })
       return
     }
+    if (previous.role === 'admin' && !ensureRecentAuth(db, req, res)) return
     const result = createInvitation(db, {
       workspaceId: membership.workspaceId,
       role: previous.role,

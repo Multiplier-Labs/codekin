@@ -1,4 +1,5 @@
 /** Tests for the share REST endpoints: grantee resolution and live revocation. */
+import { signInFully } from './__fixtures__/auth.js'
 import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
@@ -51,7 +52,7 @@ describe('share routes', () => {
     app.use(express.json())
     app.use(session({ secret: 's'.repeat(32), resave: false, saveUninitialized: false }))
     app.use((req, _res, next) => {
-      if (req.headers['x-test-user'] === 'owner') req.session.user = toSessionUser(owner)
+      if (req.headers['x-test-user'] === 'owner') { req.session.user = toSessionUser(owner); signInFully(db, req.session, req.session.user.id) }
       next()
     })
     app.use(createShareRouter(db, { reauthorize } as unknown as BrowserHub))
