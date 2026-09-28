@@ -402,14 +402,10 @@ function MachineOversight({ members }: { members: WorkspaceMember[] }) {
   )
 }
 
-export function WorkspaceSection() {
+/** The signed-in account's workspaces (from /api/me) and the one this tab is in. */
+function useWorkspaceAccount(): { account: Account | null; workspace: Workspace | undefined; error: string | null } {
   const [account, setAccount] = useState<Account | null>(null)
-  const [members, setMembers] = useState<WorkspaceMember[] | null>(null)
-  const [creating, setCreating] = useState(false)
-  const [renaming, setRenaming] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const workspaceId = currentWorkspaceId()
-
   useEffect(() => {
     void (async () => {
       try {
@@ -430,27 +426,42 @@ export function WorkspaceSection() {
       }
     })()
   }, [])
+  const workspaceId = currentWorkspaceId()
+  return { account, workspace: account?.workspaces.find(w => w.id === workspaceId), error }
+}
 
-  const loadMembers = useCallback(async () => {
+/** This tab's workspace's members, reloadable after a change. */
+function useMembers(workspaceId: string | undefined, onError: (message: string | null) => void) {
+  const [members, setMembers] = useState<WorkspaceMember[] | null>(null)
+  const reload = useCallback(async () => {
     if (!workspaceId) return
     try {
       setMembers(await fetchMembers(workspaceId))
     } catch (err) {
-      setError(errorText(err))
+      onError(errorText(err))
     }
-  }, [workspaceId])
-
+  }, [workspaceId, onError])
   useEffect(() => {
     if (!workspaceId) return
     fetchMembers(workspaceId)
       .then(setMembers)
-      .catch((err: unknown) => { setError(errorText(err)) })
-  }, [workspaceId])
+      .catch((err: unknown) => { onError(errorText(err)) })
+  }, [workspaceId, onError])
+  return { members, reload }
+}
 
-  const workspace = account?.workspaces.find(w => w.id === workspaceId)
-  if (!account || !workspace) {
-    return error ? <p className="text-meta text-error-4">{error}</p> : <p className="text-body text-ink-muted">Loading…</p>
-  }
+function Loading({ error }: { error: string | null }) {
+  return error ? <p className="text-meta text-error-4">{error}</p> : <p className="text-body text-ink-muted">Loading…</p>
+}
+
+/** Workspace → General: name, switching and creating, 2FA policy, leave/delete. */
+export function WorkspaceGeneral() {
+  const { account, workspace, error: loadError } = useWorkspaceAccount()
+  const [creating, setCreating] = useState(false)
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  if (!account || !workspace) return <Loading error={loadError} />
 
   const role = workspace.role
   const others = account.workspaces.filter(w => w.id !== workspace.id)
@@ -543,30 +554,6 @@ export function WorkspaceSection() {
         </label>
       )}
 
-      <div className="mt-5">
-        <h4 className={subheading}>Members</h4>
-        {members === null ? (
-          <p className="text-meta text-ink-faint">Loading…</p>
-        ) : (
-          <ul className="divide-y divide-edge">
-            {members.map(member => (
-              <MemberRow
-                key={member.userId}
-                member={member}
-                actorRole={role}
-                isSelf={member.userId === account.userId}
-                onChanged={() => void loadMembers()}
-                onError={setError}
-              />
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {can(role, 'member.invite') && <InvitationsPanel actorRole={role} />}
-
-      {can(role, 'machine.oversee') && members && <MachineOversight members={members} />}
-
       {error && <p className="mt-3 text-meta text-error-4">{error}</p>}
 
       <div className="mt-5 flex flex-wrap gap-2 border-t border-edge pt-4">
@@ -591,6 +578,68 @@ export function WorkspaceSection() {
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+/** Workspace → Members: the member list with role controls, and invitations. */
+export function WorkspaceMembers() {
+  const { account, workspace, error: loadError } = useWorkspaceAccount()
+  const [error, setError] = useState<string | null>(null)
+  const { members, reload } = useMembers(workspace?.id, setError)
+
+  if (!account || !workspace) return <Loading error={loadError} />
+  const role = workspace.role
+
+  return (
+    <div>
+      <h4 className={subheading}>Members</h4>
+      {members === null ? (
+        <p className="text-meta text-ink-faint">Loading…</p>
+      ) : (
+        <ul className="divide-y divide-edge">
+          {members.map(member => (
+            <MemberRow
+              key={member.userId}
+              member={member}
+              actorRole={role}
+              isSelf={member.userId === account.userId}
+              onChanged={() => void reload()}
+              onError={setError}
+            />
+          ))}
+        </ul>
+      )}
+      {error && <p className="mt-3 text-meta text-error-4">{error}</p>}
+      {can(role, 'member.invite') && <InvitationsPanel actorRole={role} />}
+    </div>
+  )
+}
+
+/** Workspace → Machines (owners and admins): every machine in the workspace. */
+export function WorkspaceMachines() {
+  const { account, workspace, error: loadError } = useWorkspaceAccount()
+  const [error, setError] = useState<string | null>(null)
+  const { members } = useMembers(workspace?.id, setError)
+
+  if (!account || !workspace) return <Loading error={loadError} />
+  if (!can(workspace.role, 'machine.oversee')) return null
+  if (!members) return <Loading error={error} />
+  return <MachineOversight members={members} />
+}
+
+/**
+ * All three workspace panels in one card — the hosted no-machine screen,
+ * until that screen becomes /settings (docs/SETTINGS-VIEW-SPEC.md, PR 3).
+ */
+export function WorkspaceSection() {
+  return (
+    <div>
+      <WorkspaceGeneral />
+      <div className="mt-5">
+        <WorkspaceMembers />
+      </div>
+      <WorkspaceMachines />
     </div>
   )
 }

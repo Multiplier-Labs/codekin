@@ -1,6 +1,6 @@
 # Settings as a Full View
 
-**Status:** Approved 2026-09-28 · PR 1 (section extraction) in progress
+**Status:** Approved 2026-09-28 · PR 1 merged (#651) · PR 2 (routed view) in review
 
 ## 1. Problem
 
@@ -60,6 +60,17 @@ Rules:
 | 1 | Extract each modal section into `src/components/settings/*` with its own state and data loading. The modal becomes a thin shell. | No |
 | 2 | `SettingsView` with nav and `/settings/<section>` routing (desktop + mobile). The sidebar/top-bar Settings buttons open it; the modal is removed. Theme quick menu. | Yes |
 | 3 | The hosted disconnected home becomes `/settings/machines`, and `machinesOnly` is removed. Add the Platform → Accounts section (operator UI for `/api/users`). | Yes |
+
+**Notes from PR 2:**
+- The theme quick menu already existed (`ThemeMenu` in the sidebar, desktop and mobile), so PR 2
+  adds nothing for it.
+- `Account → Profile` (identity, sign out) moves to PR 3. The account screens that own sign-out
+  live in `HostedApp`, which PR 3 reworks anyway.
+- Opening Settings no longer leaves the current session. The URL-to-session sync skips the
+  settings view, and closing returns to `/s/<id>`.
+- The Workspace card is split into `WorkspaceGeneral`, `WorkspaceMembers` and `WorkspaceMachines`
+  (`src/hosted/WorkspaceSection.tsx`). `WorkspaceSection` composes them for the not-connected
+  screen until PR 3.
 
 ## 4. Out of scope
 
