@@ -33,6 +33,7 @@ import { getUserById } from './control-plane-db.js'
 import { resolveMachineAccess } from './shares.js'
 import type { MachineAccess } from './shares.js'
 import { recordAuditEvent } from './audit.js'
+import { checkRestPolicy, isServerFrameVisible } from './connector-policy.js'
 import { BROWSER_FRAME_LIMIT, RateLimiter, isBackedUp } from './rate-limit.js'
 
 const CLOSE_AUTH_FAILED = 4001
@@ -304,6 +305,19 @@ export class BrowserHub {
       return
     }
 
+    // The connector enforces this too; checking here as well means a machine
+    // running an older connector is still protected by the hosted service.
+    if (client.access.kind === 'grantee') {
+      const permitted = checkRestPolicy({ role: 'grantee', grants: client.access.grants }, request.method, request.path)
+      if (!permitted.allowed) {
+        this.sendError(client.socket, id, {
+          code: RELAY_ERROR.notPermitted,
+          message: permitted.reason ?? 'Not permitted',
+        })
+        return
+      }
+    }
+
     client.inflight += 1
     try {
       // Only method/path/body/contentType cross the hub — the connector
@@ -360,6 +374,12 @@ export class BrowserHub {
             envelope('stream_close', { code: STREAM_CLOSE.normal, reason: 'client too slow' }, { channelId: localId }),
           ),
         )
+        return
+      }
+      // Same outbound rule the connector applies, repeated here for older
+      // connectors: never relay another session's frames to a grantee.
+      if (kind === 'stream_data' && client.access.kind === 'grantee' &&
+          !isServerFrameVisible(client.access.grants, (payload as StreamData).data)) {
         return
       }
       client.socket.send(JSON.stringify(envelope(kind, payload, { channelId: localId })))

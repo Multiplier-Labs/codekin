@@ -47,8 +47,65 @@ export function permissionForTool(toolName: string | undefined): SessionPermissi
 }
 
 /**
- * REST paths a grantee may reach at all — deliberately tiny, because a
- * grantee's real surface is the session stream, not the machine's API.
+ * A proxied path split into the exact pieces that are authorized and then
+ * executed. Both gates and the outgoing fetch read these same values, so the
+ * URL that was checked is the URL that runs.
+ */
+export interface CanonicalPath {
+  pathname: string
+  /** Query string including its leading `?`, or empty. */
+  search: string
+}
+
+/**
+ * Validate a proxied path and return its canonical form, or null when it is
+ * ambiguous. A path is ambiguous when anything downstream — WHATWG URL
+ * parsing in `fetch`, or Express routing — could read it as a different
+ * route than the one authorized: dot segments (literal or percent-encoded),
+ * encoded slashes or backslashes, empty segments, fragments, and characters
+ * URL parsing would rewrite. Such paths are refused rather than normalized:
+ * the frontend never needs them, and refusing leaves no second spelling of
+ * a route to reason about.
+ */
+export function canonicalizePath(path: unknown): CanonicalPath | null {
+  if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//')) return null
+  // Printable ASCII only; no fragment, no backslash.
+  if (!/^[\x21-\x7e]*$/.test(path) || path.includes('#') || path.includes('\\')) return null
+
+  const q = path.indexOf('?')
+  const pathname = q === -1 ? path : path.slice(0, q)
+  const search = q === -1 ? '' : path.slice(q)
+
+  if (/%(2e|2f|5c|00)/i.test(pathname)) return null
+  const segments = pathname.split('/').slice(1)
+  // Empty segments (`a//b`) are refused; a single trailing slash is the one
+  // empty segment allowed, and grantees are held to exact routes anyway.
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]
+    if (seg === '.' || seg === '..') return null
+    if (seg === '' && i !== segments.length - 1) return null
+  }
+
+  let parsed: URL
+  try {
+    parsed = new URL(path, 'http://127.0.0.1')
+  } catch {
+    return null
+  }
+  if (parsed.pathname !== pathname || parsed.search !== search) {
+    // `?` alone parses to an empty search; accept that one harmless case.
+    if (!(parsed.pathname === pathname && search === '?' && parsed.search === '')) return null
+  }
+  return { pathname, search }
+}
+
+/**
+ * REST routes a grantee may reach at all — deliberately tiny and matched
+ * exactly (method and path), because a grantee's real surface is the session
+ * stream, not the machine's API. Prefix matching is what let a view grant
+ * reach unrelated routes: Express treats `/api/sessions/list/` and
+ * `/api/sessions/list` as one route, and anything under a prefix is a route
+ * nobody reviewed for grantees.
  *
  * `/api/sessions/list` is allowed but its response is filtered to granted
  * sessions (see filterSessionList), so names and working directories of
@@ -57,12 +114,31 @@ export function permissionForTool(toolName: string | undefined): SessionPermissi
  * participation. `/api/upload` writes into the screenshots directory only,
  * which is why it can be granted without a path check.
  */
-const GRANTEE_READ_PREFIXES = ['/auth-verify', '/api/health', '/api/sessions/list']
-const GRANTEE_WRITE_PREFIXES = ['/auth-verify', '/api/upload']
+const GRANTEE_ROUTES: ReadonlyArray<{ methods: readonly string[]; path: string }> = [
+  { methods: ['GET', 'HEAD'], path: '/api/health' },
+  { methods: ['GET', 'HEAD'], path: '/api/sessions/list' },
+  { methods: ['POST'], path: '/auth-verify' },
+  { methods: ['POST'], path: '/api/upload' },
+]
+
+/**
+ * Route identity as Express would see it: case-insensitive, trailing slash
+ * ignored. Used where under-matching would leak (response filtering), never
+ * where over-matching would grant.
+ */
+function routeKey(pathname: string): string {
+  const trimmed = pathname.replace(/\/+$/, '')
+  return (trimmed || '/').toLowerCase()
+}
 
 /** Response bodies that must be narrowed before a grantee may see them. */
 export function needsSessionListFilter(policy: ChannelPolicy, path: string): boolean {
-  return policy.role === 'grantee' && path.split('?')[0] === '/api/sessions/list'
+  if (policy.role !== 'grantee') return false
+  const canonical = canonicalizePath(path)
+  // An unparsable path never reaches here (it is refused first); if it
+  // somehow did, filtering is the safe answer.
+  if (!canonical) return true
+  return routeKey(canonical.pathname).startsWith('/api/sessions')
 }
 
 /**
@@ -77,7 +153,7 @@ export function filterSessionList(policy: ChannelPolicy, body: string): string |
     const granted = parsed.sessions.filter(
       (s): s is { id: string } =>
         typeof s === 'object' && s !== null && typeof (s as { id?: unknown }).id === 'string' &&
-        (s as { id: string }).id in policy.grants,
+        Object.hasOwn(policy.grants, (s as { id: string }).id),
     )
     return JSON.stringify({ ...parsed, sessions: granted })
   } catch {
@@ -85,29 +161,19 @@ export function filterSessionList(policy: ChannelPolicy, body: string): string |
   }
 }
 
-function matchesPrefix(pathname: string, prefixes: string[]): boolean {
-  return prefixes.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`))
-}
-
 /** Whether a grantee may issue this proxied REST call. */
 export function checkRestPolicy(policy: ChannelPolicy, method: string, path: string): PolicyDecision {
+  const canonical = canonicalizePath(path)
+  if (!canonical) return { allowed: false, reason: 'Malformed path' }
   if (policy.role === 'owner') return ALLOW
 
   const upper = method.toUpperCase()
-  const pathname = path.split('?')[0]
-  const isRead = upper === 'GET' || upper === 'HEAD'
-
-  if (isRead) {
-    if (!matchesPrefix(pathname, GRANTEE_READ_PREFIXES)) {
-      return { allowed: false, reason: `${upper} ${pathname} is owner-only` }
-    }
-    return ALLOW
-  }
-
-  if (!matchesPrefix(pathname, GRANTEE_WRITE_PREFIXES)) {
+  const { pathname } = canonical
+  const route = GRANTEE_ROUTES.find(r => r.path === pathname && r.methods.includes(upper))
+  if (!route) {
     return { allowed: false, reason: `${upper} ${pathname} is owner-only` }
   }
-  if (pathname.startsWith('/api/upload') && !hasAnyPermission(policy, 'upload_file')) {
+  if (route.path === '/api/upload' && !hasAnyPermission(policy, 'upload_file')) {
     return { allowed: false, reason: 'Uploading files is not granted', permission: 'upload_file' }
   }
   return ALLOW
@@ -119,8 +185,8 @@ function hasAnyPermission(policy: ChannelPolicy, permission: SessionPermission):
 }
 
 function hasPermission(policy: ChannelPolicy, sessionId: string | null, permission: SessionPermission): boolean {
-  if (!sessionId) return false
-  return (policy.grants[sessionId] ?? []).includes(permission)
+  if (!sessionId || !Object.hasOwn(policy.grants, sessionId)) return false
+  return policy.grants[sessionId].includes(permission)
 }
 
 export interface ChannelState {
@@ -159,6 +225,49 @@ export function observeServerFrame(state: ChannelState, frame: string): void {
 }
 
 /**
+ * Server frame types that describe the machine rather than a session, and
+ * so are never relayed to a grantee. `webhook_event` names repos, branches
+ * and CI workflows, and is fanned out into every session's stream.
+ */
+const MACHINE_WIDE_FRAME_TYPES = new Set(['webhook_event'])
+
+/**
+ * Whether a frame may reach a grantee at all, judged on grants alone. Frames
+ * tagged with another session's id are refused: the local server fans some
+ * frames out to every socket (an approval prompt for a session with no
+ * viewer, carrying its tool input), and a grantee's channel is one of those
+ * sockets. Untagged frames are either session-scoped — the local server only
+ * sends those to the session this socket joined, which the grantee could
+ * only join with a grant — or content-free notices such as `sessions_updated`.
+ *
+ * Shared with the relay, which applies it too so that connectors predating
+ * this check do not leak through the hosted service.
+ */
+export function isServerFrameVisible(grants: GrantMap, frame: string): boolean {
+  const msg = parseFrame(frame)
+  if (!msg || typeof msg.type !== 'string') return false
+  if (MACHINE_WIDE_FRAME_TYPES.has(msg.type)) return false
+  if (msg.sessionId !== undefined && msg.sessionId !== null) {
+    return typeof msg.sessionId === 'string' && Object.hasOwn(grants, msg.sessionId)
+  }
+  return true
+}
+
+/**
+ * Whether a frame from the local server may be relayed on this channel.
+ * Owners see everything. A grantee additionally sees session-tagged frames
+ * only for the session the channel has joined, so a prompt for another of
+ * their shared sessions is not answered from the wrong session's grant.
+ */
+export function checkServerFrame(policy: ChannelPolicy, state: ChannelState, frame: string): boolean {
+  if (policy.role === 'owner') return true
+  if (!isServerFrameVisible(policy.grants, frame)) return false
+  const msg = parseFrame(frame)
+  if (typeof msg?.sessionId === 'string' && msg.sessionId !== state.sessionId) return false
+  return true
+}
+
+/**
  * Whether a frame from the browser may be forwarded to the local server, and
  * what it does to the channel's state.
  *
@@ -175,7 +284,7 @@ export function checkClientFrame(policy: ChannelPolicy, state: ChannelState, fra
   // Track the joined session for both roles; the owner path needs it for audit.
   if (msg.type === 'join_session') {
     const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : null
-    if (policy.role === 'grantee' && (!sessionId || !(sessionId in policy.grants))) {
+    if (policy.role === 'grantee' && (!sessionId || !Object.hasOwn(policy.grants, sessionId))) {
       return { allowed: false, reason: 'That session has not been shared with you' }
     }
     state.sessionId = sessionId

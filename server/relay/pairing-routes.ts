@@ -22,7 +22,7 @@ import {
 } from './pairing.js'
 import { createRequireActiveUser } from './relay-auth-routes.js'
 import { createRequireWorkspace } from './workspace-routes.js'
-import { can } from './workspaces.js'
+import { can, getActiveMembership } from './workspaces.js'
 import { getMachine } from './control-plane-db.js'
 import { recordAuditEvent } from './audit.js'
 import type { RelayConfig } from './relay-config.js'
@@ -244,8 +244,15 @@ export function createPairingRouter(
     }
     // Being able to name a machine is not authority over it: anyone holding a
     // share reads its id from GET /api/machines, and removing it deletes the
-    // connector's credential. Only the owner may do that.
-    if (machine.owner_user_id !== userId) {
+    // connector's credential. Only the owner may do that, and only while they
+    // still belong to its workspace: removal keeps owner_user_id for the audit
+    // trail and quarantines the machine for an administrator to transfer or
+    // remove, which a former member must not pre-empt.
+    if (
+      machine.owner_user_id !== userId
+      || machine.quarantined_at !== null
+      || !getActiveMembership(db, machine.workspace_id, userId)
+    ) {
       recordAuditEvent(db, {
         kind: 'access_denied',
         actorUserId: userId,

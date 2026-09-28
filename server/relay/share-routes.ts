@@ -11,6 +11,7 @@ import type Database from 'better-sqlite3'
 import type { BrowserHub } from './browser-hub.js'
 import type { RelayConfig } from './relay-config.js'
 import { createRequireActiveUser } from './relay-auth-routes.js'
+import type { SessionUser } from './relay-auth-routes.js'
 import {
   SHARE_ROLES,
   deleteShare,
@@ -20,6 +21,7 @@ import {
   listSharesFor,
   normalizePermissions,
   parseShareExpiry,
+  resolveMachineAccess,
   updateSharePermissions,
   upsertShare,
 } from './shares.js'
@@ -206,6 +208,30 @@ export function createShareRouter(
       res.status(403).json({ error: 'Only the user who shared this session can change it' })
       return
     }
+    // Changing a share is sharing again, so it needs the authority creation
+    // needed — as of now, not as of when the share was made. A creator who
+    // has since been demoted, removed, or lost the machine may still revoke
+    // (DELETE), but may not widen what someone else holds.
+    const machine = db
+      .prepare('SELECT owner_user_id, workspace_id, quarantined_at FROM machines WHERE id = ?')
+      .get(share.machineId) as { owner_user_id: string; workspace_id: string; quarantined_at: string | null } | undefined
+    if (
+      !machine
+      || machine.owner_user_id !== user.id
+      || machine.quarantined_at !== null
+      || machine.workspace_id !== share.workspaceId
+      || !can(getActiveMembership(db, machine.workspace_id, user.id)?.role, 'machine.share')
+    ) {
+      recordAuditEvent(db, {
+        kind: 'access_denied',
+        actorUserId: user.id,
+        machineId: share.machineId,
+        ip: req.ip ?? null,
+        metadata: { stage: 'share_update' },
+      })
+      res.status(403).json({ error: 'You can no longer share sessions on this machine' })
+      return
+    }
 
     const body = req.body as { role?: unknown; permissions?: unknown; expiresAt?: unknown }
     const permissions = resolvePermissions(body)
@@ -216,6 +242,12 @@ export function createShareRouter(
     const granteeRole = share.granteeUserId
       ? getActiveMembership(db, share.workspaceId, share.granteeUserId)?.role
       : undefined
+    // A grantee who has left the workspace has nothing to update; refusing
+    // keeps a stale row from being revived with new permissions.
+    if (!granteeRole) {
+      res.status(400).json({ error: 'That user is no longer a member of this workspace' })
+      return
+    }
     if (exceedsRoleCap(permissions, granteeRole)) {
       res.status(400).json(VIEWER_CAP)
       return
@@ -282,6 +314,16 @@ export function createShareRouter(
   })
 
   /**
+   * Whether a user may read a machine's audit log: they must own it with
+   * current standing — active membership in its live workspace and a machine
+   * that is not quarantined. The stored owner alone is not enough, because
+   * removal deliberately keeps it for the audit trail.
+   */
+  function canReadMachineAudit(user: Pick<SessionUser, 'id' | 'status'>, machineId: string): boolean {
+    return resolveMachineAccess(db, user, machineId).kind === 'owner'
+  }
+
+  /**
    * Audit log. A user sees their own actions; a machine's owner additionally
    * sees everything that happened on their machines.
    */
@@ -291,10 +333,7 @@ export function createShareRouter(
     const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined
 
     if (machineId) {
-      const machine = db.prepare('SELECT owner_user_id FROM machines WHERE id = ?').get(machineId) as
-        | { owner_user_id: string }
-        | undefined
-      if (!machine || machine.owner_user_id !== user.id) {
+      if (!canReadMachineAudit(user, machineId)) {
         res.status(403).json({ error: 'Only the machine owner can read its audit log' })
         return
       }
@@ -315,10 +354,7 @@ export function createShareRouter(
     const machineId = typeof req.query.machineId === 'string' ? req.query.machineId : undefined
 
     if (machineId) {
-      const machine = db.prepare('SELECT owner_user_id FROM machines WHERE id = ?').get(machineId) as
-        | { owner_user_id: string }
-        | undefined
-      if (!machine || machine.owner_user_id !== user.id) {
+      if (!canReadMachineAudit(user, machineId)) {
         res.status(403).json({ error: 'Only the machine owner can export its audit log' })
         return
       }
