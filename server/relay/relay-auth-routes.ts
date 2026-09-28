@@ -22,6 +22,15 @@ import { recordAuditEvent } from './audit.js'
 import { revokePendingDeviceLinks } from './device-link.js'
 import { listUserWorkspaces } from './workspaces.js'
 import { acceptInvitation, checkInvitation } from './invitations.js'
+import {
+  PARTIAL_SESSION_TTL_MS,
+  STEP_UP_WINDOW_MS,
+  authLevelAfterSignIn,
+  hasSecondFactor,
+  isMfaRequired,
+  mfaStatus,
+} from './mfa.js'
+import type { AuthLevel } from './mfa.js'
 import type { GithubIdentity } from './invitations.js'
 
 const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize'
@@ -60,6 +69,12 @@ declare module 'express-session' {
     authMethod?: AuthMethod
     /** Epoch ms of sign-in. Bounds the session's absolute lifetime. */
     authenticatedAt?: number
+    /** How far sign-in has got (see mfa.ts). Absent on sessions from before 2FA. */
+    authLevel?: AuthLevel
+    /** Epoch ms the current half-signed-in state began; it expires after PARTIAL_SESSION_TTL_MS. */
+    partialSince?: number
+    /** Epoch ms of the last second-factor check, for step-up on sensitive actions. */
+    mfaVerifiedAt?: number
   }
 }
 
@@ -99,12 +114,72 @@ function destroySession(req: Request): Promise<void> {
  * passkey, device link) ends here, so a new session always gets a fresh id
  * (session fixation) and the same sign-in metadata.
  */
-export async function establishSession(req: Request, user: UserRow, method: AuthMethod): Promise<void> {
+export async function establishSession(
+  req: Request,
+  user: UserRow,
+  method: AuthMethod,
+  level: AuthLevel = 'full',
+): Promise<void> {
   await regenerateSession(req)
+  const now = Date.now()
   req.session.user = toSessionUser(user)
   req.session.authMethod = method
-  req.session.authenticatedAt = Date.now()
+  req.session.authenticatedAt = now
+  req.session.authLevel = level
+  if (level !== 'full') req.session.partialSince = now
+  // A passkey sign-in is itself a second-factor check.
+  if (method === 'passkey') req.session.mfaVerifiedAt = now
   await saveSession(req)
+}
+
+/**
+ * Record a successful second-factor check. Completing sign-in (a partial
+ * session becoming full) gets a fresh session id, like any privilege change;
+ * a step-up on an already-full session keeps its id, so the machine sockets
+ * bound to it stay connected.
+ */
+export async function markMfaVerified(req: Request): Promise<void> {
+  if (req.session.authLevel !== 'full') {
+    const { user, authMethod, authenticatedAt } = req.session
+    await regenerateSession(req)
+    req.session.user = user
+    req.session.authMethod = authMethod
+    req.session.authenticatedAt = authenticatedAt
+  }
+  req.session.authLevel = 'full'
+  delete req.session.partialSince
+  req.session.mfaVerifiedAt = Date.now()
+  await saveSession(req)
+}
+
+/**
+ * The session's effective auth level, or null when a half-signed-in session
+ * has run out of time. Sessions from before 2FA are held to what a fresh
+ * GitHub sign-in would face, and a full session whose account has since
+ * become subject to 2FA (promoted, or a workspace now requires it) without
+ * having a factor drops to enrollment.
+ */
+export function currentAuthLevel(
+  db: Database.Database,
+  req: Request,
+  user: UserRow,
+  config?: Pick<RelayConfig, 'ownerGithubId'>,
+): AuthLevel | null {
+  const policy = config ?? { ownerGithubId: 0 }
+  const now = Date.now()
+  let level = req.session.authLevel
+  if (level === undefined) {
+    level = authLevelAfterSignIn(db, user, policy, 'github')
+    req.session.authLevel = level
+    if (level !== 'full') req.session.partialSince = now
+  }
+  if (level === 'full' && !hasSecondFactor(db, user.id) && isMfaRequired(db, user, policy)) {
+    level = 'enrollment_required'
+    req.session.authLevel = level
+    req.session.partialSince = now
+  }
+  if (level !== 'full' && now - (req.session.partialSince ?? 0) > PARTIAL_SESSION_TTL_MS) return null
+  return level
 }
 
 export function requestAuditMeta(req: Request): { ip: string | null; userAgent: string | null } {
@@ -290,39 +365,41 @@ export function createRelayAuthRouter({
       }
       const user = upsertUserFromGithub(db, profile, accessPolicy, { admitViaInvitation: invite?.ok === true })
 
-      await establishSession(req, user, 'github')
-      recordAuditEvent(db, {
-        kind: 'login',
-        actorUserId: user.id,
-        ...requestAuditMeta(req),
-        metadata: { method: 'github' },
-      })
-
-      // A disabled account keeps its session (it sees the no-access screen)
-      // but joins nothing.
+      // Accept before settling the auth level: joining as an admin, or into a
+      // workspace that requires 2FA, changes what this sign-in must complete.
+      // A disabled account signs in (it sees the no-access screen) but joins nothing.
+      let destination = returnTo
       if (inviteToken && user.status === 'active') {
         const accepted = acceptInvitation(db, inviteToken, user.id, identity)
-        if (!accepted.ok) {
+        if (accepted.ok) {
+          recordAuditEvent(db, {
+            kind: 'invitation_accepted',
+            workspaceId: accepted.workspaceId,
+            actorUserId: user.id,
+            ...requestAuditMeta(req),
+            metadata: { role: accepted.role, alreadyMember: accepted.alreadyMember },
+          })
+          destination = `/?joined=${encodeURIComponent(accepted.workspaceId)}`
+        } else {
           recordAuditEvent(db, {
             kind: 'invitation_rejected',
             actorUserId: user.id,
             ...requestAuditMeta(req),
             metadata: { reason: accepted.reason },
           })
-          res.redirect(`/?auth_error=${accepted.reason}`)
-          return
+          destination = `/?auth_error=${accepted.reason}`
         }
-        recordAuditEvent(db, {
-          kind: 'invitation_accepted',
-          workspaceId: accepted.workspaceId,
-          actorUserId: user.id,
-          ...requestAuditMeta(req),
-          metadata: { role: accepted.role, alreadyMember: accepted.alreadyMember },
-        })
-        res.redirect(`/?joined=${encodeURIComponent(accepted.workspaceId)}`)
-        return
       }
-      res.redirect(returnTo)
+
+      const level = authLevelAfterSignIn(db, user, config, 'github')
+      await establishSession(req, user, 'github', level)
+      recordAuditEvent(db, {
+        kind: 'login',
+        actorUserId: user.id,
+        ...requestAuditMeta(req),
+        metadata: { method: 'github', authLevel: level },
+      })
+      res.redirect(destination)
     })().catch(() => { loginFailed(req, res, 'login_failed'); })
   })
 
@@ -381,11 +458,23 @@ export function createRelayAuthRouter({
     }
     req.session.user = toSessionUser(current)
     const active = current.status === 'active'
+    const authLevel = active ? currentAuthLevel(db, req, current, config) : 'full'
+    if (authLevel === null) {
+      // The window to finish signing in closed; start over.
+      destroySession(req)
+        .then(() => { res.json({ user: null }) })
+        .catch(() => { res.json({ user: null }) })
+      return
+    }
+    const full = active && authLevel === 'full'
     res.json({
       user: req.session.user,
-      workspaces: active ? listUserWorkspaces(db, current.id) : [],
-      isOperator: active && isOperator(current, config),
-      canCreateWorkspaces: canCreateWorkspaces(current, config),
+      authLevel,
+      mfa: active ? mfaStatus(db, current, config) : null,
+      // Workspace facts only once fully signed in.
+      workspaces: full ? listUserWorkspaces(db, current.id) : [],
+      isOperator: full && isOperator(current, config),
+      canCreateWorkspaces: full && canCreateWorkspaces(current, config),
     })
   })
 
@@ -393,40 +482,102 @@ export function createRelayAuthRouter({
 }
 
 /**
- * Guard for routes that require a signed-in, active user.
- * 401 when not signed in; 403 when signed in but pending/disabled.
+ * The signed-in, active account behind a request, refreshed from the DB, or
+ * null after an error response has been sent (401 not signed in; 403
+ * pending/disabled).
  *
- * Role and status are re-read from the database on every request rather than
- * taken from the session. The session holds a snapshot written at login and
- * rolls for 30 days, so trusting it would leave a disabled user with working
- * access until their cookie happened to expire. The refreshed row is written
- * back to the session so downstream handlers and /api/me agree with the DB.
+ * Status is re-read on every request rather than taken from the session. The
+ * session holds a snapshot written at login and rolls for 30 days, so trusting
+ * it would leave a disabled user with working access until their cookie
+ * happened to expire. The refreshed row is written back to the session so
+ * downstream handlers and /api/me agree with the DB.
  */
-export function createRequireActiveUser(db: Database.Database) {
+function activeAccount(db: Database.Database, req: Request, res: Response): UserRow | null {
+  const sessionUser = req.session.user
+  if (!sessionUser) {
+    res.status(401).json({ error: 'Unauthorized' })
+    return null
+  }
+  const current = getUserById(db, sessionUser.id)
+  if (!current) {
+    // The account was deleted out from under a live session.
+    res.status(401).json({ error: 'Unauthorized' })
+    return null
+  }
+  // Refresh before the status check, not after: a user who has just been
+  // disabled should see that in /api/me too, not a stale "active".
+  req.session.user = toSessionUser(current)
+  // Sessions from before sign-in times were recorded start their absolute
+  // lifetime now rather than being exempt from it forever.
+  req.session.authenticatedAt ??= Date.now()
+  if (current.status !== 'active') {
+    res.status(403).json({ error: 'Access not granted', status: current.status })
+    return null
+  }
+  return current
+}
+
+/**
+ * Guard for routes that need a fully signed-in, active user: 401 with
+ * `mfa_required` (and the level) while a second factor or 2FA enrollment is
+ * outstanding.
+ */
+export function createRequireActiveUser(db: Database.Database, config?: Pick<RelayConfig, 'ownerGithubId'>) {
   return function requireActiveUser(req: Request, res: Response, next: () => void): void {
-    const sessionUser = req.session.user
-    if (!sessionUser) {
-      res.status(401).json({ error: 'Unauthorized' })
+    const current = activeAccount(db, req, res)
+    if (!current) return
+    const level = currentAuthLevel(db, req, current, config)
+    if (level === null) {
+      res.status(401).json({ error: 'session_expired' })
       return
     }
-    const current = getUserById(db, sessionUser.id)
-    if (!current) {
-      // The account was deleted out from under a live session.
-      res.status(401).json({ error: 'Unauthorized' })
-      return
-    }
-    // Refresh before the status check, not after: a user who has just been
-    // disabled should see that in /api/me too, not a stale "active".
-    req.session.user = toSessionUser(current)
-    // Sessions from before sign-in times were recorded start their absolute
-    // lifetime now rather than being exempt from it forever.
-    req.session.authenticatedAt ??= Date.now()
-    if (current.status !== 'active') {
-      res.status(403).json({ error: 'Access not granted', status: current.status })
+    if (level !== 'full') {
+      res.status(401).json({ error: 'mfa_required', authLevel: level })
       return
     }
     next()
   }
+}
+
+/**
+ * Guard for the routes that finish signing in (second factor, enrollment):
+ * an active user at any auth level, as long as a half-signed-in session is
+ * still within its window.
+ */
+export function createRequireSignedIn(db: Database.Database, config?: Pick<RelayConfig, 'ownerGithubId'>) {
+  return function requireSignedIn(req: Request, res: Response, next: () => void): void {
+    const current = activeAccount(db, req, res)
+    if (!current) return
+    if (currentAuthLevel(db, req, current, config) === null) {
+      res.status(401).json({ error: 'session_expired' })
+      return
+    }
+    next()
+  }
+}
+
+/**
+ * Step-up for sensitive actions (after one of the guards above). With a
+ * second factor enrolled it must have been checked in the last ten minutes;
+ * without one, the GitHub sign-in itself must be that recent. 401
+ * `step_up_required` otherwise, naming which of the two the client should ask for.
+ */
+export function createRequireRecentAuth(db: Database.Database) {
+  return function requireRecentAuth(req: Request, res: Response, next: () => void): void {
+    if (ensureRecentAuth(db, req, res)) next()
+  }
+}
+
+/** The step-up check as a predicate, for actions that need it only sometimes. Sends the 401 when false. */
+export function ensureRecentAuth(db: Database.Database, req: Request, res: Response): boolean {
+  const userId = req.session.user?.id ?? ''
+  const enrolled = hasSecondFactor(db, userId)
+  const since = enrolled ? req.session.mfaVerifiedAt : req.session.authenticatedAt
+  if (since === undefined || Date.now() - since > STEP_UP_WINDOW_MS) {
+    res.status(401).json({ error: 'step_up_required', method: enrolled ? 'mfa' : 'github' })
+    return false
+  }
+  return true
 }
 
 /** Project a user row down to what the session and /api/me carry. */

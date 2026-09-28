@@ -1,4 +1,5 @@
 /** Tests for GET /api/machines: setup-pending state and lazy orphan sweep. */
+import { signInFully } from './__fixtures__/auth.js'
 import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
@@ -37,7 +38,7 @@ describe('machine routes', () => {
     app.use(express.json())
     app.use(session({ secret: 's'.repeat(32), resave: false, saveUninitialized: false }))
     app.use((req, _res, next) => {
-      if (req.headers['x-test-user'] === 'active') req.session.user = user
+      if (req.headers['x-test-user'] === 'active') { req.session.user = user; signInFully(db, req.session, req.session.user.id) }
       next()
     })
     app.use(createMachineRouter(db))

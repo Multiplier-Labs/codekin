@@ -10,6 +10,7 @@
  */
 
 import { Router } from 'express'
+import type { Request, Response } from 'express'
 import type Database from 'better-sqlite3'
 import {
   generateRegistrationOptions,
@@ -26,10 +27,16 @@ import { isoBase64URL, isoUint8Array } from '@simplewebauthn/server/helpers'
 import type { RelayConfig } from './relay-config.js'
 import {
   createRequireActiveUser,
+  createRequireRecentAuth,
+  createRequireSignedIn,
   establishSession,
+  markMfaVerified,
   requestAuditMeta,
   saveSession,
 } from './relay-auth-routes.js'
+import { FailedAttemptLimiter, deleteRecoveryCodes, hasSecondFactor, hasTotp, isMfaRequired, passkeyCount } from './mfa.js'
+import { secureAfterFirstFactor } from './mfa-routes.js'
+import type { MfaRouterDeps } from './mfa-routes.js'
 import { getUserById } from './control-plane-db.js'
 import {
   listPasskeys,
@@ -46,6 +53,8 @@ declare module 'express-session' {
   interface SessionData {
     webauthnRegChallenge?: PendingChallenge
     webauthnAuthChallenge?: PendingChallenge
+    /** A second-factor / step-up ceremony for the signed-in user. */
+    webauthnMfaChallenge?: PendingChallenge
   }
 }
 
@@ -72,13 +81,31 @@ function freshChallenge(pending: PendingChallenge | undefined): string | null {
   return pending.challenge
 }
 
-export function createWebauthnRouter(db: Database.Database, config: RelayConfig): Router {
+export function createWebauthnRouter(
+  db: Database.Database,
+  config: RelayConfig,
+  deps: Pick<MfaRouterDeps, 'store' | 'disconnectUser' | 'limiter'> = {},
+): Router {
   const router = Router()
-  const requireActiveUser = createRequireActiveUser(db)
+  const requireActiveUser = createRequireActiveUser(db, config)
+  const requireSignedIn = createRequireSignedIn(db, config)
+  const requireRecentAuth = createRequireRecentAuth(db)
+  const limiter = deps.limiter ?? new FailedAttemptLimiter()
+
+  /** Registering is for a full session or one sent to enroll — not one owing a second factor. */
+  const notPendingSecondFactor = (req: Request, res: Response, next: () => void) => {
+    if (req.session.authLevel === 'mfa_pending') {
+      res.status(401).json({ error: 'mfa_required', authLevel: 'mfa_pending' })
+      return
+    }
+    next()
+  }
   const rpID = new URL(config.publicUrl).hostname
   const expectedOrigin = config.publicUrl
 
-  router.post('/api/auth/webauthn/register/options', requireActiveUser, (req, res, next) => {
+  // A new passkey is a new way in: adding one needs a fresh check (step-up),
+  // or it would turn a stolen cookie into lasting access.
+  router.post('/api/auth/webauthn/register/options', requireSignedIn, notPendingSecondFactor, requireRecentAuth, (req, res, next) => {
     void (async () => {
       // requireActiveUser just refreshed this from the DB
       const user = req.session.user
@@ -110,7 +137,7 @@ export function createWebauthnRouter(db: Database.Database, config: RelayConfig)
     })().catch(next)
   })
 
-  router.post('/api/auth/webauthn/register/verify', requireActiveUser, (req, res, next) => {
+  router.post('/api/auth/webauthn/register/verify', requireSignedIn, notPendingSecondFactor, (req, res, next) => {
     void (async () => {
       const user = req.session.user
       if (!user) {
@@ -146,6 +173,7 @@ export function createWebauthnRouter(db: Database.Database, config: RelayConfig)
 
       const { credential } = registrationInfo
       const label = typeof body.label === 'string' ? body.label.slice(0, 64) : null
+      const firstFactor = !hasSecondFactor(db, user.id)
       const passkey = insertCredential(db, {
         userId: user.id,
         credentialId: credential.id,
@@ -160,7 +188,14 @@ export function createWebauthnRouter(db: Database.Database, config: RelayConfig)
         ...auditMeta(req),
         metadata: { passkeyId: passkey.id },
       })
-      res.json({ passkey })
+      if (firstFactor) {
+        secureAfterFirstFactor({ db, ...deps }, req, user.id)
+        recordAuditEvent(db, { kind: 'mfa_enabled', actorUserId: user.id, ...auditMeta(req), metadata: { factor: 'passkey' } })
+      }
+      // Registration verified the user on the authenticator: that completes
+      // an enrollment and counts as a fresh check.
+      await markMfaVerified(req)
+      res.json({ passkey, authLevel: 'full' })
     })().catch(next)
   })
 
@@ -247,19 +282,106 @@ export function createWebauthnRouter(db: Database.Database, config: RelayConfig)
     })().catch(next)
   })
 
+  /** Second step of a GitHub sign-in, or step-up, with one of the user's own passkeys. */
+  router.post('/api/auth/webauthn/verify/options', requireSignedIn, (req, res, next) => {
+    void (async () => {
+      const userId = req.session.user?.id ?? ''
+      const credentials = listCredentialRows(db, userId)
+      if (credentials.length === 0) {
+        res.status(409).json({ error: 'no_passkeys' })
+        return
+      }
+      const options = await generateAuthenticationOptions({
+        rpID,
+        userVerification: 'required',
+        allowCredentials: credentials.map(row => ({
+          id: row.credential_id,
+          transports: parseTransports(row) as AuthenticatorTransportFuture[] | undefined,
+        })),
+      })
+      req.session.webauthnMfaChallenge = issueChallenge(options.challenge)
+      await saveSession(req)
+      res.json({ options })
+    })().catch(next)
+  })
+
+  router.post('/api/auth/webauthn/verify/verify', requireSignedIn, (req, res, next) => {
+    void (async () => {
+      const userId = req.session.user?.id ?? ''
+      const expectedChallenge = freshChallenge(req.session.webauthnMfaChallenge)
+      delete req.session.webauthnMfaChallenge
+      const response = (req.body as { response?: unknown } | undefined)?.response as AuthenticationResponseJSON | undefined
+      if (!expectedChallenge || !response || typeof response !== 'object' || typeof response.id !== 'string') {
+        res.status(400).json({ error: 'No verification in progress' })
+        return
+      }
+      if (limiter.blocked(userId)) {
+        res.status(429).json({ error: 'too_many_attempts' })
+        return
+      }
+      // Only the signed-in user's own credential can vouch for them.
+      const row = getCredentialByCredentialId(db, response.id)
+      let verified = false
+      let newCounter = 0
+      if (row && row.user_id === userId) {
+        try {
+          const result = await verifyAuthenticationResponse({
+            response,
+            expectedChallenge,
+            expectedOrigin,
+            expectedRPID: rpID,
+            credential: {
+              id: row.credential_id,
+              publicKey: isoBase64URL.toBuffer(row.public_key),
+              counter: row.counter,
+              transports: parseTransports(row) as AuthenticatorTransportFuture[] | undefined,
+            },
+          })
+          verified = result.verified
+          newCounter = result.authenticationInfo.newCounter
+        } catch {
+          // Bad signatures throw
+        }
+      }
+      if (!row || !verified) {
+        limiter.fail(userId)
+        recordAuditEvent(db, { kind: 'mfa_failed', actorUserId: userId, ...auditMeta(req), metadata: { method: 'passkey' } })
+        res.status(401).json({ error: 'Passkey could not be verified' })
+        return
+      }
+      limiter.reset(userId)
+      recordCredentialUse(db, row.id, newCounter)
+      const stage = req.session.authLevel === 'full' ? 'step_up' : 'sign_in'
+      await markMfaVerified(req)
+      recordAuditEvent(db, {
+        kind: 'mfa_verified',
+        actorUserId: userId,
+        ...auditMeta(req),
+        metadata: { method: 'passkey', stage, passkeyId: row.id },
+      })
+      res.json({ authLevel: 'full' })
+    })().catch(next)
+  })
+
   router.get('/api/auth/passkeys', requireActiveUser, (req, res) => {
     const userId = req.session.user?.id ?? ''
     res.json({ passkeys: listPasskeys(db, userId) })
   })
 
-  router.delete('/api/auth/passkeys/:id', requireActiveUser, (req, res) => {
+  router.delete('/api/auth/passkeys/:id', requireActiveUser, requireRecentAuth, (req, res) => {
     const userId = req.session.user?.id ?? ''
     const passkeyId = typeof req.params.id === 'string' ? req.params.id : ''
-    // Deleting the last passkey is fine: GitHub OAuth remains the recovery path.
+    const user = getUserById(db, userId)
+    // An account that must have 2FA cannot remove its only factor.
+    if (user && passkeyCount(db, userId) === 1 && !hasTotp(db, userId) && isMfaRequired(db, user, config)) {
+      res.status(409).json({ error: 'mfa_required_by_role' })
+      return
+    }
     if (!passkeyId || !deletePasskey(db, userId, passkeyId)) {
       res.status(404).json({ error: 'Passkey not found' })
       return
     }
+    if (!hasSecondFactor(db, userId)) deleteRecoveryCodes(db, userId)
     recordAuditEvent(db, {
       kind: 'passkey_removed',
       actorUserId: userId,

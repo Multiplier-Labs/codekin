@@ -4,6 +4,7 @@
  * isolation, and the membership lifecycle (last owner, removal, quarantine).
  */
 
+import { signInFully } from './__fixtures__/auth.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { EventEmitter } from 'events'
 import express from 'express'
@@ -71,7 +72,7 @@ describe('migration to workspaces', () => {
     legacy.close()
 
     const db = openControlPlaneDb(path)
-    expect(db.pragma('user_version', { simple: true })).toBe(3)
+    expect(db.pragma('user_version', { simple: true })).toBe(4)
     expect(db.prepare('SELECT user_id, role FROM workspace_memberships ORDER BY user_id').all()).toEqual([
       { user_id: 'u-admin', role: 'admin' },
       { user_id: 'u-off', role: 'member' },
@@ -187,7 +188,7 @@ describe('workspace boundary', () => {
     app.use(session({ secret: 's'.repeat(32), resave: false, saveUninitialized: false }))
     app.use((req, _res, next) => {
       const id = req.headers['x-test-user']
-      if (typeof id === 'string') req.session.user = toSessionUser(getUserById(db, id)!)
+      if (typeof id === 'string') { req.session.user = toSessionUser(getUserById(db, id)!); signInFully(db, req.session, req.session.user.id) }
       next()
     })
     app.use(createWorkspaceRouter({ db, config, browserHub: hubSpy }))

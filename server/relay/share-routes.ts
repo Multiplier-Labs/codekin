@@ -9,6 +9,7 @@
 import { Router } from 'express'
 import type Database from 'better-sqlite3'
 import type { BrowserHub } from './browser-hub.js'
+import type { RelayConfig } from './relay-config.js'
 import { createRequireActiveUser } from './relay-auth-routes.js'
 import {
   SHARE_ROLES,
@@ -51,9 +52,13 @@ function resolvePermissions(body: { role?: unknown; permissions?: unknown }): Se
   return permissions.length > 0 ? permissions : null
 }
 
-export function createShareRouter(db: Database.Database, browserHub?: BrowserHub): Router {
+export function createShareRouter(
+  db: Database.Database,
+  browserHub?: BrowserHub,
+  config?: Pick<RelayConfig, 'ownerGithubId'>,
+): Router {
   const router = Router()
-  const requireActiveUser = createRequireActiveUser(db)
+  const requireActiveUser = createRequireActiveUser(db, config)
   const requireWorkspace = createRequireWorkspace(db)
 
   /** Shares this user created, plus those granted to them, in the current workspace. */

@@ -5,6 +5,7 @@
  * requires (wrong recipient, expired, revoked, replayed, inviter lost rights).
  */
 
+import { signInFully } from './__fixtures__/auth.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
 import session from 'express-session'
@@ -120,7 +121,7 @@ describe('workspace invitations', () => {
       const id = req.headers['x-test-user']
       if (typeof id === 'string') {
         const row = getUserById(db, id)!
-        req.session.user = { id: row.id, login: row.login, displayName: null, avatarUrl: null, status: row.status }
+        { req.session.user = { id: row.id, login: row.login, displayName: null, avatarUrl: null, status: row.status }; signInFully(db, req.session, req.session.user.id) }
       }
       next()
     })

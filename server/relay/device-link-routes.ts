@@ -11,16 +11,18 @@
 import { Router } from 'express'
 import type Database from 'better-sqlite3'
 import type { RelayConfig } from './relay-config.js'
-import { createRequireActiveUser, establishSession } from './relay-auth-routes.js'
+import { createRequireActiveUser, createRequireRecentAuth, establishSession } from './relay-auth-routes.js'
 import { getUserById } from './control-plane-db.js'
 import { startDeviceLink, getDeviceLinkStatus, completeDeviceLink } from './device-link.js'
 import { recordAuditEvent } from './audit.js'
 
 export function createDeviceLinkRouter(db: Database.Database, config: RelayConfig): Router {
   const router = Router()
-  const requireActiveUser = createRequireActiveUser(db)
+  const requireActiveUser = createRequireActiveUser(db, config)
+  const requireRecentAuth = createRequireRecentAuth(db)
 
-  router.post('/api/auth/device-link/start', requireActiveUser, (req, res) => {
+  // Minting signs another device in as this user: a fresh check first.
+  router.post('/api/auth/device-link/start', requireActiveUser, requireRecentAuth, (req, res) => {
     const userId = req.session.user?.id ?? ''
     const { requestId, code, expiresAt } = startDeviceLink(db, userId)
     recordAuditEvent(db, {

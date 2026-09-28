@@ -16,13 +16,15 @@ import { join } from 'path'
 import { loadRelayConfig } from './relay-config.js'
 import { openControlPlaneDb, getUserById } from './control-plane-db.js'
 import { SqliteSessionStore } from './sqlite-session-store.js'
-import { createRelayAuthRouter, toSessionUser } from './relay-auth-routes.js'
+import { createRelayAuthRouter, currentAuthLevel, toSessionUser } from './relay-auth-routes.js'
 import { createMachineRouter } from './machine-routes.js'
 import { createPairingRouter } from './pairing-routes.js'
 import { createShareRouter } from './share-routes.js'
 import { createUserRouter } from './user-routes.js'
 import { createWorkspaceRouter } from './workspace-routes.js'
 import { createInvitationRouter } from './invitation-routes.js'
+import { createMfaRouter } from './mfa-routes.js'
+import { FailedAttemptLimiter } from './mfa.js'
 import { createDeviceLinkRouter } from './device-link-routes.js'
 import { createWebauthnRouter } from './webauthn-routes.js'
 import { ConnectorHub } from './connector-hub.js'
@@ -137,14 +139,20 @@ app.use(createRelayAuthRouter({
   disconnectUser: (userId, reason) => { browserHub.disconnectUser(userId, reason) },
   disconnectSession: (sessionId, reason) => { browserHub.disconnectSession(sessionId, reason) },
 }))
-app.use(createMachineRouter(db, hub))
+app.use(createMachineRouter(db, hub, config))
 app.use(createPairingRouter(db, config, { connectorHub: hub, browserHub }))
-app.use(createShareRouter(db, browserHub))
+app.use(createShareRouter(db, browserHub, config))
 app.use(createUserRouter(db, config, browserHub, store))
 app.use(createWorkspaceRouter({ db, config, browserHub, connectorHub: hub }))
 app.use(createInvitationRouter({ db, config }))
 app.use(createDeviceLinkRouter(db, config))
-app.use(createWebauthnRouter(db, config))
+// One failed-attempt budget for typed codes and passkey checks alike.
+const mfaLimiter = new FailedAttemptLimiter()
+const disconnectUserExcept = (userId: string, reason: string, exceptSessionId?: string) => {
+  browserHub.disconnectUser(userId, reason, exceptSessionId)
+}
+app.use(createMfaRouter({ db, config, store, disconnectUser: disconnectUserExcept, limiter: mfaLimiter }))
+app.use(createWebauthnRouter(db, config, { store, disconnectUser: disconnectUserExcept, limiter: mfaLimiter }))
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' })
@@ -214,9 +222,10 @@ function authenticateUpgrade(req: IncomingMessage): Promise<{ user: SessionUser;
         return
       }
       const current = getUserById(db, user.id)
-      resolve(current && current.status === 'active'
-        ? { user: toSessionUser(current), sessionId: expressReq.sessionID }
-        : null)
+      // Only a fully signed-in session (second factor done, 2FA enrolled
+      // where required) may reach a machine.
+      const full = current?.status === 'active' && currentAuthLevel(db, expressReq, current, config) === 'full'
+      resolve(current && full ? { user: toSessionUser(current), sessionId: expressReq.sessionID } : null)
     })
   })
 }

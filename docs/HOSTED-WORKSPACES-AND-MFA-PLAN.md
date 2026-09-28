@@ -152,6 +152,20 @@ needs a second factor to prompt for, and re-running GitHub OAuth is not a meanin
   members-page compliance column.
 - Platform operator CLI: `codekin-relay reset-mfa <github-id>` (D9).
 
+**Implementation notes (3a, backend):**
+- Migration 4 adds `user_totp` and `user_recovery_codes`.
+- TOTP is hand-rolled on `node:crypto` and checked against the RFC 6238 vectors. The secret is
+  AES-256-GCM encrypted (`v1:` format) under `MFA_ENCRYPTION_KEY`. Without that key,
+  authenticator apps are unavailable and passkeys still work.
+- Instead of an `auth_version` column, security changes destroy the account's other server-side
+  sessions directly, which has the same effect. Adding a first factor ends the other sessions and
+  device links, and the operator reset ends all of them.
+- The per-workspace `require_mfa` is enforced account-wide: belonging to any workspace that
+  requires 2FA means the account needs it.
+- Failed-attempt limiting (5 per 15 min per account) is in memory, which is enough for the single
+  relay process.
+- Operator reset: `node server/dist/relay/relay-admin-cli.js reset-mfa <github-id>`.
+
 ### Phase 4 — Staging gate and rollout
 
 Stand up two independent workspaces plus a user who belongs to both, then walk through the
@@ -177,6 +191,6 @@ Optional later work: transactional email, open signup with per-workspace quotas.
 |---|---|---|
 | 0 | Merged | #644 |
 | 1 | Merged | #645, #646 |
-| 2 | In review (`feat/hosted-invitations`) | — |
-| 3 | Not started | — |
+| 2 | Merged | #647 |
+| 3 | 3a backend in review (`feat/hosted-mfa`); 3b frontend next — deploy together | — |
 | 4 | Not started | — |

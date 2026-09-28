@@ -1,4 +1,5 @@
 /** Tests for the operator's account endpoints: auth boundaries, guards, live revocation. */
+import { signInFully } from './__fixtures__/auth.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
 import session from 'express-session'
@@ -77,9 +78,9 @@ describe('user admin routes', () => {
     app.use(session({ secret: 's'.repeat(32), resave: false, saveUninitialized: false }))
     app.use((req, _res, next) => {
       const who = req.headers['x-test-user']
-      if (who === 'owner') req.session.user = sessionUser(db, ownerId)
-      if (who === 'admin') req.session.user = sessionUser(db, adminId)
-      if (who === 'member') req.session.user = sessionUser(db, memberId)
+      if (who === 'owner') { req.session.user = sessionUser(db, ownerId); signInFully(db, req.session, req.session.user.id) }
+      if (who === 'admin') { req.session.user = sessionUser(db, adminId); signInFully(db, req.session, req.session.user.id) }
+      if (who === 'member') { req.session.user = sessionUser(db, memberId); signInFully(db, req.session, req.session.user.id) }
       next()
     })
     store = new SqliteSessionStore(db)

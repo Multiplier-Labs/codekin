@@ -5,6 +5,7 @@
  * point of rejection — producing a valid attestation requires an
  * authenticator.
  */
+import { signInFully } from './__fixtures__/auth.js'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import express from 'express'
 import session from 'express-session'
@@ -47,7 +48,7 @@ describe('webauthn routes', () => {
     app.use(express.json())
     app.use(session({ secret: 's'.repeat(32), resave: false, saveUninitialized: false }))
     app.use((req, _res, next) => {
-      if (req.headers['x-test-user'] === 'active') req.session.user = activeUser
+      if (req.headers['x-test-user'] === 'active') { req.session.user = activeUser; signInFully(db, req.session, req.session.user.id) }
       next()
     })
     app.use(createWebauthnRouter(db, CONFIG))

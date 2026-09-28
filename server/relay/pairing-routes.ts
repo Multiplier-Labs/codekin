@@ -69,7 +69,7 @@ export function createPairingRouter(
   options: PairingRouterOptions = {},
 ): Router {
   const router = Router()
-  const requireActiveUser = createRequireActiveUser(db)
+  const requireActiveUser = createRequireActiveUser(db, config)
   const requireWorkspace = createRequireWorkspace(db)
   const precreateLimit = options.precreateLimit ?? PRECREATE_LIMIT
   const allowPrecreate = createKeyedWindow(precreateLimit.limit, precreateLimit.windowMs)
