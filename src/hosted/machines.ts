@@ -7,6 +7,8 @@
  * path needs the fetch without either of them.
  */
 
+import { workspaceHeaders } from './workspace'
+
 export interface Machine {
   id: string
   displayName: string
@@ -56,7 +58,7 @@ export function lastMachineId(): string | null {
  * app.codekin.ai, so it never goes through the transport.
  */
 export async function fetchMachines(): Promise<Machine[]> {
-  const res = await fetch('/api/machines', { credentials: 'include' })
+  const res = await fetch('/api/machines', { credentials: 'include', headers: workspaceHeaders() })
   if (!res.ok) throw new Error(String(res.status))
   const data = (await res.json()) as { machines: Machine[] }
   return data.machines
@@ -135,7 +137,7 @@ export async function precreatePairing(opts: { replaceMachineId?: string } = {})
   const res = await fetch('/api/machines/pair/precreate', {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...workspaceHeaders() },
     body: JSON.stringify(opts.replaceMachineId ? { replaceMachineId: opts.replaceMachineId } : {}),
   })
   if (!res.ok) throw await relayError(res)

@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
+import type { Workspace } from './workspace'
 
 export interface HostedUser {
   id: string
@@ -15,8 +16,19 @@ export interface HostedUser {
   status: 'active' | 'pending' | 'disabled'
 }
 
+/** Account-level facts /api/me reports alongside the user. */
+export interface HostedAccount {
+  /** Workspaces the user is an active member of, default first. */
+  workspaces: Workspace[]
+  isOperator: boolean
+  canCreateWorkspaces: boolean
+}
+
+const NO_ACCOUNT: HostedAccount = { workspaces: [], isOperator: false, canCreateWorkspaces: false }
+
 export interface HostedAuthState {
   user: HostedUser | null
+  account: HostedAccount
   /** True once the first /api/me probe has resolved (success or failure). */
   initialized: boolean
   /** Error code passed back from a failed OAuth callback (?auth_error=...). */
@@ -39,6 +51,7 @@ function consumeAuthError(): string | null {
 
 export function useHostedAuth(): HostedAuthState {
   const [user, setUser] = useState<HostedUser | null>(null)
+  const [account, setAccount] = useState(NO_ACCOUNT)
   const [initialized, setInitialized] = useState(false)
   const [authError] = useState<string | null>(consumeAuthError)
 
@@ -46,8 +59,13 @@ export function useHostedAuth(): HostedAuthState {
     try {
       const res = await fetch('/api/me', { credentials: 'include' })
       if (res.ok) {
-        const data = await res.json() as { user: HostedUser | null }
+        const data = await res.json() as { user: HostedUser | null } & Partial<HostedAccount>
         setUser(data.user)
+        setAccount({
+          workspaces: data.workspaces ?? [],
+          isOperator: data.isOperator ?? false,
+          canCreateWorkspaces: data.canCreateWorkspaces ?? false,
+        })
       } else {
         setUser(null)
       }
@@ -71,5 +89,5 @@ export function useHostedAuth(): HostedAuthState {
     void refresh()
   }, [refresh])
 
-  return { user, initialized, authError, refresh, logout }
+  return { user, account, initialized, authError, refresh, logout }
 }

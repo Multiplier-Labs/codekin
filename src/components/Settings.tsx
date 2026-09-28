@@ -10,7 +10,7 @@ import {
   IconKey, IconPalette, IconBrandGithub, IconCopy, IconCheck,
   IconChevronDown, IconChevronRight, IconCircleCheckFilled, IconCircleXFilled,
   IconRobot, IconArchive, IconGitBranch, IconRefresh, IconAlertTriangle,
-  IconPlugConnected, IconPlayerPlay, IconWand, IconShieldLock, IconServer2, IconDevices,
+  IconPlugConnected, IconPlayerPlay, IconWand, IconShieldLock, IconServer2, IconDevices, IconUsersGroup,
 } from '@tabler/icons-react'
 import type { Settings as SettingsType, PermissionMode, Repo } from '../types'
 import { PERMISSION_MODES } from '../types'
@@ -86,6 +86,7 @@ interface Props {
  */
 const MachinesSection = lazy(() => import('../hosted/MachinesSection').then(m => ({ default: m.MachinesSection })))
 const DevicesSection = lazy(() => import('../hosted/DevicesSection').then(m => ({ default: m.DevicesSection })))
+const WorkspaceSection = lazy(() => import('../hosted/WorkspaceSection').then(m => ({ default: m.WorkspaceSection })))
 
 // ---------------------------------------------------------------------------
 // Section header component
@@ -367,6 +368,13 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
               </Suspense>
             </SectionCard>
             <div className="mt-4">
+              <SectionCard icon={<IconUsersGroup size={15} />} title="Workspace">
+                <Suspense fallback={<p className="text-body text-ink-muted">Loading…</p>}>
+                  <WorkspaceSection />
+                </Suspense>
+              </SectionCard>
+            </div>
+            <div className="mt-4">
               <SectionCard icon={<IconDevices size={15} />} title="Devices & passkeys">
                 <Suspense fallback={<p className="text-body text-ink-muted">Loading…</p>}>
                   <DevicesSection />
@@ -400,6 +408,15 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                   onSwitch={machine => { onClose(); onSwitchMachine(machine) }}
                   onDisconnect={onDisconnectMachine && (() => { onClose(); onDisconnectMachine() })}
                 />
+              </Suspense>
+            </SectionCard>
+          )}
+
+          {/* ── Workspace (hosted only) ── */}
+          {onSwitchMachine && (
+            <SectionCard icon={<IconUsersGroup size={15} />} title="Workspace">
+              <Suspense fallback={<p className="text-body text-ink-muted">Loading…</p>}>
+                <WorkspaceSection />
               </Suspense>
             </SectionCard>
           )}

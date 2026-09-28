@@ -92,6 +92,19 @@ needs a second factor to prompt for, and re-running GitHub OAuth is not a meanin
 - `/api/users` is operator-only. It handles account status and `canCreateWorkspaces`.
 - The bootstrap workspace cannot be deleted while allowlist admission still targets it.
 
+**Implementation notes (1b, frontend):**
+- `src/hosted/workspace.ts` holds this tab's workspace in memory, seeded from localStorage. It adds
+  `X-Codekin-Workspace` to relay calls (machine list, pairing, shares) and mirrors the capability
+  matrix for UI gating.
+- Switching workspace forgets the open machine and reloads at `/`, so nothing from the old
+  workspace survives.
+- The Settings "Workspace" section (`WorkspaceSection.tsx`) holds:
+  - the switcher, create, rename, leave and delete controls;
+  - members, with role, suspend and remove;
+  - admin machine oversight: transfer or remove, including locked machines.
+- Accounts with no workspace get a dedicated screen (create one if allowed). The share dialog picks
+  grantees from the workspace's members.
+
 ### Phase 2 — Invitations and workspace onboarding
 
 - Add the `workspace_invitations` table (Claude report §5.1) and these routes: create, list,
@@ -146,7 +159,7 @@ Optional later work: transactional email, open signup with per-workspace quotas.
 | Phase | Status | PR |
 |---|---|---|
 | 0 | Merged | #644 |
-| 1 | 1a backend in review (`feat/hosted-workspaces-phase1`); 1b frontend next | — |
+| 1 | 1a backend merged; 1b frontend in review | #645 |
 | 2 | Not started | — |
 | 3 | Not started | — |
 | 4 | Not started | — |

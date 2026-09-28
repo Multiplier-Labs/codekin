@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
+import { currentWorkspaceId, fetchMembers, workspaceHeaders, type WorkspaceMember } from './workspace'
 
 export interface SessionShare {
   id: string
@@ -31,7 +32,8 @@ interface ShareDialogProps {
 }
 
 export function ShareDialog({ machineId, sessionId, sessionName, onClose }: ShareDialogProps) {
-  const [login, setLogin] = useState('')
+  const [granteeId, setGranteeId] = useState('')
+  const [members, setMembers] = useState<WorkspaceMember[] | null>(null)
   const [role, setRole] = useState<'viewer' | 'editor'>('viewer')
   const [shares, setShares] = useState<SessionShare[]>([])
   const [busy, setBusy] = useState(false)
@@ -39,7 +41,7 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
 
   const loadShares = useCallback(async () => {
     try {
-      const res = await fetch('/api/shares', { credentials: 'include' })
+      const res = await fetch('/api/shares', { credentials: 'include', headers: workspaceHeaders() })
       if (!res.ok) return
       const data = (await res.json()) as { shared?: SessionShare[] }
       setShares((data.shared ?? []).filter(s => s.machineId === machineId && s.localSessionId === sessionId))
@@ -50,6 +52,19 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
 
   useEffect(() => { void loadShares() }, [loadShares])
 
+  // Sessions are shared with members of this workspace, picked from a list
+  // rather than typed, so a grant can only reach someone already inside.
+  useEffect(() => {
+    const workspaceId = currentWorkspaceId()
+    if (!workspaceId) return
+    void Promise.all([
+      fetchMembers(workspaceId),
+      fetch('/api/me', { credentials: 'include' }).then(res => res.json() as Promise<{ user: { id: string } | null }>),
+    ])
+      .then(([list, me]) => { setMembers(list.filter(m => m.userId !== me.user?.id)) })
+      .catch(() => { setMembers([]) })
+  }, [])
+
   const submit = async () => {
     setBusy(true)
     setError(null)
@@ -58,13 +73,13 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ machineId, localSessionId: sessionId, granteeLogin: login.trim(), role }),
+        body: JSON.stringify({ machineId, localSessionId: sessionId, granteeUserId: granteeId, role }),
       })
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null
         throw new Error(body?.error ?? `Request failed (${res.status})`)
       }
-      setLogin('')
+      setGranteeId('')
       await loadShares()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -84,16 +99,26 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
         <h2 className="mb-1 text-title text-ink">Share session</h2>
         <p className="mb-4 truncate text-meta text-ink-muted">{sessionName}</p>
 
-        <label className="mb-1 block text-meta text-ink-muted" htmlFor="share-login">
-          GitHub login
+        <label className="mb-1 block text-meta text-ink-muted" htmlFor="share-member">
+          Workspace member
         </label>
-        <input
-          id="share-login"
-          value={login}
-          onChange={e => { setLogin(e.target.value) }}
-          placeholder="octocat"
-          className="mb-3 w-full rounded-control border border-edge bg-surface px-3 py-2 text-body text-ink focus:border-focus focus:outline-none"
-        />
+        <select
+          id="share-member"
+          value={granteeId}
+          onChange={e => { setGranteeId(e.target.value) }}
+          className="mb-1 w-full rounded-control border border-edge bg-surface px-3 py-2 text-body text-ink focus:border-focus focus:outline-none"
+        >
+          <option value="">{members === null ? 'Loading members…' : 'Choose a member'}</option>
+          {(members ?? [])
+            .filter(m => m.status === 'active' && m.accountStatus === 'active')
+            .map(m => (
+              <option key={m.userId} value={m.userId}>
+                {m.displayName ? `${m.displayName} (${m.login})` : m.login}
+                {m.role === 'viewer' ? ' — viewer' : ''}
+              </option>
+            ))}
+        </select>
+        <p className="mb-3 text-micro text-ink-faint">Viewers can only be given view access.</p>
 
         <fieldset className="mb-4 flex flex-col gap-2">
           <legend className="mb-1 text-meta text-ink-muted">Access</legend>
@@ -153,7 +178,7 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
           </button>
           <button
             onClick={() => void submit()}
-            disabled={busy || login.trim().length === 0}
+            disabled={busy || !granteeId}
             className="rounded-control bg-primary-6 px-3 py-1.5 text-meta text-ink-inverse transition hover:bg-primary-7 disabled:opacity-50"
           >
             {busy ? 'Sharing…' : 'Share'}
