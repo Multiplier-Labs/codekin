@@ -16,7 +16,7 @@ Codekin runs the coding agent and accesses repositories **on the computer where 
 Codekin runs coding agents on your own computer; the hosted app at [app.codekin.ai](https://app.codekin.ai) is how you reach them from a browser, phone or tablet.
 
 1. Install and sign in to at least one supported coding agent on your macOS or Linux computer: [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), or [OpenCode](https://opencode.ai). Windows isn't supported yet.
-2. Open [app.codekin.ai](https://app.codekin.ai) and sign in with GitHub. Access is currently by invitation.
+2. Open [app.codekin.ai](https://app.codekin.ai) and sign in with GitHub. Access is by invitation: open the invite link a workspace owner or admin sent you, then sign in. Owners and admins set up two-factor authentication (an authenticator app or a passkey) on first sign-in.
 3. On **Connect your computer**, copy the generated install command and run it in a terminal **on that computer**. The pairing command expires after 10 minutes and can be used once.
 4. Wait for the computer to show **online**, then click **Open**. Keep the computer awake and connected while using Codekin remotely.
 5. Use **New** to choose a repository and a coding agent. Local Git checkouts under `~/repos` appear automatically; the GitHub CLI is optional for listing and cloning GitHub repositories.
@@ -46,7 +46,7 @@ This will:
 4. Generate a local access token and install and start a background service
 5. Print your local access URL
 
-Open the printed `http://localhost:32352?token=...` URL **on the installed computer**. The token is in that URL; if you open the address without it, paste the token in the Settings prompt. Run `codekin token` to print the URL again. For another device, use the hosted setup above rather than a `localhost` link.
+Open the printed `http://localhost:32352?token=...` URL **on the installed computer**. The token is in that URL; if you open the address without it, paste it on the **Settings → Connection** page, which opens automatically. Run `codekin token` to print the URL again. For another device, use the hosted setup above rather than a `localhost` link.
 
 The installer checks GitHub CLI (`gh`) but does not require it. Existing local Git checkouts work without GitHub authentication. Continue with [your first session](docs/GETTING-STARTED.md#3-start-your-first-session).
 
@@ -70,6 +70,7 @@ codekin uninstall               # Remove Codekin entirely
 - **Multi-provider AI** — Use Claude Code, [OpenCode](https://github.com/nicepkg/opencode), or [OpenAI Codex](https://github.com/openai/codex) as the backend per session. OpenCode enables any LLM provider (OpenAI, Gemini, etc.) through a single interface; Codex unlocks ChatGPT-subscription OpenAI models — all with full streaming, tool events, plan mode, and permission control
 - **Multi-session terminal** — Open and switch between multiple coding sessions, one per repo
 - **Remote access** — Reach the agents on your computer from any browser, phone or tablet through [app.codekin.ai](https://app.codekin.ai): one-line install-and-pair, QR device linking with passkey sign-in, and session sharing with per-user access control
+- **Workspaces and teams** — Invite people into a workspace by link, give them a role (owner, admin, member, viewer), and require two-factor authentication (authenticator app, passkey, recovery codes) for everyone
 - **Session handoff** — Switch a running session to another agent (Claude Code, Codex, OpenCode) and carry its context across
 - **Agent Joe** — AI orchestrator agent that spawns and manages up to 5 concurrent child sessions, with a dedicated chat UI, welcome screen, and color-coded sidebar status indicators. Runs on any supported agent and has its own Codekin MCP server. Resilient by design: realtime blocked-child notifications, a persistent notification outbox that replays when the orchestrator returns, pausable child timeouts, and ground-truth completion verification
 - **Loops** — Durable, event-sourced outcome loops that run a coding agent until *deterministic* evaluators pass (your own build/test/lint commands, judged by exit code), under turn/cost/wall-time budgets with no-progress detection. An independent second provider reviews the diff before it lands, every transition is an auditable event with retained evidence artifacts, runs survive server restarts (pause/resume/steer included), and a passing run is committed, pushed and opened as a PR by Codekin itself. Supports parallel workstreams, checkpoint forks, remote CI evaluators and lessons carried between runs. Ships with CI Autorepair, Coverage Increase, and Dependency Upgrade recipes
@@ -123,7 +124,7 @@ The installed service reads environment variables from `~/.config/codekin/env`. 
 | `PORT` | `32352` | Server port |
 | `REPOS_ROOT` | `~/repos` | Root directory scanned for local repositories |
 
-You can also change **Repositories Path** in the app's Settings or first-session screen without restarting the service. See [Getting started](docs/GETTING-STARTED.md#no-repositories-appear).
+You can also change **Repositories Path** in **Settings → Sessions** or on the first-session screen without restarting the service. See [Getting started](docs/GETTING-STARTED.md#no-repositories-appear).
 
 ## Manual / Advanced Setup
 
