@@ -7,6 +7,7 @@
  */
 
 import type { HostedUser } from './useHostedAuth'
+import { stepUpFetch } from './mfa'
 
 export interface DeviceLinkStart {
   requestId: string
@@ -17,7 +18,8 @@ export interface DeviceLinkStart {
 export type DeviceLinkStatus = 'pending' | 'claimed' | 'expired'
 
 export async function startDeviceLink(): Promise<DeviceLinkStart> {
-  const res = await fetch('/api/auth/device-link/start', { method: 'POST', credentials: 'include' })
+  // Signing another device in as you needs a fresh check.
+  const res = await stepUpFetch('/api/auth/device-link/start', { method: 'POST', credentials: 'include' })
   if (!res.ok) throw new Error('Could not create a link code')
   return res.json() as Promise<DeviceLinkStart>
 }

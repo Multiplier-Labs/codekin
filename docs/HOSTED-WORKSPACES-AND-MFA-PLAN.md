@@ -166,6 +166,18 @@ needs a second factor to prompt for, and re-running GitHub OAuth is not a meanin
   relay process.
 - Operator reset: `node server/dist/relay/relay-admin-cli.js reset-mfa <github-id>`.
 
+**Implementation notes (3b, frontend):**
+- `src/hosted/mfa.ts` provides the 2FA client and `stepUpFetch`. Relay calls that may need a step-up
+  go through it: passkey add/remove, device-link mint, workspace calls and 2FA settings. On
+  `step_up_required` the call asks the mounted `StepUpHost` dialog for a passkey or code, or a
+  fresh GitHub sign-in, and then retries once.
+- `HostedApp` gates on `/api/me`'s `authLevel`: `MfaChallengePage` for `mfa_pending`,
+  `MfaEnrollPage` for `enrollment_required`. Enrollment always ends on recovery codes the user
+  must acknowledge.
+- Settings has a "Two-factor authentication" card: status, authenticator on/off, new recovery
+  codes. The Workspace card gains the owner's "Require 2FA for everyone" toggle and a per-member
+  2FA badge.
+
 ### Phase 4 — Staging gate and rollout
 
 Stand up two independent workspaces plus a user who belongs to both, then walk through the
@@ -192,5 +204,5 @@ Optional later work: transactional email, open signup with per-workspace quotas.
 | 0 | Merged | #644 |
 | 1 | Merged | #645, #646 |
 | 2 | Merged | #647 |
-| 3 | 3a backend in review (`feat/hosted-mfa`); 3b frontend next — deploy together | — |
+| 3 | 3a merged; 3b frontend in review — deploy together | #648 |
 | 4 | Not started | — |

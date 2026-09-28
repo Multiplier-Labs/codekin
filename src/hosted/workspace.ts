@@ -9,6 +9,7 @@
  */
 
 import { forgetMachine } from './machines'
+import { stepUpFetch } from './mfa'
 
 export type WorkspaceRole = 'owner' | 'admin' | 'member' | 'viewer'
 
@@ -27,6 +28,8 @@ export interface WorkspaceMember {
   role: WorkspaceRole
   status: 'active' | 'suspended'
   accountStatus: 'active' | 'pending' | 'disabled'
+  /** Has a second factor (authenticator app or passkey). */
+  mfaEnabled: boolean
   joinedAt: string
 }
 
@@ -139,13 +142,15 @@ export class WorkspaceRequestError extends Error {
 }
 
 const REASONS: Record<string, string> = {
+  enroll_first: 'Set up two-factor authentication for yourself before requiring it of everyone.',
   last_owner: 'A workspace needs at least one owner. Make someone else an owner first.',
   invalid_owner: 'That person cannot own machines here (viewers cannot).',
   not_a_member: 'You are no longer a member of this workspace.',
 }
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, {
+  // Privileged changes (granting admin, deleting, lowering 2FA) may ask for a fresh check.
+  const res = await stepUpFetch(path, {
     credentials: 'include',
     ...init,
     headers: { 'Content-Type': 'application/json', ...(init.headers as Record<string, string> | undefined) },
@@ -170,6 +175,11 @@ export async function createWorkspace(name: string): Promise<Workspace> {
 
 export async function renameWorkspace(id: string, name: string): Promise<void> {
   await call(ws(id), { method: 'PATCH', body: JSON.stringify({ name }) })
+}
+
+/** Require two-factor authentication of every member (owner only). */
+export async function setWorkspaceRequireMfa(id: string, requireMfa: boolean): Promise<void> {
+  await call(ws(id), { method: 'PATCH', body: JSON.stringify({ requireMfa }) })
 }
 
 export async function deleteWorkspace(id: string): Promise<void> {

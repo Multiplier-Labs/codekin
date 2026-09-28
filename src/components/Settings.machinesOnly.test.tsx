@@ -98,7 +98,7 @@ describe('Settings — machines only', () => {
     const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
     // Control-plane requests (machine list, passkey list) are the relay's own
     // business and fine while disconnected; machine-backed ones are not.
-    const controlPlane = new Set(['/api/machines', '/api/auth/passkeys', '/api/me'])
+    const controlPlane = new Set(['/api/machines', '/api/auth/passkeys', '/api/auth/mfa', '/api/me'])
     const isControlPlane = (url: string) => controlPlane.has(url) || url.startsWith('/api/workspaces/')
     expect(calls.every(([url]) => isControlPlane(String(url)))).toBe(true)
   })
