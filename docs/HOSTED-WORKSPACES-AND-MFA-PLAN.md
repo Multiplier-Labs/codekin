@@ -1,6 +1,6 @@
 # Hosted Workspaces, Invitations and MFA — Implementation Plan
 
-**Status:** Phase 0 in progress · **Date:** 2026-09-28
+**Status:** Phases 0–3 deployed to app.codekin.ai 2026-09-28; Phase 4 (staging gate) open · **Date:** 2026-09-28
 **Sources:** `.codekin/reports/security/2026-09-28_hosted-access-audit.md` (Claude) and
 `.codekin/reports/security/2026-09-28_hosted-access-audit-codex.md` (Codex). The two audits
 agree on every confirmed defect. This plan combines them and resolves the few points where
@@ -201,8 +201,8 @@ Optional later work: transactional email, open signup with per-workspace quotas.
 
 | Phase | Status | PR |
 |---|---|---|
-| 0 | Merged | #644 |
-| 1 | Merged | #645, #646 |
-| 2 | Merged | #647 |
-| 3 | 3a merged; 3b frontend in review — deploy together | #648 |
+| 0 | Merged, deployed 2026-09-28 | #644 |
+| 1 | Merged, deployed 2026-09-28 | #645, #646 |
+| 2 | Merged, deployed 2026-09-28 | #647 |
+| 3 | Merged, deployed 2026-09-28 | #648, #649 |
 | 4 | Not started | — |
