@@ -19,7 +19,8 @@ import { HostedRelayTransport, LocalHttpTransport, setTransport } from '../lib/t
 import { PairPage } from './PairPage'
 import { LinkClaimPage } from './LinkClaimPage'
 import { useHostedAuth } from './useHostedAuth'
-import { pickWorkspace } from './workspace'
+import { INVITE_ERROR_MESSAGES, consumeJoinedWorkspace, pickWorkspace } from './workspace'
+import { InvitePage } from './InvitePage'
 import { CreateWorkspaceForm } from './WorkspaceSection'
 import { Settings } from '../components/Settings'
 import { useSettings } from '../hooks/useSettings'
@@ -82,6 +83,25 @@ function NoWorkspacePage({ login, canCreate, onLogout }: { login: string; canCre
   )
 }
 
+/** A dismissible line over whatever screen is showing (invitation outcomes). */
+function Notice({ tone, children, onDismiss }: { tone: 'success' | 'error'; children: React.ReactNode; onDismiss: () => void }) {
+  return (
+    <div className="fixed inset-x-0 top-3 z-[60] flex justify-center px-4">
+      <div
+        role="status"
+        className={`flex max-w-lg items-start gap-3 rounded-floating border border-edge-strong bg-surface-raised px-4 py-2.5 text-body shadow-floating ${
+          tone === 'success' ? 'text-success-6' : 'text-error-4'
+        }`}
+      >
+        <span className="min-w-0 flex-1">{children}</span>
+        <button onClick={onDismiss} aria-label="Dismiss" className="text-meta text-ink-faint transition hover:text-ink-muted">
+          ✕
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /**
  * Home screen when no machine is connected. Decides once, on the first
  * successful machine list, whether this is a first run (no usable machine):
@@ -135,6 +155,10 @@ function HostedHome({ settings, onUpdate, onOpen, onSignOut, signedInAs }: {
 
 export default function HostedApp() {
   const { user, account, initialized, authError, logout, refresh } = useHostedAuth()
+  // Back from accepting an invitation: open in the workspace just joined.
+  // Read before the workspace is picked below.
+  const [joinedId] = useState(consumeJoinedWorkspace)
+  const [noticeDismissed, setNoticeDismissed] = useState(false)
   // This tab's workspace, settled once the account is known. Every relay call
   // that is not addressed to a machine carries it (see ./workspace).
   const workspace = useMemo(
@@ -226,6 +250,10 @@ export default function HostedApp() {
   if (window.location.pathname === '/link') {
     return <LinkClaimPage />
   }
+  // Likewise an invitation: the invitee usually has no account yet.
+  if (window.location.pathname === '/invite') {
+    return <InvitePage />
+  }
 
   // Latch not resolved yet — render the page background, no flash of login UI
   if (!initialized) {
@@ -240,13 +268,23 @@ export default function HostedApp() {
     return <PendingPage login={user.login} onLogout={() => void logout()} />
   }
 
+  // Invitation outcomes for a signed-in user. A signed-out one sees invite
+  // errors on the login page instead.
+  const joinedName = joinedId ? account.workspaces.find(w => w.id === joinedId)?.name : undefined
+  const notice = noticeDismissed ? null : joinedName ? (
+    <Notice tone="success" onDismiss={() => { setNoticeDismissed(true) }}>You joined {joinedName}.</Notice>
+  ) : authError && INVITE_ERROR_MESSAGES[authError] ? (
+    <Notice tone="error" onDismiss={() => { setNoticeDismissed(true) }}>{INVITE_ERROR_MESSAGES[authError]}</Notice>
+  ) : null
+  const withNotice = (screen: React.ReactNode) => <>{notice}{screen}</>
+
   if (!workspace) {
-    return (
+    return withNotice(
       <NoWorkspacePage
         login={user.login}
         canCreate={account.canCreateWorkspaces}
         onLogout={() => void logout()}
-      />
+      />,
     )
   }
 
@@ -283,13 +321,13 @@ export default function HostedApp() {
   // Not connected to anything: first run gets the focused setup surface;
   // otherwise land in Settings, where the machine list lives once you are
   // connected too.
-  return (
+  return withNotice(
     <HostedHome
       settings={settings}
       onUpdate={updateSettings}
       onOpen={selectMachine}
       onSignOut={() => void logout()}
       signedInAs={`${user.displayName ?? user.login} · ${workspace.name}`}
-    />
+    />,
   )
 }

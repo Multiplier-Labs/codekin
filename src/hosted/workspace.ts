@@ -89,6 +89,7 @@ export type WorkspaceAction =
   | 'machine.pair'
   | 'machine.oversee'
   | 'member.manage'
+  | 'member.invite'
   | 'member.manage_privileged'
   | 'workspace.edit'
   | 'workspace.delete'
@@ -97,6 +98,7 @@ const MATRIX: Record<WorkspaceAction, readonly WorkspaceRole[]> = {
   'machine.pair': ['owner', 'admin', 'member'],
   'machine.oversee': ['owner', 'admin'],
   'member.manage': ['owner', 'admin'],
+  'member.invite': ['owner', 'admin'],
   'member.manage_privileged': ['owner'],
   'workspace.edit': ['owner'],
   'workspace.delete': ['owner'],
@@ -204,4 +206,121 @@ export async function transferMachine(id: string, machineId: string, userId: str
 
 export async function removeWorkspaceMachine(id: string, machineId: string): Promise<void> {
   await call(`${ws(id)}/machines/${encodeURIComponent(machineId)}`, { method: 'DELETE' })
+}
+
+export type InvitableRole = Exclude<WorkspaceRole, 'owner'>
+
+export interface PendingInvitation {
+  id: string
+  role: InvitableRole
+  email: string | null
+  githubLogin: string | null
+  createdAt: string
+  expiresAt: number
+}
+
+export interface IssuedInvitation {
+  invitation: PendingInvitation
+  /** Shown once: only the relay's hash of its token is kept. */
+  inviteUrl: string
+}
+
+const INVITE_REASONS: Record<string, string> = {
+  github_user_not_found: 'No GitHub user has that username.',
+  already_member: 'That person is already in this workspace.',
+  invalid_email: 'That does not look like an email address.',
+  invalid_github_login: 'That is not a valid GitHub username.',
+  github_unavailable: 'GitHub did not answer. Try again in a moment.',
+  too_many_pending: 'Too many open invitations. Revoke some first.',
+}
+
+async function inviteCall<T>(path: string, init: RequestInit = {}): Promise<T> {
+  try {
+    return await call<T>(path, init)
+  } catch (err) {
+    if (err instanceof WorkspaceRequestError && err.code && INVITE_REASONS[err.code]) {
+      throw new WorkspaceRequestError(err.status, err.code, INVITE_REASONS[err.code])
+    }
+    throw err
+  }
+}
+
+export async function createInvitation(
+  id: string,
+  input: { role: InvitableRole; email?: string; githubLogin?: string },
+): Promise<IssuedInvitation> {
+  return inviteCall<IssuedInvitation>(`${ws(id)}/invitations`, { method: 'POST', body: JSON.stringify(input) })
+}
+
+export async function fetchInvitations(id: string): Promise<PendingInvitation[]> {
+  return (await call<{ invitations: PendingInvitation[] }>(`${ws(id)}/invitations`)).invitations
+}
+
+export async function revokeInvitation(id: string, invitationId: string): Promise<void> {
+  await call(`${ws(id)}/invitations/${encodeURIComponent(invitationId)}`, { method: 'DELETE' })
+}
+
+export async function resendInvitation(id: string, invitationId: string): Promise<IssuedInvitation> {
+  return inviteCall<IssuedInvitation>(`${ws(id)}/invitations/${encodeURIComponent(invitationId)}/resend`, { method: 'POST' })
+}
+
+export interface InvitationPreview {
+  workspaceName: string
+  inviterLogin: string | null
+  role: InvitableRole
+  expiresAt: number
+  boundTo: 'email' | 'github'
+  githubLogin: string | null
+  status: 'pending' | 'accepted' | 'revoked' | 'expired' | 'unavailable'
+}
+
+/** What an invitation link is; null when the relay does not know it. */
+export async function lookupInvitation(token: string): Promise<InvitationPreview | null> {
+  const res = await fetch('/api/invitations/lookup', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  })
+  if (res.status === 404) return null
+  if (!res.ok) throw new WorkspaceRequestError(res.status, null, `Request failed (${res.status})`)
+  return ((await res.json()) as { invitation: InvitationPreview }).invitation
+}
+
+/**
+ * Park the token in the session, then hand over to GitHub sign-in; the
+ * relay accepts the invitation when GitHub sends the browser back.
+ */
+export async function acceptInvitationViaGithub(token: string): Promise<void> {
+  const res = await fetch('/api/invitations/prepare', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  })
+  if (!res.ok) throw new WorkspaceRequestError(res.status, 'invite_invalid', 'This invitation can no longer be used.')
+  window.location.assign('/api/auth/github/start')
+}
+
+/**
+ * After accepting an invitation the relay lands on `/?joined=<workspace>`:
+ * make that the workspace this tab opens in, and clean the URL.
+ */
+export function consumeJoinedWorkspace(): string | null {
+  const params = new URLSearchParams(window.location.search)
+  const joined = params.get('joined')
+  if (!joined) return null
+  params.delete('joined')
+  const qs = params.toString()
+  history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''))
+  localStorage.setItem(WORKSPACE_KEY, joined)
+  current = null
+  return joined
+}
+
+/** Invitation outcomes, shown here and — for a signed-in user — as a notice. */
+export const INVITE_ERROR_MESSAGES: Record<string, string> = {
+  invite_mismatch:
+    'That invitation is for a different GitHub account (or an email address not verified on this one). Sign in with the invited account.',
+  invite_invalid: 'That invitation has expired, was revoked, or was already used. Ask for a new link.',
 }

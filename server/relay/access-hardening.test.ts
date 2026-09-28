@@ -307,7 +307,7 @@ describe('hosted access hardening (Phase 0)', () => {
 describe('control-plane migrations', () => {
   it('tracks the schema version and backfills session owners', () => {
     const db = openControlPlaneDb(':memory:')
-    expect(db.pragma('user_version', { simple: true })).toBe(2)
+    expect(db.pragma('user_version', { simple: true })).toBe(3)
     const columns = (db.prepare('PRAGMA table_info(web_sessions)').all() as Array<{ name: string }>).map(c => c.name)
     expect(columns).toContain('user_id')
     db.close()
@@ -330,7 +330,7 @@ describe('control-plane migrations', () => {
     db.close()
     // Re-opening is a no-op once the version is recorded.
     const again = openControlPlaneDb(path)
-    expect(again.pragma('user_version', { simple: true })).toBe(2)
+    expect(again.pragma('user_version', { simple: true })).toBe(3)
     again.close()
     rmSync(dir, { recursive: true, force: true })
   })

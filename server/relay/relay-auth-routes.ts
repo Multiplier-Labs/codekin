@@ -21,6 +21,8 @@ import { validateReturnTo } from './return-to.js'
 import { recordAuditEvent } from './audit.js'
 import { revokePendingDeviceLinks } from './device-link.js'
 import { listUserWorkspaces } from './workspaces.js'
+import { acceptInvitation, checkInvitation } from './invitations.js'
+import type { GithubIdentity } from './invitations.js'
 
 const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize'
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token'
@@ -191,6 +193,9 @@ export function createRelayAuthRouter({
       // Read before regenerateSession() wipes it; re-validated on the way out.
       const returnTo = validateReturnTo(req.session.oauthReturnTo) ?? '/'
       delete req.session.oauthReturnTo
+      // Parked by POST /api/invitations/prepare; this sign-in accepts it.
+      const inviteToken = req.session.pendingInviteToken
+      delete req.session.pendingInviteToken
 
       // Exchange the code for an access token
       const tokenRes = await fetchImpl(GITHUB_TOKEN_URL, {
@@ -230,15 +235,30 @@ export function createRelayAuthRouter({
         avatar_url: string | null
       }
 
+      // An email-bound invitation is matched against the addresses GitHub
+      // itself has verified, never the profile's self-declared one.
       let email = gh.email
-      if (!email) {
+      let verifiedEmails: string[] = []
+      if (!email || inviteToken) {
         const emailsRes = await fetchImpl(GITHUB_EMAILS_URL, { headers: ghHeaders })
         if (emailsRes.ok) {
-          const emails = (await emailsRes.json()) as Array<{ email: string; primary: boolean }>
-          if (emails.length > 0) {
+          const emails = (await emailsRes.json()) as Array<{ email: string; primary: boolean; verified?: boolean }>
+          verifiedEmails = emails.filter(e => e.verified === true).map(e => e.email)
+          if (!email && emails.length > 0) {
             email = (emails.find(e => e.primary) ?? emails[0]).email
           }
         }
+      }
+      const identity: GithubIdentity = { githubId: gh.id, verifiedEmails }
+      const invite = inviteToken ? checkInvitation(db, inviteToken, identity) : null
+      if (invite && !invite.ok) {
+        recordAuditEvent(db, {
+          kind: 'invitation_rejected',
+          ...requestAuditMeta(req),
+          metadata: { reason: invite.reason, githubId: gh.id },
+        })
+        loginFailed(req, res, invite.reason, { githubId: gh.id })
+        return
       }
 
       const profile: GithubProfile = {
@@ -261,16 +281,14 @@ export function createRelayAuthRouter({
       // forever, so an identity the allowlist rejects can never accumulate a
       // standing exemption by having knocked once. An `active` or `disabled`
       // row is a real decision someone made, and is left to upsert to honour.
+      // A valid invitation for this very identity is the other way in.
       const provisional = !existing || existing.status === 'pending'
-      if (provisional && !isGithubAccountAllowed(profile.id, accessPolicy)) {
+      if (provisional && !isGithubAccountAllowed(profile.id, accessPolicy) && !invite?.ok) {
         await destroySession(req)
         loginFailed(req, res, 'access_not_allowed', { githubId: profile.id })
         return
       }
-      const user = upsertUserFromGithub(db, profile, {
-        ownerGithubId: config.ownerGithubId,
-        allowedGithubIds: config.allowedGithubIds,
-      })
+      const user = upsertUserFromGithub(db, profile, accessPolicy, { admitViaInvitation: invite?.ok === true })
 
       await establishSession(req, user, 'github')
       recordAuditEvent(db, {
@@ -279,6 +297,31 @@ export function createRelayAuthRouter({
         ...requestAuditMeta(req),
         metadata: { method: 'github' },
       })
+
+      // A disabled account keeps its session (it sees the no-access screen)
+      // but joins nothing.
+      if (inviteToken && user.status === 'active') {
+        const accepted = acceptInvitation(db, inviteToken, user.id, identity)
+        if (!accepted.ok) {
+          recordAuditEvent(db, {
+            kind: 'invitation_rejected',
+            actorUserId: user.id,
+            ...requestAuditMeta(req),
+            metadata: { reason: accepted.reason },
+          })
+          res.redirect(`/?auth_error=${accepted.reason}`)
+          return
+        }
+        recordAuditEvent(db, {
+          kind: 'invitation_accepted',
+          workspaceId: accepted.workspaceId,
+          actorUserId: user.id,
+          ...requestAuditMeta(req),
+          metadata: { role: accepted.role, alreadyMember: accepted.alreadyMember },
+        })
+        res.redirect(`/?joined=${encodeURIComponent(accepted.workspaceId)}`)
+        return
+      }
       res.redirect(returnTo)
     })().catch(() => { loginFailed(req, res, 'login_failed'); })
   })

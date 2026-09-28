@@ -259,6 +259,30 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
       CREATE INDEX idx_audit_events_workspace ON audit_events(workspace_id, id);
     `)
   },
+
+  // 3: workspace invitations. Bound to a recipient (a verified email or an
+  // immutable GitHub id), single-use, expiring; only the token's hash is kept.
+  db => {
+    db.exec(`
+      CREATE TABLE workspace_invitations (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+        role TEXT NOT NULL CHECK (role IN ('admin', 'member', 'viewer')),
+        invitee_email TEXT,
+        invitee_github_id INTEGER,
+        invitee_github_login TEXT,
+        token_hash TEXT NOT NULL UNIQUE,
+        invited_by_user_id TEXT NOT NULL REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        expires_at INTEGER NOT NULL,
+        accepted_at TEXT,
+        accepted_by_user_id TEXT REFERENCES users(id),
+        revoked_at TEXT,
+        CHECK (invitee_email IS NOT NULL OR invitee_github_id IS NOT NULL)
+      );
+      CREATE INDEX idx_workspace_invitations_workspace ON workspace_invitations(workspace_id);
+    `)
+  },
 ]
 
 function runMigrations(db: Database.Database): void {
@@ -362,8 +386,20 @@ export function upsertUserFromGithub(
   db: Database.Database,
   profile: GithubProfile,
   policy: AccessPolicy,
+  options: {
+    /**
+     * The caller holds a valid invitation for this identity: admit the
+     * account even though the allowlist does not name it. The invitation
+     * supplies the membership; no bootstrap membership is added.
+     */
+    admitViaInvitation?: boolean
+  } = {},
 ): UserRow {
-  const resolved = resolveUserAccess(profile.id, policy)
+  const allowlisted = resolveUserAccess(profile.id, policy)
+  const resolved =
+    allowlisted.status === 'active' || !options.admitViaInvitation
+      ? allowlisted
+      : { status: 'active' as const, bootstrapRole: null }
 
   // GitHub logins are unique among live accounts, so another row still
   // holding this login is stale from before a rename. Clear it, or login
