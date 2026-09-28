@@ -15,6 +15,7 @@ import { verifyToken } from '../../lib/ccApi'
 import { AccessTokenField } from './AccessTokenField'
 import { AgentNameField } from './AgentNameField'
 import { ThemePicker } from './ThemePicker'
+import AppIcon from '../AppIcon'
 import { SessionPreferences } from './SessionPreferences'
 import { PermissionsSection } from './PermissionsSection'
 import { WebhooksSection } from './WebhooksSection'
@@ -314,6 +315,8 @@ export function SettingsView({
                 ← Back to setup
               </button>
             )}
+            {/* A page of its own (no sidebar), so it carries the app mark. */}
+            <AppIcon size={24} className="text-primary-7" />
             <h1 className="text-title font-semibold text-ink">Settings</h1>
           </div>
         )}

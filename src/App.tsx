@@ -696,8 +696,9 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
 
   return (
     <div className="flex h-full bg-edge-strong" data-density={isMobile ? 'touch' : undefined}>
-      {/* Left sidebar — repo/session tree + nav */}
-      <LeftSidebar
+      {/* Left sidebar — repo/session tree + nav. Settings is a page of its
+          own, so it takes the whole window rather than sitting beside it. */}
+      {view !== 'settings' && <LeftSidebar
         sessions={sessions}
         activeSessionId={activeSessionId}
         activeWorkingDir={activeWorkingDir}
@@ -739,12 +740,12 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
           mobileOpen: mobileMenuOpen,
           onMobileClose: () => setMobileMenuOpen(false),
         }}
-      />
+      />}
 
       {/* Main area */}
       <div className="terminal-area flex flex-1 flex-col overflow-hidden bg-page">
         {/* Mobile top bar */}
-        {isMobile && (
+        {isMobile && view !== 'settings' && (
           <MobileTopBar
             repoName={activeRepoName}
             sessionName={activeSessionName}
