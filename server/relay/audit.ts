@@ -39,6 +39,10 @@ export type AuditEventKind =
   | 'member_updated'
   | 'member_removed'
   | 'machine_transferred'
+  | 'invitation_created'
+  | 'invitation_revoked'
+  | 'invitation_accepted'
+  | 'invitation_rejected'
 
 export interface AuditEventInput {
   kind: AuditEventKind

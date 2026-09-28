@@ -27,6 +27,8 @@ export type WorkspaceAction =
   /** See every machine's metadata; remove or transfer any machine. Never drives sessions. */
   | 'machine.oversee'
   | 'member.list'
+  /** Invite members and viewers (inviting an admin also needs member.manage_privileged). */
+  | 'member.invite'
   /** Suspend, remove or re-role members and viewers. */
   | 'member.manage'
   /** The same for admins and owners, and granting those roles. */
@@ -40,6 +42,7 @@ const MATRIX: Record<WorkspaceAction, readonly WorkspaceRole[]> = {
   'machine.share': ['owner', 'admin', 'member'],
   'machine.oversee': ['owner', 'admin'],
   'member.list': ['owner', 'admin', 'member', 'viewer'],
+  'member.invite': ['owner', 'admin'],
   'member.manage': ['owner', 'admin'],
   'member.manage_privileged': ['owner'],
   'audit.workspace': ['owner', 'admin'],

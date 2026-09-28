@@ -116,6 +116,23 @@ needs a second factor to prompt for, and re-running GitHub OAuth is not a meanin
   workspace yet", "removed" and "disabled" states.
 - Workspace creation stays behind the platform flag (D2).
 
+**Implementation notes:**
+- Migration 3 adds `workspace_invitations`. Each invitation is bound to a GitHub id (the username
+  is resolved via the public users API at creation) or to an email.
+- Invitations are **accepted only in the OAuth callback**:
+  1. `/invite#token` calls `POST /api/invitations/lookup`, which gives a preview that never
+     discloses the bound email.
+  2. `POST /api/invitations/prepare` parks the token in the session.
+  3. The browser goes through GitHub sign-in.
+  4. The callback matches the invitation against the GitHub id and the *verified* emails, admits
+     the account past the allowlist if needed, and consumes the invitation in one transaction.
+  5. It redirects to `/?joined=<id>`.
+- The inviter's authority is re-checked at acceptance. The inviter must still be an active
+  owner or admin, and only owners can have invited an admin.
+- There is one live link per recipient, and "new link" revokes the old one.
+- At most 100 pending invitations per workspace.
+- An existing membership (including a suspended one) is left untouched.
+
 ### Phase 3 — Enforced MFA
 
 - Add the `user_totp` table (secret encrypted with AES-256-GCM under a separate, versioned
@@ -159,7 +176,7 @@ Optional later work: transactional email, open signup with per-workspace quotas.
 | Phase | Status | PR |
 |---|---|---|
 | 0 | Merged | #644 |
-| 1 | 1a backend merged; 1b frontend in review | #645 |
-| 2 | Not started | — |
+| 1 | Merged | #645, #646 |
+| 2 | In review (`feat/hosted-invitations`) | — |
 | 3 | Not started | — |
 | 4 | Not started | — |

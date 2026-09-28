@@ -14,8 +14,12 @@ import {
   ROLE_LABELS,
   can,
   canManageMember,
+  createInvitation,
   createWorkspace,
   currentWorkspaceId,
+  fetchInvitations,
+  resendInvitation,
+  revokeInvitation,
   deleteWorkspace,
   fetchMembers,
   fetchWorkspaceMachines,
@@ -25,6 +29,8 @@ import {
   switchWorkspace,
   transferMachine,
   updateMember,
+  type InvitableRole,
+  type PendingInvitation,
   type Workspace,
   type WorkspaceMachine,
   type WorkspaceMember,
@@ -177,6 +183,134 @@ function MemberRow({
         <span className="text-meta text-ink-muted">{ROLE_LABELS[member.role]}</span>
       )}
     </li>
+  )
+}
+
+/** A just-issued link: shown once, since the relay keeps only its hash. */
+function IssuedLink({ url, onDone }: { url: string; onDone: () => void }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="mt-2 rounded-control border border-edge bg-surface px-3 py-2">
+      <p className="text-meta text-ink-muted">Send this link to them. It works once, for them only, and is shown only now.</p>
+      <div className="mt-1.5 flex items-center gap-2">
+        <input readOnly value={url} aria-label="Invitation link" className={`${input} min-w-0 flex-1 font-mono text-meta`} onFocus={e => { e.target.select() }} />
+        <button
+          onClick={() => { void navigator.clipboard.writeText(url).then(() => { setCopied(true) }) }}
+          className={button}
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+        <button onClick={onDone} className="px-1.5 text-meta text-ink-faint transition hover:text-ink-muted">Done</button>
+      </div>
+    </div>
+  )
+}
+
+function InvitationsPanel({ actorRole }: { actorRole: WorkspaceRole }) {
+  const workspaceId = currentWorkspaceId() ?? ''
+  const [recipient, setRecipient] = useState('')
+  const [role, setRole] = useState<InvitableRole>('member')
+  const [pending, setPending] = useState<PendingInvitation[]>([])
+  const [issued, setIssued] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const roles: InvitableRole[] = can(actorRole, 'member.manage_privileged') ? ['admin', 'member', 'viewer'] : ['member', 'viewer']
+
+  const reload = useCallback(async () => {
+    try {
+      setPending(await fetchInvitations(workspaceId))
+    } catch (err) {
+      setError(errorText(err))
+    }
+  }, [workspaceId])
+
+  useEffect(() => {
+    fetchInvitations(workspaceId)
+      .then(setPending)
+      .catch((err: unknown) => { setError(errorText(err)) })
+  }, [workspaceId])
+
+  const run = async (action: () => Promise<string | undefined>) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const url = await action()
+      if (url) setIssued(url)
+      await reload()
+    } catch (err) {
+      setError(errorText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const invite = () => {
+    const value = recipient.trim()
+    const target = value.includes('@') && !value.startsWith('@') ? { email: value } : { githubLogin: value }
+    void run(async () => {
+      const result = await createInvitation(workspaceId, { role, ...target })
+      setRecipient('')
+      return result.inviteUrl
+    })
+  }
+
+  return (
+    <div className="mt-5">
+      <h4 className={subheading}>Invite people</h4>
+      <form className="flex flex-wrap items-center gap-2" onSubmit={e => { e.preventDefault(); invite() }}>
+        <input
+          aria-label="GitHub username or email"
+          value={recipient}
+          onChange={e => { setRecipient(e.target.value) }}
+          placeholder="GitHub username or email"
+          className={`${input} min-w-0 flex-1`}
+        />
+        <select aria-label="Role for the invitation" value={role} onChange={e => { setRole(e.target.value as InvitableRole) }} className={`${input} text-meta`}>
+          {roles.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+        </select>
+        <button type="submit" disabled={busy || !recipient.trim()} className={button}>
+          {busy ? 'Inviting…' : 'Create link'}
+        </button>
+      </form>
+      <p className="mt-1.5 text-micro text-ink-faint">
+        A link for a GitHub username works only for that account; one for an email works for whoever has that
+        address verified on GitHub. Links expire after 7 days.
+      </p>
+      {issued && <IssuedLink url={issued} onDone={() => { setIssued(null) }} />}
+      {pending.length > 0 && (
+        <ul className="mt-3 divide-y divide-edge">
+          {pending.map(inv => (
+            <li key={inv.id} className="flex flex-wrap items-center gap-2 py-1.5">
+              <span className="min-w-0 flex-1 truncate text-body text-ink">
+                {inv.githubLogin ?? inv.email}
+                <span className="ml-1.5 text-meta text-ink-faint">
+                  {ROLE_LABELS[inv.role]} · expires {new Date(inv.expiresAt).toLocaleDateString()}
+                </span>
+              </span>
+              {(inv.role !== 'admin' || can(actorRole, 'member.manage_privileged')) && (
+                <>
+                  <button
+                    disabled={busy}
+                    onClick={() => { void run(async () => (await resendInvitation(workspaceId, inv.id)).inviteUrl) }}
+                    className={button}
+                  >
+                    New link
+                  </button>
+                  <button
+                    disabled={busy}
+                    onClick={() => { void run(async () => { await revokeInvitation(workspaceId, inv.id); return undefined }) }}
+                    className={`${button} hover:text-error-4`}
+                  >
+                    Revoke
+                  </button>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {error && <p className="mt-2 text-meta text-error-4">{error}</p>}
+    </div>
   )
 }
 
@@ -400,10 +534,9 @@ export function WorkspaceSection() {
             ))}
           </ul>
         )}
-        {can(role, 'member.manage') && (
-          <p className="mt-1.5 text-micro text-ink-faint">Inviting people by link is coming next.</p>
-        )}
       </div>
+
+      {can(role, 'member.invite') && <InvitationsPanel actorRole={role} />}
 
       {can(role, 'machine.oversee') && members && <MachineOversight members={members} />}
 

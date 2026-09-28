@@ -1,6 +1,7 @@
 /** Sign-in screen for the hosted app: GitHub OAuth, or a passkey if one exists. */
 
 import { useState, useEffect } from 'react'
+import { INVITE_ERROR_MESSAGES } from './workspace'
 import { IconFingerprint } from '@tabler/icons-react'
 import { passkeysSupported, loginWithPasskey, isPasskeyCancel } from './passkeys'
 import { githubSignInHref } from './signInHref'
@@ -18,6 +19,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   profile_fetch_failed: 'Could not read your GitHub profile. Please try again.',
   login_failed: 'Sign-in failed. Please try again.',
   access_not_allowed: "This GitHub account doesn't have access to this Codekin instance yet.",
+  ...INVITE_ERROR_MESSAGES,
 }
 
 /** What the relay says about admission, before anyone signs in. */

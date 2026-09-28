@@ -22,6 +22,7 @@ import { createPairingRouter } from './pairing-routes.js'
 import { createShareRouter } from './share-routes.js'
 import { createUserRouter } from './user-routes.js'
 import { createWorkspaceRouter } from './workspace-routes.js'
+import { createInvitationRouter } from './invitation-routes.js'
 import { createDeviceLinkRouter } from './device-link-routes.js'
 import { createWebauthnRouter } from './webauthn-routes.js'
 import { ConnectorHub } from './connector-hub.js'
@@ -91,6 +92,8 @@ app.use('/api/machines/pair/info', ipRateLimiter(30, 60_000))
 app.use('/api/shares', ipRateLimiter(60, 60_000))
 app.use('/api/users', ipRateLimiter(60, 60_000))
 app.use('/api/workspaces', ipRateLimiter(120, 60_000))
+// Unauthenticated invitation lookups: holding a link is the only credential.
+app.use('/api/invitations', ipRateLimiter(20, 60_000))
 
 // Cookie-authenticated REST mutations must come from the app itself.
 // SameSite=Lax alone still admits sibling subdomains of the site.
@@ -139,6 +142,7 @@ app.use(createPairingRouter(db, config, { connectorHub: hub, browserHub }))
 app.use(createShareRouter(db, browserHub))
 app.use(createUserRouter(db, config, browserHub, store))
 app.use(createWorkspaceRouter({ db, config, browserHub, connectorHub: hub }))
+app.use(createInvitationRouter({ db, config }))
 app.use(createDeviceLinkRouter(db, config))
 app.use(createWebauthnRouter(db, config))
 

@@ -7,6 +7,7 @@ import {
   WORKSPACE_KEY,
   can,
   canManageMember,
+  consumeJoinedWorkspace,
   currentWorkspaceId,
   pickWorkspace,
   resetWorkspaceForTests,
@@ -76,5 +77,17 @@ describe('capabilities (UI mirror)', () => {
     expect(canManageMember('admin', 'admin')).toBe(false)
     expect(canManageMember('owner', 'admin', 'owner')).toBe(true)
     expect(canManageMember('member', 'viewer')).toBe(false)
+  })
+})
+
+describe('consumeJoinedWorkspace', () => {
+  it('opens the tab in the workspace just joined and cleans the URL', () => {
+    pickWorkspace([ws('a'), ws('b')])
+    history.replaceState(null, '', '/?joined=b&x=1')
+    expect(consumeJoinedWorkspace()).toBe('b')
+    expect(window.location.search).toBe('?x=1')
+    expect(pickWorkspace([ws('a'), ws('b')])?.id).toBe('b')
+    history.replaceState(null, '', '/')
+    expect(consumeJoinedWorkspace()).toBeNull()
   })
 })

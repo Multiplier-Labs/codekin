@@ -9,7 +9,14 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { WorkspaceSection } from './WorkspaceSection'
-import { pickWorkspace, resetWorkspaceForTests, type Workspace, type WorkspaceMember, type WorkspaceRole } from './workspace'
+import {
+  pickWorkspace,
+  resetWorkspaceForTests,
+  type PendingInvitation,
+  type Workspace,
+  type WorkspaceMember,
+  type WorkspaceRole,
+} from './workspace'
 
 const member = (userId: string, role: WorkspaceRole): WorkspaceMember => ({
   userId,
@@ -25,13 +32,14 @@ const member = (userId: string, role: WorkspaceRole): WorkspaceMember => ({
 interface Scenario {
   role: WorkspaceRole
   members: WorkspaceMember[]
+  invitations?: PendingInvitation[]
   patchStatus?: number
   patchError?: string
 }
 
 let calls: Array<{ url: string; method: string; body: unknown }> = []
 
-function mockRelay({ role, members, patchStatus = 200, patchError }: Scenario): void {
+function mockRelay({ role, members, invitations = [], patchStatus = 200, patchError }: Scenario): void {
   const workspaces: Workspace[] = [
     { id: 'ws1', name: 'Acme', role, requireMfa: false },
     { id: 'ws2', name: 'Side project', role: 'member', requireMfa: false },
@@ -43,6 +51,10 @@ function mockRelay({ role, members, patchStatus = 200, patchError }: Scenario): 
     const json = (status: number, body: unknown) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) })
     if (url === '/api/me') return json(200, { user: { id: 'me' }, workspaces, canCreateWorkspaces: false })
     if (url.endsWith('/members') && method === 'GET') return json(200, { members })
+    if (url.endsWith('/invitations') && method === 'GET') return json(200, { invitations })
+    if (url.endsWith('/invitations') && method === 'POST') {
+      return json(201, { invitation: { id: 'inv1' }, inviteUrl: 'https://app.example.com/invite#tok' })
+    }
     if (url.endsWith('/machines') && method === 'GET') {
       return json(200, { machines: [{ id: 'm1', displayName: 'Laptop', hostname: null, platform: null, status: 'offline', lastSeenAt: null, ownerUserId: 'bob', ownerLogin: 'bob', quarantined: true }] })
     }
@@ -103,7 +115,7 @@ describe('WorkspaceSection', () => {
   it('lets an admin manage members but not owners, and never offer privileged roles', async () => {
     mockRelay({ role: 'admin', members: [member('me', 'admin'), member('bob', 'member'), member('olga', 'owner')] })
     const el = await render()
-    const roleSelects = selects(el).filter(s => s.getAttribute('aria-label')?.startsWith('Role for'))
+    const roleSelects = selects(el).filter(s => /^Role for (?!the invitation)/.test(s.getAttribute('aria-label') ?? ''))
     expect(roleSelects.map(s => s.getAttribute('aria-label'))).toEqual(['Role for bob'])
     expect([...roleSelects[0].options].map(o => o.value)).toEqual(['member', 'viewer'])
     expect(el.textContent).toContain('All machines in this workspace')
@@ -130,5 +142,53 @@ describe('WorkspaceSection', () => {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
     expect(calls.find(c => c.method === 'PATCH')).toMatchObject({ url: '/api/workspaces/ws1/members/bob', body: { role: 'member' } })
     expect(el.textContent).toContain('A workspace needs at least one owner')
+  })
+
+  it('hides invitations from members, and never offers an admin the admin role', async () => {
+    mockRelay({ role: 'member', members: [member('me', 'member')] })
+    let el = await render()
+    expect(el.textContent).not.toContain('Invite people')
+    act(() => { root?.unmount() })
+    container?.remove()
+
+    mockRelay({ role: 'admin', members: [member('me', 'admin')] })
+    el = await render()
+    const roleSelect = selects(el).find(s => s.getAttribute('aria-label') === 'Role for the invitation')!
+    expect([...roleSelect.options].map(o => o.value)).toEqual(['member', 'viewer'])
+  })
+
+  it('creates a GitHub or email invitation and shows the link once', async () => {
+    mockRelay({ role: 'owner', members: [member('me', 'owner')] })
+    const el = await render()
+    const field = el.querySelector<HTMLInputElement>('input[aria-label="GitHub username or email"]')!
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    for (const value of ['@octocat', 'pat@example.com']) {
+      await act(async () => {
+        setValue.call(field, value)
+        field.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      await act(async () => {
+        field.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+      })
+      for (let i = 0; i < 2; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+    }
+    const posts = calls.filter(c => c.method === 'POST' && c.url.endsWith('/invitations'))
+    expect(posts.map(c => c.body)).toEqual([
+      { role: 'member', githubLogin: '@octocat' },
+      { role: 'member', email: 'pat@example.com' },
+    ])
+    expect(el.querySelector<HTMLInputElement>('input[aria-label="Invitation link"]')!.value).toBe('https://app.example.com/invite#tok')
+  })
+
+  it('lists pending invitations with new-link and revoke controls', async () => {
+    mockRelay({
+      role: 'owner',
+      members: [member('me', 'owner')],
+      invitations: [{ id: 'inv1', role: 'viewer', email: null, githubLogin: 'octocat', createdAt: '2026-09-28', expiresAt: Date.now() + 1000 }],
+    })
+    const el = await render()
+    expect(el.textContent).toContain('octocat')
+    expect(buttons(el)).toContain('New link')
+    expect(buttons(el)).toContain('Revoke')
   })
 })
