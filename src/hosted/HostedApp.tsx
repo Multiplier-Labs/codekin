@@ -21,6 +21,7 @@ import { LinkClaimPage } from './LinkClaimPage'
 import { useHostedAuth } from './useHostedAuth'
 import { INVITE_ERROR_MESSAGES, consumeJoinedWorkspace, pickWorkspace } from './workspace'
 import { InvitePage } from './InvitePage'
+import { MfaChallengePage, MfaEnrollPage, StepUpHost } from './TwoFactor'
 import { CreateWorkspaceForm } from './WorkspaceSection'
 import { Settings } from '../components/Settings'
 import { useSettings } from '../hooks/useSettings'
@@ -161,9 +162,10 @@ export default function HostedApp() {
   const [noticeDismissed, setNoticeDismissed] = useState(false)
   // This tab's workspace, settled once the account is known. Every relay call
   // that is not addressed to a machine carries it (see ./workspace).
+  const fullySignedIn = user?.status === 'active' && account.authLevel === 'full'
   const workspace = useMemo(
-    () => (user?.status === 'active' ? pickWorkspace(account.workspaces) : null),
-    [user, account],
+    () => (fullySignedIn ? pickWorkspace(account.workspaces) : null),
+    [fullySignedIn, account],
   )
   const { settings, updateSettings } = useSettings()
   const [selected, setSelected] = useState<Machine | null>(null)
@@ -194,7 +196,7 @@ export default function HostedApp() {
   // chat, and the machine list at least says what is available.
   useEffect(() => {
     if (!restoring) return
-    if (!user || user.status !== 'active') return
+    if (!fullySignedIn) return
     // No workspace means no machines to restore to (and the no-workspace
     // screen renders ahead of the restoring gate).
     if (!workspace) return
@@ -218,7 +220,7 @@ export default function HostedApp() {
 
     void restore()
     return () => { cancelled = true }
-  }, [restoring, user, workspace, selectMachine])
+  }, [restoring, fullySignedIn, workspace, selectMachine])
 
   // Return to Settings' machine list. The workspace owns its own teardown on
   // unmount, so when it was showing (phase 'ready') we leave the transport to
@@ -276,7 +278,16 @@ export default function HostedApp() {
   ) : authError && INVITE_ERROR_MESSAGES[authError] ? (
     <Notice tone="error" onDismiss={() => { setNoticeDismissed(true) }}>{INVITE_ERROR_MESSAGES[authError]}</Notice>
   ) : null
-  const withNotice = (screen: React.ReactNode) => <>{notice}{screen}</>
+  // StepUpHost answers "confirm it's you" for sensitive actions on any screen.
+  const withNotice = (screen: React.ReactNode) => <>{notice}<StepUpHost />{screen}</>
+
+  // GitHub sign-in done, second factor (or 2FA enrollment) outstanding.
+  if (account.authLevel === 'mfa_pending') {
+    return <MfaChallengePage login={user.login} onVerified={() => void refresh()} onLogout={() => void logout()} />
+  }
+  if (account.authLevel === 'enrollment_required') {
+    return <MfaEnrollPage login={user.login} onDone={() => void refresh()} onLogout={() => void logout()} />
+  }
 
   if (!workspace) {
     return withNotice(
@@ -300,21 +311,21 @@ export default function HostedApp() {
 
   if (selected && transport) {
     if (phase === 'ready') {
-      return (
+      return withNotice(
         <MachineWorkspace
           transport={transport}
           onExit={backToMachines}
           onSwitchMachine={switchMachine}
-        />
+        />,
       )
     }
-    return (
+    return withNotice(
       <MachineConnect
         machine={selected}
         transport={transport}
         onBack={backToMachines}
         onConnected={() => { setPhase('ready') }}
-      />
+      />,
     )
   }
 

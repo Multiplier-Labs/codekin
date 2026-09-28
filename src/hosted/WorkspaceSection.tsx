@@ -26,6 +26,7 @@ import {
   removeMember,
   removeWorkspaceMachine,
   renameWorkspace,
+  setWorkspaceRequireMfa,
   switchWorkspace,
   transferMachine,
   updateMember,
@@ -36,6 +37,7 @@ import {
   type WorkspaceMember,
   type WorkspaceRole,
 } from './workspace'
+import { isStepUpCancel } from './mfa'
 
 interface Account {
   userId: string
@@ -49,7 +51,9 @@ const input =
   'rounded-control border border-edge bg-surface px-2.5 py-1 text-body text-ink focus:border-focus focus:outline-none'
 const subheading = 'mb-2 text-meta font-semibold text-ink-muted'
 
-function errorText(err: unknown): string {
+function errorText(err: unknown): string | null {
+  // Dismissing the "confirm it's you" prompt is a choice, not an error.
+  if (isStepUpCancel(err)) return null
   return err instanceof Error ? err.message : 'Something went wrong. Try again.'
 }
 
@@ -143,6 +147,9 @@ function MemberRow({
         {isSelf && <span className="ml-1.5 text-meta text-ink-faint">(you)</span>}
         {member.status === 'suspended' && <span className="ml-1.5 text-meta text-warning-5">suspended</span>}
         {member.accountStatus === 'disabled' && <span className="ml-1.5 text-meta text-error-4">account disabled</span>}
+        <span className={`ml-1.5 text-micro ${member.mfaEnabled ? 'text-success-6' : 'text-ink-faint'}`}>
+          {member.mfaEnabled ? '2FA' : 'no 2FA'}
+        </span>
       </span>
       {manageable ? (
         <>
@@ -514,6 +521,26 @@ export function WorkspaceSection() {
         <div className="mt-3">
           <CreateWorkspaceForm onCancel={() => { setCreating(false) }} />
         </div>
+      )}
+
+      {can(role, 'workspace.edit') && (
+        <label className="mt-4 flex items-start gap-2 text-body text-ink">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={workspace.requireMfa}
+            onChange={e => {
+              const next = e.target.checked
+              void act(() => setWorkspaceRequireMfa(workspace.id, next), () => { window.location.reload() })
+            }}
+          />
+          <span>
+            Require two-factor authentication for everyone
+            <span className="block text-meta text-ink-muted">
+              Members without it are asked to set it up before they can continue. Owners and admins always need it.
+            </span>
+          </span>
+        </label>
       )}
 
       <div className="mt-5">

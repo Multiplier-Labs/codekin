@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import type { Workspace } from './workspace'
+import type { AuthLevel } from './mfa'
 
 export interface HostedUser {
   id: string
@@ -18,13 +19,15 @@ export interface HostedUser {
 
 /** Account-level facts /api/me reports alongside the user. */
 export interface HostedAccount {
+  /** How far sign-in has got; anything but 'full' means a 2FA screen. */
+  authLevel: AuthLevel
   /** Workspaces the user is an active member of, default first. */
   workspaces: Workspace[]
   isOperator: boolean
   canCreateWorkspaces: boolean
 }
 
-const NO_ACCOUNT: HostedAccount = { workspaces: [], isOperator: false, canCreateWorkspaces: false }
+const NO_ACCOUNT: HostedAccount = { authLevel: 'full', workspaces: [], isOperator: false, canCreateWorkspaces: false }
 
 export interface HostedAuthState {
   user: HostedUser | null
@@ -62,6 +65,7 @@ export function useHostedAuth(): HostedAuthState {
         const data = await res.json() as { user: HostedUser | null } & Partial<HostedAccount>
         setUser(data.user)
         setAccount({
+          authLevel: data.authLevel ?? 'full',
           workspaces: data.workspaces ?? [],
           isOperator: data.isOperator ?? false,
           canCreateWorkspaces: data.canCreateWorkspaces ?? false,

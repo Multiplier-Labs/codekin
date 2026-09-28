@@ -10,7 +10,7 @@ import {
   IconKey, IconPalette, IconBrandGithub, IconCopy, IconCheck,
   IconChevronDown, IconChevronRight, IconCircleCheckFilled, IconCircleXFilled,
   IconRobot, IconArchive, IconGitBranch, IconRefresh, IconAlertTriangle,
-  IconPlugConnected, IconPlayerPlay, IconWand, IconShieldLock, IconServer2, IconDevices, IconUsersGroup,
+  IconPlugConnected, IconPlayerPlay, IconWand, IconShieldLock, IconServer2, IconDevices, IconUsersGroup, IconShieldCheck,
 } from '@tabler/icons-react'
 import type { Settings as SettingsType, PermissionMode, Repo } from '../types'
 import { PERMISSION_MODES } from '../types'
@@ -87,6 +87,7 @@ interface Props {
 const MachinesSection = lazy(() => import('../hosted/MachinesSection').then(m => ({ default: m.MachinesSection })))
 const DevicesSection = lazy(() => import('../hosted/DevicesSection').then(m => ({ default: m.DevicesSection })))
 const WorkspaceSection = lazy(() => import('../hosted/WorkspaceSection').then(m => ({ default: m.WorkspaceSection })))
+const TwoFactorPanel = lazy(() => import('../hosted/TwoFactor').then(m => ({ default: m.TwoFactorPanel })))
 
 // ---------------------------------------------------------------------------
 // Section header component
@@ -381,6 +382,13 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
                 </Suspense>
               </SectionCard>
             </div>
+            <div className="mt-4">
+              <SectionCard icon={<IconShieldCheck size={15} />} title="Two-factor authentication">
+                <Suspense fallback={<p className="text-body text-ink-muted">Loading…</p>}>
+                  <TwoFactorPanel />
+                </Suspense>
+              </SectionCard>
+            </div>
           </div>
         </div>
       </div>
@@ -426,6 +434,15 @@ export function Settings({ open, onClose, settings, onUpdate, isMobile = false, 
             <SectionCard icon={<IconDevices size={15} />} title="Devices & passkeys">
               <Suspense fallback={<p className="text-body text-ink-muted">Loading…</p>}>
                 <DevicesSection />
+              </Suspense>
+            </SectionCard>
+          )}
+
+          {/* ── Two-factor authentication (hosted only) ── */}
+          {onSwitchMachine && (
+            <SectionCard icon={<IconShieldCheck size={15} />} title="Two-factor authentication">
+              <Suspense fallback={<p className="text-body text-ink-muted">Loading…</p>}>
+                <TwoFactorPanel />
               </Suspense>
             </SectionCard>
           )}
