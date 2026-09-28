@@ -34,12 +34,12 @@ curl -fsSL https://codekin.ai/install.sh | bash
 
 The script can install Node.js 20+ through nvm, installs Codekin from npm, creates a local access token, and starts a user-level background service. It also checks for GitHub CLI (`gh`), but `gh` is optional if you use local Git checkouts.
 
-Open the URL printed by the installer on the **same computer**. It looks like `http://localhost:32352?token=...`. `localhost` refers to the device opening the URL, so this link will not reach your computer from a phone or another computer. Run `codekin token` to print it again. The URL contains an access credential; keep it private. If you open the page without the `?token=...` part, enter the token when Settings prompts you.
+Open the URL printed by the installer on the **same computer**. It looks like `http://localhost:32352?token=...`. `localhost` refers to the device opening the URL, so this link will not reach your computer from a phone or another computer. Run `codekin token` to print it again. The URL contains an access credential; keep it private. If you open the page without the `?token=...` part, enter the token on the **Settings → Connection** page, which opens automatically.
 
 ## 3. Start your first session
 
 1. On the landing page, check **Environment**. At least one agent should be ready. The GitHub CLI is optional.
-2. Choose a repository. Codekin finds local Git checkouts under `~/repos`, including `~/repos/project` and `~/repos/owner/project`. If your checkouts are elsewhere, set **Repositories Path** below the repository list or in **Settings** to the directory containing them. You can also clone a repository into `~/repos` yourself.
+2. Choose a repository. Codekin finds local Git checkouts under `~/repos`, including `~/repos/project` and `~/repos/owner/project`. If your checkouts are elsewhere, set **Repositories Path** below the repository list or in **Settings → Sessions** to the directory containing them. You can also clone a repository into `~/repos` yourself.
 3. If you have installed and signed in to [GitHub CLI](https://cli.github.com/) (`gh auth login`) on the Codekin computer, Codekin can list your GitHub repositories and clone one when you select it.
 4. Use **New** in the sidebar, select the repository, then choose an available provider. Send your first message in the session that opens. Selecting a repository directly can reopen an existing session; for a new session it uses the current default provider.
 
@@ -51,7 +51,7 @@ Run the agent's command from [step 1](#1-prepare-a-coding-agent) on the Codekin 
 
 ### No repositories appear
 
-Use **Repositories Path** on the landing page or in **Settings** to select the directory that contains your local Git checkouts. The directory must exist and be readable by the user running Codekin. Leave the field empty to use the default `~/repos`. GitHub CLI is only needed to list and clone GitHub repositories; it is not needed for local checkouts.
+Use **Repositories Path** on the landing page or in **Settings → Sessions** to select the directory that contains your local Git checkouts. The directory must exist and be readable by the user running Codekin. Leave the field empty to use the default `~/repos`. GitHub CLI is only needed to list and clone GitHub repositories; it is not needed for local checkouts.
 
 ### The local page does not open
 

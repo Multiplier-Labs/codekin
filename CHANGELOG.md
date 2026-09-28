@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-28
+
+### Added
+- **Workspaces** in the hosted app — machines, session shares and the audit log now belong to a workspace, and every role is per workspace (owner, admin, member, viewer). Switch between workspaces, create one (when permitted), and manage members: change roles, suspend, remove, or leave. Owners and admins see every machine in the workspace and can transfer or remove it, but only open sessions shared with them; a removed member's machines are locked until transferred. The single organization of earlier releases becomes the first workspace, with existing roles carried over (#645, #646)
+- **Workspace invitations** — owners and admins invite people by GitHub username or email address with a single-use link that expires after 7 days. The invitee accepts by signing in with GitHub, which checks the invited account (or a GitHub-verified email) — and also admits new accounts, so access no longer needs a server-side allowlist change (#647)
+- **Two-factor authentication** — authenticator apps (TOTP), passkeys and single-use recovery codes. Required for workspace owners and admins, and for everyone in a workspace that turns on "Require two-factor authentication". Sensitive actions — adding a passkey, linking a device, granting admin, deleting a workspace — ask for a fresh check first. Operators can reset a locked-out account with `relay-admin-cli reset-mfa` (#648, #649)
+- **Settings as a full page** — Settings moves from a dialog to `/settings/<section>`, grouped into Account (profile, security, appearance), Workspace (general, members, machines), This machine (connection, sessions, permissions, webhooks) and, for the operator, Platform (accounts). Sections can be linked directly, and on phones Settings is a list with one section per page. Opening Settings no longer leaves the session you are in (#651, #652, #654)
+- **Platform accounts page** for the operator: every account's status and who may create workspaces (#654)
+
+### Changed
+- Theme palettes are more distinct from one another, and Matrix is softer on the eyes (#653)
+- Relay sessions end 30 days after sign-in even when active, and REST requests that change data must come from the app's own origin (#644)
+
+### Security
+- Hosted access audit (#643) and fixes: signing out closes that session's live connections, "sign out everywhere" also cancels pending device links, invalid share expiry dates no longer mean "never", viewers are read-only, and passkey sign-in no longer reveals whether an account is disabled (#644)
+- Hosted session isolation: proxied paths are canonicalized and grantees are held to exact routes, events from other sessions are no longer relayed to a session's grantees, and share changes, machine audit logs and machine removal re-check current authority (#655)
+
 ## [0.8.1] - 2026-09-27
 
 ### Added

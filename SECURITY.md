@@ -35,7 +35,7 @@ Codekin spawns coding agent CLI processes (Claude Code, Codex, OpenCode) and exp
 - Keep API keys in environment variables, never in code or config files
 - Treat the local access token (`~/.config/codekin/token`) like a password
 
-When using the hosted app ([app.codekin.ai](https://app.codekin.ai)), the connector on your computer makes an outbound connection to the relay, so no inbound port needs to be opened. Pairing commands are single-use and expire after 10 minutes. Remove machines you no longer use and use **Sign out everywhere** in Settings if a device is lost.
+When using the hosted app ([app.codekin.ai](https://app.codekin.ai)), the connector on your computer makes an outbound connection to the relay, so no inbound port needs to be opened. Pairing commands are single-use and expire after 10 minutes. Remove machines you no longer use (**Settings → Machines**) and use **Sign out everywhere** (**Settings → Security**) if a device is lost. Turn on two-factor authentication in **Settings → Security** — it is required for workspace owners and admins, and a workspace can require it of everyone. Invitation links are single-use, bound to the invited GitHub account or verified email, and expire after 7 days.
 
 ## Disclosure
 
