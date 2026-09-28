@@ -8,7 +8,7 @@
  * (src/App.tsx) is untouched by hosted mode.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { LoginPage } from './LoginPage'
 import { decideRestore, fetchMachines, forgetMachine, isUsableMachine, lastMachineId, rememberMachine, type Machine } from './machines'
 import { useMachineSetup } from './useMachineSetup'
@@ -19,6 +19,8 @@ import { HostedRelayTransport, LocalHttpTransport, setTransport } from '../lib/t
 import { PairPage } from './PairPage'
 import { LinkClaimPage } from './LinkClaimPage'
 import { useHostedAuth } from './useHostedAuth'
+import { pickWorkspace } from './workspace'
+import { CreateWorkspaceForm } from './WorkspaceSection'
 import { Settings } from '../components/Settings'
 import { useSettings } from '../hooks/useSettings'
 import type { Settings as SettingsValues } from '../types'
@@ -35,6 +37,40 @@ function PendingPage({ login, onLogout }: { login: string; onLogout: () => void 
         <p className="mb-6 text-meta text-ink-muted">
           An administrator needs to approve your account before you can use hosted Codekin.
         </p>
+        <button
+          onClick={onLogout}
+          className="w-full rounded-control border border-edge px-4 py-2.5 text-body text-ink-muted transition hover:bg-surface-raised hover:text-ink"
+        >
+          Sign out
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Signed in and admitted, but a member of no workspace: removed from the
+ * last one, or its workspaces were deleted. Offers to create one when the
+ * account may; otherwise explains that someone has to add them.
+ */
+function NoWorkspacePage({ login, canCreate, onLogout }: { login: string; canCreate: boolean; onLogout: () => void }) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-page">
+      <div className="w-full max-w-sm rounded-floating border border-edge bg-surface p-8">
+        <h1 className="mb-2 text-center font-mono text-head text-ink">Codekin</h1>
+        <p className="mb-2 text-center text-body text-ink">
+          Hi <span className="font-mono">{login}</span> — you are not in a workspace yet.
+        </p>
+        <p className="mb-6 text-center text-meta text-ink-muted">
+          {canCreate
+            ? 'Create one to connect your machines, or ask a workspace admin to add you.'
+            : 'Ask a workspace admin to add you.'}
+        </p>
+        {canCreate && (
+          <div className="mb-4">
+            <CreateWorkspaceForm />
+          </div>
+        )}
         <button
           onClick={onLogout}
           className="w-full rounded-control border border-edge px-4 py-2.5 text-body text-ink-muted transition hover:bg-surface-raised hover:text-ink"
@@ -98,7 +134,13 @@ function HostedHome({ settings, onUpdate, onOpen, onSignOut, signedInAs }: {
 }
 
 export default function HostedApp() {
-  const { user, initialized, authError, logout, refresh } = useHostedAuth()
+  const { user, account, initialized, authError, logout, refresh } = useHostedAuth()
+  // This tab's workspace, settled once the account is known. Every relay call
+  // that is not addressed to a machine carries it (see ./workspace).
+  const workspace = useMemo(
+    () => (user?.status === 'active' ? pickWorkspace(account.workspaces) : null),
+    [user, account],
+  )
   const { settings, updateSettings } = useSettings()
   const [selected, setSelected] = useState<Machine | null>(null)
   // The transport is created when a machine is picked and installed before
@@ -129,6 +171,9 @@ export default function HostedApp() {
   useEffect(() => {
     if (!restoring) return
     if (!user || user.status !== 'active') return
+    // No workspace means no machines to restore to (and the no-workspace
+    // screen renders ahead of the restoring gate).
+    if (!workspace) return
 
     let cancelled = false
 
@@ -149,7 +194,7 @@ export default function HostedApp() {
 
     void restore()
     return () => { cancelled = true }
-  }, [restoring, user, selectMachine])
+  }, [restoring, user, workspace, selectMachine])
 
   // Return to Settings' machine list. The workspace owns its own teardown on
   // unmount, so when it was showing (phase 'ready') we leave the transport to
@@ -195,6 +240,16 @@ export default function HostedApp() {
     return <PendingPage login={user.login} onLogout={() => void logout()} />
   }
 
+  if (!workspace) {
+    return (
+      <NoWorkspacePage
+        login={user.login}
+        canCreate={account.canCreateWorkspaces}
+        onLogout={() => void logout()}
+      />
+    )
+  }
+
   if (window.location.pathname === '/pair') {
     return <PairPage />
   }
@@ -234,7 +289,7 @@ export default function HostedApp() {
       onUpdate={updateSettings}
       onOpen={selectMachine}
       onSignOut={() => void logout()}
-      signedInAs={user.displayName ?? user.login}
+      signedInAs={`${user.displayName ?? user.login} · ${workspace.name}`}
     />
   )
 }

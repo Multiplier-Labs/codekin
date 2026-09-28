@@ -1,6 +1,7 @@
 /** Approval screen for a machine pairing request (/pair?code=XXXX-XXXX). */
 
 import { useState, useEffect, useCallback } from 'react'
+import { workspaceHeaders } from './workspace'
 
 interface PairingRequest {
   userCode: string
@@ -57,7 +58,8 @@ export function PairPage() {
       const res = await fetch(`/api/machines/pair/${action}`, {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        // The approved machine joins this tab's workspace.
+        headers: { 'Content-Type': 'application/json', ...workspaceHeaders() },
         body: JSON.stringify(
           action === 'approve' ? { code, displayName: displayName || undefined } : { code },
         ),

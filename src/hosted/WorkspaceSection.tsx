@@ -1,0 +1,436 @@
+/**
+ * Workspace, as a section of Settings (hosted only): which workspace this tab
+ * is in, who is in it, and — for owners and admins — every machine in it.
+ *
+ * Self-contained: it reads the account from /api/me and the workspace from
+ * this tab's choice (./workspace), so Settings only has to place it. Every
+ * control is gated on the caller's role for tidiness; the relay enforces it.
+ * Lazy-loaded by Settings so the local build never pulls it in.
+ */
+
+import { useState, useEffect, useCallback } from 'react'
+import {
+  BOOTSTRAP_WORKSPACE_ID,
+  ROLE_LABELS,
+  can,
+  canManageMember,
+  createWorkspace,
+  currentWorkspaceId,
+  deleteWorkspace,
+  fetchMembers,
+  fetchWorkspaceMachines,
+  removeMember,
+  removeWorkspaceMachine,
+  renameWorkspace,
+  switchWorkspace,
+  transferMachine,
+  updateMember,
+  type Workspace,
+  type WorkspaceMachine,
+  type WorkspaceMember,
+  type WorkspaceRole,
+} from './workspace'
+
+interface Account {
+  userId: string
+  workspaces: Workspace[]
+  canCreateWorkspaces: boolean
+}
+
+const button =
+  'rounded-control border border-edge px-2.5 py-1 text-meta text-ink-muted transition hover:bg-surface-raised hover:text-ink disabled:opacity-50'
+const input =
+  'rounded-control border border-edge bg-surface px-2.5 py-1 text-body text-ink focus:border-focus focus:outline-none'
+const subheading = 'mb-2 text-meta font-semibold text-ink-muted'
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : 'Something went wrong. Try again.'
+}
+
+/** Create a workspace and move into it. */
+export function CreateWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const workspace = await createWorkspace(name.trim())
+      switchWorkspace(workspace.id)
+    } catch (err) {
+      setError(errorText(err))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form
+      className="flex flex-col gap-2"
+      onSubmit={e => { e.preventDefault(); void submit() }}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          aria-label="Workspace name"
+          value={name}
+          onChange={e => { setName(e.target.value) }}
+          placeholder="Workspace name"
+          maxLength={64}
+          className={`${input} min-w-0 flex-1`}
+        />
+        <button type="submit" disabled={busy || !name.trim()} className={button}>
+          {busy ? 'Creating…' : 'Create'}
+        </button>
+        {onCancel && (
+          <button type="button" onClick={onCancel} className="px-2 py-1 text-meta text-ink-faint transition hover:text-ink-muted">
+            Cancel
+          </button>
+        )}
+      </div>
+      {error && <p className="text-meta text-error-4">{error}</p>}
+    </form>
+  )
+}
+
+function MemberRow({
+  member,
+  actorRole,
+  isSelf,
+  onChanged,
+  onError,
+}: {
+  member: WorkspaceMember
+  actorRole: WorkspaceRole
+  isSelf: boolean
+  onChanged: () => void
+  onError: (message: string | null) => void
+}) {
+  const workspaceId = currentWorkspaceId() ?? ''
+  const [busy, setBusy] = useState(false)
+  const manageable = !isSelf && canManageMember(actorRole, member.role)
+  const roleOptions = (['owner', 'admin', 'member', 'viewer'] as WorkspaceRole[]).filter(
+    role => role === member.role || canManageMember(actorRole, member.role, role),
+  )
+
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true)
+    onError(null)
+    try {
+      await action()
+      onChanged()
+    } catch (err) {
+      onError(errorText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const name = member.displayName ?? member.login
+  const inactive = member.status === 'suspended' || member.accountStatus !== 'active'
+
+  return (
+    <li className="flex flex-wrap items-center gap-2 py-1.5">
+      <span className={`min-w-0 flex-1 truncate text-body ${inactive ? 'text-ink-faint' : 'text-ink'}`}>
+        {name}
+        {name !== member.login && <span className="ml-1.5 font-mono text-meta text-ink-faint">{member.login}</span>}
+        {isSelf && <span className="ml-1.5 text-meta text-ink-faint">(you)</span>}
+        {member.status === 'suspended' && <span className="ml-1.5 text-meta text-warning-5">suspended</span>}
+        {member.accountStatus === 'disabled' && <span className="ml-1.5 text-meta text-error-4">account disabled</span>}
+      </span>
+      {manageable ? (
+        <>
+          <select
+            aria-label={`Role for ${member.login}`}
+            value={member.role}
+            disabled={busy}
+            onChange={e => {
+              const role = e.target.value as WorkspaceRole
+              void run(() => updateMember(workspaceId, member.userId, { role }))
+            }}
+            className={`${input} text-meta`}
+          >
+            {roleOptions.map(role => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}
+          </select>
+          <button
+            disabled={busy}
+            onClick={() => {
+              const status = member.status === 'suspended' ? 'active' : 'suspended'
+              void run(() => updateMember(workspaceId, member.userId, { status }))
+            }}
+            className={button}
+          >
+            {member.status === 'suspended' ? 'Reinstate' : 'Suspend'}
+          </button>
+          <button
+            disabled={busy}
+            onClick={() => {
+              if (!window.confirm(`Remove ${member.login} from this workspace? Their machines here are locked until an admin transfers or removes them.`)) return
+              void run(() => removeMember(workspaceId, member.userId))
+            }}
+            className={`${button} hover:text-error-4`}
+          >
+            Remove
+          </button>
+        </>
+      ) : (
+        <span className="text-meta text-ink-muted">{ROLE_LABELS[member.role]}</span>
+      )}
+    </li>
+  )
+}
+
+function MachineOversight({ members }: { members: WorkspaceMember[] }) {
+  const workspaceId = currentWorkspaceId() ?? ''
+  const [machines, setMachines] = useState<WorkspaceMachine[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const eligibleOwners = members.filter(m => m.status === 'active' && m.accountStatus === 'active' && m.role !== 'viewer')
+
+  const load = useCallback(async () => {
+    try {
+      setMachines(await fetchWorkspaceMachines(workspaceId))
+    } catch (err) {
+      setError(errorText(err))
+    }
+  }, [workspaceId])
+
+  useEffect(() => {
+    fetchWorkspaceMachines(workspaceId)
+      .then(setMachines)
+      .catch((err: unknown) => { setError(errorText(err)) })
+  }, [workspaceId])
+
+  const run = async (action: () => Promise<void>) => {
+    setError(null)
+    try {
+      await action()
+      await load()
+    } catch (err) {
+      setError(errorText(err))
+    }
+  }
+
+  if (machines === null) return error ? <p className="text-meta text-error-4">{error}</p> : null
+
+  return (
+    <div className="mt-5">
+      <h4 className={subheading}>All machines in this workspace</h4>
+      {machines.length === 0 ? (
+        <p className="text-meta text-ink-faint">No machines yet.</p>
+      ) : (
+        <ul className="divide-y divide-edge">
+          {machines.map(machine => (
+            <li key={machine.id} className="flex flex-wrap items-center gap-2 py-1.5">
+              <span className="min-w-0 flex-1 truncate text-body text-ink">
+                {machine.displayName}
+                <span className="ml-1.5 text-meta text-ink-faint">{machine.ownerLogin ?? 'unknown owner'}</span>
+                {machine.quarantined && <span className="ml-1.5 text-meta text-warning-5">locked — owner left</span>}
+              </span>
+              <select
+                aria-label={`Transfer ${machine.displayName}`}
+                value=""
+                onChange={e => {
+                  const userId = e.target.value
+                  if (userId) void run(() => transferMachine(workspaceId, machine.id, userId))
+                }}
+                className={`${input} text-meta`}
+              >
+                <option value="">Transfer to…</option>
+                {eligibleOwners
+                  .filter(m => m.userId !== machine.ownerUserId || machine.quarantined)
+                  .map(m => <option key={m.userId} value={m.userId}>{m.login}</option>)}
+              </select>
+              <button
+                onClick={() => {
+                  if (!window.confirm(`Remove ${machine.displayName}? Its connector is signed out and must be paired again.`)) return
+                  void run(() => removeWorkspaceMachine(workspaceId, machine.id))
+                }}
+                className={`${button} hover:text-error-4`}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-1.5 text-micro text-ink-faint">
+        Admins see and manage every machine here but can only open sessions shared with them.
+      </p>
+      {error && <p className="mt-2 text-meta text-error-4">{error}</p>}
+    </div>
+  )
+}
+
+export function WorkspaceSection() {
+  const [account, setAccount] = useState<Account | null>(null)
+  const [members, setMembers] = useState<WorkspaceMember[] | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const workspaceId = currentWorkspaceId()
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/me', { credentials: 'include' })
+        const data = (await res.json()) as {
+          user: { id: string } | null
+          workspaces?: Workspace[]
+          canCreateWorkspaces?: boolean
+        }
+        if (!data.user) return
+        setAccount({
+          userId: data.user.id,
+          workspaces: data.workspaces ?? [],
+          canCreateWorkspaces: data.canCreateWorkspaces ?? false,
+        })
+      } catch {
+        setError('Could not load your workspaces.')
+      }
+    })()
+  }, [])
+
+  const loadMembers = useCallback(async () => {
+    if (!workspaceId) return
+    try {
+      setMembers(await fetchMembers(workspaceId))
+    } catch (err) {
+      setError(errorText(err))
+    }
+  }, [workspaceId])
+
+  useEffect(() => {
+    if (!workspaceId) return
+    fetchMembers(workspaceId)
+      .then(setMembers)
+      .catch((err: unknown) => { setError(errorText(err)) })
+  }, [workspaceId])
+
+  const workspace = account?.workspaces.find(w => w.id === workspaceId)
+  if (!account || !workspace) {
+    return error ? <p className="text-meta text-error-4">{error}</p> : <p className="text-body text-ink-muted">Loading…</p>
+  }
+
+  const role = workspace.role
+  const others = account.workspaces.filter(w => w.id !== workspace.id)
+
+  const act = async (action: () => Promise<void>, after?: () => void) => {
+    setError(null)
+    try {
+      await action()
+      after?.()
+    } catch (err) {
+      setError(errorText(err))
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        {renaming === null ? (
+          <>
+            <span className="min-w-0 truncate text-title text-ink">{workspace.name}</span>
+            <span className="rounded-control border border-edge px-1.5 py-0.5 text-micro text-ink-muted">{ROLE_LABELS[role]}</span>
+            {can(role, 'workspace.edit') && (
+              <button onClick={() => { setRenaming(workspace.name) }} className="px-1.5 text-meta text-ink-faint transition hover:text-ink-muted">
+                Rename
+              </button>
+            )}
+          </>
+        ) : (
+          <form
+            className="flex flex-1 items-center gap-2"
+            onSubmit={e => {
+              e.preventDefault()
+              void act(() => renameWorkspace(workspace.id, renaming.trim()), () => { window.location.reload() })
+            }}
+          >
+            <input
+              aria-label="New workspace name"
+              value={renaming}
+              maxLength={64}
+              onChange={e => { setRenaming(e.target.value) }}
+              className={`${input} min-w-0 flex-1`}
+            />
+            <button type="submit" disabled={!renaming.trim()} className={button}>Save</button>
+            <button type="button" onClick={() => { setRenaming(null) }} className="px-1.5 text-meta text-ink-faint">Cancel</button>
+          </form>
+        )}
+      </div>
+
+      {(others.length > 0 || account.canCreateWorkspaces) && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {others.length > 0 && (
+            <select
+              aria-label="Switch workspace"
+              value=""
+              onChange={e => { if (e.target.value) switchWorkspace(e.target.value) }}
+              className={`${input} text-meta`}
+            >
+              <option value="">Switch to…</option>
+              {others.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </select>
+          )}
+          {account.canCreateWorkspaces && !creating && (
+            <button onClick={() => { setCreating(true) }} className={button}>New workspace</button>
+          )}
+        </div>
+      )}
+      {creating && (
+        <div className="mt-3">
+          <CreateWorkspaceForm onCancel={() => { setCreating(false) }} />
+        </div>
+      )}
+
+      <div className="mt-5">
+        <h4 className={subheading}>Members</h4>
+        {members === null ? (
+          <p className="text-meta text-ink-faint">Loading…</p>
+        ) : (
+          <ul className="divide-y divide-edge">
+            {members.map(member => (
+              <MemberRow
+                key={member.userId}
+                member={member}
+                actorRole={role}
+                isSelf={member.userId === account.userId}
+                onChanged={() => void loadMembers()}
+                onError={setError}
+              />
+            ))}
+          </ul>
+        )}
+        {can(role, 'member.manage') && (
+          <p className="mt-1.5 text-micro text-ink-faint">Inviting people by link is coming next.</p>
+        )}
+      </div>
+
+      {can(role, 'machine.oversee') && members && <MachineOversight members={members} />}
+
+      {error && <p className="mt-3 text-meta text-error-4">{error}</p>}
+
+      <div className="mt-5 flex flex-wrap gap-2 border-t border-edge pt-4">
+        <button
+          onClick={() => {
+            if (!window.confirm(`Leave ${workspace.name}? Your machines here are locked until an admin transfers or removes them.`)) return
+            void act(() => removeMember(workspace.id, account.userId), () => { switchWorkspace(others.at(0)?.id ?? '') })
+          }}
+          className={`${button} hover:text-error-4`}
+        >
+          Leave workspace
+        </button>
+        {can(role, 'workspace.delete') && workspace.id !== BOOTSTRAP_WORKSPACE_ID && (
+          <button
+            onClick={() => {
+              if (!window.confirm(`Delete ${workspace.name}? Everyone loses access to it and its machines. This cannot be undone.`)) return
+              void act(() => deleteWorkspace(workspace.id), () => { switchWorkspace(others.at(0)?.id ?? '') })
+            }}
+            className={`${button} text-error-4`}
+          >
+            Delete workspace
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
