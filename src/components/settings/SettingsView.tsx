@@ -18,7 +18,9 @@ import { ThemePicker } from './ThemePicker'
 import { SessionPreferences } from './SessionPreferences'
 import { PermissionsSection } from './PermissionsSection'
 import { WebhooksSection } from './WebhooksSection'
-import { availableSections, resolveSection, type SettingsSectionId } from './sections'
+import {
+  SETTINGS_GROUPS, availableSections, resolveSection, unavailableSections, type SettingsSectionId,
+} from './sections'
 
 // Hosted sections are lazy so the local build never loads them.
 const MachinesSection = lazy(() => import('../../hosted/MachinesSection').then(m => ({ default: m.MachinesSection })))
@@ -27,6 +29,8 @@ const TwoFactorPanel = lazy(() => import('../../hosted/TwoFactor').then(m => ({ 
 const WorkspaceGeneral = lazy(() => import('../../hosted/WorkspaceSection').then(m => ({ default: m.WorkspaceGeneral })))
 const WorkspaceMembers = lazy(() => import('../../hosted/WorkspaceSection').then(m => ({ default: m.WorkspaceMembers })))
 const WorkspaceMachines = lazy(() => import('../../hosted/WorkspaceSection').then(m => ({ default: m.WorkspaceMachines })))
+const ProfileSection = lazy(() => import('../../hosted/AccountPages').then(m => ({ default: m.ProfileSection })))
+const AccountsSection = lazy(() => import('../../hosted/AccountPages').then(m => ({ default: m.AccountsSection })))
 
 interface Props {
   /** From the URL; null for bare /settings. */
@@ -48,6 +52,35 @@ interface Props {
   onSwitchMachine?: (machine: import('../../hosted/machines').Machine) => void
   /** Hosted only: leave the current machine. */
   onDisconnectMachine?: () => void
+  /**
+   * Hosted, no machine connected: Settings is the home screen. Machine
+   * sections are listed as unavailable, and there is nothing to close to.
+   */
+  connected?: boolean
+  /** Hosted home: machine list/setup state shared with the first-run surface. */
+  machineSetup?: import('../../hosted/useMachineSetup').MachineSetup
+  /** Hosted home: shown in the header, where there is no sidebar. */
+  signedInAs?: string
+  onSignOut?: () => void
+  /** Hosted home, first run: back to the setup surface. */
+  onBack?: () => void
+}
+
+/**
+ * Hosted: whether the signed-in account is the platform operator (for the
+ * Platform group). Null until known — callers must not redirect away from an
+ * operator-only section before then.
+ */
+function useIsOperator(hosted: boolean): boolean | null {
+  const [isOperator, setIsOperator] = useState(hosted ? null : false)
+  useEffect(() => {
+    if (!hosted) return
+    fetch('/api/me', { credentials: 'include' })
+      .then(res => res.json() as Promise<{ isOperator?: boolean }>)
+      .then(data => { setIsOperator(data.isOperator === true) })
+      .catch(() => { setIsOperator(false) })
+  }, [hosted])
+  return isOperator
 }
 
 const loading = <p className="text-body text-ink-muted">Loading…</p>
@@ -123,17 +156,22 @@ function ConnectionSection({ settings, onUpdate, hosted, agentName, onAgentNameC
 export function SettingsView({
   section, onNavigate, onClose, settings, onUpdate, isMobile = false, autoWorktree = false,
   onAutoWorktreeChange, agentName = 'Joe', onAgentNameChange, repos = [], hostedMachineId = '',
-  onSwitchMachine, onDisconnectMachine,
+  onSwitchMachine, onDisconnectMachine, connected = true, machineSetup, signedInAs, onSignOut, onBack,
 }: Props) {
   const hosted = onSwitchMachine !== undefined
-  const available = availableSections({ hosted, hasToken: settings.token !== '' })
+  const isOperator = useIsOperator(hosted)
+  const context = { hosted, hasToken: settings.token !== '', connected, isOperator: isOperator === true }
+  const available = availableSections(context)
+  const unavailable = unavailableSections(context)
   const current = resolveSection(section, available)
   const [error, setError] = useState<{ section: string; message: string } | null>(null)
 
-  // A missing or unavailable section: desktop opens the first one; mobile
+  // A missing or unavailable section: desktop opens the first one (the
+  // machine list when disconnected — the one thing to do there); mobile
   // shows the list (bare /settings). Either way the URL is corrected in place.
-  const fallback = isMobile ? null : (available.at(0)?.id ?? null)
-  const needsRedirect = current === null && (section !== null || fallback !== null)
+  const fallback = isMobile ? null : connected ? (available.at(0)?.id ?? null) : 'machines'
+  const settled = isOperator !== null
+  const needsRedirect = settled && current === null && (section !== null || fallback !== null)
   useEffect(() => {
     if (needsRedirect) onNavigate(fallback, true)
   }, [needsRedirect, fallback, onNavigate])
@@ -145,12 +183,25 @@ export function SettingsView({
 
   const nav = (
     <nav aria-label="Settings sections" className={isMobile ? 'px-3 py-3' : 'w-56 shrink-0 overflow-y-auto border-r border-edge bg-surface px-2 py-3'}>
-      {(['Account', 'Workspace', 'This machine'] as const).map(group => {
+      {SETTINGS_GROUPS.map(group => {
         const items = available.filter(s => s.group === group)
-        if (items.length === 0) return null
+        const offline = unavailable.filter(s => s.group === group)
+        if (items.length === 0 && offline.length === 0) return null
         return (
           <div key={group} className="mb-4">
             <p className="px-3 pb-1 text-micro font-semibold uppercase tracking-wide text-ink-faint">{group}</p>
+            {offline.length > 0 && (
+              <p className="px-3 pb-1 text-micro text-ink-faint">Connect a machine to change these.</p>
+            )}
+            {offline.map(item => {
+              const Icon = item.icon
+              return (
+                <div key={item.id} aria-disabled="true" className="density-row flex w-full items-center gap-2 px-3 text-body text-ink-faint">
+                  <Icon size={16} className="shrink-0" />
+                  <span className="flex-1 truncate">{item.label}</span>
+                </div>
+              )
+            })}
             {items.map(item => {
               const active = item.id === current
               const Icon = item.icon
@@ -177,6 +228,12 @@ export function SettingsView({
 
   let body: React.ReactNode = null
   switch (current) {
+    case 'profile':
+      body = <Block><Suspense fallback={loading}><ProfileSection /></Suspense></Block>
+      break
+    case 'accounts':
+      body = <Block><Suspense fallback={loading}><AccountsSection /></Suspense></Block>
+      break
     case 'security':
       body = (
         <div className="space-y-4">
@@ -203,6 +260,7 @@ export function SettingsView({
                 currentMachineId={hostedMachineId}
                 onSwitch={machine => { onSwitchMachine?.(machine) }}
                 onDisconnect={onDisconnectMachine}
+                setup={machineSetup}
               />
             </Suspense>
           </Block>
@@ -250,12 +308,31 @@ export function SettingsView({
             <IconArrowLeft size={16} /> Settings
           </button>
         ) : (
-          <h1 className="text-title font-semibold text-ink">Settings</h1>
+          <div className="flex items-center gap-2">
+            {onBack && (
+              <button onClick={onBack} className="rounded-control px-1.5 py-1 text-meta text-ink-muted transition hover:bg-surface-raised hover:text-ink">
+                ← Back to setup
+              </button>
+            )}
+            <h1 className="text-title font-semibold text-ink">Settings</h1>
+          </div>
         )}
         <div className="flex-1" />
-        <button onClick={onClose} aria-label="Close settings" title="Close settings" className="rounded-control p-1.5 text-ink-muted transition hover:bg-surface-raised hover:text-ink">
-          <IconX size={18} />
-        </button>
+        {connected ? (
+          <button onClick={onClose} aria-label="Close settings" title="Close settings" className="rounded-control p-1.5 text-ink-muted transition hover:bg-surface-raised hover:text-ink">
+            <IconX size={18} />
+          </button>
+        ) : (
+          // The home screen: nothing to close to; who is signed in, and the way out.
+          <div className="flex items-center gap-3">
+            {signedInAs && <span className="hidden text-meta text-ink-muted sm:inline">{signedInAs}</span>}
+            {onSignOut && (
+              <button onClick={onSignOut} className="rounded-control border border-edge px-3 py-1.5 text-meta text-ink-muted transition hover:bg-surface-raised hover:text-ink">
+                Sign out
+              </button>
+            )}
+          </div>
+        )}
       </header>
       <div className="flex min-h-0 flex-1">
         {showNav && nav}

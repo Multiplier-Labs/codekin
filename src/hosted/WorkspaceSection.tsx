@@ -627,19 +627,3 @@ export function WorkspaceMachines() {
   if (!members) return <Loading error={error} />
   return <MachineOversight members={members} />
 }
-
-/**
- * All three workspace panels in one card — the hosted no-machine screen,
- * until that screen becomes /settings (docs/SETTINGS-VIEW-SPEC.md, PR 3).
- */
-export function WorkspaceSection() {
-  return (
-    <div>
-      <WorkspaceGeneral />
-      <div className="mt-5">
-        <WorkspaceMembers />
-      </div>
-      <WorkspaceMachines />
-    </div>
-  )
-}

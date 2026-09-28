@@ -37,9 +37,27 @@ vi.mock('../FolderPicker', () => ({ FolderPicker: ({ value }: { value: string })
 // Hosted sections are only probed for presence here.
 vi.mock('../../hosted/TwoFactor', () => ({ TwoFactorPanel: () => <p>2FA panel</p> }))
 vi.mock('../../hosted/DevicesSection', () => ({ DevicesSection: () => <p>devices panel</p> }))
+vi.mock('../../hosted/AccountPages', () => ({ ProfileSection: () => <p>profile page</p>, AccountsSection: () => <p>accounts page</p> }))
+vi.mock('../../hosted/MachinesSection', () => ({
+  MachinesSection: ({ onSwitch }: { onSwitch: (m: { id: string }) => void }) => (
+    <button onClick={() => { onSwitch({ id: 'm1' }) }}>hatchery</button>
+  ),
+}))
+vi.mock('../../hosted/WorkspaceSection', () => ({
+  WorkspaceGeneral: () => <p>general page</p>,
+  WorkspaceMembers: () => <p>members page</p>,
+  WorkspaceMachines: () => null,
+}))
+
+/** /api/me as the hosted view asks it (only isOperator matters here). */
+function stubMe(isOperator: boolean) {
+  const fetchMock = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ user: { id: 'u' }, isOperator }) }))
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
+}
 
 import { SettingsView } from './SettingsView'
-import { availableSections, resolveSection } from './sections'
+import { availableSections, resolveSection, unavailableSections } from './sections'
 
 const local: SettingsType = { token: 'tok', fontSize: 14, theme: 'dark' }
 let root: ReturnType<typeof createRoot> | null = null
@@ -60,6 +78,7 @@ beforeEach(() => { Object.values(api).forEach(fn => { if (vi.isMockFunction(fn))
 afterEach(() => {
   act(() => { root?.unmount() })
   container?.remove()
+  vi.unstubAllGlobals()
 })
 
 describe('section map', () => {
@@ -71,9 +90,21 @@ describe('section map', () => {
 
   it('adds account and workspace sections when hosted, and hides machine settings without a token', () => {
     expect(availableSections({ hosted: true, hasToken: true }).map(s => s.id)).toEqual([
-      'security', 'appearance', 'workspace', 'members', 'machines', 'connection', 'sessions', 'permissions', 'webhooks',
+      'profile', 'security', 'appearance', 'workspace', 'members', 'machines', 'connection', 'sessions', 'permissions', 'webhooks',
     ])
     expect(availableSections({ hosted: false, hasToken: false }).map(s => s.id)).toEqual(['appearance', 'connection'])
+  })
+
+  it('adds the Platform group for the operator only', () => {
+    expect(availableSections({ hosted: true, hasToken: true, isOperator: true }).map(s => s.id)).toContain('accounts')
+    expect(availableSections({ hosted: false, hasToken: true, isOperator: true }).map(s => s.id)).not.toContain('accounts')
+  })
+
+  it('lists machine sections as unavailable, not hidden, while disconnected', () => {
+    const ctx = { hosted: true, hasToken: true, connected: false }
+    expect(availableSections(ctx).map(s => s.id)).toEqual(['profile', 'security', 'appearance', 'workspace', 'members', 'machines'])
+    expect(unavailableSections(ctx).map(s => s.id)).toEqual(['connection', 'sessions', 'permissions', 'webhooks'])
+    expect(unavailableSections({ hosted: false, hasToken: true })).toEqual([])
   })
 
   it('resolves only sections that are shown', () => {
@@ -154,6 +185,7 @@ describe('SettingsView', () => {
   })
 
   it('in hosted mode groups account and workspace sections, and hides the local token', async () => {
+    stubMe(false)
     const el = await render(view({ section: 'connection', onSwitchMachine: vi.fn() }))
     expect(navLabels(el)).toEqual(expect.arrayContaining(['Security', 'General', 'Members', 'Machines']))
     expect(el.querySelector('input[type="password"]')).toBeNull()
@@ -169,5 +201,57 @@ describe('SettingsView', () => {
     const el = await render(view({ section: 'appearance', onClose }))
     await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Close settings"]')!.click() })
     expect(onClose).toHaveBeenCalled()
+  })
+
+  it('shows the operator the Accounts page, and waits for that answer before redirecting', async () => {
+    stubMe(true)
+    const onNavigate = vi.fn()
+    const el = await render(view({ section: 'accounts', onNavigate, onSwitchMachine: vi.fn() }))
+    expect(onNavigate).not.toHaveBeenCalled()
+    expect(el.textContent).toContain('accounts page')
+    expect(navLabels(el)).toContain('Accounts')
+    act(() => { root?.unmount() }); container?.remove()
+
+    stubMe(false)
+    const denied = vi.fn()
+    await render(view({ section: 'accounts', onNavigate: denied, onSwitchMachine: vi.fn() }))
+    expect(denied).toHaveBeenCalledWith('profile', true)
+  })
+
+  describe('as the hosted home (no machine connected)', () => {
+    const home = (props: Partial<React.ComponentProps<typeof SettingsView>> = {}) =>
+      view({ connected: false, onSwitchMachine: vi.fn(), section: 'machines', ...props })
+
+    it('asks no machine-backed questions, and shows machine sections as unavailable', async () => {
+      const fetchMock = stubMe(false)
+      const el = await render(home())
+      expect(fetchMock.mock.calls.map(c => c[0] as string)).toEqual(['/api/me'])
+      expect(api.getRetentionDays).not.toHaveBeenCalled()
+      expect(el.textContent).toContain('Connect a machine to change these.')
+      expect(el.querySelectorAll('[aria-disabled="true"]')).toHaveLength(4)
+    })
+
+    it('opens the machine list by default and connects the machine that is clicked', async () => {
+      stubMe(false)
+      const onNavigate = vi.fn()
+      await render(home({ section: null, onNavigate }))
+      expect(onNavigate).toHaveBeenCalledWith('machines', true)
+      act(() => { root?.unmount() }); container?.remove()
+
+      const onSwitchMachine = vi.fn()
+      const el = await render(home({ onSwitchMachine }))
+      await act(async () => { [...el.querySelectorAll('button')].find(b => b.textContent === 'hatchery')!.click() })
+      expect(onSwitchMachine).toHaveBeenCalledWith({ id: 'm1' })
+    })
+
+    it('offers sign out and who is signed in instead of a close button', async () => {
+      stubMe(false)
+      const onSignOut = vi.fn()
+      const el = await render(home({ onSignOut, signedInAs: 'alari76' }))
+      expect(el.querySelector('button[aria-label="Close settings"]')).toBeNull()
+      expect(el.textContent).toContain('alari76')
+      await act(async () => { [...el.querySelectorAll('button')].find(b => b.textContent === 'Sign out')!.click() })
+      expect(onSignOut).toHaveBeenCalled()
+    })
   })
 })
