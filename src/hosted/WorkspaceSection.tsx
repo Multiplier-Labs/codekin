@@ -38,6 +38,7 @@ import {
   type WorkspaceRole,
 } from './workspace'
 import { isStepUpCancel } from './mfa'
+import { Block, Row, Rows, button, checkbox, dangerButton, input, quietButton } from '../components/settings/Block'
 
 interface Account {
   userId: string
@@ -45,11 +46,7 @@ interface Account {
   canCreateWorkspaces: boolean
 }
 
-const button =
-  'rounded-control border border-edge px-2.5 py-1 text-meta text-ink-muted transition hover:bg-surface-raised hover:text-ink disabled:opacity-50'
-const input =
-  'rounded-control border border-edge bg-surface px-2.5 py-1 text-body text-ink focus:border-focus focus:outline-none'
-const subheading = 'mb-2 text-meta font-semibold text-ink-muted'
+const subheading = 'mb-2 text-body font-semibold text-ink'
 
 function errorText(err: unknown): string | null {
   // Dismissing the "confirm it's you" prompt is a choice, not an error.
@@ -93,7 +90,7 @@ export function CreateWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
           {busy ? 'Creating…' : 'Create'}
         </button>
         {onCancel && (
-          <button type="button" onClick={onCancel} className="px-2 py-1 text-meta text-ink-faint transition hover:text-ink-muted">
+          <button type="button" onClick={onCancel} className={quietButton}>
             Cancel
           </button>
         )}
@@ -140,14 +137,14 @@ function MemberRow({
   const inactive = member.status === 'suspended' || member.accountStatus !== 'active'
 
   return (
-    <li className="flex flex-wrap items-center gap-2 py-1.5">
+    <li className="flex flex-wrap items-center gap-2 py-2.5">
       <span className={`min-w-0 flex-1 truncate text-body ${inactive ? 'text-ink-faint' : 'text-ink'}`}>
         {name}
-        {name !== member.login && <span className="ml-1.5 font-mono text-meta text-ink-faint">{member.login}</span>}
-        {isSelf && <span className="ml-1.5 text-meta text-ink-faint">(you)</span>}
+        {name !== member.login && <span className="ml-1.5 font-mono text-meta text-ink-muted">{member.login}</span>}
+        {isSelf && <span className="ml-1.5 text-meta text-ink-muted">(you)</span>}
         {member.status === 'suspended' && <span className="ml-1.5 text-meta text-warning-5">suspended</span>}
         {member.accountStatus === 'disabled' && <span className="ml-1.5 text-meta text-error-4">account disabled</span>}
-        <span className={`ml-1.5 text-micro ${member.mfaEnabled ? 'text-success-6' : 'text-ink-faint'}`}>
+        <span className={`ml-1.5 text-meta ${member.mfaEnabled ? 'text-success-6' : 'text-ink-muted'}`}>
           {member.mfaEnabled ? '2FA' : 'no 2FA'}
         </span>
       </span>
@@ -161,7 +158,7 @@ function MemberRow({
               const role = e.target.value as WorkspaceRole
               void run(() => updateMember(workspaceId, member.userId, { role }))
             }}
-            className={`${input} text-meta`}
+            className={input}
           >
             {roleOptions.map(role => <option key={role} value={role}>{ROLE_LABELS[role]}</option>)}
           </select>
@@ -197,9 +194,9 @@ function MemberRow({
 function IssuedLink({ url, onDone }: { url: string; onDone: () => void }) {
   const [copied, setCopied] = useState(false)
   return (
-    <div className="mt-2 rounded-control border border-edge bg-surface px-3 py-2">
-      <p className="text-meta text-ink-muted">Send this link to them. It works once, for them only, and is shown only now.</p>
-      <div className="mt-1.5 flex items-center gap-2">
+    <div className="mt-3 rounded-control border border-edge bg-page px-3 py-2.5">
+      <p className="text-body text-ink-muted">Send this link to them. It works once, for them only, and is shown only now.</p>
+      <div className="mt-2 flex items-center gap-2">
         <input readOnly value={url} aria-label="Invitation link" className={`${input} min-w-0 flex-1 font-mono text-meta`} onFocus={e => { e.target.select() }} />
         <button
           onClick={() => { void navigator.clipboard.writeText(url).then(() => { setCopied(true) }) }}
@@ -207,7 +204,7 @@ function IssuedLink({ url, onDone }: { url: string; onDone: () => void }) {
         >
           {copied ? 'Copied' : 'Copy'}
         </button>
-        <button onClick={onDone} className="px-1.5 text-meta text-ink-faint transition hover:text-ink-muted">Done</button>
+        <button onClick={onDone} className={quietButton}>Done</button>
       </div>
     </div>
   )
@@ -262,7 +259,7 @@ function InvitationsPanel({ actorRole }: { actorRole: WorkspaceRole }) {
   }
 
   return (
-    <div className="mt-5">
+    <div className="mt-4 border-t border-edge pt-4">
       <h4 className={subheading}>Invite people</h4>
       <form className="flex flex-wrap items-center gap-2" onSubmit={e => { e.preventDefault(); invite() }}>
         <input
@@ -272,14 +269,14 @@ function InvitationsPanel({ actorRole }: { actorRole: WorkspaceRole }) {
           placeholder="GitHub username or email"
           className={`${input} min-w-0 flex-1`}
         />
-        <select aria-label="Role for the invitation" value={role} onChange={e => { setRole(e.target.value as InvitableRole) }} className={`${input} text-meta`}>
+        <select aria-label="Role for the invitation" value={role} onChange={e => { setRole(e.target.value as InvitableRole) }} className={input}>
           {roles.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
         </select>
         <button type="submit" disabled={busy || !recipient.trim()} className={button}>
           {busy ? 'Inviting…' : 'Create link'}
         </button>
       </form>
-      <p className="mt-1.5 text-micro text-ink-faint">
+      <p className="mt-2 text-meta text-ink-muted">
         A link for a GitHub username works only for that account; one for an email works for whoever has that
         address verified on GitHub. Links expire after 7 days.
       </p>
@@ -287,10 +284,10 @@ function InvitationsPanel({ actorRole }: { actorRole: WorkspaceRole }) {
       {pending.length > 0 && (
         <ul className="mt-3 divide-y divide-edge">
           {pending.map(inv => (
-            <li key={inv.id} className="flex flex-wrap items-center gap-2 py-1.5">
+            <li key={inv.id} className="flex flex-wrap items-center gap-2 py-2.5">
               <span className="min-w-0 flex-1 truncate text-body text-ink">
                 {inv.githubLogin ?? inv.email}
-                <span className="ml-1.5 text-meta text-ink-faint">
+                <span className="ml-1.5 text-meta text-ink-muted">
                   {ROLE_LABELS[inv.role]} · expires {new Date(inv.expiresAt).toLocaleDateString()}
                 </span>
               </span>
@@ -354,17 +351,19 @@ function MachineOversight({ members }: { members: WorkspaceMember[] }) {
   if (machines === null) return error ? <p className="text-meta text-error-4">{error}</p> : null
 
   return (
-    <div className="mt-5">
-      <h4 className={subheading}>All machines in this workspace</h4>
+    <Block
+      title="All machines in this workspace"
+      description="Admins see and manage every machine here but can only open sessions shared with them."
+    >
       {machines.length === 0 ? (
-        <p className="text-meta text-ink-faint">No machines yet.</p>
+        <p className="text-body text-ink-muted">No machines yet.</p>
       ) : (
         <ul className="divide-y divide-edge">
           {machines.map(machine => (
-            <li key={machine.id} className="flex flex-wrap items-center gap-2 py-1.5">
+            <li key={machine.id} className="flex flex-wrap items-center gap-2 py-2.5">
               <span className="min-w-0 flex-1 truncate text-body text-ink">
                 {machine.displayName}
-                <span className="ml-1.5 text-meta text-ink-faint">{machine.ownerLogin ?? 'unknown owner'}</span>
+                <span className="ml-1.5 text-meta text-ink-muted">{machine.ownerLogin ?? 'unknown owner'}</span>
                 {machine.quarantined && <span className="ml-1.5 text-meta text-warning-5">locked — owner left</span>}
               </span>
               <select
@@ -374,7 +373,7 @@ function MachineOversight({ members }: { members: WorkspaceMember[] }) {
                   const userId = e.target.value
                   if (userId) void run(() => transferMachine(workspaceId, machine.id, userId))
                 }}
-                className={`${input} text-meta`}
+                className={input}
               >
                 <option value="">Transfer to…</option>
                 {eligibleOwners
@@ -394,11 +393,8 @@ function MachineOversight({ members }: { members: WorkspaceMember[] }) {
           ))}
         </ul>
       )}
-      <p className="mt-1.5 text-micro text-ink-faint">
-        Admins see and manage every machine here but can only open sessions shared with them.
-      </p>
       {error && <p className="mt-2 text-meta text-error-4">{error}</p>}
-    </div>
+    </Block>
   )
 }
 
@@ -482,9 +478,9 @@ export function WorkspaceGeneral() {
         {renaming === null ? (
           <>
             <span className="min-w-0 truncate text-title text-ink">{workspace.name}</span>
-            <span className="rounded-control border border-edge px-1.5 py-0.5 text-micro text-ink-muted">{ROLE_LABELS[role]}</span>
+            <span className="rounded-control border border-edge px-1.5 py-0.5 text-meta text-ink-muted">{ROLE_LABELS[role]}</span>
             {can(role, 'workspace.edit') && (
-              <button onClick={() => { setRenaming(workspace.name) }} className="px-1.5 text-meta text-ink-faint transition hover:text-ink-muted">
+              <button onClick={() => { setRenaming(workspace.name) }} className={quietButton}>
                 Rename
               </button>
             )}
@@ -505,7 +501,7 @@ export function WorkspaceGeneral() {
               className={`${input} min-w-0 flex-1`}
             />
             <button type="submit" disabled={!renaming.trim()} className={button}>Save</button>
-            <button type="button" onClick={() => { setRenaming(null) }} className="px-1.5 text-meta text-ink-faint">Cancel</button>
+            <button type="button" onClick={() => { setRenaming(null) }} className={quietButton}>Cancel</button>
           </form>
         )}
       </div>
@@ -517,7 +513,7 @@ export function WorkspaceGeneral() {
               aria-label="Switch workspace"
               value=""
               onChange={e => { if (e.target.value) switchWorkspace(e.target.value) }}
-              className={`${input} text-meta`}
+              className={input}
             >
               <option value="">Switch to…</option>
               {others.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
@@ -534,49 +530,62 @@ export function WorkspaceGeneral() {
         </div>
       )}
 
-      {can(role, 'workspace.edit') && (
-        <label className="mt-4 flex items-start gap-2 text-body text-ink">
-          <input
-            type="checkbox"
-            className="mt-1"
-            checked={workspace.requireMfa}
-            onChange={e => {
-              const next = e.target.checked
-              void act(() => setWorkspaceRequireMfa(workspace.id, next), () => { window.location.reload() })
-            }}
-          />
-          <span>
-            Require two-factor authentication for everyone
-            <span className="block text-meta text-ink-muted">
-              Members without it are asked to set it up before they can continue. Owners and admins always need it.
-            </span>
-          </span>
-        </label>
-      )}
-
       {error && <p className="mt-3 text-meta text-error-4">{error}</p>}
 
-      <div className="mt-5 flex flex-wrap gap-2 border-t border-edge pt-4">
-        <button
-          onClick={() => {
-            if (!window.confirm(`Leave ${workspace.name}? Your machines here are locked until an admin transfers or removes them.`)) return
-            void act(() => removeMember(workspace.id, account.userId), () => { switchWorkspace(others.at(0)?.id ?? '') })
-          }}
-          className={`${button} hover:text-error-4`}
-        >
-          Leave workspace
-        </button>
-        {can(role, 'workspace.delete') && workspace.id !== BOOTSTRAP_WORKSPACE_ID && (
-          <button
-            onClick={() => {
-              if (!window.confirm(`Delete ${workspace.name}? Everyone loses access to it and its machines. This cannot be undone.`)) return
-              void act(() => deleteWorkspace(workspace.id), () => { switchWorkspace(others.at(0)?.id ?? '') })
-            }}
-            className={`${button} text-error-4`}
-          >
-            Delete workspace
-          </button>
-        )}
+      <div className="mt-4 border-t border-edge pt-3">
+        <Rows>
+          {can(role, 'workspace.edit') && (
+            <Row
+              label="Require two-factor authentication for everyone"
+              htmlFor="workspace-require-mfa"
+              description="Members without it are asked to set it up before they can continue. Owners and admins always need it."
+              control={
+                <input
+                  id="workspace-require-mfa"
+                  type="checkbox"
+                  className={checkbox}
+                  checked={workspace.requireMfa}
+                  onChange={e => {
+                    const next = e.target.checked
+                    void act(() => setWorkspaceRequireMfa(workspace.id, next), () => { window.location.reload() })
+                  }}
+                />
+              }
+            />
+          )}
+          <Row
+            label="Leave workspace"
+            description="Your machines here are locked until an admin transfers or removes them."
+            control={
+              <button
+                onClick={() => {
+                  if (!window.confirm(`Leave ${workspace.name}? Your machines here are locked until an admin transfers or removes them.`)) return
+                  void act(() => removeMember(workspace.id, account.userId), () => { switchWorkspace(others.at(0)?.id ?? '') })
+                }}
+                className={dangerButton}
+              >
+                Leave workspace
+              </button>
+            }
+          />
+          {can(role, 'workspace.delete') && workspace.id !== BOOTSTRAP_WORKSPACE_ID && (
+            <Row
+              label="Delete workspace"
+              description="Everyone loses access to it and its machines. This cannot be undone."
+              control={
+                <button
+                  onClick={() => {
+                    if (!window.confirm(`Delete ${workspace.name}? Everyone loses access to it and its machines. This cannot be undone.`)) return
+                    void act(() => deleteWorkspace(workspace.id), () => { switchWorkspace(others.at(0)?.id ?? '') })
+                  }}
+                  className={dangerButton}
+                >
+                  Delete workspace
+                </button>
+              }
+            />
+          )}
+        </Rows>
       </div>
     </div>
   )
@@ -593,9 +602,8 @@ export function WorkspaceMembers() {
 
   return (
     <div>
-      <h4 className={subheading}>Members</h4>
       {members === null ? (
-        <p className="text-meta text-ink-faint">Loading…</p>
+        <p className="text-body text-ink-muted">Loading…</p>
       ) : (
         <ul className="divide-y divide-edge">
           {members.map(member => (

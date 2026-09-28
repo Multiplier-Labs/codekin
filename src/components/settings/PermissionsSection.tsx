@@ -12,7 +12,7 @@ import { PERMISSION_MODES } from '../../types'
 import { getAllRepoApprovals, removeRepoApproval, bulkRemoveRepoApprovals, type RepoApprovalsEntry } from '../../lib/ccApi'
 import { ApprovalGroupRow } from '../ApprovalsPanel'
 import { PERMISSION_MODE_ICONS, buildGroups, type ApprovalGroup, type RemovalTarget } from '../../lib/approvalGroups'
-import { Block } from './Block'
+import { Block, button } from './Block'
 
 /** localStorage key holding the permission mode new sessions start with. */
 const PERMISSION_MODE_KEY = 'claude-permission-mode'
@@ -82,7 +82,7 @@ function DefaultModeBlock() {
   }
 
   return (
-    <Block title="New sessions start in">
+    <Block title="New sessions start in" description="Saved in this browser. Sessions already running keep their own mode.">
       <div role="radiogroup" aria-label="Default permission mode" className="flex flex-col gap-1">
         {PERMISSION_MODES.map(m => {
           const ModeIcon = PERMISSION_MODE_ICONS[m.icon]
@@ -94,7 +94,7 @@ function DefaultModeBlock() {
               role="radio"
               aria-checked={active}
               onClick={() => { select(m.id) }}
-              className={`flex w-full items-start gap-3 rounded-control border px-3 py-2 text-left transition-colors ${
+              className={`flex w-full items-start gap-3 rounded-control border px-3 py-2.5 text-left transition-colors ${
                 active
                   ? m.dangerous ? 'border-error-7 bg-error-9/15' : 'border-primary-7 bg-surface-raised'
                   : 'border-transparent hover:bg-surface-raised'
@@ -124,10 +124,6 @@ function DefaultModeBlock() {
           </p>
         </div>
       )}
-
-      <p className="mt-3 text-meta text-ink-faint">
-        Saved in this browser. Sessions already running keep their own mode.
-      </p>
     </Block>
   )
 }
@@ -230,7 +226,7 @@ function ApprovedRulesBlock({ token, repos, onError }: Props) {
       type="button"
       onClick={() => { void revokeAll() }}
       disabled={revoking}
-      className="shrink-0 rounded-control border border-edge px-3 py-1 text-meta text-ink-muted transition-colors hover:bg-surface-raised hover:text-error-5 disabled:opacity-50"
+      className={`${button} shrink-0 hover:text-error-5`}
     >
       {revoking ? 'Revoking…' : 'Revoke all'}
     </button>
@@ -248,7 +244,7 @@ function ApprovedRulesBlock({ token, repos, onError }: Props) {
         <button
           type="button"
           onClick={() => { setState({ status: 'loading' }); reload() }}
-          className="rounded-control border border-edge px-3 py-1 text-meta text-ink-muted transition-colors hover:bg-surface-raised hover:text-ink"
+          className={button}
         >
           Retry
         </button>
@@ -265,8 +261,7 @@ function ApprovedRulesBlock({ token, repos, onError }: Props) {
     body = (
       <>
         <p className="mb-3 text-meta text-ink-muted">
-          {plural(total, 'rule')} in {plural(rules.length, 'repo')}. Claude runs these without asking, in the repo
-          they were approved in.
+          {plural(total, 'rule')} in {plural(rules.length, 'repo')}.
         </p>
         {rules.length >= FILTER_THRESHOLD && (
           <input
@@ -296,9 +291,9 @@ function ApprovedRulesBlock({ token, repos, onError }: Props) {
                     >
                       <IconChevronRight size={13} stroke={2.5} className={`shrink-0 text-ink-faint transition-transform ${open ? 'rotate-90' : ''}`} />
                       <span className="shrink-0 text-body font-medium text-ink">{r.name}</span>
-                      <span className="min-w-0 truncate text-meta text-ink-faint" title={r.workingDir}>{r.workingDir}</span>
+                      <span className="min-w-0 truncate text-meta text-ink-muted" title={r.workingDir}>{r.workingDir}</span>
                     </button>
-                    <span className="shrink-0 rounded-control bg-surface-raised px-1.5 text-micro tabular-nums text-ink-faint">{shown}</span>
+                    <span className="shrink-0 rounded-control bg-surface-raised px-1.5 text-meta tabular-nums text-ink-muted">{shown}</span>
                     <button
                       type="button"
                       onClick={() => {
@@ -306,7 +301,7 @@ function ApprovedRulesBlock({ token, repos, onError }: Props) {
                           revoke(r.workingDir, r.groups.flatMap(g => g.rules.map(rule => rule.target)))
                         }
                       }}
-                      className="shrink-0 text-meta text-ink-faint transition-colors hover:text-error-5"
+                      className="shrink-0 text-meta text-ink-muted transition-colors hover:text-error-5"
                     >
                       Revoke
                     </button>
@@ -338,7 +333,11 @@ function ApprovedRulesBlock({ token, repos, onError }: Props) {
   }
 
   return (
-    <Block title="Auto-approved rules" action={revokeAllButton}>
+    <Block
+      title="Auto-approved rules"
+      description="Tools and commands Claude runs without asking, in the repo they were approved in."
+      action={revokeAllButton}
+    >
       {body}
     </Block>
   )

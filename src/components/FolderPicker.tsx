@@ -18,9 +18,11 @@ interface Props {
   onSave: (path: string) => Promise<void>
   /** Font size class for the input. */
   inputClass?: string
+  /** Hide the built-in label, for callers that label the field themselves. */
+  hideLabel?: boolean
 }
 
-export function FolderPicker({ value, token, placeholder = '~/repos (default)', helpText, onSave, inputClass }: Props) {
+export function FolderPicker({ value, token, placeholder = '~/repos (default)', helpText, onSave, inputClass, hideLabel = false }: Props) {
   const [path, setPath] = useState(value)
   const [savedPath, setSavedPath] = useState(value)
   const [saving, setSaving] = useState(false)
@@ -100,12 +102,14 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
 
   return (
     <div className="relative">
-      <label className="mb-1.5 block text-ink-muted" style={{ fontSize: inputClass ? undefined : '13px' }}>
-        <span className="flex items-center gap-1.5">
-          <IconFolder size={13} className="text-ink-faint" />
-          Repositories Path
-        </span>
-      </label>
+      {!hideLabel && (
+        <label className="mb-1.5 block text-ink-muted" style={{ fontSize: inputClass ? undefined : '13px' }}>
+          <span className="flex items-center gap-1.5">
+            <IconFolder size={13} className="text-ink-faint" />
+            Repositories Path
+          </span>
+        </label>
+      )}
 
       <div className="flex gap-1.5">
         <input

@@ -20,6 +20,7 @@ import { MACHINE_STATUS_DOT, type Machine } from './machines'
 import { useMachineSetup, type MachineSetup } from './useMachineSetup'
 import { InstallCommand } from './InstallCommand'
 import { PairingPanel, PendingSetup } from './SetupProgress'
+import { Row, button, dangerButton, quietButton } from '../components/settings/Block'
 
 interface MachinesSectionProps {
   /** Machine the workspace is currently connected to. */
@@ -84,9 +85,9 @@ function MachineRow({ machine: m, isCurrent, onSwitch, setup, gutter }: {
         >
           <span className={`h-2 w-2 flex-shrink-0 rounded-full ${MACHINE_STATUS_DOT[m.status]}`} />
           <span className="truncate text-body text-ink">{m.displayName}</span>
-          {m.hostname && <span className="truncate text-meta text-ink-faint">{m.hostname}</span>}
+          {m.hostname && <span className="truncate text-meta text-ink-muted">{m.hostname}</span>}
           {m.access === 'shared' && (
-            <span className="flex-shrink-0 rounded-control border border-edge px-1.5 py-0.5 text-micro text-ink-muted">
+            <span className="flex-shrink-0 rounded-control border border-edge px-1.5 py-0.5 text-meta text-ink-muted">
               shared with you
             </span>
           )}
@@ -105,13 +106,13 @@ function MachineRow({ machine: m, isCurrent, onSwitch, setup, gutter }: {
             title={`Remove ${m.displayName}`}
             aria-label={`Remove ${m.displayName}`}
             aria-expanded={confirmingRemove}
-            className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-control transition hover:bg-surface-raised hover:text-error-4 ${
-              confirmingRemove ? 'text-error-4' : 'text-ink-faint'
+            className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-control transition hover:bg-surface-raised hover:text-error-4 ${
+              confirmingRemove ? 'text-error-4' : 'text-ink-muted'
             }`}
           >
-            <IconTrash size={14} />
+            <IconTrash size={16} />
           </button>
-        ) : gutter && <span aria-hidden className="w-7 flex-shrink-0" />}
+        ) : gutter && <span aria-hidden className="w-8 flex-shrink-0" />}
       </div>
       {canRemove && confirmingRemove && (
         <ConfirmRemove machine={m} setup={setup} onClose={() => { setConfirmingRemove(false) }} />
@@ -124,8 +125,8 @@ function MachineRow({ machine: m, isCurrent, onSwitch, setup, gutter }: {
 function ConfirmRemove({ machine, setup, onClose }: { machine: Machine; setup: MachineSetup; onClose: () => void }) {
   const [busy, setBusy] = useState(false)
   return (
-    <div className="mt-1.5 rounded-control border border-error-7/60 bg-surface px-3 py-2" role="group" aria-label="Confirm removal">
-      <p className="text-meta text-ink">
+    <div className="mt-1.5 rounded-control border border-error-7/60 bg-page px-3 py-2.5" role="group" aria-label="Confirm removal">
+      <p className="text-body text-ink">
         Remove <span className="font-medium">{machine.displayName}</span>? This revokes the credential its
         connector uses, so it disconnects now and has to be paired again to come back.
       </p>
@@ -139,14 +140,14 @@ function ConfirmRemove({ machine, setup, onClose }: { machine: Machine; setup: M
             })
           }}
           disabled={busy}
-          className="rounded-control border border-error-7/60 px-2.5 py-1 text-meta text-error-4 transition hover:bg-surface-raised disabled:opacity-50"
+          className={dangerButton}
         >
           {busy ? 'Removing…' : 'Remove'}
         </button>
         <button
           onClick={onClose}
           disabled={busy}
-          className="rounded-control px-2 py-1 text-meta text-ink-faint transition hover:text-ink-muted disabled:opacity-50"
+          className={quietButton}
         >
           Keep it
         </button>
@@ -159,7 +160,7 @@ function RetryButton({ setup }: { setup: MachineSetup }) {
   return (
     <button
       onClick={() => void setup.refresh()}
-      className="rounded-control border border-edge px-2.5 py-1 text-meta text-ink-muted transition hover:bg-surface-raised hover:text-ink"
+      className={button}
     >
       Retry
     </button>
@@ -215,7 +216,7 @@ function MachinesView({ currentMachineId, onSwitch, onDisconnect, setup }: Machi
           {pending.map(m => (
             <li key={m.id} className="flex items-center gap-1">
               <div className="min-w-0 flex-1"><PendingSetup machine={m} setup={setup} /></div>
-              {gutter && <span aria-hidden className="w-7 flex-shrink-0" />}
+              {gutter && <span aria-hidden className="w-8 flex-shrink-0" />}
             </li>
           ))}
         </ul>
@@ -223,7 +224,7 @@ function MachinesView({ currentMachineId, onSwitch, onDisconnect, setup }: Machi
 
       {setup.removeError && !pairing && <p role="alert" className="mt-2 text-meta text-error-4">{setup.removeError}</p>}
 
-      <div className={ready.length > 0 || pending.length > 0 ? 'mt-3 border-t border-edge pt-3' : ''}>
+      <div className={ready.length > 0 || pending.length > 0 ? 'mt-4 border-t border-edge pt-1' : ''}>
         {pairing ? (
           <PairingPanel setup={setup} onOpen={onSwitch} />
         ) : (
@@ -239,16 +240,16 @@ function MachinesView({ currentMachineId, onSwitch, onDisconnect, setup }: Machi
       )}
 
       {onDisconnect && (
-        <div className="mt-3 border-t border-edge pt-3">
-          <button
-            onClick={onDisconnect}
-            className="rounded-control px-2 py-1 text-meta text-ink-muted transition hover:bg-surface hover:text-ink"
-          >
-            Disconnect{current ? ` from ${current.displayName}` : ''}
-          </button>
-          <p className="mt-1 px-2 text-micro text-ink-faint">
-            Returns to the machine list, and stops reconnecting here on reload.
-          </p>
+        <div className="border-t border-edge">
+          <Row
+            label="Leave this machine"
+            description="Returns to the machine list, and stops reconnecting here on reload."
+            control={
+              <button onClick={onDisconnect} className={button}>
+                Disconnect{current ? ` from ${current.displayName}` : ''}
+              </button>
+            }
+          />
         </div>
       )}
     </>
@@ -261,22 +262,23 @@ function AddComputer({ setup }: { setup: MachineSetup }) {
 
   if (!open) {
     return (
-      <div>
-        <button
-          onClick={() => {
-            setOpen(true)
-            void setup.generate()
-          }}
-          disabled={setup.generating}
-          className="flex items-center gap-1.5 rounded-control border border-edge px-3 py-1.5 text-body text-ink transition hover:bg-surface-raised disabled:opacity-60"
-        >
-          <IconPlus size={15} stroke={2} />
-          Add computer
-        </button>
-        <p className="mt-1.5 text-micro text-ink-faint">
-          Generates a one-line install command to run on the computer (macOS or Linux).
-        </p>
-      </div>
+      <Row
+        label="Add a computer"
+        description="Generates a one-line install command to run on the computer (macOS or Linux)."
+        control={
+          <button
+            onClick={() => {
+              setOpen(true)
+              void setup.generate()
+            }}
+            disabled={setup.generating}
+            className={button}
+          >
+            <IconPlus size={16} stroke={2} />
+            Add computer
+          </button>
+        }
+      />
     )
   }
 

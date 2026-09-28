@@ -7,13 +7,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   IconCopy, IconCheck, IconChevronDown, IconChevronRight, IconCircleCheckFilled, IconCircleXFilled,
-  IconRobot, IconRefresh, IconAlertTriangle, IconPlugConnected, IconPlayerPlay, IconWand,
+  IconRobot, IconRefresh, IconAlertTriangle, IconPlayerPlay, IconWand,
 } from '@tabler/icons-react'
 import {
   getWebhookConfig, getWebhookEvents, type WebhookConfigInfo,
   getIntegrationHealth, previewWebhookSetup, applyWebhookSetup, testWebhookDelivery, webhookEndpointUrl,
   type HealthCheckResult, type SetupPreview,
 } from '../../lib/ccApi'
+import { Block, input } from './Block'
 
 // ---------------------------------------------------------------------------
 // Copy-to-clipboard button
@@ -52,7 +53,7 @@ function StatusBadge({ status }: { status: string }) {
     received: 'bg-edge/50 text-ink-muted',
   }
   return (
-    <span className={`rounded-control px-1.5 py-0.5 text-micro font-medium ${styles[status] || styles.received}`}>
+    <span className={`rounded-control px-1.5 py-0.5 text-meta font-medium ${styles[status] || styles.received}`}>
       {status.replace('_', ' ')}
     </span>
   )
@@ -86,58 +87,109 @@ export function WebhooksSection({ token }: { token: string }) {
 
   const webhookUrl = webhookEndpointUrl()
 
+  const status = webhookConfig ? (
+    webhookConfig.enabled ? (
+      <span className="flex shrink-0 items-center gap-1.5 text-body">
+        <IconCircleCheckFilled size={16} className="text-success-6" />
+        <span className="font-medium text-success-5">Active</span>
+      </span>
+    ) : (
+      <span className="flex shrink-0 items-center gap-1.5 text-body text-ink-muted">
+        <IconCircleXFilled size={16} className="text-ink-faint" />
+        Disabled
+      </span>
+    )
+  ) : (
+    <span className="shrink-0 text-body text-ink-muted">Loading…</span>
+  )
+
   return (
-    <>
-      {/* Server config status */}
-      <div className="flex items-center gap-2 mb-3">
-        {webhookConfig ? (
-          webhookConfig.enabled ? (
-            <>
-              <IconCircleCheckFilled size={16} className="text-success-6" />
-              <span className="text-body text-success-5 font-medium">Active</span>
-              <span className="text-meta text-ink-muted">
-                &middot; max {webhookConfig.maxConcurrentSessions} concurrent sessions
-              </span>
-            </>
-          ) : (
-            <>
-              <IconCircleXFilled size={16} className="text-ink-faint" />
-              <span className="text-body text-ink-muted">Disabled</span>
-            </>
-          )
-        ) : (
-          <span className="text-body text-ink-muted">Loading...</span>
-        )}
-      </div>
-
-      <p className="text-body text-ink-muted mb-3">
-        Automatically review PRs and diagnose CI failures via GitHub webhooks.
-      </p>
-
-      {/* Webhook URL */}
-      <div className="mb-4">
-        <label className="mb-1 block text-meta font-medium text-ink-muted uppercase tracking-wide">Webhook URL</label>
-        <div className="flex items-center gap-1 rounded-control border border-edge bg-surface px-3 py-2">
-          <code className="flex-1 text-meta text-ink font-mono truncate select-all">{webhookUrl}</code>
+    <div className="space-y-4">
+      <Block
+        title="Webhook endpoint"
+        description={<>
+          Review pull requests and diagnose CI failures automatically when GitHub sends an event.
+          {webhookConfig?.enabled && ` Up to ${webhookConfig.maxConcurrentSessions} sessions run at once.`}
+        </>}
+        action={status}
+      >
+        <label className="mb-1.5 block text-body font-medium text-ink">Webhook URL</label>
+        <div className="flex items-center gap-1 rounded-control border border-edge bg-page px-3 py-2">
+          <code className="flex-1 truncate select-all font-mono text-body text-ink">{webhookUrl}</code>
           <CopyButton text={webhookUrl} />
         </div>
-      </div>
+        <p className="mt-1.5 text-meta text-ink-muted">Paste this as the Payload URL of the webhook in GitHub.</p>
+
+        {/* Disabled hint */}
+        {webhookConfig && !webhookConfig.enabled && !healthResult && (
+          <p className="mt-3 text-body text-ink-muted">
+            Set <code className="rounded-control bg-edge/50 px-1 text-ink">GITHUB_WEBHOOK_ENABLED=true</code> and <code className="rounded-control bg-edge/50 px-1 text-ink">GITHUB_WEBHOOK_SECRET</code> on the server to enable.
+          </p>
+        )}
+
+        {/* Setup guide (collapsible) — context-aware */}
+        <button
+          onClick={() => setWebhookExpanded(!webhookExpanded)}
+          aria-expanded={webhookExpanded}
+          className="mt-4 flex items-center gap-1.5 text-body text-primary-6 transition-colors hover:text-primary-5"
+        >
+          {webhookExpanded ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+          Manual setup instructions
+        </button>
+        {webhookExpanded && (
+        <div className="mt-3 space-y-2.5 rounded-control border border-edge bg-page px-4 py-3 text-body text-ink-muted">
+          {(!healthResult || !healthResult.checks.config.ok) && (
+            <div className="flex gap-2">
+              <span className="text-primary-6 font-semibold shrink-0">1.</span>
+              <span>
+                Set <code className="text-ink bg-edge/50 px-1 rounded-control">GITHUB_WEBHOOK_ENABLED=true</code> and <code className="text-ink bg-edge/50 px-1 rounded-control">GITHUB_WEBHOOK_SECRET=&lt;your-secret&gt;</code> on the server, then restart.
+              </span>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <span className="text-primary-6 font-semibold shrink-0">{!healthResult || !healthResult.checks.config.ok ? '2' : '1'}.</span>
+            <span>
+              In your GitHub repo, go to <strong className="text-ink">Settings &rarr; Webhooks &rarr; Add webhook</strong>
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <span className="text-primary-6 font-semibold shrink-0">{!healthResult || !healthResult.checks.config.ok ? '3' : '2'}.</span>
+            <span>
+              Set <strong className="text-ink">Payload URL</strong> to the webhook URL above.
+              Set <strong className="text-ink">Content type</strong> to <code className="text-ink bg-edge/50 px-1 rounded-control">application/json</code>
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <span className="text-primary-6 font-semibold shrink-0">{!healthResult || !healthResult.checks.config.ok ? '4' : '3'}.</span>
+            <span>
+              Set a <strong className="text-ink">Secret</strong> matching the server&apos;s <code className="text-ink bg-edge/50 px-1 rounded-control">GITHUB_WEBHOOK_SECRET</code>
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <span className="text-primary-6 font-semibold shrink-0">{!healthResult || !healthResult.checks.config.ok ? '5' : '4'}.</span>
+            <span>
+              Under <strong className="text-ink">&ldquo;Which events?&rdquo;</strong>, select <strong className="text-ink">Let me select individual events</strong> and check <strong className="text-ink">Workflow runs</strong> and <strong className="text-ink">Pull requests</strong>
+            </span>
+          </div>
+          <p className="text-body text-ink-muted pt-1 border-t border-edge">
+            Webhook events will automatically spawn <IconRobot size={14} className="inline -mt-0.5" /> sessions for PR reviews and CI failure analysis.
+          </p>
+        </div>
+        )}
+      </Block>
 
       {/* ── Integration Health Check ── */}
-      <div className="border-t border-edge pt-4 mb-4">
-        <div className="flex items-center gap-2 mb-3">
-          <IconPlugConnected size={14} className="text-ink-muted" />
-          <span className="text-meta font-semibold uppercase tracking-wide text-ink-muted">Integration Health</span>
-        </div>
+      <Block title="Integration health" description="Check one repository end to end: GitHub CLI, server config, the webhook and its recent deliveries.">
 
         {/* Repo input */}
         <div className="flex gap-2 mb-3">
           <input
             type="text"
             placeholder="owner/repo"
+            aria-label="Repository to check"
             value={healthRepo}
             onChange={e => setHealthRepo(e.target.value)}
-            className="flex-1 rounded-control border border-edge bg-surface px-3 py-2 text-body text-ink outline-none focus:border-primary-7 font-mono placeholder:text-ink-faint"
+            className={`${input} min-w-0 flex-1 font-mono`}
           />
           <button
             onClick={async () => {
@@ -155,7 +207,7 @@ export function WebhooksSection({ token }: { token: string }) {
               }
             }}
             disabled={!healthRepo.trim() || healthLoading}
-            className="flex items-center gap-1.5 rounded-control bg-primary-8 px-3 py-2 text-body font-medium text-on-primary hover:bg-primary-7 disabled:opacity-50 transition-colors"
+            className="flex items-center gap-1.5 rounded-control bg-primary-8 px-3 py-1.5 text-body font-medium text-on-primary hover:bg-primary-7 disabled:opacity-50 transition-colors"
           >
             {healthLoading ? (
               <IconRefresh size={14} className="animate-spin" />
@@ -189,7 +241,7 @@ export function WebhooksSection({ token }: { token: string }) {
                 {healthResult.overall === 'healthy' ? 'Healthy' :
                  healthResult.overall === 'degraded' ? 'Degraded' :
                  healthResult.overall === 'broken' ? 'Broken' :
-                 'Not Configured'}
+                 'Not configured'}
               </span>
             </div>
 
@@ -203,13 +255,13 @@ export function WebhooksSection({ token }: { token: string }) {
                     <IconCircleXFilled size={14} className="text-error-5 mt-0.5 shrink-0" />
                   )}
                   <div className="min-w-0">
-                    <span className="text-meta font-medium text-ink-muted uppercase tracking-wide">
+                    <span className="text-body font-medium text-ink">
                       {key === 'ghCli' ? 'GitHub CLI' :
-                       key === 'config' ? 'Server Config' :
-                       key === 'webhook' ? 'GitHub Webhook' :
+                       key === 'config' ? 'Server config' :
+                       key === 'webhook' ? 'GitHub webhook' :
                        'Deliveries'}
                     </span>
-                    <p className="text-body text-ink-muted mt-0.5">{check.message}</p>
+                    <p className="mt-0.5 text-meta text-ink-muted">{check.message}</p>
                   </div>
                 </div>
               ))}
@@ -277,7 +329,7 @@ export function WebhooksSection({ token }: { token: string }) {
           <div className="rounded-control border border-primary-9/30 bg-primary-9/5 px-4 py-3 mb-3 space-y-3">
             <div className="flex items-center gap-2">
               <IconWand size={14} className="text-primary-6" />
-              <span className="text-body font-medium text-primary-5">Webhook Setup</span>
+              <span className="text-body font-medium text-primary-5">Webhook setup</span>
             </div>
 
             {/* Preview step */}
@@ -360,88 +412,33 @@ export function WebhooksSection({ token }: { token: string }) {
             )}
           </div>
         )}
-      </div>
+      </Block>
 
-      {/* Setup guide (collapsible) — context-aware */}
-      <button
-        onClick={() => setWebhookExpanded(!webhookExpanded)}
-        className="flex items-center gap-1.5 text-body text-primary-6 hover:text-primary-5 mb-2 transition-colors"
-      >
-        {webhookExpanded ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
-        Manual setup instructions
-      </button>
-      {webhookExpanded && (
-        <div className="rounded-control border border-edge bg-surface px-4 py-3 mb-3 text-body text-ink-muted space-y-2.5">
-          {(!healthResult || !healthResult.checks.config.ok) && (
-            <div className="flex gap-2">
-              <span className="text-primary-6 font-semibold shrink-0">1.</span>
-              <span>
-                Set <code className="text-ink bg-edge/50 px-1 rounded-control">GITHUB_WEBHOOK_ENABLED=true</code> and <code className="text-ink bg-edge/50 px-1 rounded-control">GITHUB_WEBHOOK_SECRET=&lt;your-secret&gt;</code> on the server, then restart.
-              </span>
-            </div>
-          )}
-          <div className="flex gap-2">
-            <span className="text-primary-6 font-semibold shrink-0">{!healthResult || !healthResult.checks.config.ok ? '2' : '1'}.</span>
-            <span>
-              In your GitHub repo, go to <strong className="text-ink">Settings &rarr; Webhooks &rarr; Add webhook</strong>
-            </span>
-          </div>
-          <div className="flex gap-2">
-            <span className="text-primary-6 font-semibold shrink-0">{!healthResult || !healthResult.checks.config.ok ? '3' : '2'}.</span>
-            <span>
-              Set <strong className="text-ink">Payload URL</strong> to the webhook URL above.
-              Set <strong className="text-ink">Content type</strong> to <code className="text-ink bg-edge/50 px-1 rounded-control">application/json</code>
-            </span>
-          </div>
-          <div className="flex gap-2">
-            <span className="text-primary-6 font-semibold shrink-0">{!healthResult || !healthResult.checks.config.ok ? '4' : '3'}.</span>
-            <span>
-              Set a <strong className="text-ink">Secret</strong> matching the server&apos;s <code className="text-ink bg-edge/50 px-1 rounded-control">GITHUB_WEBHOOK_SECRET</code>
-            </span>
-          </div>
-          <div className="flex gap-2">
-            <span className="text-primary-6 font-semibold shrink-0">{!healthResult || !healthResult.checks.config.ok ? '5' : '4'}.</span>
-            <span>
-              Under <strong className="text-ink">&ldquo;Which events?&rdquo;</strong>, select <strong className="text-ink">Let me select individual events</strong> and check <strong className="text-ink">Workflow runs</strong> and <strong className="text-ink">Pull requests</strong>
-            </span>
-          </div>
-          <p className="text-body text-ink-muted pt-1 border-t border-edge">
-            Webhook events will automatically spawn <IconRobot size={12} className="inline -mt-0.5" /> sessions for PR reviews and CI failure analysis.
-          </p>
-        </div>
-      )}
-
-      {/* Recent events (collapsible) */}
+      {/* Recent events */}
       {webhookEvents.length > 0 && (
-        <>
+        <Block title="Recent events" description="The latest webhook deliveries and the sessions they started.">
           <button
             onClick={() => setEventsExpanded(!eventsExpanded)}
-            className="flex items-center gap-1.5 text-body text-primary-6 hover:text-primary-5 transition-colors"
+            aria-expanded={eventsExpanded}
+            className="flex items-center gap-1.5 text-body text-primary-6 transition-colors hover:text-primary-5"
           >
-            {eventsExpanded ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
-            Recent events ({webhookEvents.length})
+            {eventsExpanded ? <IconChevronDown size={16} /> : <IconChevronRight size={16} />}
+            {eventsExpanded ? 'Hide' : 'Show'} {webhookEvents.length} {webhookEvents.length === 1 ? 'event' : 'events'}
           </button>
           {eventsExpanded && (
-            <div className="mt-2 rounded-control border border-edge bg-surface divide-y divide-edge max-h-48 overflow-y-auto">
+            <div className="mt-2 max-h-72 divide-y divide-edge overflow-y-auto rounded-control border border-edge bg-page">
               {webhookEvents.slice(0, 10).map(ev => (
-                <div key={ev.id} className="flex items-center gap-2 px-3 py-2 text-meta">
-                  <IconRobot size={13} className="text-ink-faint shrink-0" />
-                  <span className="text-ink font-mono truncate flex-1">{ev.repo}</span>
-                  <span className="text-ink-muted truncate max-w-24">{ev.workflow}</span>
+                <div key={ev.id} className="flex items-center gap-2 px-3 py-2 text-body">
+                  <IconRobot size={16} className="shrink-0 text-ink-muted" />
+                  <span className="flex-1 truncate font-mono text-ink">{ev.repo}</span>
+                  <span className="max-w-40 truncate text-meta text-ink-muted">{ev.workflow}</span>
                   <StatusBadge status={ev.status} />
                 </div>
               ))}
             </div>
           )}
-        </>
+        </Block>
       )}
-
-      {/* Disabled hint */}
-      {webhookConfig && !webhookConfig.enabled && !healthResult && (
-        <p className="mt-3 text-body text-ink-muted">
-          Set <code className="bg-edge/50 px-1 rounded-control text-ink-muted">GITHUB_WEBHOOK_ENABLED=true</code> and <code className="bg-edge/50 px-1 rounded-control text-ink-muted">GITHUB_WEBHOOK_SECRET</code> on the server to enable.
-        </p>
-      )}
-    </>
+    </div>
   )
 }
