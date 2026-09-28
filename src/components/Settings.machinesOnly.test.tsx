@@ -10,12 +10,9 @@ import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Settings } from './Settings'
-import type { Settings as SettingsType } from '../types'
 
 let activeRoot: ReturnType<typeof createRoot> | null = null
 let activeContainer: HTMLElement | null = null
-
-const settings: SettingsType = { token: 'hosted', fontSize: 14, theme: 'dark' }
 
 const machine = {
   id: 'm1', displayName: 'hatchery', hostname: 'hatchery', platform: 'linux',
@@ -71,10 +68,6 @@ describe('Settings — machines only', () => {
     stubMachines([machine])
     const container = await render(
       <Settings
-        open machinesOnly
-        settings={settings}
-        onUpdate={vi.fn()}
-        onClose={vi.fn()}
         onSwitchMachine={vi.fn()}
       />,
     )
@@ -93,7 +86,7 @@ describe('Settings — machines only', () => {
     // own API rather than a machine.
     stubMachines([machine])
     await render(
-      <Settings open machinesOnly settings={settings} onUpdate={vi.fn()} onClose={vi.fn()} onSwitchMachine={vi.fn()} />,
+      <Settings onSwitchMachine={vi.fn()} />,
     )
     const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls
     // Control-plane requests (machine list, passkey list) are the relay's own
@@ -107,7 +100,7 @@ describe('Settings — machines only', () => {
     const onSwitchMachine = vi.fn()
     stubMachines([machine])
     const container = await render(
-      <Settings open machinesOnly settings={settings} onUpdate={vi.fn()} onClose={vi.fn()} onSwitchMachine={onSwitchMachine} />,
+      <Settings onSwitchMachine={onSwitchMachine} />,
     )
     const row = [...container.querySelectorAll('button')].find(b => b.textContent?.includes('hatchery'))
     act(() => { row!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
@@ -119,10 +112,6 @@ describe('Settings — machines only', () => {
     stubMachines([machine])
     const container = await render(
       <Settings
-        open machinesOnly
-        settings={settings}
-        onUpdate={vi.fn()}
-        onClose={vi.fn()}
         onSwitchMachine={vi.fn()}
         onSignOut={onSignOut}
         signedInAs="alari76"
@@ -137,7 +126,7 @@ describe('Settings — machines only', () => {
   it('tells a user with nothing paired how to pair', async () => {
     stubMachines([])
     const container = await render(
-      <Settings open machinesOnly settings={settings} onUpdate={vi.fn()} onClose={vi.fn()} onSwitchMachine={vi.fn()} />,
+      <Settings onSwitchMachine={vi.fn()} />,
     )
     expect(container.textContent).toContain('No machines paired yet.')
     expect(container.textContent).toContain('codekin relay login')

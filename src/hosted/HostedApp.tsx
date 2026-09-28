@@ -24,8 +24,6 @@ import { InvitePage } from './InvitePage'
 import { MfaChallengePage, MfaEnrollPage, StepUpHost } from './TwoFactor'
 import { CreateWorkspaceForm } from './WorkspaceSection'
 import { Settings } from '../components/Settings'
-import { useSettings } from '../hooks/useSettings'
-import type { Settings as SettingsValues } from '../types'
 
 /** Shown to signed-in users whose access has not been granted (yet). */
 function PendingPage({ login, onLogout }: { login: string; onLogout: () => void }) {
@@ -110,9 +108,7 @@ function Notice({ tone, children, onDismiss }: { tone: 'success' | 'error'; chil
  * coming online is announced there with an Open button, rather than the page
  * jumping to Settings under the user.
  */
-function HostedHome({ settings, onUpdate, onOpen, onSignOut, signedInAs }: {
-  settings: SettingsValues
-  onUpdate: (patch: Partial<SettingsValues>) => void
+function HostedHome({ onOpen, onSignOut, signedInAs }: {
   onOpen: (machine: Machine) => void
   onSignOut: () => void
   signedInAs: string
@@ -140,11 +136,6 @@ function HostedHome({ settings, onUpdate, onOpen, onSignOut, signedInAs }: {
 
   return (
     <Settings
-      open
-      machinesOnly
-      settings={settings}
-      onUpdate={onUpdate}
-      onClose={() => { /* nothing to close to — this is the whole screen */ }}
       onSwitchMachine={onOpen}
       onSignOut={onSignOut}
       signedInAs={signedInAs}
@@ -167,7 +158,6 @@ export default function HostedApp() {
     () => (fullySignedIn ? pickWorkspace(account.workspaces) : null),
     [fullySignedIn, account],
   )
-  const { settings, updateSettings } = useSettings()
   const [selected, setSelected] = useState<Machine | null>(null)
   // The transport is created when a machine is picked and installed before
   // the workspace mounts, so App's very first call already goes to the
@@ -334,8 +324,6 @@ export default function HostedApp() {
   // connected too.
   return withNotice(
     <HostedHome
-      settings={settings}
-      onUpdate={updateSettings}
       onOpen={selectMachine}
       onSignOut={() => void logout()}
       signedInAs={`${user.displayName ?? user.login} · ${workspace.name}`}
