@@ -50,35 +50,37 @@ const THEMES = [
     syntax: { keyword: '#81a1c1', builtin: '#8fbcbb', function: '#88c0d0', string: '#a3be8c', number: '#b48ead', comment: '#8d97aa', variable: '#d8dee9', regexp: '#ebcb8b', meta: '#d08770', selector: '#8fbcbb', deletion: '#bf616a' },
   },
   {
+    // Cool cotton paper, blue ink and a red editorial accent.
     id: 'paper',
     label: 'Paper',
     scheme: 'light',
-    neutral: ramp('#1a1611 #2b2620 #3d372f #4f473c #5c5347 #7a7163 #aea38b #bfb49b #d3cab5 #e4dcc9 #efe8da #f6f1e7'),
-    keys: { primary: '#a8741a', secondary: '#a0522d', accent: '#2f6f80', error: '#b3261e', warning: '#a6720d', success: '#3f7d3a' },
-    syntax: { keyword: '#8a3b12', builtin: '#2f6f80', function: '#6b4f12', string: '#4d6b2a', number: '#7a3e7a', comment: '#6f6555', variable: '#34506a', regexp: '#9c2a2a', meta: '#7a3e7a', selector: '#8a3b12', deletion: '#a0522d' },
+    neutral: ramp('#141c2b #243047 #364359 #48566b #59677b #7a8799 #9ba9bd #b0bed1 #c4cfde #dce4ef #eaf0f8 #f8faff'),
+    keys: { primary: '#315da8', secondary: '#65528f', accent: '#ad3654', error: '#b3261e', warning: '#a6720d', success: '#3f7d3a' },
+    syntax: { keyword: '#74458f', builtin: '#315da8', function: '#254b87', string: '#32664b', number: '#ad3654', comment: '#59677b', variable: '#364359', regexp: '#963f36', meta: '#74458f', selector: '#ad3654', deletion: '#a12c39' },
   },
   {
     id: 'contrast',
     label: 'High Contrast',
     scheme: 'dark',
     neutral: ramp('#ffffff #f5f5f5 #e6e6e6 #d4d4d4 #bdbdbd #a0a0a0 #8c8c8c #7a7a7a #6a6a6a #1f1f1f #0d0d0d #000000'),
-    keys: { primary: '#ffd000', secondary: '#ff8fb0', accent: '#4dd8ff', error: '#ff5c5c', warning: '#ffb000', success: '#3ddc84' },
+    keys: { primary: '#4dd8ff', secondary: '#ff8fb0', accent: '#ffd000', error: '#ff5c5c', warning: '#ffb000', success: '#3ddc84' },
     syntax: { keyword: '#ffd000', builtin: '#4dd8ff', function: '#8cf0ff', string: '#9dff9d', number: '#ffb0ff', comment: '#c8c8c8', variable: '#a8d8ff', regexp: '#ff9d9d', meta: '#ffb0ff', selector: '#ffd000', deletion: '#ff8080' },
     minContrast: { syntax: 7 },
   },
   {
+    // Solarized cream with blue actions and teal links; ochre stays a warning.
     id: 'solarized',
     label: 'Solarized Light',
     scheme: 'light',
     neutral: ramp('#002b36 #073642 #28444d #3f565e #4f646b #6f8286 #b3b09c #c6c1ab #d8d2bd #e6e0cb #eee8d5 #fdf6e3'),
-    keys: { primary: '#b58900', secondary: '#cb4b16', accent: '#268bd2', error: '#dc322f', warning: '#b58900', success: '#859900' },
+    keys: { primary: '#268bd2', secondary: '#cb4b16', accent: '#2aa198', error: '#dc322f', warning: '#b58900', success: '#859900' },
     syntax: { keyword: '#859900', builtin: '#b58900', function: '#268bd2', string: '#2aa198', number: '#d33682', comment: '#586e75', variable: '#268bd2', regexp: '#dc322f', meta: '#cb4b16', selector: '#b58900', deletion: '#dc322f' },
   },
   {
     id: 'dracula',
     label: 'Dracula',
     scheme: 'dark',
-    neutral: ramp('#ffffff #f8f8f2 #e2e3ea #c0c4da #9ca2c2 #6272a4 #555a74 #464a5e #3a3d4f #313343 #282a36 #21222c'),
+    neutral: ramp('#ffffff #f8f8f2 #e8dff5 #cbbce0 #afa0c4 #827096 #665477 #524260 #44354f #362a40 #2c2235 #211927'),
     keys: { primary: '#bd93f9', secondary: '#ff79c6', accent: '#8be9fd', error: '#ff5555', warning: '#ffb86c', success: '#50fa7b' },
     syntax: { keyword: '#ff79c6', builtin: '#8be9fd', function: '#50fa7b', string: '#f1fa8c', number: '#bd93f9', comment: '#6272a4', variable: '#f8f8f2', regexp: '#ff5555', meta: '#ff79c6', selector: '#50fa7b', deletion: '#ff5555' },
   },
@@ -86,19 +88,19 @@ const THEMES = [
     id: 'gruvbox',
     label: 'Gruvbox',
     scheme: 'dark',
-    neutral: ramp('#fbf1c7 #ebdbb2 #d5c4a1 #bdae93 #a89984 #7c6f64 #665c54 #504945 #3c3836 #32302f #282828 #1d2021'),
-    keys: { primary: '#fabd2f', secondary: '#d3869b', accent: '#83a598', error: '#fb4934', warning: '#fe8019', success: '#b8bb26' },
+    neutral: ramp('#fbf1c7 #ebdbb2 #d5c4a1 #bdae93 #a89984 #7c6f64 #66584b #534537 #44382d #382e25 #2d251e #211b16'),
+    keys: { primary: '#fe8019', secondary: '#fabd2f', accent: '#8ec07c', error: '#fb4934', warning: '#fe8019', success: '#b8bb26' },
     syntax: { keyword: '#fb4934', builtin: '#fabd2f', function: '#8ec07c', string: '#b8bb26', number: '#d3869b', comment: '#928374', variable: '#83a598', regexp: '#fe8019', meta: '#8ec07c', selector: '#fabd2f', deletion: '#fb4934' },
   },
   {
-    // Old-school phosphor terminal: green on black. Chrome and text stay
-    // green; status keeps red/amber so errors and warnings still stand out.
+    // Soft phosphor terminal: charcoal-green grounds, gray-green text and
+    // muted mint accents. Status retains distinct red/amber hues.
     id: 'matrix',
     label: 'Matrix',
     scheme: 'dark',
-    neutral: ramp('#c8ffd4 #33ff66 #2ee65c #26c24d #1fa340 #188032 #135c27 #10491f #0c3818 #082610 #041208 #000000'),
-    keys: { primary: '#00ff41', secondary: '#9dff5c', accent: '#5cffc8', error: '#ff4545', warning: '#ffb000', success: '#00ff41' },
-    syntax: { keyword: '#00ff41', builtin: '#7dffb0', function: '#c8ff5c', string: '#9cff9c', number: '#d4ff7a', comment: '#1fa340', variable: '#5cffc8', regexp: '#ffb000', meta: '#2ee65c', selector: '#00ff41', deletion: '#ff4545' },
+    neutral: ramp('#dce6de #bfd0c2 #afc4b3 #9db5a3 #8caa92 #6a8772 #536e5b #435b4b #33463a #24332a #17211b #101713'),
+    keys: { primary: '#79b88a', secondary: '#a6b888', accent: '#84b5a2', error: '#d78b86', warning: '#c6ac77', success: '#88b897' },
+    syntax: { keyword: '#79b88a', builtin: '#94b9a0', function: '#b0bf94', string: '#a1b99c', number: '#b9b68c', comment: '#809787', variable: '#9bbcaf', regexp: '#c6ac77', meta: '#8eae98', selector: '#79b88a', deletion: '#d78b86' },
   },
 ]
 

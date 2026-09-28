@@ -61,16 +61,16 @@ Each theme declares a **scheme** (`dark` or `light`) that drives native UI
 | 1 | `dark` | Dark | dark | **Existing** dark mode, pixel-identical. Teal-tinted chrome, warm-gray transcript, gold primary, teal accent. |
 | 2 | `light` | Light | light | **Existing** light mode, pixel-identical. Cream transcript, warm-gray chrome. |
 | 3 | `midnight` | Midnight | dark | Cool blue-slate (Nord-adjacent). Frost-blue accent, soft gold primary. For users who find the warm transcript too brown. |
-| 4 | `paper` | Paper | light | Low-glare sepia. Parchment page (`#f6f1e7`), no pure white, ochre primary, muted teal accent. For long reading sessions. |
-| 5 | `contrast` | High Contrast | dark | Black ground, near-white ink, saturated intents, strong borders. Meets the stricter floors in §6. |
-| 6 | `solarized` | Solarized Light | light | Solarized base3/base2 grounds, base02 ink, Solarized accents. |
-| 7 | `dracula` | Dracula | dark | Dracula background and foreground; purple primary, pink secondary, cyan accent. |
-| 8 | `gruvbox` | Gruvbox | dark | Gruvbox dark (hard) grounds, cream ink; yellow primary, blue accent. |
-| 9 | `matrix` | Matrix | dark | Old-school phosphor terminal: green on black, green chrome and text. Error stays red and warning amber so status still reads. |
+| 4 | `paper` | Paper | light | Cool cotton-white page (`#f8faff`), blue-gray surfaces, blue ink primary and a red editorial accent. |
+| 5 | `contrast` | High Contrast | dark | Black ground, near-white ink, electric cyan primary, yellow accent, strong borders. Meets the stricter floors in §6. |
+| 6 | `solarized` | Solarized Light | light | Solarized base3/base2 cream grounds, base02 ink, blue primary and teal accent. |
+| 7 | `dracula` | Dracula | dark | Plum-tinted grounds with Dracula token colors; purple primary, pink secondary, cyan accent. |
+| 8 | `gruvbox` | Gruvbox | dark | Warm brown grounds, cream ink; burnt-orange primary, sage accent and Gruvbox token colors. |
+| 9 | `matrix` | Matrix | dark | Soft phosphor terminal: charcoal-green grounds, gray-green text and muted mint actions and syntax. Error stays dusty red and warning amber so status still reads. |
 
 Solarized ships as the light variant: the dark side is already well covered (six dark
-themes), and Solarized Light reads clearly differently from Paper (cooler accents,
-yellower ground).
+themes), and Solarized Light pairs warm cream grounds and teal accents, while Paper uses cool
+blue-white grounds and red accents.
 
 Themes 3–9 use **one palette throughout**. Dark and Light keep their distinct, warmer
 `.terminal-area` palette; the new themes do not define one.

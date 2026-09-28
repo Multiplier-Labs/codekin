@@ -6,12 +6,12 @@
     dark: ['dark', '#0b0d0e'],
     light: ['light', '#fdfcfa'],
     midnight: ['dark', '#1b1f27'],
-    paper: ['light', '#f6f1e7'],
+    paper: ['light', '#f8faff'],
     contrast: ['dark', '#000000'],
     solarized: ['light', '#fdf6e3'],
-    dracula: ['dark', '#21222c'],
-    gruvbox: ['dark', '#1d2021'],
-    matrix: ['dark', '#000000']
+    dracula: ['dark', '#211927'],
+    gruvbox: ['dark', '#211b16'],
+    matrix: ['dark', '#101713']
   };
   try {
     var saved = JSON.parse(localStorage.getItem('codekin-settings') || '{}');

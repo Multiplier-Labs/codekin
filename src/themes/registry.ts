@@ -38,12 +38,12 @@ export const THEMES: readonly ThemeDefinition[] = [
   { id: 'dark', label: 'Dark', scheme: 'dark', swatches: { page: '#0b0d0e', surface: '#161d1e', ink: '#cbd2d3', primary: '#e4ae42', accent: '#45b5c9' } },
   { id: 'light', label: 'Light', scheme: 'light', swatches: { page: '#fdfcfa', surface: '#f2efe8', ink: '#1b1a18', primary: '#b7884a', accent: '#248192' } },
   { id: 'midnight', label: 'Midnight', scheme: 'dark', swatches: { page: '#1b1f27', surface: '#222731', ink: '#d8dee9', primary: '#ebcb8b', accent: '#88c0d0' } },
-  { id: 'paper', label: 'Paper', scheme: 'light', swatches: { page: '#f6f1e7', surface: '#efe8da', ink: '#2b2620', primary: '#8c6833', accent: '#3b6e7c' } },
-  { id: 'contrast', label: 'High Contrast', scheme: 'dark', swatches: { page: '#000000', surface: '#0d0d0d', ink: '#f5f5f5', primary: '#ffd000', accent: '#4dd8ff' } },
-  { id: 'solarized', label: 'Solarized Light', scheme: 'light', swatches: { page: '#fdf6e3', surface: '#eee8d5', ink: '#073642', primary: '#876d34', accent: '#2976b0' } },
-  { id: 'dracula', label: 'Dracula', scheme: 'dark', swatches: { page: '#21222c', surface: '#282a36', ink: '#f8f8f2', primary: '#bd93f9', accent: '#8be9fd' } },
-  { id: 'gruvbox', label: 'Gruvbox', scheme: 'dark', swatches: { page: '#1d2021', surface: '#282828', ink: '#ebdbb2', primary: '#fabd2f', accent: '#83a598' } },
-  { id: 'matrix', label: 'Matrix', scheme: 'dark', swatches: { page: '#000000', surface: '#041208', ink: '#33ff66', primary: '#00ff41', accent: '#5cffc8' } },
+  { id: 'paper', label: 'Paper', scheme: 'light', swatches: { page: '#f8faff', surface: '#eaf0f8', ink: '#243047', primary: '#3f5f95', accent: '#a44257' } },
+  { id: 'contrast', label: 'High Contrast', scheme: 'dark', swatches: { page: '#000000', surface: '#0d0d0d', ink: '#f5f5f5', primary: '#4dd8ff', accent: '#ffd000' } },
+  { id: 'solarized', label: 'Solarized Light', scheme: 'light', swatches: { page: '#fdf6e3', surface: '#eee8d5', ink: '#073642', primary: '#3776a8', accent: '#2a7c75' } },
+  { id: 'dracula', label: 'Dracula', scheme: 'dark', swatches: { page: '#211927', surface: '#2c2235', ink: '#f8f8f2', primary: '#bd93f9', accent: '#8be9fd' } },
+  { id: 'gruvbox', label: 'Gruvbox', scheme: 'dark', swatches: { page: '#211b16', surface: '#2d251e', ink: '#ebdbb2', primary: '#fe8019', accent: '#8ec07c' } },
+  { id: 'matrix', label: 'Matrix', scheme: 'dark', swatches: { page: '#101713', surface: '#17211b', ink: '#bfd0c2', primary: '#79b88a', accent: '#84b5a2' } },
 ]
 
 export const DEFAULT_THEME: ThemeId = 'dark'
