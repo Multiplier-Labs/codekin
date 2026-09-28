@@ -528,6 +528,21 @@
   --color-neutral-6: #737373;
 }
 
+/* ── Settings reading scale ────────────────────────────────────────────────
+   Settings is read, not skimmed: forms, explanations and lists of machines,
+   members and rules. Most of it sits on meta/micro, which is right for the
+   dense chrome of a session but too small for a page of its own. So the
+   Settings page (`.settings-view`, SettingsView.tsx) raises every step of the
+   same five-step scale instead of each component hand-picking a bigger
+   class. Line-heights stay bound to the step. */
+.settings-view {
+  --text-micro: 12.5px;
+  --text-meta: 14px;
+  --text-body: 15.5px;
+  --text-title: 18px;
+  --text-head: 24px;
+}
+
 /* ── Density ───────────────────────────────────────────────────────────────
    One knob, set once on the app shell via data-density="touch" (App.tsx),
    with a pointer:coarse fallback so a touch laptop gets sane targets even
