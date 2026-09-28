@@ -40,10 +40,11 @@ describe('user admin routes', () => {
 
   /** Park a stored cookie row for a user, as a real login would. */
   function seedSession(sid: string, userId: string): void {
-    db.prepare('INSERT INTO web_sessions (sid, sess, expire) VALUES (?, ?, ?)').run(
+    db.prepare('INSERT INTO web_sessions (sid, sess, expire, user_id) VALUES (?, ?, ?, ?)').run(
       sid,
       JSON.stringify({ cookie: {}, user: { id: userId } }),
       Date.now() + 86_400_000,
+      userId,
     )
   }
 

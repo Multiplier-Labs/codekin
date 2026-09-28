@@ -50,6 +50,16 @@ export function startDeviceLink(db: Database.Database, userId: string): StartDev
   return { requestId, code, expiresAt }
 }
 
+/**
+ * Drop a user's unclaimed codes (logout-all, account disable). A code minted
+ * before the revocation must not mint a session after it. Returns the count.
+ */
+export function revokePendingDeviceLinks(db: Database.Database, userId: string): number {
+  return db
+    .prepare(`DELETE FROM device_link_requests WHERE created_by_user_id = ? AND status = 'pending'`)
+    .run(userId).changes
+}
+
 export type DeviceLinkStatus = 'pending' | 'claimed' | 'expired'
 
 /** Status for the creator's polling dialog. Null when unknown or not the creator's. */

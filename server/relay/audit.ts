@@ -30,6 +30,10 @@ export type AuditEventKind =
   | 'passkey_registered'
   | 'passkey_login'
   | 'passkey_removed'
+  | 'login'
+  | 'login_failed'
+  | 'logout'
+  | 'logout_all'
 
 export interface AuditEventInput {
   kind: AuditEventKind

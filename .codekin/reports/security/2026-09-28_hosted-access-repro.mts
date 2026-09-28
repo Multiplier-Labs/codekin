@@ -1,4 +1,6 @@
-/** Audit-only reproductions of existing behavior, NOT desired regression assertions.
+/** Audit-only reproductions of the PRE-FIX behavior, NOT desired regression assertions.
+ * Fixed in Phase 0 (docs/HOSTED-WORKSPACES-AND-MFA-PLAN.md): against current code these
+ * assertions fail by design. The desired behavior is pinned in server/relay/access-hardening.test.ts.
  * Run from repo root: server/node_modules/.bin/tsx .codekin/reports/security/2026-09-28_hosted-access-repro.mts
  * Uses an in-memory DB, synthetic users, loopback HTTP, and a fake browser socket.
  */

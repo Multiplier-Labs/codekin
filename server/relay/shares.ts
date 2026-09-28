@@ -208,8 +208,45 @@ export function listSharesFor(db: Database.Database, userId: string, now = new D
     .filter(share => !isExpired(share, now))
 }
 
+/**
+ * Fails closed: a stored value that does not parse as a time is treated as
+ * already expired, never as "no expiry".
+ */
 export function isExpired(share: SessionShare, now = new Date()): boolean {
-  return share.expiresAt !== null && new Date(share.expiresAt).getTime() <= now.getTime()
+  if (share.expiresAt === null) return false
+  const at = new Date(share.expiresAt).getTime()
+  return !Number.isFinite(at) || at <= now.getTime()
+}
+
+export type ParsedExpiry = { ok: true; value: string | null | undefined } | { ok: false }
+
+/**
+ * Validate a client-supplied share expiry. `undefined` means "not given"
+ * (PATCH keeps the current value), `null` means "never". Anything else must
+ * be a parseable time in the future and is normalized to ISO-8601.
+ */
+export function parseShareExpiry(value: unknown, now = new Date()): ParsedExpiry {
+  if (value === undefined || value === null) return { ok: true, value }
+  if (typeof value !== 'string') return { ok: false }
+  const at = new Date(value).getTime()
+  if (!Number.isFinite(at) || at <= now.getTime()) return { ok: false }
+  return { ok: true, value: new Date(at).toISOString() }
+}
+
+/**
+ * A workspace viewer is read-only whatever a share says: grants are cut down
+ * to the viewer preset, and a grant left empty grants nothing.
+ */
+export function capPermissionsForRole(
+  permissions: SessionPermission[],
+  role: UserRow['role'] | undefined,
+): SessionPermission[] {
+  if (role !== 'viewer') return permissions
+  return permissions.filter(p => SHARE_ROLES.viewer.includes(p))
+}
+
+export function exceedsRoleCap(permissions: SessionPermission[], role: UserRow['role'] | undefined): boolean {
+  return capPermissionsForRole(permissions, role).length !== permissions.length
 }
 
 /**
@@ -224,11 +261,13 @@ export function grantsForMachine(
   userId: string,
   machineId: string,
   now = new Date(),
+  role?: UserRow['role'],
 ): GrantMap {
   const grants: GrantMap = {}
   for (const share of listSharesFor(db, userId, now)) {
     if (share.machineId !== machineId) continue
-    grants[share.localSessionId] = share.permissions
+    const permissions = capPermissionsForRole(share.permissions, role)
+    if (permissions.length > 0) grants[share.localSessionId] = permissions
   }
   return grants
 }
@@ -244,7 +283,7 @@ export type MachineAccess =
  */
 export function resolveMachineAccess(
   db: Database.Database,
-  user: Pick<UserRow, 'id' | 'status'>,
+  user: Pick<UserRow, 'id' | 'status'> & Partial<Pick<UserRow, 'role'>>,
   machineId: string,
   now = new Date(),
 ): MachineAccess {
@@ -256,7 +295,7 @@ export function resolveMachineAccess(
   if (!machine) return { kind: 'none' }
   if (machine.owner_user_id === user.id) return { kind: 'owner' }
 
-  const grants = grantsForMachine(db, user.id, machineId, now)
+  const grants = grantsForMachine(db, user.id, machineId, now, user.role)
   if (Object.keys(grants).length === 0) return { kind: 'none' }
   return { kind: 'grantee', grants }
 }

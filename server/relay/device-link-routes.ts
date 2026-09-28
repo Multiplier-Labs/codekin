@@ -11,12 +11,7 @@
 import { Router } from 'express'
 import type Database from 'better-sqlite3'
 import type { RelayConfig } from './relay-config.js'
-import {
-  createRequireActiveUser,
-  regenerateSession,
-  saveSession,
-  toSessionUser,
-} from './relay-auth-routes.js'
+import { createRequireActiveUser, establishSession } from './relay-auth-routes.js'
 import { getUserById } from './control-plane-db.js'
 import { startDeviceLink, getDeviceLinkStatus, completeDeviceLink } from './device-link.js'
 import { recordAuditEvent } from './audit.js'
@@ -79,11 +74,7 @@ export function createDeviceLinkRouter(db: Database.Database, config: RelayConfi
         return
       }
 
-      // Fresh session id before granting the session (fixation), same as the
-      // OAuth callback.
-      await regenerateSession(req)
-      req.session.user = toSessionUser(user)
-      await saveSession(req)
+      await establishSession(req, user, 'device_link')
       recordAuditEvent(db, {
         kind: 'device_linked',
         actorUserId: user.id,

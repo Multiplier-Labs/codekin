@@ -164,14 +164,17 @@ describe('webauthn routes', () => {
     expect(res.status).toBe(401)
   })
 
-  it('login verify for a disabled user is a 403 before any crypto runs', async () => {
+  it('an unverified assertion for a disabled user is the same 401 as for an active one', async () => {
+    // Checking status before the signature would let a bare credential id
+    // reveal whether its account is disabled.
     insertCredential(db, { userId: activeUser.id, credentialId: 'cred-1', publicKey: 'pk', counter: 0 })
     db.prepare(`UPDATE users SET status = 'disabled' WHERE id = ?`).run(activeUser.id)
     const cookie = await loginChallengeCookie()
     const res = await fetch(`${baseUrl}/api/auth/webauthn/login/verify`, {
       method: 'POST', headers: { ...anon, cookie }, body: assertionBody('cred-1'),
     })
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(401)
+    expect(listAuditEvents(db, {}).map(e => e.kind)).toContain('login_failed')
   })
 
   it('a forged assertion for a real credential is a 401 and mints no session', async () => {

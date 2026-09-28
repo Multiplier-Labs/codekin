@@ -10,7 +10,6 @@
  */
 
 import { Router } from 'express'
-import type { Request } from 'express'
 import type Database from 'better-sqlite3'
 import {
   generateRegistrationOptions,
@@ -27,9 +26,9 @@ import { isoBase64URL, isoUint8Array } from '@simplewebauthn/server/helpers'
 import type { RelayConfig } from './relay-config.js'
 import {
   createRequireActiveUser,
-  regenerateSession,
+  establishSession,
+  requestAuditMeta,
   saveSession,
-  toSessionUser,
 } from './relay-auth-routes.js'
 import { getUserById } from './control-plane-db.js'
 import {
@@ -45,15 +44,32 @@ import { recordAuditEvent } from './audit.js'
 
 declare module 'express-session' {
   interface SessionData {
-    webauthnRegChallenge?: string
-    webauthnAuthChallenge?: string
+    webauthnRegChallenge?: PendingChallenge
+    webauthnAuthChallenge?: PendingChallenge
   }
 }
 
+interface PendingChallenge {
+  challenge: string
+  issuedAt: number
+}
+
+/** A ceremony not finished within this window must start over. */
+export const WEBAUTHN_CHALLENGE_TTL_MS = 5 * 60 * 1000
+
 const RP_NAME = 'Codekin'
 
-function auditMeta(req: Request) {
-  return { ip: req.ip ?? null, userAgent: req.get('user-agent') ?? null }
+const auditMeta = requestAuditMeta
+
+function issueChallenge(challenge: string): PendingChallenge {
+  return { challenge, issuedAt: Date.now() }
+}
+
+/** The challenge if still fresh. Callers delete it first: each is single-use. */
+function freshChallenge(pending: PendingChallenge | undefined): string | null {
+  if (!pending || typeof pending.challenge !== 'string') return null
+  if (Date.now() - pending.issuedAt > WEBAUTHN_CHALLENGE_TTL_MS) return null
+  return pending.challenge
 }
 
 export function createWebauthnRouter(db: Database.Database, config: RelayConfig): Router {
@@ -88,7 +104,7 @@ export function createWebauthnRouter(db: Database.Database, config: RelayConfig)
           userVerification: 'required',
         },
       })
-      req.session.webauthnRegChallenge = options.challenge
+      req.session.webauthnRegChallenge = issueChallenge(options.challenge)
       await saveSession(req)
       res.json({ options })
     })().catch(next)
@@ -102,7 +118,7 @@ export function createWebauthnRouter(db: Database.Database, config: RelayConfig)
         return
       }
       const body = (req.body ?? {}) as { response?: unknown; label?: unknown }
-      const expectedChallenge = req.session.webauthnRegChallenge
+      const expectedChallenge = freshChallenge(req.session.webauthnRegChallenge)
       delete req.session.webauthnRegChallenge
       if (!expectedChallenge || !body.response || typeof body.response !== 'object') {
         res.status(400).json({ error: 'No registration in progress' })
@@ -156,7 +172,7 @@ export function createWebauthnRouter(db: Database.Database, config: RelayConfig)
         rpID,
         userVerification: 'required',
       })
-      req.session.webauthnAuthChallenge = options.challenge
+      req.session.webauthnAuthChallenge = issueChallenge(options.challenge)
       await saveSession(req)
       res.json({ options })
     })().catch(next)
@@ -165,7 +181,7 @@ export function createWebauthnRouter(db: Database.Database, config: RelayConfig)
   router.post('/api/auth/webauthn/login/verify', (req, res, next) => {
     void (async () => {
       const body = (req.body ?? {}) as { response?: unknown }
-      const expectedChallenge = req.session.webauthnAuthChallenge
+      const expectedChallenge = freshChallenge(req.session.webauthnAuthChallenge)
       delete req.session.webauthnAuthChallenge
       const response = body.response as AuthenticationResponseJSON | undefined
       if (!expectedChallenge || !response || typeof response !== 'object' || typeof response.id !== 'string') {
@@ -175,12 +191,8 @@ export function createWebauthnRouter(db: Database.Database, config: RelayConfig)
 
       const row = getCredentialByCredentialId(db, response.id)
       if (!row) {
+        recordAuditEvent(db, { kind: 'login_failed', ...auditMeta(req), metadata: { method: 'passkey', reason: 'unknown_credential' } })
         res.status(401).json({ error: 'Unknown passkey' })
-        return
-      }
-      const user = getUserById(db, row.user_id)
-      if (!user || user.status !== 'active') {
-        res.status(403).json({ error: 'Access not granted' })
         return
       }
 
@@ -205,16 +217,26 @@ export function createWebauthnRouter(db: Database.Database, config: RelayConfig)
         // Bad signatures throw; same 401 as an unknown credential
       }
       if (!verified) {
+        recordAuditEvent(db, {
+          kind: 'login_failed',
+          actorUserId: row.user_id,
+          ...auditMeta(req),
+          metadata: { method: 'passkey', reason: 'verification_failed', passkeyId: row.id },
+        })
         res.status(401).json({ error: 'Passkey could not be verified' })
         return
       }
 
+      // Status is checked only after the signature: before it, a bare
+      // credential id would tell anyone whether its account is disabled.
+      const user = getUserById(db, row.user_id)
+      if (!user || user.status !== 'active') {
+        res.status(403).json({ error: 'Access not granted' })
+        return
+      }
+
       recordCredentialUse(db, row.id, newCounter)
-      // Fresh session id before granting the session (fixation), same as the
-      // OAuth callback.
-      await regenerateSession(req)
-      req.session.user = toSessionUser(user)
-      await saveSession(req)
+      await establishSession(req, user, 'passkey')
       recordAuditEvent(db, {
         kind: 'passkey_login',
         actorUserId: user.id,
