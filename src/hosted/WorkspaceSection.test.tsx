@@ -8,7 +8,18 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { WorkspaceSection } from './WorkspaceSection'
+import { WorkspaceGeneral, WorkspaceMachines, WorkspaceMembers } from './WorkspaceSection'
+
+/** The three workspace pages of Settings, rendered together as one fixture. */
+function WorkspaceSection() {
+  return (
+    <>
+      <WorkspaceGeneral />
+      <WorkspaceMembers />
+      <WorkspaceMachines />
+    </>
+  )
+}
 import {
   pickWorkspace,
   resetWorkspaceForTests,

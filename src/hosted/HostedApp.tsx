@@ -23,7 +23,11 @@ import { INVITE_ERROR_MESSAGES, consumeJoinedWorkspace, pickWorkspace } from './
 import { InvitePage } from './InvitePage'
 import { MfaChallengePage, MfaEnrollPage, StepUpHost } from './TwoFactor'
 import { CreateWorkspaceForm } from './WorkspaceSection'
-import { Settings } from '../components/Settings'
+import { SettingsView } from '../components/settings/SettingsView'
+import { useRouter } from '../hooks/useRouter'
+import { useSettings } from '../hooks/useSettings'
+import { useIsMobile } from '../hooks/useIsMobile'
+import { applyTheme } from '../themes/registry'
 
 /** Shown to signed-in users whose access has not been granted (yet). */
 function PendingPage({ login, onLogout }: { login: string; onLogout: () => void }) {
@@ -116,18 +120,29 @@ function HostedHome({ onOpen, onSignOut, signedInAs }: {
   const setup = useMachineSetup({ pollWhileEmpty: true })
   const [firstRun, setFirstRun] = useState<boolean | null>(null)
   const [view, setView] = useState<'setup' | 'account'>('setup')
+  const route = useRouter()
+  const isMobile = useIsMobile()
+  // App (which normally applies the theme) is not mounted until a machine is.
+  const { settings, updateSettings } = useSettings()
+  useEffect(() => { applyTheme(settings.theme) }, [settings.theme])
+
+  // Opening a machine from Settings lands in its app, not on its settings.
+  const openMachine = useCallback((machine: Machine) => {
+    if (window.location.pathname.startsWith('/settings')) history.replaceState(null, '', '/')
+    onOpen(machine)
+  }, [onOpen])
 
   // Latch during render (React's "adjust state while rendering" pattern).
   if (firstRun === null && setup.machines !== null) {
     setFirstRun(!setup.machines.some(isUsableMachine))
   }
 
-  if (firstRun !== false && view === 'setup') {
+  if (firstRun !== false && view === 'setup' && route.view !== 'settings') {
     return (
       <ConnectComputer
         setup={setup}
         onOpen={onOpen}
-        onAccount={() => { setView('account') }}
+        onAccount={() => { setView('account'); route.navigate('/settings/machines') }}
         onSignOut={onSignOut}
         signedInAs={signedInAs}
       />
@@ -135,13 +150,22 @@ function HostedHome({ onOpen, onSignOut, signedInAs }: {
   }
 
   return (
-    <Settings
-      onSwitchMachine={onOpen}
-      onSignOut={onSignOut}
-      signedInAs={signedInAs}
-      machineSetup={setup}
-      onBack={firstRun ? () => { setView('setup') } : undefined}
-    />
+    <div className="flex h-dvh flex-col">
+      <SettingsView
+        connected={false}
+        section={route.view === 'settings' ? route.settingsSection : 'machines'}
+        onNavigate={(section, replace) => { route.navigate(section ? `/settings/${section}` : '/settings', replace) }}
+        onClose={() => { /* the home screen: nothing to close to */ }}
+        settings={settings}
+        onUpdate={updateSettings}
+        isMobile={isMobile}
+        onSwitchMachine={openMachine}
+        machineSetup={setup}
+        signedInAs={signedInAs}
+        onSignOut={onSignOut}
+        onBack={firstRun ? () => { setView('setup'); route.navigate('/', true) } : undefined}
+      />
+    </div>
   )
 }
 

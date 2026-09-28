@@ -1,6 +1,6 @@
 # Settings as a Full View
 
-**Status:** Approved 2026-09-28 · PR 1 merged (#651) · PR 2 (routed view) in review
+**Status:** Complete: PR 1 #651, PR 2 #652, PR 3 (hosted home, Profile, operator Accounts)
 
 ## 1. Problem
 
@@ -71,6 +71,17 @@ Rules:
 - The Workspace card is split into `WorkspaceGeneral`, `WorkspaceMembers` and `WorkspaceMachines`
   (`src/hosted/WorkspaceSection.tsx`). `WorkspaceSection` composes them for the not-connected
   screen until PR 3.
+
+**Notes from PR 3:**
+- The hosted no-machine screen is now `SettingsView` with `connected={false}`. It opens on
+  `/settings/machines`, machine sections are listed as unavailable ("Connect a machine to change
+  these"), and the header shows who is signed in plus Sign out in place of Close. Opening a
+  machine from there lands in the app at `/`. A reload on `/settings/<section>` with a remembered
+  machine reconnects and stays on that page.
+- Account → Profile shows identity, the current workspace and Sign out.
+- Platform → Accounts is for the operator only, detected via `/api/me`. The view doesn't redirect
+  away from it until that answer is in. Changes go through `stepUpFetch`.
+- The old `Settings.tsx` screen and the composed `WorkspaceSection` export are removed.
 
 ## 4. Out of scope
 
