@@ -23,6 +23,7 @@ import {
   type MfaStatus,
   type StepUpMethod,
 } from './mfa'
+import { Row, Rows, button as settingsButton, dangerButton } from '../components/settings/Block'
 import { defaultPasskeyLabel, isPasskeyCancel, passkeysSupported, registerPasskey } from './passkeys'
 
 const button =
@@ -321,45 +322,75 @@ export function TwoFactorPanel() {
   }
 
   const enabled = status.totp || status.passkeys > 0
+  const noCodesLeft = enabled && status.recoveryCodesRemaining === 0
   return (
     <div>
-      <p className="text-body text-ink">
-        Two-factor authentication: {enabled ? <span className="text-success-6">on</span> : <span className="text-ink-muted">off</span>}
-        {status.required && <span className="ml-2 text-meta text-ink-faint">required by your role</span>}
-      </p>
-      <ul className="mt-1.5 text-meta text-ink-muted">
-        <li>Authenticator app: {status.totp ? 'set up' : 'not set up'}</li>
-        <li>Passkeys: {status.passkeys}</li>
-        {enabled && <li>Recovery codes left: {status.recoveryCodesRemaining}</li>}
-      </ul>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {!status.totp && status.totpAvailable && (
-          <button onClick={() => { setMode('totp') }} className={button}>Set up authenticator app</button>
-        )}
-        {status.totp && (
-          <button
-            onClick={() => {
-              if (!window.confirm('Turn off the authenticator app?')) return
-              void run(disableTotp)
-            }}
-            className={`${button} hover:text-error-4`}
-          >
-            Turn off authenticator app
-          </button>
-        )}
+      <Rows>
+        <Row
+          label="Status"
+          description={status.required
+            ? 'Required by your role, so it stays on.'
+            : 'Asked for after GitHub sign-in, and before sensitive changes.'}
+          control={
+            <span className={`rounded-control px-2 py-0.5 text-meta font-medium ${enabled ? 'bg-success-9/20 text-success-6' : 'bg-surface-raised text-ink-muted'}`}>
+              {enabled ? 'On' : 'Off'}
+            </span>
+          }
+        />
+        <Row
+          label="Authenticator app"
+          description={status.totp
+            ? 'Set up. Enter the 6-digit code it shows when asked.'
+            : '1Password, Google Authenticator, Authy and others.'}
+          control={
+            status.totp ? (
+              <button
+                onClick={() => {
+                  if (!window.confirm('Turn off the authenticator app?')) return
+                  void run(disableTotp)
+                }}
+                className={dangerButton}
+              >
+                Turn off authenticator app
+              </button>
+            ) : status.totpAvailable ? (
+              <button onClick={() => { setMode('totp') }} className={settingsButton}>Set up authenticator app</button>
+            ) : (
+              <span className="text-body text-ink-muted">Not available</span>
+            )
+          }
+        />
+        <Row
+          label="Passkeys"
+          description="Face ID, fingerprint or device PIN. Add and remove them under Devices & passkeys."
+          control={<span className="text-body tabular-nums text-ink">{status.passkeys}</span>}
+        />
         {enabled && (
-          <button
-            onClick={() => {
-              if (!window.confirm('Make new recovery codes? The old ones stop working.')) return
-              void run(async () => { setCodes(await regenerateRecoveryCodes()); setMode('codes') })
-            }}
-            className={button}
-          >
-            New recovery codes
-          </button>
+          <Row
+            label="Recovery codes"
+            description={noCodesLeft
+              ? 'None left. Make new ones so a lost device cannot lock you out.'
+              : 'One-time codes for when you cannot use your other factors.'}
+            control={
+              <>
+                <span className={`text-body tabular-nums ${noCodesLeft ? 'font-medium text-warning-5' : 'text-ink'}`}>
+                  {status.recoveryCodesRemaining} left
+                </span>
+                <button
+                  onClick={() => {
+                    if (!window.confirm('Make new recovery codes? The old ones stop working.')) return
+                    void run(async () => { setCodes(await regenerateRecoveryCodes()); setMode('codes') })
+                  }}
+                  className={settingsButton}
+                >
+                  New recovery codes
+                </button>
+              </>
+            }
+          />
         )}
-      </div>
-      {error && <p className="mt-2 text-meta text-error-4">{error}</p>}
+      </Rows>
+      {error && <p className="mt-4 text-meta text-error-4">{error}</p>}
     </div>
   )
 }

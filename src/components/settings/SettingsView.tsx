@@ -16,7 +16,7 @@ import { AccessTokenField } from './AccessTokenField'
 import { AgentNameField } from './AgentNameField'
 import { ThemePicker } from './ThemePicker'
 import AppIcon from '../AppIcon'
-import { Block } from './Block'
+import { Block, Rows } from './Block'
 import { SessionPreferences } from './SessionPreferences'
 import { PermissionsSection } from './PermissionsSection'
 import { WebhooksSection } from './WebhooksSection'
@@ -118,7 +118,7 @@ function ConnectionSection({ settings, onUpdate, hosted, agentName, onAgentNameC
   return (
     <div className="space-y-4">
       {!hosted && (
-        <Block title="Access token">
+        <Block title="Access token" description="The token this browser uses to talk to your Codekin server.">
           <AccessTokenField
             value={token}
             onChange={value => { setToken(value); setStatus('idle') }}
@@ -129,7 +129,7 @@ function ConnectionSection({ settings, onUpdate, hosted, agentName, onAgentNameC
           {token.trim() && token.trim() !== settings.token && (
             <button
               onClick={() => { onUpdate({ token: token.trim() }) }}
-              className="mt-2 text-meta text-ink-muted underline-offset-2 transition hover:text-ink hover:underline"
+              className="mt-3 text-meta text-ink-muted underline underline-offset-2 transition hover:text-ink"
             >
               Save without verifying
             </button>
@@ -138,7 +138,9 @@ function ConnectionSection({ settings, onUpdate, hosted, agentName, onAgentNameC
       )}
       {settings.token && (
         <Block title="Agent">
+          <Rows>
           <AgentNameField token={settings.token} agentName={agentName} onAgentNameChange={onAgentNameChange} onError={onError} />
+          </Rows>
         </Block>
       )}
     </div>
@@ -181,9 +183,9 @@ export function SettingsView({
         if (items.length === 0 && offline.length === 0) return null
         return (
           <div key={group} className="mb-4">
-            <p className="px-3 pb-1 text-micro font-semibold uppercase tracking-wide text-ink-faint">{group}</p>
+            <p className="px-3 pb-1 text-micro font-semibold uppercase tracking-wide text-ink-muted">{group}</p>
             {offline.length > 0 && (
-              <p className="px-3 pb-1 text-micro text-ink-faint">Connect a machine to change these.</p>
+              <p className="px-3 pb-1 text-micro text-ink-muted">Connect a machine to change these.</p>
             )}
             {offline.map(item => {
               const Icon = item.icon
@@ -224,29 +226,48 @@ export function SettingsView({
       body = <Block><Suspense fallback={loading}><ProfileSection /></Suspense></Block>
       break
     case 'accounts':
-      body = <Block><Suspense fallback={loading}><AccountsSection /></Suspense></Block>
+      body = (
+        <Block
+          title="Everyone on the platform"
+          description="Disabling an account signs it out everywhere and blocks it in every workspace. Membership is managed by each workspace's owners and admins."
+        >
+          <Suspense fallback={loading}><AccountsSection /></Suspense>
+        </Block>
+      )
       break
     case 'security':
       body = (
         <div className="space-y-4">
-          <Block title="Two-factor authentication"><Suspense fallback={loading}><TwoFactorPanel /></Suspense></Block>
-          <Block title="Devices & passkeys"><Suspense fallback={loading}><DevicesSection /></Suspense></Block>
+          <Block title="Two-factor authentication" description="A second step after GitHub sign-in, so a stolen GitHub session is not enough.">
+            <Suspense fallback={loading}><TwoFactorPanel /></Suspense>
+          </Block>
+          <Block title="Devices & passkeys" description="Where you are signed in, and how those devices get back in.">
+            <Suspense fallback={loading}><DevicesSection /></Suspense>
+          </Block>
         </div>
       )
       break
     case 'appearance':
-      body = <Block><ThemePicker theme={settings.theme} onSelect={theme => { onUpdate({ theme }) }} /></Block>
+      body = (
+        <Block title="Theme" description="Colors only — layout and type stay the same. Saved in this browser.">
+          <ThemePicker theme={settings.theme} onSelect={theme => { onUpdate({ theme }) }} />
+        </Block>
+      )
       break
     case 'workspace':
       body = <Block><Suspense fallback={loading}><WorkspaceGeneral /></Suspense></Block>
       break
     case 'members':
-      body = <Block><Suspense fallback={loading}><WorkspaceMembers /></Suspense></Block>
+      body = (
+        <Block title="People" description="Everyone in this workspace, their role, and whether they use two-factor.">
+          <Suspense fallback={loading}><WorkspaceMembers /></Suspense>
+        </Block>
+      )
       break
     case 'machines':
       body = (
         <div className="space-y-4">
-          <Block title="Your machines">
+          <Block title="Your machines" description="Computers running Codekin that this account can connect to.">
             <Suspense fallback={loading}>
               <MachinesSection
                 currentMachineId={hostedMachineId}
@@ -275,18 +296,14 @@ export function SettingsView({
       break
     case 'sessions':
       body = (
-        <Block>
-          <div className="space-y-5">
-            <SessionPreferences token={settings.token} autoWorktree={autoWorktree} onAutoWorktreeChange={onAutoWorktreeChange} onError={onError} />
-          </div>
-        </Block>
+        <SessionPreferences token={settings.token} autoWorktree={autoWorktree} onAutoWorktreeChange={onAutoWorktreeChange} onError={onError} />
       )
       break
     case 'permissions':
       body = <PermissionsSection token={settings.token} repos={repos} onError={onError} />
       break
     case 'webhooks':
-      body = <Block><WebhooksSection token={settings.token} /></Block>
+      body = <WebhooksSection token={settings.token} />
       break
     case null:
       break
@@ -332,8 +349,8 @@ export function SettingsView({
         {showNav && nav}
         {showContent && def && (
           <main className="min-w-0 flex-1 overflow-y-auto">
-            <div className="mx-auto max-w-2xl px-4 py-5 sm:px-6">
-              <h2 className="mb-4 text-head font-semibold text-ink">{def.label}</h2>
+            <div className="mx-auto max-w-3xl px-4 py-6 sm:px-8">
+              <h2 className="mb-5 text-head font-semibold text-ink">{def.label}</h2>
               {error?.section === current && (
                 <p role="alert" className="mb-4 rounded-control border border-error-9/50 bg-error-9/10 px-3 py-2 text-body text-error-5">
                   {error.message}

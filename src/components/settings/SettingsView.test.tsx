@@ -157,7 +157,7 @@ describe('SettingsView', () => {
     act(() => { root?.unmount() }); container?.remove()
 
     el = await render(view({ section: 'webhooks' }))
-    expect(el.textContent).toContain('max 3 concurrent sessions')
+    expect(el.textContent).toContain('Up to 3 sessions run at once')
   })
 
   it('shows a section’s save failure within that section', async () => {

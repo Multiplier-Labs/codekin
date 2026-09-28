@@ -3,8 +3,8 @@
  * connected machine on blur or Enter.
  */
 
-import { IconRobot } from '@tabler/icons-react'
 import { setAgentName as setAgentNameApi } from '../../lib/ccApi'
+import { Row, input } from './Block'
 
 interface Props {
   token: string
@@ -14,42 +14,31 @@ interface Props {
 }
 
 export function AgentNameField({ token, agentName, onAgentNameChange, onError }: Props) {
+  // Enter always saves; blur only when the value differs.
+  const save = (value: string, always: boolean) => {
+    const val = value.trim()
+    if (val && (always || val !== agentName)) {
+      setAgentNameApi(token, val).then(saved => onAgentNameChange?.(saved)).catch(() => { onError('Failed to save agent name'); })
+    }
+  }
   return (
-    <div>
-      <label className="mb-1.5 block text-body text-ink-muted">
-        <span className="flex items-center gap-1.5">
-          <IconRobot size={14} className="text-ink-muted" />
-          Agent Name
-        </span>
-      </label>
-      <div className="flex items-center gap-2">
+    <Row
+      label="Agent name"
+      htmlFor="settings-agent-name"
+      description="What the orchestrator agent is called in the sidebar and in chat."
+      control={
         <input
+          id="settings-agent-name"
           type="text"
           value={agentName}
-          onChange={e => {
-            const val = e.target.value
-            onAgentNameChange?.(val)
-          }}
-          onBlur={e => {
-            const val = e.target.value.trim()
-            if (val && val !== agentName) {
-              setAgentNameApi(token, val).then(saved => onAgentNameChange?.(saved)).catch(() => onError('Failed to save agent name'))
-            }
-          }}
-          onKeyDown={e => {
-            if (e.key === 'Enter') {
-              const val = (e.target as HTMLInputElement).value.trim()
-              if (val) {
-                setAgentNameApi(token, val).then(saved => onAgentNameChange?.(saved)).catch(() => onError('Failed to save agent name'))
-              }
-            }
-          }}
+          onChange={e => { onAgentNameChange?.(e.target.value) }}
+          onBlur={e => { save(e.target.value, false) }}
+          onKeyDown={e => { if (e.key === 'Enter') save((e.target as HTMLInputElement).value, true) }}
           placeholder="Joe"
           maxLength={30}
-          className="w-40 rounded-control border border-edge bg-surface px-3 py-2 text-body text-ink outline-none focus:border-primary-7"
+          className={`${input} w-40`}
         />
-      </div>
-      <p className="mt-1 text-body text-ink-muted">Display name for the orchestrator agent in the sidebar and chat</p>
-    </div>
+      }
+    />
   )
 }

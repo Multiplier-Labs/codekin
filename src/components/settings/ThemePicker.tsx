@@ -15,8 +15,7 @@ interface Props {
 export function ThemePicker({ theme, onSelect }: Props) {
   return (
     <div>
-      <label id="settings-theme-label" className="mb-1.5 block text-body text-ink-muted">Theme</label>
-      <div role="radiogroup" aria-labelledby="settings-theme-label" className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <div role="radiogroup" aria-label="Theme" className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {THEMES.map(t => {
           const selected = theme === t.id
           return (
@@ -30,11 +29,11 @@ export function ThemePicker({ theme, onSelect }: Props) {
               }`}
             >
               <ThemeSwatch theme={t} />
-              <span className="flex items-center gap-1 px-0.5">
-                <span className="flex-1 truncate text-meta text-ink">{t.label}</span>
+              <span className="flex items-center gap-1 px-0.5 pb-0.5">
+                <span className="flex-1 truncate text-body text-ink">{t.label}</span>
                 {selected
-                  ? <IconCheck size={13} stroke={2} className="flex-shrink-0 text-focus" />
-                  : t.label.toLowerCase() !== t.scheme && <span className="text-micro text-ink-faint">{t.scheme === 'dark' ? 'Dark' : 'Light'}</span>}
+                  ? <IconCheck size={15} stroke={2} className="flex-shrink-0 text-focus" />
+                  : t.label.toLowerCase() !== t.scheme && <span className="text-meta text-ink-muted">{t.scheme === 'dark' ? 'Dark' : 'Light'}</span>}
               </span>
             </button>
           )
