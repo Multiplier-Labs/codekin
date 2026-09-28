@@ -110,6 +110,22 @@ describe('RepoSection', () => {
     expect(onDeleteRepo).toHaveBeenCalledWith('/srv/repos/codekin')
   })
 
+  it('offers Share in the session row menu only when sharing is available', () => {
+    const openSessionMenu = (c: HTMLElement) =>
+      click(c.querySelector<HTMLButtonElement>('button[title="Actions for fix sidebar"]')!)
+
+    const plain = render(<RepoSection {...props()} />)
+    openSessionMenu(plain)
+    expect(() => findButton(plain, 'Share')).toThrow()
+    act(() => activeRoot!.unmount()); activeRoot = null
+
+    const onShareSession = vi.fn()
+    const container = render(<RepoSection {...props({ onShareSession })} />)
+    openSessionMenu(container)
+    click(findButton(container, 'Share'))
+    expect(onShareSession).toHaveBeenCalledWith('abc12345')
+  })
+
   it('marks the harness on every session row, Claude included', () => {
     const sessions: Session[] = [
       { ...session, id: 'a1', provider: 'claude' } as Session,

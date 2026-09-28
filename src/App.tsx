@@ -686,7 +686,8 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   // Hosted mode shares the active session from the sidebar footer. The
   // machine id comes from the installed relay transport; empty in local mode,
   // where the Share control is never rendered.
-  const [shareOpen, setShareOpen] = useState(false)
+  const [shareSessionId, setShareSessionId] = useState<string | null>(null)
+  const shareSession = sessions.find(s => s.id === shareSessionId)
   const hostedMachineId = (transport as { machineId?: string }).machineId ?? ''
 
   // Session input change handler for extracted components
@@ -727,7 +728,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
         onSelectRepo={handleSelectRepo}
         onDeleteRepo={handleDeleteRepo}
         onSettingsOpen={() => { openSettings() }}
-        onShareSession={isHosted ? () => setShareOpen(true) : undefined}
+        onShareSession={isHosted ? setShareSessionId : undefined}
         onUpdateTheme={(theme) => { updateSettings({ theme }) }}
         onSendModule={handleSendModule}
         agentName={agentName}
@@ -970,13 +971,13 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
         onSelectArchived={handleOpenArchivedFromPalette}
         activeWorkingDir={activeWorkingDir}
       />
-      {isHosted && shareOpen && activeSession && (
+      {isHosted && shareSession && (
         <Suspense fallback={null}>
           <ShareDialog
             machineId={hostedMachineId}
-            sessionId={activeSession.id}
-            sessionName={activeSessionName ?? activeSession.id}
-            onClose={() => setShareOpen(false)}
+            sessionId={shareSession.id}
+            sessionName={shareSession.name}
+            onClose={() => setShareSessionId(null)}
           />
         </Suspense>
       )}

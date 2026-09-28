@@ -12,7 +12,6 @@ import {
   IconBook, IconSettings as IconSettingsGear,
   IconLogout,
   IconChevronRight, IconChevronLeft, IconSparkles, IconX, IconRobotFace,
-  IconShare,
 } from '@tabler/icons-react'
 import type { Session, Module, Repo, MobileProps, ConnectionState } from '../types'
 import type { RepoGroup } from '../hooks/useRepos'
@@ -134,7 +133,8 @@ interface Props {
    * Hosted mode only: share the active session. Omitted in the local app,
    * where there is nothing to share and no Share control is shown.
    */
-  onShareSession?: () => void
+  /** Share a session (hosted only) — offered in each session's row menu. */
+  onShareSession?: (id: string) => void
   /** Set the color theme. */
   onUpdateTheme: (theme: ThemeId) => void
   /** Send a module's content to the active session as context. */
@@ -293,16 +293,6 @@ export function LeftSidebar({
           <IconChevronRight size={14} stroke={2} />
         </button>
         <div className="mt-auto flex flex-col items-center gap-2">
-          {onShareSession && (
-            <button
-              onClick={onShareSession}
-              disabled={!activeSessionId}
-              className="rounded-control p-1.5 text-ink hover:bg-surface-raised hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent"
-              title={activeSessionId ? 'Share this session' : 'Open a session to share it'}
-            >
-              <IconShare size={14} stroke={2} />
-            </button>
-          )}
           <ThemeMenu
             theme={theme}
             onSelect={onUpdateTheme}
@@ -456,6 +446,7 @@ export function LeftSidebar({
             onDeleteRepo={onDeleteRepo}
             onOpenDrawer={(wd, tab) => { onOpenDrawer(wd, tab); if (isMobile) onMobileClose?.() }}
             onMoveToWorktree={onMoveToWorktree}
+            onShareSession={onShareSession}
           />
         ))}
 
@@ -502,16 +493,6 @@ export function LeftSidebar({
           >
             <IconSettingsGear className="density-icon" stroke={2} />
           </button>
-          {onShareSession && (
-            <button
-              onClick={onShareSession}
-              disabled={!activeSessionId}
-              className="density-icon-btn gap-1 px-1.5 py-1 rounded-control text-body text-ink hover:text-ink hover:bg-surface-raised transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
-              title={activeSessionId ? 'Share this session' : 'Open a session to share it'}
-            >
-              <IconShare className="density-icon" stroke={2} />
-            </button>
-          )}
           <div className="flex-1" />
           <ThemeMenu
             theme={theme}
