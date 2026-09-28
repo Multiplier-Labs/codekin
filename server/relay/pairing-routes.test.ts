@@ -1,4 +1,5 @@
 /** Tests for the pairing REST endpoints (auth boundaries + status codes). */
+import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
 import session from 'express-session'
@@ -40,7 +41,6 @@ describe('pairing routes', () => {
       login: row.login,
       displayName: null,
       avatarUrl: null,
-      role: row.role,
       status: row.status,
     }
 
@@ -56,7 +56,6 @@ describe('pairing routes', () => {
       login: otherRow.login,
       displayName: null,
       avatarUrl: null,
-      role: otherRow.role,
       status: otherRow.status,
     }
 
@@ -189,7 +188,7 @@ describe('pairing routes', () => {
 
     expect(res.status).toBe(403)
     // The machine must survive the attempt
-    expect(listMachines(db)).toHaveLength(1)
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)).toHaveLength(1)
 
     const denied = listAuditEvents(db, {}).find(e => e.kind === 'access_denied')
     expect(denied?.actorUserId).toBe(otherUser.id)
@@ -204,7 +203,7 @@ describe('pairing routes', () => {
     })
 
     expect(res.status).toBe(200)
-    expect(listMachines(db)).toHaveLength(0)
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)).toHaveLength(0)
 
     const removed = listAuditEvents(db, {}).find(e => e.kind === 'machine_removed')
     expect(removed?.actorUserId).toBe(activeUser.id)
@@ -266,7 +265,7 @@ describe('pairing routes', () => {
     expect(res.status).toBe(200)
     const second = await res.json() as { machineId: string }
 
-    expect(listMachines(db).map(m => m.id)).toEqual([second.machineId])
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID).map(m => m.id)).toEqual([second.machineId])
     const stale = await fetch(`${baseUrl}/api/machines/pair/complete`, {
       method: 'POST', headers: anon, body: JSON.stringify({ deviceCode: first.pairingToken }),
     })
@@ -283,7 +282,7 @@ describe('pairing routes', () => {
     expect(res.status).toBe(409)
     expect(await res.json()).toEqual({ error: 'machine_already_paired' })
     // Nothing was created or removed
-    expect(listMachines(db).map(m => m.id)).toEqual([machineId])
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID).map(m => m.id)).toEqual([machineId])
   })
 
   it("precreate treats someone else's or an unknown machine id as not found", async () => {
@@ -292,7 +291,7 @@ describe('pairing routes', () => {
     expect(res.status).toBe(404)
     expect(await res.json()).toEqual({ error: 'machine_not_found' })
     expect((await precreate({ replaceMachineId: 'nope' })).status).toBe(404)
-    expect(listMachines(db).map(m => m.id)).toEqual([theirs.machineId])
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID).map(m => m.id)).toEqual([theirs.machineId])
     expect((await precreate({ replaceMachineId: 42 })).status).toBe(400)
   })
 
@@ -314,7 +313,7 @@ describe('pairing routes: precreate rate limit', () => {
         { id, login: `u${id}`, name: null, email: null, avatarUrl: null },
         { ownerGithubId: 1, allowedGithubIds: [2] },
       )
-      return { id: row.id, login: row.login, displayName: null, avatarUrl: null, role: row.role, status: row.status }
+      return { id: row.id, login: row.login, displayName: null, avatarUrl: null, status: row.status }
     })
     const app = express()
     app.use(express.json())

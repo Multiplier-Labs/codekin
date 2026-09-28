@@ -3,6 +3,7 @@
  * The local Codekin server is stubbed with an injected fetch so the test
  * exercises the relay path, not the app's routes.
  */
+import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createServer } from 'http'
 import type { Server } from 'http'
@@ -109,12 +110,11 @@ describe('browser hub REST proxy', () => {
       login: ownerRow.login,
       displayName: null,
       avatarUrl: null,
-      role: ownerRow.role,
       status: ownerRow.status,
     }
 
     const { userCode, deviceCode } = startPairing(db, { hostname: 'devbox', platform: 'linux' })
-    approvePairing(db, userCode, owner.id, 'Dev box')
+    approvePairing(db, userCode, owner.id, BOOTSTRAP_WORKSPACE_ID, 'Dev box')
     const complete = completePairing(db, deviceCode)
     if (complete.status !== 'complete') throw new Error('pairing failed in setup')
     machineId = complete.machineId

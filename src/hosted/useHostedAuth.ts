@@ -12,7 +12,6 @@ export interface HostedUser {
   login: string
   displayName: string | null
   avatarUrl: string | null
-  role: 'owner' | 'admin' | 'member' | 'viewer'
   status: 'active' | 'pending' | 'disabled'
 }
 

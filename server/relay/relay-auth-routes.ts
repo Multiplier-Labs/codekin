@@ -15,25 +15,37 @@ import { randomBytes } from 'crypto'
 import type Database from 'better-sqlite3'
 import type { RelayConfig } from './relay-config.js'
 import { upsertUserFromGithub, getUserById, isGithubAccountAllowed } from './control-plane-db.js'
-import type { GithubProfile, UserRole, UserStatus, UserRow } from './control-plane-db.js'
+import type { GithubProfile, UserStatus, UserRow } from './control-plane-db.js'
 import type { SqliteSessionStore } from './sqlite-session-store.js'
 import { validateReturnTo } from './return-to.js'
 import { recordAuditEvent } from './audit.js'
 import { revokePendingDeviceLinks } from './device-link.js'
+import { listUserWorkspaces } from './workspaces.js'
 
 const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize'
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token'
 const GITHUB_USER_URL = 'https://api.github.com/user'
 const GITHUB_EMAILS_URL = 'https://api.github.com/user/emails'
 
-/** The subset of the user stored in the web session and returned by /api/me. */
+/**
+ * The subset of the user stored in the web session and returned by /api/me.
+ * Roles are per workspace and are never cached here.
+ */
 export interface SessionUser {
   id: string
   login: string
   displayName: string | null
   avatarUrl: string | null
-  role: UserRole
   status: UserStatus
+}
+
+/** The platform operator (OWNER_GITHUB_ID): creates workspaces, manages accounts. */
+export function isOperator(user: Pick<UserRow, 'github_id'>, config: Pick<RelayConfig, 'ownerGithubId'>): boolean {
+  return config.ownerGithubId > 0 && user.github_id === config.ownerGithubId
+}
+
+export function canCreateWorkspaces(user: UserRow, config: Pick<RelayConfig, 'ownerGithubId'>): boolean {
+  return user.status === 'active' && (isOperator(user, config) || user.can_create_workspaces === 1)
 }
 
 declare module 'express-session' {
@@ -320,8 +332,18 @@ export function createRelayAuthRouter({
     const sessionUser = req.session.user
     const current = sessionUser ? getUserById(db, sessionUser.id) : undefined
     if (sessionUser && !current) delete req.session.user
-    if (current) req.session.user = toSessionUser(current)
-    res.json({ user: req.session.user ?? null })
+    if (!current) {
+      res.json({ user: null })
+      return
+    }
+    req.session.user = toSessionUser(current)
+    const active = current.status === 'active'
+    res.json({
+      user: req.session.user,
+      workspaces: active ? listUserWorkspaces(db, current.id) : [],
+      isOperator: active && isOperator(current, config),
+      canCreateWorkspaces: canCreateWorkspaces(current, config),
+    })
   })
 
   return router
@@ -371,7 +393,6 @@ export function toSessionUser(row: UserRow): SessionUser {
     login: row.login,
     displayName: row.display_name,
     avatarUrl: row.avatar_url,
-    role: row.role,
     status: row.status,
   }
 }

@@ -1,4 +1,5 @@
 /** Tests for control-plane DB: access resolution and user upsert semantics. */
+import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import type Database from 'better-sqlite3'
 import {
@@ -6,7 +7,6 @@ import {
   resolveUserAccess,
   upsertUserFromGithub,
   listMachines,
-  DEFAULT_ORG_ID,
 } from './control-plane-db.js'
 
 const OWNER_ID = 1
@@ -25,28 +25,33 @@ function profile(overrides: Partial<Parameters<typeof upsertUserFromGithub>[1]> 
 }
 
 describe('resolveUserAccess', () => {
-  it('grants the owner role to the owner id', () => {
-    expect(resolveUserAccess(OWNER_ID, POLICY)).toEqual({ role: 'owner', status: 'active' })
+  it('admits the owner id as owner of the bootstrap workspace', () => {
+    expect(resolveUserAccess(OWNER_ID, POLICY)).toEqual({ status: 'active', bootstrapRole: 'owner' })
   })
 
-  it('grants active member to allowlisted ids', () => {
-    expect(resolveUserAccess(TEAMMATE_ID, POLICY)).toEqual({ role: 'member', status: 'active' })
+  it('admits allowlisted ids as bootstrap members', () => {
+    expect(resolveUserAccess(TEAMMATE_ID, POLICY)).toEqual({ status: 'active', bootstrapRole: 'member' })
   })
 
-  it('puts everyone else in pending', () => {
-    expect(resolveUserAccess(999, POLICY)).toEqual({ role: 'member', status: 'pending' })
+  it('puts everyone else in pending with no workspace', () => {
+    expect(resolveUserAccess(999, POLICY)).toEqual({ status: 'pending', bootstrapRole: null })
   })
 
   it('never treats an unconfigured owner id as a match', () => {
     expect(resolveUserAccess(0, { ownerGithubId: 0, allowedGithubIds: [] })).toEqual({
-      role: 'member',
       status: 'pending',
+      bootstrapRole: null,
     })
   })
 })
 
 describe('upsertUserFromGithub', () => {
   let db: Database.Database
+
+  const bootstrapRole = (userId: string) =>
+    (db
+      .prepare('SELECT role FROM workspace_memberships WHERE workspace_id = ? AND user_id = ?')
+      .get(BOOTSTRAP_WORKSPACE_ID, userId) as { role: string } | undefined)?.role
 
   beforeEach(() => {
     db = openControlPlaneDb(':memory:')
@@ -56,25 +61,38 @@ describe('upsertUserFromGithub', () => {
     db.close()
   })
 
-  it('creates a pending user for a non-allowlisted account', () => {
+  it('creates a pending user with no membership for a non-allowlisted account', () => {
     const user = upsertUserFromGithub(db, profile(), POLICY)
     expect(user.status).toBe('pending')
-    expect(user.role).toBe('member')
-    expect(user.organization_id).toBe(DEFAULT_ORG_ID)
+    expect(bootstrapRole(user.id)).toBeUndefined()
   })
 
-  it('creates an active owner for the owner id', () => {
+  it('creates an active owner of the bootstrap workspace for the owner id', () => {
     const user = upsertUserFromGithub(db, profile({ id: OWNER_ID, login: 'alari76' }), POLICY)
     expect(user.status).toBe('active')
-    expect(user.role).toBe('owner')
+    expect(bootstrapRole(user.id)).toBe('owner')
   })
 
   it('does not activate a different account that claims the owner login', () => {
     // The owner renamed on GitHub; an attacker registered the freed login.
     // Their github_id differs, so they must land in pending, not owner.
     const attacker = upsertUserFromGithub(db, profile({ id: 666, login: 'alari76' }), POLICY)
-    expect(attacker.role).toBe('member')
     expect(attacker.status).toBe('pending')
+    expect(bootstrapRole(attacker.id)).toBeUndefined()
+  })
+
+  it('adds the bootstrap membership when a pending user is admitted', () => {
+    const before = upsertUserFromGithub(db, profile(), POLICY)
+    const after = upsertUserFromGithub(db, profile(), { ...POLICY, allowedGithubIds: [1001] })
+    expect(after.status).toBe('active')
+    expect(bootstrapRole(before.id)).toBe('member')
+  })
+
+  it('does not re-add a member who was removed from the bootstrap workspace', () => {
+    const user = upsertUserFromGithub(db, profile({ id: TEAMMATE_ID, login: 'teammate' }), POLICY)
+    db.prepare('DELETE FROM workspace_memberships WHERE user_id = ?').run(user.id)
+    upsertUserFromGithub(db, profile({ id: TEAMMATE_ID, login: 'teammate' }), POLICY)
+    expect(bootstrapRole(user.id)).toBeUndefined()
   })
 
   it('clears a stale duplicate login when the current holder signs in', () => {
@@ -127,7 +145,7 @@ describe('upsertUserFromGithub', () => {
 describe('listMachines', () => {
   it('returns an empty list on a fresh database', () => {
     const db = openControlPlaneDb(':memory:')
-    expect(listMachines(db)).toEqual([])
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)).toEqual([])
     db.close()
   })
 })

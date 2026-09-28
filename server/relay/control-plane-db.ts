@@ -1,10 +1,11 @@
 /**
- * Control-plane database: users, machines, shares, audit events.
+ * Control-plane database: users, workspaces, machines, shares, audit events.
  *
- * Schema v1 per docs/HOSTED-RELAY-IMPLEMENTATION-PLAN.md §5. Tables that
- * later phases populate (machine_credentials, pairing_requests,
- * session_shares, audit_events) are created now so those phases are data
- * changes, not schema changes.
+ * SCHEMA is the original (version 0) layout from
+ * docs/HOSTED-RELAY-IMPLEMENTATION-PLAN.md §5. Everything since is a numbered
+ * migration (MIGRATIONS), including the move from one hardcoded organization
+ * to workspaces with per-workspace memberships
+ * (docs/HOSTED-WORKSPACES-AND-MFA-PLAN.md, Phase 1).
  */
 
 import Database from 'better-sqlite3'
@@ -12,24 +13,31 @@ import { randomUUID } from 'crypto'
 import { mkdirSync, chmodSync } from 'fs'
 import { dirname } from 'path'
 
-export type UserRole = 'owner' | 'admin' | 'member' | 'viewer'
+/** A role within one workspace (workspace_memberships.role). */
+export type WorkspaceRole = 'owner' | 'admin' | 'member' | 'viewer'
+/**
+ * Platform-wide account status. `disabled` is the operator's kill switch and
+ * applies in every workspace; per-workspace standing lives on the membership.
+ */
 export type UserStatus = 'active' | 'pending' | 'disabled'
 
 export interface UserRow {
   id: string
-  organization_id: string
   github_id: number
   login: string
   display_name: string | null
   email: string | null
   avatar_url: string | null
-  role: UserRole
   status: UserStatus
+  /** 0/1: may create workspaces (the operator always may). */
+  can_create_workspaces: number
 }
 
 export interface MachineRow {
   id: string
-  organization_id: string
+  workspace_id: string
+  /** Set when the owner left the workspace; unreachable until transferred or removed. */
+  quarantined_at: string | null
   owner_user_id: string
   display_name: string
   hostname: string | null
@@ -40,9 +48,13 @@ export interface MachineRow {
   last_seen_at: string | null
 }
 
-/** Single hardcoded organization for the MVP (multi-org is a data change later). */
-export const DEFAULT_ORG_ID = 'org-default'
-export const DEFAULT_ORG_NAME = 'Multiplier Labs'
+/**
+ * The workspace every pre-workspace deployment is migrated into, and where
+ * allowlisted accounts (OWNER_GITHUB_ID, ALLOWED_GITHUB_IDS) are admitted
+ * until invitations replace the allowlist. The id predates workspaces.
+ */
+export const BOOTSTRAP_WORKSPACE_ID = 'org-default'
+export const BOOTSTRAP_WORKSPACE_NAME = 'Multiplier Labs'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS organizations (
@@ -159,9 +171,10 @@ CREATE TABLE IF NOT EXISTS audit_events (
 
 /**
  * Versioned schema changes on top of SCHEMA, tracked in `PRAGMA user_version`.
- * SCHEMA is idempotent `CREATE ... IF NOT EXISTS`, so it can only add tables;
- * anything that alters an existing table goes here, in order, and each step
- * runs exactly once per database. Never edit or reorder a shipped step.
+ * Each step runs exactly once per database, in order, inside a transaction
+ * with foreign-key enforcement off (so tables can be rebuilt) and a
+ * foreign_key_check before commit. Never edit or reorder a shipped step, and
+ * never add to SCHEMA: new tables are migrations too.
  */
 const MIGRATIONS: Array<(db: Database.Database) => void> = [
   // 1: web_sessions.user_id, so revoking a user's sessions is an indexed
@@ -175,15 +188,97 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
              WHERE user_id IS NULL AND json_valid(sess)`)
     db.exec('CREATE INDEX IF NOT EXISTS idx_web_sessions_user ON web_sessions(user_id)')
   },
+
+  // 2: workspaces. The single organization becomes the first workspace and
+  // each user's global role becomes a membership in it. users loses role and
+  // organization_id (rebuilt: SQLite cannot drop an FK column in place);
+  // audit_events.workspace_id becomes nullable for account-level events.
+  db => {
+    db.exec(`
+      ALTER TABLE organizations RENAME TO workspaces;
+      ALTER TABLE workspaces ADD COLUMN require_mfa INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE workspaces ADD COLUMN created_by_user_id TEXT;
+      ALTER TABLE workspaces ADD COLUMN deleted_at TEXT;
+
+      CREATE TABLE workspace_memberships (
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+        user_id TEXT NOT NULL REFERENCES users(id),
+        role TEXT NOT NULL CHECK (role IN ('owner', 'admin', 'member', 'viewer')),
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
+        invited_by_user_id TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (workspace_id, user_id)
+      );
+      CREATE INDEX idx_workspace_memberships_user ON workspace_memberships(user_id);
+
+      INSERT INTO workspace_memberships (workspace_id, user_id, role)
+        SELECT organization_id, id,
+               CASE WHEN role IN ('owner', 'admin', 'member', 'viewer') THEN role ELSE 'member' END
+        FROM users WHERE status != 'pending';
+
+      CREATE TABLE users_v2 (
+        id TEXT PRIMARY KEY,
+        github_id INTEGER UNIQUE NOT NULL,
+        login TEXT NOT NULL,
+        display_name TEXT,
+        email TEXT,
+        avatar_url TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        can_create_workspaces INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+      INSERT INTO users_v2 (id, github_id, login, display_name, email, avatar_url, status, created_at, updated_at)
+        SELECT id, github_id, login, display_name, email, avatar_url, status, created_at, updated_at FROM users;
+      DROP TABLE users;
+      ALTER TABLE users_v2 RENAME TO users;
+
+      ALTER TABLE machines RENAME COLUMN organization_id TO workspace_id;
+      ALTER TABLE machines ADD COLUMN quarantined_at TEXT;
+      CREATE INDEX idx_machines_workspace ON machines(workspace_id);
+      ALTER TABLE session_shares RENAME COLUMN organization_id TO workspace_id;
+
+      CREATE TABLE audit_events_v2 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        workspace_id TEXT,
+        kind TEXT NOT NULL,
+        actor_user_id TEXT,
+        machine_id TEXT,
+        local_session_id TEXT,
+        ip TEXT,
+        user_agent TEXT,
+        metadata TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+      );
+      INSERT INTO audit_events_v2
+        SELECT id, organization_id, kind, actor_user_id, machine_id, local_session_id, ip, user_agent, metadata, created_at
+        FROM audit_events;
+      DROP TABLE audit_events;
+      ALTER TABLE audit_events_v2 RENAME TO audit_events;
+      CREATE INDEX idx_audit_events_workspace ON audit_events(workspace_id, id);
+    `)
+  },
 ]
 
 function runMigrations(db: Database.Database): void {
   const current = db.pragma('user_version', { simple: true }) as number
-  for (let version = current; version < MIGRATIONS.length; version++) {
-    db.transaction(() => {
-      MIGRATIONS[version](db)
-      db.pragma(`user_version = ${version + 1}`)
-    })()
+  if (current >= MIGRATIONS.length) return
+  // Must be toggled outside a transaction; table rebuilds need it off.
+  db.pragma('foreign_keys = OFF')
+  try {
+    for (let version = current; version < MIGRATIONS.length; version++) {
+      db.transaction(() => {
+        MIGRATIONS[version](db)
+        const violations = db.pragma('foreign_key_check') as unknown[]
+        if (violations.length > 0) {
+          throw new Error(`control-plane migration ${version + 1} left ${violations.length} foreign-key violation(s)`)
+        }
+        db.pragma(`user_version = ${version + 1}`)
+      })()
+    }
+  } finally {
+    db.pragma('foreign_keys = ON')
   }
 }
 
@@ -195,11 +290,13 @@ export function openControlPlaneDb(path: string): Database.Database {
   const db = new Database(path)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
-  db.exec(SCHEMA)
+  // The version-0 layout; after that the database is shaped by migrations
+  // alone (re-running SCHEMA would recreate tables they renamed away).
+  if ((db.pragma('user_version', { simple: true }) as number) === 0) db.exec(SCHEMA)
   runMigrations(db)
-  db.prepare('INSERT OR IGNORE INTO organizations (id, name) VALUES (?, ?)').run(
-    DEFAULT_ORG_ID,
-    DEFAULT_ORG_NAME,
+  db.prepare('INSERT OR IGNORE INTO workspaces (id, name) VALUES (?, ?)').run(
+    BOOTSTRAP_WORKSPACE_ID,
+    BOOTSTRAP_WORKSPACE_NAME,
   )
   if (path !== ':memory:') {
     try {
@@ -217,23 +314,26 @@ export interface AccessPolicy {
 }
 
 /**
- * Decide role and status for an authenticated GitHub account. The owner id
- * gets the owner role; allowlisted ids become active members; everyone else
- * lands in pending and sees the request-access screen.
+ * Decide admission for an authenticated GitHub account. The owner id and
+ * allowlisted ids are admitted (active) with a role in the bootstrap
+ * workspace; everyone else is pending.
  *
  * Matching is by GitHub's immutable numeric user id, never by login: a login
  * can be renamed and then re-registered by a stranger, and a login match
  * would auto-activate whoever holds the name today with the access meant for
  * whoever held it when the config was written.
  */
-export function resolveUserAccess(githubId: number, policy: AccessPolicy): { role: UserRole; status: UserStatus } {
+export function resolveUserAccess(
+  githubId: number,
+  policy: AccessPolicy,
+): { status: UserStatus; bootstrapRole: WorkspaceRole | null } {
   if (githubId > 0 && githubId === policy.ownerGithubId) {
-    return { role: 'owner', status: 'active' }
+    return { status: 'active', bootstrapRole: 'owner' }
   }
   if (policy.allowedGithubIds.includes(githubId)) {
-    return { role: 'member', status: 'active' }
+    return { status: 'active', bootstrapRole: 'member' }
   }
-  return { role: 'member', status: 'pending' }
+  return { status: 'pending', bootstrapRole: null }
 }
 
 /** Whether a GitHub identity may create a hosted Codekin account. */
@@ -252,10 +352,11 @@ export interface GithubProfile {
 /**
  * Insert or update a user from a GitHub profile at login time.
  *
- * Role/status from the allowlist only ever upgrade automatically: a user
- * manually promoted to active (or admin) in the DB is not demoted back to
- * pending/member just because the env allowlist doesn't mention them.
- * A disabled user stays disabled regardless of the allowlist.
+ * Status from the allowlist only ever upgrades automatically (pending →
+ * active); a disabled user stays disabled regardless of the allowlist.
+ * Admission adds a bootstrap-workspace membership once, when the account
+ * becomes active — never on later logins, so a member an admin removed from
+ * that workspace is not silently re-added by signing in again.
  */
 export function upsertUserFromGithub(
   db: Database.Database,
@@ -277,54 +378,51 @@ export function upsertUserFromGithub(
     .prepare('SELECT * FROM users WHERE github_id = ?')
     .get(profile.id) as UserRow | undefined
 
+  let userId: string
+  let admittedNow: boolean
   if (!existing) {
-    const id = randomUUID()
+    userId = randomUUID()
     db.prepare(
-      `INSERT INTO users (id, organization_id, github_id, login, display_name, email, avatar_url, role, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(
-      id,
-      DEFAULT_ORG_ID,
-      profile.id,
-      profile.login,
-      profile.name,
-      profile.email,
-      profile.avatarUrl,
-      resolved.role,
-      resolved.status,
-    )
-    return db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow
+      `INSERT INTO users (id, github_id, login, display_name, email, avatar_url, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(userId, profile.id, profile.login, profile.name, profile.email, profile.avatarUrl, resolved.status)
+    admittedNow = resolved.status === 'active'
+  } else {
+    userId = existing.id
+    const status: UserStatus =
+      existing.status === 'disabled'
+        ? 'disabled'
+        : existing.status === 'pending' && resolved.status === 'active'
+          ? 'active'
+          : existing.status
+    admittedNow = existing.status === 'pending' && status === 'active'
+    db.prepare(
+      `UPDATE users SET login = ?, display_name = ?, email = ?, avatar_url = ?, status = ?,
+         updated_at = datetime('now')
+       WHERE id = ?`,
+    ).run(profile.login, profile.name, profile.email, profile.avatarUrl, status, userId)
   }
 
-  const role = existing.role === 'member' && resolved.role === 'owner' ? 'owner' : existing.role
-  const status: UserStatus =
-    existing.status === 'disabled'
-      ? 'disabled'
-      : existing.status === 'pending' && resolved.status === 'active'
-        ? 'active'
-        : existing.status
+  if (admittedNow && resolved.bootstrapRole) {
+    db.prepare(
+      `INSERT OR IGNORE INTO workspace_memberships (workspace_id, user_id, role)
+       SELECT id, ?, ? FROM workspaces WHERE id = ? AND deleted_at IS NULL`,
+    ).run(userId, resolved.bootstrapRole, BOOTSTRAP_WORKSPACE_ID)
+  }
 
-  db.prepare(
-    `UPDATE users SET login = ?, display_name = ?, email = ?, avatar_url = ?, role = ?, status = ?,
-       updated_at = datetime('now')
-     WHERE id = ?`,
-  ).run(profile.login, profile.name, profile.email, profile.avatarUrl, role, status, existing.id)
-
-  return db.prepare('SELECT * FROM users WHERE id = ?').get(existing.id) as UserRow
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as UserRow
 }
 
-/** All users in the default org, for the admin user-management view. */
+/** Every account on the platform, for the operator's user view. */
 export function listUsers(db: Database.Database): UserRow[] {
-  return db
-    .prepare('SELECT * FROM users WHERE organization_id = ? ORDER BY login COLLATE NOCASE')
-    .all(DEFAULT_ORG_ID) as UserRow[]
+  return db.prepare('SELECT * FROM users ORDER BY login COLLATE NOCASE').all() as UserRow[]
 }
 
-/** List machines in the default org (MVP: all machines, newest first). */
-export function listMachines(db: Database.Database): MachineRow[] {
+/** Machines in one workspace, newest first. */
+export function listMachines(db: Database.Database, workspaceId: string): MachineRow[] {
   return db
-    .prepare('SELECT * FROM machines WHERE organization_id = ? ORDER BY created_at DESC')
-    .all(DEFAULT_ORG_ID) as MachineRow[]
+    .prepare('SELECT * FROM machines WHERE workspace_id = ? ORDER BY created_at DESC')
+    .all(workspaceId) as MachineRow[]
 }
 
 /** One machine by id, for ownership checks. */

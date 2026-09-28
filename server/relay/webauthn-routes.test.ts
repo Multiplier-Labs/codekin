@@ -40,7 +40,6 @@ describe('webauthn routes', () => {
       login: row.login,
       displayName: null,
       avatarUrl: null,
-      role: row.role,
       status: row.status,
     }
 

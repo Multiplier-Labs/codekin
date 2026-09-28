@@ -6,6 +6,7 @@
  * never reach the local server — so the enforcement holds even if the hub
  * forwards something it should not have.
  */
+import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createServer } from 'http'
 import type { Server } from 'http'
@@ -125,7 +126,6 @@ function toSessionUser(row: UserRow): SessionUser {
     login: row.login,
     displayName: null,
     avatarUrl: null,
-    role: row.role,
     status: row.status,
   }
 }
@@ -169,7 +169,7 @@ describe('a shared-in user over the relay', () => {
     connectingUser = toSessionUser(guest)
 
     const { userCode, deviceCode } = startPairing(db, { hostname: 'box', platform: 'linux' })
-    approvePairing(db, userCode, owner.id, 'Dev box')
+    approvePairing(db, userCode, owner.id, BOOTSTRAP_WORKSPACE_ID, 'Dev box')
     const complete = completePairing(db, deviceCode)
     if (complete.status !== 'complete') throw new Error('pairing failed')
     machineId = complete.machineId

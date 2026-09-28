@@ -1,4 +1,5 @@
 /** Tests for the device-code pairing lifecycle and machine credentials. */
+import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type Database from 'better-sqlite3'
 import { openControlPlaneDb, upsertUserFromGithub, listMachines } from './control-plane-db.js'
@@ -38,7 +39,7 @@ describe('pairing lifecycle', () => {
   })
 
   it('precreate mints a pre-approved token the installer claims in one step, with hostname backfill', () => {
-    const pre = precreatePairing(db, userId)
+    const pre = precreatePairing(db, userId, BOOTSTRAP_WORKSPACE_ID)
 
     const complete = completePairing(db, pre.pairingToken, { hostname: 'fresh-laptop', platform: 'darwin' })
     expect(complete.status).toBe('complete')
@@ -47,7 +48,7 @@ describe('pairing lifecycle', () => {
     expect(verifyMachineCredential(db, complete.machineId, complete.machineSecret)).toBe(true)
 
     // The machine row was created blind at precreate — the claim named it.
-    const machines = listMachines(db)
+    const machines = listMachines(db, BOOTSTRAP_WORKSPACE_ID)
     expect(machines[0].hostname).toBe('fresh-laptop')
     expect(machines[0].display_name).toBe('fresh-laptop')
 
@@ -57,16 +58,16 @@ describe('pairing lifecycle', () => {
 
   it('a precreated token honors the explicit display name and the pairing TTL', () => {
     vi.useFakeTimers()
-    const pre = precreatePairing(db, userId, 'Build server')
+    const pre = precreatePairing(db, userId, BOOTSTRAP_WORKSPACE_ID, 'Build server')
 
     vi.advanceTimersByTime(11 * 60 * 1000)
     expect(completePairing(db, pre.pairingToken)).toEqual({ status: 'expired' })
 
     vi.useRealTimers()
-    const fresh = precreatePairing(db, userId, 'Build server')
+    const fresh = precreatePairing(db, userId, BOOTSTRAP_WORKSPACE_ID, 'Build server')
     const complete = completePairing(db, fresh.pairingToken, { hostname: 'ci-01' })
     expect(complete.status).toBe('complete')
-    const named = listMachines(db).find((m) => m.id === fresh.machineId)
+    const named = listMachines(db, BOOTSTRAP_WORKSPACE_ID).find((m) => m.id === fresh.machineId)
     expect(named?.display_name).toBe('Build server')
     expect(named?.hostname).toBe('ci-01')
   })
@@ -89,7 +90,7 @@ describe('pairing lifecycle', () => {
 
     expect(completePairing(db, deviceCode)).toEqual({ status: 'pending' })
 
-    const approval = approvePairing(db, userCode, userId, 'Dev box')
+    const approval = approvePairing(db, userCode, userId, BOOTSTRAP_WORKSPACE_ID, 'Dev box')
     expect(approval.ok).toBe(true)
 
     const complete = completePairing(db, deviceCode)
@@ -101,7 +102,7 @@ describe('pairing lifecycle', () => {
     // Replay must not mint a second credential
     expect(completePairing(db, deviceCode)).toEqual({ status: 'not_found' })
 
-    const machines = listMachines(db)
+    const machines = listMachines(db, BOOTSTRAP_WORKSPACE_ID)
     expect(machines).toHaveLength(1)
     expect(machines[0].display_name).toBe('Dev box')
     expect(machines[0].hostname).toBe('devbox')
@@ -111,7 +112,7 @@ describe('pairing lifecycle', () => {
     const { userCode, deviceCode } = startPairing(db, {})
     expect(denyPairing(db, userCode, userId)).toBe(true)
     expect(completePairing(db, deviceCode)).toEqual({ status: 'denied' })
-    expect(listMachines(db)).toHaveLength(0)
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)).toHaveLength(0)
   })
 
   it('expired requests cannot be approved or completed', () => {
@@ -119,14 +120,14 @@ describe('pairing lifecycle', () => {
     const { userCode, deviceCode } = startPairing(db, {})
     vi.advanceTimersByTime(11 * 60 * 1000)
     expect(getPairingInfo(db, userCode)?.status).toBe('expired')
-    expect(approvePairing(db, userCode, userId)).toEqual({ ok: false, reason: 'expired' })
+    expect(approvePairing(db, userCode, userId, BOOTSTRAP_WORKSPACE_ID)).toEqual({ ok: false, reason: 'expired' })
     expect(completePairing(db, deviceCode)).toEqual({ status: 'expired' })
   })
 
   it('approving twice fails', () => {
     const { userCode } = startPairing(db, {})
-    expect(approvePairing(db, userCode, userId).ok).toBe(true)
-    expect(approvePairing(db, userCode, userId)).toEqual({ ok: false, reason: 'not_pending' })
+    expect(approvePairing(db, userCode, userId, BOOTSTRAP_WORKSPACE_ID).ok).toBe(true)
+    expect(approvePairing(db, userCode, userId, BOOTSTRAP_WORKSPACE_ID)).toEqual({ ok: false, reason: 'not_pending' })
   })
 
   it('unknown device codes are not found', () => {
@@ -135,12 +136,12 @@ describe('pairing lifecycle', () => {
 
   it('removeMachine revokes credentials and deletes the machine', () => {
     const { userCode, deviceCode } = startPairing(db, {})
-    approvePairing(db, userCode, userId)
+    approvePairing(db, userCode, userId, BOOTSTRAP_WORKSPACE_ID)
     const complete = completePairing(db, deviceCode)
     if (complete.status !== 'complete') throw new Error('expected complete')
 
     expect(removeMachine(db, complete.machineId)).toBe(true)
-    expect(listMachines(db)).toHaveLength(0)
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)).toHaveLength(0)
     expect(verifyMachineCredential(db, complete.machineId, complete.machineSecret)).toBe(false)
     expect(removeMachine(db, complete.machineId)).toBe(false)
   })
@@ -165,7 +166,7 @@ describe('unclaimed machine hygiene', () => {
   })
 
   it('reports a precreated machine as setup-pending until its installer claims it', () => {
-    const pre = precreatePairing(db, userId)
+    const pre = precreatePairing(db, userId, BOOTSTRAP_WORKSPACE_ID)
     const before = getMachineSetupStates(db).get(pre.machineId)
     expect(isSetupPending(before)).toBe(true)
     expect(before?.pendingPairingExpiresAt).toBe(pre.expiresAt)
@@ -178,21 +179,21 @@ describe('unclaimed machine hygiene', () => {
 
   it('an expired, unclaimed precreate is no longer setup-pending and is swept', () => {
     vi.useFakeTimers()
-    const pre = precreatePairing(db, userId)
+    const pre = precreatePairing(db, userId, BOOTSTRAP_WORKSPACE_ID)
     // Still claimable: the sweep leaves it alone
     expect(sweepOrphanMachines(db)).toEqual([])
 
     vi.advanceTimersByTime(11 * 60 * 1000)
     expect(isSetupPending(getMachineSetupStates(db).get(pre.machineId))).toBe(false)
     expect(sweepOrphanMachines(db)).toEqual([pre.machineId])
-    expect(listMachines(db)).toHaveLength(0)
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)).toHaveLength(0)
     // The stale token still reads as expired, not as an unexplained miss
     expect(completePairing(db, pre.pairingToken)).toEqual({ status: 'expired' })
   })
 
   it('never sweeps a machine that has held a credential, even long after its pairing expired', () => {
     vi.useFakeTimers()
-    const pre = precreatePairing(db, userId)
+    const pre = precreatePairing(db, userId, BOOTSTRAP_WORKSPACE_ID)
     const complete = completePairing(db, pre.pairingToken, { hostname: 'laptop' })
     expect(complete.status).toBe('complete')
     // A revoked credential still counts as "had one"
@@ -200,38 +201,38 @@ describe('unclaimed machine hygiene', () => {
 
     vi.advanceTimersByTime(24 * 60 * 60 * 1000)
     expect(sweepOrphanMachines(db)).toEqual([])
-    expect(listMachines(db)).toHaveLength(1)
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)).toHaveLength(1)
   })
 
   it('never sweeps a machine with no linked pairing request', () => {
     db.prepare(
-      `INSERT INTO machines (id, organization_id, owner_user_id, display_name, status)
+      `INSERT INTO machines (id, workspace_id, owner_user_id, display_name, status)
        VALUES ('legacy', 'org-default', ?, 'Legacy', 'offline')`,
     ).run(userId)
     expect(sweepOrphanMachines(db, Date.now() + 365 * 24 * 60 * 60 * 1000)).toEqual([])
-    expect(listMachines(db)).toHaveLength(1)
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)).toHaveLength(1)
   })
 
   it('sweeps a device-code approval whose CLI never came back', () => {
     vi.useFakeTimers()
     const { userCode } = startPairing(db, { hostname: 'devbox' })
-    const approved = approvePairing(db, userCode, userId)
+    const approved = approvePairing(db, userCode, userId, BOOTSTRAP_WORKSPACE_ID)
     if (!approved.ok) throw new Error('expected approval')
     vi.advanceTimersByTime(11 * 60 * 1000)
     expect(sweepOrphanMachines(db)).toEqual([approved.machineId])
   })
 
   it('discardUnclaimedMachine invalidates the pending token immediately', () => {
-    const pre = precreatePairing(db, userId)
+    const pre = precreatePairing(db, userId, BOOTSTRAP_WORKSPACE_ID)
     expect(discardUnclaimedMachine(db, pre.machineId)).toBe(true)
-    expect(listMachines(db)).toHaveLength(0)
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)).toHaveLength(0)
     expect(completePairing(db, pre.pairingToken)).toEqual({ status: 'expired' })
   })
 
   it('discardUnclaimedMachine refuses a machine that has been claimed', () => {
-    const pre = precreatePairing(db, userId)
+    const pre = precreatePairing(db, userId, BOOTSTRAP_WORKSPACE_ID)
     completePairing(db, pre.pairingToken)
     expect(discardUnclaimedMachine(db, pre.machineId)).toBe(false)
-    expect(listMachines(db)).toHaveLength(1)
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)).toHaveLength(1)
   })
 })
