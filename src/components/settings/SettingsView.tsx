@@ -293,7 +293,7 @@ export function SettingsView({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-page">
+    <div className="settings-view flex min-h-0 flex-1 flex-col bg-page">
       <header className="flex shrink-0 items-center gap-2 border-b border-edge px-4 py-3">
         {isMobile && showContent ? (
           <button onClick={() => { onNavigate(null) }} className="flex items-center gap-1 rounded-control px-1.5 py-1 text-body text-ink-muted transition hover:bg-surface-raised hover:text-ink">
