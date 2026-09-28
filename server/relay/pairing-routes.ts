@@ -98,6 +98,11 @@ export function createPairingRouter(
   // has never held a credential is removed and its token invalidated first,
   // so repeated regeneration leaves at most one pending record.
   router.post('/api/machines/pair/precreate', requireActiveUser, (req, res) => {
+    // Viewers are read-only: registering a machine would make them its owner.
+    if (req.session.user?.role === 'viewer') {
+      res.status(403).json({ error: 'viewers_cannot_pair' })
+      return
+    }
     const body = (req.body ?? {}) as { displayName?: unknown; replaceMachineId?: unknown }
     const displayName = typeof body.displayName === 'string' ? body.displayName.slice(0, 64) : undefined
     const userId = req.session.user?.id ?? ''
@@ -189,6 +194,10 @@ export function createPairingRouter(
   })
 
   router.post('/api/machines/pair/approve', requireActiveUser, (req, res) => {
+    if (req.session.user?.role === 'viewer') {
+      res.status(403).json({ error: 'viewers_cannot_pair' })
+      return
+    }
     const body = (req.body ?? {}) as { code?: unknown; displayName?: unknown }
     const code = typeof body.code === 'string' ? body.code : ''
     const displayName = typeof body.displayName === 'string' ? body.displayName.slice(0, 128) : undefined

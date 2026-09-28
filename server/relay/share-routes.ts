@@ -13,15 +13,22 @@ import { createRequireActiveUser } from './relay-auth-routes.js'
 import {
   SHARE_ROLES,
   deleteShare,
+  exceedsRoleCap,
   getShare,
   listSharesBy,
   listSharesFor,
   normalizePermissions,
+  parseShareExpiry,
   updateSharePermissions,
   upsertShare,
 } from './shares.js'
 import type { SessionPermission, ShareRole } from './shares.js'
 import { listAuditEvents, recordAuditEvent } from './audit.js'
+import { getUserById } from './control-plane-db.js'
+import type { UserRole } from './control-plane-db.js'
+
+const INVALID_EXPIRY = { error: 'expiresAt must be a future ISO-8601 time or null' }
+const VIEWER_CAP = { error: 'Viewers can only receive view-only access' }
 
 /** Upper bound on a single CSV export, so one request cannot read the table. */
 const MAX_EXPORT_ROWS = 500
@@ -97,8 +104,8 @@ export function createShareRouter(db: Database.Database, browserHub?: BrowserHub
       return
     }
     const granteeMatches = db
-      .prepare('SELECT id, status FROM users WHERE lower(login) = lower(?)')
-      .all(body.granteeLogin) as Array<{ id: string; status: string }>
+      .prepare('SELECT id, status, role FROM users WHERE lower(login) = lower(?)')
+      .all(body.granteeLogin) as Array<{ id: string; status: string; role: UserRole }>
     if (granteeMatches.length === 0) {
       res.status(404).json({ error: 'No such user has signed in yet' })
       return
@@ -127,6 +134,15 @@ export function createShareRouter(db: Database.Database, browserHub?: BrowserHub
       res.status(400).json({ error: 'Provide a valid role or permission list' })
       return
     }
+    if (exceedsRoleCap(permissions, grantee.role)) {
+      res.status(400).json(VIEWER_CAP)
+      return
+    }
+    const expiry = parseShareExpiry(body.expiresAt)
+    if (!expiry.ok) {
+      res.status(400).json(INVALID_EXPIRY)
+      return
+    }
 
     const share = upsertShare(db, {
       machineId: body.machineId,
@@ -134,7 +150,7 @@ export function createShareRouter(db: Database.Database, browserHub?: BrowserHub
       sharedByUserId: user.id,
       granteeUserId: grantee.id,
       permissions,
-      expiresAt: typeof body.expiresAt === 'string' ? body.expiresAt : null,
+      expiresAt: expiry.value ?? null,
     })
     if (share.granteeUserId) {
       browserHub?.reauthorize({ userId: share.granteeUserId, machineId: share.machineId })
@@ -172,12 +188,22 @@ export function createShareRouter(db: Database.Database, browserHub?: BrowserHub
       res.status(400).json({ error: 'Provide a valid role or permission list' })
       return
     }
+    const granteeRole = share.granteeUserId ? getUserById(db, share.granteeUserId)?.role : undefined
+    if (exceedsRoleCap(permissions, granteeRole)) {
+      res.status(400).json(VIEWER_CAP)
+      return
+    }
+    const expiry = parseShareExpiry(body.expiresAt)
+    if (!expiry.ok) {
+      res.status(400).json(INVALID_EXPIRY)
+      return
+    }
 
     const updated = updateSharePermissions(
       db,
       share.id,
       permissions,
-      typeof body.expiresAt === 'string' ? body.expiresAt : body.expiresAt === null ? null : undefined,
+      expiry.value,
     )
     // A connected grantee is working from the permissions resolved at hello;
     // drop their sockets so a reconnect picks up the narrowed grant.

@@ -20,6 +20,7 @@ import type { UserRole, UserStatus, UserRow } from './control-plane-db.js'
 import { recordAuditEvent } from './audit.js'
 import type { BrowserHub } from './browser-hub.js'
 import type { RelayConfig } from './relay-config.js'
+import { revokePendingDeviceLinks } from './device-link.js'
 import type { SqliteSessionStore } from './sqlite-session-store.js'
 
 /** The slice of the session store this router needs (kept narrow for tests). */
@@ -158,6 +159,7 @@ export function createUserRouter(
     let destroyedSessions = 0
     if (nextStatus !== 'active') {
       destroyedSessions = store?.destroyUserSessions(target.id) ?? 0
+      revokePendingDeviceLinks(db, target.id)
     }
 
     recordAuditEvent(db, {

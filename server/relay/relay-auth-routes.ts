@@ -18,6 +18,8 @@ import { upsertUserFromGithub, getUserById, isGithubAccountAllowed } from './con
 import type { GithubProfile, UserRole, UserStatus, UserRow } from './control-plane-db.js'
 import type { SqliteSessionStore } from './sqlite-session-store.js'
 import { validateReturnTo } from './return-to.js'
+import { recordAuditEvent } from './audit.js'
+import { revokePendingDeviceLinks } from './device-link.js'
 
 const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize'
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token'
@@ -40,8 +42,14 @@ declare module 'express-session' {
     oauthState?: string
     /** Validated same-origin path to land on after the OAuth round trip. */
     oauthReturnTo?: string
+    /** How this session was signed in; the basis for MFA assurance and step-up. */
+    authMethod?: AuthMethod
+    /** Epoch ms of sign-in. Bounds the session's absolute lifetime. */
+    authenticatedAt?: number
   }
 }
+
+export type AuthMethod = 'github' | 'passkey' | 'device_link'
 
 function toError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err))
@@ -72,6 +80,23 @@ function destroySession(req: Request): Promise<void> {
   })
 }
 
+/**
+ * The one way a request becomes signed in. Every login path (GitHub OAuth,
+ * passkey, device link) ends here, so a new session always gets a fresh id
+ * (session fixation) and the same sign-in metadata.
+ */
+export async function establishSession(req: Request, user: UserRow, method: AuthMethod): Promise<void> {
+  await regenerateSession(req)
+  req.session.user = toSessionUser(user)
+  req.session.authMethod = method
+  req.session.authenticatedAt = Date.now()
+  await saveSession(req)
+}
+
+export function requestAuditMeta(req: Request): { ip: string | null; userAgent: string | null } {
+  return { ip: req.ip ?? null, userAgent: req.get('user-agent') ?? null }
+}
+
 /** Redirect to the SPA with an error code it can render on the login screen. */
 function failLogin(res: Response, code: string): void {
   res.redirect(`/?auth_error=${encodeURIComponent(code)}`)
@@ -84,10 +109,28 @@ export interface AuthRouterDeps {
   fetchImpl?: typeof fetch
   store?: SqliteSessionStore
   disconnectUser?: (userId: string, reason: string) => void
+  /** Close the browser sockets opened under one web session. */
+  disconnectSession?: (sessionId: string, reason: string) => void
 }
 
-export function createRelayAuthRouter({ db, config, fetchImpl = fetch, store, disconnectUser }: AuthRouterDeps): Router {
+export function createRelayAuthRouter({
+  db,
+  config,
+  fetchImpl = fetch,
+  store,
+  disconnectUser,
+  disconnectSession,
+}: AuthRouterDeps): Router {
   const router = Router()
+
+  const loginFailed = (req: Request, res: Response, code: string, detail: { githubId?: number } = {}) => {
+    recordAuditEvent(db, {
+      kind: 'login_failed',
+      ...requestAuditMeta(req),
+      metadata: { method: 'github', reason: code, ...detail },
+    })
+    failLogin(res, code)
+  }
 
   // Public, unauthenticated: what the sign-in page may say before OAuth.
   // Admission is always by allowlist (owner + ALLOWED_GITHUB_IDS), so the
@@ -129,7 +172,7 @@ export function createRelayAuthRouter({ db, config, fetchImpl = fetch, store, di
       const state = typeof req.query.state === 'string' ? req.query.state : ''
 
       if (!code || !state || !req.session.oauthState || state !== req.session.oauthState) {
-        failLogin(res, 'state_mismatch')
+        loginFailed(req, res, 'state_mismatch')
         return
       }
       delete req.session.oauthState
@@ -148,12 +191,12 @@ export function createRelayAuthRouter({ db, config, fetchImpl = fetch, store, di
         }),
       })
       if (!tokenRes.ok) {
-        failLogin(res, 'token_exchange_failed')
+        loginFailed(req, res, 'token_exchange_failed')
         return
       }
       const tokenData = (await tokenRes.json()) as { access_token?: string; error?: string }
       if (!tokenData.access_token) {
-        failLogin(res, tokenData.error || 'token_exchange_failed')
+        loginFailed(req, res, tokenData.error || 'token_exchange_failed')
         return
       }
 
@@ -164,7 +207,7 @@ export function createRelayAuthRouter({ db, config, fetchImpl = fetch, store, di
       }
       const userRes = await fetchImpl(GITHUB_USER_URL, { headers: ghHeaders })
       if (!userRes.ok) {
-        failLogin(res, 'profile_fetch_failed')
+        loginFailed(req, res, 'profile_fetch_failed')
         return
       }
       const gh = (await userRes.json()) as {
@@ -209,7 +252,7 @@ export function createRelayAuthRouter({ db, config, fetchImpl = fetch, store, di
       const provisional = !existing || existing.status === 'pending'
       if (provisional && !isGithubAccountAllowed(profile.id, accessPolicy)) {
         await destroySession(req)
-        failLogin(res, 'access_not_allowed')
+        loginFailed(req, res, 'access_not_allowed', { githubId: profile.id })
         return
       }
       const user = upsertUserFromGithub(db, profile, {
@@ -217,17 +260,25 @@ export function createRelayAuthRouter({ db, config, fetchImpl = fetch, store, di
         allowedGithubIds: config.allowedGithubIds,
       })
 
-      // Fresh session id after privilege change (session fixation)
-      await regenerateSession(req)
-      req.session.user = toSessionUser(user)
-      await saveSession(req)
+      await establishSession(req, user, 'github')
+      recordAuditEvent(db, {
+        kind: 'login',
+        actorUserId: user.id,
+        ...requestAuditMeta(req),
+        metadata: { method: 'github' },
+      })
       res.redirect(returnTo)
-    })().catch(() => { failLogin(res, 'login_failed'); })
+    })().catch(() => { loginFailed(req, res, 'login_failed'); })
   })
 
   router.post('/api/auth/logout', (req, res, next) => {
+    const sessionId = req.sessionID
+    const userId = req.session.user?.id ?? null
     destroySession(req)
       .then(() => {
+        // The HTTP session is gone; sockets it opened must not outlive it.
+        disconnectSession?.(sessionId, 'logged out')
+        if (userId) recordAuditEvent(db, { kind: 'logout', actorUserId: userId, ...requestAuditMeta(req) })
         res.clearCookie('codekin_relay_sid')
         res.json({ success: true })
       })
@@ -242,7 +293,16 @@ export function createRelayAuthRouter({ db, config, fetchImpl = fetch, store, di
     }
     try {
       const destroyed = store?.destroyUserSessions(userId) ?? 0
+      // An unclaimed device-link code would otherwise mint a fresh session
+      // after "log out everywhere".
+      const linksRevoked = revokePendingDeviceLinks(db, userId)
       disconnectUser?.(userId, 'all sessions logged out')
+      recordAuditEvent(db, {
+        kind: 'logout_all',
+        actorUserId: userId,
+        ...requestAuditMeta(req),
+        metadata: { sessions: destroyed, deviceLinks: linksRevoked },
+      })
       destroySession(req)
         .then(() => {
           res.clearCookie('codekin_relay_sid')
@@ -254,7 +314,13 @@ export function createRelayAuthRouter({ db, config, fetchImpl = fetch, store, di
     }
   })
 
+  // Refreshed from the DB like requireActiveUser, so the UI never renders a
+  // role or status the server no longer honours.
   router.get('/api/me', (req, res) => {
+    const sessionUser = req.session.user
+    const current = sessionUser ? getUserById(db, sessionUser.id) : undefined
+    if (sessionUser && !current) delete req.session.user
+    if (current) req.session.user = toSessionUser(current)
     res.json({ user: req.session.user ?? null })
   })
 
@@ -287,6 +353,9 @@ export function createRequireActiveUser(db: Database.Database) {
     // Refresh before the status check, not after: a user who has just been
     // disabled should see that in /api/me too, not a stale "active".
     req.session.user = toSessionUser(current)
+    // Sessions from before sign-in times were recorded start their absolute
+    // lifetime now rather than being exempt from it forever.
+    req.session.authenticatedAt ??= Date.now()
     if (current.status !== 'active') {
       res.status(403).json({ error: 'Access not granted', status: current.status })
       return

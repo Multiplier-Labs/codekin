@@ -16,6 +16,18 @@ const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000
 /** How often expired rows are swept. */
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000
 
+/**
+ * Hard cap on a signed-in session, counted from sign-in. The cookie rolls, so
+ * without this an active session would never have to re-authenticate.
+ */
+export const SESSION_ABSOLUTE_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000
+
+/** Past the absolute lifetime. Sessions without `authenticatedAt` are stamped on their next request. */
+function isPastAbsoluteLifetime(session: SessionData, now = Date.now()): boolean {
+  const at = (session as { authenticatedAt?: unknown }).authenticatedAt
+  return typeof at === 'number' && now - at > SESSION_ABSOLUTE_LIFETIME_MS
+}
+
 export class SqliteSessionStore extends Store {
   private cleanupTimer: ReturnType<typeof setInterval> | null = null
 
@@ -39,7 +51,13 @@ export class SqliteSessionStore extends Store {
         callback(null, null)
         return
       }
-      callback(null, JSON.parse(row.sess) as SessionData)
+      const session = JSON.parse(row.sess) as SessionData
+      if (isPastAbsoluteLifetime(session)) {
+        this.db.prepare('DELETE FROM web_sessions WHERE sid = ?').run(sid)
+        callback(null, null)
+        return
+      }
+      callback(null, session)
     } catch (err) {
       callback(err)
     }
@@ -50,10 +68,10 @@ export class SqliteSessionStore extends Store {
       const expire = Date.now() + this.ttlMs(session)
       this.db
         .prepare(
-          `INSERT INTO web_sessions (sid, sess, expire) VALUES (?, ?, ?)
-           ON CONFLICT(sid) DO UPDATE SET sess = excluded.sess, expire = excluded.expire`,
+          `INSERT INTO web_sessions (sid, sess, expire, user_id) VALUES (?, ?, ?, ?)
+           ON CONFLICT(sid) DO UPDATE SET sess = excluded.sess, expire = excluded.expire, user_id = excluded.user_id`,
         )
-        .run(sid, JSON.stringify(session), expire)
+        .run(sid, JSON.stringify(session), expire, session.user?.id ?? null)
       callback?.()
     } catch (err) {
       callback?.(err)
@@ -71,22 +89,24 @@ export class SqliteSessionStore extends Store {
 
   /** Destroy every web session belonging to a user. Returns the number removed. */
   destroyUserSessions(userId: string): number {
-    const rows = this.db.prepare('SELECT sid, sess FROM web_sessions').all() as Array<{ sid: string; sess: string }>
-    const ids: string[] = []
-    for (const row of rows) {
-      try {
-        const data = JSON.parse(row.sess) as { user?: { id?: unknown } }
-        if (data.user?.id === userId) ids.push(row.sid)
-      } catch {
-        // Corrupt sessions are ignored here and handled as invalid by get().
-      }
+    return this.db.prepare('DELETE FROM web_sessions WHERE user_id = ?').run(userId).changes
+  }
+
+  /**
+   * Whether a session still exists and is within both lifetimes. Browser
+   * sockets are bound to the session that opened them and are dropped once
+   * this turns false (logout, logout-all, revocation, expiry).
+   */
+  isAlive(sid: string): boolean {
+    const row = this.db
+      .prepare('SELECT sess, expire FROM web_sessions WHERE sid = ?')
+      .get(sid) as { sess: string; expire: number } | undefined
+    if (!row || row.expire <= Date.now()) return false
+    try {
+      return !isPastAbsoluteLifetime(JSON.parse(row.sess) as SessionData)
+    } catch {
+      return false
     }
-    const remove = this.db.transaction((sessionIds: string[]) => {
-      const statement = this.db.prepare('DELETE FROM web_sessions WHERE sid = ?')
-      for (const sid of sessionIds) statement.run(sid)
-    })
-    remove(ids)
-    return ids.length
   }
 
   touch(sid: string, session: SessionData, callback?: (err?: unknown) => void): void {

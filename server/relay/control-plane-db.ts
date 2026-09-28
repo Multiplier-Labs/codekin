@@ -157,6 +157,36 @@ CREATE TABLE IF NOT EXISTS audit_events (
 );
 `
 
+/**
+ * Versioned schema changes on top of SCHEMA, tracked in `PRAGMA user_version`.
+ * SCHEMA is idempotent `CREATE ... IF NOT EXISTS`, so it can only add tables;
+ * anything that alters an existing table goes here, in order, and each step
+ * runs exactly once per database. Never edit or reorder a shipped step.
+ */
+const MIGRATIONS: Array<(db: Database.Database) => void> = [
+  // 1: web_sessions.user_id, so revoking a user's sessions is an indexed
+  // delete instead of a JSON parse of every session row.
+  db => {
+    const columns = db.prepare('PRAGMA table_info(web_sessions)').all() as Array<{ name: string }>
+    if (!columns.some(c => c.name === 'user_id')) {
+      db.exec('ALTER TABLE web_sessions ADD COLUMN user_id TEXT')
+    }
+    db.exec(`UPDATE web_sessions SET user_id = json_extract(sess, '$.user.id')
+             WHERE user_id IS NULL AND json_valid(sess)`)
+    db.exec('CREATE INDEX IF NOT EXISTS idx_web_sessions_user ON web_sessions(user_id)')
+  },
+]
+
+function runMigrations(db: Database.Database): void {
+  const current = db.pragma('user_version', { simple: true }) as number
+  for (let version = current; version < MIGRATIONS.length; version++) {
+    db.transaction(() => {
+      MIGRATIONS[version](db)
+      db.pragma(`user_version = ${version + 1}`)
+    })()
+  }
+}
+
 /** Open (creating if needed) the control-plane DB and apply the schema. */
 export function openControlPlaneDb(path: string): Database.Database {
   if (path !== ':memory:') {
@@ -166,6 +196,7 @@ export function openControlPlaneDb(path: string): Database.Database {
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
   db.exec(SCHEMA)
+  runMigrations(db)
   db.prepare('INSERT OR IGNORE INTO organizations (id, name) VALUES (?, ?)').run(
     DEFAULT_ORG_ID,
     DEFAULT_ORG_NAME,
