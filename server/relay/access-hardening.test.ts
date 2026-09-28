@@ -98,9 +98,9 @@ describe('hosted access hardening (Phase 0)', () => {
     hub = new BrowserHub(db, connectorStub as never, { isSessionAlive: sid => store.isAlive(sid) })
     owner = addUser(1)
     viewer = addUser(2)
-    db.prepare("UPDATE users SET role = 'viewer' WHERE id = ?").run(viewer.id)
+    db.prepare("UPDATE workspace_memberships SET role = 'viewer' WHERE user_id = ?").run(viewer.id)
     viewer = getUserById(db, viewer.id)!
-    db.prepare("INSERT INTO machines (id, organization_id, owner_user_id, display_name) VALUES ('m1', 'org-default', ?, 'M')").run(owner.id)
+    db.prepare("INSERT INTO machines (id, workspace_id, owner_user_id, display_name) VALUES ('m1', 'org-default', ?, 'M')").run(owner.id)
 
     const app = express()
     app.use(express.json())
@@ -263,10 +263,12 @@ describe('hosted access hardening (Phase 0)', () => {
 
   describe('sessions', () => {
     it('/api/me reflects the current role, not the sign-in snapshot', async () => {
-      const { cookie } = await login(owner.id)
-      db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(owner.id)
-      const me = (await (await call('/api/me', { cookie, method: 'GET' })).json()) as { user: { role: string } }
-      expect(me.user.role).toBe('admin')
+      const { cookie } = await login(viewer.id)
+      db.prepare("UPDATE workspace_memberships SET role = 'admin' WHERE user_id = ?").run(viewer.id)
+      const me = (await (await call('/api/me', { cookie, method: 'GET' })).json()) as {
+        workspaces: Array<{ role: string }>
+      }
+      expect(me.workspaces[0].role).toBe('admin')
     })
 
     it('stores the owning user id, so revocation is an indexed delete', async () => {
@@ -305,7 +307,7 @@ describe('hosted access hardening (Phase 0)', () => {
 describe('control-plane migrations', () => {
   it('tracks the schema version and backfills session owners', () => {
     const db = openControlPlaneDb(':memory:')
-    expect(db.pragma('user_version', { simple: true })).toBe(1)
+    expect(db.pragma('user_version', { simple: true })).toBe(2)
     const columns = (db.prepare('PRAGMA table_info(web_sessions)').all() as Array<{ name: string }>).map(c => c.name)
     expect(columns).toContain('user_id')
     db.close()
@@ -328,7 +330,7 @@ describe('control-plane migrations', () => {
     db.close()
     // Re-opening is a no-op once the version is recorded.
     const again = openControlPlaneDb(path)
-    expect(again.pragma('user_version', { simple: true })).toBe(1)
+    expect(again.pragma('user_version', { simple: true })).toBe(2)
     again.close()
     rmSync(dir, { recursive: true, force: true })
   })

@@ -10,7 +10,6 @@
 
 import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'crypto'
 import type Database from 'better-sqlite3'
-import { DEFAULT_ORG_ID } from './control-plane-db.js'
 
 /** Pairing requests expire after 10 minutes. */
 const PAIRING_TTL_MS = 10 * 60 * 1000
@@ -121,6 +120,7 @@ export function approvePairing(
   db: Database.Database,
   userCode: string,
   approvedByUserId: string,
+  workspaceId: string,
   displayName?: string,
 ): { ok: true; machineId: string } | { ok: false; reason: 'not_found' | 'expired' | 'not_pending' } {
   const row = getRequest(db, userCode)
@@ -131,9 +131,9 @@ export function approvePairing(
   const machineId = randomUUID()
   const name = displayName?.trim() || row.hostname || 'Unnamed machine'
   db.prepare(
-    `INSERT INTO machines (id, organization_id, owner_user_id, display_name, hostname, platform, status)
+    `INSERT INTO machines (id, workspace_id, owner_user_id, display_name, hostname, platform, status)
      VALUES (?, ?, ?, ?, ?, ?, 'offline')`,
-  ).run(machineId, DEFAULT_ORG_ID, approvedByUserId, name, row.hostname, row.platform)
+  ).run(machineId, workspaceId, approvedByUserId, name, row.hostname, row.platform)
   db.prepare(
     `UPDATE pairing_requests SET status = 'approved', approved_by_user_id = ?, machine_id = ? WHERE code = ?`,
   ).run(approvedByUserId, machineId, row.code)
@@ -160,10 +160,11 @@ export interface PrecreatePairingResult {
 export function precreatePairing(
   db: Database.Database,
   createdByUserId: string,
+  workspaceId: string,
   displayName?: string,
 ): PrecreatePairingResult {
   const started = startPairing(db, {})
-  const approved = approvePairing(db, started.userCode, createdByUserId, displayName)
+  const approved = approvePairing(db, started.userCode, createdByUserId, workspaceId, displayName)
   if (!approved.ok) throw new Error(`precreate approval failed: ${approved.reason}`)
   return {
     pairingToken: started.deviceCode,
@@ -249,6 +250,8 @@ export function verifyMachineCredential(
 export function removeMachine(db: Database.Database, machineId: string): boolean {
   return db.transaction(() => {
     db.prepare('DELETE FROM machine_credentials WHERE machine_id = ?').run(machineId)
+    // Shares reference the machine; left in place they fail the FK delete.
+    db.prepare('DELETE FROM session_shares WHERE machine_id = ?').run(machineId)
     db.prepare('UPDATE pairing_requests SET machine_id = NULL WHERE machine_id = ?').run(machineId)
     const result = db.prepare('DELETE FROM machines WHERE id = ?').run(machineId)
     return result.changes > 0

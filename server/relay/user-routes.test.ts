@@ -1,4 +1,4 @@
-/** Tests for the admin user-management endpoints: auth boundaries, guards, live revocation. */
+/** Tests for the operator's account endpoints: auth boundaries, guards, live revocation. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
 import session from 'express-session'
@@ -9,7 +9,6 @@ import { openControlPlaneDb, upsertUserFromGithub, getUserById } from './control
 import { createUserRouter } from './user-routes.js'
 import { listAuditEvents } from './audit.js'
 import type { RelayConfig } from './relay-config.js'
-import type { UserRole } from './control-plane-db.js'
 import type { SessionUser } from './relay-auth-routes.js'
 import type { BrowserHub } from './browser-hub.js'
 import { SqliteSessionStore } from './sqlite-session-store.js'
@@ -23,7 +22,6 @@ function sessionUser(db: Database.Database, id: string): SessionUser {
     login: row.login,
     displayName: row.display_name,
     avatarUrl: row.avatar_url,
-    role: row.role,
     status: row.status,
   }
 }
@@ -66,7 +64,8 @@ describe('user admin routes', () => {
       { id: 2, login: 'adminuser', name: null, email: null, avatarUrl: null },
       { ownerGithubId: 1, allowedGithubIds: [2] },
     ).id
-    db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(adminId)
+    // A workspace admin is still not the platform operator.
+    db.prepare("UPDATE workspace_memberships SET role = 'admin' WHERE user_id = ?").run(adminId)
     memberId = upsertUserFromGithub(
       db,
       { id: 3, login: 'member', name: null, email: null, avatarUrl: null },
@@ -115,24 +114,26 @@ describe('user admin routes', () => {
     expect((await fetch(`${baseUrl}/api/users`)).status).toBe(401)
   })
 
-  it('forbids a non-manager from listing or changing users', async () => {
-    expect((await fetch(`${baseUrl}/api/users`, { headers: as('member') })).status).toBe(403)
-    const res = await patch('member', ownerId, { status: 'disabled' })
-    expect(res.status).toBe(403)
+  it('forbids anyone but the operator, including workspace admins', async () => {
+    for (const who of ['member', 'admin']) {
+      expect((await fetch(`${baseUrl}/api/users`, { headers: as(who) })).status).toBe(403)
+      expect((await patch(who, memberId, { status: 'disabled' })).status).toBe(403)
+    }
+    expect(getUserById(db, memberId)!.status).toBe('active')
     // The refusal is audited
     expect(listAuditEvents(db, {}).some(e => e.kind === 'access_denied')).toBe(true)
   })
 
-  it('lists all users with an owner flag for the manager', async () => {
+  it('lists all accounts with an operator flag', async () => {
     const res = await fetch(`${baseUrl}/api/users`, { headers: as('owner') })
     expect(res.status).toBe(200)
-    const { users } = (await res.json()) as { users: Array<{ login: string; isOwner: boolean }> }
+    const { users } = (await res.json()) as { users: Array<{ login: string; isOperator: boolean }> }
     expect(users.map(u => u.login).sort()).toEqual(['adminuser', 'member', 'owner'])
-    expect(users.find(u => u.login === 'owner')!.isOwner).toBe(true)
-    expect(users.find(u => u.login === 'member')!.isOwner).toBe(false)
+    expect(users.find(u => u.login === 'owner')!.isOperator).toBe(true)
+    expect(users.find(u => u.login === 'member')!.isOperator).toBe(false)
   })
 
-  it('disables a member and drops their live sockets', async () => {
+  it('disables an account and drops their live sockets', async () => {
     const res = await patch('owner', memberId, { status: 'disabled' })
     expect(res.status).toBe(200)
     expect(getUserById(db, memberId)!.status).toBe('disabled')
@@ -143,43 +144,29 @@ describe('user admin routes', () => {
     expect(event?.metadata).toMatchObject({ status: 'disabled', previousStatus: 'active' })
   })
 
-  it('re-enables a disabled user', async () => {
+  it('re-enables a disabled account', async () => {
     db.prepare("UPDATE users SET status = 'disabled' WHERE id = ?").run(memberId)
     const res = await patch('owner', memberId, { status: 'active' })
     expect(res.status).toBe(200)
     expect(getUserById(db, memberId)!.status).toBe('active')
   })
 
-  it('refuses to change the configured owner account', async () => {
-    const res = await patch('admin', ownerId, { status: 'disabled' })
-    expect(res.status).toBe(403)
+  it('refuses to change the operator account', async () => {
+    const res = await patch('owner', ownerId, { status: 'disabled' })
+    expect(res.status).toBe(400)
     expect(getUserById(db, ownerId)!.status).toBe('active')
     expect(reauthorize).not.toHaveBeenCalled()
   })
 
-  it('refuses to let a manager change their own access', async () => {
-    const res = await patch('admin', adminId, { status: 'disabled' })
-    expect(res.status).toBe(400)
-    expect(getUserById(db, adminId)!.status).toBe('active')
-  })
+  it('grants and revokes permission to create workspaces', async () => {
+    const grant = await patch('owner', memberId, { canCreateWorkspaces: true })
+    expect(grant.status).toBe(200)
+    expect(((await grant.json()) as { user: { canCreateWorkspaces: boolean } }).user.canCreateWorkspaces).toBe(true)
+    expect(getUserById(db, memberId)!.can_create_workspaces).toBe(1)
 
-  it('lets an admin change status but not role', async () => {
-    const ok = await patch('admin', memberId, { status: 'disabled' })
-    expect(ok.status).toBe(200)
-
-    const denied = await patch('admin', memberId, { role: 'admin' })
-    expect(denied.status).toBe(403)
-    expect(getUserById(db, memberId)!.role).toBe('member')
-  })
-
-  it('lets the owner change a role, but never to owner', async () => {
-    const promote = await patch('owner', memberId, { role: 'admin' as UserRole })
-    expect(promote.status).toBe(200)
-    expect(getUserById(db, memberId)!.role).toBe('admin')
-
-    const toOwner = await patch('owner', memberId, { role: 'owner' })
-    expect(toOwner.status).toBe(400)
-    expect(getUserById(db, memberId)!.role).toBe('admin')
+    expect((await patch('owner', memberId, { canCreateWorkspaces: false })).status).toBe(200)
+    expect(getUserById(db, memberId)!.can_create_workspaces).toBe(0)
+    expect((await patch('owner', memberId, { canCreateWorkspaces: 'yes' })).status).toBe(400)
   })
 
   it('rejects an unknown status value', async () => {
@@ -225,11 +212,10 @@ describe('user admin routes', () => {
     expect(storedSids()).toEqual([])
   })
 
-  it('keeps stored cookies when the change is a demotion, not a revocation', async () => {
+  it('keeps stored cookies when the change is not a revocation', async () => {
     seedSession('member-a', memberId)
-    const res = await patch('owner', memberId, { role: 'viewer' as UserRole })
+    const res = await patch('owner', memberId, { canCreateWorkspaces: true })
     expect(res.status).toBe(200)
-    // Still active: the account is not revoked, so the session survives.
     expect(storedSids()).toEqual(['member-a'])
   })
 })

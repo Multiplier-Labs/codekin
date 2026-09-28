@@ -79,6 +79,19 @@ needs a second factor to prompt for, and re-running GitHub OAuth is not a meanin
 - `OWNER_GITHUB_ID` becomes bootstrap-only: owner of the migrated workspace plus the platform
   operator.
 
+**Implementation notes (1a, backend):**
+- Migration 2 renames `organizations` to `workspaces`. It rebuilds `users` without `role` and
+  `organization_id`, adding `can_create_workspaces`, and rebuilds `audit_events` with a nullable
+  `workspace_id`.
+- `SCHEMA` now runs only on version 0. Every later table change is a migration.
+- Authorization lives in `workspaces.ts` (`can()`, membership lifecycle) and `resolveMachineAccess`.
+  `resolveMachineAccess` requires an active membership in the machine's workspace. A quarantined
+  machine, or a viewer's own machine, is unreachable.
+- REST routes not addressed by workspace id resolve the workspace from `X-Codekin-Workspace`,
+  falling back to the user's default (bootstrap first), so the pre-1b UI keeps working.
+- `/api/users` is operator-only. It handles account status and `canCreateWorkspaces`.
+- The bootstrap workspace cannot be deleted while allowlist admission still targets it.
+
 ### Phase 2 — Invitations and workspace onboarding
 
 - Add the `workspace_invitations` table (Claude report §5.1) and these routes: create, list,
@@ -132,8 +145,8 @@ Optional later work: transactional email, open signup with per-workspace quotas.
 
 | Phase | Status | PR |
 |---|---|---|
-| 0 | Implemented (`fix/hosted-access-phase0`) | pending |
-| 1 | Not started | — |
+| 0 | Merged | #644 |
+| 1 | 1a backend in review (`feat/hosted-workspaces-phase1`); 1b frontend next | — |
 | 2 | Not started | — |
 | 3 | Not started | — |
 | 4 | Not started | — |

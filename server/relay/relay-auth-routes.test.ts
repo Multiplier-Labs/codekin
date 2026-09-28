@@ -115,10 +115,17 @@ describe('relay auth routes', () => {
     const cookie = await login()
 
     const meRes = await fetch(`${baseUrl}/api/me`, { headers: { cookie } })
-    const me = (await meRes.json()) as { user: { login: string; role: string; status: string } }
+    const me = (await meRes.json()) as {
+      user: { login: string; status: string }
+      workspaces: Array<{ id: string; role: string }>
+      isOperator: boolean
+      canCreateWorkspaces: boolean
+    }
     expect(me.user.login).toBe('alari76')
-    expect(me.user.role).toBe('owner')
     expect(me.user.status).toBe('active')
+    expect(me.workspaces).toEqual([expect.objectContaining({ id: 'org-default', role: 'owner' })])
+    expect(me.isOperator).toBe(true)
+    expect(me.canCreateWorkspaces).toBe(true)
 
     const prot = await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })
     expect(prot.status).toBe(200)
@@ -142,8 +149,8 @@ describe('relay auth routes', () => {
     // A `pending` row is the residue of a login the policy already refused, not
     // an admission — it must not become a standing exemption from the gate.
     db.prepare(
-      `INSERT INTO users (id, organization_id, github_id, login, role, status)
-       VALUES ('u-stranger', 'org-default', 2, 'stranger', 'member', 'pending')`,
+      `INSERT INTO users (id, github_id, login, status)
+       VALUES ('u-stranger', 2, 'stranger', 'pending')`,
     ).run()
 
     const startRes = await fetch(`${baseUrl}/api/auth/github/start`, { redirect: 'manual' })
@@ -163,8 +170,8 @@ describe('relay auth routes', () => {
     // The escape hatch: an operator who activated someone by hand is making a
     // real decision, and an env allowlist that omits them must not undo it.
     db.prepare(
-      `INSERT INTO users (id, organization_id, github_id, login, role, status)
-       VALUES ('u-manual', 'org-default', 77, 'manual', 'member', 'active')`,
+      `INSERT INTO users (id, github_id, login, status)
+       VALUES ('u-manual', 77, 'manual', 'active')`,
     ).run()
 
     const cookie = await login()
@@ -221,6 +228,7 @@ describe('relay auth routes', () => {
   it('401s a live session whose user row was deleted', async () => {
     await start(githubFetchMock({ id: 1, login: 'alari76' }))
     const cookie = await login()
+    db.prepare('DELETE FROM workspace_memberships WHERE user_id IN (SELECT id FROM users WHERE login = ?)').run('alari76')
     db.prepare('DELETE FROM users WHERE login = ?').run('alari76')
 
     expect((await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })).status).toBe(401)

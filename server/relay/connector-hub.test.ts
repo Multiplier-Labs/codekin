@@ -1,4 +1,5 @@
 /** Integration tests: RelayConnector ↔ ConnectorHub over a real WebSocket server. */
+import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createServer } from 'http'
 import type { Server } from 'http'
@@ -45,7 +46,7 @@ describe('connector hub', () => {
     ).id
 
     const { userCode, deviceCode } = startPairing(db, { hostname: 'devbox', platform: 'linux' })
-    approvePairing(db, userCode, userId, 'Dev box')
+    approvePairing(db, userCode, userId, BOOTSTRAP_WORKSPACE_ID, 'Dev box')
     const complete = completePairing(db, deviceCode)
     if (complete.status !== 'complete') throw new Error('pairing failed in setup')
     machineId = complete.machineId
@@ -169,12 +170,12 @@ describe('connector hub', () => {
     // ack that makes it report 'connected'. Gate on both signals.
     await waitFor(() => hub.isOnline(machineId) && statuses.includes('connected'))
     expect(statuses).toContain('connected')
-    expect(listMachines(db)[0].status).toBe('online')
-    expect(listMachines(db)[0].connector_version).toBe('0.8.0-test')
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)[0].status).toBe('online')
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)[0].connector_version).toBe('0.8.0-test')
 
     connector.stop()
     await waitFor(() => !hub.isOnline(machineId))
-    expect(listMachines(db)[0].status).toBe('offline')
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)[0].status).toBe('offline')
   })
 
   it('rejects a bad credential with 4001 and the connector does not retry', async () => {
@@ -224,7 +225,7 @@ describe('connector hub', () => {
       relayUrl, machineId, machineSecret, connectorVersion: '2',
     })
     second.start()
-    await waitFor(() => listMachines(db)[0].connector_version === '2')
+    await waitFor(() => listMachines(db, BOOTSTRAP_WORKSPACE_ID)[0].connector_version === '2')
     expect(hub.onlineCount).toBe(1)
 
     // The replaced connector stands down instead of taking the slot back:
@@ -265,12 +266,12 @@ describe('connector hub', () => {
 
     const second = new RelayConnector({ relayUrl, machineId, machineSecret, connectorVersion: '2' })
     second.start()
-    await waitFor(() => listMachines(db)[0].connector_version === '2')
+    await waitFor(() => listMachines(db, BOOTSTRAP_WORKSPACE_ID)[0].connector_version === '2')
 
     // Give the loser time to have flapped, if it were going to
     await new Promise(resolve => setTimeout(resolve, 500))
     expect(hub.onlineCount).toBe(1)
-    expect(listMachines(db)[0].status).toBe('online')
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)[0].status).toBe('online')
 
     second.stop()
     first.stop()

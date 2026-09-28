@@ -21,6 +21,8 @@ import {
   machineHasEverHadCredential,
 } from './pairing.js'
 import { createRequireActiveUser } from './relay-auth-routes.js'
+import { createRequireWorkspace } from './workspace-routes.js'
+import { can } from './workspaces.js'
 import { getMachine } from './control-plane-db.js'
 import { recordAuditEvent } from './audit.js'
 import type { RelayConfig } from './relay-config.js'
@@ -68,6 +70,7 @@ export function createPairingRouter(
 ): Router {
   const router = Router()
   const requireActiveUser = createRequireActiveUser(db)
+  const requireWorkspace = createRequireWorkspace(db)
   const precreateLimit = options.precreateLimit ?? PRECREATE_LIMIT
   const allowPrecreate = createKeyedWindow(precreateLimit.limit, precreateLimit.windowMs)
 
@@ -97,9 +100,9 @@ export function createPairingRouter(
   // `replaceMachineId` regenerates a command: the caller's own machine that
   // has never held a credential is removed and its token invalidated first,
   // so repeated regeneration leaves at most one pending record.
-  router.post('/api/machines/pair/precreate', requireActiveUser, (req, res) => {
+  router.post('/api/machines/pair/precreate', requireActiveUser, requireWorkspace, (req, res) => {
     // Viewers are read-only: registering a machine would make them its owner.
-    if (req.session.user?.role === 'viewer') {
+    if (!can(req.workspace!.role, 'machine.pair')) {
       res.status(403).json({ error: 'viewers_cannot_pair' })
       return
     }
@@ -124,7 +127,7 @@ export function createPairingRouter(
       const existing = getMachine(db, replaceMachineId)
       // Not revealing whether someone else's machine id exists: not-owned
       // reads the same as missing.
-      if (!existing || existing.owner_user_id !== userId) {
+      if (!existing || existing.owner_user_id !== userId || existing.workspace_id !== req.workspace!.workspaceId) {
         res.status(404).json({ error: 'machine_not_found' })
         return
       }
@@ -143,7 +146,7 @@ export function createPairingRouter(
       })
     }
 
-    const result = precreatePairing(db, userId, displayName)
+    const result = precreatePairing(db, userId, req.workspace!.workspaceId, displayName)
     recordAuditEvent(db, {
       kind: 'machine_pairing_created',
       actorUserId: userId,
@@ -193,8 +196,9 @@ export function createPairingRouter(
     res.json({ request: info })
   })
 
-  router.post('/api/machines/pair/approve', requireActiveUser, (req, res) => {
-    if (req.session.user?.role === 'viewer') {
+  router.post('/api/machines/pair/approve', requireActiveUser, requireWorkspace, (req, res) => {
+    // Viewers are read-only: registering a machine would make them its owner.
+    if (!can(req.workspace!.role, 'machine.pair')) {
       res.status(403).json({ error: 'viewers_cannot_pair' })
       return
     }
@@ -203,7 +207,7 @@ export function createPairingRouter(
     const displayName = typeof body.displayName === 'string' ? body.displayName.slice(0, 128) : undefined
     // requireActiveUser guarantees the session user exists
     const userId = req.session.user?.id ?? ''
-    const result = approvePairing(db, code, userId, displayName)
+    const result = approvePairing(db, code, userId, req.workspace!.workspaceId, displayName)
     if (!result.ok) {
       const status = result.reason === 'not_found' ? 404 : 410
       res.status(status).json({ error: result.reason })

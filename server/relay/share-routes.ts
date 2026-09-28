@@ -24,8 +24,9 @@ import {
 } from './shares.js'
 import type { SessionPermission, ShareRole } from './shares.js'
 import { listAuditEvents, recordAuditEvent } from './audit.js'
-import { getUserById } from './control-plane-db.js'
-import type { UserRole } from './control-plane-db.js'
+import { createRequireWorkspace } from './workspace-routes.js'
+import { can, getActiveMembership } from './workspaces.js'
+import type { WorkspaceRole } from './control-plane-db.js'
 
 const INVALID_EXPIRY = { error: 'expiresAt must be a future ISO-8601 time or null' }
 const VIEWER_CAP = { error: 'Viewers can only receive view-only access' }
@@ -53,13 +54,15 @@ function resolvePermissions(body: { role?: unknown; permissions?: unknown }): Se
 export function createShareRouter(db: Database.Database, browserHub?: BrowserHub): Router {
   const router = Router()
   const requireActiveUser = createRequireActiveUser(db)
+  const requireWorkspace = createRequireWorkspace(db)
 
-  /** Shares this user created, plus those granted to them. */
-  router.get('/api/shares', requireActiveUser, (req, res) => {
+  /** Shares this user created, plus those granted to them, in the current workspace. */
+  router.get('/api/shares', requireActiveUser, requireWorkspace, (req, res) => {
     const user = req.session.user!
+    const workspaceId = req.workspace!.workspaceId
     res.json({
-      shared: listSharesBy(db, user.id),
-      receivedShares: listSharesFor(db, user.id),
+      shared: listSharesBy(db, user.id, workspaceId),
+      receivedShares: listSharesFor(db, user.id, new Date(), workspaceId),
     })
   })
 
@@ -69,6 +72,7 @@ export function createShareRouter(db: Database.Database, browserHub?: BrowserHub
       machineId?: unknown
       localSessionId?: unknown
       granteeLogin?: unknown
+      granteeUserId?: unknown
       role?: unknown
       permissions?: unknown
       expiresAt?: unknown
@@ -79,15 +83,21 @@ export function createShareRouter(db: Database.Database, browserHub?: BrowserHub
       return
     }
 
-    const machine = db.prepare('SELECT owner_user_id FROM machines WHERE id = ?').get(body.machineId) as
-      | { owner_user_id: string }
-      | undefined
+    const machine = db
+      .prepare('SELECT owner_user_id, workspace_id, quarantined_at FROM machines WHERE id = ?')
+      .get(body.machineId) as { owner_user_id: string; workspace_id: string; quarantined_at: string | null } | undefined
     if (!machine) {
       res.status(404).json({ error: 'Machine not found' })
       return
     }
-    // Sharing is not transitive: only the owner may hand out access.
-    if (machine.owner_user_id !== user.id) {
+    const actorMembership = getActiveMembership(db, machine.workspace_id, user.id)
+    // Sharing is not transitive: only the owner may hand out access, and only
+    // while they may share in the machine's workspace.
+    if (
+      machine.owner_user_id !== user.id
+      || machine.quarantined_at !== null
+      || !can(actorMembership?.role, 'machine.share')
+    ) {
       recordAuditEvent(db, {
         kind: 'access_denied',
         actorUserId: user.id,
@@ -99,15 +109,25 @@ export function createShareRouter(db: Database.Database, browserHub?: BrowserHub
       return
     }
 
-    if (typeof body.granteeLogin !== 'string') {
-      res.status(400).json({ error: 'granteeLogin is required' })
+    if (typeof body.granteeUserId !== 'string' && typeof body.granteeLogin !== 'string') {
+      res.status(400).json({ error: 'granteeUserId or granteeLogin is required' })
       return
     }
+    // Grantees are members of the machine's workspace, and nobody else: the
+    // lookup never leaves the workspace, so a login cannot reach a stranger.
     const granteeMatches = db
-      .prepare('SELECT id, status, role FROM users WHERE lower(login) = lower(?)')
-      .all(body.granteeLogin) as Array<{ id: string; status: string; role: UserRole }>
+      .prepare(
+        `SELECT u.id, u.status, m.role FROM users u
+         JOIN workspace_memberships m ON m.user_id = u.id AND m.workspace_id = ? AND m.status = 'active'
+         WHERE ${typeof body.granteeUserId === 'string' ? 'u.id = ?' : 'lower(u.login) = lower(?)'}`,
+      )
+      .all(machine.workspace_id, typeof body.granteeUserId === 'string' ? body.granteeUserId : body.granteeLogin) as Array<{
+      id: string
+      status: string
+      role: WorkspaceRole
+    }>
     if (granteeMatches.length === 0) {
-      res.status(404).json({ error: 'No such user has signed in yet' })
+      res.status(404).json({ error: 'No such member in this workspace' })
       return
     }
     // Logins are mutable: after a GitHub rename, two rows can hold the same
@@ -163,7 +183,7 @@ export function createShareRouter(db: Database.Database, browserHub?: BrowserHub
       localSessionId: share.localSessionId,
       ip: req.ip ?? null,
       userAgent: req.get('user-agent') ?? null,
-      metadata: { grantee: body.granteeLogin, permissions: permissions.join(',') },
+      metadata: { grantee: grantee.id, permissions: permissions.join(',') },
     })
 
     res.status(201).json({ share })
@@ -188,7 +208,9 @@ export function createShareRouter(db: Database.Database, browserHub?: BrowserHub
       res.status(400).json({ error: 'Provide a valid role or permission list' })
       return
     }
-    const granteeRole = share.granteeUserId ? getUserById(db, share.granteeUserId)?.role : undefined
+    const granteeRole = share.granteeUserId
+      ? getActiveMembership(db, share.workspaceId, share.granteeUserId)?.role
+      : undefined
     if (exceedsRoleCap(permissions, granteeRole)) {
       res.status(400).json(VIEWER_CAP)
       return

@@ -3,6 +3,7 @@
  * local Codekin server, including the local auth handshake the connector
  * performs on the browser's behalf.
  */
+import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createServer } from 'http'
 import type { Server } from 'http'
@@ -185,12 +186,11 @@ describe('session streaming over the relay', () => {
       login: ownerRow.login,
       displayName: null,
       avatarUrl: null,
-      role: ownerRow.role,
       status: ownerRow.status,
     }
 
     const { userCode, deviceCode } = startPairing(db, { hostname: 'devbox', platform: 'linux' })
-    approvePairing(db, userCode, owner.id, 'Dev box')
+    approvePairing(db, userCode, owner.id, BOOTSTRAP_WORKSPACE_ID, 'Dev box')
     const complete = completePairing(db, deviceCode)
     if (complete.status !== 'complete') throw new Error('pairing failed in setup')
     machineId = complete.machineId

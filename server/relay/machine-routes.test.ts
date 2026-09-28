@@ -1,4 +1,5 @@
 /** Tests for GET /api/machines: setup-pending state and lazy orphan sweep. */
+import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
 import session from 'express-session'
@@ -30,7 +31,7 @@ describe('machine routes', () => {
       { id: 1, login: 'alari76', name: null, email: null, avatarUrl: null },
       { ownerGithubId: 1, allowedGithubIds: [] },
     )
-    user = { id: row.id, login: row.login, displayName: null, avatarUrl: null, role: row.role, status: row.status }
+    user = { id: row.id, login: row.login, displayName: null, avatarUrl: null, status: row.status }
 
     const app = express()
     app.use(express.json())
@@ -61,7 +62,7 @@ describe('machine routes', () => {
   }
 
   it('marks an unclaimed install command as setup-pending with its expiry', async () => {
-    const pre = precreatePairing(db, user.id)
+    const pre = precreatePairing(db, user.id, BOOTSTRAP_WORKSPACE_ID)
     const [machine] = await list()
     expect(machine.id).toBe(pre.machineId)
     expect(machine.setupPending).toBe(true)
@@ -69,7 +70,7 @@ describe('machine routes', () => {
   })
 
   it('a claimed machine is no longer setup-pending', async () => {
-    const pre = precreatePairing(db, user.id)
+    const pre = precreatePairing(db, user.id, BOOTSTRAP_WORKSPACE_ID)
     completePairing(db, pre.pairingToken, { hostname: 'laptop' })
     const [machine] = await list()
     expect(machine.setupPending).toBe(false)
@@ -77,9 +78,9 @@ describe('machine routes', () => {
   })
 
   it('sweeps expired unclaimed machines before listing, but keeps paired ones', async () => {
-    const paired = precreatePairing(db, user.id)
+    const paired = precreatePairing(db, user.id, BOOTSTRAP_WORKSPACE_ID)
     completePairing(db, paired.pairingToken, { hostname: 'laptop' })
-    const abandoned = precreatePairing(db, user.id)
+    const abandoned = precreatePairing(db, user.id, BOOTSTRAP_WORKSPACE_ID)
 
     // Only the clock moves: the expired precreate disappears on the next list.
     vi.useFakeTimers({ toFake: ['Date'] })
@@ -87,6 +88,6 @@ describe('machine routes', () => {
 
     const machines = await list()
     expect(machines.map(m => m.id)).toEqual([paired.machineId])
-    expect(listMachines(db).map(m => m.id)).not.toContain(abandoned.machineId)
+    expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID).map(m => m.id)).not.toContain(abandoned.machineId)
   })
 })

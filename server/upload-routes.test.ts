@@ -40,6 +40,21 @@ vi.mock('fs', async (importOriginal) => {
   }
 })
 
+// Never spawn a real `gh repo clone` — on CI it hits the network (up to the
+// route's 120s timeout) and times the test out. Fail fast instead.
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>()
+  return {
+    ...actual,
+    execFile: ((...args: unknown[]) => {
+      const cb = args[args.length - 1]
+      if (typeof cb === 'function') {
+        process.nextTick(() => { (cb as (err: Error) => void)(new Error('gh unavailable in tests')) })
+      }
+    }) as unknown as typeof actual.execFile,
+  }
+})
+
 // Imported after vi.mock so the router picks up the mocked fs.
 import { localRepoPath, createUploadRouter } from './upload-routes.js'
 
@@ -206,8 +221,10 @@ describe('POST /api/clone — symlink escape (C1)', () => {
       headers: { Authorization: `Bearer ${AUTH_TOKEN}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ owner: 'valid-owner', name: 'myrepo' }),
     })
-    // Boundary check passes; clone itself may fail (no gh credentials) — not 400
-    expect(res.status).not.toBe(400)
+    // Boundary check passes and the clone is attempted (stubbed to fail) — not 400
+    expect(res.status).toBe(500)
+    const body = await res.json() as { error: string }
+    expect(body.error).toMatch(/^Clone failed/)
   })
 })
 

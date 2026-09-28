@@ -10,8 +10,8 @@
 
 import { randomUUID } from 'crypto'
 import type Database from 'better-sqlite3'
-import { DEFAULT_ORG_ID } from './control-plane-db.js'
-import type { UserRow } from './control-plane-db.js'
+import type { UserRow, WorkspaceRole } from './control-plane-db.js'
+import { getActiveMembership } from './workspaces.js'
 
 export type SessionPermission =
   | 'view'
@@ -48,7 +48,7 @@ export type ShareRole = keyof typeof SHARE_ROLES
 
 export interface SessionShareRow {
   id: string
-  organization_id: string
+  workspace_id: string
   machine_id: string
   local_session_id: string
   shared_by_user_id: string
@@ -60,6 +60,7 @@ export interface SessionShareRow {
 
 export interface SessionShare {
   id: string
+  workspaceId: string
   machineId: string
   localSessionId: string
   sharedByUserId: string
@@ -72,6 +73,7 @@ export interface SessionShare {
 function toShare(row: SessionShareRow): SessionShare {
   return {
     id: row.id,
+    workspaceId: row.workspace_id,
     machineId: row.machine_id,
     localSessionId: row.local_session_id,
     sharedByUserId: row.shared_by_user_id,
@@ -142,19 +144,21 @@ export function upsertShare(db: Database.Database, input: CreateShareInput): Ses
   }
 
   const id = randomUUID()
+  // A share lives in its machine's workspace, always: taken from the machine
+  // row here rather than trusted from the caller.
   db.prepare(
     `INSERT INTO session_shares
-       (id, organization_id, machine_id, local_session_id, shared_by_user_id, grantee_user_id, permissions, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, workspace_id, machine_id, local_session_id, shared_by_user_id, grantee_user_id, permissions, expires_at)
+     SELECT ?, workspace_id, ?, ?, ?, ?, ?, ? FROM machines WHERE id = ?`,
   ).run(
     id,
-    DEFAULT_ORG_ID,
     input.machineId,
     input.localSessionId,
     input.sharedByUserId,
     input.granteeUserId,
     JSON.stringify(input.permissions),
     input.expiresAt ?? null,
+    input.machineId,
   )
   return getShare(db, id)!
 }
@@ -186,23 +190,34 @@ export function deleteShare(db: Database.Database, shareId: string): boolean {
   return db.prepare('DELETE FROM session_shares WHERE id = ?').run(shareId).changes > 0
 }
 
-/** Shares created by a user (what they have shared out). */
-export function listSharesBy(db: Database.Database, userId: string): SessionShare[] {
+/** Shares created by a user (what they have shared out), optionally within one workspace. */
+export function listSharesBy(db: Database.Database, userId: string, workspaceId?: string): SessionShare[] {
   return (
     db
-      .prepare('SELECT * FROM session_shares WHERE shared_by_user_id = ? ORDER BY created_at DESC')
-      .all(userId) as SessionShareRow[]
+      .prepare(
+        `SELECT * FROM session_shares WHERE shared_by_user_id = ? AND (? IS NULL OR workspace_id = ?)
+         ORDER BY created_at DESC`,
+      )
+      .all(userId, workspaceId ?? null, workspaceId ?? null) as SessionShareRow[]
   ).map(toShare)
 }
 
 /** Shares granted to a user (what has been shared with them), unexpired. */
-export function listSharesFor(db: Database.Database, userId: string, now = new Date()): SessionShare[] {
+export function listSharesFor(
+  db: Database.Database,
+  userId: string,
+  now = new Date(),
+  workspaceId?: string,
+): SessionShare[] {
   return (
     db
       // `created_at` is second-granular, so it alone leaves same-second rows in
       // an order SQLite does not promise; `id` breaks the tie deterministically.
-      .prepare('SELECT * FROM session_shares WHERE grantee_user_id = ? ORDER BY created_at DESC, id DESC')
-      .all(userId) as SessionShareRow[]
+      .prepare(
+        `SELECT * FROM session_shares WHERE grantee_user_id = ? AND (? IS NULL OR workspace_id = ?)
+         ORDER BY created_at DESC, id DESC`,
+      )
+      .all(userId, workspaceId ?? null, workspaceId ?? null) as SessionShareRow[]
   )
     .map(toShare)
     .filter(share => !isExpired(share, now))
@@ -239,13 +254,13 @@ export function parseShareExpiry(value: unknown, now = new Date()): ParsedExpiry
  */
 export function capPermissionsForRole(
   permissions: SessionPermission[],
-  role: UserRow['role'] | undefined,
+  role: WorkspaceRole | undefined,
 ): SessionPermission[] {
   if (role !== 'viewer') return permissions
   return permissions.filter(p => SHARE_ROLES.viewer.includes(p))
 }
 
-export function exceedsRoleCap(permissions: SessionPermission[], role: UserRow['role'] | undefined): boolean {
+export function exceedsRoleCap(permissions: SessionPermission[], role: WorkspaceRole | undefined): boolean {
   return capPermissionsForRole(permissions, role).length !== permissions.length
 }
 
@@ -261,7 +276,7 @@ export function grantsForMachine(
   userId: string,
   machineId: string,
   now = new Date(),
-  role?: UserRow['role'],
+  role?: WorkspaceRole,
 ): GrantMap {
   const grants: GrantMap = {}
   for (const share of listSharesFor(db, userId, now)) {
@@ -280,22 +295,31 @@ export type MachineAccess =
 /**
  * How a user may reach a machine: as its owner (unrestricted), as the holder
  * of at least one live session grant, or not at all.
+ *
+ * Every path runs through the machine's workspace: without an active
+ * membership there (in a live workspace) there is no access, whatever the
+ * machine or share rows say. A quarantined machine is unreachable, and a
+ * viewer is read-only even on a machine they own.
  */
 export function resolveMachineAccess(
   db: Database.Database,
-  user: Pick<UserRow, 'id' | 'status'> & Partial<Pick<UserRow, 'role'>>,
+  user: Pick<UserRow, 'id' | 'status'>,
   machineId: string,
   now = new Date(),
 ): MachineAccess {
   if (user.status !== 'active') return { kind: 'none' }
 
-  const machine = db.prepare('SELECT owner_user_id FROM machines WHERE id = ?').get(machineId) as
-    | { owner_user_id: string }
-    | undefined
-  if (!machine) return { kind: 'none' }
-  if (machine.owner_user_id === user.id) return { kind: 'owner' }
+  const machine = db
+    .prepare('SELECT owner_user_id, workspace_id, quarantined_at FROM machines WHERE id = ?')
+    .get(machineId) as { owner_user_id: string; workspace_id: string; quarantined_at: string | null } | undefined
+  if (!machine || machine.quarantined_at !== null) return { kind: 'none' }
+  const membership = getActiveMembership(db, machine.workspace_id, user.id)
+  if (!membership) return { kind: 'none' }
+  if (machine.owner_user_id === user.id) {
+    return membership.role === 'viewer' ? { kind: 'none' } : { kind: 'owner' }
+  }
 
-  const grants = grantsForMachine(db, user.id, machineId, now, user.role)
+  const grants = grantsForMachine(db, user.id, machineId, now, membership.role)
   if (Object.keys(grants).length === 0) return { kind: 'none' }
   return { kind: 'grantee', grants }
 }
