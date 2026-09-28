@@ -37,7 +37,7 @@ import { emitWorkflowEvent } from './lib/workflowEvents'
 import { setAgentHealth, getAgentHealth, resolveDefaultProvider, PROVIDER_STORAGE_KEY } from './lib/agentHealth'
 import { useAgentHealth } from './hooks/useAgentHealth'
 import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo } from './lib/ccApi'
-import { Settings } from './components/Settings'
+import { SettingsView } from './components/settings/SettingsView'
 import { LeftSidebar } from './components/LeftSidebar'
 import { MobileTopBar } from './components/MobileTopBar'
 import { AutomationsView } from './components/AutomationsView'
@@ -81,7 +81,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   } = useRepos(settings.token)
   const { sessions, rename: renameSession, remove: removeSession, refresh: refreshSessions } = useSessions(settings.token)
   const { queues: tentativeQueues, addToQueue, clearQueue } = useTentativeQueue()
-  const { sessionId: urlSessionId, view, automationsTab, path: routePath, navigate } = useRouter()
+  const { sessionId: urlSessionId, view, automationsTab, settingsSection, path: routePath, navigate } = useRouter()
 
   // Canonicalize the pre-unification routes: /workflows and /loops render the
   // Automations view (with the matching tab); the URL becomes /automations.
@@ -107,7 +107,13 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     }
   }, [navigate, view])
 
-  const [settingsOpen, setSettingsOpen] = useState(!settings.token)
+  // Settings is a routed view (/settings/<section>); leaving returns to the session.
+  const openSettings = useCallback((section?: string) => {
+    navigate(section ? `/settings/${section}` : '/settings')
+  }, [navigate])
+  const closeSettings = useCallback(() => {
+    navigate(activeSessionId ? `/s/${activeSessionId}` : '/')
+  }, [navigate, activeSessionId])
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [diffPanelOpen, setDiffPanelOpen] = useState(false)
   /** Callback ref for forwarding WsServerMessages to the diff panel (set by DiffPanel on mount). */
@@ -510,6 +516,8 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   // don't change, but listing them would obscure the intentional `activeSessionId` omission.
   useEffect(() => {
     if (urlSessionId === activeSessionId) return
+    // Settings is visited on top of the current session, not instead of it.
+    if (view === 'settings') return
     if (urlSessionId) {
       clearMessages()
       leaveSession()
@@ -534,10 +542,10 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     restoreSession()
   })
 
-  // Auto-open settings on first visit
+  // First visit without a token: the one thing to do is connect.
   useEffect(() => {
-    if (!settings.token) setSettingsOpen(true) // eslint-disable-line react-hooks/set-state-in-effect -- initial setup
-  }, [settings.token])
+    if (!settings.token && view !== 'settings') navigate('/settings/connection', true)
+  }, [settings.token]) // eslint-disable-line react-hooks/exhaustive-deps -- first-run redirect only
 
   // Close docs browser when switching sessions
   useEffect(() => {
@@ -717,7 +725,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
         onOpenSession={handleOpenSession}
         onSelectRepo={handleSelectRepo}
         onDeleteRepo={handleDeleteRepo}
-        onSettingsOpen={() => setSettingsOpen(true)}
+        onSettingsOpen={() => { openSettings() }}
         onShareSession={isHosted ? () => setShareOpen(true) : undefined}
         onUpdateTheme={(theme) => { updateSettings({ theme }) }}
         onSendModule={handleSendModule}
@@ -742,7 +750,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
             sessionName={activeSessionName}
             onMenuOpen={() => setMobileMenuOpen(true)}
             onNewSession={handleNewSessionForRepo}
-            onSettingsOpen={() => setSettingsOpen(true)}
+            onSettingsOpen={() => { openSettings() }}
             activeRepo={activeRepo}
           />
         )}
@@ -761,7 +769,24 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
         )}
 
         {/* Main content: orchestrator, workflows view, docs browser, or chat */}
-        {view === 'orchestrator' ? (
+        {view === 'settings' ? (
+          <SettingsView
+            section={settingsSection}
+            onNavigate={(section, replace) => { navigate(section ? `/settings/${section}` : '/settings', replace) }}
+            onClose={closeSettings}
+            settings={settings}
+            onUpdate={updateSettings}
+            isMobile={isMobile}
+            autoWorktree={useWorktree}
+            onAutoWorktreeChange={setUseWorktree}
+            agentName={agentName}
+            onAgentNameChange={setAgentName}
+            repos={repos}
+            hostedMachineId={hostedMachineId}
+            onSwitchMachine={onSwitchMachine}
+            onDisconnectMachine={onDisconnectMachine}
+          />
+        ) : view === 'orchestrator' ? (
           <OrchestratorContent
             token={settings.token}
             onOrchestratorSessionReady={handleOrchestratorSessionReady}
@@ -925,21 +950,6 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
       )}
 
       {/* Modals */}
-      <Settings
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        settings={settings}
-        onUpdate={updateSettings}
-        isMobile={isMobile}
-        autoWorktree={useWorktree}
-        onAutoWorktreeChange={setUseWorktree}
-        agentName={agentName}
-        onAgentNameChange={setAgentName}
-        repos={repos}
-        hostedMachineId={hostedMachineId}
-        onSwitchMachine={onSwitchMachine}
-        onDisconnectMachine={onDisconnectMachine}
-      />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
@@ -949,7 +959,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
         onOpenRepo={handleOpenSession}
         onSendSkill={handleSendSkill}
         onSendModule={handleSendModule}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => { openSettings() }}
         theme={settings.theme}
         onSelectTheme={(theme) => { updateSettings({ theme }) }}
         isMobile={isMobile}
