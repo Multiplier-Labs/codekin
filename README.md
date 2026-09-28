@@ -7,23 +7,23 @@
 
 Web UI for [Claude Code](https://github.com/anthropics/claude-code), [OpenCode](https://github.com/nicepkg/opencode), and [OpenAI Codex](https://github.com/openai/codex) sessions — multi-provider AI coding with multi-session support, WebSocket streaming, file uploads, and slash-command skills.
 
-Codekin runs the coding agent and accesses repositories **on the computer where you install it**. Use the hosted app to reach that computer from another device, or open the local UI directly for a self-hosted setup. See [Getting started](docs/GETTING-STARTED.md) for a first-session walkthrough and troubleshooting.
+Codekin runs the coding agent and accesses repositories **on the computer where you install it**. Open its UI on that computer, or reach it from any other device through a **Codekin web app** — the public instance at [app.codekin.ai](https://app.codekin.ai) or [one you host yourself](docs/SELF-HOSTED-RELAY.md). See [Getting started](docs/GETTING-STARTED.md) for a first-session walkthrough and troubleshooting.
 
 ![Codekin screenshot](docs/screenshot.png)
 
-## Quick start (hosted)
+## Quick start (remote access)
 
-Codekin runs coding agents on your own computer; the hosted app at [app.codekin.ai](https://app.codekin.ai) is how you reach them from a browser, phone or tablet.
+Codekin runs coding agents on your own computer; a Codekin web app is how you reach them from a browser, phone or tablet. Use the public instance at [app.codekin.ai](https://app.codekin.ai), or run your own for your team — on your domain, with your own GitHub sign-in and data. See [Hosting your own Codekin web app](docs/SELF-HOSTED-RELAY.md).
 
 1. Install and sign in to at least one supported coding agent on your macOS or Linux computer: [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), or [OpenCode](https://opencode.ai). Windows isn't supported yet.
-2. Open [app.codekin.ai](https://app.codekin.ai) and sign in with GitHub. Access is by invitation: open the invite link a workspace owner or admin sent you, then sign in. Owners and admins set up two-factor authentication (an authenticator app or a passkey) on first sign-in.
-3. On **Connect your computer**, copy the generated install command and run it in a terminal **on that computer**. The pairing command expires after 10 minutes and can be used once.
+2. Open your Codekin web app ([app.codekin.ai](https://app.codekin.ai), or your team's own) and sign in with GitHub. Access is by invitation: open the invite link a workspace owner or admin sent you, then sign in. Owners and admins set up two-factor authentication (an authenticator app or a passkey) on first sign-in.
+3. On **Connect your computer**, copy the generated install command and run it in a terminal **on that computer**. It pairs the computer with the web app you generated it in, whichever instance that is. The pairing command expires after 10 minutes and can be used once.
 4. Wait for the computer to show **online**, then click **Open**. Keep the computer awake and connected while using Codekin remotely.
 5. Use **New** to choose a repository and a coding agent. Local Git checkouts under `~/repos` appear automatically; the GitHub CLI is optional for listing and cloning GitHub repositories.
 
-Prefer to run everything yourself, without the hosted relay? Use the self-hosted install below.
+Only need Codekin on the computer in front of you? Use the local install below — no web app involved.
 
-## Install (self-hosted)
+## Install (local)
 
 **Prerequisites:**
 - macOS or Linux
@@ -46,7 +46,7 @@ This will:
 4. Generate a local access token and install and start a background service
 5. Print your local access URL
 
-Open the printed `http://localhost:32352?token=...` URL **on the installed computer**. The token is in that URL; if you open the address without it, paste it on the **Settings → Connection** page, which opens automatically. Run `codekin token` to print the URL again. For another device, use the hosted setup above rather than a `localhost` link.
+Open the printed `http://localhost:32352?token=...` URL **on the installed computer**. The token is in that URL; if you open the address without it, paste it on the **Settings → Connection** page, which opens automatically. Run `codekin token` to print the URL again. For another device, use a Codekin web app (see remote access above) rather than a `localhost` link.
 
 The installer checks GitHub CLI (`gh`) but does not require it. Existing local Git checkouts work without GitHub authentication. Continue with [your first session](docs/GETTING-STARTED.md#3-start-your-first-session).
 
@@ -69,7 +69,7 @@ codekin uninstall               # Remove Codekin entirely
 
 - **Multi-provider AI** — Use Claude Code, [OpenCode](https://github.com/nicepkg/opencode), or [OpenAI Codex](https://github.com/openai/codex) as the backend per session. OpenCode enables any LLM provider (OpenAI, Gemini, etc.) through a single interface; Codex unlocks ChatGPT-subscription OpenAI models — all with full streaming, tool events, plan mode, and permission control
 - **Multi-session terminal** — Open and switch between multiple coding sessions, one per repo
-- **Remote access** — Reach the agents on your computer from any browser, phone or tablet through [app.codekin.ai](https://app.codekin.ai): one-line install-and-pair, QR device linking with passkey sign-in, and session sharing with per-user access control
+- **Remote access** — Reach the agents on your computer from any browser, phone or tablet through a Codekin web app — [app.codekin.ai](https://app.codekin.ai) or [your own instance](docs/SELF-HOSTED-RELAY.md): one-line install-and-pair, QR device linking with passkey sign-in, and session sharing with per-user access control. Computers connect outbound only; no open ports
 - **Workspaces and teams** — Invite people into a workspace by link, give them a role (owner, admin, member, viewer), and require two-factor authentication (authenticator app, passkey, recovery codes) for everyone
 - **Session handoff** — Switch a running session to another agent (Claude Code, Codex, OpenCode) and carry its context across
 - **Agent Joe** — AI orchestrator agent that spawns and manages up to 5 concurrent child sessions, with a dedicated chat UI, welcome screen, and color-coded sidebar status indicators. Runs on any supported agent and has its own Codekin MCP server. Resilient by design: realtime blocked-child notifications, a persistent notification outbox that replays when the orchestrator returns, pausable child timeouts, and ground-truth completion verification

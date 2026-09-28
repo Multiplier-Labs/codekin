@@ -16,15 +16,17 @@ The installer looks for `claude`, `codex`, or `opencode` on your `PATH` and stop
 
 ## 2. Choose how to connect
 
-### Hosted access from a browser or phone
+### Remote access from a browser or phone
 
-1. Open [app.codekin.ai](https://app.codekin.ai) and sign in with GitHub. Access is currently by invitation.
+Remote access goes through a Codekin web app: the public instance at [app.codekin.ai](https://app.codekin.ai), or one your team hosts ([Hosting your own Codekin web app](SELF-HOSTED-RELAY.md)). The steps are the same for both.
+
+1. Open your Codekin web app and sign in with GitHub. Access is by invitation: use the invite link a workspace owner or admin sent you.
 2. On **Connect your computer**, generate and copy the install command. Run that exact command in a terminal on your macOS or Linux computer. It contains a one-use pairing token that expires after 10 minutes; generate a new command if it expires.
 3. The installer pairs the computer, installs Codekin, and starts its background service. Wait for the page to show the machine **online**, then click **Open**.
 
-The hosted app connects to the service on your computer; it does not run your coding agent in the browser. Keep that computer awake and connected while you use it remotely. If the installer finishes but the machine stays offline, see [Machine is paired but offline](#machine-is-paired-but-offline).
+The web app connects to the service on your computer; it does not run your coding agent in the browser. Keep that computer awake and connected while you use it remotely. If the installer finishes but the machine stays offline, see [Machine is paired but offline](#machine-is-paired-but-offline).
 
-### Local, self-hosted access
+### Local access
 
 Run this on the computer where the agent and repositories live:
 

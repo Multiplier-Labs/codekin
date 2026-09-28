@@ -4,7 +4,7 @@ Operational reference for running Codekin in production. Covers the two runtime-
 
 - [WebSocket Rate Limiting](#websocket-rate-limiting) — per-IP connection caps and per-connection message rate limits.
 - [Workflow Restart-Resume & Orphan-Session Handling](#workflow-restart-resume--orphan-session-handling) — how the workflow engine recovers in-flight runs across server restarts and handles sessions that disappear mid-run.
-- [Hosted Relay](#hosted-relay-appcodekinai) — the control plane, the hosted frontend, and the per-machine connector.
+- [Hosted relay](#hosted-relay) — the control plane, the hosted frontend, and the per-machine connector; to run your own, see [SELF-HOSTED-RELAY.md](SELF-HOSTED-RELAY.md).
 
 ---
 
@@ -312,14 +312,15 @@ There is no down-migration. Rolling back to a pre-#437 server build is safe — 
 
 ---
 
-## Hosted Relay (app.codekin.ai)
+## Hosted relay
 
 The hosted relay lets a browser reach a developer machine's local Codekin
-server. It is two processes plus a static bundle:
+server. app.codekin.ai is one deployment of it; to run your own, follow
+[SELF-HOSTED-RELAY.md](SELF-HOSTED-RELAY.md). It is two processes plus a static bundle:
 
 | Piece | Where | What it is |
 |---|---|---|
-| Control plane / hub | the host serving `app.codekin.ai`, port 32360 | `server/dist/relay/relay-server.js` behind nginx |
+| Control plane / hub | the host serving the web app (e.g. `app.codekin.ai`), port 32360 | `server/dist/relay/relay-server.js` behind nginx |
 | Hosted frontend | `/var/www/codekin-app` | `npm run build:hosted` output, static-served |
 | Connector | each developer machine | runs inside the local Codekin server for managed pairings (`server/dist/relay/embedded-connector.js`); `server/dist/relay/connector-cli.js` standalone otherwise. Outbound only |
 
@@ -338,8 +339,9 @@ misconfiguration fails at start rather than at first login.
 |---|---|---|
 | `SESSION_SECRET` | yes | ≥ 32 chars; signs session cookies |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | yes | GitHub **OAuth App** credentials |
-| `OWNER_GITHUB_ID` | yes | numeric GitHub user id; gets the owner role |
-| `ALLOWED_GITHUB_IDS` | no | comma-separated numeric ids; others land in `pending` |
+| `OWNER_GITHUB_ID` | yes | numeric GitHub user id of the **operator**: owns the first workspace, creates workspaces, manages accounts |
+| `ALLOWED_GITHUB_IDS` | no | comma-separated numeric ids admitted without an invitation, as members of the first workspace |
+| `MFA_ENCRYPTION_KEY` | recommended | 32 bytes (64 hex chars) encrypting authenticator-app secrets; without it 2FA offers passkeys only. Keep a copy — losing it resets every enrolled authenticator |
 | `PUBLIC_URL` | no | default `http://localhost:5173`; must match the OAuth callback host |
 | `RELAY_PORT` | no | default 32360, bound to 127.0.0.1 |
 | `AUDIT_RETENTION_DAYS` | no | default 90; `0` disables pruning |
@@ -357,30 +359,24 @@ keys are ignored, and the server refuses to boot until the id keys replace them.
 
 ### Managing access
 
-New users land in `pending` and see a request-access screen; an id in
-`ALLOWED_GITHUB_IDS` starts them `active`. To grant, revoke, or promote after
-the fact, an **owner or admin** uses the user-admin API (there is no UI yet):
+People are admitted by **invitation** (Settings → Workspace → Members → Invite
+people), or by `ALLOWED_GITHUB_IDS`. Roles are per workspace (owner, admin,
+member, viewer) and are managed in each workspace's Members page by its owners
+and admins. Owners and admins must use two-factor authentication.
+
+Account-level controls belong to the operator (`OWNER_GITHUB_ID`) in
+**Settings → Platform → Accounts**: disabling an account (signs it out and
+blocks it in every workspace — sticky, a login never re-activates it) and
+allowing it to create workspaces. The same is available as `GET /api/users`
+and `PATCH /api/users/<id>` (`{"status": …}` / `{"canCreateWorkspaces": …}`);
+changes need a recent second-factor check and are audited as `user_updated`.
+
+An account that has lost every second factor can only be reset by the
+operator, on the relay host:
 
 ```bash
-# List users (id, login, role, status, isOwner)
-curl -s --cookie "codekin_relay_sid=…" https://app.codekin.ai/api/users
-
-# Revoke access immediately (also drops the user's open relay sockets)
-curl -X PATCH https://app.codekin.ai/api/users/<id> \
-  --cookie "codekin_relay_sid=…" -H 'Content-Type: application/json' \
-  -d '{"status":"disabled"}'
-
-# Re-enable, or (owner only) change role to admin/member/viewer
-curl -X PATCH https://app.codekin.ai/api/users/<id> \
-  --cookie … -H 'Content-Type: application/json' -d '{"status":"active"}'
+node server/dist/relay/relay-admin-cli.js reset-mfa <github-id>
 ```
-
-`disabled` is the revocation path and is sticky — a login never re-activates a
-disabled user. The configured owner account cannot be changed here and no one
-may change their own access, so neither a mistake nor a hostile admin can lock
-the owner out or an admin lock themselves in. Only the owner may change roles;
-`owner` is not an assignable role (it follows `OWNER_GITHUB_ID`). Every change
-is written to the audit log as `user_updated`.
 
 ### Deploying
 

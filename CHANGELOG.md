@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Guide to hosting your own Codekin web app** (`docs/SELF-HOSTED-RELAY.md`): the relay and web app run on any server under your own domain, GitHub OAuth app and database; app.codekin.ai is one instance. The README and getting-started guide now describe remote access that way, and the relay runbook reflects workspaces, invitations and 2FA
+
 ## [0.9.0] - 2026-09-28
 
 ### Added
