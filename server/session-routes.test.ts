@@ -86,6 +86,7 @@ function fakeSessions(overrides: Partial<Record<string, unknown>> = {}): Session
   const approvalManager = {
     getApprovals: vi.fn(() => ({ approvals: [] })),
     getGlobalApprovals: vi.fn(() => ({ approvals: [] })),
+    getAllApprovals: vi.fn(() => [{ workingDir: '/repos/x', tools: ['Read'], commands: [], patterns: [] }]),
     removeApproval: vi.fn(() => true),
     persistRepoApprovals: vi.fn(),
   }
@@ -177,6 +178,7 @@ describe('createSessionRouter', () => {
       ['GET', '/api/browse-dirs'],
       ['GET', '/api/approvals?path=/repos/x'],
       ['GET', '/api/approvals/global'],
+      ['GET', '/api/approvals/all'],
     ]
 
     it.each(ROUTES)('%s %s returns 401 without a token', async (method, path) => {
@@ -601,6 +603,13 @@ describe('createSessionRouter', () => {
     it('GET /api/approvals requires path query parameter', async () => {
       const res = await fetch(`${server.baseUrl}/api/approvals`, { headers: auth() })
       expect(res.status).toBe(400)
+    })
+
+    it('GET /api/approvals/all returns every repo in one response', async () => {
+      const res = await fetch(`${server.baseUrl}/api/approvals/all`, { headers: auth() })
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.repos).toEqual([{ workingDir: '/repos/x', tools: ['Read'], commands: [], patterns: [] }])
     })
 
     it('DELETE /api/approvals rejects invalid single-delete with 400', async () => {

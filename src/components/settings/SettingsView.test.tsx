@@ -29,6 +29,8 @@ const api = vi.hoisted(() => ({
   applyWebhookSetup: vi.fn(),
   testWebhookDelivery: vi.fn(),
   getRepoApprovals: vi.fn(() => Promise.resolve({ tools: ['Read'], commands: ['ls'], patterns: [] })),
+  getAllRepoApprovals: vi.fn(() => Promise.resolve([{ workingDir: '/r/a', tools: ['Read'], commands: ['ls'], patterns: [] }])),
+  removeRepoApproval: vi.fn(() => Promise.resolve()),
   bulkRemoveRepoApprovals: vi.fn(() => Promise.resolve()),
   webhookEndpointUrl: () => 'https://example.test/api/webhooks/github',
 }))
@@ -150,7 +152,8 @@ describe('SettingsView', () => {
     act(() => { root?.unmount() }); container?.remove()
 
     el = await render(view({ section: 'permissions', repos: [{ workingDir: '/r/a' } as never] }))
-    expect(el.textContent).toContain('2 approved patterns across 1 repo')
+    expect(el.textContent).toContain('2 rules in 1 repo')
+    expect(api.getAllRepoApprovals).toHaveBeenCalledTimes(1)
     act(() => { root?.unmount() }); container?.remove()
 
     el = await render(view({ section: 'webhooks' }))

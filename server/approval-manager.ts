@@ -343,6 +343,20 @@ export class ApprovalManager {
   }
 
   /**
+   * Every repo that has at least one rule, with its rules — the whole store in
+   * one read, so a machine-wide view does not need a request per repo.
+   */
+  getAllApprovals(): Array<{ workingDir: string; tools: string[]; commands: string[]; patterns: string[] }> {
+    const result: Array<{ workingDir: string; tools: string[]; commands: string[]; patterns: string[] }> = []
+    for (const workingDir of this.repoApprovals.keys()) {
+      const approvals = this.getApprovals(workingDir)
+      if (approvals.tools.length + approvals.commands.length + approvals.patterns.length === 0) continue
+      result.push({ workingDir, ...approvals })
+    }
+    return result.sort((a, b) => a.workingDir.localeCompare(b.workingDir))
+  }
+
+  /**
    * Return approvals that are effective globally via cross-repo inference
    * (approved in CROSS_REPO_THRESHOLD+ repos). Each entry includes the
    * repos that contributed to it.
