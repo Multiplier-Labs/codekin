@@ -246,6 +246,20 @@ describe('ApprovalManager', () => {
     })
   })
 
+  describe('getAllApprovals', () => {
+    it('returns every repo with rules, sorted, and skips emptied repos', () => {
+      mgr.addRepoApproval('/repo/b', { tool: 'Read' })
+      mgr.addRepoApproval('/repo/a', { pattern: 'git diff *' })
+      mgr.addRepoApproval('/repo/c', { tool: 'Write' })
+      mgr.removeApproval('/repo/c', { tool: 'Write' })
+
+      expect(mgr.getAllApprovals()).toEqual([
+        { workingDir: '/repo/a', tools: [], commands: [], patterns: ['git diff *'] },
+        { workingDir: '/repo/b', tools: ['Read'], commands: [], patterns: [] },
+      ])
+    })
+  })
+
   // ─── 9. getGlobalApprovals ──────────────────────────────────────────
 
   describe('getGlobalApprovals', () => {

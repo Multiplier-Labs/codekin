@@ -16,6 +16,7 @@ import { AccessTokenField } from './AccessTokenField'
 import { AgentNameField } from './AgentNameField'
 import { ThemePicker } from './ThemePicker'
 import AppIcon from '../AppIcon'
+import { Block } from './Block'
 import { SessionPreferences } from './SessionPreferences'
 import { PermissionsSection } from './PermissionsSection'
 import { WebhooksSection } from './WebhooksSection'
@@ -85,16 +86,6 @@ function useIsOperator(hosted: boolean): boolean | null {
 }
 
 const loading = <p className="text-body text-ink-muted">Loading…</p>
-
-/** A titled block inside a section page. */
-function Block({ title, children }: { title?: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-control border border-edge bg-surface px-4 py-4">
-      {title && <h3 className="mb-3 text-meta font-semibold uppercase tracking-wide text-ink-muted">{title}</h3>}
-      {children}
-    </section>
-  )
-}
 
 /** The Connection page: the access token (local) and the agent's name. */
 function ConnectionSection({ settings, onUpdate, hosted, agentName, onAgentNameChange, onError }: {
@@ -292,7 +283,7 @@ export function SettingsView({
       )
       break
     case 'permissions':
-      body = <Block><PermissionsSection token={settings.token} repos={repos} onError={onError} /></Block>
+      body = <PermissionsSection token={settings.token} repos={repos} onError={onError} />
       break
     case 'webhooks':
       body = <Block><WebhooksSection token={settings.token} /></Block>

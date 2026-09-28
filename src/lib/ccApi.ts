@@ -157,6 +157,40 @@ export async function getRepoApprovals(token: string, workingDir: string): Promi
   return jsonBody<RepoApprovals>(res)
 }
 
+/** One repo's rules, as returned by the machine-wide listing. */
+export interface RepoApprovalsEntry extends RepoApprovals {
+  workingDir: string
+}
+
+/**
+ * Every repo that has auto-approval rules, in one request. Servers that
+ * predate `/api/approvals/all` answer 404; for those, fall back to asking
+ * per repo, a few at a time — a burst of hundreds of requests trips the
+ * hosted relay's frame limit and drops the whole connection.
+ */
+export async function getAllRepoApprovals(token: string, workingDirs: string[]): Promise<RepoApprovalsEntry[]> {
+  const res = await transport.authFetch('/api/approvals/all', {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (res.ok) return (await jsonBody<{ repos: RepoApprovalsEntry[] }>(res)).repos
+  if (res.status !== 404) throw new Error(`Failed to fetch approvals: ${res.status}`)
+
+  const CONCURRENCY = 4
+  const results: RepoApprovalsEntry[] = []
+  let next = 0
+  async function worker() {
+    while (next < workingDirs.length) {
+      const workingDir = workingDirs[next++]
+      try {
+        const a = await getRepoApprovals(token, workingDir)
+        if (a.tools.length + a.commands.length + a.patterns.length > 0) results.push({ workingDir, ...a })
+      } catch { /* one unreadable repo should not hide the rest */ }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, workingDirs.length) }, worker))
+  return results.sort((a, b) => a.workingDir.localeCompare(b.workingDir))
+}
+
 /** Remove an auto-approval rule for a repo (by workingDir path). */
 export async function removeRepoApproval(
   token: string,

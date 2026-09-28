@@ -498,6 +498,14 @@ export function createSessionRouter(
     res.json(sessions.approvalManager.getApprovals(workingDir))
   })
 
+  /** Every repo's rules in one response (the Settings → Permissions overview). */
+  router.get('/api/approvals/all', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+
+    res.json({ repos: sessions.approvalManager.getAllApprovals() })
+  })
+
   /** Approvals effective globally via cross-repo inference (approved in 2+ repos). */
   router.get('/api/approvals/global', (req, res) => {
     const token = extractToken(req)
