@@ -1228,3 +1228,17 @@ html, body, #root {
   background: color-mix(in srgb, var(--color-error-3) 15%, transparent);
 }
 
+
+/* Single-line selects: replace the native chevron — which browsers draw flush
+   against the right border — with a caret in the control's own text color,
+   inset to match the left padding. Unlayered so it beats px-* utilities. */
+select:not([multiple]):not([size]) {
+  appearance: none;
+  padding-right: 2rem;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 15px) 55%, calc(100% - 10px) 55%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
