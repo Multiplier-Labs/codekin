@@ -7,11 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-28
+
 ### Changed
+- **Settings is easier to read** — every page uses the same layout: titled blocks with a one-line description, and each setting as a row with its explanation on the left and the control on the right. Larger type across the page, one button size, higher-contrast help text, two-factor status shown row by row with a warning when no recovery codes are left, and Sessions and Webhooks split into focused blocks (#663, #664)
+- Settings opens as a page of its own, without the session sidebar (#657)
+- The Permissions page loads every repo's approval rules in one request and groups them by repo and tool, with revoke at each level (#659)
+- "Share this session" moved into the session row's menu in the sidebar (#660)
 - README and npm package description follow the codekin.ai messaging: "A workbench for serious AI coding", why teams choose Codekin, features grouped as interactive workbench / orchestration & automation / open platform, and use cases
 
 ### Added
 - **Guide to hosting your own Codekin web app** (`docs/SELF-HOSTED-RELAY.md`): the relay and web app run on any server under your own domain, GitHub OAuth app and database; app.codekin.ai is one instance. The README and getting-started guide now describe remote access that way, and the relay runbook reflects workspaces, invitations and 2FA
+
+### Fixed
+- Select menus show an inset chevron instead of the native one flush against the border (#662)
 
 ## [0.9.0] - 2026-09-28
 
