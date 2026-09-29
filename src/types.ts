@@ -110,11 +110,13 @@ export interface Session {
   /** 'isolated' sessions only ever run in their own worktree. */
   executionMode?: 'isolated' | 'existing-checkout'
   /** Readiness of an isolated session's worktree. */
-  worktreeState?: 'preparing' | 'ready' | 'failed' | 'missing'
+  worktreeState?: 'preparing' | 'ready' | 'failed' | 'missing' | 'removed'
   /** Why the worktree is not ready. */
   worktreeError?: string
   /** Branch checked out in the session's worktree. */
   worktreeBranch?: string
+  /** Set while the session is archived (stopped, hidden, worktree kept). */
+  archivedAt?: string
   connectedClients: number
   lastActivity: string
   /** How the session was created: manually by a user, by a GitHub webhook, or by a workflow. */

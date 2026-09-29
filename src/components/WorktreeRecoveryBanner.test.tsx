@@ -54,6 +54,12 @@ describe('WorktreeRecoveryBanner', () => {
     expect(c.textContent).toContain('Worktree is missing')
   })
 
+  it('names a worktree whose working files were removed', () => {
+    const c = render(<WorktreeRecoveryBanner state="removed" onRetry={vi.fn()} onUseExistingCheckout={vi.fn()} />)
+
+    expect(c.textContent).toContain('Working files were removed')
+  })
+
   it('calls the matching handler for each action', () => {
     const onRetry = vi.fn()
     const onUseExistingCheckout = vi.fn()

@@ -28,6 +28,7 @@ export interface PersistedSession {
   worktreeState?: import('./types.js').WorktreeState
   worktreeError?: string
   worktreeBranch?: string
+  archivedAt?: string
   created: string
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   provider?: import('./coding-process.js').CodingProvider
@@ -62,6 +63,7 @@ export class SessionPersistence {
       worktreeState: s.worktreeState,
       worktreeError: s.worktreeError,
       worktreeBranch: s.worktreeBranch,
+      archivedAt: s.archivedAt,
       created: s.created,
       source: s.source,
     provider: s.provider,
@@ -113,7 +115,7 @@ export class SessionPersistence {
           worktreeState = 'failed'
           worktreeError = 'Worktree creation was interrupted by a server restart.'
         }
-        if (s.worktreePath && !existsSync(s.worktreePath)) {
+        if (s.worktreePath && worktreeState !== 'removed' && !existsSync(s.worktreePath)) {
           console.warn(`[restore] Worktree ${s.worktreePath} for session ${s.id} is missing — session will wait for recovery`)
           worktreeState = 'missing'
           worktreeError = `Worktree ${s.worktreePath} no longer exists.`
@@ -129,6 +131,7 @@ export class SessionPersistence {
           worktreeState,
           worktreeError,
           worktreeBranch: s.worktreeBranch,
+          archivedAt: s.archivedAt,
           created: s.created,
           source: s.source ?? 'manual',
           provider: s.provider ?? 'claude',

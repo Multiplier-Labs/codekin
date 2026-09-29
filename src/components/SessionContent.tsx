@@ -63,7 +63,7 @@ export interface SessionContentProps {
   moveToWorktree: (() => void) | undefined
   worktreePath: string | undefined
   /** Readiness of an isolated session's worktree; failed/missing shows the recovery banner. */
-  worktreeState?: 'preparing' | 'ready' | 'failed' | 'missing'
+  worktreeState?: 'preparing' | 'ready' | 'failed' | 'missing' | 'removed'
   worktreeError?: string
   onRetryWorktree: () => void
   onUseExistingCheckout: () => void
@@ -211,7 +211,7 @@ export function SessionContent({
       )}
 
       {/* Isolated session whose worktree is unavailable */}
-      {(worktreeState === 'failed' || worktreeState === 'missing') && (
+      {(worktreeState === 'failed' || worktreeState === 'missing' || worktreeState === 'removed') && (
         <WorktreeRecoveryBanner
           state={worktreeState}
           error={worktreeError}

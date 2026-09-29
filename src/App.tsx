@@ -99,7 +99,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     loading: reposLoading, error: reposError, ghStatus, ghError,
     refresh: refreshRepos,
   } = useRepos(settings.token)
-  const { sessions, rename: renameSession, remove: removeSession, refresh: refreshSessions } = useSessions(settings.token)
+  const { sessions, rename: renameSession, archive: archiveSession, refresh: refreshSessions } = useSessions(settings.token)
   const { queues: tentativeQueues, addToQueue, clearQueue } = useTentativeQueue()
   const { sessionId: urlSessionId, view, automationsTab, settingsSection, path: routePath, navigate } = useRouter()
 
@@ -368,7 +368,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     leaveSession,
     clearMessages,
     wsCreateSession,
-    removeSession,
+    closeSession: archiveSession,
     pendingContextRef,
     useWorktreeRef,
     permissionModeRef,
@@ -957,6 +957,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
         archiveRefreshKey={archiveRefreshKey}
         onViewArchivedSession={() => { /* the drawer owns the viewer */ }}
         onNewSessionFromArchive={handleNewSessionFromArchive}
+        onResumeSession={(id) => { void refreshSessions(); handleSelectSession(id) }}
         fontSize={settings.fontSize}
         initialTab={drawer?.tab}
         isMobile={isMobile}

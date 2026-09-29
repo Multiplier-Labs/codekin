@@ -84,12 +84,14 @@ export class SessionLifecycle {
    */
   reportWorktreeUnavailable(session: Session): void {
     const missing = !!session.worktreePath
-    const state = missing ? 'missing' : 'failed'
+    const state = session.worktreeState === 'removed' ? 'removed' : missing ? 'missing' : 'failed'
     if (session.worktreeState === state && session._worktreeReported) return
     session.worktreeState = state
-    session.worktreeError ??= missing
-      ? `Worktree ${session.worktreePath} no longer exists.`
-      : 'The worktree could not be created.'
+    session.worktreeError ??= state === 'removed'
+      ? `The working files at ${session.worktreePath} were removed.`
+      : missing
+        ? `Worktree ${session.worktreePath} no longer exists.`
+        : 'The worktree could not be created.'
     session._worktreeReported = true
     this.deps.persistToDisk()
     this.deps.globalBroadcast?.({ type: 'sessions_updated' })
@@ -109,6 +111,8 @@ export class SessionLifecycle {
   startClaude(sessionId: string): boolean {
     const session = this.deps.getSession(sessionId)
     if (!session) return false
+    // Archived sessions start only after an explicit resume.
+    if (session.archivedAt) return false
 
     // Clear stopped flag and any pending restart timer on explicit start
     session._stoppedByUser = false

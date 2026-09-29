@@ -28,7 +28,7 @@ import type { CodingProcess, CodingProvider } from './coding-process.js'
 import { buildHandoffInjection, generateHandoff } from './handoff-manager.js'
 import { PlanManager } from './plan-manager.js'
 import { SessionArchive } from './session-archive.js'
-import type { DiffFileStatus, DiffScope, Session, SessionInfo, TaskItem, WorktreeState, WsServerMessage } from './types.js'
+import type { DiffFileStatus, DiffScope, Session, SessionInfo, TaskItem, WorktreeRemovalPreflight, WorktreeState, WsServerMessage } from './types.js'
 import { cleanupWorkspace } from './webhook-workspace.js'
 import { PORT } from './config.js'
 import { ApprovalManager } from './approval-manager.js'
@@ -38,7 +38,7 @@ import { SessionNaming } from './session-naming.js'
 import { SessionPersistence } from './session-persistence.js'
 import { DiffManager } from './diff-manager.js'
 import { ProcessCoordinator } from './process-coordinator.js'
-import { prepareWorktree, removeWorktree, type WorktreeResult } from './worktree-ops.js'
+import { inspectWorktree, prepareWorktree, removeWorktree, type WorktreeResult } from './worktree-ops.js'
 
 /** Max messages retained in a session's output history buffer. */
 const MAX_HISTORY = 2000
@@ -260,6 +260,8 @@ export class SessionManager {
       if (session.claudeProcess?.isAlive()) continue
       if (session.clients.size > 0) continue
       if (session.source === 'orchestrator') continue
+      // Archived sessions are kept until the user removes them.
+      if (session.archivedAt) continue
       const headless = isHeadlessSession(session)
       const threshold = headless ? HEADLESS_STALE_AGE_MS : STALE_SESSION_AGE_MS
       const ageMs = now - new Date(session.created).getTime()
@@ -270,6 +272,13 @@ export class SessionManager {
     for (const id of staleIds) {
       const s = this.sessions.get(id)
       const days = s ? Math.round((now - new Date(s.created).getTime()) / 86_400_000) : 0
+      // A session is the only record of the worktree it owns: archive it
+      // rather than deleting it, so its files are never orphaned or lost.
+      if (s?.worktreePath && existsSync(s.worktreePath)) {
+        console.log(`[idle-reaper] archiving stale worktree session=${id} source=${s.source} age=${days}d`)
+        this.archiveSession(id)
+        continue
+      }
       console.log(`[idle-reaper] pruning stale session=${id} source=${s?.source ?? '?'} age=${days}d`)
       this.delete(id)
     }
@@ -568,6 +577,107 @@ export class SessionManager {
   }
 
   /**
+   * Archive a session: stop its process, cancel any pending start, and hide it
+   * from the active list. Its transcript, provider session, worktree and branch
+   * are kept, so {@link resumeSession} continues exactly where it left off.
+   */
+  archiveSession(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session || session.source === 'orchestrator') return false
+    if (session.archivedAt) return true
+    session.archivedAt = new Date().toISOString()
+    session._heldInputs = undefined
+    session._stoppedByUser = true
+    session.coordinator.teardown()
+    this.stopClaude(sessionId)
+    session.isProcessing = false
+    const msg: WsServerMessage = {
+      type: 'system_message',
+      subtype: 'notification',
+      text: 'Session archived. Its worktree and branch are kept; resume it from the Archive tab.',
+    }
+    this.addToHistory(session, msg)
+    this.broadcast(session, msg)
+    this.persistToDisk()
+    this._globalBroadcast?.({ type: 'sessions_updated' })
+    return true
+  }
+
+  /**
+   * Return an archived session to the active list. The process is not started
+   * here; it starts on the next input, after the usual isolation checks.
+   */
+  resumeSession(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session?.archivedAt) return false
+    session.archivedAt = undefined
+    session._stoppedByUser = false
+    session._lastActivityAt = Date.now()
+    this.persistToDisk()
+    this._globalBroadcast?.({ type: 'sessions_updated' })
+    return true
+  }
+
+  /**
+   * Report what removing a session's working files would affect. Removal is
+   * safe only with no uncommitted or untracked files and no other session
+   * working inside the worktree. Commits are always kept on the branch.
+   */
+  async getRemovalPreflight(sessionId: string): Promise<WorktreeRemovalPreflight | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+    const worktreePath = session.worktreePath ?? null
+    if (!worktreePath || session.worktreeState === 'removed') {
+      return { worktreePath, exists: false, modified: [], untracked: [], uniqueCommits: null, referencedBy: [], safe: false, blockers: ['This session has no working files to remove.'] }
+    }
+    const inspection = await inspectWorktree(worktreePath)
+    const inside = (dir: string) => dir === worktreePath || dir.startsWith(worktreePath + path.sep)
+    const referencedBy = [...this.sessions.values()]
+      .filter(s => s.id !== sessionId && inside(s.workingDir))
+      .map(s => s.id)
+    const blockers: string[] = []
+    if (!inspection.exists) blockers.push('The worktree no longer exists.')
+    if (inspection.modified.length) blockers.push(`${inspection.modified.length} file(s) have uncommitted changes.`)
+    if (inspection.untracked.length) blockers.push(`${inspection.untracked.length} untracked file(s) would be lost.`)
+    if (referencedBy.length) blockers.push(`${referencedBy.length} other session(s) are working in this worktree.`)
+    return {
+      worktreePath,
+      branch: inspection.branch ?? session.worktreeBranch,
+      exists: inspection.exists,
+      modified: inspection.modified,
+      untracked: inspection.untracked,
+      uniqueCommits: inspection.uniqueCommits,
+      referencedBy,
+      safe: blockers.length === 0,
+      blockers,
+    }
+  }
+
+  /**
+   * Remove an archived session's working files after a fresh preflight. The
+   * branch, transcript and session record are kept, so resuming and retrying
+   * recreates the worktree from the branch. Never forces removal.
+   */
+  async removeSessionWorktree(sessionId: string): Promise<{ removed: boolean; preflight: WorktreeRemovalPreflight | null; reason?: string }> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return { removed: false, preflight: null, reason: 'Session not found.' }
+    if (!session.archivedAt) return { removed: false, preflight: null, reason: 'Archive the session before removing its working files.' }
+    await this.stopClaudeAndWait(sessionId)
+    const preflight = await this.getRemovalPreflight(sessionId)
+    if (!preflight?.safe || !preflight.worktreePath) {
+      return { removed: false, preflight, reason: preflight?.blockers.join(' ') ?? 'Nothing to remove.' }
+    }
+    const { removed, reason } = await removeWorktree(preflight.worktreePath, session.groupDir ?? preflight.worktreePath)
+    if (!removed) return { removed: false, preflight, reason }
+    session.worktreeState = 'removed'
+    session.worktreeError = undefined
+    session._worktreeReported = false
+    this.persistToDisk()
+    this._globalBroadcast?.({ type: 'sessions_updated' })
+    return { removed: true, preflight }
+  }
+
+  /**
    * Resolve the Claude CLI project storage directory for a given working dir.
    * Claude encodes the absolute path by replacing `/` with `-`.
    */
@@ -730,6 +840,7 @@ export class SessionManager {
       worktreeState: s.worktreeState,
       worktreeError: s.worktreeError,
       worktreeBranch: s.worktreeBranch,
+      archivedAt: s.archivedAt,
       connectedClients: s.clients.size,
       lastActivity: new Date(s._lastActivityAt).toISOString(),
       source: s.source,
@@ -740,7 +851,15 @@ export class SessionManager {
 
   list(): SessionInfo[] {
     return Array.from(this.sessions.values())
-      .filter((s) => s.source !== 'orchestrator')
+      .filter((s) => s.source !== 'orchestrator' && !s.archivedAt)
+      .map((s) => this.serializeSession(s))
+  }
+
+  /** Archived sessions (resumable, with their worktrees kept), newest first. */
+  listArchived(): SessionInfo[] {
+    return Array.from(this.sessions.values())
+      .filter((s) => !!s.archivedAt)
+      .sort((a, b) => (b.archivedAt ?? '').localeCompare(a.archivedAt ?? ''))
       .map((s) => this.serializeSession(s))
   }
 
@@ -1207,6 +1326,13 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return
     session._lastActivityAt = Date.now()
+    // Archived sessions take no input until they are explicitly resumed.
+    if (session.archivedAt) {
+      const msg: WsServerMessage = { type: 'system_message', subtype: 'error', text: 'This session is archived. Resume it from the Archive tab to continue.' }
+      this.broadcast(session, msg)
+      return
+    }
+
     // An isolated session without a usable worktree must not start anywhere
     // else. Hold the input until the user retries or switches checkout.
     if (isIsolationBlocked(session)) {
@@ -1748,7 +1874,7 @@ export class SessionManager {
   restoreActiveSessions(): void {
     const toRestore: Session[] = []
     for (const session of this.sessions.values()) {
-      if (session._wasActiveBeforeRestart && session.claudeSessionId && session.source !== 'webhook') {
+      if (session._wasActiveBeforeRestart && session.claudeSessionId && session.source !== 'webhook' && !session.archivedAt) {
         toRestore.push(session)
       }
     }

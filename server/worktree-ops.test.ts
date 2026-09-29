@@ -4,7 +4,7 @@ import { execFileSync } from 'child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { prepareWorktree, removeWorktree, type WorktreeCreated } from './worktree-ops.js'
+import { inspectWorktree, prepareWorktree, removeWorktree, type WorktreeCreated } from './worktree-ops.js'
 
 let root: string
 let repo: string
@@ -243,5 +243,49 @@ describe('removeWorktree', () => {
 
     expect(result).toEqual({ removed: true })
     expect(git(['worktree', 'list'])).not.toContain('proj-wt-abcd1234')
+  })
+})
+
+describe('inspectWorktree', () => {
+  let wt: WorktreeCreated
+
+  beforeEach(async () => {
+    wt = await created({ sourceDir: repo, ownerId: 'abcd1234', branch: 'wt/abcd1234', generatedBranch: true })
+  })
+
+  it('reports a clean worktree with no commits of its own', async () => {
+    expect(await inspectWorktree(wt.path)).toEqual({
+      exists: true, modified: [], untracked: [], branch: 'wt/abcd1234', uniqueCommits: 0,
+    })
+  })
+
+  it('lists modified, staged and untracked files but not ignored ones', async () => {
+    commit(wt.path, '.gitignore', 'node_modules/\n', 'ignore deps')
+    writeFileSync(join(wt.path, 'README.md'), 'edited\n')
+    writeFileSync(join(wt.path, 'staged.txt'), 'staged\n')
+    git(['add', 'staged.txt'], wt.path)
+    mkdirSync(join(wt.path, 'notes'))
+    writeFileSync(join(wt.path, 'notes', 'todo.txt'), 'todo\n')
+    mkdirSync(join(wt.path, 'node_modules'))
+    writeFileSync(join(wt.path, 'node_modules', 'dep.js'), '')
+
+    const result = await inspectWorktree(wt.path)
+
+    expect(result.modified.sort()).toEqual(['README.md', 'staged.txt'])
+    expect(result.untracked).toEqual(['notes/todo.txt'])
+    expect(result.uniqueCommits).toBe(1)
+  })
+
+  it('does not count commits that another branch already has', async () => {
+    commit(wt.path, 'feature.txt', 'work\n', 'agent work')
+    git(['branch', 'keep', 'wt/abcd1234'])
+
+    expect((await inspectWorktree(wt.path)).uniqueCommits).toBe(0)
+  })
+
+  it('reports a missing worktree', async () => {
+    rmSync(wt.path, { recursive: true, force: true })
+
+    expect(await inspectWorktree(wt.path)).toMatchObject({ exists: false, uniqueCommits: null })
   })
 })

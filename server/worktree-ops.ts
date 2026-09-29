@@ -343,3 +343,55 @@ export async function removeWorktree(worktreePath: string, repoDir: string): Pro
     }
   })
 }
+
+export interface WorktreeInspection {
+  /** Whether the worktree directory exists and is a git checkout. */
+  exists: boolean
+  /** Tracked files with staged or unstaged changes. */
+  modified: string[]
+  /** Untracked, non-ignored files. */
+  untracked: string[]
+  /** Branch checked out in the worktree, if any. */
+  branch?: string
+  /** Commits on the branch reachable from no other branch or remote-tracking
+   *  ref; null when this could not be determined. They survive worktree
+   *  removal because the branch is kept. */
+  uniqueCommits: number | null
+}
+
+/** Report what removing a worktree would affect, without changing anything. */
+export async function inspectWorktree(worktreePath: string): Promise<WorktreeInspection> {
+  if (!existsSync(path.join(worktreePath, '.git'))) {
+    return { exists: false, modified: [], untracked: [], uniqueCommits: null }
+  }
+  const status = await git(['status', '--porcelain', '-z', '--untracked-files=all'], worktreePath)
+  const modified: string[] = []
+  const untracked: string[] = []
+  const entries = status.split('\0')
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i]
+    if (entry.length < 4) continue
+    const code = entry.slice(0, 2)
+    const file = entry.slice(3)
+    if (code === '??') untracked.push(file)
+    else modified.push(file)
+    if (code[0] === 'R' || code[0] === 'C') i++ // rename/copy source path follows
+  }
+
+  let branch: string | undefined
+  try {
+    branch = (await git(['symbolic-ref', '--quiet', '--short', 'HEAD'], worktreePath)).trim() || undefined
+  } catch {
+    // detached HEAD
+  }
+  let uniqueCommits: number | null = null
+  try {
+    // --exclude patterns for --branches are matched without the refs/heads/ prefix.
+    const exclude = branch ? [`--exclude=${branch}`] : []
+    const out = await git(['rev-list', '--count', 'HEAD', '--not', ...exclude, '--branches', '--remotes'], worktreePath)
+    uniqueCommits = Number(out.trim())
+  } catch {
+    // leave unknown
+  }
+  return { exists: true, modified, untracked, branch, uniqueCommits }
+}

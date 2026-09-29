@@ -1,6 +1,7 @@
 /**
  * Banner shown above the input bar when an isolated session's worktree is
- * unavailable (creation failed, or the directory disappeared).
+ * unavailable (creation failed, the directory disappeared, or its working
+ * files were removed from the Archive tab).
  *
  * The session never falls back to the shared checkout on its own: nothing
  * runs, and messages sent meanwhile are held by the server. The user either
@@ -8,14 +9,16 @@
  */
 
 interface Props {
-  state: 'failed' | 'missing'
+  state: 'failed' | 'missing' | 'removed'
   error?: string
   onRetry: () => void
   onUseExistingCheckout: () => void
 }
 
 export function WorktreeRecoveryBanner({ state, error, onRetry, onUseExistingCheckout }: Props) {
-  const headline = state === 'missing' ? 'Worktree is missing' : 'Worktree could not be created'
+  const headline = state === 'removed'
+    ? 'Working files were removed'
+    : state === 'missing' ? 'Worktree is missing' : 'Worktree could not be created'
   return (
     <div role="alert" className="flex items-center justify-between gap-3 border-t border-error-9/50 bg-error-10/40 px-4 py-2 flex-shrink-0">
       <div className="min-w-0 text-body text-error-4">

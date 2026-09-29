@@ -265,6 +265,26 @@ describe('SessionPersistence.restoreFromDisk', () => {
     expect(s.worktreeError).toContain('interrupted')
   })
 
+  it('keeps the removed state for a worktree whose files were deliberately removed', () => {
+    seed([{
+      id: 's1',
+      name: 'WT',
+      workingDir: '/nonexistent/wt',
+      worktreePath: '/nonexistent/wt',
+      executionMode: 'isolated',
+      worktreeState: 'removed',
+      archivedAt: '2026-09-29T10:00:00.000Z',
+      created: '2026-04-27T00:00:00Z',
+      claudeSessionId: null,
+      outputHistory: [],
+    }])
+
+    const s = restoreQuietly().get('s1')!
+
+    expect(s.worktreeState).toBe('removed')
+    expect(s.archivedAt).toBe('2026-09-29T10:00:00.000Z')
+  })
+
   it('round-trips isolation fields through persistToDisk', () => {
     seed([{
       id: 's1',
@@ -272,6 +292,7 @@ describe('SessionPersistence.restoreFromDisk', () => {
       workingDir: '/some/repo',
       executionMode: 'existing-checkout',
       worktreeBranch: 'wt/abc',
+      archivedAt: '2026-09-29T10:00:00.000Z',
       created: '2026-04-27T00:00:00Z',
       claudeSessionId: null,
       outputHistory: [],
@@ -281,7 +302,7 @@ describe('SessionPersistence.restoreFromDisk', () => {
     new SessionPersistence(sessions).persistToDisk()
     const written = JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'))
 
-    expect(written[0]).toMatchObject({ executionMode: 'existing-checkout', worktreeBranch: 'wt/abc' })
+    expect(written[0]).toMatchObject({ executionMode: 'existing-checkout', worktreeBranch: 'wt/abc', archivedAt: '2026-09-29T10:00:00.000Z' })
   })
 
   it('handles malformed JSON without throwing', () => {
