@@ -4,11 +4,12 @@
  */
 // @vitest-environment jsdom
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   decideRestore, forgetMachine, lastMachineId, rememberMachine,
-  LAST_MACHINE_KEY, type Machine, installCommands,
+  type Machine, installCommands,
 } from './machines'
+import { resetUserPrefsForTests } from './userPrefs'
 
 function machine(overrides: Partial<Machine> = {}): Machine {
   return {
@@ -25,18 +26,30 @@ function machine(overrides: Partial<Machine> = {}): Machine {
 }
 
 describe('remembered machine', () => {
-  beforeEach(() => { localStorage.clear() })
+  const fetchMock = vi.fn(async () => new Response('{}'))
+  beforeEach(() => {
+    resetUserPrefsForTests()
+    fetchMock.mockClear()
+    vi.stubGlobal('fetch', fetchMock)
+  })
+  afterEach(() => { vi.unstubAllGlobals() })
 
-  it('remembers the machine that was connected to', () => {
+  it('remembers the machine that was connected to, on the relay', () => {
     rememberMachine('m1')
     expect(lastMachineId()).toBe('m1')
-    expect(localStorage.getItem(LAST_MACHINE_KEY)).toBe('m1')
+    expect(fetchMock).toHaveBeenCalledWith('/api/me/preferences', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ machineId: 'm1' }),
+    }))
   })
 
-  it('forgets it when the user leaves the machine on purpose', () => {
+  it('forgets it when the user leaves the machine on purpose', async () => {
     rememberMachine('m1')
-    forgetMachine()
+    await forgetMachine()
     expect(lastMachineId()).toBeNull()
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/me/preferences', expect.objectContaining({
+      body: JSON.stringify({ machineId: null }),
+    }))
   })
 
   it('has nothing to restore before the first connection', () => {

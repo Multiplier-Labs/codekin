@@ -307,6 +307,20 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
       CREATE INDEX idx_user_recovery_codes_user ON user_recovery_codes(user_id);
     `)
   },
+
+  // 5: per-user preferences that used to live in one browser's localStorage —
+  // the workspace a new tab opens in and the machine a reload reconnects to —
+  // so they follow the user across browsers and devices.
+  db => {
+    db.exec(`
+      CREATE TABLE user_preferences (
+        user_id TEXT PRIMARY KEY REFERENCES users(id),
+        last_workspace_id TEXT,
+        last_machine_id TEXT,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `)
+  },
 ]
 
 function runMigrations(db: Database.Database): void {
@@ -498,4 +512,30 @@ export function getMachine(db: Database.Database, machineId: string): MachineRow
  */
 export function getUserById(db: Database.Database, userId: string): UserRow | undefined {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as UserRow | undefined
+}
+
+/** Where a user's hosted session resumes: last workspace and machine. */
+export interface UserPreferences {
+  workspaceId: string | null
+  machineId: string | null
+}
+
+export function getUserPreferences(db: Database.Database, userId: string): UserPreferences {
+  const row = db.prepare('SELECT last_workspace_id, last_machine_id FROM user_preferences WHERE user_id = ?')
+    .get(userId) as { last_workspace_id: string | null; last_machine_id: string | null } | undefined
+  return { workspaceId: row?.last_workspace_id ?? null, machineId: row?.last_machine_id ?? null }
+}
+
+/** Merge a partial update; keys left out keep their stored value. */
+export function setUserPreferences(db: Database.Database, userId: string, patch: Partial<UserPreferences>): UserPreferences {
+  const next = { ...getUserPreferences(db, userId), ...patch }
+  db.prepare(`
+    INSERT INTO user_preferences (user_id, last_workspace_id, last_machine_id, updated_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT(user_id) DO UPDATE SET
+      last_workspace_id = excluded.last_workspace_id,
+      last_machine_id = excluded.last_machine_id,
+      updated_at = excluded.updated_at
+  `).run(userId, next.workspaceId, next.machineId)
+  return next
 }

@@ -131,6 +131,58 @@ describe('relay auth routes', () => {
     expect(prot.status).toBe(200)
   })
 
+  describe('/api/me/preferences', () => {
+    async function signIn(): Promise<string> {
+      await start(githubFetchMock({ id: 2, login: 'teammate' }), { ...CONFIG, allowedGithubIds: [1, 2] })
+      return await login()
+    }
+    const put = (cookie: string, body: unknown) => fetch(`${baseUrl}/api/me/preferences`, {
+      method: 'PUT',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const me = async (cookie: string) =>
+      ((await (await fetch(`${baseUrl}/api/me`, { headers: { cookie } })).json()) as { preferences: unknown }).preferences
+
+    it('starts empty and round-trips through /api/me', async () => {
+      const cookie = await signIn()
+      expect(await me(cookie)).toEqual({ workspaceId: null, machineId: null })
+
+      const res = await put(cookie, { workspaceId: 'org-default', machineId: 'm-1' })
+      expect(res.status).toBe(200)
+      expect(await me(cookie)).toEqual({ workspaceId: 'org-default', machineId: 'm-1' })
+    })
+
+    it('merges partial updates and clears with null', async () => {
+      const cookie = await signIn()
+      await put(cookie, { workspaceId: 'org-default', machineId: 'm-1' })
+      await put(cookie, { machineId: null })
+      expect(await me(cookie)).toEqual({ workspaceId: 'org-default', machineId: null })
+    })
+
+    it('refuses a workspace the user is not a member of', async () => {
+      const cookie = await signIn()
+      const res = await put(cookie, { workspaceId: 'someone-elses' })
+      expect(res.status).toBe(400)
+      expect(await me(cookie)).toEqual({ workspaceId: null, machineId: null })
+    })
+
+    it('rejects malformed ids', async () => {
+      const cookie = await signIn()
+      expect((await put(cookie, { machineId: 42 })).status).toBe(400)
+      expect((await put(cookie, { machineId: 'x'.repeat(200) })).status).toBe(400)
+      expect((await put(cookie, { machineId: '../etc' })).status).toBe(400)
+    })
+
+    it('requires a signed-in user', async () => {
+      await signIn()
+      const res = await fetch(`${baseUrl}/api/me/preferences`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{}',
+      })
+      expect(res.status).toBe(401)
+    })
+  })
+
   it('sends the operator to 2FA enrollment when they have no second factor', async () => {
     await start(githubFetchMock({ id: 1, login: 'alari76' }))
     const cookie = await login()

@@ -14,13 +14,14 @@ import type { Request, Response } from 'express'
 import { randomBytes } from 'crypto'
 import type Database from 'better-sqlite3'
 import type { RelayConfig } from './relay-config.js'
-import { upsertUserFromGithub, getUserById, isGithubAccountAllowed } from './control-plane-db.js'
+import { upsertUserFromGithub, getUserById, isGithubAccountAllowed, getUserPreferences, setUserPreferences } from './control-plane-db.js'
+import type { UserPreferences } from './control-plane-db.js'
 import type { GithubProfile, UserStatus, UserRow } from './control-plane-db.js'
 import type { SqliteSessionStore } from './sqlite-session-store.js'
 import { validateReturnTo } from './return-to.js'
 import { recordAuditEvent } from './audit.js'
 import { revokePendingDeviceLinks } from './device-link.js'
-import { listUserWorkspaces } from './workspaces.js'
+import { getActiveMembership, listUserWorkspaces } from './workspaces.js'
 import { acceptInvitation, checkInvitation } from './invitations.js'
 import {
   PARTIAL_SESSION_TTL_MS,
@@ -37,6 +38,9 @@ const GITHUB_AUTHORIZE_URL = 'https://github.com/login/oauth/authorize'
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token'
 const GITHUB_USER_URL = 'https://api.github.com/user'
 const GITHUB_EMAILS_URL = 'https://api.github.com/user/emails'
+
+/** Workspace and machine ids are opaque tokens; this bounds what gets stored. */
+const ID_RE = /^[A-Za-z0-9_-]{1,128}$/
 
 /**
  * The subset of the user stored in the web session and returned by /api/me.
@@ -475,7 +479,33 @@ export function createRelayAuthRouter({
       workspaces: full ? listUserWorkspaces(db, current.id) : [],
       isOperator: full && isOperator(current, config),
       canCreateWorkspaces: full && canCreateWorkspaces(current, config),
+      preferences: full ? getUserPreferences(db, current.id) : null,
     })
+  })
+
+  // Where the hosted app resumes for this user — the workspace a new tab
+  // opens in and the machine a reload reconnects to. Kept here rather than in
+  // browser storage so it follows the user across devices. Each key is
+  // optional; null clears it.
+  router.put('/api/me/preferences', createRequireActiveUser(db, config), (req, res) => {
+    const userId = req.session.user?.id ?? ''
+    const body = (req.body ?? {}) as Record<string, unknown>
+    const patch: Partial<UserPreferences> = {}
+    for (const key of ['workspaceId', 'machineId'] as const) {
+      if (!(key in body)) continue
+      const value = body[key]
+      if (value !== null && (typeof value !== 'string' || !ID_RE.test(value))) {
+        res.status(400).json({ error: `invalid ${key}` })
+        return
+      }
+      patch[key] = value
+    }
+    // Only a workspace the user can actually open is worth remembering.
+    if (patch.workspaceId && !getActiveMembership(db, patch.workspaceId, userId)) {
+      res.status(400).json({ error: 'not_a_member' })
+      return
+    }
+    res.json({ preferences: setUserPreferences(db, userId, patch) })
   })
 
   return router

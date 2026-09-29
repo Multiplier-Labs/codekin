@@ -8,6 +8,7 @@
  */
 
 import { workspaceHeaders } from './workspace'
+import { saveUserPrefs, userPref } from './userPrefs'
 
 export interface Machine {
   id: string
@@ -37,20 +38,21 @@ export function isUsableMachine(machine: Machine): boolean {
   return !machine.setupPending
 }
 
-/** Machine the user was last connected to, so a reload returns them to it. */
-export const LAST_MACHINE_KEY = 'codekin.hosted.lastMachineId'
-
+/**
+ * Machine the user was last connected to, so a reload — on this device or
+ * another — returns them to it. Kept on the relay (see ./userPrefs).
+ */
 export function rememberMachine(id: string): void {
-  localStorage.setItem(LAST_MACHINE_KEY, id)
+  void saveUserPrefs({ machineId: id })
 }
 
 /** Forget the connection — a reload then lands on the picker, as before. */
-export function forgetMachine(): void {
-  localStorage.removeItem(LAST_MACHINE_KEY)
+export function forgetMachine(): Promise<void> {
+  return saveUserPrefs({ machineId: null })
 }
 
 export function lastMachineId(): string | null {
-  return localStorage.getItem(LAST_MACHINE_KEY)
+  return userPref('machineId')
 }
 
 /**

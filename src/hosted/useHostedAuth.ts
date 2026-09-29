@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { Workspace } from './workspace'
 import type { AuthLevel } from './mfa'
+import { seedUserPrefs, type UserPrefs } from './userPrefs'
 
 export interface HostedUser {
   id: string
@@ -62,7 +63,10 @@ export function useHostedAuth(): HostedAuthState {
     try {
       const res = await fetch('/api/me', { credentials: 'include' })
       if (res.ok) {
-        const data = await res.json() as { user: HostedUser | null } & Partial<HostedAccount>
+        const data = await res.json() as { user: HostedUser | null; preferences?: UserPrefs | null } & Partial<HostedAccount>
+        // Before the user state below, so the workspace pick and the machine
+        // restore it triggers already see the remembered choices.
+        seedUserPrefs(data.preferences)
         setUser(data.user)
         setAccount({
           authLevel: data.authLevel ?? 'full',
