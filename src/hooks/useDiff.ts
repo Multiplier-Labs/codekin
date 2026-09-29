@@ -169,7 +169,8 @@ export function useDiff({ send, isOpen, sessionId, defaultView }: UseDiffOptions
   }, [scheduleRefresh])
 
   // Auto-fetch when panel opens
-  const prevOpenRef = useRef(false)
+  // Starts at the initial value: the session effect covers the first open.
+  const prevOpenRef = useRef(isOpen)
   useEffect(() => {
     if (isOpen && !prevOpenRef.current && sessionIdRef.current) {
       request(scopeRef.current)

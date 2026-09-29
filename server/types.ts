@@ -386,6 +386,7 @@ export type WsServerMessage =
   | { type: 'sessions_updated' }
   | { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary; branch: string; scope: DiffView; requestId?: number; sessionId?: string; review?: DiffReview; incomplete?: string[] }
   | { type: 'diff_error'; message: string; scope?: DiffView; requestId?: number; sessionId?: string }
+  | { type: 'pr_status'; status: PrStatus; requestId?: number; sessionId?: string }
 
 /** Messages sent from browser clients to the server over WebSocket. */
 export type WsClientMessage =
@@ -405,6 +406,8 @@ export type WsClientMessage =
   | { type: 'get_diff'; scope?: DiffView; requestId?: number }
   /** Choose the ref branch views compare against (null = automatic), then return the diff for `scope`. */
   | { type: 'set_review_base'; base: string | null; scope: DiffView; requestId?: number }
+  /** Look up the pull request for the session's branch (cached ~60s unless refresh). */
+  | { type: 'get_pr_status'; requestId?: number; refresh?: boolean }
   | { type: 'discard_changes'; scope: DiffScope; paths?: string[]; statuses?: Record<string, DiffFileStatus> }
   | { type: 'move_to_worktree' }
   | { type: 'retry_worktree' }
@@ -423,12 +426,62 @@ export type DiffScope = 'staged' | 'unstaged' | 'all'
  */
 export type DiffView = DiffScope | 'branch' | 'committed'
 
+/** Outcome of a pull request lookup; everything except 'found' and 'none' means "unknown". */
+export type PrLookupState = 'found' | 'none' | 'no_github_remote' | 'gh_missing' | 'unauthenticated' | 'rate_limited' | 'error'
+
+/** CI checks on a pull request's remote head. */
+export interface PrChecksSummary {
+  total: number
+  passed: number
+  failed: number
+  pending: number
+  skipped: number
+  /** Names of (up to five) failing checks. */
+  failing: string[]
+}
+
+export interface PullRequestInfo {
+  number: number
+  title: string
+  url: string
+  state: 'OPEN' | 'CLOSED' | 'MERGED'
+  isDraft: boolean
+  baseRefName: string
+  headRefName: string
+  /** Commit GitHub's checks ran on. */
+  headRefOid: string
+  /** The head lives in a fork; its base is in another repository. */
+  isCrossRepository: boolean
+  headOwner?: string
+  updatedAt: string
+  reviewDecision?: string
+  checks: PrChecksSummary
+  /** Local commits not on the PR head (not pushed); null when that head is not fetched locally. */
+  ahead: number | null
+  /** PR head commits missing locally; null when unknown. */
+  behind: number | null
+}
+
+/** Pull request status for a session's branch. */
+export interface PrStatus {
+  state: PrLookupState
+  message?: string
+  branch?: string
+  /** Open first, then most recently updated. */
+  pulls: PullRequestInfo[]
+  /** The working tree has edits no check has seen. */
+  dirty: boolean
+  fetchedAt: string
+  /** Set when a refresh failed and the last good result is shown instead. */
+  staleReason?: string
+}
+
 /** How a branch view was computed. */
 export interface DiffReview {
   /** Ref the branch is compared against, e.g. 'main' or 'origin/main'. */
   baseRef: string
-  /** Why this base: the user's choice, the ref the worktree was created from, or the repo default. */
-  baseSource: 'user' | 'worktree' | 'default'
+  /** Why this base: the user's choice, the branch's open pull request, the ref the worktree was created from, or the repo default. */
+  baseSource: 'user' | 'pr' | 'worktree' | 'default'
   /** Merge-base commit the diff starts from. */
   mergeBase: string
   /** HEAD commit the diff was computed at. */

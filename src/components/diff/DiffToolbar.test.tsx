@@ -43,7 +43,7 @@ describe('DiffToolbar', () => {
     expect(c.querySelector('[title="Discard all changes"]')).toBeNull()
     const select = c.querySelector('select')!
     expect([...select.options].map(o => o.value)).toEqual(['__automatic__', 'main', 'develop', 'origin/main'])
-    expect(select.options[0].textContent).toBe('main (automatic)')
+    expect(select.options[0].textContent).toBe('main (default branch)')
 
     act(() => {
       select.value = 'develop'

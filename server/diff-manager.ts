@@ -121,7 +121,7 @@ function isBranchView(view: DiffView): view is 'branch' | 'committed' {
 /** The caller's preferred review base (from session state). */
 export interface ReviewBasePreference {
   ref: string
-  source: 'user' | 'worktree'
+  source: 'user' | 'pr' | 'worktree'
 }
 
 /** A git failure with a message meant for the user. */

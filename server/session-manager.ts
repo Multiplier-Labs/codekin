@@ -28,7 +28,7 @@ import type { CodingProcess, CodingProvider } from './coding-process.js'
 import { buildHandoffInjection, generateHandoff } from './handoff-manager.js'
 import { PlanManager } from './plan-manager.js'
 import { SessionArchive } from './session-archive.js'
-import type { DiffFileStatus, DiffScope, DiffView, Session, SessionInfo, TaskItem, WorktreeRemovalPreflight, WorktreeState, WsServerMessage } from './types.js'
+import type { DiffFileStatus, DiffScope, DiffView, PrStatus, Session, SessionInfo, TaskItem, WorktreeRemovalPreflight, WorktreeState, WsServerMessage } from './types.js'
 import { cleanupWorkspace } from './webhook-workspace.js'
 import { PORT } from './config.js'
 import { ApprovalManager } from './approval-manager.js'
@@ -37,6 +37,7 @@ import { isIsolationBlocked, SessionLifecycle } from './session-lifecycle.js'
 import { SessionNaming } from './session-naming.js'
 import { SessionPersistence } from './session-persistence.js'
 import { DiffManager, isValidReviewBase, type ReviewBasePreference } from './diff-manager.js'
+import { cachedPrBaseFor, getPrStatus } from './pr-status.js'
 import { ProcessCoordinator } from './process-coordinator.js'
 import { inspectWorktree, prepareWorktree, removeWorktree, type WorktreeResult } from './worktree-ops.js'
 
@@ -1781,10 +1782,28 @@ export class SessionManager {
   async getDiff(sessionId: string, view: DiffView = 'all'): Promise<WsServerMessage> {
     const session = this.sessions.get(sessionId)
     if (!session) return { type: 'diff_error', message: 'Session not found', scope: view }
-    const base: ReviewBasePreference | undefined = session.reviewBase
-      ? { ref: session.reviewBase, source: 'user' }
-      : session.worktreeBase ? { ref: session.worktreeBase, source: 'worktree' } : undefined
-    return this.diffManager.getDiff(session.workingDir, view, base)
+    return this.diffManager.getDiff(session.workingDir, view, await this.reviewBaseFor(session, view))
+  }
+
+  /**
+   * The base a branch view compares against, in priority order: the user's
+   * choice, the branch's single open pull request (from the cached lookup;
+   * never a network call), the ref the worktree was created from, else
+   * undefined (the repository default).
+   */
+  private async reviewBaseFor(session: Session, view: DiffView): Promise<ReviewBasePreference | undefined> {
+    if (session.reviewBase) return { ref: session.reviewBase, source: 'user' }
+    if (view !== 'branch' && view !== 'committed') return undefined
+    const prBase = await cachedPrBaseFor(session.workingDir)
+    if (prBase) return { ref: prBase, source: 'pr' }
+    return session.worktreeBase ? { ref: session.worktreeBase, source: 'worktree' } : undefined
+  }
+
+  /** Pull request status for the session's branch (cached; `refresh` forces a lookup). */
+  async getPrStatus(sessionId: string, refresh = false): Promise<PrStatus | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+    return getPrStatus(session.workingDir, { refresh })
   }
 
   /**

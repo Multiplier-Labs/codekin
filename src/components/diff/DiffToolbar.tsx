@@ -46,6 +46,13 @@ const VIEW_ORDER: DiffView[] = ['branch', 'committed', 'all', 'staged', 'unstage
 
 const AUTOMATIC = '__automatic__'
 
+/** Why an automatic base was chosen, shown next to it. */
+const AUTOMATIC_REASON: Record<Exclude<DiffReview['baseSource'], 'user'>, string> = {
+  pr: 'pull request base',
+  worktree: 'branch start',
+  default: 'default branch',
+}
+
 export function DiffToolbar({
   branch, scope, summary, review, loading, hasUntrackedFiles,
   onScopeChange, onReviewBaseChange, onRefresh, onDiscardAll,
@@ -158,7 +165,7 @@ export function DiffToolbar({
             title={`Compared against ${review.baseRef} (merge base ${review.mergeBase.slice(0, 8)})`}
             onChange={(e) => { onReviewBaseChange(e.target.value === AUTOMATIC ? null : e.target.value) }}
           >
-            <option value={AUTOMATIC}>{review.baseSource === 'user' ? 'Automatic' : `${review.baseRef} (automatic)`}</option>
+            <option value={AUTOMATIC}>{review.baseSource === 'user' ? 'Automatic' : `${review.baseRef} (${AUTOMATIC_REASON[review.baseSource]})`}</option>
             {baseOptions.map(ref => <option key={ref} value={ref}>{ref}</option>)}
           </select>
         </div>

@@ -73,6 +73,7 @@ describe('grantee actions', () => {
     const state = joined(editor)
     expect(checkClientFrame(editor, state, frame({ type: 'input', data: 'hi' })).allowed).toBe(true)
     expect(checkClientFrame(editor, state, frame({ type: 'get_diff' })).allowed).toBe(true)
+    expect(checkClientFrame(editor, state, frame({ type: 'get_pr_status' })).allowed).toBe(true)
     expect(checkClientFrame(editor, state, frame({ type: 'ping' })).allowed).toBe(true)
   })
 
@@ -89,6 +90,7 @@ describe('grantee actions', () => {
     for (const type of [
       'create_session', 'set_model', 'set_provider', 'set_permission_mode',
       'discard_changes', 'move_to_worktree', 'start_claude',
+      'set_review_base', 'retry_worktree', 'use_existing_checkout',
     ]) {
       expect(checkClientFrame(editor, state, frame({ type })).allowed).toBe(false)
     }
