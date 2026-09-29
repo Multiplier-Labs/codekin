@@ -285,6 +285,7 @@ export class DiffManager {
           deletions: files.reduce((sum, f) => sum + f.deletions, 0),
           truncated,
           truncationReason,
+          ...(view === 'branch' ? { uncommittedFiles: files.filter(f => f.uncommitted).length } : {}),
         }
         return {
           type: 'diff_result', files, summary, branch, scope: view,
@@ -355,6 +356,17 @@ export class DiffManager {
       }
       if (large) incomplete.push(`${large} untracked file(s) over 1 MB are listed without content.`)
       if (unreadable) incomplete.push(`${unreadable} untracked file(s) could not be read.`)
+    }
+
+    // The task view mixes history and live edits: mark which files still
+    // have uncommitted changes so reviewers know what is not yet in a commit.
+    if (view === 'branch') {
+      try {
+        const live = await getFileStatuses(cwd)
+        for (const f of files) if (f.path in live) f.uncommitted = true
+      } catch {
+        incomplete.push('Could not tell which files have uncommitted changes.')
+      }
     }
 
     return { files, truncated, truncationReason, incomplete }

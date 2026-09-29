@@ -58,6 +58,16 @@ describe('DiffToolbar', () => {
     expect(onReviewBaseChange).toHaveBeenLastCalledWith(null)
   })
 
+  it('counts files with uncommitted changes in the task view', () => {
+    const c = render(
+      <DiffToolbar branch="feat/x" scope="branch" summary={{ ...summary, uncommittedFiles: 2 }} review={review} loading={false} hasUntrackedFiles={false}
+        onScopeChange={vi.fn()} onReviewBaseChange={vi.fn()} onRefresh={vi.fn()} />,
+    )
+
+    expect(c.textContent).toContain('3 files changed')
+    expect(c.textContent).toContain('2 uncommitted')
+  })
+
   it('keeps discard for uncommitted views', () => {
     const c = render(
       <DiffToolbar branch="feat/x" scope="all" summary={summary} review={null} loading={false} hasUntrackedFiles={false}
