@@ -28,12 +28,12 @@ import type { CodingProcess, CodingProvider } from './coding-process.js'
 import { buildHandoffInjection, generateHandoff } from './handoff-manager.js'
 import { PlanManager } from './plan-manager.js'
 import { SessionArchive } from './session-archive.js'
-import type { DiffFileStatus, DiffScope, Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
+import type { DiffFileStatus, DiffScope, Session, SessionInfo, TaskItem, WorktreeState, WsServerMessage } from './types.js'
 import { cleanupWorkspace } from './webhook-workspace.js'
 import { PORT } from './config.js'
 import { ApprovalManager } from './approval-manager.js'
 import { PromptRouter } from './prompt-router.js'
-import { SessionLifecycle } from './session-lifecycle.js'
+import { isIsolationBlocked, SessionLifecycle } from './session-lifecycle.js'
 import { SessionNaming } from './session-naming.js'
 import { SessionPersistence } from './session-persistence.js'
 import { DiffManager } from './diff-manager.js'
@@ -102,7 +102,9 @@ export interface CreateSessionOptions {
   id?: string
   groupDir?: string
   model?: string
-  /** When true, create a git worktree as a sibling of workingDir and run Claude there. */
+  /** When true, the session is isolated: it will only start in its own git
+   *  worktree (created afterwards via createWorktree) and never falls back to
+   *  the shared checkout. */
   useWorktree?: boolean
   /** Permission mode for the Claude CLI process. */
   permissionMode?: import('./types.js').PermissionMode
@@ -387,6 +389,7 @@ export class SessionManager {
       name,
       workingDir,
       groupDir: options?.groupDir,
+      ...(options?.useWorktree ? { executionMode: 'isolated' as const, worktreeState: 'preparing' as const } : {}),
       created: new Date().toISOString(),
       source: options?.source ?? 'manual',
       provider: options?.provider ?? 'claude',
@@ -453,6 +456,9 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return { ok: false, code: 'session_not_found', message: `Session ${sessionId} not found.` }
 
+    const isolated = session.executionMode === 'isolated'
+    if (isolated) this.setWorktreeState(session, 'preparing')
+
     const shortId = sessionId.slice(0, 8)
     const result = await prepareWorktree({
       sourceDir: workingDir,
@@ -463,17 +469,22 @@ export class SessionManager {
       baseBranch,
       ownedPath: session.worktreePath,
     })
-    if (!result.ok) {
-      console.error(`[worktree] Failed to create worktree for session ${sessionId}: ${result.message}`)
-      return result
-    }
     // The session may have been deleted while git was running.
     if (this.sessions.get(sessionId) !== session) return result
+    if (!result.ok) {
+      console.error(`[worktree] Failed to create worktree for session ${sessionId}: ${result.message}`)
+      // Only a session that requires isolation is blocked by the failure; a
+      // session moving out of the shared checkout simply stays where it is.
+      if (isolated) this.setWorktreeState(session, 'failed', result.message)
+      return result
+    }
 
     const previousDir = session.workingDir
     session.groupDir = result.repoRoot  // Group under original repo in sidebar
     session.workingDir = result.path
     session.worktreePath = result.path
+    session.worktreeBranch = result.branch
+    session.executionMode = 'isolated'
 
     // Copy Claude CLI session data to the worktree's project storage dir.
     // startClaude() will use --resume (not --session-id) to continue the
@@ -481,16 +492,79 @@ export class SessionManager {
     // it's also available in the worktree's project dir as a safety net.
     if (session.claudeSessionId && previousDir !== result.path) {
       try {
-        this.migrateClaudeSession(session.claudeSessionId, session.claudeSessionId, workingDir, result.path, session)
+        this.migrateClaudeSession(session.claudeSessionId, session.claudeSessionId, previousDir, result.path, session)
         console.log(`[worktree] Copied Claude session ${session.claudeSessionId} to worktree project dir`)
       } catch (err) {
         console.warn(`[worktree] Failed to migrate session data:`, err instanceof Error ? err.message : err)
       }
     }
 
+    this.setWorktreeState(session, 'ready')
+    return result
+  }
+
+  /** Record worktree readiness, persist it and tell clients. */
+  private setWorktreeState(session: Session, state: WorktreeState, error?: string): void {
+    session.worktreeState = state
+    session.worktreeError = error
+    session._worktreeReported = false
     this.persistToDisk()
     this._globalBroadcast?.({ type: 'sessions_updated' })
+  }
+
+  /**
+   * Recreate a failed or missing worktree for an isolated session, then start
+   * it and deliver any input held while it was unavailable. An existing
+   * branch (and its commits) is checked out again rather than recreated.
+   */
+  async retryWorktree(sessionId: string): Promise<WorktreeResult> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return { ok: false, code: 'session_not_found', message: `Session ${sessionId} not found.` }
+    if (session.executionMode !== 'isolated') {
+      return { ok: false, code: 'git_failed', message: 'This session does not use an isolated worktree.' }
+    }
+    if (session.worktreeState === 'preparing') {
+      return { ok: false, code: 'git_failed', message: 'A worktree is already being prepared.' }
+    }
+    const generated = `${this.getWorktreeBranchPrefix()}${sessionId.slice(0, 8)}`
+    const branch = session.worktreeBranch && session.worktreeBranch !== generated ? session.worktreeBranch : undefined
+    const repoDir = session.groupDir ?? session.workingDir
+    const result = await this.prepareSessionWorktree(sessionId, repoDir, branch)
+    if (result.ok) this.resumeAfterWorktreeChange(session, `Worktree ready: ${result.path}`)
     return result
+  }
+
+  /**
+   * Explicitly switch an isolated session to the shared checkout. This is the
+   * only way an isolated session runs outside its worktree; the worktree and
+   * its branch, if any, are left untouched.
+   */
+  useExistingCheckout(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session || session.executionMode !== 'isolated') return false
+    if (session.worktreeState === 'preparing') return false
+    const checkout = session.groupDir ?? session.workingDir
+    if (session.claudeProcess?.isAlive()) this.stopClaude(sessionId)
+    session.executionMode = 'existing-checkout'
+    session.workingDir = checkout
+    session.worktreePath = undefined
+    session.worktreeState = undefined
+    session.worktreeError = undefined
+    this.persistToDisk()
+    this._globalBroadcast?.({ type: 'sessions_updated' })
+    this.resumeAfterWorktreeChange(session, `Switched to the shared checkout: ${checkout}`)
+    return true
+  }
+
+  /** Announce a working-directory change, then start the session with any held input. */
+  private resumeAfterWorktreeChange(session: Session, notice: string): void {
+    const msg: WsServerMessage = { type: 'system_message', subtype: 'notification', text: notice }
+    this.addToHistory(session, msg)
+    this.broadcast(session, msg)
+    const held = session._heldInputs ?? []
+    session._heldInputs = undefined
+    if (held.length === 0) this.startClaude(session.id)
+    else this.sendInput(session.id, held.join('\n\n'))
   }
 
   /**
@@ -652,6 +726,10 @@ export class SessionManager {
       workingDir: s.workingDir,
       groupDir: s.groupDir,
       worktreePath: s.worktreePath,
+      executionMode: s.executionMode,
+      worktreeState: s.worktreeState,
+      worktreeError: s.worktreeError,
+      worktreeBranch: s.worktreeBranch,
       connectedClients: s.clients.size,
       lastActivity: new Date(s._lastActivityAt).toISOString(),
       source: s.source,
@@ -1129,6 +1207,16 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return
     session._lastActivityAt = Date.now()
+    // An isolated session without a usable worktree must not start anywhere
+    // else. Hold the input until the user retries or switches checkout.
+    if (isIsolationBlocked(session)) {
+      session._heldInputs = [...(session._heldInputs ?? []), data]
+      if (session.worktreeState !== 'preparing') {
+        this.sessionLifecycle.reportWorktreeUnavailable(session)
+      }
+      return
+    }
+
     // Reset stopped-by-user flag so idle-reaped sessions can auto-start
     session._stoppedByUser = false
     session.coordinator.clearUserStopped()

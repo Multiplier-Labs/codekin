@@ -62,7 +62,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       const model = msg.model ?? (provider === 'claude' ? getDefaultClaudeModel() : undefined)
       // Use the security-checked canonical path (not the raw msg.workingDir) so
       // grouping/archive behavior stays consistent with the resolved directory.
-      const session = sessions.create(msg.name, resolvedDir, { model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider })
+      const session = sessions.create(msg.name, resolvedDir, { model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider, useWorktree: msg.useWorktree })
       session.clients.add(ws)
       clientSessions.set(ws, session.id)
 
@@ -70,26 +70,26 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       triggerCliProbeIfNeeded()
 
       if (msg.useWorktree) {
-        // Create worktree asynchronously, then start Claude in it
-        void sessions.createWorktree(session.id, resolvedDir).then((wtPath) => {
-          if (wtPath) {
-            send({
-              type: 'session_created',
-              sessionId: session.id,
-              sessionName: session.name,
-              workingDir: session.workingDir,
-            })
+        // Create the worktree, then start Claude in it. An isolated session
+        // never falls back to the shared checkout: on failure it stays
+        // stopped (input is held) until the user retries or switches.
+        void sessions.prepareSessionWorktree(session.id, resolvedDir).then((result) => {
+          if (sessions.get(session.id) !== session) return  // deleted meanwhile
+          send({
+            type: 'session_created',
+            sessionId: session.id,
+            sessionName: session.name,
+            workingDir: session.workingDir,
+          })
+          if (result.ok) {
+            sessions.startClaude(session.id)
           } else {
-            // Worktree creation failed — fall back to main directory
-            send({ type: 'system_message', subtype: 'error', text: 'Failed to create git worktree. Using main project directory.' })
             send({
-              type: 'session_created',
-              sessionId: session.id,
-              sessionName: session.name,
-              workingDir: session.workingDir,
+              type: 'system_message',
+              subtype: 'error',
+              text: `Could not create an isolated worktree: ${result.message} Nothing was started in the shared checkout. Retry, or switch this session to the shared checkout.`,
             })
           }
-          sessions.startClaude(session.id)
         })
       } else {
         send({
@@ -266,6 +266,28 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
     // Move a running session into a git worktree mid-conversation.
     // Stops the Claude process first, creates the worktree, then restarts Claude in it.
     // Preserves the Claude session ID so the CLI resumes with full conversation context.
+    // Recover an isolated session whose worktree failed or disappeared.
+    case 'retry_worktree': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId) { send({ type: 'error', message: 'Not in a session' }); break }
+      void sessions.retryWorktree(sessionId).then((result) => {
+        if (!result.ok) {
+          send({ type: 'system_message', subtype: 'error', text: `Worktree retry failed: ${result.message}` })
+        }
+      })
+      break
+    }
+
+    // Explicit, user-chosen switch of an isolated session to the shared checkout.
+    case 'use_existing_checkout': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId) { send({ type: 'error', message: 'Not in a session' }); break }
+      if (!sessions.useExistingCheckout(sessionId)) {
+        send({ type: 'error', message: 'Session cannot switch to the shared checkout right now' })
+      }
+      break
+    }
+
     case 'move_to_worktree': {
       const sessionId = clientSessions.get(ws)
       if (!sessionId) { send({ type: 'error', message: 'Not in a session' }); break }
@@ -280,19 +302,20 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
         // Keep claudeSessionId so Claude CLI resumes with full conversation
         // context after the restart.  stopClaudeAndWait() already awaits
         // process exit, so the session lock should be released.
-        return sessions.createWorktree(sessionId, originalDir)
-      }).then((wtPath) => {
-        if (wtPath) {
-          const wtName = wtPath.split('/').pop() ?? wtPath
-          const createdMsg = { type: 'worktree_created' as const, worktreePath: wtPath, workingDir: wtPath }
+        return sessions.prepareSessionWorktree(sessionId, originalDir)
+      }).then((result) => {
+        if (result.ok) {
+          const wtName = result.path.split('/').pop() ?? result.path
+          const createdMsg = { type: 'worktree_created' as const, worktreePath: result.path, workingDir: result.path }
           sessions.broadcast(session, createdMsg)
           const notifMsg = { type: 'system_message' as const, subtype: 'notification' as const, text: `Moved to worktree: ${wtName}` }
           sessions.addToHistory(session, notifMsg)
           sessions.broadcast(session, notifMsg)
         } else {
-          send({ type: 'system_message', subtype: 'error', text: 'Failed to create worktree. Check server logs for details.' })
+          send({ type: 'system_message', subtype: 'error', text: `Failed to create worktree: ${result.message} Continuing in the current checkout.` })
         }
-        // Always restart Claude — in the worktree on success, or original dir on failure
+        // Restart Claude — in the worktree on success, or where it already was
+        // on failure (the session was not isolated before the move).
         sessions.startClaude(sessionId)
       }).catch((err) => {
         console.error('[worktree] move_to_worktree failed:', err)

@@ -107,6 +107,14 @@ export interface Session {
   groupDir?: string
   /** Absolute path to the git worktree, if this session uses one. */
   worktreePath?: string
+  /** 'isolated' sessions only ever run in their own worktree. */
+  executionMode?: 'isolated' | 'existing-checkout'
+  /** Readiness of an isolated session's worktree. */
+  worktreeState?: 'preparing' | 'ready' | 'failed' | 'missing'
+  /** Why the worktree is not ready. */
+  worktreeError?: string
+  /** Branch checked out in the session's worktree. */
+  worktreeBranch?: string
   connectedClients: number
   lastActivity: string
   /** How the session was created: manually by a user, by a GitHub webhook, or by a workflow. */
@@ -148,6 +156,8 @@ export type WsClientMessage =
   | { type: 'get_diff'; scope?: DiffScope }
   | { type: 'discard_changes'; scope: DiffScope; paths?: string[]; statuses?: Record<string, DiffFileStatus> }
   | { type: 'move_to_worktree' }
+  | { type: 'retry_worktree' }
+  | { type: 'use_existing_checkout' }
 
 /** A tracked task item from Claude's TodoWrite tool. */
 export interface TaskItem {

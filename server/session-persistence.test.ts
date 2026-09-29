@@ -193,53 +193,95 @@ describe('SessionPersistence.restoreFromDisk', () => {
     expect(s._wasActiveBeforeRestart).toBe(true)
   })
 
-  it('falls back to groupDir when worktreePath no longer exists', () => {
-    const fs = require('fs') as typeof import('fs')
-    const os = require('os') as typeof import('os')
-    const repoDir = fs.mkdtempSync(join(os.tmpdir(), 'codekin-fallback-'))
-    seed([{
-      id: 's1',
-      name: 'WT',
-      workingDir: '/some/old/path',
-      groupDir: repoDir,
-      worktreePath: '/nonexistent/path',
-      created: '2026-04-27T00:00:00Z',
-      claudeSessionId: null,
-      outputHistory: [],
-    }])
-
+  function restoreQuietly(): Map<string, Session> {
     const sessions = new Map<string, Session>()
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     new SessionPersistence(sessions).restoreFromDisk()
     warnSpy.mockRestore()
     logSpy.mockRestore()
+    return sessions
+  }
 
-    const s = sessions.get('s1')!
-    expect(s.workingDir).toBe(repoDir)
-    expect(s.worktreePath).toBeUndefined()
-    rmSync(repoDir, { recursive: true })
+  it('keeps a missing worktree on the session and marks it missing instead of falling back', () => {
+    seed([{
+      id: 's1',
+      name: 'WT',
+      workingDir: '/nonexistent/wt',
+      groupDir: '/some/repo',
+      worktreePath: '/nonexistent/wt',
+      executionMode: 'isolated',
+      worktreeState: 'ready',
+      created: '2026-04-27T00:00:00Z',
+      claudeSessionId: null,
+      outputHistory: [],
+    }])
+
+    const s = restoreQuietly().get('s1')!
+
+    expect(s.workingDir).toBe('/nonexistent/wt')
+    expect(s.worktreePath).toBe('/nonexistent/wt')
+    expect(s.executionMode).toBe('isolated')
+    expect(s.worktreeState).toBe('missing')
+    expect(s.worktreeError).toContain('/nonexistent/wt')
   })
 
-  it('clears worktreePath when both worktree and fallback are missing', () => {
+  it('treats a legacy session with a worktree as isolated', () => {
+    const fs = require('fs') as typeof import('fs')
+    const os = require('os') as typeof import('os')
+    const wtDir = fs.mkdtempSync(join(os.tmpdir(), 'codekin-legacy-wt-'))
     seed([{
       id: 's1',
       name: 'WT',
-      workingDir: '/nonexistent/origin',
-      worktreePath: '/nonexistent/wt',
+      workingDir: wtDir,
+      worktreePath: wtDir,
       created: '2026-04-27T00:00:00Z',
       claudeSessionId: null,
       outputHistory: [],
     }])
 
-    const sessions = new Map<string, Session>()
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
-    new SessionPersistence(sessions).restoreFromDisk()
-    warnSpy.mockRestore()
-    logSpy.mockRestore()
+    const s = restoreQuietly().get('s1')!
 
-    expect(sessions.get('s1')!.worktreePath).toBeUndefined()
+    expect(s.executionMode).toBe('isolated')
+    expect(s.worktreeState).toBe('ready')
+    rmSync(wtDir, { recursive: true })
+  })
+
+  it('marks a worktree creation interrupted by a restart as failed', () => {
+    seed([{
+      id: 's1',
+      name: 'WT',
+      workingDir: '/some/repo',
+      executionMode: 'isolated',
+      worktreeState: 'preparing',
+      created: '2026-04-27T00:00:00Z',
+      claudeSessionId: null,
+      outputHistory: [],
+    }])
+
+    const s = restoreQuietly().get('s1')!
+
+    expect(s.worktreeState).toBe('failed')
+    expect(s.worktreeError).toContain('interrupted')
+  })
+
+  it('round-trips isolation fields through persistToDisk', () => {
+    seed([{
+      id: 's1',
+      name: 'Plain',
+      workingDir: '/some/repo',
+      executionMode: 'existing-checkout',
+      worktreeBranch: 'wt/abc',
+      created: '2026-04-27T00:00:00Z',
+      claudeSessionId: null,
+      outputHistory: [],
+    }])
+    const sessions = restoreQuietly()
+
+    new SessionPersistence(sessions).persistToDisk()
+    const written = JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'))
+
+    expect(written[0]).toMatchObject({ executionMode: 'existing-checkout', worktreeBranch: 'wt/abc' })
   })
 
   it('handles malformed JSON without throwing', () => {

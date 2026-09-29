@@ -27,6 +27,18 @@ const PROVIDER_LABELS: Record<CodingProvider, string> = {
   opencode: 'OpenCode',
 }
 
+/**
+ * True when an isolated session has no usable worktree: none was created yet,
+ * or its directory is gone. Such a session must not run anywhere.
+ */
+export function isIsolationBlocked(session: Session): boolean {
+  // A session holding a worktree is isolated unless explicitly switched away.
+  const isolated = session.executionMode === 'isolated' || (!session.executionMode && !!session.worktreePath)
+  if (!isolated) return false
+  if (session.worktreeState === 'preparing') return true
+  return !session.worktreePath || !existsSync(path.join(session.worktreePath, '.git'))
+}
+
 /** Dependencies injected by SessionManager so SessionLifecycle can interact with session state. */
 export interface SessionLifecycleDeps {
   getSession(id: string): Session | undefined
@@ -66,6 +78,31 @@ export class SessionLifecycle {
   // ---------------------------------------------------------------------------
 
   /**
+   * Mark an isolated session's worktree as failed/missing (if not already)
+   * and tell its clients how to recover. Repeated calls in the same state
+   * do not repeat the message.
+   */
+  reportWorktreeUnavailable(session: Session): void {
+    const missing = !!session.worktreePath
+    const state = missing ? 'missing' : 'failed'
+    if (session.worktreeState === state && session._worktreeReported) return
+    session.worktreeState = state
+    session.worktreeError ??= missing
+      ? `Worktree ${session.worktreePath} no longer exists.`
+      : 'The worktree could not be created.'
+    session._worktreeReported = true
+    this.deps.persistToDisk()
+    this.deps.globalBroadcast?.({ type: 'sessions_updated' })
+    const msg: WsServerMessage = {
+      type: 'system_message',
+      subtype: 'error',
+      text: `${session.worktreeError} This session is isolated, so nothing was started in the shared checkout. Retry the worktree, or switch this session to the shared checkout explicitly. Messages you send meanwhile are held.`,
+    }
+    this.deps.addToHistory(session, msg)
+    this.deps.broadcast(session, msg)
+  }
+
+  /**
    * Spawn (or re-spawn) a Claude CLI process for a session.
    * Wires up all event handlers for streaming text, tools, prompts, and auto-restart.
    */
@@ -80,27 +117,34 @@ export class SessionLifecycle {
     // become stale and no-op when they fire.
     session._processGeneration = (session._processGeneration ?? 0) + 1
 
-    // Validate that the working directory still exists.  Worktree directories
-    // can be removed externally (cleanup, manual deletion, failed creation that
-    // left a stale placeholder).  Fall back to groupDir (the original repo) so
-    // the session can still function instead of entering an infinite restart loop.
-    if (!existsSync(session.workingDir) || (session.worktreePath && !existsSync(path.join(session.workingDir, '.git')))) {
+    // An isolated session runs only in its own verified worktree. If it is
+    // not ready, stay stopped and let the user retry or explicitly switch to
+    // the shared checkout — never fall back silently.
+    if (isIsolationBlocked(session)) {
+      session._stoppedByUser = true  // prevent restart loop
+      if (session.worktreeState !== 'preparing') this.reportWorktreeUnavailable(session)
+      return false
+    }
+
+    // Validate that the working directory still exists. A session outside a
+    // worktree (e.g. a webhook workspace) falls back to groupDir so it can
+    // still function instead of entering an infinite restart loop.
+    if (!existsSync(session.workingDir)) {
       const fallback = session.groupDir ?? session.workingDir
       if (fallback !== session.workingDir && existsSync(fallback)) {
         const deadPath = session.workingDir
-        console.warn(`[startClaude] Working directory ${deadPath} missing or not a valid worktree — falling back to ${fallback}`)
+        console.warn(`[startClaude] Working directory ${deadPath} missing — falling back to ${fallback}`)
         session.workingDir = fallback
-        session.worktreePath = undefined
         this.deps.persistToDisk()
         this.deps.globalBroadcast?.({ type: 'sessions_updated' })
         const fallbackMsg: WsServerMessage = {
           type: 'system_message',
           subtype: 'notification',
-          text: `Worktree directory ${deadPath} no longer exists. Falling back to original repository: ${fallback}`,
+          text: `Working directory ${deadPath} no longer exists. Falling back to: ${fallback}`,
         }
         this.deps.addToHistory(session, fallbackMsg)
         this.deps.broadcast(session, fallbackMsg)
-      } else if (!existsSync(session.workingDir)) {
+      } else {
         console.error(`[startClaude] Working directory ${session.workingDir} does not exist and no fallback available — cannot start`)
         session._stoppedByUser = true  // prevent restart loop
         const errMsg: WsServerMessage = {
@@ -328,23 +372,34 @@ export class SessionLifecycle {
       session._noOutputExitCount = 0
     }
 
+    // An isolated session whose worktree vanished mid-run must not restart
+    // anywhere else: stop and wait for the user to recover it.
+    if (isIsolationBlocked(session)) {
+      console.error(`[restart] Worktree for session ${sessionId} is unavailable — not restarting`)
+      session._stoppedByUser = true
+      for (const listener of this.deps.exitListeners) {
+        try { listener(sessionId, code, signal, false) } catch { /* listener error */ }
+      }
+      this.reportWorktreeUnavailable(session)
+      this.deps.broadcast(session, { type: 'exit', code: code ?? -1, signal })
+      return
+    }
+
     // Before evaluating restart, check if the working directory still exists.
-    // If a worktree was deleted mid-session, fall back to the original repo
-    // instead of entering a guaranteed restart death loop where every attempt
-    // fails with the same missing CWD.
+    // A session outside a worktree falls back to groupDir instead of entering
+    // a guaranteed restart death loop where every attempt fails.
     if (!existsSync(session.workingDir)) {
       const fallback = session.groupDir
       if (fallback && existsSync(fallback)) {
         const deadPath = session.workingDir
         console.warn(`[restart] Working directory ${deadPath} no longer exists — falling back to ${fallback}`)
         session.workingDir = fallback
-        session.worktreePath = undefined
         this.deps.persistToDisk()
         this.deps.globalBroadcast?.({ type: 'sessions_updated' })
         const fallbackMsg: WsServerMessage = {
           type: 'system_message',
           subtype: 'notification',
-          text: `Worktree directory ${deadPath} was removed. Restarting in original repository: ${fallback}`,
+          text: `Working directory ${deadPath} was removed. Restarting in: ${fallback}`,
         }
         this.deps.addToHistory(session, fallbackMsg)
         this.deps.broadcast(session, fallbackMsg)

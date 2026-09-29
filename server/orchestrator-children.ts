@@ -80,7 +80,7 @@ export interface ChildSession {
   /**
    * Worktree isolation outcome:
    *  - 'active': worktree created, session runs isolated
-   *  - 'failed': worktree was requested but creation failed (running in repo)
+   *  - 'failed': worktree was requested but creation failed (child not started)
    *  - 'none':   worktree was not requested
    */
   worktree: 'active' | 'failed' | 'none'
@@ -380,22 +380,29 @@ export class OrchestratorChildManager {
         model: request.model,
         permissionMode: 'acceptEdits',
         allowedTools: request.allowedTools ?? AGENT_CHILD_ALLOWED_TOOLS,
+        useWorktree: request.useWorktree,
       })
 
       // Create a git worktree for isolation if requested (default for Joe children).
       // This must happen BEFORE startClaude so Claude runs in the worktree directory.
       // Pass the target branch name so the worktree is created directly on the
       // feature branch — no need for Claude to create a second branch.
-      let worktreeFailed = false
+      // A child that asked for isolation never runs in the shared checkout:
+      // if the worktree cannot be created, the child fails and the parent is told.
       if (request.useWorktree) {
-        const wtPath = await this.sessions.createWorktree(sessionId, request.repo, request.branchName)
-        if (wtPath) {
-          child.worktree = 'active'
-          child.worktreePath = wtPath
-        } else {
-          worktreeFailed = true
-          console.warn(`[orchestrator-child] Failed to create worktree for ${sessionId}, falling back to main directory`)
+        const result = await this.sessions.prepareSessionWorktree(sessionId, request.repo, request.branchName)
+        if (!result.ok) {
+          console.warn(`[orchestrator-child] Failed to create worktree for ${sessionId}: ${result.message}`)
+          this.sessions.delete(sessionId)
+          child.status = 'failed'
+          child.error = `Could not create an isolated worktree: ${result.message}`
+          child.completedAt = new Date().toISOString()
+          this.persistRun(child, 'Worktree creation failed; nothing was started in the shared checkout.')
+          this.notifyTerminal(child)
+          return child
         }
+        child.worktree = 'active'
+        child.worktreePath = result.path
       }
 
       // Start Claude
@@ -404,7 +411,7 @@ export class OrchestratorChildManager {
       this.persistRun(child)
 
       // Build and send the task prompt, including worktree failure context
-      const prompt = this.buildPrompt(request, worktreeFailed)
+      const prompt = this.buildPrompt(request)
       this.sessions.sendInput(sessionId, prompt)
 
       // Monitor completion asynchronously
@@ -497,8 +504,8 @@ export class OrchestratorChildManager {
   /**
    * Build a focused task prompt for a child session.
    */
-  private buildPrompt(request: ChildSessionRequest, worktreeFailed = false): string {
-    const inWorktree = request.useWorktree && !worktreeFailed
+  private buildPrompt(request: ChildSessionRequest): string {
+    const inWorktree = request.useWorktree
 
     const lines = [
       `# Task: ${request.task}`,
@@ -575,19 +582,6 @@ export class OrchestratorChildManager {
       '- If you encounter issues that block the task, explain what went wrong',
       '- When done, provide a brief summary of what you changed',
     )
-
-    if (worktreeFailed) {
-      lines.push(
-        '',
-        '## ⚠ Worktree Not Available',
-        '',
-        'A git worktree could not be created for isolation. You are working **directly in the main repository**.',
-        'Be extra careful with git operations — do NOT force-push, reset, or make destructive changes to existing branches.',
-        `Create branch \`${request.branchName}\` before making any changes.`,
-        '',
-        '**IMPORTANT**: Do NOT use the `EnterWorktree` or `ExitWorktree` tools — worktree creation already failed, and retrying will not help.',
-      )
-    }
 
     return lines.join('\n')
   }

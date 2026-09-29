@@ -533,6 +533,16 @@ export function useChatSocket({
     send({ type: 'move_to_worktree' })
   }, [send])
 
+  /** Recreate the joined session's failed or missing worktree. */
+  const retryWorktree = useCallback(() => {
+    send({ type: 'retry_worktree' })
+  }, [send])
+
+  /** Explicitly run the joined isolated session in the shared checkout. */
+  const switchToSharedCheckout = useCallback(() => {
+    send({ type: 'use_existing_checkout' })
+  }, [send])
+
   /** Switch the session's coding provider. With carryContext, the server
    *  distills the current transcript into a handoff for the new provider. */
   const setProvider = useCallback((provider: import('../types').CodingProvider, carryContext?: boolean) => {
@@ -577,5 +587,7 @@ export function useChatSocket({
     currentPermissionMode,
     setPermissionMode,
     moveToWorktree,
+    retryWorktree,
+    switchToSharedCheckout,
   }
 }

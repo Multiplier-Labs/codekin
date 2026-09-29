@@ -3237,6 +3237,112 @@ describe('SessionManager', () => {
     })
   })
 
+  describe('durable isolation', () => {
+    const created = (path: string) => ({ ok: true, path, branch: 'fix/thing', repoRoot: '/repos/myproject', reused: false })
+    const failed = { ok: false, code: 'git_failed', message: 'git worktree add failed' }
+
+    it('marks a session created with useWorktree as isolated and preparing', () => {
+      const s = sm.create('iso', '/repos/myproject', { useWorktree: true })
+
+      expect(s.executionMode).toBe('isolated')
+      expect(s.worktreeState).toBe('preparing')
+      expect(sm.list().find(i => i.id === s.id)).toMatchObject({ executionMode: 'isolated', worktreeState: 'preparing' })
+    })
+
+    it('records the worktree as ready with its branch on success', async () => {
+      const s = sm.create('iso-ok', '/repos/myproject', { useWorktree: true })
+      mockPrepareWorktree.mockResolvedValue(created('/repos/myproject-wt-1'))
+
+      await sm.prepareSessionWorktree(s.id, '/repos/myproject', 'fix/thing')
+
+      expect(s.worktreeState).toBe('ready')
+      expect(s.worktreeBranch).toBe('fix/thing')
+      expect(s.worktreeError).toBeUndefined()
+    })
+
+    it('marks an isolated session failed, keeping it out of the shared checkout', async () => {
+      const s = sm.create('iso-fail', '/repos/myproject', { useWorktree: true })
+      mockPrepareWorktree.mockResolvedValue(failed)
+
+      await sm.prepareSessionWorktree(s.id, '/repos/myproject')
+
+      expect(s.worktreeState).toBe('failed')
+      expect(s.worktreeError).toBe('git worktree add failed')
+      expect(sm.startClaude(s.id)).toBe(false)
+      expect(s.claudeProcess).toBeNull()
+    })
+
+    it('leaves a non-isolated session usable when moving to a worktree fails', async () => {
+      const s = sm.create('move-fail', '/repos/myproject')
+      mockPrepareWorktree.mockResolvedValue(failed)
+
+      await sm.prepareSessionWorktree(s.id, '/repos/myproject')
+
+      expect(s.executionMode).toBeUndefined()
+      expect(s.worktreeState).toBeUndefined()
+    })
+
+    it('holds input while the worktree is unavailable and tells the client once', async () => {
+      const s = sm.create('iso-held', '/repos/myproject', { useWorktree: true })
+      mockPrepareWorktree.mockResolvedValue(failed)
+      await sm.prepareSessionWorktree(s.id, '/repos/myproject')
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+      ws.send.mockClear()
+
+      sm.sendInput(s.id, 'first')
+      sm.sendInput(s.id, 'second')
+
+      expect(s._heldInputs).toEqual(['first', 'second'])
+      expect(s.claudeProcess).toBeNull()
+      const errors = ws.send.mock.calls.map((c: any) => JSON.parse(c[0])).filter((m: any) => m.subtype === 'error')
+      expect(errors).toHaveLength(1)
+    })
+
+    it('retries the worktree on its recorded branch and delivers held input as one message', async () => {
+      const s = sm.create('iso-retry', '/repos/myproject', { useWorktree: true, groupDir: '/repos/myproject' })
+      mockPrepareWorktree.mockResolvedValue(failed)
+      await sm.prepareSessionWorktree(s.id, '/repos/myproject', 'fix/thing')
+      s.worktreeBranch = 'fix/thing'
+      s._heldInputs = ['first', 'second']
+      mockPrepareWorktree.mockResolvedValue(created('/repos/myproject-wt-1'))
+      const sendSpy = vi.spyOn(sm, 'sendInput').mockImplementation(() => {})
+
+      const result = await sm.retryWorktree(s.id)
+
+      expect(result.ok).toBe(true)
+      expect(mockPrepareWorktree).toHaveBeenLastCalledWith(expect.objectContaining({
+        sourceDir: '/repos/myproject', branch: 'fix/thing', generatedBranch: false,
+      }))
+      expect(s.worktreeState).toBe('ready')
+      expect(sendSpy).toHaveBeenCalledOnce()
+      expect(sendSpy).toHaveBeenCalledWith(s.id, 'first\n\nsecond')
+      expect(s._heldInputs).toBeUndefined()
+    })
+
+    it('switches to the shared checkout only on explicit request', () => {
+      const s = sm.create('iso-switch', '/repos/myproject-wt-1', { useWorktree: true, groupDir: '/repos/myproject' })
+      s.worktreePath = '/repos/myproject-wt-1'
+      s.worktreeState = 'missing'
+      const startSpy = vi.spyOn(sm, 'startClaude').mockReturnValue(true)
+
+      expect(sm.useExistingCheckout(s.id)).toBe(true)
+
+      expect(s.executionMode).toBe('existing-checkout')
+      expect(s.workingDir).toBe('/repos/myproject')
+      expect(s.worktreePath).toBeUndefined()
+      expect(s.worktreeState).toBeUndefined()
+      expect(startSpy).toHaveBeenCalledWith(s.id)
+    })
+
+    it('refuses to switch while a worktree is being prepared', () => {
+      const s = sm.create('iso-busy', '/repos/myproject', { useWorktree: true })
+
+      expect(sm.useExistingCheckout(s.id)).toBe(false)
+      expect(s.executionMode).toBe('isolated')
+    })
+  })
+
   describe('client lifecycle: join/leave grace timer', () => {
     it('join re-broadcasts pending tool approval prompts', () => {
       const s = sm.create('rejoin-test', '/tmp')
@@ -3609,7 +3715,7 @@ describe('SessionManager', () => {
   })
 
   describe('handleClaudeExit — missing workingDir fallback', () => {
-    it('falls back to groupDir when workingDir no longer exists', () => {
+    it('keeps a worktree session on its worktree instead of falling back to groupDir', () => {
       vi.useFakeTimers()
       const mockedExistsSync = vi.mocked(existsSync)
       const s = sm.create('wt-deleted', '/repos/project-wt-abc12345')
@@ -3618,11 +3724,9 @@ describe('SessionManager', () => {
       ;(session as any).worktreePath = '/repos/project-wt-abc12345'
       ;(session as any).restartCount = 0
 
-      // workingDir doesn't exist, but groupDir does
       mockedExistsSync.mockImplementation((p) => {
         const ps = String(p)
-        if (ps === '/repos/project-wt-abc12345') return false
-        if (ps === '/repos/project') return true
+        if (ps.startsWith('/repos/project-wt-abc12345')) return false
         if (ps.includes('sessions.json')) return false
         return true
       })
@@ -3632,18 +3736,13 @@ describe('SessionManager', () => {
 
       ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 1, null)
 
-      // Should update workingDir to groupDir
-      expect(session.workingDir).toBe('/repos/project')
-      expect(session.worktreePath).toBeUndefined()
-
-      // Should broadcast notification about fallback
+      expect(session.workingDir).toBe('/repos/project-wt-abc12345')
+      expect(session.worktreePath).toBe('/repos/project-wt-abc12345')
+      expect(session.worktreeState).toBe('missing')
       const messages = ws.send.mock.calls.map((c: any) => JSON.parse(c[0]))
-      const fallbackMsg = messages.find((m: any) =>
-        m.type === 'system_message' && m.subtype === 'notification' && m.text?.includes('was removed')
-      )
-      expect(fallbackMsg).toBeDefined()
+      expect(messages.some((m: any) => m.type === 'system_message' && m.subtype === 'error' && m.text?.includes('isolated'))).toBe(true)
+      expect(messages.some((m: any) => m.type === 'exit')).toBe(true)
 
-      // Reset mock
       mockedExistsSync.mockImplementation((p) => String(p).includes('sessions.json') ? false : true)
       vi.useRealTimers()
     })

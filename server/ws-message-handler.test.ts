@@ -83,7 +83,9 @@ function createContext(): WsHandlerContext & { sent: WsServerMessage[] } {
       broadcast: vi.fn(),
       getDiff: vi.fn().mockResolvedValue({ type: 'diff_result', files: [], summary: {} }),
       discardChanges: vi.fn().mockResolvedValue({ type: 'diff_result', files: [], summary: {} }),
-      createWorktree: vi.fn().mockResolvedValue(null),
+      prepareSessionWorktree: vi.fn().mockResolvedValue({ ok: false, code: 'git_failed', message: 'git worktree add failed' }),
+      retryWorktree: vi.fn().mockResolvedValue({ ok: true }),
+      useExistingCheckout: vi.fn().mockReturnValue(true),
     } as unknown as WsHandlerContext['sessions'],
     clientSessions: new Map(),
     send: vi.fn((msg: WsServerMessage) => sent.push(msg)),
@@ -191,7 +193,8 @@ describe('handleWsMessage', () => {
     it('creates session, creates worktree async, sends session_created after', async () => {
       const session = mockSession({ id: 'wt-1', name: 'WT Session', workingDir: '/projects/app' })
       ;(ctx.sessions.create as ReturnType<typeof vi.fn>).mockReturnValue(session)
-      ;(ctx.sessions.createWorktree as ReturnType<typeof vi.fn>).mockResolvedValue('/tmp/worktree')
+      ;(ctx.sessions.get as ReturnType<typeof vi.fn>).mockReturnValue(session)
+      ;(ctx.sessions.prepareSessionWorktree as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, path: '/tmp/worktree', branch: 'wt/x', repoRoot: '/projects/app', reused: false })
 
       handleWsMessage({
         type: 'create_session',
@@ -206,7 +209,8 @@ describe('handleWsMessage', () => {
       // Flush microtasks
       await vi.waitFor(() => expect(ctx.sent.length).toBeGreaterThan(0))
 
-      expect(ctx.sessions.createWorktree).toHaveBeenCalledWith('wt-1', '/projects/app')
+      expect(ctx.sessions.prepareSessionWorktree).toHaveBeenCalledWith('wt-1', '/projects/app')
+      expect(ctx.sessions.create).toHaveBeenCalledWith('WT Session', '/projects/app', expect.objectContaining({ useWorktree: true }))
       expect(ctx.sent[0]).toMatchObject({
         type: 'session_created',
         sessionId: 'wt-1',
@@ -214,13 +218,14 @@ describe('handleWsMessage', () => {
       expect(ctx.sessions.startClaude).toHaveBeenCalledWith('wt-1')
     })
 
-    it('passes the canonical (realpath-resolved) dir to createWorktree(), not the raw path', async () => {
+    it('passes the canonical (realpath-resolved) dir to prepareSessionWorktree(), not the raw path', async () => {
       realpathSyncMock.mockImplementation((p: string) =>
         p === '/projects/link' ? '/projects/app' : p,
       )
       const session = mockSession({ id: 'wt-canon', name: 'WT Canon', workingDir: '/projects/app' })
       ;(ctx.sessions.create as ReturnType<typeof vi.fn>).mockReturnValue(session)
-      ;(ctx.sessions.createWorktree as ReturnType<typeof vi.fn>).mockResolvedValue('/tmp/worktree')
+      ;(ctx.sessions.get as ReturnType<typeof vi.fn>).mockReturnValue(session)
+      ;(ctx.sessions.prepareSessionWorktree as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, path: '/tmp/worktree', branch: 'wt/x', repoRoot: '/projects/app', reused: false })
 
       handleWsMessage({
         type: 'create_session',
@@ -232,13 +237,13 @@ describe('handleWsMessage', () => {
       await vi.waitFor(() => expect(ctx.sent.length).toBeGreaterThan(0))
 
       expect(ctx.sessions.create).toHaveBeenCalledWith('WT Canon', '/projects/app', expect.any(Object))
-      expect(ctx.sessions.createWorktree).toHaveBeenCalledWith('wt-canon', '/projects/app')
+      expect(ctx.sessions.prepareSessionWorktree).toHaveBeenCalledWith('wt-canon', '/projects/app')
     })
 
-    it('sends error when worktree creation fails, then falls back', async () => {
+    it('reports the failure and starts nothing when worktree creation fails', async () => {
       const session = mockSession({ id: 'wt-2', name: 'WT Fail', workingDir: '/projects/app' })
       ;(ctx.sessions.create as ReturnType<typeof vi.fn>).mockReturnValue(session)
-      ;(ctx.sessions.createWorktree as ReturnType<typeof vi.fn>).mockResolvedValue(null)
+      ;(ctx.sessions.get as ReturnType<typeof vi.fn>).mockReturnValue(session)
 
       handleWsMessage({
         type: 'create_session',
@@ -247,12 +252,32 @@ describe('handleWsMessage', () => {
         useWorktree: true,
       } as WsClientMessage, ctx)
 
-      await vi.waitFor(() => expect(ctx.sent.length).toBeGreaterThan(0))
+      await vi.waitFor(() => expect(ctx.sent.length).toBe(2))
 
-      // Should send error message first, then session_created fallback
-      expect(ctx.sent[0]).toMatchObject({ type: 'system_message', subtype: 'error' })
-      expect(ctx.sent[1]).toMatchObject({ type: 'session_created', sessionId: 'wt-2' })
-      expect(ctx.sessions.startClaude).toHaveBeenCalledWith('wt-2')
+      expect(ctx.sent[0]).toMatchObject({ type: 'session_created', sessionId: 'wt-2' })
+      expect(ctx.sent[1]).toMatchObject({ type: 'system_message', subtype: 'error' })
+      expect((ctx.sent[1] as any).text).toContain('git worktree add failed')
+      expect(ctx.sessions.startClaude).not.toHaveBeenCalled()
+    })
+
+    it('does nothing when the session was deleted while the worktree was created', async () => {
+      const session = mockSession({ id: 'wt-3', name: 'WT Gone', workingDir: '/projects/app' })
+      ;(ctx.sessions.create as ReturnType<typeof vi.fn>).mockReturnValue(session)
+      ;(ctx.sessions.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined)
+      ;(ctx.sessions.prepareSessionWorktree as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, path: '/tmp/worktree', branch: 'wt/x', repoRoot: '/projects/app', reused: false })
+
+      handleWsMessage({
+        type: 'create_session',
+        name: 'WT Gone',
+        workingDir: '/projects/app',
+        useWorktree: true,
+      } as WsClientMessage, ctx)
+
+      await vi.waitFor(() => expect(ctx.sessions.prepareSessionWorktree).toHaveBeenCalled())
+      await new Promise(r => setTimeout(r, 0))
+
+      expect(ctx.sent).toHaveLength(0)
+      expect(ctx.sessions.startClaude).not.toHaveBeenCalled()
     })
   })
 
@@ -639,14 +664,14 @@ describe('handleWsMessage', () => {
     it('stops Claude, creates worktree, broadcasts, and restarts', async () => {
       const session = mockSession({ workingDir: '/projects/app' })
       ;(ctx.sessions.get as ReturnType<typeof vi.fn>).mockReturnValue(session)
-      ;(ctx.sessions.createWorktree as ReturnType<typeof vi.fn>).mockResolvedValue('/tmp/wt-branch')
+      ;(ctx.sessions.prepareSessionWorktree as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, path: '/tmp/wt-branch', branch: 'wt/x', repoRoot: '/projects/app', reused: false })
 
       handleWsMessage({ type: 'move_to_worktree' } as WsClientMessage, ctx)
 
       await vi.waitFor(() => expect(ctx.sessions.startClaude).toHaveBeenCalled())
 
       expect(ctx.sessions.stopClaudeAndWait).toHaveBeenCalledWith('sess-1')
-      expect(ctx.sessions.createWorktree).toHaveBeenCalledWith('sess-1', '/projects/app')
+      expect(ctx.sessions.prepareSessionWorktree).toHaveBeenCalledWith('sess-1', '/projects/app')
       expect(ctx.sessions.broadcast).toHaveBeenCalledWith(session, expect.objectContaining({
         type: 'worktree_created',
         worktreePath: '/tmp/wt-branch',
@@ -659,17 +684,55 @@ describe('handleWsMessage', () => {
       expect(ctx.sessions.startClaude).toHaveBeenCalledWith('sess-1')
     })
 
-    it('sends error and restarts Claude when worktree creation returns null', async () => {
+    it('reports the reason and continues in the current checkout when the move fails', async () => {
       const session = mockSession({ workingDir: '/projects/app' })
       ;(ctx.sessions.get as ReturnType<typeof vi.fn>).mockReturnValue(session)
-      ;(ctx.sessions.createWorktree as ReturnType<typeof vi.fn>).mockResolvedValue(null)
 
       handleWsMessage({ type: 'move_to_worktree' } as WsClientMessage, ctx)
 
       await vi.waitFor(() => expect(ctx.sessions.startClaude).toHaveBeenCalled())
 
-      expect(ctx.sent.some(m => m.type === 'system_message' && (m as any).subtype === 'error')).toBe(true)
+      const error = ctx.sent.find(m => m.type === 'system_message' && (m as any).subtype === 'error') as any
+      expect(error.text).toContain('git worktree add failed')
       expect(ctx.sessions.startClaude).toHaveBeenCalledWith('sess-1')
+    })
+  })
+
+  /* ---- worktree recovery ---- */
+
+  describe('retry_worktree', () => {
+    it('retries the joined session and reports a failure', async () => {
+      ;(ctx.sessions.retryWorktree as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, code: 'branch_in_use', message: 'Branch x is already checked out at /y.' })
+
+      handleWsMessage({ type: 'retry_worktree' } as WsClientMessage, ctx)
+
+      await vi.waitFor(() => expect(ctx.sent.length).toBe(1))
+      expect(ctx.sessions.retryWorktree).toHaveBeenCalledWith('sess-1')
+      expect((ctx.sent[0] as any).text).toContain('already checked out')
+    })
+
+    it('sends error when not in a session', () => {
+      ctx.clientSessions.clear()
+      handleWsMessage({ type: 'retry_worktree' } as WsClientMessage, ctx)
+
+      expect(ctx.sent[0]).toMatchObject({ type: 'error', message: 'Not in a session' })
+    })
+  })
+
+  describe('use_existing_checkout', () => {
+    it('switches the joined session explicitly', () => {
+      handleWsMessage({ type: 'use_existing_checkout' } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.useExistingCheckout).toHaveBeenCalledWith('sess-1')
+      expect(ctx.sent).toHaveLength(0)
+    })
+
+    it('reports when the switch is refused', () => {
+      ;(ctx.sessions.useExistingCheckout as ReturnType<typeof vi.fn>).mockReturnValue(false)
+
+      handleWsMessage({ type: 'use_existing_checkout' } as WsClientMessage, ctx)
+
+      expect(ctx.sent[0]).toMatchObject({ type: 'error' })
     })
   })
 })

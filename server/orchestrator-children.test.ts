@@ -41,7 +41,10 @@ function makeMockSessions(worktreeSucceeds = true) {
 
   return {
     create: vi.fn(),
-    createWorktree: vi.fn(async () => worktreeSucceeds ? '/repos/myproject-wt-child123' : null),
+    prepareSessionWorktree: vi.fn(async () => worktreeSucceeds
+      ? { ok: true, path: '/repos/myproject-wt-child123', branch: 'fix/test', repoRoot: '/repos/myproject', reused: false }
+      : { ok: false, code: 'git_failed', message: 'git worktree add failed' }),
+    delete: vi.fn(),
     startClaude: vi.fn(),
     sendInput: vi.fn((_: string, prompt: string) => { sentInputs.push(prompt) }),
     get: vi.fn(() => ({
@@ -139,19 +142,22 @@ describe('OrchestratorChildManager', () => {
     it('creates a worktree when requested', async () => {
       const child = await manager.spawn(makeRequest({ useWorktree: true }))
 
-      expect(sessions.createWorktree).toHaveBeenCalledWith(child.id, '/repos/myproject', 'fix/login-bug')
+      expect(sessions.prepareSessionWorktree).toHaveBeenCalledWith(child.id, '/repos/myproject', 'fix/login-bug')
+      expect(sessions.create).toHaveBeenCalledWith(expect.any(String), '/repos/myproject', expect.objectContaining({ useWorktree: true }))
       expect(child.status).toBe('running')
     })
 
-    it('falls back gracefully when worktree creation fails', async () => {
+    it('fails the child instead of running in the shared checkout when worktree creation fails', async () => {
       sessions = makeMockSessions(false)
       manager = makeManager(sessions)
 
       const child = await manager.spawn(makeRequest({ useWorktree: true }))
 
-      expect(child.status).toBe('running')
-      const prompt = sessions._sentInputs[0]
-      expect(prompt).toContain('Worktree Not Available')
+      expect(child.status).toBe('failed')
+      expect(child.error).toContain('git worktree add failed')
+      expect(sessions.startClaude).not.toHaveBeenCalled()
+      expect(sessions._sentInputs).toHaveLength(0)
+      expect(sessions.delete).toHaveBeenCalledWith(child.id)
     })
 
     it('reports worktree status "active" with the worktree path on success', async () => {
@@ -672,9 +678,7 @@ describe('OrchestratorChildManager', () => {
     })
 
     it('includes create-branch step when NOT in worktree', async () => {
-      sessions = makeMockSessions(false)
-      manager = makeManager(sessions)
-      await manager.spawn(makeRequest({ useWorktree: true, completionPolicy: 'pr' }))
+      await manager.spawn(makeRequest({ useWorktree: false, completionPolicy: 'pr' }))
 
       const prompt = sessions._sentInputs[0]
       expect(prompt).toContain('Create and switch to branch')

@@ -11,6 +11,7 @@ import { ChatView } from './ChatView'
 import { TodoPanel } from './TodoPanel'
 import { PromptButtons } from './PromptButtons'
 import { TentativeBanner } from './TentativeBanner'
+import { WorktreeRecoveryBanner } from './WorktreeRecoveryBanner'
 import { InputBar, type InputBarHandle } from './InputBar'
 import { IconEye } from '@tabler/icons-react'
 import type { SkillGroup } from './SkillMenu'
@@ -61,6 +62,11 @@ export interface SessionContentProps {
   onPermissionModeChange: (mode: PermissionMode) => void
   moveToWorktree: (() => void) | undefined
   worktreePath: string | undefined
+  /** Readiness of an isolated session's worktree; failed/missing shows the recovery banner. */
+  worktreeState?: 'preparing' | 'ready' | 'failed' | 'missing'
+  worktreeError?: string
+  onRetryWorktree: () => void
+  onUseExistingCheckout: () => void
   /** null = not an OpenCode session, true = connected, false = not connected */
   openCodeConnected: boolean | null
   /** null = not a Codex session, true = connected, false = not connected */
@@ -110,6 +116,10 @@ export function SessionContent({
   onPermissionModeChange,
   moveToWorktree,
   worktreePath,
+  worktreeState,
+  worktreeError,
+  onRetryWorktree,
+  onUseExistingCheckout,
   openCodeConnected,
   codexConnected,
   claudeDisabled,
@@ -198,6 +208,16 @@ export function SessionContent({
         <div className="px-3 py-1 text-meta text-ink-muted bg-surface border-t border-edge">
           {promptQueueSize - 1} more pending
         </div>
+      )}
+
+      {/* Isolated session whose worktree is unavailable */}
+      {(worktreeState === 'failed' || worktreeState === 'missing') && (
+        <WorktreeRecoveryBanner
+          state={worktreeState}
+          error={worktreeError}
+          onRetry={onRetryWorktree}
+          onUseExistingCheckout={onUseExistingCheckout}
+        />
       )}
 
       {/* Tentative banner */}
