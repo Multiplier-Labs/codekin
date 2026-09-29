@@ -44,9 +44,9 @@ But the two modes were wired as a *polarity*, not as *themes*:
   tokens are theme-independent. A theme is a set of color values, nothing else.
 - No user-authored or imported themes, no per-token color pickers.
 - No per-session or per-repo themes. The theme is app-wide.
-- No server-side persistence or cross-device sync. The theme stays in `localStorage`
-  (`codekin-settings`) like before — hosted mode included; each origin/device remembers
-  its own choice.
+- ~~No server-side persistence or cross-device sync.~~ Superseded: the theme now lives
+  in the server-side prefs store (`/api/settings/prefs`), so it follows the user across
+  browsers and devices. In hosted mode it is stored per machine.
 - No "follow OS" mode in v1 (§10).
 
 ---

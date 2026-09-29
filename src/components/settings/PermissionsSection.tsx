@@ -1,6 +1,6 @@
 /**
- * Permissions: the mode new sessions start in (a browser setting, shared with
- * the composer through localStorage) and every auto-approval rule on the
+ * Permissions: the mode new sessions start in (a stored preference, shared with
+ * the composer through the prefs store) and every auto-approval rule on the
  * connected machine, grouped by repo and then by tool, with revoke at each
  * level.
  */
@@ -13,9 +13,8 @@ import { getAllRepoApprovals, removeRepoApproval, bulkRemoveRepoApprovals, type 
 import { ApprovalGroupRow } from '../ApprovalsPanel'
 import { PERMISSION_MODE_ICONS, buildGroups, type ApprovalGroup, type RemovalTarget } from '../../lib/approvalGroups'
 import { Block, button } from './Block'
+import { getPref, setPref } from '../../lib/prefs'
 
-/** localStorage key holding the permission mode new sessions start with. */
-const PERMISSION_MODE_KEY = 'claude-permission-mode'
 
 /** Show the filter once there are more repos than fit at a glance. */
 const FILTER_THRESHOLD = 4
@@ -40,7 +39,7 @@ interface RepoRules {
 }
 
 function readPermissionMode(): PermissionMode {
-  const stored = localStorage.getItem(PERMISSION_MODE_KEY)
+  const stored = getPref('permissionMode')
   return PERMISSION_MODES.some(m => m.id === stored) ? stored as PermissionMode : 'acceptEdits'
 }
 
@@ -60,7 +59,7 @@ export function PermissionsSection({ token, repos, onError }: Props) {
 /* ── Default mode ───────────────────────────────────────────────── */
 
 function DefaultModeBlock() {
-  // Read on mount: the composer writes the same key when a session switches mode.
+  // Read on mount: the composer writes the same pref when a session switches mode.
   const [mode, setMode] = useState<PermissionMode>(readPermissionMode)
   const current = PERMISSION_MODES.find(m => m.id === mode)
 
@@ -77,12 +76,12 @@ function DefaultModeBlock() {
       )
       if (!confirmed) return
     }
-    localStorage.setItem(PERMISSION_MODE_KEY, next)
+    setPref('permissionMode', next)
     setMode(next)
   }
 
   return (
-    <Block title="New sessions start in" description="Saved in this browser. Sessions already running keep their own mode.">
+    <Block title="New sessions start in" description="Sessions already running keep their own mode.">
       <div role="radiogroup" aria-label="Default permission mode" className="flex flex-col gap-1">
         {PERMISSION_MODES.map(m => {
           const ModeIcon = PERMISSION_MODE_ICONS[m.icon]

@@ -15,6 +15,7 @@ import { useRef, useCallback, useEffect, useState } from 'react'
 import type { WsClientMessage, WsServerMessage, ChatMessage, TaskItem, PermissionMode, SessionUsage } from '../types'
 import { usePromptState } from './usePromptState'
 import { useWsConnection } from './useWsConnection'
+import { getPref, setPref } from '../lib/prefs'
 
 /** Max chat messages kept in the browser before trimming older entries. */
 const MAX_BROWSER_MESSAGES = 500
@@ -175,14 +176,14 @@ export function useChatSocket({
   const [planningMode, setPlanningMode] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [tasks, setTasks] = useState<TaskItem[]>([])
-  const [currentModel, setCurrentModel] = useState<string | null>(() => localStorage.getItem('claude-model') ?? null)
+  const [currentModel, setCurrentModel] = useState<string | null>(() => getPref('claudeModel') ?? null)
   /** Provider of the currently joined session, synced from session_joined. */
   const [sessionProvider, setSessionProvider] = useState<import('../types').CodingProvider | null>(null)
   /** Mirror of currentModel for callbacks that must not re-create on every model change. */
   const currentModelRef = useRef(currentModel)
   useEffect(() => { currentModelRef.current = currentModel }, [currentModel])
   const [currentPermissionMode, setCurrentPermissionMode] = useState<PermissionMode>(() =>
-    (localStorage.getItem('claude-permission-mode') as PermissionMode) || 'acceptEdits'
+    getPref('permissionMode') ?? 'acceptEdits'
   )
   const [thinkingSummary, setThinkingSummary] = useState<string | null>(null)
   const [usage, setUsage] = useState<SessionUsage | null>(null)
@@ -259,7 +260,7 @@ export function useChatSocket({
       case 'system_message':
         if (msg.subtype === 'init' && msg.model) {
           setCurrentModel(msg.model)
-          localStorage.setItem('claude-model', msg.model)
+          setPref('claudeModel', msg.model)
         }
         flushBeforeStructuralMessage()
         setMessages(prev => trimMessages(processMessage(prev, msg)))
@@ -301,7 +302,6 @@ export function useChatSocket({
       // another client switching modes) — keeps the toolbar in sync.
       case 'permission_mode_changed':
         setCurrentPermissionMode(msg.permissionMode)
-        localStorage.setItem('claude-permission-mode', msg.permissionMode)
         break
 
       case 'todo_update':
@@ -350,13 +350,12 @@ export function useChatSocket({
         // Sync model, provider, and permission mode from server state
         if (msg.model) {
           setCurrentModel(msg.model)
-          localStorage.setItem('claude-model', msg.model)
+          setPref('claudeModel', msg.model)
         }
         setSessionProvider(msg.provider ?? null)
-        if (msg.permissionMode) {
-          setCurrentPermissionMode(msg.permissionMode)
-          localStorage.setItem('claude-permission-mode', msg.permissionMode)
-        }
+        // Show the joined session's mode without making it the default for
+        // new sessions — only an explicit choice (setPermissionMode) does that.
+        if (msg.permissionMode) setCurrentPermissionMode(msg.permissionMode)
         let rebuilt: ChatMessage[] = []
         let restoredPlanMode = false
         let restoredTasks: TaskItem[] = []
@@ -527,7 +526,7 @@ export function useChatSocket({
   const setModel = useCallback((model: string) => {
     send({ type: 'set_model', model })
     setCurrentModel(model)
-    localStorage.setItem('claude-model', model)
+    setPref('claudeModel', model)
   }, [send])
 
   const moveToWorktree = useCallback(() => {
@@ -546,7 +545,7 @@ export function useChatSocket({
   const setPermissionMode = useCallback((mode: PermissionMode) => {
     send({ type: 'set_permission_mode', permissionMode: mode })
     setCurrentPermissionMode(mode)
-    localStorage.setItem('claude-permission-mode', mode)
+    setPref('permissionMode', mode)
   }, [send])
 
   return {

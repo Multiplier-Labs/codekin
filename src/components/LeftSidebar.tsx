@@ -24,8 +24,8 @@ import { ConnectionPopup } from './ConnectionPopup'
 import { ThemeMenu } from './ThemeMenu'
 import type { ThemeId } from '../themes/registry'
 import { groupKey } from '../hooks/useSessionOrchestration'
+import { getPref, setPref } from '../lib/prefs'
 
-const SIDEBAR_WIDTH_KEY = 'codekin-left-sidebar-width'
 const DEFAULT_WIDTH = 224
 const MIN_WIDTH = 160
 const MAX_WIDTH = 480
@@ -196,10 +196,10 @@ export function LeftSidebar({
   mobile = {},
 }: Props) {
   const { isMobile = false, mobileOpen = false, onMobileClose } = mobile
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('codekin-left-sidebar-collapsed') === 'true')
+  const [collapsed, setCollapsed] = useState(() => getPref('sidebarCollapsed') === true)
   const [width, setWidth] = useState(() => {
-    const stored = localStorage.getItem(SIDEBAR_WIDTH_KEY)
-    return stored ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Number(stored))) : DEFAULT_WIDTH
+    const stored = getPref('sidebarWidth')
+    return stored ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, stored)) : DEFAULT_WIDTH
   })
   const [modulesOpen, setModulesOpen] = useState(false)
   const [connPopupOpen, setConnPopupOpen] = useState(false)
@@ -209,11 +209,11 @@ export function LeftSidebar({
   const startWidth = useRef(0)
 
   useEffect(() => {
-    localStorage.setItem('codekin-left-sidebar-collapsed', String(collapsed))
+    setPref('sidebarCollapsed', collapsed)
   }, [collapsed])
 
   useEffect(() => {
-    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width))
+    setPref('sidebarWidth', width)
   }, [width])
 
   // Close modules popover on outside click

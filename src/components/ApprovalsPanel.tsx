@@ -15,8 +15,8 @@ import { IconChevronRight, IconCheck, IconX } from '@tabler/icons-react'
 import { getRepoApprovals, removeRepoApproval, bulkRemoveRepoApprovals, type RepoApprovals } from '../lib/ccApi'
 import { PERMISSION_MODE_ICONS, buildGroups, type ApprovalGroup, type RemovalTarget } from '../lib/approvalGroups'
 import { PERMISSION_MODES, type PermissionMode } from '../types'
+import { getPref, setPref } from '../lib/prefs'
 
-const PERMISSION_MODE_KEY = 'claude-permission-mode'
 
 interface Props {
   token: string
@@ -152,13 +152,13 @@ export function ApprovalsPanel({ token, workingDir, visible = true, filter = '' 
 /* ── Permission mode ────────────────────────────────────────────── */
 
 function readPermissionMode(): PermissionMode {
-  const stored = localStorage.getItem(PERMISSION_MODE_KEY)
+  const stored = getPref('permissionMode')
   return PERMISSION_MODES.some(m => m.id === stored) ? stored as PermissionMode : 'acceptEdits'
 }
 
 /**
  * The other half of "what am I auto-approving". Writes the app-wide
- * `claude-permission-mode` key that new sessions start from — in-flight
+ * `permissionMode` pref that new sessions start from — in-flight
  * sessions keep the mode they were started with.
  */
 function PermissionModeControl() {
@@ -180,7 +180,7 @@ function PermissionModeControl() {
       )
       if (!confirmed) return
     }
-    localStorage.setItem(PERMISSION_MODE_KEY, next)
+    setPref('permissionMode', next)
     setMode(next)
     setOpen(false)
   }, [])

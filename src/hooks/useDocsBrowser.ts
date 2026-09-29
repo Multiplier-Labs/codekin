@@ -7,25 +7,20 @@
 
 import { useState, useCallback } from 'react'
 import { transport } from '../lib/transport'
-
-const STARRED_KEY = 'codekin-starred-docs'
+import { getPref, setPref } from '../lib/prefs'
 
 interface DocFile {
   path: string
   pinned: boolean
 }
 
-/** Load starred doc paths from localStorage. Keyed by repo dir. */
+/** Load starred doc paths from the prefs store. Keyed by repo dir. */
 function loadStarred(): Record<string, string[]> {
-  try {
-    return JSON.parse(localStorage.getItem(STARRED_KEY) || '{}') as Record<string, string[]>
-  } catch {
-    return {}
-  }
+  return getPref('starredDocs') ?? {}
 }
 
 function persistStarred(starred: Record<string, string[]>) {
-  localStorage.setItem(STARRED_KEY, JSON.stringify(starred))
+  setPref('starredDocs', starred)
 }
 
 interface UseDocsBrowserReturn {
@@ -61,7 +56,7 @@ interface UseDocsBrowserReturn {
   /** The repo working dir for the open picker. */
   pickerRepoDir: string | null
 
-  /** Starred docs — persisted per-repo in localStorage. */
+  /** Starred docs — persisted per-repo in the prefs store. */
   starredDocs: string[]
   /** Whether the currently viewed file is starred. */
   isCurrentFileStarred: boolean

@@ -288,6 +288,23 @@ Set the orchestrator agent display name.
 **Request body:** `{ "name": "Agent Joe" }`
 **Response:** `{ "name": "Agent Joe" }`
 
+### `GET /api/settings/prefs`
+
+Get the UI preferences blob: theme, new-session defaults (worktree, permission mode,
+provider, last model per provider), layout (sidebar, diff panel, repo drawer), starred
+docs, recent models and queued drafts. The server stores it verbatim in the `settings`
+table (`ui_prefs`) and does not interpret the values.
+
+**Response:** `{ "prefs": { "theme": "dark", "useWorktree": true, ... } }`
+
+### `PUT /api/settings/prefs`
+
+Merge a partial update. Each key replaces the stored value; `null` removes the key.
+Keys must be camelCase identifiers, and the stored blob is capped at 256 KB (413 if exceeded).
+
+**Request body:** `{ "patch": { "sidebarWidth": 300, "activeSessionId": null } }`
+**Response:** `{ "prefs": { ... } }`
+
 ---
 
 ## Directory Browsing

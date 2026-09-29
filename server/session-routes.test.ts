@@ -175,6 +175,8 @@ describe('createSessionRouter', () => {
       ['PUT', '/api/settings/repos-path'],
       ['GET', '/api/settings/agent-name'],
       ['PUT', '/api/settings/agent-name'],
+      ['GET', '/api/settings/prefs'],
+      ['PUT', '/api/settings/prefs'],
       ['GET', '/api/browse-dirs'],
       ['GET', '/api/approvals?path=/repos/x'],
       ['GET', '/api/approvals/global'],
@@ -484,6 +486,52 @@ describe('createSessionRouter', () => {
       })
       const body = await res.json()
       expect(body.name.length).toBe(30)
+    })
+  })
+
+  describe('/api/settings/prefs', () => {
+    let store: Record<string, string>
+    beforeEach(async () => {
+      store = {}
+      sessions = fakeSessions()
+      const archive = sessions.archive as unknown as { getSetting: ReturnType<typeof vi.fn>; setSetting: ReturnType<typeof vi.fn> }
+      archive.getSetting.mockImplementation((k: string, def: string) => store[k] ?? def)
+      archive.setSetting.mockImplementation((k: string, v: string) => { store[k] = v })
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+    })
+
+    const put = (body: unknown) => fetch(`${server.baseUrl}/api/settings/prefs`, {
+      method: 'PUT', headers: auth(), body: JSON.stringify(body),
+    })
+
+    it('returns an empty object when nothing is stored', async () => {
+      const res = await fetch(`${server.baseUrl}/api/settings/prefs`, { headers: auth() })
+      expect(await res.json()).toEqual({ prefs: {} })
+    })
+
+    it('merges patches and removes keys set to null', async () => {
+      await put({ patch: { theme: 'light', sidebarWidth: 300 } })
+      await put({ patch: { sidebarWidth: null, useWorktree: false } })
+      const res = await fetch(`${server.baseUrl}/api/settings/prefs`, { headers: auth() })
+      expect(await res.json()).toEqual({ prefs: { theme: 'light', useWorktree: false } })
+    })
+
+    it('rejects a non-object patch', async () => {
+      expect((await put({ patch: [1] })).status).toBe(400)
+      expect((await put({})).status).toBe(400)
+    })
+
+    it('rejects malformed keys', async () => {
+      const proto = await fetch(`${server.baseUrl}/api/settings/prefs`, {
+        method: 'PUT', headers: auth(), body: '{"patch":{"__proto__":{"polluted":true}}}',
+      })
+      expect(proto.status).toBe(400)
+      expect((await put({ patch: { 'a b': 1 } })).status).toBe(400)
+    })
+
+    it('rejects a blob over the size cap', async () => {
+      store.ui_prefs = JSON.stringify({ big: 'x'.repeat(256 * 1024) })
+      expect((await put({ patch: { theme: 'dark' } })).status).toBe(413)
     })
   })
 

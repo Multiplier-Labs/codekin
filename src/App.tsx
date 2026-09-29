@@ -15,6 +15,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react'
 import { transport } from './lib/transport'
 import { useSettings } from './hooks/useSettings'
+import { getPref, loadPrefs, setPref } from './lib/prefs'
 import { useRepos } from './hooks/useRepos'
 import { useSessions } from './hooks/useSessions'
 import { useChatSocket } from './hooks/useChatSocket'
@@ -34,7 +35,7 @@ import { useProviderValidation } from './hooks/useProviderValidation'
 import { buildSlashCommandList, buildOpenCodeSlashCommandList } from './lib/slashCommands'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { emitWorkflowEvent } from './lib/workflowEvents'
-import { setAgentHealth, getAgentHealth, resolveDefaultProvider, PROVIDER_STORAGE_KEY } from './lib/agentHealth'
+import { setAgentHealth, getAgentHealth, resolveDefaultProvider } from './lib/agentHealth'
 import { useAgentHealth } from './hooks/useAgentHealth'
 import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo } from './lib/ccApi'
 import { SettingsView } from './components/settings/SettingsView'
@@ -72,7 +73,26 @@ interface AppProps {
   onDisconnectMachine?: () => void
 }
 
-export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps = {}) {
+/**
+ * Loads the user's preferences from the connected server before the app
+ * renders, so every component can read them synchronously on mount. Without
+ * a token (first-run setup) the app renders on defaults, then remounts once
+ * a token is saved and its preferences are loaded.
+ */
+export default function App(props: AppProps = {}) {
+  const { settings } = useSettings()
+  const [loadedFor, setLoadedFor] = useState<string | null>(null)
+  useEffect(() => {
+    if (!settings.token) return
+    let cancelled = false
+    void loadPrefs(settings.token).then(() => { if (!cancelled) setLoadedFor(settings.token) })
+    return () => { cancelled = true }
+  }, [settings.token])
+  if (settings.token && loadedFor !== settings.token) return <div className="h-full bg-page" />
+  return <AppMain key={loadedFor ?? 'setup'} {...props} />
+}
+
+function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   const { settings, updateSettings } = useSettings()
   const {
     groups, repos, globalSkills, globalModules,
@@ -93,7 +113,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const [activeSessionId, setActiveSessionIdRaw] = useState<string | null>(() =>
-    urlSessionId ?? localStorage.getItem('codekin-active-session')
+    urlSessionId ?? getPref('activeSessionId') ?? null
   )
 
   const setActiveSessionId = useCallback((id: string | null) => {
@@ -129,13 +149,13 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   /** Stable ref to the current sendInput function, used by callbacks that close over stale state. */
   const sendInputRef = useRef<(data: string) => void>(() => {})
 
-  /** Worktree toggle state, persisted to localStorage. On by default; only an explicit opt-out turns it off. */
-  const [useWorktree, setUseWorktreeRaw] = useState(() => localStorage.getItem('codekin-use-worktree') !== 'false')
+  /** Worktree toggle for new sessions. On by default; only an explicit opt-out turns it off. */
+  const [useWorktree, setUseWorktreeRaw] = useState(() => getPref('useWorktree') !== false)
   const useWorktreeRef = useRef(useWorktree)
   useEffect(() => { useWorktreeRef.current = useWorktree }, [useWorktree])
   const setUseWorktree = useCallback((v: boolean) => {
     setUseWorktreeRaw(v)
-    localStorage.setItem('codekin-use-worktree', String(v))
+    setPref('useWorktree', v)
   }, [])
 
   /** Queue messages setting — fetched from server, default off. */
@@ -155,16 +175,16 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   /**
    * The mode new sessions start in, read at session-creation time.
    *
-   * Backed by localStorage rather than a mount-time snapshot: Settings and the
-   * repo drawer's approvals tab both write that key directly, and a cached ref
+   * Backed by the prefs store rather than a mount-time snapshot: Settings and the
+   * repo drawer's approvals tab both write that pref directly, and a cached ref
    * would hand new sessions a mode the user had already changed.
    */
   const permissionModeRef = useMemo(() => ({
     get current(): PermissionMode {
-      return (localStorage.getItem('claude-permission-mode') as PermissionMode | null) ?? 'acceptEdits'
+      return getPref('permissionMode') ?? 'acceptEdits'
     },
     set current(mode: PermissionMode) {
-      localStorage.setItem('claude-permission-mode', mode)
+      setPref('permissionMode', mode)
     },
   }), [])
 
@@ -176,7 +196,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
    */
   const providerRef = useMemo(() => ({
     get current(): CodingProvider {
-      return resolveDefaultProvider(getAgentHealth(), localStorage.getItem(PROVIDER_STORAGE_KEY))
+      return resolveDefaultProvider(getAgentHealth(), getPref('provider') ?? null)
     },
   }), [])
 
@@ -273,9 +293,9 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     setPermissionMode(mode)
   }, [setPermissionMode])
 
-  // Provider is per-session; default for new sessions is persisted to localStorage
+  // Provider is per-session; the default for new sessions is a stored pref
   const agentHealth = useAgentHealth()
-  const [storedProvider] = useState(() => localStorage.getItem(PROVIDER_STORAGE_KEY))
+  const [storedProvider] = useState(() => getPref('provider') ?? null)
   const currentProvider = useMemo(
     () => resolveDefaultProvider(agentHealth, storedProvider),
     [agentHealth, storedProvider],
@@ -393,13 +413,13 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     [activeSessionProvider, openCodeCommands, allCommands],
   )
 
-  // Wrap setModel to also persist OpenCode model selection to localStorage
+  // Wrap setModel to also remember the OpenCode / Codex model choice
   const handleModelChange = useCallback((model: string) => {
     setModel(model)
     if (activeSessionProvider === 'opencode') {
-      localStorage.setItem('opencode-model', model)
+      setPref('opencodeModel', model)
     } else if (activeSessionProvider === 'codex') {
-      localStorage.setItem('codex-model', model)
+      setPref('codexModel', model)
     }
   }, [setModel, activeSessionProvider])
 
@@ -407,7 +427,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   // provider-derived UI (model list, permission modes) follows immediately.
   const handleProviderChange = useCallback((provider: CodingProvider, carryContext: boolean) => {
     setProvider(provider, carryContext)
-    localStorage.setItem(PROVIDER_STORAGE_KEY, provider)
+    setPref('provider', provider)
     void refreshSessions()
   }, [setProvider, refreshSessions])
 
@@ -485,13 +505,9 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   const toggleDiffPanel = useCallback(() => setDiffPanelOpen(prev => !prev), [])
   useGlobalKeyBindings({ onTogglePalette: togglePalette, onToggleDiffPanel: toggleDiffPanel })
 
-  // Persist active session ID
+  // Remember the active session for the next visit
   useEffect(() => {
-    if (activeSessionId) {
-      localStorage.setItem('codekin-active-session', activeSessionId)
-    } else {
-      localStorage.removeItem('codekin-active-session')
-    }
+    setPref('activeSessionId', activeSessionId ?? undefined)
   }, [activeSessionId])
 
   // Auto-rejoin last session on connect/reconnect
@@ -530,7 +546,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     }
   }, [urlSessionId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync URL on initial load when restoring from localStorage
+  // Sync URL on initial load when restoring the remembered session
   useEffect(() => {
     if (activeSessionId && window.location.pathname === '/') {
       navigate(`/s/${activeSessionId}`, true)

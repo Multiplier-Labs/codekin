@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { fetchCodexModels } from '../lib/ccApi'
 import type { ModelOption, CodingProvider } from '../types'
+import { getPref } from '../lib/prefs'
 
 interface UseCodexModelSyncOptions {
   token: string
@@ -50,7 +51,7 @@ export function useCodexModelSync({
       setCodexConnected(models.length > 0)
       const currentIsCodex = currentModelRef.current && models.some(m => m.id === currentModelRef.current)
       if (!currentIsCodex) {
-        const savedModel = localStorage.getItem('codex-model')
+        const savedModel = getPref('codexModel')
         const savedIsValid = savedModel && models.some(m => m.id === savedModel)
         if (savedIsValid) {
           setModel(savedModel)

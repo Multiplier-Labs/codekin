@@ -293,7 +293,7 @@ export type ChatMessage =
 /** WebSocket connection lifecycle state. */
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected'
 
-/** User-configurable settings stored in localStorage. */
+/** App settings: the auth token (localStorage) and display preferences (server prefs). */
 export interface Settings {
   token: string
   fontSize: number
