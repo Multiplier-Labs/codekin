@@ -55,7 +55,7 @@ function makeParams(overrides: Partial<UseSessionOrchestrationParams> = {}): Use
     leaveSession: vi.fn(),
     clearMessages: vi.fn(),
     wsCreateSession: vi.fn(),
-    removeSession: vi.fn<(id: string) => Promise<void>>().mockResolvedValue(undefined),
+    closeSession: vi.fn<(id: string) => Promise<void>>().mockResolvedValue(undefined),
     pendingContextRef: { current: null },
     useWorktreeRef: { current: false },
     permissionModeRef: { current: 'default' as PermissionMode },
@@ -193,7 +193,7 @@ describe('useSessionOrchestration', () => {
     expect(params.clearMessages).toHaveBeenCalled()
     expect(params.leaveSession).toHaveBeenCalled()
     expect(params.joinSession).toHaveBeenCalledWith('sibling')
-    expect(params.removeSession).toHaveBeenCalledWith('active')
+    expect(params.closeSession).toHaveBeenCalledWith('active')
     unmount()
   })
 
@@ -207,7 +207,7 @@ describe('useSessionOrchestration', () => {
     await act(() => result.current.handleDeleteSession('active'))
 
     expect(params.joinSession).toHaveBeenCalledWith('other')
-    expect(params.removeSession).toHaveBeenCalledWith('active')
+    expect(params.closeSession).toHaveBeenCalledWith('active')
     unmount()
   })
 
@@ -221,7 +221,7 @@ describe('useSessionOrchestration', () => {
 
     expect(params.setActiveSessionId).toHaveBeenCalledWith(null)
     expect(params.joinSession).not.toHaveBeenCalled()
-    expect(params.removeSession).toHaveBeenCalledWith('only')
+    expect(params.closeSession).toHaveBeenCalledWith('only')
     unmount()
   })
 
@@ -258,9 +258,9 @@ describe('useSessionOrchestration', () => {
     expect(params.clearMessages).toHaveBeenCalled()
     expect(params.leaveSession).toHaveBeenCalled()
     expect(params.joinSession).toHaveBeenCalledWith('c')
-    expect(params.removeSession).toHaveBeenCalledWith('a')
-    expect(params.removeSession).toHaveBeenCalledWith('b')
-    expect(params.removeSession).not.toHaveBeenCalledWith('c')
+    expect(params.closeSession).toHaveBeenCalledWith('a')
+    expect(params.closeSession).toHaveBeenCalledWith('b')
+    expect(params.closeSession).not.toHaveBeenCalledWith('c')
     unmount()
   })
 

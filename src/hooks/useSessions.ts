@@ -52,6 +52,16 @@ export function useSessions(token: string) {
     }
   }, [token, refresh])
 
+  const archive = useCallback(async (sessionId: string) => {
+    if (!token) return
+    try {
+      await api.archiveSession(token, sessionId)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to archive session')
+    }
+  }, [token, refresh])
+
   const remove = useCallback(async (sessionId: string) => {
     if (!token) return
     try {
@@ -72,5 +82,5 @@ export function useSessions(token: string) {
     }
   }, [token, refresh])
 
-  return { sessions, loading, error, refresh, create, rename, remove }
+  return { sessions, loading, error, refresh, create, rename, remove, archive }
 }

@@ -27,7 +27,26 @@ export const VALID_PERMISSION_MODES = new Set<PermissionMode>(['default', 'accep
 export type ExecutionMode = 'isolated' | 'existing-checkout'
 
 /** Readiness of an isolated session's worktree. */
-export type WorktreeState = 'preparing' | 'ready' | 'failed' | 'missing'
+export type WorktreeState = 'preparing' | 'ready' | 'failed' | 'missing' | 'removed'
+
+/** What removing an archived session's working files would affect. */
+export interface WorktreeRemovalPreflight {
+  worktreePath: string | null
+  branch?: string
+  exists: boolean
+  /** Tracked files with uncommitted changes. */
+  modified: string[]
+  /** Untracked, non-ignored files. */
+  untracked: string[]
+  /** Commits only on this branch (kept on removal); null when unknown. */
+  uniqueCommits: number | null
+  /** Other sessions working inside the worktree. */
+  referencedBy: string[]
+  /** True when removal loses no uncommitted work. */
+  safe: boolean
+  /** Why removal is refused, for display. */
+  blockers: string[]
+}
 
 /**
  * Server-side session state. Holds the Claude child process, connected
@@ -51,6 +70,9 @@ export interface Session {
   worktreeError?: string
   /** Branch checked out in the session's worktree. */
   worktreeBranch?: string
+  /** When the session was archived: stopped, hidden from the active list, never
+   *  auto-started or pruned. Its worktree and branch are kept. */
+  archivedAt?: string
   created: string
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   /** Which AI coding assistant provider powers this session. Defaults to 'claude'. */
@@ -172,6 +194,9 @@ export interface SessionInfo {
   worktreeError?: string
   /** Branch checked out in the session's worktree. */
   worktreeBranch?: string
+  /** When the session was archived: stopped, hidden from the active list, never
+   *  auto-started or pruned. Its worktree and branch are kept. */
+  archivedAt?: string
   connectedClients: number
   lastActivity: string
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'

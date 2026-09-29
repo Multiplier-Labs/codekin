@@ -49,6 +49,8 @@ export interface RepoDrawerProps {
    */
   onViewArchivedSession: (id: string) => void
   onNewSessionFromArchive: (workingDir: string, context: string) => void
+  /** Open an archived session that was just resumed. */
+  onResumeSession?: (sessionId: string) => void
   /** Font size for any archived-transcript preview. */
   fontSize: number
   /**
@@ -97,6 +99,7 @@ export function RepoDrawer({
   archiveRefreshKey,
   onViewArchivedSession,
   onNewSessionFromArchive,
+  onResumeSession,
   fontSize,
   initialTab,
   isMobile,
@@ -299,6 +302,7 @@ export function RepoDrawer({
             filter={filter}
             onView={handleView}
             onNewSessionFromArchive={handleNewSessionFromArchive}
+            onResumed={onResumeSession}
           />
         )}
         {tab === 'approvals' && (

@@ -101,6 +101,66 @@ export async function deleteSession(token: string, sessionId: string): Promise<v
   if (!res.ok) throw new Error(`Failed to delete session: ${res.status}`)
 }
 
+/** List archived sessions — resumable, with their worktrees kept. */
+export async function listArchivedLiveSessions(token: string): Promise<Session[]> {
+  const res = await transport.authFetch(`/api/sessions/list?archived=1`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to list archived sessions: ${res.status}`)
+  const data = await jsonBody<{ sessions?: Session[] }>(res)
+  return data.sessions ?? []
+}
+
+/** Archive a session: stop it and hide it, keeping its worktree and branch. */
+export async function archiveSession(token: string, sessionId: string): Promise<void> {
+  const res = await transport.authFetch(`/api/sessions/${sessionId}/archive`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to archive session: ${res.status}`)
+}
+
+/** Return an archived session to the active list. */
+export async function resumeSession(token: string, sessionId: string): Promise<void> {
+  const res = await transport.authFetch(`/api/sessions/${sessionId}/resume`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to resume session: ${res.status}`)
+}
+
+/** What removing an archived session's working files would affect. */
+export interface WorktreeRemovalPreflight {
+  worktreePath: string | null
+  branch?: string
+  exists: boolean
+  modified: string[]
+  untracked: string[]
+  uniqueCommits: number | null
+  referencedBy: string[]
+  safe: boolean
+  blockers: string[]
+}
+
+export async function getRemovalPreflight(token: string, sessionId: string): Promise<WorktreeRemovalPreflight> {
+  const res = await transport.authFetch(`/api/sessions/${sessionId}/removal-preflight`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to check working files: ${res.status}`)
+  return jsonBody<WorktreeRemovalPreflight>(res)
+}
+
+/** Remove an archived session's working files. The server re-checks and refuses unsafe removals. */
+export async function removeSessionWorktree(token: string, sessionId: string): Promise<{ removed: boolean; error?: string }> {
+  const res = await transport.authFetch(`/api/sessions/${sessionId}/remove-worktree`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (res.ok) return { removed: true }
+  const body = await jsonBody<{ error?: string }>(res).catch(() => ({ error: undefined }))
+  return { removed: false, error: body.error ?? `Failed to remove working files: ${res.status}` }
+}
+
 /** Ensure the orchestrator session is running and return its session ID. */
 export async function startOrchestrator(token: string): Promise<{ sessionId: string; status: string; agentName?: string }> {
   const res = await transport.authFetch(`/api/orchestrator/start`, {

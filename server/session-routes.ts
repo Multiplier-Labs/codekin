@@ -152,10 +152,11 @@ export function createSessionRouter(
 
   // --- Session CRUD ---
 
+  // `?archived=1` lists archived (resumable) sessions instead of active ones.
   router.get('/api/sessions/list', (req, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
-    res.json({ sessions: sessions.list() })
+    res.json({ sessions: req.query.archived === '1' ? sessions.listArchived() : sessions.list() })
   })
 
   router.get('/api/claude/models', async (req, res) => {
@@ -324,6 +325,42 @@ export function createSessionRouter(
     } else {
       res.status(404).json({ error: 'Session not found' })
     }
+  })
+
+  // --- Archive lifecycle: archive/resume keep the worktree; removing working
+  // files is a separate, preflighted step that never forces. ---
+
+  router.post('/api/sessions/:id/archive', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!sessions.get(req.params.id)) return res.status(404).json({ error: 'Session not found' })
+    if (!sessions.archiveSession(req.params.id)) return res.status(409).json({ error: 'This session cannot be archived' })
+    res.json({ success: true })
+  })
+
+  router.post('/api/sessions/:id/resume', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!sessions.get(req.params.id)) return res.status(404).json({ error: 'Session not found' })
+    if (!sessions.resumeSession(req.params.id)) return res.status(409).json({ error: 'Session is not archived' })
+    res.json({ success: true })
+  })
+
+  router.get('/api/sessions/:id/removal-preflight', async (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const preflight = await sessions.getRemovalPreflight(req.params.id)
+    if (!preflight) return res.status(404).json({ error: 'Session not found' })
+    res.json(preflight)
+  })
+
+  router.post('/api/sessions/:id/remove-worktree', async (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!sessions.get(req.params.id)) return res.status(404).json({ error: 'Session not found' })
+    const result = await sessions.removeSessionWorktree(req.params.id)
+    if (!result.removed) return res.status(409).json({ error: result.reason ?? 'Working files were not removed', preflight: result.preflight })
+    res.json({ success: true, preflight: result.preflight })
   })
 
   router.delete('/api/sessions/:id', (req, res) => {

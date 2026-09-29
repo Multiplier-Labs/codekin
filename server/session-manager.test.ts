@@ -70,9 +70,11 @@ vi.mock('child_process', async (importOriginal) => {
 // worktree-ops.test.ts; here we only verify how SessionManager uses it.
 const mockPrepareWorktree = vi.hoisted(() => vi.fn())
 const mockRemoveWorktree = vi.hoisted(() => vi.fn())
+const mockInspectWorktree = vi.hoisted(() => vi.fn())
 vi.mock('./worktree-ops.js', () => ({
   prepareWorktree: (...args: any[]) => mockPrepareWorktree(...args),
   removeWorktree: (...args: any[]) => mockRemoveWorktree(...args),
+  inspectWorktree: (...args: any[]) => mockInspectWorktree(...args),
 }))
 
 import { SessionManager } from './session-manager.js'
@@ -161,6 +163,7 @@ describe('SessionManager', () => {
   beforeEach(() => {
     mockPrepareWorktree.mockReset()
     mockRemoveWorktree.mockReset().mockResolvedValue({ removed: true })
+    mockInspectWorktree.mockReset().mockResolvedValue({ exists: true, modified: [], untracked: [], branch: 'wt/x', uniqueCommits: 0 })
     sm = new SessionManager()
     // Session naming runs through the utility agent, which only spawns a
     // harness whose probe reports available+authenticated. Real probes shell
@@ -3917,6 +3920,173 @@ describe('SessionManager', () => {
       ;(sm as any).handleClaudeResult(s, s.id, 'success', false)
 
       expect(s.claudeSessionId).toBe('still-fresh')
+    })
+  })
+
+  describe('archive and resume', () => {
+    const DAY = 24 * 60 * 60 * 1000
+
+    it('stops the process, hides the session and keeps its worktree', () => {
+      const s = sm.create('arch', '/tmp')
+      s.worktreePath = '/repos/myproject-wt-1'
+      const cp = fakeClaudeProcess()
+      s.claudeProcess = cp
+
+      expect(sm.archiveSession(s.id)).toBe(true)
+
+      expect(cp.stop).toHaveBeenCalledOnce()
+      expect(s.archivedAt).toBeTruthy()
+      expect(s.worktreePath).toBe('/repos/myproject-wt-1')
+      expect(mockRemoveWorktree).not.toHaveBeenCalled()
+      expect(sm.list().some(i => i.id === s.id)).toBe(false)
+      expect(sm.listArchived().map(i => i.id)).toEqual([s.id])
+      expect(sm.get(s.id)).toBeDefined()
+    })
+
+    it('refuses to archive the orchestrator session', () => {
+      const s = sm.create('orch', '/tmp', { source: 'orchestrator' })
+
+      expect(sm.archiveSession(s.id)).toBe(false)
+      expect(s.archivedAt).toBeUndefined()
+    })
+
+    it('never starts an archived session, even from a pending restart or input', () => {
+      const s = sm.create('arch-start', '/tmp')
+      sm.archiveSession(s.id)
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+      ws.send.mockClear()
+
+      expect(sm.startClaude(s.id)).toBe(false)
+      sm.sendInput(s.id, 'hello')
+
+      expect(s.claudeProcess).toBeNull()
+      const msgs = ws.send.mock.calls.map((c: any) => JSON.parse(c[0]))
+      expect(msgs.some((m: any) => m.subtype === 'error' && m.text.includes('archived'))).toBe(true)
+    })
+
+    it('resumes into the active list without starting a process', () => {
+      const s = sm.create('arch-resume', '/tmp')
+      sm.archiveSession(s.id)
+
+      expect(sm.resumeSession(s.id)).toBe(true)
+
+      expect(s.archivedAt).toBeUndefined()
+      expect(s.claudeProcess).toBeNull()
+      expect(sm.list().some(i => i.id === s.id)).toBe(true)
+      expect(sm.resumeSession(s.id)).toBe(false)
+    })
+
+    it('does not auto-restore an archived session on server start', () => {
+      vi.useFakeTimers()
+      try {
+        const s = sm.create('arch-restore', '/tmp')
+        s.claudeSessionId = 'abc'
+        s._wasActiveBeforeRestart = true
+        s.archivedAt = new Date().toISOString()
+        const startSpy = vi.spyOn(sm, 'startClaude')
+
+        sm.restoreActiveSessions()
+        vi.advanceTimersByTime(5000)
+
+        expect(startSpy).not.toHaveBeenCalled()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('reaper archives a stale session that owns an existing worktree instead of deleting it', () => {
+      const s = sm.create('stale-wt', '/tmp')
+      s.worktreePath = '/tmp'  // exists on disk
+      s.created = new Date(Date.now() - 8 * DAY).toISOString()
+
+      ;(sm as any).reapIdleSessions()
+
+      expect(sm.get(s.id)?.archivedAt).toBeTruthy()
+      expect(mockRemoveWorktree).not.toHaveBeenCalled()
+    })
+
+    it('reaper still prunes a stale session without a worktree', () => {
+      const s = sm.create('stale-plain', '/tmp')
+      s.created = new Date(Date.now() - 8 * DAY).toISOString()
+
+      ;(sm as any).reapIdleSessions()
+
+      expect(sm.get(s.id)).toBeUndefined()
+    })
+
+    it('reaper never prunes an archived session', () => {
+      const s = sm.create('stale-archived', '/tmp')
+      s.created = new Date(Date.now() - 90 * DAY).toISOString()
+      sm.archiveSession(s.id)
+
+      ;(sm as any).reapIdleSessions()
+
+      expect(sm.get(s.id)).toBeDefined()
+    })
+
+    describe('working-file removal', () => {
+      function archivedWithWorktree() {
+        const s = sm.create('rm', '/repos/myproject-wt-1', { groupDir: '/repos/myproject' })
+        s.worktreePath = '/repos/myproject-wt-1'
+        s.worktreeBranch = 'wt/x'
+        sm.archiveSession(s.id)
+        return s
+      }
+
+      it('preflight reports dirty and untracked files as blockers', async () => {
+        const s = archivedWithWorktree()
+        mockInspectWorktree.mockResolvedValue({ exists: true, modified: ['a.ts'], untracked: ['b.txt', 'c.txt'], branch: 'wt/x', uniqueCommits: 3 })
+
+        const preflight = await sm.getRemovalPreflight(s.id)
+
+        expect(preflight).toMatchObject({ safe: false, uniqueCommits: 3, branch: 'wt/x' })
+        expect(preflight!.blockers).toEqual(['1 file(s) have uncommitted changes.', '2 untracked file(s) would be lost.'])
+      })
+
+      it('preflight flags another session working inside the worktree', async () => {
+        const s = archivedWithWorktree()
+        sm.create('other', '/repos/myproject-wt-1/sub')
+
+        const preflight = await sm.getRemovalPreflight(s.id)
+
+        expect(preflight!.safe).toBe(false)
+        expect(preflight!.referencedBy).toHaveLength(1)
+      })
+
+      it('refuses removal for a session that is not archived', async () => {
+        const s = sm.create('active', '/repos/myproject-wt-1')
+        s.worktreePath = '/repos/myproject-wt-1'
+
+        const result = await sm.removeSessionWorktree(s.id)
+
+        expect(result.removed).toBe(false)
+        expect(mockRemoveWorktree).not.toHaveBeenCalled()
+      })
+
+      it('refuses removal when the fresh preflight is not clean', async () => {
+        const s = archivedWithWorktree()
+        mockInspectWorktree.mockResolvedValue({ exists: true, modified: ['a.ts'], untracked: [], branch: 'wt/x', uniqueCommits: 0 })
+
+        const result = await sm.removeSessionWorktree(s.id)
+
+        expect(result.removed).toBe(false)
+        expect(result.reason).toContain('uncommitted')
+        expect(mockRemoveWorktree).not.toHaveBeenCalled()
+      })
+
+      it('removes a clean worktree and keeps the session and branch record', async () => {
+        const s = archivedWithWorktree()
+
+        const result = await sm.removeSessionWorktree(s.id)
+
+        expect(result.removed).toBe(true)
+        expect(mockRemoveWorktree).toHaveBeenCalledWith('/repos/myproject-wt-1', '/repos/myproject')
+        expect(sm.get(s.id)).toBeDefined()
+        expect(s.worktreeState).toBe('removed')
+        expect(s.worktreeBranch).toBe('wt/x')
+        expect(s.worktreePath).toBe('/repos/myproject-wt-1')
+      })
     })
   })
 
