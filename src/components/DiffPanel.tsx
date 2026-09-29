@@ -7,6 +7,8 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { IconX, IconFileCode } from '@tabler/icons-react'
 import type { DiffFileStatus, DiffView, WsClientMessage, WsServerMessage } from '../types'
 import { isDiscardableView, useDiff } from '../hooks/useDiff'
+import { usePrStatus } from '../hooks/usePrStatus'
+import { PrStatusCard } from './diff/PrStatusCard'
 import { DiffToolbar } from './diff/DiffToolbar'
 import { DiffFileTree } from './diff/DiffFileTree'
 import { DiffFileCard } from './diff/DiffFileCard'
@@ -20,7 +22,7 @@ interface DiffPanelProps {
   isOpen: boolean
   onClose: () => void
   send: (msg: WsClientMessage) => void
-  /** Register callback so parent can forward diff_result/diff_error messages. */
+  /** Register callback so parent can forward diff_result/diff_error/pr_status messages. */
   onHandleMessage: (fn: (msg: WsServerMessage) => void) => void
   /** Register callback so parent can forward tool_done events. */
   onHandleToolDone: (fn: (toolName: string, summary?: string) => void) => void
@@ -39,6 +41,9 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
   })
 
   const diff = useDiff({ send, isOpen, sessionId, defaultView })
+  const pr = usePrStatus({ send, isOpen, sessionId })
+  const { handleMessage: diffHandleMessage, handleTurnDone: diffTurnDone, refresh: refreshDiff } = diff
+  const { handleMessage: prHandleMessage, refresh: refreshPr } = pr
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-arguments -- new Map() infers Map<any,any>
   const fileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const [activeFile, setActiveFile] = useState<string | null>(null)
@@ -47,17 +52,39 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
   const startWidth = useRef(0)
 
   // Register message forwarding callbacks with parent
+  const handleMessage = useCallback((msg: WsServerMessage) => {
+    diffHandleMessage(msg)
+    prHandleMessage(msg)
+  }, [diffHandleMessage, prHandleMessage])
   useEffect(() => {
-    onHandleMessage(diff.handleMessage)
-  }, [diff.handleMessage, onHandleMessage])
+    onHandleMessage(handleMessage)
+  }, [handleMessage, onHandleMessage])
 
   useEffect(() => {
     onHandleToolDone(diff.handleToolDone)
   }, [diff.handleToolDone, onHandleToolDone])
 
+  const handleTurnDone = useCallback(() => {
+    diffTurnDone()
+    refreshPr()
+  }, [diffTurnDone, refreshPr])
   useEffect(() => {
-    onHandleTurnDone(diff.handleTurnDone)
-  }, [diff.handleTurnDone, onHandleTurnDone])
+    onHandleTurnDone(handleTurnDone)
+  }, [handleTurnDone, onHandleTurnDone])
+
+  // A PR lookup can change the automatic review base (its base branch wins
+  // over the worktree's). Re-diff when the base the server would now pick
+  // differs from the one shown; the user's explicit choice is never touched.
+  const prBase = (() => {
+    const open = pr.status?.state === 'found' ? pr.status.pulls.filter(p => p.state === 'OPEN' && !p.isCrossRepository) : []
+    return open.length === 1 ? open[0].baseRefName : null
+  })()
+  const shownBase = diff.review?.baseRef.replace(/^origin\//, '') ?? null
+  const shownSource = diff.review?.baseSource
+  useEffect(() => {
+    if (!shownSource || shownSource === 'user') return
+    if ((prBase && prBase !== shownBase) || (!prBase && shownSource === 'pr')) refreshDiff()
+  }, [prBase, shownBase, shownSource, refreshDiff])
 
   // Persist width
   useEffect(() => {
@@ -158,6 +185,8 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
         onRefresh={diff.refresh}
         onDiscardAll={canDiscard ? handleDiscardAll : undefined}
       />
+
+      <PrStatusCard key={sessionId ?? 'none'} status={pr.status} loading={pr.loading} onRefresh={() => { refreshPr(true) }} />
 
       {/* Error state */}
       {diff.error && (

@@ -71,6 +71,11 @@ vi.mock('child_process', async (importOriginal) => {
 const mockPrepareWorktree = vi.hoisted(() => vi.fn())
 const mockRemoveWorktree = vi.hoisted(() => vi.fn())
 const mockInspectWorktree = vi.hoisted(() => vi.fn())
+const mockCachedPrBaseFor = vi.hoisted(() => vi.fn())
+vi.mock('./pr-status.js', () => ({
+  cachedPrBaseFor: (...args: any[]) => mockCachedPrBaseFor(...args),
+  getPrStatus: vi.fn(async () => ({ state: 'none', pulls: [], dirty: false, fetchedAt: '' })),
+}))
 vi.mock('./worktree-ops.js', () => ({
   prepareWorktree: (...args: any[]) => mockPrepareWorktree(...args),
   removeWorktree: (...args: any[]) => mockRemoveWorktree(...args),
@@ -163,6 +168,7 @@ describe('SessionManager', () => {
   beforeEach(() => {
     mockPrepareWorktree.mockReset()
     mockRemoveWorktree.mockReset().mockResolvedValue({ removed: true })
+    mockCachedPrBaseFor.mockReset().mockResolvedValue(null)
     mockInspectWorktree.mockReset().mockResolvedValue({ exists: true, modified: [], untracked: [], branch: 'wt/x', uniqueCommits: 0 })
     sm = new SessionManager()
     // Session naming runs through the utility agent, which only spawns a
@@ -3147,6 +3153,23 @@ describe('SessionManager', () => {
 
       expect(spy).toHaveBeenNthCalledWith(1, '/tmp/test-repo', 'branch', { ref: 'main', source: 'worktree' })
       expect(spy).toHaveBeenNthCalledWith(2, '/tmp/test-repo', 'committed', { ref: 'release/1.2', source: 'user' })
+    })
+
+    it("uses the open pull request's base before the worktree's, but never over the user's", async () => {
+      const sm = new SessionManager()
+      const s = sm.create('base-pr', '/tmp/test-repo')
+      const spy = vi.spyOn((sm as any).diffManager, 'getDiff').mockResolvedValue({ type: 'diff_result' })
+      s.worktreeBase = 'main'
+      mockCachedPrBaseFor.mockResolvedValue('develop')
+
+      await sm.getDiff(s.id, 'branch')
+      await sm.getDiff(s.id, 'all')
+      s.reviewBase = 'release/1.2'
+      await sm.getDiff(s.id, 'branch')
+
+      expect(spy).toHaveBeenNthCalledWith(1, '/tmp/test-repo', 'branch', { ref: 'develop', source: 'pr' })
+      expect(spy).toHaveBeenNthCalledWith(2, '/tmp/test-repo', 'all', undefined)
+      expect(spy).toHaveBeenNthCalledWith(3, '/tmp/test-repo', 'branch', { ref: 'release/1.2', source: 'user' })
     })
 
     it('clears the review base without consulting git', async () => {

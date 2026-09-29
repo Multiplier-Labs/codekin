@@ -305,6 +305,11 @@ export function checkClientFrame(policy: ChannelPolicy, state: ChannelState, fra
     case 'get_diff':
       return requirePermission(policy, state, 'view_diff', 'Viewing diffs is not granted')
 
+    // Status of this session's own pull request — part of reviewing its
+    // changes, not a general GitHub proxy.
+    case 'get_pr_status':
+      return requirePermission(policy, state, 'view_diff', 'Viewing pull request status is not granted')
+
     case 'input':
       return requirePermission(policy, state, 'send_prompt', 'Sending prompts is not granted')
 

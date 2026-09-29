@@ -266,6 +266,16 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    case 'get_pr_status': {
+      const sessionId = clientSessions.get(ws)
+      const { requestId } = msg
+      if (!sessionId) { send({ type: 'error', message: 'Not in a session' }); break }
+      void sessions.getPrStatus(sessionId, msg.refresh === true).then(status => {
+        if (status) send({ type: 'pr_status', status, requestId, sessionId })
+      })
+      break
+    }
+
     case 'set_review_base': {
       const sessionId = clientSessions.get(ws)
       const { requestId, scope: view } = msg

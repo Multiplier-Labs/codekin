@@ -600,6 +600,23 @@ describe('handleWsMessage', () => {
     })
   })
 
+  /* ---- get_pr_status ---- */
+
+  describe('get_pr_status', () => {
+    it('returns the tagged status, forcing a lookup only on refresh', async () => {
+      const status = { state: 'none', pulls: [], dirty: false, fetchedAt: 'now' }
+      ;(ctx.sessions as any).getPrStatus = vi.fn().mockResolvedValue(status)
+
+      handleWsMessage({ type: 'get_pr_status', requestId: 2 } as WsClientMessage, ctx)
+      handleWsMessage({ type: 'get_pr_status', requestId: 3, refresh: true } as WsClientMessage, ctx)
+
+      await vi.waitFor(() => expect(ctx.sent.length).toBe(2))
+      expect((ctx.sessions as any).getPrStatus).toHaveBeenNthCalledWith(1, 'sess-1', false)
+      expect((ctx.sessions as any).getPrStatus).toHaveBeenNthCalledWith(2, 'sess-1', true)
+      expect(ctx.sent[0]).toEqual({ type: 'pr_status', status, requestId: 2, sessionId: 'sess-1' })
+    })
+  })
+
   /* ---- set_review_base ---- */
 
   describe('set_review_base', () => {
