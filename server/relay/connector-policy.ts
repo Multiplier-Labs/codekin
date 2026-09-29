@@ -276,7 +276,7 @@ export function checkServerFrame(policy: ChannelPolicy, state: ChannelState, fra
 }
 
 /** Server frames that carry diff content or review data. */
-const DIFF_FRAME_TYPES = new Set(['diff_result', 'review_comments', 'pr_status'])
+const DIFF_FRAME_TYPES = new Set(['diff_result', 'review_comments', 'pr_status', 'change_summary'])
 
 /**
  * Whether a frame from the browser may be forwarded to the local server, and
@@ -330,6 +330,9 @@ export function checkClientFrame(policy: ChannelPolicy, state: ChannelState, fra
     // changes, not a general GitHub proxy.
     case 'get_pr_status':
       return requirePermission(policy, state, 'view_diff', 'Viewing pull request status is not granted')
+
+    case 'get_change_summary':
+      return requirePermission(policy, state, 'view_diff', 'Viewing changes is not granted')
 
     case 'input':
       return requirePermission(policy, state, 'send_prompt', 'Sending prompts is not granted')

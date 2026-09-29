@@ -1900,6 +1900,13 @@ export class SessionManager {
     return null
   }
 
+  /** Whether the session has anything to review (uncommitted files, branch commits). */
+  async getChangeSummary(sessionId: string): Promise<{ uncommittedFiles: number; branchCommits: number | null } | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+    return this.diffManager.getChangeSummary(session.workingDir, await this.reviewBaseFor(session, 'branch'))
+  }
+
   /** Pull request status for the session's branch (cached; `refresh` forces a lookup). */
   async getPrStatus(sessionId: string, refresh = false): Promise<PrStatus | null> {
     const session = this.sessions.get(sessionId)

@@ -390,6 +390,8 @@ export type WsServerMessage =
   | { type: 'diff_error'; message: string; scope?: DiffView; requestId?: number; sessionId?: string }
   | { type: 'pr_status'; status: PrStatus; requestId?: number; sessionId?: string }
   | { type: 'review_comments'; sessionId: string; comments: ReviewComment[] }
+  /** How much there is to review: files with uncommitted changes, and commits on the branch since its base (null when unknown). */
+  | { type: 'change_summary'; sessionId: string; uncommittedFiles: number; branchCommits: number | null }
   | { type: 'review_error'; message: string; sessionId?: string }
 
 /** Messages sent from browser clients to the server over WebSocket. */
@@ -412,6 +414,8 @@ export type WsClientMessage =
   | { type: 'set_review_base'; base: string | null; scope: DiffView; requestId?: number }
   /** Look up the pull request for the session's branch (cached ~60s unless refresh). */
   | { type: 'get_pr_status'; requestId?: number; refresh?: boolean }
+  /** Cheap check of whether the session has anything to review (drives the Changes button). */
+  | { type: 'get_change_summary' }
   // Review comments. `relayUser`/`relayRole` are stamped by the relay connector
   // (never trusted from a remote browser); local clients are the owner.
   | { type: 'review_comments_get'; relayUser?: string; relayRole?: 'owner' | 'grantee' }
