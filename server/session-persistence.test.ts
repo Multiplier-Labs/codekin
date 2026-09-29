@@ -294,6 +294,10 @@ describe('SessionPersistence.restoreFromDisk', () => {
       worktreeBranch: 'wt/abc',
       worktreeBase: 'main',
       reviewBase: 'release/1.2',
+      reviewComments: [{
+        id: 'c1', body: 'why?', status: 'draft', author: 'owner', authorRole: 'owner', createdAt: '2026-09-29T10:00:00.000Z',
+        anchor: { path: 'a.ts', side: 'new', startLine: 1, endLine: 1, view: 'branch', source: 'worktree', excerpt: ['x'], fingerprint: 'f' },
+      }],
       archivedAt: '2026-09-29T10:00:00.000Z',
       created: '2026-04-27T00:00:00Z',
       claudeSessionId: null,
@@ -301,10 +305,13 @@ describe('SessionPersistence.restoreFromDisk', () => {
     }])
     const sessions = restoreQuietly()
 
+    sessions.get('s1')!.reviewComments![0].stale = true  // computed, never persisted
     new SessionPersistence(sessions).persistToDisk()
     const written = JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'))
 
     expect(written[0]).toMatchObject({ executionMode: 'existing-checkout', worktreeBranch: 'wt/abc', worktreeBase: 'main', reviewBase: 'release/1.2', archivedAt: '2026-09-29T10:00:00.000Z' })
+    expect(written[0].reviewComments).toHaveLength(1)
+    expect(written[0].reviewComments[0]).not.toHaveProperty('stale')
   })
 
   it('handles malformed JSON without throwing', () => {

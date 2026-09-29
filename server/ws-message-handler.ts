@@ -13,6 +13,7 @@ import { getDefaultClaudeModel, triggerCliProbeIfNeeded } from './anthropic-mode
 import { REPOS_ROOT } from './config.js'
 import { isDiffView } from './diff-manager.js'
 import { isOrchestratorSession, setOrchestratorModel, setOrchestratorProvider } from './orchestrator-manager.js'
+import type { ReviewAuthor } from './review-comments.js'
 import type { SessionManager } from './session-manager.js'
 import { VALID_PERMISSION_MODES, VALID_PROVIDERS } from './types.js'
 import type { WsClientMessage, WsServerMessage } from './types.js'
@@ -23,6 +24,17 @@ export interface WsHandlerContext {
   sessions: SessionManager
   clientSessions: Map<WebSocket, string>
   send: (msg: WsServerMessage) => void
+}
+
+/**
+ * Who wrote a review comment. The relay connector stamps relayUser/relayRole
+ * on every review frame from a remote browser (overwriting anything the
+ * browser sent); a direct local client is the machine owner.
+ */
+function reviewAuthor(msg: { relayUser?: string; relayRole?: 'owner' | 'grantee' }): ReviewAuthor {
+  return msg.relayRole === 'grantee'
+    ? { id: typeof msg.relayUser === 'string' && msg.relayUser ? msg.relayUser : 'unknown', role: 'grantee' }
+    : { id: typeof msg.relayUser === 'string' && msg.relayUser ? msg.relayUser : 'owner', role: 'owner' }
 }
 
 /** Route a single parsed client message to the appropriate session manager method. */
@@ -273,6 +285,40 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       void sessions.getPrStatus(sessionId, msg.refresh === true).then(status => {
         if (status) send({ type: 'pr_status', status, requestId, sessionId })
       })
+      break
+    }
+
+    // --- Review comments: anchored drafts, sent to the agent as one prompt ---
+
+    case 'review_comments_get': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId) { send({ type: 'review_error', message: 'Not in a session' }); break }
+      void sessions.listReviewComments(sessionId).then(comments => {
+        if (comments) send({ type: 'review_comments', sessionId, comments })
+      })
+      break
+    }
+
+    case 'review_comment_add':
+    case 'review_comment_update':
+    case 'review_comment_delete':
+    case 'review_feedback_send': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId) { send({ type: 'review_error', message: 'Not in a session' }); break }
+      const author = reviewAuthor(msg)
+      const done = (error: string | null) => { if (error) send({ type: 'review_error', message: error, sessionId }) }
+      if (msg.type === 'review_comment_add') {
+        const { path, side, startLine, endLine, view, baseCommit, headCommit } = msg
+        if (!isDiffView(view)) { done(`Unknown diff view: ${String(view)}`); break }
+        void sessions.addReviewComment(sessionId, { path, side, startLine, endLine, view, baseCommit, headCommit }, msg.body, author).then(done)
+      } else if (msg.type === 'review_comment_update') {
+        void sessions.updateReviewComment(sessionId, msg.id, msg.body, author).then(done)
+      } else if (msg.type === 'review_comment_delete') {
+        void sessions.deleteReviewComment(sessionId, msg.id, author).then(done)
+      } else {
+        const ids = Array.isArray(msg.ids) ? msg.ids.filter((id): id is string => typeof id === 'string') : undefined
+        void sessions.sendReviewFeedback(sessionId, { ids, includeStale: msg.includeStale === true }).then(done)
+      }
       break
     }
 

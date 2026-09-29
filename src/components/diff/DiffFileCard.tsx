@@ -6,7 +6,7 @@
 import { useState } from 'react'
 import { IconChevronDown, IconChevronRight, IconCopy, IconTrash, IconFile } from '@tabler/icons-react'
 import type { DiffFile, DiffFileStatus } from '../../types'
-import { DiffHunkView } from './DiffHunkView'
+import { DiffHunkView, type DiffCommenting } from './DiffHunkView'
 
 // Diffs exceeding this many total changed lines start collapsed to keep initial
 // render fast and avoid overwhelming the user with a wall of changes.
@@ -18,9 +18,11 @@ interface DiffFileCardProps {
   /** Omitted in read-only (branch history) views, which hides the discard button. */
   onDiscard?: (path: string, status: DiffFileStatus) => void
   onScrollRef: (el: HTMLDivElement | null) => void
+  /** Line selection and inline review comments for this file. */
+  commenting?: DiffCommenting
 }
 
-export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFileCardProps) {
+export function DiffFileCard({ file, isActive, onDiscard, onScrollRef, commenting }: DiffFileCardProps) {
   const totalChanges = file.additions + file.deletions
   const isLarge = totalChanges > LARGE_DIFF_THRESHOLD
   const [expanded, setExpanded] = useState(!isLarge)
@@ -115,11 +117,11 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
             </div>
           ) : isLarge && file.hunks.length > 0 ? (
             <div className="px-4 py-3">
-              <DiffHunkView hunks={file.hunks}  />
+              <DiffHunkView hunks={file.hunks} commenting={commenting} />
             </div>
           ) : file.hunks.length > 0 ? (
             <div className="px-0">
-              <DiffHunkView hunks={file.hunks}  />
+              <DiffHunkView hunks={file.hunks} commenting={commenting} />
             </div>
           ) : (
             <div className="px-4 py-3 text-ink-muted text-xs italic">No changes</div>

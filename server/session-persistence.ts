@@ -30,6 +30,7 @@ export interface PersistedSession {
   worktreeBranch?: string
   worktreeBase?: string
   reviewBase?: string
+  reviewComments?: import('./types.js').ReviewComment[]
   archivedAt?: string
   created: string
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
@@ -67,6 +68,8 @@ export class SessionPersistence {
       worktreeBranch: s.worktreeBranch,
       worktreeBase: s.worktreeBase,
       reviewBase: s.reviewBase,
+      // `stale` is computed when listed, never stored.
+      reviewComments: s.reviewComments?.map(c => { const copy = { ...c }; delete copy.stale; return copy }),
       archivedAt: s.archivedAt,
       created: s.created,
       source: s.source,
@@ -137,6 +140,7 @@ export class SessionPersistence {
           worktreeBranch: s.worktreeBranch,
           worktreeBase: s.worktreeBase,
           reviewBase: s.reviewBase,
+          reviewComments: s.reviewComments,
           archivedAt: s.archivedAt,
           created: s.created,
           source: s.source ?? 'manual',

@@ -28,7 +28,7 @@ import type { CodingProcess, CodingProvider } from './coding-process.js'
 import { buildHandoffInjection, generateHandoff } from './handoff-manager.js'
 import { PlanManager } from './plan-manager.js'
 import { SessionArchive } from './session-archive.js'
-import type { DiffFileStatus, DiffScope, DiffView, PrStatus, Session, SessionInfo, TaskItem, WorktreeRemovalPreflight, WorktreeState, WsServerMessage } from './types.js'
+import type { DiffFileStatus, DiffScope, DiffView, PrStatus, ReviewComment, Session, SessionInfo, TaskItem, WorktreeRemovalPreflight, WorktreeState, WsServerMessage } from './types.js'
 import { cleanupWorkspace } from './webhook-workspace.js'
 import { PORT } from './config.js'
 import { ApprovalManager } from './approval-manager.js'
@@ -38,6 +38,10 @@ import { SessionNaming } from './session-naming.js'
 import { SessionPersistence } from './session-persistence.js'
 import { DiffManager, isValidReviewBase, type ReviewBasePreference } from './diff-manager.js'
 import { cachedPrBaseFor, getPrStatus } from './pr-status.js'
+import {
+  anchorErrorMessage, buildFeedbackPrompt, canModify, checkBody, createAnchor, isAnchorStale, MAX_COMMENTS_PER_SESSION, newComment,
+  type AnchorInput, type ReviewAuthor,
+} from './review-comments.js'
 import { ProcessCoordinator } from './process-coordinator.js'
 import { inspectWorktree, prepareWorktree, removeWorktree, type WorktreeResult } from './worktree-ops.js'
 
@@ -1797,6 +1801,103 @@ export class SessionManager {
     const prBase = await cachedPrBaseFor(session.workingDir)
     if (prBase) return { ref: prBase, source: 'pr' }
     return session.worktreeBase ? { ref: session.worktreeBase, source: 'worktree' } : undefined
+  }
+
+  // ---------------------------------------------------------------------------
+  // Review comments (anchored feedback drafts, sent to the agent in one batch)
+  // ---------------------------------------------------------------------------
+
+  /** The session's review comments, with drafts checked for staleness. */
+  async listReviewComments(sessionId: string): Promise<ReviewComment[] | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+    return Promise.all((session.reviewComments ?? []).map(async c =>
+      c.status === 'draft' ? { ...c, stale: await isAnchorStale(session.workingDir, c.anchor) } : c))
+  }
+
+  /** Tell every client of the session (every device) the current comments. */
+  private async broadcastReviewComments(session: Session): Promise<void> {
+    const comments = await this.listReviewComments(session.id)
+    if (comments) this.broadcast(session, { type: 'review_comments', sessionId: session.id, comments })
+  }
+
+  /** Store a draft comment on lines the server reads itself. Returns an error message, or null. */
+  async addReviewComment(sessionId: string, input: AnchorInput, body: unknown, author: ReviewAuthor): Promise<string | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return 'Session not found'
+    const comments = session.reviewComments ?? []
+    if (comments.length >= MAX_COMMENTS_PER_SESSION) return `This session already has ${MAX_COMMENTS_PER_SESSION} review comments. Delete some first.`
+    try {
+      const text = checkBody(body)
+      const anchor = await createAnchor(session.workingDir, input)
+      session.reviewComments = [...(session.reviewComments ?? []), newComment(anchor, text, author)]
+    } catch (err) {
+      return anchorErrorMessage(err) ?? 'Could not save the comment.'
+    }
+    this.persistToDiskDebounced()
+    await this.broadcastReviewComments(session)
+    return null
+  }
+
+  /** Edit a draft's text (its author or the owner only). */
+  async updateReviewComment(sessionId: string, commentId: string, body: unknown, author: ReviewAuthor): Promise<string | null> {
+    const session = this.sessions.get(sessionId)
+    const comment = session?.reviewComments?.find(c => c.id === commentId)
+    if (!session || !comment) return 'Comment not found'
+    if (!canModify(comment, author)) return 'Only the author can edit this comment.'
+    if (comment.status !== 'draft') return 'Sent comments cannot be edited.'
+    try {
+      comment.body = checkBody(body)
+    } catch (err) {
+      return anchorErrorMessage(err) ?? 'Could not update the comment.'
+    }
+    comment.updatedAt = new Date().toISOString()
+    this.persistToDiskDebounced()
+    await this.broadcastReviewComments(session)
+    return null
+  }
+
+  /** Delete a comment (its author or the owner only). */
+  async deleteReviewComment(sessionId: string, commentId: string, author: ReviewAuthor): Promise<string | null> {
+    const session = this.sessions.get(sessionId)
+    const comment = session?.reviewComments?.find(c => c.id === commentId)
+    if (!session || !comment) return 'Comment not found'
+    if (!canModify(comment, author)) return 'Only the author can delete this comment.'
+    session.reviewComments = session.reviewComments?.filter(c => c.id !== commentId)
+    this.persistToDiskDebounced()
+    await this.broadcastReviewComments(session)
+    return null
+  }
+
+  /**
+   * Send draft comments (all, or `ids`) to the agent as one prompt through
+   * the normal input path. Drafts whose code changed are refused unless
+   * `includeStale`, in which case they go with their original excerpt.
+   */
+  async sendReviewFeedback(sessionId: string, opts: { ids?: string[]; includeStale?: boolean }): Promise<string | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return 'Session not found'
+    if (session.archivedAt) return 'This session is archived. Resume it before sending feedback.'
+    const drafts = (session.reviewComments ?? []).filter(c => c.status === 'draft' && (!opts.ids || opts.ids.includes(c.id)))
+    if (drafts.length === 0) return 'There are no draft comments to send.'
+    const checked = await Promise.all(drafts.map(async comment => ({ comment, stale: await isAnchorStale(session.workingDir, comment.anchor) })))
+    const staleCount = checked.filter(c => c.stale).length
+    if (staleCount && !opts.includeStale) {
+      return `${staleCount} comment(s) point at code that has changed since they were written. Re-select those lines, or send them with their original code.`
+    }
+    const prompt = buildFeedbackPrompt(checked)
+    const echo: WsServerMessage = { type: 'user_echo', text: prompt }
+    this.addToHistory(session, echo)
+    this.broadcast(session, echo)
+    this.sendInput(sessionId, prompt)
+    const sentAt = new Date().toISOString()
+    for (const { comment } of checked) {
+      comment.status = 'sent'
+      comment.sentAt = sentAt
+    }
+    this.persistToDiskDebounced()
+    await this.broadcastReviewComments(session)
+    return null
   }
 
   /** Pull request status for the session's branch (cached; `refresh` forces a lookup). */

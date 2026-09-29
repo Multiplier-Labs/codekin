@@ -251,6 +251,7 @@ export class RelayConnector {
     const policy: ChannelPolicy = {
       role: principal.role === 'owner' ? 'owner' : 'grantee',
       grants: principal.grants as GrantMap,
+      userId: principal.userId,
     }
 
     const send = (kind: 'event' | 'stream_data' | 'stream_close' | 'error', payload: unknown) => {

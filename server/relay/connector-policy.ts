@@ -18,6 +18,8 @@ export interface ChannelPolicy {
   role: ChannelRole
   /** Session id → permissions. Empty for owners, who are not restricted. */
   grants: GrantMap
+  /** Relay user behind the channel; stamped on review comments as their author. */
+  userId?: string
 }
 
 export interface PolicyDecision {
@@ -264,8 +266,17 @@ export function checkServerFrame(policy: ChannelPolicy, state: ChannelState, fra
   if (!isServerFrameVisible(policy.grants, frame)) return false
   const msg = parseFrame(frame)
   if (typeof msg?.sessionId === 'string' && msg.sessionId !== state.sessionId) return false
+  // Code, review comments and PR details are part of the diff: a grantee
+  // without view_diff must not receive them, even as a broadcast.
+  if (typeof msg?.type === 'string' && DIFF_FRAME_TYPES.has(msg.type)) {
+    const granted = state.sessionId ? policy.grants[state.sessionId] : undefined
+    if (!granted?.includes('view_diff')) return false
+  }
   return true
 }
+
+/** Server frames that carry diff content or review data. */
+const DIFF_FRAME_TYPES = new Set(['diff_result', 'review_comments', 'pr_status'])
 
 /**
  * Whether a frame from the browser may be forwarded to the local server, and
@@ -304,6 +315,16 @@ export function checkClientFrame(policy: ChannelPolicy, state: ChannelState, fra
 
     case 'get_diff':
       return requirePermission(policy, state, 'view_diff', 'Viewing diffs is not granted')
+
+    // Review comments: reading is part of viewing the diff; drafting and
+    // sending feed the agent, so they need the same right as a prompt.
+    case 'review_comments_get':
+      return requirePermission(policy, state, 'view_diff', 'Viewing review comments is not granted')
+    case 'review_comment_add':
+    case 'review_comment_update':
+    case 'review_comment_delete':
+    case 'review_feedback_send':
+      return requirePermission(policy, state, 'send_prompt', 'Writing review feedback is not granted')
 
     // Status of this session's own pull request — part of reviewing its
     // changes, not a general GitHub proxy.
@@ -362,4 +383,22 @@ function parseFrame(text: string): LocalFrame | null {
   } catch {
     return null
   }
+}
+
+/** Review frames get their author from the channel, never from the browser. */
+const REVIEW_FRAME_TYPES = new Set(['review_comments_get', 'review_comment_add', 'review_comment_update', 'review_comment_delete', 'review_feedback_send'])
+
+/**
+ * Stamp the channel's identity onto a review frame (replacing any claimed
+ * identity); other frames pass through unchanged.
+ */
+export function stampReviewIdentity(policy: ChannelPolicy, data: string): string {
+  let msg: unknown
+  try {
+    msg = JSON.parse(data)
+  } catch {
+    return data
+  }
+  if (!msg || typeof msg !== 'object' || !REVIEW_FRAME_TYPES.has(String((msg as { type?: unknown }).type))) return data
+  return JSON.stringify({ ...msg, relayUser: policy.userId ?? 'unknown', relayRole: policy.role })
 }

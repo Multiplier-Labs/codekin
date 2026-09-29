@@ -5,9 +5,12 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { IconX, IconFileCode } from '@tabler/icons-react'
-import type { DiffFileStatus, DiffView, WsClientMessage, WsServerMessage } from '../types'
+import type { DiffFile, DiffFileStatus, DiffView, WsClientMessage, WsServerMessage } from '../types'
 import { isDiscardableView, useDiff } from '../hooks/useDiff'
 import { usePrStatus } from '../hooks/usePrStatus'
+import { useReviewComments } from '../hooks/useReviewComments'
+import { ReviewCommentsTray } from './diff/ReviewCommentsTray'
+import type { DiffCommenting } from './diff/DiffHunkView'
 import { PrStatusCard } from './diff/PrStatusCard'
 import { DiffToolbar } from './diff/DiffToolbar'
 import { DiffFileTree } from './diff/DiffFileTree'
@@ -44,6 +47,8 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
   const pr = usePrStatus({ send, isOpen, sessionId })
   const { handleMessage: diffHandleMessage, handleTurnDone: diffTurnDone, refresh: refreshDiff } = diff
   const { handleMessage: prHandleMessage, refresh: refreshPr } = pr
+  const review = useReviewComments({ send, isOpen, sessionId })
+  const { handleMessage: reviewHandleMessage } = review
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-arguments -- new Map() infers Map<any,any>
   const fileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const [activeFile, setActiveFile] = useState<string | null>(null)
@@ -55,7 +60,8 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
   const handleMessage = useCallback((msg: WsServerMessage) => {
     diffHandleMessage(msg)
     prHandleMessage(msg)
-  }, [diffHandleMessage, prHandleMessage])
+    reviewHandleMessage(msg)
+  }, [diffHandleMessage, prHandleMessage, reviewHandleMessage])
   useEffect(() => {
     onHandleMessage(handleMessage)
   }, [handleMessage, onHandleMessage])
@@ -142,6 +148,27 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
   if (!isOpen) return null
 
   const hasUntrackedFiles = diff.files.some(f => f.status === 'added')
+
+  /** Line selection and inline comments for one file in the current view. */
+  const commentingFor = (file: DiffFile): DiffCommenting | undefined => {
+    if (diff.error || file.isBinary) return undefined
+    return {
+      comments: review.comments.filter(c => c.anchor.view === diff.scope && (c.anchor.path === file.path || c.anchor.path === file.oldPath)),
+      onAdd: (range, body) => {
+        review.add({
+          // Removed lines of a renamed file live under its old path in the base.
+          path: range.side === 'old' && file.oldPath ? file.oldPath : file.path,
+          ...range,
+          view: diff.scope,
+          baseCommit: diff.review?.mergeBase,
+          headCommit: diff.review?.head,
+          body,
+        })
+      },
+      onUpdate: review.update,
+      onDelete: review.remove,
+    }
+  }
   const canDiscard = isDiscardableView(diff.scope)
 
   return (
@@ -239,10 +266,23 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
                 if (el) fileRefs.current.set(file.path, el)
                 else fileRefs.current.delete(file.path)
               }}
+              commenting={commentingFor(file)}
             />
           ))}
         </div>
       </div>
+
+      <ReviewCommentsTray
+        comments={review.comments}
+        view={diff.scope}
+        sending={review.sending}
+        error={review.error}
+        hasFiles={diff.files.some(f => !f.isBinary && f.hunks.length > 0)}
+        onSend={review.sendToAgent}
+        onDelete={review.remove}
+        onSelectFile={handleSelectFile}
+        onDismissError={review.clearError}
+      />
     </div>
   )
 }

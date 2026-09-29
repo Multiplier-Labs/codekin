@@ -74,6 +74,8 @@ export interface Session {
   worktreeBase?: string
   /** Ref the user chose to review this session's branch against; unset = automatic. */
   reviewBase?: string
+  /** Review comments on this session's changes (drafts and sent). */
+  reviewComments?: ReviewComment[]
   /** When the session was archived: stopped, hidden from the active list, never
    *  auto-started or pruned. Its worktree and branch are kept. */
   archivedAt?: string
@@ -387,6 +389,8 @@ export type WsServerMessage =
   | { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary; branch: string; scope: DiffView; requestId?: number; sessionId?: string; review?: DiffReview; incomplete?: string[] }
   | { type: 'diff_error'; message: string; scope?: DiffView; requestId?: number; sessionId?: string }
   | { type: 'pr_status'; status: PrStatus; requestId?: number; sessionId?: string }
+  | { type: 'review_comments'; sessionId: string; comments: ReviewComment[] }
+  | { type: 'review_error'; message: string; sessionId?: string }
 
 /** Messages sent from browser clients to the server over WebSocket. */
 export type WsClientMessage =
@@ -408,6 +412,14 @@ export type WsClientMessage =
   | { type: 'set_review_base'; base: string | null; scope: DiffView; requestId?: number }
   /** Look up the pull request for the session's branch (cached ~60s unless refresh). */
   | { type: 'get_pr_status'; requestId?: number; refresh?: boolean }
+  // Review comments. `relayUser`/`relayRole` are stamped by the relay connector
+  // (never trusted from a remote browser); local clients are the owner.
+  | { type: 'review_comments_get'; relayUser?: string; relayRole?: 'owner' | 'grantee' }
+  | { type: 'review_comment_add'; path: string; side: 'new' | 'old'; startLine: number; endLine: number; view: DiffView; baseCommit?: string; headCommit?: string; body: string; relayUser?: string; relayRole?: 'owner' | 'grantee' }
+  | { type: 'review_comment_update'; id: string; body: string; relayUser?: string; relayRole?: 'owner' | 'grantee' }
+  | { type: 'review_comment_delete'; id: string; relayUser?: string; relayRole?: 'owner' | 'grantee' }
+  /** Send drafts (all, or `ids`) to the agent as one prompt; stale ones only with includeStale. */
+  | { type: 'review_feedback_send'; ids?: string[]; includeStale?: boolean; relayUser?: string; relayRole?: 'owner' | 'grantee' }
   | { type: 'discard_changes'; scope: DiffScope; paths?: string[]; statuses?: Record<string, DiffFileStatus> }
   | { type: 'move_to_worktree' }
   | { type: 'retry_worktree' }
@@ -425,6 +437,39 @@ export type DiffScope = 'staged' | 'unstaged' | 'all'
  * 'committed' (merge base → HEAD).
  */
 export type DiffView = DiffScope | 'branch' | 'committed'
+
+/** Where a review comment points, captured when it was written. */
+export interface ReviewAnchor {
+  path: string
+  /** 'new' = lines as they are now; 'old' = removed lines, from the base. */
+  side: 'new' | 'old'
+  startLine: number
+  endLine: number
+  /** Changes-panel view the lines were selected in. */
+  view: DiffView
+  /** Content the line numbers refer to. */
+  source: 'worktree' | 'index' | 'commit'
+  commit?: string
+  /** The selected lines, read by the server. */
+  excerpt: string[]
+  fingerprint: string
+}
+
+/** A reviewer's comment on selected lines; drafts are sent to the agent in one batch. */
+export interface ReviewComment {
+  id: string
+  body: string
+  anchor: ReviewAnchor
+  status: 'draft' | 'sent'
+  /** Relay user id of the author, or 'owner' for the machine owner. */
+  author: string
+  authorRole: 'owner' | 'grantee'
+  createdAt: string
+  updatedAt?: string
+  sentAt?: string
+  /** Computed when listed: the anchored lines have changed in the working tree. */
+  stale?: boolean
+}
 
 /** Outcome of a pull request lookup; everything except 'found' and 'none' means "unknown". */
 export type PrLookupState = 'found' | 'none' | 'no_github_remote' | 'gh_missing' | 'unauthenticated' | 'rate_limited' | 'error'
