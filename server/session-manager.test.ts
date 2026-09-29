@@ -66,6 +66,15 @@ vi.mock('child_process', async (importOriginal) => {
   }
 })
 
+// Worktree git behavior is covered against real repositories in
+// worktree-ops.test.ts; here we only verify how SessionManager uses it.
+const mockPrepareWorktree = vi.hoisted(() => vi.fn())
+const mockRemoveWorktree = vi.hoisted(() => vi.fn())
+vi.mock('./worktree-ops.js', () => ({
+  prepareWorktree: (...args: any[]) => mockPrepareWorktree(...args),
+  removeWorktree: (...args: any[]) => mockRemoveWorktree(...args),
+}))
+
 import { SessionManager } from './session-manager.js'
 import { seedUtilityProbe, resetUtilityProbeCache } from './utility-agent.js'
 import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync } from 'fs'
@@ -150,6 +159,8 @@ describe('SessionManager', () => {
   let sm: SessionManager
 
   beforeEach(() => {
+    mockPrepareWorktree.mockReset()
+    mockRemoveWorktree.mockReset().mockResolvedValue({ removed: true })
     sm = new SessionManager()
     // Session naming runs through the utility agent, which only spawns a
     // harness whose probe reports available+authenticated. Real probes shell
@@ -502,35 +513,46 @@ describe('SessionManager', () => {
       expect(cp.stop).toHaveBeenCalledOnce()
     })
 
-    it('cleans up git worktree when session has worktreePath', async () => {
+    it('removes the worktree without force after the process exits', async () => {
       const s = sm.create('wt-test', '/repos/myproject')
       s.worktreePath = '/repos/myproject-wt-abc123'
       s.groupDir = '/repos/myproject'
 
-      // Mock execFile to succeed (callback-style: (cmd, args, opts, cb) => cb(null, stdout, stderr))
-      mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: any, cb?: any) => {
-        if (typeof cb === 'function') cb(null, '/repos/myproject\n', '')
-        return { on: vi.fn() }
-      })
-
       sm.delete(s.id)
 
-      // Session should be removed
       expect(sm.get(s.id)).toBeUndefined()
-
       // Worktree cleanup is deferred behind a microtask (process exit promise)
-      await vi.waitFor(() => expect(mockExecFile).toHaveBeenCalled())
+      await vi.waitFor(() => expect(mockRemoveWorktree).toHaveBeenCalledWith('/repos/myproject-wt-abc123', '/repos/myproject'))
+    })
+
+    it('retains a worktree that git refuses to remove', async () => {
+      vi.useFakeTimers()
+      try {
+        const s = sm.create('wt-dirty', '/repos/myproject')
+        s.worktreePath = '/repos/myproject-wt-dirty'
+        s.groupDir = '/repos/myproject'
+        mockRemoveWorktree.mockResolvedValue({ removed: false, reason: 'contains modified or untracked files' })
+
+        sm.delete(s.id)
+        await vi.waitFor(() => expect(mockRemoveWorktree).toHaveBeenCalledTimes(1))
+        await vi.advanceTimersByTimeAsync(3000)
+
+        // One retry, then the worktree is left in place — never force-removed.
+        expect(mockRemoveWorktree).toHaveBeenCalledTimes(2)
+        await vi.advanceTimersByTimeAsync(10000)
+        expect(mockRemoveWorktree).toHaveBeenCalledTimes(2)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('does not call worktree cleanup when session has no worktreePath', () => {
       const s = sm.create('normal-test', '/repos/myproject')
 
-      mockExecFile.mockClear()
       sm.delete(s.id)
 
       expect(sm.get(s.id)).toBeUndefined()
-      // No git worktree commands should be called
-      expect(mockExecFile).not.toHaveBeenCalled()
+      expect(mockRemoveWorktree).not.toHaveBeenCalled()
     })
   })
 
@@ -3116,101 +3138,102 @@ describe('SessionManager', () => {
   // =====================================================================
 
   describe('createWorktree()', () => {
-    afterEach(() => {
-      mockExecFile.mockReset()
+    const created = (path: string, extra: Record<string, unknown> = {}) => ({
+      ok: true, path, branch: 'wt/x', repoRoot: '/repos/myproject', reused: false, ...extra,
     })
 
-    it('returns worktree path on success', async () => {
+    it('points the session at the new worktree and returns its path', async () => {
       const s = sm.create('wt-test', '/repos/myproject')
-
-      // Mock execFile: callback style (cmd, args, opts, cb)
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
+      const wtPath = `/repos/myproject-wt-${s.id.slice(0, 8)}`
+      mockPrepareWorktree.mockResolvedValue(created(wtPath))
 
       const result = await sm.createWorktree(s.id, '/repos/myproject')
 
-      expect(result).not.toBeNull()
-      expect(result).toContain('-wt-')
-      expect(result).toContain(s.id.slice(0, 8))
-    })
-
-    it('returns null on git failure', async () => {
-      const s = sm.create('wt-fail', '/repos/myproject')
-
-      // Mock execFile to fail on worktree add
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else if (args[0] === 'worktree' && args[1] === 'add') {
-            cb(new Error('fatal: worktree add failed'), '', 'fatal: worktree add failed')
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
-
-      const result = await sm.createWorktree(s.id, '/repos/myproject')
-
-      expect(result).toBeNull()
-    })
-
-    it('returns null for unknown session', async () => {
-      const result = await sm.createWorktree('nonexistent', '/repos/myproject')
-      expect(result).toBeNull()
-    })
-
-    it('updates session.workingDir and session.groupDir on success', async () => {
-      const s = sm.create('wt-update', '/repos/myproject')
-
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
-
-      const worktreePath = await sm.createWorktree(s.id, '/repos/myproject')
-
-      expect(worktreePath).not.toBeNull()
-      expect(s.workingDir).toBe(worktreePath)
+      expect(result).toBe(wtPath)
+      expect(s.workingDir).toBe(wtPath)
+      expect(s.worktreePath).toBe(wtPath)
       expect(s.groupDir).toBe('/repos/myproject')
-      expect(s.worktreePath).toBe(worktreePath)
     })
 
-    it('returns null when rev-parse returns invalid path', async () => {
-      const s = sm.create('wt-invalid-root', '/repos/myproject')
+    it('requests a generated wt/ branch owned by the session', async () => {
+      const s = sm.create('wt-generated', '/repos/myproject')
+      const shortId = s.id.slice(0, 8)
+      mockPrepareWorktree.mockResolvedValue(created('/repos/wt'))
 
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // Return a relative path (invalid)
-            cb(null, 'relative/path\n', '')
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
+      await sm.createWorktree(s.id, '/repos/myproject')
+
+      expect(mockPrepareWorktree).toHaveBeenCalledWith({
+        sourceDir: '/repos/myproject',
+        ownerId: shortId,
+        branch: `wt/${shortId}`,
+        generatedBranch: true,
+        baseBranch: undefined,
+        ownedPath: undefined,
       })
+    })
+
+    it('passes a caller-supplied branch as not generated, with its base', async () => {
+      const s = sm.create('wt-target', '/repos/myproject')
+      mockPrepareWorktree.mockResolvedValue(created('/repos/wt'))
+
+      await sm.createWorktree(s.id, '/repos/myproject', 'fix/my-feature', 'develop')
+
+      expect(mockPrepareWorktree).toHaveBeenCalledWith(expect.objectContaining({
+        branch: 'fix/my-feature',
+        generatedBranch: false,
+        baseBranch: 'develop',
+      }))
+    })
+
+    it("offers the session's existing worktree for reuse", async () => {
+      const s = sm.create('wt-reuse', '/repos/myproject')
+      s.worktreePath = '/repos/myproject-wt-existing'
+      mockPrepareWorktree.mockResolvedValue(created('/repos/myproject-wt-existing', { reused: true }))
+
+      await sm.createWorktree(s.id, '/repos/myproject-wt-existing')
+
+      expect(mockPrepareWorktree).toHaveBeenCalledWith(expect.objectContaining({ ownedPath: '/repos/myproject-wt-existing' }))
+    })
+
+    it('returns null and leaves the session unchanged on failure', async () => {
+      const s = sm.create('wt-fail', '/repos/myproject')
+      mockPrepareWorktree.mockResolvedValue({ ok: false, code: 'git_failed', message: 'boom' })
 
       const result = await sm.createWorktree(s.id, '/repos/myproject')
+
       expect(result).toBeNull()
+      expect(s.workingDir).toBe('/repos/myproject')
+      expect(s.worktreePath).toBeUndefined()
+    })
+
+    it('exposes the failure reason through prepareSessionWorktree', async () => {
+      const s = sm.create('wt-reason', '/repos/myproject')
+      mockPrepareWorktree.mockResolvedValue({ ok: false, code: 'branch_in_use', message: 'Branch x is already checked out at /y.' })
+
+      const result = await sm.prepareSessionWorktree(s.id, '/repos/myproject')
+
+      expect(result).toEqual({ ok: false, code: 'branch_in_use', message: 'Branch x is already checked out at /y.' })
+    })
+
+    it('returns null for unknown session without touching git', async () => {
+      const result = await sm.createWorktree('nonexistent', '/repos/myproject')
+
+      expect(result).toBeNull()
+      expect(mockPrepareWorktree).not.toHaveBeenCalled()
+    })
+
+    it('does not resurrect a session deleted while the worktree was being created', async () => {
+      const s = sm.create('wt-deleted', '/repos/myproject')
+      let finish!: (v: unknown) => void
+      mockPrepareWorktree.mockReturnValue(new Promise(r => { finish = r }))
+
+      const pending = sm.createWorktree(s.id, '/repos/myproject')
+      sm.delete(s.id)
+      finish(created('/repos/wt'))
+      await pending
+
+      expect(sm.get(s.id)).toBeUndefined()
+      expect(s.worktreePath).toBeUndefined()
     })
   })
 
@@ -3512,182 +3535,6 @@ describe('SessionManager', () => {
 
       s.pendingToolApprovals.values().next().value!.resolve({ allow: false, always: false })
       await promise
-    })
-  })
-
-  describe('createWorktree() with targetBranch', () => {
-    afterEach(() => {
-      mockExecFile.mockReset()
-    })
-
-    it('uses targetBranch as branch name instead of generating wt/ prefix', async () => {
-      const s = sm.create('wt-target', '/repos/myproject')
-
-      const gitCalls: string[][] = []
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        gitCalls.push(args)
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else if (args[0] === 'show-ref') {
-            // Branch does not exist yet
-            cb(new Error('not found'), '', '')
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
-
-      const result = await sm.createWorktree(s.id, '/repos/myproject', 'fix/my-feature')
-
-      expect(result).not.toBeNull()
-      // Should use the targetBranch name, not wt/<shortId>
-      const worktreeAddCall = gitCalls.find(a => a[0] === 'worktree' && a[1] === 'add')
-      expect(worktreeAddCall).toBeDefined()
-      expect(worktreeAddCall).toContain('fix/my-feature')
-    })
-
-    it('does NOT force-delete caller-supplied branch (non-ephemeral)', async () => {
-      const s = sm.create('wt-no-delete', '/repos/myproject')
-
-      const gitCalls: string[][] = []
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        gitCalls.push(args)
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else if (args[0] === 'show-ref') {
-            // Branch already exists
-            cb(null, '', '')
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
-
-      const result = await sm.createWorktree(s.id, '/repos/myproject', 'fix/existing-branch')
-
-      expect(result).not.toBeNull()
-      // Should NOT have called `git branch -D` for caller-supplied branch
-      const branchDeleteCall = gitCalls.find(a => a[0] === 'branch' && a[1] === '-D')
-      expect(branchDeleteCall).toBeUndefined()
-    })
-
-    it('uses show-ref to detect existing branches', async () => {
-      const s = sm.create('wt-showref', '/repos/myproject')
-
-      const gitCalls: string[][] = []
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        gitCalls.push(args)
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else if (args[0] === 'show-ref') {
-            // Branch exists
-            cb(null, '', '')
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
-
-      await sm.createWorktree(s.id, '/repos/myproject', 'feat/test')
-
-      // Verify show-ref was called with refs/heads/ for the target branch
-      const showRefCall = gitCalls.find(a =>
-        a[0] === 'show-ref' && a[1] === '--verify' && a.some(arg => arg === 'refs/heads/feat/test')
-      )
-      expect(showRefCall).toBeDefined()
-    })
-
-    it('checks out existing branch without -b flag', async () => {
-      const s = sm.create('wt-existing', '/repos/myproject')
-
-      const gitCalls: string[][] = []
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        gitCalls.push(args)
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else if (args[0] === 'show-ref') {
-            cb(null, '', '') // branch exists
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
-
-      await sm.createWorktree(s.id, '/repos/myproject', 'feat/existing')
-
-      const worktreeAddCall = gitCalls.find(a => a[0] === 'worktree' && a[1] === 'add')
-      expect(worktreeAddCall).toBeDefined()
-      // Should NOT contain -b flag for existing branch
-      expect(worktreeAddCall).not.toContain('-b')
-      expect(worktreeAddCall).toContain('feat/existing')
-    })
-
-    it('creates new branch with -b flag when branch does not exist', async () => {
-      const s = sm.create('wt-new-branch', '/repos/myproject')
-
-      const gitCalls: string[][] = []
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        gitCalls.push(args)
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else if (args[0] === 'show-ref') {
-            cb(new Error('not found'), '', '') // branch doesn't exist
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
-
-      await sm.createWorktree(s.id, '/repos/myproject', 'feat/brand-new')
-
-      const worktreeAddCall = gitCalls.find(a => a[0] === 'worktree' && a[1] === 'add')
-      expect(worktreeAddCall).toBeDefined()
-      expect(worktreeAddCall).toContain('-b')
-      expect(worktreeAddCall).toContain('feat/brand-new')
-    })
-
-    it('force-deletes ephemeral wt/ branches when no targetBranch supplied', async () => {
-      const s = sm.create('wt-ephemeral', '/repos/myproject')
-      const shortId = s.id.slice(0, 8)
-
-      const gitCalls: string[][] = []
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        gitCalls.push(args)
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else if (args[0] === 'show-ref') {
-            cb(null, '', '') // branch exists
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
-
-      // No targetBranch — ephemeral
-      await sm.createWorktree(s.id, '/repos/myproject')
-
-      const branchDeleteCall = gitCalls.find(a => a[0] === 'branch' && a[1] === '-D')
-      expect(branchDeleteCall).toBeDefined()
-      // The deleted branch should contain the shortId (ephemeral wt/ pattern)
-      expect(branchDeleteCall![2]).toContain(shortId)
     })
   })
 
