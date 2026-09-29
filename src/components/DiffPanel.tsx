@@ -10,11 +10,11 @@ import { useDiff } from '../hooks/useDiff'
 import { DiffToolbar } from './diff/DiffToolbar'
 import { DiffFileTree } from './diff/DiffFileTree'
 import { DiffFileCard } from './diff/DiffFileCard'
+import { getPref, setPref } from '../lib/prefs'
 
 const MIN_WIDTH = 280
 const MAX_WIDTH = 1200
 const DEFAULT_WIDTH = 400
-const STORAGE_KEY = 'codekin-diff-panel-width'
 
 interface DiffPanelProps {
   isOpen: boolean
@@ -28,8 +28,8 @@ interface DiffPanelProps {
 
 export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleToolDone }: DiffPanelProps) {
   const [width, setWidth] = useState(() => {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    return stored ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Number(stored))) : DEFAULT_WIDTH
+    const stored = getPref('diffPanelWidth')
+    return stored ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, stored)) : DEFAULT_WIDTH
   })
 
   const diff = useDiff({ send, isOpen })
@@ -51,7 +51,7 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
 
   // Persist width
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, String(width))
+    setPref('diffPanelWidth', width)
   }, [width])
 
   // Resize drag handler

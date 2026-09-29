@@ -342,6 +342,30 @@ export async function setQueueMessages(token: string, enabled: boolean): Promise
   return data.enabled
 }
 
+/**
+ * Get the UI preferences blob. Resolves to null when the server predates the
+ * endpoint (404), so the caller can fall back instead of treating it as empty.
+ */
+export async function getPrefs(token: string): Promise<Record<string, unknown> | null> {
+  const res = await transport.authFetch(`/api/settings/prefs`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(`Failed to get preferences: ${res.status}`)
+  const data = await jsonBody<{ prefs: Record<string, unknown> }>(res)
+  return data.prefs
+}
+
+/** Merge a partial update into the UI preferences; null values remove keys. */
+export async function putPrefs(token: string, patch: Record<string, unknown>): Promise<void> {
+  const res = await transport.authFetch(`/api/settings/prefs`, {
+    method: 'PUT',
+    headers: headers(token),
+    body: JSON.stringify({ patch }),
+  })
+  if (!res.ok) throw new Error(`Failed to save preferences: ${res.status}`)
+}
+
 /** Get the worktree branch prefix setting. */
 export async function getWorktreePrefix(token: string): Promise<string> {
   const res = await transport.authFetch(`/api/settings/worktree-prefix`, {

@@ -299,7 +299,7 @@ Sessions survive server restarts and browser refreshes.
 - **Disk persistence** — All session metadata (ID, name, working directory, Claude session ID, output history, auto-approved tools) is persisted to `~/.codekin/sessions.json`. Persistence is debounced to avoid excessive I/O.
 - **Output history** — Each session stores up to 2000 messages of output history on the server. When a client joins a session, the last 500 messages are sent as an output buffer for immediate replay.
 - **Context rebuilding** — When Claude's process needs to restart, the session's output history is converted to a natural language context summary and fed to the new Claude process as a system prompt, allowing it to resume where it left off.
-- **Browser persistence** — The active session ID is stored in `localStorage`, so refreshing the page automatically rejoins the last active session.
+- **Rejoin on reload** — The active session ID is saved with your preferences on the server, so refreshing the page (or opening Codekin on another device) rejoins the last active session.
 
 ---
 
@@ -327,8 +327,7 @@ A per-session registry that remembers which tools and commands have been approve
 ## Settings & Configuration
 
 - **Authentication token** — Enter your Codekin token in the Settings modal. The token is validated in real time with a checkmark (valid) or cross (invalid) indicator.
-- **Font size** — Adjustable from 10px to 24px via a slider in Settings.
-- **Persistent** — Settings are stored in `localStorage` under the key `codekin-settings`.
+- **Stored on the server** — Preferences (theme, new-session defaults, layout, starred docs, queued drafts) live on the Codekin server (`/api/settings/prefs`), so they follow you across browsers and devices. Only the auth token (and, on app.codekin.ai, the chosen machine and workspace) stays in the browser. Values from older versions are moved from `localStorage` to the server on first load.
 - **Auto-open** — The Settings modal opens automatically on first visit when no token is configured.
 
 ---
@@ -344,7 +343,7 @@ A right-hand sidebar panel that shows all file changes made by Claude during the
 - **Unified diffs** — Each file is rendered as a card with syntax-highlighted unified diff, dual-gutter line numbers, and color-coded add/delete/context lines.
 - **Discard changes** — Discard all changes or per-file via `git restore`. Requires confirmation. Supports all scopes (staged, unstaged, all).
 - **Auto-refresh** — The diff panel refreshes automatically after `Edit`, `Write`, or file-mutating `Bash` tool calls (debounced 500ms). No polling.
-- **Resizable** — Drag the left edge to resize (280px–600px). Width is persisted in `localStorage`.
+- **Resizable** — Drag the left edge to resize (280px–600px). Width is saved with your preferences on the server.
 - **Large diff handling** — Files with >300 changed lines are collapsed by default. Diffs exceeding 2 MB are truncated with a banner.
 - **Branch indicator** — Shows the current branch name, or `detached at <sha>` in detached HEAD state.
 - **Summary line** — Total files changed, insertions, and deletions displayed in the toolbar.

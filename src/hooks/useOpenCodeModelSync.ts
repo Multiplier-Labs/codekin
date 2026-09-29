@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { fetchOpenCodeModels } from '../lib/ccApi'
 import type { ModelOption, CodingProvider } from '../types'
+import { getPref } from '../lib/prefs'
 
 interface UseOpenCodeModelSyncOptions {
   token: string
@@ -56,7 +57,7 @@ export function useOpenCodeModelSync({
       openCodeModelsDirRef.current = activeWd
       const currentIsOpenCode = currentModelRef.current && models.some(m => m.id === currentModelRef.current)
       if (!currentIsOpenCode) {
-        const savedOcModel = localStorage.getItem('opencode-model')
+        const savedOcModel = getPref('opencodeModel')
         const savedIsValid = savedOcModel && models.some(m => m.id === savedOcModel)
         if (savedIsValid) {
           setModel(savedOcModel)

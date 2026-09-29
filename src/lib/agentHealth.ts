@@ -71,9 +71,6 @@ export function providerAvailability(health: AgentHealth | null, provider: Codin
   }
 }
 
-/** localStorage key holding the user's chosen default provider for new sessions. */
-export const PROVIDER_STORAGE_KEY = 'codekin-provider'
-
 function isProvider(value: unknown): value is CodingProvider {
   return PROVIDERS.some((p) => p.id === value)
 }

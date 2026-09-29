@@ -1,13 +1,16 @@
 /**
- * Persists user settings (auth token, font size) to localStorage.
+ * App settings: the auth token plus the display preferences built on it.
  *
- * On load, restores the saved token but always uses the current default
- * font size so new defaults take effect without migration.
+ * The token is the one value still kept in localStorage — it is needed to
+ * reach the server that stores everything else. The theme lives in the
+ * server-side prefs store (src/lib/prefs.ts). Font size is a fixed default
+ * so new defaults take effect without migration.
  */
 
-import { useState, useCallback } from 'react'
+import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import type { Settings } from '../types'
 import { DEFAULT_THEME, isThemeId } from '../themes/registry'
+import { setPref, usePref } from '../lib/prefs'
 
 const STORAGE_KEY = 'codekin-settings'
 
@@ -21,55 +24,77 @@ export const HOSTED_TOKEN_SENTINEL = 'hosted-relay'
 
 const isHosted = import.meta.env.VITE_APP_MODE === 'hosted'
 
-const defaults: Settings = {
-  token: isHosted ? HOSTED_TOKEN_SENTINEL : '',
-  fontSize: 16,
-  theme: DEFAULT_THEME,
+const FONT_SIZE = 16
+
+function saveToken(token: string) {
+  try {
+    // Merge rather than overwrite: legacy fields (the theme) stay put until
+    // the prefs migration has copied them to the server.
+    const raw = localStorage.getItem(STORAGE_KEY)
+    const saved = raw ? JSON.parse(raw) as Record<string, unknown> | null : null
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...saved, token }))
+  } catch { /* storage disabled */ }
 }
 
-function load(): Settings {
+function loadToken(): string {
+  // In hosted mode the sentinel always wins: a token saved by a previous
+  // local session on the same origin would not authenticate anything.
+  if (isHosted) return HOSTED_TOKEN_SENTINEL
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    const saved = raw ? JSON.parse(raw) as Partial<Settings> | null : null
-    const base: Settings = {
-      ...defaults,
-      // In hosted mode the sentinel always wins: a token saved by a previous
-      // local session on the same origin would not authenticate anything.
-      token: isHosted ? HOSTED_TOKEN_SENTINEL : saved?.token ?? defaults.token,
-      theme: isThemeId(saved?.theme) ? saved.theme : DEFAULT_THEME,
-    }
+    const saved = raw ? JSON.parse(raw) as { token?: string } | null : null
+    let token = saved?.token ?? ''
 
     // Check URL for ?token= parameter (e.g. shared invite links)
     const url = new URL(window.location.href)
-    const urlToken = isHosted ? null : url.searchParams.get('token')
+    const urlToken = url.searchParams.get('token')
     if (urlToken) {
-      base.token = urlToken
+      token = urlToken
       // Persist immediately so subsequent loads pick it up
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(base))
+      saveToken(token)
       // Strip the token from the URL for security
       url.searchParams.delete('token')
       window.history.replaceState({}, '', url.pathname + url.search + url.hash)
     }
-
-    return base
+    return token
   } catch {
-    return defaults
+    return ''
   }
 }
 
-function save(settings: Settings) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
+// The token is shared by every useSettings() caller (App's prefs gate and
+// the app itself), so saving it in Settings re-runs the gate.
+let currentToken: string | null = null
+const tokenListeners = new Set<() => void>()
+function getToken(): string {
+  if (currentToken === null) currentToken = loadToken()
+  return currentToken
+}
+function setToken(token: string) {
+  currentToken = token
+  saveToken(token)
+  for (const l of tokenListeners) l()
+}
+function subscribeToken(listener: () => void) {
+  tokenListeners.add(listener)
+  return () => { tokenListeners.delete(listener) }
+}
+
+/** Test helper: forget the cached token so the next render reloads it. */
+export function resetTokenForTest(): void {
+  currentToken = null
 }
 
 export function useSettings() {
-  const [settings, setSettingsState] = useState<Settings>(load)
+  const token = useSyncExternalStore(subscribeToken, getToken)
+  const storedTheme = usePref('theme')
+  const theme = isThemeId(storedTheme) ? storedTheme : DEFAULT_THEME
+
+  const settings = useMemo<Settings>(() => ({ token, fontSize: FONT_SIZE, theme }), [token, theme])
 
   const updateSettings = useCallback((patch: Partial<Settings>) => {
-    setSettingsState(prev => {
-      const next = { ...prev, ...patch }
-      save(next)
-      return next
-    })
+    if (patch.theme !== undefined) setPref('theme', patch.theme)
+    if (patch.token !== undefined) setToken(patch.token)
   }, [])
 
   return { settings, updateSettings }
