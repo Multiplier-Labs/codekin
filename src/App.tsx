@@ -129,8 +129,8 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   /** Stable ref to the current sendInput function, used by callbacks that close over stale state. */
   const sendInputRef = useRef<(data: string) => void>(() => {})
 
-  /** Worktree toggle state, persisted to localStorage. */
-  const [useWorktree, setUseWorktreeRaw] = useState(() => localStorage.getItem('codekin-use-worktree') === 'true')
+  /** Worktree toggle state, persisted to localStorage. On by default; only an explicit opt-out turns it off. */
+  const [useWorktree, setUseWorktreeRaw] = useState(() => localStorage.getItem('codekin-use-worktree') !== 'false')
   const useWorktreeRef = useRef(useWorktree)
   useEffect(() => { useWorktreeRef.current = useWorktree }, [useWorktree])
   const setUseWorktree = useCallback((v: boolean) => {
