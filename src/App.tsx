@@ -140,6 +140,8 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   const diffHandleMessageRef = useRef<(msg: import('./types').WsServerMessage) => void>(() => {})
   /** Callback ref for notifying the diff panel when a tool finishes (triggers auto-refresh). */
   const diffHandleToolDoneRef = useRef<(toolName: string, summary?: string) => void>(() => {})
+  /** Callback ref for notifying the diff panel that an agent turn finished. */
+  const diffHandleTurnDoneRef = useRef<() => void>(() => {})
   /** Tracks whether file-mutating tools have fired in this session (heuristic for "has diffs"). */
   const [hasFileChanges, setHasFileChanges] = useState(false)
   const [archiveRefreshKey, setArchiveRefreshKey] = useState(0)
@@ -262,6 +264,8 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     onRawMessage: (msg) => {
       if (msg.type === 'diff_result' || msg.type === 'diff_error') {
         diffHandleMessageRef.current(msg)
+      } else if (msg.type === 'result') {
+        diffHandleTurnDoneRef.current()
       } else if (msg.type === 'tool_done') {
         diffHandleToolDoneRef.current(msg.toolName, msg.summary)
         // Track file-mutating tools to show Code Review button.
@@ -971,6 +975,9 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
           send={wsSend}
           onHandleMessage={(fn) => { diffHandleMessageRef.current = fn }}
           onHandleToolDone={(fn) => { diffHandleToolDoneRef.current = fn }}
+          onHandleTurnDone={(fn) => { diffHandleTurnDoneRef.current = fn }}
+          sessionId={activeSessionId}
+          defaultView={activeSession?.worktreePath ? 'branch' : 'all'}
         />
       )}
 

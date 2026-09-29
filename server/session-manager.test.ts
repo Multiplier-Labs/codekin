@@ -3119,7 +3119,7 @@ describe('SessionManager', () => {
     it('returns diff_error when session not found', async () => {
       const sm = new SessionManager()
       const result = await sm.getDiff('nonexistent-session')
-      expect(result).toEqual({ type: 'diff_error', message: 'Session not found' })
+      expect(result).toEqual({ type: 'diff_error', message: 'Session not found', scope: 'all' })
     })
 
     it('delegates to diffManager.getDiff with session workingDir', async () => {
@@ -3131,8 +3131,58 @@ describe('SessionManager', () => {
 
       const result = await sm.getDiff(s.id, 'all')
 
-      expect(spy).toHaveBeenCalledWith('/tmp/test-repo', 'all')
+      expect(spy).toHaveBeenCalledWith('/tmp/test-repo', 'all', undefined)
       expect(result).toEqual(mockResult)
+    })
+
+    it("prefers the user's review base over the worktree's creation base", async () => {
+      const sm = new SessionManager()
+      const s = sm.create('base', '/tmp/test-repo')
+      const spy = vi.spyOn((sm as any).diffManager, 'getDiff').mockResolvedValue({ type: 'diff_result' })
+
+      s.worktreeBase = 'main'
+      await sm.getDiff(s.id, 'branch')
+      s.reviewBase = 'release/1.2'
+      await sm.getDiff(s.id, 'committed')
+
+      expect(spy).toHaveBeenNthCalledWith(1, '/tmp/test-repo', 'branch', { ref: 'main', source: 'worktree' })
+      expect(spy).toHaveBeenNthCalledWith(2, '/tmp/test-repo', 'committed', { ref: 'release/1.2', source: 'user' })
+    })
+
+    it('clears the review base without consulting git', async () => {
+      const sm = new SessionManager()
+      const s = sm.create('base-clear', '/tmp/test-repo')
+      s.reviewBase = 'develop'
+      mockExecFile.mockClear()
+
+      expect(await sm.setReviewBase(s.id, null)).toBeNull()
+
+      expect(s.reviewBase).toBeUndefined()
+      expect(mockExecFile).not.toHaveBeenCalled()
+    })
+
+    it('rejects a review base that is not a commit', async () => {
+      const sm = new SessionManager()
+      const s = sm.create('base-bad', '/tmp/test-repo')
+      mockExecFile.mockImplementation((_c: string, _a: string[], _o: any, cb?: any) => {
+        if (typeof cb === 'function') cb(new Error('unknown revision'), '', '')
+        return { on: vi.fn() }
+      })
+
+      expect(await sm.setReviewBase(s.id, 'nope')).toContain('not a branch or commit')
+      expect(await sm.setReviewBase(s.id, '--output=/tmp/x')).toContain('not a branch or commit')
+      expect(s.reviewBase).toBeUndefined()
+      mockExecFile.mockReset()
+    })
+
+    it('records the base a new worktree was created from', async () => {
+      const sm = new SessionManager()
+      const s = sm.create('wt-base', '/repos/myproject')
+      mockPrepareWorktree.mockResolvedValue({ ok: true, path: '/repos/wt', branch: 'wt/x', repoRoot: '/repos/myproject', baseRef: 'main', reused: false })
+
+      await sm.createWorktree(s.id, '/repos/myproject')
+
+      expect(s.worktreeBase).toBe('main')
     })
   })
 

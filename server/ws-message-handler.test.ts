@@ -571,25 +571,58 @@ describe('handleWsMessage', () => {
   /* ---- get_diff ---- */
 
   describe('get_diff', () => {
-    it('calls sessions.getDiff and sends result', async () => {
+    it('calls sessions.getDiff and tags the result with request and session', async () => {
       const diffResult = { type: 'diff_result', files: [{ path: 'a.ts' }], summary: { added: 1 } }
       ;(ctx.sessions.getDiff as ReturnType<typeof vi.fn>).mockResolvedValue(diffResult)
 
-      handleWsMessage({ type: 'get_diff', scope: 'worktree' } as WsClientMessage, ctx)
+      handleWsMessage({ type: 'get_diff', scope: 'branch', requestId: 7 } as WsClientMessage, ctx)
 
       await vi.waitFor(() => expect(ctx.sent.length).toBeGreaterThan(0))
 
-      expect(ctx.sessions.getDiff).toHaveBeenCalledWith('sess-1', 'worktree')
-      expect(ctx.sent[0]).toEqual(diffResult)
+      expect(ctx.sessions.getDiff).toHaveBeenCalledWith('sess-1', 'branch')
+      expect(ctx.sent[0]).toEqual({ ...diffResult, requestId: 7, sessionId: 'sess-1' })
+    })
+
+    it('rejects an unknown view without touching git', () => {
+      handleWsMessage({ type: 'get_diff', scope: 'worktree', requestId: 3 } as unknown as WsClientMessage, ctx)
+
+      expect(ctx.sessions.getDiff).not.toHaveBeenCalled()
+      expect(ctx.sent[0]).toMatchObject({ type: 'diff_error', requestId: 3, sessionId: 'sess-1' })
     })
 
     it('sends diff_error when not in a session', () => {
       ctx.clientSessions.clear()
-      handleWsMessage({ type: 'get_diff', scope: 'worktree' } as WsClientMessage, ctx)
+      handleWsMessage({ type: 'get_diff', scope: 'all' } as WsClientMessage, ctx)
 
       expect(ctx.sent).toHaveLength(1)
       expect(ctx.sent[0].type).toBe('diff_error')
       expect((ctx.sent[0] as any).message).toBe('Not in a session')
+    })
+  })
+
+  /* ---- set_review_base ---- */
+
+  describe('set_review_base', () => {
+    it('stores the base and returns the refreshed diff', async () => {
+      ;(ctx.sessions as any).setReviewBase = vi.fn().mockResolvedValue(null)
+      ;(ctx.sessions.getDiff as ReturnType<typeof vi.fn>).mockResolvedValue({ type: 'diff_result', files: [] })
+
+      handleWsMessage({ type: 'set_review_base', base: ' develop ', scope: 'committed', requestId: 4 } as WsClientMessage, ctx)
+
+      await vi.waitFor(() => expect(ctx.sent.length).toBe(1))
+      expect((ctx.sessions as any).setReviewBase).toHaveBeenCalledWith('sess-1', 'develop')
+      expect(ctx.sessions.getDiff).toHaveBeenCalledWith('sess-1', 'committed')
+      expect(ctx.sent[0]).toMatchObject({ type: 'diff_result', requestId: 4, sessionId: 'sess-1' })
+    })
+
+    it('clears the base with null and reports an invalid base without diffing', async () => {
+      ;(ctx.sessions as any).setReviewBase = vi.fn().mockResolvedValue('"nope" is not a branch or commit in this repository.')
+
+      handleWsMessage({ type: 'set_review_base', base: 'nope', scope: 'branch', requestId: 5 } as WsClientMessage, ctx)
+
+      await vi.waitFor(() => expect(ctx.sent.length).toBe(1))
+      expect(ctx.sessions.getDiff).not.toHaveBeenCalled()
+      expect(ctx.sent[0]).toMatchObject({ type: 'diff_error', requestId: 5, scope: 'branch' })
     })
   })
 
@@ -610,7 +643,7 @@ describe('handleWsMessage', () => {
       await vi.waitFor(() => expect(ctx.sent.length).toBeGreaterThan(0))
 
       expect(ctx.sessions.discardChanges).toHaveBeenCalledWith('sess-1', 'worktree', ['a.ts'], ['modified'])
-      expect(ctx.sent[0]).toEqual(result)
+      expect(ctx.sent[0]).toEqual({ ...result, sessionId: 'sess-1' })
     })
 
     it('sends diff_error when not in a session', () => {

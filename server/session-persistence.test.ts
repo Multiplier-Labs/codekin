@@ -292,6 +292,8 @@ describe('SessionPersistence.restoreFromDisk', () => {
       workingDir: '/some/repo',
       executionMode: 'existing-checkout',
       worktreeBranch: 'wt/abc',
+      worktreeBase: 'main',
+      reviewBase: 'release/1.2',
       archivedAt: '2026-09-29T10:00:00.000Z',
       created: '2026-04-27T00:00:00Z',
       claudeSessionId: null,
@@ -302,7 +304,7 @@ describe('SessionPersistence.restoreFromDisk', () => {
     new SessionPersistence(sessions).persistToDisk()
     const written = JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'))
 
-    expect(written[0]).toMatchObject({ executionMode: 'existing-checkout', worktreeBranch: 'wt/abc', archivedAt: '2026-09-29T10:00:00.000Z' })
+    expect(written[0]).toMatchObject({ executionMode: 'existing-checkout', worktreeBranch: 'wt/abc', worktreeBase: 'main', reviewBase: 'release/1.2', archivedAt: '2026-09-29T10:00:00.000Z' })
   })
 
   it('handles malformed JSON without throwing', () => {

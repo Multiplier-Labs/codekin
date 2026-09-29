@@ -28,6 +28,8 @@ export interface PersistedSession {
   worktreeState?: import('./types.js').WorktreeState
   worktreeError?: string
   worktreeBranch?: string
+  worktreeBase?: string
+  reviewBase?: string
   archivedAt?: string
   created: string
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
@@ -63,6 +65,8 @@ export class SessionPersistence {
       worktreeState: s.worktreeState,
       worktreeError: s.worktreeError,
       worktreeBranch: s.worktreeBranch,
+      worktreeBase: s.worktreeBase,
+      reviewBase: s.reviewBase,
       archivedAt: s.archivedAt,
       created: s.created,
       source: s.source,
@@ -131,6 +135,8 @@ export class SessionPersistence {
           worktreeState,
           worktreeError,
           worktreeBranch: s.worktreeBranch,
+          worktreeBase: s.worktreeBase,
+          reviewBase: s.reviewBase,
           archivedAt: s.archivedAt,
           created: s.created,
           source: s.source ?? 'manual',
