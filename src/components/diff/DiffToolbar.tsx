@@ -172,6 +172,11 @@ export function DiffToolbar({
               <span className="text-warning-5" title={summary.truncationReason}>truncated</span>
             )}
             <span>{summary.filesChanged} file{summary.filesChanged !== 1 ? 's' : ''} changed</span>
+            {!!summary.uncommittedFiles && (
+              <span className="text-warning-5" title="Files with changes that are not committed yet">
+                · {summary.uncommittedFiles} uncommitted
+              </span>
+            )}
           </span>
           <span className="text-success-5">+{summary.insertions}</span>
           <span className="text-error-5">&minus;{summary.deletions}</span>

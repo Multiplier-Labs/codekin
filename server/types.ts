@@ -446,6 +446,8 @@ export interface DiffFile {
   additions: number
   deletions: number
   hunks: DiffHunk[]
+  /** Branch view only: the file also has uncommitted changes (staged, unstaged or untracked). */
+  uncommitted?: boolean
 }
 
 export interface DiffHunk {
@@ -470,6 +472,8 @@ export interface DiffSummary {
   deletions: number
   truncated: boolean
   truncationReason?: string
+  /** Branch view only: how many listed files have uncommitted changes. */
+  uncommittedFiles?: number
 }
 
 /** A selectable option in a permission or question prompt dialog. */

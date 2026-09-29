@@ -63,6 +63,14 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
         <span className="font-mono text-xs text-ink truncate flex-1" title={displayPath}>
           {displayPath}
         </span>
+        {file.uncommitted && (
+          <span
+            className="shrink-0 rounded-control bg-warning-9/20 px-1.5 text-micro text-warning-4"
+            title="This file has changes that are not committed yet"
+          >
+            uncommitted
+          </span>
+        )}
         {!file.isBinary && (
           <span className="text-xs whitespace-nowrap">
             {file.additions > 0 && <span className="text-success-5">+{file.additions}</span>}

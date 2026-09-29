@@ -76,8 +76,15 @@ describe('branch review views', () => {
     write('app.ts', 'export const a = 2\n')
     write('notes.md', 'todo\n')
 
-    expect(paths(await diff('branch'))).toEqual(['app.ts', 'login.ts', 'notes.md'])
-    expect(paths(await diff('committed'))).toEqual(['login.ts'])
+    const branch = await diff('branch')
+    expect(paths(branch)).toEqual(['app.ts', 'login.ts', 'notes.md'])
+    // Committed-only files are unmarked; edited and new files are flagged.
+    expect(branch.files.filter(f => f.uncommitted).map(f => f.path).sort()).toEqual(['app.ts', 'notes.md'])
+    expect(branch.summary.uncommittedFiles).toBe(2)
+    const committed = await diff('committed')
+    expect(paths(committed)).toEqual(['login.ts'])
+    expect(committed.summary.uncommittedFiles).toBeUndefined()
+    expect(committed.files.some(f => f.uncommitted)).toBe(false)
     expect(paths(await diff('all'))).toEqual(['app.ts', 'notes.md'])
   })
 

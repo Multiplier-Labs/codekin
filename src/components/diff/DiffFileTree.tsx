@@ -40,9 +40,12 @@ export function DiffFileTree({ files, activeFile, onSelectFile }: DiffFileTreePr
             <span className={`inline-flex items-center justify-center w-4 h-4 rounded-control text-micro font-bold shrink-0 ${cfg.color}`}>
               {cfg.label}
             </span>
-            <span className="font-mono truncate flex-1" title={displayPath}>
+            <span className="font-mono truncate flex-1" title={file.uncommitted ? `${displayPath} (uncommitted changes)` : displayPath}>
               {displayPath}
             </span>
+            {file.uncommitted && (
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning-5" role="img" aria-label="uncommitted changes" />
+            )}
             {!file.isBinary && (file.additions > 0 || file.deletions > 0) && (
               <span className="whitespace-nowrap shrink-0">
                 {file.additions > 0 && <span className="text-success-5">+{file.additions}</span>}
