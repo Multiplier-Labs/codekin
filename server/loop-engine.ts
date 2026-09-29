@@ -67,6 +67,8 @@ interface CreateOpts {
   model?: string
   source?: 'agent'
   allowedTools?: string[]
+  /** The session requires its own worktree and never runs in the shared checkout. */
+  useWorktree?: boolean
 }
 
 interface HistoryMsg {
@@ -304,14 +306,20 @@ export class LoopEngine {
       model: run.model ?? undefined,
       source: 'agent',
       allowedTools: AGENT_ALLOWED_TOOLS,
+      useWorktree: !resumeCwd,
     })
     ctx.makerSessionId = session.id
 
     if (resumeCwd) {
       ctx.cwd = resumeCwd
     } else {
+      // The maker never falls back to the shared checkout.
       const worktree = await this.host.createWorktree(session.id, run.repo, run.branch, run.baseBranch ?? undefined)
-      ctx.cwd = worktree ?? run.repo
+      if (!worktree) {
+        this.finishRun(run.id, 'failed', `Could not create an isolated worktree for branch ${run.branch}; nothing was started in the shared checkout.`)
+        return
+      }
+      ctx.cwd = worktree
     }
     this.store.patchRun(run.id, { makerSessionId: session.id, worktreePath: ctx.cwd })
 
@@ -647,6 +655,7 @@ export class LoopEngine {
           model: run.model ?? undefined,
           source: 'agent',
           allowedTools: AGENT_ALLOWED_TOOLS,
+          useWorktree: true,
         })
         ctx.workerSessionIds.push(session.id)
         const cwd = await this.host.createWorktree(session.id, run.repo, branch, run.branch)
@@ -951,12 +960,18 @@ export class LoopEngine {
       model: config.model,
       source: 'agent',
       allowedTools: READONLY_AGENT_ALLOWED_TOOLS,
+      useWorktree: true,
     })
     // The maker's edits are uncommitted, so the reviewer gets its own worktree
     // on a review branch and the diff travels in the prompt.
-    await this.host.createWorktree(session.id, run.repo, `${run.branch}-review`, run.branch)
+    const reviewWorktree = await this.host.createWorktree(session.id, run.repo, `${run.branch}-review`, run.branch)
     ctx.reviewSessionId = session.id
     ctx.reviewProcessing = false
+    if (!reviewWorktree) {
+      // Never review from the shared checkout; record the review as errored.
+      await this.onRubricResult(ctx, config, stage.id, true)
+      return
+    }
 
     ctx.disposers.push(
       this.host.onSessionResult((sid, isError) => {

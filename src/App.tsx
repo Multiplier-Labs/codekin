@@ -230,6 +230,8 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     currentPermissionMode,
     setPermissionMode,
     moveToWorktree,
+    retryWorktree,
+    switchToSharedCheckout,
   } = useChatSocket({
     token: settings.token,
     onSessionCreated: (sessionId) => {
@@ -928,6 +930,10 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             onPermissionModeChange={handlePermissionModeChange}
             moveToWorktree={moveToWorktree}
             worktreePath={activeSession?.worktreePath}
+            worktreeState={activeSession?.worktreeState}
+            worktreeError={activeSession?.worktreeError}
+            onRetryWorktree={retryWorktree}
+            onUseExistingCheckout={switchToSharedCheckout}
             openCodeConnected={activeSessionProvider === 'opencode' ? (openCodeDisabled ? false : openCodeConnected) : null}
             codexConnected={activeSessionProvider === 'codex' ? (codexDisabled ? false : codexConnected) : null}
             claudeDisabled={activeSessionProvider === 'claude' && claudeDisabled}

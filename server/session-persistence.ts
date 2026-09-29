@@ -24,6 +24,10 @@ export interface PersistedSession {
   groupDir?: string
   /** Absolute path to the git worktree, if this session uses one. */
   worktreePath?: string
+  executionMode?: import('./types.js').ExecutionMode
+  worktreeState?: import('./types.js').WorktreeState
+  worktreeError?: string
+  worktreeBranch?: string
   created: string
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   provider?: import('./coding-process.js').CodingProvider
@@ -54,6 +58,10 @@ export class SessionPersistence {
       workingDir: s.workingDir,
       groupDir: s.groupDir,
       worktreePath: s.worktreePath,
+      executionMode: s.executionMode,
+      worktreeState: s.worktreeState,
+      worktreeError: s.worktreeError,
+      worktreeBranch: s.worktreeBranch,
       created: s.created,
       source: s.source,
     provider: s.provider,
@@ -93,30 +101,34 @@ export class SessionPersistence {
       const data = jsonParse(raw) as PersistedSession[]
 
       for (const s of data) {
-        // Validate worktree paths on restore: if the worktree directory was
-        // removed while the server was down, reset to the original repo to
-        // prevent spawning Claude in a nonexistent CWD.
-        let workingDir = s.workingDir
-        let worktreePath = s.worktreePath
-        const groupDir = s.groupDir
-        if (worktreePath && !existsSync(worktreePath)) {
-          const fallback = groupDir ?? workingDir
-          if (fallback !== worktreePath && existsSync(fallback)) {
-            console.warn(`[restore] Worktree ${worktreePath} no longer exists — resetting session ${s.id} to ${fallback}`)
-            workingDir = fallback
-            worktreePath = undefined
-          } else {
-            console.warn(`[restore] Worktree ${worktreePath} and fallback both missing for session ${s.id}`)
-            worktreePath = undefined
-          }
+        // An isolated session keeps its worktree identity even when the
+        // directory is gone; it is marked missing and waits for the user to
+        // retry or explicitly switch to the shared checkout. Sessions saved
+        // before executionMode existed are isolated if they had a worktree.
+        const executionMode = s.executionMode ?? (s.worktreePath ? 'isolated' : undefined)
+        let worktreeState = s.worktreeState ?? (s.worktreePath ? 'ready' : undefined)
+        let worktreeError = s.worktreeError
+        if (executionMode === 'isolated' && worktreeState === 'preparing') {
+          // Creation was interrupted by the restart.
+          worktreeState = 'failed'
+          worktreeError = 'Worktree creation was interrupted by a server restart.'
+        }
+        if (s.worktreePath && !existsSync(s.worktreePath)) {
+          console.warn(`[restore] Worktree ${s.worktreePath} for session ${s.id} is missing — session will wait for recovery`)
+          worktreeState = 'missing'
+          worktreeError = `Worktree ${s.worktreePath} no longer exists.`
         }
 
         const session: Session = {
           id: s.id,
           name: s.name,
-          workingDir,
-          groupDir,
-          worktreePath,
+          workingDir: s.workingDir,
+          groupDir: s.groupDir,
+          worktreePath: s.worktreePath,
+          executionMode,
+          worktreeState,
+          worktreeError,
+          worktreeBranch: s.worktreeBranch,
           created: s.created,
           source: s.source ?? 'manual',
           provider: s.provider ?? 'claude',

@@ -23,6 +23,12 @@ export const VALID_PROVIDERS = new Set<CodingProvider>(['claude', 'opencode', 'c
 
 export const VALID_PERMISSION_MODES = new Set<PermissionMode>(['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dangerouslySkipPermissions'])
 
+/** Where a session's agent is allowed to run. */
+export type ExecutionMode = 'isolated' | 'existing-checkout'
+
+/** Readiness of an isolated session's worktree. */
+export type WorktreeState = 'preparing' | 'ready' | 'failed' | 'missing'
+
 /**
  * Server-side session state. Holds the Claude child process, connected
  * WebSocket clients, output history for replay, and permission registries.
@@ -36,6 +42,15 @@ export interface Session {
   groupDir?: string
   /** Absolute path to the git worktree directory, if this session uses one. */
   worktreePath?: string
+  /** 'isolated' sessions must run in their own worktree and never fall back
+   *  to the shared checkout. Unset means the session runs where it was created. */
+  executionMode?: ExecutionMode
+  /** Readiness of the worktree an isolated session requires. */
+  worktreeState?: WorktreeState
+  /** Why the worktree is not ready, for display. */
+  worktreeError?: string
+  /** Branch checked out in the session's worktree. */
+  worktreeBranch?: string
   created: string
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   /** Which AI coding assistant provider powers this session. Defaults to 'claude'. */
@@ -87,6 +102,11 @@ export interface Session {
   _processStartedOnce?: boolean
   /** Last user input sent, stored for API error retry. */
   _lastUserInput?: string
+  /** Inputs received while an isolated session's worktree was unavailable;
+   *  delivered once it is ready or the user switches to the shared checkout. */
+  _heldInputs?: string[]
+  /** Whether clients were already told the worktree is unavailable in its current state. */
+  _worktreeReported?: boolean
   /** First user input, preserved for session naming (not cleared by API retry). */
   _namingUserInput?: string
   /** Timestamp of last user input, used to detect stale retries. */
@@ -143,6 +163,15 @@ export interface SessionInfo {
   groupDir?: string
   /** Absolute path to the git worktree directory, if this session uses one. */
   worktreePath?: string
+  /** 'isolated' sessions must run in their own worktree and never fall back
+   *  to the shared checkout. Unset means the session runs where it was created. */
+  executionMode?: ExecutionMode
+  /** Readiness of the worktree an isolated session requires. */
+  worktreeState?: WorktreeState
+  /** Why the worktree is not ready, for display. */
+  worktreeError?: string
+  /** Branch checked out in the session's worktree. */
+  worktreeBranch?: string
   connectedClients: number
   lastActivity: string
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
@@ -343,6 +372,8 @@ export type WsClientMessage =
   | { type: 'get_diff'; scope?: DiffScope }
   | { type: 'discard_changes'; scope: DiffScope; paths?: string[]; statuses?: Record<string, DiffFileStatus> }
   | { type: 'move_to_worktree' }
+  | { type: 'retry_worktree' }
+  | { type: 'use_existing_checkout' }
 
 // --- Diff viewer types ---
 
