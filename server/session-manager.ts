@@ -28,7 +28,7 @@ import type { CodingProcess, CodingProvider } from './coding-process.js'
 import { buildHandoffInjection, generateHandoff } from './handoff-manager.js'
 import { PlanManager } from './plan-manager.js'
 import { SessionArchive } from './session-archive.js'
-import type { DiffFileStatus, DiffScope, Session, SessionInfo, TaskItem, WorktreeRemovalPreflight, WorktreeState, WsServerMessage } from './types.js'
+import type { DiffFileStatus, DiffScope, DiffView, Session, SessionInfo, TaskItem, WorktreeRemovalPreflight, WorktreeState, WsServerMessage } from './types.js'
 import { cleanupWorkspace } from './webhook-workspace.js'
 import { PORT } from './config.js'
 import { ApprovalManager } from './approval-manager.js'
@@ -36,7 +36,7 @@ import { PromptRouter } from './prompt-router.js'
 import { isIsolationBlocked, SessionLifecycle } from './session-lifecycle.js'
 import { SessionNaming } from './session-naming.js'
 import { SessionPersistence } from './session-persistence.js'
-import { DiffManager } from './diff-manager.js'
+import { DiffManager, isValidReviewBase, type ReviewBasePreference } from './diff-manager.js'
 import { ProcessCoordinator } from './process-coordinator.js'
 import { inspectWorktree, prepareWorktree, removeWorktree, type WorktreeResult } from './worktree-ops.js'
 
@@ -493,6 +493,7 @@ export class SessionManager {
     session.workingDir = result.path
     session.worktreePath = result.path
     session.worktreeBranch = result.branch
+    if (result.baseRef) session.worktreeBase = result.baseRef
     session.executionMode = 'isolated'
 
     // Copy Claude CLI session data to the worktree's project storage dir.
@@ -840,6 +841,8 @@ export class SessionManager {
       worktreeState: s.worktreeState,
       worktreeError: s.worktreeError,
       worktreeBranch: s.worktreeBranch,
+      worktreeBase: s.worktreeBase,
+      reviewBase: s.reviewBase,
       archivedAt: s.archivedAt,
       connectedClients: s.clients.size,
       lastActivity: new Date(s._lastActivityAt).toISOString(),
@@ -1775,10 +1778,28 @@ export class SessionManager {
   // ---------------------------------------------------------------------------
 
   /** Run git diff in a session's workingDir and return structured results. */
-  async getDiff(sessionId: string, scope: DiffScope = 'all'): Promise<WsServerMessage> {
+  async getDiff(sessionId: string, view: DiffView = 'all'): Promise<WsServerMessage> {
     const session = this.sessions.get(sessionId)
-    if (!session) return { type: 'diff_error', message: 'Session not found' }
-    return this.diffManager.getDiff(session.workingDir, scope)
+    if (!session) return { type: 'diff_error', message: 'Session not found', scope: view }
+    const base: ReviewBasePreference | undefined = session.reviewBase
+      ? { ref: session.reviewBase, source: 'user' }
+      : session.worktreeBase ? { ref: session.worktreeBase, source: 'worktree' } : undefined
+    return this.diffManager.getDiff(session.workingDir, view, base)
+  }
+
+  /**
+   * Set (or clear, with null) the ref this session's branch views compare
+   * against. Returns an error message when the ref is not a commit here.
+   */
+  async setReviewBase(sessionId: string, base: string | null): Promise<string | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return 'Session not found'
+    if (base !== null && !(await isValidReviewBase(base, session.workingDir))) {
+      return `"${base}" is not a branch or commit in this repository.`
+    }
+    session.reviewBase = base ?? undefined
+    this.persistToDiskDebounced()
+    return null
   }
 
   /** Discard changes in a session's workingDir per the given scope and paths. */

@@ -302,21 +302,37 @@ describe('DiffManager.getDiff', () => {
     expect(lsFilesCall).toBeUndefined()
   })
 
-  it('falls back when git diff HEAD fails (no HEAD commit)', async () => {
+  it('combines staged and unstaged diffs when there is no HEAD commit yet', async () => {
     stubExecFileByArgs({
       'rev-parse --abbrev-ref': 'main\n',
-      'diff --find-renames --no-color --unified=3 HEAD': new Error('bad revision HEAD'),
-      'diff --cached': 'staged diff\n',
+      'rev-parse --verify --quiet HEAD': new Error('no HEAD'),
+      '--unified=3 --cached': 'staged diff\n',
       // plain diff (unstaged) falls through to default ''
       'ls-files --others': '',
     })
-    // First call for HEAD fails, parseDiff is called with fallback combined output
     mockParseDiff.mockReturnValue({ files: [], truncated: false })
 
     const result = await dm.getDiff('/repo', 'all') as any
     expect(result.type).toBe('diff_result')
-    // parseDiff should have been called with the fallback output
-    expect(mockParseDiff).toHaveBeenCalled()
+    expect(mockParseDiff).toHaveBeenCalledWith('staged diff\n')
+  })
+
+  it('reports a failing diff as diff_error instead of an empty result', async () => {
+    stubExecFileByArgs({
+      'rev-parse --abbrev-ref': 'main\n',
+      'diff --find-renames --no-color --unified=3 --cached': new Error('fatal: index file corrupt'),
+    })
+
+    const result = await dm.getDiff('/repo', 'staged') as any
+    expect(result.type).toBe('diff_error')
+    expect(result.message).toContain('index file corrupt')
+  })
+
+  it('refuses to discard from a branch view', async () => {
+    const result = await dm.discardChanges('/repo', 'branch' as any, ['a.ts']) as any
+
+    expect(result).toMatchObject({ type: 'diff_error', scope: 'branch' })
+    expect(mockExecFile).not.toHaveBeenCalled()
   })
 
   it('discovers untracked files for unstaged scope', async () => {

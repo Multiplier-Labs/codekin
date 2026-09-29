@@ -15,7 +15,8 @@ const LARGE_DIFF_THRESHOLD = 300
 interface DiffFileCardProps {
   file: DiffFile
   isActive: boolean
-  onDiscard: (path: string, status: DiffFileStatus) => void
+  /** Omitted in read-only (branch history) views, which hides the discard button. */
+  onDiscard?: (path: string, status: DiffFileStatus) => void
   onScrollRef: (el: HTMLDivElement | null) => void
 }
 
@@ -39,7 +40,7 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
       setTimeout(() => setConfirmDiscard(false), 3000)
       return
     }
-    onDiscard(file.path, file.status)
+    onDiscard?.(file.path, file.status)
     setConfirmDiscard(false)
   }
 
@@ -82,15 +83,17 @@ export function DiffFileCard({ file, isActive, onDiscard, onScrollRef }: DiffFil
           >
             <IconCopy size={13} />
           </button>
-          <button
-            className={`p-1 rounded-control hover:bg-error-950/50 ${
-              confirmDiscard ? 'text-error-5' : 'text-ink-muted hover:text-error-5'
-            }`}
-            onClick={handleDiscard}
-            title={confirmDiscard ? 'Click again to confirm' : 'Discard file changes'}
-          >
-            <IconTrash size={13} />
-          </button>
+          {onDiscard && (
+            <button
+              className={`p-1 rounded-control hover:bg-error-950/50 ${
+                confirmDiscard ? 'text-error-5' : 'text-ink-muted hover:text-error-5'
+              }`}
+              onClick={handleDiscard}
+              title={confirmDiscard ? 'Click again to confirm' : 'Discard file changes'}
+            >
+              <IconTrash size={13} />
+            </button>
+          )}
         </div>
       </div>
 

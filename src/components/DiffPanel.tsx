@@ -5,8 +5,8 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { IconX, IconFileCode } from '@tabler/icons-react'
-import type { DiffFileStatus, WsClientMessage, WsServerMessage } from '../types'
-import { useDiff } from '../hooks/useDiff'
+import type { DiffFileStatus, DiffView, WsClientMessage, WsServerMessage } from '../types'
+import { isDiscardableView, useDiff } from '../hooks/useDiff'
 import { DiffToolbar } from './diff/DiffToolbar'
 import { DiffFileTree } from './diff/DiffFileTree'
 import { DiffFileCard } from './diff/DiffFileCard'
@@ -24,15 +24,21 @@ interface DiffPanelProps {
   onHandleMessage: (fn: (msg: WsServerMessage) => void) => void
   /** Register callback so parent can forward tool_done events. */
   onHandleToolDone: (fn: (toolName: string, summary?: string) => void) => void
+  /** Register callback so parent can signal the end of an agent turn. */
+  onHandleTurnDone: (fn: () => void) => void
+  /** Session shown; results for other sessions are ignored. */
+  sessionId: string | null
+  /** View each session opens on ('branch' for isolated sessions). */
+  defaultView: DiffView
 }
 
-export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleToolDone }: DiffPanelProps) {
+export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleToolDone, onHandleTurnDone, sessionId, defaultView }: DiffPanelProps) {
   const [width, setWidth] = useState(() => {
     const stored = getPref('diffPanelWidth')
     return stored ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, stored)) : DEFAULT_WIDTH
   })
 
-  const diff = useDiff({ send, isOpen })
+  const diff = useDiff({ send, isOpen, sessionId, defaultView })
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-arguments -- new Map() infers Map<any,any>
   const fileRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const [activeFile, setActiveFile] = useState<string | null>(null)
@@ -48,6 +54,10 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
   useEffect(() => {
     onHandleToolDone(diff.handleToolDone)
   }, [diff.handleToolDone, onHandleToolDone])
+
+  useEffect(() => {
+    onHandleTurnDone(diff.handleTurnDone)
+  }, [diff.handleTurnDone, onHandleTurnDone])
 
   // Persist width
   useEffect(() => {
@@ -105,6 +115,7 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
   if (!isOpen) return null
 
   const hasUntrackedFiles = diff.files.some(f => f.status === 'added')
+  const canDiscard = isDiscardableView(diff.scope)
 
   return (
     <div
@@ -139,11 +150,13 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
         branch={diff.branch}
         scope={diff.scope}
         summary={diff.summary}
+        review={diff.review}
         loading={diff.loading}
         hasUntrackedFiles={hasUntrackedFiles}
         onScopeChange={diff.changeScope}
+        onReviewBaseChange={diff.changeReviewBase}
         onRefresh={diff.refresh}
-        onDiscardAll={handleDiscardAll}
+        onDiscardAll={canDiscard ? handleDiscardAll : undefined}
       />
 
       {/* Error state */}
@@ -175,6 +188,12 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
             </div>
           )}
 
+          {diff.incomplete.length > 0 && (
+            <div className="px-3 py-2 text-xs text-warning-5 bg-warning-950/20 rounded-control" role="status">
+              {diff.incomplete.map(note => <p key={note}>{note}</p>)}
+            </div>
+          )}
+
           {diff.summary.truncated && (
             <div className="px-3 py-2 text-xs text-warning-5 bg-warning-950/20 rounded-control">
               Diff truncated — showing partial results
@@ -186,7 +205,7 @@ export function DiffPanel({ isOpen, onClose, send, onHandleMessage, onHandleTool
               key={file.path}
               file={file}
               isActive={file.path === activeFile}
-              onDiscard={handleDiscard}
+              onDiscard={canDiscard ? handleDiscard : undefined}
               onScrollRef={(el) => {
                 if (el) fileRefs.current.set(file.path, el)
                 else fileRefs.current.delete(file.path)

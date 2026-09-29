@@ -155,7 +155,9 @@ export type WsClientMessage =
   | { type: 'prompt_response'; value: string | string[]; requestId?: string }
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'ping' }
-  | { type: 'get_diff'; scope?: DiffScope }
+  | { type: 'get_diff'; scope?: DiffView; requestId?: number }
+  /** Choose the ref branch views compare against (null = automatic), then return the diff for `scope`. */
+  | { type: 'set_review_base'; base: string | null; scope: DiffView; requestId?: number }
   | { type: 'discard_changes'; scope: DiffScope; paths?: string[]; statuses?: Record<string, DiffFileStatus> }
   | { type: 'move_to_worktree' }
   | { type: 'retry_worktree' }
@@ -228,12 +230,35 @@ export type WsServerMessage =
   | { type: 'workflow_event'; eventType: string; runId: string; kind: string; stepKey?: string; status?: string; payload?: unknown; engine?: 'workflow' | 'loop' | 'agent' }
   | { type: 'worktree_created'; worktreePath: string; workingDir: string }
   | { type: 'sessions_updated' }
-  | { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary; branch: string; scope: DiffScope }
-  | { type: 'diff_error'; message: string }
+  | { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary; branch: string; scope: DiffView; requestId?: number; sessionId?: string; review?: DiffReview; incomplete?: string[] }
+  | { type: 'diff_error'; message: string; scope?: DiffView; requestId?: number; sessionId?: string }
 
 // --- Diff viewer types ---
 
+/** Uncommitted scopes: what discard operates on. */
 export type DiffScope = 'staged' | 'unstaged' | 'all'
+
+/**
+ * What the Changes panel shows. The uncommitted scopes plus two read-only
+ * branch views measured from the merge base with the review base:
+ * 'branch' (all task changes: committed + uncommitted + untracked) and
+ * 'committed' (merge base → HEAD).
+ */
+export type DiffView = DiffScope | 'branch' | 'committed'
+
+/** How a branch view was computed. */
+export interface DiffReview {
+  /** Ref the branch is compared against, e.g. 'main' or 'origin/main'. */
+  baseRef: string
+  /** Why this base: the user's choice, the ref the worktree was created from, or the repo default. */
+  baseSource: 'user' | 'worktree' | 'default'
+  /** Merge-base commit the diff starts from. */
+  mergeBase: string
+  /** HEAD commit the diff was computed at. */
+  head: string
+  /** Refs the user can choose as the base. */
+  candidates: string[]
+}
 export type DiffFileStatus = 'modified' | 'added' | 'deleted' | 'renamed'
 
 export interface DiffFile {
