@@ -262,7 +262,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
       }
     },
     onRawMessage: (msg) => {
-      if (msg.type === 'diff_result' || msg.type === 'diff_error' || msg.type === 'pr_status') {
+      if (msg.type === 'diff_result' || msg.type === 'diff_error' || msg.type === 'pr_status' || msg.type === 'review_comments' || msg.type === 'review_error') {
         diffHandleMessageRef.current(msg)
       } else if (msg.type === 'result') {
         diffHandleTurnDoneRef.current()

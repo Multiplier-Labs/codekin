@@ -8,10 +8,12 @@
 import { describe, it, expect } from 'vitest'
 import {
   checkClientFrame,
+  checkServerFrame,
   filterSessionList,
   newChannelState,
   observeServerFrame,
   permissionForTool,
+  stampReviewIdentity,
 } from './connector-policy.js'
 import type { ChannelPolicy } from './connector-policy.js'
 
@@ -155,5 +157,35 @@ describe('filterSessionList', () => {
   it('refuses a body it cannot filter', () => {
     expect(filterSessionList(viewer, 'not json')).toBeNull()
     expect(filterSessionList(viewer, JSON.stringify({ nope: true }))).toBeNull()
+  })
+})
+
+describe('review feedback', () => {
+  const watcher: ChannelPolicy = { role: 'grantee', grants: { s1: ['view'] }, userId: 'u-watch' }
+
+  it('lets viewers read comments but only prompt-senders write or send them', () => {
+    for (const type of ['review_comment_add', 'review_comment_update', 'review_comment_delete', 'review_feedback_send']) {
+      expect(checkClientFrame(viewer, joined(viewer), frame({ type })).allowed).toBe(false)
+      expect(checkClientFrame(editor, joined(editor), frame({ type })).allowed).toBe(true)
+    }
+    expect(checkClientFrame(viewer, joined(viewer), frame({ type: 'review_comments_get' })).allowed).toBe(true)
+    expect(checkClientFrame(watcher, joined(watcher), frame({ type: 'review_comments_get' })).allowed).toBe(false)
+  })
+
+  it('stamps the channel identity over anything the browser claims', () => {
+    const policy: ChannelPolicy = { ...editor, userId: 'u-alice' }
+    const stamped = JSON.parse(stampReviewIdentity(policy, frame({ type: 'review_comment_add', body: 'x', relayUser: 'owner', relayRole: 'owner' })))
+
+    expect(stamped).toMatchObject({ body: 'x', relayUser: 'u-alice', relayRole: 'grantee' })
+    expect(stampReviewIdentity(policy, frame({ type: 'input', data: 'hi' }))).toBe(frame({ type: 'input', data: 'hi' }))
+  })
+
+  it('withholds diff, review and PR frames from grantees without view_diff', () => {
+    for (const type of ['diff_result', 'review_comments', 'pr_status']) {
+      const msg = frame({ type, sessionId: 's1' })
+      expect(checkServerFrame(watcher, joined(watcher), msg)).toBe(false)
+      expect(checkServerFrame(viewer, joined(viewer), msg)).toBe(true)
+    }
+    expect(checkServerFrame(watcher, joined(watcher), frame({ type: 'output', sessionId: 's1' }))).toBe(true)
   })
 })

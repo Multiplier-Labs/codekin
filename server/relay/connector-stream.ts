@@ -12,7 +12,7 @@
 import WebSocket from 'ws'
 import { STREAM_CLOSE } from './relay-protocol.js'
 import type { LocalServerTarget } from './connector-proxy.js'
-import { checkClientFrame, checkServerFrame, newChannelState, observeServerFrame } from './connector-policy.js'
+import { checkClientFrame, checkServerFrame, newChannelState, observeServerFrame, stampReviewIdentity } from './connector-policy.js'
 import type { ChannelPolicy, ChannelState } from './connector-policy.js'
 
 /** The local server drops sockets that do not authenticate promptly. */
@@ -140,7 +140,7 @@ export class StreamChannel {
     }
 
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(data)
+      this.ws.send(stampReviewIdentity(this.policy, data))
     }
   }
 

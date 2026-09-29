@@ -617,6 +617,61 @@ describe('handleWsMessage', () => {
     })
   })
 
+  /* ---- review comments ---- */
+
+  describe('review comments', () => {
+    beforeEach(() => {
+      Object.assign(ctx.sessions as any, {
+        listReviewComments: vi.fn().mockResolvedValue([]),
+        addReviewComment: vi.fn().mockResolvedValue(null),
+        updateReviewComment: vi.fn().mockResolvedValue(null),
+        deleteReviewComment: vi.fn().mockResolvedValue(null),
+        sendReviewFeedback: vi.fn().mockResolvedValue(null),
+      })
+    })
+    const add = { type: 'review_comment_add', path: 'a.ts', side: 'new', startLine: 1, endLine: 2, view: 'branch', baseCommit: 'abc', body: 'why?' }
+
+    it('treats a local client as the owner and a relay-stamped one as its user', async () => {
+      handleWsMessage(add as WsClientMessage, ctx)
+      handleWsMessage({ ...add, relayUser: 'u-alice', relayRole: 'grantee' } as WsClientMessage, ctx)
+
+      await vi.waitFor(() => expect((ctx.sessions as any).addReviewComment).toHaveBeenCalledTimes(2))
+      const calls = (ctx.sessions as any).addReviewComment.mock.calls
+      expect(calls[0]).toEqual(['sess-1', { path: 'a.ts', side: 'new', startLine: 1, endLine: 2, view: 'branch', baseCommit: 'abc', headCommit: undefined }, 'why?', { id: 'owner', role: 'owner' }])
+      expect(calls[1][3]).toEqual({ id: 'u-alice', role: 'grantee' })
+    })
+
+    it('reports errors to the sender only', async () => {
+      ;(ctx.sessions as any).deleteReviewComment.mockResolvedValue('Only the author can delete this comment.')
+
+      handleWsMessage({ type: 'review_comment_delete', id: 'c1', relayUser: 'u-bob', relayRole: 'grantee' } as WsClientMessage, ctx)
+
+      await vi.waitFor(() => expect(ctx.sent).toHaveLength(1))
+      expect(ctx.sent[0]).toEqual({ type: 'review_error', message: 'Only the author can delete this comment.', sessionId: 'sess-1' })
+    })
+
+    it('sends the chosen drafts, with stale ones only on request', async () => {
+      handleWsMessage({ type: 'review_feedback_send', ids: ['a', 7, 'b'], includeStale: true } as unknown as WsClientMessage, ctx)
+      handleWsMessage({ type: 'review_feedback_send' } as WsClientMessage, ctx)
+
+      await vi.waitFor(() => expect((ctx.sessions as any).sendReviewFeedback).toHaveBeenCalledTimes(2))
+      expect((ctx.sessions as any).sendReviewFeedback.mock.calls).toEqual([
+        ['sess-1', { ids: ['a', 'b'], includeStale: true }],
+        ['sess-1', { ids: undefined, includeStale: false }],
+      ])
+    })
+
+    it('rejects an unknown view and lists comments for the joined session', async () => {
+      handleWsMessage({ ...add, view: 'nope' } as unknown as WsClientMessage, ctx)
+      handleWsMessage({ type: 'review_comments_get' } as WsClientMessage, ctx)
+
+      await vi.waitFor(() => expect(ctx.sent).toHaveLength(2))
+      expect((ctx.sessions as any).addReviewComment).not.toHaveBeenCalled()
+      expect(ctx.sent).toContainEqual({ type: 'review_comments', sessionId: 'sess-1', comments: [] })
+      expect(ctx.sent).toContainEqual(expect.objectContaining({ type: 'review_error', message: 'Unknown diff view: nope' }))
+    })
+  })
+
   /* ---- set_review_base ---- */
 
   describe('set_review_base', () => {

@@ -71,6 +71,13 @@ vi.mock('child_process', async (importOriginal) => {
 const mockPrepareWorktree = vi.hoisted(() => vi.fn())
 const mockRemoveWorktree = vi.hoisted(() => vi.fn())
 const mockInspectWorktree = vi.hoisted(() => vi.fn())
+const mockCreateAnchor = vi.hoisted(() => vi.fn())
+const mockIsAnchorStale = vi.hoisted(() => vi.fn())
+vi.mock('./review-comments.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./review-comments.js')>()),
+  createAnchor: (...args: any[]) => mockCreateAnchor(...args),
+  isAnchorStale: (...args: any[]) => mockIsAnchorStale(...args),
+}))
 const mockCachedPrBaseFor = vi.hoisted(() => vi.fn())
 vi.mock('./pr-status.js', () => ({
   cachedPrBaseFor: (...args: any[]) => mockCachedPrBaseFor(...args),
@@ -169,6 +176,10 @@ describe('SessionManager', () => {
     mockPrepareWorktree.mockReset()
     mockRemoveWorktree.mockReset().mockResolvedValue({ removed: true })
     mockCachedPrBaseFor.mockReset().mockResolvedValue(null)
+    mockIsAnchorStale.mockReset().mockResolvedValue(false)
+    mockCreateAnchor.mockReset().mockImplementation(async (_cwd: string, input: any) => ({
+      ...input, source: 'worktree', excerpt: [`line ${input.startLine}`], fingerprint: 'f',
+    }))
     mockInspectWorktree.mockReset().mockResolvedValue({ exists: true, modified: [], untracked: [], branch: 'wt/x', uniqueCommits: 0 })
     sm = new SessionManager()
     // Session naming runs through the utility agent, which only spawns a
@@ -3993,6 +4004,112 @@ describe('SessionManager', () => {
       ;(sm as any).handleClaudeResult(s, s.id, 'success', false)
 
       expect(s.claudeSessionId).toBe('still-fresh')
+    })
+  })
+
+  describe('review comments', () => {
+    const owner = { id: 'owner', role: 'owner' as const }
+    const alice = { id: 'alice', role: 'grantee' as const }
+    const bob = { id: 'bob', role: 'grantee' as const }
+    const at = (startLine: number, path = 'app.ts') => ({ path, side: 'new' as const, startLine, endLine: startLine, view: 'branch' as const })
+
+    function sessionWithClient() {
+      const s = sm.create('review', '/repos/app')
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+      ws.send.mockClear()
+      return { s, ws }
+    }
+    const sentOf = (ws: any) => ws.send.mock.calls.map((c: any) => JSON.parse(c[0]))
+
+    it('stores drafts with their author and tells every client', async () => {
+      const { s, ws } = sessionWithClient()
+
+      expect(await sm.addReviewComment(s.id, at(3), '  Why?  ', alice)).toBeNull()
+
+      const [comment] = s.reviewComments!
+      expect(comment).toMatchObject({ body: 'Why?', status: 'draft', author: 'alice', authorRole: 'grantee' })
+      expect(mockCreateAnchor).toHaveBeenCalledWith('/repos/app', at(3))
+      const broadcast = sentOf(ws).find((m: any) => m.type === 'review_comments')
+      expect(broadcast.comments).toHaveLength(1)
+      expect(broadcast.comments[0].stale).toBe(false)
+    })
+
+    it('rejects empty comments and reports anchor errors', async () => {
+      const { s } = sessionWithClient()
+      const { createAnchor } = await vi.importActual<typeof import('./review-comments.js')>('./review-comments.js')
+      mockCreateAnchor.mockImplementation((cwd: string, input: any) => createAnchor(cwd, input))
+
+      expect(await sm.addReviewComment(s.id, at(1), '   ', owner)).toBe('The comment is empty.')
+      expect(await sm.addReviewComment(s.id, { ...at(1), path: '../x' }, 'hi', owner)).toContain('Invalid path')
+      expect(s.reviewComments ?? []).toHaveLength(0)
+    })
+
+    it('lets only the author or the owner edit and delete', async () => {
+      const { s } = sessionWithClient()
+      await sm.addReviewComment(s.id, at(1), 'mine', alice)
+      const id = s.reviewComments![0].id
+
+      expect(await sm.updateReviewComment(s.id, id, 'hijack', bob)).toContain('Only the author')
+      expect(await sm.deleteReviewComment(s.id, id, bob)).toContain('Only the author')
+      expect(await sm.updateReviewComment(s.id, id, 'edited', alice)).toBeNull()
+      expect(s.reviewComments![0].body).toBe('edited')
+      expect(await sm.deleteReviewComment(s.id, id, owner)).toBeNull()
+      expect(s.reviewComments).toEqual([])
+    })
+
+    it('sends all drafts as one prompt, echoes it, and marks them sent', async () => {
+      const { s, ws } = sessionWithClient()
+      await sm.addReviewComment(s.id, at(9, 'b.ts'), 'second file', owner)
+      await sm.addReviewComment(s.id, at(2), 'first file', alice)
+      const input = vi.spyOn(sm, 'sendInput').mockImplementation(() => {})
+      ws.send.mockClear()
+
+      expect(await sm.sendReviewFeedback(s.id, {})).toBeNull()
+
+      expect(input).toHaveBeenCalledOnce()
+      const prompt = input.mock.calls[0][1]
+      expect(prompt).toContain('(2 comments)')
+      expect(prompt.indexOf('first file')).toBeLessThan(prompt.indexOf('second file'))
+      expect(sentOf(ws).some((m: any) => m.type === 'user_echo' && m.text === prompt)).toBe(true)
+      expect(s.reviewComments!.every(c => c.status === 'sent' && c.sentAt)).toBe(true)
+      expect(await sm.updateReviewComment(s.id, s.reviewComments![0].id, 'late edit', owner)).toContain('cannot be edited')
+      expect(await sm.sendReviewFeedback(s.id, {})).toBe('There are no draft comments to send.')
+    })
+
+    it('refuses stale drafts unless explicitly sent with their original code', async () => {
+      const { s } = sessionWithClient()
+      await sm.addReviewComment(s.id, at(1), 'moved code', owner)
+      mockIsAnchorStale.mockResolvedValue(true)
+      const input = vi.spyOn(sm, 'sendInput').mockImplementation(() => {})
+
+      expect(await sm.sendReviewFeedback(s.id, {})).toContain('1 comment(s) point at code that has changed')
+      expect(input).not.toHaveBeenCalled()
+      expect((await sm.listReviewComments(s.id))![0].stale).toBe(true)
+
+      expect(await sm.sendReviewFeedback(s.id, { includeStale: true })).toBeNull()
+      expect(input.mock.calls[0][1]).toContain('this code has changed since the comment was written')
+    })
+
+    it('sends only the chosen drafts', async () => {
+      const { s } = sessionWithClient()
+      await sm.addReviewComment(s.id, at(1), 'one', owner)
+      await sm.addReviewComment(s.id, at(2), 'two', owner)
+      const input = vi.spyOn(sm, 'sendInput').mockImplementation(() => {})
+
+      await sm.sendReviewFeedback(s.id, { ids: [s.reviewComments![1].id] })
+
+      expect(input.mock.calls[0][1]).toContain('(1 comment)')
+      expect(s.reviewComments!.map(c => c.status)).toEqual(['draft', 'sent'])
+    })
+
+    it('does not send feedback to an archived session', async () => {
+      const { s } = sessionWithClient()
+      await sm.addReviewComment(s.id, at(1), 'x', owner)
+      sm.archiveSession(s.id)
+
+      expect(await sm.sendReviewFeedback(s.id, {})).toContain('archived')
+      expect(s.reviewComments![0].status).toBe('draft')
     })
   })
 
