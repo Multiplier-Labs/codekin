@@ -2,14 +2,14 @@ Concrete plan: branch review and dependable worktree lifecycle
 
 Follow-up to the [Conductor comparison](2026-09-28_conductor-comparison.md). This is a proposed implementation plan, based on static inspection of the same application checkout (`8772ef5`). No application behavior was changed or runtime-tested for this plan.
 
-**Implementation status (updated 2026-09-29).** Slices 1–3 and 5 are merged to `main`; slice 4 is not started. The sections below are the original plan; the notes at the end record what implementation found and decided, including where the shipped behavior differs from the plan. Nothing has been deployed to production yet.
+**Implementation status (updated 2026-09-29).** All five slices are merged to `main`. The sections below are the original plan; the notes at the end record what implementation found and decided, including where the shipped behavior differs from the plan. Nothing has been deployed to production yet.
 
 | Slice | Status | Pull requests |
 |---|---|---|
 | 1 — Durable isolation, non-destructive retries | Merged | [#669](https://github.com/Multiplier-Labs/codekin/pull/669) worktree create/remove, [#672](https://github.com/Multiplier-Labs/codekin/pull/672) isolation |
 | 2 — Archive/resume and explicit cleanup | Merged | [#673](https://github.com/Multiplier-Labs/codekin/pull/673) |
 | 3 — Branch review views | Merged | [#674](https://github.com/Multiplier-Labs/codekin/pull/674), [#675](https://github.com/Multiplier-Labs/codekin/pull/675) uncommitted markers |
-| 4 — Anchored feedback | Not started | — |
+| 4 — Anchored feedback | Merged | [#677](https://github.com/Multiplier-Labs/codekin/pull/677) |
 | 5 — Read-only PR/checks card | Merged | [#676](https://github.com/Multiplier-Labs/codekin/pull/676) |
 
 **Product outcome.** A developer can review the complete result of a task after the agent commits, give precise feedback, and archive that task without losing its code. A session that requested isolation cannot start or restart in the shared checkout because isolation failed.
@@ -124,11 +124,12 @@ Code inspection while implementing surfaced problems the plan did not name:
 - **Removal of working files requires an archived session and a clean preflight;** there is no forced-removal action in the UI.
 - **Review base priority** is: the user's choice, the base of the branch's single open same-repository pull request, the ref the worktree was created from (`worktreeBase`), then the repository default. The pull-request base comes only from the cached lookup, so opening the diff never waits on the network. Fork pull requests are never used as the base.
 - **Local versus remote base.** For a bare branch name both the local branch and `origin/<name>` are tried and the more recent fork point wins, so neither a stale nor an unpushed local base adds unrelated commits.
+- **Review comments are anchored by the server.** It reads the selected lines itself (working tree, index or an immutable commit) and fingerprints them; a comment whose lines later change or move is marked stale and sent only on explicit opt-in, with its original code. Removed-line comments refer to a commit and cannot go stale. Reading comments needs `view_diff`; writing and sending need `send_prompt`. The relay connector stamps the author from the channel, and only the author or the owner may edit or delete a comment.
+- **Diff-bearing frames are withheld from grantees without `view_diff`.** Comment broadcasts would otherwise have exposed code excerpts to view-only grantees, so `diff_result`, `review_comments` and `pr_status` are filtered at the connector.
 - **Pull request discovery** uses `gh pr list --head <branch>` from the session's checkout, cached for 60 seconds per repository and branch. It is available to shared viewers only with the `view_diff` grant; it is not a general GitHub proxy.
 
 **Remaining work.**
 
-- Slice 4 (anchored feedback drafts and send-to-agent) is not started.
 - Pull request card: unresolved review threads and approval details beyond the review decision were deferred, as planned.
 - Durable held input, a guided forced-removal flow, and applying the isolation rules to webhook workspaces are possible follow-ups.
 - Production deployment of the merged work.
