@@ -93,7 +93,9 @@ needs a second factor to prompt for, and re-running GitHub OAuth is not a meanin
 - The bootstrap workspace cannot be deleted while allowlist admission still targets it.
 
 **Implementation notes (1b, frontend):**
-- `src/hosted/workspace.ts` holds this tab's workspace in memory, seeded from localStorage. It adds
+- `src/hosted/workspace.ts` holds this tab's workspace in memory, seeded from the user's last choice
+  on the relay (`user_preferences` table, migration 5; `/api/me` returns it and
+  `PUT /api/me/preferences` saves it — see `src/hosted/userPrefs.ts`). It adds
   `X-Codekin-Workspace` to relay calls (machine list, pairing, shares) and mirrors the capability
   matrix for UI gating.
 - Switching workspace forgets the open machine and reloads at `/`, so nothing from the old

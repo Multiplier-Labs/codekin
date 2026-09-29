@@ -3,12 +3,13 @@
  * tells the relay, and the relay's workspace/member API.
  *
  * The current workspace is per tab (module state), so two tabs can sit in
- * different workspaces. localStorage only seeds it on load. Switching goes
+ * different workspaces. The user's last choice, kept on the relay (see
+ * ./userPrefs), only seeds it on load. Switching goes
  * through a full reload: every machine, share and socket belongs to one
  * workspace, and a fresh start is the simplest way to drop the old one's.
  */
 
-import { forgetMachine } from './machines'
+import { saveUserPrefs, userPref } from './userPrefs'
 import { stepUpFetch } from './mfa'
 
 export type WorkspaceRole = 'owner' | 'admin' | 'member' | 'viewer'
@@ -48,10 +49,11 @@ export interface WorkspaceMachine {
 /** The workspace that is never deletable (allowlist admission lands there). */
 export const BOOTSTRAP_WORKSPACE_ID = 'org-default'
 
-export const WORKSPACE_KEY = 'codekin.hosted.workspaceId'
 export const WORKSPACE_HEADER = 'X-Codekin-Workspace'
 
 let current: string | null = null
+/** Set by an invitation just accepted: open there, whatever was remembered. */
+let joinedOverride: string | null = null
 
 /**
  * Settle this tab's workspace from the account's list: the remembered one
@@ -59,10 +61,11 @@ let current: string | null = null
  * orders the default first). Null only for an account with no workspace.
  */
 export function pickWorkspace(workspaces: Workspace[]): Workspace | null {
-  const remembered = current ?? localStorage.getItem(WORKSPACE_KEY)
+  const remembered = current ?? joinedOverride ?? userPref('workspaceId')
   const chosen = workspaces.find(w => w.id === remembered) ?? workspaces.at(0) ?? null
   current = chosen?.id ?? null
-  if (chosen) localStorage.setItem(WORKSPACE_KEY, chosen.id)
+  joinedOverride = null
+  if (chosen) void saveUserPrefs({ workspaceId: chosen.id })
   return chosen
 }
 
@@ -73,6 +76,7 @@ export function currentWorkspaceId(): string | null {
 /** For tests: forget the in-memory choice. */
 export function resetWorkspaceForTests(): void {
   current = null
+  joinedOverride = null
 }
 
 /** Headers that scope a relay call to this tab's workspace. */
@@ -80,11 +84,14 @@ export function workspaceHeaders(): Record<string, string> {
   return current ? { [WORKSPACE_HEADER]: current } : {}
 }
 
-/** Move this tab (and future loads) to another workspace. */
-export function switchWorkspace(id: string): void {
-  localStorage.setItem(WORKSPACE_KEY, id)
+/**
+ * Move this tab (and future loads, on any device) to another workspace. The
+ * reload waits for the relay to have the choice, since that is what the
+ * next load reads.
+ */
+export async function switchWorkspace(id: string): Promise<void> {
   // The remembered machine belongs to the workspace being left.
-  forgetMachine()
+  await saveUserPrefs({ workspaceId: id || null, machineId: null })
   window.location.assign('/')
 }
 
@@ -323,7 +330,7 @@ export function consumeJoinedWorkspace(): string | null {
   params.delete('joined')
   const qs = params.toString()
   history.replaceState(null, '', window.location.pathname + (qs ? `?${qs}` : ''))
-  localStorage.setItem(WORKSPACE_KEY, joined)
+  joinedOverride = joined
   current = null
   return joined
 }

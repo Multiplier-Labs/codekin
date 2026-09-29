@@ -1,10 +1,9 @@
 /** Tests for this tab's workspace choice and the UI mirror of the capability matrix. */
 // @vitest-environment jsdom
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   WORKSPACE_HEADER,
-  WORKSPACE_KEY,
   can,
   canManageMember,
   consumeJoinedWorkspace,
@@ -15,31 +14,42 @@ import {
   workspaceHeaders,
   type Workspace,
 } from './workspace'
-import { LAST_MACHINE_KEY } from './machines'
+import { resetUserPrefsForTests, userPref } from './userPrefs'
 
 const ws = (id: string): Workspace => ({ id, name: id, role: 'member', requireMfa: false })
 
+const fetchMock = vi.fn(async () => new Response('{}'))
+
 beforeEach(() => {
-  localStorage.clear()
   resetWorkspaceForTests()
+  resetUserPrefsForTests()
+  fetchMock.mockClear()
+  vi.stubGlobal('fetch', fetchMock)
 })
+
+afterEach(() => { vi.unstubAllGlobals() })
 
 describe('pickWorkspace', () => {
   it('returns to the remembered workspace while the account still belongs to it', () => {
-    localStorage.setItem(WORKSPACE_KEY, 'b')
+    resetUserPrefsForTests({ workspaceId: 'b' })
     expect(pickWorkspace([ws('a'), ws('b')])?.id).toBe('b')
     expect(currentWorkspaceId()).toBe('b')
+    // Already what the relay has: nothing to save.
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('falls back to the first (default) workspace when the remembered one is gone', () => {
-    localStorage.setItem(WORKSPACE_KEY, 'gone')
+    resetUserPrefsForTests({ workspaceId: 'gone' })
     expect(pickWorkspace([ws('a'), ws('b')])?.id).toBe('a')
-    expect(localStorage.getItem(WORKSPACE_KEY)).toBe('a')
+    expect(userPref('workspaceId')).toBe('a')
+    expect(fetchMock).toHaveBeenCalledWith('/api/me/preferences', expect.objectContaining({
+      body: JSON.stringify({ workspaceId: 'a' }),
+    }))
   })
 
   it('keeps this tab where it is even if another tab changed the stored choice', () => {
     pickWorkspace([ws('a'), ws('b')])
-    localStorage.setItem(WORKSPACE_KEY, 'b')
+    resetUserPrefsForTests({ workspaceId: 'b' })
     expect(pickWorkspace([ws('a'), ws('b')])?.id).toBe('a')
   })
 
@@ -55,15 +65,17 @@ describe('pickWorkspace', () => {
 })
 
 describe('switchWorkspace', () => {
-  it('remembers the new workspace, forgets the machine, and reloads at the root', () => {
+  it('saves the new workspace and forgets the machine before reloading at the root', async () => {
     const assign = vi.fn()
     vi.stubGlobal('location', { ...window.location, assign })
-    localStorage.setItem(LAST_MACHINE_KEY, 'm1')
-    switchWorkspace('b')
-    expect(localStorage.getItem(WORKSPACE_KEY)).toBe('b')
-    expect(localStorage.getItem(LAST_MACHINE_KEY)).toBeNull()
+    resetUserPrefsForTests({ workspaceId: 'a', machineId: 'm1' })
+    await switchWorkspace('b')
+    expect(fetchMock).toHaveBeenCalledWith('/api/me/preferences', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ workspaceId: 'b', machineId: null }),
+    }))
+    expect(userPref('machineId')).toBeNull()
     expect(assign).toHaveBeenCalledWith('/')
-    vi.unstubAllGlobals()
   })
 })
 

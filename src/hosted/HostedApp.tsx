@@ -189,10 +189,11 @@ export default function HostedApp() {
   const [transport, setLocalTransport] = useState<HostedRelayTransport | null>(null)
   const [phase, setPhase] = useState<'connecting' | 'ready'>('connecting')
   // A remembered connection is reinstated before anything renders, so a reload
-  // returns to the chat rather than to Settings. Only the presence of the
-  // memory is known synchronously; resolving it takes one request.
+  // returns to the chat rather than to Settings. The memory arrives with
+  // /api/me (it is kept on the relay), so hold until the effect below has
+  // looked at it; resolving a remembered machine takes one more request.
   const [restoring, setRestoring] = useState(
-    () => lastMachineId() !== null && !['/pair', '/link'].includes(window.location.pathname),
+    () => !['/pair', '/link'].includes(window.location.pathname),
   )
 
   const selectMachine = useCallback((machine: Machine) => {
@@ -202,6 +203,8 @@ export default function HostedApp() {
     setLocalTransport(next)
     setPhase('connecting')
     setSelected(machine)
+    // A pick settles the question a pending restore was waiting on.
+    setRestoring(false)
     rememberMachine(machine.id)
   }, [])
 
@@ -215,19 +218,19 @@ export default function HostedApp() {
     // screen renders ahead of the restoring gate).
     if (!workspace) return
 
+    const id = lastMachineId()
+    if (!id) return
+
     let cancelled = false
 
     const restore = async () => {
-      const id = lastMachineId()
-      if (id) {
-        try {
-          const decision = decideRestore(await fetchMachines(), id)
-          if (cancelled) return
-          if (decision.action === 'connect') selectMachine(decision.machine)
-          else if (decision.action === 'forget') forgetMachine()
-        } catch {
-          // Fall through to Settings, whose machine list reports the failure.
-        }
+      try {
+        const decision = decideRestore(await fetchMachines(), id)
+        if (cancelled) return
+        if (decision.action === 'connect') selectMachine(decision.machine)
+        else if (decision.action === 'forget') void forgetMachine()
+      } catch {
+        // Fall through to Settings, whose machine list reports the failure.
       }
       if (!cancelled) setRestoring(false)
     }
@@ -249,7 +252,7 @@ export default function HostedApp() {
     setLocalTransport(null)
     setPhase('connecting')
     // Leaving on purpose is also a decision not to be sent back next time.
-    forgetMachine()
+    void forgetMachine()
   }, [phase, transport])
 
   // Switching machines from Settings goes through the same connect gate a
@@ -318,8 +321,9 @@ export default function HostedApp() {
   }
 
   // Same blank page the auth latch uses: a remembered connection should not
-  // flash Settings on its way to the workspace.
-  if (restoring) {
+  // flash Settings on its way to the workspace. With nothing remembered there
+  // is nothing to wait for.
+  if (restoring && lastMachineId() !== null) {
     return <div className="min-h-screen bg-page" />
   }
 

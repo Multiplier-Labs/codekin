@@ -65,7 +65,7 @@ export function CreateWorkspaceForm({ onCancel }: { onCancel?: () => void }) {
     setError(null)
     try {
       const workspace = await createWorkspace(name.trim())
-      switchWorkspace(workspace.id)
+      await switchWorkspace(workspace.id)
     } catch (err) {
       setError(errorText(err))
       setBusy(false)
@@ -512,7 +512,7 @@ export function WorkspaceGeneral() {
             <select
               aria-label="Switch workspace"
               value=""
-              onChange={e => { if (e.target.value) switchWorkspace(e.target.value) }}
+              onChange={e => { if (e.target.value) void switchWorkspace(e.target.value) }}
               className={input}
             >
               <option value="">Switch to…</option>
@@ -560,7 +560,7 @@ export function WorkspaceGeneral() {
               <button
                 onClick={() => {
                   if (!window.confirm(`Leave ${workspace.name}? Your machines here are locked until an admin transfers or removes them.`)) return
-                  void act(() => removeMember(workspace.id, account.userId), () => { switchWorkspace(others.at(0)?.id ?? '') })
+                  void act(() => removeMember(workspace.id, account.userId), () => { void switchWorkspace(others.at(0)?.id ?? '') })
                 }}
                 className={dangerButton}
               >
@@ -576,7 +576,7 @@ export function WorkspaceGeneral() {
                 <button
                   onClick={() => {
                     if (!window.confirm(`Delete ${workspace.name}? Everyone loses access to it and its machines. This cannot be undone.`)) return
-                    void act(() => deleteWorkspace(workspace.id), () => { switchWorkspace(others.at(0)?.id ?? '') })
+                    void act(() => deleteWorkspace(workspace.id), () => { void switchWorkspace(others.at(0)?.id ?? '') })
                   }}
                   className={dangerButton}
                 >

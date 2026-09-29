@@ -327,7 +327,7 @@ A per-session registry that remembers which tools and commands have been approve
 ## Settings & Configuration
 
 - **Authentication token** — Enter your Codekin token in the Settings modal. The token is validated in real time with a checkmark (valid) or cross (invalid) indicator.
-- **Stored on the server** — Preferences (theme, new-session defaults, layout, starred docs, queued drafts) live on the Codekin server (`/api/settings/prefs`), so they follow you across browsers and devices. Only the auth token (and, on app.codekin.ai, the chosen machine and workspace) stays in the browser. Values from older versions are moved from `localStorage` to the server on first load.
+- **Stored on the server** — Preferences (theme, new-session defaults, layout, starred docs, queued drafts) live on the Codekin server (`/api/settings/prefs`), so they follow you across browsers and devices. Only the auth token stays in the browser. On app.codekin.ai, the workspace you last opened and the machine a reload reconnects to are stored per user on the relay (`PUT /api/me/preferences`, returned by `/api/me`), so they follow you across devices too. Values from older versions are moved from `localStorage` to the server on first load.
 - **Auto-open** — The Settings modal opens automatically on first visit when no token is configured.
 
 ---

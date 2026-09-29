@@ -93,6 +93,7 @@ app.use('/api/machines/pair/approve', ipRateLimiter(20, 60_000))
 app.use('/api/machines/pair/info', ipRateLimiter(30, 60_000))
 app.use('/api/shares', ipRateLimiter(60, 60_000))
 app.use('/api/users', ipRateLimiter(60, 60_000))
+app.use('/api/me/preferences', ipRateLimiter(60, 60_000))
 app.use('/api/workspaces', ipRateLimiter(120, 60_000))
 // Unauthenticated invitation lookups: holding a link is the only credential.
 app.use('/api/invitations', ipRateLimiter(20, 60_000))
