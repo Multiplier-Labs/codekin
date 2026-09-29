@@ -144,6 +144,10 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   const diffHandleTurnDoneRef = useRef<() => void>(() => {})
   /** Tracks whether file-mutating tools have fired in this session (heuristic for "has diffs"). */
   const [hasFileChanges, setHasFileChanges] = useState(false)
+  /** What the active session has to review; drives the Changes button even when no edit happened in this browser. */
+  const [changeSummary, setChangeSummary] = useState<{ uncommittedFiles: number; branchCommits: number | null } | null>(null)
+  /** Asks the server for the active session's change summary (debounced; set once the socket exists). */
+  const requestChangeSummaryRef = useRef<() => void>(() => {})
   const [archiveRefreshKey, setArchiveRefreshKey] = useState(0)
   const { error, showError } = useErrorNotification()
   /** Holds context text (e.g. from archive "Continue" action) to inject into the next session's first message. */
@@ -264,16 +268,20 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     onRawMessage: (msg) => {
       if (msg.type === 'diff_result' || msg.type === 'diff_error' || msg.type === 'pr_status' || msg.type === 'review_comments' || msg.type === 'review_error') {
         diffHandleMessageRef.current(msg)
+      } else if (msg.type === 'change_summary') {
+        if (msg.sessionId === activeSessionId) setChangeSummary({ uncommittedFiles: msg.uncommittedFiles, branchCommits: msg.branchCommits })
       } else if (msg.type === 'result') {
         diffHandleTurnDoneRef.current()
+        requestChangeSummaryRef.current()
       } else if (msg.type === 'tool_done') {
         diffHandleToolDoneRef.current(msg.toolName, msg.summary)
-        // Track file-mutating tools to show Code Review button.
+        // Track file-mutating tools to show the Changes button right away.
         // Case-insensitive: Claude reports 'Edit'/'Write', OpenCode 'edit'/'write'/'patch'.
         const tool = msg.toolName.toLowerCase()
         if (tool === 'edit' || tool === 'write' || tool === 'patch') {
           setHasFileChanges(true)
         }
+        if (tool === 'edit' || tool === 'write' || tool === 'patch' || tool === 'bash') requestChangeSummaryRef.current()
       } else if (msg.type === 'workflow_event') {
         // Server-pushed workflow progress — forwarded so useWorkflows can
         // refresh on events instead of fast-polling.
@@ -345,9 +353,24 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     : activeSessionProvider === 'codex' ? codexModels
     : claudeModels
 
-  // Reset file-change tracking when switching sessions
+  // Debounced change-summary request for the joined session (cheap git status + commit count).
+  const changeSummaryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    requestChangeSummaryRef.current = () => {
+      if (changeSummaryTimerRef.current) clearTimeout(changeSummaryTimerRef.current)
+      changeSummaryTimerRef.current = setTimeout(() => {
+        changeSummaryTimerRef.current = null
+        wsSend({ type: 'get_change_summary' })
+      }, 800)
+    }
+    return () => { if (changeSummaryTimerRef.current) clearTimeout(changeSummaryTimerRef.current) }
+  }, [wsSend])
+
+  // Reset file-change tracking when switching sessions, then ask what the new one has to review.
   useEffect(() => {
     setHasFileChanges(false) // eslint-disable-line react-hooks/set-state-in-effect -- sync with session change
+    setChangeSummary(null)
+    if (activeSessionId) requestChangeSummaryRef.current()
   }, [activeSessionId])
 
   useProviderValidation({ activeSessionProvider, currentModel, setModel, claudeModels })
@@ -904,6 +927,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             isProcessing={isProcessing}
             disabled={!settings.token}
             hasFileChanges={hasFileChanges}
+            changeSummary={changeSummary}
             diffPanelOpen={diffPanelOpen}
             onOpenDiffPanel={() => setDiffPanelOpen(true)}
             activePrompt={activePrompt}

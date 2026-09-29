@@ -600,6 +600,25 @@ describe('handleWsMessage', () => {
     })
   })
 
+  /* ---- get_change_summary ---- */
+
+  describe('get_change_summary', () => {
+    it('answers with the joined session tagged', async () => {
+      ;(ctx.sessions as any).getChangeSummary = vi.fn().mockResolvedValue({ uncommittedFiles: 2, branchCommits: 3 })
+
+      handleWsMessage({ type: 'get_change_summary' } as WsClientMessage, ctx)
+
+      await vi.waitFor(() => expect(ctx.sent).toHaveLength(1))
+      expect(ctx.sent[0]).toEqual({ type: 'change_summary', sessionId: 'sess-1', uncommittedFiles: 2, branchCommits: 3 })
+    })
+
+    it('stays silent outside a session', () => {
+      ctx.clientSessions.clear()
+      handleWsMessage({ type: 'get_change_summary' } as WsClientMessage, ctx)
+      expect(ctx.sent).toHaveLength(0)
+    })
+  })
+
   /* ---- get_pr_status ---- */
 
   describe('get_pr_status', () => {

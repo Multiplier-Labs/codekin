@@ -194,3 +194,44 @@ describe('discard guard', () => {
     expect(paths(await diff('all'))).toEqual(['app.ts'])
   })
 })
+
+describe('getChangeSummary', () => {
+  it('counts nothing on a fresh branch', async () => {
+    expect(await dm.getChangeSummary(repo)).toEqual({ uncommittedFiles: 0, branchCommits: 0 })
+  })
+
+  it('counts commits on the branch even when the working tree is clean', async () => {
+    commit('login.ts', 'x\n', 'add login')
+    commit('logout.ts', 'y\n', 'add logout')
+
+    expect(await dm.getChangeSummary(repo)).toEqual({ uncommittedFiles: 0, branchCommits: 2 })
+  })
+
+  it('counts modified and untracked files', async () => {
+    commit('login.ts', 'x\n', 'add login')
+    write('app.ts', 'changed\n')
+    write('notes.md', 'todo\n')
+
+    expect(await dm.getChangeSummary(repo)).toEqual({ uncommittedFiles: 2, branchCommits: 1 })
+  })
+
+  it('uses the preferred base', async () => {
+    commit('login.ts', 'x\n', 'add login')
+    git(['branch', 'checkpoint'])
+    commit('logout.ts', 'y\n', 'add logout')
+
+    expect((await dm.getChangeSummary(repo, { ref: 'checkpoint', source: 'user' })).branchCommits).toBe(1)
+  })
+
+  it('reports unknown commits outside a repository or before the first commit', async () => {
+    const plain = join(root, 'plain')
+    mkdirSync(plain)
+    expect(await dm.getChangeSummary(plain)).toEqual({ uncommittedFiles: 0, branchCommits: null })
+
+    const fresh = join(root, 'fresh')
+    mkdirSync(fresh)
+    git(['init', '-q', '-b', 'main'], fresh)
+    write('a.txt', 'a\n', fresh)
+    expect(await dm.getChangeSummary(fresh)).toEqual({ uncommittedFiles: 1, branchCommits: null })
+  })
+})

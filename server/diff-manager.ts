@@ -207,7 +207,7 @@ export async function isValidReviewBase(ref: string, cwd: string): Promise<boole
  * point wins: a stale local main or an unpushed local main would otherwise
  * pull unrelated commits into the review.
  */
-async function resolveReview(cwd: string, head: string | null, preferred?: ReviewBasePreference): Promise<DiffReview> {
+async function resolveReview(cwd: string, head: string | null, preferred?: ReviewBasePreference, withCandidates = true): Promise<DiffReview> {
   if (!head) throw new DiffUserError('This branch has no commits yet, so there is nothing to compare. Use the Uncommitted view.')
   let baseName = preferred?.ref
   let baseSource: DiffReview['baseSource'] = preferred?.source ?? 'default'
@@ -236,7 +236,7 @@ async function resolveReview(cwd: string, head: string | null, preferred?: Revie
   if (!best) {
     throw new DiffUserError(`HEAD and "${baseName}" have no common history (unrelated branches, or a shallow clone without the fork point). Fetch more history or choose another base.`)
   }
-  return { baseRef: best.ref, baseSource, mergeBase: best.mergeBase, head, candidates: await listBaseCandidates(cwd) }
+  return { baseRef: best.ref, baseSource, mergeBase: best.mergeBase, head, candidates: withCandidates ? await listBaseCandidates(cwd) : [] }
 }
 
 async function listBaseCandidates(cwd: string): Promise<string[]> {
@@ -296,6 +296,26 @@ export class DiffManager {
     } catch (err) {
       return { type: 'diff_error', message: describeGitError(err, 'Failed to get diff'), scope: view }
     }
+  }
+
+  /**
+   * How much there is to review, without building a diff: the number of
+   * files with uncommitted changes (tracked or untracked) and the number of
+   * commits on the branch since its merge base (null when there is no base,
+   * e.g. no commits yet or unrelated history). Outside a repository both are
+   * zero/null rather than an error, since this only drives UI hints.
+   */
+  async getChangeSummary(cwd: string, base?: ReviewBasePreference): Promise<{ uncommittedFiles: number; branchCommits: number | null }> {
+    const uncommittedFiles = await getFileStatuses(cwd).then(s => Object.keys(s).length).catch(() => 0)
+    let branchCommits: number | null = null
+    try {
+      const head = await resolveHead(cwd)
+      const review = await resolveReview(cwd, head, base, false)
+      branchCommits = Number((await execGit(['rev-list', '--count', `${review.mergeBase}..${review.head}`], cwd)).trim())
+    } catch {
+      // no base to compare against
+    }
+    return { uncommittedFiles, branchCommits }
   }
 
   /** Run the diff for one view and append untracked files where the view includes them. */

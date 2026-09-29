@@ -181,7 +181,9 @@ describe('review feedback', () => {
   })
 
   it('withholds diff, review and PR frames from grantees without view_diff', () => {
-    for (const type of ['diff_result', 'review_comments', 'pr_status']) {
+    expect(checkClientFrame(watcher, joined(watcher), frame({ type: 'get_change_summary' })).allowed).toBe(false)
+    expect(checkClientFrame(viewer, joined(viewer), frame({ type: 'get_change_summary' })).allowed).toBe(true)
+    for (const type of ['diff_result', 'review_comments', 'pr_status', 'change_summary']) {
       const msg = frame({ type, sessionId: 's1' })
       expect(checkServerFrame(watcher, joined(watcher), msg)).toBe(false)
       expect(checkServerFrame(viewer, joined(viewer), msg)).toBe(true)

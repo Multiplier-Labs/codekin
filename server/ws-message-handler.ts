@@ -278,6 +278,15 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
     }
 
+    case 'get_change_summary': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId) break
+      void sessions.getChangeSummary(sessionId).then(summary => {
+        if (summary) send({ type: 'change_summary', sessionId, ...summary })
+      })
+      break
+    }
+
     case 'get_pr_status': {
       const sessionId = clientSessions.get(ws)
       const { requestId } = msg
