@@ -384,6 +384,9 @@ const orchestratorMonitorRef: { current: OrchestratorMonitor | null } = { curren
 // Child manager is created here (not router-internal) so the deployment
 // breach handler can spawn diagnostic children through the same instance.
 const childManager = new OrchestratorChildManager(sessions, { runStore })
+// List the interrupted children again, tell Joe so partial work can be
+// salvaged, and keep their sessions from auto-restarting unsupervised.
+childManager.recoverInterrupted(interruptedAgentRuns)
 app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, childManager, runStore))
 // Loops 2.0 — durable, event-sourced outcome loops (docs/LOOPS-REWRITE-SPEC.md).
 const loopStore = new LoopStore()
@@ -641,6 +644,9 @@ server.listen(port, '0.0.0.0', () => {
     // Don't notify the orchestrator about its own prompts
     const session = sessions.get(sessionId)
     if (!session || isOrchestratorSession(session.source)) return
+    // Joe's own children are reported by the child manager (deduplicated,
+    // through the outbox's idle gate) — don't interrupt Joe a second time.
+    if (childManager.get(sessionId)) return
 
     const displayName = getAgentDisplayName()
     const actionDesc = toolName ? `Tool: ${toolName}` : 'Unknown tool'
@@ -828,7 +834,6 @@ server.listen(port, '0.0.0.0', () => {
           task: buildIncidentTask(payload, samples, new Date(now)),
           branchName: incidentBranchName(deployment.id, new Date(now)),
           completionPolicy: 'pr',
-          deployAfter: false,
           useWorktree: true,
           parentSessionId: getOrCreateOrchestratorId(),
         })

@@ -252,6 +252,35 @@ describe('PromptRouter', () => {
       }))
     })
 
+    it('notifies prompt-resolved listeners once the answered prompt is removed', async () => {
+      const resolved: Array<[string, string, number]> = []
+      deps.promptResolvedListeners = [(sid, rid) => { resolved.push([sid, rid, session.pendingToolApprovals.size]) }]
+      const promise = router.requestToolApproval('sess-1', 'Bash', { command: 'npm test' })
+      const reqId = Array.from(session.pendingToolApprovals.keys())[0]
+
+      router.sendPromptResponse('sess-1', 'allow', reqId)
+      await promise
+
+      // Fired after removal, so a listener sees no remaining pending prompts.
+      expect(resolved).toEqual([['sess-1', reqId, 0]])
+    })
+
+    it('notifies prompt-resolved listeners when an approval times out', async () => {
+      vi.useFakeTimers()
+      try {
+        const listener = vi.fn()
+        deps.promptResolvedListeners = [listener]
+        const promise = router.requestToolApproval('sess-1', 'Bash', { command: 'npm test' })
+        const reqId = Array.from(session.pendingToolApprovals.keys())[0]
+
+        vi.advanceTimersByTime(300_000)
+        expect(await promise).toEqual({ allow: false, always: false })
+        expect(listener).toHaveBeenCalledWith('sess-1', reqId)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it('broadcasts prompt to clients when approval needed', async () => {
       // Don't await — just check the broadcast happened
       const promise = router.requestToolApproval('sess-1', 'Bash', { command: 'npm test' })

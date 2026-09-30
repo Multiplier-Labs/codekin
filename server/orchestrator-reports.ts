@@ -39,21 +39,6 @@ export interface ReportContent extends ReportMeta {
 
 const REPORTS_DIR = '.codekin/reports'
 
-/** Known report categories — must include every subdirectory used by MD and Stepflow workflows. */
-const REPORT_CATEGORIES = [
-  'code-review',
-  'comments',
-  'commit-review',
-  'complexity',
-  'coverage',
-  'dependencies',
-  'docs-audit',
-  'pr-review',
-  'repo-health',
-  'security',
-  'test-coverage',
-]
-
 /**
  * Scan a single repo for all available reports.
  * Returns metadata only (no content) for efficiency.
@@ -64,9 +49,19 @@ export function scanRepoReports(repoPath: string): ReportMeta[] {
 
   const results: ReportMeta[] = []
 
-  for (const category of REPORT_CATEGORIES) {
+  // Every subdirectory is a category — workflows, Joe's diagnostic children
+  // (incidents/) and ad-hoc audits (product/) all add their own.
+  let categories: string[]
+  try {
+    categories = readdirSync(reportsDir, { withFileTypes: true })
+      .filter(e => e.isDirectory())
+      .map(e => e.name)
+  } catch {
+    return []
+  }
+
+  for (const category of categories) {
     const categoryDir = join(reportsDir, category)
-    if (!existsSync(categoryDir)) continue
 
     let entries: string[]
     try {
@@ -145,7 +140,8 @@ export function readReport(filePath: string): ReportContent | null {
 }
 
 /**
- * Get reports that are newer than a given date.
+ * Reports across the given repos dated on or after `sinceDate` (YYYY-MM-DD;
+ * '' returns all), newest first.
  */
 export function getReportsSince(repoPaths: string[], sinceDate: string): ReportMeta[] {
   const all: ReportMeta[] = []

@@ -25,6 +25,8 @@ export interface PromptRouterDeps {
   globalBroadcast(msg: WsServerMessage): void
   approvalManager: ApprovalManager
   promptListeners: Array<(sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void>
+  /** Notified after a pending prompt is removed — answered, auto-approved, or timed out. */
+  promptResolvedListeners?: Array<(sessionId: string, requestId: string) => void>
   /** Called after the user approves a plan, so the session can transition out of plan mode. */
   onPlanApproved(session: Session): void
 }
@@ -251,7 +253,7 @@ export class PromptRouter {
     if (pending) {
       session.pendingControlRequests.delete(pending.requestId)
       // Dismiss prompt on all other clients viewing this session
-      this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: pending.requestId })
+      this.dismissPrompt(session, pending.requestId)
 
       if (pending.toolName === 'AskUserQuestion') {
         this.handleAskUserQuestion(session, pending, value)
@@ -327,7 +329,7 @@ export class PromptRouter {
         console.log(`[tool-approval] auto-approving control_request for ${toolName} (PreToolUse hook taking over)`)
         session.claudeProcess?.sendControlResponse(reqId, 'allow')
         session.pendingControlRequests.delete(reqId)
-        this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: reqId })
+        this.dismissPrompt(session, reqId)
         break
       }
     }
@@ -354,7 +356,7 @@ export class PromptRouter {
           session.pendingToolApprovals.delete(approvalRequestId)
           // Dismiss the stale prompt in all clients so they don't inject
           // "allow"/"deny" as plain text after the timeout
-          this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: approvalRequestId })
+          this.dismissPrompt(session, approvalRequestId)
           this.notifyAutoDeny(session, `Approval request for ${toolName} timed out after 5 minutes and was automatically denied.`)
           resolve({ allow: false, always: false })
         }
@@ -436,6 +438,17 @@ export class PromptRouter {
   // ---------------------------------------------------------------------------
 
   /**
+   * Dismiss a resolved prompt on every client and tell resolution listeners
+   * (e.g. the child monitor, which resumes a child's working clock).
+   */
+  private dismissPrompt(session: Session, requestId: string): void {
+    this.deps.broadcast(session, { type: 'prompt_dismiss', requestId })
+    for (const listener of this.deps.promptResolvedListeners ?? []) {
+      try { listener(session.id, requestId) } catch { /* listener error */ }
+    }
+  }
+
+  /**
    * Surface an automatic denial to the user as a visible system message
    * (broadcast + history), so silent timeouts/disconnect denials are explained.
    */
@@ -467,7 +480,7 @@ export class PromptRouter {
       console.log(`[tool-approval] resolving AskUserQuestion: answer=${answer.slice(0, 100)}`)
       approval.resolve({ allow: true, always: false, answer })
       session.pendingToolApprovals.delete(approval.requestId)
-      this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: approval.requestId })
+      this.dismissPrompt(session, approval.requestId)
       return
     }
 
@@ -490,7 +503,7 @@ export class PromptRouter {
         this.deps.onPlanApproved(session)
       }
       session.pendingToolApprovals.delete(approval.requestId)
-      this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: approval.requestId })
+      this.dismissPrompt(session, approval.requestId)
       return
     }
 
@@ -506,7 +519,7 @@ export class PromptRouter {
     console.log(`[tool-approval] resolving: allow=${!isDeny} always=${isAlwaysAllow} pattern=${isApprovePattern} tool=${approval.toolName}`)
     approval.resolve({ allow: !isDeny, always: isAlwaysAllow || isApprovePattern })
     session.pendingToolApprovals.delete(approval.requestId)
-    this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: approval.requestId })
+    this.dismissPrompt(session, approval.requestId)
   }
 
   /**
@@ -533,7 +546,7 @@ export class PromptRouter {
           console.log(`[plan-approval] timed out, auto-denying`)
           session.pendingToolApprovals.delete(reviewId)
           session.planManager.deny(reviewId)
-          this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: reviewId })
+          this.dismissPrompt(session, reviewId)
           this.notifyAutoDeny(session, 'Plan approval request timed out after 5 minutes — the plan was automatically rejected.')
           resolve({ allow: false, always: false })
         }

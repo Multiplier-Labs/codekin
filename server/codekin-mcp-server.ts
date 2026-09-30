@@ -43,9 +43,11 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
         repo: z.string().describe('Absolute path to the repository'),
         task: z.string().describe('Focused task description for the child'),
         branchName: z.string().describe('Branch the child works on, e.g. fix/thing'),
-        completionPolicy: z.enum(['pr', 'merge', 'commit-only']).optional().describe('How finished work lands (default pr)'),
+        completionPolicy: z.enum(['pr', 'merge', 'commit-only']).optional()
+          .describe('How finished work lands: pr (default) opens a pull request, merge pushes the branch without merging, commit-only commits locally'),
         useWorktree: z.boolean().optional().describe('Isolate the child in a git worktree (default true)'),
-        deployAfter: z.boolean().optional(),
+        timeoutMs: z.number().int().min(60_000).max(14_400_000).optional()
+          .describe('Working-time budget in ms, 1 min to 4 h (default 30 min); time blocked on prompts does not count'),
         provider: z.enum(['claude', 'codex', 'opencode']).optional().describe('Agent harness; defaults to Joe’s selected harness. Honor the user’s choice.'),
         model: z.string().optional().describe('Model for the selected harness; inherits Joe’s model only when using the same harness'),
       },
@@ -55,13 +57,13 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
 
   server.registerTool(
     'list_children',
-    { description: 'List your child sessions with status (starting/running/blocked/completed/failed/timed_out).', inputSchema: {} },
+    { description: 'List your child sessions with status: starting/running/blocked, or terminal completed (final step verified — see verification), unverified (PR/push not confirmed; check before reporting it ready), failed, timed_out, canceled.', inputSchema: {} },
     () => run(() => api.listChildren()),
   )
 
   server.registerTool(
     'get_child',
-    { description: 'Get one child session, including its result or error once terminal.', inputSchema: { id: z.string() } },
+    { description: 'Get one child session, including its result, error, and verification evidence (commit, PR) once terminal. Also returns children from earlier server runs.', inputSchema: { id: z.string() } },
     ({ id }) => run(() => api.getChild(id)),
   )
 
@@ -196,8 +198,14 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
 
   server.registerTool(
     'list_reports',
-    { description: 'List audit reports (.codekin/reports/) across managed repos.', inputSchema: {} },
-    () => run(() => api.listReports()),
+    {
+      description: 'List audit reports (.codekin/reports/) newest first — across all managed repos, or one repo.',
+      inputSchema: {
+        repo: z.string().optional().describe('Absolute repo path; omit for every managed repo'),
+        since: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Only reports dated on or after YYYY-MM-DD'),
+      },
+    },
+    (args) => run(() => api.listReports(args)),
   )
 
   server.registerTool(

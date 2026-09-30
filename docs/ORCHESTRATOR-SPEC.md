@@ -365,7 +365,7 @@ After a child session completes:
 1. Agent Joe reads the outcome (success/failure, what was changed)
 2. Stores a `session_summary` memory
 3. If `completionPolicy === 'pr'`: verifies PR was created
-4. If `deployAfter`: triggers deployment (with user confirmation)
+4. If `deployAfter`: triggers deployment (with user confirmation). *Not implemented: the child API rejects `deployAfter: true`.*
 5. Updates the corresponding audit finding status
 6. Reports to the user in the Agent Joe chat
 

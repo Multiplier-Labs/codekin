@@ -10,11 +10,11 @@ import { randomUUID } from 'crypto'
 import { execFile } from 'child_process'
 import { VALID_PROVIDERS } from './types.js'
 import type { CodingProvider } from './coding-process.js'
-import type { SessionManager } from './session-manager.js'
+import type { SessionManager, SessionStopReason } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
 import { getAgentDisplayName } from './config.js'
 import { AGENT_ALLOWED_TOOLS } from './agent-allowlist.js'
-import type { RunStore } from './run-store.js'
+import type { RunStore, StoredRun } from './run-store.js'
 import type { RunLifecycleStatus } from './run-status.js'
 import {
   sendOrchestratorNotification,
@@ -32,10 +32,11 @@ export interface ChildSessionRequest {
   task: string
   /** Branch name for the fix. */
   branchName: string
-  /** How changes should land. */
+  /**
+   * How changes should land: 'pr' opens a pull request, 'merge' pushes the
+   * branch (it does not merge anything), 'commit-only' commits locally.
+   */
   completionPolicy: 'pr' | 'merge' | 'commit-only'
-  /** Whether to deploy after merge. */
-  deployAfter: boolean
   /** Use a git worktree for isolation. */
   useWorktree: boolean
   /**
@@ -59,14 +60,45 @@ export interface ChildSessionRequest {
   parentSessionId?: string
 }
 
-export type ChildStatus = 'starting' | 'running' | 'blocked' | 'completed' | 'failed' | 'timed_out'
+/**
+ * Child lifecycle. Terminal outcomes:
+ *  - completed:  the final step was verified (or there is nothing remote to verify)
+ *  - unverified: the agent stopped, but its PR / push could not be confirmed —
+ *                a human (or Joe) must check before treating it as done
+ *  - failed:     the agent errored, or exited with the final step missing
+ *  - timed_out:  the working or blocked-time budget ran out
+ *  - canceled:   the session was stopped, archived, or deleted
+ */
+export type ChildStatus = 'starting' | 'running' | 'blocked' | 'completed' | 'unverified' | 'failed' | 'timed_out' | 'canceled'
 
 /** Statuses considered terminal — once entered, the child is done. */
 const TERMINAL_STATUSES: ReadonlySet<ChildStatus> = new Set([
   'completed',
+  'unverified',
   'failed',
   'timed_out',
+  'canceled',
 ])
+
+export function isTerminalChildStatus(status: ChildStatus): boolean {
+  return TERMINAL_STATUSES.has(status)
+}
+
+/** Evidence behind a child's completion status. */
+export interface ChildVerification {
+  /**
+   * - verified:       the PR (open or merged) / remote branch points at the local HEAD
+   * - missing:        checked, and the expected PR / push is absent or behind HEAD
+   * - unknown:        the check itself could not run (no gh, no remote, …)
+   * - not_applicable: commit-only — nothing remote to verify
+   */
+  state: 'verified' | 'missing' | 'unknown' | 'not_applicable'
+  /** Commit the evidence refers to (the worktree's HEAD when checked). */
+  commit: string | null
+  prUrl: string | null
+  detail: string
+  checkedAt: string
+}
 
 export interface ChildSession {
   id: string
@@ -90,6 +122,8 @@ export interface ChildSession {
   worktree: 'active' | 'failed' | 'none'
   /** Absolute path of the worktree when active. */
   worktreePath: string | null
+  /** Latest final-step check, once the child has finished a turn. */
+  verification: ChildVerification | null
 }
 
 /**
@@ -147,11 +181,11 @@ export class OrchestratorChildManager {
   /** Prompt requestIds already reported to the parent (single-fire per prompt). */
   private notifiedPromptIds = new Set<string>()
   /**
-   * Per-child timeout controllers — lets the prompt handler pause the
-   * working-time clock the moment a child blocks on an approval/question,
-   * instead of waiting for the next monitor event.
+   * Per-child monitor controllers — let session events act on a monitored
+   * child immediately: pause/resume the working-time clock the moment a
+   * prompt opens or resolves, and cancel when the session is stopped.
    */
-  private timeoutControllers = new Map<string, { pause(): void; resume(): void }>()
+  private controllers = new Map<string, { pause(): void; resume(): void; cancel(error: string): void }>()
   private exec: ExecFn
   /** Unified run store — children persist as engine:'agent' runs when set. */
   private runStore: RunStore | null
@@ -167,6 +201,109 @@ export class OrchestratorChildManager {
     this.sessions.onSessionPrompt((sessionId, promptType, toolName, requestId) => {
       this.handleChildPrompt(sessionId, promptType, toolName, requestId)
     })
+    // An answered (or auto-denied) prompt unblocks the child right away — the
+    // agent keeps working before its next result event arrives.
+    this.sessions.onSessionPromptResolved((sessionId) => {
+      this.handlePromptResolved(sessionId)
+    })
+    // Stop/archive/delete detach the process's listeners before killing it,
+    // so no exit event reaches the monitor — settle the child here instead.
+    this.sessions.onSessionStopped((sessionId, reason) => {
+      this.handleSessionStopped(sessionId, reason)
+    })
+  }
+
+  /** Unblock a child once its last pending prompt is resolved. */
+  private handlePromptResolved(sessionId: string): void {
+    const child = this.children.get(sessionId)
+    if (child?.status !== 'blocked') return
+    const session = this.sessions.get(sessionId)
+    if (session && (session.pendingToolApprovals.size > 0 || session.pendingControlRequests.size > 0)) return
+    child.status = 'running'
+    this.controllers.get(sessionId)?.resume()
+    this.persistRun(child, 'Unblocked: prompt resolved, working clock resumed.')
+  }
+
+  /** Cancel an active child whose session was deliberately taken out of service. */
+  private handleSessionStopped(sessionId: string, reason: SessionStopReason): void {
+    const child = this.children.get(sessionId)
+    if (!child || TERMINAL_STATUSES.has(child.status)) return
+    const error = reason === 'deleted' ? 'Session was deleted'
+      : reason === 'archived' ? 'Session was archived'
+      : 'Session was stopped by the user'
+    const controller = this.controllers.get(sessionId)
+    if (controller) {
+      controller.cancel(error)  // monitorChild's finally persists + notifies
+      return
+    }
+    // Not monitored yet (still spawning) — settle directly.
+    child.status = 'canceled'
+    child.error = error
+    child.completedAt = new Date().toISOString()
+    this.persistRun(child, `Finished: canceled — ${error}`)
+    this.notifyTerminal(child)
+  }
+
+  /**
+   * Rebuild children whose runs were interrupted by a server restart (the
+   * run store has already failed them). They are listed again, their parent
+   * is told once so partial work can be salvaged, and their sessions are
+   * kept from auto-restarting unsupervised.
+   */
+  recoverInterrupted(runIds: string[]): ChildSession[] {
+    const recovered: ChildSession[] = []
+    for (const id of runIds) {
+      const run = this.runStore?.getRun(id)
+      if (run?.engine !== 'agent' || run.kind !== 'child' || this.children.has(id)) continue
+      const child = this.childFromRun(run)
+      if (!child) continue
+      const session = this.sessions.get(id)
+      if (session) session._wasActiveBeforeRestart = false
+      this.children.set(id, child)
+      this.notifyTerminal(child)
+      recovered.push(child)
+    }
+    return recovered
+  }
+
+  /** Reconstruct a (read-only) child record from its persisted run. */
+  private childFromRun(run: StoredRun): ChildSession | null {
+    const spec = run.spec as Partial<ChildSessionRequest>
+    if (typeof spec.repo !== 'string' || typeof spec.task !== 'string' || typeof spec.branchName !== 'string') return null
+    const statusMap: Partial<Record<RunLifecycleStatus, ChildStatus>> = {
+      queued: 'starting',
+      running: 'running',
+      blocked: 'blocked',
+      succeeded: 'completed',
+      awaiting_human: 'unverified',
+      failed: run.error?.startsWith('Timed out') ? 'timed_out' : 'failed',
+      canceled: 'canceled',
+    }
+    const worktreePath = this.sessions.get(run.id)?.worktreePath ?? null
+    return {
+      id: run.id,
+      request: {
+        repo: spec.repo,
+        task: spec.task,
+        branchName: spec.branchName,
+        completionPolicy: spec.completionPolicy ?? 'pr',
+        useWorktree: spec.useWorktree ?? true,
+        timeoutMs: spec.timeoutMs,
+        provider: spec.provider,
+        model: spec.model,
+        allowedTools: spec.allowedTools,
+        parentSessionId: spec.parentSessionId,
+      },
+      status: statusMap[run.status] ?? 'failed',
+      startedAt: run.createdAt,
+      completedAt: run.completedAt,
+      result: null,
+      error: run.error,
+      terminalNotifiedAt: null,
+      worktree: worktreePath ? 'active' : spec.useWorktree === false ? 'none' : 'failed',
+      worktreePath,
+      verification: null,
+    }
   }
 
   /**
@@ -185,7 +322,7 @@ export class OrchestratorChildManager {
 
     child.status = 'blocked'
     // Pause the working-time clock while the child waits for an answer.
-    this.timeoutControllers.get(sessionId)?.pause()
+    this.controllers.get(sessionId)?.pause()
 
     // Single-fire per requestId (re-broadcasts on client join would otherwise
     // spam the parent). Prompts without a requestId can't be deduped or
@@ -272,9 +409,15 @@ export class OrchestratorChildManager {
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
   }
 
-  /** Get a child session by ID. */
+  /**
+   * Get a child session by ID. Children evicted from the live list (or from
+   * before a restart) are rebuilt from the run store as read-only history.
+   */
   get(id: string): ChildSession | null {
-    return this.children.get(id) ?? null
+    const live = this.children.get(id)
+    if (live) return live
+    const run = this.runStore?.getRun(id)
+    return run?.engine === 'agent' && run.kind === 'child' ? this.childFromRun(run) : null
   }
 
   /** Purge completed/failed children older than the retention period. */
@@ -319,8 +462,10 @@ export class OrchestratorChildManager {
         running: 'running',
         blocked: 'blocked',
         completed: 'succeeded',
+        unverified: 'awaiting_human',
         failed: 'failed',
         timed_out: 'failed',
+        canceled: 'canceled',
       }
       if (!this.runStore.getRun(child.id)) {
         this.runStore.createRun({
@@ -338,6 +483,7 @@ export class OrchestratorChildManager {
         status: statusMap[child.status],
         error: child.status === 'timed_out' ? (child.error ?? 'timed out') : child.error,
         completedAt: child.completedAt,
+        ...(child.verification?.prUrl ? { prUrl: child.verification.prUrl } : {}),
       })
       if (note) this.runStore.appendLedger(child.id, { summary: note })
     } catch (err) {
@@ -381,6 +527,7 @@ export class OrchestratorChildManager {
       terminalNotifiedAt: null,
       worktree: request.useWorktree ? 'failed' : 'none',  // upgraded to 'active' on success
       worktreePath: null,
+      verification: null,
     }
     this.children.set(sessionId, child)
     this.persistRun(child, `Spawned in ${request.repo} on branch ${request.branchName}.`)
@@ -406,6 +553,8 @@ export class OrchestratorChildManager {
       // if the worktree cannot be created, the child fails and the parent is told.
       if (request.useWorktree) {
         const result = await this.sessions.prepareSessionWorktree(sessionId, request.repo, request.branchName)
+        // Stopped or deleted while the worktree was being prepared — already settled.
+        if (TERMINAL_STATUSES.has(child.status)) return child
         if (!result.ok) {
           console.warn(`[orchestrator-child] Failed to create worktree for ${sessionId}: ${result.message}`)
           this.sessions.delete(sessionId)
@@ -491,27 +640,34 @@ export class OrchestratorChildManager {
       `Repo: ${child.request.repo}`,
     ]
     if (child.error) lines.push(`Error: ${child.error}`)
+    const v = child.verification
+    if (v) {
+      lines.push(`Verification: ${v.state} — ${v.detail}`)
+      if (v.commit) lines.push(`Commit: ${v.commit}`)
+      if (v.prUrl) lines.push(`PR: ${v.prUrl}`)
+    }
     lines.push(this.buildHintLine(child))
     return lines.join('\n')
   }
 
   /**
    * Build a single-line hint about how to proceed, tailored to the status:
-   *   - timed_out / failed → point at the worktree so partial work can be salvaged
-   *   - completed         → remind that the PR may still need to be opened
+   *   - timed_out / failed / canceled → point at the worktree so partial work can be salvaged
+   *   - unverified → the PR / push must be checked before treating the work as done
+   *   - completed  → the evidence above is ready for review
    */
   private buildHintLine(child: ChildSession): string {
-    const session = this.sessions.get(child.id)
-    const worktreePath = session?.worktreePath
-    if (child.status === 'timed_out' || child.status === 'failed') {
-      const where = worktreePath ?? `${child.request.repo} (no worktree)`
+    const worktreePath = this.sessions.get(child.id)?.worktreePath ?? child.worktreePath
+    const where = worktreePath ?? `${child.request.repo} (no worktree)`
+    if (child.status === 'timed_out' || child.status === 'failed' || child.status === 'canceled') {
       return `Inspect worktree at ${where} for partial work.`
     }
+    if (child.status === 'unverified') {
+      return `Not confirmed done — check the ${child.request.completionPolicy === 'pr' ? 'PR' : 'pushed branch'} (worktree: ${where}) before reporting it as ready.`
+    }
     if (child.status === 'completed') {
-      const policy = child.request.completionPolicy
-      if (policy === 'pr') return 'Verify the PR was opened — push and create one if not.'
-      if (policy === 'merge') return 'Verify the branch was pushed.'
-      return 'Verify changes were committed locally as expected.'
+      if (child.request.completionPolicy === 'commit-only') return 'Verify changes were committed locally as expected.'
+      return 'Ready for review.'
     }
     return 'Review the child session output before deciding next steps.'
   }
@@ -641,11 +797,9 @@ export class OrchestratorChildManager {
           child.error = error
           child.completedAt = new Date().toISOString()
           clearTimers()
-
-          const session = this.sessions.get(child.id)
-          if (session?.claudeProcess?.isAlive()) {
-            session.claudeProcess.stop()
-          }
+          // A deliberate stop — a bare process kill would look like a crash
+          // and be auto-restarted, leaving an unsupervised process behind.
+          this.sessions.stopClaude(child.id)
           settle()
         }
 
@@ -668,8 +822,17 @@ export class OrchestratorChildManager {
           }, remainingMs)
         }
 
-        // Expose pause/resume to the prompt handler (handleChildPrompt).
-        this.timeoutControllers.set(child.id, { pause, resume })
+        const cancel = (error: string) => {
+          if (settled) return
+          child.status = 'canceled'
+          child.error = error
+          child.completedAt = new Date().toISOString()
+          clearTimers()
+          settle()
+        }
+
+        // Expose the clock and cancellation to session-event handlers.
+        this.controllers.set(child.id, { pause, resume, cancel })
 
         // Start the working clock.
         workStartedAt = Date.now()
@@ -686,11 +849,7 @@ export class OrchestratorChildManager {
           if (sessionId !== child.id || settled || verifying) return
           const session = this.sessions.get(child.id)
           if (!session) {
-            child.status = 'failed'
-            child.error = 'Session was deleted'
-            child.completedAt = new Date().toISOString()
-            clearTimers()
-            settle()
+            cancel('Session was deleted')
             return
           }
 
@@ -706,8 +865,8 @@ export class OrchestratorChildManager {
             return
           }
 
-          // The prompt (if any) was answered — restart the working clock so
-          // post-approval work draws from the remaining working budget.
+          // Normally the prompt-resolved event already unblocked the child;
+          // this covers prompts resolved without one.
           resume()
           if (child.status === 'blocked') {
             child.status = 'running'
@@ -718,24 +877,35 @@ export class OrchestratorChildManager {
           void (async () => {
             try {
               const text = this.extractText(session.outputHistory)
-              // Ground-truth check: did the final step (PR / push) really land?
-              const missing = await this.isFinalStepMissing(child, text)
-              if (isSettled()) return
-
-              // Final step missing — nudge once, then keep monitoring.
-              if (missing && !isError && !nudgedIds.has(child.id) && session.claudeProcess?.isAlive()) {
-                nudgedIds.add(child.id)
-                this.sessions.sendInput(child.id, this.buildNudgeInstruction(child.request.completionPolicy))
+              if (isError) {
+                if (isSettled()) return
+                child.status = 'failed'
+                child.result = text || null
+                child.error = 'Coding agent returned an error'
+                child.completedAt = new Date().toISOString()
+                clearTimers()
+                settle()
                 return
               }
 
-              child.status = isError ? 'failed' : 'completed'
+              // Ground-truth check: did the final step (PR / push) really land,
+              // at the commit the child ended on?
+              const verification = await this.verifyFinalStep(child)
+              if (isSettled()) return
+              child.verification = verification
+
+              // Final step missing — nudge once, then keep monitoring.
+              if (verification.state === 'missing' && !nudgedIds.has(child.id) && session.claudeProcess?.isAlive()) {
+                nudgedIds.add(child.id)
+                this.persistRun(child, `Final step missing (${verification.detail}); nudged once.`)
+                this.sessions.sendInput(child.id, this.buildNudgeInstruction(child.request.completionPolicy, verification))
+                return
+              }
+
+              const done = verification.state === 'verified' || verification.state === 'not_applicable'
+              child.status = done ? 'completed' : 'unverified'
               child.result = text || null
-              child.error = isError
-                ? 'Coding agent returned an error'
-                : missing
-                  ? `Completion not verified: expected ${child.request.completionPolicy === 'pr' ? 'a pull request' : 'a pushed branch'} but found none`
-                  : null
+              child.error = done ? null : `Completion not verified: ${verification.detail}`
               child.completedAt = new Date().toISOString()
               clearTimers()
               settle()
@@ -755,14 +925,20 @@ export class OrchestratorChildManager {
           void (async () => {
             // Process is gone — decide the terminal status from ground truth
             // (did the PR / push land?) rather than transcript length.
-            let missing = session ? await this.isFinalStepMissing(child, text) : true
+            let verification: ChildVerification = session
+              ? await this.verifyFinalStep(child)
+              : { state: 'missing', commit: null, prUrl: null, detail: 'the session no longer exists', checkedAt: new Date().toISOString() }
             // commit-only has no remote artifact to verify; an exit without
             // any output cannot be considered a success.
-            if (child.request.completionPolicy === 'commit-only' && !text) missing = true
+            if (verification.state === 'not_applicable' && !text) {
+              verification = { ...verification, state: 'missing', detail: 'the agent exited without any output' }
+            }
             if (isSettled()) return
-            child.status = missing ? 'failed' : 'completed'
+            child.verification = verification
+            const done = verification.state === 'verified' || verification.state === 'not_applicable'
+            child.status = done ? 'completed' : verification.state === 'unknown' ? 'unverified' : 'failed'
             child.result = text || null
-            child.error = missing ? 'Coding agent exited before the final step could be verified' : null
+            child.error = done ? null : `Coding agent exited before the final step could be verified: ${verification.detail}`
             child.completedAt = new Date().toISOString()
             clearTimers()
             settle()
@@ -776,13 +952,13 @@ export class OrchestratorChildManager {
       // Unsubscribe listeners to prevent accumulation across spawn() calls
       unsubResult?.()
       unsubExit?.()
-      this.timeoutControllers.delete(child.id)
+      this.controllers.delete(child.id)
       // Safety net: ensure isProcessing is cleared when monitoring ends.
       // handleClaudeResult should have already done this, but edge cases
       // (nudge race, missed result event) can leave the flag stuck.
       this.sessions.clearProcessingFlag(child.id)
-      // Every terminal path (completed, failed, timed_out) funnels through
-      // here — one persist captures the final status, error, and outcome.
+      // Every terminal path funnels through here — one persist captures the
+      // final status, error, and outcome.
       this.persistRun(child, `Finished: ${child.status}${child.error ? ` — ${child.error}` : ''}`)
       // Push-notify the parent orchestrator so it learns about the terminal
       // state immediately, instead of waiting for the 30-minute polling cron.
@@ -791,53 +967,81 @@ export class OrchestratorChildManager {
   }
 
   /**
-   * Ground-truth check for the child's expected final step. Instead of
-   * sniffing the transcript for keywords (which both false-positives on
-   * mentions and false-negatives on terse output), ask the real systems:
-   *   - 'pr':    does an open/merged PR exist for the branch? (gh pr list)
-   *   - 'merge': does the branch exist on the remote? (git ls-remote)
-   *   - 'commit-only': nothing remote to verify — never missing.
-   * Falls back to transcript keyword sniffing when the command fails
-   * (e.g. gh not installed, no remote configured).
+   * Ground-truth check for the child's expected final step, tied to the
+   * commit the child ended on (the worktree's HEAD):
+   *   - 'pr':    an open or merged PR for the branch whose head is that commit
+   *   - 'merge': the remote branch points at that commit
+   *   - 'commit-only': nothing remote to verify
+   * When a check cannot run (gh missing, no remote) the result is 'unknown' —
+   * never a success inferred from the transcript.
    */
-  private async isFinalStepMissing(child: ChildSession, text: string): Promise<boolean> {
+  private async verifyFinalStep(child: ChildSession): Promise<ChildVerification> {
     const policy = child.request.completionPolicy
-    if (policy === 'commit-only') return false
-
     const cwd = child.worktreePath ?? child.request.repo
     const branch = child.request.branchName
+    const checkedAt = new Date().toISOString()
+    const result = (state: ChildVerification['state'], detail: string, commit: string | null, prUrl: string | null = null): ChildVerification =>
+      ({ state, detail, commit, prUrl, checkedAt })
+
+    let head: string | null = null
+    try {
+      head = (await this.exec('git', ['rev-parse', 'HEAD'], cwd)).trim() || null
+    } catch { /* reported per policy below */ }
+
+    if (policy === 'commit-only') {
+      return result('not_applicable', 'commit-only: nothing remote to verify', head)
+    }
 
     if (policy === 'pr') {
+      let prs: Array<{ number?: number; url?: string; state?: string; headRefOid?: string }>
       try {
         const out = await this.exec(
           'gh',
-          ['pr', 'list', '--head', branch, '--state', 'all', '--json', 'number', '--limit', '1'],
+          ['pr', 'list', '--head', branch, '--state', 'all', '--json', 'number,url,state,headRefOid', '--limit', '5'],
           cwd,
         )
         const parsed: unknown = JSON.parse(out)
-        return !(Array.isArray(parsed) && parsed.length > 0)
-      } catch {
-        const lower = text.toLowerCase()
-        return !(lower.includes('pull request') || lower.includes('created a pr') || lower.includes('gh pr create'))
+        prs = Array.isArray(parsed) ? parsed as typeof prs : []
+      } catch (err) {
+        return result('unknown', `could not query pull requests (${this.errorSummary(err)})`, head)
       }
+      const pr = prs.find(p => p.state === 'OPEN' || p.state === 'MERGED')
+      if (!pr) {
+        return result('missing', prs.length > 0 ? `only closed pull requests exist for ${branch}` : `no pull request exists for ${branch}`, head)
+      }
+      const prUrl = pr.url ?? null
+      if (head && pr.headRefOid && pr.headRefOid !== head) {
+        return result('missing', `pull request ${prUrl ?? `#${pr.number}`} is at ${pr.headRefOid.slice(0, 12)}, but the branch HEAD is ${head.slice(0, 12)} — latest commits are not pushed`, head, prUrl)
+      }
+      return result('verified', `pull request ${prUrl ?? `#${pr.number}`} is ${pr.state === 'MERGED' ? 'merged' : 'open'} at the branch HEAD`, head ?? pr.headRefOid ?? null, prUrl)
     }
 
-    // policy === 'merge' — verify the branch was pushed to the remote
+    // policy === 'merge' — the remote branch must point at the local HEAD
+    let remote: string
     try {
-      const out = await this.exec('git', ['ls-remote', '--heads', 'origin', branch], cwd)
-      return out.trim().length === 0
-    } catch {
-      const lower = text.toLowerCase()
-      return !(lower.includes('git push') || lower.includes('pushed'))
+      remote = (await this.exec('git', ['ls-remote', '--heads', 'origin', branch], cwd)).trim()
+    } catch (err) {
+      return result('unknown', `could not query the remote (${this.errorSummary(err)})`, head)
     }
+    const remoteSha = remote.split(/\s+/)[0] || null
+    if (!remoteSha) return result('missing', `branch ${branch} is not on the remote`, head)
+    if (!head) return result('unknown', `branch ${branch} is on the remote, but the local HEAD could not be read`, remoteSha)
+    if (remoteSha !== head) {
+      return result('missing', `origin/${branch} is at ${remoteSha.slice(0, 12)}, but the branch HEAD is ${head.slice(0, 12)} — latest commits are not pushed`, head)
+    }
+    return result('verified', `origin/${branch} is at the branch HEAD`, head)
+  }
+
+  private errorSummary(err: unknown): string {
+    return (err instanceof Error ? err.message : String(err)).split('\n')[0].slice(0, 200)
   }
 
   /** Follow-up instruction sent (once) when the final step is missing. */
-  private buildNudgeInstruction(policy: ChildSessionRequest['completionPolicy']): string {
+  private buildNudgeInstruction(policy: ChildSessionRequest['completionPolicy'], verification: ChildVerification): string {
     if (policy === 'pr') {
-      return 'You completed the code changes but no Pull Request exists for your branch yet. Please push your branch and create a PR now with a clear description of what was changed and why.'
+      return `You are not done yet: ${verification.detail}. Please push your branch and make sure an open Pull Request with a clear description of what was changed and why points at your latest commit.`
     }
-    return 'You completed the code changes but your branch has not been pushed to the remote. Please push your changes now.'
+    return `You are not done yet: ${verification.detail}. Please push your latest commits to the remote branch now.`
   }
 
   /**

@@ -12,9 +12,10 @@ import type { CodingProvider } from './coding-process.js'
 import type { SessionManager } from './session-manager.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, getOrCreateOrchestratorId, getOrchestratorProvider, setOrchestratorProvider } from './orchestrator-manager.js'
 import { getAgentDisplayName, REPOS_ROOT, resolveRepoPathInRoot } from './config.js'
-import { scanRepoReports, readReport, getReportsSince } from './orchestrator-reports.js'
+import { readReport, getReportsSince } from './orchestrator-reports.js'
+import { loadWorkflowConfig } from './workflow-config.js'
 import type { OrchestratorMemory } from './orchestrator-memory.js'
-import type { OrchestratorChildManager } from './orchestrator-children.js'
+import { isTerminalChildStatus, type OrchestratorChildManager } from './orchestrator-children.js'
 import type { OrchestratorMonitor } from './orchestrator-monitor.js'
 
 // ---------------------------------------------------------------------------
@@ -70,6 +71,7 @@ interface SpawnChildBody {
   task: string
   branchName: string
   completionPolicy?: 'pr' | 'merge' | 'commit-only'
+  /** Not supported — rejected when true rather than silently ignored. */
   deployAfter?: boolean
   useWorktree?: boolean
   provider?: CodingProvider
@@ -157,28 +159,41 @@ export function createSessionRouter(
   // Reports
   // -------------------------------------------------------------------------
 
-  /** Scan reports for a single repo. */
+  /** Repos Joe knows about: its repo memory, configured workflow repos, and its children's repos. */
+  function managedRepoPaths(): string[] {
+    const paths = [
+      ...memory.list({ memoryType: 'repo_context' }).map(r => r.scope),
+      ...loadWorkflowConfig().reviewRepos.map(r => r.repoPath),
+      ...children.list().map(c => c.request.repo),
+    ]
+    return [...new Set(paths.filter((p): p is string => !!p))]
+      .filter(p => existsSync(p))
+  }
+
+  /**
+   * List reports — for one repo (?repo=), or across every managed repo.
+   * ?since=<YYYY-MM-DD> keeps only reports dated on or after that day.
+   */
   router.get('/api/orchestrator/reports', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const repoPath = req.query.repo as string | undefined
     const since = req.query.since as string | undefined
+    if (since !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(since)) {
+      return res.status(400).json({ error: 'Invalid since: use YYYY-MM-DD' })
+    }
 
+    let repoPaths: string[]
     if (repoPath) {
       const resolvedRepoPath = resolveRepoPathInRoot(repoPath)
       if (!resolvedRepoPath) {
         return res.status(400).json({ error: 'Invalid repo path: must be an existing directory under the configured repos root' })
       }
-      const reports = scanRepoReports(resolvedRepoPath)
-      res.json({ reports })
-    } else if (since) {
-      const repoItems = memory.list({ memoryType: 'repo_context' })
-      const repoPaths = repoItems.map(r => r.scope).filter((s): s is string => !!s)
-      const reports = getReportsSince(repoPaths, since)
-      res.json({ reports })
+      repoPaths = [resolvedRepoPath]
     } else {
-      res.status(400).json({ error: 'Provide ?repo=<path> or ?since=<YYYY-MM-DD>' })
+      repoPaths = managedRepoPaths()
     }
+    res.json({ reports: getReportsSince(repoPaths, since ?? '') })
   })
 
   /** Read a specific report's content. */
@@ -218,6 +233,10 @@ export function createSessionRouter(
       return res.status(400).json({ error: 'Invalid provider: choose claude, codex, or opencode' })
     }
 
+    if (deployAfter === true) {
+      return res.status(400).json({ error: 'deployAfter is not supported: children never deploy. Deploy separately once the change has landed.' })
+    }
+
     // Validate timeoutMs if provided: 1 minute to 4 hours
     if (timeoutMs !== undefined) {
       if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs < 60_000 || timeoutMs > 14_400_000) {
@@ -254,7 +273,6 @@ export function createSessionRouter(
         task,
         branchName,
         completionPolicy: completionPolicy ?? 'pr',
-        deployAfter: deployAfter ?? false,
         useWorktree: useWorktree ?? true,
         provider,
         model,
@@ -396,19 +414,41 @@ export function createSessionRouter(
     res.json({ sessions: sessions.listAll() })
   })
 
-  /** Delete all automated sessions (source: workflow, webhook, stepflow, agent). */
+  /**
+   * Delete finished automated sessions (source: workflow, webhook, stepflow,
+   * agent). Sessions still working — mid-turn, waiting on a prompt, or a
+   * child Joe is supervising — are skipped and reported, never stopped.
+   * `?dryRun=true` previews the selection without deleting anything.
+   * Worktrees with uncommitted work, and all branches, are kept on deletion.
+   */
   router.delete('/api/orchestrator/sessions/cleanup', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
+    const dryRun = req.query.dryRun === 'true'
     const automatedSources = new Set(['workflow', 'webhook', 'stepflow', 'agent'])
-    const toDelete = sessions.listAll().filter((s) => automatedSources.has(s.source ?? ''))
+    const deleted: Array<{ id: string; name: string }> = []
+    const skipped: Array<{ id: string; name: string; reason: string }> = []
 
-    let deleted = 0
-    for (const s of toDelete) {
-      if (sessions.delete(s.id)) deleted++
+    for (const info of sessions.listAll()) {
+      if (!automatedSources.has(info.source ?? '')) continue
+      const session = sessions.get(info.id)
+      if (!session) continue
+      const child = children.get(info.id)
+      const reason = child && !isTerminalChildStatus(child.status)
+        ? `supervised child is ${child.status}`
+        : session.pendingToolApprovals.size + session.pendingControlRequests.size > 0
+          ? 'waiting on a prompt'
+          : session.isProcessing && session.claudeProcess?.isAlive()
+            ? 'still working'
+            : null
+      if (reason) {
+        skipped.push({ id: info.id, name: info.name, reason })
+        continue
+      }
+      if (dryRun || sessions.delete(info.id)) deleted.push({ id: info.id, name: info.name })
     }
 
-    res.json({ deleted })
+    res.json({ dryRun, deleted, skipped })
   })
 
   /** Delete a specific session by ID. */
