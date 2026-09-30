@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-09-30
+
+### Added
+- GPT-6.1 Sol appears in the Codex model picker while older Codex app-server catalogs have yet to list it. An app-server entry takes precedence when available (#705)
+
 ## [0.9.2] - 2026-09-30
 
 ### Added
