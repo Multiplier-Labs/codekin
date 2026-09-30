@@ -150,7 +150,20 @@ export async function fetchCodexModels(): Promise<{ models: CodexModelInfo[] }> 
         write({ id: 2, method: 'model/list', params: { includeHidden: false } })
       } else if (msg.id === 2) {
         const data = (msg.result as { data?: Array<{ id: string; displayName: string; description: string; isDefault: boolean }> } | undefined)?.data ?? []
-        done(data.map(m => ({ id: m.id, name: m.displayName, description: m.description, isDefault: m.isDefault })))
+        const models = data.map(m => ({ id: m.id, name: m.displayName, description: m.description, isDefault: m.isDefault }))
+        // Codex's bundled model catalog can lag behind newly released models.
+        // Keep the app-server's availability check and default, but offer the
+        // documented model ID until it appears in model/list itself.
+        if (models.some(m => m.id === 'gpt-6-sol' || m.id === 'gpt-6-astra') && !models.some(m => m.id === 'gpt-6.1-sol')) {
+          const solIndex = models.findIndex(m => m.id === 'gpt-6-sol')
+          models.splice(solIndex >= 0 ? solIndex : models.length, 0, {
+            id: 'gpt-6.1-sol',
+            name: 'GPT-6.1 Sol',
+            description: 'Near-Astra performance for complex work at a lower cost.',
+            isDefault: false,
+          })
+        }
+        done(models)
       }
     })
     write({
