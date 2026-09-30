@@ -59,6 +59,19 @@ export interface WorktreeRemovalPreflight {
  * Server-side session state. Holds the Claude child process, connected
  * WebSocket clients, output history for replay, and permission registries.
  */
+/**
+ * Who drives a session's execution (spec §4). One controller at a time:
+ * handing over to Joe or taking back control bumps the revision, which
+ * fences instructions issued under an older revision.
+ */
+export interface SessionController {
+  owner: 'user' | 'joe'
+  revision: number
+  /** Task Joe is supervising the session for, if any. */
+  taskId?: string
+  since: string
+}
+
 export interface Session {
   id: string
   name: string
@@ -86,6 +99,8 @@ export interface Session {
   /** When the session was archived: stopped, hidden from the active list, never
    *  auto-started or pruned. Its worktree and branch are kept. */
   archivedAt?: string
+  /** Execution controller; unset means the default for the source (Joe for its children, else the user). */
+  controller?: SessionController
   created: string
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   /** Which AI coding assistant provider powers this session. Defaults to 'claude'. */
@@ -214,6 +229,7 @@ export interface SessionInfo {
   /** When the session was archived: stopped, hidden from the active list, never
    *  auto-started or pruned. Its worktree and branch are kept. */
   archivedAt?: string
+  controller?: SessionController
   connectedClients: number
   lastActivity: string
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
@@ -383,6 +399,29 @@ export type WsServerMessage =
   | { type: 'image'; base64: string; mediaType: string }
   | { type: 'system_message'; subtype: 'init' | 'exit' | 'error' | 'restart' | 'notification'; text: string; model?: string }
   | { type: 'user_echo'; text: string }
+  | {
+      /** A message to or from Agent Joe inside a repo session (never sent to the coding agent). */
+      type: 'joe_message'
+      id: string
+      role: 'to_joe' | 'joe'
+      text: string
+      ts: string
+      /** The @Joe request this belongs to. */
+      requestId?: string
+      /** A task milestone posted back to the originating conversation. */
+      milestone?: 'accepted' | 'decision' | 'blocked' | 'review'
+      /** Joe's instruction to the coding agent while Joe controls the session. */
+      instruction?: boolean
+      /** A system notice about Joe (availability, control changes). */
+      notice?: boolean
+      task?: {
+        id: string
+        title: string
+        status: string
+        prUrl: string | null
+        decision: { question: string; recommendation: string | null; options: string[] } | null
+      }
+    }
   | { type: 'result' }
   | { type: 'usage'; inputTokens: number; outputTokens: number; costUsd?: number }
   | { type: 'planning_mode'; active: boolean }
@@ -413,6 +452,8 @@ export type WsClientMessage =
   | { type: 'set_permission_mode'; permissionMode: PermissionMode }
   | { type: 'stop' }
   | { type: 'input'; data: string; displayText?: string }
+  /** Address Agent Joe in the joined session instead of its coding agent. */
+  | { type: 'ask_joe'; text: string }
   | { type: 'prompt_response'; value: string | string[]; requestId?: string }
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'ping' }

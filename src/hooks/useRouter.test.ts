@@ -31,6 +31,11 @@ function renderHook<T>(hookFn: () => T): { result: { current: T }; unmount: () =
 }
 
 describe('parsePath', () => {
+  it('parses the Tasks view', () => {
+    expect(parsePath('/tasks')).toMatchObject({ view: 'tasks', sessionId: null })
+    expect(parsePath('/tasks/')).toMatchObject({ view: 'tasks' })
+  })
+
   it('routes /settings and /settings/:section to the settings view', () => {
     expect(parsePath('/settings')).toMatchObject({ view: 'settings', settingsSection: null, sessionId: null })
     expect(parsePath('/settings/')).toMatchObject({ view: 'settings', settingsSection: null })

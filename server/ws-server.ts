@@ -39,6 +39,7 @@ import { generate404Page, generate500Page } from './error-page.js'
 import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, createAutomationService, syncSchedules } from './workflow-routes.js'
 import { AutomationChangeLog } from './automation-changes.js'
+import { JoeSessionBridge } from './joe-session-bridge.js'
 import { LoopStore } from './loop-store.js'
 import { LoopEngine } from './loop-engine.js'
 import { LoopArtifactStore } from './loop-artifacts.js'
@@ -411,13 +412,37 @@ const childManager = new OrchestratorChildManager(sessions, { runStore })
 // Joe's per-repo task list (docs/JOE-TASKS-SPEC.md). Task status follows the
 // linked child; human actions reach Joe through the durable outbox.
 const taskStore = new TaskStore()
+// Joe in repo sessions: @Joe requests, replies and task milestones in the
+// originating conversation (docs/JOE-REPO-COLLABORATION-MAINTENANCE-SPEC.md).
+let joeBridge: JoeSessionBridge | null = null
 const taskService = new OrchestratorTaskService({
   store: taskStore,
   notify: (args) => sendOrchestratorNotification(sessions, { ...args, parentSessionId: getOrCreateOrchestratorId() }),
+  isChildActive: (id) => {
+    const status = childManager.get(id)?.status
+    return status === 'starting' || status === 'running' || status === 'blocked'
+  },
+  onMilestone: (task, milestone) => joeBridge?.postMilestone(task, milestone),
+})
+joeBridge = new JoeSessionBridge({
+  sessions,
+  tasks: taskService,
+  notifyJoe: (args) => sendOrchestratorNotification(sessions, { ...args, parentSessionId: getOrCreateOrchestratorId() }),
+  ensureJoe: () => {
+    const name = getAgentDisplayName()
+    if (!getOrchestratorProvider(sessions)) return `Agent ${name} needs an agent before it can help — choose one in Tasks.`
+    try {
+      ensureOrchestratorRunning(sessions)
+      return null
+    } catch (err) {
+      return `Agent ${name} could not start: ${err instanceof Error ? err.message : String(err)}`
+    }
+  },
+  agentName: getAgentDisplayName,
 })
 childManager.onChildUpdate((child) => taskService.syncFromChild(child))
 childManager.recoverInterrupted(interruptedAgentRuns)
-app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, childManager, runStore, taskService, automationService))
+app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, childManager, runStore, taskService, automationService, joeBridge))
 // Loops 2.0 — durable, event-sourced outcome loops (docs/LOOPS-REWRITE-SPEC.md).
 const loopStore = new LoopStore()
 const loopArtifacts = new LoopArtifactStore(join(DATA_DIR, 'loop-artifacts'))
@@ -562,7 +587,7 @@ wss.on('connection', (ws: WebSocket, req) => {
     }
   }, WS_AUTH_TIMEOUT_MS)
 
-  const handlerCtx = { ws, sessions, clientSessions, send }
+  const handlerCtx = { ws, sessions, clientSessions, send, joe: joeBridge ?? undefined }
 
   // Per-connection message rate limiting: max 60 messages per second.
   // The counter is incremented for every received frame (including those that

@@ -13,13 +13,14 @@ import { useOutsideClick } from '../hooks/useOutsideClick'
 import { useAutoGrow } from '../hooks/useAutoGrow'
 import { useAgentHealth } from '../hooks/useAgentHealth'
 import { providerAvailability } from '../lib/agentHealth'
-import { IconPlus, IconX, IconTerminal2, IconChevronDown, IconChevronLeft, IconChevronRight, IconArrowRight, IconArrowsRightLeft, IconDots, IconGitBranch, IconGitBranchDeleted, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck, IconCornerDownLeft } from '@tabler/icons-react'
+import { IconRobotFace, IconLock, IconPlus, IconX, IconTerminal2, IconChevronDown, IconChevronLeft, IconChevronRight, IconArrowRight, IconArrowsRightLeft, IconDots, IconGitBranch, IconGitBranchDeleted, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck, IconCornerDownLeft } from '@tabler/icons-react'
 import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
 import type { SlashCommand } from '../lib/slashCommands'
 import { AGENT_PROVIDER_IDS, PERMISSION_MODES, PROVIDERS, permissionModesFor, type PermissionMode, type ModelOption } from '../types'
 import { getPref, setPref } from '../lib/prefs'
+import { isAddressedToJoe } from '../lib/joeAddress'
 
 const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
   shield: IconShieldCheck,
@@ -514,9 +515,17 @@ interface InputBarProps {
   worktreePath?: string | null
   /** Visual variant — 'orchestrator' strips toolbar to attach+send only with accent theme. */
   variant?: InputBarVariant
+  /**
+   * Agent Joe's display name. When set, a leading @Joe addresses Joe instead
+   * of the coding agent, the recipient is shown before sending, and an Ask
+   * Joe action is offered.
+   */
+  joeName?: string
+  /** Why ordinary messages are paused (Joe controls the session); @Joe still sends. */
+  lockedReason?: string
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default', joeName, lockedReason }, ref) {
   const isOrchestrator = variant === 'orchestrator'
   const visibleModes = permissionModesFor(sessionProvider)
   const handoffTargets = isOrchestrator ? AGENT_HANDOFF_TARGETS : PROVIDERS
@@ -564,13 +573,27 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   useOutsideClick(permMenuRef, permMenuOpen, useCallback(() => setPermMenuOpen(false), []))
   useOutsideClick(agentMenuRef, agentMenuOpen, useCallback(() => setAgentMenuOpen(false), []))
 
+  // The recipient is decided by the text, and shown before sending.
+  const toJoe = !!joeName && isAddressedToJoe(value, joeName)
+  const blocked = !!lockedReason && !toJoe
+
   const handleSend = useCallback(() => {
     if (!value.trim() && pendingFiles.length === 0) return
+    if (blocked) return
     setSlashMenuOpen(false)
     onSendInput(value)
     setValue('')
     onValueChange?.('')
-  }, [value, pendingFiles, onSendInput, onValueChange])
+  }, [value, pendingFiles, onSendInput, onValueChange, blocked])
+
+  /** Ask Joe: address the current text to Joe (or back to the coding agent). */
+  const toggleJoe = useCallback(() => {
+    if (!joeName) return
+    const next = toJoe ? value.replace(/^\s*@\S+[,:]?\s*/, '') : `@${joeName} ${value.trimStart()}`
+    setValue(next)
+    onValueChange?.(next)
+    setTimeout(() => textareaRef.current?.focus(), 0)
+  }, [joeName, toJoe, value, onValueChange])
 
   // --- Slash autocomplete logic ---
 
@@ -718,6 +741,15 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                   </button>
                 </span>
               ))}
+            </div>
+          )}
+
+          {(toJoe || blocked) && (
+            <div className={`flex items-center gap-1.5 text-meta ${toJoe ? 'text-accent-4' : 'text-ink-muted'}`} role="status">
+              {toJoe ? <IconRobotFace size={14} stroke={2} /> : <IconLock size={14} stroke={2} />}
+              {toJoe
+                ? <span>To Agent {joeName} — the coding agent won't see this</span>
+                : <span>{lockedReason} Start with @{joeName ?? 'Joe'} to message it.</span>}
             </div>
           )}
 
@@ -898,6 +930,17 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 </div>
               )}
 
+              {joeName && !isOrchestrator && (
+                <ToolbarAction
+                  onClick={toggleJoe}
+                  disabled={disabled}
+                  title={toJoe ? `Send to the coding agent instead` : `Ask Agent ${joeName}`}
+                  accent
+                >
+                  <IconRobotFace className={`density-icon ${toJoe ? 'text-accent-4' : ''}`} stroke={2} />
+                </ToolbarAction>
+              )}
+
               {hasSkills && (
                 <div className="relative">
                   <ToolbarAction
@@ -923,9 +966,9 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
 
               <SendButton
                 onClick={handleSend}
-                disabled={disabled}
+                disabled={disabled || blocked}
                 hasContent={!!(value.trim() || pendingFiles.length > 0)}
-                accent={isOrchestrator}
+                accent={isOrchestrator || toJoe}
               />
             </div>
           </div>

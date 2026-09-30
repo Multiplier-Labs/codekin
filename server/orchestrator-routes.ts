@@ -20,6 +20,8 @@ import { createTaskRouter } from './orchestrator-task-router.js'
 import type { OrchestratorTaskService } from './orchestrator-tasks.js'
 import { createAutomationRouter } from './automation-routes.js'
 import type { AutomationService } from './automation-service.js'
+import { createJoeSessionRouter } from './joe-session-routes.js'
+import type { JoeSessionBridge } from './joe-session-bridge.js'
 
 type VerifyFn = (token: string | undefined) => boolean
 type VerifySessionFn = (token: string | undefined, sessionId: string | undefined) => boolean
@@ -36,6 +38,7 @@ export function createOrchestratorRouter(
   runStore?: RunStore,
   tasks?: OrchestratorTaskService,
   automations?: AutomationService,
+  joeBridge?: JoeSessionBridge,
 ): Router {
   const router = Router()
   const memory = injectedMemory ?? new OrchestratorMemory()
@@ -60,7 +63,9 @@ export function createOrchestratorRouter(
     return verifyToken(extractToken(req)) ? 'user' : 'joe'
   }
 
-  // Mount sub-routers
+  // Mount sub-routers. The Joe session routes go first: their paths are more
+  // specific than the session router's /sessions/:id handlers.
+  if (joeBridge) router.use(createJoeSessionRouter(verifyOrchestratorAuth, actorOf, joeBridge))
   router.use(createSessionRouter(verifyOrchestratorAuth, sessions, memory, children, monitorRef, tasks))
   if (tasks) router.use(createTaskRouter(verifyOrchestratorAuth, actorOf, tasks))
   if (automations) router.use(createAutomationRouter(verifyOrchestratorAuth, actorOf, automations))

@@ -400,6 +400,7 @@ export class OrchestratorChildManager {
     }
     const session = this.sessions.get(id)
     if (!session) throw new ChildControlError('Session no longer exists', 404)
+    if (session.controller?.owner === 'user') throw new ChildControlError('The user took back control of this session — ask them in its conversation instead', 409)
     if (session.pendingToolApprovals.size > 0 || session.pendingControlRequests.size > 0) {
       throw new ChildControlError('Child is waiting on a prompt — answer it with respond_to_prompt first', 409)
     }
@@ -431,6 +432,7 @@ export class OrchestratorChildManager {
     }
     const session = this.sessions.get(id)
     if (!session) throw new ChildControlError('Session was deleted — spawn a new child instead', 409)
+    if (session.controller?.owner === 'user') throw new ChildControlError('The user took back control of this session — ask them in its conversation instead', 409)
     if (session.worktreeState === 'removed') {
       throw new ChildControlError('The worktree was removed — spawn a new child from the branch instead', 409)
     }

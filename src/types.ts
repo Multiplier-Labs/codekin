@@ -131,6 +131,14 @@ const GROK_PERMISSION_MODES = NON_CLAUDE_PERMISSION_MODES.map(m => {
   return description ? { ...m, description } : m
 })
 
+/** Execution controller of a session (server/types.ts SessionController). */
+export interface SessionController {
+  owner: 'user' | 'joe'
+  revision: number
+  taskId?: string
+  since: string
+}
+
 /** Client-side session info (subset of server Session, safe to serialize). */
 export interface Session {
   id: string
@@ -155,6 +163,8 @@ export interface Session {
   worktreeBranch?: string
   /** Set while the session is archived (stopped, hidden, worktree kept). */
   archivedAt?: string
+  /** Who drives execution; unset = Joe for its children, the user otherwise. */
+  controller?: SessionController
   connectedClients: number
   lastActivity: string
   /** How the session was created: manually by a user, by a GitHub webhook, or by a workflow. */
@@ -190,6 +200,7 @@ export type WsClientMessage =
   | { type: 'set_permission_mode'; permissionMode: PermissionMode }
   | { type: 'stop' }
   | { type: 'input'; data: string; displayText?: string }
+  | { type: 'ask_joe'; text: string }
   | { type: 'prompt_response'; value: string | string[]; requestId?: string }
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'ping' }
@@ -270,6 +281,7 @@ export type WsServerMessage =
   | { type: 'image'; base64: string; mediaType: string }
   | { type: 'system_message'; subtype: 'init' | 'exit' | 'error' | 'restart' | 'notification' | 'info'; text: string; model?: string }
   | { type: 'user_echo'; text: string }
+  | { type: 'joe_message'; id: string; role: 'to_joe' | 'joe'; text: string; ts: string; requestId?: string; milestone?: JoeMilestone; instruction?: boolean; notice?: boolean; task?: JoeMessageTask }
   | { type: 'result' }
   | { type: 'usage'; inputTokens: number; outputTokens: number; costUsd?: number }
   | { type: 'planning_mode'; active: boolean }
@@ -468,6 +480,19 @@ export type ChatMessage =
   | { type: 'planning_mode'; active: boolean; ts?: number; key?: string }
   | { type: 'todo_list'; tasks: TaskItem[]; ts?: number; key?: string }
   | { type: 'tentative'; text: string; index: number; ts?: number; key?: string }
+  | { type: 'joe'; role: 'to_joe' | 'joe'; text: string; requestId?: string; milestone?: JoeMilestone; instruction?: boolean; notice?: boolean; task?: JoeMessageTask; ts?: number; key?: string }
+
+/** Task milestones Joe posts back into the conversation a task came from. */
+export type JoeMilestone = 'accepted' | 'decision' | 'blocked' | 'review'
+
+/** Task snapshot attached to a Joe message (the live task is fetched separately). */
+export interface JoeMessageTask {
+  id: string
+  title: string
+  status: string
+  prUrl: string | null
+  decision: { question: string; recommendation: string | null; options: string[] } | null
+}
 
 /** WebSocket connection lifecycle state. */
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected'

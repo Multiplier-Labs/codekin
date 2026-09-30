@@ -75,7 +75,22 @@ describe('JoeTasksView', () => {
 
   it('orders sections by what needs the user first', async () => {
     await render(list([task('todo'), task('in_progress'), task('in_review'), task('needs_decision', { decision: null })]))
-    expect(sectionTitles()).toEqual(['Needs your decision', 'Ready for review', 'In progress', 'To do'])
+    expect(sectionTitles()).toEqual(['Needs your decision', 'Ready for review', 'Running', 'To do'])
+  })
+
+  it('keeps queued work apart from running work', async () => {
+    await render(list([
+      task('in_progress', { id: 'live', execution: 'running' }),
+      task('in_progress', { id: 'answered', title: 'Answered, waiting for Joe', execution: 'queued' }),
+      task('todo', { id: 'start-requested', title: 'Start requested', execution: 'queued' }),
+      task('todo', { id: 'idle', execution: 'idle' }),
+    ]))
+    expect(sectionTitles()).toEqual(['Running', 'Queued', 'To do'])
+    const queued = container.querySelector('section[aria-label="Queued"]')!
+    expect(queued.textContent).toContain('Answered, waiting for Joe')
+    expect(queued.textContent).toContain('Start requested')
+    // A queued start cannot be started twice.
+    expect(Array.from(queued.querySelectorAll('button')).some(b => b.textContent === 'Start')).toBe(false)
   })
 
   it('answers a decision with a one-click option or free text', async () => {
@@ -132,7 +147,7 @@ describe('JoeTasksView', () => {
 
   it('delegates one task per line from the dialog', async () => {
     await render(list([task('todo')]))
-    await act(async () => { button('Delegate tasks')!.click() })
+    await act(async () => { button('New task')!.click() })
     const dialog = container.querySelector('[role="dialog"]')!
     const textarea = dialog.querySelector('textarea')!
     await act(async () => {
