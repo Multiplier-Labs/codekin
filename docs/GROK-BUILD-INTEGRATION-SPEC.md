@@ -1,6 +1,6 @@
 # Grok Build integration spec
 
-Status: **implemented** (steps 1–3: #699, #700, #701). Steps 4–5 (workflows, loops, Joe) pending. Revised after upstream-doc and codebase review and a spike against grok 1.0.44 (2026-09-30).
+Status: **implemented** through step 4 (#699, #700, #701). Step 5 (workflows, loops, Joe) pending. Revised after upstream-doc and codebase review and a spike against grok 1.0.44 (2026-09-30).
 
 Date: **2026-09-27**
 
