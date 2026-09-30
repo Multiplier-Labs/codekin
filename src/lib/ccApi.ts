@@ -6,7 +6,7 @@
  * This module stays the single facade components and hooks import from.
  */
 
-import type { Session, WsServerMessage } from '../types'
+import type { Session, WsServerMessage, CodingProvider } from '../types'
 import { transport } from './transport'
 
 /**
@@ -161,11 +161,19 @@ export async function removeSessionWorktree(token: string, sessionId: string): P
   return { removed: false, error: body.error ?? `Failed to remove working files: ${res.status}` }
 }
 
+/** Read Joe's saved harness without starting an agent process. */
+export async function getOrchestratorStatus(token: string): Promise<{ provider: CodingProvider | null; agentName?: string }> {
+  const res = await transport.authFetch('/api/orchestrator/status', { headers: headers(token) })
+  if (!res.ok) throw new Error(`Failed to load orchestrator: ${res.status}`)
+  return jsonBody<{ provider: CodingProvider | null; agentName?: string }>(res)
+}
+
 /** Ensure the orchestrator session is running and return its session ID. */
-export async function startOrchestrator(token: string): Promise<{ sessionId: string; status: string; agentName?: string }> {
+export async function startOrchestrator(token: string, provider?: CodingProvider): Promise<{ sessionId: string; status: string; agentName?: string }> {
   const res = await transport.authFetch(`/api/orchestrator/start`, {
     method: 'POST',
     headers: headers(token),
+    body: JSON.stringify(provider ? { provider } : {}),
   })
   if (!res.ok) throw new Error(`Failed to start orchestrator: ${res.status}`)
   return jsonBody<{ sessionId: string; status: string; agentName?: string }>(res)

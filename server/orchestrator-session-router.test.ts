@@ -13,6 +13,9 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
+import { mkdirSync, mkdtempSync, rmSync } from 'fs'
+import { CodekinApi } from './codekin-mcp-api.js'
+import { getOrchestratorProvider, setOrchestratorProvider, ensureOrchestratorRunning } from './orchestrator-manager.js'
 import type { Request } from 'express'
 import type { AddressInfo } from 'net'
 import type { Server } from 'http'
@@ -22,6 +25,8 @@ vi.mock('./orchestrator-manager.js', () => ({
   getOrCreateOrchestratorId: vi.fn(() => 'orch-session-id'),
   getOrchestratorSessionId: vi.fn(() => null),
   ensureOrchestratorRunning: vi.fn(() => 'orch-session-id'),
+  getOrchestratorProvider: vi.fn(() => 'codex'),
+  setOrchestratorProvider: vi.fn(),
 }))
 
 vi.mock('./config.js', () => ({
@@ -118,6 +123,56 @@ describe('createSessionRouter', () => {
 
       // The over-limit request never reached the spawn path.
       expect(children.spawn).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('harness selection contract', () => {
+    beforeEach(async () => { await mount(() => true) })
+
+    it('reports no selection without starting an agent', async () => {
+      vi.mocked(getOrchestratorProvider).mockReturnValueOnce(null)
+      const response = await fetch(`${server.baseUrl}/api/orchestrator/status`)
+      expect(await response.json()).toMatchObject({ provider: null })
+      expect(ensureOrchestratorRunning).not.toHaveBeenCalled()
+    })
+
+    it('requires an explicit choice on first start', async () => {
+      vi.mocked(getOrchestratorProvider).mockReturnValueOnce(null)
+      const response = await fetch(`${server.baseUrl}/api/orchestrator/start`, { method: 'POST' })
+      expect(response.status).toBe(409)
+      expect(ensureOrchestratorRunning).not.toHaveBeenCalled()
+    })
+
+    it.each(['claude', 'codex', 'opencode'])('saves %s before starting Joe', async (provider) => {
+      const response = await fetch(`${server.baseUrl}/api/orchestrator/start`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider }),
+      })
+      expect(response.status).toBe(200)
+      expect(setOrchestratorProvider).toHaveBeenCalledWith(expect.anything(), provider)
+      expect(vi.mocked(setOrchestratorProvider).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(ensureOrchestratorRunning).mock.invocationCallOrder[0])
+    })
+
+    it('rejects invalid start and spawn providers before doing any work', async () => {
+      for (const path of ['start', 'children']) {
+        const response = await fetch(`${server.baseUrl}/api/orchestrator/${path}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...VALID_SPAWN, provider: 'unknown' }),
+        })
+        expect(response.status).toBe(400)
+      }
+      expect(children.spawn).not.toHaveBeenCalled()
+      expect(ensureOrchestratorRunning).not.toHaveBeenCalled()
+    })
+
+    it.each(['codex', 'opencode'] as const)('passes %s through the MCP API client and real HTTP router', async (provider) => {
+      mkdirSync('/tmp/repos', { recursive: true })
+      const repo = mkdtempSync('/tmp/repos/joe-harness-')
+      try {
+        vi.mocked(children.spawn).mockResolvedValue({ id: 'child' } as never)
+        const api = new CodekinApi({ baseUrl: server.baseUrl, token: 'test' })
+        await api.spawnChild({ repo, task: 'implement task', branchName: 'fix/task', provider, model: 'selected-model' })
+        expect(children.spawn).toHaveBeenCalledWith(expect.objectContaining({ provider, model: 'selected-model', parentSessionId: 'orch-session-id' }))
+      } finally { rmSync(repo, { recursive: true }) }
     })
   })
 

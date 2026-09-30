@@ -23,6 +23,7 @@ import { RunStore } from './run-store.js'
 
 function makeRequest(overrides: Partial<ChildSessionRequest> = {}): ChildSessionRequest {
   return {
+    provider: 'claude',
     repo: '/repos/myproject',
     task: 'Fix the login bug',
     branchName: 'fix/login-bug',
@@ -250,7 +251,7 @@ describe('OrchestratorChildManager', () => {
       await vi.waitFor(() => {
         expect(child.status).toBe('failed')
       })
-      expect(child.error).toBe('Claude returned an error')
+      expect(child.error).toBe('Coding agent returned an error')
     })
 
     it('marks child as completed on exit when ground truth confirms the final step', async () => {
@@ -479,6 +480,50 @@ describe('OrchestratorChildManager', () => {
       for (const tool of ['Bash(rm:*)', 'Bash(sudo:*)', 'Bash(docker:*)', 'Bash:*', 'Bash']) {
         expect(AGENT_CHILD_ALLOWED_TOOLS).not.toContain(tool)
       }
+    })
+  })
+
+
+  describe('harness selection', () => {
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.clearAllTimers(); vi.useRealTimers() })
+
+    it.each(['claude', 'codex', 'opencode'] as const)('honors an explicit %s override without inheriting another harness model', async (provider) => {
+      sessions = makeMockSessions()
+      sessions.get.mockReturnValue({ provider: 'codex', model: 'codex-model' })
+      const child = await makeManager(sessions).spawn(makeRequest({ provider, parentSessionId: 'joe' }))
+      expect(sessions.create).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.objectContaining({ provider, model: provider === 'codex' ? 'codex-model' : undefined }))
+      expect(child.request.provider).toBe(provider)
+    })
+
+    it.each(['codex', 'opencode'] as const)('inherits the parent %s harness and model', async (provider) => {
+      sessions = makeMockSessions()
+      sessions.get.mockReturnValue({ provider, model: 'selected-model' })
+      const child = await makeManager(sessions).spawn(makeRequest({ provider: undefined, parentSessionId: 'joe' }))
+      expect(child.request).toMatchObject({ provider, model: 'selected-model' })
+      expect(sessions.create).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.objectContaining({ provider, model: 'selected-model' }))
+    })
+
+    it('uses the saved harness when the parent is not loaded', async () => {
+      sessions = makeMockSessions()
+      sessions.get.mockReturnValue(undefined)
+      sessions.archive = { getSetting: () => 'opencode' }
+      const child = await makeManager(sessions).spawn(makeRequest({ provider: undefined, parentSessionId: 'joe' }))
+      expect(child.request.provider).toBe('opencode')
+    })
+
+    it('refuses to spawn without a selected harness', async () => {
+      sessions = makeMockSessions()
+      sessions.archive = { getSetting: () => '' }
+      await expect(makeManager(sessions).spawn(makeRequest({ provider: undefined }))).rejects.toThrow(/Choose an agent harness/)
+      expect(sessions.create).not.toHaveBeenCalled()
+    })
+
+    it('preserves an explicit child model on the selected harness', async () => {
+      sessions = makeMockSessions()
+      sessions.get.mockReturnValue({ provider: 'codex', model: 'parent-model' })
+      const child = await makeManager(sessions).spawn(makeRequest({ provider: 'codex', model: 'child-model', parentSessionId: 'joe' }))
+      expect(child.request.model).toBe('child-model')
     })
   })
 

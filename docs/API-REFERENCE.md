@@ -694,6 +694,11 @@ offered options; `note` becomes guidance to the maker where applicable.
 
 ## Orchestrator (Agent Joe)
 
+Harness selection: `GET /api/orchestrator/status` includes `provider` (`claude`, `codex`, `opencode`, or `null` when not yet selected). `POST /api/orchestrator/start` accepts `{ "provider": "codex" }` to save a choice before starting; an omitted provider reuses the saved choice, or returns 409 if none exists. Invalid providers return 400. Users can subsequently switch harnesses in Joe's composer.
+
+`POST /api/orchestrator/children` and the `spawn_child` MCP tool accept optional `provider` and `model` overrides. Without a provider override, the child uses its parent's harness, then Joe's saved choice if the parent is not loaded. It inherits the parent's model only when the harness matches; otherwise it uses the selected harness's default. Spawning without any harness choice is rejected. The resolved provider/model are included in the child request and persisted run spec.
+
+
 All orchestrator routes are mounted at the `/api/orchestrator/` prefix.
 
 ### Status & Lifecycle

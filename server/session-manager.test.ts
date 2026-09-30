@@ -2213,6 +2213,16 @@ describe('SessionManager', () => {
       vi.useRealTimers()
     })
 
+    it('leaves Joe startup to the orchestrator manager and its saved harness choice', () => {
+      const joe = sm.create('Joe', '/tmp', { source: 'orchestrator' })
+      joe._wasActiveBeforeRestart = true
+      joe.claudeSessionId = 'legacy-claude-session'
+      const start = vi.spyOn(sm, 'startClaude').mockReturnValue(true)
+      sm.restoreActiveSessions()
+      vi.advanceTimersByTime(2000)
+      expect(start).not.toHaveBeenCalled()
+    })
+
     it('auto-restarts sessions that were active and have claudeSessionId', () => {
       const mockedExistsSync = vi.mocked(existsSync)
       const mockedReadFileSync = vi.mocked(readFileSync)
@@ -2937,6 +2947,15 @@ describe('SessionManager', () => {
   })
 
   describe('setProvider()', () => {
+    it('clears a model when switching harnesses but retains it when reselecting the same one', () => {
+      const s = sm.create('Joe', '/tmp', { source: 'orchestrator', provider: 'codex', model: 'codex-model' })
+      sm.setProvider(s.id, 'codex')
+      expect(s.model).toBe('codex-model')
+      sm.setProvider(s.id, 'opencode')
+      expect(s.provider).toBe('opencode')
+      expect(s.model).toBeUndefined()
+    })
+
     it('calls coordinator.requestReconfigure when process is alive', () => {
       const s = sm.create('test', '/tmp')
       const cp = fakeClaudeProcess(true)

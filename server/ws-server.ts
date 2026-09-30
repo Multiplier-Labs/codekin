@@ -62,7 +62,7 @@ import { EmbeddedConnectorSupervisor, createRelayStatusRouter, embeddedConnector
 import { resolveLocalTarget } from './relay/connector-proxy.js'
 import { codekinPackageVersion } from './relay/relay-credential.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
-import { ensureOrchestratorRunning, getOrchestratorSessionId, isOrchestratorSession, getOrCreateOrchestratorId } from './orchestrator-manager.js'
+import { ensureOrchestratorRunning, getOrchestratorProvider, getOrchestratorSessionId, isOrchestratorSession, getOrCreateOrchestratorId } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
 import { getOrchestratorOutbox } from './orchestrator-outbox.js'
 import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR, DATA_DIR } from './config.js'
@@ -624,7 +624,7 @@ server.listen(port, '0.0.0.0', () => {
   if (AUTO_RESTORE_SESSIONS) {
     sessions.restoreActiveSessions()
     try {
-      ensureOrchestratorRunning(sessions)
+      if (getOrchestratorProvider(sessions)) ensureOrchestratorRunning(sessions)
     } catch (err) {
       console.error('[orchestrator] Failed to start on boot:', err)
     }
