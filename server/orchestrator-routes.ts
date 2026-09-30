@@ -16,6 +16,8 @@ import type { RunStore } from './run-store.js'
 import { createSessionRouter } from './orchestrator-session-router.js'
 import { createMemoryRouter } from './orchestrator-memory-router.js'
 import { createLearningRouter } from './orchestrator-learning-router.js'
+import { createTaskRouter } from './orchestrator-task-router.js'
+import type { OrchestratorTaskService } from './orchestrator-tasks.js'
 
 type VerifyFn = (token: string | undefined) => boolean
 type VerifySessionFn = (token: string | undefined, sessionId: string | undefined) => boolean
@@ -30,6 +32,7 @@ export function createOrchestratorRouter(
   injectedMemory?: OrchestratorMemory,
   injectedChildren?: OrchestratorChildManager,
   runStore?: RunStore,
+  tasks?: OrchestratorTaskService,
 ): Router {
   const router = Router()
   const memory = injectedMemory ?? new OrchestratorMemory()
@@ -49,8 +52,14 @@ export function createOrchestratorRouter(
     return false
   }
 
+  /** The master token is the user; the orchestrator's scoped session token is Joe. */
+  function actorOf(req: Request): 'user' | 'joe' {
+    return verifyToken(extractToken(req)) ? 'user' : 'joe'
+  }
+
   // Mount sub-routers
-  router.use(createSessionRouter(verifyOrchestratorAuth, sessions, memory, children, monitorRef))
+  router.use(createSessionRouter(verifyOrchestratorAuth, sessions, memory, children, monitorRef, tasks))
+  if (tasks) router.use(createTaskRouter(verifyOrchestratorAuth, actorOf, tasks))
   router.use(createMemoryRouter(verifyOrchestratorAuth, memory, monitorRef))
   router.use(createLearningRouter(verifyOrchestratorAuth, memory))
 

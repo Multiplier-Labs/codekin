@@ -44,6 +44,9 @@ import { LoopArtifactStore } from './loop-artifacts.js'
 import { createLoopRouter } from './loop-routes.js'
 import { createRunsRouter } from './runs-routes.js'
 import { RunStore } from './run-store.js'
+import { TaskStore } from './task-store.js'
+import { OrchestratorTaskService } from './orchestrator-tasks.js'
+import { sendOrchestratorNotification } from './orchestrator-notify.js'
 import { HARNESSES } from './harness-registry.js'
 import { CommitEventHandler } from './commit-event-handler.js'
 import { jsonParse } from './json-parse.js'
@@ -66,7 +69,7 @@ import { createOrchestratorRouter } from './orchestrator-routes.js'
 import { ensureOrchestratorRunning, getOrchestratorProvider, getOrchestratorSessionId, isOrchestratorSession, getOrCreateOrchestratorId } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
 import { getOrchestratorOutbox } from './orchestrator-outbox.js'
-import { PORT as CONFIG_PORT, BIND_HOST, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR, DATA_DIR } from './config.js'
+import { PORT as CONFIG_PORT, BIND_HOST, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR, DATA_DIR, resolveRepoPathInRoot } from './config.js'
 
 // ---------------------------------------------------------------------------
 // CLI args (legacy bare-metal compat) and auth setup
@@ -387,8 +390,16 @@ const orchestratorMonitorRef: { current: OrchestratorMonitor | null } = { curren
 const childManager = new OrchestratorChildManager(sessions, { runStore })
 // List the interrupted children again, tell Joe so partial work can be
 // salvaged, and keep their sessions from auto-restarting unsupervised.
+// Joe's per-repo task list (docs/JOE-TASKS-SPEC.md). Task status follows the
+// linked child; human actions reach Joe through the durable outbox.
+const taskStore = new TaskStore()
+const taskService = new OrchestratorTaskService({
+  store: taskStore,
+  notify: (args) => sendOrchestratorNotification(sessions, { ...args, parentSessionId: getOrCreateOrchestratorId() }),
+})
+childManager.onChildUpdate((child) => taskService.syncFromChild(child))
 childManager.recoverInterrupted(interruptedAgentRuns)
-app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, childManager, runStore))
+app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, childManager, runStore, taskService))
 // Loops 2.0 — durable, event-sourced outcome loops (docs/LOOPS-REWRITE-SPEC.md).
 const loopStore = new LoopStore()
 const loopArtifacts = new LoopArtifactStore(join(DATA_DIR, 'loop-artifacts'))
@@ -707,6 +718,19 @@ server.listen(port, BIND_HOST, () => {
       broadcastToAuthenticated(authenticatedClients, msg)
     })
 
+    // Task list changes on the same channel, so open task views refresh.
+    taskStore.setEventListener((event) => {
+      const msg: WsServerMessage = {
+        type: 'workflow_event',
+        engine: 'agent',
+        eventType: 'task_updated',
+        runId: event.taskId,
+        kind: 'task',
+        status: event.status,
+      }
+      broadcastToAuthenticated(authenticatedClients, msg)
+    })
+
     // Agent (orchestrator-child) run events on the same channel.
     runStore.setEventListener((event) => {
       const msg: WsServerMessage = {
@@ -814,9 +838,21 @@ server.listen(port, BIND_HOST, () => {
         lastDiagnoseAt.set(payload.probeKey, now)
 
         const samples = deploymentMonitor.listSamples({ probeKey: payload.probeKey, limit: 12 })
+        const incidentTask = buildIncidentTask(payload, samples, new Date(now))
+        const [task] = taskService.create([{
+          repo: resolveRepoPathInRoot(deployment.repoPath) ?? deployment.repoPath,
+          title: `Diagnose ${payload.probeKey} breach on ${deployment.name}`,
+          detail: incidentTask,
+          acceptance: 'An incident report in .codekin/reports/incidents/ and a PR with it.',
+          priority: 'high',
+          source: 'incident',
+          sourceRef: payload.probeKey,
+          createdBy: 'system',
+        }])
         const child = await childManager.spawn({
           repo: deployment.repoPath,
-          task: buildIncidentTask(payload, samples, new Date(now)),
+          taskId: task.id,
+          task: incidentTask,
           branchName: incidentBranchName(deployment.id, new Date(now)),
           completionPolicy: 'pr',
           useWorktree: true,
