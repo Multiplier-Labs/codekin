@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-09-30
+
+### Added
+- **Grok Build as a coding agent** — xAI's Grok Build joins Claude Code, Codex and OpenCode. Codekin drives `grok agent` over ACP with streamed turns, approvals through Codekin's own prompts (Grok's all-commands "always allow" is never used), plan mode, model switching and resume. Grok appears in the new-session and repo pickers, the "Hand off to" list, the connection popup, the environment checklist and the installer. Agent Joe, Joe's child sessions, workflows and loops don't run on Grok yet (#697, #699, #700, #701)
+- **Work with Agent Joe from any repo session** — start a message with `@Joe` or use **Ask Joe**. The composer shows who will receive it, Joe answers in the same conversation, and it posts task cards there when work is accepted, needs a decision, is blocked or is ready for review. A decision answered in the chat or in Tasks resolves in both places. **Hand over to Joe** and **Take back control** in the session menu make it explicit who drives a session (#702)
+- **Tasks** — a durable task list per repo that follows each child session's lifecycle, in a sidebar view that replaces the Joe chat: decisions, reviews, running, queued and to-do work across repos, a per-repo overview and **New task**. A task only shows as running once an attempt actually starts. Joe's transcript remains as a read-only activity log (#692, #693, #702)
+- **Repo maintenance** — explicitly put Joe in charge of a repo with a reviewable plan of responsibilities, each linked to the automations that check it and a response policy (notify, propose work, investigate or implement). Health comes from real check evidence, and missing, stale or failing checks never show as healthy. A maintenance view at `/maintenance/<repo>`, a status line under each maintained repo, pause/resume that keeps every automation's own settings, and "Run independently" to release an automation (#696, #703)
+- **Joe manages repo automations** — typed tools to list, create, update, disable, remove, validate and inspect repo automations and their health and trigger history, backed by the same service as the Automations view. Changes are revisioned, retries apply once, and every change is recorded with its reason and origin (#698)
+- **Joe session control** — follow up, stop, resume, close and list child sessions (#691)
+- **Branch review** — review everything a branch changes since its merge base (#674), files with uncommitted edits marked in the task view (#675), a read-only pull request card with CI checks and review state (#676), and review comments anchored to diff lines, sent to the agent as one batch (#677)
+
+### Changed
+- **New sessions start in their own git worktree by default** (#668). An isolated session never falls back to the shared checkout (#672), worktrees are created and removed without destroying work (#669), and archiving keeps the worktree until you remove it (#673). Workflow runs also use a fresh worktree (#689)
+- **Redesigned Changes panel** — a pinned, filterable file list grouped by folder, one file's diff at a time with `J`/`K`, an inline discard confirmation that names new files, and layouts for narrow panels and phones (#685, #687). The Changes button shows whenever a session has something to review (#679)
+- UI preferences are stored on the server instead of in the browser (#670), and the hosted app remembers your workspace and machine per user (#671)
+- Joe needs an explicit harness choice, and its child sessions inherit its harness, model and permission mode (#684, #695). Joe's composer has the same permission picker as sessions, with a read-only inspection allowlist (#694)
+- Loop engine decision, evaluation and intervention paths are split into separate modules (#686)
+
+### Fixed
+- Joe's child lifecycle is truthful: stopping a child cancels it, answering unblocks it, and completion is verified against the pushed commit (#688)
+- Codex shell commands now match saved approvals, and compound commands are approved segment by segment — stricter for Claude sessions too: `cat x | wc -l` needs both commands approved (#694)
+- Joe's scoped token was rejected by the workflows, runs, loops and deployments APIs (#698)
+
+### Security
+- WebSocket broadcasts (including approval prompts) reach only authenticated connections, the server binds to `127.0.0.1` by default (set `BIND_HOST=0.0.0.0` to expose the port directly), and the access token is passed as `#token=` so it stays out of logs (#690)
+- Dependency advisories fixed: fast-uri, qs (#667), undici, vitest and ip-address (#683)
+
 ## [0.9.1] - 2026-09-28
 
 ### Changed
