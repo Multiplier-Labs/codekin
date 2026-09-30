@@ -47,6 +47,8 @@ export interface Prefs {
   sidebarCollapsed: boolean
   sidebarWidth: number
   diffPanelWidth: number
+  /** Height of the Changes panel's pinned file list. */
+  diffListHeight: number
   repoDrawerWidth: number
   /** Last repo drawer tab, keyed by repo dir. */
   repoDrawerTabs: Record<string, string>

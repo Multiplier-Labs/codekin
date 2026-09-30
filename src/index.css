@@ -543,6 +543,25 @@
   --text-head: 24px;
 }
 
+/* ── Changes panel reading scale ───────────────────────────────────────────
+   The Changes panel (`.changes-panel`, DiffPanel.tsx) is read closely — paths,
+   branch names and code — so, like Settings, it raises the steps of the same
+   scale rather than hand-picking bigger classes. Mono text (paths, diff) uses
+   the step above the Lato beside it, since Inconsolata reads smaller. Touch
+   (the full-screen sheet on phones) goes one step further. */
+.changes-panel {
+  --text-micro: 12.5px;
+  --text-meta: 14px;
+  --text-body: 15.5px;
+  --text-title: 17px;
+}
+
+[data-density="touch"] .changes-panel {
+  --text-meta: 15.5px;
+  --text-body: 16px;
+  --text-title: 17px;
+}
+
 /* ── Density ───────────────────────────────────────────────────────────────
    One knob, set once on the app shell via data-density="touch" (App.tsx),
    with a pointer:coarse fallback so a touch laptop gets sane targets even
@@ -1177,25 +1196,70 @@ html, body, #root {
 }
 
 /* ---------- react-diff-view overrides ---------- */
+.diff-hunk-view {
+  /* The library sets its own font on each line; point it at ours. */
+  --diff-font-family: 'Inconsolata', monospace;
+}
+
 .diff-hunk-view .diff-unified {
-  font-family: 'Inconsolata', monospace;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 14px;
+}
+
+.diff-hunk-view .diff-line {
+  line-height: 1.55;
 }
 
 .diff-hunk-view .diff-gutter {
   color: var(--color-neutral-6);
-  padding: 0 6px;
-  min-width: 40px;
+  padding: 0 8px;
+  min-width: 44px;
   text-align: right;
   user-select: none;
   border-right: 1px solid var(--color-neutral-9);
 }
 
 .diff-hunk-view .diff-code {
-  padding: 0 8px;
+  padding: 0 10px;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* Mark added and removed lines with + / − so a change reads without color.
+   Pseudo-content is not copied with the code. */
+.diff-hunk-view .diff-code-insert::before,
+.diff-hunk-view .diff-code-delete::before,
+.diff-hunk-view .diff-code-normal::before {
+  user-select: none;
+}
+.diff-hunk-view .diff-code-insert::before { content: '+ '; }
+.diff-hunk-view .diff-code-delete::before { content: '\2212  '; }
+.diff-hunk-view .diff-code-normal::before { content: '  '; }
+
+/* Narrow panels: one gutter. The old-side column is collapsed to zero width
+   (not removed, so cells stay under their <col>); DiffHunkView puts removed
+   lines' old number in the new-side gutter. */
+.diff-hunk-view.diff-single-gutter col.diff-gutter-col:first-child {
+  width: 0;
+}
+.diff-hunk-view.diff-single-gutter .diff-line > .diff-gutter:first-child {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  font-size: 0;
+  overflow: hidden;
+}
+.diff-hunk-view.diff-single-gutter col.diff-gutter-col:nth-child(2) {
+  width: 38px;
+}
+
+[data-density="touch"] .diff-hunk-view .diff-unified {
+  font-size: 15px;
+}
+[data-density="touch"] .diff-hunk-view .diff-line {
+  line-height: 1.6;
+}
+[data-density="touch"] .diff-hunk-view.diff-single-gutter col.diff-gutter-col:nth-child(2) {
+  width: 48px;
 }
 
 .diff-hunk-view .diff-code-insert {
@@ -1218,11 +1282,18 @@ html, body, #root {
   color: var(--color-error-5);
 }
 
-.diff-hunk-view .diff-hunk-header {
+.diff-hunk-view .diff-decoration-content {
   background: var(--color-neutral-10);
+  padding: 0;
+}
+
+.diff-hunk-view .diff-hunk-header {
+  display: block;
   color: var(--color-neutral-5);
-  font-size: 11px;
-  padding: 2px 8px;
+  font-size: 12.5px;
+  padding: 3px 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 [data-scheme="light"] .diff-hunk-view .diff-code-insert {

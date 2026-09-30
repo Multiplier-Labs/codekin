@@ -189,7 +189,7 @@ export function SessionContent({
             an edit just made in this browser. */}
         {showChangesButton && !diffPanelOpen && (
           <button
-            className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-control bg-primary-8 px-3 py-1.5 text-body font-medium text-on-primary shadow-floating backdrop-blur-sm transition-colors hover:bg-primary-7"
+            className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-control bg-primary-8 px-3 py-1.5 text-body font-medium text-on-primary backdrop-blur-sm transition-colors hover:bg-primary-7"
             onClick={onOpenDiffPanel}
             title={`Review this session's changes${changesDetail ? ` — ${changesDetail}` : ''} (Ctrl+Shift+D)`}
           >
