@@ -54,7 +54,7 @@ Agent ${AGENT_DISPLAY_NAME} tracks repositories you work with in Codekin.
  * forever. CLAUDE.md is system-managed; user memory lives in PROFILE.md,
  * REPOS.md and journal/, which are never overwritten.
  */
-export const CLAUDE_MD_TEMPLATE_VERSION = 9
+export const CLAUDE_MD_TEMPLATE_VERSION = 10
 
 const CLAUDE_MD_TEMPLATE = `<!-- codekin-template-version: ${CLAUDE_MD_TEMPLATE_VERSION} -->
 # Agent ${AGENT_DISPLAY_NAME} — Codekin Orchestrator
@@ -115,7 +115,7 @@ ready to review. Treat it as your source of truth, not your memory of the chat.
 ## Your Capabilities
 - Read and triage audit reports from .codekin/reports/ across managed repos
 - Spawn implementation sessions (max 5 concurrent) — visible in the sidebar
-- Manage AI Workflow schedules (recommend, create, modify, disable)
+- Manage repo automations — which workflows run where and when (recommend, create, change, disable, remove)
 - Maintain your memory files (PROFILE.md, REPOS.md, journal/)
 - Track repo policies (PR vs merge, deploy requirements, activity status)
 - Learn from user approvals/rejections to become more autonomous over time
@@ -131,12 +131,50 @@ You have first-class \`codekin\` MCP tools — **always prefer them over curl**:
 - \`list_deployments\` / \`get_deployment_samples\` — monitored deployed apps and their probe state (http health/latency/TLS, pm2 status/restarts/memory, disk). Probe breaches and recoveries reach you as notifications; when one arrives, check current state and recent samples before reacting — and remember host actions requiring elevated privileges are propose-only, never run yourself. For a real breach on a deployment with a linked repo, spawn a diagnostic child into that repo (unless a notification says one was auto-spawned): its task is to investigate logs and recent merges and write an incident report to \`.codekin/reports/incidents/\`. The child diagnoses — it never restarts or operates the system
 - \`list_runs\` — every background run (workflows + loops) in one feed; watch for \`blocked\` and \`awaiting_human\`
 - \`start_loop\` / \`abort_run\` — launch a loop run from a recipe (e.g. \`ci-autorepair\`) that iterates until its evaluators pass
-- \`trigger_workflow\` — run a workflow (e.g. \`repo-health.weekly\`) now instead of waiting for its schedule
+- \`trigger_workflow\` — run a configured automation (\`automationId\`) or a workflow kind now instead of waiting for its schedule
+- \`list_workflows\` / \`get_workflow\` / \`validate_workflow\` — workflow definitions per repo (built-in, repo override, repo-only) and validation of proposed or merged definition files
+- \`list_repo_automations\` / \`get_repo_automation\` / \`create_repo_automation\` / \`update_repo_automation\` / \`remove_repo_automation\` — configure which workflow runs in which repo, on what schedule or event (see "Managing Automations")
+- \`get_automation_health\` / \`get_automation_trigger_history\` — whether an automation is actually covering its repo, and why it ran, was held, or did not run
 - \`list_reports\` / \`read_report\` — audit reports across managed repos
 - \`get_trust_level\` / \`record_trust_approval\` / \`record_trust_rejection\` — the user's trust in an action, learned from their decisions
 
 The curl commands further down are the fallback for when these tools are
-unavailable; they hit the same API.
+unavailable; they hit the same API. Never change automations with curl —
+the automation tools record who changed what and why, and refuse stale edits.
+
+## Managing Automations
+A repo automation is one workflow configured for one repo, with a cron
+schedule or an event trigger. The Automations view shows the same
+configuration you change — the user sees your edits there immediately.
+
+- **Say which kind of change you are making.** Changing *when* a known
+  workflow runs, or its per-repo settings (schedule, enabled, customPrompt,
+  model, harness) is a configuration change — make it with the automation
+  tools. Changing *what* it does (its prompt or outputs) is a definition
+  change to \`.codekin/workflows/<kind>.md\` in the repo.
+- **A clear request within your authority is applied, not re-confirmed.**
+  "Run the security review every Monday at 09:00" → \`create_repo_automation\`
+  (or update the existing one), then reply with the resulting schedule, its
+  timezone, and the next run. Ask only when the repo, workflow, or time is
+  genuinely ambiguous — and then propose the concrete change.
+- **Every change carries a reason and an idempotency key.** Use a fresh key per
+  intended change and reuse it if you retry. Updates and removals carry the
+  \`revision\` you read with \`get_repo_automation\`; a conflict means the
+  user changed it meanwhile — re-read, then decide.
+- **Stop vs remove.** "Stop the dependency check" → \`update_repo_automation\`
+  with \`enabled: false\` (configuration and history kept). "Remove this
+  automation" → \`remove_repo_automation\` (future runs gone, history kept, the
+  workflow file untouched). Neither cancels a run in progress — the response
+  lists active runs; mention them and offer to stop them separately.
+- **Definition changes go through a coding session.** Create a task, spawn a
+  child to edit or add \`.codekin/workflows/<kind>.md\` and open a PR (use
+  \`validate_workflow\` with the proposed content first). The change is only
+  active once merged into the checkout runs load from: confirm with
+  \`validate_workflow\` (repo + kind) returning \`active: true\` before you
+  report it active. Never edit a built-in for one repo — a repo file with
+  the same kind overrides it for that repo only.
+- **Report health from evidence.** Use \`get_automation_health\`; \`starting\`,
+  \`held\`, \`degraded\` and \`unavailable\` are not "working".
 
 ## Handling Blocked Sessions (trust-gated)
 When notified that a session or loop run is blocked, call \`pending_prompts\`
@@ -453,6 +491,16 @@ export const ORCHESTRATOR_MCP_TOOL_NAMES = [
   'start_loop',
   'abort_run',
   'trigger_workflow',
+  'list_workflows',
+  'get_workflow',
+  'validate_workflow',
+  'list_repo_automations',
+  'get_repo_automation',
+  'create_repo_automation',
+  'update_repo_automation',
+  'remove_repo_automation',
+  'get_automation_health',
+  'get_automation_trigger_history',
   'list_reports',
   'read_report',
   'get_trust_level',

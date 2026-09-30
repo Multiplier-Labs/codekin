@@ -37,7 +37,8 @@ import { buildHostDigest } from './host-probe.js'
 import { runDependencyAuditSweep } from './dependency-audit.js'
 import { generate404Page, generate500Page } from './error-page.js'
 import { loadMdWorkflows } from './workflow-loader.js'
-import { createWorkflowRouter, syncSchedules } from './workflow-routes.js'
+import { createWorkflowRouter, createAutomationService, syncSchedules } from './workflow-routes.js'
+import { AutomationChangeLog } from './automation-changes.js'
 import { LoopStore } from './loop-store.js'
 import { LoopEngine } from './loop-engine.js'
 import { LoopArtifactStore } from './loop-artifacts.js'
@@ -118,6 +119,15 @@ function verifyTokenOrSessionToken(token: string | undefined, sessionId: string 
   if (verifyToken(token)) return true
   if (!authToken || !token || !sessionId) return false
   return verifySessionToken(authToken, sessionId, token)
+}
+
+/**
+ * The user's token or Agent Joe's scoped session token. Joe's MCP tools reach
+ * the runs, loops, deployments and workflow APIs with its own token; where a
+ * change must be attributed, routers tell the two apart with verifyToken.
+ */
+function verifyUserOrJoe(token: string | undefined): boolean {
+  return verifyTokenOrSessionToken(token, getOrCreateOrchestratorId())
 }
 
 /** Extract auth token from Authorization header only. */
@@ -375,9 +385,15 @@ app.use(createRelayStatusRouter(verifyToken, extractToken, relayConnector))
 
 // Workflow router — commitEventHandler is set after engine init, but the
 // router closure captures the variable reference so it will resolve correctly.
-app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessions, commitEventState))
+// One automation service for the Automations UI and Joe's automation tools —
+// same config, same revision checks, one audit trail.
+const automationService = createAutomationService(sessions, new AutomationChangeLog())
+app.use('/api/workflows', createWorkflowRouter(verifyUserOrJoe, extractToken, sessions, commitEventState, {
+  automations: automationService,
+  isUserRequest: (req) => verifyToken(extractToken(req)),
+}))
 // Deployment registry + monitor (probes, samples, discovery)
-app.use('/api/deployments', createDeploymentRouter(verifyToken, extractToken))
+app.use('/api/deployments', createDeploymentRouter(verifyUserOrJoe, extractToken))
 // Unified run store — orchestrator children persist here as engine:'agent'
 // runs. Children orphaned by the previous process are failed honestly at boot.
 const runStore = new RunStore()
@@ -401,7 +417,7 @@ const taskService = new OrchestratorTaskService({
 })
 childManager.onChildUpdate((child) => taskService.syncFromChild(child))
 childManager.recoverInterrupted(interruptedAgentRuns)
-app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, childManager, runStore, taskService))
+app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, childManager, runStore, taskService, automationService))
 // Loops 2.0 — durable, event-sourced outcome loops (docs/LOOPS-REWRITE-SPEC.md).
 const loopStore = new LoopStore()
 const loopArtifacts = new LoopArtifactStore(join(DATA_DIR, 'loop-artifacts'))
@@ -413,9 +429,9 @@ void loopEngine.recoverAll().then(({ resumed, waiting, failed }) => {
     console.log(`[loops] Recovery: resumed ${resumed.length}, left waiting ${waiting.length}, failed ${failed.length}`)
   }
 }).catch((err) => console.error('[loops] Recovery failed:', err))
-app.use('/api/loops', createLoopRouter(verifyToken, extractToken, loopStore, loopEngine, loopArtifacts))
+app.use('/api/loops', createLoopRouter(verifyUserOrJoe, extractToken, loopStore, loopEngine, loopArtifacts))
 // Unified run read model — all engines' runs in one shape for the Automations feed.
-app.use('/api/runs', createRunsRouter(verifyToken, extractToken, () => {
+app.use('/api/runs', createRunsRouter(verifyUserOrJoe, extractToken, () => {
   try {
     return getWorkflowEngine()
   } catch {

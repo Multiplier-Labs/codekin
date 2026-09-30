@@ -32,6 +32,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'fs'
 import { execFileSync } from 'child_process'
+import { createHash } from 'crypto'
 import { dirname, isAbsolute, join, resolve, sep } from 'path'
 import { REPOS_ROOT } from './config.js'
 import { fileURLToPath } from 'url'
@@ -141,17 +142,22 @@ const WORKFLOWS_DIR = existsSync(join(__ownDir, 'workflows'))
  *                want best-effort discovery without crashing the server.
  */
 function loadBuiltinWorkflows(strict = false): WorkflowDef[] {
+  return loadBuiltinWorkflowFiles(strict).map(f => f.def)
+}
+
+function loadBuiltinWorkflowFiles(strict = false): { def: WorkflowDef; path: string; content: string }[] {
   if (!existsSync(WORKFLOWS_DIR)) {
     console.warn(`[workflow-loader] Built-in workflows dir not found: ${WORKFLOWS_DIR}`)
     return []
   }
 
-  const defs: WorkflowDef[] = []
+  const files: { def: WorkflowDef; path: string; content: string }[] = []
   for (const file of readdirSync(WORKFLOWS_DIR)) {
     if (!file.endsWith('.md')) continue
     const filePath = join(WORKFLOWS_DIR, file)
     try {
-      defs.push(parseMdWorkflow(readFileSync(filePath, 'utf-8'), filePath))
+      const content = readFileSync(filePath, 'utf-8')
+      files.push({ def: parseMdWorkflow(content, filePath), path: filePath, content })
     } catch (err) {
       if (strict) {
         throw err
@@ -159,7 +165,7 @@ function loadBuiltinWorkflows(strict = false): WorkflowDef[] {
       console.error(`[workflow-loader] Failed to parse ${filePath}:`, err)
     }
   }
-  return defs
+  return files
 }
 
 /** Try to load a per-repo override for a given kind from {repoPath}/.codekin/workflows/. */
@@ -379,14 +385,20 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
           sessions.startClaude(sessionId)
           await sessions.waitForReady(sessionId)
 
+          // Per-repo override: check {repoPath}/.codekin/workflows/{kind}.md.
+          // Resolved once so the run records exactly which definition it used.
+          const repoOverride = loadRepoOverride(repoPath, ctx.run.kind)
+          const definition = {
+            source: repoOverride ? (isBuiltinKind(ctx.run.kind) ? 'override' : 'repo') : 'builtin',
+            hash: workflowDefinitionHash(repoOverride ?? def),
+          }
+
           if (ctx.resumed) {
             // The prompt was already sent in the original run before the server crashed.
             // Just wait for the result Claude is (still) producing — sending again would
             // duplicate the prompt and fork the conversation.
             console.log(`[workflow:${def.kind}] Resuming run ${ctx.runId}: re-attaching to session ${sessionId} (no re-send)`)
           } else {
-            // Per-repo override: check {repoPath}/.codekin/workflows/{kind}.md
-            const repoOverride = loadRepoOverride(repoPath, ctx.run.kind)
             const basePrompt = repoOverride ? repoOverride.prompt : def.prompt
 
             const userPrompt = customPrompt
@@ -447,6 +459,7 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
             repoPath,
             branch: input.branch,
             runId: ctx.runId,
+            definition,
           }
         },
       },
@@ -693,6 +706,135 @@ export function listAvailableKinds(repoPath?: string): WorkflowKindInfo[] {
   }
 
   return kinds
+}
+
+// ---------------------------------------------------------------------------
+// Effective definitions and validation (Joe's workflow tools)
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a repo's effective definition for a kind comes from: a shipped
+ * built-in, a repo file overriding that built-in's prompt, or a repo-only kind.
+ */
+export type WorkflowDefinitionSource = 'builtin' | 'override' | 'repo'
+
+export interface EffectiveWorkflow {
+  kind: string
+  name: string
+  source: WorkflowDefinitionSource
+  /** File the effective definition is read from. */
+  path: string
+  /** Built-in the repo file overrides, when source is 'override'. */
+  builtinPath: string | null
+  /** Short content hash — recorded on each run as `output.definition.hash`. */
+  hash: string
+  model: string | null
+  outputDir: string
+  prompt: string
+  /**
+   * Per-automation settings that change behavior without a definition edit.
+   * Anything else (prompt, output location) is a definition change.
+   */
+  configurableFields: string[]
+}
+
+const CONFIGURABLE_AUTOMATION_FIELDS = ['cronExpression', 'enabled', 'customPrompt', 'model', 'provider', 'name']
+
+/** Content hash of the parts of a definition that shape a run. */
+export function workflowDefinitionHash(def: WorkflowDef): string {
+  const material = JSON.stringify([def.kind, def.name, def.outputDir, def.filenameSuffix, def.commitMessage, def.model ?? null, def.prompt])
+  return createHash('sha256').update(material).digest('hex').slice(0, 12)
+}
+
+function isBuiltinKind(kind: string): boolean {
+  return loadBuiltinWorkflows().some(d => d.kind === kind)
+}
+
+function toEffective(def: WorkflowDef, source: WorkflowDefinitionSource, path: string, builtinPath: string | null): EffectiveWorkflow {
+  return {
+    kind: def.kind,
+    name: def.name,
+    source,
+    path,
+    builtinPath,
+    hash: workflowDefinitionHash(def),
+    model: def.model ?? null,
+    outputDir: def.outputDir,
+    prompt: def.prompt,
+    configurableFields: CONFIGURABLE_AUTOMATION_FIELDS,
+  }
+}
+
+/**
+ * The definitions a run in `repoPath` would actually use, per kind. Reads the
+ * repo's main checkout — the location runs load from — so a definition that
+ * only exists on an unmerged branch or worktree is not reported as effective.
+ */
+export function listEffectiveWorkflows(repoPath?: string): EffectiveWorkflow[] {
+  const builtins = loadBuiltinWorkflowFiles()
+  const byKind = new Map<string, EffectiveWorkflow>()
+  for (const b of builtins) byKind.set(b.def.kind, toEffective(b.def, 'builtin', b.path, null))
+
+  if (repoPath) {
+    for (const def of discoverRepoWorkflows(repoPath)) {
+      const builtin = builtins.find(b => b.def.kind === def.kind)
+      if (builtin) {
+        // Runs only apply an override read from <kind>.md; another filename is inert.
+        const overridePath = join(repoPath, '.codekin', 'workflows', `${def.kind}.md`)
+        const override = loadRepoOverride(repoPath, def.kind)
+        if (override) byKind.set(def.kind, toEffective(override, 'override', overridePath, builtin.path))
+      } else if (!byKind.has(def.kind)) {
+        byKind.set(def.kind, toEffective(def, 'repo', join(repoPath, '.codekin', 'workflows', `${def.kind}.md`), null))
+      }
+    }
+  }
+  return [...byKind.values()]
+}
+
+export function getEffectiveWorkflow(repoPath: string | undefined, kind: string): EffectiveWorkflow | null {
+  return listEffectiveWorkflows(repoPath).find(w => w.kind === kind) ?? null
+}
+
+export interface WorkflowValidation {
+  valid: boolean
+  errors: string[]
+  warnings: string[]
+  kind: string | null
+  /** What activating this file would do in the repo. */
+  effect: 'new-kind' | 'override-builtin' | 'update-repo-kind' | null
+  hash: string | null
+}
+
+/**
+ * Validate a proposed workflow definition before it is activated. Pass the
+ * file content (and, for repo files, the repo and intended filename) — this
+ * never writes anything.
+ */
+export function validateWorkflowDefinition(content: string, opts: { repoPath?: string; filename?: string } = {}): WorkflowValidation {
+  const errors: string[] = []
+  const warnings: string[] = []
+  let def: WorkflowDef
+  try {
+    def = parseMdWorkflow(content, opts.filename ?? 'proposed definition')
+  } catch (err) {
+    errors.push(err instanceof Error ? err.message : String(err))
+    return { valid: false, errors, warnings, kind: null, effect: null, hash: null }
+  }
+
+  if (!/^[a-z0-9][a-z0-9.-]*$/.test(def.kind)) errors.push(`Invalid kind "${def.kind}": use lowercase letters, digits, dots and dashes`)
+  if (!def.prompt) errors.push('The prompt body is empty')
+  if (!def.outputDir.startsWith('.codekin/reports')) warnings.push(`outputDir "${def.outputDir}" is outside .codekin/reports — reports will not show in the reports list`)
+  if (opts.filename) {
+    const base = opts.filename.split(/[/\\]/).pop() ?? opts.filename
+    if (base !== `${def.kind}.md`) errors.push(`File must be named ${def.kind}.md — runs load the definition by kind`)
+  }
+
+  const builtin = loadBuiltinWorkflows().some(d => d.kind === def.kind)
+  const existingRepoKind = !builtin && !!opts.repoPath && discoverRepoWorkflows(opts.repoPath).some(d => d.kind === def.kind)
+  const effect = builtin ? 'override-builtin' : existingRepoKind ? 'update-repo-kind' : 'new-kind'
+  if (builtin) warnings.push(`Overrides the built-in ${def.kind} prompt for this repo only`)
+
+  return { valid: errors.length === 0, errors, warnings, kind: def.kind, effect, hash: workflowDefinitionHash(def) }
 }
 
 // ---------------------------------------------------------------------------

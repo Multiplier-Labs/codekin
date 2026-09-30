@@ -89,6 +89,28 @@ describe('Codekin MCP tool registry', () => {
     expect(respond).toHaveBeenCalledWith('s', 'r', ['Yes', 'Postgres'])
   })
 
+  it('maps the automation tools onto the API client and requires change metadata', async () => {
+    const create = vi.spyOn(api, 'createRepoAutomation').mockResolvedValue({})
+    const update = vi.spyOn(api, 'updateRepoAutomation').mockResolvedValue({})
+    const remove = vi.spyOn(api, 'removeRepoAutomation').mockResolvedValue({})
+    const trigger = vi.spyOn(api, 'triggerWorkflow').mockResolvedValue({})
+
+    const change = { reason: 'user asked', idempotencyKey: 'key-12345678' }
+    await client.callTool({ name: 'create_repo_automation', arguments: { repo: '/r', kind: 'security-audit.weekly', cronExpression: '0 9 * * 1', ...change } })
+    await client.callTool({ name: 'update_repo_automation', arguments: { id: 'a1', expectedRevision: 2, enabled: false, ...change } })
+    await client.callTool({ name: 'remove_repo_automation', arguments: { id: 'a1', expectedRevision: 3, ...change } })
+    await client.callTool({ name: 'trigger_workflow', arguments: { automationId: 'a1' } })
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ repo: '/r', cronExpression: '0 9 * * 1', idempotencyKey: 'key-12345678' }))
+    expect(update).toHaveBeenCalledWith('a1', expect.objectContaining({ expectedRevision: 2, enabled: false }))
+    expect(remove).toHaveBeenCalledWith('a1', expect.objectContaining({ expectedRevision: 3 }))
+    expect(trigger).toHaveBeenCalledWith({ automationId: 'a1', kind: undefined, input: undefined })
+
+    const missingKey = await client.callTool({ name: 'update_repo_automation', arguments: { id: 'a1', expectedRevision: 2, reason: 'r' } })
+    expect(missingKey.isError).toBe(true)
+    expect(update).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects an empty follow-up without calling the API', async () => {
     const send = vi.spyOn(api, 'sendToChild').mockResolvedValue({})
     const result = await client.callTool({ name: 'send_to_child', arguments: { id: 'c1', text: '' } })

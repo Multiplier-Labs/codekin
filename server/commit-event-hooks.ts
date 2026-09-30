@@ -133,6 +133,16 @@ export function installCommitHook(repoPath: string): boolean {
   return true
 }
 
+/** Whether the Codekin post-commit section is currently installed in a repo. */
+export function isCommitHookInstalled(repoPath: string): boolean {
+  try {
+    const hookPath = join(getHooksDir(repoPath), 'post-commit')
+    return existsSync(hookPath) && readFileSync(hookPath, 'utf-8').includes(BEGIN_MARKER)
+  } catch {
+    return false
+  }
+}
+
 /**
  * Remove the codekin section from a repo's post-commit hook.
  * If the file only contains the codekin section (+ shebang), removes the file entirely.

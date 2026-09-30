@@ -40,6 +40,36 @@ export interface CreateTaskApiInput {
   sourceRef?: string
 }
 
+/** Why and on whose behalf an automation change is made — recorded in its audit trail. */
+export interface AutomationChangeFields {
+  reason: string
+  idempotencyKey: string
+  authorization?: string
+  originSessionId?: string
+  taskId?: string
+}
+
+export interface CreateAutomationApiInput extends AutomationChangeFields {
+  repo: string
+  kind: string
+  cronExpression: string
+  name?: string
+  enabled?: boolean
+  customPrompt?: string
+  model?: string
+  provider?: CodingProvider
+}
+
+export interface UpdateAutomationApiInput extends AutomationChangeFields {
+  expectedRevision: number
+  name?: string
+  cronExpression?: string
+  enabled?: boolean
+  customPrompt?: string
+  model?: string
+  provider?: CodingProvider
+}
+
 export class CodekinApi {
   private readonly baseUrl: string
   private readonly token: string
@@ -178,8 +208,51 @@ export class CodekinApi {
     return this.request('POST', `/api/loops/runs/${encodeURIComponent(runId)}/cancel`)
   }
 
-  triggerWorkflow(kind: string, input?: Record<string, unknown>): Promise<unknown> {
-    return this.request('POST', '/api/workflows/runs', { kind, input })
+  triggerWorkflow(opts: { kind?: string; automationId?: string; input?: Record<string, unknown> }): Promise<unknown> {
+    if (opts.automationId) return this.request('POST', `/api/orchestrator/automations/${encodeURIComponent(opts.automationId)}/trigger`)
+    return this.request('POST', '/api/orchestrator/automations/runs', { kind: opts.kind, input: opts.input })
+  }
+
+  // --- workflow definitions and repo automations ---------------------------
+
+  listWorkflows(repo?: string): Promise<unknown> {
+    return this.request('GET', `/api/orchestrator/automations/workflows${repo ? `?repo=${encodeURIComponent(repo)}` : ''}`)
+  }
+
+  getWorkflow(kind: string, repo?: string): Promise<unknown> {
+    return this.request('GET', `/api/orchestrator/automations/workflows/${encodeURIComponent(kind)}${repo ? `?repo=${encodeURIComponent(repo)}` : ''}`)
+  }
+
+  validateWorkflow(input: { content?: string; repo?: string; kind?: string; filename?: string }): Promise<unknown> {
+    return this.request('POST', '/api/orchestrator/automations/workflows/validate', input)
+  }
+
+  listRepoAutomations(repo?: string): Promise<unknown> {
+    return this.request('GET', `/api/orchestrator/automations${repo ? `?repo=${encodeURIComponent(repo)}` : ''}`)
+  }
+
+  getRepoAutomation(id: string): Promise<unknown> {
+    return this.request('GET', `/api/orchestrator/automations/${encodeURIComponent(id)}`)
+  }
+
+  createRepoAutomation(input: CreateAutomationApiInput): Promise<unknown> {
+    return this.request('POST', '/api/orchestrator/automations', input)
+  }
+
+  updateRepoAutomation(id: string, input: UpdateAutomationApiInput): Promise<unknown> {
+    return this.request('PATCH', `/api/orchestrator/automations/${encodeURIComponent(id)}`, input)
+  }
+
+  removeRepoAutomation(id: string, input: AutomationChangeFields & { expectedRevision: number }): Promise<unknown> {
+    return this.request('POST', `/api/orchestrator/automations/${encodeURIComponent(id)}/remove`, input)
+  }
+
+  getAutomationHealth(id: string): Promise<unknown> {
+    return this.request('GET', `/api/orchestrator/automations/${encodeURIComponent(id)}/health`)
+  }
+
+  getAutomationTriggerHistory(id: string, limit?: number): Promise<unknown> {
+    return this.request('GET', `/api/orchestrator/automations/${encodeURIComponent(id)}/history${limit ? `?limit=${limit}` : ''}`)
   }
 
   getRepoActivity(): Promise<unknown> {

@@ -19,7 +19,7 @@ import type { Server } from 'http'
 const mocks = vi.hoisted(() => ({
   // Workflow engine
   engineAvailable: true,
-  listRuns: vi.fn(() => [{ id: 'run-1', kind: 'code-review.daily', status: 'succeeded' }] as unknown[]),
+  listRuns: vi.fn(() => [{ id: 'run-1', kind: 'code-review.daily', status: 'succeeded', input: {} }] as unknown[]),
   getRun: vi.fn(() => null as unknown),
   startRun: vi.fn(async (kind: string, input?: unknown) => ({ id: 'new-run', kind, input })),
   cancelRun: vi.fn(() => true),
@@ -51,6 +51,9 @@ const mocks = vi.hoisted(() => ({
 
   // Workflow loader
   listAvailableKinds: vi.fn(() => [{ kind: 'code-review.daily', name: 'Daily', source: 'builtin' as const }]),
+  listEffectiveWorkflows: vi.fn(() => ['code-review.daily', 'commit-review'].map(kind => ({
+    kind, name: kind, source: 'builtin' as const, path: `/wf/${kind}.md`, builtinPath: null, hash: 'abc', model: null, outputDir: '.codekin/reports', prompt: 'p', configurableFields: [],
+  }))),
   ensureRepoWorkflowsRegistered: vi.fn(),
 
   // Commit hooks + config helpers
@@ -100,10 +103,12 @@ vi.mock('./workflow-config.js', () => ({
 vi.mock('./workflow-loader.js', () => ({
   listAvailableKinds: mocks.listAvailableKinds,
   ensureRepoWorkflowsRegistered: mocks.ensureRepoWorkflowsRegistered,
+  listEffectiveWorkflows: mocks.listEffectiveWorkflows,
 }))
 
 vi.mock('./commit-event-hooks.js', () => ({
   syncCommitHooks: mocks.syncCommitHooks,
+  isCommitHookInstalled: () => true,
 }))
 
 vi.mock('./config.js', () => ({
@@ -302,7 +307,7 @@ describe('workflow routes', () => {
     mocks.engineAvailable = true
     vi.clearAllMocks()
     // Re-install default return values after clearAllMocks
-    mocks.listRuns.mockReturnValue([{ id: 'run-1', kind: 'code-review.daily', status: 'succeeded' }])
+    mocks.listRuns.mockReturnValue([{ id: 'run-1', kind: 'code-review.daily', status: 'succeeded', input: {} }])
     mocks.listSchedules.mockReturnValue([{ id: 'sched-1', kind: 'code-review.daily', cronExpression: '0 6 * * *', input: {}, enabled: true }])
     mocks.startRun.mockImplementation(async (kind: string, input?: unknown) => ({ id: 'new-run', kind, input }))
     mocks.cancelRun.mockReturnValue(true)
@@ -727,7 +732,7 @@ describe('workflow routes', () => {
         body: JSON.stringify({ name: 'New' }),
       })
       expect(res.status).toBe(200)
-      expect(mocks.updateReviewRepo).toHaveBeenCalledWith('r1', { name: 'New' })
+      expect(mocks.updateReviewRepo).toHaveBeenCalledWith('r1', { name: 'New', revision: 2 })
     })
 
     it('returns 400 when repoPath is provided and is invalid', async () => {
@@ -743,7 +748,6 @@ describe('workflow routes', () => {
     })
 
     it('returns 404 when repo does not exist', async () => {
-      mocks.updateReviewRepo.mockImplementationOnce(() => { throw new Error('Repo not found: ghost') })
       const res = await fetch(`${harness.baseUrl}/config/repos/ghost`, {
         method: 'PATCH',
         headers: authHeader(),
@@ -774,7 +778,7 @@ describe('workflow routes', () => {
         body: JSON.stringify({ cronExpression: 'event' }),
       })
       expect(res.status).toBe(200)
-      expect(mocks.updateReviewRepo).toHaveBeenCalledWith('r1', { cronExpression: 'event' })
+      expect(mocks.updateReviewRepo).toHaveBeenCalledWith('r1', { cronExpression: 'event', revision: 2 })
     })
 
     it('returns 400 for an invalid provider in patch', async () => {
@@ -799,7 +803,7 @@ describe('workflow routes', () => {
         body: JSON.stringify({ provider: 'opencode' }),
       })
       expect(res.status).toBe(200)
-      expect(mocks.updateReviewRepo).toHaveBeenCalledWith('r1', { provider: 'opencode' })
+      expect(mocks.updateReviewRepo).toHaveBeenCalledWith('r1', { provider: 'opencode', revision: 2 })
     })
   })
 
