@@ -17,6 +17,7 @@ import { loadWorkflowConfig } from './workflow-config.js'
 import type { OrchestratorMemory } from './orchestrator-memory.js'
 import { ChildControlError, isTerminalChildStatus, type OrchestratorChildManager } from './orchestrator-children.js'
 import type { OrchestratorMonitor } from './orchestrator-monitor.js'
+import { TaskActionError, type OrchestratorTaskService } from './orchestrator-tasks.js'
 
 // ---------------------------------------------------------------------------
 // Per-IP rate limiter for child-session spawn (mirrors auth-routes pattern).
@@ -78,6 +79,8 @@ interface SpawnChildBody {
   model?: string
   allowedTools?: string[]
   timeoutMs?: number
+  /** Joe task this child works on (see docs/JOE-TASKS-SPEC.md). */
+  taskId?: string
 }
 
 interface SessionRespondBody {
@@ -105,6 +108,7 @@ export function createSessionRouter(
   memory: OrchestratorMemory,
   children: OrchestratorChildManager,
   monitorRef?: { current: OrchestratorMonitor | null },
+  tasks?: OrchestratorTaskService,
 ): Router {
   const router = Router()
   // 20 spawns per 5 minutes per IP — child sessions allocate real subprocesses,
@@ -234,7 +238,8 @@ export function createSessionRouter(
   router.post('/api/orchestrator/children', spawnRateLimiter, async (req: Request<Record<string, string>, unknown, SpawnChildBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { repo, task, branchName, completionPolicy, deployAfter, useWorktree, provider, model, allowedTools, timeoutMs } = req.body
+    const { repo, task, branchName, deployAfter, useWorktree, provider, model, allowedTools, timeoutMs, taskId } = req.body
+    let { completionPolicy } = req.body
     if (!repo || !task || !branchName) {
       return res.status(400).json({ error: 'Missing required fields: repo, task, branchName' })
     }
@@ -277,6 +282,16 @@ export function createSessionRouter(
       return res.status(400).json({ error: 'Invalid repo path: must be under configured repos root' })
     }
 
+    if (taskId !== undefined) {
+      if (typeof taskId !== 'string' || !tasks) return res.status(400).json({ error: 'Invalid taskId' })
+      try {
+        completionPolicy ??= tasks.assertStartable(taskId, resolvedRepo).completionPolicy
+      } catch (err) {
+        const status = err instanceof TaskActionError ? err.status : 500
+        return res.status(status).json({ error: err instanceof Error ? err.message : 'Invalid taskId' })
+      }
+    }
+
     try {
       const child = await children.spawn({
         repo,
@@ -288,6 +303,7 @@ export function createSessionRouter(
         model,
         allowedTools,
         timeoutMs,
+        taskId,
         // Stamp the orchestrator (parent) session ID so the child can push
         // a terminal-state notification back to it without a 30-min poll.
         parentSessionId: getOrCreateOrchestratorId(),

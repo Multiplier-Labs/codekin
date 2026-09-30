@@ -26,6 +26,18 @@ export interface SpawnChildInput {
   provider?: CodingProvider
   model?: string
   parentSessionId?: string
+  taskId?: string
+}
+
+export interface CreateTaskApiInput {
+  repo: string
+  title: string
+  detail?: string
+  acceptance?: string
+  priority?: 'high' | 'normal' | 'low'
+  completionPolicy?: 'pr' | 'merge' | 'commit-only'
+  source?: 'joe' | 'report' | 'incident'
+  sourceRef?: string
 }
 
 export class CodekinApi {
@@ -49,7 +61,7 @@ export class CodekinApi {
     return new CodekinApi({ baseUrl: `http://127.0.0.1:${port}`, token })
   }
 
-  private async request(method: 'GET' | 'POST', path: string, body?: unknown): Promise<unknown> {
+  private async request(method: 'GET' | 'POST' | 'PATCH', path: string, body?: unknown): Promise<unknown> {
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method,
       headers: {
@@ -99,6 +111,33 @@ export class CodekinApi {
 
   closeChild(id: string, opts: { mode?: 'archive' | 'delete'; cancel?: boolean } = {}): Promise<unknown> {
     return this.request('POST', `/api/orchestrator/children/${encodeURIComponent(id)}/close`, opts)
+  }
+
+  // --- tasks ----------------------------------------------------------------
+
+  listTasks(opts: { repo?: string; status?: string } = {}): Promise<unknown> {
+    const params = new URLSearchParams()
+    if (opts.repo) params.set('repo', opts.repo)
+    if (opts.status) params.set('status', opts.status)
+    const qs = params.toString()
+    return this.request('GET', `/api/orchestrator/tasks${qs ? `?${qs}` : ''}`)
+  }
+
+  getTask(id: string): Promise<unknown> {
+    return this.request('GET', `/api/orchestrator/tasks/${encodeURIComponent(id)}`)
+  }
+
+  createTask(input: CreateTaskApiInput): Promise<unknown> {
+    const { repo, completionPolicy, source, sourceRef, ...task } = input
+    return this.request('POST', '/api/orchestrator/tasks', { repo, completionPolicy, source, sourceRef, tasks: [task] })
+  }
+
+  updateTask(id: string, patch: { title?: string; detail?: string; acceptance?: string; priority?: string; status?: string; note?: string }): Promise<unknown> {
+    return this.request('PATCH', `/api/orchestrator/tasks/${encodeURIComponent(id)}`, patch)
+  }
+
+  requestDecision(id: string, input: { question: string; recommendation?: string; options?: string[] }): Promise<unknown> {
+    return this.request('POST', `/api/orchestrator/tasks/${encodeURIComponent(id)}/decision`, input)
   }
 
   // --- sessions -------------------------------------------------------------

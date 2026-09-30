@@ -13,7 +13,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
-import { mkdirSync, mkdtempSync, rmSync } from 'fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'fs'
 import { CodekinApi } from './codekin-mcp-api.js'
 import { getOrchestratorProvider, setOrchestratorProvider, ensureOrchestratorRunning } from './orchestrator-manager.js'
 import type { Request } from 'express'
@@ -54,6 +54,7 @@ import { getReportsSince } from './orchestrator-reports.js'
 import { loadWorkflowConfig } from './workflow-config.js'
 import { createSessionRouter } from './orchestrator-session-router.js'
 import { ChildControlError } from './orchestrator-children.js'
+import { TaskActionError, type OrchestratorTaskService } from './orchestrator-tasks.js'
 import type { SessionManager } from './session-manager.js'
 import type { OrchestratorMemory } from './orchestrator-memory.js'
 import type { OrchestratorChildManager } from './orchestrator-children.js'
@@ -554,6 +555,32 @@ describe('createSessionRouter', () => {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId: 'req-1', value: [] }),
       })
       expect(bad.status).toBe(400)
+    })
+  })
+
+  describe('spawn linked to a task', () => {
+    it('validates the task, defaults the completion policy from it, and passes taskId through', async () => {
+      mkdirSync('/tmp/repos', { recursive: true })
+      const repo = mkdtempSync('/tmp/repos/joe-task-')
+      const realRepo = realpathSync(repo)
+      try {
+        const tasks = {
+          assertStartable: vi.fn((id: string, r: string) => {
+            if (id !== 'task-1' || r !== realRepo) throw new TaskActionError('Task belongs to another repo', 409)
+            return { completionPolicy: 'merge' }
+          }),
+        } as unknown as OrchestratorTaskService
+        children = makeChildren()
+        vi.mocked(children.spawn).mockResolvedValue({ id: 'child' } as never)
+        server = await startApp(createSessionRouter(() => true, makeSessions(), makeMemory(), children, undefined, tasks))
+        const api = new CodekinApi({ baseUrl: server.baseUrl, token: 'test' })
+
+        await api.spawnChild({ repo, task: 'do it', branchName: 'fix/it', taskId: 'task-1' })
+        expect(children.spawn).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'task-1', completionPolicy: 'merge' }))
+
+        await expect(api.spawnChild({ repo, task: 'do it', branchName: 'fix/it', taskId: 'other' })).rejects.toThrow(/\(409\)/)
+        expect(children.spawn).toHaveBeenCalledTimes(1)
+      } finally { rmSync(repo, { recursive: true }) }
     })
   })
 })

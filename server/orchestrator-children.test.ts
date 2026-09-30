@@ -1556,6 +1556,28 @@ describe('OrchestratorChildManager', () => {
       expect(other.get('nope')).toBeNull()
     })
 
+    it('notifies update listeners on every state change and carries the task id', async () => {
+      const updates: string[] = []
+      const notify = vi.fn(() => true)
+      manager = new OrchestratorChildManager(sessions, { exec: fakeGit(), runStore, notify })
+      manager.onChildUpdate((c) => { updates.push(`${c.request.taskId}:${c.status}`) })
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => false), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'done' }],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+      }))
+      const child = await manager.spawn(makeRequest({ taskId: 'task-9', parentSessionId: 'parent-1' }))
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+      await vi.waitFor(() => expect(child.status).toBe('completed'))
+
+      expect(updates[0]).toBe('task-9:starting')
+      expect(updates).toContain('task-9:running')
+      expect(updates.at(-1)).toBe('task-9:completed')
+      expect(runStore.getRun(child.id)?.spec).toMatchObject({ taskId: 'task-9' })
+      expect((notify.mock.calls[0] as any[])[0].body).toContain('Task: task-9')
+    })
+
     it('persists a spawn failure as a failed run', async () => {
       sessions.startClaude.mockImplementation(() => { throw new Error('no CLI') })
       const child = await manager.spawn(makeRequest())

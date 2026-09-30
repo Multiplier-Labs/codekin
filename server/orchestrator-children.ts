@@ -58,6 +58,8 @@ export interface ChildSessionRequest {
    * not generate notifications.
    */
   parentSessionId?: string
+  /** Joe task this child works on; its status follows the child (see OrchestratorTaskService). */
+  taskId?: string
 }
 
 /**
@@ -219,6 +221,8 @@ export class OrchestratorChildManager {
   private exec: ExecFn
   /** Unified run store — children persist as engine:'agent' runs when set. */
   private runStore: RunStore | null
+  /** Notified on every persisted child state change (task sync, …). */
+  private updateListeners: Array<(child: ChildSession) => void> = []
 
   constructor(sessions: SessionManager, opts?: { notify?: ChildNotifyFn; exec?: ExecFn; runStore?: RunStore }) {
     this.sessions = sessions
@@ -241,6 +245,15 @@ export class OrchestratorChildManager {
     this.sessions.onSessionStopped((sessionId, reason) => {
       this.handleSessionStopped(sessionId, reason)
     })
+  }
+
+  /** Register a listener for every child state change. Returns an unsubscribe function. */
+  onChildUpdate(listener: (child: ChildSession) => void): () => void {
+    this.updateListeners.push(listener)
+    return () => {
+      const idx = this.updateListeners.indexOf(listener)
+      if (idx >= 0) this.updateListeners.splice(idx, 1)
+    }
   }
 
   /** Unblock a child once its last pending prompt is resolved. */
@@ -323,6 +336,7 @@ export class OrchestratorChildManager {
         model: spec.model,
         allowedTools: spec.allowedTools,
         parentSessionId: spec.parentSessionId,
+        taskId: spec.taskId,
       },
       status: statusMap[run.status] ?? 'failed',
       startedAt: run.createdAt,
@@ -632,6 +646,9 @@ export class OrchestratorChildManager {
    * timed_out→failed with the error preserved). `note` adds a ledger entry.
    */
   private persistRun(child: ChildSession, note?: string): void {
+    for (const listener of this.updateListeners) {
+      try { listener(child) } catch (err) { console.error('[orchestrator-child] Update listener threw:', err) }
+    }
     if (!this.runStore) return
     try {
       const statusMap: Record<ChildStatus, RunLifecycleStatus> = {
@@ -817,6 +834,7 @@ export class OrchestratorChildManager {
       `Branch: ${child.request.branchName}`,
       `Repo: ${child.request.repo}`,
     ]
+    if (child.request.taskId) lines.push(`Task: ${child.request.taskId}`)
     if (child.error) lines.push(`Error: ${child.error}`)
     const v = child.verification
     if (v) {
