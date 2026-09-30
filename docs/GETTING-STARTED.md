@@ -36,7 +36,7 @@ curl -fsSL https://codekin.ai/install.sh | bash
 
 The script can install Node.js 20+ through nvm, installs Codekin from npm, creates a local access token, and starts a user-level background service. It also checks for GitHub CLI (`gh`), but `gh` is optional if you use local Git checkouts.
 
-Open the URL printed by the installer on the **same computer**. It looks like `http://localhost:32352?token=...`. `localhost` refers to the device opening the URL, so this link will not reach your computer from a phone or another computer. Run `codekin token` to print it again. The URL contains an access credential; keep it private. If you open the page without the `?token=...` part, enter the token on the **Settings → Connection** page, which opens automatically.
+Open the URL printed by the installer on the **same computer**. It looks like `http://localhost:32352/#token=...`. `localhost` refers to the device opening the URL, so this link will not reach your computer from a phone or another computer. Run `codekin token` to print it again. The URL contains an access credential; keep it private. If you open the page without the `#token=...` part, enter the token on the **Settings → Connection** page, which opens automatically.
 
 ## 3. Start your first session
 

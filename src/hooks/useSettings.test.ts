@@ -201,5 +201,19 @@ describe('useSettings', () => {
       expect(calledUrl).not.toContain('token=')
       unmount()
     })
+
+    it('reads token from the #token= fragment, persists it and strips it', () => {
+      window.history.replaceState = originalReplaceState
+      window.history.replaceState({}, '', '/#token=frag-tok-456')
+      window.history.replaceState = vi.fn()
+
+      const { result, unmount } = renderHook(() => useSettings())
+      expect(result.current.settings.token).toBe('frag-tok-456')
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).token).toBe('frag-tok-456')
+
+      const calledUrl = (window.history.replaceState as ReturnType<typeof vi.fn>).mock.calls[0][2] as string
+      expect(calledUrl).toBe('/')
+      unmount()
+    })
   })
 })

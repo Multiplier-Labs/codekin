@@ -49,6 +49,7 @@ import { CommitEventHandler } from './commit-event-handler.js'
 import { jsonParse } from './json-parse.js'
 import { createMessageRateLimiter } from './ws-rate-limit.js'
 import { isWsOriginAllowed } from './ws-origin-check.js'
+import { broadcastToAuthenticated } from './ws-broadcast.js'
 import { checkForUpdates, getUpdateNotification } from './version-check.js'
 import { stopOpenCodeServer } from './opencode-process.js'
 import { ensureHookConfig, syncCommitHooks } from './commit-event-hooks.js'
@@ -65,7 +66,7 @@ import { createOrchestratorRouter } from './orchestrator-routes.js'
 import { ensureOrchestratorRunning, getOrchestratorProvider, getOrchestratorSessionId, isOrchestratorSession, getOrCreateOrchestratorId } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
 import { getOrchestratorOutbox } from './orchestrator-outbox.js'
-import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR, DATA_DIR } from './config.js'
+import { PORT as CONFIG_PORT, BIND_HOST, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR, DATA_DIR } from './config.js'
 
 // ---------------------------------------------------------------------------
 // CLI args (legacy bare-metal compat) and auth setup
@@ -454,16 +455,13 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 const server = createServer(app)
 const wss = new WebSocketServer({ server })
 
-// Wire up global broadcast so session manager can notify ALL connected clients
-// (e.g. when a webhook creates a new session that all UIs should show)
-sessions._globalBroadcast = (msg) => {
-  const data = JSON.stringify(msg)
-  for (const ws of wss.clients) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(data)
-    }
-  }
-}
+/** Connections that have completed the `auth` handshake. */
+const authenticatedClients = new Set<WebSocket>()
+
+// Wire up global broadcast so session manager can notify all authenticated
+// clients (e.g. when a webhook creates a new session that all UIs should show).
+// Never wss.clients: that includes sockets still inside the auth window.
+sessions._globalBroadcast = (msg) => broadcastToAuthenticated(authenticatedClients, msg)
 
 /** Maps each WebSocket connection to its current session ID. */
 const clientSessions = new Map<WebSocket, string>()
@@ -569,6 +567,7 @@ wss.on('connection', (ws: WebSocket, req) => {
         return
       }
       authenticated = true
+      authenticatedClients.add(ws)
       clearTimeout(authTimeout)
       send({ type: 'connected', connectionId, claudeAvailable, claudeVersion, apiKeySet, codexAvailable, codexAuthenticated, openCodeAvailable })
 
@@ -588,6 +587,7 @@ wss.on('connection', (ws: WebSocket, req) => {
       sessions.leave(sessionId, ws)
     }
     clientSessions.delete(ws)
+    authenticatedClients.delete(ws)
   })
 
   ws.on('error', (err) => {
@@ -610,8 +610,8 @@ wss.on('close', () => clearInterval(heartbeat))
 // Start server and handle graceful shutdown
 // ---------------------------------------------------------------------------
 
-server.listen(port, '0.0.0.0', () => {
-  console.log(`Codekin WebSocket server listening on port ${port}`)
+server.listen(port, BIND_HOST, () => {
+  console.log(`Codekin WebSocket server listening on ${BIND_HOST}:${port}`)
 
   // Start after listening, so the connector's first proxied call lands.
   relayConnector.start()
@@ -674,7 +674,7 @@ server.listen(port, '0.0.0.0', () => {
       console.error('[workflow] Failed to resume interrupted runs:', err)
     })
 
-    // Broadcast workflow events to all WebSocket clients
+    // Broadcast workflow events to all authenticated WebSocket clients
     engine.on('workflow_event', (event: WorkflowEvent) => {
       const msg: WsServerMessage = {
         type: 'workflow_event',
@@ -684,12 +684,7 @@ server.listen(port, '0.0.0.0', () => {
         stepKey: event.stepKey,
         status: event.status,
       }
-      const data = JSON.stringify(msg)
-      for (const ws of wss.clients) {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data)
-        }
-      }
+      broadcastToAuthenticated(authenticatedClients, msg)
     })
 
     // Broadcast loop events on the same channel, tagged with engine:'loop' so
@@ -709,12 +704,7 @@ server.listen(port, '0.0.0.0', () => {
         kind: run?.recipeId ?? '',
         status: run?.state,
       }
-      const data = JSON.stringify(msg)
-      for (const ws of wss.clients) {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data)
-        }
-      }
+      broadcastToAuthenticated(authenticatedClients, msg)
     })
 
     // Agent (orchestrator-child) run events on the same channel.
@@ -727,12 +717,7 @@ server.listen(port, '0.0.0.0', () => {
         kind: event.kind,
         status: event.status,
       }
-      const data = JSON.stringify(msg)
-      for (const ws of wss.clients) {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data)
-        }
-      }
+      broadcastToAuthenticated(authenticatedClients, msg)
     })
 
     // Repo activity index: aggregates commits, session activity, and hook/webhook
