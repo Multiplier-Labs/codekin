@@ -1,6 +1,6 @@
 # Grok Build integration spec
 
-Status: **proposed** (revised after upstream-doc and codebase review)
+Status: **proposed**. Revised after upstream-doc and codebase review, then a spike against grok 1.0.44 (2026-09-30).
 
 Date: **2026-09-27**
 
@@ -148,6 +148,14 @@ the SDK clearly cheaper. Decide during step 1 and record why.
   and add only the session-scoped `CODEKIN_TOKEN`/`CODEKIN_AUTH_TOKEN`, never
   the master token. This policy is currently duplicated in three adapters;
   extract a shared `buildHarnessEnv()` helper first and use it in all four.
+- **Always set `GROK_CLAUDE_HOOKS_ENABLED=false`** on the child. Grok runs
+  Claude hooks from `~/.claude/settings.json` by default, and Codekin installs
+  a global `PreToolUse` hook (`.claude/hooks/pre-tool-use.mjs`) there. The
+  spike showed that hook answering `permissionDecision: "allow"`, and Grok
+  then skipped its own prompt: ask mode was bypassed without any
+  `session/request_permission` reaching the client. Grok approvals must flow
+  through ACP only. Leave Claude rules, skills, and MCP compatibility on (see
+  [Cross-harness configuration bleed](#cross-harness-configuration-bleed)).
 - Send `initialize` with `protocolVersion: 1` and only the client capabilities
   Codekin implements. Do **not** advertise `fs` or `terminal` until those
   client-side request handlers exist. Without them, Grok runs its own tools
@@ -165,8 +173,15 @@ the SDK clearly cheaper. Decide during step 1 and record why.
   migration.
 - Mark the process ready only after `initialize` and new/load finish.
   `session/load` replays history as `session/update` notifications before its
-  response; suppress those (Codekin already holds the transcript) and do not
-  emit `result` for replayed turns.
+  response (confirmed: `user_message_chunk`, coalesced agent/thought chunks,
+  and `tool_call`s already carrying their final status, plus an
+  `_x.ai/session/update` `turn_completed` for each past turn). Drop every
+  update received between sending `session/load` and its response. Codekin
+  already holds the transcript, and replayed turns must not emit `result`.
+- The `session/new` and `session/load` responses carry `models`
+  (`currentModelId`, `availableModels[]` with context size and reasoning
+  efforts) and `configOptions` (`model`, `reasoning_effort`). There is no
+  `modes` field.
 - Handle child exit, malformed JSON, JSON-RPC errors, startup timeout, stdin
   `EPIPE`, and rejection of pending requests on exit. Let the existing
   lifecycle retry recoverable failures. Bound shutdown and kill the child if it
@@ -178,11 +193,15 @@ the SDK clearly cheaper. Decide during step 1 and record why.
 | --- | --- |
 | `agent_message_chunk` (text content) | `text` delta and the normal output stream |
 | `agent_thought_chunk` | `thinking`, under the existing UI disclosure rules |
-| `tool_call` | `tool_active`, keyed by `toolCallId`, with the tool name normalized (`run_terminal_cmd` → `Bash`, `search_replace` → `Edit`, …) and a short safe input summary |
-| `tool_call_update` with a terminal status | `tool_done` (plus `tool_output` for bounded text content); intermediate updates refresh the summary only |
+| `tool_call` | `tool_active`, keyed by `toolCallId`. The first `tool_call` has only `title` = raw tool name and `_meta["x.ai/tool"]` (`name`, `kind`, `read_only`). Normalize by `_meta["x.ai/tool"].kind`/`name` (`execute`/`run_terminal_command` → `Bash`, `write` → `Write`, edit → `Edit`, …) and summarize `rawInput` |
+| `tool_call_update` without `status` | refresh the summary. It carries the human title (``Execute `cmd` ``), ACP `kind`, and `diff` content for edits |
+| `tool_call_update` with `completed`/`failed` | `tool_done` (plus `tool_output` for bounded text content). Repeated `in_progress` updates stream output; the `rawOutput.output` byte arrays must not be forwarded |
 | `plan` | `todo_update` when entries map to `{content, status}`; otherwise ignore |
+| `session_info_update` (`title`) | optional: offer as the session name instead of a utility-agent call |
+| `current_mode_update` | reconcile Codekin's displayed mode |
 | `session/prompt` response | exactly one `result` per turn. `stopReason` `end_turn` → success; `cancelled`, `refusal`, `max_tokens`, `max_turn_requests` → result with that reason surfaced |
-| `session/prompt` response `_meta.usage` | `usage`, only if the fields are present and structured; never infer from text |
+| `session/prompt` response `_meta.usage` | `usage`: `inputTokens`, `outputTokens`, `cachedReadTokens`, `reasoningTokens`, `costUsdTicks` (1 USD = 10^10 ticks, which may be absent) |
+| `_x.ai/*` notifications (setup phases, MCP status, queue, announcements, settings, `session_notification`) | ignored. They are high-volume and not part of the contract; log only in debug |
 | process failure | `error` followed by `exit`; do not synthesize a successful result |
 
 Tool calls still open when a turn ends are closed with `tool_done` (error) so
@@ -195,8 +214,8 @@ silence, as Codex does.
 
 `sendMessage()` sends `session/prompt` with text content blocks (images later,
 if `promptCapabilities.image` is advertised) and serializes turns per session.
-`stop()` sends `session/cancel` for an active turn, answers any pending
-permission request as cancelled, waits a bounded time for the `cancelled`
+`stop()` sends `session/cancel` for an active turn, drops any pending
+permission request and its UI prompt (Grok resolves it itself), waits a bounded time for the `cancelled`
 prompt response, then terminates the child. If the UI exposes “stop response”
 separately from ending the session, map the first to `session/cancel` only.
 
@@ -207,24 +226,38 @@ separately from ending the session, map the first to `session/cancel` only.
 Grok's native modes are `default` (ask), `acceptEdits`, `auto`, `dontAsk`,
 `bypassPermissions`/always-approve, and plan. Codekin's `PermissionMode` is
 `default | acceptEdits | plan | bypassPermissions |
-dangerouslySkipPermissions`. Proposed mapping, each item gated on
-verification:
+dangerouslySkipPermissions`. Mapping, verified on grok 1.0.44 except where
+noted:
 
 | Codekin mode | Grok launch | Codekin-side policy on `session/request_permission` |
 | --- | --- | --- |
 | `default` | ask (no `_meta` mode) | forward every request to `PromptRouter` |
-| `acceptEdits` | ask | auto-allow once for edit-kind tools inside the working directory; forward the rest |
-| `plan` | ask + native plan mode (see below) | deny edit and execute kinds without prompting; allow read |
-| `bypassPermissions` / `dangerouslySkipPermissions` | `_meta.yoloMode: true` | none (Grok deny rules and hooks still apply) |
+| `acceptEdits` | ask | auto-allow once for edit-kind requests whose path is inside the working directory; forward the rest |
+| `plan` | ask + `session/set_mode {modeId: "plan"}` | deny execute- and edit-kind requests without prompting |
+| `bypassPermissions` / `dangerouslySkipPermissions` | `_meta.yoloMode: true` on new/load | none (Grok deny rules still apply) |
+
+**Grok's ask mode is not Claude's default mode.** Grok auto-approves commands
+it classifies as safe, with no `session/request_permission` sent. In the spike,
+`touch`, `mkdir -p`, and `git status` ran unprompted, including `touch` on a
+path **outside** the working directory. `rm` and shell redirects (`echo >`)
+did prompt. Codekin cannot see or veto those auto-approvals. The UI's
+Ask/plan labels for Grok must say “Grok asks for commands it considers
+risky”, not “asks before every command”. Tightening this (for example a
+`[permission] ask = ["Bash"]` rule in the user's `~/.grok/config.toml`; the
+`GROK_CONFIG` overlay cannot set permissions) is a follow-up. It must be
+verified before the UI claims more.
 
 Do not map any Codekin mode to Grok's `auto`. Its classifier decides without
 the user, and that decision is not visible to Codekin.
 
-Mode changes on a live session (Codekin's `setPermissionMode`): `_meta` is
-applied at `session/new` time. Use `session/set_mode` or `set_config_option`
-only if the pinned binary advertises a mode option. Otherwise restart the
-child with `session/load` and new `_meta`, which is how OpenCode handles its
-PATCH-on-resume.
+Mode changes on a live session (Codekin's `setPermissionMode`): switching into
+or out of `plan` uses `session/set_mode` and is acknowledged by a
+`current_mode_update`. `set_mode` returns `{}` even for unknown mode IDs, so
+treat the `current_mode_update` as the confirmation and fail visibly without
+it. Toggling yolo on a live session is unverified (`/always-approve on|off` is
+an advertised slash command). Until verified, change it by restarting the
+child with `session/load` and new `_meta`, the same way OpenCode re-applies
+settings when it resumes a session.
 
 ### Approval bridge
 
@@ -232,11 +265,20 @@ PATCH-on-resume.
   normalized tool name and input, so the existing auto-approval registry,
   plan-mode denial, and UI prompt all apply unchanged.
 - Answer with the request's own `options[]`, selecting by `kind`:
-  Codekin `allow` → `allow_once`, `allow_always` → `allow_always` only if
-  offered (otherwise `allow_once`), `deny` → `reject_once`. Never choose an
-  option that widens scope beyond the request (for example, an
-  all-sessions allow). A cancelled turn answers with the ACP `cancelled`
-  outcome.
+  Codekin `allow` → `allow_once`, `deny` → `reject_once`. Observed options:
+  shell requests offer `always-allow` (“don't ask again for bash commands”,
+  which is **all** bash, not this command), `allow-once`, `reject-once`, and
+  `reject-always`; edit requests offer `allow-edits-session`, `allow-once`, and
+  `reject-once`. Because Grok's `allow_always` is broader than Codekin's
+  per-pattern “Always allow”, map Codekin `allow_always` to `allow_once` and
+  let Codekin's own registry remember the pattern. A cancelled turn
+  answers with the ACP `cancelled` outcome.
+- **A rejection ends the turn.** `reject_once` fails the tool and the prompt
+  resolves with `stopReason: "cancelled"` (Grok's
+  `_x.ai/session/prompt_complete` adds `cancellationCategory:
+  "PermissionRejected"`). This differs from Claude, where the model sees the
+  denial and continues. Report a denied-then-stopped turn as “stopped after
+  denial”, not as a user cancel or an error.
 - Pending permission requests time out under the same policy as other
   harnesses; unattended sessions deny instead of waiting indefinitely.
 
@@ -251,11 +293,15 @@ more than its own config. The spec must account for each:
   so a rule approved in a Claude session also silently auto-approves in Grok.
   This is acceptable only if the Always-allow UI says so. Otherwise
   scope Codekin's registry and skip the Claude dual-write for Grok approvals.
-- Project hooks in `.claude/settings*.json` (trust-gated), `CLAUDE.md` /
-  `AGENTS.md` project rules, `.claude/skills`, and MCP servers from
-  `~/.claude.json`, `.mcp.json`, and Cursor configs. This is mostly
-  desirable (Codekin's repos already carry `CLAUDE.md`), but Codekin-installed
-  Claude hooks may fire in Grok sessions and must be checked for side effects.
+- Claude hooks: disabled for Grok children via `GROK_CLAUDE_HOOKS_ENABLED`
+  (see Startup), because Codekin's own global `PreToolUse` hook otherwise
+  pre-approves tools. Without that setting, user-scope Claude hooks
+  demonstrably run (`global/settings:pre_tool_use`,
+  `user_prompt_submit`).
+- `CLAUDE.md` / `AGENTS.md` project rules, `.claude/skills` (exposed as Grok
+  slash commands), and MCP servers from `~/.claude.json`, `.mcp.json`, and
+  Cursor configs. The spike session inherited the user's `bookgraph` and
+  `tubegraph` MCP servers and Claude skills. This is desirable; keep it.
 - Folder trust: project rules, skills, and hooks load only in trusted folders.
   Confirm how `agent stdio` treats trust. If it is untrusted by default, the
   Grok session won't see `CLAUDE.md`, and the UI must say so. Do not grant
@@ -263,20 +309,24 @@ more than its own config. The spec must account for each:
 
 ### Plan mode
 
-Grok's plan mode is **not** a read-only sandbox. It blocks the edit tools
-except `plan.md`, but it does not inspect shell commands for writes. Subagents
-start outside the plan gate and inherit the parent's permission mode.
-Therefore:
+Grok's plan mode is **not** a read-only sandbox. Verified: after
+`session/set_mode plan`, the write tool was rejected by Grok itself (“file
+edits are not allowed in plan mode”), but `echo x > plan-shell.txt` arrived
+as an ordinary permission request and, when allowed, wrote the file.
+Subagents also start outside the plan gate. Therefore:
 
 - Codekin `plan` launches Grok in ask mode, never yolo, and the Codekin-side
   policy denies execute- and edit-kind permission requests. Plan-mode safety
-  comes from Codekin's denial, not from Grok's gate.
+  comes from Codekin's denial, not from Grok's gate. Grok's safe-command
+  auto-approval (above) still applies, so `touch`/`mkdir` can run in plan mode.
+  The plan-mode label must not promise “read-only”.
 - Grok's `exit_plan_mode` approval should map to Codekin's existing
   plan-approval UI (`planning_mode` event, ExitPlanMode prompt) if it
   arrives as a permission request. If not, show the plan as text and hide the
   plan-approval affordance for Grok.
-- Plan state persists in Grok across restarts. On `session/load`, re-read the
-  mode from the response and reconcile it with Codekin's stored mode.
+- Plan state persists in Grok across restarts (`plan_mode.json` in the
+  session directory; `current_mode_update` is part of the load replay). On
+  `session/load`, reconcile it with Codekin's stored mode.
 
 ### Release gate
 
@@ -318,10 +368,14 @@ localStorage keys. Every site is listed here so none is missed.
   optional `grokAvailable` and `grokAuthenticated` fields; old clients ignore them.
 - Model list: `GET /api/grok/models` backed by a cached `fetchGrokModels()`
   that runs a short-lived `grok agent stdio` → `initialize` → `session/new`
-  and reads `configOptions[model]` (mirroring `fetchCodexModels`). Use
-  `grok models` output only if the ACP route fails. Do not hard-code a model
-  catalog. Live model switches use `session/set_config_option`. Add the route
-  to the relay `connector-proxy.ts` allowlist.
+  and reads `configOptions[model]` (mirroring `fetchCodexModels`). The
+  `initialize` response's `_meta.modelState.availableModels` already lists
+  models with context size and reasoning efforts, so `session/new` is only
+  needed as a fallback. Use `grok models` output only if the ACP route fails.
+  Do not hard-code a model catalog. Live model switches use
+  `session/set_config_option {configId: "model", value}`; the response is the
+  updated option list, and an unknown ID returns JSON-RPC `-32602`. Add the
+  route to the relay `connector-proxy.ts` allowlist.
 
 **Frontend**
 - `PROVIDERS` in `src/types.ts`; `agentHealth.ts` (`providerAvailability` has
@@ -353,9 +407,13 @@ localStorage keys. Every site is listed here so none is missed.
 - **Transcript reader.** Add a Grok branch in `transcript-readers.ts`
   (today every non-Codex provider falls through to the Claude parser). Resolve
   `$GROK_HOME/sessions/<encoded-cwd>/<id>/updates.jsonl` from the exact cwd,
-  handling the long-path slug form through its `.cwd` file. Validate that
-  `<id>` is a plain ID so it cannot escape the directory, and bound the read.
-  Parse user/agent text and tool titles. Extend the `handoff-manager.ts`
+  handling the long-path slug form through its `.cwd` file. The encoding is
+  `encodeURIComponent`-style (`/tmp/grok-spike/repo` →
+  `%2Ftmp%2Fgrok-spike%2Frepo`). Validate that `<id>` is a plain ID so it
+  cannot escape the directory, and bound the read. Each line is
+  `{timestamp, method, params}` with `method` = `session/update` or
+  `_x.ai/session/update`. Chunks are already coalesced per message. Parse
+  `user_message_chunk`, `agent_message_chunk`, and `tool_call` titles. Extend the `handoff-manager.ts`
   labels, keep the display-buffer fallback, and test switching in both directions.
 - **Workflows and loops.** Add `grok` to `workflow-config.ts`,
   `workflow-loader.ts`, `workflow-routes.ts`, and `loop-recipe.ts`
@@ -398,9 +456,10 @@ states that limitation plainly.
 
 ## Implementation sequence
 
-0. **Spike (no product code).** Install and pin a Grok release on the dev
-   host. Capture ACP fixtures for everything in Validation §1–2, and answer
-   the open questions below. The results decide which modes ship.
+0. **Spike: done** (grok 1.0.44, 2026-09-30). See
+   [Spike results](#spike-results-grok-1044). Before step 2, capture sanitized
+   fixtures (strip host paths, hostnames, MCP URLs, and response
+   `signature`s) into `server/__fixtures__/grok/`.
 1. Extract `buildHarnessEnv()`; no behavior change.
 2. `GrokProcess` plus the pure mapper module and fixture tests.
 3. Registry entry, provider unions, health, model route and hook, UI controls,
@@ -408,14 +467,31 @@ states that limitation plainly.
 4. Transcript reader and handoff.
 5. Workflows, loops, and Joe, once unattended mode has passed the gate.
 
-## Open questions for the spike
+## Spike results (grok 1.0.44)
 
-- Does the pinned build emit `session/request_permission` in ask mode over
-  `agent stdio`, and which `options[].kind` values does it offer?
-- Is there an ACP mode option (`session/set_mode` or a `configOptions` mode
-  entry) for switching ask/plan/yolo live, or does a change require a reload?
-- Does `exit_plan_mode` reach the client as a permission request?
-- How does `agent stdio` treat folder trust for `CLAUDE.md`/hooks/skills?
-- Does `session/load` replay history, and is the replay distinguishable from
-  live updates?
-- What does `session/prompt`'s response carry for usage and cost?
+Probed on 2026-09-30 with a throwaway ACP client against `grok agent
+--no-leader stdio`, logged in via grok.com, in a scratch git repo.
+
+| Question | Result |
+| --- | --- |
+| Does `session/request_permission` arrive in ask mode? | **Yes**, for `rm`, shell redirects, and file writes. `allow-once` ran the tool; `reject-once` failed it **and ended the turn** (`stopReason: cancelled`). |
+| Does everything risky prompt? | **No.** `touch` (including outside the cwd), `mkdir -p`, and `git status` auto-ran with no request. |
+| Do Codekin's Claude hooks interfere? | **Yes.** The global `PreToolUse` hook returned `allow` and Grok skipped the prompt. `GROK_CLAUDE_HOOKS_ENABLED=false` removes this. |
+| Is there a live mode switch? | `session/set_mode {modeId: "plan"}` works and emits `current_mode_update`. It returns `{}` for unknown IDs too. There is no `modes` field in responses. |
+| Does plan mode enforce read-only? | Edit tools are blocked by Grok. Shell writes come through as permission requests and run if allowed. |
+| Does `yoloMode` work? | Yes: shell tools run with no request. |
+| Does `session/load` replay? | Yes, before the load response: user/agent/thought chunks, tool calls with final status, the mode, and `turn_completed` markers. |
+| Does model discovery/switch work? | `initialize` `_meta.modelState` and `session/new` `models`/`configOptions` list `grok-4.7`, `grok-4.7-build-fast`, `grok-4.6`, `grok-4.5`. `set_config_option` switches models; an unknown ID → `-32602`. |
+| Usage/cost? | Prompt response `_meta.usage` has token counts and `costUsdTicks`. Headless `-p` reports its model as `grok-4.7-build`, which `grok models` does not list. |
+| Inherited config? | User MCP servers (`bookgraph`, `tubegraph`), Claude skills as slash commands, and `CLAUDE.md` rules loaded in an untrusted `/tmp` repo. |
+| Cancel | With a permission request pending (`rm`), `session/cancel` resolved the interaction on Grok's side with no client reply. The prompt returned `cancelled` (`cancellationCategory: MidTurnAbort`) within 5 ms, the command did not run, and the next prompt worked. The adapter must drop its pending approval (and dismiss the UI prompt) instead of answering it. |
+
+Still open:
+
+- Whether `exit_plan_mode` reaches the client as a permission request; the
+  spike did not drive a full plan → approve cycle.
+- Whether `/always-approve on|off` toggles yolo on a live session with Claude
+  hooks disabled.
+- Whether a user-level `[permission] ask = ["Bash"]` rule makes Grok prompt
+  for the commands it currently auto-approves.
+- Joe via ACP `session/new` `mcpServers` (not exercised).
