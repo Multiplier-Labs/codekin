@@ -457,8 +457,27 @@ export const ORCHESTRATOR_MCP_TOOL_NAMES = [
   'record_trust_rejection',
 ] as const
 
+/**
+ * Read-only inspection Joe needs to triage repos and reports without a prompt
+ * per command. Joe never writes code, so no git/gh write subcommands, no
+ * package managers, no file mutation — those still ask (or are delegated to
+ * a child session).
+ */
+export const ORCHESTRATOR_INSPECTION_TOOLS = [
+  'Read', 'Glob', 'Grep',
+  'Bash(ls:*)', 'Bash(cat:*)', 'Bash(head:*)', 'Bash(tail:*)', 'Bash(wc:*)',
+  'Bash(rg:*)', 'Bash(grep:*)', 'Bash(jq:*)', 'Bash(diff:*)',
+  'Bash(tree:*)', 'Bash(pwd:*)', 'Bash(realpath:*)', 'Bash(basename:*)', 'Bash(dirname:*)',
+  'Bash(stat:*)', 'Bash(file:*)', 'Bash(which:*)', 'Bash(date:*)',
+  'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git diff:*)', 'Bash(git status:*)',
+  'Bash(git rev-parse:*)', 'Bash(git ls-files:*)', 'Bash(git blame:*)',
+  'Bash(gh pr list:*)', 'Bash(gh pr view:*)', 'Bash(gh pr checks:*)', 'Bash(gh pr diff:*)',
+  'Bash(gh run list:*)', 'Bash(gh run view:*)', 'Bash(gh issue list:*)', 'Bash(gh issue view:*)',
+]
+
 export const ORCHESTRATOR_ALLOWED_TOOLS = [
   'Bash(curl:*)',
+  ...ORCHESTRATOR_INSPECTION_TOOLS,
   'CronCreate',
   'CronDelete',
   'CronList',

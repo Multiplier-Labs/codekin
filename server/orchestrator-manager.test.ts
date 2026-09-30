@@ -53,6 +53,7 @@ import {
   readTemplateVersion,
   CLAUDE_MD_TEMPLATE_VERSION,
   ORCHESTRATOR_ALLOWED_TOOLS,
+  ORCHESTRATOR_INSPECTION_TOOLS,
 } from './orchestrator-manager.js'
 
 function fakeSessionManager(existingSession?: any, settings: Record<string, string> = {}) {
@@ -603,5 +604,20 @@ describe('getOrchestratorSessionId', () => {
     const session = { id: 'existing-uuid' }
     const sm = fakeSessionManager(session)
     expect(getOrchestratorSessionId(sm)).toBe('existing-uuid')
+  })
+})
+
+describe('ORCHESTRATOR_ALLOWED_TOOLS', () => {
+  it('lets Joe inspect repos without a prompt per command', () => {
+    for (const tool of ['Read', 'Grep', 'Bash(rg:*)', 'Bash(cat:*)', 'Bash(git log:*)', 'Bash(gh pr view:*)']) {
+      expect(ORCHESTRATOR_ALLOWED_TOOLS).toContain(tool)
+    }
+    expect(ORCHESTRATOR_ALLOWED_TOOLS).toEqual(expect.arrayContaining([...ORCHESTRATOR_INSPECTION_TOOLS]))
+  })
+
+  it('grants nothing that writes code or history — that is delegated to children', () => {
+    for (const tool of ['Write', 'Edit', 'Bash(git:*)', 'Bash(gh:*)', 'Bash(rm:*)', 'Bash(npm:*)', 'Bash(git push:*)', 'Bash(git branch:*)', 'Bash(sort:*)']) {
+      expect(ORCHESTRATOR_ALLOWED_TOOLS).not.toContain(tool)
+    }
   })
 })

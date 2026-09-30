@@ -150,6 +150,11 @@ export class ApprovalManager {
     return this.checkCrossRepoApproval(workingDir, toolName, toolInput)
   }
 
+  /** True when this exact Bash command was saved with "Always allow" for the repo. */
+  hasExactCommand(workingDir: string, command: string): boolean {
+    return this.repoApprovals.get(workingDir)?.commands.has(command.trim()) ?? false
+  }
+
   /** Check approvals for a single repo (no cross-repo fallback). */
   private checkRepoApproval(workingDir: string, toolName: string, toolInput: Record<string, unknown>): boolean {
     if (ApprovalManager.NEVER_AUTO_APPROVE_TOOLS.has(toolName)) return false
