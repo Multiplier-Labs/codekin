@@ -85,13 +85,38 @@ export class CodekinApi {
     return this.request('GET', `/api/orchestrator/children/${encodeURIComponent(id)}/transcript?limit=${limit}`)
   }
 
+  sendToChild(id: string, text: string): Promise<unknown> {
+    return this.request('POST', `/api/orchestrator/children/${encodeURIComponent(id)}/input`, { text })
+  }
+
+  stopChild(id: string): Promise<unknown> {
+    return this.request('POST', `/api/orchestrator/children/${encodeURIComponent(id)}/stop`)
+  }
+
+  resumeChild(id: string, instructions?: string): Promise<unknown> {
+    return this.request('POST', `/api/orchestrator/children/${encodeURIComponent(id)}/resume`, instructions ? { instructions } : {})
+  }
+
+  closeChild(id: string, opts: { mode?: 'archive' | 'delete'; cancel?: boolean } = {}): Promise<unknown> {
+    return this.request('POST', `/api/orchestrator/children/${encodeURIComponent(id)}/close`, opts)
+  }
+
+  // --- sessions -------------------------------------------------------------
+
+  listSessions(opts: { source?: string; active?: boolean } = {}): Promise<unknown> {
+    const params = new URLSearchParams({ view: 'summary' })
+    if (opts.source) params.set('source', opts.source)
+    if (opts.active) params.set('active', 'true')
+    return this.request('GET', `/api/orchestrator/sessions?${params.toString()}`)
+  }
+
   // --- prompts (blocked sessions) ------------------------------------------
 
   pendingPrompts(): Promise<unknown> {
     return this.request('GET', '/api/orchestrator/sessions/pending-prompts')
   }
 
-  respondToPrompt(sessionId: string, requestId: string, value: string): Promise<unknown> {
+  respondToPrompt(sessionId: string, requestId: string, value: string | string[]): Promise<unknown> {
     return this.request('POST', `/api/orchestrator/sessions/${encodeURIComponent(sessionId)}/respond`, { requestId, value })
   }
 

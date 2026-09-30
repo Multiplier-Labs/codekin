@@ -11,7 +11,7 @@ import { execFile } from 'child_process'
 import { VALID_PROVIDERS } from './types.js'
 import type { CodingProvider } from './coding-process.js'
 import type { SessionManager, SessionStopReason } from './session-manager.js'
-import type { WsServerMessage } from './types.js'
+import type { WorktreeRemovalPreflight, WsServerMessage } from './types.js'
 import { getAgentDisplayName } from './config.js'
 import { AGENT_ALLOWED_TOOLS } from './agent-allowlist.js'
 import type { RunStore, StoredRun } from './run-store.js'
@@ -124,6 +124,36 @@ export interface ChildSession {
   worktreePath: string | null
   /** Latest final-step check, once the child has finished a turn. */
   verification: ChildVerification | null
+  /** Supervised attempt number — 1 at spawn, incremented by each resume. */
+  attempt: number
+}
+
+/** A control request that cannot be applied in the child's current state. */
+export class ChildControlError extends Error {
+  constructor(message: string, readonly status: 404 | 409) {
+    super(message)
+    this.name = 'ChildControlError'
+  }
+}
+
+/** What closing a child did to its session, worktree, and branch. */
+export interface ChildCloseResult {
+  child: ChildSession
+  /** archived: stopped + hidden, resumable. deleted: session record removed. */
+  action: 'archived' | 'deleted'
+  worktree: {
+    path: string | null
+    /**
+     * kept: left in place (archive, or delete with uncommitted work)
+     * removal_started: clean — removed once the process exits
+     * none: the child had no worktree
+     */
+    outcome: 'kept' | 'removal_started' | 'none'
+    modified: string[]
+    untracked: string[]
+  }
+  /** Branches are never deleted. */
+  branch: string
 }
 
 /**
@@ -303,7 +333,154 @@ export class OrchestratorChildManager {
       worktree: worktreePath ? 'active' : spec.useWorktree === false ? 'none' : 'failed',
       worktreePath,
       verification: null,
+      attempt: 1,
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Control — only for children this manager owns (spawned by the orchestrator)
+  // -------------------------------------------------------------------------
+
+  private requireChild(id: string): ChildSession {
+    const child = this.get(id)
+    if (!child) throw new ChildControlError('Not one of your child sessions', 404)
+    return child
+  }
+
+  /**
+   * Send a follow-up instruction to an active child. A turn in progress
+   * receives it as its next message. Blocked children must have their prompt
+   * answered first (respond_to_prompt) — free text would not answer it.
+   */
+  sendFollowUp(id: string, text: string): ChildSession {
+    const child = this.requireChild(id)
+    if (TERMINAL_STATUSES.has(child.status)) {
+      throw new ChildControlError(`Child is ${child.status} — use resume to start another supervised attempt`, 409)
+    }
+    const session = this.sessions.get(id)
+    if (!session) throw new ChildControlError('Session no longer exists', 404)
+    if (session.pendingToolApprovals.size > 0 || session.pendingControlRequests.size > 0) {
+      throw new ChildControlError('Child is waiting on a prompt — answer it with respond_to_prompt first', 409)
+    }
+    this.sessions.sendInput(id, text)
+    this.persistRun(child, `Follow-up from the orchestrator: ${text.slice(0, 200)}`)
+    return child
+  }
+
+  /** Stop an active child. It becomes canceled; its worktree and branch are kept. */
+  stop(id: string): ChildSession {
+    const child = this.requireChild(id)
+    if (TERMINAL_STATUSES.has(child.status)) {
+      throw new ChildControlError(`Child is already ${child.status}`, 409)
+    }
+    this.markOrchestratorInitiated(child)
+    this.sessions.stopSession(id)  // → onSessionStopped → canceled
+    return child
+  }
+
+  /**
+   * Start a new supervised attempt on a finished child's session: same
+   * branch and worktree, fresh working-time budget, verification rerun at
+   * the end. The agent keeps its conversation and gets `instructions`.
+   */
+  resume(id: string, instructions?: string): ChildSession {
+    const existing = this.requireChild(id)
+    if (!TERMINAL_STATUSES.has(existing.status)) {
+      throw new ChildControlError(`Child is ${existing.status} — send it a follow-up instead`, 409)
+    }
+    const session = this.sessions.get(id)
+    if (!session) throw new ChildControlError('Session was deleted — spawn a new child instead', 409)
+    if (session.worktreeState === 'removed') {
+      throw new ChildControlError('The worktree was removed — spawn a new child from the branch instead', 409)
+    }
+    this.purgeStaleChildren()
+    if (this.activeCount() >= MAX_CONCURRENT) {
+      throw new ChildControlError(`Cannot resume: ${MAX_CONCURRENT} concurrent sessions already running`, 409)
+    }
+
+    const child: ChildSession = {
+      ...existing,
+      status: 'running',
+      completedAt: null,
+      result: null,
+      error: null,
+      terminalNotifiedAt: null,
+      verification: null,
+      attempt: existing.attempt + 1,
+      worktreePath: session.worktreePath ?? existing.worktreePath,
+    }
+    this.children.set(id, child)
+    if (session.archivedAt) this.sessions.resumeSession(id)
+    this.persistRun(child, `Resumed: attempt ${child.attempt}.`)
+    void this.monitorChild(child)
+    this.sessions.sendInput(id, instructions?.trim() || this.buildResumeInstruction(child.request))
+    return child
+  }
+
+  /**
+   * Close a child. `archive` (default) stops it and keeps session, transcript,
+   * worktree and branch — resume brings it back. `delete` removes the session;
+   * a clean worktree is removed, one with uncommitted work is kept. Active
+   * children are refused unless `cancel` is set. Branches are never deleted.
+   */
+  async close(id: string, opts: { mode?: 'archive' | 'delete'; cancel?: boolean } = {}): Promise<ChildCloseResult> {
+    const child = this.requireChild(id)
+    if (!TERMINAL_STATUSES.has(child.status) && !opts.cancel) {
+      throw new ChildControlError(`Child is ${child.status} — stop it first or pass cancel: true`, 409)
+    }
+    const session = this.sessions.get(id)
+    if (!session) throw new ChildControlError('Session no longer exists', 404)
+    if (!TERMINAL_STATUSES.has(child.status)) this.markOrchestratorInitiated(child)
+    const mode = opts.mode ?? 'archive'
+    const worktreePath = session.worktreePath ?? null
+    const noWorktree = { path: null, outcome: 'none' as const, modified: [], untracked: [] }
+
+    if (mode === 'archive') {
+      this.sessions.archiveSession(id)  // → onSessionStopped cancels an active child
+      return {
+        child: this.get(id) ?? child,
+        action: 'archived',
+        worktree: worktreePath ? { path: worktreePath, outcome: 'kept', modified: [], untracked: [] } : noWorktree,
+        branch: child.request.branchName,
+      }
+    }
+
+    let preflight: WorktreeRemovalPreflight | null = null
+    if (worktreePath) preflight = await this.sessions.getRemovalPreflight(id)
+    this.sessions.delete(id)  // → onSessionStopped cancels an active child
+    const current = this.children.get(id) ?? child
+    this.children.delete(id)  // the run store keeps the history
+    return {
+      child: current,
+      action: 'deleted',
+      worktree: worktreePath
+        ? {
+            path: worktreePath,
+            // delete() never forces removal: dirty/untracked work stays on disk.
+            outcome: preflight && preflight.modified.length + preflight.untracked.length === 0 ? 'removal_started' : 'kept',
+            modified: preflight?.modified ?? [],
+            untracked: preflight?.untracked ?? [],
+          }
+        : noWorktree,
+      branch: child.request.branchName,
+    }
+  }
+
+  /**
+   * The orchestrator asked for this stop, and the tool result tells it the
+   * outcome — skip the redundant "Child Session Stopped" notification.
+   */
+  private markOrchestratorInitiated(child: ChildSession): void {
+    child.terminalNotifiedAt = new Date().toISOString()
+  }
+
+  private buildResumeInstruction(request: ChildSessionRequest): string {
+    const delivery = request.completionPolicy === 'pr'
+      ? 'make sure your latest commit is pushed and an open Pull Request points at it'
+      : request.completionPolicy === 'merge'
+        ? 'make sure your latest commits are pushed to the remote branch'
+        : 'commit your changes locally'
+    return `Continue the task: ${request.task}\n\nPick up where you left off, finish the remaining work, then ${delivery}. Summarize what you changed when done.`
   }
 
   /**
@@ -528,6 +705,7 @@ export class OrchestratorChildManager {
       worktree: request.useWorktree ? 'failed' : 'none',  // upgraded to 'active' on success
       worktreePath: null,
       verification: null,
+      attempt: 1,
     }
     this.children.set(sessionId, child)
     this.persistRun(child, `Spawned in ${request.repo} on branch ${request.branchName}.`)

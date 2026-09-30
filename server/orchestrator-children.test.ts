@@ -838,6 +838,165 @@ describe('OrchestratorChildManager', () => {
   })
 
   // -------------------------------------------------------------------------
+  // Control: follow-up, stop, resume, close
+  // -------------------------------------------------------------------------
+
+  describe('control', () => {
+    let session: any
+    let notify: ReturnType<typeof vi.fn>
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+      sessions = makeMockSessions()
+      session = {
+        claudeProcess: { isAlive: vi.fn(() => true), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'done' }],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+        worktreePath: '/repos/myproject-wt-child123',
+        archivedAt: undefined as string | undefined,
+      }
+      sessions.get = vi.fn(() => session)
+      const fireStop = (reason: string) => (id: string) => { for (const cb of sessions._stopListeners) cb(id, reason) }
+      sessions.stopSession = vi.fn(fireStop('stopped'))
+      sessions.archiveSession = vi.fn((id: string) => { session.archivedAt = 'now'; fireStop('archived')(id) })
+      sessions.delete = vi.fn(fireStop('deleted'))
+      sessions.resumeSession = vi.fn(() => { session.archivedAt = undefined })
+      sessions.getRemovalPreflight = vi.fn(async () => ({ modified: [], untracked: [] }))
+      notify = vi.fn(() => true)
+      manager = makeManager(sessions, { notify })
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    async function finish(child: { id: string; status: string }) {
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+      await vi.waitFor(() => expect(child.status).toBe('completed'))
+    }
+
+    it('rejects every control call for sessions that are not its children', async () => {
+      expect(() => manager.sendFollowUp('stranger', 'hi')).toThrow(/Not one of your child sessions/)
+      expect(() => manager.stop('stranger')).toThrow(/Not one of your child sessions/)
+      expect(() => manager.resume('stranger')).toThrow(/Not one of your child sessions/)
+      await expect(manager.close('stranger')).rejects.toThrow(/Not one of your child sessions/)
+      expect(sessions.stopSession).not.toHaveBeenCalled()
+      expect(sessions.delete).not.toHaveBeenCalled()
+    })
+
+    it('sends a follow-up to an active child', async () => {
+      const child = await manager.spawn(makeRequest())
+      manager.sendFollowUp(child.id, 'Also update the README')
+      expect(sessions.sendInput).toHaveBeenLastCalledWith(child.id, 'Also update the README')
+    })
+
+    it('refuses a follow-up while the child waits on a prompt, and for a finished child', async () => {
+      const child = await manager.spawn(makeRequest())
+      session.pendingToolApprovals.set('req-1', {})
+      expect(() => manager.sendFollowUp(child.id, 'x')).toThrow(/respond_to_prompt/)
+      session.pendingToolApprovals.clear()
+      await finish(child)
+      expect(() => manager.sendFollowUp(child.id, 'x')).toThrow(/resume/)
+    })
+
+    it('stops an active child without a redundant stop notification', async () => {
+      const child = await manager.spawn(makeRequest({ parentSessionId: 'parent-1' }))
+      manager.stop(child.id)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(child.status).toBe('canceled')
+      expect(sessions.stopSession).toHaveBeenCalledWith(child.id)
+      expect(notify).not.toHaveBeenCalled()
+      expect(() => manager.stop(child.id)).toThrow(/already canceled/)
+    })
+
+    it('resumes a finished child as a new supervised attempt on the same session', async () => {
+      const child = await manager.spawn(makeRequest({ parentSessionId: 'parent-1' }))
+      manager.stop(child.id)
+      await vi.advanceTimersByTimeAsync(0)
+
+      const resumed = manager.resume(child.id, 'Fix the failing test and push')
+      expect(resumed).toMatchObject({ status: 'running', attempt: 2, error: null, completedAt: null })
+      expect(manager.get(child.id)).toBe(resumed)
+      expect(manager.activeCount()).toBe(1)
+      expect(sessions.sendInput).toHaveBeenLastCalledWith(child.id, 'Fix the failing test and push')
+
+      // Supervised again: completion is re-verified and the parent is notified.
+      await finish(resumed)
+      expect(resumed.verification?.state).toBe('verified')
+      expect(notify).toHaveBeenCalledTimes(1)
+    })
+
+    it('sends a default continue instruction and unarchives an archived child', async () => {
+      const child = await manager.spawn(makeRequest())
+      await finish(child)
+      await manager.close(child.id)
+      expect(session.archivedAt).toBe('now')
+
+      manager.resume(child.id)
+      expect(sessions.resumeSession).toHaveBeenCalledWith(child.id)
+      expect(sessions._sentInputs.at(-1)).toContain('Continue the task: Fix the login bug')
+      expect(sessions._sentInputs.at(-1)).toContain('open Pull Request')
+    })
+
+    it('refuses to resume an active child, a deleted session, or a removed worktree', async () => {
+      const child = await manager.spawn(makeRequest())
+      expect(() => manager.resume(child.id)).toThrow(/send it a follow-up/)
+      await finish(child)
+      session.worktreeState = 'removed'
+      expect(() => manager.resume(child.id)).toThrow(/worktree was removed/)
+      sessions.get = vi.fn(() => undefined)
+      expect(() => manager.resume(child.id)).toThrow(/Session was deleted/)
+    })
+
+    it('refuses to resume past the concurrency limit', async () => {
+      const first = await manager.spawn(makeRequest())
+      await finish(first)
+      for (let i = 0; i < 5; i++) await manager.spawn(makeRequest({ branchName: `fix/b${i}` }))
+      expect(() => manager.resume(first.id)).toThrow(/5 concurrent/)
+    })
+
+    it('archives by default and keeps the worktree and branch', async () => {
+      const child = await manager.spawn(makeRequest())
+      await finish(child)
+      const result = await manager.close(child.id)
+      expect(result).toMatchObject({
+        action: 'archived',
+        worktree: { path: '/repos/myproject-wt-child123', outcome: 'kept' },
+        branch: 'fix/login-bug',
+      })
+      expect(sessions.delete).not.toHaveBeenCalled()
+    })
+
+    it('refuses to close an active child unless cancel is set', async () => {
+      const child = await manager.spawn(makeRequest({ parentSessionId: 'parent-1' }))
+      await expect(manager.close(child.id)).rejects.toThrow(/cancel: true/)
+      const result = await manager.close(child.id, { cancel: true })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(result.action).toBe('archived')
+      expect(child.status).toBe('canceled')
+      expect(notify).not.toHaveBeenCalled()
+    })
+
+    it('deletes a clean child and reports the worktree removal', async () => {
+      const child = await manager.spawn(makeRequest())
+      await finish(child)
+      const result = await manager.close(child.id, { mode: 'delete' })
+      expect(sessions.delete).toHaveBeenCalledWith(child.id)
+      expect(result.worktree).toMatchObject({ outcome: 'removal_started', modified: [], untracked: [] })
+      expect(manager.list()).toEqual([])
+    })
+
+    it('reports a dirty worktree as kept on delete', async () => {
+      sessions.getRemovalPreflight = vi.fn(async () => ({ modified: ['src/a.ts'], untracked: ['notes.md'] }))
+      const child = await manager.spawn(makeRequest())
+      await finish(child)
+      const result = await manager.close(child.id, { mode: 'delete' })
+      expect(result.worktree).toEqual({ path: '/repos/myproject-wt-child123', outcome: 'kept', modified: ['src/a.ts'], untracked: ['notes.md'] })
+    })
+  })
+
+  // -------------------------------------------------------------------------
   // Listing and retrieval
   // -------------------------------------------------------------------------
 

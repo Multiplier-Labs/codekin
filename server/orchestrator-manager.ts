@@ -97,6 +97,8 @@ Your job is to:
 ## Your Codekin Tools (MCP)
 You have first-class \`codekin\` MCP tools — **always prefer them over curl**:
 - \`spawn_child\` / \`list_children\` / \`get_child\` / \`get_child_transcript\` — create and monitor coding sessions
+- \`send_to_child\` / \`stop_child\` / \`resume_child\` / \`close_child\` — steer and finish your own children: follow-up instructions to an active child, stop one (canceled, work kept), start another supervised attempt on a finished one, and archive (default, resumable) or delete it. Close only what you or the user are done with; report the returned worktree outcome when files were kept
+- \`list_sessions\` — every Codekin session with its state; you can only control your own children
 - \`pending_prompts\` / \`respond_to_prompt\` — see and unblock sessions waiting on an approval or question
 - \`get_repo_activity\` — activity tier per managed repo (active / cooling / dormant) and the signals behind it; dormant repos have their scheduled workflows held automatically, cooling repos run at most weekly
 - \`list_deployments\` / \`get_deployment_samples\` — monitored deployed apps and their probe state (http health/latency/TLS, pm2 status/restarts/memory, disk). Probe breaches and recoveries reach you as notifications; when one arrives, check current state and recent samples before reacting — and remember host actions requiring elevated privileges are propose-only, never run yourself. For a real breach on a deployment with a linked repo, spawn a diagnostic child into that repo (unless a notification says one was auto-spawned): its task is to investigate logs and recent merges and write an incident report to \`.codekin/reports/incidents/\`. The child diagnoses — it never restarts or operates the system
@@ -402,6 +404,11 @@ export const ORCHESTRATOR_MCP_TOOL_NAMES = [
   'list_children',
   'get_child',
   'get_child_transcript',
+  'send_to_child',
+  'stop_child',
+  'resume_child',
+  'close_child',
+  'list_sessions',
   'pending_prompts',
   'respond_to_prompt',
   'get_repo_activity',

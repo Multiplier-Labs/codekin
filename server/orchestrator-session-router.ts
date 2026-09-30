@@ -4,7 +4,7 @@
  */
 
 import { Router } from 'express'
-import type { Request, RequestHandler } from 'express'
+import type { Request, RequestHandler, Response } from 'express'
 import { resolve } from 'path'
 import { existsSync, statSync, realpathSync } from 'fs'
 import { VALID_PROVIDERS } from './types.js'
@@ -15,7 +15,7 @@ import { getAgentDisplayName, REPOS_ROOT, resolveRepoPathInRoot } from './config
 import { readReport, getReportsSince } from './orchestrator-reports.js'
 import { loadWorkflowConfig } from './workflow-config.js'
 import type { OrchestratorMemory } from './orchestrator-memory.js'
-import { isTerminalChildStatus, type OrchestratorChildManager } from './orchestrator-children.js'
+import { ChildControlError, isTerminalChildStatus, type OrchestratorChildManager } from './orchestrator-children.js'
 import type { OrchestratorMonitor } from './orchestrator-monitor.js'
 
 // ---------------------------------------------------------------------------
@@ -82,7 +82,17 @@ interface SpawnChildBody {
 
 interface SessionRespondBody {
   requestId?: string
-  value: string
+  /** Answer text, "allow"/"deny", or one entry per question for multi-question prompts. */
+  value: string | string[]
+}
+
+/** Map a child-control failure onto an HTTP response. */
+function sendControlError(res: Response, err: unknown): void {
+  if (err instanceof ChildControlError) {
+    res.status(err.status).json({ error: err.message })
+  } else {
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Child control failed' })
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +344,55 @@ export function createSessionRouter(
   })
 
   // -------------------------------------------------------------------------
+  // Child control — only children this orchestrator spawned
+  // -------------------------------------------------------------------------
+
+  /** Send a follow-up instruction to an active child. */
+  router.post('/api/orchestrator/children/:id/input', (req: Request<{ id: string }, unknown, { text?: unknown }>, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+    const text = req.body?.text
+    if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'Missing required field: text' })
+    try {
+      res.json({ child: children.sendFollowUp(req.params.id, text) })
+    } catch (err) { sendControlError(res, err) }
+  })
+
+  /** Stop an active child (it becomes canceled; worktree and branch are kept). */
+  router.post('/api/orchestrator/children/:id/stop', (req: Request<{ id: string }>, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+    try {
+      res.json({ child: children.stop(req.params.id) })
+    } catch (err) { sendControlError(res, err) }
+  })
+
+  /** Start another supervised attempt on a finished child's session. */
+  router.post('/api/orchestrator/children/:id/resume', (req: Request<{ id: string }, unknown, { instructions?: unknown }>, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+    const instructions = req.body?.instructions
+    if (instructions !== undefined && typeof instructions !== 'string') {
+      return res.status(400).json({ error: 'Invalid instructions: must be a string' })
+    }
+    try {
+      res.json({ child: children.resume(req.params.id, instructions) })
+    } catch (err) { sendControlError(res, err) }
+  })
+
+  /** Close a child: archive (default, resumable) or delete. Active children need cancel: true. */
+  router.post('/api/orchestrator/children/:id/close', async (req: Request<{ id: string }, unknown, { mode?: unknown; cancel?: unknown }>, res) => {
+    if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
+    const { mode, cancel } = req.body ?? {}
+    if (mode !== undefined && mode !== 'archive' && mode !== 'delete') {
+      return res.status(400).json({ error: 'Invalid mode: archive or delete' })
+    }
+    if (cancel !== undefined && typeof cancel !== 'boolean') {
+      return res.status(400).json({ error: 'Invalid cancel: must be a boolean' })
+    }
+    try {
+      res.json(await children.close(req.params.id, { mode, cancel }))
+    } catch (err) { sendControlError(res, err) }
+  })
+
+  // -------------------------------------------------------------------------
   // Session prompts & approvals
   // -------------------------------------------------------------------------
 
@@ -350,8 +409,11 @@ export function createSessionRouter(
 
     const sessionId = req.params.id
     const { requestId, value } = req.body
-    if (!value) {
-      return res.status(400).json({ error: 'Missing required field: value (e.g. "allow", "deny", or answer text)' })
+    const validValue = typeof value === 'string'
+      ? value.length > 0
+      : Array.isArray(value) && value.length > 0 && value.every(v => typeof v === 'string')
+    if (!validValue) {
+      return res.status(400).json({ error: 'Missing required field: value (e.g. "allow", "deny", answer text, or one answer per question)' })
     }
 
     const session = sessions.get(sessionId)
@@ -389,7 +451,7 @@ export function createSessionRouter(
     if (orchestratorSession && orchestratorSession.clients.size > 0) {
       const actionLabel = promptType === 'question'
         ? `answered question from ${promptToolName}`
-        : `responded "${value}" to ${promptToolName}`
+        : `responded "${Array.isArray(value) ? value.join(', ') : value}" to ${promptToolName}`
       const notifMsg = {
         type: 'system_message' as const,
         subtype: 'info' as const,
@@ -407,11 +469,44 @@ export function createSessionRouter(
   // Session cleanup & listing
   // -------------------------------------------------------------------------
 
-  /** List all sessions (unfiltered, includes source field). */
+  /**
+   * List all sessions (unfiltered, includes source field). `?view=summary`
+   * returns one compact row per session — what it is doing, whether it waits
+   * on a prompt, and whether it is one of the orchestrator's children —
+   * optionally filtered by `?source=` and `?active=true` (not archived).
+   */
   router.get('/api/orchestrator/sessions', (req, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    res.json({ sessions: sessions.listAll() })
+    if (req.query.view !== 'summary') return res.json({ sessions: sessions.listAll() })
+
+    const source = typeof req.query.source === 'string' ? req.query.source : undefined
+    const activeOnly = req.query.active === 'true'
+    const rows = sessions.listAll()
+      .filter(info => (!source || info.source === source) && (!activeOnly || !info.archivedAt))
+      .map(info => {
+        const session = sessions.get(info.id)
+        const pendingPrompts = session ? session.pendingToolApprovals.size + session.pendingControlRequests.size : 0
+        const child = info.source === 'agent' ? children.get(info.id) : null
+        return {
+          id: info.id,
+          name: info.name,
+          source: info.source,
+          state: info.archivedAt ? 'archived'
+            : pendingPrompts > 0 ? 'waiting_on_prompt'
+            : info.isProcessing ? 'working'
+            : info.active ? 'idle'
+            : 'stopped',
+          pendingPrompts,
+          provider: info.provider ?? null,
+          repo: info.groupDir ?? info.workingDir,
+          branch: info.worktreeBranch ?? null,
+          worktreePath: info.worktreePath ?? null,
+          lastActivity: info.lastActivity,
+          child: child ? { status: child.status, attempt: child.attempt, verification: child.verification?.state ?? null } : null,
+        }
+      })
+    res.json({ sessions: rows })
   })
 
   /**
