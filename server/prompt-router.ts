@@ -15,6 +15,7 @@ import { ApprovalManager } from './approval-manager.js'
 import type { CodingProcess } from './coding-process.js'
 import type { PromptQuestion, Session, WsServerMessage } from './types.js'
 import { jsonParse } from './json-parse.js'
+import { approvalSegments, isHarmlessSegment, unwrapShellCommand } from './shell-command.js'
 
 /** Dependencies injected by SessionManager so PromptRouter can interact with session state. */
 export interface PromptRouterDeps {
@@ -135,6 +136,11 @@ export class PromptRouter {
       return
     }
     console.log(`[control_request] session=${sessionId} tool=${toolName} requestId=${requestId}`)
+    // Show and remember the command the user would recognise, not the
+    // harness wrapper (`/bin/bash -lc '…'`).
+    if (toolName === 'Bash' && typeof toolInput.command === 'string') {
+      toolInput = { ...toolInput, command: unwrapShellCommand(toolInput.command) }
+    }
 
     const autoResult = this.resolveAutoApproval(session, toolName, toolInput)
     if (autoResult === 'planDeny') {
@@ -704,11 +710,16 @@ export class PromptRouter {
     if (PromptRouter.FILE_TOOLS.has(toolName) && PromptRouter.EDIT_MODES.has(session.permissionMode ?? '')) {
       return 'permissionMode'
     }
-    if (this.deps.approvalManager.checkAutoApproval(session.groupDir ?? session.workingDir, toolName, toolInput)) {
-      return 'registry'
-    }
-    if (session.allowedTools && this.matchesAllowedTools(session.allowedTools, toolName, toolInput)) {
-      return 'session'
+    if (toolName === 'Bash') {
+      const bash = this.resolveBashApproval(session, toolInput)
+      if (bash) return bash
+    } else {
+      if (this.deps.approvalManager.checkAutoApproval(session.groupDir ?? session.workingDir, toolName, toolInput)) {
+        return 'registry'
+      }
+      if (session.allowedTools && this.matchesAllowedTools(session.allowedTools, toolName, toolInput)) {
+        return 'session'
+      }
     }
     // Agent child sessions: only auto-approve tools in their allowedTools list,
     // never blanket headless. This ensures AGENT_CHILD_ALLOWED_TOOLS is the
@@ -720,6 +731,34 @@ export class PromptRouter {
       return 'headless'
     }
     return 'prompt'
+  }
+
+  /**
+   * Bash auto-approval, one segment at a time. The command is unwrapped from
+   * harness shell wrappers (Codex sends `/bin/bash -lc '<cmd>'`) and split on
+   * control operators; every segment must be approved by the repo registry
+   * or the session allowlist (`cd` needs no approval). A command that cannot
+   * be split safely — substitution, redirection, subshells — only passes as
+   * an exact "Always allow" match.
+   */
+  private resolveBashApproval(session: Session, toolInput: Record<string, unknown>): 'registry' | 'session' | null {
+    const repo = session.groupDir ?? session.workingDir
+    const raw = typeof toolInput.command === 'string' ? toolInput.command : ''
+    const command = unwrapShellCommand(raw)
+    if (this.deps.approvalManager.hasExactCommand(repo, command) || this.deps.approvalManager.hasExactCommand(repo, raw)) {
+      return 'registry'
+    }
+    const segments = approvalSegments(raw)
+    if (!segments) return null
+    let viaRegistry = false
+    for (const segment of segments) {
+      if (isHarmlessSegment(segment)) continue
+      const input = { ...toolInput, command: segment }
+      if (this.deps.approvalManager.checkAutoApproval(repo, 'Bash', input)) { viaRegistry = true; continue }
+      if (session.allowedTools && this.matchesAllowedTools(session.allowedTools, 'Bash', input)) continue
+      return null
+    }
+    return viaRegistry ? 'registry' : 'session'
   }
 
   /**
