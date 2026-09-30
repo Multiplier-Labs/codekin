@@ -1,6 +1,8 @@
 /**
- * Read-only pull request card at the top of the Changes panel: PR link,
- * base ← head, draft/open/merged state, CI checks and review decision.
+ * Read-only pull request row in the Changes panel: PR number and title,
+ * draft/open/merged state, CI checks and review decision. The branch is not
+ * repeated here; the panel's context block shows it. The panel header's
+ * refresh button refreshes this too.
  *
  * Checks describe the PR's remote head, so the card says when local work is
  * not what was checked (commits not pushed, edits not committed, head not
@@ -11,14 +13,14 @@
 
 import { useState } from 'react'
 import {
-  IconGitPullRequest, IconExternalLink, IconRefresh, IconCircleCheck, IconCircleX, IconClock, IconAlertTriangle,
+  IconGitPullRequest, IconExternalLink, IconCircleCheck, IconCircleX, IconClock, IconAlertTriangle,
 } from '@tabler/icons-react'
 import type { PrStatus, PullRequestInfo } from '../../types'
 
 interface Props {
   status: PrStatus | null
-  loading: boolean
-  onRefresh: () => void
+  /** Narrow panel: number, badge, checks and link on one line, the title below. */
+  narrow?: boolean
 }
 
 function relativeTime(iso: string): string {
@@ -35,7 +37,7 @@ function relativeTime(iso: string): string {
 const STATE_STYLE: Record<string, string> = {
   open: 'bg-success-9/20 text-success-4',
   draft: 'bg-surface-raised text-ink-muted',
-  merged: 'bg-primary-9/20 text-primary-4',
+  merged: 'bg-primary-11 text-primary-4',
   closed: 'bg-error-9/20 text-error-4',
 }
 
@@ -62,31 +64,37 @@ function localNotes(pull: PullRequestInfo, dirty: boolean): string[] {
   return notes
 }
 
-export function PrStatusCard({ status, loading, onRefresh }: Props) {
+function Checks({ checks, compact }: { checks: PullRequestInfo['checks']; compact?: boolean }) {
+  if (checks.total === 0) return <span className="text-ink-faint">no checks</span>
+  const allPassed = checks.failed === 0 && checks.pending === 0
+  return (
+    <span className="flex items-center gap-2" title={`${checks.total} checks on the PR head`}>
+      {checks.passed > 0 && (
+        <span className="flex items-center gap-1 text-success-5">
+          <IconCircleCheck size={14} className="shrink-0" />
+          {compact ? checks.passed : allPassed ? `${checks.passed} check${checks.passed === 1 ? '' : 's'} passed` : `${checks.passed} passed`}
+        </span>
+      )}
+      {checks.failed > 0 && <span className="flex items-center gap-1 text-error-5"><IconCircleX size={14} className="shrink-0" />{compact ? checks.failed : `${checks.failed} failed`}</span>}
+      {checks.pending > 0 && <span className="flex items-center gap-1 text-warning-5"><IconClock size={14} className="shrink-0" />{compact ? checks.pending : `${checks.pending} pending`}</span>}
+      {checks.skipped > 0 && !compact && <span className="text-ink-faint">{checks.skipped} skipped</span>}
+    </span>
+  )
+}
+
+export function PrStatusCard({ status, narrow }: Props) {
   const [selected, setSelected] = useState(0)
 
   if (!status) return null
 
-  const refreshButton = (
-    <button
-      onClick={onRefresh}
-      disabled={loading}
-      title="Refresh pull request status"
-      className={`shrink-0 rounded-control p-1 text-ink-muted hover:bg-surface-raised hover:text-ink ${loading ? 'animate-spin' : ''}`}
-    >
-      <IconRefresh size={13} />
-    </button>
-  )
-
   if (status.state !== 'found') {
     const unknown = status.state !== 'none'
     return (
-      <div className="flex items-center gap-2 border-b border-edge px-3 py-1.5 text-meta text-ink-faint">
-        {unknown ? <IconAlertTriangle size={13} className="shrink-0 text-warning-5" /> : <IconGitPullRequest size={13} className="shrink-0" />}
+      <div className="flex shrink-0 items-center gap-2.5 border-b border-edge py-2.5 pl-4 pr-2 text-meta text-ink-faint">
+        {unknown ? <IconAlertTriangle size={17} className="shrink-0 text-warning-5" /> : <IconGitPullRequest size={17} className="shrink-0" />}
         <span className={`min-w-0 flex-1 ${unknown ? 'text-warning-5' : ''}`}>
           {unknown ? `Pull request status unknown: ${status.message ?? status.state}` : (status.message ?? 'No pull request for this branch.')}
         </span>
-        {refreshButton}
       </div>
     )
   }
@@ -96,56 +104,71 @@ export function PrStatusCard({ status, loading, onRefresh }: Props) {
   const { checks } = pull
   const notes = localNotes(pull, status.dirty)
 
-  return (
-    <div className="flex flex-col gap-1 border-b border-edge bg-surface px-3 py-2 text-meta">
-      <div className="flex items-center gap-2">
-        <IconGitPullRequest size={14} className="shrink-0 text-ink-muted" />
-        {status.pulls.length > 1 ? (
-          <select
-            aria-label="Pull request"
-            value={selected}
-            onChange={(e) => { setSelected(Number(e.target.value)) }}
-            className="min-w-0 flex-1 truncate rounded-control border border-edge bg-surface px-1 py-0.5 text-meta text-ink focus:border-focus"
-          >
-            {status.pulls.map((p, i) => <option key={p.number} value={i}>#{p.number} {p.title} ({stateLabel(p)})</option>)}
-          </select>
-        ) : (
-          <span className="min-w-0 flex-1 truncate text-ink" title={pull.title}>#{pull.number} {pull.title}</span>
-        )}
-        <span className={`shrink-0 rounded-control px-1.5 text-micro ${STATE_STYLE[label]}`}>{label}</span>
-        {refreshButton}
-        <a
-          href={pull.url}
-          target="_blank"
-          rel="noreferrer"
-          title="Open on GitHub"
-          className="shrink-0 rounded-control p-1 text-ink-muted hover:bg-surface-raised hover:text-ink"
-        >
-          <IconExternalLink size={13} />
-        </a>
-      </div>
+  const title = status.pulls.length > 1 ? (
+    <select
+      aria-label="Pull request"
+      value={selected}
+      onChange={(e) => { setSelected(Number(e.target.value)) }}
+      className="min-w-0 flex-1 truncate rounded-control border border-edge bg-page px-2 py-0.5 text-meta text-ink focus:border-focus"
+    >
+      {status.pulls.map((p, i) => <option key={p.number} value={i}>#{p.number} {p.title} ({stateLabel(p)})</option>)}
+    </select>
+  ) : (
+    <span className="min-w-0 flex-1 truncate text-ink" title={pull.title}>
+      {!narrow && <span className="text-ink-muted">#{pull.number} </span>}
+      {pull.title}
+    </span>
+  )
+  const badge = <span className={`shrink-0 rounded-control px-2 py-px text-micro capitalize ${STATE_STYLE[label]}`}>{label}</span>
+  const link = (
+    <a
+      href={pull.url}
+      target="_blank"
+      rel="noreferrer"
+      title="Open on GitHub"
+      aria-label="Open on GitHub"
+      className="density-icon-btn inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-ink-muted hover:bg-surface-raised hover:text-ink"
+    >
+      <IconExternalLink size={18} />
+    </a>
+  )
+  const reviewLabel = pull.reviewDecision ? REVIEW_LABELS[pull.reviewDecision] : undefined
 
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-5 text-ink-muted">
-        <span className="font-mono">{pull.baseRefName} ← {pull.headRefName}</span>
-        {checks.total === 0 ? (
-          <span>no checks</span>
-        ) : (
-          <span className="flex items-center gap-1.5" title={`${checks.total} checks on the PR head`}>
-            {checks.passed > 0 && <span className="flex items-center gap-0.5 text-success-5"><IconCircleCheck size={12} />{checks.passed}</span>}
-            {checks.failed > 0 && <span className="flex items-center gap-0.5 text-error-5"><IconCircleX size={12} />{checks.failed}</span>}
-            {checks.pending > 0 && <span className="flex items-center gap-0.5 text-warning-5"><IconClock size={12} />{checks.pending}</span>}
-            {checks.skipped > 0 && <span className="text-ink-faint">{checks.skipped} skipped</span>}
-          </span>
-        )}
-        {pull.reviewDecision && REVIEW_LABELS[pull.reviewDecision] && <span>{REVIEW_LABELS[pull.reviewDecision]}</span>}
-        <span className="text-ink-faint">checked {relativeTime(status.fetchedAt)}</span>
-      </div>
+  return (
+    <div className="flex shrink-0 flex-col gap-1 border-b border-edge py-2.5 pl-4 pr-2 text-meta">
+      {narrow ? (
+        <>
+          <div className="flex items-center gap-2">
+            <IconGitPullRequest size={17} className="shrink-0 text-ink-muted" />
+            <span className="text-ink-muted">#{pull.number}</span>
+            {badge}
+            <span className="min-w-0 flex-1 text-micro"><Checks checks={checks} compact /></span>
+            {link}
+          </div>
+          {status.pulls.length > 1 ? <div className="flex">{title}</div> : <div className="truncate text-ink" title={pull.title}>{pull.title}</div>}
+        </>
+      ) : (
+        <>
+          <div className="flex items-center gap-2">
+            <IconGitPullRequest size={17} className="shrink-0 text-ink-muted" />
+            {title}
+            {badge}
+            {link}
+          </div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pl-[25px] text-micro text-ink-muted">
+            <Checks checks={checks} />
+            {reviewLabel && <><span className="text-ink-faint">·</span><span>{reviewLabel}</span></>}
+            <span className="text-ink-faint">·</span>
+            <span className="text-ink-faint">checked {relativeTime(status.fetchedAt)}</span>
+          </div>
+        </>
+      )}
 
       {checks.failing.length > 0 && (
-        <p className="pl-5 text-error-5">Failing: {checks.failing.join(', ')}</p>
+        <p className={`${narrow ? '' : 'pl-[25px]'} text-micro text-error-5`}>Failing: {checks.failing.join(', ')}</p>
       )}
-      {status.staleReason && <p className="pl-5 text-warning-5">{status.staleReason}</p>}
-      {notes.map(note => <p key={note} className="pl-5 text-warning-5">{note}</p>)}
+      {status.staleReason && <p className={`${narrow ? '' : 'pl-[25px]'} text-micro text-warning-5`}>{status.staleReason}</p>}
+      {notes.map(note => <p key={note} className={`${narrow ? '' : 'pl-[25px]'} text-micro text-warning-5`}>{note}</p>)}
     </div>
   )
 }

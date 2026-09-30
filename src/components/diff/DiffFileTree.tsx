@@ -1,64 +1,60 @@
 /**
- * Compact file list showing changed files with status badges and change counts.
+ * The Changes panel's file list: files grouped under folder headings, one
+ * row per file with its status chip, name, uncommitted dot and +/− counts.
+ * Expects files already in group order (see `groupOrder`).
  */
 
-import type { DiffFile, DiffFileStatus } from '../../types'
-
-const STATUS_CONFIG: Record<DiffFileStatus, { label: string; color: string }> = {
-  modified: { label: 'M', color: 'text-warning-5 bg-warning-950/40' },
-  added: { label: 'A', color: 'text-success-5 bg-success-950/40' },
-  deleted: { label: 'D', color: 'text-error-5 bg-error-950/40' },
-  renamed: { label: 'R', color: 'text-accent-5 bg-accent-950/40' },
-}
+import { IconFolder } from '@tabler/icons-react'
+import type { DiffFile } from '../../types'
+import { Counts, StatusChip } from './diffFileMeta'
+import { displayName, displayPath, splitPath } from './diffFiles'
 
 interface DiffFileTreeProps {
   files: DiffFile[]
   activeFile: string | null
   onSelectFile: (path: string) => void
+  /** Narrow panel: folder headings drop their icon. */
+  narrow?: boolean
 }
 
-export function DiffFileTree({ files, activeFile, onSelectFile }: DiffFileTreeProps) {
+export function DiffFileTree({ files, activeFile, onSelectFile, narrow }: DiffFileTreeProps) {
   if (files.length === 0) return null
 
-  return (
-    <div className="flex flex-col text-xs">
-      {files.map(file => {
-        const cfg = STATUS_CONFIG[file.status]
-        const isActive = file.path === activeFile
-        const displayPath = file.status === 'renamed' && file.oldPath
-          ? `${file.oldPath} → ${file.path}`
-          : file.path
+  const rows: React.ReactNode[] = []
+  let lastDir: string | null = null
+  for (const file of files) {
+    const { dir } = splitPath(file.path)
+    if (dir !== lastDir && dir) {
+      rows.push(
+        <div key={`dir:${dir}`} className="flex h-[26px] shrink-0 items-center gap-1.5 px-4 font-mono text-meta text-ink-faint" title={dir}>
+          {!narrow && <IconFolder size={14} className="shrink-0" />}
+          <span className="truncate">{dir}</span>
+        </div>,
+      )
+    }
+    lastDir = dir
 
-        return (
-          <button
-            key={file.path}
-            className={`flex items-center gap-2 px-3 py-1.5 text-left hover:bg-surface-raised transition-colors ${
-              isActive ? 'bg-surface-raised text-ink' : 'text-ink'
-            }`}
-            onClick={() => onSelectFile(file.path)}
-          >
-            <span className={`inline-flex items-center justify-center w-4 h-4 rounded-control text-micro font-bold shrink-0 ${cfg.color}`}>
-              {cfg.label}
-            </span>
-            <span className="font-mono truncate flex-1" title={file.uncommitted ? `${displayPath} (uncommitted changes)` : displayPath}>
-              {displayPath}
-            </span>
-            {file.uncommitted && (
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning-5" role="img" aria-label="uncommitted changes" />
-            )}
-            {!file.isBinary && (file.additions > 0 || file.deletions > 0) && (
-              <span className="whitespace-nowrap shrink-0">
-                {file.additions > 0 && <span className="text-success-5">+{file.additions}</span>}
-                {file.additions > 0 && file.deletions > 0 && ' '}
-                {file.deletions > 0 && <span className="text-error-5">&minus;{file.deletions}</span>}
-              </span>
-            )}
-            {file.isBinary && (
-              <span className="text-ink-faint italic shrink-0">binary</span>
-            )}
-          </button>
-        )
-      })}
-    </div>
-  )
+    const isActive = file.path === activeFile
+    const full = displayPath(file)
+    rows.push(
+      <button
+        key={file.path}
+        className={`density-row flex h-8 w-full shrink-0 items-center gap-2.5 border-l-2 pl-[26px] pr-4 text-left text-ink transition-colors ${
+          isActive ? 'border-primary-6 bg-page' : 'border-transparent hover:bg-surface-raised'
+        }`}
+        onClick={() => { onSelectFile(file.path) }}
+        title={file.uncommitted ? `${full} (uncommitted changes)` : full}
+        aria-current={isActive ? 'true' : undefined}
+      >
+        <StatusChip status={file.status} />
+        <span className={`min-w-0 flex-1 truncate font-mono text-body ${isActive ? 'font-bold' : ''}`}>{displayName(file)}</span>
+        {file.uncommitted && (
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning-5" role="img" aria-label="uncommitted changes" />
+        )}
+        <Counts file={file} className="text-micro" />
+      </button>,
+    )
+  }
+
+  return <div className="flex flex-col">{rows}</div>
 }

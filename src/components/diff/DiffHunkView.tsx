@@ -9,8 +9,8 @@
  */
 
 import { useMemo, useState } from 'react'
-import { Diff, Hunk, getChangeKey } from 'react-diff-view'
-import type { HunkData, ChangeData, ChangeEventArgs } from 'react-diff-view'
+import { Decoration, Diff, Hunk, getChangeKey } from 'react-diff-view'
+import type { HunkData, ChangeData, ChangeEventArgs, GutterOptions } from 'react-diff-view'
 import type { DiffHunk, ReviewComment } from '../../types'
 import 'react-diff-view/style/index.css'
 
@@ -33,6 +33,8 @@ export interface DiffCommenting {
 interface DiffHunkViewProps {
   hunks: DiffHunk[]
   commenting?: DiffCommenting
+  /** One gutter: the new line number, or the old one for removed lines. */
+  narrow?: boolean
 }
 
 /** Convert our DiffHunk[] to react-diff-view's HunkData[] format. */
@@ -160,7 +162,7 @@ function CommentCard({ comment, onUpdate, onDelete }: {
   )
 }
 
-export function DiffHunkView({ hunks, commenting }: DiffHunkViewProps) {
+export function DiffHunkView({ hunks, commenting, narrow }: DiffHunkViewProps) {
   const [selection, setSelection] = useState<LineRange | null>(null)
   const rdvHunks = useMemo(() => toRdvHunks(hunks), [hunks])
 
@@ -217,8 +219,15 @@ export function DiffHunkView({ hunks, commenting }: DiffHunkViewProps) {
       }
     : undefined
 
+  // Narrow mode hides the old-side gutter (CSS) and shows removed lines' old
+  // number in the new-side one.
+  const renderGutter = narrow
+    ? ({ change, side, renderDefault }: GutterOptions) =>
+        side === 'new' && change.type === 'delete' ? change.lineNumber : renderDefault()
+    : undefined
+
   return (
-    <div className="diff-hunk-view text-xs font-mono overflow-x-auto">
+    <div className={`diff-hunk-view overflow-x-auto font-mono ${narrow ? 'diff-single-gutter' : ''}`}>
       <Diff
         viewType="unified"
         diffType="modify"
@@ -227,10 +236,14 @@ export function DiffHunkView({ hunks, commenting }: DiffHunkViewProps) {
         widgets={widgets}
         gutterEvents={gutterEvents}
         gutterClassName={commenting ? 'cursor-pointer' : undefined}
+        renderGutter={renderGutter}
       >
-        {(rdvHunks) => rdvHunks.map((hunk, i) => (
-          <Hunk key={`${hunk.oldStart}:${hunk.newStart}:${i}`} hunk={hunk} />
-        ))}
+        {(rdvHunks) => rdvHunks.flatMap((hunk, i) => [
+          <Decoration key={`h:${hunk.oldStart}:${hunk.newStart}:${i}`}>
+            <span className="diff-hunk-header">{hunk.content}</span>
+          </Decoration>,
+          <Hunk key={`${hunk.oldStart}:${hunk.newStart}:${i}`} hunk={hunk} />,
+        ])}
       </Diff>
     </div>
   )

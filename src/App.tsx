@@ -1002,6 +1002,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
           onHandleTurnDone={(fn) => { diffHandleTurnDoneRef.current = fn }}
           sessionId={activeSessionId}
           defaultView={activeSession?.worktreePath ? 'branch' : 'all'}
+          isMobile={isMobile}
         />
       )}
 
