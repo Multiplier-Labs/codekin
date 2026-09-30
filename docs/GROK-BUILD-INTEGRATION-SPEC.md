@@ -1,6 +1,6 @@
 # Grok Build integration spec
 
-Status: **proposed**. Revised after upstream-doc and codebase review, then a spike against grok 1.0.44 (2026-09-30).
+Status: **implemented** (steps 1–3: #699, #700, #701). Steps 4–5 (workflows, loops, Joe) pending. Revised after upstream-doc and codebase review and a spike against grok 1.0.44 (2026-09-30).
 
 Date: **2026-09-27**
 
@@ -233,7 +233,7 @@ noted:
 | --- | --- | --- |
 | `default` | ask (no `_meta` mode) | forward every request to `PromptRouter` |
 | `acceptEdits` | ask | auto-allow once for edit-kind requests whose path is inside the working directory; forward the rest |
-| `plan` | ask + `session/set_mode {modeId: "plan"}` | deny execute- and edit-kind requests without prompting |
+| `plan` | ask + `session/set_mode {modeId: "plan"}` | deny edit-kind requests without prompting (Codekin's plan-mode rule); shell commands prompt the user, as for every harness |
 | `bypassPermissions` / `dangerouslySkipPermissions` | `_meta.yoloMode: true` on new/load | none (Grok deny rules still apply) |
 
 **Grok's ask mode is not Claude's default mode.** Grok auto-approves commands
@@ -315,9 +315,11 @@ edits are not allowed in plan mode”), but `echo x > plan-shell.txt` arrived
 as an ordinary permission request and, when allowed, wrote the file.
 Subagents also start outside the plan gate. Therefore:
 
-- Codekin `plan` launches Grok in ask mode, never yolo, and the Codekin-side
-  policy denies execute- and edit-kind permission requests. Plan-mode safety
-  comes from Codekin's denial, not from Grok's gate. Grok's safe-command
+- Codekin `plan` launches Grok in ask mode, never yolo. Edit requests are
+  denied by Codekin's plan-mode rule; shell commands reach the user as
+  ordinary prompts (the same behaviour as Claude plan mode), so a shell write
+  needs an explicit approval. Plan-mode safety comes from Codekin, not from
+  Grok's gate. Grok's safe-command
   auto-approval (above) still applies, so `touch`/`mkdir` can run in plan mode.
   The plan-mode label must not promise “read-only”.
 - Grok's `exit_plan_mode` approval should map to Codekin's existing
