@@ -2,6 +2,38 @@
 
 Date: 2026-09-30. Audited revision: `7f24e7c600727d60c6df2ef1dba7ea49a07017bb`.
 
+## Status after re-audit against `main`
+
+Findings were re-checked against `main` at `cba2d02` (after #672 and #684). The findings below are kept as originally written; this section records corrections and where each one stands.
+
+**Corrections:**
+
+- **S5 isolation fallback — outdated.** Since #672, a child whose worktree cannot be created fails and notifies Joe; it never runs in the shared checkout. Provider selection and inheritance were added by #684.
+- **Finding 5 / S4 restart — overstated.** At boot, `ws-server` already calls `runStore.failInterrupted('agent')` (since #591), so interrupted runs are recorded as `failed`, not left `running`. The diagnostic built a manager without that boot step. The real gaps were narrower: recovered children did not reappear in `list()`, Joe was never told, and with `CODEKIN_AUTO_RESTORE_SESSIONS` the child sessions restarted without supervision.
+- **Finding 4 — also covers the fallback.** When `gh` / `git` failed, completion fell back to transcript keywords, so "Opened a pull request" in the output counted as success.
+
+**New finding:**
+
+- **N1 — High: timed-out children restarted unsupervised.** The timeout killed the child process with a bare `SIGTERM`, without marking a deliberate stop. The session lifecycle classified the exit as a crash and auto-restarted it after the monitor had already detached.
+
+**Where each finding stands:**
+
+| Finding | Status |
+| --- | --- |
+| S1 stop/delete don't settle the child | Fixed in #688: `onSessionStopped` → `canceled`, slot freed, single notification |
+| S2 cleanup deletes active work | Fixed in #688: completed-only, reports skipped sessions, `?dryRun=true` |
+| S3 approvals don't resume the clock | Fixed in #688: `onSessionPromptResolved` from every dismiss path |
+| S4 / 5 restart recovery | Fixed in #688: interrupted children relisted, Joe notified once, no unsupervised auto-restart; `get()` falls back to the run store |
+| 4 / S6 false completion | Fixed in #688: PR or remote head must equal the worktree HEAD; otherwise `unverified` (`awaiting_human`), never `succeeded` |
+| N1 timed-out children restarted | Fixed in #688 |
+| 2 `list_reports` returns 400 | Fixed in #688: no-argument call lists all managed repos; optional `repo` / `since` |
+| 8 report categories hardcoded | Fixed in #688: categories discovered from disk. Automations banner still omits blocked children (open) |
+| S5 `timeoutMs` / `deployAfter` | Fixed in #688: `timeoutMs` exposed; `deployAfter` removed from MCP and rejected by REST |
+| 6 duplicate notification paths | Partly fixed in #688: Joe's own children use only the outbox path. Unrelated interactive sessions still reach Joe directly (open product decision) |
+| Session-control MCP tools (follow up, stop, resume, close) | Open — next slice, built on the #688 lifecycle events |
+| S6 ownership and structured answers | Open — part of the control-tools slice |
+| 1 entry experience, 3 activation state, 7 memory/trust automation | Open — product and UI work after the reliability slices |
+
 ## Assessment
 
 Joe has useful execution infrastructure, but an unclear user contract. It presents itself as an AI ops manager, offers generic coding tasks, discusses reports, manages approvals, and receives deployment events. The user must still decide what to delegate, supply policies, interpret chat, and determine whether the work is actually finished. For one straightforward coding task, a normal session has fewer handoffs.
