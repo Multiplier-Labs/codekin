@@ -109,6 +109,12 @@ interface Props {
   codexDisabled: boolean
   /** Toggle Codex connection on/off. */
   onToggleCodex: () => void
+  /** Grok connection state: true=connected, false=disconnected, null=unknown. */
+  grokConnected: boolean | null
+  /** Whether Grok connection is disabled by the user. */
+  grokDisabled: boolean
+  /** Toggle Grok connection on/off. */
+  onToggleGrok: () => void
   /** Current route view ('chat' | 'workflows'). */
   view: string
   /** Agent display name for the orchestrator button. */
@@ -176,6 +182,9 @@ export function LeftSidebar({
   codexConnected,
   codexDisabled,
   onToggleCodex,
+  grokConnected,
+  grokDisabled,
+  onToggleGrok,
   view,
   onSelectSession,
   onDeleteSession,
@@ -318,6 +327,9 @@ export function LeftSidebar({
                 codexConnected={codexConnected}
                 codexDisabled={codexDisabled}
                 onToggleCodex={onToggleCodex}
+                grokConnected={grokConnected}
+                grokDisabled={grokDisabled}
+                onToggleGrok={onToggleGrok}
                 onClose={() => setConnPopupOpen(false)}
               />
             )}
@@ -482,6 +494,9 @@ export function LeftSidebar({
                 codexConnected={codexConnected}
                 codexDisabled={codexDisabled}
                 onToggleCodex={onToggleCodex}
+                grokConnected={grokConnected}
+                grokDisabled={grokDisabled}
+                onToggleGrok={onToggleGrok}
                 onClose={() => setConnPopupOpen(false)}
               />
             )}

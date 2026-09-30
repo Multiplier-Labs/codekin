@@ -30,6 +30,7 @@ import { useErrorNotification } from './hooks/useErrorNotification'
 import { useGlobalKeyBindings } from './hooks/useGlobalKeyBindings'
 import { useOpenCodeModelSync } from './hooks/useOpenCodeModelSync'
 import { useCodexModelSync } from './hooks/useCodexModelSync'
+import { useGrokModelSync } from './hooks/useGrokModelSync'
 import { useOpenCodeCommands } from './hooks/useOpenCodeCommands'
 import { useProviderValidation } from './hooks/useProviderValidation'
 import { buildSlashCommandList, buildOpenCodeSlashCommandList } from './lib/slashCommands'
@@ -296,6 +297,8 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
           codexAvailable: msg.codexAvailable ?? false,
           codexAuthenticated: msg.codexAuthenticated ?? false,
           openCodeAvailable: msg.openCodeAvailable ?? false,
+          grokAvailable: msg.grokAvailable ?? false,
+          grokAuthenticated: msg.grokAuthenticated ?? false,
         })
       }
     },
@@ -317,6 +320,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   const [claudeDisabled, setClaudeDisabled] = useState(false)
   const [openCodeDisabled, setOpenCodeDisabled] = useState(false)
   const [codexDisabled, setCodexDisabled] = useState(false)
+  const [grokDisabled, setGrokDisabled] = useState(false)
   // Derive the active session's provider (falls back to the default for new
   // sessions). The orchestrator session is not in the sidebar sessions list,
   // so its provider comes from the session_joined sync — without this the
@@ -344,6 +348,13 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     setModel,
     codexDisabled,
   })
+  const { grokModels, grokConnected, setGrokConnected, reconnect: reconnectGrok } = useGrokModelSync({
+    token: settings.token,
+    activeSessionProvider,
+    currentModel,
+    setModel,
+    grokDisabled,
+  })
   const { claudeModels } = useClaudeModelSync({
     token: settings.token,
     currentModel,
@@ -351,6 +362,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   })
   const availableModels = activeSessionProvider === 'opencode' ? openCodeModels
     : activeSessionProvider === 'codex' ? codexModels
+    : activeSessionProvider === 'grok' ? grokModels
     : claudeModels
 
   // Debounced change-summary request for the joined session (cheap git status + commit count).
@@ -442,13 +454,15 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     [activeSessionProvider, openCodeCommands, allCommands],
   )
 
-  // Wrap setModel to also remember the OpenCode / Codex model choice
+  // Wrap setModel to also remember the OpenCode / Codex / Grok model choice
   const handleModelChange = useCallback((model: string) => {
     setModel(model)
     if (activeSessionProvider === 'opencode') {
       setPref('opencodeModel', model)
     } else if (activeSessionProvider === 'codex') {
       setPref('codexModel', model)
+    } else if (activeSessionProvider === 'grok') {
+      setPref('grokModel', model)
     }
   }, [setModel, activeSessionProvider])
 
@@ -724,6 +738,20 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     }
   }, [codexDisabled, activeSessionProvider, activeSessionId, leaveSession, reconnectCodex, setCodexConnected])
 
+  const handleToggleGrok = useCallback(() => {
+    if (grokDisabled) {
+      setGrokDisabled(false)
+      reconnectGrok()
+    } else {
+      setGrokDisabled(true)
+      setGrokConnected(false)
+      // Leave the current session if it's a Grok session
+      if (activeSessionProvider === 'grok' && activeSessionId) {
+        leaveSession()
+      }
+    }
+  }, [grokDisabled, activeSessionProvider, activeSessionId, leaveSession, reconnectGrok, setGrokConnected])
+
   const activeSession = sessions.find(s => s.id === activeSessionId)
   const activeSessionName = activeSession?.name ?? null
   const activeRepoName = activeRepo?.name ?? activeWorkingDir?.split('/').pop() ?? null
@@ -764,6 +792,9 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
         codexConnected={codexConnected}
         codexDisabled={codexDisabled}
         onToggleCodex={handleToggleCodex}
+        grokConnected={grokConnected}
+        grokDisabled={grokDisabled}
+        onToggleGrok={handleToggleGrok}
         view={view}
         onSelectSession={(id) => { docsBrowser.close(); if (view === 'orchestrator') navigate(`/s/${id}`); handleSelectSession(id) }}
         onDeleteSession={handleDeleteSession}
@@ -971,6 +1002,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             onUseExistingCheckout={switchToSharedCheckout}
             openCodeConnected={activeSessionProvider === 'opencode' ? (openCodeDisabled ? false : openCodeConnected) : null}
             codexConnected={activeSessionProvider === 'codex' ? (codexDisabled ? false : codexConnected) : null}
+            grokConnected={activeSessionProvider === 'grok' ? (grokDisabled ? false : grokConnected) : null}
             claudeDisabled={activeSessionProvider === 'claude' && claudeDisabled}
           />
         ) : (

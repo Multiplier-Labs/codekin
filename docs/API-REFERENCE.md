@@ -115,6 +115,10 @@ Return the model list reported by the Codex app-server's `model/list` method. Ca
 
 **Response:** `{ "models": [{ "id": "gpt-6-astra", "name": "...", "description": "...", "isDefault": true }, ...] }`
 
+### `GET /api/grok/models`
+
+Return the models the Grok Build CLI reports in its ACP `initialize` response (`grok agent stdio`), each with `id`, `name`, `description`, `isDefault`, and `contextTokens` when known. Cached for 10 minutes. Returns an empty `models` array when the Grok CLI is unavailable or the handshake fails.
+
 ### `GET /api/opencode/models`
 
 Return the models configured on the running OpenCode server, plus the per-provider default model IDs.

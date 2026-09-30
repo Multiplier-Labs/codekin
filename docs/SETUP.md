@@ -2,7 +2,7 @@
 
 > **New users**: Start with [Getting started](./GETTING-STARTED.md) for hosted or local installation and your first session. This guide covers an advanced nginx, Authelia, and systemd deployment.
 
-Codekin is a web UI for Claude Code, Codex, and OpenCode sessions. It connects via WebSocket and provides repo browsing, skill discovery, and screenshot uploads.
+Codekin is a web UI for Claude Code, Codex, OpenCode, and Grok Build sessions. It connects via WebSocket and provides repo browsing, skill discovery, and screenshot uploads.
 
 ## Architecture
 

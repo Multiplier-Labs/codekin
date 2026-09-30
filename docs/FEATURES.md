@@ -1,6 +1,6 @@
 # Codekin — Feature Reference
 
-Codekin is a web-based terminal UI for managing multiple coding-agent sessions (Claude Code, OpenAI Codex and OpenCode). It provides real-time streaming, multi-session management, repository browsing, slash-command skills, file uploads, and a rich interactive chat interface — all accessible from a browser.
+Codekin is a web-based terminal UI for managing multiple coding-agent sessions (Claude Code, OpenAI Codex, OpenCode and Grok Build). It provides real-time streaming, multi-session management, repository browsing, slash-command skills, file uploads, and a rich interactive chat interface — all accessible from a browser.
 
 ---
 

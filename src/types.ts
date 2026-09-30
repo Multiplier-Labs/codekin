@@ -51,8 +51,9 @@ export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermiss
  * - 'claude': Claude Code CLI (subprocess, NDJSON on stdin/stdout)
  * - 'opencode': OpenCode server (HTTP REST + SSE)
  * - 'codex': OpenAI Codex CLI (subprocess, `codex app-server` JSON-RPC on stdin/stdout)
+ * - 'grok': Grok Build CLI (subprocess, `grok agent stdio` ACP JSON-RPC on stdin/stdout)
  */
-export type CodingProvider = 'claude' | 'opencode' | 'codex'
+export type CodingProvider = 'claude' | 'opencode' | 'codex' | 'grok'
 
 /**
  * Provider metadata for the UI selector.
@@ -65,7 +66,17 @@ export const PROVIDERS: { id: CodingProvider; label: string; description: string
   { id: 'claude', label: 'Claude', description: 'Anthropic Claude Code CLI' },
   { id: 'opencode', label: 'OpenCode', description: 'OpenCode server (multi-provider)' },
   { id: 'codex', label: 'Codex', description: 'OpenAI Codex CLI (ChatGPT subscription)' },
+  { id: 'grok', label: 'Grok', description: 'Grok Build CLI (SpaceXAI)' },
 ]
+
+/**
+ * Harnesses that may run unattended — Agent Joe, its delegated sessions, and
+ * workflows.
+ * Grok is excluded until its unattended behaviour is verified; keep in sync
+ * with AGENT_PROVIDERS in server/types.ts.
+ */
+export type AgentProvider = Exclude<CodingProvider, 'grok'>
+export const AGENT_PROVIDER_IDS: readonly CodingProvider[] = ['claude', 'opencode', 'codex'] satisfies AgentProvider[]
 
 /** Model option for UI selectors. */
 export interface ModelOption { id: string; label: string }
@@ -92,6 +103,33 @@ export const PERMISSION_MODES: { id: PermissionMode; label: string; description:
   { id: 'bypassPermissions', label: 'Bypass permissions', description: 'Accepts all permissions without asking', icon: 'warning', dangerous: true },
   { id: 'dangerouslySkipPermissions', label: 'Skip permissions', description: 'Skips all permission checks entirely — use only in sandboxed environments', icon: 'warning', dangerous: true },
 ]
+
+/**
+ * Grok enforces modes differently from Claude: in ask mode it runs commands
+ * it considers safe (mkdir, git status, …) without asking, and its plan mode
+ * blocks edits but not shell commands, which Codekin then asks about.
+ */
+const GROK_MODE_DESCRIPTIONS: Partial<Record<PermissionMode, string>> = {
+  default: 'Asks before risky commands and edits; Grok runs commands it considers safe without asking',
+  plan: 'Blocks file edits while planning; asks before shell commands',
+}
+
+/**
+ * Permission modes a provider can honour, with provider-specific wording.
+ * Only Claude has a separate --dangerously-skip-permissions flag; for the
+ * others bypassPermissions already covers that case.
+ */
+export function permissionModesFor(provider: CodingProvider | undefined): typeof PERMISSION_MODES {
+  if (provider === 'grok') return GROK_PERMISSION_MODES
+  return provider === undefined || provider === 'claude' ? PERMISSION_MODES : NON_CLAUDE_PERMISSION_MODES
+}
+
+// Precomputed so callers get stable references across renders.
+const NON_CLAUDE_PERMISSION_MODES = PERMISSION_MODES.filter(m => m.id !== 'dangerouslySkipPermissions')
+const GROK_PERMISSION_MODES = NON_CLAUDE_PERMISSION_MODES.map(m => {
+  const description = GROK_MODE_DESCRIPTIONS[m.id]
+  return description ? { ...m, description } : m
+})
 
 /** Client-side session info (subset of server Session, safe to serialize). */
 export interface Session {

@@ -17,6 +17,8 @@ function health(overrides: Partial<AgentHealth> = {}): AgentHealth {
     codexAvailable: true,
     codexAuthenticated: true,
     openCodeAvailable: true,
+    grokAvailable: true,
+    grokAuthenticated: true,
     ...overrides,
   }
 }
@@ -25,7 +27,7 @@ function env(overrides: Partial<ChecklistEnv> = {}): ChecklistEnv {
   return { ghStatus: 'ok', repoCount: 3, ...overrides }
 }
 
-const onlyCodex = { claudeAvailable: false, claudeAuthenticated: false, openCodeAvailable: false }
+const onlyCodex = { claudeAvailable: false, claudeAuthenticated: false, openCodeAvailable: false, grokAvailable: false }
 
 describe('buildChecklist', () => {
   it('marks everything ready in a healthy environment, with the Claude version as detail', () => {
@@ -37,7 +39,7 @@ describe('buildChecklist', () => {
 
   it('shows unknown rows (not failures) before the connected frame arrives', () => {
     const rows = buildChecklist(null, env())
-    for (const id of ['claude', 'opencode', 'codex']) {
+    for (const id of ['claude', 'opencode', 'codex', 'grok']) {
       expect(rows.find((r) => r.id === id)?.state).toBe('unknown')
     }
   })
@@ -49,6 +51,15 @@ describe('buildChecklist', () => {
     expect(codex?.detail).toContain('codex login')
     const claude = rows.find((r) => r.id === 'claude')
     expect(claude?.state).toBe('warn')
+  })
+
+  it('grok: missing binary shows the curl installer; unsigned warns with grok login', () => {
+    const missing = buildChecklist(health({ grokAvailable: false }), env()).find((r) => r.id === 'grok')
+    expect(missing?.state).toBe('missing')
+    expect(missing?.detail).toContain('x.ai/cli/install.sh')
+    const unsigned = buildChecklist(health({ grokAuthenticated: false }), env()).find((r) => r.id === 'grok')
+    expect(unsigned?.state).toBe('warn')
+    expect(unsigned?.detail).toContain('grok login')
   })
 
   it('gh missing: optional row with an install hint, never "set the repositories path"', () => {
@@ -123,7 +134,7 @@ describe('hasUsableAgent', () => {
   })
 
   it('false when every agent binary is missing', () => {
-    const none = health({ claudeAvailable: false, codexAvailable: false, openCodeAvailable: false })
+    const none = health({ claudeAvailable: false, codexAvailable: false, openCodeAvailable: false, grokAvailable: false })
     expect(hasUsableAgent(buildChecklist(none, env()))).toBe(false)
   })
 })

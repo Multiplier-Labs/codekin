@@ -21,7 +21,7 @@ Install once, then open from any browser. Codekin runs your coding agents and re
 
 Works with Claude Code, Codex, and OpenCode. More durable than the CLI alone, more controllable than SaaS platforms.
 
-- **Multi-agent support** — Run Claude Code, Codex, and OpenCode side by side with a consistent interface for sessions, approvals, and workflows.
+- **Multi-agent support** — Run Claude Code, Codex, OpenCode, and Grok Build side by side with a consistent interface for sessions, approvals, and workflows.
 - **Self-hosted control** — Keep data and runtime on your infrastructure. Fits into your existing auth, networking, and deployment stack.
 - **Built-in orchestration** — Combine live sessions with scheduled workflows, webhooks, and CI-driven runs in one platform.
 
@@ -75,7 +75,7 @@ Built for real engineering workflows:
 
 Codekin runs coding agents on your own computer; a Codekin web app is how you reach them from a browser, phone or tablet. Use the public instance at [app.codekin.ai](https://app.codekin.ai), or run your own for your team — on your domain, with your own GitHub sign-in and data. See [Hosting your own Codekin web app](docs/SELF-HOSTED-RELAY.md).
 
-1. Install and sign in to at least one supported coding agent on your macOS or Linux computer: [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), or [OpenCode](https://opencode.ai). Windows isn't supported yet.
+1. Install and sign in to at least one supported coding agent on your macOS or Linux computer: [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai), or [Grok Build](https://github.com/xai-org/grok-build). Windows isn't supported yet.
 2. Open your Codekin web app ([app.codekin.ai](https://app.codekin.ai), or your team's own) and sign in with GitHub. Access is by invitation: open the invite link a workspace owner or admin sent you, then sign in. Owners and admins set up two-factor authentication (an authenticator app or a passkey) on first sign-in.
 3. On **Connect your computer**, copy the generated install command and run it in a terminal **on that computer**. It pairs the computer with the web app you generated it in, whichever instance that is. The pairing command expires after 10 minutes and can be used once.
 4. Wait for the computer to show **online**, then click **Open**. Keep the computer awake and connected while using Codekin remotely.
@@ -92,6 +92,7 @@ Only need Codekin on the computer in front of you? Use the local install below �
   - [Claude Code CLI](https://github.com/anthropics/claude-code) (`claude`)
   - [OpenAI Codex CLI](https://github.com/openai/codex) (`codex login`) to use ChatGPT-subscription OpenAI models
   - [OpenCode](https://opencode.ai) with a configured provider
+  - [Grok Build](https://github.com/xai-org/grok-build) (`grok login`, or `XAI_API_KEY`). Agent Joe and workflows don't run on Grok yet
 
 **One-liner:**
 
