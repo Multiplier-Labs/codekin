@@ -169,6 +169,8 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
         completionPolicy: z.enum(['pr', 'merge', 'commit-only']).optional(),
         source: z.enum(['joe', 'report', 'incident']).optional(),
         sourceRef: z.string().optional().describe('e.g. the report path the finding came from'),
+        originSessionId: z.string().optional().describe('Repo session the request came from — its milestones are posted back there'),
+        originRequestId: z.string().optional().describe('The @Joe request id from the Session Request notification'),
       },
     },
     (args) => run(() => api.createTask(args)),
@@ -205,6 +207,50 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
       },
     },
     ({ id, ...input }) => run(() => api.requestDecision(id, input)),
+  )
+
+  server.registerTool(
+    'reply_in_session',
+    {
+      description:
+        'Answer an @Joe request in the repo session it came from. The reply appears in that conversation attributed to you; the coding agent does not see it. Pass taskId to attach a task card.',
+      inputSchema: {
+        sessionId: z.string(),
+        text: z.string().min(1),
+        requestId: z.string().optional().describe('The request id from the Session Request notification'),
+        taskId: z.string().optional(),
+      },
+    },
+    ({ sessionId, ...input }) => run(() => api.replyInSession(sessionId, input)),
+  )
+
+  server.registerTool(
+    'get_session_context',
+    {
+      description: 'Read a repo session\'s recent conversation (user, agent, and @Joe exchanges), its branch, who controls its execution, and its linked tasks.',
+      inputSchema: { sessionId: z.string(), limit: z.number().int().positive().optional().describe('Max characters (default 10000)') },
+    },
+    ({ sessionId, limit }) => run(() => api.getSessionContext(sessionId, limit)),
+  )
+
+  server.registerTool(
+    'take_over_session',
+    {
+      description:
+        'Take control of a repo session\'s execution when the user explicitly asked you to in that session (pass that @Joe requestId). Returns the controller revision to use with send_to_session. Never take over work the user did not hand you.',
+      inputSchema: { sessionId: z.string(), requestId: z.string(), taskId: z.string().optional().describe('Task you supervise it for') },
+    },
+    ({ sessionId, ...input }) => run(() => api.takeOverSession(sessionId, input)),
+  )
+
+  server.registerTool(
+    'send_to_session',
+    {
+      description:
+        'Instruct the coding agent of a session you control (not your own children — use send_to_child for those). Refused once the user takes back control or when your controllerRevision is stale.',
+      inputSchema: { sessionId: z.string(), text: z.string().min(1), controllerRevision: z.number().int().nonnegative() },
+    },
+    ({ sessionId, ...input }) => run(() => api.sendToSession(sessionId, input)),
   )
 
   server.registerTool(

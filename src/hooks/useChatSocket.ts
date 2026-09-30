@@ -73,6 +73,21 @@ function applyMessageMut(messages: ChatMessage[], msg: WsServerMessage): boolean
       messages.push({ type: 'user', text: msg.text, ts: Date.now(), key: nextKey() })
       return true
 
+    case 'joe_message':
+      messages.push({
+        type: 'joe',
+        role: msg.role,
+        text: msg.text,
+        requestId: msg.requestId,
+        milestone: msg.milestone,
+        instruction: msg.instruction,
+        notice: msg.notice,
+        task: msg.task,
+        ts: Date.parse(msg.ts) || Date.now(),
+        key: msg.id,
+      })
+      return true
+
     case 'claude_started':
       messages.push({ type: 'system', subtype: 'init', text: 'Session started', key: nextKey() })
       return true
@@ -267,6 +282,7 @@ export function useChatSocket({
         break
 
       case 'user_echo':
+      case 'joe_message':
         flushBeforeStructuralMessage()
         setMessages(prev => trimMessages(processMessage(prev, msg)))
         break
@@ -498,6 +514,11 @@ export function useChatSocket({
     if (sid) promptState.clearForSession(sid)
   }, [send, promptState])
 
+  /** Address Agent Joe in the joined session; the coding agent is not involved. */
+  const askJoe = useCallback((text: string) => {
+    send({ type: 'ask_joe', text })
+  }, [send])
+
   const sendPromptResponse = useCallback((value: string | string[]) => {
     const requestId = activePrompt?.requestId
     send({ type: 'prompt_response', value, requestId } as WsClientMessage)
@@ -576,6 +597,7 @@ export function useChatSocket({
     joinSession,
     createSession,
     sendInput,
+    askJoe,
     sendPromptResponse,
     leaveSession,
     clearMessages,

@@ -1,13 +1,14 @@
 /**
- * Orchestrator view — initialization + dashboard header.
+ * Joe's activity log — initialization + header.
  *
  * On mount, fetches the orchestrator session ID from the server and notifies
- * the parent to join it. Displays a dashboard header with summary stats.
- * The actual chat rendering is handled by ChatView and InputBar in App.tsx.
+ * the parent to join it. Users talk to Joe from repo sessions (@Joe) and see
+ * delegated work in Tasks; this view is Joe's own transcript, kept as
+ * history and for answering Joe's own approval prompts.
  */
 
 import { useEffect, useState, useCallback } from 'react'
-import { IconRobotFace, IconFolder, IconBell, IconTerminal2 } from '@tabler/icons-react'
+import { IconRobotFace, IconFolder, IconBell, IconTerminal2, IconArrowLeft } from '@tabler/icons-react'
 import * as api from '../lib/ccApi'
 import { AGENT_PROVIDER_IDS, PROVIDERS, type CodingProvider } from '../types'
 import { useAgentHealth } from '../hooks/useAgentHealth'
@@ -30,14 +31,9 @@ interface Props {
   sessionJoined: boolean
   /** Agent display name (from parent settings). */
   agentName?: string
-  /** Chat / Tasks tab (header tabs render only when onTabChange is given). */
-  tab?: OrchestratorTab
-  onTabChange?: (tab: OrchestratorTab) => void
-  /** Tasks waiting on the user (decisions + reviews), shown as a badge. */
-  taskAttention?: number
+  /** Return to the Tasks view. */
+  onBackToTasks?: () => void
 }
-
-export type OrchestratorTab = 'chat' | 'tasks'
 
 function StatCard({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
   return (
@@ -51,7 +47,7 @@ function StatCard({ label, value, icon }: { label: string; value: number; icon: 
   )
 }
 
-export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoined, agentName: agentNameProp, tab = 'chat', onTabChange, taskAttention = 0 }: Props) {
+export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoined, agentName: agentNameProp, onBackToTasks }: Props) {
   const [status, setStatus] = useState<'loading' | 'choose' | 'active' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
   const [stats, setStats] = useState<DashboardStats | null>(null)
@@ -168,29 +164,16 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
 
   return (
     <div className="flex items-center gap-3 px-4 py-2.5 border-b border-edge bg-page">
+      {onBackToTasks && (
+        <button type="button" onClick={onBackToTasks} className="inline-flex items-center gap-1 rounded-control px-1.5 py-1 text-meta text-ink-muted hover:bg-surface-raised hover:text-ink" title="Back to Tasks">
+          <IconArrowLeft size={14} stroke={2} /> Tasks
+        </button>
+      )}
       <div className="flex items-center gap-2 text-ink">
         <IconRobotFace size={18} stroke={2} className="text-accent-5" />
         <span className="text-body font-medium">Agent {agentName}</span>
+        <span className="text-meta text-ink-muted">activity log</span>
       </div>
-      {onTabChange && (
-        <div role="tablist" aria-label={`Agent ${agentName} views`} className="flex items-center gap-1">
-          {(['chat', 'tasks'] as const).map(id => (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={tab === id}
-              onClick={() => { onTabChange(id) }}
-              className={`inline-flex items-center gap-1.5 rounded-control px-2.5 py-1 text-meta ${tab === id ? 'bg-surface-raised text-ink' : 'text-ink-muted hover:text-ink'}`}
-            >
-              {id === 'chat' ? 'Chat' : 'Tasks'}
-              {id === 'tasks' && taskAttention > 0 && (
-                <span aria-label={`${taskAttention} waiting on you`} className="rounded-full bg-warning-7 px-1.5 text-micro font-semibold text-warning-1">{taskAttention}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
       {stats && (
         <div className="flex items-center gap-2 ml-auto">
           {stats.managedRepos > 0 && (

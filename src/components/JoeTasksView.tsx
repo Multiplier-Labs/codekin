@@ -1,21 +1,25 @@
 /**
- * Joe's Tasks tab — the per-repo task list (docs/JOE-TASKS-SPEC.md).
+ * The task list behind the Tasks view (docs/JOE-TASKS-SPEC.md,
+ * docs/JOE-REPO-COLLABORATION-MAINTENANCE-SPEC.md §5).
  *
- * Answers "what happened while I was away?" in three short lists instead of
- * three transcripts: Needs your decision, Ready for review, In progress.
- * To do and closed tasks sit below. "Delegate tasks" hands new work to Joe.
+ * Answers "what happened while I was away?" in short lists instead of
+ * transcripts: Needs your decision, Ready for review, Running, Queued.
+ * Running means an attempt is active now; queued means it is waiting for Joe
+ * to start or resume it. To do and closed tasks sit below. "New task" hands
+ * new work to Joe.
  */
 
 import { useState } from 'react'
 import {
-  IconPlus, IconExternalLink, IconTerminal2, IconCheck, IconMessageCircle, IconRefresh, IconChevronRight,
+  IconPlus, IconExternalLink, IconTerminal2, IconCheck, IconMessageCircle, IconRefresh, IconChevronRight, IconMessages,
 } from '@tabler/icons-react'
 import type { Repo } from '../types'
 import {
   acceptTask, answerDecision, repoName, requestChanges, setTaskStatus, startTask,
-  type JoeTask, type TaskList, type TaskStatus,
+  type JoeTask, type TaskList,
 } from '../lib/tasksApi'
 import { DelegateTasksDialog } from './DelegateTasksDialog'
+import { SECTIONS, sectionOf, type SectionId } from '../lib/taskSections'
 
 interface Props {
   token: string
@@ -30,13 +34,6 @@ interface Props {
   onOpenSession?: (sessionId: string) => void
   agentName?: string
 }
-
-const SECTIONS: { status: TaskStatus; title: string; empty?: string }[] = [
-  { status: 'needs_decision', title: 'Needs your decision' },
-  { status: 'in_review', title: 'Ready for review' },
-  { status: 'in_progress', title: 'In progress' },
-  { status: 'todo', title: 'To do' },
-]
 
 const PRIORITY_ORDER = { high: 0, normal: 1, low: 2 } as const
 
@@ -63,8 +60,8 @@ export function JoeTasksView({ token, data, error, repos, repoFilter, onRepoFilt
   }
 
   const tasks = data?.tasks ?? []
-  const byStatus = (status: TaskStatus) => tasks
-    .filter(t => t.status === status)
+  const bySection = (id: SectionId) => tasks
+    .filter(t => sectionOf(t) === id)
     .sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority] || b.updatedAt.localeCompare(a.updatedAt))
   const closed = tasks.filter(t => t.status === 'done' || t.status === 'dismissed')
   // Offer every known repo plus any repo that already has tasks.
@@ -88,7 +85,7 @@ export function JoeTasksView({ token, data, error, repos, repoFilter, onRepoFilt
           </select>
         </label>
         <button type="button" onClick={() => { setDelegating(true) }} className={`${buttonPrimary} ml-auto`}>
-          <IconPlus size={14} stroke={2} /> Delegate tasks
+          <IconPlus size={14} stroke={2} /> New task
         </button>
       </div>
 
@@ -99,28 +96,29 @@ export function JoeTasksView({ token, data, error, repos, repoFilter, onRepoFilt
           <div className="mx-auto mt-10 max-w-md text-center">
             <p className="text-title font-semibold text-ink">No tasks yet</p>
             <p className="mt-2 text-body text-ink-muted">
-              Delegate work to {agentName}. It runs each task in its own session, keeps this list up to date, and
-              only interrupts you for decisions. Finished work shows up here with a verified pull request.
+              Ask {agentName} from any repo session by starting a message with @{agentName}, or add a task here. It runs
+              each task in its own session, keeps this list up to date, and only interrupts you for decisions. Finished
+              work shows up here with a verified pull request.
             </p>
             <button type="button" onClick={() => { setDelegating(true) }} className={`${buttonPrimary} mt-4`}>
-              <IconPlus size={14} stroke={2} /> Delegate tasks
+              <IconPlus size={14} stroke={2} /> New task
             </button>
           </div>
         )}
 
-        {SECTIONS.map(({ status, title }) => {
-          const items = byStatus(status)
+        {SECTIONS.map(({ id, title }) => {
+          const items = bySection(id)
           if (items.length === 0) return null
           return (
-            <section key={status} aria-label={title} className="mb-5">
+            <section key={id} aria-label={title} className="mb-5">
               <h3 className="mb-2 text-meta font-semibold uppercase tracking-wide text-ink-muted">
                 {title} <span className="text-ink-faint">{items.length}</span>
               </h3>
               <ul className="flex flex-col gap-2">
                 {items.map(task => (
                   <li key={task.id}>
-                    {status === 'needs_decision' ? <DecisionCard task={task} {...cardProps} />
-                      : status === 'in_review' ? <ReviewCard task={task} {...cardProps} />
+                    {id === 'decision' ? <DecisionCard task={task} {...cardProps} />
+                      : id === 'review' ? <ReviewCard task={task} {...cardProps} />
                       : <TaskRow task={task} {...cardProps} />}
                   </li>
                 ))}
@@ -176,6 +174,16 @@ function TaskHeader({ task, showRepo, onOpenSession }: Pick<CardProps, 'task' | 
       {task.priority === 'high' && <span className="rounded-control bg-error-8 px-1.5 text-micro text-error-2">high</span>}
       {task.source !== 'user' && <span className="rounded-control bg-edge-strong px-1.5 text-micro text-ink-muted">{task.source}</span>}
       {showRepo && <span className="text-meta text-ink-faint">{repoName(task.repo)}</span>}
+      {task.originSessionId && task.originSessionId !== childId && onOpenSession && (
+        <button
+          type="button"
+          onClick={() => { if (task.originSessionId) onOpenSession(task.originSessionId) }}
+          className={`${childId ? '' : 'ml-auto '}inline-flex items-center gap-1 text-meta text-ink-muted hover:text-ink`}
+          title="Open the conversation this task came from"
+        >
+          <IconMessages size={13} stroke={2} /> Conversation
+        </button>
+      )}
       {childId && onOpenSession && (
         <button
           type="button"
@@ -290,8 +298,9 @@ function TaskRow({ task, token, busyId, act, onOpenSession, showRepo }: CardProp
     <div className="rounded-control border border-edge bg-surface px-3 py-2">
       <TaskHeader task={task} showRepo={showRepo} onOpenSession={onOpenSession} />
       <div className="mt-1 flex flex-wrap items-center gap-2 text-meta text-ink-muted">
-        {task.status === 'in_progress' && <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-accent-5 animate-pulse" />Working</span>}
-        {task.status === 'todo' && <span>{task.childIds.length > 0 ? 'Stopped — partial work kept' : 'Not started'}</span>}
+        {sectionOf(task) === 'running' && <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-accent-5 animate-pulse" />Running</span>}
+        {sectionOf(task) === 'queued' && <span>Waiting for {task.childIds.length > 0 ? 'the next attempt' : 'Joe to start it'}</span>}
+        {sectionOf(task) === 'todo' && <span>{task.childIds.length > 0 ? 'Stopped — partial work kept' : 'Not started'}</span>}
         {closed && <span>{task.status === 'done' ? 'Done' : 'Dismissed'}</span>}
         {task.prUrl && closed && (
           <a href={task.prUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary-5 hover:underline">
@@ -301,7 +310,7 @@ function TaskRow({ task, token, busyId, act, onOpenSession, showRepo }: CardProp
         <span className="ml-auto flex gap-2">
           {closed ? (
             <button type="button" disabled={busy} onClick={() => { void act(task.id, () => setTaskStatus(token, task.id, 'todo')) }} className={buttonSecondary}>Reopen</button>
-          ) : task.status === 'todo' ? (
+          ) : task.status === 'todo' && task.execution !== 'queued' ? (
             <>
               <button type="button" disabled={busy} onClick={() => { void act(task.id, () => startTask(token, task.id)) }} className={buttonPrimary}>Start</button>
               <button type="button" disabled={busy} onClick={() => { void act(task.id, () => setTaskStatus(token, task.id, 'dismissed')) }} className={buttonSecondary}>Dismiss</button>

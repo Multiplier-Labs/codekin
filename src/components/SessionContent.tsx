@@ -14,7 +14,8 @@ import { TentativeBanner } from './TentativeBanner'
 import { WorktreeRecoveryBanner } from './WorktreeRecoveryBanner'
 import { changesButtonState } from '../lib/changesButton'
 import { InputBar, type InputBarHandle } from './InputBar'
-import { IconEye } from '@tabler/icons-react'
+import { IconEye, IconRobotFace } from '@tabler/icons-react'
+import type { JoeChatContext } from './JoeChatMessage'
 import type { SkillGroup } from './SkillMenu'
 import type { SlashCommand } from '../lib/slashCommands'
 import type { ChatMessage, PermissionMode, TaskItem } from '../types'
@@ -78,6 +79,13 @@ export interface SessionContentProps {
   grokConnected: boolean | null
   /** Whether Claude Code connection has been disabled by the user. */
   claudeDisabled?: boolean
+  /** Agent Joe in this session: attributed messages and live task cards. */
+  joe?: JoeChatContext
+  /** Who drives execution. While Joe does, ordinary messages pause. */
+  controllerOwner?: 'user' | 'joe'
+  /** Title of the task Joe supervises this session for. */
+  supervisedTaskTitle?: string
+  onTakeBackControl?: () => void
 }
 
 export function SessionContent({
@@ -130,7 +138,13 @@ export function SessionContent({
   codexConnected,
   grokConnected,
   claudeDisabled,
+  joe,
+  controllerOwner = 'user',
+  supervisedTaskTitle,
+  onTakeBackControl,
 }: SessionContentProps) {
+  const joeName = joe?.agentName ?? 'Joe'
+  const joeControls = controllerOwner === 'joe'
   const isOpenCodeDisconnected = openCodeConnected === false
   const isCodexDisconnected = codexConnected === false
   const isGrokDisconnected = grokConnected === false
@@ -146,6 +160,8 @@ export function SessionContent({
           disabled={disabled}
           planningMode={planningMode}
           activityLabel={isProviderDisabled ? undefined : activityLabel}
+          joe={joe}
+          agentName={joeName}
         />
         <TodoPanel tasks={tasks} isProcessing={isProcessing} />
 
@@ -246,6 +262,25 @@ export function SessionContent({
         />
       )}
 
+      {/* One controller per execution: while Joe drives, say so and offer the way back. */}
+      {joeControls && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-accent-8/50 bg-surface px-4 py-2 text-meta" role="status">
+          <IconRobotFace size={15} stroke={2} className="flex-shrink-0 text-accent-5" />
+          <span className="font-medium text-ink">Supervised by Agent {joeName}</span>
+          {supervisedTaskTitle && <span className="text-ink-muted">Task: {supervisedTaskTitle}</span>}
+          <span className="text-ink-muted">{joeName} is coordinating this execution.</span>
+          {onTakeBackControl && (
+            <button
+              type="button"
+              onClick={onTakeBackControl}
+              className="ml-auto rounded-control border border-edge px-2.5 py-1 font-medium text-ink hover:border-edge-strong"
+            >
+              Take back control
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Tentative banner */}
       {activeTentativeCount > 0 && (
         <TentativeBanner
@@ -285,6 +320,8 @@ export function SessionContent({
         onPermissionModeChange={onPermissionModeChange}
         onMoveToWorktree={moveToWorktree}
         worktreePath={worktreePath}
+        joeName={joe ? joeName : undefined}
+        lockedReason={joeControls ? `${joeName} is coordinating this session — take back control to message the agent.` : undefined}
       />
     </div>
   )

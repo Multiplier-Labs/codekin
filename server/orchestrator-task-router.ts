@@ -71,7 +71,8 @@ export function createTaskRouter(
       repo = resolveRepoPathInRoot(req.query.repo) ?? undefined
       if (!repo) return res.status(400).json({ error: 'Invalid repo path: must be an existing directory under the configured repos root' })
     }
-    res.json(tasks.list({ repo, status }))
+    const originSessionId = typeof req.query.session === 'string' && req.query.session ? req.query.session : undefined
+    res.json(tasks.list({ repo, status, originSessionId }))
   })
 
   /** One task with its history. */
@@ -79,7 +80,7 @@ export function createTaskRouter(
     if (!authorize(req, res)) return
     const task = tasks.get(req.params.id)
     if (!task) return res.status(404).json({ error: 'Task not found' })
-    res.json({ task, events: tasks.events(task.id) })
+    res.json({ task: tasks.view(task), events: tasks.events(task.id) })
   })
 
   /** Create tasks in one repo; `delegate: true` hands them to Joe to start. */
@@ -97,6 +98,9 @@ export function createTaskRouter(
     if (completionPolicy === null) return res.status(400).json({ error: 'Invalid completionPolicy: pr, merge, or commit-only' })
     if (source === null) return res.status(400).json({ error: `Invalid source: one of ${TASK_SOURCES.join(', ')}` })
     if (sourceRef === null) return res.status(400).json({ error: 'Invalid sourceRef' })
+    const originSessionId = optionalText(body.originSessionId, 200)
+    const originRequestId = optionalText(body.originRequestId, 200)
+    if (originSessionId === null || originRequestId === null) return res.status(400).json({ error: 'Invalid originSessionId / originRequestId' })
 
     const actor = actorOf(req)
     const inputs: CreateTaskInput[] = []
@@ -118,6 +122,8 @@ export function createTaskRouter(
         completionPolicy,
         source: source ?? (actor === 'user' ? 'user' : 'joe'),
         sourceRef,
+        originSessionId,
+        originRequestId,
         createdBy: actor,
       })
     }

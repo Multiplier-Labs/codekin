@@ -30,10 +30,25 @@ export class TaskActionError extends Error {
   }
 }
 
+/** Moments worth posting into the conversation a task came from (spec §5). */
+export type TaskMilestone = 'accepted' | 'decision' | 'blocked' | 'review'
+
+/**
+ * Whether an execution attempt is actually running, separate from status:
+ * a task can be in_progress while Joe has not resumed it yet (queued).
+ */
+export type TaskExecution = 'running' | 'queued' | 'idle'
+
+export type TaskView = Task & { execution: TaskExecution }
+
 export interface TaskServiceDeps {
   store: TaskStore
   /** Deliver a notification to Joe (outbox-backed; returns false only if queueing failed). */
   notify: (args: Omit<OrchestratorNotifyArgs, 'parentSessionId'>) => boolean
+  /** Whether a child session is an active attempt (starting / running / blocked). */
+  isChildActive?: (childId: string) => boolean
+  /** Post a milestone into the task's originating session, if it has one. */
+  onMilestone?: (task: Task, milestone: TaskMilestone) => void
 }
 
 const RETRY = 'Retry'
@@ -42,18 +57,39 @@ const DISMISS = 'Dismiss'
 export class OrchestratorTaskService {
   private store: TaskStore
   private notify: TaskServiceDeps['notify']
+  private isChildActive: NonNullable<TaskServiceDeps['isChildActive']>
+  private onMilestone: TaskServiceDeps['onMilestone']
 
   constructor(deps: TaskServiceDeps) {
     this.store = deps.store
     this.notify = deps.notify
+    this.isChildActive = deps.isChildActive ?? (() => false)
+    this.onMilestone = deps.onMilestone
+  }
+
+  /** Attach the execution substate. */
+  view(task: Task): TaskView {
+    const running = !!task.childId && !CLOSED_TASK_STATUSES.has(task.status) && this.isChildActive(task.childId)
+    // Only work Joe owes can be queued — not a task waiting on the user.
+    const queued = !!task.queuedAt && (task.status === 'todo' || task.status === 'in_progress')
+    return { ...task, execution: running ? 'running' : queued ? 'queued' : 'idle' }
+  }
+
+  private milestone(task: Task, milestone: TaskMilestone): void {
+    if (!task.originSessionId || !this.onMilestone) return
+    try {
+      this.onMilestone(task, milestone)
+    } catch (err) {
+      console.error('[tasks] Failed to post milestone:', err)
+    }
   }
 
   // -------------------------------------------------------------------------
   // Reads
   // -------------------------------------------------------------------------
 
-  list(opts: { repo?: string; status?: TaskStatus } = {}): { tasks: Task[]; counts: Record<TaskStatus, number> } {
-    return { tasks: this.store.list(opts), counts: this.store.counts(opts.repo) }
+  list(opts: { repo?: string; status?: TaskStatus; originSessionId?: string } = {}): { tasks: TaskView[]; counts: Record<TaskStatus, number> } {
+    return { tasks: this.store.list(opts).map(t => this.view(t)), counts: this.store.counts(opts.repo) }
   }
 
   get(id: string): Task | null {
@@ -79,7 +115,12 @@ export class OrchestratorTaskService {
    * used by the user's "Delegate tasks" flow.
    */
   create(inputs: CreateTaskInput[], opts: { delegate?: boolean } = {}): Task[] {
-    const tasks = inputs.map(input => this.store.create(input))
+    const tasks = inputs.map(input => {
+      const created = this.store.create(input)
+      const task = opts.delegate ? (this.store.patch(created.id, { queuedAt: new Date().toISOString() }, 'system') ?? created) : created
+      this.milestone(task, 'accepted')
+      return task
+    })
     if (opts.delegate && tasks.length > 0) {
       const repo = tasks[0].repo
       this.notify({
@@ -133,7 +174,9 @@ export class OrchestratorTaskService {
       answer: null,
       answeredAt: null,
     }
-    return this.patch(id, { status: 'needs_decision', decision }, 'joe', `Asked: ${input.question}`)
+    const updated = this.patch(id, { status: 'needs_decision', decision, queuedAt: null }, 'joe', `Asked: ${input.question}`)
+    this.milestone(updated, 'decision')
+    return updated
   }
 
   /** The user answers the open decision; Joe is told what to do next. */
@@ -151,7 +194,9 @@ export class OrchestratorTaskService {
       return updated
     }
 
-    const updated = this.patch(id, { status: 'in_progress', decision }, 'user', `Answered: ${answer}`)
+    // Answering hands work back to Joe; it is queued until an attempt runs.
+    const queuedAt = task.childId && this.isChildActive(task.childId) ? null : new Date().toISOString()
+    const updated = this.patch(id, { status: 'in_progress', decision, queuedAt }, 'user', `Answered: ${answer}`)
     this.notifyAnswer(updated, answer)
     return updated
   }
@@ -160,7 +205,7 @@ export class OrchestratorTaskService {
   requestStart(id: string): Task {
     const task = this.require(id)
     if (task.status !== 'todo') throw new TaskActionError(`Only to-do tasks can be started (task is ${task.status})`, 409)
-    const updated = this.patch(id, {}, 'user', 'Start requested')
+    const updated = this.patch(id, { queuedAt: new Date().toISOString() }, 'user', 'Start requested')
     this.notify({
       label: 'Task Start Requested',
       title: `Task ${task.id}: ${task.title}`,
@@ -188,7 +233,7 @@ export class OrchestratorTaskService {
   requestChanges(id: string, note: string): Task {
     const task = this.require(id)
     if (task.status !== 'in_review') throw new TaskActionError(`Only tasks ready for review can be sent back (task is ${task.status})`, 409)
-    const updated = this.patch(id, { status: 'in_progress', reviewNote: note }, 'user', `Changes requested: ${note}`)
+    const updated = this.patch(id, { status: 'in_progress', reviewNote: note, queuedAt: new Date().toISOString() }, 'user', `Changes requested: ${note}`)
     this.notify({
       label: 'Changes Requested',
       title: `Task ${task.id}: ${task.title}`,
@@ -268,6 +313,7 @@ export class OrchestratorTaskService {
       case 'starting':
       case 'running':
       case 'blocked':
+        if (task.queuedAt) patch.queuedAt = null
         if (openJoeDecision) break
         if (task.status !== 'in_progress') patch.status = 'in_progress'
         // A new attempt supersedes the previous one's evidence and system decision.
@@ -307,6 +353,9 @@ export class OrchestratorTaskService {
 
     if (patch.status === task.status) delete patch.status
     const changed = Object.keys(patch).length > 0
-    if (changed) this.store.patch(task.id, patch, 'system', summary)
+    if (!changed) return
+    const updated = this.store.patch(task.id, patch, 'system', summary)
+    if (updated && patch.status === 'in_review') this.milestone(updated, 'review')
+    if (updated && patch.status === 'needs_decision') this.milestone(updated, 'blocked')
   }
 }

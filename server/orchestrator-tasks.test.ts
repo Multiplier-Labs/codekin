@@ -56,6 +56,46 @@ describe('OrchestratorTaskService', () => {
     })
   })
 
+  describe('execution substate', () => {
+    it('is queued, not running, until an attempt is actually active', () => {
+      const active = new Set<string>()
+      service = new OrchestratorTaskService({ store, notify, isChildActive: (id) => active.has(id) })
+      const task = newTask()
+      expect(service.view(task).execution).toBe('idle')
+
+      service.requestStart(task.id)
+      expect(service.list().tasks[0]).toMatchObject({ status: 'todo', execution: 'queued' })
+
+      active.add('child-1')
+      service.syncFromChild(child('running', {}, task.id))
+      expect(service.list().tasks[0]).toMatchObject({ status: 'in_progress', execution: 'running', queuedAt: null })
+
+      // The attempt stops unverified; answering Retry queues work for Joe again.
+      active.delete('child-1')
+      service.syncFromChild(child('unverified', { error: 'no PR' }, task.id))
+      service.answer(task.id, 'Retry')
+      expect(service.list().tasks[0]).toMatchObject({ status: 'in_progress', execution: 'queued' })
+    })
+
+    it('reports milestones only for tasks with an originating session', () => {
+      const onMilestone = vi.fn()
+      service = new OrchestratorTaskService({ store, notify, onMilestone })
+      newTask('No origin')
+      const [linked] = service.create([{ repo: '/repos/a', title: 'From a session', createdBy: 'joe', originSessionId: 's1' }])
+      service.syncFromChild(child('completed', { verification: { state: 'verified', commit: 'abc', prUrl: 'https://pr', detail: 'PR open', checkedAt: 'now' } }, linked.id))
+      expect(onMilestone.mock.calls.map(([t, m]: [{ title: string }, string]) => `${t.title}:${m}`)).toEqual(['From a session:accepted', 'From a session:review'])
+    })
+
+    it('lists tasks started from, or executing in, a session', () => {
+      const [fromSession] = service.create([{ repo: '/repos/a', title: 'From s1', createdBy: 'joe', originSessionId: 's1' }])
+      const executing = newTask('Runs in child-1')
+      service.syncFromChild(child('running', {}, executing.id))
+      newTask('Unrelated')
+      expect(service.list({ originSessionId: 's1' }).tasks.map(t => t.id)).toEqual([fromSession.id])
+      expect(service.list({ originSessionId: 'child-1' }).tasks.map(t => t.id)).toEqual([executing.id])
+    })
+  })
+
   describe('syncFromChild', () => {
     it('links the attempt and moves the task to in_progress', () => {
       const task = newTask()

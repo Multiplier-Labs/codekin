@@ -67,17 +67,17 @@ describe('Joe harness selection', () => {
   })
 })
 
-describe('Chat / Tasks tabs', () => {
-  it('switches tabs and shows how many tasks wait on the user', async () => {
+describe('activity log header', () => {
+  it('labels the view as a log and links back to Tasks', async () => {
     vi.mocked(api.getOrchestratorStatus).mockResolvedValue({ provider: 'codex' })
-    const onTabChange = vi.fn()
+    const onBack = vi.fn()
     await act(async () => {
-      root.render(<OrchestratorView token="test" onOrchestratorSessionReady={ready} sessionJoined tab="chat" onTabChange={onTabChange} taskAttention={3} />)
+      root.render(<OrchestratorView token="test" onOrchestratorSessionReady={ready} sessionJoined onBackToTasks={onBack} />)
     })
-    const tabs = Array.from(container.querySelectorAll('[role="tab"]'))
-    expect(tabs.map(t => t.getAttribute('aria-selected'))).toEqual(['true', 'false'])
-    expect(tabs[1].textContent).toContain('3')
-    await act(async () => { (tabs[1] as HTMLButtonElement).click() })
-    expect(onTabChange).toHaveBeenCalledWith('tasks')
+    expect(container.textContent).toContain('activity log')
+    expect(container.querySelector('[role="tab"]')).toBeNull()
+    const back = Array.from(container.querySelectorAll('button')).find(b => b.textContent?.includes('Tasks'))!
+    await act(async () => { back.click() })
+    expect(onBack).toHaveBeenCalled()
   })
 })

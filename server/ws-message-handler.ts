@@ -24,6 +24,8 @@ export interface WsHandlerContext {
   sessions: SessionManager
   clientSessions: Map<WebSocket, string>
   send: (msg: WsServerMessage) => void
+  /** Routes @Joe messages; absent in contexts without Joe (tests, quiet mode). */
+  joe?: { askJoe: (sessionId: string, text: string) => unknown }
 }
 
 /**
@@ -187,6 +189,22 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           sessions.broadcast(session, echoMsg)
         }
         sessions.sendInput(sessionId, msg.data)
+      }
+      break
+    }
+
+    // An @Joe message: recorded in the session and delivered to Joe, never to the coding agent.
+    case 'ask_joe': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId || typeof msg.text !== 'string') break
+      if (!ctx.joe) {
+        send({ type: 'error', message: 'Agent Joe is not available on this server' })
+        break
+      }
+      try {
+        ctx.joe.askJoe(sessionId, msg.text)
+      } catch (err) {
+        send({ type: 'error', message: err instanceof Error ? err.message : 'Could not reach Joe' })
       }
       break
     }

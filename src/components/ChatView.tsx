@@ -18,6 +18,7 @@ import hljs from '../lib/hljs'
 import { IconArrowDown, IconRobotFace } from '@tabler/icons-react'
 import type { ChatMessage } from '../types'
 import { formatModelName, formatUserText } from '../lib/chatFormatters'
+import { JoeChatMessage, type JoeChatContext } from './JoeChatMessage'
 
 /** Visual theme variant — 'orchestrator' uses accent colors for the non-coding assistant persona. */
 export type ChatViewVariant = 'default' | 'orchestrator'
@@ -39,6 +40,8 @@ interface Props {
   variant?: ChatViewVariant
   /** Agent display name for the orchestrator welcome screen. */
   agentName?: string
+  /** Renders Agent Joe's messages in a repo session (live task cards, answers). */
+  joe?: JoeChatContext
 }
 
 /**
@@ -491,7 +494,7 @@ function ActivityIndicator({ label, variant = 'default' }: { label: string; vari
   )
 }
 
-export function ChatView({ messages, fontSize, disabled, planningMode, activityLabel, isMobile, variant = 'default', agentName }: Props) {
+export function ChatView({ messages, fontSize, disabled, planningMode, activityLabel, isMobile, variant = 'default', agentName, joe }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
   const isNearBottomRef = useRef(true)
@@ -543,6 +546,10 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
           {(() => {
             let lastShownLabel: string | null = null
             const nodes: React.ReactNode[] = []
+            // Only a task's newest card carries its live controls; earlier
+            // milestones for the same task stay as a compact record.
+            const latestTaskCard = new Map<string, number>()
+            messages.forEach((m, idx) => { if (m.type === 'joe' && m.task) latestTaskCard.set(m.task.id, idx) })
 
             // Group consecutive tool_group + tool_output messages into ToolRuns
             let i = 0
@@ -562,7 +569,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
               // is as often as it can be without repeating itself.
               let tsLabel: string | null = null
               const ts = (msg as ChatMessage & { ts?: number }).ts
-              if (ts && (msg.type === 'user' || msg.type === 'assistant')) {
+              if (ts && (msg.type === 'user' || msg.type === 'assistant' || msg.type === 'joe')) {
                 const d = new Date(ts)
                 const hh = String(d.getHours()).padStart(2, '0')
                 const mm = String(d.getMinutes()).padStart(2, '0')
@@ -640,6 +647,8 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
                   node = null; break
                 case 'tentative':
                   node = <TentativeMessage msg={msg} fontSize={fontSize} />; break
+                case 'joe':
+                  node = <JoeChatMessage msg={msg} fontSize={fontSize} ctx={joe ?? { token: '', agentName: agentName ?? 'Joe', tasks: {} }} current={!msg.task || latestTaskCard.get(msg.task.id) === i} />; break
               }
               if (node) {
                 const rowKey = msg.type === 'tentative' ? (msg.key || `tentative-${msg.index}`) : (msg.key || i)

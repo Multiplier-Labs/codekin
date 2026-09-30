@@ -48,6 +48,12 @@ import type { InputBarHandle } from './components/InputBar'
 import { RepoSelector } from './components/RepoSelector'
 import { DiffPanel } from './components/DiffPanel'
 import { OrchestratorContent } from './components/OrchestratorContent'
+import { TasksView } from './components/TasksView'
+import { useJoeTasks } from './hooks/useJoeTasks'
+import { useJoeStatus } from './hooks/useJoeStatus'
+import { useSessionTasks } from './hooks/useSessionTasks'
+import { attentionCount } from './lib/tasksApi'
+import { effectiveOwner, takeBackControl } from './lib/joeApi'
 import { DocsBrowserContent } from './components/DocsBrowserContent'
 import { SessionContent } from './components/SessionContent'
 import { RepoDrawer, type RepoDrawerTab } from './components/RepoDrawer'
@@ -223,6 +229,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     joinSession,
     createSession: wsCreateSession,
     sendInput,
+    askJoe,
     sendPromptResponse,
     leaveSession,
     clearMessages,
@@ -538,6 +545,8 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
       repoWorkingDir: docsBrowser.repoWorkingDir,
     },
     queueEnabled,
+    askJoe,
+    agentName,
   })
 
   // Keep sendInputRef in sync so onSessionCreated can use it
@@ -633,7 +642,26 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     return parts[parts.length - 1] || docsBrowser.repoWorkingDir
   }, [docsBrowser.repoWorkingDir])
 
-  // Navigate to the orchestrator view
+  // Tasks: delegated work across repos, plus Joe's availability and whether
+  // Joe itself waits on the user (answered from its activity log).
+  const [taskRepoFilter, setTaskRepoFilter] = useState('')
+  // Unfiltered for the sidebar badge; the view's own list follows its repo filter.
+  const allJoeTasks = useJoeTasks(settings.token, '', !!settings.token)
+  const viewJoeTasks = useJoeTasks(settings.token, taskRepoFilter, !!settings.token && view === 'tasks' && !!taskRepoFilter)
+  const joeTasks = taskRepoFilter ? viewJoeTasks : allJoeTasks
+  const joeStatus = useJoeStatus(settings.token)
+  const joeWaiting = !!joeStatus.status?.sessionId && waitingSessions[joeStatus.status.sessionId]
+  const joeMessageCount = useMemo(() => messages.filter(m => m.type === 'joe').length, [messages])
+  const sessionTasks = useSessionTasks(settings.token, view === 'chat' ? activeSessionId : null, joeMessageCount)
+
+  const openSessionFromTasks = useCallback((sessionId: string) => {
+    clearMessages()
+    leaveSession()
+    joinSession(sessionId)
+    navigate(`/s/${sessionId}`)
+  }, [clearMessages, leaveSession, joinSession, navigate])
+
+  // Navigate to Joe's activity log (its own transcript)
   const orchestratorSessionRef = useRef<string | null>(null)
   const handleNavigateToOrchestrator = useCallback(() => {
     navigate('/orchestrator')
@@ -796,7 +824,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
         grokDisabled={grokDisabled}
         onToggleGrok={handleToggleGrok}
         view={view}
-        onSelectSession={(id) => { docsBrowser.close(); if (view === 'orchestrator') navigate(`/s/${id}`); handleSelectSession(id) }}
+        onSelectSession={(id) => { docsBrowser.close(); if (view === 'orchestrator' || view === 'tasks') navigate(`/s/${id}`); handleSelectSession(id) }}
         onDeleteSession={handleDeleteSession}
         onRenameSession={renameSession}
         onNewSessionInRepo={handleNewSessionInRepo}
@@ -808,8 +836,10 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
         onUpdateTheme={(theme) => { updateSettings({ theme }) }}
         onSendModule={handleSendModule}
         agentName={agentName}
+        taskAttention={attentionCount(allJoeTasks.data?.counts)}
+        joeWaiting={joeWaiting}
         onNavigateToAutomations={() => navigate('/automations')}
-        onNavigateToOrchestrator={() => handleNavigateToOrchestrator()}
+        onNavigateToTasks={() => { void joeStatus.refresh(); navigate('/tasks') }}
         onOpenDrawer={handleOpenDrawer}
         onMoveToWorktree={moveToWorktree}
         mobile={{
@@ -864,28 +894,35 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             onSwitchMachine={onSwitchMachine}
             onDisconnectMachine={onDisconnectMachine}
           />
+        ) : view === 'tasks' ? (
+          <TasksView
+            token={settings.token}
+            data={joeTasks.data}
+            error={joeTasks.error}
+            onChanged={() => { void joeTasks.refresh(); if (joeTasks !== allJoeTasks) void allJoeTasks.refresh() }}
+            repos={repos}
+            repoFilter={taskRepoFilter}
+            onRepoFilterChange={setTaskRepoFilter}
+            agentName={agentName}
+            joeStatus={joeStatus.status}
+            onJoeStatusChanged={() => { void joeStatus.refresh() }}
+            joeWaiting={joeWaiting}
+            onOpenSession={openSessionFromTasks}
+            onOpenJoeLog={() => handleNavigateToOrchestrator()}
+          />
         ) : view === 'orchestrator' ? (
           <OrchestratorContent
             token={settings.token}
             onOrchestratorSessionReady={handleOrchestratorSessionReady}
             sessionJoined={!!activeSessionId}
             activeSessionId={activeSessionId}
-            messages={[...messages, ...tentativeMessages]}
+            messages={messages}
             fontSize={settings.fontSize + (isMobile ? 1 : 0)}
             isMobile={isMobile}
             planningMode={planningMode}
             activityLabel={activityLabel}
-            tasks={tasks}
-            isProcessing={isProcessing}
             activePrompt={activePrompt}
             sendPromptResponse={sendPromptResponse}
-            inputBarRef={inputBarRef}
-            onSendInput={handleSendWithFiles}
-            pendingFiles={pendingFiles}
-            onAddFiles={addFiles}
-            onRemoveFile={removeFile}
-            skillGroups={skillGroups}
-            slashCommands={allCommands}
             currentModel={currentModel}
             onModelChange={handleModelChange}
             /* Provider-aware: the orchestrator is agent-agnostic, so the model
@@ -897,18 +934,13 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             onProviderChange={(provider, carryContext) => {
               setProvider(provider, carryContext)
               void refreshSessions()
+              void joeStatus.refresh()
             }}
             currentPermissionMode={currentPermissionMode}
             onPermissionModeChange={handlePermissionModeChange}
             disabled={!settings.token}
             agentName={agentName}
-            repos={repos}
-            onOpenSession={(sessionId) => {
-              clearMessages()
-              leaveSession()
-              joinSession(sessionId)
-              navigate(`/s/${sessionId}`)
-            }}
+            onBackToTasks={() => navigate('/tasks')}
           />
         ) : view === 'automations' ? (
           <AutomationsView
@@ -1004,6 +1036,20 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             codexConnected={activeSessionProvider === 'codex' ? (codexDisabled ? false : codexConnected) : null}
             grokConnected={activeSessionProvider === 'grok' ? (grokDisabled ? false : grokConnected) : null}
             claudeDisabled={activeSessionProvider === 'claude' && claudeDisabled}
+            joe={{
+              token: settings.token,
+              agentName,
+              tasks: sessionTasks.tasks,
+              onTaskChanged: () => { void sessionTasks.refresh(); void allJoeTasks.refresh() },
+              onOpenTasks: () => navigate('/tasks'),
+            }}
+            controllerOwner={effectiveOwner(activeSession)}
+            supervisedTaskTitle={activeSession?.controller?.taskId ? sessionTasks.tasks[activeSession.controller.taskId]?.title : undefined}
+            onTakeBackControl={() => {
+              takeBackControl(settings.token, activeSessionId)
+                .then(() => refreshSessions())
+                .catch((err: unknown) => { showError(err instanceof Error ? err.message : 'Could not take back control') })
+            }}
           />
         ) : (
           <RepoSelector groups={groups} token={settings.token} ghStatus={ghStatus} ghError={ghError} loading={reposLoading} error={reposError} onOpen={handleOpenSession} onRefreshRepos={refreshRepos} />

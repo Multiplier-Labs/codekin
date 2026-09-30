@@ -66,6 +66,15 @@ export interface Task {
   verification: ChildVerification | null
   decision: TaskDecision | null
   reviewNote: string | null
+  /** Repo session the request came from; milestones are posted back there. */
+  originSessionId: string | null
+  /** The @Joe request in that session that created the task. */
+  originRequestId: string | null
+  /**
+   * Set when the user (or an answer) asks for execution and cleared once an
+   * attempt is running — "queued" is distinct from "running".
+   */
+  queuedAt: string | null
   createdBy: TaskActor
   createdAt: string
   updatedAt: string
@@ -89,12 +98,14 @@ export interface CreateTaskInput {
   source?: TaskSource
   sourceRef?: string | null
   completionPolicy?: TaskCompletionPolicy
+  originSessionId?: string | null
+  originRequestId?: string | null
   createdBy: TaskActor
 }
 
 export type TaskPatch = Partial<Pick<Task,
   'title' | 'detail' | 'acceptance' | 'priority' | 'status' | 'completionPolicy' | 'childId' | 'childIds'
-  | 'prUrl' | 'commit' | 'verification' | 'decision' | 'reviewNote' | 'closedAt'>>
+  | 'prUrl' | 'commit' | 'verification' | 'decision' | 'reviewNote' | 'closedAt' | 'originSessionId' | 'queuedAt'>>
 
 export interface TaskStoreEvent {
   taskId: string
@@ -120,6 +131,9 @@ interface TaskRow {
   verification: string | null
   decision: string | null
   review_note: string | null
+  origin_session_id: string | null
+  origin_request_id: string | null
+  queued_at: string | null
   created_by: string
   created_at: string
   updated_at: string
@@ -141,6 +155,8 @@ const PATCH_COLUMNS: Record<keyof TaskPatch, { column: string; json?: boolean }>
   decision: { column: 'decision', json: true },
   reviewNote: { column: 'review_note' },
   closedAt: { column: 'closed_at' },
+  originSessionId: { column: 'origin_session_id' },
+  queuedAt: { column: 'queued_at' },
 }
 
 export class TaskStore {
@@ -190,6 +206,16 @@ export class TaskStore {
       CREATE INDEX IF NOT EXISTS idx_joe_tasks_child ON joe_tasks(child_id);
       CREATE INDEX IF NOT EXISTS idx_joe_task_events_task ON joe_task_events(task_id);
     `)
+    this.migrate()
+  }
+
+  /** Additive columns for databases created before they existed. */
+  private migrate(): void {
+    const columns = new Set((this.db.prepare('PRAGMA table_info(joe_tasks)').all() as { name: string }[]).map(c => c.name))
+    for (const [column, type] of [['origin_session_id', 'TEXT'], ['origin_request_id', 'TEXT'], ['queued_at', 'TEXT']] as const) {
+      if (!columns.has(column)) this.db.exec(`ALTER TABLE joe_tasks ADD COLUMN ${column} ${type}`)
+    }
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_joe_tasks_origin ON joe_tasks(origin_session_id)')
   }
 
   setEventListener(listener: (event: TaskStoreEvent) => void): void {
@@ -209,8 +235,8 @@ export class TaskStore {
     const id = randomUUID()
     const now = new Date().toISOString()
     this.db.prepare(
-      `INSERT INTO joe_tasks (id, repo, title, detail, acceptance, priority, source, source_ref, completion_policy, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO joe_tasks (id, repo, title, detail, acceptance, priority, source, source_ref, completion_policy, origin_session_id, origin_request_id, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       input.repo,
@@ -221,6 +247,8 @@ export class TaskStore {
       input.source ?? 'user',
       input.sourceRef ?? null,
       input.completionPolicy ?? 'pr',
+      input.originSessionId ?? null,
+      input.originRequestId ?? null,
       input.createdBy,
       now,
       now,
@@ -246,10 +274,15 @@ export class TaskStore {
     return row ? mapTask(row) : null
   }
 
-  list(opts: { repo?: string; status?: TaskStatus; limit?: number } = {}): Task[] {
+  list(opts: { repo?: string; status?: TaskStatus; originSessionId?: string; limit?: number } = {}): Task[] {
     const where: string[] = []
     const params: unknown[] = []
     if (opts.repo) { where.push('repo = ?'); params.push(opts.repo) }
+    if (opts.originSessionId) {
+      // Tasks started from the session, or executed in it.
+      where.push('(origin_session_id = ? OR child_id = ? OR EXISTS (SELECT 1 FROM json_each(child_ids) WHERE value = ?))')
+      params.push(opts.originSessionId, opts.originSessionId, opts.originSessionId)
+    }
     if (opts.status) { where.push('status = ?'); params.push(opts.status) }
     const sql = `SELECT * FROM joe_tasks${where.length ? ` WHERE ${where.join(' AND ')}` : ''}
       ORDER BY updated_at DESC LIMIT ?`
@@ -323,6 +356,9 @@ function mapTask(row: TaskRow): Task {
     verification: row.verification ? jsonParse(row.verification) as ChildVerification : null,
     decision: row.decision ? jsonParse(row.decision) as TaskDecision : null,
     reviewNote: row.review_note,
+    originSessionId: row.origin_session_id ?? null,
+    originRequestId: row.origin_request_id ?? null,
+    queuedAt: row.queued_at ?? null,
     createdBy: row.created_by as TaskActor,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

@@ -11,7 +11,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   IconBook, IconSettings as IconSettingsGear,
   IconLogout,
-  IconChevronRight, IconChevronLeft, IconSparkles, IconX, IconRobotFace,
+  IconChevronRight, IconChevronLeft, IconSparkles, IconX, IconChecklist,
 } from '@tabler/icons-react'
 import type { Session, Module, Repo, MobileProps, ConnectionState } from '../types'
 import type { RepoGroup } from '../hooks/useRepos'
@@ -117,8 +117,12 @@ interface Props {
   onToggleGrok: () => void
   /** Current route view ('chat' | 'workflows'). */
   view: string
-  /** Agent display name for the orchestrator button. */
+  /** Agent display name, for the Tasks entry's tooltip. */
   agentName?: string
+  /** Decisions and reviews waiting on the user across all tasks. */
+  taskAttention?: number
+  /** Joe itself is blocked on the user's approval (shown on the Tasks entry). */
+  joeWaiting?: boolean
   /** Switch the active session to the given ID. */
   onSelectSession: (id: string) => void
   /** Delete a session by ID (with confirmation). */
@@ -147,8 +151,8 @@ interface Props {
   onSendModule: (mod: Module) => void
   /** Navigate to the Automations view (workflows + loop runs). */
   onNavigateToAutomations: () => void
-  /** Navigate to the orchestrator view. */
-  onNavigateToOrchestrator: () => void
+  /** Navigate to the Tasks view (delegated work across repos). */
+  onNavigateToTasks: () => void
   /** Open the repo drawer (docs / archive / approvals) for a repo. */
   onOpenDrawer: (workingDir: string, tab: RepoDrawerTab) => void
   /** Move the joined session into a git worktree. */
@@ -198,8 +202,10 @@ export function LeftSidebar({
   onUpdateTheme,
   onSendModule,
   agentName = 'Joe',
+  taskAttention = 0,
+  joeWaiting = false,
   onNavigateToAutomations,
-  onNavigateToOrchestrator,
+  onNavigateToTasks,
   onOpenDrawer,
   onMoveToWorktree,
   mobile = {},
@@ -263,19 +269,6 @@ export function LeftSidebar({
   const repoNodes = buildRepoNodes(sessions, waitingSessions, tentativeQueues)
   const connDotColor = connState === 'connected' ? 'bg-success-7' : connState === 'connecting' ? 'bg-warning-6' : 'bg-error-7'
 
-  // Derive orchestrator icon style from its session state
-  const orchestratorSession = sessions.find(s => s.source === 'orchestrator')
-  const orchestratorIconClass = orchestratorSession
-    ? (tentativeQueues[orchestratorSession.id]?.length ?? 0) > 0
-      ? '!text-accent-5 animate-pulse'
-      : waitingSessions[orchestratorSession.id]
-      ? '!text-warning-5 animate-pulse'
-      : orchestratorSession.isProcessing
-      ? '!text-success-6 animate-pulse'
-      : orchestratorSession.active
-      ? '!text-ink-muted'
-      : ''
-    : ''
   const hasModules = globalModules.length > 0 || (activeRepo && activeRepo.modules.length > 0)
 
   // In mobile mode, auto-close the drawer when a session is selected
@@ -401,15 +394,19 @@ export function LeftSidebar({
             <span className="flex-1 text-left">Automations</span>
           </button>
           <button
-            onClick={() => { onNavigateToOrchestrator(); if (isMobile) onMobileClose?.() }}
+            onClick={() => { onNavigateToTasks(); if (isMobile) onMobileClose?.() }}
+            title={joeWaiting ? `Agent ${agentName} is waiting for your approval` : `Work delegated to Agent ${agentName}`}
             className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-control text-body transition-colors ${
-              view === 'orchestrator'
+              view === 'tasks' || view === 'orchestrator'
                 ? 'bg-accent-9/30 text-accent-2'
                 : 'text-ink hover:text-ink hover:bg-surface-raised'
             }`}
           >
-            <IconRobotFace size={16} stroke={2} className={`flex-shrink-0 ${orchestratorIconClass}`} />
-            <span className="flex-1 text-left">Agent {agentName}</span>
+            <IconChecklist size={16} stroke={2} className={`flex-shrink-0 ${joeWaiting ? '!text-warning-5 animate-pulse' : ''}`} />
+            <span className="flex-1 text-left">Tasks</span>
+            {taskAttention > 0 && (
+              <span aria-label={`${taskAttention} waiting on you`} className="rounded-full bg-warning-7 px-1.5 text-micro font-semibold text-warning-1">{taskAttention}</span>
+            )}
           </button>
           {hasModules && (
             <div ref={modulesRef} className="relative">

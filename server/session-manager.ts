@@ -891,6 +891,7 @@ export class SessionManager {
       worktreeBase: s.worktreeBase,
       reviewBase: s.reviewBase,
       archivedAt: s.archivedAt,
+      controller: s.controller,
       connectedClients: s.clients.size,
       lastActivity: new Date(s._lastActivityAt).toISOString(),
       source: s.source,
@@ -1805,6 +1806,11 @@ export class SessionManager {
       session.outputHistory.splice(0, session.outputHistory.length - MAX_HISTORY)
     }
     this.persistToDiskDebounced()
+  }
+
+  /** Tell every client the session list changed (e.g. a controller change). */
+  notifySessionsUpdated(): void {
+    this._globalBroadcast?.({ type: 'sessions_updated' })
   }
 
   /** Send a message to all connected clients of a session, with back-pressure protection. */

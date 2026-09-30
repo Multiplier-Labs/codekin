@@ -1,22 +1,19 @@
 /**
- * OrchestratorContent — the orchestrator view content area.
+ * OrchestratorContent — Agent Joe's activity log.
  *
- * Extracted from App.tsx to reduce its complexity. Renders the OrchestratorView
- * header and, once an orchestrator session is joined, the chat UI with input bar.
+ * Joe no longer has a chat of its own: users address it from repo sessions
+ * (@Joe) and follow delegated work in Tasks
+ * (docs/JOE-REPO-COLLABORATION-MAINTENANCE-SPEC.md §2). This view keeps Joe's
+ * transcript as history, lets the user answer Joe's own approval prompts, and
+ * holds Joe's agent settings (harness, model, permissions). There is no
+ * composer.
  */
 
-import { useState, type RefObject } from 'react'
-import { OrchestratorView, type OrchestratorTab } from './OrchestratorView'
-import { JoeTasksView } from './JoeTasksView'
-import { useJoeTasks } from '../hooks/useJoeTasks'
-import { attentionCount } from '../lib/tasksApi'
+import { OrchestratorView } from './OrchestratorView'
 import { ChatView } from './ChatView'
-import { TodoPanel } from './TodoPanel'
 import { PromptButtons } from './PromptButtons'
-import { InputBar, type InputBarHandle } from './InputBar'
-import type { SkillGroup } from './SkillMenu'
-import type { SlashCommand } from '../lib/slashCommands'
-import type { ChatMessage, PermissionMode, Repo, TaskItem } from '../types'
+import type { ChatMessage, CodingProvider, ModelOption, PermissionMode } from '../types'
+import { PROVIDERS, permissionModesFor } from '../types'
 import type { PromptEntry } from '../hooks/usePromptState'
 
 export interface OrchestratorContentProps {
@@ -29,32 +26,22 @@ export interface OrchestratorContentProps {
   isMobile: boolean
   planningMode: boolean
   activityLabel?: string
-  tasks: TaskItem[]
-  isProcessing: boolean
   activePrompt: PromptEntry | null
   sendPromptResponse: (value: string | string[], requestId?: string) => void
-  inputBarRef: RefObject<InputBarHandle | null>
-  onSendInput: (text: string, files?: File[]) => void
-  pendingFiles: File[]
-  onAddFiles: (files: File[]) => void
-  onRemoveFile: (index: number) => void
-  skillGroups: SkillGroup[]
-  slashCommands: SlashCommand[]
   currentModel: string | null
   onModelChange: (model: string) => void
   /** Models for the orchestrator's current harness — Joe is agent-agnostic. */
-  availableModels?: import('../types').ModelOption[]
-  sessionProvider?: import('../types').CodingProvider
-  onProviderChange?: (provider: import('../types').CodingProvider, carryContext: boolean) => void
+  availableModels?: ModelOption[]
+  sessionProvider?: CodingProvider
+  onProviderChange?: (provider: CodingProvider, carryContext: boolean) => void
   currentPermissionMode: PermissionMode
   onPermissionModeChange: (mode: PermissionMode) => void
   disabled: boolean
   agentName?: string
-  /** Known repositories, for the task list's filter and delegate form. */
-  repos?: Repo[]
-  /** Open a child session from a task card. */
-  onOpenSession?: (sessionId: string) => void
+  onBackToTasks?: () => void
 }
+
+const selectClass = 'rounded-control border border-edge bg-page px-2 py-1 text-meta text-ink focus:border-focus focus:outline-none'
 
 export function OrchestratorContent({
   token,
@@ -66,32 +53,20 @@ export function OrchestratorContent({
   isMobile,
   planningMode,
   activityLabel,
-  tasks,
-  isProcessing,
   activePrompt,
   sendPromptResponse,
-  inputBarRef,
-  onSendInput,
-  pendingFiles,
-  onAddFiles,
-  onRemoveFile,
-  skillGroups,
-  slashCommands,
   currentModel,
   onModelChange,
-  availableModels,
+  availableModels = [],
   sessionProvider,
   onProviderChange,
   currentPermissionMode,
   onPermissionModeChange,
   disabled,
   agentName,
-  repos = [],
-  onOpenSession,
+  onBackToTasks,
 }: OrchestratorContentProps) {
-  const [tab, setTab] = useState<OrchestratorTab>('chat')
-  const [repoFilter, setRepoFilter] = useState('')
-  const joeTasks = useJoeTasks(token, repoFilter, sessionJoined)
+  const modes = permissionModesFor(sessionProvider)
 
   return (
     <>
@@ -100,25 +75,9 @@ export function OrchestratorContent({
         onOrchestratorSessionReady={onOrchestratorSessionReady}
         sessionJoined={sessionJoined}
         agentName={agentName}
-        tab={tab}
-        onTabChange={setTab}
-        taskAttention={attentionCount(joeTasks.data?.counts)}
+        onBackToTasks={onBackToTasks}
       />
-      {activeSessionId && tab === 'tasks' && (
-        <JoeTasksView
-          token={token}
-          data={joeTasks.data}
-          error={joeTasks.error}
-          repos={repos}
-          repoFilter={repoFilter}
-          onRepoFilterChange={setRepoFilter}
-          onChanged={() => { void joeTasks.refresh() }}
-          onOpenSession={onOpenSession}
-          agentName={agentName}
-        />
-      )}
-      {/* Render chat UI once orchestrator session is joined */}
-      {activeSessionId && tab === 'chat' && (
+      {activeSessionId && (
         <div className="flex flex-1 flex-col overflow-hidden min-h-0">
           <div className="relative flex-1 min-h-0 flex flex-col">
             <ChatView
@@ -131,7 +90,6 @@ export function OrchestratorContent({
               variant="orchestrator"
               agentName={agentName}
             />
-            <TodoPanel tasks={tasks} isProcessing={isProcessing} />
           </div>
           {activePrompt && (
             <PromptButtons
@@ -145,31 +103,50 @@ export function OrchestratorContent({
               onSelect={sendPromptResponse}
             />
           )}
-          <InputBar
-            key={`orchestrator-${activeSessionId}`}
-            variant="orchestrator"
-            ref={inputBarRef}
-            onSendInput={onSendInput}
-            isWaiting={!!activePrompt}
-            disabled={disabled}
-            onEscape={() => {}}
-            pendingFiles={pendingFiles}
-            onAddFiles={onAddFiles}
-            onRemoveFile={onRemoveFile}
-            skillGroups={skillGroups}
-            slashCommands={slashCommands}
-            placeholder={`Ask Agent ${agentName ?? 'Joe'} to work on your code...`}
-            initialValue=""
-            onValueChange={() => {}}
-            currentModel={currentModel}
-            onModelChange={onModelChange}
-            availableModels={availableModels}
-            sessionProvider={sessionProvider}
-            onProviderChange={onProviderChange}
-            isMobile={isMobile}
-            currentPermissionMode={currentPermissionMode}
-            onPermissionModeChange={onPermissionModeChange}
-          />
+          <div className="flex flex-wrap items-center gap-3 border-t border-edge bg-surface px-4 py-2 text-meta text-ink-muted" aria-label={`Agent ${agentName ?? 'Joe'} settings`}>
+            <span>Talk to {agentName ?? 'Joe'} from any repo session with @{agentName ?? 'Joe'}.</span>
+            <span className="ml-auto flex flex-wrap items-center gap-2">
+              {sessionProvider && onProviderChange && (
+                <label className="flex items-center gap-1.5">
+                  Agent
+                  <select
+                    aria-label="Harness"
+                    value={sessionProvider}
+                    disabled={disabled}
+                    onChange={e => { onProviderChange(e.target.value as CodingProvider, false) }}
+                    className={selectClass}
+                  >
+                    {PROVIDERS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                  </select>
+                </label>
+              )}
+              {availableModels.length > 0 && (
+                <select
+                  aria-label="Model"
+                  value={currentModel ?? ''}
+                  disabled={disabled}
+                  onChange={e => { onModelChange(e.target.value) }}
+                  className={selectClass}
+                >
+                  {!currentModel && <option value="">Default model</option>}
+                  {currentModel && !availableModels.some(m => m.id === currentModel) && <option value={currentModel}>{currentModel}</option>}
+                  {availableModels.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                </select>
+              )}
+              <label className="flex items-center gap-1.5">
+                Permissions
+                <select
+                  aria-label="Permission mode"
+                  value={currentPermissionMode}
+                  disabled={disabled}
+                  onChange={e => { onPermissionModeChange(e.target.value as PermissionMode) }}
+                  className={selectClass}
+                >
+                  {modes.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                </select>
+              </label>
+            </span>
+          </div>
         </div>
       )}
     </>

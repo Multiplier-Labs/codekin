@@ -12,6 +12,7 @@ import type { QueueEntry } from './useTentativeQueue'
 import { groupKey } from './useSessionOrchestration'
 import { uploadAndBuildMessage } from '../lib/ccApi'
 import { resolveBuiltinAlias, BUNDLED_SKILLS } from '../lib/slashCommands'
+import { parseJoeAddress } from '../lib/joeAddress'
 
 /** Set of bundled skill command names for fast lookup. */
 const BUNDLED_COMMANDS = new Set(BUNDLED_SKILLS.map(s => s.command))
@@ -29,6 +30,9 @@ interface UseSendMessageOptions {
   clearQueue: (sessionId: string) => void
   docsContext: { isOpen: boolean; selectedFile: string | null; repoWorkingDir: string | null }
   queueEnabled: boolean
+  /** Deliver an @Joe message to Joe in the active session. */
+  askJoe?: (text: string) => void
+  agentName?: string
 }
 
 export function useSendMessage({
@@ -44,6 +48,8 @@ export function useSendMessage({
   clearQueue,
   docsContext,
   queueEnabled,
+  askJoe,
+  agentName = 'Joe',
 }: UseSendMessageOptions) {
   const [uploadStatus, setUploadStatus] = useState<string | null>(null)
   const [sessionPendingFiles, setSessionPendingFiles] = useState<Record<string, File[]>>({})
@@ -125,6 +131,12 @@ export function useSendMessage({
    */
   const handleSend = useCallback(async (text: string) => {
     if (!token) return
+    // @Joe goes to Joe, never to the coding agent (and never queues behind it).
+    const forJoe = askJoe ? parseJoeAddress(text, agentName) : null
+    if (forJoe !== null && askJoe) {
+      if (forJoe) askJoe(forJoe)
+      return
+    }
     const { expanded, displayText, handled } = processSlashCommand(text)
     if (handled) return
 
@@ -173,7 +185,7 @@ export function useSendMessage({
       setUploadStatus(`Upload failed: ${err instanceof Error ? err.message : 'unknown error'}`)
       setTimeout(() => setUploadStatus(null), 3000)
     }
-  }, [token, activeSessionId, activeWorkingDir, sessions, tentativeQueues, addToQueue, pendingFiles, processSlashCommand, sendInput, docsContext.isOpen, docsContext.selectedFile, docsContext.repoWorkingDir, queueEnabled])
+  }, [token, activeSessionId, activeWorkingDir, sessions, tentativeQueues, addToQueue, pendingFiles, processSlashCommand, sendInput, docsContext.isOpen, docsContext.selectedFile, docsContext.repoWorkingDir, queueEnabled, askJoe, agentName])
 
   const handleExecuteTentative = useCallback(async (sessionId: string) => {
     const queue = tentativeQueues[sessionId] ?? []

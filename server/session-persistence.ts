@@ -32,6 +32,7 @@ export interface PersistedSession {
   reviewBase?: string
   reviewComments?: import('./types.js').ReviewComment[]
   archivedAt?: string
+  controller?: import('./types.js').SessionController
   created: string
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   provider?: import('./coding-process.js').CodingProvider
@@ -71,6 +72,7 @@ export class SessionPersistence {
       // `stale` is computed when listed, never stored.
       reviewComments: s.reviewComments?.map(c => { const copy = { ...c }; delete copy.stale; return copy }),
       archivedAt: s.archivedAt,
+      controller: s.controller,
       created: s.created,
       source: s.source,
     provider: s.provider,
@@ -142,6 +144,7 @@ export class SessionPersistence {
           reviewBase: s.reviewBase,
           reviewComments: s.reviewComments,
           archivedAt: s.archivedAt,
+          controller: s.controller,
           created: s.created,
           source: s.source ?? 'manual',
           provider: s.provider ?? 'claude',

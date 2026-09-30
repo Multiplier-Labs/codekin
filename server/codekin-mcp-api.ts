@@ -38,6 +38,8 @@ export interface CreateTaskApiInput {
   completionPolicy?: 'pr' | 'merge' | 'commit-only'
   source?: 'joe' | 'report' | 'incident'
   sourceRef?: string
+  originSessionId?: string
+  originRequestId?: string
 }
 
 /** Why and on whose behalf an automation change is made — recorded in its audit trail. */
@@ -158,8 +160,8 @@ export class CodekinApi {
   }
 
   createTask(input: CreateTaskApiInput): Promise<unknown> {
-    const { repo, completionPolicy, source, sourceRef, ...task } = input
-    return this.request('POST', '/api/orchestrator/tasks', { repo, completionPolicy, source, sourceRef, tasks: [task] })
+    const { repo, completionPolicy, source, sourceRef, originSessionId, originRequestId, ...task } = input
+    return this.request('POST', '/api/orchestrator/tasks', { repo, completionPolicy, source, sourceRef, originSessionId, originRequestId, tasks: [task] })
   }
 
   updateTask(id: string, patch: { title?: string; detail?: string; acceptance?: string; priority?: string; status?: string; note?: string }): Promise<unknown> {
@@ -177,6 +179,24 @@ export class CodekinApi {
     if (opts.source) params.set('source', opts.source)
     if (opts.active) params.set('active', 'true')
     return this.request('GET', `/api/orchestrator/sessions?${params.toString()}`)
+  }
+
+  // --- Joe in repo sessions ------------------------------------------------
+
+  replyInSession(sessionId: string, input: { text: string; requestId?: string; taskId?: string }): Promise<unknown> {
+    return this.request('POST', `/api/orchestrator/sessions/${encodeURIComponent(sessionId)}/joe-reply`, input)
+  }
+
+  getSessionContext(sessionId: string, limit?: number): Promise<unknown> {
+    return this.request('GET', `/api/orchestrator/sessions/${encodeURIComponent(sessionId)}/context${limit ? `?limit=${limit}` : ''}`)
+  }
+
+  takeOverSession(sessionId: string, input: { requestId: string; taskId?: string }): Promise<unknown> {
+    return this.request('POST', `/api/orchestrator/sessions/${encodeURIComponent(sessionId)}/handover`, input)
+  }
+
+  sendToSession(sessionId: string, input: { text: string; controllerRevision: number }): Promise<unknown> {
+    return this.request('POST', `/api/orchestrator/sessions/${encodeURIComponent(sessionId)}/instruct`, input)
   }
 
   // --- prompts (blocked sessions) ------------------------------------------

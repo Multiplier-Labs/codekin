@@ -46,6 +46,10 @@ export interface JoeTask {
   verification: TaskVerification | null
   decision: TaskDecision | null
   reviewNote: string | null
+  /** Repo session the request came from. */
+  originSessionId?: string | null
+  /** Whether an attempt is running now, queued for Joe, or neither. */
+  execution?: 'running' | 'queued' | 'idle'
   createdBy: 'user' | 'joe' | 'system'
   createdAt: string
   updatedAt: string
