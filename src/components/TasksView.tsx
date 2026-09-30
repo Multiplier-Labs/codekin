@@ -20,6 +20,7 @@ import * as api from '../lib/ccApi'
 import { useAgentHealth } from '../hooks/useAgentHealth'
 import { providerAvailability } from '../lib/agentHealth'
 import type { JoeStatus } from '../hooks/useJoeStatus'
+import { indicatorText, type RepoMaintenance } from '../lib/maintenanceApi'
 
 interface Props {
   token: string
@@ -36,13 +37,20 @@ interface Props {
   joeWaiting: boolean
   onOpenSession: (sessionId: string) => void
   onOpenJoeLog: () => void
+  /** Maintenance plans by repo — maintained, paused and unhealthy repos show in the overview. */
+  maintenance?: Record<string, RepoMaintenance>
+  onOpenMaintenance?: (repo: string) => void
 }
 
 export function TasksView({
   token, data, error, onChanged, repos, repoFilter, onRepoFilterChange,
   agentName, joeStatus, onJoeStatusChanged, joeWaiting, onOpenSession, onOpenJoeLog,
+  maintenance = {}, onOpenMaintenance,
 }: Props) {
-  const summaries = summarizeRepos(data)
+  const taskSummaries = summarizeRepos(data)
+  // Repos with a plan appear even without open tasks — "which repos does Joe maintain?"
+  const planned = Object.values(maintenance).filter(m => m.state !== 'off' && !taskSummaries.some(s => s.repo === m.repo))
+  const summaries = [...taskSummaries, ...planned.map(m => ({ repo: m.repo, needsYou: 0, running: 0, queued: 0, open: 0 }))]
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden min-h-0">
@@ -78,9 +86,10 @@ export function TasksView({
         <div className="flex flex-wrap gap-2 border-b border-edge px-4 py-2" role="group" aria-label="Repos with open tasks">
           {summaries.map(s => {
             const active = repoFilter === s.repo
+            const plan = maintenance[s.repo] as RepoMaintenance | undefined
             return (
+              <span key={s.repo} className="flex items-center gap-1">
               <button
-                key={s.repo}
                 type="button"
                 aria-pressed={active}
                 onClick={() => { onRepoFilterChange(active ? '' : s.repo) }}
@@ -90,8 +99,19 @@ export function TasksView({
                 {s.needsYou > 0 && <span className="rounded-full bg-warning-7 px-1.5 text-micro font-semibold text-warning-1">{s.needsYou} need{s.needsYou === 1 ? 's' : ''} you</span>}
                 {s.running > 0 && <span>{s.running} running</span>}
                 {s.queued > 0 && <span>{s.queued} queued</span>}
-                {s.needsYou + s.running + s.queued === 0 && <span>{s.open} to do</span>}
+                {s.needsYou + s.running + s.queued === 0 && s.open > 0 && <span>{s.open} to do</span>}
               </button>
+              {plan && plan.state !== 'off' && onOpenMaintenance && (
+                <button
+                  type="button"
+                  onClick={() => { onOpenMaintenance(s.repo) }}
+                  className={`rounded-control px-1.5 py-1 text-micro hover:bg-surface-raised ${plan.state === 'paused' ? 'text-ink-faint' : plan.health === 'healthy' ? 'text-accent-4' : plan.health === 'starting' ? 'text-ink-muted' : 'text-warning-5'}`}
+                  title={plan.reasons.join('\n') || plan.label}
+                >
+                  {indicatorText({ ...plan, runningTasks: 0, needsYou: 0 }, agentName)}
+                </button>
+              )}
+              </span>
             )
           })}
         </div>

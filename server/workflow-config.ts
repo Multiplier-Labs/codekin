@@ -32,6 +32,11 @@ export interface ReviewRepoConfig {
    * Entries written before revisions existed count as revision 1.
    */
   revision?: number
+  /**
+   * 'maintenance' once adopted into a repo's maintenance plan: it then runs
+   * only while the plan is enabled. Unset = independently managed.
+   */
+  managedBy?: 'maintenance'
 }
 
 export interface WorkflowConfig {

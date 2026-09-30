@@ -81,6 +81,10 @@ export interface ReviewRepoConfig {
   model?: string
   /** AI provider to use for this workflow ('claude', 'opencode', or 'codex'). Defaults to 'claude'. */
   provider?: 'claude' | 'opencode' | 'codex'
+  /** Configuration revision; bumps on every change. */
+  revision?: number
+  /** 'maintenance' when adopted into the repo's maintenance plan (pauses with it). */
+  managedBy?: 'maintenance'
 }
 
 export interface WorkflowConfig {

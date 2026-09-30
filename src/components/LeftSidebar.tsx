@@ -123,6 +123,11 @@ interface Props {
   taskAttention?: number
   /** Joe itself is blocked on the user's approval (shown on the Tasks entry). */
   joeWaiting?: boolean
+  /** Maintenance plans by repo path, for each repo's indicator. */
+  maintenance?: Record<string, import('../lib/maintenanceApi').RepoMaintenance>
+  onOpenMaintenance?: (workingDir: string) => void
+  onHandOver?: (sessionId: string) => void
+  onTakeBack?: (sessionId: string) => void
   /** Switch the active session to the given ID. */
   onSelectSession: (id: string) => void
   /** Delete a session by ID (with confirmation). */
@@ -204,6 +209,10 @@ export function LeftSidebar({
   agentName = 'Joe',
   taskAttention = 0,
   joeWaiting = false,
+  maintenance = {},
+  onOpenMaintenance,
+  onHandOver,
+  onTakeBack,
   onNavigateToAutomations,
   onNavigateToTasks,
   onOpenDrawer,
@@ -456,6 +465,11 @@ export function LeftSidebar({
             onOpenDrawer={(wd, tab) => { onOpenDrawer(wd, tab); if (isMobile) onMobileClose?.() }}
             onMoveToWorktree={onMoveToWorktree}
             onShareSession={onShareSession}
+            maintenance={maintenance[node.workingDir]}
+            onOpenMaintenance={onOpenMaintenance ? (wd) => { onOpenMaintenance(wd); if (isMobile) onMobileClose?.() } : undefined}
+            onHandOver={onHandOver}
+            onTakeBack={onTakeBack}
+            agentName={agentName}
           />
         ))}
 

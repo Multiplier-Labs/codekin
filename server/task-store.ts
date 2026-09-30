@@ -21,13 +21,13 @@ import type { ChildVerification } from './orchestrator-children.js'
 
 export type TaskStatus = 'todo' | 'in_progress' | 'needs_decision' | 'in_review' | 'done' | 'dismissed'
 export type TaskPriority = 'high' | 'normal' | 'low'
-export type TaskSource = 'user' | 'joe' | 'report' | 'incident'
+export type TaskSource = 'user' | 'joe' | 'report' | 'incident' | 'maintenance'
 export type TaskCompletionPolicy = 'pr' | 'merge' | 'commit-only'
 export type TaskActor = 'user' | 'joe' | 'system'
 
 export const TASK_STATUSES: readonly TaskStatus[] = ['todo', 'in_progress', 'needs_decision', 'in_review', 'done', 'dismissed']
 export const TASK_PRIORITIES: readonly TaskPriority[] = ['high', 'normal', 'low']
-export const TASK_SOURCES: readonly TaskSource[] = ['user', 'joe', 'report', 'incident']
+export const TASK_SOURCES: readonly TaskSource[] = ['user', 'joe', 'report', 'incident', 'maintenance']
 export const TASK_COMPLETION_POLICIES: readonly TaskCompletionPolicy[] = ['pr', 'merge', 'commit-only']
 
 /** Statuses a task never leaves on its own — only a human reopens them. */
@@ -75,6 +75,8 @@ export interface Task {
    * attempt is running — "queued" is distinct from "running".
    */
   queuedAt: string | null
+  /** Maintenance responsibility that governs this task, if any. */
+  responsibilityId: string | null
   createdBy: TaskActor
   createdAt: string
   updatedAt: string
@@ -100,6 +102,7 @@ export interface CreateTaskInput {
   completionPolicy?: TaskCompletionPolicy
   originSessionId?: string | null
   originRequestId?: string | null
+  responsibilityId?: string | null
   createdBy: TaskActor
 }
 
@@ -134,6 +137,7 @@ interface TaskRow {
   origin_session_id: string | null
   origin_request_id: string | null
   queued_at: string | null
+  responsibility_id: string | null
   created_by: string
   created_at: string
   updated_at: string
@@ -212,7 +216,7 @@ export class TaskStore {
   /** Additive columns for databases created before they existed. */
   private migrate(): void {
     const columns = new Set((this.db.prepare('PRAGMA table_info(joe_tasks)').all() as { name: string }[]).map(c => c.name))
-    for (const [column, type] of [['origin_session_id', 'TEXT'], ['origin_request_id', 'TEXT'], ['queued_at', 'TEXT']] as const) {
+    for (const [column, type] of [['origin_session_id', 'TEXT'], ['origin_request_id', 'TEXT'], ['queued_at', 'TEXT'], ['responsibility_id', 'TEXT']] as const) {
       if (!columns.has(column)) this.db.exec(`ALTER TABLE joe_tasks ADD COLUMN ${column} ${type}`)
     }
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_joe_tasks_origin ON joe_tasks(origin_session_id)')
@@ -235,8 +239,8 @@ export class TaskStore {
     const id = randomUUID()
     const now = new Date().toISOString()
     this.db.prepare(
-      `INSERT INTO joe_tasks (id, repo, title, detail, acceptance, priority, source, source_ref, completion_policy, origin_session_id, origin_request_id, created_by, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO joe_tasks (id, repo, title, detail, acceptance, priority, source, source_ref, completion_policy, origin_session_id, origin_request_id, responsibility_id, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       input.repo,
@@ -249,6 +253,7 @@ export class TaskStore {
       input.completionPolicy ?? 'pr',
       input.originSessionId ?? null,
       input.originRequestId ?? null,
+      input.responsibilityId ?? null,
       input.createdBy,
       now,
       now,
@@ -359,6 +364,7 @@ function mapTask(row: TaskRow): Task {
     originSessionId: row.origin_session_id ?? null,
     originRequestId: row.origin_request_id ?? null,
     queuedAt: row.queued_at ?? null,
+    responsibilityId: row.responsibility_id ?? null,
     createdBy: row.created_by as TaskActor,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

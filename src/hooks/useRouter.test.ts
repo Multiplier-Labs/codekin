@@ -31,6 +31,11 @@ function renderHook<T>(hookFn: () => T): { result: { current: T }; unmount: () =
 }
 
 describe('parsePath', () => {
+  it('parses a repo maintenance view', () => {
+    expect(parsePath('/maintenance/%2Fsrv%2Frepos%2Fapp')).toMatchObject({ view: 'maintenance', maintenanceRepo: '/srv/repos/app' })
+    expect(parsePath('/maintenance/%E0%A4%A').view).toBe('chat')
+  })
+
   it('parses the Tasks view', () => {
     expect(parsePath('/tasks')).toMatchObject({ view: 'tasks', sessionId: null })
     expect(parsePath('/tasks/')).toMatchObject({ view: 'tasks' })

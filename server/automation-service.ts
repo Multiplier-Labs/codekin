@@ -112,6 +112,8 @@ export interface RepoAutomation {
   model: string | null
   provider: string | null
   revision: number
+  /** 'maintenance' when adopted into the repo's maintenance plan (pauses with it). */
+  managedBy: 'user' | 'maintenance'
   schedule: Pick<CronSchedule, 'nextRunAt' | 'lastRunAt' | 'lastHeldAt' | 'lastHeldReason' | 'heldCount' | 'catchUp'> | null
   timezone: string
 }
@@ -141,6 +143,8 @@ export interface MutationResult {
   replayed: boolean
   /** Runs still going for this automation — disabling or removing never cancels them. */
   activeRuns: { id: string; status: string }[]
+  /** Maintenance responsibilities whose coverage this change affects. */
+  affectedResponsibilities: string[]
 }
 
 /** A schedule more than this far past its fire time has missed it. */
@@ -148,15 +152,31 @@ const OVERDUE_GRACE_MS = 15 * 60_000
 /** Heartbeat older than three ticks means the dispatch loop is not running. */
 const SCHEDULER_STALE_MS = 3 * 60_000
 /** Holds that mean coverage is withheld, not that there was nothing to do. */
-const COVERAGE_HOLD = /dormant|cooling|missed fire window/
+const COVERAGE_HOLD = /dormant|cooling|missed fire window|maintenance/
 
 export class AutomationService {
   private readonly deps: AutomationServiceDeps
   private readonly timezone: string
+  /** Reports which maintenance responsibilities a change affects (set once maintenance exists). */
+  private changeObserver: ((automationId: string, action: AutomationChangeAction) => string[]) | null = null
 
   constructor(deps: AutomationServiceDeps) {
     this.deps = deps
     this.timezone = deps.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+  }
+
+  setChangeObserver(observer: ((automationId: string, action: AutomationChangeAction) => string[]) | null): void {
+    this.changeObserver = observer
+  }
+
+  private affected(automationId: string, action: AutomationChangeAction): string[] {
+    if (!this.changeObserver) return []
+    try {
+      return this.changeObserver(automationId, action)
+    } catch (err) {
+      console.error('[automations] Change observer failed:', err)
+      return []
+    }
   }
 
   private now(): Date {
@@ -380,7 +400,7 @@ export class AutomationService {
     this.deps.config.add(entry)
     this.safeSync()
     const change = this.record(entry, 'create', ctx, null, entry)
-    return { automation: this.view(entry, workflows), change, replayed: false, activeRuns: [] }
+    return { automation: this.view(entry, workflows), change, replayed: false, activeRuns: [], affectedResponsibilities: [] }
   }
 
   update(id: string, patch: AutomationPatch, ctx: ChangeContext & { expectedRevision?: number }): MutationResult {
@@ -401,7 +421,7 @@ export class AutomationService {
     const clean = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as AutomationPatch
     const changedKeys = (Object.keys(clean) as (keyof AutomationPatch)[]).filter(k => clean[k] !== before[k])
     if (changedKeys.length === 0) {
-      return { automation: this.get(id), change: null, replayed: false, activeRuns: this.activeRuns(before) }
+      return { automation: this.get(id), change: null, replayed: false, activeRuns: this.activeRuns(before), affectedResponsibilities: [] }
     }
 
     const after: ReviewRepoConfig = { ...before, ...clean, revision: revisionOf(before) + 1 }
@@ -411,7 +431,7 @@ export class AutomationService {
       ? (after.enabled ? 'enable' : 'disable')
       : 'update'
     const change = this.record(after, action, ctx, before, after)
-    return { automation: this.get(id), change, replayed: false, activeRuns: this.activeRuns(after) }
+    return { automation: this.get(id), change, replayed: false, activeRuns: this.activeRuns(after), affectedResponsibilities: this.affected(id, action) }
   }
 
   /** Remove future configured execution. Run history and workflow files are kept. */
@@ -425,7 +445,7 @@ export class AutomationService {
     this.deps.config.remove(id)
     this.safeSync()
     const change = this.record(before, 'remove', ctx, before, null)
-    return { automation: null, change, replayed: false, activeRuns }
+    return { automation: null, change, replayed: false, activeRuns, affectedResponsibilities: this.affected(id, 'remove') }
   }
 
   /** Run an automation now (manual trigger — activity gates bypassed). */
@@ -441,6 +461,16 @@ export class AutomationService {
       model: entry.model,
       provider: entry.provider,
     })
+  }
+
+  /** Adopt an automation into its repo's maintenance plan, or hand it back. Audited like any change. */
+  setManagedBy(id: string, owner: 'user' | 'maintenance', ctx: ChangeContext): RepoAutomation {
+    const before = this.requireEntry(id)
+    if ((before.managedBy ?? 'user') === owner) return this.get(id)
+    const after: ReviewRepoConfig = { ...before, managedBy: owner === 'maintenance' ? 'maintenance' : undefined, revision: revisionOf(before) + 1 }
+    this.deps.config.update(id, { managedBy: after.managedBy, revision: after.revision })
+    this.record(after, 'update', ctx, before, after)
+    return this.get(id)
   }
 
   /** Run a workflow kind once, outside any configured automation. */
@@ -509,7 +539,7 @@ export class AutomationService {
     } catch {
       automation = null
     }
-    return { automation, change: prior, replayed: true, activeRuns: [] }
+    return { automation, change: prior, replayed: true, activeRuns: [], affectedResponsibilities: [] }
   }
 
   private record(entry: ReviewRepoConfig, action: AutomationChangeAction, ctx: ChangeContext, before: ReviewRepoConfig | null, after: ReviewRepoConfig | null): AutomationChange | null {
@@ -589,6 +619,7 @@ export class AutomationService {
       model: entry.model ?? null,
       provider: entry.provider ?? null,
       revision: revisionOf(entry),
+      managedBy: entry.managedBy === 'maintenance' ? 'maintenance' : 'user',
       schedule,
       timezone: this.timezone,
     }

@@ -22,6 +22,8 @@ import { createAutomationRouter } from './automation-routes.js'
 import type { AutomationService } from './automation-service.js'
 import { createJoeSessionRouter } from './joe-session-routes.js'
 import type { JoeSessionBridge } from './joe-session-bridge.js'
+import { createMaintenanceRouter } from './maintenance-routes.js'
+import type { MaintenanceService } from './maintenance-service.js'
 
 type VerifyFn = (token: string | undefined) => boolean
 type VerifySessionFn = (token: string | undefined, sessionId: string | undefined) => boolean
@@ -39,6 +41,7 @@ export function createOrchestratorRouter(
   tasks?: OrchestratorTaskService,
   automations?: AutomationService,
   joeBridge?: JoeSessionBridge,
+  maintenance?: MaintenanceService,
 ): Router {
   const router = Router()
   const memory = injectedMemory ?? new OrchestratorMemory()
@@ -69,6 +72,7 @@ export function createOrchestratorRouter(
   router.use(createSessionRouter(verifyOrchestratorAuth, sessions, memory, children, monitorRef, tasks))
   if (tasks) router.use(createTaskRouter(verifyOrchestratorAuth, actorOf, tasks))
   if (automations) router.use(createAutomationRouter(verifyOrchestratorAuth, actorOf, automations))
+  if (maintenance && automations) router.use(createMaintenanceRouter(verifyOrchestratorAuth, actorOf, maintenance, (repo) => automations.isValidRepo(repo)))
   router.use(createMemoryRouter(verifyOrchestratorAuth, memory, monitorRef))
   router.use(createLearningRouter(verifyOrchestratorAuth, memory))
 
