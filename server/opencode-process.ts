@@ -26,6 +26,7 @@ import type { ClaudeProcessEvents } from './claude-process.js'
 import { OPENCODE_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
 import type { PermissionMode, TaskItem } from './types.js'
 import { summarizeToolInput } from './tool-labels.js'
+import { buildHarnessEnv } from './harness-env.js'
 
 // ---------------------------------------------------------------------------
 // OpenCode SSE event types (subset — only what we need to map)
@@ -165,21 +166,8 @@ async function startOpenCodeServer(workingDir: string): Promise<void> {
   serverState.port = 14096 + Math.floor(Math.random() * 1000)
   serverState.password = randomUUID()
 
-  // Strip API keys and GIT_* vars (except GIT_EDITOR) — same filtering as
-  // claude-process.ts.  GIT_INDEX_FILE=.git/index breaks worktrees where
-  // .git is a file, and stale API keys override OpenCode's own auth.
-  const API_KEY_VARS = new Set(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_API_KEY', 'AUTH_TOKEN', 'AUTH_TOKEN_FILE'])
-  const env: Record<string, string> = {
-    ...Object.fromEntries(
-      Object.entries(process.env).filter(
-        (entry): entry is [string, string] =>
-          entry[1] != null &&
-          !API_KEY_VARS.has(entry[0]) &&
-          (!entry[0].startsWith('GIT_') || entry[0] === 'GIT_EDITOR')
-      )
-    ),
-    OPENCODE_SERVER_PASSWORD: serverState.password,
-  }
+  // Full parent environment minus stale API keys and GIT_* — see harness-env.ts.
+  const env = buildHarnessEnv({ OPENCODE_SERVER_PASSWORD: serverState.password })
 
   const proc = spawn('opencode', ['serve', '--port', String(serverState.port)], {
     cwd: workingDir,

@@ -22,6 +22,7 @@ import { summarizeToolInput } from './tool-labels.js'
 import { redactSecrets } from './crypto-utils.js'
 import { jsonParse } from './json-parse.js'
 import { CLAUDE_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
+import { buildHarnessEnv } from './harness-env.js'
 
 /** Options for constructing a ClaudeProcess. Replaces positional constructor parameters. */
 export interface ClaudeProcessOptions {
@@ -183,27 +184,8 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       return
     }
 
-    // Pass through the full parent environment so the Claude CLI inherits
-    // XDG paths, TERM, SHELL, and any other vars it needs.
-    // Exclude ANTHROPIC_API_KEY / CLAUDE_CODE_API_KEY from inheritance —
-    // stale or incorrect keys override the CLI's subscription/OAuth auth
-    // and cause "Invalid API key" errors. Let the CLI use its own auth.
-    // Also strip GIT_* vars (except GIT_EDITOR) that the server may have
-    // inherited from the shell that launched it. In particular,
-    // GIT_INDEX_FILE=.git/index breaks worktrees where .git is a file,
-    // not a directory, causing all index-dependent git commands to fail.
-    const API_KEY_VARS = new Set(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_API_KEY', 'AUTH_TOKEN', 'AUTH_TOKEN_FILE'])
-    const env: Record<string, string> = {
-      ...Object.fromEntries(
-        Object.entries(process.env).filter(
-          (entry): entry is [string, string] =>
-            entry[1] != null &&
-            !API_KEY_VARS.has(entry[0]) &&
-            (!entry[0].startsWith('GIT_') || entry[0] === 'GIT_EDITOR')
-        )
-      ),
-      ...this.extraEnv,
-    }
+    // Full parent environment minus stale API keys and GIT_* — see harness-env.ts.
+    const env = buildHarnessEnv(this.extraEnv)
 
     // Suppress Node.js deprecation warnings in child tools
     env.NODE_NO_WARNINGS = '1'

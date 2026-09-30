@@ -33,6 +33,7 @@ import type { ClaudeProcessEvents } from './claude-process.js'
 import { CODEX_CAPABILITIES, type CodingProcess, type CodingProvider, type ProviderCapabilities } from './coding-process.js'
 import type { PermissionMode, TaskItem } from './types.js'
 import { summarizeToolInput } from './tool-labels.js'
+import { buildHarnessEnv } from './harness-env.js'
 
 // ---------------------------------------------------------------------------
 // Codex app-server protocol types (subset — only what we consume)
@@ -85,23 +86,6 @@ const APPROVAL_ID_PREFIX = 'codex-approval-'
 
 const CODEX_BINARY = process.env.CODEX_BINARY || 'codex'
 
-/** Env vars stripped from the child process env (same filtering as opencode-process). */
-const API_KEY_VARS = new Set(['ANTHROPIC_API_KEY', 'CLAUDE_CODE_API_KEY', 'AUTH_TOKEN', 'AUTH_TOKEN_FILE'])
-
-function buildEnv(extraEnv: Record<string, string>): Record<string, string> {
-  return {
-    ...Object.fromEntries(
-      Object.entries(process.env).filter(
-        (entry): entry is [string, string] =>
-          entry[1] != null &&
-          !API_KEY_VARS.has(entry[0]) &&
-          (!entry[0].startsWith('GIT_') || entry[0] === 'GIT_EDITOR')
-      )
-    ),
-    ...extraEnv,
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Model discovery
 // ---------------------------------------------------------------------------
@@ -142,7 +126,7 @@ export async function fetchCodexModels(): Promise<{ models: CodexModelInfo[] }> 
 
     let proc: ChildProcess
     try {
-      proc = spawn(CODEX_BINARY, ['app-server'], { env: buildEnv({}), stdio: ['pipe', 'pipe', 'ignore'] })
+      proc = spawn(CODEX_BINARY, ['app-server'], { env: buildHarnessEnv(), stdio: ['pipe', 'pipe', 'ignore'] })
     } catch {
       clearTimeout(timer)
       resolve({ models: [] })
@@ -282,7 +266,7 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
     this.alive = true
     this.proc = spawn(CODEX_BINARY, ['app-server'], {
       cwd: this.workingDir,
-      env: buildEnv(this.extraEnv),
+      env: buildHarnessEnv(this.extraEnv),
       stdio: ['pipe', 'pipe', 'pipe'],
     })
 
