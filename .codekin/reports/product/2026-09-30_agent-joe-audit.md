@@ -131,3 +131,89 @@ Use the existing run store as the source of truth. Add durable task ownership, a
 **Pilot:** Compare at least ten comparable task batches with ordinary manual session management. Record supervision minutes, manual transcript visits, actionable versus unnecessary interruptions, time blocked, accepted reviewable outputs, and total agent cost including Joe.
 
 Proposed go/no-go criteria: at least 50% fewer manual status checks, no false “ready” result, recovery without duplicate execution in a deliberate restart exercise, and repeated voluntary use by the pilot user. These are proposed targets, not measured outcomes. If supervision effort or review load does not improve, keep Joe as an optional coordination interface and prioritize deterministic run/decision UI instead.
+
+## Follow-up: session management tooling audit
+
+Requested focus: can Joe spawn, control, and close Codekin sessions reliably?
+
+**Verdict:** The basic spawn/inspect/answer path is implemented and tested. Joe does not have a complete session-management MCP interface, and underlying lifecycle gaps make control and closure unreliable as a supervisory workflow. Fix the lifecycle alongside adding tools; exposing existing methods alone will preserve stale states.
+
+### Capability map
+
+| Operation | What Joe has today | Assessment |
+| --- | --- | --- |
+| Spawn a child | `spawn_child` → child REST route → child manager | Basic path works; worktree default, capacity cap, status records, and notifications exist |
+| Select provider and time budget | MCP exposes model, but no provider or `timeoutMs`; REST supports `timeoutMs` | All children default to Claude; Joe cannot select another harness or configure the supported working budget through MCP |
+| Inspect children | `list_children`, `get_child`, `get_child_transcript` | Useful during current process lifetime; list purges terminal children after one hour, and manager does not recover from run store |
+| List all Codekin sessions | REST `GET /api/orchestrator/sessions` | No corresponding MCP tool; curl fallback required |
+| Answer a permission or question | `pending_prompts`, `respond_to_prompt` | Existing route checks pending request IDs; scope is all sessions, not just Joe-owned work |
+| Send a follow-up instruction | User WebSocket `input` operation | No Joe MCP tool or equivalent orchestrator REST operation |
+| Stop or resume a child | User WebSocket `stop` / `start_claude` operations | No Joe MCP tools; stopping is not synchronized with child status |
+| Cancel a run | `abort_run` | Only calls the loop cancellation endpoint; cannot cancel a Joe child or workflow |
+| Close one session | REST `DELETE /api/orchestrator/sessions/:id` | No MCP wrapper; deletes session, conditionally archives transcript, and attempts worktree cleanup |
+| Close finished sessions | REST `DELETE /api/orchestrator/sessions/cleanup` | Deletes all automated sessions regardless of whether they are finished; unsuitable for this intent |
+
+Evidence: `server/codekin-mcp-server.ts:35`, `server/codekin-mcp-api.ts:14`, `server/orchestrator-session-router.ts:185`, `server/ws-message-handler.ts:145`.
+
+### S1 — High: stop and delete do not settle the child supervisor
+
+`SessionLifecycle.stopClaude()` (`server/session-lifecycle.ts:477`) removes process listeners, stops the process, and clears its reference without notifying session exit observers. `SessionManager.delete()` (`server/session-manager.ts:786`) likewise removes listeners and the session without a child-manager lifecycle event. The child manager listens to result/exit/prompt events, not deletion or explicit stopping.
+
+Consequently a stopped or deleted child can stay `running` or `blocked`, continue occupying one of the five slots, and eventually be recorded as `timed_out`. On the blocked path, that can last until the separate 30-minute blocked cap. Restarting the process manually does not create a fresh supervised attempt with explicit semantics.
+
+**Evidence check:** Two temporary tests invoked the actual SessionManager stop/delete methods with mocked processes and verified no exit observer was called. A child-manager diagnostic removed its backing session without a result/exit event; it remained active until its working timeout and then became `timed_out`.
+
+**Improvement:** Add explicit stop/cancel/delete lifecycle events, durable cancellation state, immediate slot release, timer/listener disposal, and exactly-once terminal notification. Define whether resume continues an attempt or starts another. A close tool must report session, archive, branch, and worktree outcomes separately.
+
+### S2 — High: cleanup includes active work, not just completed sessions
+
+The cleanup route (`server/orchestrator-session-router.ts:377`) selects every session whose source is workflow, webhook, stepflow, or agent. It does not filter active/blocked state or restrict selection to Joe's children. This can stop unrelated active automation when Joe uses cleanup to tidy finished work.
+
+The underlying deletion behavior does have useful protections: it waits for process exit before worktree cleanup, keeps branches, and uses non-forced `git worktree remove`, retaining dirty/untracked work (`server/worktree-ops.ts:330`). Transcript archival only occurs above a 150-character output threshold. Calling it “archive” without explaining these semantics would be misleading.
+
+**Improvement:** Provide `close_session` and a completed-only cleanup operation with explicit IDs or a previewable selection. Reject active work unless cancellation is expressly requested. Return what was closed, what was retained, and why.
+
+### S3 — High: approvals do not resume the child working clock promptly
+
+`handleChildPrompt()` immediately pauses the timer. `monitorChild()` only resumes it in `onResult` after pending prompts have cleared (`server/orchestrator-children.ts:701`). `PromptRouter.sendPromptResponse()` clears/routes the answer but emits no matching unblocked event (`server/prompt-router.ts:203`). A tool can execute and the model can keep working before another result is emitted.
+
+**Evidence check:** With a 60-second budget, the diagnostic consumed 30 seconds, raised a permission prompt, cleared the pending approval, and advanced another 120 seconds without a result. The child still reported `blocked`, and the process was not stopped. The existing tests simulate unblocking by explicitly emitting a result, masking this interval.
+
+**Improvement:** Resume the working clock and transition to running when the last outstanding prompt resolves, including auto-denial paths. Track prompt resolution explicitly, not by waiting for turn completion.
+
+### S4 — High: durable records are not durable control
+
+The follow-up confirmed finding 5: reconstructing `OrchestratorChildManager` against the same run store yields an empty list, zero active count, and no child by ID even though its stored run remains running. The five-child cap therefore also loses historical active work at restart. Terminal children are additionally evicted by `list()` after one hour, after which child transcript lookup returns 404 even when the session still exists.
+
+**Improvement:** Recover active tasks and watchers from persisted records, reconcile missing/stopped sessions, and expose durable history separately from live process state. Let transcript lookup resolve an authorized retained session independently of the short-lived child map.
+
+### S5 — Medium: spawning options do not match the supported product
+
+`spawn_child` exposes `model` but not `provider`. The child manager calls `sessions.create()` without a provider (`server/orchestrator-children.ts:377`); `SessionManager.create()` defaults it to `claude` (`server/session-manager.ts:391`). Joe running on Codex or OpenCode does not change that. The MCP schema also omits the REST route's supported `timeoutMs` and `allowedTools` fields.
+
+`deployAfter` is accepted, recorded, and exposed in MCP, but no child execution or completion branch consumes it. A diagnostic comparing spawned prompts with false/true produced identical instructions. The `merge` completion policy means pushing the current branch, not merging a PR. If worktree creation fails, spawning proceeds in the original checkout.
+
+**Improvement:** Add validated provider/model and timeout support; decide provider inheritance explicitly. Remove or reject unimplemented deployment options. Rename the push policy to describe what it does. Default to pausing on isolation failure rather than silently changing the execution environment.
+
+### S6 — High: completion and permission enforcement remain prerequisites
+
+The earlier false-success finding is confirmed by the existing child test suite: a missing PR after one nudge produces `completed` with an error note, which the run store maps to success. A control interface needs distinct `canceled`, `failed`, and `verification_unknown` outcomes.
+
+The approval route can act on any session; consulting trust is an agent instruction rather than a server-side prerequisite. Its MCP value accepts only a string whereas the underlying prompt router also supports string arrays. Ownership and structured answer support should be part of a deliberate control contract, rather than exposing unrestricted mutation endpoints under friendlier tool names.
+
+### Recommended implementation order
+
+1. Fix stop/delete/cancel transitions, approval-resolution timing, false completion, and restart reconciliation. Add integration tests connecting the child manager to actual session lifecycle methods.
+2. Add typed MCP operations: list/get sessions, send input with explicit queue-or-interrupt behavior, stop/cancel, resume, and close. Distinguish a running process from an active task and a retained transcript. Enforce ownership and scoped authorization on mutations.
+3. Make cleanup completed-only by default; expose retained worktrees and archival results. Add provider/timeout selection and remove misleading spawn fields.
+4. Add tool-to-real-router contract tests. The current API-client tests use a catch-all HTTP stub; they verify request shapes but cannot establish that a real endpoint supports them.
+
+### Follow-up validation
+
+Installed checkout dependencies and rebuilt the SQLite native binding. Ran:
+
+```bash
+npx vitest run server/codekin-mcp-api.test.ts server/orchestrator-children.test.ts server/orchestrator-session-router.test.ts server/orchestrator-notify.test.ts server/orchestrator-outbox.test.ts
+```
+
+Result: **97 tests passed across five files**. Six additional temporary diagnostic tests reproduced the approval-clock gap, missing recovery, missing provider/unused deployment option, delayed settlement after session removal, and absent exit notifications on actual stop/delete methods. They assert the current undesirable behavior, not acceptance criteria for a fix, and were removed after the audit. Processes and provider execution were mocked; no live sessions were spawned, stopped, or closed. No application code was changed. This validation supersedes the initial audit's no-test-execution limitation for the specific follow-up scope only.
