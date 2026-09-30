@@ -339,14 +339,25 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
             model,
             provider,
             allowedTools: ['Bash(gh pr:*)'],
+            useWorktree: true,
           })
+
+          // Run in an isolated worktree branched from the default branch, so the
+          // agent never touches (or audits) whatever the main checkout has out.
+          const worktree = await sessions.prepareSessionWorktree(session.id, repoPath)
+          if (!worktree.ok) {
+            sessions.delete(session.id)
+            throw new Error(`Could not create a worktree for ${repoName}: ${worktree.message}`)
+          }
 
           // Persist the session id on the run BEFORE returning so a server crash
           // between this step and `run_prompt` can still locate the session.
           ctx.recordSessionId?.(session.id)
 
-          console.log(`[workflow:${def.kind}] Created session ${session.id} for ${repoName} (run ${ctx.runId})`)
-          return { sessionId: session.id, repoPath, repoName, branch: input.branch, lastCommit: input.lastCommit }
+          console.log(`[workflow:${def.kind}] Created session ${session.id} for ${repoName} in ${worktree.path} (run ${ctx.runId})`)
+          // The audited code is the worktree's base, not the main checkout's branch.
+          const branch = worktree.baseRef ?? worktree.branch
+          return { sessionId: session.id, repoPath, repoName, branch, lastCommit: input.lastCommit }
         },
       },
 
@@ -606,25 +617,6 @@ function registerWorkflow(engine: WorkflowEngine, sessions: SessionManager, def:
         }
       } catch {
         // Ignore cleanup errors
-      }
-
-      // Guard: the audit session runs directly in repoPath (no worktree isolation),
-      // so the Claude agent can check out the audit branch while following CLAUDE.md's
-      // instruction to commit reports on a branch. Restore the original branch so the
-      // next run does not fork its audit branch from a stale, audit-branch HEAD.
-      const repoPath = run.output?.repoPath as string | undefined
-      const branch = run.output?.branch as string | undefined
-      if (repoPath && branch) {
-        try {
-          const current = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'],
-            { cwd: repoPath, timeout: 5_000, stdio: 'pipe' }).toString().trim()
-          if (current !== branch) {
-            console.warn(`[workflow:${def.kind}] Main checkout is on '${current}' instead of '${branch}' — restoring`)
-            execFileSync('git', ['checkout', branch], { cwd: repoPath, timeout: 10_000, stdio: 'pipe' })
-          }
-        } catch (err) {
-          console.warn(`[workflow:${def.kind}] Could not restore branch to ${branch}: ${err}`)
-        }
       }
     },
   })
