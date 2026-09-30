@@ -174,6 +174,14 @@ export function createTaskRouter(
     } catch (err) { sendError(res, err) }
   })
 
+  /** The user asks Joe to start a to-do task. */
+  router.post('/api/orchestrator/tasks/:id/start', (req: Request<{ id: string }>, res) => {
+    if (!authorize(req, res) || !requireUser(req, res)) return
+    try {
+      res.json({ task: tasks.requestStart(req.params.id) })
+    } catch (err) { sendError(res, err) }
+  })
+
   /** The user accepts a result that is ready for review. */
   router.post('/api/orchestrator/tasks/:id/accept', (req: Request<{ id: string }>, res) => {
     if (!authorize(req, res) || !requireUser(req, res)) return
