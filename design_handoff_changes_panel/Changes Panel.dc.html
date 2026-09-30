@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@300..700&family=Lato:wght@300;400;700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<style>
+html{background:#d9e0ea}body{margin:0;background:#d9e0ea;font-family:Lato,sans-serif;color:#243047}
+a{color:#3f5f95}a:hover{color:#314a74}
+button{font:inherit;color:inherit}
+input::placeholder{color:#59677b}
+@keyframes ck-spin{to{transform:rotate(360deg)}}
+</style>
+</helmet>
+<section style="display:flex;flex-direction:column;gap:28px;padding:56px 56px 0">
+  <div style="display:flex;flex-direction:column;gap:6px;max-width:980px">
+    <h1 style="margin:0;font-size:24px;line-height:1.25;font-weight:700">Open cases for 2a</h1>
+    <p style="margin:0;font-size:15.5px;line-height:1.6;color:#48566b;text-wrap:pretty">One rule for small widths: below 420px the view tabs become one dropdown and the diff uses a single line-number column. <a href="#3a">3a</a> is the 280px minimum, <a href="#3b">3b</a> is touch, <a href="#3c">3c</a> is review comments, <a href="#3d">3d</a> is discarding.</p>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:56px;align-items:flex-start">
+
+    <div id="3a" style="display:flex;flex-direction:column;gap:14px;width:280px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font-size:13px;font-weight:700;padding:2px 8px;border-radius:6px;background:#243047;color:#f8faff">3a</span><span style="font-size:17px;font-weight:700">280px, pointer</span></div>
+      <p style="margin:0;font-size:14px;line-height:1.45;color:#48566b">Tabs become a dropdown. Base and PR stack. The diff bar drops the counter and copy button.</p>
+      <div style="width:280px;height:920px;display:flex;flex-direction:column;background:#eaf0f8;border-left:1px solid #c4cfde;overflow:hidden;box-shadow:0 24px 48px -28px rgba(20,28,43,.45)">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 6px 10px 14px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+          <span style="width:8px;height:8px;border-radius:999px;background:#477b42"></span>
+          <span style="font-size:17px;line-height:1.35;font-weight:700;flex:1">Changes</span>
+          <button style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#48566b"><i class="ti ti-refresh" style="font-size:18px"></i></button>
+          <button style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#48566b"><i class="ti ti-x" style="font-size:18px"></i></button>
+        </div>
+        <div style="padding:12px 14px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+          <button style="display:flex;align-items:center;gap:8px;height:34px;padding:0 8px 0 12px;border:1px solid #c4cfde;border-radius:6px;background:#f8faff;cursor:pointer;font-size:14px"><span style="font-weight:700">All task changes</span><span style="font-size:12.5px;color:#48566b">13</span><span style="flex:1"></span><i class="ti ti-chevron-down" style="font-size:16px;color:#48566b"></i></button>
+          <div style="display:flex;flex-direction:column;gap:4px;font-family:Inconsolata,monospace;font-size:15px;min-width:0">
+            <span style="display:flex;align-items:center;gap:6px;min-width:0"><i class="ti ti-git-branch" style="font-size:16px;color:#48566b;flex-shrink:0"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">feat/changes-button-visibility</span></span>
+            <span style="display:flex;align-items:center;gap:6px"><span style="font-family:Lato,sans-serif;font-size:12.5px;color:#59677b">vs</span><button style="display:flex;align-items:center;gap:4px;height:28px;padding:0 4px 0 8px;border:1px solid #c4cfde;border-radius:6px;background:#f8faff;font-family:Inconsolata,monospace;font-size:15px">origin/main<i class="ti ti-chevron-down" style="font-size:14px;color:#48566b"></i></button></span>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:2px;padding:10px 6px 10px 14px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+          <div style="display:flex;align-items:center;gap:8px;font-size:14px">
+            <i class="ti ti-git-pull-request" style="font-size:17px;color:#48566b"></i><span style="color:#48566b">#679</span>
+            <span style="border-radius:6px;padding:0 6px;font-size:12.5px;background:#e1edff;color:#38578a">Merged</span>
+            <span style="display:flex;align-items:center;gap:3px;font-size:12.5px;color:#477b42"><i class="ti ti-circle-check" style="font-size:14px"></i>2</span>
+            <span style="flex:1"></span>
+            <a style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;color:#48566b"><i class="ti ti-external-link" style="font-size:17px"></i></a>
+          </div>
+          <span style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">feat(ui): show the Changes button whenever a session has changes</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 14px 6px 8px;flex-shrink:0">
+          <span style="display:flex;align-items:center;gap:6px;flex:1;padding-left:6px"><i class="ti ti-chevron-down" style="font-size:16px;color:#48566b"></i><span style="font-size:14px;font-weight:700">13 files</span></span>
+          <span style="font-size:13px;color:#477b42">+201</span><span style="font-size:13px;color:#af2d24">−10</span>
+        </div>
+        <div style="height:200px;overflow-y:auto;flex-shrink:0">
+          <sc-for list="{{ g0 }}" as="g" hint-placeholder-count="5">
+            <div style="display:flex;align-items:center;gap:6px;height:26px;padding:0 14px;font-family:Inconsolata,monospace;font-size:14px;color:#59677b">{{ g.dir }}</div>
+            <sc-for list="{{ g.files }}" as="f" hint-placeholder-count="2">
+              <div style="display:flex;align-items:center;gap:8px;height:32px;padding:0 14px 0 20px;border-left:2px solid {{ f.bar }};background:{{ f.bg }}">
+                <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;font-size:11px;font-weight:700;flex-shrink:0;color:{{ f.sfg }};background:{{ f.sbg }}">{{ f.s }}</span>
+                <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:Inconsolata,monospace;font-size:15px;font-weight:{{ f.weight }}">{{ f.name }}</span>
+                <span style="font-size:13px;color:#477b42">{{ f.add }}</span>
+              </div>
+            </sc-for>
+          </sc-for>
+        </div>
+        <div style="height:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border-top:1px solid #c4cfde"><span style="width:36px;height:3px;border-radius:999px;background:#b0bed1"></span></div>
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column;border-top:1px solid #c4cfde">
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 4px 6px 14px;background:#dce4ef;border-bottom:1px solid #c4cfde;flex-shrink:0">
+            <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;font-size:11px;font-weight:700;color:#946b29;background:#f9e5ca;flex-shrink:0">M</span>
+            <span style="flex:1;min-width:0;font-family:Inconsolata,monospace;font-size:15px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="server/diff-manager.git.test.ts">diff-manager.git.test.ts</span>
+            <button style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;opacity:.35"><i class="ti ti-chevron-up" style="font-size:18px"></i></button>
+            <button style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent"><i class="ti ti-chevron-down" style="font-size:18px"></i></button>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;font-family:Inconsolata,monospace;font-size:14px;line-height:1.55">
+            <sc-for list="{{ nLines }}" as="ln" hint-placeholder-count="14">
+              <div style="display:grid;grid-template-columns:38px minmax(0,1fr)">
+                <span style="padding:0 6px;text-align:right;color:{{ ln.gfg }};background:{{ ln.gbg }};border-right:1px solid #c4cfde">{{ ln.num }}</span>
+                <span style="padding:0 8px;white-space:pre-wrap;word-break:break-all;color:{{ ln.fg }};background:{{ ln.bg }}">{{ ln.t2 }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <p style="margin:0;flex-shrink:0;border-top:1px solid #c4cfde;padding:8px 14px;font-size:12.5px;line-height:1.45;color:#59677b">Click a line number to comment.</p>
+      </div>
+    </div>
+
+    <div id="3b" style="display:flex;flex-direction:column;gap:14px;width:390px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font-size:13px;font-weight:700;padding:2px 8px;border-radius:6px;background:#243047;color:#f8faff">3b</span><span style="font-size:17px;font-weight:700">Phone, touch density</span></div>
+      <p style="margin:0;font-size:14px;line-height:1.45;color:#48566b">Full-screen sheet with 48px targets. The file list folds into a file switcher; tapping the file name opens the full list.</p>
+      <div style="width:390px;height:844px;display:flex;flex-direction:column;background:#eaf0f8;border:1px solid #c4cfde;border-radius:20px;overflow:hidden;box-shadow:0 24px 48px -28px rgba(20,28,43,.45)">
+        <div style="display:flex;align-items:center;gap:6px;padding:8px 4px 8px 16px;border-bottom:1px solid #c4cfde;flex-shrink:0;margin-top:36px">
+          <span style="width:8px;height:8px;border-radius:999px;background:#477b42"></span>
+          <span style="font-size:18px;line-height:1.35;font-weight:700;flex:1">Changes</span>
+          <button style="display:flex;align-items:center;justify-content:center;width:48px;height:48px;border:none;background:transparent;color:#48566b"><i class="ti ti-refresh" style="font-size:22px"></i></button>
+          <button style="display:flex;align-items:center;justify-content:center;width:48px;height:48px;border:none;background:transparent;color:#48566b"><i class="ti ti-x" style="font-size:22px"></i></button>
+        </div>
+        <div style="padding:12px 16px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+          <button style="display:flex;align-items:center;gap:8px;height:48px;padding:0 12px 0 14px;border:1px solid #c4cfde;border-radius:8px;background:#f8faff;font-size:15.5px"><span style="font-weight:700">All task changes</span><span style="font-size:14px;color:#48566b">13</span><span style="flex:1"></span><i class="ti ti-chevron-down" style="font-size:20px;color:#48566b"></i></button>
+          <div style="display:flex;align-items:center;gap:8px;font-family:Inconsolata,monospace;font-size:16px;min-width:0">
+            <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">feat/changes-button-visibility</span>
+            <span style="font-family:Lato,sans-serif;font-size:14px;color:#59677b">vs</span>
+            <button style="display:flex;align-items:center;gap:4px;height:40px;padding:0 8px 0 10px;border:1px solid #c4cfde;border-radius:8px;background:#f8faff;font-family:Inconsolata,monospace;font-size:16px;flex-shrink:0">origin/main<i class="ti ti-chevron-down" style="font-size:16px;color:#48566b"></i></button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:4px 4px 4px 16px;border-bottom:1px solid #c4cfde;flex-shrink:0;font-size:15.5px">
+          <i class="ti ti-git-pull-request" style="font-size:20px;color:#48566b"></i>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:#48566b">#679</span> feat(ui): show the Changes button whenever a session has changes</span>
+          <span style="border-radius:6px;padding:1px 8px;font-size:14px;background:#e1edff;color:#38578a">Merged</span>
+          <a style="display:flex;align-items:center;justify-content:center;width:48px;height:48px;color:#48566b"><i class="ti ti-external-link" style="font-size:20px"></i></a>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;padding:4px 4px 4px 12px;background:#dce4ef;border-bottom:1px solid #c4cfde;flex-shrink:0">
+          <button style="flex:1;min-width:0;display:flex;align-items:center;gap:10px;height:56px;padding:0 6px;border:none;background:transparent;text-align:left">
+            <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:5px;font-size:13px;font-weight:700;color:#946b29;background:#f9e5ca;flex-shrink:0">M</span>
+            <span style="flex:1;min-width:0;display:flex;flex-direction:column">
+              <span style="font-family:Inconsolata,monospace;font-size:17px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">diff-manager.git.test.ts</span>
+              <span style="font-size:14px;color:#48566b;display:flex;gap:8px"><span>1 of 13 files</span><span style="color:#477b42">+41</span></span>
+            </span>
+            <i class="ti ti-selector" style="font-size:20px;color:#48566b"></i>
+          </button>
+          <button style="display:flex;align-items:center;justify-content:center;width:48px;height:48px;border:none;background:transparent;opacity:.35"><i class="ti ti-chevron-up" style="font-size:22px"></i></button>
+          <button style="display:flex;align-items:center;justify-content:center;width:48px;height:48px;border:none;background:transparent"><i class="ti ti-chevron-down" style="font-size:22px"></i></button>
+        </div>
+        <div style="flex:1;min-height:0;overflow:auto;font-family:Inconsolata,monospace;font-size:15px;line-height:1.6">
+          <sc-for list="{{ nLines }}" as="ln" hint-placeholder-count="14">
+            <div style="display:grid;grid-template-columns:48px minmax(0,1fr)">
+              <span style="padding:0 8px;text-align:right;color:{{ ln.gfg }};background:{{ ln.gbg }};border-right:1px solid #c4cfde">{{ ln.num }}</span>
+              <span style="padding:0 10px;white-space:pre-wrap;word-break:break-all;color:{{ ln.fg }};background:{{ ln.bg }}">{{ ln.t2 }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <p style="margin:0;flex-shrink:0;border-top:1px solid #c4cfde;padding:12px 16px 28px;font-size:14px;line-height:1.45;color:#59677b">Tap a line number to comment.</p>
+      </div>
+    </div>
+
+    <div id="3c" style="display:flex;flex-direction:column;gap:14px;width:505px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font-size:13px;font-weight:700;padding:2px 8px;border-radius:6px;background:#243047;color:#f8faff">3c</span><span style="font-size:17px;font-weight:700">Review comments</span></div>
+      <p style="margin:0;font-size:14px;line-height:1.45;color:#48566b">While drafts exist the file list folds to its header, and the tray takes its place at the bottom. Comments render inline under the lines they cover.</p>
+      <div style="width:505px;height:920px;display:flex;flex-direction:column;background:#eaf0f8;border-left:1px solid #c4cfde;overflow:hidden;box-shadow:0 24px 48px -28px rgba(20,28,43,.45)">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 8px 10px 16px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+          <span style="width:8px;height:8px;border-radius:999px;background:#477b42"></span>
+          <span style="font-size:17px;line-height:1.35;font-weight:700;flex:1">Changes</span>
+          <button style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;color:#48566b"><i class="ti ti-refresh" style="font-size:18px"></i></button>
+          <button style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;color:#48566b"><i class="ti ti-x" style="font-size:18px"></i></button>
+        </div>
+        <div style="padding:12px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #c4cfde;flex-shrink:0;font-size:14px">
+          <div style="display:flex;padding:3px;gap:2px;background:#dce4ef;border-radius:8px;flex:1">
+            <span style="flex:1 1 auto;display:flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 10px;border-radius:6px;background:#f8faff;font-weight:700;box-shadow:0 1px 2px rgba(20,28,43,.12)">All task changes<span style="font-size:12.5px;color:#48566b;font-weight:400">13</span></span>
+            <span style="flex:1 1 auto;display:flex;align-items:center;justify-content:center;height:32px;color:#48566b">Committed</span>
+            <span style="flex:1 1 auto;display:flex;align-items:center;justify-content:center;height:32px;color:#48566b">Uncommitted</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 16px 6px 10px;flex-shrink:0">
+          <span style="display:flex;align-items:center;gap:6px;flex:1;padding-left:6px"><i class="ti ti-chevron-right" style="font-size:16px;color:#48566b"></i><span style="font-size:14px;font-weight:700">13 files</span><span style="font-size:12.5px;color:#48566b">· 2 with comments</span></span>
+          <span style="font-size:14px;color:#477b42">+201</span><span style="font-size:14px;color:#af2d24">−10</span>
+        </div>
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column;border-top:1px solid #c4cfde">
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 8px 8px 16px;background:#dce4ef;border-bottom:1px solid #c4cfde;flex-shrink:0">
+            <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;font-size:11px;font-weight:700;color:#946b29;background:#f9e5ca">M</span>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column"><span style="font-family:Inconsolata,monospace;font-size:13px;color:#59677b">server/</span><span style="font-family:Inconsolata,monospace;font-size:16px;font-weight:700">diff-manager.git.test.ts</span></div>
+            <span style="display:flex;align-items:center;gap:4px;font-size:12.5px;color:#48566b"><i class="ti ti-message-2" style="font-size:15px"></i>2</span>
+            <span style="font-size:13px;color:#477b42">+41</span>
+            <button style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;opacity:.35"><i class="ti ti-chevron-up" style="font-size:18px"></i></button>
+            <span style="font-size:12.5px;color:#48566b;min-width:44px;text-align:center">1 / 13</span>
+            <button style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent"><i class="ti ti-chevron-down" style="font-size:18px"></i></button>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;font-family:Inconsolata,monospace;font-size:14px;line-height:1.55">
+            <sc-for list="{{ lines1 }}" as="ln" hint-placeholder-count="7">
+              <div style="display:grid;grid-template-columns:44px 44px minmax(0,1fr)">
+                <span style="padding:0 8px;text-align:right;color:{{ ln.gfg }};background:{{ ln.gbg }};border-right:1px solid #c4cfde">{{ ln.o }}</span>
+                <span style="padding:0 8px;text-align:right;color:{{ ln.gfg }};background:{{ ln.gbg }};border-right:1px solid #c4cfde">{{ ln.n }}</span>
+                <span style="padding:0 10px;white-space:pre-wrap;word-break:break-all;color:{{ ln.fg }};background:{{ ln.bg }}">{{ ln.t2 }}</span>
+              </div>
+            </sc-for>
+            <div style="border-top:1px solid #c4cfde;border-bottom:1px solid #c4cfde;background:#f8faff;padding:10px 14px;font-family:Lato,sans-serif;display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#59677b"><span>Owner · line 200</span><span style="flex:1"></span><span>Edit</span><span>Delete</span></div>
+              <p style="margin:0;font-size:14.5px;line-height:1.6;color:#243047">Also assert the uncommitted count when an untracked file exists.</p>
+            </div>
+            <sc-for list="{{ lines2 }}" as="ln" hint-placeholder-count="7">
+              <div style="display:grid;grid-template-columns:44px 44px minmax(0,1fr)">
+                <span style="padding:0 8px;text-align:right;color:{{ ln.gfg }};background:{{ ln.gbg }};border-right:1px solid #c4cfde">{{ ln.o }}</span>
+                <span style="padding:0 8px;text-align:right;color:{{ ln.gfg }};background:{{ ln.gbg }};border-right:1px solid #c4cfde">{{ ln.n }}</span>
+                <span style="padding:0 10px;white-space:pre-wrap;word-break:break-all;color:{{ ln.fg }};background:{{ ln.bg }}">{{ ln.t2 }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="flex-shrink:0;border-top:1px solid #c4cfde;background:#eaf0f8;display:flex;flex-direction:column;max-height:45%">
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px 8px 12px">
+            <i class="ti ti-chevron-down" style="font-size:15px;color:#48566b"></i>
+            <i class="ti ti-message-2" style="font-size:16px;color:#48566b"></i>
+            <span style="flex:1;font-size:14px;font-weight:700">2 drafts <span style="font-weight:400;color:#946b29">· 1 changed</span></span>
+            <button style="display:flex;align-items:center;gap:6px;height:32px;padding:0 12px;border:none;border-radius:6px;background:#82adf4;color:#232f43;font-size:14px;font-weight:700;cursor:pointer"><i class="ti ti-send" style="font-size:15px"></i>Send 1 to agent</button>
+          </div>
+          <div style="padding:0 8px 10px;display:flex;flex-direction:column;gap:2px;overflow-y:auto">
+            <label style="display:flex;align-items:flex-start;gap:8px;padding:4px 6px 6px;font-size:12.5px;line-height:1.45;color:#946b29"><input type="checkbox" style="margin-top:2px"><span>1 comment points at code that changed. Include it with the original code, or delete and re-select.</span></label>
+            <div style="display:flex;flex-direction:column;gap:2px;padding:6px;border-radius:6px" style-hover="background:#dce4ef">
+              <span style="font-family:Inconsolata,monospace;font-size:13px;color:#59677b">server/diff-manager.git.test.ts:200</span>
+              <span style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Also assert the uncommitted count when an untracked file exists.</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:2px;padding:6px;border-radius:6px" style-hover="background:#dce4ef">
+              <span style="display:flex;align-items:center;gap:8px;font-family:Inconsolata,monospace;font-size:13px;color:#59677b">src/App.tsx:412–418<span style="font-family:Lato,sans-serif;font-size:12px;padding:0 6px;border-radius:4px;background:#f9e5ca;color:#7b5923">code changed</span></span>
+              <span style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Move the visibility check into changesButton.ts so it is tested.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="3d" style="display:flex;flex-direction:column;gap:14px;width:505px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font-size:13px;font-weight:700;padding:2px 8px;border-radius:6px;background:#243047;color:#f8faff">3d</span><span style="font-size:17px;font-weight:700">Discard (Uncommitted view)</span></div>
+      <p style="margin:0;font-size:14px;line-height:1.45;color:#48566b">Discard only appears in views that can be discarded. "Discard all" sits with the file count; the file's trash button sits in the diff bar. Confirmation is inline and names what gets deleted. Click "Discard all" to see it.</p>
+      <div style="width:505px;height:920px;display:flex;flex-direction:column;background:#eaf0f8;border-left:1px solid #c4cfde;overflow:hidden;box-shadow:0 24px 48px -28px rgba(20,28,43,.45)">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 8px 10px 16px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+          <span style="width:8px;height:8px;border-radius:999px;background:#477b42"></span>
+          <span style="font-size:17px;line-height:1.35;font-weight:700;flex:1">Changes</span>
+          <button style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;color:#48566b"><i class="ti ti-refresh" style="font-size:18px"></i></button>
+          <button style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;color:#48566b"><i class="ti ti-x" style="font-size:18px"></i></button>
+        </div>
+        <div style="padding:12px 16px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid #c4cfde;flex-shrink:0;font-size:14px">
+          <div style="display:flex;padding:3px;gap:2px;background:#dce4ef;border-radius:8px">
+            <span style="flex:1 1 auto;display:flex;align-items:center;justify-content:center;height:32px;color:#48566b">All task changes</span>
+            <span style="flex:1 1 auto;display:flex;align-items:center;justify-content:center;height:32px;color:#48566b">Committed</span>
+            <span style="flex:1 1 auto;display:flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 10px;border-radius:6px;background:#f8faff;font-weight:700;box-shadow:0 1px 2px rgba(20,28,43,.12)">Uncommitted<span style="font-size:12.5px;color:#48566b;font-weight:400">3</span></span>
+            <span style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;color:#48566b"><i class="ti ti-dots" style="font-size:18px"></i></span>
+          </div>
+          <span style="font-size:12.5px;color:#59677b">Edits not yet committed, including new files</span>
+        </div>
+        <sc-if value="{{ tConfirm }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:10px;margin:10px 16px 4px;padding:12px 14px;border:1px solid #e78679;border-radius:8px;background:#fcece9;flex-shrink:0" role="alertdialog">
+            <span style="font-size:14px;font-weight:700;color:#94261e">Discard all 3 files?</span>
+            <span style="font-size:14px;line-height:1.45;color:#5e1b15">Edits to 2 files are reverted and 1 new file, <span style="font-family:Inconsolata,monospace;font-size:15px">src/lib/changesLayout.ts</span>, is deleted. This can't be undone.</span>
+            <div style="display:flex;justify-content:flex-end;gap:8px">
+              <button onClick="{{ tCancel }}" style="height:32px;padding:0 12px;border:1px solid #c4cfde;border-radius:6px;background:#f8faff;font-size:14px;cursor:pointer">Cancel</button>
+              <button onClick="{{ tCancel }}" style="height:32px;padding:0 12px;border:none;border-radius:6px;background:#af2d24;color:#fef2f1;font-size:14px;font-weight:700;cursor:pointer">Discard 3 files</button>
+            </div>
+          </div>
+        </sc-if>
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 8px 6px 10px;flex-shrink:0">
+          <span style="display:flex;align-items:center;gap:6px;flex:1;padding-left:6px"><i class="ti ti-chevron-down" style="font-size:16px;color:#48566b"></i><span style="font-size:14px;font-weight:700">3 files</span></span>
+          <span style="font-size:14px;color:#477b42">+30</span><span style="font-size:14px;color:#af2d24">−1</span>
+          <button onClick="{{ tAsk }}" style="display:flex;align-items:center;gap:6px;height:32px;padding:0 10px;margin-left:6px;border:none;border-radius:6px;background:transparent;color:#af2d24;font-size:14px;cursor:pointer" style-hover="background:#fcece9"><i class="ti ti-trash" style="font-size:16px"></i>Discard all</button>
+        </div>
+        <div style="flex-shrink:0;padding-bottom:6px">
+          <sc-for list="{{ ucGroups }}" as="g" hint-placeholder-count="3">
+            <div style="display:flex;align-items:center;gap:6px;height:26px;padding:0 16px;font-family:Inconsolata,monospace;font-size:14px;color:#59677b"><i class="ti ti-folder" style="font-size:14px"></i>{{ g.dir }}</div>
+            <sc-for list="{{ g.files }}" as="f" hint-placeholder-count="1">
+              <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 16px 0 26px;border-left:2px solid {{ f.bar }};background:{{ f.bg }}">
+                <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;font-size:11px;font-weight:700;flex-shrink:0;color:{{ f.sfg }};background:{{ f.sbg }}">{{ f.s }}</span>
+                <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:Inconsolata,monospace;font-size:15px;font-weight:{{ f.weight }}">{{ f.name }}</span>
+                <span style="display:flex;gap:6px;font-size:13px"><span style="color:#477b42">{{ f.add }}</span><span style="color:#af2d24">{{ f.del }}</span></span>
+              </div>
+            </sc-for>
+          </sc-for>
+        </div>
+        <div style="height:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;border-top:1px solid #c4cfde"><span style="width:36px;height:3px;border-radius:999px;background:#b0bed1"></span></div>
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column;border-top:1px solid #c4cfde">
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 8px 8px 16px;background:#dce4ef;border-bottom:1px solid #c4cfde;flex-shrink:0">
+            <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;font-size:11px;font-weight:700;color:#946b29;background:#f9e5ca">M</span>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column"><span style="font-family:Inconsolata,monospace;font-size:13px;color:#59677b">server/</span><span style="font-family:Inconsolata,monospace;font-size:16px;font-weight:700">diff-manager.ts</span></div>
+            <span style="display:flex;gap:6px;font-size:13px"><span style="color:#477b42">+5</span><span style="color:#af2d24">−1</span></span>
+            <button style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;opacity:.35"><i class="ti ti-chevron-up" style="font-size:18px"></i></button>
+            <span style="font-size:12.5px;color:#48566b;min-width:36px;text-align:center">1 / 3</span>
+            <button style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent"><i class="ti ti-chevron-down" style="font-size:18px"></i></button>
+            <button title="Discard this file's changes" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;border-radius:6px;background:transparent;color:#af2d24;cursor:pointer" style-hover="background:#fcece9"><i class="ti ti-trash" style="font-size:16px"></i></button>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;font-family:Inconsolata,monospace;font-size:14px;line-height:1.55">
+            <div style="padding:3px 12px;font-size:12.5px;color:#59677b;background:#dce4ef">@@ -194,3 +194,20 @@</div>
+            <sc-for list="{{ lines }}" as="ln" hint-placeholder-count="14">
+              <div style="display:grid;grid-template-columns:44px 44px minmax(0,1fr)">
+                <span style="padding:0 8px;text-align:right;color:{{ ln.gfg }};background:{{ ln.gbg }};border-right:1px solid #c4cfde">{{ ln.o }}</span>
+                <span style="padding:0 8px;text-align:right;color:{{ ln.gfg }};background:{{ ln.gbg }};border-right:1px solid #c4cfde">{{ ln.n }}</span>
+                <span style="padding:0 10px;white-space:pre-wrap;word-break:break-all;color:{{ ln.fg }};background:{{ ln.bg }}">{{ ln.t2 }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <p style="margin:0;flex-shrink:0;border-top:1px solid #c4cfde;padding:8px 16px;font-size:12.5px;line-height:1.45;color:#59677b">Click a line number to comment; shift-click to select a range.</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+<section style="display:flex;flex-direction:column;gap:28px;padding:56px 56px 0">
+  <div style="display:flex;flex-direction:column;gap:6px;max-width:980px">
+    <h1 style="margin:0;font-size:24px;line-height:1.25;font-weight:700">1b refined, with states</h1>
+    <p style="margin:0;font-size:15.5px;line-height:1.6;color:#48566b;text-wrap:pretty">Changes from <a href="#1b">1b</a>: drag the divider to resize the file list; files with uncommitted edits are marked in the list, the summary and the diff bar; the arrows grey out at the first and last file, and J / K step between files. Use the switcher to see the other states.</p>
+  </div>
+  <div id="2a" style="display:flex;flex-direction:column;gap:14px;width:505px">
+    <div style="display:flex;align-items:center;gap:10px"><span style="font-size:13px;font-weight:700;padding:2px 8px;border-radius:6px;background:#243047;color:#f8faff">2a</span><span style="font-size:17px;font-weight:700">Pinned file list, refined</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      <sc-for list="{{ s2States }}" as="t" hint-placeholder-count="5">
+        <button onClick="{{ t.onClick }}" style="height:32px;padding:0 12px;border-radius:6px;border:1px solid {{ t.border }};background:{{ t.bg }};color:{{ t.fg }};font-size:14px;cursor:pointer">{{ t.label }}</button>
+      </sc-for>
+    </div>
+    <div style="width:505px;height:920px;display:flex;flex-direction:column;background:#eaf0f8;border-left:1px solid #c4cfde;overflow:hidden;box-shadow:0 24px 48px -28px rgba(20,28,43,.45)">
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 8px 10px 16px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+        <span style="width:8px;height:8px;border-radius:999px;background:{{ s2Dot }}"></span>
+        <span style="font-size:17px;line-height:1.35;font-weight:700;flex:1">Changes</span>
+        <button title="Refresh changes and pull request" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#48566b;cursor:pointer" style-hover="background:#dce4ef;color:#243047"><i class="ti ti-refresh" style="font-size:18px;display:inline-block;animation:{{ s2Spin }}"></i></button>
+        <button title="Close (Esc)" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#48566b;cursor:pointer" style-hover="background:#dce4ef;color:#243047"><i class="ti ti-x" style="font-size:18px"></i></button>
+      </div>
+      <div style="padding:12px 16px;display:flex;flex-direction:column;gap:12px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+        <div style="display:flex;padding:3px;gap:2px;background:#dce4ef;border-radius:8px">
+          <sc-for list="{{ s2Scopes }}" as="s" hint-placeholder-count="3">
+            <button onClick="{{ s.onClick }}" title="{{ s.hint }}" style="flex:1 1 auto;display:flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 10px;border:none;border-radius:6px;cursor:pointer;font-size:14px;background:{{ s.bg }};color:{{ s.fg }};font-weight:{{ s.weight }};box-shadow:{{ s.shadow }}">{{ s.label }}<span style="font-size:12.5px;color:#48566b">{{ s.count }}</span></button>
+          </sc-for>
+          <button title="Staged, Unstaged" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#48566b;cursor:pointer"><i class="ti ti-dots" style="font-size:18px"></i></button>
+        </div>
+        <div style="display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:14px;row-gap:6px;align-items:center;font-size:14px">
+          <span style="font-size:12.5px;color:#59677b">Branch</span>
+          <span style="display:flex;align-items:center;gap:6px;min-width:0;font-family:Inconsolata,monospace;font-size:15px"><i class="ti ti-git-branch" style="font-size:16px;color:#48566b"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">feat/changes-button-visibility</span></span>
+          <span style="font-size:12.5px;color:#59677b">Compared with</span>
+          <button style="justify-self:start;display:flex;align-items:center;gap:8px;height:30px;padding:0 8px 0 10px;border:1px solid #c4cfde;border-radius:6px;background:#f8faff;cursor:pointer"><span style="font-family:Inconsolata,monospace;font-size:15px;white-space:nowrap;flex-shrink:0">origin/main</span><span style="font-size:12.5px;color:#59677b;white-space:nowrap;flex-shrink:0">default branch</span><i class="ti ti-chevron-down" style="font-size:14px;color:#48566b"></i></button>
+        </div>
+      </div>
+      <sc-if value="{{ s2PrFound }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;gap:4px;padding:10px 8px 10px 16px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+          <div style="display:flex;align-items:center;gap:8px;font-size:14px">
+            <i class="ti ti-git-pull-request" style="font-size:17px;color:#48566b;flex-shrink:0"></i>
+            <span style="color:#48566b;flex-shrink:0">#679</span>
+            <span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="feat(ui): show the Changes button whenever a session has changes">feat(ui): show the Changes button whenever a session has changes</span>
+            <span style="flex-shrink:0;border-radius:6px;padding:1px 8px;font-size:12.5px;background:#e1edff;color:#38578a">Merged</span>
+            <a title="Open on GitHub" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:6px;color:#48566b"><i class="ti ti-external-link" style="font-size:17px"></i></a>
+          </div>
+          <div style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding-left:25px;font-size:12.5px;color:#48566b">
+            <span style="display:flex;align-items:center;gap:4px;color:#477b42"><i class="ti ti-circle-check" style="font-size:14px"></i>2 checks passed</span>
+            <span style="color:#59677b">·</span>
+            <span style="color:#59677b">checked just now</span>
+          </div>
+          <sc-if value="{{ s2Uc }}" hint-placeholder-val="{{ false }}">
+            <p style="margin:0;padding-left:25px;font-size:12.5px;line-height:1.45;color:#946b29">Uncommitted local edits are not checked.</p>
+          </sc-if>
+        </div>
+      </sc-if>
+      <sc-if value="{{ s2PrNone }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid #c4cfde;font-size:14px;color:#59677b;flex-shrink:0"><i class="ti ti-git-pull-request" style="font-size:17px"></i>No pull request for this branch.</div>
+      </sc-if>
+      <sc-if value="{{ s2PrUnknown }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid #c4cfde;font-size:14px;color:#946b29;flex-shrink:0"><i class="ti ti-alert-triangle" style="font-size:17px;flex-shrink:0"></i>Pull request status unknown: gh is not signed in</div>
+      </sc-if>
+      <sc-if value="{{ s2Error }}" hint-placeholder-val="{{ false }}">
+        <div style="margin:16px;display:flex;align-items:flex-start;gap:10px;padding:12px 12px 12px 14px;border:1px solid #f1b2a8;border-radius:8px;background:#fcece9" role="alert">
+          <i class="ti ti-alert-circle" style="font-size:18px;color:#af2d24;margin-top:1px"></i>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:4px">
+            <span style="font-size:14px;font-weight:700;color:#94261e">Couldn't load changes</span>
+            <span style="font-family:Inconsolata,monospace;font-size:14px;line-height:1.45;color:#5e1b15;word-break:break-word">fatal: bad revision 'origin/main...HEAD'</span>
+            <span style="font-size:12.5px;line-height:1.45;color:#48566b">The base branch may not be fetched. Pick another base or retry.</span>
+          </div>
+          <button style="height:30px;padding:0 12px;border:1px solid #e78679;border-radius:6px;background:#fef2f1;color:#94261e;font-size:14px;cursor:pointer;flex-shrink:0">Retry</button>
+        </div>
+      </sc-if>
+      <sc-if value="{{ s2Loading }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:14px;padding:16px">
+          <div style="width:90px;height:14px;border-radius:4px;background:#dce4ef"></div>
+          <sc-for list="{{ s2Skel }}" as="k" hint-placeholder-count="6">
+            <div style="display:flex;align-items:center;gap:10px;padding-left:10px"><div style="width:18px;height:18px;border-radius:4px;background:#dce4ef"></div><div style="height:12px;border-radius:4px;background:#dce4ef;width:{{ k.w }}"></div></div>
+          </sc-for>
+          <span style="font-size:12.5px;color:#59677b">Reading changes…</span>
+        </div>
+      </sc-if>
+      <sc-if value="{{ s2Empty }}" hint-placeholder-val="{{ false }}">
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:32px;text-align:center">
+          <i class="ti ti-file-code" style="font-size:36px;color:#7a8799"></i>
+          <span style="font-size:15.5px;font-weight:700">No uncommitted changes</span>
+          <span style="font-size:14px;line-height:1.45;color:#48566b;max-width:300px;text-wrap:pretty">Everything on this branch is committed.</span>
+          <button onClick="{{ s2ShowAll }}" style="margin-top:6px;height:32px;padding:0 12px;border:1px solid #c4cfde;border-radius:6px;background:#f8faff;font-size:14px;cursor:pointer">Show all task changes</button>
+        </div>
+      </sc-if>
+      <sc-if value="{{ s2Files }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 16px 6px 10px;flex-shrink:0">
+          <button onClick="{{ s2ToggleList }}" style="display:flex;align-items:center;gap:6px;height:32px;padding:0 6px;border:none;background:transparent;border-radius:6px;cursor:pointer;flex:1;justify-content:flex-start"><i class="{{ s2Chevron }}" style="font-size:16px;color:#48566b"></i><span style="font-size:14px;font-weight:700">13 files</span><sc-if value="{{ s2Uc }}" hint-placeholder-val="{{ false }}"><span style="display:flex;align-items:center;gap:5px;font-size:12.5px;color:#946b29"><span style="width:6px;height:6px;border-radius:999px;background:#946b29"></span>2 uncommitted</span></sc-if></button>
+          <span style="font-size:14px;color:#477b42">+201</span><span style="font-size:14px;color:#af2d24">−10</span>
+        </div>
+        <sc-if value="{{ s2Open }}" hint-placeholder-val="{{ true }}">
+          <div style="padding:0 16px 8px;flex-shrink:0">
+            <div style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border:1px solid #c4cfde;border-radius:6px;background:#f8faff"><i class="ti ti-search" style="font-size:15px;color:#59677b"></i><input value="{{ s2Filter }}" onChange="{{ s2FilterChange }}" placeholder="Filter files" style="flex:1;min-width:0;border:none;outline:none;background:transparent;font-family:Lato,sans-serif;font-size:14px;color:#243047"></div>
+          </div>
+          <div style="height:{{ s2ListH }};overflow-y:auto;flex-shrink:0;padding-bottom:6px">
+            <sc-for list="{{ s2Groups }}" as="g" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;gap:6px;height:26px;padding:0 16px;font-family:Inconsolata,monospace;font-size:14px;color:#59677b"><i class="ti ti-folder" style="font-size:14px"></i>{{ g.dir }}</div>
+              <sc-for list="{{ g.files }}" as="f" hint-placeholder-count="2">
+                <button onClick="{{ f.onClick }}" title="{{ f.tip }}" style="display:flex;align-items:center;gap:10px;width:100%;height:32px;padding:0 16px 0 26px;border:none;border-left:2px solid {{ f.bar }};background:{{ f.bg }};cursor:pointer;text-align:left" style-hover="background:#dce4ef">
+                  <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;font-size:11px;font-weight:700;flex-shrink:0;color:{{ f.sfg }};background:{{ f.sbg }}">{{ f.s }}</span>
+                  <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:Inconsolata,monospace;font-size:15px;font-weight:{{ f.weight }};color:#243047">{{ f.name }}</span>
+                  <sc-if value="{{ f.uc }}" hint-placeholder-val="{{ false }}"><span style="width:6px;height:6px;border-radius:999px;background:#946b29;flex-shrink:0" aria-label="uncommitted changes"></span></sc-if>
+                  <span style="display:flex;gap:6px;font-size:13px;white-space:nowrap"><span style="color:#477b42">{{ f.add }}</span><span style="color:#af2d24">{{ f.del }}</span></span>
+                </button>
+              </sc-for>
+            </sc-for>
+          </div>
+          <div onMouseDown="{{ s2DragStart }}" title="Drag to resize" style="height:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:row-resize;border-top:1px solid #c4cfde;background:#eaf0f8" style-hover="background:#dce4ef"><span style="width:36px;height:3px;border-radius:999px;background:#b0bed1"></span></div>
+        </sc-if>
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column;border-top:1px solid #c4cfde">
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 8px 8px 16px;background:#dce4ef;border-bottom:1px solid #c4cfde;flex-shrink:0">
+            <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;font-size:11px;font-weight:700;flex-shrink:0;color:{{ s2Cur.sfg }};background:{{ s2Cur.sbg }}">{{ s2Cur.s }}</span>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+              <span style="display:flex;align-items:center;gap:8px;font-family:Inconsolata,monospace;font-size:13px;color:#59677b;white-space:nowrap"><span style="overflow:hidden;text-overflow:ellipsis">{{ s2Cur.dir }}</span><sc-if value="{{ s2Cur.uc }}" hint-placeholder-val="{{ false }}"><span style="font-family:Lato,sans-serif;font-size:12px;padding:0 6px;border-radius:4px;background:#f9e5ca;color:#7b5923">uncommitted</span></sc-if></span>
+              <span style="font-family:Inconsolata,monospace;font-size:16px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s2Cur.name }}</span>
+            </div>
+            <span style="display:flex;gap:6px;font-size:13px"><span style="color:#477b42">{{ s2Cur.add }}</span><span style="color:#af2d24">{{ s2Cur.del }}</span></span>
+            <div style="display:flex;align-items:center;gap:2px;margin-left:4px">
+              <button onClick="{{ s2Prev }}" title="Previous file (K)" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#243047;cursor:pointer;opacity:{{ s2PrevOp }}" style-hover="background:#c4cfde"><i class="ti ti-chevron-up" style="font-size:18px"></i></button>
+              <span style="font-size:12.5px;color:#48566b;min-width:44px;text-align:center">{{ s2Pos }}</span>
+              <button onClick="{{ s2Next }}" title="Next file (J)" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#243047;cursor:pointer;opacity:{{ s2NextOp }}" style-hover="background:#c4cfde"><i class="ti ti-chevron-down" style="font-size:18px"></i></button>
+              <button title="Copy path" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#48566b;cursor:pointer" style-hover="background:#c4cfde"><i class="ti ti-copy" style="font-size:16px"></i></button>
+            </div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;font-family:Inconsolata,monospace;font-size:14px;line-height:1.55">
+            <div style="padding:3px 12px;font-size:12.5px;color:#59677b;background:#dce4ef">@@ -194,3 +194,20 @@</div>
+            <sc-for list="{{ lines }}" as="ln" hint-placeholder-count="14">
+              <div style="display:grid;grid-template-columns:44px 44px minmax(0,1fr)">
+                <span style="padding:0 8px;text-align:right;color:{{ ln.gfg }};background:{{ ln.gbg }};border-right:1px solid #c4cfde">{{ ln.o }}</span>
+                <span style="padding:0 8px;text-align:right;color:{{ ln.gfg }};background:{{ ln.gbg }};border-right:1px solid #c4cfde">{{ ln.n }}</span>
+                <span style="padding:0 10px;white-space:pre-wrap;word-break:break-all;color:{{ ln.fg }};background:{{ ln.bg }}">{{ ln.t2 }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;border-top:1px solid #c4cfde;padding:8px 16px;font-size:12.5px;line-height:1.45;color:#59677b">
+          <span style="flex:1">Click a line number to comment; shift-click to select a range.</span>
+          <span style="font-family:Inconsolata,monospace;font-size:13px;padding:0 5px;border:1px solid #c4cfde;border-radius:4px;background:#f8faff;color:#48566b">J</span>
+          <span style="font-family:Inconsolata,monospace;font-size:13px;padding:0 5px;border:1px solid #c4cfde;border-radius:4px;background:#f8faff;color:#48566b">K</span>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+</section>
+<section style="display:flex;flex-direction:column;gap:28px;padding:56px">
+  <div style="display:flex;flex-direction:column;gap:6px;max-width:980px">
+    <h1 style="margin:0;font-size:24px;line-height:1.25;font-weight:700">Changes panel</h1>
+    <p style="margin:0;font-size:15.5px;line-height:1.6;color:#48566b;text-wrap:pretty">Paper theme, 505px panel. <a href="#1a">1a</a> is the panel as it ships. <a href="#1b">1b</a> and <a href="#1c">1c</a> move the panel onto the Settings reading scale (12.5 / 14 / 15.5px), merge the two refresh buttons, show the branch once, and group files by folder. They differ in navigation: <a href="#1b">1b</a> keeps the file list pinned above one diff; <a href="#1c">1c</a> drills from the list into a single file. Both are clickable.</p>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:56px;align-items:flex-start">
+
+    <div id="1a" style="display:flex;flex-direction:column;gap:14px;width:505px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font-size:13px;font-weight:700;padding:2px 8px;border-radius:6px;background:#243047;color:#f8faff">1a</span><span style="font-size:17px;font-weight:700">Current</span></div>
+      <p style="margin:0;font-size:14px;line-height:1.45;color:#48566b">Recreated from DiffPanel, DiffToolbar, PrStatusCard, DiffFileTree, DiffFileCard and ReviewCommentsTray.</p>
+      <div style="width:505px;height:920px;display:flex;flex-direction:column;background:#eaf0f8;border-left:1px solid #c4cfde;overflow:hidden;box-shadow:0 24px 48px -28px rgba(20,28,43,.45)">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+          <div style="display:flex;align-items:center;gap:8px"><span style="width:8px;height:8px;border-radius:999px;background:#477b42"></span><span style="font-size:14px;line-height:20px;font-weight:700">Changes</span></div>
+          <button style="display:flex;padding:4px;border:none;background:transparent;border-radius:6px;color:#48566b;cursor:pointer"><i class="ti ti-x" style="font-size:14px"></i></button>
+        </div>
+        <div style="background:#dce4ef;border-bottom:1px solid #c4cfde;padding:8px 12px;display:flex;flex-direction:column;gap:8px;flex-shrink:0;font-size:12px;line-height:16px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="display:flex;align-items:center;gap:4px;color:#48566b;flex-shrink:0"><i class="ti ti-git-branch" style="font-size:13px"></i><span style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">feat/changes-button-visibility</span></div>
+            <div style="flex:1"><button style="display:flex;align-items:center;gap:4px;border:none;background:#dce4ef;border-radius:6px;padding:4px 8px;font-size:12px;line-height:16px;color:#243047;cursor:pointer"><span>All task changes</span><span style="color:#48566b">(13)</span><i class="ti ti-chevron-down" style="font-size:12px"></i></button></div>
+            <button style="display:flex;padding:4px;border:none;background:transparent;border-radius:6px;color:#48566b;cursor:pointer"><i class="ti ti-refresh" style="font-size:14px"></i></button>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;color:#48566b">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">feat/changes-button-visibility</span>
+            <i class="ti ti-arrow-right" style="font-size:12px;flex-shrink:0"></i>
+            <div style="position:relative;max-width:180px;min-width:0;border:1px solid #c4cfde;background:#eaf0f8;border-radius:6px;padding:2px 32px 2px 6px;color:#243047;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">origin/main (default branch)<span style="position:absolute;right:10px;top:6px;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:5px solid #243047"></span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;color:#48566b"><span>13 files changed</span><span style="color:#477b42">+201</span><span style="color:#af2d24">−10</span></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;border-bottom:1px solid #c4cfde;background:#eaf0f8;padding:8px 12px;font-size:12.5px;line-height:1.45;flex-shrink:0">
+          <div style="display:flex;align-items:center;gap:8px">
+            <i class="ti ti-git-pull-request" style="font-size:14px;color:#48566b;flex-shrink:0"></i>
+            <span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">#679 feat(ui): show the Changes button whenever a session has changes</span>
+            <span style="flex-shrink:0;border-radius:6px;padding:0 6px;font-size:11px;line-height:1.4;background:rgba(169,201,252,.2);color:#38578a">merged</span>
+            <button style="display:flex;padding:4px;border:none;background:transparent;color:#48566b"><i class="ti ti-refresh" style="font-size:13px"></i></button>
+            <a style="display:flex;padding:4px;color:#48566b"><i class="ti ti-external-link" style="font-size:13px"></i></a>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;align-items:center;column-gap:8px;padding-left:20px;color:#48566b">
+            <span style="font-family:Inconsolata,monospace">main ← feat/changes-button-visibility</span>
+            <span style="display:flex;align-items:center;gap:2px;color:#477b42"><i class="ti ti-circle-check" style="font-size:12px"></i>2</span>
+            <span style="color:#59677b">checked just now</span>
+          </div>
+        </div>
+        <div style="flex:1;overflow-y:auto;min-height:0">
+          <div style="border-bottom:1px solid #c4cfde;display:flex;flex-direction:column;font-size:12px;line-height:16px">
+            <sc-for list="{{ flat }}" as="f" hint-placeholder-count="13">
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 12px;color:#243047;cursor:pointer" style-hover="background:#dce4ef">
+                <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;font-size:11px;font-weight:700;flex-shrink:0;color:{{ f.sfg }}">{{ f.s }}</span>
+                <span style="font-family:Inconsolata,monospace;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.path }}</span>
+                <span style="white-space:nowrap;display:flex;gap:4px"><span style="color:#477b42">{{ f.add }}</span><span style="color:#af2d24">{{ f.del }}</span></span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="padding:8px;display:flex;flex-direction:column;gap:8px">
+            <div style="border:1px solid #c4cfde;border-radius:6px;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#c4cfde;font-size:12px;line-height:16px">
+                <i class="ti ti-chevron-down" style="font-size:14px;color:#48566b"></i>
+                <span style="font-family:Inconsolata,monospace;flex:1">server/diff-manager.git.test.ts</span>
+                <span style="color:#477b42">+41</span>
+                <button style="display:flex;padding:4px;border:none;background:transparent;color:#48566b;margin-left:4px"><i class="ti ti-copy" style="font-size:13px"></i></button>
+              </div>
+              <div style="border-top:1px solid #c4cfde;font-family:Inconsolata,monospace;font-size:12px;line-height:1.5">
+                <sc-for list="{{ lines }}" as="ln" hint-placeholder-count="14">
+                  <div style="display:grid;grid-template-columns:42px 42px minmax(0,1fr)">
+                    <span style="padding:0 6px;text-align:right;color:{{ ln.gfg }};background:{{ ln.gbg }};border-right:1px solid #c4cfde">{{ ln.o }}</span>
+                    <span style="padding:0 6px;text-align:right;color:{{ ln.gfg }};background:{{ ln.gbg }};border-right:1px solid #c4cfde">{{ ln.n }}</span>
+                    <span style="padding:0 8px;white-space:pre-wrap;word-break:break-all;color:{{ ln.fg }};background:{{ ln.bg }}">{{ ln.t }}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p style="margin:0;flex-shrink:0;border-top:1px solid #c4cfde;padding:6px 12px;font-size:11px;line-height:1.4;color:#59677b">Click a line number to comment; shift-click to select a range.</p>
+      </div>
+    </div>
+
+    <div id="1b" style="display:flex;flex-direction:column;gap:14px;width:505px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font-size:13px;font-weight:700;padding:2px 8px;border-radius:6px;background:#243047;color:#f8faff">1b</span><span style="font-size:17px;font-weight:700">Pinned file list</span></div>
+      <p style="margin:0;font-size:14px;line-height:1.45;color:#48566b">List and diff scroll separately. The diff shows one file; step with the arrows or pick from the list.</p>
+      <div style="width:505px;height:920px;display:flex;flex-direction:column;background:#eaf0f8;border-left:1px solid #c4cfde;overflow:hidden;box-shadow:0 24px 48px -28px rgba(20,28,43,.45)">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 8px 10px 16px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+          <span style="width:8px;height:8px;border-radius:999px;background:#477b42"></span>
+          <span style="font-size:17px;line-height:1.35;font-weight:700;flex:1">Changes</span>
+          <button title="Refresh changes and pull request" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#48566b;cursor:pointer" style-hover="background:#dce4ef;color:#243047"><i class="ti ti-refresh" style="font-size:18px"></i></button>
+          <button title="Close (Esc)" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#48566b;cursor:pointer" style-hover="background:#dce4ef;color:#243047"><i class="ti ti-x" style="font-size:18px"></i></button>
+        </div>
+        <div style="padding:12px 16px;display:flex;flex-direction:column;gap:12px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+          <div style="display:flex;padding:3px;gap:2px;background:#dce4ef;border-radius:8px">
+            <sc-for list="{{ aScopes }}" as="s" hint-placeholder-count="3">
+              <button onClick="{{ s.onClick }}" title="{{ s.hint }}" style="flex:1 1 auto;display:flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 10px;border:none;border-radius:6px;cursor:pointer;font-size:14px;background:{{ s.bg }};color:{{ s.fg }};font-weight:{{ s.weight }};box-shadow:{{ s.shadow }}">{{ s.label }}<span style="font-size:12.5px;color:#48566b">{{ s.count }}</span></button>
+            </sc-for>
+            <button title="Staged, Unstaged" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#48566b;cursor:pointer"><i class="ti ti-dots" style="font-size:18px"></i></button>
+          </div>
+          <div style="display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:14px;row-gap:6px;align-items:center;font-size:14px">
+            <span style="font-size:12.5px;color:#59677b">Branch</span>
+            <span style="display:flex;align-items:center;gap:6px;min-width:0;font-family:Inconsolata,monospace;font-size:15px"><i class="ti ti-git-branch" style="font-size:16px;color:#48566b"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">feat/changes-button-visibility</span></span>
+            <span style="font-size:12.5px;color:#59677b">Compared with</span>
+            <button style="justify-self:start;display:flex;align-items:center;gap:8px;height:30px;padding:0 8px 0 10px;border:1px solid #c4cfde;border-radius:6px;background:#f8faff;cursor:pointer"><span style="font-family:Inconsolata,monospace;font-size:15px;white-space:nowrap;flex-shrink:0">origin/main</span><span style="font-size:12.5px;color:#59677b;white-space:nowrap;flex-shrink:0">default branch</span><i class="ti ti-chevron-down" style="font-size:14px;color:#48566b"></i></button>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px;padding:10px 8px 10px 16px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+          <div style="display:flex;align-items:center;gap:8px;font-size:14px">
+            <i class="ti ti-git-pull-request" style="font-size:17px;color:#48566b;flex-shrink:0"></i>
+            <span style="color:#48566b;flex-shrink:0">#679</span>
+            <span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="feat(ui): show the Changes button whenever a session has changes">feat(ui): show the Changes button whenever a session has changes</span>
+            <span style="flex-shrink:0;border-radius:6px;padding:1px 8px;font-size:12.5px;background:#e1edff;color:#38578a">Merged</span>
+            <a title="Open on GitHub" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:6px;color:#48566b"><i class="ti ti-external-link" style="font-size:17px"></i></a>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;padding-left:25px;font-size:12.5px;color:#48566b">
+            <span style="display:flex;align-items:center;gap:4px;color:#477b42"><i class="ti ti-circle-check" style="font-size:14px"></i>2 checks passed</span>
+            <span style="color:#59677b">·</span>
+            <span style="color:#59677b">checked just now</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 16px 6px 10px;flex-shrink:0">
+          <button onClick="{{ aToggleList }}" style="display:flex;align-items:center;gap:6px;height:32px;padding:0 6px;border:none;background:transparent;border-radius:6px;cursor:pointer;flex:1;justify-content:flex-start"><i class="{{ aChevron }}" style="font-size:16px;color:#48566b"></i><span style="font-size:14px;font-weight:700">13 files</span></button>
+          <span style="font-size:14px;color:#477b42">+201</span><span style="font-size:14px;color:#af2d24">−10</span>
+        </div>
+        <sc-if value="{{ aOpen }}" hint-placeholder-val="{{ true }}">
+          <div style="padding:0 16px 8px;flex-shrink:0">
+            <div style="display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;border:1px solid #c4cfde;border-radius:6px;background:#f8faff"><i class="ti ti-search" style="font-size:15px;color:#59677b"></i><input value="{{ aFilter }}" onChange="{{ aFilterChange }}" placeholder="Filter files" style="flex:1;min-width:0;border:none;outline:none;background:transparent;font-family:Lato,sans-serif;font-size:14px;color:#243047"></div>
+          </div>
+          <div style="max-height:232px;overflow-y:auto;flex-shrink:0;padding-bottom:6px;border-bottom:1px solid #c4cfde">
+            <sc-for list="{{ aGroups }}" as="g" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;gap:6px;height:26px;padding:0 16px;font-family:Inconsolata,monospace;font-size:14px;color:#59677b"><i class="ti ti-folder" style="font-size:14px"></i>{{ g.dir }}</div>
+              <sc-for list="{{ g.files }}" as="f" hint-placeholder-count="2">
+                <button onClick="{{ f.onClick }}" style="display:flex;align-items:center;gap:10px;width:100%;height:32px;padding:0 16px 0 26px;border:none;border-left:2px solid {{ f.bar }};background:{{ f.bg }};cursor:pointer;text-align:left" style-hover="background:#dce4ef">
+                  <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;font-size:11px;font-weight:700;flex-shrink:0;color:{{ f.sfg }};background:{{ f.sbg }}">{{ f.s }}</span>
+                  <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:Inconsolata,monospace;font-size:15px;font-weight:{{ f.weight }};color:#243047">{{ f.name }}</span>
+                  <span style="display:flex;gap:6px;font-size:13px;white-space:nowrap"><span style="color:#477b42">{{ f.add }}</span><span style="color:#af2d24">{{ f.del }}</span></span>
+                </button>
+              </sc-for>
+            </sc-for>
+          </div>
+        </sc-if>
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column;border-top:1px solid #c4cfde">
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 8px 8px 16px;background:#dce4ef;border-bottom:1px solid #c4cfde;flex-shrink:0">
+            <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;font-size:11px;font-weight:700;flex-shrink:0;color:{{ aCur.sfg }};background:{{ aCur.sbg }}">{{ aCur.s }}</span>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+              <span style="font-family:Inconsolata,monospace;font-size:13px;color:#59677b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ aCur.dir }}</span>
+              <span style="font-family:Inconsolata,monospace;font-size:16px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ aCur.name }}</span>
+            </div>
+            <span style="display:flex;gap:6px;font-size:13px"><span style="color:#477b42">{{ aCur.add }}</span><span style="color:#af2d24">{{ aCur.del }}</span></span>
+            <div style="display:flex;align-items:center;gap:2px;margin-left:4px">
+              <button onClick="{{ aPrev }}" title="Previous file" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#243047;cursor:pointer" style-hover="background:#c4cfde"><i class="ti ti-chevron-up" style="font-size:18px"></i></button>
+              <span style="font-size:12.5px;color:#48566b;min-width:44px;text-align:center">{{ aPos }}</span>
+              <button onClick="{{ aNext }}" title="Next file" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#243047;cursor:pointer" style-hover="background:#c4cfde"><i class="ti ti-chevron-down" style="font-size:18px"></i></button>
+              <button title="Copy path" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#48566b;cursor:pointer" style-hover="background:#c4cfde"><i class="ti ti-copy" style="font-size:16px"></i></button>
+            </div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;font-family:Inconsolata,monospace;font-size:14px;line-height:1.55">
+            <div style="padding:3px 12px;font-size:12.5px;color:#59677b;background:#dce4ef">@@ -194,3 +194,20 @@</div>
+            <sc-for list="{{ lines }}" as="ln" hint-placeholder-count="14">
+              <div style="display:grid;grid-template-columns:44px 44px minmax(0,1fr)">
+                <span style="padding:0 8px;text-align:right;color:{{ ln.gfg }};background:{{ ln.gbg }};border-right:1px solid #c4cfde">{{ ln.o }}</span>
+                <span style="padding:0 8px;text-align:right;color:{{ ln.gfg }};background:{{ ln.gbg }};border-right:1px solid #c4cfde">{{ ln.n }}</span>
+                <span style="padding:0 10px;white-space:pre-wrap;word-break:break-all;color:{{ ln.fg }};background:{{ ln.bg }}">{{ ln.t2 }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <p style="margin:0;flex-shrink:0;border-top:1px solid #c4cfde;padding:8px 16px;font-size:12.5px;line-height:1.45;color:#59677b">Click a line number to comment; shift-click to select a range.</p>
+      </div>
+    </div>
+
+    <div id="1c" style="display:flex;flex-direction:column;gap:14px;width:1034px">
+      <div style="display:flex;align-items:center;gap:10px"><span style="font-size:13px;font-weight:700;padding:2px 8px;border-radius:6px;background:#243047;color:#f8faff">1c</span><span style="font-size:17px;font-weight:700">Drill-in</span></div>
+      <p style="margin:0;font-size:14px;line-height:1.45;color:#48566b">Two screens of one panel. The overview holds context and the file list; opening a file replaces it with that file's diff. Pick a file on the left to update the right.</p>
+      <div style="display:flex;gap:24px;align-items:flex-start">
+        <div style="width:505px;height:920px;display:flex;flex-direction:column;background:#eaf0f8;border-left:1px solid #c4cfde;overflow:hidden;box-shadow:0 24px 48px -28px rgba(20,28,43,.45)">
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 8px 10px 16px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+            <span style="width:8px;height:8px;border-radius:999px;background:#477b42"></span>
+            <span style="font-size:17px;line-height:1.35;font-weight:700;flex:1">Changes</span>
+            <button title="Refresh changes and pull request" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#48566b;cursor:pointer" style-hover="background:#dce4ef;color:#243047"><i class="ti ti-refresh" style="font-size:18px"></i></button>
+            <button title="Close (Esc)" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#48566b;cursor:pointer" style-hover="background:#dce4ef;color:#243047"><i class="ti ti-x" style="font-size:18px"></i></button>
+          </div>
+          <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+            <span style="font-size:12.5px;color:#59677b">Show</span>
+            <div style="display:flex;padding:3px;gap:2px;background:#dce4ef;border-radius:8px">
+              <sc-for list="{{ bScopes }}" as="s" hint-placeholder-count="3">
+                <button onClick="{{ s.onClick }}" style="flex:1 1 auto;display:flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 10px;border:none;border-radius:6px;cursor:pointer;font-size:14px;background:{{ s.bg }};color:{{ s.fg }};font-weight:{{ s.weight }};box-shadow:{{ s.shadow }}">{{ s.label }}<span style="font-size:12.5px;color:#48566b">{{ s.count }}</span></button>
+              </sc-for>
+              <button title="Staged, Unstaged" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#48566b;cursor:pointer"><i class="ti ti-dots" style="font-size:18px"></i></button>
+            </div>
+            <span style="font-size:12.5px;line-height:1.45;color:#48566b">{{ bHint }}</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px;padding:14px 16px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-family:Inconsolata,monospace;font-size:15px">
+              <span style="display:flex;align-items:center;gap:6px"><i class="ti ti-git-branch" style="font-size:16px;color:#48566b"></i>feat/changes-button-visibility</span>
+              <i class="ti ti-arrow-right" style="font-size:15px;color:#59677b"></i>
+              <button style="display:flex;align-items:center;gap:6px;height:28px;padding:0 6px 0 8px;border:1px solid #c4cfde;border-radius:6px;background:#f8faff;cursor:pointer;font-family:Inconsolata,monospace;font-size:15px">origin/main<i class="ti ti-chevron-down" style="font-size:14px;color:#48566b"></i></button>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 6px 10px 12px;border:1px solid #c4cfde;border-radius:8px;background:#f8faff">
+              <i class="ti ti-git-pull-request" style="font-size:18px;color:#48566b;flex-shrink:0"></i>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+                <span style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:#48566b">#679</span> feat(ui): show the Changes button whenever a session has changes</span>
+                <span style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#59677b"><span style="border-radius:6px;padding:0 6px;background:#e1edff;color:#38578a">Merged</span><span style="display:flex;align-items:center;gap:4px;color:#477b42"><i class="ti ti-circle-check" style="font-size:14px"></i>2 checks</span><span>checked just now</span></span>
+              </div>
+              <a title="Open on GitHub" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:6px;color:#48566b"><i class="ti ti-external-link" style="font-size:17px"></i></a>
+            </div>
+          </div>
+          <div style="display:flex;align-items:baseline;gap:8px;padding:12px 16px 6px;flex-shrink:0">
+            <span style="font-size:14px;font-weight:700;flex:1">13 files changed</span>
+            <span style="font-size:14px;color:#477b42">+201</span><span style="font-size:14px;color:#af2d24">−10</span>
+          </div>
+          <div style="flex:1;min-height:0;overflow-y:auto;padding-bottom:8px">
+            <sc-for list="{{ bGroups }}" as="g" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;gap:6px;height:28px;padding:0 16px;font-family:Inconsolata,monospace;font-size:14px;color:#59677b"><i class="ti ti-folder" style="font-size:14px"></i>{{ g.dir }}</div>
+              <sc-for list="{{ g.files }}" as="f" hint-placeholder-count="2">
+                <button onClick="{{ f.onClick }}" style="display:flex;align-items:center;gap:10px;width:100%;height:36px;padding:0 12px 0 26px;border:none;border-left:2px solid {{ f.bar }};background:{{ f.bg }};cursor:pointer;text-align:left" style-hover="background:#dce4ef">
+                  <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:4px;font-size:11px;font-weight:700;flex-shrink:0;color:{{ f.sfg }};background:{{ f.sbg }}">{{ f.s }}</span>
+                  <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:Inconsolata,monospace;font-size:15px;font-weight:{{ f.weight }};color:#243047">{{ f.name }}</span>
+                  <span style="display:flex;gap:6px;font-size:13px;white-space:nowrap"><span style="color:#477b42">{{ f.add }}</span><span style="color:#af2d24">{{ f.del }}</span></span>
+                  <i class="ti ti-chevron-right" style="font-size:16px;color:#59677b"></i>
+                </button>
+              </sc-for>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="width:505px;height:920px;display:flex;flex-direction:column;background:#eaf0f8;border-left:1px solid #c4cfde;overflow:hidden;box-shadow:0 24px 48px -28px rgba(20,28,43,.45)">
+          <div style="display:flex;align-items:center;gap:4px;padding:10px 8px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+            <button title="Back to all files" style="display:flex;align-items:center;gap:6px;height:32px;padding:0 10px 0 6px;border:none;background:transparent;border-radius:6px;cursor:pointer;font-size:14px;font-weight:700" style-hover="background:#dce4ef"><i class="ti ti-arrow-left" style="font-size:18px"></i>All files</button>
+            <span style="flex:1;font-size:12.5px;color:#59677b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">All task changes · vs origin/main</span>
+            <button onClick="{{ bPrev }}" title="Previous file (K)" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#243047;cursor:pointer" style-hover="background:#dce4ef"><i class="ti ti-chevron-up" style="font-size:18px"></i></button>
+            <span style="font-size:12.5px;color:#48566b;min-width:44px;text-align:center">{{ bPos }}</span>
+            <button onClick="{{ bNext }}" title="Next file (J)" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#243047;cursor:pointer" style-hover="background:#dce4ef"><i class="ti ti-chevron-down" style="font-size:18px"></i></button>
+            <button title="Close (Esc)" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#48566b;cursor:pointer" style-hover="background:#dce4ef"><i class="ti ti-x" style="font-size:18px"></i></button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;padding:14px 8px 14px 16px;border-bottom:1px solid #c4cfde;flex-shrink:0">
+            <span style="font-family:Inconsolata,monospace;font-size:14px;color:#59677b">{{ bCur.dir }}</span>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;font-size:12px;font-weight:700;flex-shrink:0;color:{{ bCur.sfg }};background:{{ bCur.sbg }}">{{ bCur.s }}</span>
+              <span style="flex:1;min-width:0;font-family:Inconsolata,monospace;font-size:18px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ bCur.name }}</span>
+              <span style="display:flex;gap:6px;font-size:14px"><span style="color:#477b42">{{ bCur.add }}</span><span style="color:#af2d24">{{ bCur.del }}</span></span>
+              <button title="Copy path" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:#48566b;cursor:pointer" style-hover="background:#dce4ef"><i class="ti ti-copy" style="font-size:16px"></i></button>
+            </div>
+          </div>
+          <div style="flex:1;min-height:0;overflow:auto;font-family:Inconsolata,monospace;font-size:14px;line-height:1.55">
+            <div style="padding:3px 12px;font-size:12.5px;color:#59677b;background:#dce4ef">@@ -194,3 +194,20 @@</div>
+            <sc-for list="{{ lines }}" as="ln" hint-placeholder-count="14">
+              <div style="display:grid;grid-template-columns:44px 44px minmax(0,1fr)">
+                <span style="padding:0 8px;text-align:right;color:{{ ln.gfg }};background:{{ ln.gbg }};border-right:1px solid #c4cfde">{{ ln.o }}</span>
+                <span style="padding:0 8px;text-align:right;color:{{ ln.gfg }};background:{{ ln.gbg }};border-right:1px solid #c4cfde">{{ ln.n }}</span>
+                <span style="padding:0 10px;white-space:pre-wrap;word-break:break-all;color:{{ ln.fg }};background:{{ ln.bg }}">{{ ln.t2 }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;border-top:1px solid #c4cfde;padding:8px 16px;font-size:12.5px;line-height:1.45;color:#59677b">
+            <span style="flex:1">Click a line number to comment; shift-click to select a range.</span>
+            <span style="font-family:Inconsolata,monospace;font-size:13px;padding:0 5px;border:1px solid #c4cfde;border-radius:4px;background:#f8faff;color:#48566b">J</span>
+            <span style="font-family:Inconsolata,monospace;font-size:13px;padding:0 5px;border:1px solid #c4cfde;border-radius:4px;background:#f8faff;color:#48566b">K</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const FLAT = [
+  ['M','server/diff-manager.git.test.ts',41,0],['M','server/diff-manager.ts',22,2],
+  ['M','server/relay/connector-policy.test.ts',3,1],['M','server/relay/connector-policy.ts',4,1],
+  ['M','server/session-manager.ts',7,0],['M','server/types.ts',4,0],
+  ['M','server/ws-message-handler.test.ts',19,0],['M','server/ws-message-handler.ts',9,0],
+  ['M','src/App.tsx',26,2],['M','src/components/SessionContent.tsx',13,4],
+  ['A','src/lib/changesButton.test.ts',27,0],['A','src/lib/changesButton.ts',22,0],['M','src/types.ts',4,0],
+];
+const dirOf = p => p.slice(0, p.lastIndexOf('/') + 1);
+const GROUPED = [...FLAT].sort((a, b) => dirOf(a[1]) === dirOf(b[1]) ? 0 : (dirOf(a[1]) < dirOf(b[1]) ? -1 : 1));
+const LINES = [
+  [' ',194,194,"    expect(paths(await diff('all'))).toEqual(['app.ts'])"],
+  [' ',195,195,'  })'],[' ',196,196,'})'],
+  ['+',null,197,''],
+  ['+',null,198,"describe('getChangeSummary', () => {"],
+  ['+',null,199,"  it('counts nothing on a fresh branch', async () => {"],
+  ['+',null,200,'    expect(await dm.getChangeSummary(repo)).toEqual({ uncommittedFiles: 0, branchCommits: 0 })'],
+  ['+',null,201,'  })'],['+',null,202,''],
+  ['+',null,203,"  it('counts commits on the branch even when the working tree is clean', async () => {"],
+  ['+',null,204,"    commit('login.ts', 'x\\n', 'add login')"],
+  ['+',null,205,"    commit('logout.ts', 'y\\n', 'add logout')"],
+  ['+',null,206,'    expect(await dm.getChangeSummary(repo)).toEqual({ uncommittedFiles: 0, branchCommits: 2 })'],
+  ['+',null,207,'  })'],['+',null,208,'})'],
+];
+const SCOPES = [
+  { id: 'branch', label: 'All task changes', count: '13', hint: 'Everything this branch changes since it left its base: commits, edits and new files' },
+  { id: 'committed', label: 'Committed', count: '', hint: 'Only what is committed on this branch since it left its base' },
+  { id: 'all', label: 'Uncommitted', count: '', hint: 'Edits not yet committed, including new files' },
+];
+const fileObj = (f, i) => {
+  const [s, path, a, d] = f;
+  const dir = dirOf(path);
+  return { i, s, path, dir, name: path.slice(dir.length), add: a ? '+' + a : '', del: d ? '\u2212' + d : '',
+    sfg: s === 'A' ? '#477b42' : '#946b29', sbg: s === 'A' ? '#daedd7' : '#f9e5ca' };
+};
+const FILES = GROUPED.map(fileObj);
+
+class Component extends DCLogic {
+  state = { aIdx: 0, aScope: 'branch', aOpen: true, aFilter: '', bIdx: 1, bScope: 'branch',
+    s2: 'default', s2Idx: 0, s2Scope: 'branch', s2Open: true, s2Filter: '', s2ListH: 232 };
+
+  componentDidMount() {
+    this._key = e => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      const k = e.key.toLowerCase();
+      if (k === 'j' || k === 'k') this.setState(s => ({ s2Idx: Math.max(0, Math.min(FILES.length - 1, s.s2Idx + (k === 'j' ? 1 : -1))) }));
+    };
+    document.addEventListener('keydown', this._key);
+  }
+  componentWillUnmount() { document.removeEventListener('keydown', this._key); }
+
+  s2Vals() {
+    const st = this.state, n = FILES.length, v = st.s2;
+    const UC = ['server/diff-manager.ts', 'src/App.tsx'];
+    const uc = v === 'uncommitted';
+    const STATES = [['default', 'Default'], ['uncommitted', 'Uncommitted files'], ['loading', 'Loading'], ['empty', 'Empty'], ['error', 'Error']];
+    const groups = this.groups(st.s2Idx, i => this.setState({ s2Idx: i }), st.s2Filter).map(g => ({ ...g,
+      files: g.files.map(f => ({ ...f, uc: uc && UC.includes(f.path), tip: uc && UC.includes(f.path) ? f.path + ' (uncommitted changes)' : f.path })) }));
+    const cur = FILES[st.s2Idx];
+    const showFiles = v === 'default' || v === 'uncommitted';
+    return {
+      s2States: STATES.map(([id, label]) => ({ label, onClick: () => this.setState({ s2: id, s2Scope: id === 'empty' ? 'all' : 'branch' }),
+        bg: id === v ? '#243047' : '#f8faff', fg: id === v ? '#f8faff' : '#243047', border: id === v ? '#243047' : '#c4cfde' })),
+      s2Dot: showFiles ? '#477b42' : 'transparent',
+      s2Spin: v === 'loading' ? 'ck-spin 900ms linear infinite' : 'none',
+      s2Scopes: this.scopes(st.s2Scope, 's2Scope').map(s => ({ ...s, count: s.id === st.s2Scope && v === 'empty' ? '0' : s.count })),
+      s2PrFound: v === 'default' || v === 'uncommitted' || v === 'loading',
+      s2PrNone: v === 'empty', s2PrUnknown: v === 'error',
+      s2Uc: uc, s2Error: v === 'error', s2Loading: v === 'loading', s2Empty: v === 'empty', s2Files: showFiles,
+      s2Skel: ['62%', '48%', '71%', '40%', '55%', '66%'].map(w => ({ w })),
+      s2ShowAll: () => this.setState({ s2: 'default', s2Scope: 'branch' }),
+      s2Open: st.s2Open,
+      s2Chevron: st.s2Open ? 'ti ti-chevron-down' : 'ti ti-chevron-right',
+      s2ToggleList: () => this.setState(s => ({ s2Open: !s.s2Open })),
+      s2Filter: st.s2Filter,
+      s2FilterChange: e => this.setState({ s2Filter: e.target.value }),
+      s2Groups: groups,
+      s2ListH: st.s2ListH + 'px',
+      s2DragStart: e => {
+        e.preventDefault();
+        const y0 = e.clientY, h0 = this.state.s2ListH;
+        const move = ev => this.setState({ s2ListH: Math.max(96, Math.min(520, h0 + ev.clientY - y0)) });
+        const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.body.style.cursor = ''; };
+        document.body.style.cursor = 'row-resize';
+        document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+      },
+      s2Cur: { ...cur, uc: uc && UC.includes(cur.path) },
+      s2Pos: `${st.s2Idx + 1} / ${n}`,
+      s2Prev: () => this.setState(s => ({ s2Idx: Math.max(0, s.s2Idx - 1) })),
+      s2Next: () => this.setState(s => ({ s2Idx: Math.min(n - 1, s.s2Idx + 1) })),
+      s2PrevOp: st.s2Idx === 0 ? 0.35 : 1, s2NextOp: st.s2Idx === n - 1 ? 0.35 : 1,
+    };
+  }
+
+  groups(active, pick, filter) {
+    const out = [];
+    for (const f of FILES) {
+      if (filter && !f.path.toLowerCase().includes(filter.toLowerCase())) continue;
+      let g = out[out.length - 1];
+      if (!g || g.dir !== f.dir) { g = { dir: f.dir, files: [] }; out.push(g); }
+      const on = f.i === active;
+      g.files.push({ ...f, bg: on ? '#f8faff' : 'transparent', bar: on ? '#4976c3' : 'transparent', weight: on ? 700 : 400, onClick: () => pick(f.i) });
+    }
+    return out;
+  }
+
+  scopes(cur, key) {
+    return SCOPES.map(s => {
+      const on = s.id === cur;
+      return { ...s, bg: on ? '#f8faff' : 'transparent', fg: on ? '#243047' : '#48566b', weight: on ? 700 : 400,
+        shadow: on ? '0 1px 2px rgba(20,28,43,.12)' : 'none', count: on ? s.count : '', onClick: () => this.setState({ [key]: s.id }) };
+    });
+  }
+
+  renderVals() {
+    const st = this.state, n = FILES.length;
+    const step = (key, d) => () => this.setState(s => ({ [key]: Math.max(0, Math.min(n - 1, s[key] + d)) }));
+    const lines = LINES.map(([t, o, nn, x]) => {
+      const ins = t === '+';
+      return { o: o ?? '', n: nn ?? '', t: x, t2: (ins ? '+ ' : '  ') + x,
+        bg: ins ? 'color-mix(in srgb, #2d4f2a 20%, transparent)' : 'transparent',
+        gbg: ins ? 'color-mix(in srgb, #2d4f2a 15%, transparent)' : 'transparent',
+        gfg: ins ? '#477b42' : '#7a8799', fg: ins ? '#141c2b' : '#243047' };
+    });
+    const row = (f, on) => ({ ...f, bg: on ? '#f8faff' : 'transparent', bar: on ? '#4976c3' : 'transparent', weight: on ? 700 : 400 });
+    const UCF = [['M','server/diff-manager.ts',5,1],['M','src/App.tsx',3,0],['A','src/lib/changesLayout.ts',22,0]].map(fileObj);
+    const ucGroups = [];
+    UCF.forEach((f, i) => { let g = ucGroups[ucGroups.length - 1]; if (!g || g.dir !== f.dir) { g = { dir: f.dir, files: [] }; ucGroups.push(g); } g.files.push(row(f, i === 0)); });
+    return {
+      ...this.s2Vals(),
+      g0: this.groups(0, () => {}),
+      ucGroups,
+      lines1: lines.slice(0, 7), lines2: lines.slice(7),
+      nLines: lines.map(l => ({ ...l, num: l.n || l.o })),
+      tConfirm: !!st.tConfirm,
+      tAsk: () => this.setState({ tConfirm: true }),
+      tCancel: () => this.setState({ tConfirm: false }),
+      flat: FLAT.map(fileObj),
+      lines,
+      aScopes: this.scopes(st.aScope, 'aScope'),
+      aOpen: st.aOpen,
+      aChevron: st.aOpen ? 'ti ti-chevron-down' : 'ti ti-chevron-right',
+      aToggleList: () => this.setState(s => ({ aOpen: !s.aOpen })),
+      aFilter: st.aFilter,
+      aFilterChange: e => this.setState({ aFilter: e.target.value }),
+      aGroups: this.groups(st.aIdx, i => this.setState({ aIdx: i }), st.aFilter),
+      aCur: FILES[st.aIdx], aPos: `${st.aIdx + 1} / ${n}`, aPrev: step('aIdx', -1), aNext: step('aIdx', 1),
+      bScopes: this.scopes(st.bScope, 'bScope'),
+      bHint: SCOPES.find(s => s.id === st.bScope).hint,
+      bGroups: this.groups(st.bIdx, i => this.setState({ bIdx: i })),
+      bCur: FILES[st.bIdx], bPos: `${st.bIdx + 1} of ${n}`, bPrev: step('bIdx', -1), bNext: step('bIdx', 1),
+    };
+  }
+}
+</script>
+</body>
+</html>
