@@ -19,6 +19,8 @@ interface Props {
   error: string | null
   /** Whether the current view has lines to comment on (for the hint). */
   hasFiles: boolean
+  /** Footer hint wording: full (with the J/K keys), short (narrow panel) or touch. */
+  hint?: 'full' | 'short' | 'touch'
   onSend: (ids: string[], includeStale: boolean) => void
   onDelete: (id: string) => void
   onSelectFile: (path: string) => void
@@ -49,7 +51,7 @@ function Row({ comment, view, onDelete, onSelectFile }: {
             {where(comment)}
           </button>
           {comment.anchor.view !== view && <span>· {VIEW_LABELS[comment.anchor.view]}</span>}
-          {comment.stale && <span className="rounded-control bg-warning-9/20 px-1 text-warning-4">code changed</span>}
+          {comment.stale && <span className="shrink-0 rounded bg-warning-10 px-1.5 text-warning-4">code changed</span>}
         </div>
         <p className="truncate text-meta text-ink" title={comment.body}>{comment.body}</p>
       </div>
@@ -58,13 +60,13 @@ function Row({ comment, view, onDelete, onSelectFile }: {
         title="Delete comment"
         className="shrink-0 rounded-control p-0.5 text-ink-faint opacity-0 hover:text-error-5 group-hover:opacity-100 focus:opacity-100"
       >
-        <IconX size={12} />
+        <IconX size={14} />
       </button>
     </li>
   )
 }
 
-export function ReviewCommentsTray({ comments, view, sending, error, hasFiles, onSend, onDelete, onSelectFile, onDismissError }: Props) {
+export function ReviewCommentsTray({ comments, view, sending, error, hasFiles, hint = 'full', onSend, onDelete, onSelectFile, onDismissError }: Props) {
   const [includeStale, setIncludeStale] = useState(false)
   const [showSent, setShowSent] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
@@ -75,42 +77,53 @@ export function ReviewCommentsTray({ comments, view, sending, error, hasFiles, o
   const toSend = includeStale ? drafts : drafts.filter(c => !c.stale)
 
   if (comments.length === 0 && !error) {
-    return hasFiles
-      ? <p className="shrink-0 border-t border-edge px-3 py-1.5 text-micro text-ink-faint">Click a line number to comment; shift-click to select a range.</p>
-      : null
+    if (!hasFiles) return null
+    return (
+      <div className={`flex shrink-0 items-center gap-3 border-t border-edge px-4 py-2 text-micro text-ink-faint ${hint === 'touch' ? 'pb-[max(0.5rem,env(safe-area-inset-bottom))]' : ''}`}>
+        <p className="min-w-0 flex-1">
+          {hint === 'touch' ? 'Tap a line number to comment.' : hint === 'short' ? 'Click a line number to comment.' : 'Click a line number to comment; shift-click to select a range.'}
+        </p>
+        {hint === 'full' && (
+          <span className="flex shrink-0 gap-1" title="J / K: next / previous file">
+            <kbd className="rounded border border-edge bg-page px-[5px] font-mono text-micro text-ink-muted">J</kbd>
+            <kbd className="rounded border border-edge bg-page px-[5px] font-mono text-micro text-ink-muted">K</kbd>
+          </span>
+        )}
+      </div>
+    )
   }
 
   return (
-    <div className="flex max-h-[45%] shrink-0 flex-col border-t border-edge bg-surface text-meta">
-      <div className="flex items-center gap-2 px-3 py-1.5">
+    <div className={`flex max-h-[45%] shrink-0 flex-col border-t border-edge bg-surface text-meta ${hint === 'touch' ? 'pb-[env(safe-area-inset-bottom)]' : ''}`}>
+      <div className="flex items-center gap-2 py-2 pl-4 pr-2">
         <button onClick={() => { setCollapsed(!collapsed) }} className="flex min-w-0 flex-1 items-center gap-1.5 text-ink" title={collapsed ? 'Show comments' : 'Hide comments'}>
-          {collapsed ? <IconChevronRight size={12} /> : <IconChevronDown size={12} />}
-          <IconMessage2 size={13} className="text-ink-muted" />
-          <span className="truncate">
+          {collapsed ? <IconChevronRight size={16} /> : <IconChevronDown size={16} />}
+          <IconMessage2 size={16} className="text-ink-muted" />
+          <span className="truncate font-bold">
             {drafts.length} draft{drafts.length === 1 ? '' : 's'}
-            {stale.length > 0 && <span className="text-warning-5"> · {stale.length} changed</span>}
+            {stale.length > 0 && <span className="font-normal text-warning-5"> · {stale.length} changed</span>}
           </span>
         </button>
         <button
           onClick={() => { onSend(toSend.map(c => c.id), includeStale) }}
           disabled={toSend.length === 0 || sending}
           title="Send these comments to the agent as one message"
-          className="flex shrink-0 items-center gap-1 rounded-control bg-primary-9/30 px-2 py-0.5 text-primary-3 hover:bg-primary-8/40 disabled:opacity-50"
+          className="density-row flex h-8 shrink-0 items-center gap-1.5 rounded-control bg-primary-fill px-3 font-bold text-on-primary-fill hover:opacity-90 disabled:opacity-50"
         >
-          <IconSend size={12} />
+          <IconSend size={16} />
           {sending ? 'Sending…' : `Send ${toSend.length} to agent`}
         </button>
       </div>
 
       {error && (
-        <div className="flex items-start gap-2 px-3 pb-1 text-error-5" role="alert">
+        <div className="flex items-start gap-2 px-4 pb-1 text-error-5" role="alert">
           <span className="flex-1">{error}</span>
           <button onClick={onDismissError} title="Dismiss" className="shrink-0"><IconX size={12} /></button>
         </div>
       )}
 
       {!collapsed && (
-        <div className="overflow-y-auto px-2 pb-2">
+        <div className="overflow-y-auto px-3 pb-2">
           {stale.length > 0 && (
             <label className="mb-1 flex items-start gap-1.5 px-1 text-warning-5">
               <input type="checkbox" checked={includeStale} onChange={(e) => { setIncludeStale(e.target.checked) }} className="mt-0.5" />

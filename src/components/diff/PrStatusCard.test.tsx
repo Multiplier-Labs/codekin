@@ -2,7 +2,7 @@
 // @vitest-environment jsdom
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { PrStatusCard } from './PrStatusCard.js'
@@ -11,12 +11,12 @@ import type { PrStatus, PullRequestInfo } from '../../types'
 let root: ReturnType<typeof createRoot> | null = null
 let container: HTMLElement | null = null
 
-function render(status: PrStatus | null, onRefresh = vi.fn()): HTMLElement {
+function render(status: PrStatus | null, narrow = false): HTMLElement {
   container = document.createElement('div')
   document.body.appendChild(container)
   act(() => {
     root = createRoot(container!)
-    root.render(<PrStatusCard status={status} loading={false} onRefresh={onRefresh} />)
+    root.render(<PrStatusCard status={status} narrow={narrow} />)
   })
   return container
 }
@@ -39,12 +39,15 @@ const found = (pulls: PullRequestInfo[], extra: Partial<PrStatus> = {}): PrStatu
 })
 
 describe('PrStatusCard', () => {
-  it('shows the PR, its state, base ← head, checks and a GitHub link', () => {
+  it('shows the PR, its state, checks and a GitHub link, without repeating the branch', () => {
     const c = render(found([pull({ reviewDecision: 'APPROVED' })]))
 
     expect(c.textContent).toContain('#12 Add login')
     expect(c.textContent).toContain('open')
-    expect(c.textContent).toContain('main ← feat/login')
+    expect(c.textContent).not.toContain('feat/login')
+    expect(c.textContent).toContain('2 passed')
+    expect(c.textContent).toContain('1 failed')
+    expect(c.textContent).toContain('checked just now')
     expect(c.textContent).toContain('Failing: test')
     expect(c.textContent).toContain('approved')
     expect(c.querySelector('a')?.getAttribute('href')).toBe('https://github.com/o/r/pull/12')
@@ -89,9 +92,21 @@ describe('PrStatusCard', () => {
       .toContain('Could not refresh: GitHub rate limit reached.')
   })
 
-  it('offers a picker when several PRs match and forces a refresh on demand', () => {
-    const onRefresh = vi.fn()
-    const c = render(found([pull(), pull({ number: 9, title: 'Old attempt', state: 'CLOSED' })]), onRefresh)
+  it('summarises passing checks in words', () => {
+    const c = render(found([pull({ checks: { total: 2, passed: 2, failed: 0, pending: 0, skipped: 0, failing: [] } })]))
+    expect(c.textContent).toContain('2 checks passed')
+  })
+
+  it('puts the title on its own line when narrow', () => {
+    const c = render(found([pull({ state: 'MERGED' })]), true)
+    const lines = [...c.firstElementChild!.children].map(el => el.textContent)
+    expect(lines[0]).toContain('#12')
+    expect(lines[0]).toContain('merged')
+    expect(lines[1]).toBe('Add login')
+  })
+
+  it('offers a picker when several PRs match and has no refresh of its own', () => {
+    const c = render(found([pull(), pull({ number: 9, title: 'Old attempt', state: 'CLOSED' })]))
 
     const select = c.querySelector('select')!
     expect([...select.options].map(o => o.textContent)).toEqual(['#12 Add login (open)', '#9 Old attempt (closed)'])
@@ -102,8 +117,7 @@ describe('PrStatusCard', () => {
     expect(c.querySelector('a')?.getAttribute('href')).toBe('https://github.com/o/r/pull/12')
     expect(c.textContent).toContain('closed')
 
-    act(() => { (c.querySelector('button[title="Refresh pull request status"]') as HTMLButtonElement).click() })
-    expect(onRefresh).toHaveBeenCalledOnce()
+    expect(c.querySelector('button[title="Refresh pull request status"]')).toBeNull()
   })
 
   it('renders nothing before the first lookup', () => {
