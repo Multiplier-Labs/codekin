@@ -758,13 +758,27 @@ Get details for a specific child session. Children no longer in the live list ar
 
 **Response:** `{ "child": ChildSession }` or `404`
 
+#### Child control
+
+These endpoints act only on children the orchestrator spawned. For any other session they return `404`. A request that doesn't fit the child's current state returns `409` with an explanation.
+
+| Endpoint | Body | Effect |
+| --- | --- | --- |
+| `POST /api/orchestrator/children/:id/input` | `{ "text": "..." }` | Sends a follow-up instruction to an active child. `409` if the child is finished (use resume) or waiting on a prompt (answer it first). |
+| `POST /api/orchestrator/children/:id/stop` | — | Stops an active child. It becomes `canceled`, and its worktree, branch and transcript are kept. |
+| `POST /api/orchestrator/children/:id/resume` | `{ "instructions"?: "..." }` | Starts another supervised attempt on a finished child's session: same branch and worktree, a fresh working-time budget, and completion re-verified. `attempt` increments. Counts toward the 5-child limit. `409` if the session was deleted or its worktree removed. |
+| `POST /api/orchestrator/children/:id/close` | `{ "mode"?: "archive" \| "delete", "cancel"?: boolean }` | `archive` (default) stops the child and keeps session, transcript, worktree and branch; it can be resumed. `delete` removes the session: a clean worktree is removed, and one with uncommitted or untracked files is kept. Branches are never deleted. Active children are refused unless `cancel: true`. |
+
+**Close response:** `{ "child", "action": "archived" | "deleted", "worktree": { "path", "outcome": "kept" | "removal_started" | "none", "modified": string[], "untracked": string[] }, "branch" }`
+
 ### Session Management
 
 #### `GET /api/orchestrator/sessions`
 
 List all sessions visible to the orchestrator.
 
-**Response:** `{ "sessions": Session[] }`
+**Query params:** `view=summary` (optional) returns one compact row per session: `{ id, name, source, state: "working" | "idle" | "waiting_on_prompt" | "stopped" | "archived", pendingPrompts, provider, repo, branch, worktreePath, lastActivity, child: { status, attempt, verification } | null }`. Filter with `source=<source>` and `active=true` (excludes archived sessions).
+**Response:** `{ "sessions": Session[] }`, or the summary rows.
 
 #### `GET /api/orchestrator/sessions/pending-prompts`
 
@@ -776,7 +790,7 @@ Get sessions that have pending approval prompts.
 
 Respond to a pending prompt in a session.
 
-**Request body:** `{ "requestId"?: "...", "value": "..." }`
+**Request body:** `{ "requestId"?: "...", "value": "..." | string[] }` — pass one answer per question for multi-question prompts.
 **Response:** `{ "ok": true }`, `400` when `value` is missing, `404` when the session does not exist, or `409` when there is no pending prompt to respond to.
 
 #### `DELETE /api/orchestrator/sessions/cleanup`

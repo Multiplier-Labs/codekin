@@ -77,6 +77,65 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
   )
 
   server.registerTool(
+    'send_to_child',
+    {
+      description:
+        'Send a follow-up instruction to one of your active children that is not waiting on a prompt. A turn in progress receives it as its next message. Answer pending prompts with respond_to_prompt instead; for finished children use resume_child.',
+      inputSchema: { id: z.string().describe('Child session id'), text: z.string().min(1) },
+    },
+    ({ id, text }) => run(() => api.sendToChild(id, text)),
+  )
+
+  server.registerTool(
+    'stop_child',
+    {
+      description: 'Stop one of your active children. It becomes canceled; its worktree, branch, and transcript are kept, so resume_child can continue it later.',
+      inputSchema: { id: z.string() },
+    },
+    ({ id }) => run(() => api.stopChild(id)),
+  )
+
+  server.registerTool(
+    'resume_child',
+    {
+      description:
+        'Start another supervised attempt on a finished child (completed, unverified, failed, timed_out, canceled — including ones interrupted by a restart): same session, branch, and worktree, fresh working-time budget, completion re-verified. Counts toward the 5-child limit.',
+      inputSchema: {
+        id: z.string(),
+        instructions: z.string().optional().describe('What to do next; defaults to finishing the task and delivering per its completion policy'),
+      },
+    },
+    ({ id, instructions }) => run(() => api.resumeChild(id, instructions)),
+  )
+
+  server.registerTool(
+    'close_child',
+    {
+      description:
+        'Close one of your children. mode "archive" (default) stops it and keeps session, transcript, worktree, and branch — resumable. mode "delete" removes the session; a clean worktree is removed, one with uncommitted work is kept and listed. Branches are never deleted. Active children are refused unless cancel is true. Returns exactly what happened.',
+      inputSchema: {
+        id: z.string(),
+        mode: z.enum(['archive', 'delete']).optional(),
+        cancel: z.boolean().optional().describe('Also stop the child if it is still active'),
+      },
+    },
+    ({ id, mode, cancel }) => run(() => api.closeChild(id, { mode, cancel })),
+  )
+
+  server.registerTool(
+    'list_sessions',
+    {
+      description:
+        'All Codekin sessions in one compact row each: state (working / idle / waiting_on_prompt / stopped / archived), repo, branch, and — for your children — child status and verification. Control tools only act on your own children.',
+      inputSchema: {
+        source: z.enum(['manual', 'webhook', 'workflow', 'stepflow', 'orchestrator', 'agent']).optional(),
+        active: z.boolean().optional().describe('Exclude archived sessions'),
+      },
+    },
+    (args) => run(() => api.listSessions(args)),
+  )
+
+  server.registerTool(
     'pending_prompts',
     { description: 'List sessions blocked on a tool approval or question, with the requestId needed to respond.', inputSchema: {} },
     () => run(() => api.pendingPrompts()),
@@ -85,8 +144,8 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
   server.registerTool(
     'respond_to_prompt',
     {
-      description: 'Answer a blocked session\'s prompt. For permission prompts value is "allow" or "deny"; for questions it is the answer text.',
-      inputSchema: { sessionId: z.string(), requestId: z.string(), value: z.string() },
+      description: 'Answer a blocked session\'s prompt. For permission prompts value is "allow" or "deny"; for questions it is the answer text, or one answer per question when the prompt asks several.',
+      inputSchema: { sessionId: z.string(), requestId: z.string(), value: z.union([z.string().min(1), z.array(z.string()).min(1)]) },
     },
     ({ sessionId, requestId, value }) => run(() => api.respondToPrompt(sessionId, requestId, value)),
   )
