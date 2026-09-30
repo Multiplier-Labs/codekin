@@ -1,6 +1,6 @@
 # Device Link & Passkey Authentication
 
-**Status**: Draft spec
+**Status**: Implemented in #573 (QR device linking and WebAuthn passkeys on app.codekin.ai).
 **Goal**: Let a signed-in user bring a phone (or any second browser) onto hosted Codekin by scanning a QR code — no password, no GitHub round trip on the small screen — and keep that device signed in afterwards with platform biometrics (Face ID / fingerprint) via WebAuthn passkeys.
 
 ---

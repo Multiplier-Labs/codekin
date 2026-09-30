@@ -1,6 +1,6 @@
 # Codekin — Feature Reference
 
-Codekin is a web-based terminal UI for managing multiple Claude Code sessions. It provides real-time streaming, multi-session management, repository browsing, slash-command skills, file uploads, and a rich interactive chat interface — all accessible from a browser.
+Codekin is a web-based terminal UI for managing multiple coding-agent sessions (Claude Code, OpenAI Codex and OpenCode). It provides real-time streaming, multi-session management, repository browsing, slash-command skills, file uploads, and a rich interactive chat interface — all accessible from a browser.
 
 ---
 
@@ -17,8 +17,10 @@ Codekin is a web-based terminal UI for managing multiple Claude Code sessions. I
 - [Repository Browser](#repository-browser)
 - [Slash-Command Skills](#slash-command-skills)
 - [Automated Workflows](#automated-workflows)
+- [Loops](#loops)
 - [PR Review Automation](#pr-review-automation)
 - [Agent Joe Orchestrator](#agent-joe-orchestrator)
+- [Deployment Monitoring](#deployment-monitoring)
 - [Git Worktrees](#git-worktrees)
 - [Modules](#modules)
 - [Plugin Presets](#plugin-presets)
@@ -28,10 +30,12 @@ Codekin is a web-based terminal UI for managing multiple Claude Code sessions. I
 - [Auto-Restart & Stall Detection](#auto-restart--stall-detection)
 - [Tool Approval Registry](#tool-approval-registry)
 - [Settings & Configuration](#settings--configuration)
-- [Diff Viewer](#diff-viewer)
+- [Color Themes](#color-themes)
+- [Changes Panel (Diff & Review)](#changes-panel-diff--review)
 - [Docs Browser](#docs-browser)
 - [Keyboard Shortcuts](#keyboard-shortcuts)
 - [Authentication & Security](#authentication--security)
+- [Hosted Access & Workspaces](#hosted-access--workspaces)
 - [Architecture Overview](#architecture-overview)
 
 ---
@@ -139,7 +143,7 @@ A fuzzy-search command palette accessible via `Ctrl+K` (or `Cmd+K` on macOS).
 - **Unified search** — Search across repos, skills, modules, presets, and actions from a single input field.
 - **Categorized results** — Results are grouped under headings: Repos, Skills, Modules, Presets, Actions.
 - **Fuzzy matching** — Search matches against names, tags, commands, and descriptions.
-- **One-click actions** — Select a repo to open it in a new session, a skill to insert its command, a module to send its content, a preset to install its plugins, or Settings to open the settings modal.
+- **One-click actions** — Select a repo to open it in a new session, a skill to insert its command, a module to send its content, a preset to install its plugins, or Settings to open the Settings page.
 - **Visual icons** — Repos show a square icon, skills show a slash (`/`), modules show a diamond, presets show their emoji icon.
 
 ---
@@ -188,7 +192,24 @@ Codekin can run scheduled Claude Code sessions against repositories to produce s
 - **Staleness check** — Workflows accept a `sinceTimestamp` parameter; if no commits have been made since the last run, the workflow is skipped automatically.
 - **Auto-committed reports** — Output is saved to a configurable directory within the repo (e.g. `.codekin/reports/code-review/`, `.codekin/reports/security/`) and committed with a configurable message.
 
-See [docs/WORKFLOWS.md](./WORKFLOWS.md) for the full workflow definition format, frontmatter field reference, and instructions for writing per-repo overrides.
+- **Activity-aware trigger engine** — Scheduled runs pass through gates before they start: catch-up policy, repo activity tier (dormant repos are held), single-flight, and change detection (no new commits since the last successful run). Every fire or hold is recorded in a trigger log.
+- **Automations view** — Scheduled workflows, loops and Agent Joe's runs appear together at `/automations`, with a needs-attention banner.
+
+See [docs/WORKFLOWS.md](./WORKFLOWS.md) for the full workflow definition format, frontmatter field reference, trigger engine details, and instructions for writing per-repo overrides.
+
+---
+
+## Loops
+
+Loops run a coding agent toward a stated outcome until deterministic acceptance criteria pass, a human decision is needed, or a budget runs out.
+
+- **Recipes** — A recipe states the outcome, evaluators and budgets. Codekin ships CI Autorepair, Coverage Increase and Dependency Upgrade recipes (`server/loops/`).
+- **Deterministic evaluators** — Your own build, test and lint commands judged by exit code, plus diff policy (size caps, forbidden paths, secret scan), required artifacts, and remote CI checks.
+- **Independent review** — A rubric reviewer on a *different* provider than the maker reviews the diff before it lands. Human sign-off steps are optional.
+- **Durable and steerable** — Every transition is an append-only event. Runs survive server restarts and can be paused, resumed, steered, forked from a checkpoint, or cancelled.
+- **Finalize** — Codekin itself commits the verified tree and, per the recipe, pushes and opens a PR. There is no auto-merge.
+
+See [docs/LOOPS.md](./LOOPS.md) for the full reference.
 
 ---
 
@@ -227,15 +248,29 @@ See [docs/ORCHESTRATOR-SPEC.md](./ORCHESTRATOR-SPEC.md) for the full architectur
 
 ---
 
+## Deployment Monitoring
+
+Codekin can watch the apps you deploy and the machine it runs on, using cheap deterministic probes with no model in the sampling path.
+
+- **Probes** — `http` (status, latency against a learned p95, TLS expiry and protocol, security headers), `pm2`, `disk`, `log` (error-pattern rate) and `host` (memory, load, pending security updates, reboot required).
+- **Breaches become signals** — Only state transitions (ok → breached, breached → ok) notify Agent Joe, through the durable signal queue.
+- **Auto-diagnosis** — With `autoDiagnose` enabled, a breach spawns a diagnostic child that writes an incident report as a PR. It never restarts services or changes the host.
+- **Weekly host digest** — A summary of host health is delivered to Agent Joe when a host probe is configured.
+
+See [docs/DEPLOYMENTS.md](./DEPLOYMENTS.md) for the registry format and API.
+
+---
+
 ## Git Worktrees
 
 Sessions can be isolated in dedicated git worktree directories, preventing concurrent sessions from interfering with each other's working trees.
 
 - **Per-session worktrees** — Each session can run in its own worktree, keeping file changes isolated from other sessions and the main working directory.
+- **Isolation is enforced** — A session that asked for a worktree only ever starts in its verified worktree. If creating it fails, the session offers Retry instead of falling back to the shared checkout. Retries never remove uncommitted files or unique commits.
 - **Mid-session creation** — Worktrees can be created during an active session. The session's full context is preserved across the migration.
 - **Worktree name indicator** — The input toolbar displays the current worktree name when a session is running in a worktree.
 - **Auto-enable setting** — A global setting to automatically create worktrees for new sessions.
-- **Cleanup on delete** — Worktrees are automatically cleaned up when their associated session is deleted.
+- **Archive keeps the work** — Archiving a session keeps its worktree and branch, so it can be resumed later with its files intact. Removing the worktree is a separate, explicit action in the archived sessions panel.
 
 ---
 
@@ -326,22 +361,46 @@ A per-session registry that remembers which tools and commands have been approve
 
 ## Settings & Configuration
 
-- **Authentication token** — Enter your Codekin token in the Settings modal. The token is validated in real time with a checkmark (valid) or cross (invalid) indicator.
+Settings is a full page at `/settings/<section>`, with a section list on the left (desktop) or a list-then-detail layout (mobile). Sections are grouped by what they apply to:
+
+| Group | Sections | Shown |
+|---|---|---|
+| Account | Profile, Security (2FA, passkeys, device linking), Appearance | Profile and Security in hosted mode only |
+| Workspace | Workspace, Members, Machines | hosted mode |
+| This machine | Connection, Sessions, Permissions, Webhooks | when a machine is reachable |
+| Platform | Accounts | hosted-mode operator only |
+
+- **Saves immediately** — Every setting saves as you change it, except the access token, which has an explicit Verify/Save.
+- **Authentication token** — Enter your Codekin token under **Settings → Connection**. It is validated in real time with a checkmark (valid) or cross (invalid) indicator.
 - **Stored on the server** — Preferences (theme, new-session defaults, layout, starred docs, queued drafts) live on the Codekin server (`/api/settings/prefs`), so they follow you across browsers and devices. Only the auth token stays in the browser. On app.codekin.ai, the workspace you last opened and the machine a reload reconnects to are stored per user on the relay (`PUT /api/me/preferences`, returned by `/api/me`), so they follow you across devices too. Values from older versions are moved from `localStorage` to the server on first load.
-- **Auto-open** — The Settings modal opens automatically on first visit when no token is configured.
+- **Auto-open** — **Settings → Connection** opens automatically on first visit when no token is configured.
+- **Quick settings** — The theme can also be switched from the sidebar theme menu and the command palette without visiting Settings.
 
 ---
 
-## Diff Viewer
+## Color Themes
 
-A right-hand sidebar panel that shows all file changes made by Claude during the current session, with inline unified diffs and file-level navigation.
+Nine themes: Dark, Light, Midnight, Paper, High Contrast, Solarized Light, Dracula, Gruvbox and Matrix.
 
-- **Toggle** — Open/close via the toolbar button or `Ctrl+Shift+D` / `Cmd+Shift+D`.
-- **Side-by-side layout** — The diff panel opens alongside the chat (both visible). On mobile, it opens as a full-screen overlay.
-- **Scope selector** — Switch between `Uncommitted changes` (default), `Staged`, and `Unstaged` views.
+- **Color only** — Themes change colors. Fonts, type scale, spacing, radii and density are the same in every theme.
+- **Contrast-checked** — Each theme is tested against contrast floors.
+- **Where to switch** — **Settings → Appearance**, the sidebar theme menu, or the command palette. The choice is stored with your other preferences on the server.
+
+---
+
+## Changes Panel (Diff & Review)
+
+A right-hand panel that shows the changes in the current session's checkout, lets you leave review comments for the agent, and shows the status of the branch's pull request.
+
+- **Toggle** — Open/close via the **Changes** toolbar button (shown whenever the session has something to review) or `Ctrl+Shift+D` / `Cmd+Shift+D`.
+- **Side-by-side layout** — The panel opens alongside the chat (both visible). On mobile, it opens as a full-screen overlay.
+- **Scope selector** — `All task changes` (everything the branch changes since it left its base: commits, edits and new files), `Committed`, `Uncommitted`, `Staged` and `Unstaged`. The branch views compare against the merge base, and the base can be changed.
+- **Uncommitted markers** — In the task views, files that also have uncommitted edits are marked.
+- **Review comments** — Comment on specific diff lines. Comments collect in a tray and are sent to the agent together as one prompt.
+- **Pull request card** — A read-only card with the PR link, base ← head, draft/open/merged state, CI checks and review decision. It says when local work differs from what was checked (unpushed commits, uncommitted edits), and shows unknown states (no `gh`, rate limited, errors) as unknown, never as passing. There are no merge controls.
 - **File tree** — A compact list of changed files grouped by status: Modified (yellow `M`), Added (green `A`), Deleted (red `D`), Renamed (blue `R`). Each row shows the relative path and `+N −M` change counts.
 - **Unified diffs** — Each file is rendered as a card with syntax-highlighted unified diff, dual-gutter line numbers, and color-coded add/delete/context lines.
-- **Discard changes** — Discard all changes or per-file via `git restore`. Requires confirmation. Supports all scopes (staged, unstaged, all).
+- **Discard changes** — Discard all changes or per-file via `git restore`. Requires confirmation. Available in the uncommitted, staged and unstaged scopes; the branch views are read-only.
 - **Auto-refresh** — The diff panel refreshes automatically after `Edit`, `Write`, or file-mutating `Bash` tool calls (debounced 500ms). No polling.
 - **Resizable** — Drag the left edge to resize (280px–600px). Width is saved with your preferences on the server.
 - **Large diff handling** — Files with >300 changed lines are collapsed by default. Diffs exceeding 2 MB are truncated with a banner.
@@ -381,9 +440,24 @@ Browse and read Markdown files from any connected repository, rendered as rich t
 
 - **Token-based auth** — The WebSocket connection and REST API are authenticated using a shared token (generated with `openssl rand -hex 32`).
 - **Authelia integration** — The production deployment sits behind Authelia for user authentication at the nginx layer.
-- **CORS configuration** — The `CORS_ORIGIN` environment variable controls allowed origins (defaults to `*`).
+- **CORS configuration** — The `CORS_ORIGIN` environment variable controls the allowed origin (defaults to `http://localhost:5173`; must be set explicitly in production).
 - **Disabled state** — When no token is configured, the chat area shows an overlay prompting the user to configure their token. Input is disabled.
 - **Logout** — A logout button in the sidebar redirects to the Authelia logout endpoint.
+
+---
+
+## Hosted Access & Workspaces
+
+The hosted app at [app.codekin.ai](https://app.codekin.ai) reaches the Codekin server on your own computer through an outbound relay connection. Coding agents, credentials and repositories stay on your computer. You can also run the relay yourself; see [docs/SELF-HOSTED-RELAY.md](./SELF-HOSTED-RELAY.md).
+
+- **Install and pair** — A one-use install command (valid for 10 minutes) installs Codekin, pairs the computer and starts its service. No inbound port is opened.
+- **Workspaces and roles** — Invite people into a workspace by link, with owner, admin, member or viewer roles. Invitation links are single-use, bound to the invited GitHub account or verified email, and expire after 7 days.
+- **Two-factor authentication** — Sign-in is with GitHub, plus an authenticator app or a passkey. 2FA is required for owners and admins, and a workspace can require it for everyone. Recovery codes are available.
+- **Device linking and passkeys** — Bring a phone onto your account by scanning a QR code, then sign in on it with a passkey.
+- **Session sharing** — Share a session with another member, with per-user access presets.
+- **Machine oversight** — Owners and admins see every machine in the workspace and can remove it; they cannot drive another member's sessions without a share.
+
+See [docs/OPERATIONS.md](./OPERATIONS.md#hosted-relay) for operating the relay.
 
 ---
 

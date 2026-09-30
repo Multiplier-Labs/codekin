@@ -139,27 +139,12 @@ Repositories are discovered automatically at runtime — no manual scanning step
 
 To add local repositories, simply clone them into your `REPOS_ROOT` directory. They will appear in the Codekin UI automatically.
 
-## 6. Deploy Settings
+## 6. Choose Where the Frontend Is Served From
 
-Copy the example settings and customize for your environment:
+The server is configured only through environment variables (step 2). There is no separate deploy settings file.
 
-```bash
-cp .codekin/settings.example.json .codekin/settings.json
-nano .codekin/settings.json
-```
-
-Key fields in `settings.json`:
-
-| Field       | Description                                | Default              |
-|-------------|--------------------------------------------|----------------------|
-| `webRoot`   | Where the built frontend is deployed to    | `/var/www/codekin`   |
-| `distDir`   | Path to the frontend build output          | `./dist`             |
-| `serverDir` | Path to the server source directory        | `./server`           |
-| `port`      | codekin server port                         | `32352`              |
-| `authFile`  | Path to the auth token file                | `~/.codekin/auth-token` |
-| `log`       | Server log file path                       | `/tmp/codekin.log`    |
-
-> **Note**: `settings.json` is gitignored — your local config won't be overwritten by `git pull`.
+- **nginx serves the frontend (this guide)** — Copy the build output to a web root in step 7 and point nginx at it in step 8. Leave `FRONTEND_DIST` unset.
+- **Codekin serves the frontend** — Set `FRONTEND_DIST` to the built `dist/` directory in `~/.config/codekin/env`, and Express serves the app itself. nginx then only needs to proxy to port 32352.
 
 ## 7. Build and Deploy
 
@@ -208,7 +193,7 @@ sudo systemctl reload nginx
 
 1. Open `https://YOUR_DOMAIN` in a browser
 2. Authenticate via Authelia
-3. The Settings modal opens automatically — paste your codekin token (from `~/.config/codekin/token`)
+3. **Settings → Connection** opens automatically — paste your codekin token (from `~/.config/codekin/token`)
 4. Click a repo to open a terminal session
 
 ## 10. Configure GitHub Webhooks (Optional)
@@ -409,7 +394,7 @@ codekin/
 | Path                                          | Purpose                        |
 |-----------------------------------------------|--------------------------------|
 | `~/.config/codekin/env`                       | Secrets and configuration      |
-| Web root (set via `FRONTEND_DIST` or `settings.json`) | Deployed frontend |
+| Web root (nginx), or `FRONTEND_DIST` when Codekin serves the frontend | Deployed frontend |
 | `~/.config/codekin/token` (or `AUTH_TOKEN_FILE`) | codekin auth token           |
 | `~/.codekin/screenshots/`                     | Uploaded screenshots           |
 | `/etc/nginx/sites-available/codekin`          | nginx config (production)      |

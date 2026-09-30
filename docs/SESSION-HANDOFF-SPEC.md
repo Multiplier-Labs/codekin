@@ -3,7 +3,7 @@
 Pass a session's context between coding harnesses (Codex → Claude Code, Claude Code →
 OpenCode, …) without manual copy-paste.
 
-Status: **draft / ideation**
+Status: **MVP (Flow 1, carry-context on provider switch) shipped in #548.** Phase 2 (external session import) and Phase 3 (`/handoff` export) are not built.
 
 ## Problem
 
