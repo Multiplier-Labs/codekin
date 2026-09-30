@@ -17,7 +17,7 @@ import {
   RELAY_ERROR,
 } from './relay-protocol.js'
 import type { ProxyRequest, ProxyResponse, RelayError } from './relay-protocol.js'
-import { checkRestPolicy, filterSessionList, needsSessionListFilter } from './connector-policy.js'
+import { canonicalizePath, checkRestPolicy, filterSessionList, needsSessionListFilter } from './connector-policy.js'
 import type { ChannelPolicy } from './connector-policy.js'
 import type { GrantMap } from './shares.js'
 
@@ -100,10 +100,17 @@ export function checkProxyRequest(req: ProxyRequest): ProxyDecision {
   if (!principal) {
     return { allowed: false, error: { code: RELAY_ERROR.forbidden, message: 'Request carried no principal' } }
   }
+  // One canonical form is authorized and executed; anything that could be
+  // read as a second route (encoded dot segments, backslashes, `//host`) is
+  // refused before either gate matches it.
+  const canonical = canonicalizePath(req.path)
+  if (!canonical) {
+    return { allowed: false, error: { code: RELAY_ERROR.badRequest, message: 'Malformed path' } }
+  }
   const permitted = checkRestPolicy(
     { role: principal.role === 'owner' ? 'owner' : 'grantee', grants: principal.grants as GrantMap },
     req.method || '',
-    req.path || '/',
+    req.path,
   )
   if (!permitted.allowed) {
     return { allowed: false, error: { code: RELAY_ERROR.notPermitted, message: permitted.reason ?? 'Not permitted' } }
@@ -118,15 +125,7 @@ export function checkProxyRequest(req: ProxyRequest): ProxyDecision {
     }
   }
 
-  if (typeof req.path !== 'string' || !req.path.startsWith('/')) {
-    return { allowed: false, error: { code: RELAY_ERROR.badRequest, message: 'Path must start with /' } }
-  }
-  // Reject anything that could escape the prefix check or address another host.
-  if (req.path.startsWith('//') || req.path.includes('..') || req.path.includes('\\')) {
-    return { allowed: false, error: { code: RELAY_ERROR.badRequest, message: 'Malformed path' } }
-  }
-
-  const pathname = req.path.split('?')[0]
+  const { pathname } = canonical
   const prefixes: readonly string[] = isRead ? ALLOWED_GET_PREFIXES : ALLOWED_MUTATION_PREFIXES
   const allowed = prefixes.some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`))
   if (!allowed) {
@@ -288,6 +287,9 @@ export async function executeProxyRequest(
 ): Promise<ProxyOutcome> {
   const decision = checkProxyRequest(req)
   if (!decision.allowed) return { error: decision.error! }
+  // Authorized above in exactly this form; the fetch below runs it verbatim.
+  const canonical = canonicalizePath(req.path)
+  if (!canonical) return { error: { code: RELAY_ERROR.badRequest, message: 'Malformed path' } }
 
   const policy: ChannelPolicy = {
     role: req.principal?.role === 'grantee' ? 'grantee' : 'owner',
@@ -320,8 +322,10 @@ export async function executeProxyRequest(
   const timer = setTimeout(() => { controller.abort() }, opts.timeoutMs ?? 20_000)
 
   try {
-    const res = await fetchImpl(`${opts.target.origin}${req.path}`, {
+    const res = await fetchImpl(`${opts.target.origin}${canonical.pathname}${canonical.search}`, {
       method: req.method.toUpperCase(),
+      // A redirect would be a request to a URL nobody authorized.
+      redirect: 'manual',
       headers,
       body: body as unknown as BodyInit | undefined,
       signal: controller.signal,

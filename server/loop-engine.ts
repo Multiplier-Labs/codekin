@@ -54,6 +54,7 @@ import {
   type CompositeEvaluatorConfig,
   type HumanEvaluatorConfig,
   type CiEvaluatorConfig,
+  type EvaluatorConfig,
 } from './loop-recipe.js'
 import type { LoopRun, LoopRunOutcome, LoopRunState, LoopStore } from './loop-store.js'
 import type { LoopArtifactStore } from './loop-artifacts.js'
@@ -67,6 +68,8 @@ interface CreateOpts {
   model?: string
   source?: 'agent'
   allowedTools?: string[]
+  /** The session requires its own worktree and never runs in the shared checkout. */
+  useWorktree?: boolean
 }
 
 interface HistoryMsg {
@@ -161,6 +164,8 @@ const CI_POLL_MS = 30_000
 const MAX_PROTECTED_STRIKES = 2
 /** Each granted budget extension adds this fraction of the original budget. */
 const EXTENSION_FRACTION = 0.5
+/** Intervention purpose prefix for a human evaluator sign-off, followed by the evaluator id. */
+const HUMAN_EVALUATION_PREFIX = 'human-evaluation:'
 
 // ---------------------------------------------------------------------------
 // Runtime context
@@ -304,14 +309,20 @@ export class LoopEngine {
       model: run.model ?? undefined,
       source: 'agent',
       allowedTools: AGENT_ALLOWED_TOOLS,
+      useWorktree: !resumeCwd,
     })
     ctx.makerSessionId = session.id
 
     if (resumeCwd) {
       ctx.cwd = resumeCwd
     } else {
+      // The maker never falls back to the shared checkout.
       const worktree = await this.host.createWorktree(session.id, run.repo, run.branch, run.baseBranch ?? undefined)
-      ctx.cwd = worktree ?? run.repo
+      if (!worktree) {
+        this.finishRun(run.id, 'failed', `Could not create an isolated worktree for branch ${run.branch}; nothing was started in the shared checkout.`)
+        return
+      }
+      ctx.cwd = worktree
     }
     this.store.patchRun(run.id, { makerSessionId: session.id, worktreePath: ctx.cwd })
 
@@ -380,84 +391,77 @@ export class LoopEngine {
       const run = this.store.getRun(ctx.runId)
       if (!run || !this.active.has(ctx.runId)) return
 
-      ctx.turnCount += 1
-      ctx.makerCostUsd = readCumulativeCost(this.host.get(ctx.makerSessionId ?? '')?.outputHistory ?? [])
-      this.store.patchRun(run.id, { turnCount: ctx.turnCount, costUsd: this.totalCost(ctx), stateReason: null })
-      this.store.appendEvent({
-        runId: run.id,
-        type: 'maker_turn_completed',
-        actor: { type: 'agent', id: 'maker' },
-        payload: { turn: ctx.turnCount, costUsd: this.totalCost(ctx), isError },
-      })
-
-      // 1–2. User intent first: cancel, then pause, at this safe boundary.
-      if (ctx.cancelRequested) {
-        this.completeCancel(ctx, run)
-        return
-      }
-      if (ctx.pauseRequested) {
-        this.parkPaused(ctx, run)
-        return
-      }
-
-      // 3. Maker process error: retry within budget, else budget boundary.
-      if (isError) {
-        if (this.budgetExhausted(ctx, run)) {
-          this.onBudgetBoundary(ctx, run)
-          return
-        }
-        this.sendMakerFeedback(ctx, run, 'The previous turn ended with an error. Review the outcome and continue.')
-        return
-      }
-
-      // 4. Budgets (turns, cost, wall time).
-      if (this.budgetExhausted(ctx, run)) {
-        this.onBudgetBoundary(ctx, run)
-        return
-      }
-
-      // 5. Planning phase: capture the plan artifact and route — no
-      // evaluation until the maker is executing.
-      if (ctx.phase === 'planning') {
-        this.onPlanProduced(ctx, run)
-        return
-      }
-
-      // 6. Protected paths: violation re-prompts; repeats escalate.
+      this.recordMakerTurn(ctx, run, isError)
+      // Order matters: each step either handles the turn (true) or passes it on.
+      if (this.handleTurnBoundary(ctx, run, isError)) return
       const changedFiles = await this.evaluator.getChangedFiles(ctx.cwd)
-      const protectedPaths = run.recipe.workspace.protectedPaths
-      const violations = protectedPaths.length ? changedFiles.filter((f) => matchesAnyGlob(f, protectedPaths)) : []
-      if (violations.length) {
-        ctx.protectedStrikes += 1
-        this.store.appendEvent({ runId: run.id, type: 'protected_path_violation', payload: { files: violations, strike: ctx.protectedStrikes } })
-        if (ctx.protectedStrikes > MAX_PROTECTED_STRIKES) {
-          this.escalate(ctx, run, `The agent repeatedly modified protected paths: ${violations.join(', ')}`)
-          return
-        }
-        this.sendMakerFeedback(
-          ctx,
-          run,
-          [
-            `You modified protected files that must not change: ${violations.join(', ')}.`,
-            `Protected patterns: ${protectedPaths.join(', ')}.`,
-            `Revert those changes and achieve the outcome without touching them.`,
-          ].join('\n'),
-        )
-        return
-      }
-      ctx.protectedStrikes = 0
-
-      // 7. No changes yet: a clean tree must not masquerade as success.
+      if (this.handleProtectedPaths(ctx, run, changedFiles)) return
+      // A clean tree must not masquerade as success.
       if (changedFiles.length === 0) {
         this.sendMakerFeedback(ctx, run, 'No file changes detected yet. Make the changes required to achieve the outcome.')
         return
       }
-
-      // 8. Evaluate.
       await this.evaluate(ctx, run)
     } finally {
       ctx.processing = false
     }
+  }
+
+  private recordMakerTurn(ctx: RunCtx, run: LoopRun, isError: boolean): void {
+    ctx.turnCount += 1
+    ctx.makerCostUsd = readCumulativeCost(this.host.get(ctx.makerSessionId ?? '')?.outputHistory ?? [])
+    this.store.patchRun(run.id, { turnCount: ctx.turnCount, costUsd: this.totalCost(ctx), stateReason: null })
+    this.store.appendEvent({
+      runId: run.id,
+      type: 'maker_turn_completed',
+      actor: { type: 'agent', id: 'maker' },
+      payload: { turn: ctx.turnCount, costUsd: this.totalCost(ctx), isError },
+    })
+  }
+
+  /** Cancel, pause, maker error, budget, then planning phase — in that order. */
+  private handleTurnBoundary(ctx: RunCtx, run: LoopRun, isError: boolean): boolean {
+    if (ctx.cancelRequested) {
+      this.completeCancel(ctx, run)
+    } else if (ctx.pauseRequested) {
+      this.parkPaused(ctx, run)
+    } else if (this.budgetExhausted(ctx, run)) {
+      this.onBudgetBoundary(ctx, run)
+    } else if (isError) {
+      this.sendMakerFeedback(ctx, run, 'The previous turn ended with an error. Review the outcome and continue.')
+    } else if (ctx.phase === 'planning') {
+      // No evaluation until the maker is executing.
+      this.onPlanProduced(ctx, run)
+    } else {
+      return false
+    }
+    return true
+  }
+
+  /** A violation re-prompts the maker; repeated violations escalate. */
+  private handleProtectedPaths(ctx: RunCtx, run: LoopRun, changedFiles: string[]): boolean {
+    const protectedPaths = run.recipe.workspace.protectedPaths
+    const violations = protectedPaths.length ? changedFiles.filter((f) => matchesAnyGlob(f, protectedPaths)) : []
+    if (!violations.length) {
+      ctx.protectedStrikes = 0
+      return false
+    }
+    ctx.protectedStrikes += 1
+    this.store.appendEvent({ runId: run.id, type: 'protected_path_violation', payload: { files: violations, strike: ctx.protectedStrikes } })
+    if (ctx.protectedStrikes > MAX_PROTECTED_STRIKES) {
+      this.escalate(ctx, run, `The agent repeatedly modified protected paths: ${violations.join(', ')}`)
+      return true
+    }
+    this.sendMakerFeedback(
+      ctx,
+      run,
+      [
+        `You modified protected files that must not change: ${violations.join(', ')}.`,
+        `Protected patterns: ${protectedPaths.join(', ')}.`,
+        `Revert those changes and achieve the outcome without touching them.`,
+      ].join('\n'),
+    )
+    return true
   }
 
   // -------------------------------------------------------------------------
@@ -647,6 +651,7 @@ export class LoopEngine {
           model: run.model ?? undefined,
           source: 'agent',
           allowedTools: AGENT_ALLOWED_TOOLS,
+          useWorktree: true,
         })
         ctx.workerSessionIds.push(session.id)
         const cwd = await this.host.createWorktree(session.id, run.repo, branch, run.branch)
@@ -729,32 +734,8 @@ export class LoopEngine {
     // short-circuits — it is what the maker needs to see next. Rubric, human,
     // ci, and composite evaluators are handled after this gate.
     for (const config of run.recipe.evaluators) {
-      let outcome: CommandEvaluationOutcome
-      if (config.type === 'command' || config.type === 'test-report') {
-        outcome = await this.runDeterministicWithRetry(ctx, run, stage.id, config)
-        if (outcome.status === 'pass') ctx.passedCommands.push(outcome.command)
-      } else if (config.type === 'diff-policy') {
-        const diff = await this.evaluator.getDiff(ctx.cwd)
-        const changedFiles = await this.evaluator.getChangedFiles(ctx.cwd)
-        const violations = analyzeDiffPolicy(config, diff, changedFiles)
-        outcome = this.recordLocalEvaluation(ctx, run, stage.id, config.id, {
-          pass: violations.length === 0,
-          summary: violations.length ? `diff policy: ${violations.length} violation(s)` : 'diff policy: clean',
-          detail: violations.map((v) => `[${v.rule}] ${v.detail}`).join('\n') || 'no violations',
-          classification: 'policy',
-        })
-      } else if (config.type === 'artifact') {
-        const check = checkArtifactRequirement(config, ctx.cwd)
-        outcome = this.recordLocalEvaluation(ctx, run, stage.id, config.id, {
-          pass: check.ok,
-          summary: check.ok ? `required artifact present: ${check.detail}` : `required artifact missing: ${check.detail}`,
-          detail: check.detail,
-          classification: 'policy',
-        })
-      } else {
-        continue
-      }
-      if (outcome.status === 'pass') continue
+      const outcome = await this.runLocalEvaluator(ctx, run, stage.id, config)
+      if (!outcome || outcome.status === 'pass') continue
       if (outcome.fingerprint) fingerprints.push(outcome.fingerprint)
       if (config.required) {
         requiredFailure = outcome
@@ -780,6 +761,45 @@ export class LoopEngine {
       return
     }
     this.startHumanEvaluations(ctx, run)
+  }
+
+  /** Run one deterministic local evaluator; null for types evaluated after the gate. */
+  private async runLocalEvaluator(
+    ctx: RunCtx,
+    run: LoopRun,
+    stageId: string,
+    config: EvaluatorConfig,
+  ): Promise<CommandEvaluationOutcome | null> {
+    switch (config.type) {
+      case 'command':
+      case 'test-report': {
+        const outcome = await this.runDeterministicWithRetry(ctx, run, stageId, config)
+        if (outcome.status === 'pass') ctx.passedCommands.push(outcome.command)
+        return outcome
+      }
+      case 'diff-policy': {
+        const diff = await this.evaluator.getDiff(ctx.cwd)
+        const changedFiles = await this.evaluator.getChangedFiles(ctx.cwd)
+        const violations = analyzeDiffPolicy(config, diff, changedFiles)
+        return this.recordLocalEvaluation(ctx, run, stageId, config.id, {
+          pass: violations.length === 0,
+          summary: violations.length ? `diff policy: ${violations.length} violation(s)` : 'diff policy: clean',
+          detail: violations.map((v) => `[${v.rule}] ${v.detail}`).join('\n') || 'no violations',
+          classification: 'policy',
+        })
+      }
+      case 'artifact': {
+        const check = checkArtifactRequirement(config, ctx.cwd)
+        return this.recordLocalEvaluation(ctx, run, stageId, config.id, {
+          pass: check.ok,
+          summary: check.ok ? `required artifact present: ${check.detail}` : `required artifact missing: ${check.detail}`,
+          detail: check.detail,
+          classification: 'policy',
+        })
+      }
+      default:
+        return null
+    }
   }
 
   /** Record a synchronous deterministic check (diff-policy, artifact) uniformly. */
@@ -951,12 +971,18 @@ export class LoopEngine {
       model: config.model,
       source: 'agent',
       allowedTools: READONLY_AGENT_ALLOWED_TOOLS,
+      useWorktree: true,
     })
     // The maker's edits are uncommitted, so the reviewer gets its own worktree
     // on a review branch and the diff travels in the prompt.
-    await this.host.createWorktree(session.id, run.repo, `${run.branch}-review`, run.branch)
+    const reviewWorktree = await this.host.createWorktree(session.id, run.repo, `${run.branch}-review`, run.branch)
     ctx.reviewSessionId = session.id
     ctx.reviewProcessing = false
+    if (!reviewWorktree) {
+      // Never review from the shared checkout; record the review as errored.
+      await this.onRubricResult(ctx, config, stage.id, true)
+      return
+    }
 
     ctx.disposers.push(
       this.host.onSessionResult((sid, isError) => {
@@ -1082,7 +1108,7 @@ export class LoopEngine {
       return
     }
     this.createEngineIntervention(ctx, run, {
-      purpose: `human-evaluation:${config.id}`,
+      purpose: `${HUMAN_EVALUATION_PREFIX}${config.id}`,
       title: config.title,
       body: `Evaluator "${config.id}" needs your sign-off. Waiving keeps the run green but qualifies the outcome; failing sends your note back to the agent.`,
       options: ['pass', 'waive', 'fail'],
@@ -1478,97 +1504,108 @@ export class LoopEngine {
       return true
     }
 
-    if (resolved.purpose.startsWith('human-evaluation:')) {
-      const evaluatorId = resolved.purpose.slice('human-evaluation:'.length)
-      ctx.pendingHumanIds = ctx.pendingHumanIds.filter((id) => id !== evaluatorId)
-      this.checkpoint(ctx)
-      if (choice === 'fail') {
-        this.recordHumanEvaluation(run, evaluatorId, 'fail', note)
-        await this.resumeActing(
-          ctx,
-          run,
-          `The human sign-off "${evaluatorId}" failed.${note ? ` Feedback: ${note}` : ''} Address this and continue.`,
-        )
-        return true
-      }
-      this.recordHumanEvaluation(run, evaluatorId, choice === 'waive' ? 'waived' : 'pass', note)
-      this.nextHumanEvaluation(ctx, run)
-      return true
+    const purpose = resolved.purpose
+    if (purpose.startsWith(HUMAN_EVALUATION_PREFIX)) {
+      await this.onHumanEvaluationResolved(ctx, run, purpose.slice(HUMAN_EVALUATION_PREFIX.length), choice, note)
+    } else if (purpose === 'ci-timeout') {
+      this.onCiTimeoutResolved(ctx, run, choice, note)
+    } else if (purpose === 'plan-approval') {
+      await this.onPlanApprovalResolved(ctx, run, choice, note)
+    } else if (purpose === 'completion-approval') {
+      await this.onCompletionApprovalResolved(ctx, run, choice, note)
+    } else if (purpose === 'budget-extension') {
+      await this.onBudgetExtensionResolved(ctx, run, choice)
+    } else {
+      // 'escalation' and any unrecognized purpose.
+      await this.onEscalationResolved(ctx, run, choice, note)
     }
+    return true
+  }
 
-    switch (resolved.purpose) {
-      case 'ci-timeout': {
-        if (choice === 'keep-waiting') {
-          this.startCiMonitoring(ctx, run)
-        } else if (choice === 'finish') {
-          this.teardown(ctx)
-          this.finishRun(run.id, 'completed_with_warnings', 'Completed with remote CI still unresolved (operator decision).')
-        } else {
-          this.teardown(ctx)
-          this.finishRun(run.id, 'canceled', `Stopped while waiting on CI.${note ? ` Note: ${note}` : ''}`)
-        }
-        return true
-      }
-      case 'plan-approval': {
-        if (choice === 'approve') {
-          ctx.phase = 'acting'
-          this.checkpoint(ctx)
-          const streams = this.plannedWorkstreams(run)
-          if (streams) {
-            void this.runWorkers(ctx, run, streams)
-            return true
-          }
-          const plan = this.latestPlanText(run.id)
-          await this.resumeActing(
-            ctx,
-            run,
-            `Your plan was approved${note ? ` with this note: ${note}` : ''}. Execute it now.${plan ? `\n\nApproved plan:\n${plan}` : ''}`,
-          )
-        } else if (choice === 'revise') {
-          const plan = this.latestPlanText(run.id)
-          await this.resumeActing(
-            ctx,
-            run,
-            `The operator requested plan revisions${note ? `: ${note}` : ''}.${plan ? `\n\nPrevious plan:\n${plan}` : ''}`,
-          )
-        } else {
-          this.teardown(ctx)
-          this.finishRun(run.id, 'canceled', `Stopped at plan approval.${note ? ` Note: ${note}` : ''}`)
-        }
-        return true
-      }
-      case 'completion-approval': {
-        if (choice === 'approve') {
-          // finalizeRun stops the maker itself; no fresh session needed.
-          await this.finalizeRun(ctx, run)
-        } else {
-          await this.resumeActing(ctx, run, `The operator rejected completion.${note ? ` Feedback: ${note}` : ''} Address this and continue.`)
-        }
-        return true
-      }
-      case 'budget-extension': {
-        if (choice === 'extend') {
-          ctx.budgetExtensions += 1
-          this.checkpoint(ctx)
-          this.store.appendEvent({ runId: run.id, type: 'budget_extended', actor: { type: 'user' }, payload: { extensions: ctx.budgetExtensions } })
-          await this.resumeActing(ctx, run, 'The operator extended the budget. Continue working toward the outcome.')
-        } else {
-          this.teardown(ctx)
-          this.finishRun(run.id, 'failed', 'Budget exhausted; stopped with partial result by the operator.')
-        }
-        return true
-      }
-      case 'escalation':
-      default: {
-        if (choice === 'continue') {
-          await this.resumeActing(ctx, run, `The operator reviewed the escalation and chose to continue.${note ? ` Guidance: ${note}` : ''}`)
-        } else {
-          this.teardown(ctx)
-          this.finishRun(run.id, 'canceled', `Stopped by the operator at an escalation.${note ? ` Note: ${note}` : ''}`)
-        }
-        return true
-      }
+  private async onHumanEvaluationResolved(ctx: RunCtx, run: LoopRun, evaluatorId: string, choice: string, note?: string): Promise<void> {
+    ctx.pendingHumanIds = ctx.pendingHumanIds.filter((id) => id !== evaluatorId)
+    this.checkpoint(ctx)
+    if (choice === 'fail') {
+      this.recordHumanEvaluation(run, evaluatorId, 'fail', note)
+      await this.resumeActing(
+        ctx,
+        run,
+        `The human sign-off "${evaluatorId}" failed.${note ? ` Feedback: ${note}` : ''} Address this and continue.`,
+      )
+      return
     }
+    this.recordHumanEvaluation(run, evaluatorId, choice === 'waive' ? 'waived' : 'pass', note)
+    this.nextHumanEvaluation(ctx, run)
+  }
+
+  private onCiTimeoutResolved(ctx: RunCtx, run: LoopRun, choice: string, note?: string): void {
+    if (choice === 'keep-waiting') {
+      this.startCiMonitoring(ctx, run)
+    } else if (choice === 'finish') {
+      this.stopRun(ctx, run, 'completed_with_warnings', 'Completed with remote CI still unresolved (operator decision).')
+    } else {
+      this.stopRun(ctx, run, 'canceled', `Stopped while waiting on CI.${note ? ` Note: ${note}` : ''}`)
+    }
+  }
+
+  private async onPlanApprovalResolved(ctx: RunCtx, run: LoopRun, choice: string, note?: string): Promise<void> {
+    if (choice === 'approve') {
+      ctx.phase = 'acting'
+      this.checkpoint(ctx)
+      const streams = this.plannedWorkstreams(run)
+      if (streams) {
+        void this.runWorkers(ctx, run, streams)
+        return
+      }
+      const plan = this.latestPlanText(run.id)
+      await this.resumeActing(
+        ctx,
+        run,
+        `Your plan was approved${note ? ` with this note: ${note}` : ''}. Execute it now.${plan ? `\n\nApproved plan:\n${plan}` : ''}`,
+      )
+    } else if (choice === 'revise') {
+      const plan = this.latestPlanText(run.id)
+      await this.resumeActing(
+        ctx,
+        run,
+        `The operator requested plan revisions${note ? `: ${note}` : ''}.${plan ? `\n\nPrevious plan:\n${plan}` : ''}`,
+      )
+    } else {
+      this.stopRun(ctx, run, 'canceled', `Stopped at plan approval.${note ? ` Note: ${note}` : ''}`)
+    }
+  }
+
+  private async onCompletionApprovalResolved(ctx: RunCtx, run: LoopRun, choice: string, note?: string): Promise<void> {
+    if (choice === 'approve') {
+      // finalizeRun stops the maker itself; no fresh session needed.
+      await this.finalizeRun(ctx, run)
+    } else {
+      await this.resumeActing(ctx, run, `The operator rejected completion.${note ? ` Feedback: ${note}` : ''} Address this and continue.`)
+    }
+  }
+
+  private async onBudgetExtensionResolved(ctx: RunCtx, run: LoopRun, choice: string): Promise<void> {
+    if (choice !== 'extend') {
+      this.stopRun(ctx, run, 'failed', 'Budget exhausted; stopped with partial result by the operator.')
+      return
+    }
+    ctx.budgetExtensions += 1
+    this.checkpoint(ctx)
+    this.store.appendEvent({ runId: run.id, type: 'budget_extended', actor: { type: 'user' }, payload: { extensions: ctx.budgetExtensions } })
+    await this.resumeActing(ctx, run, 'The operator extended the budget. Continue working toward the outcome.')
+  }
+
+  private async onEscalationResolved(ctx: RunCtx, run: LoopRun, choice: string, note?: string): Promise<void> {
+    if (choice === 'continue') {
+      await this.resumeActing(ctx, run, `The operator reviewed the escalation and chose to continue.${note ? ` Guidance: ${note}` : ''}`)
+    } else {
+      this.stopRun(ctx, run, 'canceled', `Stopped by the operator at an escalation.${note ? ` Note: ${note}` : ''}`)
+    }
+  }
+
+  private stopRun(ctx: RunCtx, run: LoopRun, outcome: LoopRunOutcome, reason: string): void {
+    this.teardown(ctx)
+    this.finishRun(run.id, outcome, reason)
   }
 
   // -------------------------------------------------------------------------

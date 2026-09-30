@@ -11,7 +11,9 @@ import { resolve as pathResolve } from 'path'
 import type { WebSocket } from 'ws'
 import { getDefaultClaudeModel, triggerCliProbeIfNeeded } from './anthropic-models.js'
 import { REPOS_ROOT } from './config.js'
+import { isDiffView } from './diff-manager.js'
 import { isOrchestratorSession, setOrchestratorModel, setOrchestratorProvider } from './orchestrator-manager.js'
+import type { ReviewAuthor } from './review-comments.js'
 import type { SessionManager } from './session-manager.js'
 import { VALID_PERMISSION_MODES, VALID_PROVIDERS } from './types.js'
 import type { WsClientMessage, WsServerMessage } from './types.js'
@@ -22,6 +24,17 @@ export interface WsHandlerContext {
   sessions: SessionManager
   clientSessions: Map<WebSocket, string>
   send: (msg: WsServerMessage) => void
+}
+
+/**
+ * Who wrote a review comment. The relay connector stamps relayUser/relayRole
+ * on every review frame from a remote browser (overwriting anything the
+ * browser sent); a direct local client is the machine owner.
+ */
+function reviewAuthor(msg: { relayUser?: string; relayRole?: 'owner' | 'grantee' }): ReviewAuthor {
+  return msg.relayRole === 'grantee'
+    ? { id: typeof msg.relayUser === 'string' && msg.relayUser ? msg.relayUser : 'unknown', role: 'grantee' }
+    : { id: typeof msg.relayUser === 'string' && msg.relayUser ? msg.relayUser : 'owner', role: 'owner' }
 }
 
 /** Route a single parsed client message to the appropriate session manager method. */
@@ -62,7 +75,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       const model = msg.model ?? (provider === 'claude' ? getDefaultClaudeModel() : undefined)
       // Use the security-checked canonical path (not the raw msg.workingDir) so
       // grouping/archive behavior stays consistent with the resolved directory.
-      const session = sessions.create(msg.name, resolvedDir, { model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider })
+      const session = sessions.create(msg.name, resolvedDir, { model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider, useWorktree: msg.useWorktree })
       session.clients.add(ws)
       clientSessions.set(ws, session.id)
 
@@ -70,26 +83,26 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       triggerCliProbeIfNeeded()
 
       if (msg.useWorktree) {
-        // Create worktree asynchronously, then start Claude in it
-        void sessions.createWorktree(session.id, resolvedDir).then((wtPath) => {
-          if (wtPath) {
-            send({
-              type: 'session_created',
-              sessionId: session.id,
-              sessionName: session.name,
-              workingDir: session.workingDir,
-            })
+        // Create the worktree, then start Claude in it. An isolated session
+        // never falls back to the shared checkout: on failure it stays
+        // stopped (input is held) until the user retries or switches.
+        void sessions.prepareSessionWorktree(session.id, resolvedDir).then((result) => {
+          if (sessions.get(session.id) !== session) return  // deleted meanwhile
+          send({
+            type: 'session_created',
+            sessionId: session.id,
+            sessionName: session.name,
+            workingDir: session.workingDir,
+          })
+          if (result.ok) {
+            sessions.startClaude(session.id)
           } else {
-            // Worktree creation failed — fall back to main directory
-            send({ type: 'system_message', subtype: 'error', text: 'Failed to create git worktree. Using main project directory.' })
             send({
-              type: 'session_created',
-              sessionId: session.id,
-              sessionName: session.name,
-              workingDir: session.workingDir,
+              type: 'system_message',
+              subtype: 'error',
+              text: `Could not create an isolated worktree: ${result.message} Nothing was started in the shared checkout. Retry, or switch this session to the shared checkout.`,
             })
           }
-          sessions.startClaude(session.id)
         })
       } else {
         send({
@@ -157,7 +170,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
     case 'stop': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
-        sessions.stopClaude(sessionId)
+        sessions.stopSession(sessionId)
       }
       break
     }
@@ -219,12 +232,12 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           send({ type: 'error', message: `Invalid provider: ${msg.provider}` })
           break
         }
-        sessions.setProvider(sessionId, msg.provider, msg.carryContext)
         // The orchestrator's harness is a standing preference, not a per-session
         // one — its session is recreated on demand, so persist the choice.
         if (isOrchestratorSession(sessions.get(sessionId)?.source)) {
           setOrchestratorProvider(sessions, msg.provider)
         }
+        sessions.setProvider(sessionId, msg.provider, msg.carryContext)
       }
       break
     }
@@ -253,19 +266,110 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       break
 
     // Compute git diff for the session's working directory and return structured results.
+    // Diff responses carry the request and session they answer, so a client
+    // that has since switched session or view can drop late results.
     case 'get_diff': {
       const sessionId = clientSessions.get(ws)
-      if (sessionId) {
-        void sessions.getDiff(sessionId, msg.scope).then(result => { send(result) })
+      const { requestId } = msg
+      const view = msg.scope ?? 'all'
+      if (!sessionId) { send({ type: 'diff_error', message: 'Not in a session', requestId }); break }
+      if (!isDiffView(view)) { send({ type: 'diff_error', message: `Unknown diff view: ${String(view)}`, requestId, sessionId }); break }
+      void sessions.getDiff(sessionId, view).then(result => { send({ ...result, requestId, sessionId } as WsServerMessage) })
+      break
+    }
+
+    case 'get_change_summary': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId) break
+      void sessions.getChangeSummary(sessionId).then(summary => {
+        if (summary) send({ type: 'change_summary', sessionId, ...summary })
+      })
+      break
+    }
+
+    case 'get_pr_status': {
+      const sessionId = clientSessions.get(ws)
+      const { requestId } = msg
+      if (!sessionId) { send({ type: 'error', message: 'Not in a session' }); break }
+      void sessions.getPrStatus(sessionId, msg.refresh === true).then(status => {
+        if (status) send({ type: 'pr_status', status, requestId, sessionId })
+      })
+      break
+    }
+
+    // --- Review comments: anchored drafts, sent to the agent as one prompt ---
+
+    case 'review_comments_get': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId) { send({ type: 'review_error', message: 'Not in a session' }); break }
+      void sessions.listReviewComments(sessionId).then(comments => {
+        if (comments) send({ type: 'review_comments', sessionId, comments })
+      })
+      break
+    }
+
+    case 'review_comment_add':
+    case 'review_comment_update':
+    case 'review_comment_delete':
+    case 'review_feedback_send': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId) { send({ type: 'review_error', message: 'Not in a session' }); break }
+      const author = reviewAuthor(msg)
+      const done = (error: string | null) => { if (error) send({ type: 'review_error', message: error, sessionId }) }
+      if (msg.type === 'review_comment_add') {
+        const { path, side, startLine, endLine, view, baseCommit, headCommit } = msg
+        if (!isDiffView(view)) { done(`Unknown diff view: ${String(view)}`); break }
+        void sessions.addReviewComment(sessionId, { path, side, startLine, endLine, view, baseCommit, headCommit }, msg.body, author).then(done)
+      } else if (msg.type === 'review_comment_update') {
+        void sessions.updateReviewComment(sessionId, msg.id, msg.body, author).then(done)
+      } else if (msg.type === 'review_comment_delete') {
+        void sessions.deleteReviewComment(sessionId, msg.id, author).then(done)
       } else {
-        send({ type: 'diff_error', message: 'Not in a session' })
+        const ids = Array.isArray(msg.ids) ? msg.ids.filter((id): id is string => typeof id === 'string') : undefined
+        void sessions.sendReviewFeedback(sessionId, { ids, includeStale: msg.includeStale === true }).then(done)
       }
+      break
+    }
+
+    case 'set_review_base': {
+      const sessionId = clientSessions.get(ws)
+      const { requestId, scope: view } = msg
+      if (!sessionId) { send({ type: 'diff_error', message: 'Not in a session', requestId }); break }
+      if (!isDiffView(view)) { send({ type: 'diff_error', message: `Unknown diff view: ${String(view)}`, requestId, sessionId }); break }
+      const base = typeof msg.base === 'string' && msg.base.trim() ? msg.base.trim() : null
+      void sessions.setReviewBase(sessionId, base).then(async (error) => {
+        if (error) { send({ type: 'diff_error', message: error, scope: view, requestId, sessionId }); return }
+        const result = await sessions.getDiff(sessionId, view)
+        send({ ...result, requestId, sessionId } as WsServerMessage)
+      })
       break
     }
 
     // Move a running session into a git worktree mid-conversation.
     // Stops the Claude process first, creates the worktree, then restarts Claude in it.
     // Preserves the Claude session ID so the CLI resumes with full conversation context.
+    // Recover an isolated session whose worktree failed or disappeared.
+    case 'retry_worktree': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId) { send({ type: 'error', message: 'Not in a session' }); break }
+      void sessions.retryWorktree(sessionId).then((result) => {
+        if (!result.ok) {
+          send({ type: 'system_message', subtype: 'error', text: `Worktree retry failed: ${result.message}` })
+        }
+      })
+      break
+    }
+
+    // Explicit, user-chosen switch of an isolated session to the shared checkout.
+    case 'use_existing_checkout': {
+      const sessionId = clientSessions.get(ws)
+      if (!sessionId) { send({ type: 'error', message: 'Not in a session' }); break }
+      if (!sessions.useExistingCheckout(sessionId)) {
+        send({ type: 'error', message: 'Session cannot switch to the shared checkout right now' })
+      }
+      break
+    }
+
     case 'move_to_worktree': {
       const sessionId = clientSessions.get(ws)
       if (!sessionId) { send({ type: 'error', message: 'Not in a session' }); break }
@@ -280,19 +384,20 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
         // Keep claudeSessionId so Claude CLI resumes with full conversation
         // context after the restart.  stopClaudeAndWait() already awaits
         // process exit, so the session lock should be released.
-        return sessions.createWorktree(sessionId, originalDir)
-      }).then((wtPath) => {
-        if (wtPath) {
-          const wtName = wtPath.split('/').pop() ?? wtPath
-          const createdMsg = { type: 'worktree_created' as const, worktreePath: wtPath, workingDir: wtPath }
+        return sessions.prepareSessionWorktree(sessionId, originalDir)
+      }).then((result) => {
+        if (result.ok) {
+          const wtName = result.path.split('/').pop() ?? result.path
+          const createdMsg = { type: 'worktree_created' as const, worktreePath: result.path, workingDir: result.path }
           sessions.broadcast(session, createdMsg)
           const notifMsg = { type: 'system_message' as const, subtype: 'notification' as const, text: `Moved to worktree: ${wtName}` }
           sessions.addToHistory(session, notifMsg)
           sessions.broadcast(session, notifMsg)
         } else {
-          send({ type: 'system_message', subtype: 'error', text: 'Failed to create worktree. Check server logs for details.' })
+          send({ type: 'system_message', subtype: 'error', text: `Failed to create worktree: ${result.message} Continuing in the current checkout.` })
         }
-        // Always restart Claude — in the worktree on success, or original dir on failure
+        // Restart Claude — in the worktree on success, or where it already was
+        // on failure (the session was not isolated before the move).
         sessions.startClaude(sessionId)
       }).catch((err) => {
         console.error('[worktree] move_to_worktree failed:', err)
@@ -306,7 +411,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
     case 'discard_changes': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
-        void sessions.discardChanges(sessionId, msg.scope, msg.paths, msg.statuses).then(result => { send(result) })
+        void sessions.discardChanges(sessionId, msg.scope, msg.paths, msg.statuses).then(result => { send({ ...result, sessionId } as WsServerMessage) })
       } else {
         send({ type: 'diff_error', message: 'Not in a session' })
       }

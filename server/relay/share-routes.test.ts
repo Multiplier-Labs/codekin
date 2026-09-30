@@ -1,4 +1,6 @@
 /** Tests for the share REST endpoints: grantee resolution and live revocation. */
+import { signInFully } from './__fixtures__/auth.js'
+import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
 import session from 'express-session'
@@ -21,7 +23,6 @@ function toSessionUser(row: UserRow): SessionUser {
     login: row.login,
     displayName: null,
     avatarUrl: null,
-    role: row.role,
     status: row.status,
   }
 }
@@ -42,7 +43,7 @@ describe('share routes', () => {
     guest = upsertUserFromGithub(db, { id: 2, login: 'guest', name: null, email: null, avatarUrl: null }, POLICY)
 
     const { userCode, deviceCode } = startPairing(db, { hostname: 'box', platform: 'linux' })
-    approvePairing(db, userCode, owner.id, 'Box')
+    approvePairing(db, userCode, owner.id, BOOTSTRAP_WORKSPACE_ID, 'Box')
     const complete = completePairing(db, deviceCode)
     if (complete.status !== 'complete') throw new Error('pairing failed')
     machineId = complete.machineId
@@ -51,7 +52,7 @@ describe('share routes', () => {
     app.use(express.json())
     app.use(session({ secret: 's'.repeat(32), resave: false, saveUninitialized: false }))
     app.use((req, _res, next) => {
-      if (req.headers['x-test-user'] === 'owner') req.session.user = toSessionUser(owner)
+      if (req.headers['x-test-user'] === 'owner') { req.session.user = toSessionUser(owner); signInFully(db, req.session, req.session.user.id) }
       next()
     })
     app.use(createShareRouter(db, { reauthorize } as unknown as BrowserHub))
@@ -88,8 +89,12 @@ describe('share routes', () => {
   it('refuses a grantee login held by more than one account', async () => {
     // A rename left a stale row with the same login as a newer account; a
     // grant must not silently land on whichever row the query returned.
-    upsertUserFromGithub(db, { id: 3, login: 'guest', name: null, email: null, avatarUrl: null }, POLICY)
-    db.prepare('UPDATE users SET login = ? WHERE github_id = 2').run('guest')
+    const stale = upsertUserFromGithub(db, { id: 3, login: 'guest', name: null, email: null, avatarUrl: null }, POLICY)
+    db.prepare(`UPDATE users SET login = ?, status = 'active' WHERE github_id = 2`).run('guest')
+    // Both accounts are members, so the workspace-scoped lookup is ambiguous.
+    db.prepare(`INSERT OR IGNORE INTO workspace_memberships (workspace_id, user_id, role) VALUES ('org-default', ?, 'member')`).run(stale.id)
+    db.prepare(`INSERT OR IGNORE INTO workspace_memberships (workspace_id, user_id, role)
+                SELECT 'org-default', id, 'member' FROM users WHERE github_id = 2`).run()
 
     const res = await fetch(`${baseUrl}/api/shares`, {
       method: 'POST',

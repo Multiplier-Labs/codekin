@@ -1,6 +1,6 @@
 # Device Link & Passkey Authentication
 
-**Status**: Draft spec
+**Status**: Implemented in #573 (QR device linking and WebAuthn passkeys on app.codekin.ai).
 **Goal**: Let a signed-in user bring a phone (or any second browser) onto hosted Codekin by scanning a QR code — no password, no GitHub round trip on the small screen — and keep that device signed in afterwards with platform biometrics (Face ID / fingerprint) via WebAuthn passkeys.
 
 ---
@@ -35,6 +35,8 @@ subsequent logins on that device are a single biometric prompt.
   installed to the home screen.
 - No TOTP/SMS second factors; WebAuthn covers the "something you have + something you
   are" combination natively.
+  *Superseded (2026-09-28):* authenticator-app TOTP and recovery codes were added as second
+  factors in Phase 3 of `docs/HOSTED-WORKSPACES-AND-MFA-PLAN.md`; SMS remains out of scope.
 - No cross-device WebAuthn "hybrid" (QR + BLE) login flow. The first-party QR link is
   smoother, works without Bluetooth proximity, and reuses an existing pattern. Nothing
   here precludes adding it later — it would only be additional client UI over the same

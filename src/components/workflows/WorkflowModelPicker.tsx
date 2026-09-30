@@ -10,19 +10,19 @@
 import { useState, useRef, useEffect } from 'react'
 import { IconSearch, IconChevronDown } from '@tabler/icons-react'
 import type { ModelOption } from '../../types'
+import { getPref, setPref } from '../../lib/prefs'
 
-const RECENTS_KEY = 'codekin.workflowRecentModels'
 const MAX_RECENTS = 5
 
 function getRecents(): string[] {
-  try { return JSON.parse(localStorage.getItem(RECENTS_KEY) || '[]') as string[] } catch { return [] }
+  return getPref('workflowRecentModels') ?? []
 }
 
 function addRecent(id: string) {
   if (!id) return
   const next = getRecents().filter(m => m !== id)
   next.unshift(id)
-  localStorage.setItem(RECENTS_KEY, JSON.stringify(next.slice(0, MAX_RECENTS)))
+  setPref('workflowRecentModels', next.slice(0, MAX_RECENTS))
 }
 
 const btnClass = (selected: boolean) =>

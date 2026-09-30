@@ -1,20 +1,29 @@
 /**
- * The first-run environment checklist (audit N1).
+ * The first-run environment checklist (audits N1, N6).
  *
  * The landing surface's live answer to "will this actually work?": one row
  * per agent CLI (installed? signed in? — from the agent-health store the
- * server probes at boot), plus the GitHub CLI and the repository root. Every
- * row is a real check with the exact fix next to it, replacing the silent
- * failure-at-session-start the audit called out.
+ * server probes at boot), plus the optional GitHub CLI and the repository
+ * root. Every row is a real check with the exact fix next to it, replacing
+ * the silent failure-at-session-start the audit called out.
  *
- * Compact when everything is green (a single "all ready" line — returning
- * users shouldn't stare at a checklist); expands into a card whenever
- * anything needs attention.
+ * Compact when the environment is usable (one signed-in agent and
+ * repositories found) — returning users shouldn't stare at a checklist, and
+ * optional agents or an unconnected GitHub CLI shouldn't force it open. The
+ * compact line expands to the full list on click.
  */
 
+import { useState } from 'react'
 import { IconCircleCheck, IconAlertTriangle, IconCircleX, IconCircleDashed } from '@tabler/icons-react'
 import { useAgentHealth } from '../hooks/useAgentHealth'
-import { buildChecklist, hasUsableAgent, type ChecklistState } from '../lib/environmentChecklist'
+import {
+  buildChecklist,
+  hasUsableAgent,
+  isEnvironmentReady,
+  readyAgentCount,
+  type ChecklistEnv,
+  type ChecklistState,
+} from '../lib/environmentChecklist'
 
 const STATE_ICON: Record<ChecklistState, { icon: typeof IconCircleCheck; className: string }> = {
   ready: { icon: IconCircleCheck, className: 'text-success-4' },
@@ -23,29 +32,39 @@ const STATE_ICON: Record<ChecklistState, { icon: typeof IconCircleCheck; classNa
   unknown: { icon: IconCircleDashed, className: 'text-ink-faint' },
 }
 
-interface Props {
-  ghMissing: boolean
-  repoCount: number
-}
+type Props = ChecklistEnv
 
-export function EnvironmentChecklist({ ghMissing, repoCount }: Props) {
+export function EnvironmentChecklist(env: Props) {
   const health = useAgentHealth()
-  const rows = buildChecklist(health, ghMissing, repoCount)
-  const problems = rows.filter((r) => r.state !== 'ready')
-  const agentsReady = rows.filter((r) => r.state === 'ready' && ['claude', 'opencode', 'codex'].includes(r.id)).length
+  const [expanded, setExpanded] = useState(false)
+  const rows = buildChecklist(health, env)
+  const agentsReady = readyAgentCount(rows)
 
-  if (problems.length === 0) {
+  if (isEnvironmentReady(rows) && !expanded) {
+    const gh = env.ghStatus === 'ok' ? 'GitHub CLI ✓' : 'GitHub CLI not connected (optional)'
     return (
-      <p className="mb-4 flex items-center justify-center gap-1.5 text-meta text-ink-faint">
+      <button
+        type="button"
+        onClick={() => { setExpanded(true) }}
+        title="Show environment details"
+        className="mx-auto mb-4 flex items-center justify-center gap-1.5 rounded-control px-2 text-meta text-ink-faint transition-colors hover:text-ink-muted"
+      >
         <IconCircleCheck size={14} stroke={2} className="text-success-4" />
-        {agentsReady} agent{agentsReady === 1 ? '' : 's'} ready · GitHub CLI ✓ · {repoCount} repositories
-      </p>
+        {agentsReady} agent{agentsReady === 1 ? '' : 's'} ready · {gh} · {env.repoCount} repositories
+      </button>
     )
   }
 
   return (
     <div className="mb-5 rounded-control border border-edge bg-surface px-4 py-3">
-      <p className="mb-2 text-meta font-medium text-ink-muted">Environment</p>
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-meta font-medium text-ink-muted">Environment</p>
+        {expanded && (
+          <button type="button" onClick={() => { setExpanded(false) }} className="text-meta text-ink-faint hover:text-ink-muted">
+            Hide
+          </button>
+        )}
+      </div>
       {!hasUsableAgent(rows) && health && (
         <p className="mb-2 text-body text-warning-4">
           No coding agent is available on this host — install at least one to use Codekin.

@@ -1,6 +1,6 @@
 # Loops 2.0 — Product and Technical Specification
 
-**Status:** proposal
+**Status:** Implemented — all four phases shipped in #620–#623. Kept as design rationale; the user-facing reference is [LOOPS.md](./LOOPS.md).
 
 **Date:** 2026-08-30
 **Scope:** replace the current Goal Runs/Loop Runs experience and engine

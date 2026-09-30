@@ -16,24 +16,30 @@ import { join } from 'path'
 import { loadRelayConfig } from './relay-config.js'
 import { openControlPlaneDb, getUserById } from './control-plane-db.js'
 import { SqliteSessionStore } from './sqlite-session-store.js'
-import { createRelayAuthRouter, toSessionUser } from './relay-auth-routes.js'
+import { createRelayAuthRouter, currentAuthLevel, toSessionUser } from './relay-auth-routes.js'
 import { createMachineRouter } from './machine-routes.js'
 import { createPairingRouter } from './pairing-routes.js'
 import { createShareRouter } from './share-routes.js'
 import { createUserRouter } from './user-routes.js'
+import { createWorkspaceRouter } from './workspace-routes.js'
+import { createInvitationRouter } from './invitation-routes.js'
+import { createMfaRouter } from './mfa-routes.js'
+import { FailedAttemptLimiter } from './mfa.js'
 import { createDeviceLinkRouter } from './device-link-routes.js'
 import { createWebauthnRouter } from './webauthn-routes.js'
 import { ConnectorHub } from './connector-hub.js'
 import { BrowserHub } from './browser-hub.js'
 import { MAX_PROXY_BODY_BYTES } from './relay-protocol.js'
 import { pruneAuditEvents } from './audit.js'
+import { sweepOrphanMachines } from './pairing.js'
 import type { SessionUser } from './relay-auth-routes.js'
+import { createMutationOriginGuard } from './origin-guard.js'
 
 const config = loadRelayConfig()
 const db = openControlPlaneDb(join(config.dataDir, 'control-plane.db'))
 const store = new SqliteSessionStore(db)
 const hub = new ConnectorHub(db)
-const browserHub = new BrowserHub(db, hub)
+const browserHub = new BrowserHub(db, hub, { isSessionAlive: sid => store.isAlive(sid) })
 
 const app = express()
 
@@ -82,6 +88,19 @@ app.use('/api/auth', ipRateLimiter(20, 60_000))
 // Pairing: start writes rows; complete is polled every ~3s by the CLI.
 app.use('/api/machines/pair/start', ipRateLimiter(10, 60_000))
 app.use('/api/machines/pair/complete', ipRateLimiter(60, 60_000))
+// Authenticated mutations and lookups: generous for people, a ceiling for scripts.
+app.use('/api/machines/pair/approve', ipRateLimiter(20, 60_000))
+app.use('/api/machines/pair/info', ipRateLimiter(30, 60_000))
+app.use('/api/shares', ipRateLimiter(60, 60_000))
+app.use('/api/users', ipRateLimiter(60, 60_000))
+app.use('/api/me/preferences', ipRateLimiter(60, 60_000))
+app.use('/api/workspaces', ipRateLimiter(120, 60_000))
+// Unauthenticated invitation lookups: holding a link is the only credential.
+app.use('/api/invitations', ipRateLimiter(20, 60_000))
+
+// Cookie-authenticated REST mutations must come from the app itself.
+// SameSite=Lax alone still admits sibling subdomains of the site.
+app.use(createMutationOriginGuard(config.publicUrl))
 
 // Held in a const so WebSocket upgrades can reuse it to resolve the session.
 const sessionMiddleware = session({
@@ -93,7 +112,9 @@ const sessionMiddleware = session({
   rolling: true,
   cookie: {
     httpOnly: true,
-    secure: config.isProduction,
+    // Follows the public URL, not NODE_ENV: an https deployment must never
+    // issue a cookie a plain-http hop could carry.
+    secure: config.publicUrl.startsWith('https:'),
     // 'lax' is required for the OAuth return trip from github.com
     sameSite: 'lax',
     path: '/',
@@ -117,13 +138,22 @@ app.use(createRelayAuthRouter({
   config,
   store,
   disconnectUser: (userId, reason) => { browserHub.disconnectUser(userId, reason) },
+  disconnectSession: (sessionId, reason) => { browserHub.disconnectSession(sessionId, reason) },
 }))
-app.use(createMachineRouter(db, hub))
+app.use(createMachineRouter(db, hub, config))
 app.use(createPairingRouter(db, config, { connectorHub: hub, browserHub }))
-app.use(createShareRouter(db, browserHub))
+app.use(createShareRouter(db, browserHub, config))
 app.use(createUserRouter(db, config, browserHub, store))
+app.use(createWorkspaceRouter({ db, config, browserHub, connectorHub: hub }))
+app.use(createInvitationRouter({ db, config }))
 app.use(createDeviceLinkRouter(db, config))
-app.use(createWebauthnRouter(db, config))
+// One failed-attempt budget for typed codes and passkey checks alike.
+const mfaLimiter = new FailedAttemptLimiter()
+const disconnectUserExcept = (userId: string, reason: string, exceptSessionId?: string) => {
+  browserHub.disconnectUser(userId, reason, exceptSessionId)
+}
+app.use(createMfaRouter({ db, config, store, disconnectUser: disconnectUserExcept, limiter: mfaLimiter }))
+app.use(createWebauthnRouter(db, config, { store, disconnectUser: disconnectUserExcept, limiter: mfaLimiter }))
 
 app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' })
@@ -148,6 +178,16 @@ if (config.auditRetentionDays > 0) {
   setInterval(prune, 24 * 60 * 60 * 1000).unref()
 }
 
+// Install commands that were never run leave a machine row behind. Sweep the
+// ones whose pairing expired unclaimed (GET /api/machines also sweeps lazily).
+// Machines that have ever held a credential are never touched.
+const sweepOrphans = () => {
+  const removed = sweepOrphanMachines(db)
+  if (removed.length > 0) console.log(`[relay] Swept ${removed.length} unclaimed machine(s) with expired pairing`)
+}
+sweepOrphans()
+setInterval(sweepOrphans, 5 * 60 * 1000).unref()
+
 const server = createServer(app)
 
 // Path-routed WebSocket upgrades (noServer — reject unknown paths).
@@ -169,20 +209,24 @@ const browserWss = new WebSocketServer(wssOptions)
  * reason requireActiveUser re-reads it: a socket opened on a stale session
  * would outlive the revocation by as long as the tab stays open.
  */
-function authenticateUpgrade(req: IncomingMessage): Promise<SessionUser | null> {
+function authenticateUpgrade(req: IncomingMessage): Promise<{ user: SessionUser; sessionId: string } | null> {
   const origin = req.headers.origin
   if (origin !== config.publicUrl) return Promise.resolve(null)
 
   return new Promise(resolve => {
     const res = new ServerResponse(req) as unknown as express.Response
     sessionMiddleware(req as express.Request, res, () => {
-      const user = (req as express.Request).session?.user
+      const expressReq = req as express.Request
+      const user = expressReq.session?.user
       if (!user) {
         resolve(null)
         return
       }
       const current = getUserById(db, user.id)
-      resolve(current && current.status === 'active' ? toSessionUser(current) : null)
+      // Only a fully signed-in session (second factor done, 2FA enrolled
+      // where required) may reach a machine.
+      const full = current?.status === 'active' && currentAuthLevel(db, expressReq, current, config) === 'full'
+      resolve(current && full ? { user: toSessionUser(current), sessionId: expressReq.sessionID } : null)
     })
   })
 }
@@ -196,14 +240,14 @@ server.on('upgrade', (req, socket, head) => {
     return
   }
   if (path === '/relay/browser') {
-    void authenticateUpgrade(req).then(user => {
-      if (!user) {
+    void authenticateUpgrade(req).then(auth => {
+      if (!auth) {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
         socket.destroy()
         return
       }
       browserWss.handleUpgrade(req, socket, head, ws => {
-        browserHub.handleConnection(ws, user)
+        browserHub.handleConnection(ws, auth.user, auth.sessionId)
       })
     })
     return

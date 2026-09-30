@@ -33,6 +33,7 @@ import { getUserById } from './control-plane-db.js'
 import { resolveMachineAccess } from './shares.js'
 import type { MachineAccess } from './shares.js'
 import { recordAuditEvent } from './audit.js'
+import { checkRestPolicy, isServerFrameVisible } from './connector-policy.js'
 import { BROWSER_FRAME_LIMIT, RateLimiter, isBackedUp } from './rate-limit.js'
 
 const CLOSE_AUTH_FAILED = 4001
@@ -51,6 +52,8 @@ const MAX_INFLIGHT_PER_SOCKET = 16
 
 interface BrowserClient {
   user: SessionUser
+  /** Web session that authorized the upgrade; the socket lives no longer than it. */
+  sessionId: string | null
   machineId: string
   socket: WebSocket
   inflight: number
@@ -97,6 +100,11 @@ function toPrincipal(user: SessionUser, access: MachineAccess): RelayPrincipal {
   }
 }
 
+export interface BrowserHubOptions {
+  /** Whether a web session still exists and is unexpired (SqliteSessionStore.isAlive). */
+  isSessionAlive?: (sessionId: string) => boolean
+}
+
 export class BrowserHub {
   private clients = new Set<BrowserClient>()
   /** Per-user frame budget: one browser cannot flood a machine (spec §11.5). */
@@ -106,6 +114,7 @@ export class BrowserHub {
   constructor(
     private db: Database.Database,
     private connectors: ConnectorHub,
+    private options: BrowserHubOptions = {},
   ) {
     this.reauthorizeTimer = setInterval(() => { this.reauthorize(); }, REAUTHORIZE_INTERVAL_MS)
     this.reauthorizeTimer.unref()
@@ -127,6 +136,10 @@ export class BrowserHub {
     for (const client of [...this.clients]) {
       if (filter.userId && client.user.id !== filter.userId) continue
       if (filter.machineId && client.machineId !== filter.machineId) continue
+      if (client.sessionId && this.options.isSessionAlive && !this.options.isSessionAlive(client.sessionId)) {
+        this.revoke(client, 'session ended')
+        continue
+      }
       const row = getUserById(this.db, client.user.id)
       const access = row
         ? resolveMachineAccess(this.db, row, client.machineId)
@@ -140,14 +153,40 @@ export class BrowserHub {
           metadata: { stage: 'reauthorize' },
         })
       }
-      client.socket.close(CLOSE_FORBIDDEN, 'authorization changed')
+      this.revoke(client, 'authorization changed')
     }
   }
 
-  /** Close every live browser socket for a user (global logout/revocation). */
-  disconnectUser(userId: string, reason = 'access revoked'): void {
+  /**
+   * Stop serving a client now. It leaves the client set before the close
+   * handshake starts, so frames still in flight from the browser are ignored
+   * rather than forwarded while the socket winds down.
+   */
+  private revoke(client: BrowserClient, reason: string): void {
+    if (!this.clients.delete(client)) return
+    for (const remoteId of client.channels.values()) {
+      this.connectors.closeChannel(client.machineId, remoteId, STREAM_CLOSE.normal, reason)
+    }
+    client.channels.clear()
+    client.socket.close(CLOSE_FORBIDDEN, reason)
+  }
+
+  /**
+   * Close every live browser socket for a user (global logout/revocation),
+   * optionally sparing those of one web session.
+   */
+  disconnectUser(userId: string, reason = 'access revoked', exceptSessionId?: string): void {
     for (const client of [...this.clients]) {
-      if (client.user.id === userId) client.socket.close(CLOSE_FORBIDDEN, reason)
+      if (client.user.id !== userId) continue
+      if (exceptSessionId !== undefined && client.sessionId === exceptSessionId) continue
+      this.revoke(client, reason)
+    }
+  }
+
+  /** Close the sockets opened under one web session (logout). */
+  disconnectSession(sessionId: string, reason = 'logged out'): void {
+    for (const client of [...this.clients]) {
+      if (client.sessionId === sessionId) this.revoke(client, reason)
     }
   }
 
@@ -157,7 +196,7 @@ export class BrowserHub {
   }
 
   /** Wire up a fresh /relay/browser socket for an already-authenticated user. */
-  handleConnection(socket: WebSocket, user: SessionUser): void {
+  handleConnection(socket: WebSocket, user: SessionUser, sessionId: string | null = null): void {
     let client: BrowserClient | null = null
 
     const helloTimeout = setTimeout(() => {
@@ -195,7 +234,7 @@ export class BrowserHub {
           .prepare('SELECT display_name FROM machines WHERE id = ?')
           .get(machineId) as { display_name: string }
 
-        client = { user, machineId, socket, inflight: 0, access, channels: new Map() }
+        client = { user, sessionId, machineId, socket, inflight: 0, access, channels: new Map() }
         this.clients.add(client)
         socket.send(
           JSON.stringify(
@@ -210,6 +249,9 @@ export class BrowserHub {
         )
         return
       }
+
+      // Revoked (logout, access change): nothing more is served on this socket.
+      if (!this.clients.has(client)) return
 
       // Past hello, every frame costs the user a token.
       if (!this.frameLimiter.tryConsume(client.user.id)) {
@@ -261,6 +303,19 @@ export class BrowserHub {
         message: 'Too many requests in flight',
       })
       return
+    }
+
+    // The connector enforces this too; checking here as well means a machine
+    // running an older connector is still protected by the hosted service.
+    if (client.access.kind === 'grantee') {
+      const permitted = checkRestPolicy({ role: 'grantee', grants: client.access.grants }, request.method, request.path)
+      if (!permitted.allowed) {
+        this.sendError(client.socket, id, {
+          code: RELAY_ERROR.notPermitted,
+          message: permitted.reason ?? 'Not permitted',
+        })
+        return
+      }
     }
 
     client.inflight += 1
@@ -319,6 +374,12 @@ export class BrowserHub {
             envelope('stream_close', { code: STREAM_CLOSE.normal, reason: 'client too slow' }, { channelId: localId }),
           ),
         )
+        return
+      }
+      // Same outbound rule the connector applies, repeated here for older
+      // connectors: never relay another session's frames to a grantee.
+      if (kind === 'stream_data' && client.access.kind === 'grantee' &&
+          !isServerFrameVisible(client.access.grants, (payload as StreamData).data)) {
         return
       }
       client.socket.send(JSON.stringify(envelope(kind, payload, { channelId: localId })))

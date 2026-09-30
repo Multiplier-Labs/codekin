@@ -31,6 +31,16 @@ function renderHook<T>(hookFn: () => T): { result: { current: T }; unmount: () =
 }
 
 describe('parsePath', () => {
+  it('routes /settings and /settings/:section to the settings view', () => {
+    expect(parsePath('/settings')).toMatchObject({ view: 'settings', settingsSection: null, sessionId: null })
+    expect(parsePath('/settings/')).toMatchObject({ view: 'settings', settingsSection: null })
+    expect(parsePath('/settings/members')).toMatchObject({ view: 'settings', settingsSection: 'members' })
+    expect(parsePath('/settings/members/')).toMatchObject({ view: 'settings', settingsSection: 'members' })
+    // Anything else under /settings is not a section.
+    expect(parsePath('/settings/a/b').view).toBe('chat')
+    expect(parsePath('/s/abc').settingsSection).toBeNull()
+  })
+
   it('extracts session ID from /s/:id', () => {
     const result = parsePath('/s/550e8400-e29b-41d4-a716-446655440000')
     expect(result.sessionId).toBe('550e8400-e29b-41d4-a716-446655440000')

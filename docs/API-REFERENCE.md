@@ -288,6 +288,23 @@ Set the orchestrator agent display name.
 **Request body:** `{ "name": "Agent Joe" }`
 **Response:** `{ "name": "Agent Joe" }`
 
+### `GET /api/settings/prefs`
+
+Get the UI preferences blob: theme, new-session defaults (worktree, permission mode,
+provider, last model per provider), layout (sidebar, diff panel, repo drawer), starred
+docs, recent models and queued drafts. The server stores it verbatim in the `settings`
+table (`ui_prefs`) and does not interpret the values.
+
+**Response:** `{ "prefs": { "theme": "dark", "useWorktree": true, ... } }`
+
+### `PUT /api/settings/prefs`
+
+Merge a partial update. Each key replaces the stored value; `null` removes the key.
+Keys must be camelCase identifiers, and the stored blob is capped at 256 KB (413 if exceeded).
+
+**Request body:** `{ "patch": { "sidebarWidth": 300, "activeSessionId": null } }`
+**Response:** `{ "prefs": { ... } }`
+
 ---
 
 ## Directory Browsing
@@ -677,6 +694,11 @@ offered options; `note` becomes guidance to the maker where applicable.
 
 ## Orchestrator (Agent Joe)
 
+Harness selection: `GET /api/orchestrator/status` includes `provider` (`claude`, `codex`, `opencode`, or `null` when not yet selected). `POST /api/orchestrator/start` accepts `{ "provider": "codex" }` to save a choice before starting; an omitted provider reuses the saved choice, or returns 409 if none exists. Invalid providers return 400. Users can subsequently switch harnesses in Joe's composer.
+
+`POST /api/orchestrator/children` and the `spawn_child` MCP tool accept optional `provider` and `model` overrides. Without a provider override, the child uses its parent's harness, then Joe's saved choice if the parent is not loaded. It inherits the parent's model only when the harness matches; otherwise it uses the selected harness's default. Spawning without any harness choice is rejected. The resolved provider/model are included in the child request and persisted run spec.
+
+
 All orchestrator routes are mounted at the `/api/orchestrator/` prefix.
 
 ### Status & Lifecycle
@@ -697,12 +719,12 @@ Ensure the orchestrator session is running. Starts it if not already active.
 
 #### `GET /api/orchestrator/reports`
 
-List available audit reports. Exactly one of `repo` or `since` must be provided.
+List audit reports, newest first. Without `repo`, reports are listed across every managed repo: the orchestrator's repo memory, the configured workflow repos, and the repos of its child sessions. Every subdirectory of `.codekin/reports/` is a category (e.g. `incidents`, `product`).
 
 When `repo` is supplied, it is resolved via `realpath` and must sit under the configured `REPOS_ROOT`; otherwise the request is rejected with `400`.
 
-**Query params:** `repo` (path under `REPOS_ROOT`) **or** `since` (YYYY-MM-DD date; lists reports across managed repos newer than that date)
-**Response:** `{ "reports": ReportMeta[] }`, or `400` with `{ "error": "..." }` when neither query param is provided or when `repo` is not under the configured repos root.
+**Query params:** `repo` (optional, path under `REPOS_ROOT`), `since` (optional, YYYY-MM-DD; keeps reports dated on or after that day)
+**Response:** `{ "reports": ReportMeta[] }`, or `400` with `{ "error": "..." }` when `repo` is not under the configured repos root or `since` is not a YYYY-MM-DD date.
 
 #### `GET /api/orchestrator/reports/read`
 
@@ -715,9 +737,11 @@ Read the contents of a specific report file. The resolved path must sit under `R
 
 #### `GET /api/orchestrator/children`
 
-List child sessions spawned by the orchestrator.
+List child sessions spawned by the orchestrator. The list covers running children and ones that finished in the last hour. It also includes children interrupted by a server restart, which come back as `failed` with `"error": "interrupted by server restart"`.
 
-**Response:** `{ "children": ChildSession[] }`
+`status` is one of `starting`, `running`, `blocked`, or a terminal value: `completed`, `unverified`, `failed`, `timed_out`, `canceled`. A child is `completed` only when `verification.state` is `verified` (an open or merged PR, or the pushed remote branch, points at the worktree's HEAD) or `not_applicable` (`commit-only`). If the PR or push is missing or cannot be checked, the child ends `unverified`. Stopping, archiving or deleting the session cancels the child immediately and frees its slot.
+
+**Response:** `{ "children": ChildSession[] }`. Each child includes `verification: { state, commit, prUrl, detail, checkedAt } | null`.
 
 #### `POST /api/orchestrator/children`
 
@@ -725,14 +749,47 @@ Spawn a new child session for a task. `repo` is resolved via `realpath` and must
 
 Because each spawn allocates a real Claude subprocess, this endpoint is additionally **rate-limited per client IP**: at most **20 spawn requests per 5-minute sliding window per IP**. The limiter is keyed on `req.ip` (which honours `X-Forwarded-For` when the server is configured with `TRUST_PROXY`) and runs *before* auth, so even unauthenticated floods are capped. It is applied on top of the global 300-requests-per-minute API limiter.
 
-**Request body:** `{ "repo": "...", "task": "...", "branchName": "...", "useWorktree"?: boolean, "completionPolicy"?: "pr" | "merge" | "commit-only", "deployAfter"?: boolean, "model"?: "claude-opus-4-8", "allowedTools"?: string[] }` (see [Models](#models) for accepted `model` identifiers)
+**Request body:** `{ "repo": "...", "task": "...", "branchName": "...", "useWorktree"?: boolean, "completionPolicy"?: "pr" | "merge" | "commit-only", "provider"?: "claude" | "codex" | "opencode", "model"?: "claude-opus-4-8", "allowedTools"?: string[], "timeoutMs"?: number }` (see [Models](#models) for accepted `model` identifiers). `merge` pushes the branch; it does not merge a PR. `timeoutMs` is the working-time budget (60000–14400000, default 30 minutes; time blocked on prompts does not count). `deployAfter: true` is rejected with `400`: children never deploy.
 **Response:** `{ "child": ChildSession }`, `400` with `{ "error": "..." }` when required fields are missing, `branchName` / `allowedTools` fail validation, or `repo` is not an existing directory under the configured repos root, `429` with `{ "error": "Too Many Requests", "retryAfter": 300 }` when the per-IP spawn cap is exceeded (`retryAfter` is in seconds), or `503` when the child session cannot be spawned.
 
 #### `GET /api/orchestrator/children/:id`
 
-Get details for a specific child session.
+Get details for a specific child session. Children no longer in the live list are rebuilt from the run store as read-only history.
 
 **Response:** `{ "child": ChildSession }` or `404`
+
+#### Child control
+
+These endpoints act only on children the orchestrator spawned. For any other session they return `404`. A request that doesn't fit the child's current state returns `409` with an explanation.
+
+| Endpoint | Body | Effect |
+| --- | --- | --- |
+| `POST /api/orchestrator/children/:id/input` | `{ "text": "..." }` | Sends a follow-up instruction to an active child. `409` if the child is finished (use resume) or waiting on a prompt (answer it first). |
+| `POST /api/orchestrator/children/:id/stop` | — | Stops an active child. It becomes `canceled`, and its worktree, branch and transcript are kept. |
+| `POST /api/orchestrator/children/:id/resume` | `{ "instructions"?: "..." }` | Starts another supervised attempt on a finished child's session: same branch and worktree, a fresh working-time budget, and completion re-verified. `attempt` increments. Counts toward the 5-child limit. `409` if the session was deleted or its worktree removed. |
+| `POST /api/orchestrator/children/:id/close` | `{ "mode"?: "archive" \| "delete", "cancel"?: boolean }` | `archive` (default) stops the child and keeps session, transcript, worktree and branch; it can be resumed. `delete` removes the session: a clean worktree is removed, and one with uncommitted or untracked files is kept. Branches are never deleted. Active children are refused unless `cancel: true`. |
+
+**Close response:** `{ "child", "action": "archived" | "deleted", "worktree": { "path", "outcome": "kept" | "removal_started" | "none", "modified": string[], "untracked": string[] }, "branch" }`
+
+### Tasks
+
+Agent Joe's durable per-repo task list (design: [JOE-TASKS-SPEC.md](JOE-TASKS-SPEC.md)). Task status is `todo`, `in_progress`, `needs_decision`, `in_review`, `done` or `dismissed`. It follows the linked child automatically: running → `in_progress`, verified → `in_review`, unverified/failed/timed out → `needs_decision` (Retry / Dismiss), canceled → `todo`. Mutations push a `workflow_event` with `engine: "agent"` and `kind: "task"`.
+
+Both the user and Joe can call these routes. Consent actions (`answer`, `start`, `accept`, `request-changes`) return `403` for Joe's session token.
+
+| Method | Path | Body / query | Effect |
+| --- | --- | --- | --- |
+| GET | `/api/orchestrator/tasks` | `?repo=&status=` | `{ tasks: Task[], counts: Record<status, number> }`, newest update first |
+| GET | `/api/orchestrator/tasks/:id` | — | `{ task, events: [{ actor, summary, createdAt }] }` |
+| POST | `/api/orchestrator/tasks` | `{ repo, tasks: [{ title, detail?, acceptance?, priority? }], acceptance?, completionPolicy?, source?, sourceRef?, delegate? }` | Creates 1–20 tasks in one repo. `delegate: true` notifies Joe to start them |
+| PATCH | `/api/orchestrator/tasks/:id` | `{ title?, detail?, acceptance?, priority?, completionPolicy?, status?: "todo" \| "done" \| "dismissed", note? }` | Edits, reopens, completes or dismisses |
+| POST | `/api/orchestrator/tasks/:id/decision` | `{ question, recommendation?, options?: string[] }` | Opens a decision → `needs_decision` |
+| POST | `/api/orchestrator/tasks/:id/answer` | `{ answer }` | User answers → Joe is notified (`Dismiss` on a failed attempt dismisses the task) |
+| POST | `/api/orchestrator/tasks/:id/start` | — | Asks Joe to start a `todo` task (or resume its stopped attempt) |
+| POST | `/api/orchestrator/tasks/:id/accept` | — | `in_review` → `done` |
+| POST | `/api/orchestrator/tasks/:id/request-changes` | `{ note }` | `in_review` → `in_progress`, and Joe is asked to resume the child |
+
+`POST /api/orchestrator/children` also accepts `taskId`. The task must be open and in the same repo, and its `completionPolicy` is used when none is given.
 
 ### Session Management
 
@@ -740,7 +797,8 @@ Get details for a specific child session.
 
 List all sessions visible to the orchestrator.
 
-**Response:** `{ "sessions": Session[] }`
+**Query params:** `view=summary` (optional) returns one compact row per session: `{ id, name, source, state: "working" | "idle" | "waiting_on_prompt" | "stopped" | "archived", pendingPrompts, provider, repo, branch, worktreePath, lastActivity, child: { status, attempt, verification } | null }`. Filter with `source=<source>` and `active=true` (excludes archived sessions).
+**Response:** `{ "sessions": Session[] }`, or the summary rows.
 
 #### `GET /api/orchestrator/sessions/pending-prompts`
 
@@ -752,14 +810,15 @@ Get sessions that have pending approval prompts.
 
 Respond to a pending prompt in a session.
 
-**Request body:** `{ "requestId"?: "...", "value": "..." }`
+**Request body:** `{ "requestId"?: "...", "value": "..." | string[] }` — pass one answer per question for multi-question prompts.
 **Response:** `{ "ok": true }`, `400` when `value` is missing, `404` when the session does not exist, or `409` when there is no pending prompt to respond to.
 
 #### `DELETE /api/orchestrator/sessions/cleanup`
 
-Delete all automated sessions (sources: `workflow`, `webhook`, `stepflow`, `agent`).
+Delete **finished** automated sessions (sources: `workflow`, `webhook`, `stepflow`, `agent`). Sessions that are mid-turn, waiting on a prompt, or supervised as an active child are skipped and never stopped. Worktrees with uncommitted or untracked files are kept, and branches are always kept.
 
-**Response:** `{ "deleted": number }` — count of sessions deleted.
+**Query params:** `dryRun=true` (optional): preview the selection without deleting anything.
+**Response:** `{ "dryRun": boolean, "deleted": [{ "id", "name" }], "skipped": [{ "id", "name", "reason" }] }`
 
 #### `DELETE /api/orchestrator/sessions/:id`
 

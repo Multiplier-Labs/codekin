@@ -23,6 +23,31 @@ export const VALID_PROVIDERS = new Set<CodingProvider>(['claude', 'opencode', 'c
 
 export const VALID_PERMISSION_MODES = new Set<PermissionMode>(['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dangerouslySkipPermissions'])
 
+/** Where a session's agent is allowed to run. */
+export type ExecutionMode = 'isolated' | 'existing-checkout'
+
+/** Readiness of an isolated session's worktree. */
+export type WorktreeState = 'preparing' | 'ready' | 'failed' | 'missing' | 'removed'
+
+/** What removing an archived session's working files would affect. */
+export interface WorktreeRemovalPreflight {
+  worktreePath: string | null
+  branch?: string
+  exists: boolean
+  /** Tracked files with uncommitted changes. */
+  modified: string[]
+  /** Untracked, non-ignored files. */
+  untracked: string[]
+  /** Commits only on this branch (kept on removal); null when unknown. */
+  uniqueCommits: number | null
+  /** Other sessions working inside the worktree. */
+  referencedBy: string[]
+  /** True when removal loses no uncommitted work. */
+  safe: boolean
+  /** Why removal is refused, for display. */
+  blockers: string[]
+}
+
 /**
  * Server-side session state. Holds the Claude child process, connected
  * WebSocket clients, output history for replay, and permission registries.
@@ -36,6 +61,24 @@ export interface Session {
   groupDir?: string
   /** Absolute path to the git worktree directory, if this session uses one. */
   worktreePath?: string
+  /** 'isolated' sessions must run in their own worktree and never fall back
+   *  to the shared checkout. Unset means the session runs where it was created. */
+  executionMode?: ExecutionMode
+  /** Readiness of the worktree an isolated session requires. */
+  worktreeState?: WorktreeState
+  /** Why the worktree is not ready, for display. */
+  worktreeError?: string
+  /** Branch checked out in the session's worktree. */
+  worktreeBranch?: string
+  /** Ref the worktree branch was created from (historical; not updated later). */
+  worktreeBase?: string
+  /** Ref the user chose to review this session's branch against; unset = automatic. */
+  reviewBase?: string
+  /** Review comments on this session's changes (drafts and sent). */
+  reviewComments?: ReviewComment[]
+  /** When the session was archived: stopped, hidden from the active list, never
+   *  auto-started or pruned. Its worktree and branch are kept. */
+  archivedAt?: string
   created: string
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   /** Which AI coding assistant provider powers this session. Defaults to 'claude'. */
@@ -87,6 +130,11 @@ export interface Session {
   _processStartedOnce?: boolean
   /** Last user input sent, stored for API error retry. */
   _lastUserInput?: string
+  /** Inputs received while an isolated session's worktree was unavailable;
+   *  delivered once it is ready or the user switches to the shared checkout. */
+  _heldInputs?: string[]
+  /** Whether clients were already told the worktree is unavailable in its current state. */
+  _worktreeReported?: boolean
   /** First user input, preserved for session naming (not cleared by API retry). */
   _namingUserInput?: string
   /** Timestamp of last user input, used to detect stale retries. */
@@ -143,6 +191,22 @@ export interface SessionInfo {
   groupDir?: string
   /** Absolute path to the git worktree directory, if this session uses one. */
   worktreePath?: string
+  /** 'isolated' sessions must run in their own worktree and never fall back
+   *  to the shared checkout. Unset means the session runs where it was created. */
+  executionMode?: ExecutionMode
+  /** Readiness of the worktree an isolated session requires. */
+  worktreeState?: WorktreeState
+  /** Why the worktree is not ready, for display. */
+  worktreeError?: string
+  /** Branch checked out in the session's worktree. */
+  worktreeBranch?: string
+  /** Ref the worktree branch was created from (historical; not updated later). */
+  worktreeBase?: string
+  /** Ref the user chose to review this session's branch against; unset = automatic. */
+  reviewBase?: string
+  /** When the session was archived: stopped, hidden from the active list, never
+   *  auto-started or pruned. Its worktree and branch are kept. */
+  archivedAt?: string
   connectedClients: number
   lastActivity: string
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
@@ -322,8 +386,13 @@ export type WsServerMessage =
   | { type: 'workflow_event'; eventType: string; runId: string; kind: string; stepKey?: string; status?: string; payload?: unknown; engine?: 'workflow' | 'loop' | 'agent' }
   | { type: 'worktree_created'; worktreePath: string; workingDir: string }
   | { type: 'sessions_updated' }
-  | { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary; branch: string; scope: DiffScope }
-  | { type: 'diff_error'; message: string }
+  | { type: 'diff_result'; files: DiffFile[]; summary: DiffSummary; branch: string; scope: DiffView; requestId?: number; sessionId?: string; review?: DiffReview; incomplete?: string[] }
+  | { type: 'diff_error'; message: string; scope?: DiffView; requestId?: number; sessionId?: string }
+  | { type: 'pr_status'; status: PrStatus; requestId?: number; sessionId?: string }
+  | { type: 'review_comments'; sessionId: string; comments: ReviewComment[] }
+  /** How much there is to review: files with uncommitted changes, and commits on the branch since its base (null when unknown). */
+  | { type: 'change_summary'; sessionId: string; uncommittedFiles: number; branchCommits: number | null }
+  | { type: 'review_error'; message: string; sessionId?: string }
 
 /** Messages sent from browser clients to the server over WebSocket. */
 export type WsClientMessage =
@@ -340,13 +409,135 @@ export type WsClientMessage =
   | { type: 'prompt_response'; value: string | string[]; requestId?: string }
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'ping' }
-  | { type: 'get_diff'; scope?: DiffScope }
+  | { type: 'get_diff'; scope?: DiffView; requestId?: number }
+  /** Choose the ref branch views compare against (null = automatic), then return the diff for `scope`. */
+  | { type: 'set_review_base'; base: string | null; scope: DiffView; requestId?: number }
+  /** Look up the pull request for the session's branch (cached ~60s unless refresh). */
+  | { type: 'get_pr_status'; requestId?: number; refresh?: boolean }
+  /** Cheap check of whether the session has anything to review (drives the Changes button). */
+  | { type: 'get_change_summary' }
+  // Review comments. `relayUser`/`relayRole` are stamped by the relay connector
+  // (never trusted from a remote browser); local clients are the owner.
+  | { type: 'review_comments_get'; relayUser?: string; relayRole?: 'owner' | 'grantee' }
+  | { type: 'review_comment_add'; path: string; side: 'new' | 'old'; startLine: number; endLine: number; view: DiffView; baseCommit?: string; headCommit?: string; body: string; relayUser?: string; relayRole?: 'owner' | 'grantee' }
+  | { type: 'review_comment_update'; id: string; body: string; relayUser?: string; relayRole?: 'owner' | 'grantee' }
+  | { type: 'review_comment_delete'; id: string; relayUser?: string; relayRole?: 'owner' | 'grantee' }
+  /** Send drafts (all, or `ids`) to the agent as one prompt; stale ones only with includeStale. */
+  | { type: 'review_feedback_send'; ids?: string[]; includeStale?: boolean; relayUser?: string; relayRole?: 'owner' | 'grantee' }
   | { type: 'discard_changes'; scope: DiffScope; paths?: string[]; statuses?: Record<string, DiffFileStatus> }
   | { type: 'move_to_worktree' }
+  | { type: 'retry_worktree' }
+  | { type: 'use_existing_checkout' }
 
 // --- Diff viewer types ---
 
+/** Uncommitted scopes: what discard operates on. */
 export type DiffScope = 'staged' | 'unstaged' | 'all'
+
+/**
+ * What the Changes panel shows. The uncommitted scopes plus two read-only
+ * branch views measured from the merge base with the review base:
+ * 'branch' (all task changes: committed + uncommitted + untracked) and
+ * 'committed' (merge base → HEAD).
+ */
+export type DiffView = DiffScope | 'branch' | 'committed'
+
+/** Where a review comment points, captured when it was written. */
+export interface ReviewAnchor {
+  path: string
+  /** 'new' = lines as they are now; 'old' = removed lines, from the base. */
+  side: 'new' | 'old'
+  startLine: number
+  endLine: number
+  /** Changes-panel view the lines were selected in. */
+  view: DiffView
+  /** Content the line numbers refer to. */
+  source: 'worktree' | 'index' | 'commit'
+  commit?: string
+  /** The selected lines, read by the server. */
+  excerpt: string[]
+  fingerprint: string
+}
+
+/** A reviewer's comment on selected lines; drafts are sent to the agent in one batch. */
+export interface ReviewComment {
+  id: string
+  body: string
+  anchor: ReviewAnchor
+  status: 'draft' | 'sent'
+  /** Relay user id of the author, or 'owner' for the machine owner. */
+  author: string
+  authorRole: 'owner' | 'grantee'
+  createdAt: string
+  updatedAt?: string
+  sentAt?: string
+  /** Computed when listed: the anchored lines have changed in the working tree. */
+  stale?: boolean
+}
+
+/** Outcome of a pull request lookup; everything except 'found' and 'none' means "unknown". */
+export type PrLookupState = 'found' | 'none' | 'no_github_remote' | 'gh_missing' | 'unauthenticated' | 'rate_limited' | 'error'
+
+/** CI checks on a pull request's remote head. */
+export interface PrChecksSummary {
+  total: number
+  passed: number
+  failed: number
+  pending: number
+  skipped: number
+  /** Names of (up to five) failing checks. */
+  failing: string[]
+}
+
+export interface PullRequestInfo {
+  number: number
+  title: string
+  url: string
+  state: 'OPEN' | 'CLOSED' | 'MERGED'
+  isDraft: boolean
+  baseRefName: string
+  headRefName: string
+  /** Commit GitHub's checks ran on. */
+  headRefOid: string
+  /** The head lives in a fork; its base is in another repository. */
+  isCrossRepository: boolean
+  headOwner?: string
+  updatedAt: string
+  reviewDecision?: string
+  checks: PrChecksSummary
+  /** Local commits not on the PR head (not pushed); null when that head is not fetched locally. */
+  ahead: number | null
+  /** PR head commits missing locally; null when unknown. */
+  behind: number | null
+}
+
+/** Pull request status for a session's branch. */
+export interface PrStatus {
+  state: PrLookupState
+  message?: string
+  branch?: string
+  /** Open first, then most recently updated. */
+  pulls: PullRequestInfo[]
+  /** The working tree has edits no check has seen. */
+  dirty: boolean
+  fetchedAt: string
+  /** Set when a refresh failed and the last good result is shown instead. */
+  staleReason?: string
+}
+
+/** How a branch view was computed. */
+export interface DiffReview {
+  /** Ref the branch is compared against, e.g. 'main' or 'origin/main'. */
+  baseRef: string
+  /** Why this base: the user's choice, the branch's open pull request, the ref the worktree was created from, or the repo default. */
+  baseSource: 'user' | 'pr' | 'worktree' | 'default'
+  /** Merge-base commit the diff starts from. */
+  mergeBase: string
+  /** HEAD commit the diff was computed at. */
+  head: string
+  /** Refs the user can choose as the base. */
+  candidates: string[]
+}
 export type DiffFileStatus = 'modified' | 'added' | 'deleted' | 'renamed'
 
 export interface DiffFile {
@@ -357,6 +548,8 @@ export interface DiffFile {
   additions: number
   deletions: number
   hunks: DiffHunk[]
+  /** Branch view only: the file also has uncommitted changes (staged, unstaged or untracked). */
+  uncommitted?: boolean
 }
 
 export interface DiffHunk {
@@ -381,6 +574,8 @@ export interface DiffSummary {
   deletions: number
   truncated: boolean
   truncationReason?: string
+  /** Branch view only: how many listed files have uncommitted changes. */
+  uncommittedFiles?: number
 }
 
 /** A selectable option in a permission or question prompt dialog. */

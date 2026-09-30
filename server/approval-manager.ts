@@ -150,6 +150,11 @@ export class ApprovalManager {
     return this.checkCrossRepoApproval(workingDir, toolName, toolInput)
   }
 
+  /** True when this exact Bash command was saved with "Always allow" for the repo. */
+  hasExactCommand(workingDir: string, command: string): boolean {
+    return this.repoApprovals.get(workingDir)?.commands.has(command.trim()) ?? false
+  }
+
   /** Check approvals for a single repo (no cross-repo fallback). */
   private checkRepoApproval(workingDir: string, toolName: string, toolInput: Record<string, unknown>): boolean {
     if (ApprovalManager.NEVER_AUTO_APPROVE_TOOLS.has(toolName)) return false
@@ -340,6 +345,20 @@ export class ApprovalManager {
       commands: Array.from(entry.commands).sort(),
       patterns: Array.from(entry.patterns).sort(),
     }
+  }
+
+  /**
+   * Every repo that has at least one rule, with its rules — the whole store in
+   * one read, so a machine-wide view does not need a request per repo.
+   */
+  getAllApprovals(): Array<{ workingDir: string; tools: string[]; commands: string[]; patterns: string[] }> {
+    const result: Array<{ workingDir: string; tools: string[]; commands: string[]; patterns: string[] }> = []
+    for (const workingDir of this.repoApprovals.keys()) {
+      const approvals = this.getApprovals(workingDir)
+      if (approvals.tools.length + approvals.commands.length + approvals.patterns.length === 0) continue
+      result.push({ workingDir, ...approvals })
+    }
+    return result.sort((a, b) => a.workingDir.localeCompare(b.workingDir))
   }
 
   /**

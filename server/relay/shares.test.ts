@@ -1,4 +1,5 @@
 /** Share persistence, expiry, and machine access resolution. */
+import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import type Database from 'better-sqlite3'
 import { openControlPlaneDb, upsertUserFromGithub } from './control-plane-db.js'
@@ -53,7 +54,7 @@ describe('access resolution', () => {
     )
 
     const { userCode, deviceCode } = startPairing(db, { hostname: 'box', platform: 'linux' })
-    approvePairing(db, userCode, owner.id, 'Box')
+    approvePairing(db, userCode, owner.id, BOOTSTRAP_WORKSPACE_ID, 'Box')
     const complete = completePairing(db, deviceCode)
     if (complete.status !== 'complete') throw new Error('pairing failed')
     machineId = complete.machineId

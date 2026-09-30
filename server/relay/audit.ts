@@ -8,10 +8,10 @@
  */
 
 import type Database from 'better-sqlite3'
-import { DEFAULT_ORG_ID } from './control-plane-db.js'
 
 export type AuditEventKind =
   | 'machine_paired'
+  | 'machine_pairing_created'
   | 'machine_removed'
   | 'machine_connected'
   | 'machine_disconnected'
@@ -29,9 +29,35 @@ export type AuditEventKind =
   | 'passkey_registered'
   | 'passkey_login'
   | 'passkey_removed'
+  | 'login'
+  | 'login_failed'
+  | 'logout'
+  | 'logout_all'
+  | 'workspace_created'
+  | 'workspace_updated'
+  | 'workspace_deleted'
+  | 'member_updated'
+  | 'member_removed'
+  | 'machine_transferred'
+  | 'invitation_created'
+  | 'invitation_revoked'
+  | 'invitation_accepted'
+  | 'invitation_rejected'
+  | 'mfa_verified'
+  | 'mfa_failed'
+  | 'mfa_enabled'
+  | 'mfa_disabled'
+  | 'mfa_recovery_codes_regenerated'
+  | 'mfa_reset'
+  | 'workspace_security_updated'
 
 export interface AuditEventInput {
   kind: AuditEventKind
+  /**
+   * Workspace the event belongs to. Defaults to the machine's workspace when
+   * a machineId is given; account-level events (sign-in) have none.
+   */
+  workspaceId?: string | null
   actorUserId?: string | null
   machineId?: string | null
   localSessionId?: string | null
@@ -43,6 +69,7 @@ export interface AuditEventInput {
 
 export interface AuditEvent {
   id: number
+  workspaceId: string | null
   kind: string
   actorUserId: string | null
   machineId: string | null
@@ -63,12 +90,20 @@ export function recordAuditEvent(db: Database.Database, event: AuditEventInput):
     metadata = serialized.length > MAX_METADATA_CHARS ? serialized.slice(0, MAX_METADATA_CHARS) : serialized
   }
 
+  let workspaceId = event.workspaceId ?? null
+  if (workspaceId === null && event.machineId) {
+    const machine = db.prepare('SELECT workspace_id FROM machines WHERE id = ?').get(event.machineId) as
+      | { workspace_id: string }
+      | undefined
+    workspaceId = machine?.workspace_id ?? null
+  }
+
   db.prepare(
     `INSERT INTO audit_events
-       (organization_id, kind, actor_user_id, machine_id, local_session_id, ip, user_agent, metadata)
+       (workspace_id, kind, actor_user_id, machine_id, local_session_id, ip, user_agent, metadata)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    DEFAULT_ORG_ID,
+    workspaceId,
     event.kind,
     event.actorUserId ?? null,
     event.machineId ?? null,
@@ -80,6 +115,7 @@ export function recordAuditEvent(db: Database.Database, event: AuditEventInput):
 }
 
 export interface AuditQuery {
+  workspaceId?: string
   machineId?: string
   actorUserId?: string
   limit?: number
@@ -90,9 +126,13 @@ const MAX_LIMIT = 500
 
 /** Most recent events first. */
 export function listAuditEvents(db: Database.Database, query: AuditQuery = {}): AuditEvent[] {
-  const clauses: string[] = ['organization_id = ?']
-  const params: unknown[] = [DEFAULT_ORG_ID]
+  const clauses: string[] = ['1 = 1']
+  const params: unknown[] = []
 
+  if (query.workspaceId) {
+    clauses.push('workspace_id = ?')
+    params.push(query.workspaceId)
+  }
   if (query.machineId) {
     clauses.push('machine_id = ?')
     params.push(query.machineId)
@@ -110,6 +150,7 @@ export function listAuditEvents(db: Database.Database, query: AuditQuery = {}): 
     )
     .all(...params, limit) as {
     id: number
+    workspace_id: string | null
     kind: string
     actor_user_id: string | null
     machine_id: string | null
@@ -122,6 +163,7 @@ export function listAuditEvents(db: Database.Database, query: AuditQuery = {}): 
 
   return rows.map(row => ({
     id: row.id,
+    workspaceId: row.workspace_id,
     kind: row.kind,
     actorUserId: row.actor_user_id,
     machineId: row.machine_id,

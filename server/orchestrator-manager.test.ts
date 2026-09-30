@@ -53,9 +53,11 @@ import {
   readTemplateVersion,
   CLAUDE_MD_TEMPLATE_VERSION,
   ORCHESTRATOR_ALLOWED_TOOLS,
+  ORCHESTRATOR_INSPECTION_TOOLS,
 } from './orchestrator-manager.js'
 
 function fakeSessionManager(existingSession?: any, settings: Record<string, string> = {}) {
+  settings = { agent_provider: 'claude', ...settings }
   return {
     get: vi.fn((id: string) => existingSession && existingSession.id === id ? existingSession : undefined),
     create: vi.fn((_name: string, _dir: string, opts?: any) => ({ id: opts?.id ?? 'new-id', ...opts })),
@@ -533,9 +535,23 @@ describe('orchestrator model preference', () => {
 })
 
 describe('orchestrator provider preference', () => {
-  it('defaults to claude when unset or invalid', () => {
-    expect(getOrchestratorProvider(fakeSessionManager())).toBe('claude')
-    expect(getOrchestratorProvider(fakeSessionManager(undefined, { agent_provider: 'gemini' }))).toBe('claude')
+  it('never starts a process without a harness choice', () => {
+    const sm = fakeSessionManager(undefined, { agent_provider: '' })
+    expect(() => ensureOrchestratorRunning(sm)).toThrow(/Choose an agent harness/)
+    expect(sm.create).not.toHaveBeenCalled()
+    expect(sm.startClaude).not.toHaveBeenCalled()
+  })
+
+  it('registers Codex MCP before the caller restarts on a newly selected harness', () => {
+    mockExistsSync.mockReturnValue(true)
+    const sm = fakeSessionManager()
+    setOrchestratorProvider(sm, 'codex')
+    expect(mockWriteFileSync).toHaveBeenCalledWith(expect.stringContaining('config.toml'), expect.stringContaining('[mcp_servers.codekin]'), 'utf-8')
+  })
+
+  it('requires a choice when unset or invalid', () => {
+    expect(getOrchestratorProvider(fakeSessionManager(undefined, { agent_provider: '' }))).toBeNull()
+    expect(getOrchestratorProvider(fakeSessionManager(undefined, { agent_provider: 'gemini' }))).toBeNull()
   })
 
   it('round-trips a saved choice', () => {
@@ -588,5 +604,20 @@ describe('getOrchestratorSessionId', () => {
     const session = { id: 'existing-uuid' }
     const sm = fakeSessionManager(session)
     expect(getOrchestratorSessionId(sm)).toBe('existing-uuid')
+  })
+})
+
+describe('ORCHESTRATOR_ALLOWED_TOOLS', () => {
+  it('lets Joe inspect repos without a prompt per command', () => {
+    for (const tool of ['Read', 'Grep', 'Bash(rg:*)', 'Bash(cat:*)', 'Bash(git log:*)', 'Bash(gh pr view:*)']) {
+      expect(ORCHESTRATOR_ALLOWED_TOOLS).toContain(tool)
+    }
+    expect(ORCHESTRATOR_ALLOWED_TOOLS).toEqual(expect.arrayContaining([...ORCHESTRATOR_INSPECTION_TOOLS]))
+  })
+
+  it('grants nothing that writes code or history — that is delegated to children', () => {
+    for (const tool of ['Write', 'Edit', 'Bash(git:*)', 'Bash(gh:*)', 'Bash(rm:*)', 'Bash(npm:*)', 'Bash(git push:*)', 'Bash(git branch:*)', 'Bash(sort:*)']) {
+      expect(ORCHESTRATOR_ALLOWED_TOOLS).not.toContain(tool)
+    }
   })
 })

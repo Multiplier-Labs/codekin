@@ -17,6 +17,7 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
 } from '@simplewebauthn/browser'
 import type { HostedUser } from './useHostedAuth'
+import { stepUpFetch } from './mfa'
 
 export interface Passkey {
   id: string
@@ -45,8 +46,9 @@ export function defaultPasskeyLabel(ua: string = navigator.userAgent): string {
   return 'This device'
 }
 
+// Adding or removing a passkey may ask for a fresh second-factor check.
 async function postJson(path: string, body?: unknown): Promise<Response> {
-  return fetch(path, {
+  return stepUpFetch(path, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -88,7 +90,7 @@ export async function fetchPasskeys(): Promise<Passkey[]> {
 }
 
 export async function removePasskey(id: string): Promise<boolean> {
-  const res = await fetch(`/api/auth/passkeys/${encodeURIComponent(id)}`, {
+  const res = await stepUpFetch(`/api/auth/passkeys/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     credentials: 'include',
   })

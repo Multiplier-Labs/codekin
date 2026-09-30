@@ -18,6 +18,7 @@
   "scripts": {
     "build": "tsc",
     "relay": "tsx relay/relay-server.ts",
+    "relay:admin": "tsx relay/relay-admin-cli.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

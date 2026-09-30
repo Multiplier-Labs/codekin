@@ -6,7 +6,7 @@
  * This module stays the single facade components and hooks import from.
  */
 
-import type { Session, WsServerMessage } from '../types'
+import type { Session, WsServerMessage, CodingProvider } from '../types'
 import { transport } from './transport'
 
 /**
@@ -101,11 +101,79 @@ export async function deleteSession(token: string, sessionId: string): Promise<v
   if (!res.ok) throw new Error(`Failed to delete session: ${res.status}`)
 }
 
+/** List archived sessions — resumable, with their worktrees kept. */
+export async function listArchivedLiveSessions(token: string): Promise<Session[]> {
+  const res = await transport.authFetch(`/api/sessions/list?archived=1`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to list archived sessions: ${res.status}`)
+  const data = await jsonBody<{ sessions?: Session[] }>(res)
+  return data.sessions ?? []
+}
+
+/** Archive a session: stop it and hide it, keeping its worktree and branch. */
+export async function archiveSession(token: string, sessionId: string): Promise<void> {
+  const res = await transport.authFetch(`/api/sessions/${sessionId}/archive`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to archive session: ${res.status}`)
+}
+
+/** Return an archived session to the active list. */
+export async function resumeSession(token: string, sessionId: string): Promise<void> {
+  const res = await transport.authFetch(`/api/sessions/${sessionId}/resume`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to resume session: ${res.status}`)
+}
+
+/** What removing an archived session's working files would affect. */
+export interface WorktreeRemovalPreflight {
+  worktreePath: string | null
+  branch?: string
+  exists: boolean
+  modified: string[]
+  untracked: string[]
+  uniqueCommits: number | null
+  referencedBy: string[]
+  safe: boolean
+  blockers: string[]
+}
+
+export async function getRemovalPreflight(token: string, sessionId: string): Promise<WorktreeRemovalPreflight> {
+  const res = await transport.authFetch(`/api/sessions/${sessionId}/removal-preflight`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error(`Failed to check working files: ${res.status}`)
+  return jsonBody<WorktreeRemovalPreflight>(res)
+}
+
+/** Remove an archived session's working files. The server re-checks and refuses unsafe removals. */
+export async function removeSessionWorktree(token: string, sessionId: string): Promise<{ removed: boolean; error?: string }> {
+  const res = await transport.authFetch(`/api/sessions/${sessionId}/remove-worktree`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (res.ok) return { removed: true }
+  const body = await jsonBody<{ error?: string }>(res).catch(() => ({ error: undefined }))
+  return { removed: false, error: body.error ?? `Failed to remove working files: ${res.status}` }
+}
+
+/** Read Joe's saved harness without starting an agent process. */
+export async function getOrchestratorStatus(token: string): Promise<{ provider: CodingProvider | null; agentName?: string }> {
+  const res = await transport.authFetch('/api/orchestrator/status', { headers: headers(token) })
+  if (!res.ok) throw new Error(`Failed to load orchestrator: ${res.status}`)
+  return jsonBody<{ provider: CodingProvider | null; agentName?: string }>(res)
+}
+
 /** Ensure the orchestrator session is running and return its session ID. */
-export async function startOrchestrator(token: string): Promise<{ sessionId: string; status: string; agentName?: string }> {
+export async function startOrchestrator(token: string, provider?: CodingProvider): Promise<{ sessionId: string; status: string; agentName?: string }> {
   const res = await transport.authFetch(`/api/orchestrator/start`, {
     method: 'POST',
     headers: headers(token),
+    body: JSON.stringify(provider ? { provider } : {}),
   })
   if (!res.ok) throw new Error(`Failed to start orchestrator: ${res.status}`)
   return jsonBody<{ sessionId: string; status: string; agentName?: string }>(res)
@@ -155,6 +223,40 @@ export async function getRepoApprovals(token: string, workingDir: string): Promi
   })
   if (!res.ok) throw new Error(`Failed to fetch approvals: ${res.status}`)
   return jsonBody<RepoApprovals>(res)
+}
+
+/** One repo's rules, as returned by the machine-wide listing. */
+export interface RepoApprovalsEntry extends RepoApprovals {
+  workingDir: string
+}
+
+/**
+ * Every repo that has auto-approval rules, in one request. Servers that
+ * predate `/api/approvals/all` answer 404; for those, fall back to asking
+ * per repo, a few at a time — a burst of hundreds of requests trips the
+ * hosted relay's frame limit and drops the whole connection.
+ */
+export async function getAllRepoApprovals(token: string, workingDirs: string[]): Promise<RepoApprovalsEntry[]> {
+  const res = await transport.authFetch('/api/approvals/all', {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (res.ok) return (await jsonBody<{ repos: RepoApprovalsEntry[] }>(res)).repos
+  if (res.status !== 404) throw new Error(`Failed to fetch approvals: ${res.status}`)
+
+  const CONCURRENCY = 4
+  const results: RepoApprovalsEntry[] = []
+  let next = 0
+  async function worker() {
+    while (next < workingDirs.length) {
+      const workingDir = workingDirs[next++]
+      try {
+        const a = await getRepoApprovals(token, workingDir)
+        if (a.tools.length + a.commands.length + a.patterns.length > 0) results.push({ workingDir, ...a })
+      } catch { /* one unreadable repo should not hide the rest */ }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, workingDirs.length) }, worker))
+  return results.sort((a, b) => a.workingDir.localeCompare(b.workingDir))
 }
 
 /** Remove an auto-approval rule for a repo (by workingDir path). */
@@ -308,6 +410,30 @@ export async function setQueueMessages(token: string, enabled: boolean): Promise
   return data.enabled
 }
 
+/**
+ * Get the UI preferences blob. Resolves to null when the server predates the
+ * endpoint (404), so the caller can fall back instead of treating it as empty.
+ */
+export async function getPrefs(token: string): Promise<Record<string, unknown> | null> {
+  const res = await transport.authFetch(`/api/settings/prefs`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(`Failed to get preferences: ${res.status}`)
+  const data = await jsonBody<{ prefs: Record<string, unknown> }>(res)
+  return data.prefs
+}
+
+/** Merge a partial update into the UI preferences; null values remove keys. */
+export async function putPrefs(token: string, patch: Record<string, unknown>): Promise<void> {
+  const res = await transport.authFetch(`/api/settings/prefs`, {
+    method: 'PUT',
+    headers: headers(token),
+    body: JSON.stringify({ patch }),
+  })
+  if (!res.ok) throw new Error(`Failed to save preferences: ${res.status}`)
+}
+
 /** Get the worktree branch prefix setting. */
 export async function getWorktreePrefix(token: string): Promise<string> {
   const res = await transport.authFetch(`/api/settings/worktree-prefix`, {
@@ -417,8 +543,13 @@ export function webhookEndpointUrl(): string {
   return transport.externalUrl('/api/webhooks/github')
 }
 
-/** Clone a GitHub repo on the server. Throws with the server's error message on failure. */
-export async function cloneRepo(token: string | undefined, owner: string, name: string): Promise<void> {
+/**
+ * Clone a GitHub repo on the server. Resolves to the checkout's path — which
+ * may be an existing checkout elsewhere under the repos root rather than a
+ * fresh clone — or null if the server didn't say. Throws with the server's
+ * error message on failure.
+ */
+export async function cloneRepo(token: string | undefined, owner: string, name: string): Promise<string | null> {
   const cloneHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
   if (token) cloneHeaders['Authorization'] = `Bearer ${token}`
   const res = await transport.fetch('/api/clone', {
@@ -430,6 +561,8 @@ export async function cloneRepo(token: string | undefined, owner: string, name: 
     const data = await jsonBody<{ error?: string }>(res)
     throw new Error(data.error || 'Clone failed')
   }
+  const data = await jsonBody<{ path?: unknown }>(res).catch(() => ({ path: undefined }))
+  return typeof data.path === 'string' && data.path ? data.path : null
 }
 
 /** Fetch orchestrator dashboard stats. Returns null on any failure — stats are optional. */

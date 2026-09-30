@@ -20,6 +20,7 @@ interface FakeSession {
   workingDir: string
   provider?: string
   allowedTools?: string[]
+  useWorktree?: boolean
   inputs: string[]
   outputHistory: Array<{ type: string; data?: string; costUsd?: number }>
   started: boolean
@@ -33,10 +34,12 @@ class FakeHost implements SessionHost {
     (sid: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void
   > = []
   private counter = 0
+  /** Sessions whose name matches fail worktree creation. */
+  worktreeFailsFor: RegExp | null = null
 
   constructor(private readonly worktreeRoot: string) {}
 
-  create(name: string, workingDir: string, options?: { provider?: string; allowedTools?: string[] }): { id: string } {
+  create(name: string, workingDir: string, options?: { provider?: string; allowedTools?: string[]; useWorktree?: boolean }): { id: string } {
     const id = `sess-${++this.counter}`
     this.sessions.set(id, {
       id,
@@ -44,6 +47,7 @@ class FakeHost implements SessionHost {
       workingDir,
       provider: options?.provider,
       allowedTools: options?.allowedTools,
+      useWorktree: options?.useWorktree,
       inputs: [],
       outputHistory: [],
       started: false,
@@ -53,6 +57,8 @@ class FakeHost implements SessionHost {
   }
 
   async createWorktree(sessionId: string): Promise<string | null> {
+    const name = this.sessions.get(sessionId)?.name ?? ''
+    if (this.worktreeFailsFor?.test(name)) return null
     const dir = join(this.worktreeRoot, sessionId)
     mkdirSync(dir, { recursive: true })
     return dir
@@ -473,6 +479,33 @@ describe('LoopEngine', () => {
     await settle()
     expect(store.getRun(runId)!.state).toBe('awaiting_approval')
     expect(store.listInterventions(runId, 'pending')[0].purpose).toBe('escalation')
+  })
+
+  it('fails the run instead of acting in the shared checkout when the maker worktree fails', async () => {
+    host.worktreeFailsFor = /^loop:[^:]+:(?!review|worker)/
+    const run = await engine.startRun(input(recipeFromYaml()))
+    await settle()
+
+    const finished = store.getRun(run.id)!
+    expect(finished.outcome).toBe('failed')
+    expect(finished.stateReason).toContain('isolated worktree')
+    expect(finished.worktreePath).toBeNull()
+    const maker = host.get(finished.makerSessionId ?? 'sess-1')!
+    expect(maker.useWorktree).toBe(true)
+    expect(maker.started).toBe(false)
+    expect(maker.inputs).toHaveLength(0)
+  })
+
+  it('records the review as errored instead of reviewing from the shared checkout', async () => {
+    host.worktreeFailsFor = /:review:/
+    const runId = await startAndTurn(recipeFromYaml({ rubric: true }))
+    await settle()
+
+    const reviewer = host.lastSession()
+    expect(reviewer.name).toContain(':review:')
+    expect(reviewer.useWorktree).toBe(true)
+    expect(reviewer.started).toBe(false)
+    expect(store.listEvaluations(runId).at(-1)?.status).toBe('error')
   })
 
   it('pause parks durably and resume continues in the same worktree with a fresh session', async () => {

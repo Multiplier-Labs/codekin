@@ -23,11 +23,11 @@ import { RunStore } from './run-store.js'
 
 function makeRequest(overrides: Partial<ChildSessionRequest> = {}): ChildSessionRequest {
   return {
+    provider: 'claude',
     repo: '/repos/myproject',
     task: 'Fix the login bug',
     branchName: 'fix/login-bug',
     completionPolicy: 'pr',
-    deployAfter: false,
     useWorktree: true,
     ...overrides,
   }
@@ -38,11 +38,18 @@ function makeMockSessions(worktreeSucceeds = true) {
   const resultListeners: Array<(sessionId: string, isError: boolean) => void> = []
   const exitListeners: Array<(sessionId: string, code: number | null, signal: string | null, willRestart: boolean) => void> = []
   const promptListeners: Array<(sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void> = []
+  const promptResolvedListeners: Array<(sessionId: string, requestId: string) => void> = []
+  const stopListeners: Array<(sessionId: string, reason: 'stopped' | 'archived' | 'deleted') => void> = []
 
   return {
     create: vi.fn(),
-    createWorktree: vi.fn(async () => worktreeSucceeds ? '/repos/myproject-wt-child123' : null),
+    archive: { getSetting: (_key: string, fallback = '') => fallback } as { getSetting: (key: string, fallback?: string) => string },
+    prepareSessionWorktree: vi.fn(async () => worktreeSucceeds
+      ? { ok: true, path: '/repos/myproject-wt-child123', branch: 'fix/test', repoRoot: '/repos/myproject', reused: false }
+      : { ok: false, code: 'git_failed', message: 'git worktree add failed' }),
+    delete: vi.fn(),
     startClaude: vi.fn(),
+    stopClaude: vi.fn(),
     sendInput: vi.fn((_: string, prompt: string) => { sentInputs.push(prompt) }),
     get: vi.fn(() => ({
       claudeProcess: { isAlive: vi.fn(() => false), stop: vi.fn() },
@@ -63,26 +70,49 @@ function makeMockSessions(worktreeSucceeds = true) {
       promptListeners.push(cb)
       return () => { const idx = promptListeners.indexOf(cb); if (idx >= 0) promptListeners.splice(idx, 1) }
     }),
+    onSessionPromptResolved: vi.fn((cb: any) => { promptResolvedListeners.push(cb); return () => {} }),
+    onSessionStopped: vi.fn((cb: any) => { stopListeners.push(cb); return () => {} }),
     clearProcessingFlag: vi.fn(),
     _sentInputs: sentInputs,
+    _promptResolvedListeners: promptResolvedListeners,
+    _stopListeners: stopListeners,
     _resultListeners: resultListeners,
     _exitListeners: exitListeners,
     _promptListeners: promptListeners,
   } as any
 }
 
+const HEAD = 'abc123def456abc123def456abc123def456abcd'
+
+/**
+ * Fake gh / git for ground-truth checks. Defaults describe finished work:
+ * an open PR and the remote branch both at the local HEAD. Pass `fail` to
+ * make every command throw (gh missing, no remote).
+ */
+function fakeGit(opts: { head?: string; prs?: unknown[]; remote?: string; fail?: boolean } = {}) {
+  const head = opts.head ?? HEAD
+  return vi.fn(async (cmd: string, args: string[]) => {
+    if (opts.fail) throw new Error(`${cmd}: command not found`)
+    if (cmd === 'git' && args[0] === 'rev-parse') return `${head}\n`
+    if (cmd === 'gh') {
+      return JSON.stringify(opts.prs ?? [{ number: 1, url: 'https://github.com/o/r/pull/1', state: 'OPEN', headRefOid: head }])
+    }
+    if (cmd === 'git' && args[0] === 'ls-remote') return opts.remote ?? `${head}\trefs/heads/fix/login-bug\n`
+    throw new Error(`unexpected ${cmd} ${args.join(' ')}`)
+  })
+}
+
 /**
  * Build a manager with a stubbed exec so ground-truth checks (gh / git)
  * never spawn real processes. The default stub reports the final step as
- * done ('[{"number": 1}]' parses as a non-empty PR list, and is non-empty
- * output for git ls-remote). Override `exec` to simulate a missing step.
+ * done at the local HEAD. Override `exec` to simulate a missing step.
  */
 function makeManager(
   sessions: any,
   opts: { notify?: any; exec?: any } = {},
 ): OrchestratorChildManager {
   return new OrchestratorChildManager(sessions, {
-    exec: opts.exec ?? vi.fn(async () => '[{"number": 1}]'),
+    exec: opts.exec ?? fakeGit(),
     ...(opts.notify ? { notify: opts.notify } : {}),
   })
 }
@@ -139,19 +169,22 @@ describe('OrchestratorChildManager', () => {
     it('creates a worktree when requested', async () => {
       const child = await manager.spawn(makeRequest({ useWorktree: true }))
 
-      expect(sessions.createWorktree).toHaveBeenCalledWith(child.id, '/repos/myproject', 'fix/login-bug')
+      expect(sessions.prepareSessionWorktree).toHaveBeenCalledWith(child.id, '/repos/myproject', 'fix/login-bug')
+      expect(sessions.create).toHaveBeenCalledWith(expect.any(String), '/repos/myproject', expect.objectContaining({ useWorktree: true }))
       expect(child.status).toBe('running')
     })
 
-    it('falls back gracefully when worktree creation fails', async () => {
+    it('fails the child instead of running in the shared checkout when worktree creation fails', async () => {
       sessions = makeMockSessions(false)
       manager = makeManager(sessions)
 
       const child = await manager.spawn(makeRequest({ useWorktree: true }))
 
-      expect(child.status).toBe('running')
-      const prompt = sessions._sentInputs[0]
-      expect(prompt).toContain('Worktree Not Available')
+      expect(child.status).toBe('failed')
+      expect(child.error).toContain('git worktree add failed')
+      expect(sessions.startClaude).not.toHaveBeenCalled()
+      expect(sessions._sentInputs).toHaveLength(0)
+      expect(sessions.delete).toHaveBeenCalledWith(child.id)
     })
 
     it('reports worktree status "active" with the worktree path on success', async () => {
@@ -244,7 +277,7 @@ describe('OrchestratorChildManager', () => {
       await vi.waitFor(() => {
         expect(child.status).toBe('failed')
       })
-      expect(child.error).toBe('Claude returned an error')
+      expect(child.error).toBe('Coding agent returned an error')
     })
 
     it('marks child as completed on exit when ground truth confirms the final step', async () => {
@@ -268,7 +301,7 @@ describe('OrchestratorChildManager', () => {
     })
 
     it('marks child as failed on exit when the final step never landed', async () => {
-      manager = makeManager(sessions, { exec: vi.fn(async () => '[]') })
+      manager = makeManager(sessions, { exec: fakeGit({ prs: [] }) })
       sessions.get = vi.fn(() => ({
         claudeProcess: null,
         outputHistory: [{ type: 'output', data: 'short' }],
@@ -317,7 +350,7 @@ describe('OrchestratorChildManager', () => {
       expect(child.status).toBe('running')
     })
 
-    it('marks child as failed when session is deleted', async () => {
+    it('marks child as canceled when its session disappears', async () => {
       sessions.get = vi.fn(() => null)
 
       const child = await manager.spawn(makeRequest())
@@ -327,7 +360,7 @@ describe('OrchestratorChildManager', () => {
       }
 
       await vi.waitFor(() => {
-        expect(child.status).toBe('failed')
+        expect(child.status).toBe('canceled')
       })
       expect(child.error).toBe('Session was deleted')
     })
@@ -349,8 +382,8 @@ describe('OrchestratorChildManager', () => {
       sessions = makeMockSessions()
     })
 
-    it('checks gh pr list (in the worktree) for pr policy', async () => {
-      const exec = vi.fn(async () => '[{"number": 7}]')
+    it('verifies an open PR at the worktree HEAD for pr policy', async () => {
+      const exec = fakeGit()
       manager = makeManager(sessions, { exec })
       sessions.get = vi.fn(() => aliveSession('done'))
 
@@ -362,15 +395,15 @@ describe('OrchestratorChildManager', () => {
       })
       expect(exec).toHaveBeenCalledWith(
         'gh',
-        ['pr', 'list', '--head', 'fix/login-bug', '--state', 'all', '--json', 'number', '--limit', '1'],
+        ['pr', 'list', '--head', 'fix/login-bug', '--state', 'all', '--json', 'number,url,state,headRefOid', '--limit', '5'],
         '/repos/myproject-wt-child123',
       )
       expect(child.error).toBeNull()
+      expect(child.verification).toMatchObject({ state: 'verified', commit: HEAD, prUrl: 'https://github.com/o/r/pull/1' })
     })
 
-    it('nudges once when no PR exists, then completes with an unverified note', async () => {
-      const exec = vi.fn(async () => '[]')
-      manager = makeManager(sessions, { exec })
+    it('nudges once when no PR exists, then ends unverified — never completed', async () => {
+      manager = makeManager(sessions, { exec: fakeGit({ prs: [] }) })
       sessions.get = vi.fn(() => aliveSession('made the changes and committed'))
 
       const child = await manager.spawn(makeRequest({ completionPolicy: 'pr' }))
@@ -378,22 +411,48 @@ describe('OrchestratorChildManager', () => {
       // First result: PR missing → nudge, keep monitoring
       for (const cb of sessions._resultListeners) cb(child.id, false)
       await vi.waitFor(() => {
-        expect(sessions._sentInputs.some((p: string) => p.includes('no Pull Request exists'))).toBe(true)
+        expect(sessions._sentInputs.some((p: string) => p.includes('no pull request exists'))).toBe(true)
       })
       expect(child.status).toBe('running')
 
-      // Second result: still no PR → no second nudge, terminal with note
+      // Second result: still no PR → no second nudge, terminal and unverified
       for (const cb of sessions._resultListeners) cb(child.id, false)
       await vi.waitFor(() => {
-        expect(child.status).toBe('completed')
+        expect(child.status).toBe('unverified')
       })
       expect(child.error).toContain('Completion not verified')
-      const nudges = sessions._sentInputs.filter((p: string) => p.includes('no Pull Request exists'))
+      expect(child.verification?.state).toBe('missing')
+      const nudges = sessions._sentInputs.filter((p: string) => p.includes('no pull request exists'))
       expect(nudges.length).toBe(1)
     })
 
+    it('does not accept a closed PR', async () => {
+      manager = makeManager(sessions, { exec: fakeGit({ prs: [{ number: 3, state: 'CLOSED', headRefOid: HEAD }] }) })
+      sessions.get = vi.fn(() => aliveSession('done'))
+
+      const child = await manager.spawn(makeRequest({ completionPolicy: 'pr' }))
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+
+      await vi.waitFor(() => {
+        expect(sessions._sentInputs.some((p: string) => p.includes('only closed pull requests'))).toBe(true)
+      })
+    })
+
+    it('treats a PR behind the local HEAD as missing (unpushed commits)', async () => {
+      manager = makeManager(sessions, { exec: fakeGit({ prs: [{ number: 4, state: 'OPEN', headRefOid: 'fff000' }] }) })
+      sessions.get = vi.fn(() => aliveSession('done'))
+
+      const child = await manager.spawn(makeRequest({ completionPolicy: 'pr' }))
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+
+      await vi.waitFor(() => {
+        expect(sessions._sentInputs.some((p: string) => p.includes('latest commits are not pushed'))).toBe(true)
+      })
+      expect(child.status).toBe('running')
+    })
+
     it('checks git ls-remote for merge policy and nudges when the branch is not on the remote', async () => {
-      const exec = vi.fn(async () => '')
+      const exec = fakeGit({ remote: '' })
       manager = makeManager(sessions, { exec })
       sessions.get = vi.fn(() => aliveSession('committed everything'))
 
@@ -401,7 +460,7 @@ describe('OrchestratorChildManager', () => {
       for (const cb of sessions._resultListeners) cb(child.id, false)
 
       await vi.waitFor(() => {
-        expect(sessions._sentInputs.some((p: string) => p.includes('has not been pushed'))).toBe(true)
+        expect(sessions._sentInputs.some((p: string) => p.includes('is not on the remote'))).toBe(true)
       })
       expect(exec).toHaveBeenCalledWith(
         'git',
@@ -410,9 +469,20 @@ describe('OrchestratorChildManager', () => {
       )
     })
 
-    it('treats a non-empty ls-remote as pushed for merge policy', async () => {
-      const exec = vi.fn(async () => 'abc123\trefs/heads/fix/login-bug\n')
-      manager = makeManager(sessions, { exec })
+    it('nudges for merge policy when the remote branch is behind the local HEAD', async () => {
+      manager = makeManager(sessions, { exec: fakeGit({ remote: 'fff000\trefs/heads/fix/login-bug\n' }) })
+      sessions.get = vi.fn(() => aliveSession('pushed'))
+
+      const child = await manager.spawn(makeRequest({ completionPolicy: 'merge' }))
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+
+      await vi.waitFor(() => {
+        expect(sessions._sentInputs.some((p: string) => p.includes('latest commits are not pushed'))).toBe(true)
+      })
+    })
+
+    it('completes merge policy when the remote branch is at the local HEAD', async () => {
+      manager = makeManager(sessions, { exec: fakeGit() })
       sessions.get = vi.fn(() => aliveSession('pushed'))
 
       const child = await manager.spawn(makeRequest({ completionPolicy: 'merge' }))
@@ -422,24 +492,26 @@ describe('OrchestratorChildManager', () => {
         expect(child.status).toBe('completed')
       })
       expect(child.error).toBeNull()
+      expect(child.verification).toMatchObject({ state: 'verified', commit: HEAD })
     })
 
-    it('falls back to transcript sniffing when the ground-truth command fails', async () => {
-      const exec = vi.fn(async () => { throw new Error('gh: command not found') })
-      manager = makeManager(sessions, { exec })
+    it('ends unverified (not completed) when the ground-truth command fails, whatever the transcript says', async () => {
+      manager = makeManager(sessions, { exec: fakeGit({ fail: true }) })
       sessions.get = vi.fn(() => aliveSession('Opened a pull request with the changes.'))
 
       const child = await manager.spawn(makeRequest({ completionPolicy: 'pr' }))
       for (const cb of sessions._resultListeners) cb(child.id, false)
 
       await vi.waitFor(() => {
-        expect(child.status).toBe('completed')
+        expect(child.status).toBe('unverified')
       })
-      expect(child.error).toBeNull()
+      expect(child.verification?.state).toBe('unknown')
+      // An unknown check is not something a nudge can fix.
+      expect(sessions._sentInputs.length).toBe(1)
     })
 
     it('never verifies remotely for commit-only policy', async () => {
-      const exec = vi.fn(async () => '[]')
+      const exec = fakeGit()
       manager = makeManager(sessions, { exec })
       sessions.get = vi.fn(() => aliveSession('committed locally'))
 
@@ -449,7 +521,9 @@ describe('OrchestratorChildManager', () => {
       await vi.waitFor(() => {
         expect(child.status).toBe('completed')
       })
-      expect(exec).not.toHaveBeenCalled()
+      expect(exec).not.toHaveBeenCalledWith('gh', expect.anything(), expect.anything())
+      expect(exec).not.toHaveBeenCalledWith('git', expect.arrayContaining(['ls-remote']), expect.anything())
+      expect(child.verification).toMatchObject({ state: 'not_applicable', commit: HEAD })
       expect(child.error).toBeNull()
     })
   })
@@ -473,6 +547,90 @@ describe('OrchestratorChildManager', () => {
       for (const tool of ['Bash(rm:*)', 'Bash(sudo:*)', 'Bash(docker:*)', 'Bash:*', 'Bash']) {
         expect(AGENT_CHILD_ALLOWED_TOOLS).not.toContain(tool)
       }
+    })
+  })
+
+
+  describe('harness selection', () => {
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.clearAllTimers(); vi.useRealTimers() })
+
+    it.each(['claude', 'codex', 'opencode'] as const)('honors an explicit %s override without inheriting another harness model', async (provider) => {
+      sessions = makeMockSessions()
+      sessions.get.mockReturnValue({ provider: 'codex', model: 'codex-model' })
+      const child = await makeManager(sessions).spawn(makeRequest({ provider, parentSessionId: 'joe' }))
+      expect(sessions.create).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.objectContaining({ provider, model: provider === 'codex' ? 'codex-model' : undefined }))
+      expect(child.request.provider).toBe(provider)
+    })
+
+    it.each(['codex', 'opencode'] as const)('inherits the parent %s harness and model', async (provider) => {
+      sessions = makeMockSessions()
+      sessions.get.mockReturnValue({ provider, model: 'selected-model' })
+      const child = await makeManager(sessions).spawn(makeRequest({ provider: undefined, parentSessionId: 'joe' }))
+      expect(child.request).toMatchObject({ provider, model: 'selected-model' })
+      expect(sessions.create).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.objectContaining({ provider, model: 'selected-model' }))
+    })
+
+    it('uses the saved harness when the parent is not loaded', async () => {
+      sessions = makeMockSessions()
+      sessions.get.mockReturnValue(undefined)
+      sessions.archive = { getSetting: () => 'opencode' }
+      const child = await makeManager(sessions).spawn(makeRequest({ provider: undefined, parentSessionId: 'joe' }))
+      expect(child.request.provider).toBe('opencode')
+    })
+
+    it('refuses to spawn without a selected harness', async () => {
+      sessions = makeMockSessions()
+      sessions.archive = { getSetting: () => '' }
+      await expect(makeManager(sessions).spawn(makeRequest({ provider: undefined }))).rejects.toThrow(/Choose an agent harness/)
+      expect(sessions.create).not.toHaveBeenCalled()
+    })
+
+    it('uses the saved model when the parent is not loaded and the harness matches', async () => {
+      sessions = makeMockSessions()
+      sessions.get.mockReturnValue(undefined)
+      const settings: Record<string, string> = { agent_provider: 'codex', agent_model: 'gpt-6-sol' }
+      sessions.archive = { getSetting: (key: string) => settings[key] ?? '' }
+      const child = await makeManager(sessions).spawn(makeRequest({ provider: undefined, parentSessionId: 'joe' }))
+      expect(child.request).toMatchObject({ provider: 'codex', model: 'gpt-6-sol' })
+    })
+
+    it('refuses a model id from another harness', async () => {
+      sessions = makeMockSessions()
+      sessions.get.mockReturnValue({ provider: 'codex', model: 'gpt-6-sol' })
+      await expect(makeManager(sessions).spawn(makeRequest({ provider: undefined, model: 'claude-opus-5-5', parentSessionId: 'joe' })))
+        .rejects.toThrow(/does not belong to the codex harness/)
+      await expect(makeManager(sessions).spawn(makeRequest({ provider: 'claude', model: 'gpt-6-sol', parentSessionId: 'joe' })))
+        .rejects.toThrow(/does not belong to the claude harness/)
+      expect(sessions.create).not.toHaveBeenCalled()
+    })
+
+    it('preserves an explicit child model on the selected harness', async () => {
+      sessions = makeMockSessions()
+      sessions.get.mockReturnValue({ provider: 'codex', model: 'parent-model' })
+      const child = await makeManager(sessions).spawn(makeRequest({ provider: 'codex', model: 'child-model', parentSessionId: 'joe' }))
+      expect(child.request.model).toBe('child-model')
+    })
+  })
+
+  describe('permission mode', () => {
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.clearAllTimers(); vi.useRealTimers() })
+
+    it.each(['default', 'acceptEdits', 'bypassPermissions', 'dangerouslySkipPermissions'] as const)('inherits Joe\'s %s mode', async (permissionMode) => {
+      sessions = makeMockSessions()
+      sessions.get.mockReturnValue({ provider: 'claude', model: 'claude-opus-5-5', permissionMode })
+      const child = await makeManager(sessions).spawn(makeRequest({ parentSessionId: 'joe' }))
+      expect(child.request.permissionMode).toBe(permissionMode)
+      expect(sessions.create).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.objectContaining({ permissionMode }))
+    })
+
+    it('runs in acceptEdits when Joe is planning or not loaded', async () => {
+      sessions = makeMockSessions()
+      sessions.get.mockReturnValue({ provider: 'claude', permissionMode: 'plan' })
+      expect((await makeManager(sessions).spawn(makeRequest({ parentSessionId: 'joe' }))).request.permissionMode).toBe('acceptEdits')
+      sessions.get.mockReturnValue(undefined)
+      expect((await makeManager(sessions).spawn(makeRequest({ branchName: 'fix/other', parentSessionId: 'joe' }))).request.permissionMode).toBe('acceptEdits')
     })
   })
 
@@ -508,6 +666,51 @@ describe('OrchestratorChildManager', () => {
       })
       expect(child.error).toContain('Timed out')
       expect(child.completedAt).toBeTruthy()
+      // A deliberate stop, so the process is not auto-restarted as a crash.
+      expect(sessions.stopClaude).toHaveBeenCalledWith(child.id)
+    })
+
+    it('resumes the working clock as soon as the prompt is resolved, without waiting for a result', async () => {
+      const pendingApprovals = new Map([['req-1', { toolInput: { command: 'git push' } }]])
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => true), stop: vi.fn() },
+        outputHistory: [],
+        pendingToolApprovals: pendingApprovals,
+        pendingControlRequests: new Map(),
+      }))
+
+      const child = await manager.spawn(makeRequest({ timeoutMs: 60_000 }))
+      vi.advanceTimersByTime(30_000)
+      for (const cb of sessions._promptListeners) cb(child.id, 'permission', 'Bash', 'req-1')
+      expect(child.status).toBe('blocked')
+
+      pendingApprovals.clear()
+      for (const cb of sessions._promptResolvedListeners) cb(child.id, 'req-1')
+      expect(child.status).toBe('running')
+
+      // The remaining ~30s of working budget burns with no result event.
+      vi.advanceTimersByTime(31_000)
+      await vi.waitFor(() => {
+        expect(child.status).toBe('timed_out')
+      })
+      expect(child.error).toContain('working time')
+    })
+
+    it('stays blocked while another prompt is still pending', async () => {
+      const pendingApprovals = new Map([['req-1', {}], ['req-2', {}]])
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => true), stop: vi.fn() },
+        outputHistory: [],
+        pendingToolApprovals: pendingApprovals,
+        pendingControlRequests: new Map(),
+      }))
+
+      const child = await manager.spawn(makeRequest())
+      for (const cb of sessions._promptListeners) cb(child.id, 'permission', 'Bash', 'req-1')
+      pendingApprovals.delete('req-1')
+      for (const cb of sessions._promptResolvedListeners) cb(child.id, 'req-1')
+
+      expect(child.status).toBe('blocked')
     })
 
     it('pauses the working clock while the child is blocked on a prompt', async () => {
@@ -571,7 +774,7 @@ describe('OrchestratorChildManager', () => {
     it('resumes the working clock after unblock with the remaining budget', async () => {
       // Ground truth reports no PR → after unblock, the child gets nudged and
       // monitoring continues on the resumed clock (~30s of budget left).
-      manager = makeManager(sessions, { exec: vi.fn(async () => '[]') })
+      manager = makeManager(sessions, { exec: fakeGit({ prs: [] }) })
       const pendingApprovals = new Map([['req-1', { toolInput: { command: 'git push' } }]])
       const makeSession = (pending: Map<string, unknown>) => ({
         claudeProcess: { isAlive: vi.fn(() => true), stop: vi.fn() },
@@ -594,13 +797,243 @@ describe('OrchestratorChildManager', () => {
       // Let the async ground-truth check + nudge settle, then burn the
       // remaining ~30s of working budget.
       await vi.advanceTimersByTimeAsync(0)
-      expect(sessions._sentInputs.some((p: string) => p.includes('no Pull Request exists'))).toBe(true)
+      expect(sessions._sentInputs.some((p: string) => p.includes('no pull request exists'))).toBe(true)
       vi.advanceTimersByTime(31_000)
 
       await vi.waitFor(() => {
         expect(child.status).toBe('timed_out')
       })
       expect(child.error).toContain('working time')
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Stop / archive / delete
+  // -------------------------------------------------------------------------
+
+  describe('session stop events', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+      sessions = makeMockSessions()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it.each([
+      ['stopped', 'Session was stopped by the user'],
+      ['archived', 'Session was archived'],
+      ['deleted', 'Session was deleted'],
+    ] as const)('cancels the child immediately when its session is %s', async (reason, error) => {
+      const notify = vi.fn(() => true)
+      manager = makeManager(sessions, { notify })
+      const child = await manager.spawn(makeRequest({ parentSessionId: 'parent-1' }))
+      expect(manager.activeCount()).toBe(1)
+
+      for (const cb of sessions._stopListeners) cb(child.id, reason)
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(child.status).toBe('canceled')
+      expect(child.error).toBe(error)
+      expect(manager.activeCount()).toBe(0)
+      expect(notify).toHaveBeenCalledTimes(1)
+      expect((notify.mock.calls[0] as any[])[0].body).toContain('Status: canceled')
+
+      // The old working-time budget no longer fires.
+      vi.advanceTimersByTime(2 * 3_600_000)
+      expect(child.status).toBe('canceled')
+      expect(notify).toHaveBeenCalledTimes(1)
+    })
+
+    it('stays canceled when the session is deleted while its worktree is being prepared', async () => {
+      let finishWorktree!: () => void
+      sessions.prepareSessionWorktree = vi.fn(() => new Promise((resolve) => {
+        finishWorktree = () => resolve({ ok: true, path: '/repos/myproject-wt-child123' })
+      }))
+      manager = makeManager(sessions)
+      const spawning = manager.spawn(makeRequest())
+      await vi.advanceTimersByTimeAsync(0)
+      const [child] = manager.list()
+      expect(child.status).toBe('starting')
+
+      for (const cb of sessions._stopListeners) cb(child.id, 'deleted')
+      finishWorktree()
+      await spawning
+
+      expect(child.status).toBe('canceled')
+      expect(sessions.startClaude).not.toHaveBeenCalled()
+    })
+
+    it('ignores stop events for terminal children and unrelated sessions', async () => {
+      manager = makeManager(sessions)
+      const child = await manager.spawn(makeRequest())
+      for (const cb of sessions._stopListeners) cb('someone-else', 'stopped')
+      expect(child.status).toBe('running')
+
+      for (const cb of sessions._stopListeners) cb(child.id, 'stopped')
+      await vi.advanceTimersByTimeAsync(0)
+      for (const cb of sessions._stopListeners) cb(child.id, 'deleted')
+      expect(child.error).toBe('Session was stopped by the user')
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Control: follow-up, stop, resume, close
+  // -------------------------------------------------------------------------
+
+  describe('control', () => {
+    let session: any
+    let notify: ReturnType<typeof vi.fn>
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+      sessions = makeMockSessions()
+      session = {
+        claudeProcess: { isAlive: vi.fn(() => true), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'done' }],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+        worktreePath: '/repos/myproject-wt-child123',
+        archivedAt: undefined as string | undefined,
+      }
+      sessions.get = vi.fn(() => session)
+      const fireStop = (reason: string) => (id: string) => { for (const cb of sessions._stopListeners) cb(id, reason) }
+      sessions.stopSession = vi.fn(fireStop('stopped'))
+      sessions.archiveSession = vi.fn((id: string) => { session.archivedAt = 'now'; fireStop('archived')(id) })
+      sessions.delete = vi.fn(fireStop('deleted'))
+      sessions.resumeSession = vi.fn(() => { session.archivedAt = undefined })
+      sessions.getRemovalPreflight = vi.fn(async () => ({ modified: [], untracked: [] }))
+      notify = vi.fn(() => true)
+      manager = makeManager(sessions, { notify })
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    async function finish(child: { id: string; status: string }) {
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+      await vi.waitFor(() => expect(child.status).toBe('completed'))
+    }
+
+    it('rejects every control call for sessions that are not its children', async () => {
+      expect(() => manager.sendFollowUp('stranger', 'hi')).toThrow(/Not one of your child sessions/)
+      expect(() => manager.stop('stranger')).toThrow(/Not one of your child sessions/)
+      expect(() => manager.resume('stranger')).toThrow(/Not one of your child sessions/)
+      await expect(manager.close('stranger')).rejects.toThrow(/Not one of your child sessions/)
+      expect(sessions.stopSession).not.toHaveBeenCalled()
+      expect(sessions.delete).not.toHaveBeenCalled()
+    })
+
+    it('sends a follow-up to an active child', async () => {
+      const child = await manager.spawn(makeRequest())
+      manager.sendFollowUp(child.id, 'Also update the README')
+      expect(sessions.sendInput).toHaveBeenLastCalledWith(child.id, 'Also update the README')
+    })
+
+    it('refuses a follow-up while the child waits on a prompt, and for a finished child', async () => {
+      const child = await manager.spawn(makeRequest())
+      session.pendingToolApprovals.set('req-1', {})
+      expect(() => manager.sendFollowUp(child.id, 'x')).toThrow(/respond_to_prompt/)
+      session.pendingToolApprovals.clear()
+      await finish(child)
+      expect(() => manager.sendFollowUp(child.id, 'x')).toThrow(/resume/)
+    })
+
+    it('stops an active child without a redundant stop notification', async () => {
+      const child = await manager.spawn(makeRequest({ parentSessionId: 'parent-1' }))
+      manager.stop(child.id)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(child.status).toBe('canceled')
+      expect(sessions.stopSession).toHaveBeenCalledWith(child.id)
+      expect(notify).not.toHaveBeenCalled()
+      expect(() => manager.stop(child.id)).toThrow(/already canceled/)
+    })
+
+    it('resumes a finished child as a new supervised attempt on the same session', async () => {
+      const child = await manager.spawn(makeRequest({ parentSessionId: 'parent-1' }))
+      manager.stop(child.id)
+      await vi.advanceTimersByTimeAsync(0)
+
+      const resumed = manager.resume(child.id, 'Fix the failing test and push')
+      expect(resumed).toMatchObject({ status: 'running', attempt: 2, error: null, completedAt: null })
+      expect(manager.get(child.id)).toBe(resumed)
+      expect(manager.activeCount()).toBe(1)
+      expect(sessions.sendInput).toHaveBeenLastCalledWith(child.id, 'Fix the failing test and push')
+
+      // Supervised again: completion is re-verified and the parent is notified.
+      await finish(resumed)
+      expect(resumed.verification?.state).toBe('verified')
+      expect(notify).toHaveBeenCalledTimes(1)
+    })
+
+    it('sends a default continue instruction and unarchives an archived child', async () => {
+      const child = await manager.spawn(makeRequest())
+      await finish(child)
+      await manager.close(child.id)
+      expect(session.archivedAt).toBe('now')
+
+      manager.resume(child.id)
+      expect(sessions.resumeSession).toHaveBeenCalledWith(child.id)
+      expect(sessions._sentInputs.at(-1)).toContain('Continue the task: Fix the login bug')
+      expect(sessions._sentInputs.at(-1)).toContain('open Pull Request')
+    })
+
+    it('refuses to resume an active child, a deleted session, or a removed worktree', async () => {
+      const child = await manager.spawn(makeRequest())
+      expect(() => manager.resume(child.id)).toThrow(/send it a follow-up/)
+      await finish(child)
+      session.worktreeState = 'removed'
+      expect(() => manager.resume(child.id)).toThrow(/worktree was removed/)
+      sessions.get = vi.fn(() => undefined)
+      expect(() => manager.resume(child.id)).toThrow(/Session was deleted/)
+    })
+
+    it('refuses to resume past the concurrency limit', async () => {
+      const first = await manager.spawn(makeRequest())
+      await finish(first)
+      for (let i = 0; i < 5; i++) await manager.spawn(makeRequest({ branchName: `fix/b${i}` }))
+      expect(() => manager.resume(first.id)).toThrow(/5 concurrent/)
+    })
+
+    it('archives by default and keeps the worktree and branch', async () => {
+      const child = await manager.spawn(makeRequest())
+      await finish(child)
+      const result = await manager.close(child.id)
+      expect(result).toMatchObject({
+        action: 'archived',
+        worktree: { path: '/repos/myproject-wt-child123', outcome: 'kept' },
+        branch: 'fix/login-bug',
+      })
+      expect(sessions.delete).not.toHaveBeenCalled()
+    })
+
+    it('refuses to close an active child unless cancel is set', async () => {
+      const child = await manager.spawn(makeRequest({ parentSessionId: 'parent-1' }))
+      await expect(manager.close(child.id)).rejects.toThrow(/cancel: true/)
+      const result = await manager.close(child.id, { cancel: true })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(result.action).toBe('archived')
+      expect(child.status).toBe('canceled')
+      expect(notify).not.toHaveBeenCalled()
+    })
+
+    it('deletes a clean child and reports the worktree removal', async () => {
+      const child = await manager.spawn(makeRequest())
+      await finish(child)
+      const result = await manager.close(child.id, { mode: 'delete' })
+      expect(sessions.delete).toHaveBeenCalledWith(child.id)
+      expect(result.worktree).toMatchObject({ outcome: 'removal_started', modified: [], untracked: [] })
+      expect(manager.list()).toEqual([])
+    })
+
+    it('reports a dirty worktree as kept on delete', async () => {
+      sessions.getRemovalPreflight = vi.fn(async () => ({ modified: ['src/a.ts'], untracked: ['notes.md'] }))
+      const child = await manager.spawn(makeRequest())
+      await finish(child)
+      const result = await manager.close(child.id, { mode: 'delete' })
+      expect(result.worktree).toEqual({ path: '/repos/myproject-wt-child123', outcome: 'kept', modified: ['src/a.ts'], untracked: ['notes.md'] })
     })
   })
 
@@ -672,9 +1105,7 @@ describe('OrchestratorChildManager', () => {
     })
 
     it('includes create-branch step when NOT in worktree', async () => {
-      sessions = makeMockSessions(false)
-      manager = makeManager(sessions)
-      await manager.spawn(makeRequest({ useWorktree: true, completionPolicy: 'pr' }))
+      await manager.spawn(makeRequest({ useWorktree: false, completionPolicy: 'pr' }))
 
       const prompt = sessions._sentInputs[0]
       expect(prompt).toContain('Create and switch to branch')
@@ -1065,7 +1496,7 @@ describe('OrchestratorChildManager', () => {
       sessions = makeMockSessions()
       runStore = new RunStore(':memory:')
       manager = new OrchestratorChildManager(sessions, {
-        exec: vi.fn(async () => '[{"number": 1}]'),
+        exec: fakeGit(),
         runStore,
       })
     })
@@ -1096,6 +1527,96 @@ describe('OrchestratorChildManager', () => {
 
       expect(runStore.getRun(child.id)?.status).toBe('blocked')
       expect(runStore.listLedger(child.id).some((e) => e.summary.includes('approval for Bash'))).toBe(true)
+    })
+
+    it('persists an unverified child as awaiting_human, never succeeded', async () => {
+      manager = new OrchestratorChildManager(sessions, { exec: fakeGit({ fail: true }), runStore })
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => false), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'Opened a PR' }],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+      }))
+      const child = await manager.spawn(makeRequest())
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+      await vi.waitFor(() => expect(child.status).toBe('unverified'))
+      expect(runStore.getRun(child.id)?.status).toBe('awaiting_human')
+    })
+
+    it('records the verified PR url on the run', async () => {
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => false), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'done' }],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+      }))
+      const child = await manager.spawn(makeRequest())
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+      await vi.waitFor(() => expect(child.status).toBe('completed'))
+      expect(runStore.getRun(child.id)).toMatchObject({ status: 'succeeded', prUrl: 'https://github.com/o/r/pull/1' })
+    })
+
+    it('persists a canceled child as a canceled run', async () => {
+      const child = await manager.spawn(makeRequest())
+      for (const cb of sessions._stopListeners) cb(child.id, 'stopped')
+      await vi.waitFor(() => expect(runStore.getRun(child.id)?.status).toBe('canceled'))
+    })
+
+    it('recovers children interrupted by a restart, notifies the parent once, and blocks unsupervised auto-restart', async () => {
+      const child = await manager.spawn(makeRequest({ parentSessionId: 'parent-1' }))
+      const interrupted = runStore.failInterrupted('agent')
+      expect(interrupted).toEqual([child.id])
+
+      // A fresh process: new manager, same run store, session restored from disk.
+      const restored = { _wasActiveBeforeRestart: true, worktreePath: '/repos/myproject-wt-child123' }
+      const fresh = makeMockSessions()
+      fresh.get = vi.fn((id: string) => (id === child.id ? restored : undefined))
+      const notify = vi.fn(() => true)
+      const recoveredManager = new OrchestratorChildManager(fresh, { exec: fakeGit(), runStore, notify })
+
+      const recovered = recoveredManager.recoverInterrupted(interrupted)
+      expect(recovered).toHaveLength(1)
+      expect(recoveredManager.list().map(c => c.id)).toEqual([child.id])
+      expect(recoveredManager.get(child.id)).toMatchObject({ status: 'failed', error: 'interrupted by server restart', worktreePath: '/repos/myproject-wt-child123' })
+      expect(recoveredManager.activeCount()).toBe(0)
+      expect(restored._wasActiveBeforeRestart).toBe(false)
+      expect(notify).toHaveBeenCalledTimes(1)
+      expect((notify.mock.calls[0] as any[])[0]).toMatchObject({ parentSessionId: 'parent-1' })
+      expect((notify.mock.calls[0] as any[])[0].body).toContain('Inspect worktree at /repos/myproject-wt-child123')
+
+      // Idempotent: recovering again does not re-notify.
+      recoveredManager.recoverInterrupted(interrupted)
+      expect(notify).toHaveBeenCalledTimes(1)
+    })
+
+    it('get() falls back to the run store for children no longer in the live list', async () => {
+      const child = await manager.spawn(makeRequest())
+      const other = new OrchestratorChildManager(makeMockSessions(), { exec: fakeGit(), runStore })
+      expect(other.list()).toEqual([])
+      expect(other.get(child.id)).toMatchObject({ id: child.id, status: 'running', request: { task: 'Fix the login bug' } })
+      expect(other.get('nope')).toBeNull()
+    })
+
+    it('notifies update listeners on every state change and carries the task id', async () => {
+      const updates: string[] = []
+      const notify = vi.fn(() => true)
+      manager = new OrchestratorChildManager(sessions, { exec: fakeGit(), runStore, notify })
+      manager.onChildUpdate((c) => { updates.push(`${c.request.taskId}:${c.status}`) })
+      sessions.get = vi.fn(() => ({
+        claudeProcess: { isAlive: vi.fn(() => false), stop: vi.fn() },
+        outputHistory: [{ type: 'output', data: 'done' }],
+        pendingToolApprovals: new Map(),
+        pendingControlRequests: new Map(),
+      }))
+      const child = await manager.spawn(makeRequest({ taskId: 'task-9', parentSessionId: 'parent-1' }))
+      for (const cb of sessions._resultListeners) cb(child.id, false)
+      await vi.waitFor(() => expect(child.status).toBe('completed'))
+
+      expect(updates[0]).toBe('task-9:starting')
+      expect(updates).toContain('task-9:running')
+      expect(updates.at(-1)).toBe('task-9:completed')
+      expect(runStore.getRun(child.id)?.spec).toMatchObject({ taskId: 'task-9' })
+      expect((notify.mock.calls[0] as any[])[0].body).toContain('Task: task-9')
     })
 
     it('persists a spawn failure as a failed run', async () => {

@@ -6,18 +6,33 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
+import type { Workspace } from './workspace'
+import type { AuthLevel } from './mfa'
+import { seedUserPrefs, type UserPrefs } from './userPrefs'
 
 export interface HostedUser {
   id: string
   login: string
   displayName: string | null
   avatarUrl: string | null
-  role: 'owner' | 'admin' | 'member' | 'viewer'
   status: 'active' | 'pending' | 'disabled'
 }
 
+/** Account-level facts /api/me reports alongside the user. */
+export interface HostedAccount {
+  /** How far sign-in has got; anything but 'full' means a 2FA screen. */
+  authLevel: AuthLevel
+  /** Workspaces the user is an active member of, default first. */
+  workspaces: Workspace[]
+  isOperator: boolean
+  canCreateWorkspaces: boolean
+}
+
+const NO_ACCOUNT: HostedAccount = { authLevel: 'full', workspaces: [], isOperator: false, canCreateWorkspaces: false }
+
 export interface HostedAuthState {
   user: HostedUser | null
+  account: HostedAccount
   /** True once the first /api/me probe has resolved (success or failure). */
   initialized: boolean
   /** Error code passed back from a failed OAuth callback (?auth_error=...). */
@@ -40,6 +55,7 @@ function consumeAuthError(): string | null {
 
 export function useHostedAuth(): HostedAuthState {
   const [user, setUser] = useState<HostedUser | null>(null)
+  const [account, setAccount] = useState(NO_ACCOUNT)
   const [initialized, setInitialized] = useState(false)
   const [authError] = useState<string | null>(consumeAuthError)
 
@@ -47,8 +63,17 @@ export function useHostedAuth(): HostedAuthState {
     try {
       const res = await fetch('/api/me', { credentials: 'include' })
       if (res.ok) {
-        const data = await res.json() as { user: HostedUser | null }
+        const data = await res.json() as { user: HostedUser | null; preferences?: UserPrefs | null } & Partial<HostedAccount>
+        // Before the user state below, so the workspace pick and the machine
+        // restore it triggers already see the remembered choices.
+        seedUserPrefs(data.preferences)
         setUser(data.user)
+        setAccount({
+          authLevel: data.authLevel ?? 'full',
+          workspaces: data.workspaces ?? [],
+          isOperator: data.isOperator ?? false,
+          canCreateWorkspaces: data.canCreateWorkspaces ?? false,
+        })
       } else {
         setUser(null)
       }
@@ -72,5 +97,5 @@ export function useHostedAuth(): HostedAuthState {
     void refresh()
   }, [refresh])
 
-  return { user, initialized, authError, refresh, logout }
+  return { user, account, initialized, authError, refresh, logout }
 }

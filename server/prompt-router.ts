@@ -15,6 +15,7 @@ import { ApprovalManager } from './approval-manager.js'
 import type { CodingProcess } from './coding-process.js'
 import type { PromptQuestion, Session, WsServerMessage } from './types.js'
 import { jsonParse } from './json-parse.js'
+import { approvalSegments, isHarmlessSegment, unwrapShellCommand } from './shell-command.js'
 
 /** Dependencies injected by SessionManager so PromptRouter can interact with session state. */
 export interface PromptRouterDeps {
@@ -25,6 +26,8 @@ export interface PromptRouterDeps {
   globalBroadcast(msg: WsServerMessage): void
   approvalManager: ApprovalManager
   promptListeners: Array<(sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void>
+  /** Notified after a pending prompt is removed — answered, auto-approved, or timed out. */
+  promptResolvedListeners?: Array<(sessionId: string, requestId: string) => void>
   /** Called after the user approves a plan, so the session can transition out of plan mode. */
   onPlanApproved(session: Session): void
 }
@@ -133,6 +136,11 @@ export class PromptRouter {
       return
     }
     console.log(`[control_request] session=${sessionId} tool=${toolName} requestId=${requestId}`)
+    // Show and remember the command the user would recognise, not the
+    // harness wrapper (`/bin/bash -lc '…'`).
+    if (toolName === 'Bash' && typeof toolInput.command === 'string') {
+      toolInput = { ...toolInput, command: unwrapShellCommand(toolInput.command) }
+    }
 
     const autoResult = this.resolveAutoApproval(session, toolName, toolInput)
     if (autoResult === 'planDeny') {
@@ -251,7 +259,7 @@ export class PromptRouter {
     if (pending) {
       session.pendingControlRequests.delete(pending.requestId)
       // Dismiss prompt on all other clients viewing this session
-      this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: pending.requestId })
+      this.dismissPrompt(session, pending.requestId)
 
       if (pending.toolName === 'AskUserQuestion') {
         this.handleAskUserQuestion(session, pending, value)
@@ -327,7 +335,7 @@ export class PromptRouter {
         console.log(`[tool-approval] auto-approving control_request for ${toolName} (PreToolUse hook taking over)`)
         session.claudeProcess?.sendControlResponse(reqId, 'allow')
         session.pendingControlRequests.delete(reqId)
-        this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: reqId })
+        this.dismissPrompt(session, reqId)
         break
       }
     }
@@ -354,7 +362,7 @@ export class PromptRouter {
           session.pendingToolApprovals.delete(approvalRequestId)
           // Dismiss the stale prompt in all clients so they don't inject
           // "allow"/"deny" as plain text after the timeout
-          this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: approvalRequestId })
+          this.dismissPrompt(session, approvalRequestId)
           this.notifyAutoDeny(session, `Approval request for ${toolName} timed out after 5 minutes and was automatically denied.`)
           resolve({ allow: false, always: false })
         }
@@ -436,6 +444,17 @@ export class PromptRouter {
   // ---------------------------------------------------------------------------
 
   /**
+   * Dismiss a resolved prompt on every client and tell resolution listeners
+   * (e.g. the child monitor, which resumes a child's working clock).
+   */
+  private dismissPrompt(session: Session, requestId: string): void {
+    this.deps.broadcast(session, { type: 'prompt_dismiss', requestId })
+    for (const listener of this.deps.promptResolvedListeners ?? []) {
+      try { listener(session.id, requestId) } catch { /* listener error */ }
+    }
+  }
+
+  /**
    * Surface an automatic denial to the user as a visible system message
    * (broadcast + history), so silent timeouts/disconnect denials are explained.
    */
@@ -467,7 +486,7 @@ export class PromptRouter {
       console.log(`[tool-approval] resolving AskUserQuestion: answer=${answer.slice(0, 100)}`)
       approval.resolve({ allow: true, always: false, answer })
       session.pendingToolApprovals.delete(approval.requestId)
-      this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: approval.requestId })
+      this.dismissPrompt(session, approval.requestId)
       return
     }
 
@@ -490,7 +509,7 @@ export class PromptRouter {
         this.deps.onPlanApproved(session)
       }
       session.pendingToolApprovals.delete(approval.requestId)
-      this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: approval.requestId })
+      this.dismissPrompt(session, approval.requestId)
       return
     }
 
@@ -506,7 +525,7 @@ export class PromptRouter {
     console.log(`[tool-approval] resolving: allow=${!isDeny} always=${isAlwaysAllow} pattern=${isApprovePattern} tool=${approval.toolName}`)
     approval.resolve({ allow: !isDeny, always: isAlwaysAllow || isApprovePattern })
     session.pendingToolApprovals.delete(approval.requestId)
-    this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: approval.requestId })
+    this.dismissPrompt(session, approval.requestId)
   }
 
   /**
@@ -533,7 +552,7 @@ export class PromptRouter {
           console.log(`[plan-approval] timed out, auto-denying`)
           session.pendingToolApprovals.delete(reviewId)
           session.planManager.deny(reviewId)
-          this.deps.broadcast(session, { type: 'prompt_dismiss', requestId: reviewId })
+          this.dismissPrompt(session, reviewId)
           this.notifyAutoDeny(session, 'Plan approval request timed out after 5 minutes — the plan was automatically rejected.')
           resolve({ allow: false, always: false })
         }
@@ -691,11 +710,16 @@ export class PromptRouter {
     if (PromptRouter.FILE_TOOLS.has(toolName) && PromptRouter.EDIT_MODES.has(session.permissionMode ?? '')) {
       return 'permissionMode'
     }
-    if (this.deps.approvalManager.checkAutoApproval(session.groupDir ?? session.workingDir, toolName, toolInput)) {
-      return 'registry'
-    }
-    if (session.allowedTools && this.matchesAllowedTools(session.allowedTools, toolName, toolInput)) {
-      return 'session'
+    if (toolName === 'Bash') {
+      const bash = this.resolveBashApproval(session, toolInput)
+      if (bash) return bash
+    } else {
+      if (this.deps.approvalManager.checkAutoApproval(session.groupDir ?? session.workingDir, toolName, toolInput)) {
+        return 'registry'
+      }
+      if (session.allowedTools && this.matchesAllowedTools(session.allowedTools, toolName, toolInput)) {
+        return 'session'
+      }
     }
     // Agent child sessions: only auto-approve tools in their allowedTools list,
     // never blanket headless. This ensures AGENT_CHILD_ALLOWED_TOOLS is the
@@ -707,6 +731,34 @@ export class PromptRouter {
       return 'headless'
     }
     return 'prompt'
+  }
+
+  /**
+   * Bash auto-approval, one segment at a time. The command is unwrapped from
+   * harness shell wrappers (Codex sends `/bin/bash -lc '<cmd>'`) and split on
+   * control operators; every segment must be approved by the repo registry
+   * or the session allowlist (`cd` needs no approval). A command that cannot
+   * be split safely — substitution, redirection, subshells — only passes as
+   * an exact "Always allow" match.
+   */
+  private resolveBashApproval(session: Session, toolInput: Record<string, unknown>): 'registry' | 'session' | null {
+    const repo = session.groupDir ?? session.workingDir
+    const raw = typeof toolInput.command === 'string' ? toolInput.command : ''
+    const command = unwrapShellCommand(raw)
+    if (this.deps.approvalManager.hasExactCommand(repo, command) || this.deps.approvalManager.hasExactCommand(repo, raw)) {
+      return 'registry'
+    }
+    const segments = approvalSegments(raw)
+    if (!segments) return null
+    let viaRegistry = false
+    for (const segment of segments) {
+      if (isHarmlessSegment(segment)) continue
+      const input = { ...toolInput, command: segment }
+      if (this.deps.approvalManager.checkAutoApproval(repo, 'Bash', input)) { viaRegistry = true; continue }
+      if (session.allowedTools && this.matchesAllowedTools(session.allowedTools, 'Bash', input)) continue
+      return null
+    }
+    return viaRegistry ? 'registry' : 'session'
   }
 
   /**

@@ -23,6 +23,8 @@ vi.mock('./orchestrator-manager.js', () => ({
   getOrCreateOrchestratorId: vi.fn(() => 'orch-session-id'),
   getOrchestratorSessionId: vi.fn(() => null),
   ensureOrchestratorRunning: vi.fn(() => 'orch-session-id'),
+  getOrchestratorProvider: vi.fn(() => 'codex'),
+  setOrchestratorProvider: vi.fn(),
 }))
 
 // Mock the orchestrator-learning module — these helpers are exercised via

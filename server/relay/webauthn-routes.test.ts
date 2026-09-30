@@ -5,6 +5,7 @@
  * point of rejection — producing a valid attestation requires an
  * authenticator.
  */
+import { signInFully } from './__fixtures__/auth.js'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import express from 'express'
 import session from 'express-session'
@@ -40,7 +41,6 @@ describe('webauthn routes', () => {
       login: row.login,
       displayName: null,
       avatarUrl: null,
-      role: row.role,
       status: row.status,
     }
 
@@ -48,7 +48,7 @@ describe('webauthn routes', () => {
     app.use(express.json())
     app.use(session({ secret: 's'.repeat(32), resave: false, saveUninitialized: false }))
     app.use((req, _res, next) => {
-      if (req.headers['x-test-user'] === 'active') req.session.user = activeUser
+      if (req.headers['x-test-user'] === 'active') { req.session.user = activeUser; signInFully(db, req.session, req.session.user.id) }
       next()
     })
     app.use(createWebauthnRouter(db, CONFIG))
@@ -164,14 +164,17 @@ describe('webauthn routes', () => {
     expect(res.status).toBe(401)
   })
 
-  it('login verify for a disabled user is a 403 before any crypto runs', async () => {
+  it('an unverified assertion for a disabled user is the same 401 as for an active one', async () => {
+    // Checking status before the signature would let a bare credential id
+    // reveal whether its account is disabled.
     insertCredential(db, { userId: activeUser.id, credentialId: 'cred-1', publicKey: 'pk', counter: 0 })
     db.prepare(`UPDATE users SET status = 'disabled' WHERE id = ?`).run(activeUser.id)
     const cookie = await loginChallengeCookie()
     const res = await fetch(`${baseUrl}/api/auth/webauthn/login/verify`, {
       method: 'POST', headers: { ...anon, cookie }, body: assertionBody('cred-1'),
     })
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(401)
+    expect(listAuditEvents(db, {}).map(e => e.kind)).toContain('login_failed')
   })
 
   it('a forged assertion for a real credential is a 401 and mints no session', async () => {

@@ -9,6 +9,9 @@
 import { useEffect, useState, useCallback } from 'react'
 import { IconRobotFace, IconFolder, IconBell, IconTerminal2 } from '@tabler/icons-react'
 import * as api from '../lib/ccApi'
+import { PROVIDERS, type CodingProvider } from '../types'
+import { useAgentHealth } from '../hooks/useAgentHealth'
+import { providerAvailability } from '../lib/agentHealth'
 
 interface DashboardStats {
   managedRepos: number
@@ -27,7 +30,14 @@ interface Props {
   sessionJoined: boolean
   /** Agent display name (from parent settings). */
   agentName?: string
+  /** Chat / Tasks tab (header tabs render only when onTabChange is given). */
+  tab?: OrchestratorTab
+  onTabChange?: (tab: OrchestratorTab) => void
+  /** Tasks waiting on the user (decisions + reviews), shown as a badge. */
+  taskAttention?: number
 }
+
+export type OrchestratorTab = 'chat' | 'tasks'
 
 function StatCard({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
   return (
@@ -41,12 +51,13 @@ function StatCard({ label, value, icon }: { label: string; value: number; icon: 
   )
 }
 
-export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoined, agentName: agentNameProp }: Props) {
-  const [status, setStatus] = useState<'loading' | 'active' | 'error'>('loading')
+export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoined, agentName: agentNameProp, tab = 'chat', onTabChange, taskAttention = 0 }: Props) {
+  const [status, setStatus] = useState<'loading' | 'choose' | 'active' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [agentNameLocal, setAgentNameLocal] = useState('Joe')
   const agentName = agentNameProp ?? agentNameLocal
+  const health = useAgentHealth()
 
   // Fetch dashboard stats
   const refreshStats = useCallback(async () => {
@@ -64,6 +75,13 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
 
     async function init() {
       try {
+        const saved = await api.getOrchestratorStatus(token)
+        if (cancelled) return
+        if (saved.agentName) setAgentNameLocal(saved.agentName)
+        if (!saved.provider) {
+          setStatus('choose')
+          return
+        }
         const result = await api.startOrchestrator(token)
         if (cancelled) return
         if (result.agentName) setAgentNameLocal(result.agentName)
@@ -99,15 +117,47 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
     )
   }
 
-  if (status === 'error') {
+  async function chooseProvider(provider: CodingProvider) {
+    setError(null)
+    setStatus('loading')
+    try {
+      const result = await api.startOrchestrator(token, provider)
+      if (result.agentName) setAgentNameLocal(result.agentName)
+      setStatus('active')
+      onOrchestratorSessionReady(result.sessionId)
+      void refreshStats()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start orchestrator')
+      setStatus('error')
+    }
+  }
+
+  if (status === 'choose' || status === 'error') {
     return (
-      <div className="flex flex-1 items-center justify-center">
-        <div className="text-center">
-          <div className="flex items-center justify-center gap-2 text-error-5 mb-2">
-            <IconRobotFace size={20} stroke={2} />
-            <span className="text-body font-medium">Failed to start Agent {agentName}</span>
+      <div className="flex flex-1 items-center justify-center px-6">
+        <div className="w-full max-w-lg">
+          <h2 className="text-title font-semibold text-ink">Choose an agent for {agentName}</h2>
+          <p className="mt-2 text-body text-ink-muted">
+            Joe and delegated sessions will use this agent. You can change it in the chat composer or ask Joe to use another agent for a task.
+          </p>
+          {error && <p role="alert" className="mt-2 text-body text-error-5">{error}</p>}
+          <div className="mt-4 flex flex-col gap-2">
+            {PROVIDERS.map((provider) => {
+              const availability = providerAvailability(health, provider.id)
+              return (
+                <button
+                  key={provider.id}
+                  type="button"
+                  disabled={!availability.available}
+                  onClick={() => { void chooseProvider(provider.id) }}
+                  className="rounded-control border border-edge px-4 py-3 text-left text-body text-ink hover:border-edge-strong disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span className="font-semibold">{provider.label}</span>
+                  <span className="block text-meta text-ink-muted">{availability.hint ?? provider.description}</span>
+                </button>
+              )
+            })}
           </div>
-          <p className="text-body text-ink-muted">{error}</p>
         </div>
       </div>
     )
@@ -122,6 +172,25 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
         <IconRobotFace size={18} stroke={2} className="text-accent-5" />
         <span className="text-body font-medium">Agent {agentName}</span>
       </div>
+      {onTabChange && (
+        <div role="tablist" aria-label={`Agent ${agentName} views`} className="flex items-center gap-1">
+          {(['chat', 'tasks'] as const).map(id => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              onClick={() => { onTabChange(id) }}
+              className={`inline-flex items-center gap-1.5 rounded-control px-2.5 py-1 text-meta ${tab === id ? 'bg-surface-raised text-ink' : 'text-ink-muted hover:text-ink'}`}
+            >
+              {id === 'chat' ? 'Chat' : 'Tasks'}
+              {id === 'tasks' && taskAttention > 0 && (
+                <span aria-label={`${taskAttention} waiting on you`} className="rounded-full bg-warning-7 px-1.5 text-micro font-semibold text-warning-1">{taskAttention}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
       {stats && (
         <div className="flex items-center gap-2 ml-auto">
           {stats.managedRepos > 0 && (

@@ -22,6 +22,7 @@ import { IconX, IconFileText, IconArchive, IconShieldCheck, IconSearch } from '@
 import { DocsFilePicker } from './DocsFilePicker'
 import { ArchivedSessionsList, ArchivedSessionViewer } from './ArchivedSessionsPanel'
 import { ApprovalsPanel } from './ApprovalsPanel'
+import { getPref, setPref } from '../lib/prefs'
 
 export type RepoDrawerTab = 'docs' | 'archive' | 'approvals'
 
@@ -48,6 +49,8 @@ export interface RepoDrawerProps {
    */
   onViewArchivedSession: (id: string) => void
   onNewSessionFromArchive: (workingDir: string, context: string) => void
+  /** Open an archived session that was just resumed. */
+  onResumeSession?: (sessionId: string) => void
   /** Font size for any archived-transcript preview. */
   fontSize: number
   /**
@@ -59,8 +62,6 @@ export interface RepoDrawerProps {
   isMobile?: boolean
 }
 
-const TAB_STORAGE_PREFIX = 'codekin.repoDrawerTab:'
-const WIDTH_STORAGE_KEY = 'codekin-repo-drawer-width'
 const DEFAULT_WIDTH = 320
 const MIN_WIDTH = 240
 const MAX_WIDTH = 600
@@ -78,12 +79,8 @@ function isTab(value: string | null): value is RepoDrawerTab {
 /** Tab choice is remembered per repo, so each repo reopens where you left it. */
 function readStoredTab(workingDir: string | null): RepoDrawerTab {
   if (!workingDir) return 'docs'
-  try {
-    const stored = localStorage.getItem(TAB_STORAGE_PREFIX + workingDir)
-    return isTab(stored) ? stored : 'docs'
-  } catch {
-    return 'docs'
-  }
+  const stored = getPref('repoDrawerTabs')?.[workingDir] ?? null
+  return isTab(stored) ? stored : 'docs'
 }
 
 const EMPTY_FILTERS: Record<RepoDrawerTab, string> = { docs: '', archive: '', approvals: '' }
@@ -102,12 +99,13 @@ export function RepoDrawer({
   archiveRefreshKey,
   onViewArchivedSession,
   onNewSessionFromArchive,
+  onResumeSession,
   fontSize,
   initialTab,
   isMobile,
 }: RepoDrawerProps) {
   // Selection lives in state only for repos touched this session; everything
-  // else falls back to what localStorage remembers. No effect, no flash.
+  // else falls back to the remembered tab. No effect, no flash.
   const [selected, setSelected] = useState<Record<string, RepoDrawerTab>>({})
   const [viewingId, setViewingId] = useState<string | null>(null)
   // Filter text is per tab, and scoped to the repo it was typed in — switching
@@ -118,13 +116,13 @@ export function RepoDrawer({
   // The drawer is a flex sibling of the transcript, so it needs an explicit
   // width — without one it collapses to whatever its content happens to be.
   const [width, setWidth] = useState(() => {
-    const stored = Number(localStorage.getItem(WIDTH_STORAGE_KEY))
+    const stored = getPref('repoDrawerWidth')
     return stored ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, stored)) : DEFAULT_WIDTH
   })
   const drag = useRef<{ startX: number; startWidth: number } | null>(null)
 
   useEffect(() => {
-    localStorage.setItem(WIDTH_STORAGE_KEY, String(width))
+    setPref('repoDrawerWidth', width)
   }, [width])
 
   const onDragStart = useCallback((e: React.MouseEvent) => {
@@ -155,11 +153,7 @@ export function RepoDrawer({
   const selectTab = useCallback((next: RepoDrawerTab) => {
     if (!workingDir) return
     setSelected(prev => ({ ...prev, [workingDir]: next }))
-    try {
-      localStorage.setItem(TAB_STORAGE_PREFIX + workingDir, next)
-    } catch {
-      /* private mode — the tab just won't be remembered */
-    }
+    setPref('repoDrawerTabs', { ...getPref('repoDrawerTabs'), [workingDir]: next })
   }, [workingDir])
 
   const setFilter = useCallback((value: string) => {
@@ -308,6 +302,7 @@ export function RepoDrawer({
             filter={filter}
             onView={handleView}
             onNewSessionFromArchive={handleNewSessionFromArchive}
+            onResumed={onResumeSession}
           />
         )}
         {tab === 'approvals' && (

@@ -10,6 +10,7 @@ import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { RepoDrawer, type RepoDrawerProps } from './RepoDrawer.js'
+import { resetPrefsForTest } from '../lib/prefs'
 
 let activeRoot: ReturnType<typeof createRoot> | null = null
 let activeContainer: HTMLElement | null = null
@@ -26,7 +27,7 @@ function render(ui: React.ReactElement): HTMLElement {
 }
 
 beforeEach(() => {
-  localStorage.clear()
+  resetPrefsForTest()
 })
 
 afterEach(() => {
@@ -72,7 +73,7 @@ describe('RepoDrawer', () => {
   })
 
   it('restores a persisted width, clamped to the allowed range', () => {
-    localStorage.setItem('codekin-repo-drawer-width', '9999')
+    resetPrefsForTest({ repoDrawerWidth: 9999 })
     const container = render(<RepoDrawer {...baseProps} />)
     expect(parseInt(panelOf(container).style.width, 10)).toBe(600)
   })

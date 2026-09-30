@@ -22,7 +22,9 @@ export interface UseSessionOrchestrationParams {
   leaveSession: () => void
   clearMessages: () => void
   wsCreateSession: (name: string, workingDir: string, useWorktree?: boolean, permissionMode?: PermissionMode, provider?: import('../types').CodingProvider) => void
-  removeSession: (sessionId: string) => Promise<void>
+  /** Close a session from the sidebar. Archives it: the process stops and the
+   *  session is hidden, but its worktree, branch and transcript are kept. */
+  closeSession: (sessionId: string) => Promise<void>
   pendingContextRef: React.RefObject<string | null>
   /** Ref to the current worktree preference (read at session creation time). */
   useWorktreeRef: React.RefObject<boolean>
@@ -54,7 +56,7 @@ export function useSessionOrchestration({
   leaveSession,
   clearMessages,
   wsCreateSession,
-  removeSession,
+  closeSession,
   pendingContextRef,
   useWorktreeRef,
   permissionModeRef,
@@ -104,8 +106,8 @@ export function useSessionOrchestration({
         setActiveSessionId(null)
       }
     }
-    await removeSession(sessionId)
-  }, [activeSessionId, sessions, clearMessages, leaveSession, joinSession, setActiveSessionId, removeSession])
+    await closeSession(sessionId)
+  }, [activeSessionId, sessions, clearMessages, leaveSession, joinSession, setActiveSessionId, closeSession])
 
   const handleSelectRepo = useCallback((workingDir: string) => {
     if (workingDir === activeWorkingDir) return
@@ -132,9 +134,9 @@ export function useSessionOrchestration({
       }
     }
     for (const s of repoSessions) {
-      await removeSession(s.id)
+      await closeSession(s.id)
     }
-  }, [sessions, activeSessionId, clearMessages, leaveSession, joinSession, setActiveSessionId, removeSession])
+  }, [sessions, activeSessionId, clearMessages, leaveSession, joinSession, setActiveSessionId, closeSession])
 
   const handleNewSessionInRepo = useCallback((dir: string, provider?: import('../types').CodingProvider) => {
     const repo = repos.find(r => r.workingDir === dir)

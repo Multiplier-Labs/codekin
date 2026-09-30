@@ -1,8 +1,8 @@
 # Codekin Setup Guide (Advanced / Self-Hosted)
 
-> **Standard users**: If you just want to install and run Codekin, see [INSTALL-DISTRIBUTION.md](./INSTALL-DISTRIBUTION.md). This guide is for advanced/self-hosted bare-metal deployments with nginx, Authelia, and systemd.
+> **New users**: Start with [Getting started](./GETTING-STARTED.md) for hosted or local installation and your first session. This guide covers an advanced nginx, Authelia, and systemd deployment.
 
-Codekin is a web UI for managing multiple Claude Code terminal sessions. It connects via WebSocket and provides repo browsing, skill discovery, and screenshot uploads.
+Codekin is a web UI for Claude Code, Codex, and OpenCode sessions. It connects via WebSocket and provides repo browsing, skill discovery, and screenshot uploads.
 
 ## Architecture
 
@@ -45,8 +45,7 @@ npm install
 
 ## 2. Environment Variables
 
-Secrets and configuration are stored in a single file and sourced from `~/.bashrc`.
-Session naming uses the Claude CLI (`claude -p`), so no separate API keys are needed.
+The systemd unit below reads `~/.config/codekin/env` directly. Use plain `KEY=value` lines in that file, without `export` or shell commands. Session naming uses the Claude CLI (`claude -p`), so no separate API key is needed for naming.
 
 ```bash
 # Create the codekin config directory
@@ -59,8 +58,9 @@ nano ~/.config/codekin/env
 Contents of `~/.config/codekin/env`:
 
 ```bash
-# Add environment variables here as needed.
-# Webhook-specific vars are configured in Step 10.
+AUTH_TOKEN_FILE=/home/YOUR_USER/.config/codekin/token
+CORS_ORIGIN=https://YOUR_DOMAIN
+# Add other environment variables as needed.
 ```
 
 Key server environment variables (see `server/config.ts` for the full list):
@@ -68,6 +68,7 @@ Key server environment variables (see `server/config.ts` for the full list):
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `32352` | Main server port |
+| `BIND_HOST` | `127.0.0.1` | Interface to listen on; the nginx config proxies to loopback. Set `0.0.0.0` only to expose the port directly |
 | `CORS_ORIGIN` | `http://localhost:5173` | Allowed CORS origin (must be set in production) |
 | `AUTH_TOKEN` | — | Shared auth token for WebSocket and REST API |
 | `REPOS_ROOT` | `~/repos` | Root directory for cloned repositories |
@@ -77,31 +78,14 @@ Key server environment variables (see `server/config.ts` for the full list):
 | `CODEKIN_AUTO_RESTORE_SESSIONS` | `false` | Auto-restart Claude processes that were alive at previous shutdown (`true` to opt in) |
 | `CODEKIN_ORCHESTRATOR_MONITOR` | `false` | Run the orchestrator proactive monitor (15-minute polling) (`true` to opt in) |
 
-Source it from `~/.bashrc` so it's available to all shells and systemd user services:
-
-```bash
-echo 'source ~/.config/codekin/env' >> ~/.bashrc
-source ~/.config/codekin/env
-```
-
-To add a new env var later:
-
-```bash
-echo 'export NEW_VAR="value"' >> ~/.config/codekin/env
-source ~/.config/codekin/env
-# Then restart any services that need it:
-sudo systemctl restart codekin
-```
-
-> **Note**: The systemd services run as your user with `WorkingDirectory=/home/YOUR_USER`, so they inherit env vars from the user's shell profile.
+After changing this file, restart the system service with `sudo systemctl restart codekin`. A systemd service does not read your interactive shell's `~/.bashrc`.
 
 ## 3. Configure codekin
 
 ### Generate a token
 
 ```bash
-mkdir -p ~/.config/codekin
-openssl rand -hex 32 > ~/.config/codekin/token
+codekin setup
 ```
 
 ### Create systemd service
@@ -156,27 +140,12 @@ Repositories are discovered automatically at runtime — no manual scanning step
 
 To add local repositories, simply clone them into your `REPOS_ROOT` directory. They will appear in the Codekin UI automatically.
 
-## 6. Deploy Settings
+## 6. Choose Where the Frontend Is Served From
 
-Copy the example settings and customize for your environment:
+The server is configured only through environment variables (step 2). There is no separate deploy settings file.
 
-```bash
-cp .codekin/settings.example.json .codekin/settings.json
-nano .codekin/settings.json
-```
-
-Key fields in `settings.json`:
-
-| Field       | Description                                | Default              |
-|-------------|--------------------------------------------|----------------------|
-| `webRoot`   | Where the built frontend is deployed to    | `/var/www/codekin`   |
-| `distDir`   | Path to the frontend build output          | `./dist`             |
-| `serverDir` | Path to the server source directory        | `./server`           |
-| `port`      | codekin server port                         | `32352`              |
-| `authFile`  | Path to the auth token file                | `~/.codekin/auth-token` |
-| `log`       | Server log file path                       | `/tmp/codekin.log`    |
-
-> **Note**: `settings.json` is gitignored — your local config won't be overwritten by `git pull`.
+- **nginx serves the frontend (this guide)** — Copy the build output to a web root in step 7 and point nginx at it in step 8. Leave `FRONTEND_DIST` unset.
+- **Codekin serves the frontend** — Set `FRONTEND_DIST` to the built `dist/` directory in `~/.config/codekin/env`, and Express serves the app itself. nginx then only needs to proxy to port 32352.
 
 ## 7. Build and Deploy
 
@@ -225,7 +194,7 @@ sudo systemctl reload nginx
 
 1. Open `https://YOUR_DOMAIN` in a browser
 2. Authenticate via Authelia
-3. The Settings modal opens automatically — paste your codekin token (from `~/.config/codekin/token`)
+3. **Settings → Connection** opens automatically — paste your codekin token (from `~/.config/codekin/token`)
 4. Click a repo to open a terminal session
 
 ## 10. Configure GitHub Webhooks (Optional)
@@ -238,11 +207,11 @@ Add the webhook env vars to `~/.config/codekin/env` (see [step 2](#2-environment
 
 ```bash
 cat >> ~/.config/codekin/env << 'EOF'
-export GITHUB_WEBHOOK_SECRET="your-webhook-secret-here"
-export GITHUB_WEBHOOK_ENABLED=true
+GITHUB_WEBHOOK_SECRET=your-webhook-secret-here
+GITHUB_WEBHOOK_ENABLED=true
 # Optional overrides:
-# export GITHUB_WEBHOOK_MAX_SESSIONS=3
-# export GITHUB_WEBHOOK_LOG_LINES=200
+# GITHUB_WEBHOOK_MAX_SESSIONS=3
+# GITHUB_WEBHOOK_LOG_LINES=200
 EOF
 ```
 
@@ -255,7 +224,6 @@ openssl rand -hex 32
 Reload and restart:
 
 ```bash
-source ~/.config/codekin/env
 sudo systemctl restart codekin
 ```
 
@@ -427,7 +395,7 @@ codekin/
 | Path                                          | Purpose                        |
 |-----------------------------------------------|--------------------------------|
 | `~/.config/codekin/env`                       | Secrets and configuration      |
-| Web root (set via `FRONTEND_DIST` or `settings.json`) | Deployed frontend |
+| Web root (nginx), or `FRONTEND_DIST` when Codekin serves the frontend | Deployed frontend |
 | `~/.config/codekin/token` (or `AUTH_TOKEN_FILE`) | codekin auth token           |
 | `~/.codekin/screenshots/`                     | Uploaded screenshots           |
 | `/etc/nginx/sites-available/codekin`          | nginx config (production)      |

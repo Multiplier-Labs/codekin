@@ -14,7 +14,7 @@
 import { useState, useEffect } from 'react'
 import {
   IconPlus, IconShieldCheck, IconArchive, IconFileText,
-  IconRobot, IconSparkles, IconPencil, IconGitBranch, IconRobotFace, IconTrash,
+  IconRobot, IconSparkles, IconPencil, IconGitBranch, IconRobotFace, IconTrash, IconShare,
 } from '@tabler/icons-react'
 import type { Session, CodingProvider } from '../types'
 import { PROVIDERS } from '../types'
@@ -144,6 +144,8 @@ export interface RepoSectionProps {
   onOpenDrawer: (workingDir: string, tab: RepoDrawerTab) => void
   /** Move the active session into a git worktree — only offered for the joined session. */
   onMoveToWorktree?: () => void
+  /** Share a session with another account — hosted only. */
+  onShareSession?: (id: string) => void
 }
 
 // --------------------------------------------------------------------------
@@ -164,6 +166,7 @@ export function RepoSection({
   onDeleteRepo,
   onOpenDrawer,
   onMoveToWorktree,
+  onShareSession,
 }: RepoSectionProps) {
   const health = useAgentHealth()
   const [expanded, setExpanded] = useState(true)
@@ -235,6 +238,9 @@ export function RepoSection({
               // offered for the session actually in view.
               ...(isActiveSession && onMoveToWorktree && !s.worktreePath
                 ? [{ label: 'Move to worktree', icon: <IconGitBranch size={14} stroke={2} />, onSelect: onMoveToWorktree }]
+                : []),
+              ...(onShareSession
+                ? [{ label: 'Share', icon: <IconShare size={14} stroke={2} />, onSelect: () => onShareSession(s.id) }]
                 : []),
               {
                 label: 'Close & archive',

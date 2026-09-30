@@ -4,7 +4,7 @@ Operational reference for running Codekin in production. Covers the two runtime-
 
 - [WebSocket Rate Limiting](#websocket-rate-limiting) — per-IP connection caps and per-connection message rate limits.
 - [Workflow Restart-Resume & Orphan-Session Handling](#workflow-restart-resume--orphan-session-handling) — how the workflow engine recovers in-flight runs across server restarts and handles sessions that disappear mid-run.
-- [Hosted Relay](#hosted-relay-appcodekinai) — the control plane, the hosted frontend, and the per-machine connector.
+- [Hosted relay](#hosted-relay) — the control plane, the hosted frontend, and the per-machine connector; to run your own, see [SELF-HOSTED-RELAY.md](SELF-HOSTED-RELAY.md).
 
 ---
 
@@ -312,16 +312,17 @@ There is no down-migration. Rolling back to a pre-#437 server build is safe — 
 
 ---
 
-## Hosted Relay (app.codekin.ai)
+## Hosted relay
 
 The hosted relay lets a browser reach a developer machine's local Codekin
-server. It is two processes plus a static bundle:
+server. app.codekin.ai is one deployment of it; to run your own, follow
+[SELF-HOSTED-RELAY.md](SELF-HOSTED-RELAY.md). It is two processes plus a static bundle:
 
 | Piece | Where | What it is |
 |---|---|---|
-| Control plane / hub | the host serving `app.codekin.ai`, port 32360 | `server/dist/relay/relay-server.js` behind nginx |
+| Control plane / hub | the host serving the web app (e.g. `app.codekin.ai`), port 32360 | `server/dist/relay/relay-server.js` behind nginx |
 | Hosted frontend | `/var/www/codekin-app` | `npm run build:hosted` output, static-served |
-| Connector | each developer machine | `server/dist/relay/connector-cli.js`, outbound only |
+| Connector | each developer machine | runs inside the local Codekin server for managed pairings (`server/dist/relay/embedded-connector.js`); `server/dist/relay/connector-cli.js` standalone otherwise. Outbound only |
 
 Design and protocol are in
 [HOSTED-RELAY-CONTROL-PLANE-SPEC.md](HOSTED-RELAY-CONTROL-PLANE-SPEC.md); the
@@ -338,11 +339,13 @@ misconfiguration fails at start rather than at first login.
 |---|---|---|
 | `SESSION_SECRET` | yes | ≥ 32 chars; signs session cookies |
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | yes | GitHub **OAuth App** credentials |
-| `OWNER_GITHUB_ID` | yes | numeric GitHub user id; gets the owner role |
-| `ALLOWED_GITHUB_IDS` | no | comma-separated numeric ids; others land in `pending` |
+| `OWNER_GITHUB_ID` | yes | numeric GitHub user id of the **operator**: owns the first workspace, creates workspaces, manages accounts |
+| `ALLOWED_GITHUB_IDS` | no | comma-separated numeric ids admitted without an invitation, as members of the first workspace |
+| `MFA_ENCRYPTION_KEY` | recommended | 32 bytes (64 hex chars) encrypting authenticator-app secrets; without it 2FA offers passkeys only. Keep a copy — losing it resets every enrolled authenticator |
 | `PUBLIC_URL` | no | default `http://localhost:5173`; must match the OAuth callback host |
 | `RELAY_PORT` | no | default 32360, bound to 127.0.0.1 |
 | `AUDIT_RETENTION_DAYS` | no | default 90; `0` disables pruning |
+| `RELAY_ACCESS_REQUEST_URL` | no | `https:` or `mailto:` link shown on the sign-in page ("Request access") and on the not-allowed error; served by `GET /api/auth/config` |
 | `NODE_ENV=production` | recommended | required for `Secure` session cookies |
 
 The OAuth App's **Authorization callback URL** must be exactly
@@ -356,30 +359,24 @@ keys are ignored, and the server refuses to boot until the id keys replace them.
 
 ### Managing access
 
-New users land in `pending` and see a request-access screen; an id in
-`ALLOWED_GITHUB_IDS` starts them `active`. To grant, revoke, or promote after
-the fact, an **owner or admin** uses the user-admin API (there is no UI yet):
+People are admitted by **invitation** (Settings → Workspace → Members → Invite
+people), or by `ALLOWED_GITHUB_IDS`. Roles are per workspace (owner, admin,
+member, viewer) and are managed in each workspace's Members page by its owners
+and admins. Owners and admins must use two-factor authentication.
+
+Account-level controls belong to the operator (`OWNER_GITHUB_ID`) in
+**Settings → Platform → Accounts**: disabling an account (signs it out and
+blocks it in every workspace — sticky, a login never re-activates it) and
+allowing it to create workspaces. The same is available as `GET /api/users`
+and `PATCH /api/users/<id>` (`{"status": …}` / `{"canCreateWorkspaces": …}`);
+changes need a recent second-factor check and are audited as `user_updated`.
+
+An account that has lost every second factor can only be reset by the
+operator, on the relay host:
 
 ```bash
-# List users (id, login, role, status, isOwner)
-curl -s --cookie "codekin_relay_sid=…" https://app.codekin.ai/api/users
-
-# Revoke access immediately (also drops the user's open relay sockets)
-curl -X PATCH https://app.codekin.ai/api/users/<id> \
-  --cookie "codekin_relay_sid=…" -H 'Content-Type: application/json' \
-  -d '{"status":"disabled"}'
-
-# Re-enable, or (owner only) change role to admin/member/viewer
-curl -X PATCH https://app.codekin.ai/api/users/<id> \
-  --cookie … -H 'Content-Type: application/json' -d '{"status":"active"}'
+node server/dist/relay/relay-admin-cli.js reset-mfa <github-id>
 ```
-
-`disabled` is the revocation path and is sticky — a login never re-activates a
-disabled user. The configured owner account cannot be changed here and no one
-may change their own access, so neither a mistake nor a hostile admin can lock
-the owner out or an admin lock themselves in. Only the owner may change roles;
-`owner` is not an assignable role (it follows `OWNER_GITHUB_ID`). Every change
-is written to the audit log as `user_updated`.
 
 ### Deploying
 
@@ -394,13 +391,56 @@ pm2 restart codekin-relay    # or: pm2 start server/dist/relay/relay-server.js -
 
 ### Connecting a machine
 
+The normal path is the command generated in the hosted app (Settings →
+Machines), which installs Codekin and pairs the machine in one run:
+
 ```bash
-codekin relay login      # device-code pairing; approve at <PUBLIC_URL>/pair
-codekin relay connect    # foreground; run under pm2 to keep it up
+curl -fsSL https://codekin.ai/install.sh | CODEKIN_PAIR_TOKEN=<token> bash
+# already installed:
+CODEKIN_PAIR_TOKEN=<token> codekin relay login
 ```
 
-The connector needs two things about the machine's *local* server, and finds
-them in the process environment, then `~/.codekin/env`, then
+Both write `~/.config/codekin/relay.json` with `"managed": true`. For a
+managed credential **the local Codekin server runs the connector itself**
+(`server/relay/embedded-connector.ts`): it stays up for as long as the
+Codekin service does, across terminal closes and reboots, with no separate
+process. The server re-stats `relay.json` every 5 s, so a pairing made after
+it started, a `codekin relay logout`, or a re-pair to another machine takes
+effect without a restart. Because it runs inside the server, it already knows
+the local port, auth token and `CORS_ORIGIN` — none of the connector
+environment below is needed.
+
+```bash
+codekin relay status     # mode, embedded connector state, hub health
+curl -H "Authorization: Bearer $(cat ~/.config/codekin/token)" \
+  http://127.0.0.1:32352/api/relay/status
+# → { "paired": true, "managed": true, "state": "connected", "machineId": "…", "relayUrl": "…" }
+```
+
+`state` is one of `connecting`, `connected`, `disconnected` (retrying),
+`replaced`, `auth_failed`, `unmanaged`, `disabled`, `unpaired`, `stopped`.
+`replaced` and `auth_failed` are terminal for that credential — the server
+logs why and waits for `relay.json` to change instead of reconnecting.
+
+**Unmanaged (self-supervised) connectors.** A credential without the
+`managed` field — every pairing made before it existed, or
+`codekin relay login --unmanaged` — is ignored by the server, so hosts that
+already run the connector under pm2 keep working unchanged:
+
+```bash
+codekin relay login --unmanaged   # device-code pairing; approve at <PUBLIC_URL>/pair
+codekin relay connect             # foreground; run under pm2 to keep it up
+```
+
+To switch such a host to the embedded connector, stop the pm2 connector, add
+`"managed": true` to `relay.json` (the server picks it up within 5 s). To keep
+a managed credential but run the connector yourself, set
+`CODEKIN_RELAY_CONNECTOR=off` in the server's environment and use
+`codekin relay connect --foreground` (without `--foreground`, `connect` exits
+and points at the service for managed credentials).
+
+The standalone connector needs two things about the machine's *local* server,
+and finds them in the process environment, then `~/.codekin/env`, then
 `~/.config/codekin/env`:
 
 - **`AUTH_TOKEN` or `AUTH_TOKEN_FILE`** — the local server's bearer token. The
@@ -415,7 +455,20 @@ them in the process environment, then `~/.codekin/env`, then
   4003.
 
 Only one connector may serve a machine at a time; a second one takes the slot
-and the first stops rather than fighting for it.
+and the first stops rather than fighting for it. Running both the embedded and
+a standalone connector for one machine therefore leaves one of them
+`replaced`.
+
+### Unfinished setups
+
+Generating an install command creates the machine row immediately. Until an
+installer claims the token, `GET /api/machines` reports it with
+`setupPending: true` and `pairingExpiresAt`. Regenerating passes
+`replaceMachineId` to `POST /api/machines/pair/precreate`, which removes the
+old row and expires its token. Rows whose pairing expired unclaimed are swept
+every 5 minutes (and before each machine listing); a machine that has ever
+held a credential is never swept. Precreate is limited to 10 per user per
+minute and audited as `machine_pairing_created`.
 
 ### Limits
 

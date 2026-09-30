@@ -8,8 +8,10 @@
  */
 
 import { Command } from 'cmdk'
-import { IconFileText, IconStarFilled, IconArchive } from '@tabler/icons-react'
+import { IconFileText, IconStarFilled, IconArchive, IconCheck } from '@tabler/icons-react'
 import type { Repo, Skill, Module, DocsPickerProps } from '../types'
+import { THEMES, type ThemeId } from '../themes/registry'
+import { ThemeSwatch } from './ThemeSwatch'
 import type { ArchivedSessionInfo } from '../lib/ccApi'
 
 /** The docs picker's file shape, reused so the palette stays in step with it. */
@@ -35,6 +37,9 @@ interface Props {
   onSendSkill: (command: string) => void
   onSendModule: (module: Module) => void
   onOpenSettings: () => void
+  /** Active color theme; with onSelectTheme, adds a "Theme: …" action per theme. */
+  theme?: ThemeId
+  onSelectTheme?: (theme: ThemeId) => void
   isMobile?: boolean
   /** Markdown docs across all repos; the active repo's sort first. */
   docs?: PaletteDoc[]
@@ -96,7 +101,7 @@ function archivedDisplayName(session: ArchivedSessionInfo): string {
   return name.startsWith('hub:') ? 'unnamed session' : name
 }
 
-export function CommandPalette({ open, onClose, repos, globalSkills = [], globalModules = [], onOpenRepo, onSendSkill, onSendModule, onOpenSettings, isMobile = false, docs = [], onSelectDoc, archivedSessions = [], onSelectArchived, activeWorkingDir = null }: Props) {
+export function CommandPalette({ open, onClose, repos, globalSkills = [], globalModules = [], onOpenRepo, onSendSkill, onSendModule, onOpenSettings, theme, onSelectTheme, isMobile = false, docs = [], onSelectDoc, archivedSessions = [], onSelectArchived, activeWorkingDir = null }: Props) {
   if (!open) return null
 
   // Active repo first, then starred, then pinned root files, then by path.
@@ -257,6 +262,18 @@ export function CommandPalette({ open, onClose, repos, globalSkills = [], global
                 <span className="text-ink-muted">&#9881;</span>
                 Settings
               </Command.Item>
+              {onSelectTheme && THEMES.map(t => (
+                <Command.Item
+                  key={`theme-${t.id}`}
+                  value={`theme ${t.label} ${t.scheme} color appearance`}
+                  onSelect={() => { onSelectTheme(t.id); onClose() }}
+                  className="flex cursor-pointer items-center gap-2 rounded-control px-2 py-1.5 text-body text-ink-muted aria-selected:bg-primary-8/20 aria-selected:text-primary-4"
+                >
+                  <ThemeSwatch theme={t} variant="chip" />
+                  Theme: {t.label}
+                  {t.id === theme && <IconCheck size={13} stroke={2} className="ml-auto flex-shrink-0 text-accent-5" />}
+                </Command.Item>
+              ))}
             </Command.Group>
           </Command.List>
         </Command>

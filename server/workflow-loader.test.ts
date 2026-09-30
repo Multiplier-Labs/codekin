@@ -108,6 +108,10 @@ function fakeSessionManager() {
     stopClaude: vi.fn(),
     sendInput: vi.fn(),
     waitForReady: vi.fn(() => Promise.resolve(true)),
+    prepareSessionWorktree: vi.fn(() => Promise.resolve({
+      ok: true, path: '/tmp/repo-wt-session-', branch: 'wt/session-', repoRoot: '/tmp/repo', baseRef: 'origin/main', reused: false,
+    })),
+    delete: vi.fn(),
   } as any
 }
 
@@ -513,7 +517,9 @@ Prompt.
           model: undefined,
           provider: undefined,
           allowedTools: ['Bash(gh pr:*)'],
+          useWorktree: true,
         })
+        expect(sessions.prepareSessionWorktree).toHaveBeenCalledWith('session-1', '/tmp/repo')
         expect(result.sessionId).toBe('session-1')
         expect(result.repoName).toBe('my-repo')
       })
@@ -583,15 +589,28 @@ Prompt.
         )
       })
 
-      it('carries forward branch and lastCommit in output', async () => {
+      it('reports the worktree base as the branch and carries forward lastCommit', async () => {
         const handler = registeredDef.steps[1].handler
         const result = await handler(
           { repoPath: '/tmp/repo', repoName: 'r', branch: 'feat/x', lastCommit: 'def456' },
           { runId: 'r1', run: {}, abortSignal: new AbortController().signal }
         )
 
-        expect(result.branch).toBe('feat/x')
+        expect(result.branch).toBe('origin/main')
         expect(result.lastCommit).toBe('def456')
+      })
+
+      it('fails the step and discards the session when the worktree cannot be created', async () => {
+        sessions.prepareSessionWorktree.mockResolvedValueOnce({ ok: false, code: 'git_failed', message: 'boom' })
+        const recordSessionId = vi.fn()
+        const handler = registeredDef.steps[1].handler
+        await expect(handler(
+          { repoPath: '/tmp/repo', repoName: 'r' },
+          { runId: 'r1', run: {}, abortSignal: new AbortController().signal, recordSessionId }
+        )).rejects.toThrow('Could not create a worktree for r: boom')
+
+        expect(sessions.delete).toHaveBeenCalledWith('session-1')
+        expect(recordSessionId).not.toHaveBeenCalled()
       })
 
       it('uses "unknown" when repoPath has no segments', async () => {
@@ -1012,90 +1031,11 @@ This is the repo-specific override prompt.
         expect(sessions.stopClaude).not.toHaveBeenCalled()
       })
 
-      // ----------------------------------------------------------------
-      // Fix B — restore main checkout after audit run (regression 2026-05-01)
-      // ----------------------------------------------------------------
-
-      it('restores main checkout to original branch when audit session changed it', async () => {
-        const gitCalls: string[][] = []
-        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
-          gitCalls.push(args)
-          // Simulate HEAD being on the reports branch after the run
-          if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') {
-            return Buffer.from('codekin/reports\n')
-          }
-          return Buffer.from('')
-        })
-
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
-        await registeredDef.afterRun({
-          output: {
-            sessionId: 'session-1',
-            repoPath: '/tmp/repo',
-            branch: 'main',
-          },
-        })
-
-        // Should warn that the branch was changed
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('instead of'))
-
-        // Should restore to 'main'
-        const checkoutCall = gitCalls.find(args => args[0] === 'checkout' && args[1] === 'main')
-        expect(checkoutCall).toBeDefined()
-
-        warnSpy.mockRestore()
-      })
-
-      it('does not run git checkout when HEAD is already on the original branch', async () => {
-        const gitCalls: string[][] = []
-        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
-          gitCalls.push(args)
-          if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return Buffer.from('main\n')
-          return Buffer.from('')
-        })
-
+      it('never touches the main checkout — the session ran in its own worktree', async () => {
         await registeredDef.afterRun({
           output: { sessionId: 'session-1', repoPath: '/tmp/repo', branch: 'main' },
         })
-
-        const checkoutCall = gitCalls.find(args => args[0] === 'checkout')
-        expect(checkoutCall).toBeUndefined()
-      })
-
-      it('skips branch restore when repoPath or branch is missing from output', async () => {
-        const gitCalls: string[][] = []
-        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
-          gitCalls.push(args)
-          return Buffer.from('')
-        })
-
-        // No repoPath
-        await registeredDef.afterRun({ output: { sessionId: 'session-1', branch: 'main' } })
-        // No branch
-        await registeredDef.afterRun({ output: { sessionId: 'session-1', repoPath: '/tmp/repo' } })
-        // output is null (failed run)
-        await registeredDef.afterRun({ output: null })
-
-        // No git calls should happen (no rev-parse, no checkout)
-        expect(gitCalls).toHaveLength(0)
-      })
-
-      it('warns but does not throw when branch restore fails', async () => {
-        mockExecFileSync.mockImplementation((_cmd: string, args: string[]) => {
-          if (args[0] === 'rev-parse') throw new Error('not a git repo')
-          return Buffer.from('')
-        })
-
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-
-        // Should not throw
-        await expect(registeredDef.afterRun({
-          output: { sessionId: 'session-1', repoPath: '/tmp/repo', branch: 'main' },
-        })).resolves.not.toThrow()
-
-        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Could not restore branch'))
-        warnSpy.mockRestore()
+        expect(mockExecFileSync).not.toHaveBeenCalled()
       })
     })
 

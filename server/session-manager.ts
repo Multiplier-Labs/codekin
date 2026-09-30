@@ -20,28 +20,30 @@
  */
 
 import { randomUUID } from 'crypto'
-import { execFile } from 'child_process'
-import { existsSync, mkdirSync, copyFileSync, readdirSync, statSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, copyFileSync, readdirSync, statSync } from 'fs'
 import { homedir } from 'os'
 import path from 'path'
-import { promisify } from 'util'
 import type { WebSocket } from 'ws'
 import type { CodingProcess, CodingProvider } from './coding-process.js'
 import { buildHandoffInjection, generateHandoff } from './handoff-manager.js'
 import { PlanManager } from './plan-manager.js'
 import { SessionArchive } from './session-archive.js'
-import type { DiffFileStatus, DiffScope, Session, SessionInfo, TaskItem, WsServerMessage } from './types.js'
+import type { DiffFileStatus, DiffScope, DiffView, PrStatus, ReviewComment, Session, SessionInfo, TaskItem, WorktreeRemovalPreflight, WorktreeState, WsServerMessage } from './types.js'
 import { cleanupWorkspace } from './webhook-workspace.js'
 import { PORT } from './config.js'
 import { ApprovalManager } from './approval-manager.js'
 import { PromptRouter } from './prompt-router.js'
-import { SessionLifecycle } from './session-lifecycle.js'
+import { isIsolationBlocked, SessionLifecycle } from './session-lifecycle.js'
 import { SessionNaming } from './session-naming.js'
 import { SessionPersistence } from './session-persistence.js'
-import { cleanGitEnv, DiffManager } from './diff-manager.js'
+import { DiffManager, isValidReviewBase, type ReviewBasePreference } from './diff-manager.js'
+import { cachedPrBaseFor, getPrStatus } from './pr-status.js'
+import {
+  anchorErrorMessage, buildFeedbackPrompt, canModify, checkBody, createAnchor, isAnchorStale, MAX_COMMENTS_PER_SESSION, newComment,
+  type AnchorInput, type ReviewAuthor,
+} from './review-comments.js'
 import { ProcessCoordinator } from './process-coordinator.js'
-
-const execFileAsync = promisify(execFile)
+import { inspectWorktree, prepareWorktree, removeWorktree, type WorktreeResult } from './worktree-ops.js'
 
 /** Max messages retained in a session's output history buffer. */
 const MAX_HISTORY = 2000
@@ -100,12 +102,17 @@ function isHeadlessSession(session: { source?: string }): boolean {
   return HEADLESS_SOURCES.has(session.source ?? '')
 }
 
+/** Why a session was deliberately taken out of service (see onSessionStopped). */
+export type SessionStopReason = 'stopped' | 'archived' | 'deleted'
+
 export interface CreateSessionOptions {
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   id?: string
   groupDir?: string
   model?: string
-  /** When true, create a git worktree as a sibling of workingDir and run Claude there. */
+  /** When true, the session is isolated: it will only start in its own git
+   *  worktree (created afterwards via createWorktree) and never falls back to
+   *  the shared checkout. */
   useWorktree?: boolean
   /** Permission mode for the Claude CLI process. */
   permissionMode?: import('./types.js').PermissionMode
@@ -137,6 +144,10 @@ export class SessionManager {
   private _promptListeners: Array<(sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void> = []
   /** Registered listeners notified when a session completes a turn (result event). */
   private _resultListeners: Array<(sessionId: string, isError: boolean) => void> = []
+  /** Registered listeners notified when a pending prompt is resolved (answered, auto-denied, or timed out). */
+  private _promptResolvedListeners: Array<(sessionId: string, requestId: string) => void> = []
+  /** Registered listeners notified when a session is deliberately stopped, archived, or deleted. */
+  private _stopListeners: Array<(sessionId: string, reason: SessionStopReason) => void> = []
   /** Delegated approval logic (auto-approve patterns, deny-lists, pattern management). */
   private _approvalManager: ApprovalManager
   /** Delegated auto-naming logic (generates session names from first user message via Claude API). */
@@ -171,6 +182,7 @@ export class SessionManager {
       globalBroadcast: (msg) => this._globalBroadcast?.(msg),
       approvalManager: this._approvalManager,
       promptListeners: this._promptListeners,
+      promptResolvedListeners: this._promptResolvedListeners,
       onPlanApproved: (session) => this.onPlanApproved(session),
     })
     // Use a local ref so the getter closures capture `this` (the SessionManager instance)
@@ -261,6 +273,8 @@ export class SessionManager {
       if (session.claudeProcess?.isAlive()) continue
       if (session.clients.size > 0) continue
       if (session.source === 'orchestrator') continue
+      // Archived sessions are kept until the user removes them.
+      if (session.archivedAt) continue
       const headless = isHeadlessSession(session)
       const threshold = headless ? HEADLESS_STALE_AGE_MS : STALE_SESSION_AGE_MS
       const ageMs = now - new Date(session.created).getTime()
@@ -271,6 +285,13 @@ export class SessionManager {
     for (const id of staleIds) {
       const s = this.sessions.get(id)
       const days = s ? Math.round((now - new Date(s.created).getTime()) / 86_400_000) : 0
+      // A session is the only record of the worktree it owns: archive it
+      // rather than deleting it, so its files are never orphaned or lost.
+      if (s?.worktreePath && existsSync(s.worktreePath)) {
+        console.log(`[idle-reaper] archiving stale worktree session=${id} source=${s.source} age=${days}d`)
+        this.archiveSession(id)
+        continue
+      }
       console.log(`[idle-reaper] pruning stale session=${id} source=${s?.source ?? '?'} age=${days}d`)
       this.delete(id)
     }
@@ -390,6 +411,7 @@ export class SessionManager {
       name,
       workingDir,
       groupDir: options?.groupDir,
+      ...(options?.useWorktree ? { executionMode: 'isolated' as const, worktreeState: 'preparing' as const } : {}),
       created: new Date().toISOString(),
       source: options?.source ?? 'manual',
       provider: options?.provider ?? 'claude',
@@ -430,8 +452,8 @@ export class SessionManager {
   }
 
   /**
-   * Create a git worktree for a session. Creates a new branch and worktree
-   * as a sibling directory of the project root.
+   * Create (or reuse) a git worktree for a session as a sibling directory of
+   * the project root, and point the session at it.
    * Returns the worktree path on success, or null on failure.
    *
    * @param targetBranch — use this as the worktree branch name instead of
@@ -443,131 +465,231 @@ export class SessionManager {
    *   worktrees from accidentally branching off a random HEAD.
    */
   async createWorktree(sessionId: string, workingDir: string, targetBranch?: string, baseBranch?: string): Promise<string | null> {
+    const result = await this.prepareSessionWorktree(sessionId, workingDir, targetBranch, baseBranch)
+    return result.ok ? result.path : null
+  }
+
+  /**
+   * Like {@link createWorktree}, but returns a structured result with the
+   * failure reason. Never deletes existing directories or commits; see
+   * worktree-ops.ts for the invariants.
+   */
+  async prepareSessionWorktree(sessionId: string, workingDir: string, targetBranch?: string, baseBranch?: string): Promise<WorktreeResult> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return { ok: false, code: 'session_not_found', message: `Session ${sessionId} not found.` }
+
+    const isolated = session.executionMode === 'isolated'
+    if (isolated) this.setWorktreeState(session, 'preparing')
+
+    const shortId = sessionId.slice(0, 8)
+    const result = await prepareWorktree({
+      sourceDir: workingDir,
+      ownerId: shortId,
+      branch: targetBranch ?? `${this.getWorktreeBranchPrefix()}${shortId}`,
+      // Caller-supplied branches may hold unique work and are never reset.
+      generatedBranch: !targetBranch,
+      baseBranch,
+      ownedPath: session.worktreePath,
+    })
+    // The session may have been deleted while git was running.
+    if (this.sessions.get(sessionId) !== session) return result
+    if (!result.ok) {
+      console.error(`[worktree] Failed to create worktree for session ${sessionId}: ${result.message}`)
+      // Only a session that requires isolation is blocked by the failure; a
+      // session moving out of the shared checkout simply stays where it is.
+      if (isolated) this.setWorktreeState(session, 'failed', result.message)
+      return result
+    }
+
+    const previousDir = session.workingDir
+    session.groupDir = result.repoRoot  // Group under original repo in sidebar
+    session.workingDir = result.path
+    session.worktreePath = result.path
+    session.worktreeBranch = result.branch
+    if (result.baseRef) session.worktreeBase = result.baseRef
+    session.executionMode = 'isolated'
+
+    // Copy Claude CLI session data to the worktree's project storage dir.
+    // startClaude() will use --resume (not --session-id) to continue the
+    // session, which should find the JSONL globally. The copy here ensures
+    // it's also available in the worktree's project dir as a safety net.
+    if (session.claudeSessionId && previousDir !== result.path) {
+      try {
+        this.migrateClaudeSession(session.claudeSessionId, session.claudeSessionId, previousDir, result.path, session)
+        console.log(`[worktree] Copied Claude session ${session.claudeSessionId} to worktree project dir`)
+      } catch (err) {
+        console.warn(`[worktree] Failed to migrate session data:`, err instanceof Error ? err.message : err)
+      }
+    }
+
+    this.setWorktreeState(session, 'ready')
+    return result
+  }
+
+  /** Record worktree readiness, persist it and tell clients. */
+  private setWorktreeState(session: Session, state: WorktreeState, error?: string): void {
+    session.worktreeState = state
+    session.worktreeError = error
+    session._worktreeReported = false
+    this.persistToDisk()
+    this._globalBroadcast?.({ type: 'sessions_updated' })
+  }
+
+  /**
+   * Recreate a failed or missing worktree for an isolated session, then start
+   * it and deliver any input held while it was unavailable. An existing
+   * branch (and its commits) is checked out again rather than recreated.
+   */
+  async retryWorktree(sessionId: string): Promise<WorktreeResult> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return { ok: false, code: 'session_not_found', message: `Session ${sessionId} not found.` }
+    if (session.executionMode !== 'isolated') {
+      return { ok: false, code: 'git_failed', message: 'This session does not use an isolated worktree.' }
+    }
+    if (session.worktreeState === 'preparing') {
+      return { ok: false, code: 'git_failed', message: 'A worktree is already being prepared.' }
+    }
+    const generated = `${this.getWorktreeBranchPrefix()}${sessionId.slice(0, 8)}`
+    const branch = session.worktreeBranch && session.worktreeBranch !== generated ? session.worktreeBranch : undefined
+    const repoDir = session.groupDir ?? session.workingDir
+    const result = await this.prepareSessionWorktree(sessionId, repoDir, branch)
+    if (result.ok) this.resumeAfterWorktreeChange(session, `Worktree ready: ${result.path}`)
+    return result
+  }
+
+  /**
+   * Explicitly switch an isolated session to the shared checkout. This is the
+   * only way an isolated session runs outside its worktree; the worktree and
+   * its branch, if any, are left untouched.
+   */
+  useExistingCheckout(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session || session.executionMode !== 'isolated') return false
+    if (session.worktreeState === 'preparing') return false
+    const checkout = session.groupDir ?? session.workingDir
+    if (session.claudeProcess?.isAlive()) this.stopClaude(sessionId)
+    session.executionMode = 'existing-checkout'
+    session.workingDir = checkout
+    session.worktreePath = undefined
+    session.worktreeState = undefined
+    session.worktreeError = undefined
+    this.persistToDisk()
+    this._globalBroadcast?.({ type: 'sessions_updated' })
+    this.resumeAfterWorktreeChange(session, `Switched to the shared checkout: ${checkout}`)
+    return true
+  }
+
+  /** Announce a working-directory change, then start the session with any held input. */
+  private resumeAfterWorktreeChange(session: Session, notice: string): void {
+    const msg: WsServerMessage = { type: 'system_message', subtype: 'notification', text: notice }
+    this.addToHistory(session, msg)
+    this.broadcast(session, msg)
+    const held = session._heldInputs ?? []
+    session._heldInputs = undefined
+    if (held.length === 0) this.startClaude(session.id)
+    else this.sendInput(session.id, held.join('\n\n'))
+  }
+
+  /**
+   * Archive a session: stop its process, cancel any pending start, and hide it
+   * from the active list. Its transcript, provider session, worktree and branch
+   * are kept, so {@link resumeSession} continues exactly where it left off.
+   */
+  archiveSession(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session || session.source === 'orchestrator') return false
+    if (session.archivedAt) return true
+    session.archivedAt = new Date().toISOString()
+    session._heldInputs = undefined
+    session._stoppedByUser = true
+    session.coordinator.teardown()
+    this.stopClaude(sessionId)
+    session.isProcessing = false
+    this.emitStopped(sessionId, 'archived')
+    const msg: WsServerMessage = {
+      type: 'system_message',
+      subtype: 'notification',
+      text: 'Session archived. Its worktree and branch are kept; resume it from the Archive tab.',
+    }
+    this.addToHistory(session, msg)
+    this.broadcast(session, msg)
+    this.persistToDisk()
+    this._globalBroadcast?.({ type: 'sessions_updated' })
+    return true
+  }
+
+  /**
+   * Return an archived session to the active list. The process is not started
+   * here; it starts on the next input, after the usual isolation checks.
+   */
+  resumeSession(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session?.archivedAt) return false
+    session.archivedAt = undefined
+    session._stoppedByUser = false
+    session._lastActivityAt = Date.now()
+    this.persistToDisk()
+    this._globalBroadcast?.({ type: 'sessions_updated' })
+    return true
+  }
+
+  /**
+   * Report what removing a session's working files would affect. Removal is
+   * safe only with no uncommitted or untracked files and no other session
+   * working inside the worktree. Commits are always kept on the branch.
+   */
+  async getRemovalPreflight(sessionId: string): Promise<WorktreeRemovalPreflight | null> {
     const session = this.sessions.get(sessionId)
     if (!session) return null
-
-    try {
-      // Resolve the canonical (main) repo root.
-      // --git-common-dir points to the main repo's .git even when called from
-      // inside a worktree, so its parent is always the main repo working tree.
-      // (Plain --show-toplevel would return the *current* worktree path,
-      // causing nested worktrees and a separate sidebar group bug.)
-      const env = cleanGitEnv()
-      const { stdout: commonDirRaw } = await execFileAsync(
-        'git',
-        ['rev-parse', '--path-format=absolute', '--git-common-dir'],
-        { cwd: workingDir, env, timeout: 5000 },
-      )
-      const commonDir = commonDirRaw.trim()
-      if (!commonDir || !path.isAbsolute(commonDir)) {
-        console.error(`[worktree] Invalid git common dir resolved: "${commonDir}"`)
-        return null
-      }
-      const repoRoot = path.dirname(commonDir)
-      if (!path.isAbsolute(repoRoot)) {
-        console.error(`[worktree] Invalid repo root derived from common dir: "${repoRoot}"`)
-        return null
-      }
-
-      const shortId = sessionId.slice(0, 8)
-      const branchName = targetBranch ?? `${this.getWorktreeBranchPrefix()}${shortId}`
-      const projectName = path.basename(repoRoot)
-      const worktreePath = path.resolve(repoRoot, '..', `${projectName}-wt-${shortId}`)
-
-      // Auto-detect the default branch if baseBranch not specified.
-      // Tries origin/HEAD, then falls back to common names.
-      let resolvedBase: string | undefined = baseBranch
-      if (!resolvedBase) {
-        resolvedBase = await this.detectDefaultBranch(repoRoot, env) ?? undefined
-      }
-
-      // Determine if this is an ephemeral branch (wt/ prefix, generated by us)
-      // vs a caller-supplied branch name (e.g. fix/feature-xyz from orchestrator).
-      // Caller-supplied branches must NEVER be force-deleted — they may contain
-      // unique commits from a previous session or manual work.
-      const isEphemeralBranch = !targetBranch
-
-      // Check if the target branch already exists as a local branch
-      let branchExists = false
-      try {
-        await execFileAsync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branchName}`], { cwd: repoRoot, env, timeout: 3000 })
-        branchExists = true
-      } catch {
-        // Branch doesn't exist — will be created
-      }
-
-      // Clean up stale state from previous failed attempts:
-      // 1. Prune orphaned worktree entries (directory gone but git still tracks it)
-      await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot, env, timeout: 5000 })
-        .catch((e: unknown) => console.warn(`[worktree] prune failed:`, e instanceof Error ? e.message : e))
-      // 2. Remove existing worktree directory if leftover from a partial failure.
-      //    If git doesn't recognise it as a worktree, force-remove the directory
-      //    so that `git worktree add` below doesn't fail with "already exists".
-      await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], { cwd: repoRoot, env, timeout: 5000 })
-        .catch((e: unknown) => {
-          console.debug(`[worktree] remove prior worktree (expected if fresh):`, e instanceof Error ? e.message : e)
-          // Git doesn't know about it — nuke the stale directory if it still exists
-          if (existsSync(worktreePath)) {
-            try {
-              rmSync(worktreePath, { recursive: true, force: true })
-              console.log(`[worktree] Force-removed stale directory: ${worktreePath}`)
-            } catch (rmErr) {
-              console.warn(`[worktree] Failed to force-remove stale directory ${worktreePath}:`, rmErr instanceof Error ? rmErr.message : rmErr)
-            }
-          }
-        })
-      // 3. Only delete ephemeral branches (wt/*) during cleanup — never caller-supplied ones
-      if (isEphemeralBranch && branchExists) {
-        await execFileAsync('git', ['branch', '-D', branchName], { cwd: repoRoot, env, timeout: 5000 })
-          .catch((e: unknown) => console.debug(`[worktree] ephemeral branch cleanup:`, e instanceof Error ? e.message : e))
-        branchExists = false
-      }
-
-      // Create the worktree:
-      // - Existing branch: check it out in the worktree (no -b)
-      // - New branch: create with -b, branching from the resolved base
-      let worktreeArgs: string[]
-      if (branchExists) {
-        worktreeArgs = ['worktree', 'add', worktreePath, branchName]
-        console.log(`[worktree] Using existing branch ${branchName}`)
-      } else {
-        worktreeArgs = ['worktree', 'add', '-b', branchName, worktreePath]
-        if (resolvedBase) worktreeArgs.push(resolvedBase)
-        console.log(`[worktree] Creating new branch ${branchName}${resolvedBase ? ` from ${resolvedBase}` : ''}`)
-      }
-      await execFileAsync('git', worktreeArgs, {
-        cwd: repoRoot,
-        env,
-        timeout: 15000,
-      })
-
-      // Update session to use the worktree as its working directory
-      session.groupDir = repoRoot  // Group under original repo in sidebar
-      session.workingDir = worktreePath
-      session.worktreePath = worktreePath
-
-      // Copy Claude CLI session data to the worktree's project storage dir.
-      // startClaude() will use --resume (not --session-id) to continue the
-      // session, which should find the JSONL globally. The copy here ensures
-      // it's also available in the worktree's project dir as a safety net.
-      if (session.claudeSessionId) {
-        try {
-          this.migrateClaudeSession(session.claudeSessionId, session.claudeSessionId, workingDir, worktreePath, session)
-          console.log(`[worktree] Copied Claude session ${session.claudeSessionId} to worktree project dir`)
-        } catch (err) {
-          console.warn(`[worktree] Failed to migrate session data:`, err instanceof Error ? err.message : err)
-        }
-      }
-
-      this.persistToDisk()
-      this._globalBroadcast?.({ type: 'sessions_updated' })
-
-      console.log(`[worktree] Created worktree for session ${sessionId}: ${worktreePath} (branch: ${branchName})`)
-      return worktreePath
-    } catch (err) {
-      console.error(`[worktree] Failed to create worktree for session ${sessionId}:`, err)
-      return null
+    const worktreePath = session.worktreePath ?? null
+    if (!worktreePath || session.worktreeState === 'removed') {
+      return { worktreePath, exists: false, modified: [], untracked: [], uniqueCommits: null, referencedBy: [], safe: false, blockers: ['This session has no working files to remove.'] }
     }
+    const inspection = await inspectWorktree(worktreePath)
+    const inside = (dir: string) => dir === worktreePath || dir.startsWith(worktreePath + path.sep)
+    const referencedBy = [...this.sessions.values()]
+      .filter(s => s.id !== sessionId && inside(s.workingDir))
+      .map(s => s.id)
+    const blockers: string[] = []
+    if (!inspection.exists) blockers.push('The worktree no longer exists.')
+    if (inspection.modified.length) blockers.push(`${inspection.modified.length} file(s) have uncommitted changes.`)
+    if (inspection.untracked.length) blockers.push(`${inspection.untracked.length} untracked file(s) would be lost.`)
+    if (referencedBy.length) blockers.push(`${referencedBy.length} other session(s) are working in this worktree.`)
+    return {
+      worktreePath,
+      branch: inspection.branch ?? session.worktreeBranch,
+      exists: inspection.exists,
+      modified: inspection.modified,
+      untracked: inspection.untracked,
+      uniqueCommits: inspection.uniqueCommits,
+      referencedBy,
+      safe: blockers.length === 0,
+      blockers,
+    }
+  }
+
+  /**
+   * Remove an archived session's working files after a fresh preflight. The
+   * branch, transcript and session record are kept, so resuming and retrying
+   * recreates the worktree from the branch. Never forces removal.
+   */
+  async removeSessionWorktree(sessionId: string): Promise<{ removed: boolean; preflight: WorktreeRemovalPreflight | null; reason?: string }> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return { removed: false, preflight: null, reason: 'Session not found.' }
+    if (!session.archivedAt) return { removed: false, preflight: null, reason: 'Archive the session before removing its working files.' }
+    await this.stopClaudeAndWait(sessionId)
+    const preflight = await this.getRemovalPreflight(sessionId)
+    if (!preflight?.safe || !preflight.worktreePath) {
+      return { removed: false, preflight, reason: preflight?.blockers.join(' ') ?? 'Nothing to remove.' }
+    }
+    const { removed, reason } = await removeWorktree(preflight.worktreePath, session.groupDir ?? preflight.worktreePath)
+    if (!removed) return { removed: false, preflight, reason }
+    session.worktreeState = 'removed'
+    session.worktreeError = undefined
+    session._worktreeReported = false
+    this.persistToDisk()
+    this._globalBroadcast?.({ type: 'sessions_updated' })
+    return { removed: true, preflight }
   }
 
   /**
@@ -635,91 +757,27 @@ export class SessionManager {
   }
 
   /**
-   * Clean up a git worktree and its branch. Runs asynchronously and logs errors
-   * but never throws — session deletion must not be blocked by cleanup failures.
-   * Retries once on failure after a short delay.
+   * Remove a session's worktree if it is clean. Git refuses to remove a
+   * worktree with modified or untracked files; such a worktree is retained
+   * rather than force-deleted. The branch is always kept. Runs
+   * asynchronously and never throws — session deletion must not be blocked
+   * by cleanup. Retries once in case of a transient failure (e.g. a lock).
    */
   private cleanupWorktree(worktreePath: string, repoDir: string, attempt = 1): void {
     const MAX_CLEANUP_ATTEMPTS = 2
     const RETRY_DELAY_MS = 3000
 
     void (async () => {
-      try {
-        // Resolve the actual repo root (repoDir may itself be a worktree)
-        const { stdout: repoRootRaw } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
-          cwd: repoDir,
-          timeout: 5000,
-        }).catch(() => ({ stdout: repoDir }))
-        const repoRoot = repoRootRaw.trim() || repoDir
-
-        // Remove the worktree
-        await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], {
-          cwd: repoRoot,
-          timeout: 10000,
-        })
+      const { removed, reason } = await removeWorktree(worktreePath, repoDir)
+      if (removed) {
         console.log(`[worktree] Cleaned up worktree: ${worktreePath}`)
-
-        // Prune any stale worktree references
-        await execFileAsync('git', ['worktree', 'prune'], { cwd: repoRoot, timeout: 5000 })
-          .catch((e: unknown) => console.warn(`[worktree] prune after cleanup failed:`, e instanceof Error ? e.message : e))
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err)
-        if (attempt < MAX_CLEANUP_ATTEMPTS) {
-          console.warn(`[worktree] Failed to clean up worktree ${worktreePath} (attempt ${attempt}/${MAX_CLEANUP_ATTEMPTS}): ${errMsg} — retrying in ${RETRY_DELAY_MS}ms`)
-          setTimeout(() => this.cleanupWorktree(worktreePath, repoDir, attempt + 1), RETRY_DELAY_MS)
-        } else {
-          console.error(`[worktree] Failed to clean up worktree ${worktreePath} after ${MAX_CLEANUP_ATTEMPTS} attempts: ${errMsg}`)
-          // Last resort: force-remove the directory so it doesn't block future
-          // worktree creation or leave the session in a broken restart loop.
-          if (existsSync(worktreePath)) {
-            try {
-              rmSync(worktreePath, { recursive: true, force: true })
-              console.log(`[worktree] Force-removed stale worktree directory: ${worktreePath}`)
-            } catch (rmErr) {
-              console.error(`[worktree] Failed to force-remove ${worktreePath}:`, rmErr instanceof Error ? rmErr.message : rmErr)
-            }
-          }
-        }
+      } else if (attempt < MAX_CLEANUP_ATTEMPTS) {
+        console.warn(`[worktree] Could not remove worktree ${worktreePath} (attempt ${attempt}/${MAX_CLEANUP_ATTEMPTS}): ${reason} — retrying in ${RETRY_DELAY_MS}ms`)
+        setTimeout(() => this.cleanupWorktree(worktreePath, repoDir, attempt + 1), RETRY_DELAY_MS)
+      } else {
+        console.warn(`[worktree] Retained worktree ${worktreePath}: ${reason}`)
       }
     })()
-  }
-
-  /**
-   * Detect the default branch of a repository (main, master, etc.).
-   * Tries `git symbolic-ref refs/remotes/origin/HEAD` first, then checks
-   * for common branch names. Returns null if detection fails.
-   */
-  private async detectDefaultBranch(repoRoot: string, env: NodeJS.ProcessEnv): Promise<string | null> {
-    // Try origin/HEAD (set by git clone or git remote set-head)
-    try {
-      const { stdout } = await execFileAsync(
-        'git', ['symbolic-ref', 'refs/remotes/origin/HEAD'],
-        { cwd: repoRoot, env, timeout: 5000 },
-      )
-      const ref = stdout.trim() // e.g. "refs/remotes/origin/main"
-      if (ref) {
-        const branch = ref.replace('refs/remotes/origin/', '')
-        console.log(`[worktree] Detected default branch from origin/HEAD: ${branch}`)
-        return branch
-      }
-    } catch {
-      // origin/HEAD not set — fall through to heuristics
-    }
-
-    // Check for common default branch names — use show-ref to verify
-    // these are actual local branches, not tags or other refs
-    for (const candidate of ['main', 'master']) {
-      try {
-        await execFileAsync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${candidate}`], { cwd: repoRoot, env, timeout: 3000 })
-        console.log(`[worktree] Detected default branch by name: ${candidate}`)
-        return candidate
-      } catch {
-        // branch doesn't exist, try next
-      }
-    }
-
-    console.warn(`[worktree] Could not detect default branch for ${repoRoot} — worktree will branch from HEAD`)
-    return null
   }
 
   /** Get the configured worktree branch prefix (defaults to 'wt/'). */
@@ -748,6 +806,39 @@ export class SessionManager {
     return () => {
       const idx = this._promptListeners.indexOf(listener)
       if (idx >= 0) this._promptListeners.splice(idx, 1)
+    }
+  }
+
+  /** Register a listener called when a pending prompt stops pending — answered,
+   *  auto-denied, or timed out. Fires once per resolved requestId. */
+  onSessionPromptResolved(listener: (sessionId: string, requestId: string) => void): () => void {
+    this._promptResolvedListeners.push(listener)
+    return () => {
+      const idx = this._promptResolvedListeners.indexOf(listener)
+      if (idx >= 0) this._promptResolvedListeners.splice(idx, 1)
+    }
+  }
+
+  /** Register a listener called when a session is deliberately stopped by a
+   *  user, archived, or deleted. Unlike {@link onSessionExit} this fires even
+   *  though the process's own listeners were detached before it was killed. */
+  onSessionStopped(listener: (sessionId: string, reason: SessionStopReason) => void): () => void {
+    this._stopListeners.push(listener)
+    return () => {
+      const idx = this._stopListeners.indexOf(listener)
+      if (idx >= 0) this._stopListeners.splice(idx, 1)
+    }
+  }
+
+  private emitPromptResolved(sessionId: string, requestId: string): void {
+    for (const listener of this._promptResolvedListeners) {
+      try { listener(sessionId, requestId) } catch { /* listener error */ }
+    }
+  }
+
+  private emitStopped(sessionId: string, reason: SessionStopReason): void {
+    for (const listener of this._stopListeners) {
+      try { listener(sessionId, reason) } catch { /* listener error */ }
     }
   }
 
@@ -793,6 +884,13 @@ export class SessionManager {
       workingDir: s.workingDir,
       groupDir: s.groupDir,
       worktreePath: s.worktreePath,
+      executionMode: s.executionMode,
+      worktreeState: s.worktreeState,
+      worktreeError: s.worktreeError,
+      worktreeBranch: s.worktreeBranch,
+      worktreeBase: s.worktreeBase,
+      reviewBase: s.reviewBase,
+      archivedAt: s.archivedAt,
       connectedClients: s.clients.size,
       lastActivity: new Date(s._lastActivityAt).toISOString(),
       source: s.source,
@@ -803,7 +901,15 @@ export class SessionManager {
 
   list(): SessionInfo[] {
     return Array.from(this.sessions.values())
-      .filter((s) => s.source !== 'orchestrator')
+      .filter((s) => s.source !== 'orchestrator' && !s.archivedAt)
+      .map((s) => this.serializeSession(s))
+  }
+
+  /** Archived sessions (resumable, with their worktrees kept), newest first. */
+  listArchived(): SessionInfo[] {
+    return Array.from(this.sessions.values())
+      .filter((s) => !!s.archivedAt)
+      .sort((a, b) => (b.archivedAt ?? '').localeCompare(a.archivedAt ?? ''))
       .map((s) => this.serializeSession(s))
   }
 
@@ -897,7 +1003,9 @@ export class SessionManager {
                 deniedTools.push(pending.toolName)
                 session.claudeProcess?.sendControlResponse(requestId, 'deny')
               }
+              const deniedIds = [...session.pendingControlRequests.keys()]
               session.pendingControlRequests.clear()
+              for (const id of deniedIds) this.emitPromptResolved(sessionId, id)
             }
             if (session.pendingToolApprovals.size > 0) {
               console.log(`[session] last client left, auto-denying ${session.pendingToolApprovals.size} pending tool approval(s)`)
@@ -906,7 +1014,9 @@ export class SessionManager {
                 pending.resolve({ allow: false, always: false })
                 this.broadcast(session, { type: 'prompt_dismiss', requestId: reqId })
               }
+              const deniedIds = [...session.pendingToolApprovals.keys()]
               session.pendingToolApprovals.clear()
+              for (const id of deniedIds) this.emitPromptResolved(sessionId, id)
             }
             // Record the auto-denial in history so a rejoining user can see
             // why Claude stopped instead of being silently confused.
@@ -950,6 +1060,7 @@ export class SessionManager {
       : Promise.resolve()
 
     this.archiveSessionIfWorthSaving(session)
+    this.emitStopped(sessionId, 'deleted')
 
     // Clean up git worktree if this session used one — deferred until process exits
     if (session.worktreePath) {
@@ -1270,6 +1381,23 @@ export class SessionManager {
     const session = this.sessions.get(sessionId)
     if (!session) return
     session._lastActivityAt = Date.now()
+    // Archived sessions take no input until they are explicitly resumed.
+    if (session.archivedAt) {
+      const msg: WsServerMessage = { type: 'system_message', subtype: 'error', text: 'This session is archived. Resume it from the Archive tab to continue.' }
+      this.broadcast(session, msg)
+      return
+    }
+
+    // An isolated session without a usable worktree must not start anywhere
+    // else. Hold the input until the user retries or switches checkout.
+    if (isIsolationBlocked(session)) {
+      session._heldInputs = [...(session._heldInputs ?? []), data]
+      if (session.worktreeState !== 'preparing') {
+        this.sessionLifecycle.reportWorktreeUnavailable(session)
+      }
+      return
+    }
+
     // Reset stopped-by-user flag so idle-reaped sessions can auto-start
     session._stoppedByUser = false
     session.coordinator.clearUserStopped()
@@ -1367,6 +1495,8 @@ export class SessionManager {
 
     const doSwitch = () => {
       session.provider = provider
+      // Model IDs belong to a harness; let the newly selected harness use its default.
+      session.model = undefined
       session.claudeSessionId = null
       this.persistToDiskDebounced()
       // Sidebar/provider-derived UI (model list, permission modes) keys off the
@@ -1518,6 +1648,18 @@ export class SessionManager {
   /** Stop the Claude process for a session. Delegates to SessionLifecycle. */
   stopClaude(sessionId: string): void {
     this.sessionLifecycle.stopClaude(sessionId)
+  }
+
+  /**
+   * A user-initiated stop: stop the process and tell stop listeners, so
+   * supervisors (e.g. the orchestrator's child manager) settle immediately
+   * instead of waiting for a timeout. Internal restarts use {@link stopClaude}.
+   */
+  stopSession(sessionId: string): boolean {
+    if (!this.sessions.has(sessionId)) return false
+    this.stopClaude(sessionId)
+    this.emitStopped(sessionId, 'stopped')
+    return true
   }
 
   /**
@@ -1702,10 +1844,150 @@ export class SessionManager {
   // ---------------------------------------------------------------------------
 
   /** Run git diff in a session's workingDir and return structured results. */
-  async getDiff(sessionId: string, scope: DiffScope = 'all'): Promise<WsServerMessage> {
+  async getDiff(sessionId: string, view: DiffView = 'all'): Promise<WsServerMessage> {
     const session = this.sessions.get(sessionId)
-    if (!session) return { type: 'diff_error', message: 'Session not found' }
-    return this.diffManager.getDiff(session.workingDir, scope)
+    if (!session) return { type: 'diff_error', message: 'Session not found', scope: view }
+    return this.diffManager.getDiff(session.workingDir, view, await this.reviewBaseFor(session, view))
+  }
+
+  /**
+   * The base a branch view compares against, in priority order: the user's
+   * choice, the branch's single open pull request (from the cached lookup;
+   * never a network call), the ref the worktree was created from, else
+   * undefined (the repository default).
+   */
+  private async reviewBaseFor(session: Session, view: DiffView): Promise<ReviewBasePreference | undefined> {
+    if (session.reviewBase) return { ref: session.reviewBase, source: 'user' }
+    if (view !== 'branch' && view !== 'committed') return undefined
+    const prBase = await cachedPrBaseFor(session.workingDir)
+    if (prBase) return { ref: prBase, source: 'pr' }
+    return session.worktreeBase ? { ref: session.worktreeBase, source: 'worktree' } : undefined
+  }
+
+  // ---------------------------------------------------------------------------
+  // Review comments (anchored feedback drafts, sent to the agent in one batch)
+  // ---------------------------------------------------------------------------
+
+  /** The session's review comments, with drafts checked for staleness. */
+  async listReviewComments(sessionId: string): Promise<ReviewComment[] | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+    return Promise.all((session.reviewComments ?? []).map(async c =>
+      c.status === 'draft' ? { ...c, stale: await isAnchorStale(session.workingDir, c.anchor) } : c))
+  }
+
+  /** Tell every client of the session (every device) the current comments. */
+  private async broadcastReviewComments(session: Session): Promise<void> {
+    const comments = await this.listReviewComments(session.id)
+    if (comments) this.broadcast(session, { type: 'review_comments', sessionId: session.id, comments })
+  }
+
+  /** Store a draft comment on lines the server reads itself. Returns an error message, or null. */
+  async addReviewComment(sessionId: string, input: AnchorInput, body: unknown, author: ReviewAuthor): Promise<string | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return 'Session not found'
+    const comments = session.reviewComments ?? []
+    if (comments.length >= MAX_COMMENTS_PER_SESSION) return `This session already has ${MAX_COMMENTS_PER_SESSION} review comments. Delete some first.`
+    try {
+      const text = checkBody(body)
+      const anchor = await createAnchor(session.workingDir, input)
+      session.reviewComments = [...(session.reviewComments ?? []), newComment(anchor, text, author)]
+    } catch (err) {
+      return anchorErrorMessage(err) ?? 'Could not save the comment.'
+    }
+    this.persistToDiskDebounced()
+    await this.broadcastReviewComments(session)
+    return null
+  }
+
+  /** Edit a draft's text (its author or the owner only). */
+  async updateReviewComment(sessionId: string, commentId: string, body: unknown, author: ReviewAuthor): Promise<string | null> {
+    const session = this.sessions.get(sessionId)
+    const comment = session?.reviewComments?.find(c => c.id === commentId)
+    if (!session || !comment) return 'Comment not found'
+    if (!canModify(comment, author)) return 'Only the author can edit this comment.'
+    if (comment.status !== 'draft') return 'Sent comments cannot be edited.'
+    try {
+      comment.body = checkBody(body)
+    } catch (err) {
+      return anchorErrorMessage(err) ?? 'Could not update the comment.'
+    }
+    comment.updatedAt = new Date().toISOString()
+    this.persistToDiskDebounced()
+    await this.broadcastReviewComments(session)
+    return null
+  }
+
+  /** Delete a comment (its author or the owner only). */
+  async deleteReviewComment(sessionId: string, commentId: string, author: ReviewAuthor): Promise<string | null> {
+    const session = this.sessions.get(sessionId)
+    const comment = session?.reviewComments?.find(c => c.id === commentId)
+    if (!session || !comment) return 'Comment not found'
+    if (!canModify(comment, author)) return 'Only the author can delete this comment.'
+    session.reviewComments = session.reviewComments?.filter(c => c.id !== commentId)
+    this.persistToDiskDebounced()
+    await this.broadcastReviewComments(session)
+    return null
+  }
+
+  /**
+   * Send draft comments (all, or `ids`) to the agent as one prompt through
+   * the normal input path. Drafts whose code changed are refused unless
+   * `includeStale`, in which case they go with their original excerpt.
+   */
+  async sendReviewFeedback(sessionId: string, opts: { ids?: string[]; includeStale?: boolean }): Promise<string | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return 'Session not found'
+    if (session.archivedAt) return 'This session is archived. Resume it before sending feedback.'
+    const drafts = (session.reviewComments ?? []).filter(c => c.status === 'draft' && (!opts.ids || opts.ids.includes(c.id)))
+    if (drafts.length === 0) return 'There are no draft comments to send.'
+    const checked = await Promise.all(drafts.map(async comment => ({ comment, stale: await isAnchorStale(session.workingDir, comment.anchor) })))
+    const staleCount = checked.filter(c => c.stale).length
+    if (staleCount && !opts.includeStale) {
+      return `${staleCount} comment(s) point at code that has changed since they were written. Re-select those lines, or send them with their original code.`
+    }
+    const prompt = buildFeedbackPrompt(checked)
+    const echo: WsServerMessage = { type: 'user_echo', text: prompt }
+    this.addToHistory(session, echo)
+    this.broadcast(session, echo)
+    this.sendInput(sessionId, prompt)
+    const sentAt = new Date().toISOString()
+    for (const { comment } of checked) {
+      comment.status = 'sent'
+      comment.sentAt = sentAt
+    }
+    this.persistToDiskDebounced()
+    await this.broadcastReviewComments(session)
+    return null
+  }
+
+  /** Whether the session has anything to review (uncommitted files, branch commits). */
+  async getChangeSummary(sessionId: string): Promise<{ uncommittedFiles: number; branchCommits: number | null } | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+    return this.diffManager.getChangeSummary(session.workingDir, await this.reviewBaseFor(session, 'branch'))
+  }
+
+  /** Pull request status for the session's branch (cached; `refresh` forces a lookup). */
+  async getPrStatus(sessionId: string, refresh = false): Promise<PrStatus | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return null
+    return getPrStatus(session.workingDir, { refresh })
+  }
+
+  /**
+   * Set (or clear, with null) the ref this session's branch views compare
+   * against. Returns an error message when the ref is not a commit here.
+   */
+  async setReviewBase(sessionId: string, base: string | null): Promise<string | null> {
+    const session = this.sessions.get(sessionId)
+    if (!session) return 'Session not found'
+    if (base !== null && !(await isValidReviewBase(base, session.workingDir))) {
+      return `"${base}" is not a branch or commit in this repository.`
+    }
+    session.reviewBase = base ?? undefined
+    this.persistToDiskDebounced()
+    return null
   }
 
   /** Discard changes in a session's workingDir per the given scope and paths. */
@@ -1801,7 +2083,10 @@ export class SessionManager {
   restoreActiveSessions(): void {
     const toRestore: Session[] = []
     for (const session of this.sessions.values()) {
-      if (session._wasActiveBeforeRestart && session.claudeSessionId && session.source !== 'webhook') {
+      // Joe's manager restores it using the saved harness choice. This generic
+      // path must not revive a legacy implicit-Claude session before selection.
+      if (session.source === 'orchestrator') continue
+      if (session._wasActiveBeforeRestart && session.claudeSessionId && session.source !== 'webhook' && !session.archivedAt) {
         toRestore.push(session)
       }
     }

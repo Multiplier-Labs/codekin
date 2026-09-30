@@ -66,6 +66,29 @@ vi.mock('child_process', async (importOriginal) => {
   }
 })
 
+// Worktree git behavior is covered against real repositories in
+// worktree-ops.test.ts; here we only verify how SessionManager uses it.
+const mockPrepareWorktree = vi.hoisted(() => vi.fn())
+const mockRemoveWorktree = vi.hoisted(() => vi.fn())
+const mockInspectWorktree = vi.hoisted(() => vi.fn())
+const mockCreateAnchor = vi.hoisted(() => vi.fn())
+const mockIsAnchorStale = vi.hoisted(() => vi.fn())
+vi.mock('./review-comments.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./review-comments.js')>()),
+  createAnchor: (...args: any[]) => mockCreateAnchor(...args),
+  isAnchorStale: (...args: any[]) => mockIsAnchorStale(...args),
+}))
+const mockCachedPrBaseFor = vi.hoisted(() => vi.fn())
+vi.mock('./pr-status.js', () => ({
+  cachedPrBaseFor: (...args: any[]) => mockCachedPrBaseFor(...args),
+  getPrStatus: vi.fn(async () => ({ state: 'none', pulls: [], dirty: false, fetchedAt: '' })),
+}))
+vi.mock('./worktree-ops.js', () => ({
+  prepareWorktree: (...args: any[]) => mockPrepareWorktree(...args),
+  removeWorktree: (...args: any[]) => mockRemoveWorktree(...args),
+  inspectWorktree: (...args: any[]) => mockInspectWorktree(...args),
+}))
+
 import { SessionManager } from './session-manager.js'
 import { seedUtilityProbe, resetUtilityProbeCache } from './utility-agent.js'
 import { mkdirSync, writeFileSync, renameSync, readFileSync, existsSync } from 'fs'
@@ -150,6 +173,14 @@ describe('SessionManager', () => {
   let sm: SessionManager
 
   beforeEach(() => {
+    mockPrepareWorktree.mockReset()
+    mockRemoveWorktree.mockReset().mockResolvedValue({ removed: true })
+    mockCachedPrBaseFor.mockReset().mockResolvedValue(null)
+    mockIsAnchorStale.mockReset().mockResolvedValue(false)
+    mockCreateAnchor.mockReset().mockImplementation(async (_cwd: string, input: any) => ({
+      ...input, source: 'worktree', excerpt: [`line ${input.startLine}`], fingerprint: 'f',
+    }))
+    mockInspectWorktree.mockReset().mockResolvedValue({ exists: true, modified: [], untracked: [], branch: 'wt/x', uniqueCommits: 0 })
     sm = new SessionManager()
     // Session naming runs through the utility agent, which only spawns a
     // harness whose probe reports available+authenticated. Real probes shell
@@ -502,35 +533,46 @@ describe('SessionManager', () => {
       expect(cp.stop).toHaveBeenCalledOnce()
     })
 
-    it('cleans up git worktree when session has worktreePath', async () => {
+    it('removes the worktree without force after the process exits', async () => {
       const s = sm.create('wt-test', '/repos/myproject')
       s.worktreePath = '/repos/myproject-wt-abc123'
       s.groupDir = '/repos/myproject'
 
-      // Mock execFile to succeed (callback-style: (cmd, args, opts, cb) => cb(null, stdout, stderr))
-      mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: any, cb?: any) => {
-        if (typeof cb === 'function') cb(null, '/repos/myproject\n', '')
-        return { on: vi.fn() }
-      })
-
       sm.delete(s.id)
 
-      // Session should be removed
       expect(sm.get(s.id)).toBeUndefined()
-
       // Worktree cleanup is deferred behind a microtask (process exit promise)
-      await vi.waitFor(() => expect(mockExecFile).toHaveBeenCalled())
+      await vi.waitFor(() => expect(mockRemoveWorktree).toHaveBeenCalledWith('/repos/myproject-wt-abc123', '/repos/myproject'))
+    })
+
+    it('retains a worktree that git refuses to remove', async () => {
+      vi.useFakeTimers()
+      try {
+        const s = sm.create('wt-dirty', '/repos/myproject')
+        s.worktreePath = '/repos/myproject-wt-dirty'
+        s.groupDir = '/repos/myproject'
+        mockRemoveWorktree.mockResolvedValue({ removed: false, reason: 'contains modified or untracked files' })
+
+        sm.delete(s.id)
+        await vi.waitFor(() => expect(mockRemoveWorktree).toHaveBeenCalledTimes(1))
+        await vi.advanceTimersByTimeAsync(3000)
+
+        // One retry, then the worktree is left in place — never force-removed.
+        expect(mockRemoveWorktree).toHaveBeenCalledTimes(2)
+        await vi.advanceTimersByTimeAsync(10000)
+        expect(mockRemoveWorktree).toHaveBeenCalledTimes(2)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('does not call worktree cleanup when session has no worktreePath', () => {
       const s = sm.create('normal-test', '/repos/myproject')
 
-      mockExecFile.mockClear()
       sm.delete(s.id)
 
       expect(sm.get(s.id)).toBeUndefined()
-      // No git worktree commands should be called
-      expect(mockExecFile).not.toHaveBeenCalled()
+      expect(mockRemoveWorktree).not.toHaveBeenCalled()
     })
   })
 
@@ -2171,6 +2213,16 @@ describe('SessionManager', () => {
       vi.useRealTimers()
     })
 
+    it('leaves Joe startup to the orchestrator manager and its saved harness choice', () => {
+      const joe = sm.create('Joe', '/tmp', { source: 'orchestrator' })
+      joe._wasActiveBeforeRestart = true
+      joe.claudeSessionId = 'legacy-claude-session'
+      const start = vi.spyOn(sm, 'startClaude').mockReturnValue(true)
+      sm.restoreActiveSessions()
+      vi.advanceTimersByTime(2000)
+      expect(start).not.toHaveBeenCalled()
+    })
+
     it('auto-restarts sessions that were active and have claudeSessionId', () => {
       const mockedExistsSync = vi.mocked(existsSync)
       const mockedReadFileSync = vi.mocked(readFileSync)
@@ -2381,6 +2433,40 @@ describe('SessionManager', () => {
       sm.onSessionExit(listener2)
 
       expect((sm as any)._exitListeners).toHaveLength(2)
+    })
+  })
+
+  describe('onSessionStopped()', () => {
+    it.each([
+      ['stopped', (id: string) => sm.stopSession(id)],
+      ['archived', (id: string) => sm.archiveSession(id)],
+      ['deleted', (id: string) => sm.delete(id)],
+    ] as const)('fires with reason %s', (reason, act) => {
+      const s = sm.create('stop-test', '/tmp')
+      const listener = vi.fn()
+      sm.onSessionStopped(listener)
+
+      act(s.id)
+
+      expect(listener).toHaveBeenCalledWith(s.id, reason)
+    })
+
+    it('does not fire for internal process stops', () => {
+      const s = sm.create('stop-test', '/tmp')
+      const listener = vi.fn()
+      sm.onSessionStopped(listener)
+
+      sm.stopClaude(s.id)
+
+      expect(listener).not.toHaveBeenCalled()
+    })
+
+    it('unsubscribes', () => {
+      const s = sm.create('stop-test', '/tmp')
+      const listener = vi.fn()
+      sm.onSessionStopped(listener)()
+      sm.stopSession(s.id)
+      expect(listener).not.toHaveBeenCalled()
     })
   })
 
@@ -2895,6 +2981,15 @@ describe('SessionManager', () => {
   })
 
   describe('setProvider()', () => {
+    it('clears a model when switching harnesses but retains it when reselecting the same one', () => {
+      const s = sm.create('Joe', '/tmp', { source: 'orchestrator', provider: 'codex', model: 'codex-model' })
+      sm.setProvider(s.id, 'codex')
+      expect(s.model).toBe('codex-model')
+      sm.setProvider(s.id, 'opencode')
+      expect(s.provider).toBe('opencode')
+      expect(s.model).toBeUndefined()
+    })
+
     it('calls coordinator.requestReconfigure when process is alive', () => {
       const s = sm.create('test', '/tmp')
       const cp = fakeClaudeProcess(true)
@@ -3094,7 +3189,7 @@ describe('SessionManager', () => {
     it('returns diff_error when session not found', async () => {
       const sm = new SessionManager()
       const result = await sm.getDiff('nonexistent-session')
-      expect(result).toEqual({ type: 'diff_error', message: 'Session not found' })
+      expect(result).toEqual({ type: 'diff_error', message: 'Session not found', scope: 'all' })
     })
 
     it('delegates to diffManager.getDiff with session workingDir', async () => {
@@ -3106,8 +3201,75 @@ describe('SessionManager', () => {
 
       const result = await sm.getDiff(s.id, 'all')
 
-      expect(spy).toHaveBeenCalledWith('/tmp/test-repo', 'all')
+      expect(spy).toHaveBeenCalledWith('/tmp/test-repo', 'all', undefined)
       expect(result).toEqual(mockResult)
+    })
+
+    it("prefers the user's review base over the worktree's creation base", async () => {
+      const sm = new SessionManager()
+      const s = sm.create('base', '/tmp/test-repo')
+      const spy = vi.spyOn((sm as any).diffManager, 'getDiff').mockResolvedValue({ type: 'diff_result' })
+
+      s.worktreeBase = 'main'
+      await sm.getDiff(s.id, 'branch')
+      s.reviewBase = 'release/1.2'
+      await sm.getDiff(s.id, 'committed')
+
+      expect(spy).toHaveBeenNthCalledWith(1, '/tmp/test-repo', 'branch', { ref: 'main', source: 'worktree' })
+      expect(spy).toHaveBeenNthCalledWith(2, '/tmp/test-repo', 'committed', { ref: 'release/1.2', source: 'user' })
+    })
+
+    it("uses the open pull request's base before the worktree's, but never over the user's", async () => {
+      const sm = new SessionManager()
+      const s = sm.create('base-pr', '/tmp/test-repo')
+      const spy = vi.spyOn((sm as any).diffManager, 'getDiff').mockResolvedValue({ type: 'diff_result' })
+      s.worktreeBase = 'main'
+      mockCachedPrBaseFor.mockResolvedValue('develop')
+
+      await sm.getDiff(s.id, 'branch')
+      await sm.getDiff(s.id, 'all')
+      s.reviewBase = 'release/1.2'
+      await sm.getDiff(s.id, 'branch')
+
+      expect(spy).toHaveBeenNthCalledWith(1, '/tmp/test-repo', 'branch', { ref: 'develop', source: 'pr' })
+      expect(spy).toHaveBeenNthCalledWith(2, '/tmp/test-repo', 'all', undefined)
+      expect(spy).toHaveBeenNthCalledWith(3, '/tmp/test-repo', 'branch', { ref: 'release/1.2', source: 'user' })
+    })
+
+    it('clears the review base without consulting git', async () => {
+      const sm = new SessionManager()
+      const s = sm.create('base-clear', '/tmp/test-repo')
+      s.reviewBase = 'develop'
+      mockExecFile.mockClear()
+
+      expect(await sm.setReviewBase(s.id, null)).toBeNull()
+
+      expect(s.reviewBase).toBeUndefined()
+      expect(mockExecFile).not.toHaveBeenCalled()
+    })
+
+    it('rejects a review base that is not a commit', async () => {
+      const sm = new SessionManager()
+      const s = sm.create('base-bad', '/tmp/test-repo')
+      mockExecFile.mockImplementation((_c: string, _a: string[], _o: any, cb?: any) => {
+        if (typeof cb === 'function') cb(new Error('unknown revision'), '', '')
+        return { on: vi.fn() }
+      })
+
+      expect(await sm.setReviewBase(s.id, 'nope')).toContain('not a branch or commit')
+      expect(await sm.setReviewBase(s.id, '--output=/tmp/x')).toContain('not a branch or commit')
+      expect(s.reviewBase).toBeUndefined()
+      mockExecFile.mockReset()
+    })
+
+    it('records the base a new worktree was created from', async () => {
+      const sm = new SessionManager()
+      const s = sm.create('wt-base', '/repos/myproject')
+      mockPrepareWorktree.mockResolvedValue({ ok: true, path: '/repos/wt', branch: 'wt/x', repoRoot: '/repos/myproject', baseRef: 'main', reused: false })
+
+      await sm.createWorktree(s.id, '/repos/myproject')
+
+      expect(s.worktreeBase).toBe('main')
     })
   })
 
@@ -3116,101 +3278,208 @@ describe('SessionManager', () => {
   // =====================================================================
 
   describe('createWorktree()', () => {
-    afterEach(() => {
-      mockExecFile.mockReset()
+    const created = (path: string, extra: Record<string, unknown> = {}) => ({
+      ok: true, path, branch: 'wt/x', repoRoot: '/repos/myproject', reused: false, ...extra,
     })
 
-    it('returns worktree path on success', async () => {
+    it('points the session at the new worktree and returns its path', async () => {
       const s = sm.create('wt-test', '/repos/myproject')
-
-      // Mock execFile: callback style (cmd, args, opts, cb)
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
+      const wtPath = `/repos/myproject-wt-${s.id.slice(0, 8)}`
+      mockPrepareWorktree.mockResolvedValue(created(wtPath))
 
       const result = await sm.createWorktree(s.id, '/repos/myproject')
 
-      expect(result).not.toBeNull()
-      expect(result).toContain('-wt-')
-      expect(result).toContain(s.id.slice(0, 8))
-    })
-
-    it('returns null on git failure', async () => {
-      const s = sm.create('wt-fail', '/repos/myproject')
-
-      // Mock execFile to fail on worktree add
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else if (args[0] === 'worktree' && args[1] === 'add') {
-            cb(new Error('fatal: worktree add failed'), '', 'fatal: worktree add failed')
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
-
-      const result = await sm.createWorktree(s.id, '/repos/myproject')
-
-      expect(result).toBeNull()
-    })
-
-    it('returns null for unknown session', async () => {
-      const result = await sm.createWorktree('nonexistent', '/repos/myproject')
-      expect(result).toBeNull()
-    })
-
-    it('updates session.workingDir and session.groupDir on success', async () => {
-      const s = sm.create('wt-update', '/repos/myproject')
-
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
-
-      const worktreePath = await sm.createWorktree(s.id, '/repos/myproject')
-
-      expect(worktreePath).not.toBeNull()
-      expect(s.workingDir).toBe(worktreePath)
+      expect(result).toBe(wtPath)
+      expect(s.workingDir).toBe(wtPath)
+      expect(s.worktreePath).toBe(wtPath)
       expect(s.groupDir).toBe('/repos/myproject')
-      expect(s.worktreePath).toBe(worktreePath)
     })
 
-    it('returns null when rev-parse returns invalid path', async () => {
-      const s = sm.create('wt-invalid-root', '/repos/myproject')
+    it('requests a generated wt/ branch owned by the session', async () => {
+      const s = sm.create('wt-generated', '/repos/myproject')
+      const shortId = s.id.slice(0, 8)
+      mockPrepareWorktree.mockResolvedValue(created('/repos/wt'))
 
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // Return a relative path (invalid)
-            cb(null, 'relative/path\n', '')
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
+      await sm.createWorktree(s.id, '/repos/myproject')
+
+      expect(mockPrepareWorktree).toHaveBeenCalledWith({
+        sourceDir: '/repos/myproject',
+        ownerId: shortId,
+        branch: `wt/${shortId}`,
+        generatedBranch: true,
+        baseBranch: undefined,
+        ownedPath: undefined,
       })
+    })
+
+    it('passes a caller-supplied branch as not generated, with its base', async () => {
+      const s = sm.create('wt-target', '/repos/myproject')
+      mockPrepareWorktree.mockResolvedValue(created('/repos/wt'))
+
+      await sm.createWorktree(s.id, '/repos/myproject', 'fix/my-feature', 'develop')
+
+      expect(mockPrepareWorktree).toHaveBeenCalledWith(expect.objectContaining({
+        branch: 'fix/my-feature',
+        generatedBranch: false,
+        baseBranch: 'develop',
+      }))
+    })
+
+    it("offers the session's existing worktree for reuse", async () => {
+      const s = sm.create('wt-reuse', '/repos/myproject')
+      s.worktreePath = '/repos/myproject-wt-existing'
+      mockPrepareWorktree.mockResolvedValue(created('/repos/myproject-wt-existing', { reused: true }))
+
+      await sm.createWorktree(s.id, '/repos/myproject-wt-existing')
+
+      expect(mockPrepareWorktree).toHaveBeenCalledWith(expect.objectContaining({ ownedPath: '/repos/myproject-wt-existing' }))
+    })
+
+    it('returns null and leaves the session unchanged on failure', async () => {
+      const s = sm.create('wt-fail', '/repos/myproject')
+      mockPrepareWorktree.mockResolvedValue({ ok: false, code: 'git_failed', message: 'boom' })
 
       const result = await sm.createWorktree(s.id, '/repos/myproject')
+
       expect(result).toBeNull()
+      expect(s.workingDir).toBe('/repos/myproject')
+      expect(s.worktreePath).toBeUndefined()
+    })
+
+    it('exposes the failure reason through prepareSessionWorktree', async () => {
+      const s = sm.create('wt-reason', '/repos/myproject')
+      mockPrepareWorktree.mockResolvedValue({ ok: false, code: 'branch_in_use', message: 'Branch x is already checked out at /y.' })
+
+      const result = await sm.prepareSessionWorktree(s.id, '/repos/myproject')
+
+      expect(result).toEqual({ ok: false, code: 'branch_in_use', message: 'Branch x is already checked out at /y.' })
+    })
+
+    it('returns null for unknown session without touching git', async () => {
+      const result = await sm.createWorktree('nonexistent', '/repos/myproject')
+
+      expect(result).toBeNull()
+      expect(mockPrepareWorktree).not.toHaveBeenCalled()
+    })
+
+    it('does not resurrect a session deleted while the worktree was being created', async () => {
+      const s = sm.create('wt-deleted', '/repos/myproject')
+      let finish!: (v: unknown) => void
+      mockPrepareWorktree.mockReturnValue(new Promise(r => { finish = r }))
+
+      const pending = sm.createWorktree(s.id, '/repos/myproject')
+      sm.delete(s.id)
+      finish(created('/repos/wt'))
+      await pending
+
+      expect(sm.get(s.id)).toBeUndefined()
+      expect(s.worktreePath).toBeUndefined()
+    })
+  })
+
+  describe('durable isolation', () => {
+    const created = (path: string) => ({ ok: true, path, branch: 'fix/thing', repoRoot: '/repos/myproject', reused: false })
+    const failed = { ok: false, code: 'git_failed', message: 'git worktree add failed' }
+
+    it('marks a session created with useWorktree as isolated and preparing', () => {
+      const s = sm.create('iso', '/repos/myproject', { useWorktree: true })
+
+      expect(s.executionMode).toBe('isolated')
+      expect(s.worktreeState).toBe('preparing')
+      expect(sm.list().find(i => i.id === s.id)).toMatchObject({ executionMode: 'isolated', worktreeState: 'preparing' })
+    })
+
+    it('records the worktree as ready with its branch on success', async () => {
+      const s = sm.create('iso-ok', '/repos/myproject', { useWorktree: true })
+      mockPrepareWorktree.mockResolvedValue(created('/repos/myproject-wt-1'))
+
+      await sm.prepareSessionWorktree(s.id, '/repos/myproject', 'fix/thing')
+
+      expect(s.worktreeState).toBe('ready')
+      expect(s.worktreeBranch).toBe('fix/thing')
+      expect(s.worktreeError).toBeUndefined()
+    })
+
+    it('marks an isolated session failed, keeping it out of the shared checkout', async () => {
+      const s = sm.create('iso-fail', '/repos/myproject', { useWorktree: true })
+      mockPrepareWorktree.mockResolvedValue(failed)
+
+      await sm.prepareSessionWorktree(s.id, '/repos/myproject')
+
+      expect(s.worktreeState).toBe('failed')
+      expect(s.worktreeError).toBe('git worktree add failed')
+      expect(sm.startClaude(s.id)).toBe(false)
+      expect(s.claudeProcess).toBeNull()
+    })
+
+    it('leaves a non-isolated session usable when moving to a worktree fails', async () => {
+      const s = sm.create('move-fail', '/repos/myproject')
+      mockPrepareWorktree.mockResolvedValue(failed)
+
+      await sm.prepareSessionWorktree(s.id, '/repos/myproject')
+
+      expect(s.executionMode).toBeUndefined()
+      expect(s.worktreeState).toBeUndefined()
+    })
+
+    it('holds input while the worktree is unavailable and tells the client once', async () => {
+      const s = sm.create('iso-held', '/repos/myproject', { useWorktree: true })
+      mockPrepareWorktree.mockResolvedValue(failed)
+      await sm.prepareSessionWorktree(s.id, '/repos/myproject')
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+      ws.send.mockClear()
+
+      sm.sendInput(s.id, 'first')
+      sm.sendInput(s.id, 'second')
+
+      expect(s._heldInputs).toEqual(['first', 'second'])
+      expect(s.claudeProcess).toBeNull()
+      const errors = ws.send.mock.calls.map((c: any) => JSON.parse(c[0])).filter((m: any) => m.subtype === 'error')
+      expect(errors).toHaveLength(1)
+    })
+
+    it('retries the worktree on its recorded branch and delivers held input as one message', async () => {
+      const s = sm.create('iso-retry', '/repos/myproject', { useWorktree: true, groupDir: '/repos/myproject' })
+      mockPrepareWorktree.mockResolvedValue(failed)
+      await sm.prepareSessionWorktree(s.id, '/repos/myproject', 'fix/thing')
+      s.worktreeBranch = 'fix/thing'
+      s._heldInputs = ['first', 'second']
+      mockPrepareWorktree.mockResolvedValue(created('/repos/myproject-wt-1'))
+      const sendSpy = vi.spyOn(sm, 'sendInput').mockImplementation(() => {})
+
+      const result = await sm.retryWorktree(s.id)
+
+      expect(result.ok).toBe(true)
+      expect(mockPrepareWorktree).toHaveBeenLastCalledWith(expect.objectContaining({
+        sourceDir: '/repos/myproject', branch: 'fix/thing', generatedBranch: false,
+      }))
+      expect(s.worktreeState).toBe('ready')
+      expect(sendSpy).toHaveBeenCalledOnce()
+      expect(sendSpy).toHaveBeenCalledWith(s.id, 'first\n\nsecond')
+      expect(s._heldInputs).toBeUndefined()
+    })
+
+    it('switches to the shared checkout only on explicit request', () => {
+      const s = sm.create('iso-switch', '/repos/myproject-wt-1', { useWorktree: true, groupDir: '/repos/myproject' })
+      s.worktreePath = '/repos/myproject-wt-1'
+      s.worktreeState = 'missing'
+      const startSpy = vi.spyOn(sm, 'startClaude').mockReturnValue(true)
+
+      expect(sm.useExistingCheckout(s.id)).toBe(true)
+
+      expect(s.executionMode).toBe('existing-checkout')
+      expect(s.workingDir).toBe('/repos/myproject')
+      expect(s.worktreePath).toBeUndefined()
+      expect(s.worktreeState).toBeUndefined()
+      expect(startSpy).toHaveBeenCalledWith(s.id)
+    })
+
+    it('refuses to switch while a worktree is being prepared', () => {
+      const s = sm.create('iso-busy', '/repos/myproject', { useWorktree: true })
+
+      expect(sm.useExistingCheckout(s.id)).toBe(false)
+      expect(s.executionMode).toBe('isolated')
     })
   })
 
@@ -3515,182 +3784,6 @@ describe('SessionManager', () => {
     })
   })
 
-  describe('createWorktree() with targetBranch', () => {
-    afterEach(() => {
-      mockExecFile.mockReset()
-    })
-
-    it('uses targetBranch as branch name instead of generating wt/ prefix', async () => {
-      const s = sm.create('wt-target', '/repos/myproject')
-
-      const gitCalls: string[][] = []
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        gitCalls.push(args)
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else if (args[0] === 'show-ref') {
-            // Branch does not exist yet
-            cb(new Error('not found'), '', '')
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
-
-      const result = await sm.createWorktree(s.id, '/repos/myproject', 'fix/my-feature')
-
-      expect(result).not.toBeNull()
-      // Should use the targetBranch name, not wt/<shortId>
-      const worktreeAddCall = gitCalls.find(a => a[0] === 'worktree' && a[1] === 'add')
-      expect(worktreeAddCall).toBeDefined()
-      expect(worktreeAddCall).toContain('fix/my-feature')
-    })
-
-    it('does NOT force-delete caller-supplied branch (non-ephemeral)', async () => {
-      const s = sm.create('wt-no-delete', '/repos/myproject')
-
-      const gitCalls: string[][] = []
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        gitCalls.push(args)
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else if (args[0] === 'show-ref') {
-            // Branch already exists
-            cb(null, '', '')
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
-
-      const result = await sm.createWorktree(s.id, '/repos/myproject', 'fix/existing-branch')
-
-      expect(result).not.toBeNull()
-      // Should NOT have called `git branch -D` for caller-supplied branch
-      const branchDeleteCall = gitCalls.find(a => a[0] === 'branch' && a[1] === '-D')
-      expect(branchDeleteCall).toBeUndefined()
-    })
-
-    it('uses show-ref to detect existing branches', async () => {
-      const s = sm.create('wt-showref', '/repos/myproject')
-
-      const gitCalls: string[][] = []
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        gitCalls.push(args)
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else if (args[0] === 'show-ref') {
-            // Branch exists
-            cb(null, '', '')
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
-
-      await sm.createWorktree(s.id, '/repos/myproject', 'feat/test')
-
-      // Verify show-ref was called with refs/heads/ for the target branch
-      const showRefCall = gitCalls.find(a =>
-        a[0] === 'show-ref' && a[1] === '--verify' && a.some(arg => arg === 'refs/heads/feat/test')
-      )
-      expect(showRefCall).toBeDefined()
-    })
-
-    it('checks out existing branch without -b flag', async () => {
-      const s = sm.create('wt-existing', '/repos/myproject')
-
-      const gitCalls: string[][] = []
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        gitCalls.push(args)
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else if (args[0] === 'show-ref') {
-            cb(null, '', '') // branch exists
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
-
-      await sm.createWorktree(s.id, '/repos/myproject', 'feat/existing')
-
-      const worktreeAddCall = gitCalls.find(a => a[0] === 'worktree' && a[1] === 'add')
-      expect(worktreeAddCall).toBeDefined()
-      // Should NOT contain -b flag for existing branch
-      expect(worktreeAddCall).not.toContain('-b')
-      expect(worktreeAddCall).toContain('feat/existing')
-    })
-
-    it('creates new branch with -b flag when branch does not exist', async () => {
-      const s = sm.create('wt-new-branch', '/repos/myproject')
-
-      const gitCalls: string[][] = []
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        gitCalls.push(args)
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else if (args[0] === 'show-ref') {
-            cb(new Error('not found'), '', '') // branch doesn't exist
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
-
-      await sm.createWorktree(s.id, '/repos/myproject', 'feat/brand-new')
-
-      const worktreeAddCall = gitCalls.find(a => a[0] === 'worktree' && a[1] === 'add')
-      expect(worktreeAddCall).toBeDefined()
-      expect(worktreeAddCall).toContain('-b')
-      expect(worktreeAddCall).toContain('feat/brand-new')
-    })
-
-    it('force-deletes ephemeral wt/ branches when no targetBranch supplied', async () => {
-      const s = sm.create('wt-ephemeral', '/repos/myproject')
-      const shortId = s.id.slice(0, 8)
-
-      const gitCalls: string[][] = []
-      mockExecFile.mockImplementation((_cmd: string, args: string[], _opts: any, cb?: any) => {
-        gitCalls.push(args)
-        if (typeof cb === 'function') {
-          if (args[0] === 'rev-parse') {
-            // --git-common-dir returns the main repo's .git directory
-            cb(null, '/repos/myproject/.git\n', '')
-          } else if (args[0] === 'show-ref') {
-            cb(null, '', '') // branch exists
-          } else {
-            cb(null, '', '')
-          }
-        }
-        return { on: vi.fn() }
-      })
-
-      // No targetBranch — ephemeral
-      await sm.createWorktree(s.id, '/repos/myproject')
-
-      const branchDeleteCall = gitCalls.find(a => a[0] === 'branch' && a[1] === '-D')
-      expect(branchDeleteCall).toBeDefined()
-      // The deleted branch should contain the shortId (ephemeral wt/ pattern)
-      expect(branchDeleteCall![2]).toContain(shortId)
-    })
-  })
-
   describe('handleClaudeExit — spawn failure preservation', () => {
     it('preserves claudeSessionId when spawn failed (ENOENT)', () => {
       vi.useFakeTimers()
@@ -3762,7 +3855,7 @@ describe('SessionManager', () => {
   })
 
   describe('handleClaudeExit — missing workingDir fallback', () => {
-    it('falls back to groupDir when workingDir no longer exists', () => {
+    it('keeps a worktree session on its worktree instead of falling back to groupDir', () => {
       vi.useFakeTimers()
       const mockedExistsSync = vi.mocked(existsSync)
       const s = sm.create('wt-deleted', '/repos/project-wt-abc12345')
@@ -3771,11 +3864,9 @@ describe('SessionManager', () => {
       ;(session as any).worktreePath = '/repos/project-wt-abc12345'
       ;(session as any).restartCount = 0
 
-      // workingDir doesn't exist, but groupDir does
       mockedExistsSync.mockImplementation((p) => {
         const ps = String(p)
-        if (ps === '/repos/project-wt-abc12345') return false
-        if (ps === '/repos/project') return true
+        if (ps.startsWith('/repos/project-wt-abc12345')) return false
         if (ps.includes('sessions.json')) return false
         return true
       })
@@ -3785,18 +3876,13 @@ describe('SessionManager', () => {
 
       ;(sm as any).handleClaudeExit(fakeClaudeProcess(false), session, s.id, 1, null)
 
-      // Should update workingDir to groupDir
-      expect(session.workingDir).toBe('/repos/project')
-      expect(session.worktreePath).toBeUndefined()
-
-      // Should broadcast notification about fallback
+      expect(session.workingDir).toBe('/repos/project-wt-abc12345')
+      expect(session.worktreePath).toBe('/repos/project-wt-abc12345')
+      expect(session.worktreeState).toBe('missing')
       const messages = ws.send.mock.calls.map((c: any) => JSON.parse(c[0]))
-      const fallbackMsg = messages.find((m: any) =>
-        m.type === 'system_message' && m.subtype === 'notification' && m.text?.includes('was removed')
-      )
-      expect(fallbackMsg).toBeDefined()
+      expect(messages.some((m: any) => m.type === 'system_message' && m.subtype === 'error' && m.text?.includes('isolated'))).toBe(true)
+      expect(messages.some((m: any) => m.type === 'exit')).toBe(true)
 
-      // Reset mock
       mockedExistsSync.mockImplementation((p) => String(p).includes('sessions.json') ? false : true)
       vi.useRealTimers()
     })
@@ -3971,6 +4057,279 @@ describe('SessionManager', () => {
       ;(sm as any).handleClaudeResult(s, s.id, 'success', false)
 
       expect(s.claudeSessionId).toBe('still-fresh')
+    })
+  })
+
+  describe('review comments', () => {
+    const owner = { id: 'owner', role: 'owner' as const }
+    const alice = { id: 'alice', role: 'grantee' as const }
+    const bob = { id: 'bob', role: 'grantee' as const }
+    const at = (startLine: number, path = 'app.ts') => ({ path, side: 'new' as const, startLine, endLine: startLine, view: 'branch' as const })
+
+    function sessionWithClient() {
+      const s = sm.create('review', '/repos/app')
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+      ws.send.mockClear()
+      return { s, ws }
+    }
+    const sentOf = (ws: any) => ws.send.mock.calls.map((c: any) => JSON.parse(c[0]))
+
+    it('stores drafts with their author and tells every client', async () => {
+      const { s, ws } = sessionWithClient()
+
+      expect(await sm.addReviewComment(s.id, at(3), '  Why?  ', alice)).toBeNull()
+
+      const [comment] = s.reviewComments!
+      expect(comment).toMatchObject({ body: 'Why?', status: 'draft', author: 'alice', authorRole: 'grantee' })
+      expect(mockCreateAnchor).toHaveBeenCalledWith('/repos/app', at(3))
+      const broadcast = sentOf(ws).find((m: any) => m.type === 'review_comments')
+      expect(broadcast.comments).toHaveLength(1)
+      expect(broadcast.comments[0].stale).toBe(false)
+    })
+
+    it('rejects empty comments and reports anchor errors', async () => {
+      const { s } = sessionWithClient()
+      const { createAnchor } = await vi.importActual<typeof import('./review-comments.js')>('./review-comments.js')
+      mockCreateAnchor.mockImplementation((cwd: string, input: any) => createAnchor(cwd, input))
+
+      expect(await sm.addReviewComment(s.id, at(1), '   ', owner)).toBe('The comment is empty.')
+      expect(await sm.addReviewComment(s.id, { ...at(1), path: '../x' }, 'hi', owner)).toContain('Invalid path')
+      expect(s.reviewComments ?? []).toHaveLength(0)
+    })
+
+    it('lets only the author or the owner edit and delete', async () => {
+      const { s } = sessionWithClient()
+      await sm.addReviewComment(s.id, at(1), 'mine', alice)
+      const id = s.reviewComments![0].id
+
+      expect(await sm.updateReviewComment(s.id, id, 'hijack', bob)).toContain('Only the author')
+      expect(await sm.deleteReviewComment(s.id, id, bob)).toContain('Only the author')
+      expect(await sm.updateReviewComment(s.id, id, 'edited', alice)).toBeNull()
+      expect(s.reviewComments![0].body).toBe('edited')
+      expect(await sm.deleteReviewComment(s.id, id, owner)).toBeNull()
+      expect(s.reviewComments).toEqual([])
+    })
+
+    it('sends all drafts as one prompt, echoes it, and marks them sent', async () => {
+      const { s, ws } = sessionWithClient()
+      await sm.addReviewComment(s.id, at(9, 'b.ts'), 'second file', owner)
+      await sm.addReviewComment(s.id, at(2), 'first file', alice)
+      const input = vi.spyOn(sm, 'sendInput').mockImplementation(() => {})
+      ws.send.mockClear()
+
+      expect(await sm.sendReviewFeedback(s.id, {})).toBeNull()
+
+      expect(input).toHaveBeenCalledOnce()
+      const prompt = input.mock.calls[0][1]
+      expect(prompt).toContain('(2 comments)')
+      expect(prompt.indexOf('first file')).toBeLessThan(prompt.indexOf('second file'))
+      expect(sentOf(ws).some((m: any) => m.type === 'user_echo' && m.text === prompt)).toBe(true)
+      expect(s.reviewComments!.every(c => c.status === 'sent' && c.sentAt)).toBe(true)
+      expect(await sm.updateReviewComment(s.id, s.reviewComments![0].id, 'late edit', owner)).toContain('cannot be edited')
+      expect(await sm.sendReviewFeedback(s.id, {})).toBe('There are no draft comments to send.')
+    })
+
+    it('refuses stale drafts unless explicitly sent with their original code', async () => {
+      const { s } = sessionWithClient()
+      await sm.addReviewComment(s.id, at(1), 'moved code', owner)
+      mockIsAnchorStale.mockResolvedValue(true)
+      const input = vi.spyOn(sm, 'sendInput').mockImplementation(() => {})
+
+      expect(await sm.sendReviewFeedback(s.id, {})).toContain('1 comment(s) point at code that has changed')
+      expect(input).not.toHaveBeenCalled()
+      expect((await sm.listReviewComments(s.id))![0].stale).toBe(true)
+
+      expect(await sm.sendReviewFeedback(s.id, { includeStale: true })).toBeNull()
+      expect(input.mock.calls[0][1]).toContain('this code has changed since the comment was written')
+    })
+
+    it('sends only the chosen drafts', async () => {
+      const { s } = sessionWithClient()
+      await sm.addReviewComment(s.id, at(1), 'one', owner)
+      await sm.addReviewComment(s.id, at(2), 'two', owner)
+      const input = vi.spyOn(sm, 'sendInput').mockImplementation(() => {})
+
+      await sm.sendReviewFeedback(s.id, { ids: [s.reviewComments![1].id] })
+
+      expect(input.mock.calls[0][1]).toContain('(1 comment)')
+      expect(s.reviewComments!.map(c => c.status)).toEqual(['draft', 'sent'])
+    })
+
+    it('does not send feedback to an archived session', async () => {
+      const { s } = sessionWithClient()
+      await sm.addReviewComment(s.id, at(1), 'x', owner)
+      sm.archiveSession(s.id)
+
+      expect(await sm.sendReviewFeedback(s.id, {})).toContain('archived')
+      expect(s.reviewComments![0].status).toBe('draft')
+    })
+  })
+
+  describe('archive and resume', () => {
+    const DAY = 24 * 60 * 60 * 1000
+
+    it('stops the process, hides the session and keeps its worktree', () => {
+      const s = sm.create('arch', '/tmp')
+      s.worktreePath = '/repos/myproject-wt-1'
+      const cp = fakeClaudeProcess()
+      s.claudeProcess = cp
+
+      expect(sm.archiveSession(s.id)).toBe(true)
+
+      expect(cp.stop).toHaveBeenCalledOnce()
+      expect(s.archivedAt).toBeTruthy()
+      expect(s.worktreePath).toBe('/repos/myproject-wt-1')
+      expect(mockRemoveWorktree).not.toHaveBeenCalled()
+      expect(sm.list().some(i => i.id === s.id)).toBe(false)
+      expect(sm.listArchived().map(i => i.id)).toEqual([s.id])
+      expect(sm.get(s.id)).toBeDefined()
+    })
+
+    it('refuses to archive the orchestrator session', () => {
+      const s = sm.create('orch', '/tmp', { source: 'orchestrator' })
+
+      expect(sm.archiveSession(s.id)).toBe(false)
+      expect(s.archivedAt).toBeUndefined()
+    })
+
+    it('never starts an archived session, even from a pending restart or input', () => {
+      const s = sm.create('arch-start', '/tmp')
+      sm.archiveSession(s.id)
+      const ws = fakeWs()
+      sm.join(s.id, ws)
+      ws.send.mockClear()
+
+      expect(sm.startClaude(s.id)).toBe(false)
+      sm.sendInput(s.id, 'hello')
+
+      expect(s.claudeProcess).toBeNull()
+      const msgs = ws.send.mock.calls.map((c: any) => JSON.parse(c[0]))
+      expect(msgs.some((m: any) => m.subtype === 'error' && m.text.includes('archived'))).toBe(true)
+    })
+
+    it('resumes into the active list without starting a process', () => {
+      const s = sm.create('arch-resume', '/tmp')
+      sm.archiveSession(s.id)
+
+      expect(sm.resumeSession(s.id)).toBe(true)
+
+      expect(s.archivedAt).toBeUndefined()
+      expect(s.claudeProcess).toBeNull()
+      expect(sm.list().some(i => i.id === s.id)).toBe(true)
+      expect(sm.resumeSession(s.id)).toBe(false)
+    })
+
+    it('does not auto-restore an archived session on server start', () => {
+      vi.useFakeTimers()
+      try {
+        const s = sm.create('arch-restore', '/tmp')
+        s.claudeSessionId = 'abc'
+        s._wasActiveBeforeRestart = true
+        s.archivedAt = new Date().toISOString()
+        const startSpy = vi.spyOn(sm, 'startClaude')
+
+        sm.restoreActiveSessions()
+        vi.advanceTimersByTime(5000)
+
+        expect(startSpy).not.toHaveBeenCalled()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('reaper archives a stale session that owns an existing worktree instead of deleting it', () => {
+      const s = sm.create('stale-wt', '/tmp')
+      s.worktreePath = '/tmp'  // exists on disk
+      s.created = new Date(Date.now() - 8 * DAY).toISOString()
+
+      ;(sm as any).reapIdleSessions()
+
+      expect(sm.get(s.id)?.archivedAt).toBeTruthy()
+      expect(mockRemoveWorktree).not.toHaveBeenCalled()
+    })
+
+    it('reaper still prunes a stale session without a worktree', () => {
+      const s = sm.create('stale-plain', '/tmp')
+      s.created = new Date(Date.now() - 8 * DAY).toISOString()
+
+      ;(sm as any).reapIdleSessions()
+
+      expect(sm.get(s.id)).toBeUndefined()
+    })
+
+    it('reaper never prunes an archived session', () => {
+      const s = sm.create('stale-archived', '/tmp')
+      s.created = new Date(Date.now() - 90 * DAY).toISOString()
+      sm.archiveSession(s.id)
+
+      ;(sm as any).reapIdleSessions()
+
+      expect(sm.get(s.id)).toBeDefined()
+    })
+
+    describe('working-file removal', () => {
+      function archivedWithWorktree() {
+        const s = sm.create('rm', '/repos/myproject-wt-1', { groupDir: '/repos/myproject' })
+        s.worktreePath = '/repos/myproject-wt-1'
+        s.worktreeBranch = 'wt/x'
+        sm.archiveSession(s.id)
+        return s
+      }
+
+      it('preflight reports dirty and untracked files as blockers', async () => {
+        const s = archivedWithWorktree()
+        mockInspectWorktree.mockResolvedValue({ exists: true, modified: ['a.ts'], untracked: ['b.txt', 'c.txt'], branch: 'wt/x', uniqueCommits: 3 })
+
+        const preflight = await sm.getRemovalPreflight(s.id)
+
+        expect(preflight).toMatchObject({ safe: false, uniqueCommits: 3, branch: 'wt/x' })
+        expect(preflight!.blockers).toEqual(['1 file(s) have uncommitted changes.', '2 untracked file(s) would be lost.'])
+      })
+
+      it('preflight flags another session working inside the worktree', async () => {
+        const s = archivedWithWorktree()
+        sm.create('other', '/repos/myproject-wt-1/sub')
+
+        const preflight = await sm.getRemovalPreflight(s.id)
+
+        expect(preflight!.safe).toBe(false)
+        expect(preflight!.referencedBy).toHaveLength(1)
+      })
+
+      it('refuses removal for a session that is not archived', async () => {
+        const s = sm.create('active', '/repos/myproject-wt-1')
+        s.worktreePath = '/repos/myproject-wt-1'
+
+        const result = await sm.removeSessionWorktree(s.id)
+
+        expect(result.removed).toBe(false)
+        expect(mockRemoveWorktree).not.toHaveBeenCalled()
+      })
+
+      it('refuses removal when the fresh preflight is not clean', async () => {
+        const s = archivedWithWorktree()
+        mockInspectWorktree.mockResolvedValue({ exists: true, modified: ['a.ts'], untracked: [], branch: 'wt/x', uniqueCommits: 0 })
+
+        const result = await sm.removeSessionWorktree(s.id)
+
+        expect(result.removed).toBe(false)
+        expect(result.reason).toContain('uncommitted')
+        expect(mockRemoveWorktree).not.toHaveBeenCalled()
+      })
+
+      it('removes a clean worktree and keeps the session and branch record', async () => {
+        const s = archivedWithWorktree()
+
+        const result = await sm.removeSessionWorktree(s.id)
+
+        expect(result.removed).toBe(true)
+        expect(mockRemoveWorktree).toHaveBeenCalledWith('/repos/myproject-wt-1', '/repos/myproject')
+        expect(sm.get(s.id)).toBeDefined()
+        expect(s.worktreeState).toBe('removed')
+        expect(s.worktreeBranch).toBe('wt/x')
+        expect(s.worktreePath).toBe('/repos/myproject-wt-1')
+      })
     })
   })
 

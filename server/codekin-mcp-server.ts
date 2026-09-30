@@ -43,10 +43,14 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
         repo: z.string().describe('Absolute path to the repository'),
         task: z.string().describe('Focused task description for the child'),
         branchName: z.string().describe('Branch the child works on, e.g. fix/thing'),
-        completionPolicy: z.enum(['pr', 'merge', 'commit-only']).optional().describe('How finished work lands (default pr)'),
+        completionPolicy: z.enum(['pr', 'merge', 'commit-only']).optional()
+          .describe('How finished work lands: pr (default) opens a pull request, merge pushes the branch without merging, commit-only commits locally'),
         useWorktree: z.boolean().optional().describe('Isolate the child in a git worktree (default true)'),
-        deployAfter: z.boolean().optional(),
-        model: z.string().optional().describe('Model override for the child'),
+        taskId: z.string().optional().describe('Task this child works on (from list_tasks/create_task) — the task then tracks the child automatically'),
+        timeoutMs: z.number().int().min(60_000).max(14_400_000).optional()
+          .describe('Working-time budget in ms, 1 min to 4 h (default 30 min); time blocked on prompts does not count'),
+        provider: z.enum(['claude', 'codex', 'opencode']).optional().describe('Agent harness; defaults to Joe’s selected harness. Honor the user’s choice.'),
+        model: z.string().optional().describe('Model for the selected harness; inherits Joe’s model only when using the same harness. Children always run at Joe’s permission level.'),
       },
     },
     (args) => run(() => api.spawnChild(args)),
@@ -54,13 +58,13 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
 
   server.registerTool(
     'list_children',
-    { description: 'List your child sessions with status (starting/running/blocked/completed/failed/timed_out).', inputSchema: {} },
+    { description: 'List your child sessions with status: starting/running/blocked, or terminal completed (final step verified — see verification), unverified (PR/push not confirmed; check before reporting it ready), failed, timed_out, canceled.', inputSchema: {} },
     () => run(() => api.listChildren()),
   )
 
   server.registerTool(
     'get_child',
-    { description: 'Get one child session, including its result or error once terminal.', inputSchema: { id: z.string() } },
+    { description: 'Get one child session, including its result, error, and verification evidence (commit, PR) once terminal. Also returns children from earlier server runs.', inputSchema: { id: z.string() } },
     ({ id }) => run(() => api.getChild(id)),
   )
 
@@ -74,6 +78,136 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
   )
 
   server.registerTool(
+    'send_to_child',
+    {
+      description:
+        'Send a follow-up instruction to one of your active children that is not waiting on a prompt. A turn in progress receives it as its next message. Answer pending prompts with respond_to_prompt instead; for finished children use resume_child.',
+      inputSchema: { id: z.string().describe('Child session id'), text: z.string().min(1) },
+    },
+    ({ id, text }) => run(() => api.sendToChild(id, text)),
+  )
+
+  server.registerTool(
+    'stop_child',
+    {
+      description: 'Stop one of your active children. It becomes canceled; its worktree, branch, and transcript are kept, so resume_child can continue it later.',
+      inputSchema: { id: z.string() },
+    },
+    ({ id }) => run(() => api.stopChild(id)),
+  )
+
+  server.registerTool(
+    'resume_child',
+    {
+      description:
+        'Start another supervised attempt on a finished child (completed, unverified, failed, timed_out, canceled — including ones interrupted by a restart): same session, branch, and worktree, fresh working-time budget, completion re-verified. Counts toward the 5-child limit.',
+      inputSchema: {
+        id: z.string(),
+        instructions: z.string().optional().describe('What to do next; defaults to finishing the task and delivering per its completion policy'),
+      },
+    },
+    ({ id, instructions }) => run(() => api.resumeChild(id, instructions)),
+  )
+
+  server.registerTool(
+    'close_child',
+    {
+      description:
+        'Close one of your children. mode "archive" (default) stops it and keeps session, transcript, worktree, and branch — resumable. mode "delete" removes the session; a clean worktree is removed, one with uncommitted work is kept and listed. Branches are never deleted. Active children are refused unless cancel is true. Returns exactly what happened.',
+      inputSchema: {
+        id: z.string(),
+        mode: z.enum(['archive', 'delete']).optional(),
+        cancel: z.boolean().optional().describe('Also stop the child if it is still active'),
+      },
+    },
+    ({ id, mode, cancel }) => run(() => api.closeChild(id, { mode, cancel })),
+  )
+
+  server.registerTool(
+    'list_sessions',
+    {
+      description:
+        'All Codekin sessions in one compact row each: state (working / idle / waiting_on_prompt / stopped / archived), repo, branch, and — for your children — child status and verification. Control tools only act on your own children.',
+      inputSchema: {
+        source: z.enum(['manual', 'webhook', 'workflow', 'stepflow', 'orchestrator', 'agent']).optional(),
+        active: z.boolean().optional().describe('Exclude archived sessions'),
+      },
+    },
+    (args) => run(() => api.listSessions(args)),
+  )
+
+  server.registerTool(
+    'list_tasks',
+    {
+      description:
+        'Your per-repo task list with counts. Statuses: todo, in_progress, needs_decision (waiting on the user), in_review (verified PR ready), done, dismissed. Task status follows its linked child automatically.',
+      inputSchema: {
+        repo: z.string().optional().describe('Absolute repo path; omit for all repos'),
+        status: z.enum(['todo', 'in_progress', 'needs_decision', 'in_review', 'done', 'dismissed']).optional(),
+      },
+    },
+    (args) => run(() => api.listTasks(args)),
+  )
+
+  server.registerTool(
+    'get_task',
+    { description: 'One task with its full history (attempts, decisions, reviews).', inputSchema: { id: z.string() } },
+    ({ id }) => run(() => api.getTask(id)),
+  )
+
+  server.registerTool(
+    'create_task',
+    {
+      description:
+        'Add a task to a repo\'s list — e.g. an audit finding or follow-up the user agreed to. It starts as todo; start it with spawn_child (taskId). Do not create tasks the user has not asked for or approved.',
+      inputSchema: {
+        repo: z.string().describe('Absolute repo path'),
+        title: z.string().min(1).max(300),
+        detail: z.string().optional().describe('What to do, with enough context for a coding agent'),
+        acceptance: z.string().optional().describe('How we know it is done'),
+        priority: z.enum(['high', 'normal', 'low']).optional(),
+        completionPolicy: z.enum(['pr', 'merge', 'commit-only']).optional(),
+        source: z.enum(['joe', 'report', 'incident']).optional(),
+        sourceRef: z.string().optional().describe('e.g. the report path the finding came from'),
+      },
+    },
+    (args) => run(() => api.createTask(args)),
+  )
+
+  server.registerTool(
+    'update_task',
+    {
+      description:
+        'Edit a task, or set its status to todo / done / dismissed (e.g. done once its PR merged). Other statuses follow the linked child and the user\'s review.',
+      inputSchema: {
+        id: z.string(),
+        title: z.string().min(1).max(300).optional(),
+        detail: z.string().optional(),
+        acceptance: z.string().optional(),
+        priority: z.enum(['high', 'normal', 'low']).optional(),
+        status: z.enum(['todo', 'done', 'dismissed']).optional(),
+        note: z.string().optional().describe('Why — recorded in the task history'),
+      },
+    },
+    ({ id, ...patch }) => run(() => api.updateTask(id, patch)),
+  )
+
+  server.registerTool(
+    'request_decision',
+    {
+      description:
+        'Ask the user a decision you cannot make within the agreed scope. The task moves to needs_decision and shows in their "Needs your decision" list; you are notified with the answer. Explain what is blocked, your recommendation, and the consequence of each option.',
+      inputSchema: {
+        id: z.string().describe('Task id'),
+        question: z.string().min(1),
+        recommendation: z.string().optional(),
+        options: z.array(z.string().min(1).max(200)).max(6).optional().describe('One-click answers; the user can always answer in free text'),
+      },
+    },
+    ({ id, ...input }) => run(() => api.requestDecision(id, input)),
+  )
+
+  server.registerTool(
     'pending_prompts',
     { description: 'List sessions blocked on a tool approval or question, with the requestId needed to respond.', inputSchema: {} },
     () => run(() => api.pendingPrompts()),
@@ -82,8 +216,8 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
   server.registerTool(
     'respond_to_prompt',
     {
-      description: 'Answer a blocked session\'s prompt. For permission prompts value is "allow" or "deny"; for questions it is the answer text.',
-      inputSchema: { sessionId: z.string(), requestId: z.string(), value: z.string() },
+      description: 'Answer a blocked session\'s prompt. For permission prompts value is "allow" or "deny"; for questions it is the answer text, or one answer per question when the prompt asks several.',
+      inputSchema: { sessionId: z.string(), requestId: z.string(), value: z.union([z.string().min(1), z.array(z.string()).min(1)]) },
     },
     ({ sessionId, requestId, value }) => run(() => api.respondToPrompt(sessionId, requestId, value)),
   )
@@ -195,8 +329,14 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
 
   server.registerTool(
     'list_reports',
-    { description: 'List audit reports (.codekin/reports/) across managed repos.', inputSchema: {} },
-    () => run(() => api.listReports()),
+    {
+      description: 'List audit reports (.codekin/reports/) newest first — across all managed repos, or one repo.',
+      inputSchema: {
+        repo: z.string().optional().describe('Absolute repo path; omit for every managed repo'),
+        since: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe('Only reports dated on or after YYYY-MM-DD'),
+      },
+    },
+    (args) => run(() => api.listReports(args)),
   )
 
   server.registerTool(

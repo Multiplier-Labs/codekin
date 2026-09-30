@@ -11,6 +11,8 @@ import { ChatView } from './ChatView'
 import { TodoPanel } from './TodoPanel'
 import { PromptButtons } from './PromptButtons'
 import { TentativeBanner } from './TentativeBanner'
+import { WorktreeRecoveryBanner } from './WorktreeRecoveryBanner'
+import { changesButtonState } from '../lib/changesButton'
 import { InputBar, type InputBarHandle } from './InputBar'
 import { IconEye } from '@tabler/icons-react'
 import type { SkillGroup } from './SkillMenu'
@@ -29,6 +31,8 @@ export interface SessionContentProps {
   isProcessing: boolean
   disabled: boolean
   hasFileChanges: boolean
+  /** What the session has to review, from the server; null until known. */
+  changeSummary?: { uncommittedFiles: number; branchCommits: number | null } | null
   diffPanelOpen: boolean
   onOpenDiffPanel: () => void
   activePrompt: PromptEntry | null
@@ -61,6 +65,11 @@ export interface SessionContentProps {
   onPermissionModeChange: (mode: PermissionMode) => void
   moveToWorktree: (() => void) | undefined
   worktreePath: string | undefined
+  /** Readiness of an isolated session's worktree; failed/missing shows the recovery banner. */
+  worktreeState?: 'preparing' | 'ready' | 'failed' | 'missing' | 'removed'
+  worktreeError?: string
+  onRetryWorktree: () => void
+  onUseExistingCheckout: () => void
   /** null = not an OpenCode session, true = connected, false = not connected */
   openCodeConnected: boolean | null
   /** null = not a Codex session, true = connected, false = not connected */
@@ -80,6 +89,7 @@ export function SessionContent({
   isProcessing,
   disabled,
   hasFileChanges,
+  changeSummary,
   diffPanelOpen,
   onOpenDiffPanel,
   activePrompt,
@@ -110,6 +120,10 @@ export function SessionContent({
   onPermissionModeChange,
   moveToWorktree,
   worktreePath,
+  worktreeState,
+  worktreeError,
+  onRetryWorktree,
+  onUseExistingCheckout,
   openCodeConnected,
   codexConnected,
   claudeDisabled,
@@ -117,6 +131,8 @@ export function SessionContent({
   const isOpenCodeDisconnected = openCodeConnected === false
   const isCodexDisconnected = codexConnected === false
   const isProviderDisabled = claudeDisabled || isOpenCodeDisconnected || isCodexDisconnected
+
+  const { show: showChangesButton, count: changesCount, detail: changesDetail } = changesButtonState(hasFileChanges, changeSummary)
   return (
     <div className="flex flex-1 flex-col overflow-hidden min-h-0">
       <div className="relative flex-1 min-h-0 flex flex-col">
@@ -168,15 +184,18 @@ export function SessionContent({
           </div>
         )}
 
-        {/* Diff view button — top-right corner, visible when files have been changed */}
-        {hasFileChanges && !diffPanelOpen && (
+        {/* Changes button — top-right corner, visible whenever the session has
+            something to review: uncommitted files, commits on its branch, or
+            an edit just made in this browser. */}
+        {showChangesButton && !diffPanelOpen && (
           <button
-            className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-control bg-primary-8 px-3 py-1.5 text-body font-medium text-on-primary shadow-floating backdrop-blur-sm transition-colors hover:bg-primary-7"
+            className="absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-control bg-primary-8 px-3 py-1.5 text-body font-medium text-on-primary backdrop-blur-sm transition-colors hover:bg-primary-7"
             onClick={onOpenDiffPanel}
-            title="Review code changes (Ctrl+Shift+D)"
+            title={`Review this session's changes${changesDetail ? ` — ${changesDetail}` : ''} (Ctrl+Shift+D)`}
           >
             <IconEye size={15} />
-            Diff view
+            Changes
+            {changesCount > 0 && <span className="rounded-control bg-on-primary/20 px-1.5 text-micro tabular-nums">{changesCount}</span>}
           </button>
         )}
       </div>
@@ -198,6 +217,16 @@ export function SessionContent({
         <div className="px-3 py-1 text-meta text-ink-muted bg-surface border-t border-edge">
           {promptQueueSize - 1} more pending
         </div>
+      )}
+
+      {/* Isolated session whose worktree is unavailable */}
+      {(worktreeState === 'failed' || worktreeState === 'missing' || worktreeState === 'removed') && (
+        <WorktreeRecoveryBanner
+          state={worktreeState}
+          error={worktreeError}
+          onRetry={onRetryWorktree}
+          onUseExistingCheckout={onUseExistingCheckout}
+        />
       )}
 
       {/* Tentative banner */}

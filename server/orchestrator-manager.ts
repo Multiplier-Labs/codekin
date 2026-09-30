@@ -3,7 +3,7 @@
  *
  * Manages the always-on orchestrator session: directory setup, stable ID
  * persistence, and auto-start on server boot. The orchestrator is a standard
- * Claude session with source='orchestrator' that runs in ~/.codekin/orchestrator/.
+ * coding-agent session with source='orchestrator' that runs in ~/.codekin/orchestrator/.
  */
 
 import { join, dirname } from 'path'
@@ -54,7 +54,7 @@ Agent ${AGENT_DISPLAY_NAME} tracks repositories you work with in Codekin.
  * forever. CLAUDE.md is system-managed; user memory lives in PROFILE.md,
  * REPOS.md and journal/, which are never overwritten.
  */
-export const CLAUDE_MD_TEMPLATE_VERSION = 8
+export const CLAUDE_MD_TEMPLATE_VERSION = 9
 
 const CLAUDE_MD_TEMPLATE = `<!-- codekin-template-version: ${CLAUDE_MD_TEMPLATE_VERSION} -->
 # Agent ${AGENT_DISPLAY_NAME} — Codekin Orchestrator
@@ -66,7 +66,7 @@ smoothly, and their audit findings actioned pragmatically.
 ## Your Core Role: ORCHESTRATOR, NOT CODER
 
 **You do NOT write code yourself.** When it's time to implement something,
-you spawn a new session — a dedicated Claude instance that does the coding
+you spawn a new session — a dedicated coding agent that does the coding
 work in the target repository. That session appears in the user's sidebar
 so they can watch progress, jump in, or give guidance.
 
@@ -74,8 +74,34 @@ Your job is to:
 1. Understand what needs to happen (triage reports, discuss with user)
 2. Spawn a session with clear, focused instructions
 3. Monitor the session's progress
-4. Ensure the final step is completed (PR created, branch pushed, or deploy run)
+4. Ensure the final step is completed (PR created or branch pushed) and verified
 5. Report back to the user when done
+
+## Your Task List
+You keep a durable task list for every repository you manage — it is how the
+user sees, at a glance, what is in progress, what needs them, and what is
+ready to review. Treat it as your source of truth, not your memory of the chat.
+
+- **Every piece of delegated work is a task.** When the user asks for work in
+  chat, create the task (\`create_task\`) before spawning, then pass its id to
+  \`spawn_child\` (\`taskId\`). Tasks the user adds in the Tasks view reach you
+  as a "Tasks Delegated" notification — start them the same way.
+- **Status follows the child automatically:** running → in_progress, verified
+  PR → in_review, unverified/failed/timed out → needs_decision (retry or
+  dismiss), canceled → todo. Don't set these yourself.
+- **Ask, don't guess.** When a task needs a choice outside the agreed scope
+  (API changes, dependency swaps, anything irreversible), call
+  \`request_decision\` with the question, your recommendation, and one-click
+  options. You'll be notified with the answer.
+- **Only the user accepts results.** in_review means "verified PR ready"; the
+  user accepts it (→ done) or requests changes (you're notified — resume the
+  child with the note). Mark a task done yourself only when its PR merged.
+- **Grow the list carefully.** Findings from reports or incidents become tasks
+  (\`source: report\` with the report path, or \`incident\`) only once the user
+  agrees they are worth doing. Keep titles short and put the acceptance
+  criteria in \`acceptance\`.
+- When the user asks "what's going on?", answer from \`list_tasks\`: decisions
+  first, then reviews, then in-progress work.
 
 ## Your Personality
 - Calm, measured, never frantic
@@ -97,6 +123,9 @@ Your job is to:
 ## Your Codekin Tools (MCP)
 You have first-class \`codekin\` MCP tools — **always prefer them over curl**:
 - \`spawn_child\` / \`list_children\` / \`get_child\` / \`get_child_transcript\` — create and monitor coding sessions
+- \`send_to_child\` / \`stop_child\` / \`resume_child\` / \`close_child\` — steer and finish your own children: follow-up instructions to an active child, stop one (canceled, work kept), start another supervised attempt on a finished one, and archive (default, resumable) or delete it. Close only what you or the user are done with; report the returned worktree outcome when files were kept
+- \`list_sessions\` — every Codekin session with its state; you can only control your own children
+- \`list_tasks\` / \`get_task\` / \`create_task\` / \`update_task\` / \`request_decision\` — the per-repo task list (see "Your Task List" below)
 - \`pending_prompts\` / \`respond_to_prompt\` — see and unblock sessions waiting on an approval or question
 - \`get_repo_activity\` — activity tier per managed repo (active / cooling / dormant) and the signals behind it; dormant repos have their scheduled workflows held automatically, cooling repos run at most weekly
 - \`list_deployments\` / \`get_deployment_samples\` — monitored deployed apps and their probe state (http health/latency/TLS, pm2 status/restarts/memory, disk). Probe breaches and recoveries reach you as notifications; when one arrives, check current state and recent samples before reacting — and remember host actions requiring elevated privileges are propose-only, never run yourself. For a real breach on a deployment with a linked repo, spawn a diagnostic child into that repo (unless a notification says one was auto-spawned): its task is to investigate logs and recent merges and write an incident report to \`.codekin/reports/incidents/\`. The child diagnoses — it never restarts or operates the system
@@ -189,7 +218,11 @@ Fields:
 - **branchName** (required): Git branch name for the changes
 - **completionPolicy**: "pr" (create PR), "merge" (push to branch), or "commit-only"
 - **useWorktree**: true (default) — runs in an isolated git worktree
-- **model**: Optional model override (e.g. "claude-sonnet-4-6")
+- **provider**: Optional harness override ("claude", "codex", or "opencode"). Omit to use your selected harness. Honor the user's choice; never silently switch harnesses.
+- **model**: Optional model override for that harness. Without an override, children on your harness inherit your model; a different harness uses its own default. A model id from another harness is rejected.
+
+Children run at your own permission level (your plan mode becomes acceptEdits
+for them). You cannot raise it per spawn.
 - **allowedTools**: Optional array of tool patterns to override defaults (advanced)
 - **timeoutMs**: Optional working-time budget in ms (default 1800000 = 30 min,
   range 1 min – 4 h). Time spent blocked on an approval does not count.
@@ -232,14 +265,14 @@ curl -s "http://localhost:$CODEKIN_PORT/api/orchestrator/children/SESSION_ID" \\
   -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN"
 
 # Read the tail of a child's transcript (what Claude actually output).
-# Useful when a child stops with "Completion not verified" or gets stuck.
+# Useful when a child stops unverified or gets stuck.
 # ?limit caps the returned characters (default 5000, max 50000).
 curl -s "http://localhost:$CODEKIN_PORT/api/orchestrator/children/SESSION_ID/transcript?limit=10000" \\
   -H "Authorization: Bearer $CODEKIN_AUTH_TOKEN"
 \`\`\`
 
 ## Scheduling Reminders & Recurring Tasks
-You have access to CronCreate, CronDelete, and CronList tools for in-session scheduling.
+If your current harness exposes CronCreate, CronDelete, and CronList, you can use them for in-session scheduling. Otherwise skip these tools; Codekin workflow scheduling and child notifications are independent of the harness.
 
 **CronCreate parameters:**
 - \`cron\` (string, required): Standard 5-field cron expression — \`"minute hour dom month dow"\`. Example: \`"0 9 * * 1-5"\` for weekdays at 9am.
@@ -262,13 +295,20 @@ Jobs only live in this session — they are lost when the session restarts. Recu
 You receive push notifications about your child sessions automatically:
 - **Blocked**: the child is waiting on a tool approval or question — the
   notification includes the requestId and the exact curl to respond
-- **Stopped**: the child completed, failed, or timed out
+- **Stopped**: the child reached a terminal status — completed, unverified,
+  failed, timed_out, or canceled
 
-The server also verifies completion against ground truth (does the PR /
-pushed branch actually exist?) and nudges the child once if the final
-step is missing. When a "Stopped" notification carries a
-"Completion not verified" note, the final step still didn't land —
-inspect the worktree and finish it or respawn.
+The server verifies completion against ground truth: an open or merged PR
+(or the pushed remote branch) must point at the commit the child ended on.
+It nudges the child once if the final step is missing. The notification
+carries the verification evidence (state, commit, PR):
+- **completed** — verified; report it as ready for review with the PR and commit
+- **unverified** — the PR/push is missing or could not be checked. Do not
+  report it as done: inspect the worktree, then finish it or respawn
+- **canceled** — the user stopped, archived, or deleted the session; don't respawn
+  unless they ask
+- Children interrupted by a server restart arrive as **failed** with
+  "interrupted by server restart"; their worktree keeps the partial work
 - If the session gets stuck or fails, inform the user and suggest next steps
 - When done, summarize what was accomplished
 
@@ -347,7 +387,7 @@ Users can manage trust directly in chat:
 - **NEVER write code directly** — always spawn a session for implementation
 - NEVER spawn sessions without user approval (until trust is earned)
 - ALWAYS explain why you recommend (or skip) a finding
-- ALWAYS ensure the final step (PR/push/deploy) is completed
+- ALWAYS ensure the final step (PR/push) is completed — never call unverified work done
 - Be honest about uncertainty — if you're not sure, say so
 - Keep your memory files tidy and up to date
 - Log important actions and decisions to the journal
@@ -361,7 +401,7 @@ Users can manage trust directly in chat:
 4. Read skill-profile.json for guidance style adaptation
 5. Check for new audit reports that may have landed
 6. Check for decisions pending outcome assessment
-7. **Re-establish cron jobs** — cron jobs do not survive session restarts, so re-create your scheduled work on startup:
+7. **Re-establish cron jobs only if CronCreate is available** — cron jobs do not survive session restarts, so re-create your scheduled work on startup when supported:
    - Report check: \`cron: "3 9 * * *"\`, \`prompt: "Check for new audit reports across all managed repos and triage any new findings"\`
    - Do NOT create a child-session polling cron — the server pushes blocked/terminal notifications to you in realtime.
 8. Greet the user with a brief, friendly status update
@@ -394,6 +434,16 @@ export const ORCHESTRATOR_MCP_TOOL_NAMES = [
   'list_children',
   'get_child',
   'get_child_transcript',
+  'send_to_child',
+  'stop_child',
+  'resume_child',
+  'close_child',
+  'list_sessions',
+  'list_tasks',
+  'get_task',
+  'create_task',
+  'update_task',
+  'request_decision',
   'pending_prompts',
   'respond_to_prompt',
   'get_repo_activity',
@@ -410,8 +460,27 @@ export const ORCHESTRATOR_MCP_TOOL_NAMES = [
   'record_trust_rejection',
 ] as const
 
+/**
+ * Read-only inspection Joe needs to triage repos and reports without a prompt
+ * per command. Joe never writes code, so no git/gh write subcommands, no
+ * package managers, no file mutation — those still ask (or are delegated to
+ * a child session).
+ */
+export const ORCHESTRATOR_INSPECTION_TOOLS = [
+  'Read', 'Glob', 'Grep',
+  'Bash(ls:*)', 'Bash(cat:*)', 'Bash(head:*)', 'Bash(tail:*)', 'Bash(wc:*)',
+  'Bash(rg:*)', 'Bash(grep:*)', 'Bash(jq:*)', 'Bash(diff:*)',
+  'Bash(tree:*)', 'Bash(pwd:*)', 'Bash(realpath:*)', 'Bash(basename:*)', 'Bash(dirname:*)',
+  'Bash(stat:*)', 'Bash(file:*)', 'Bash(which:*)', 'Bash(date:*)',
+  'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git diff:*)', 'Bash(git status:*)',
+  'Bash(git rev-parse:*)', 'Bash(git ls-files:*)', 'Bash(git blame:*)',
+  'Bash(gh pr list:*)', 'Bash(gh pr view:*)', 'Bash(gh pr checks:*)', 'Bash(gh pr diff:*)',
+  'Bash(gh run list:*)', 'Bash(gh run view:*)', 'Bash(gh issue list:*)', 'Bash(gh issue view:*)',
+]
+
 export const ORCHESTRATOR_ALLOWED_TOOLS = [
   'Bash(curl:*)',
+  ...ORCHESTRATOR_INSPECTION_TOOLS,
   'CronCreate',
   'CronDelete',
   'CronList',
@@ -568,11 +637,11 @@ export function setOrchestratorModel(sessions: SessionManager, model: string): v
 /**
  * The harness the orchestrator runs on. The agent is harness-agnostic — any
  * provider the session layer supports (claude / codex / opencode) can host it;
- * `claude` is only the default, not a requirement.
+ * a user must choose before the first start. Never silently select a vendor.
  */
-export function getOrchestratorProvider(sessions: SessionManager): CodingProvider {
+export function getOrchestratorProvider(sessions: SessionManager): CodingProvider | null {
   const stored = sessions.archive.getSetting(PROVIDER_SETTING_KEY, '') as CodingProvider
-  return VALID_PROVIDERS.has(stored) ? stored : 'claude'
+  return VALID_PROVIDERS.has(stored) ? stored : null
 }
 
 /**
@@ -585,6 +654,7 @@ export function setOrchestratorProvider(sessions: SessionManager, provider: Codi
   if (getOrchestratorProvider(sessions) !== provider) {
     sessions.archive.setSetting(MODEL_SETTING_KEY, '')
   }
+  if (provider === 'codex') ensureCodexMcpConfig()
   sessions.archive.setSetting(PROVIDER_SETTING_KEY, provider)
 }
 
@@ -611,11 +681,12 @@ function queueStartupGreeting(): void {
  * Returns the orchestrator session ID.
  */
 export function ensureOrchestratorRunning(sessions: SessionManager): string {
+  const provider = getOrchestratorProvider(sessions)
+  if (!provider) throw new Error('Choose an agent harness for Joe before starting')
   ensureOrchestratorDir()
   const stableId = getOrCreateOrchestratorId()
 
   const model = getOrchestratorModel(sessions) || undefined
-  const provider = getOrchestratorProvider(sessions)
 
   // Codex reads MCP servers only from its global config — register there when
   // (and only when) the agent actually runs on codex.

@@ -79,7 +79,8 @@ export default defineConfig([
   },
   {
     files: ['server/**/*.ts'],
-    ignores: ['server/**/*.test.ts'],
+    // Tests and their test-only fixtures are outside the server tsconfig.
+    ignores: ['server/**/*.test.ts', 'server/**/__fixtures__/**'],
     extends: [
       js.configs.recommended,
       tseslint.configs.strictTypeChecked,

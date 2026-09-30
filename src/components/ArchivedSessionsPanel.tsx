@@ -3,9 +3,15 @@
  * transcript viewer.
  *
  * `ArchivedSessionsList` is pure content: no header, no retention control, no
- * scroll container. `RepoDrawer` owns those. Each row is two lines (title, then
- * age / turns / worktree / source) and carries the two actions that matter:
- * "Continue in new session" inline, and delete behind the row's `⋯` menu.
+ * scroll container. `RepoDrawer` owns those. It has two sections:
+ *
+ * - Resumable: sessions closed with "Close & archive". They keep their
+ *   worktree, branch and provider conversation; Resume returns them to the
+ *   sidebar exactly as they were. Removing their working files is a separate,
+ *   preflighted action that never discards uncommitted work.
+ * - Transcripts: read-only copies of deleted sessions. Each row is two lines
+ *   (title, then age / turns / worktree / source) with "Continue in new
+ *   session" inline, and delete behind the row's `⋯` menu.
  *
  * `ArchivedSessionViewer` is the fullscreen read-only transcript. It is kept
  * because opening an archived session is still useful — it is just no longer
@@ -13,12 +19,12 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { IconArchive, IconTrash, IconRobot, IconRobotFace, IconTimeline, IconX, IconLoader2, IconMessagePlus, IconGitBranch } from '@tabler/icons-react'
-import { listArchivedSessions, getArchivedSession, deleteArchivedSession, type ArchivedSessionInfo, type ArchivedSessionFull } from '../lib/ccApi'
+import { IconArchive, IconTrash, IconRobot, IconRobotFace, IconTimeline, IconX, IconLoader2, IconMessagePlus, IconGitBranch, IconPlayerPlay, IconFolderX } from '@tabler/icons-react'
+import { listArchivedSessions, getArchivedSession, deleteArchivedSession, listArchivedLiveSessions, resumeSession, getRemovalPreflight, removeSessionWorktree, deleteSession, type ArchivedSessionInfo, type ArchivedSessionFull, type WorktreeRemovalPreflight } from '../lib/ccApi'
 import { rebuildFromHistory } from '../hooks/useChatSocket'
 import { ChatView } from './ChatView'
 import { RowMenu } from './RowMenu'
-import type { ChatMessage } from '../types'
+import type { ChatMessage, Session } from '../types'
 
 function parseUtcDate(dateStr: string): Date {
   // SQLite datetime('now') returns 'YYYY-MM-DD HH:MM:SS' without timezone — treat as UTC.
@@ -42,7 +48,7 @@ function compactAge(dateStr: string): string {
   return `${days}d`
 }
 
-function displayName(session: ArchivedSessionInfo): string {
+function displayName(session: { id: string; name: string }): string {
   const name = session.name || session.id.slice(0, 8)
   if (name.startsWith('hub:')) return 'unnamed session'
   return name
@@ -90,26 +96,94 @@ interface ListProps {
   onView: (id: string) => void
   /** Start a fresh session seeded with the archived transcript. */
   onNewSessionFromArchive?: (workingDir: string, context: string) => void
+  /** Open a session that was just resumed. */
+  onResumed?: (sessionId: string) => void
 }
 
-export function ArchivedSessionsList({ token, workingDir, refreshKey, filter = '', onView, onNewSessionFromArchive }: ListProps) {
+/** Sidebar grouping key: worktree sessions group under their repo. */
+function repoKey(s: Session): string {
+  return s.groupDir ?? s.workingDir
+}
+
+/** Confirmation text for removing working files, or null when removal is refused. */
+function removalPrompt(p: WorktreeRemovalPreflight): string | null {
+  if (!p.safe) return null
+  const kept = p.branch
+    ? `Branch ${p.branch}${p.uniqueCommits ? ` and its ${p.uniqueCommits} commit(s)` : ''} will be kept`
+    : 'Commits will be kept'
+  return `Remove the working files at ${p.worktreePath ?? 'this worktree'}? There are no uncommitted changes. ${kept}, and resuming the session can recreate the worktree.`
+}
+
+export function ArchivedSessionsList({ token, workingDir, refreshKey, filter = '', onView, onNewSessionFromArchive, onResumed }: ListProps) {
   const [sessions, setSessions] = useState<ArchivedSessionInfo[]>([])
+  const [resumable, setResumable] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
   const [continuingId, setContinuingId] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     if (!token) return
     let cancelled = false
     setLoading(true) // eslint-disable-line react-hooks/set-state-in-effect -- data fetching
-    listArchivedSessions(token, workingDir ?? undefined)
-      .then(list => { if (!cancelled) setSessions(list) })
-      .catch((err: unknown) => {
+    void Promise.all([
+      listArchivedSessions(token, workingDir ?? undefined).catch((err: unknown) => {
         console.error('Failed to load archived sessions:', err)
-        if (!cancelled) setSessions([])
+        return []
+      }),
+      listArchivedLiveSessions(token).catch((err: unknown) => {
+        console.error('Failed to load resumable sessions:', err)
+        return []
+      }),
+    ])
+      .then(([transcripts, live]) => {
+        if (cancelled) return
+        // A resumable session is not also listed as a transcript copy.
+        const liveIds = new Set(live.map(l => l.id))
+        setSessions(transcripts.filter(t => !liveIds.has(t.id)))
+        setResumable(workingDir ? live.filter(l => repoKey(l) === workingDir) : live)
       })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [token, workingDir, refreshKey])
+  }, [token, workingDir, refreshKey, reloadKey])
+
+  const handleResume = useCallback((id: string) => {
+    setBusyId(id)
+    resumeSession(token, id)
+      .then(() => {
+        setResumable(prev => prev.filter(s => s.id !== id))
+        onResumed?.(id)
+      })
+      .catch((err: unknown) => { window.alert(err instanceof Error ? err.message : 'Failed to resume session') })
+      .finally(() => { setBusyId(null) })
+  }, [token, onResumed])
+
+  const handleRemoveFiles = useCallback((id: string) => {
+    setBusyId(id)
+    getRemovalPreflight(token, id)
+      .then(async (preflight) => {
+        const prompt = removalPrompt(preflight)
+        if (!prompt) {
+          window.alert(`The working files were not removed:\n\n${preflight.blockers.join('\n')}`)
+          return
+        }
+        if (!window.confirm(prompt)) return
+        const result = await removeSessionWorktree(token, id)
+        if (!result.removed) window.alert(`The working files were not removed: ${result.error ?? 'unknown error'}`)
+        setReloadKey(k => k + 1)
+      })
+      .catch((err: unknown) => { window.alert(err instanceof Error ? err.message : 'Failed to check working files') })
+      .finally(() => { setBusyId(null) })
+  }, [token])
+
+  const handleDeleteSession = useCallback((id: string, title: string) => {
+    if (!window.confirm(`Delete "${title}"? Its worktree is removed only if it has no uncommitted work, and its branch is always kept. This cannot be undone.`)) return
+    setBusyId(id)
+    deleteSession(token, id)
+      .then(() => { setReloadKey(k => k + 1) })
+      .catch((err: unknown) => { window.alert(err instanceof Error ? err.message : 'Failed to delete session') })
+      .finally(() => { setBusyId(null) })
+  }, [token])
 
   const handleDelete = useCallback((id: string) => {
     deleteArchivedSession(token, id)
@@ -139,24 +213,92 @@ export function ArchivedSessionsList({ token, workingDir, refreshKey, filter = '
     )
   }
 
-  if (sessions.length === 0) {
+  if (sessions.length === 0 && resumable.length === 0) {
     return (
       <EmptyState
         title="Nothing archived yet"
-        body="Closing a session archives it here with its full transcript, so you can read it back or continue from it later."
+        body="Closing a session archives it here with its worktree and transcript, so you can resume it, read it back, or continue from it later."
       />
     )
   }
 
   const needle = filter.trim().toLowerCase()
   const visible = needle ? sessions.filter(s => displayName(s).toLowerCase().includes(needle)) : sessions
+  const visibleResumable = needle ? resumable.filter(s => displayName(s).toLowerCase().includes(needle)) : resumable
 
-  if (visible.length === 0) {
+  if (visible.length === 0 && visibleResumable.length === 0) {
     return <EmptyState title="No matching sessions" body={`No archived session matches "${filter.trim()}".`} />
   }
 
+  const showHeadings = visibleResumable.length > 0 && visible.length > 0
+
   return (
     <div className="flex flex-col py-1">
+      {visibleResumable.length > 0 && showHeadings && <SectionHeading>Resumable</SectionHeading>}
+      {visibleResumable.map(s => {
+        const title = displayName(s)
+        const filesRemoved = s.worktreeState === 'removed'
+        const busy = busyId === s.id
+        return (
+          <div
+            key={s.id}
+            className="group flex items-start gap-1 rounded-control px-1 py-1 transition-colors hover:bg-surface-raised"
+          >
+            <div className="min-w-0 flex-1 px-1 py-0.5">
+              <span className="flex items-center gap-1.5">
+                <SourceIcon source={s.source ?? 'manual'} />
+                <span className="truncate text-body text-ink">{title}</span>
+              </span>
+              <span className="mt-0.5 flex items-center gap-1.5 pl-5 text-micro text-ink-faint">
+                {s.archivedAt && <span className="tabular-nums">{compactAge(s.archivedAt)} ago</span>}
+                {s.worktreeBranch && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="flex min-w-0 items-center gap-0.5">
+                      <IconGitBranch size={10} className="shrink-0" />
+                      <span className="truncate font-mono">{s.worktreeBranch}</span>
+                    </span>
+                  </>
+                )}
+                {filesRemoved && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span>files removed</span>
+                  </>
+                )}
+              </span>
+            </div>
+            <button
+              onClick={() => { handleResume(s.id) }}
+              disabled={busy}
+              title="Resume this session with its worktree"
+              className="tap-target flex shrink-0 items-center gap-1 rounded-control px-1.5 py-1 text-meta text-ink-faint transition-colors hover:bg-primary-10/40 hover:text-primary-4 disabled:opacity-50"
+            >
+              {busy ? <IconLoader2 size={14} className="animate-spin" /> : <IconPlayerPlay size={14} stroke={2} />}
+              <span className="hidden @[380px]:inline">Resume</span>
+            </button>
+            <RowMenu
+              label={`Actions for ${title}`}
+              items={[
+                ...(s.worktreePath && !filesRemoved
+                  ? [{
+                      label: 'Remove working files…',
+                      icon: <IconFolderX size={14} />,
+                      onSelect: () => { handleRemoveFiles(s.id) },
+                    }]
+                  : []),
+                {
+                  label: 'Delete session',
+                  icon: <IconTrash size={14} />,
+                  danger: true,
+                  onSelect: () => { handleDeleteSession(s.id, title) },
+                },
+              ]}
+            />
+          </div>
+        )
+      })}
+      {visible.length > 0 && showHeadings && <SectionHeading>Transcripts</SectionHeading>}
       {visible.map(s => {
         const title = displayName(s)
         const wt = worktreeName(s)
@@ -220,6 +362,10 @@ export function ArchivedSessionsList({ token, workingDir, refreshKey, filter = '
       })}
     </div>
   )
+}
+
+function SectionHeading({ children }: { children: string }) {
+  return <p className="px-2 pb-0.5 pt-2 text-micro font-medium uppercase tracking-wide text-ink-faint">{children}</p>
 }
 
 function EmptyState({ title, body }: { title: string; body: string }) {

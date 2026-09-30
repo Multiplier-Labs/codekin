@@ -18,6 +18,14 @@ import { execFileSync } from 'child_process'
 /** Main server port (WebSocket + REST + uploads). */
 export const PORT = parseInt(process.env.PORT || '32352', 10)
 
+/**
+ * Interface the main server binds to. Loopback by default: a reverse proxy on
+ * the same host and the relay connector both reach it there, and REST/WS
+ * traffic is plain HTTP carrying the bearer token. Set `BIND_HOST=0.0.0.0`
+ * only to expose the port directly, behind TLS or a trusted network.
+ */
+export const BIND_HOST = process.env.BIND_HOST || '127.0.0.1'
+
 /** CORS allowed origin. Defaults to localhost dev server; must be set explicitly for production. */
 export const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:5173'
 

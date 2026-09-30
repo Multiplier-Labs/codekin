@@ -1,6 +1,6 @@
 /** Tests for the agent-health store and the provider availability policy. */
 import { describe, it, expect, beforeEach } from 'vitest'
-import { setAgentHealth, getAgentHealth, subscribeAgentHealth, providerAvailability, type AgentHealth } from './agentHealth'
+import { setAgentHealth, getAgentHealth, subscribeAgentHealth, providerAvailability, resolveDefaultProvider, type AgentHealth } from './agentHealth'
 
 function health(overrides: Partial<AgentHealth> = {}): AgentHealth {
   return {
@@ -61,5 +61,52 @@ describe('store', () => {
     unsubscribe()
     setAgentHealth(health())
     expect(notified).toBe(1)
+  })
+})
+
+describe('resolveDefaultProvider (audit N6)', () => {
+  const noClaude = { claudeAvailable: false, claudeAuthenticated: false }
+
+  it('returns the preference unchanged while health is unknown (never blocks)', () => {
+    expect(resolveDefaultProvider(null, null)).toBe('claude')
+    expect(resolveDefaultProvider(null, 'codex')).toBe('codex')
+  })
+
+  it('keeps the implicit Claude default when it is installed and signed in', () => {
+    expect(resolveDefaultProvider(health(), null)).toBe('claude')
+  })
+
+  it('falls back to the first healthy agent when Claude is not installed', () => {
+    expect(resolveDefaultProvider(health(noClaude), null)).toBe('opencode')
+    expect(resolveDefaultProvider(health({ ...noClaude, openCodeAvailable: false }), null)).toBe('codex')
+  })
+
+  it('prefers a healthy agent over an implicit Claude default whose auth probe failed', () => {
+    expect(resolveDefaultProvider(health({ claudeAuthenticated: false, openCodeAvailable: false }), null)).toBe('codex')
+  })
+
+  it('keeps implicit Claude with a caveat when nothing healthier exists', () => {
+    const h = health({ claudeAuthenticated: false, openCodeAvailable: false, codexAuthenticated: false })
+    expect(resolveDefaultProvider(h, null)).toBe('claude')
+  })
+
+  it('respects an explicit, installed choice even if its auth probe warns', () => {
+    expect(resolveDefaultProvider(health({ codexAuthenticated: false }), 'codex')).toBe('codex')
+    expect(resolveDefaultProvider(health(), 'opencode')).toBe('opencode')
+  })
+
+  it('overrides an explicit choice whose binary is gone', () => {
+    expect(resolveDefaultProvider(health({ codexAvailable: false }), 'codex')).toBe('claude')
+  })
+
+  it('treats an unrecognized stored value as no choice', () => {
+    expect(resolveDefaultProvider(health(noClaude), 'bogus')).toBe('opencode')
+  })
+
+  it('falls back to an installed-but-warned agent, then to the preference, when none are healthy', () => {
+    const onlyCodexUnauthed = health({ ...noClaude, openCodeAvailable: false, codexAuthenticated: false })
+    expect(resolveDefaultProvider(onlyCodexUnauthed, null)).toBe('codex')
+    const none = health({ ...noClaude, openCodeAvailable: false, codexAvailable: false })
+    expect(resolveDefaultProvider(none, null)).toBe('claude')
   })
 })

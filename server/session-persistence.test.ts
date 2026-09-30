@@ -193,53 +193,125 @@ describe('SessionPersistence.restoreFromDisk', () => {
     expect(s._wasActiveBeforeRestart).toBe(true)
   })
 
-  it('falls back to groupDir when worktreePath no longer exists', () => {
-    const fs = require('fs') as typeof import('fs')
-    const os = require('os') as typeof import('os')
-    const repoDir = fs.mkdtempSync(join(os.tmpdir(), 'codekin-fallback-'))
-    seed([{
-      id: 's1',
-      name: 'WT',
-      workingDir: '/some/old/path',
-      groupDir: repoDir,
-      worktreePath: '/nonexistent/path',
-      created: '2026-04-27T00:00:00Z',
-      claudeSessionId: null,
-      outputHistory: [],
-    }])
-
+  function restoreQuietly(): Map<string, Session> {
     const sessions = new Map<string, Session>()
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     new SessionPersistence(sessions).restoreFromDisk()
     warnSpy.mockRestore()
     logSpy.mockRestore()
+    return sessions
+  }
 
-    const s = sessions.get('s1')!
-    expect(s.workingDir).toBe(repoDir)
-    expect(s.worktreePath).toBeUndefined()
-    rmSync(repoDir, { recursive: true })
+  it('keeps a missing worktree on the session and marks it missing instead of falling back', () => {
+    seed([{
+      id: 's1',
+      name: 'WT',
+      workingDir: '/nonexistent/wt',
+      groupDir: '/some/repo',
+      worktreePath: '/nonexistent/wt',
+      executionMode: 'isolated',
+      worktreeState: 'ready',
+      created: '2026-04-27T00:00:00Z',
+      claudeSessionId: null,
+      outputHistory: [],
+    }])
+
+    const s = restoreQuietly().get('s1')!
+
+    expect(s.workingDir).toBe('/nonexistent/wt')
+    expect(s.worktreePath).toBe('/nonexistent/wt')
+    expect(s.executionMode).toBe('isolated')
+    expect(s.worktreeState).toBe('missing')
+    expect(s.worktreeError).toContain('/nonexistent/wt')
   })
 
-  it('clears worktreePath when both worktree and fallback are missing', () => {
+  it('treats a legacy session with a worktree as isolated', () => {
+    const fs = require('fs') as typeof import('fs')
+    const os = require('os') as typeof import('os')
+    const wtDir = fs.mkdtempSync(join(os.tmpdir(), 'codekin-legacy-wt-'))
     seed([{
       id: 's1',
       name: 'WT',
-      workingDir: '/nonexistent/origin',
-      worktreePath: '/nonexistent/wt',
+      workingDir: wtDir,
+      worktreePath: wtDir,
       created: '2026-04-27T00:00:00Z',
       claudeSessionId: null,
       outputHistory: [],
     }])
 
-    const sessions = new Map<string, Session>()
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
-    new SessionPersistence(sessions).restoreFromDisk()
-    warnSpy.mockRestore()
-    logSpy.mockRestore()
+    const s = restoreQuietly().get('s1')!
 
-    expect(sessions.get('s1')!.worktreePath).toBeUndefined()
+    expect(s.executionMode).toBe('isolated')
+    expect(s.worktreeState).toBe('ready')
+    rmSync(wtDir, { recursive: true })
+  })
+
+  it('marks a worktree creation interrupted by a restart as failed', () => {
+    seed([{
+      id: 's1',
+      name: 'WT',
+      workingDir: '/some/repo',
+      executionMode: 'isolated',
+      worktreeState: 'preparing',
+      created: '2026-04-27T00:00:00Z',
+      claudeSessionId: null,
+      outputHistory: [],
+    }])
+
+    const s = restoreQuietly().get('s1')!
+
+    expect(s.worktreeState).toBe('failed')
+    expect(s.worktreeError).toContain('interrupted')
+  })
+
+  it('keeps the removed state for a worktree whose files were deliberately removed', () => {
+    seed([{
+      id: 's1',
+      name: 'WT',
+      workingDir: '/nonexistent/wt',
+      worktreePath: '/nonexistent/wt',
+      executionMode: 'isolated',
+      worktreeState: 'removed',
+      archivedAt: '2026-09-29T10:00:00.000Z',
+      created: '2026-04-27T00:00:00Z',
+      claudeSessionId: null,
+      outputHistory: [],
+    }])
+
+    const s = restoreQuietly().get('s1')!
+
+    expect(s.worktreeState).toBe('removed')
+    expect(s.archivedAt).toBe('2026-09-29T10:00:00.000Z')
+  })
+
+  it('round-trips isolation fields through persistToDisk', () => {
+    seed([{
+      id: 's1',
+      name: 'Plain',
+      workingDir: '/some/repo',
+      executionMode: 'existing-checkout',
+      worktreeBranch: 'wt/abc',
+      worktreeBase: 'main',
+      reviewBase: 'release/1.2',
+      reviewComments: [{
+        id: 'c1', body: 'why?', status: 'draft', author: 'owner', authorRole: 'owner', createdAt: '2026-09-29T10:00:00.000Z',
+        anchor: { path: 'a.ts', side: 'new', startLine: 1, endLine: 1, view: 'branch', source: 'worktree', excerpt: ['x'], fingerprint: 'f' },
+      }],
+      archivedAt: '2026-09-29T10:00:00.000Z',
+      created: '2026-04-27T00:00:00Z',
+      claudeSessionId: null,
+      outputHistory: [],
+    }])
+    const sessions = restoreQuietly()
+
+    sessions.get('s1')!.reviewComments![0].stale = true  // computed, never persisted
+    new SessionPersistence(sessions).persistToDisk()
+    const written = JSON.parse(readFileSync(SESSIONS_FILE, 'utf-8'))
+
+    expect(written[0]).toMatchObject({ executionMode: 'existing-checkout', worktreeBranch: 'wt/abc', worktreeBase: 'main', reviewBase: 'release/1.2', archivedAt: '2026-09-29T10:00:00.000Z' })
+    expect(written[0].reviewComments).toHaveLength(1)
+    expect(written[0].reviewComments[0]).not.toHaveProperty('stale')
   })
 
   it('handles malformed JSON without throwing', () => {

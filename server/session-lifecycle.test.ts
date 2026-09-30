@@ -215,19 +215,57 @@ describe('SessionLifecycle', () => {
       expect(session._restartTimer).toBeUndefined()
     })
 
-    it('falls back to groupDir when workingDir is missing', () => {
+    it('refuses to start an isolated session whose worktree is missing', () => {
       session.workingDir = '/repos/dead-worktree'
       session.groupDir = '/repos/test'
       session.worktreePath = '/repos/dead-worktree'
-      ;(existsSync as any).mockImplementation((p: string) => {
-        if (p === '/repos/dead-worktree') return false
-        return true
-      })
+      session.executionMode = 'isolated'
+      session.worktreeState = 'ready'
+      ;(existsSync as any).mockImplementation((p: string) => !p.startsWith('/repos/dead-worktree'))
+
+      const result = lifecycle.startClaude('sess-1')
+
+      expect(result).toBe(false)
+      expect(session.claudeProcess).toBeNull()
+      expect(session.workingDir).toBe('/repos/dead-worktree')
+      expect(session.worktreePath).toBe('/repos/dead-worktree')
+      expect(session.worktreeState).toBe('missing')
+      expect(session._stoppedByUser).toBe(true)
+      expect(deps.persistToDisk).toHaveBeenCalled()
+      expect(deps.broadcast).toHaveBeenCalledWith(session, expect.objectContaining({ subtype: 'error' }))
+    })
+
+    it('reports an unavailable worktree only once per state', () => {
+      session.worktreePath = '/repos/dead-worktree'
+      session.executionMode = 'isolated'
+      session.worktreeState = 'ready'
+      ;(existsSync as any).mockImplementation((p: string) => !p.startsWith('/repos/dead-worktree'))
+
+      lifecycle.startClaude('sess-1')
+      lifecycle.startClaude('sess-1')
+
+      expect(deps.broadcast).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not start an isolated session while its worktree is being prepared', () => {
+      session.executionMode = 'isolated'
+      session.worktreeState = 'preparing'
+
+      const result = lifecycle.startClaude('sess-1')
+
+      expect(result).toBe(false)
+      expect(session.claudeProcess).toBeNull()
+      expect(deps.broadcast).not.toHaveBeenCalled()
+    })
+
+    it('falls back to groupDir for a session outside a worktree whose workingDir is missing', () => {
+      session.workingDir = '/workspaces/webhook-gone'
+      session.groupDir = '/repos/test'
+      ;(existsSync as any).mockImplementation((p: string) => p !== '/workspaces/webhook-gone')
 
       const result = lifecycle.startClaude('sess-1')
       expect(result).toBe(true)
       expect(session.workingDir).toBe('/repos/test')
-      expect(session.worktreePath).toBeUndefined()
       expect(deps.persistToDisk).toHaveBeenCalled()
     })
 
@@ -426,20 +464,34 @@ describe('SessionLifecycle', () => {
       expect(session.claudeSessionId).toBe('old-session-id')
     })
 
-    it('falls back to groupDir when workingDir disappears mid-session', () => {
+    it('does not restart an isolated session whose worktree disappeared mid-session', () => {
       session.workingDir = '/repos/dead-worktree'
       session.groupDir = '/repos/test'
       session.worktreePath = '/repos/dead-worktree'
-      ;(existsSync as any).mockImplementation((p: string) => {
-        if (p === '/repos/dead-worktree') return false
-        return true
-      })
+      session.executionMode = 'isolated'
+      session.worktreeState = 'ready'
+      ;(existsSync as any).mockImplementation((p: string) => !p.startsWith('/repos/dead-worktree'))
+      mockEvaluateRestart.mockClear()
+
+      lifecycle.handleClaudeExit(exitedProcess, session, 'sess-1', 1, null)
+
+      expect(mockEvaluateRestart).not.toHaveBeenCalled()
+      expect(session.workingDir).toBe('/repos/dead-worktree')
+      expect(session.worktreePath).toBe('/repos/dead-worktree')
+      expect(session.worktreeState).toBe('missing')
+      expect(session._stoppedByUser).toBe(true)
+      expect(deps.broadcast).toHaveBeenCalledWith(session, expect.objectContaining({ type: 'exit' }))
+    })
+
+    it('falls back to groupDir when a non-worktree workingDir disappears mid-session', () => {
+      session.workingDir = '/workspaces/webhook-gone'
+      session.groupDir = '/repos/test'
+      ;(existsSync as any).mockImplementation((p: string) => p !== '/workspaces/webhook-gone')
       mockEvaluateRestart.mockReturnValue({ kind: 'stopped_by_user' })
 
       lifecycle.handleClaudeExit(exitedProcess, session, 'sess-1', 1, null)
 
       expect(session.workingDir).toBe('/repos/test')
-      expect(session.worktreePath).toBeUndefined()
       expect(deps.persistToDisk).toHaveBeenCalled()
     })
 

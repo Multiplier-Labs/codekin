@@ -15,6 +15,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react'
 import { transport } from './lib/transport'
 import { useSettings } from './hooks/useSettings'
+import { getPref, loadPrefs, setPref } from './lib/prefs'
 import { useRepos } from './hooks/useRepos'
 import { useSessions } from './hooks/useSessions'
 import { useChatSocket } from './hooks/useChatSocket'
@@ -34,9 +35,10 @@ import { useProviderValidation } from './hooks/useProviderValidation'
 import { buildSlashCommandList, buildOpenCodeSlashCommandList } from './lib/slashCommands'
 import { deriveActivityLabel } from './lib/deriveActivityLabel'
 import { emitWorkflowEvent } from './lib/workflowEvents'
-import { setAgentHealth } from './lib/agentHealth'
+import { setAgentHealth, getAgentHealth, resolveDefaultProvider } from './lib/agentHealth'
+import { useAgentHealth } from './hooks/useAgentHealth'
 import { getQueueMessages, getAgentName, listArchivedSessions, type ArchivedSessionInfo } from './lib/ccApi'
-import { Settings } from './components/Settings'
+import { SettingsView } from './components/settings/SettingsView'
 import { LeftSidebar } from './components/LeftSidebar'
 import { MobileTopBar } from './components/MobileTopBar'
 import { AutomationsView } from './components/AutomationsView'
@@ -49,6 +51,7 @@ import { DocsBrowserContent } from './components/DocsBrowserContent'
 import { SessionContent } from './components/SessionContent'
 import { RepoDrawer, type RepoDrawerTab } from './components/RepoDrawer'
 import type { PermissionMode, CodingProvider } from './types'
+import { applyTheme } from './themes/registry'
 import { useClaudeModelSync } from './hooks/useClaudeModelSync'
 
 // Hosted-only: session sharing. Lazy so the class and its markup are code-split
@@ -70,12 +73,35 @@ interface AppProps {
   onDisconnectMachine?: () => void
 }
 
-export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps = {}) {
+/**
+ * Loads the user's preferences from the connected server before the app
+ * renders, so every component can read them synchronously on mount. Without
+ * a token (first-run setup) the app renders on defaults, then remounts once
+ * a token is saved and its preferences are loaded.
+ */
+export default function App(props: AppProps = {}) {
+  const { settings } = useSettings()
+  const [loadedFor, setLoadedFor] = useState<string | null>(null)
+  useEffect(() => {
+    if (!settings.token) return
+    let cancelled = false
+    void loadPrefs(settings.token).then(() => { if (!cancelled) setLoadedFor(settings.token) })
+    return () => { cancelled = true }
+  }, [settings.token])
+  if (settings.token && loadedFor !== settings.token) return <div className="h-full bg-page" />
+  return <AppMain key={loadedFor ?? 'setup'} {...props} />
+}
+
+function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   const { settings, updateSettings } = useSettings()
-  const { groups, repos, globalSkills, globalModules, ghMissing, refresh: refreshRepos } = useRepos(settings.token)
-  const { sessions, rename: renameSession, remove: removeSession, refresh: refreshSessions } = useSessions(settings.token)
+  const {
+    groups, repos, globalSkills, globalModules,
+    loading: reposLoading, error: reposError, ghStatus, ghError,
+    refresh: refreshRepos,
+  } = useRepos(settings.token)
+  const { sessions, rename: renameSession, archive: archiveSession, refresh: refreshSessions } = useSessions(settings.token)
   const { queues: tentativeQueues, addToQueue, clearQueue } = useTentativeQueue()
-  const { sessionId: urlSessionId, view, automationsTab, path: routePath, navigate } = useRouter()
+  const { sessionId: urlSessionId, view, automationsTab, settingsSection, path: routePath, navigate } = useRouter()
 
   // Canonicalize the pre-unification routes: /workflows and /loops render the
   // Automations view (with the matching tab); the URL becomes /automations.
@@ -87,7 +113,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const [activeSessionId, setActiveSessionIdRaw] = useState<string | null>(() =>
-    urlSessionId ?? localStorage.getItem('codekin-active-session')
+    urlSessionId ?? getPref('activeSessionId') ?? null
   )
 
   const setActiveSessionId = useCallback((id: string | null) => {
@@ -101,15 +127,27 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     }
   }, [navigate, view])
 
-  const [settingsOpen, setSettingsOpen] = useState(!settings.token)
+  // Settings is a routed view (/settings/<section>); leaving returns to the session.
+  const openSettings = useCallback((section?: string) => {
+    navigate(section ? `/settings/${section}` : '/settings')
+  }, [navigate])
+  const closeSettings = useCallback(() => {
+    navigate(activeSessionId ? `/s/${activeSessionId}` : '/')
+  }, [navigate, activeSessionId])
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [diffPanelOpen, setDiffPanelOpen] = useState(false)
   /** Callback ref for forwarding WsServerMessages to the diff panel (set by DiffPanel on mount). */
   const diffHandleMessageRef = useRef<(msg: import('./types').WsServerMessage) => void>(() => {})
   /** Callback ref for notifying the diff panel when a tool finishes (triggers auto-refresh). */
   const diffHandleToolDoneRef = useRef<(toolName: string, summary?: string) => void>(() => {})
+  /** Callback ref for notifying the diff panel that an agent turn finished. */
+  const diffHandleTurnDoneRef = useRef<() => void>(() => {})
   /** Tracks whether file-mutating tools have fired in this session (heuristic for "has diffs"). */
   const [hasFileChanges, setHasFileChanges] = useState(false)
+  /** What the active session has to review; drives the Changes button even when no edit happened in this browser. */
+  const [changeSummary, setChangeSummary] = useState<{ uncommittedFiles: number; branchCommits: number | null } | null>(null)
+  /** Asks the server for the active session's change summary (debounced; set once the socket exists). */
+  const requestChangeSummaryRef = useRef<() => void>(() => {})
   const [archiveRefreshKey, setArchiveRefreshKey] = useState(0)
   const { error, showError } = useErrorNotification()
   /** Holds context text (e.g. from archive "Continue" action) to inject into the next session's first message. */
@@ -117,13 +155,13 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   /** Stable ref to the current sendInput function, used by callbacks that close over stale state. */
   const sendInputRef = useRef<(data: string) => void>(() => {})
 
-  /** Worktree toggle state, persisted to localStorage. */
-  const [useWorktree, setUseWorktreeRaw] = useState(() => localStorage.getItem('codekin-use-worktree') === 'true')
+  /** Worktree toggle for new sessions. On by default; only an explicit opt-out turns it off. */
+  const [useWorktree, setUseWorktreeRaw] = useState(() => getPref('useWorktree') !== false)
   const useWorktreeRef = useRef(useWorktree)
   useEffect(() => { useWorktreeRef.current = useWorktree }, [useWorktree])
   const setUseWorktree = useCallback((v: boolean) => {
     setUseWorktreeRaw(v)
-    localStorage.setItem('codekin-use-worktree', String(v))
+    setPref('useWorktree', v)
   }, [])
 
   /** Queue messages setting — fetched from server, default off. */
@@ -143,23 +181,30 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   /**
    * The mode new sessions start in, read at session-creation time.
    *
-   * Backed by localStorage rather than a mount-time snapshot: Settings and the
-   * repo drawer's approvals tab both write that key directly, and a cached ref
+   * Backed by the prefs store rather than a mount-time snapshot: Settings and the
+   * repo drawer's approvals tab both write that pref directly, and a cached ref
    * would hand new sessions a mode the user had already changed.
    */
   const permissionModeRef = useMemo(() => ({
     get current(): PermissionMode {
-      return (localStorage.getItem('claude-permission-mode') as PermissionMode | null) ?? 'acceptEdits'
+      return getPref('permissionMode') ?? 'acceptEdits'
     },
     set current(mode: PermissionMode) {
-      localStorage.setItem('claude-permission-mode', mode)
+      setPref('permissionMode', mode)
     },
   }), [])
 
-  /** Provider ref for session orchestration (read at session creation time). */
-  const providerRef = useRef<CodingProvider>(
-    (localStorage.getItem('codekin-provider') as CodingProvider) || 'claude'
-  )
+  /**
+   * Default provider for new sessions, read at session-creation time. Resolved
+   * against live agent health so a fresh browser whose implicit default
+   * (Claude) isn't installed or signed in starts with a healthy agent instead
+   * (audit N6). A saved, installed choice is respected.
+   */
+  const providerRef = useMemo(() => ({
+    get current(): CodingProvider {
+      return resolveDefaultProvider(getAgentHealth(), getPref('provider') ?? null)
+    },
+  }), [])
 
   const inputBarRef = useRef<InputBarHandle>(null)
   const [sessionInputs, setSessionInputs] = useState<Record<string, string>>({})
@@ -191,6 +236,8 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     currentPermissionMode,
     setPermissionMode,
     moveToWorktree,
+    retryWorktree,
+    switchToSharedCheckout,
   } = useChatSocket({
     token: settings.token,
     onSessionCreated: (sessionId) => {
@@ -219,16 +266,22 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
       }
     },
     onRawMessage: (msg) => {
-      if (msg.type === 'diff_result' || msg.type === 'diff_error') {
+      if (msg.type === 'diff_result' || msg.type === 'diff_error' || msg.type === 'pr_status' || msg.type === 'review_comments' || msg.type === 'review_error') {
         diffHandleMessageRef.current(msg)
+      } else if (msg.type === 'change_summary') {
+        if (msg.sessionId === activeSessionId) setChangeSummary({ uncommittedFiles: msg.uncommittedFiles, branchCommits: msg.branchCommits })
+      } else if (msg.type === 'result') {
+        diffHandleTurnDoneRef.current()
+        requestChangeSummaryRef.current()
       } else if (msg.type === 'tool_done') {
         diffHandleToolDoneRef.current(msg.toolName, msg.summary)
-        // Track file-mutating tools to show Code Review button.
+        // Track file-mutating tools to show the Changes button right away.
         // Case-insensitive: Claude reports 'Edit'/'Write', OpenCode 'edit'/'write'/'patch'.
         const tool = msg.toolName.toLowerCase()
         if (tool === 'edit' || tool === 'write' || tool === 'patch') {
           setHasFileChanges(true)
         }
+        if (tool === 'edit' || tool === 'write' || tool === 'patch' || tool === 'bash') requestChangeSummaryRef.current()
       } else if (msg.type === 'workflow_event') {
         // Server-pushed workflow progress — forwarded so useWorkflows can
         // refresh on events instead of fast-polling.
@@ -254,9 +307,12 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     setPermissionMode(mode)
   }, [setPermissionMode])
 
-  // Provider is per-session; default for new sessions is persisted to localStorage
-  const [currentProvider] = useState<CodingProvider>(
-    (localStorage.getItem('codekin-provider') as CodingProvider) || 'claude'
+  // Provider is per-session; the default for new sessions is a stored pref
+  const agentHealth = useAgentHealth()
+  const [storedProvider] = useState(() => getPref('provider') ?? null)
+  const currentProvider = useMemo(
+    () => resolveDefaultProvider(agentHealth, storedProvider),
+    [agentHealth, storedProvider],
   )
   const [claudeDisabled, setClaudeDisabled] = useState(false)
   const [openCodeDisabled, setOpenCodeDisabled] = useState(false)
@@ -297,9 +353,24 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     : activeSessionProvider === 'codex' ? codexModels
     : claudeModels
 
-  // Reset file-change tracking when switching sessions
+  // Debounced change-summary request for the joined session (cheap git status + commit count).
+  const changeSummaryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    requestChangeSummaryRef.current = () => {
+      if (changeSummaryTimerRef.current) clearTimeout(changeSummaryTimerRef.current)
+      changeSummaryTimerRef.current = setTimeout(() => {
+        changeSummaryTimerRef.current = null
+        wsSend({ type: 'get_change_summary' })
+      }, 800)
+    }
+    return () => { if (changeSummaryTimerRef.current) clearTimeout(changeSummaryTimerRef.current) }
+  }, [wsSend])
+
+  // Reset file-change tracking when switching sessions, then ask what the new one has to review.
   useEffect(() => {
     setHasFileChanges(false) // eslint-disable-line react-hooks/set-state-in-effect -- sync with session change
+    setChangeSummary(null)
+    if (activeSessionId) requestChangeSummaryRef.current()
   }, [activeSessionId])
 
   useProviderValidation({ activeSessionProvider, currentModel, setModel, claudeModels })
@@ -324,7 +395,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     leaveSession,
     clearMessages,
     wsCreateSession,
-    removeSession,
+    closeSession: archiveSession,
     pendingContextRef,
     useWorktreeRef,
     permissionModeRef,
@@ -371,13 +442,13 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     [activeSessionProvider, openCodeCommands, allCommands],
   )
 
-  // Wrap setModel to also persist OpenCode model selection to localStorage
+  // Wrap setModel to also remember the OpenCode / Codex model choice
   const handleModelChange = useCallback((model: string) => {
     setModel(model)
     if (activeSessionProvider === 'opencode') {
-      localStorage.setItem('opencode-model', model)
+      setPref('opencodeModel', model)
     } else if (activeSessionProvider === 'codex') {
-      localStorage.setItem('codex-model', model)
+      setPref('codexModel', model)
     }
   }, [setModel, activeSessionProvider])
 
@@ -385,7 +456,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   // provider-derived UI (model list, permission modes) follows immediately.
   const handleProviderChange = useCallback((provider: CodingProvider, carryContext: boolean) => {
     setProvider(provider, carryContext)
-    localStorage.setItem('codekin-provider', provider)
+    setPref('provider', provider)
     void refreshSessions()
   }, [setProvider, refreshSessions])
 
@@ -463,13 +534,9 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   const toggleDiffPanel = useCallback(() => setDiffPanelOpen(prev => !prev), [])
   useGlobalKeyBindings({ onTogglePalette: togglePalette, onToggleDiffPanel: toggleDiffPanel })
 
-  // Persist active session ID
+  // Remember the active session for the next visit
   useEffect(() => {
-    if (activeSessionId) {
-      localStorage.setItem('codekin-active-session', activeSessionId)
-    } else {
-      localStorage.removeItem('codekin-active-session')
-    }
+    setPref('activeSessionId', activeSessionId ?? undefined)
   }, [activeSessionId])
 
   // Auto-rejoin last session on connect/reconnect
@@ -494,6 +561,8 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   // don't change, but listing them would obscure the intentional `activeSessionId` omission.
   useEffect(() => {
     if (urlSessionId === activeSessionId) return
+    // Settings is visited on top of the current session, not instead of it.
+    if (view === 'settings') return
     if (urlSessionId) {
       clearMessages()
       leaveSession()
@@ -506,7 +575,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     }
   }, [urlSessionId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync URL on initial load when restoring from localStorage
+  // Sync URL on initial load when restoring the remembered session
   useEffect(() => {
     if (activeSessionId && window.location.pathname === '/') {
       navigate(`/s/${activeSessionId}`, true)
@@ -518,10 +587,10 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     restoreSession()
   })
 
-  // Auto-open settings on first visit
+  // First visit without a token: the one thing to do is connect.
   useEffect(() => {
-    if (!settings.token) setSettingsOpen(true) // eslint-disable-line react-hooks/set-state-in-effect -- initial setup
-  }, [settings.token])
+    if (!settings.token && view !== 'settings') navigate('/settings/connection', true)
+  }, [settings.token]) // eslint-disable-line react-hooks/exhaustive-deps -- first-run redirect only
 
   // Close docs browser when switching sessions
   useEffect(() => {
@@ -610,9 +679,9 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
     if (found) setDrawer({ workingDir: found.groupDir ?? found.workingDir, tab: 'archive' })
   }, [paletteArchived])
 
-  // Sync data-theme attribute on <html> whenever the setting changes
+  // Sync data-theme / data-scheme on <html> whenever the setting changes
   useEffect(() => {
-    document.documentElement.dataset.theme = settings.theme
+    applyTheme(settings.theme)
   }, [settings.theme])
 
   // Derive session name for mobile top bar
@@ -662,7 +731,8 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
   // Hosted mode shares the active session from the sidebar footer. The
   // machine id comes from the installed relay transport; empty in local mode,
   // where the Share control is never rendered.
-  const [shareOpen, setShareOpen] = useState(false)
+  const [shareSessionId, setShareSessionId] = useState<string | null>(null)
+  const shareSession = sessions.find(s => s.id === shareSessionId)
   const hostedMachineId = (transport as { machineId?: string }).machineId ?? ''
 
   // Session input change handler for extracted components
@@ -672,8 +742,9 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
 
   return (
     <div className="flex h-full bg-edge-strong" data-density={isMobile ? 'touch' : undefined}>
-      {/* Left sidebar — repo/session tree + nav */}
-      <LeftSidebar
+      {/* Left sidebar — repo/session tree + nav. Settings is a page of its
+          own, so it takes the whole window rather than sitting beside it. */}
+      {view !== 'settings' && <LeftSidebar
         sessions={sessions}
         activeSessionId={activeSessionId}
         activeWorkingDir={activeWorkingDir}
@@ -701,9 +772,9 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
         onOpenSession={handleOpenSession}
         onSelectRepo={handleSelectRepo}
         onDeleteRepo={handleDeleteRepo}
-        onSettingsOpen={() => setSettingsOpen(true)}
-        onShareSession={isHosted ? () => setShareOpen(true) : undefined}
-        onUpdateTheme={(theme) => updateSettings({ theme: theme as 'dark' | 'light' })}
+        onSettingsOpen={() => { openSettings() }}
+        onShareSession={isHosted ? setShareSessionId : undefined}
+        onUpdateTheme={(theme) => { updateSettings({ theme }) }}
         onSendModule={handleSendModule}
         agentName={agentName}
         onNavigateToAutomations={() => navigate('/automations')}
@@ -715,18 +786,18 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
           mobileOpen: mobileMenuOpen,
           onMobileClose: () => setMobileMenuOpen(false),
         }}
-      />
+      />}
 
       {/* Main area */}
       <div className="terminal-area flex flex-1 flex-col overflow-hidden bg-page">
         {/* Mobile top bar */}
-        {isMobile && (
+        {isMobile && view !== 'settings' && (
           <MobileTopBar
             repoName={activeRepoName}
             sessionName={activeSessionName}
             onMenuOpen={() => setMobileMenuOpen(true)}
             onNewSession={handleNewSessionForRepo}
-            onSettingsOpen={() => setSettingsOpen(true)}
+            onSettingsOpen={() => { openSettings() }}
             activeRepo={activeRepo}
           />
         )}
@@ -745,7 +816,24 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
         )}
 
         {/* Main content: orchestrator, workflows view, docs browser, or chat */}
-        {view === 'orchestrator' ? (
+        {view === 'settings' ? (
+          <SettingsView
+            section={settingsSection}
+            onNavigate={(section, replace) => { navigate(section ? `/settings/${section}` : '/settings', replace) }}
+            onClose={closeSettings}
+            settings={settings}
+            onUpdate={updateSettings}
+            isMobile={isMobile}
+            autoWorktree={useWorktree}
+            onAutoWorktreeChange={setUseWorktree}
+            agentName={agentName}
+            onAgentNameChange={setAgentName}
+            repos={repos}
+            hostedMachineId={hostedMachineId}
+            onSwitchMachine={onSwitchMachine}
+            onDisconnectMachine={onDisconnectMachine}
+          />
+        ) : view === 'orchestrator' ? (
           <OrchestratorContent
             token={settings.token}
             onOrchestratorSessionReady={handleOrchestratorSessionReady}
@@ -783,6 +871,13 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
             onPermissionModeChange={handlePermissionModeChange}
             disabled={!settings.token}
             agentName={agentName}
+            repos={repos}
+            onOpenSession={(sessionId) => {
+              clearMessages()
+              leaveSession()
+              joinSession(sessionId)
+              navigate(`/s/${sessionId}`)
+            }}
           />
         ) : view === 'automations' ? (
           <AutomationsView
@@ -839,6 +934,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
             isProcessing={isProcessing}
             disabled={!settings.token}
             hasFileChanges={hasFileChanges}
+            changeSummary={changeSummary}
             diffPanelOpen={diffPanelOpen}
             onOpenDiffPanel={() => setDiffPanelOpen(true)}
             activePrompt={activePrompt}
@@ -869,12 +965,16 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
             onPermissionModeChange={handlePermissionModeChange}
             moveToWorktree={moveToWorktree}
             worktreePath={activeSession?.worktreePath}
+            worktreeState={activeSession?.worktreeState}
+            worktreeError={activeSession?.worktreeError}
+            onRetryWorktree={retryWorktree}
+            onUseExistingCheckout={switchToSharedCheckout}
             openCodeConnected={activeSessionProvider === 'opencode' ? (openCodeDisabled ? false : openCodeConnected) : null}
             codexConnected={activeSessionProvider === 'codex' ? (codexDisabled ? false : codexConnected) : null}
             claudeDisabled={activeSessionProvider === 'claude' && claudeDisabled}
           />
         ) : (
-          <RepoSelector groups={groups} token={settings.token} ghMissing={ghMissing} onOpen={handleOpenSession} onRefreshRepos={refreshRepos} />
+          <RepoSelector groups={groups} token={settings.token} ghStatus={ghStatus} ghError={ghError} loading={reposLoading} error={reposError} onOpen={handleOpenSession} onRefreshRepos={refreshRepos} />
         )}
       </div>
 
@@ -892,6 +992,7 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
         archiveRefreshKey={archiveRefreshKey}
         onViewArchivedSession={() => { /* the drawer owns the viewer */ }}
         onNewSessionFromArchive={handleNewSessionFromArchive}
+        onResumeSession={(id) => { void refreshSessions(); handleSelectSession(id) }}
         fontSize={settings.fontSize}
         initialTab={drawer?.tab}
         isMobile={isMobile}
@@ -905,25 +1006,14 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
           send={wsSend}
           onHandleMessage={(fn) => { diffHandleMessageRef.current = fn }}
           onHandleToolDone={(fn) => { diffHandleToolDoneRef.current = fn }}
+          onHandleTurnDone={(fn) => { diffHandleTurnDoneRef.current = fn }}
+          sessionId={activeSessionId}
+          defaultView={activeSession?.worktreePath ? 'branch' : 'all'}
+          isMobile={isMobile}
         />
       )}
 
       {/* Modals */}
-      <Settings
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        settings={settings}
-        onUpdate={updateSettings}
-        isMobile={isMobile}
-        autoWorktree={useWorktree}
-        onAutoWorktreeChange={setUseWorktree}
-        agentName={agentName}
-        onAgentNameChange={setAgentName}
-        repos={repos}
-        hostedMachineId={hostedMachineId}
-        onSwitchMachine={onSwitchMachine}
-        onDisconnectMachine={onDisconnectMachine}
-      />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
@@ -933,7 +1023,9 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
         onOpenRepo={handleOpenSession}
         onSendSkill={handleSendSkill}
         onSendModule={handleSendModule}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => { openSettings() }}
+        theme={settings.theme}
+        onSelectTheme={(theme) => { updateSettings({ theme }) }}
         isMobile={isMobile}
         docs={paletteDocs}
         onSelectDoc={handleOpenDocFromPalette}
@@ -941,13 +1033,13 @@ export default function App({ onSwitchMachine, onDisconnectMachine }: AppProps =
         onSelectArchived={handleOpenArchivedFromPalette}
         activeWorkingDir={activeWorkingDir}
       />
-      {isHosted && shareOpen && activeSession && (
+      {isHosted && shareSession && (
         <Suspense fallback={null}>
           <ShareDialog
             machineId={hostedMachineId}
-            sessionId={activeSession.id}
-            sessionName={activeSessionName ?? activeSession.id}
-            onClose={() => setShareOpen(false)}
+            sessionId={shareSession.id}
+            sessionName={shareSession.name}
+            onClose={() => setShareSessionId(null)}
           />
         </Suspense>
       )}

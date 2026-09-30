@@ -86,6 +86,7 @@ function fakeSessions(overrides: Partial<Record<string, unknown>> = {}): Session
   const approvalManager = {
     getApprovals: vi.fn(() => ({ approvals: [] })),
     getGlobalApprovals: vi.fn(() => ({ approvals: [] })),
+    getAllApprovals: vi.fn(() => [{ workingDir: '/repos/x', tools: ['Read'], commands: [], patterns: [] }]),
     removeApproval: vi.fn(() => true),
     persistRepoApprovals: vi.fn(),
   }
@@ -174,9 +175,12 @@ describe('createSessionRouter', () => {
       ['PUT', '/api/settings/repos-path'],
       ['GET', '/api/settings/agent-name'],
       ['PUT', '/api/settings/agent-name'],
+      ['GET', '/api/settings/prefs'],
+      ['PUT', '/api/settings/prefs'],
       ['GET', '/api/browse-dirs'],
       ['GET', '/api/approvals?path=/repos/x'],
       ['GET', '/api/approvals/global'],
+      ['GET', '/api/approvals/all'],
     ]
 
     it.each(ROUTES)('%s %s returns 401 without a token', async (method, path) => {
@@ -485,6 +489,52 @@ describe('createSessionRouter', () => {
     })
   })
 
+  describe('/api/settings/prefs', () => {
+    let store: Record<string, string>
+    beforeEach(async () => {
+      store = {}
+      sessions = fakeSessions()
+      const archive = sessions.archive as unknown as { getSetting: ReturnType<typeof vi.fn>; setSetting: ReturnType<typeof vi.fn> }
+      archive.getSetting.mockImplementation((k: string, def: string) => store[k] ?? def)
+      archive.setSetting.mockImplementation((k: string, v: string) => { store[k] = v })
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+    })
+
+    const put = (body: unknown) => fetch(`${server.baseUrl}/api/settings/prefs`, {
+      method: 'PUT', headers: auth(), body: JSON.stringify(body),
+    })
+
+    it('returns an empty object when nothing is stored', async () => {
+      const res = await fetch(`${server.baseUrl}/api/settings/prefs`, { headers: auth() })
+      expect(await res.json()).toEqual({ prefs: {} })
+    })
+
+    it('merges patches and removes keys set to null', async () => {
+      await put({ patch: { theme: 'light', sidebarWidth: 300 } })
+      await put({ patch: { sidebarWidth: null, useWorktree: false } })
+      const res = await fetch(`${server.baseUrl}/api/settings/prefs`, { headers: auth() })
+      expect(await res.json()).toEqual({ prefs: { theme: 'light', useWorktree: false } })
+    })
+
+    it('rejects a non-object patch', async () => {
+      expect((await put({ patch: [1] })).status).toBe(400)
+      expect((await put({})).status).toBe(400)
+    })
+
+    it('rejects malformed keys', async () => {
+      const proto = await fetch(`${server.baseUrl}/api/settings/prefs`, {
+        method: 'PUT', headers: auth(), body: '{"patch":{"__proto__":{"polluted":true}}}',
+      })
+      expect(proto.status).toBe(400)
+      expect((await put({ patch: { 'a b': 1 } })).status).toBe(400)
+    })
+
+    it('rejects a blob over the size cap', async () => {
+      store.ui_prefs = JSON.stringify({ big: 'x'.repeat(256 * 1024) })
+      expect((await put({ patch: { theme: 'dark' } })).status).toBe(413)
+    })
+  })
+
   describe('DELETE /api/sessions/:id', () => {
     it('returns 404 when session not found', async () => {
       sessions = fakeSessions({ delete: vi.fn(() => false) })
@@ -502,6 +552,80 @@ describe('createSessionRouter', () => {
         method: 'DELETE', headers: auth(),
       })
       expect(res.status).toBe(200)
+    })
+  })
+
+  describe('archive lifecycle routes', () => {
+    const known = { id: 'abc' }
+
+    it('lists archived sessions with ?archived=1 and active ones otherwise', async () => {
+      sessions = fakeSessions({ list: vi.fn(() => [{ id: 'live' }]), listArchived: vi.fn(() => [{ id: 'old' }]) })
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+
+      const archived = await (await fetch(`${server.baseUrl}/api/sessions/list?archived=1`, { headers: auth() })).json()
+      const active = await (await fetch(`${server.baseUrl}/api/sessions/list`, { headers: auth() })).json()
+
+      expect(archived.sessions).toEqual([{ id: 'old' }])
+      expect(active.sessions).toEqual([{ id: 'live' }])
+    })
+
+    it('archives and resumes a known session', async () => {
+      sessions = fakeSessions({ get: vi.fn(() => known), archiveSession: vi.fn(() => true), resumeSession: vi.fn(() => true) })
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+
+      const a = await fetch(`${server.baseUrl}/api/sessions/abc/archive`, { method: 'POST', headers: auth() })
+      const r = await fetch(`${server.baseUrl}/api/sessions/abc/resume`, { method: 'POST', headers: auth() })
+
+      expect(a.status).toBe(200)
+      expect(r.status).toBe(200)
+      expect(sessions.archiveSession).toHaveBeenCalledWith('abc')
+      expect(sessions.resumeSession).toHaveBeenCalledWith('abc')
+    })
+
+    it('returns 404 for unknown sessions and 409 when the transition is refused', async () => {
+      sessions = fakeSessions({ archiveSession: vi.fn(() => false), resumeSession: vi.fn(() => false) })
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+      expect((await fetch(`${server.baseUrl}/api/sessions/nope/archive`, { method: 'POST', headers: auth() })).status).toBe(404)
+      await server.close()
+
+      sessions = fakeSessions({ get: vi.fn(() => known), resumeSession: vi.fn(() => false) })
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+      expect((await fetch(`${server.baseUrl}/api/sessions/abc/resume`, { method: 'POST', headers: auth() })).status).toBe(409)
+    })
+
+    it('returns the removal preflight', async () => {
+      const preflight = { worktreePath: '/wt', exists: true, modified: ['a'], untracked: [], uniqueCommits: 0, referencedBy: [], safe: false, blockers: ['x'] }
+      sessions = fakeSessions({ getRemovalPreflight: vi.fn(async () => preflight) })
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+
+      const res = await fetch(`${server.baseUrl}/api/sessions/abc/removal-preflight`, { headers: auth() })
+
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual(preflight)
+    })
+
+    it('reports a refused removal as 409 with the preflight', async () => {
+      const preflight = { safe: false, blockers: ['1 file(s) have uncommitted changes.'] }
+      sessions = fakeSessions({
+        get: vi.fn(() => known),
+        removeSessionWorktree: vi.fn(async () => ({ removed: false, preflight, reason: '1 file(s) have uncommitted changes.' })),
+      })
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+
+      const res = await fetch(`${server.baseUrl}/api/sessions/abc/remove-worktree`, { method: 'POST', headers: auth() })
+
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({ error: '1 file(s) have uncommitted changes.', preflight })
+    })
+
+    it('requires auth', async () => {
+      sessions = fakeSessions({ get: vi.fn(() => known), archiveSession: vi.fn(() => true) })
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+
+      const res = await fetch(`${server.baseUrl}/api/sessions/abc/archive`, { method: 'POST' })
+
+      expect(res.status).toBe(401)
+      expect(sessions.archiveSession).not.toHaveBeenCalled()
     })
   })
 
@@ -601,6 +725,13 @@ describe('createSessionRouter', () => {
     it('GET /api/approvals requires path query parameter', async () => {
       const res = await fetch(`${server.baseUrl}/api/approvals`, { headers: auth() })
       expect(res.status).toBe(400)
+    })
+
+    it('GET /api/approvals/all returns every repo in one response', async () => {
+      const res = await fetch(`${server.baseUrl}/api/approvals/all`, { headers: auth() })
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.repos).toEqual([{ workingDir: '/repos/x', tools: ['Read'], commands: [], patterns: [] }])
     })
 
     it('DELETE /api/approvals rejects invalid single-delete with 400', async () => {

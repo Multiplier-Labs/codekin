@@ -11,28 +11,12 @@
  */
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { IconChevronRight, IconShieldCheck, IconPencil, IconMap2, IconAlertTriangle, IconCheck, IconX } from '@tabler/icons-react'
+import { IconChevronRight, IconCheck, IconX } from '@tabler/icons-react'
 import { getRepoApprovals, removeRepoApproval, bulkRemoveRepoApprovals, type RepoApprovals } from '../lib/ccApi'
+import { PERMISSION_MODE_ICONS, buildGroups, type ApprovalGroup, type RemovalTarget } from '../lib/approvalGroups'
 import { PERMISSION_MODES, type PermissionMode } from '../types'
+import { getPref, setPref } from '../lib/prefs'
 
-const PERMISSION_MODE_KEY = 'claude-permission-mode'
-
-const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
-  shield: IconShieldCheck,
-  pencil: IconPencil,
-  map: IconMap2,
-  warning: IconAlertTriangle,
-}
-
-/** What `removeRepoApproval` / `bulkRemoveRepoApprovals` accept. */
-type RemovalTarget = { tool?: string; command?: string; pattern?: string }
-
-interface ApprovalGroup {
-  key: string
-  label: string
-  kind: 'tool' | 'bash'
-  rules: { id: string; label: string; target: RemovalTarget }[]
-}
 
 interface Props {
   token: string
@@ -41,37 +25,6 @@ interface Props {
   visible?: boolean
   /** Filter text, when the host renders a filter row. */
   filter?: string
-}
-
-/**
- * Collapse the three flat rule lists into one decision per tool: every bash
- * command and wildcard pattern folds into the group of its leading binary.
- */
-function buildGroups(approvals: RepoApprovals): ApprovalGroup[] {
-  const tools: ApprovalGroup[] = [...approvals.tools].sort((a, b) => a.localeCompare(b)).map(tool => ({
-    key: `tool:${tool}`,
-    label: tool,
-    kind: 'tool' as const,
-    rules: [{ id: `tool:${tool}`, label: tool, target: { tool } }],
-  }))
-
-  const bash = new Map<string, ApprovalGroup>()
-  function addBash(raw: string, target: RemovalTarget) {
-    const prefix = raw.split(/\s+/)[0] || 'other'
-    let group = bash.get(prefix)
-    if (!group) {
-      group = { key: `bash:${prefix}`, label: prefix, kind: 'bash', rules: [] }
-      bash.set(prefix, group)
-    }
-    group.rules.push({ id: `${group.key}:${raw}`, label: raw, target })
-  }
-  for (const command of approvals.commands) addBash(command, { command })
-  for (const pattern of approvals.patterns) addBash(pattern, { pattern })
-
-  const bashGroups = [...bash.values()].sort((a, b) => a.label.localeCompare(b.label))
-  for (const group of bashGroups) group.rules.sort((a, b) => a.label.localeCompare(b.label))
-
-  return [...tools, ...bashGroups]
 }
 
 export function ApprovalsPanel({ token, workingDir, visible = true, filter = '' }: Props) {
@@ -199,13 +152,13 @@ export function ApprovalsPanel({ token, workingDir, visible = true, filter = '' 
 /* ── Permission mode ────────────────────────────────────────────── */
 
 function readPermissionMode(): PermissionMode {
-  const stored = localStorage.getItem(PERMISSION_MODE_KEY)
+  const stored = getPref('permissionMode')
   return PERMISSION_MODES.some(m => m.id === stored) ? stored as PermissionMode : 'acceptEdits'
 }
 
 /**
  * The other half of "what am I auto-approving". Writes the app-wide
- * `claude-permission-mode` key that new sessions start from — in-flight
+ * `permissionMode` pref that new sessions start from — in-flight
  * sessions keep the mode they were started with.
  */
 function PermissionModeControl() {
@@ -227,7 +180,7 @@ function PermissionModeControl() {
       )
       if (!confirmed) return
     }
-    localStorage.setItem(PERMISSION_MODE_KEY, next)
+    setPref('permissionMode', next)
     setMode(next)
     setOpen(false)
   }, [])
@@ -283,7 +236,7 @@ function PermissionModeControl() {
 
 /* ── Groups ─────────────────────────────────────────────────────── */
 
-function ApprovalGroupRow({ group, expanded, onToggle, onRemove, onRemoveMany }: {
+export function ApprovalGroupRow({ group, expanded, onToggle, onRemove, onRemoveMany }: {
   group: ApprovalGroup
   expanded: boolean
   onToggle: () => void

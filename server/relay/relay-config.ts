@@ -32,6 +32,41 @@ export interface RelayConfig {
   auditRetentionDays: number
   /** True when running behind TLS in production (secure cookies). */
   isProduction: boolean
+  /**
+   * Where people without access can ask for it (RELAY_ACCESS_REQUEST_URL):
+   * an https:// page or a mailto: address. Shown on the sign-in page.
+   */
+  accessRequestUrl?: string
+  /**
+   * 32-byte key (MFA_ENCRYPTION_KEY, base64 or hex) that encrypts TOTP
+   * secrets at rest. Deliberately separate from SESSION_SECRET. Without it,
+   * authenticator-app 2FA is unavailable; passkeys and recovery codes still work.
+   */
+  mfaEncryptionKey?: Buffer
+}
+
+/** Decode MFA_ENCRYPTION_KEY: 64 hex characters or base64 of exactly 32 bytes. */
+export function parseMfaEncryptionKey(raw: string): Buffer | undefined {
+  const value = raw.trim()
+  if (!value) return undefined
+  const key = /^[0-9a-fA-F]{64}$/.test(value) ? Buffer.from(value, 'hex') : Buffer.from(value, 'base64')
+  if (key.length === 32) return key
+  console.warn('[relay-config] Ignoring MFA_ENCRYPTION_KEY: must be 32 bytes (64 hex chars or base64)')
+  return undefined
+}
+
+/** Accept only https: and mailto: URLs for the public access-request link. */
+export function parseAccessRequestUrl(raw: string): string | undefined {
+  const value = raw.trim()
+  if (!value) return undefined
+  try {
+    const url = new URL(value)
+    if (url.protocol === 'https:' || url.protocol === 'mailto:') return url.toString()
+  } catch {
+    // fall through
+  }
+  console.warn('[relay-config] Ignoring RELAY_ACCESS_REQUEST_URL: must be an https: or mailto: URL')
+  return undefined
 }
 
 /** Parse a KEY=VALUE env file. Ignores blank lines and # comments. */
@@ -82,6 +117,8 @@ export function loadRelayConfig(opts: { envFile?: string; requireSecrets?: boole
     dataDir,
     auditRetentionDays: Math.max(0, parseInt(get('AUDIT_RETENTION_DAYS') || '90', 10) || 0),
     isProduction,
+    accessRequestUrl: parseAccessRequestUrl(get('RELAY_ACCESS_REQUEST_URL')),
+    mfaEncryptionKey: parseMfaEncryptionKey(get('MFA_ENCRYPTION_KEY')),
   }
 
   if (requireSecrets) {

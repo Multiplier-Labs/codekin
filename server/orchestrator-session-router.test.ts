@@ -13,6 +13,9 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'fs'
+import { CodekinApi } from './codekin-mcp-api.js'
+import { getOrchestratorProvider, setOrchestratorProvider, ensureOrchestratorRunning } from './orchestrator-manager.js'
 import type { Request } from 'express'
 import type { AddressInfo } from 'net'
 import type { Server } from 'http'
@@ -22,12 +25,23 @@ vi.mock('./orchestrator-manager.js', () => ({
   getOrCreateOrchestratorId: vi.fn(() => 'orch-session-id'),
   getOrchestratorSessionId: vi.fn(() => null),
   ensureOrchestratorRunning: vi.fn(() => 'orch-session-id'),
+  getOrchestratorProvider: vi.fn(() => 'codex'),
+  setOrchestratorProvider: vi.fn(),
 }))
 
 vi.mock('./config.js', () => ({
   REPOS_ROOT: '/tmp/repos',
   resolveRepoPathInRoot: vi.fn(() => null),
   getAgentDisplayName: vi.fn(() => 'Joe'),
+  DATA_DIR: '/tmp/orch-session-test',
+}))
+
+vi.mock('./orchestrator-outbox.js', () => ({
+  getOrchestratorOutbox: () => ({ enqueue: () => {} }),
+}))
+
+vi.mock('./workflow-config.js', () => ({
+  loadWorkflowConfig: vi.fn(() => ({ reviewRepos: [] })),
 }))
 
 vi.mock('./orchestrator-reports.js', () => ({
@@ -36,7 +50,11 @@ vi.mock('./orchestrator-reports.js', () => ({
   getReportsSince: vi.fn(() => []),
 }))
 
+import { getReportsSince } from './orchestrator-reports.js'
+import { loadWorkflowConfig } from './workflow-config.js'
 import { createSessionRouter } from './orchestrator-session-router.js'
+import { ChildControlError } from './orchestrator-children.js'
+import { TaskActionError, type OrchestratorTaskService } from './orchestrator-tasks.js'
 import type { SessionManager } from './session-manager.js'
 import type { OrchestratorMemory } from './orchestrator-memory.js'
 import type { OrchestratorChildManager } from './orchestrator-children.js'
@@ -66,6 +84,10 @@ function makeChildren(): OrchestratorChildManager {
     get: vi.fn(() => null),
     activeCount: vi.fn(() => 0),
     spawn: vi.fn(),
+    sendFollowUp: vi.fn(),
+    stop: vi.fn(),
+    resume: vi.fn(),
+    close: vi.fn(),
   } as unknown as OrchestratorChildManager
 }
 
@@ -121,6 +143,56 @@ describe('createSessionRouter', () => {
     })
   })
 
+  describe('harness selection contract', () => {
+    beforeEach(async () => { await mount(() => true) })
+
+    it('reports no selection without starting an agent', async () => {
+      vi.mocked(getOrchestratorProvider).mockReturnValueOnce(null)
+      const response = await fetch(`${server.baseUrl}/api/orchestrator/status`)
+      expect(await response.json()).toMatchObject({ provider: null })
+      expect(ensureOrchestratorRunning).not.toHaveBeenCalled()
+    })
+
+    it('requires an explicit choice on first start', async () => {
+      vi.mocked(getOrchestratorProvider).mockReturnValueOnce(null)
+      const response = await fetch(`${server.baseUrl}/api/orchestrator/start`, { method: 'POST' })
+      expect(response.status).toBe(409)
+      expect(ensureOrchestratorRunning).not.toHaveBeenCalled()
+    })
+
+    it.each(['claude', 'codex', 'opencode'])('saves %s before starting Joe', async (provider) => {
+      const response = await fetch(`${server.baseUrl}/api/orchestrator/start`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ provider }),
+      })
+      expect(response.status).toBe(200)
+      expect(setOrchestratorProvider).toHaveBeenCalledWith(expect.anything(), provider)
+      expect(vi.mocked(setOrchestratorProvider).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(ensureOrchestratorRunning).mock.invocationCallOrder[0])
+    })
+
+    it('rejects invalid start and spawn providers before doing any work', async () => {
+      for (const path of ['start', 'children']) {
+        const response = await fetch(`${server.baseUrl}/api/orchestrator/${path}`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...VALID_SPAWN, provider: 'unknown' }),
+        })
+        expect(response.status).toBe(400)
+      }
+      expect(children.spawn).not.toHaveBeenCalled()
+      expect(ensureOrchestratorRunning).not.toHaveBeenCalled()
+    })
+
+    it.each(['codex', 'opencode'] as const)('passes %s through the MCP API client and real HTTP router', async (provider) => {
+      mkdirSync('/tmp/repos', { recursive: true })
+      const repo = mkdtempSync('/tmp/repos/joe-harness-')
+      try {
+        vi.mocked(children.spawn).mockResolvedValue({ id: 'child' } as never)
+        const api = new CodekinApi({ baseUrl: server.baseUrl, token: 'test' })
+        await api.spawnChild({ repo, task: 'implement task', branchName: 'fix/task', provider, model: 'selected-model' })
+        expect(children.spawn).toHaveBeenCalledWith(expect.objectContaining({ provider, model: 'selected-model', parentSessionId: 'orch-session-id' }))
+      } finally { rmSync(repo, { recursive: true }) }
+    })
+  })
+
   // -------------------------------------------------------------------------
   // Auth guards
   // -------------------------------------------------------------------------
@@ -168,6 +240,13 @@ describe('createSessionRouter', () => {
       expect(children.spawn).not.toHaveBeenCalled()
     })
 
+    it('400s on deployAfter: true instead of silently ignoring it', async () => {
+      const res = await spawn({ ...VALID_SPAWN, deployAfter: true })
+      expect(res.status).toBe(400)
+      expect((await res.json()).error).toMatch(/deployAfter is not supported/)
+      expect(children.spawn).not.toHaveBeenCalled()
+    })
+
     it('400s when allowedTools is not an array of strings', async () => {
       const res = await spawn({ ...VALID_SPAWN, allowedTools: 'Bash' })
       expect(res.status).toBe(400)
@@ -202,10 +281,25 @@ describe('createSessionRouter', () => {
       expect(await res.json()).toEqual({ children: [] })
     })
 
-    it('400s on a reports request with neither ?repo nor ?since', async () => {
-      const res = await fetch(`${server.baseUrl}/api/orchestrator/reports`)
-      expect(res.status).toBe(400)
-      expect((await res.json()).error).toMatch(/Provide \?repo=/)
+    it('lists reports across managed repos when called with no parameters (the list_reports MCP call)', async () => {
+      mkdirSync('/tmp/repos', { recursive: true })
+      const repo = mkdtempSync('/tmp/repos/joe-reports-')
+      try {
+        vi.mocked(loadWorkflowConfig).mockReturnValueOnce({ reviewRepos: [{ repoPath: repo }, { repoPath: '/tmp/repos/does-not-exist' }] } as never)
+        vi.mocked(getReportsSince).mockReturnValueOnce([{ filePath: `${repo}/.codekin/reports/incidents/2026-09-30_x.md` }] as never)
+        const api = new CodekinApi({ baseUrl: server.baseUrl, token: 'test' })
+        const body = await api.listReports() as { reports: unknown[] }
+        expect(body.reports).toHaveLength(1)
+        expect(getReportsSince).toHaveBeenCalledWith([repo], '')
+      } finally { rmSync(repo, { recursive: true }) }
+    })
+
+    it('passes ?since through and rejects a malformed date', async () => {
+      const api = new CodekinApi({ baseUrl: server.baseUrl, token: 'test' })
+      await api.listReports({ since: '2026-09-01' })
+      expect(getReportsSince).toHaveBeenCalledWith([], '2026-09-01')
+      const bad = await fetch(`${server.baseUrl}/api/orchestrator/reports?since=yesterday`)
+      expect(bad.status).toBe(400)
     })
   })
 
@@ -286,6 +380,207 @@ describe('createSessionRouter', () => {
       // limit capped at 50000 — full 6000-char output fits
       expect(hugeBody.transcript.length).toBe(6000)
       expect(hugeBody.truncated).toBe(false)
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Cleanup
+  // -------------------------------------------------------------------------
+
+  describe('session cleanup', () => {
+    function fakeSession(opts: { pending?: number; processing?: boolean } = {}) {
+      return {
+        pendingToolApprovals: new Map(Array.from({ length: opts.pending ?? 0 }, (_, i) => [`r${i}`, {}])),
+        pendingControlRequests: new Map(),
+        isProcessing: opts.processing ?? false,
+        claudeProcess: { isAlive: () => true },
+      }
+    }
+
+    const all: Record<string, ReturnType<typeof fakeSession>> = {
+      done: fakeSession(),
+      busy: fakeSession({ processing: true }),
+      asking: fakeSession({ pending: 1 }),
+      child: fakeSession(),
+      manual: fakeSession(),
+    }
+    const infos = [
+      { id: 'done', name: 'done', source: 'workflow' },
+      { id: 'busy', name: 'busy', source: 'agent' },
+      { id: 'asking', name: 'asking', source: 'webhook' },
+      { id: 'child', name: 'child', source: 'agent' },
+      { id: 'manual', name: 'manual', source: 'manual' },
+    ]
+
+    function cleanupSessions(): SessionManager {
+      return {
+        listAll: vi.fn(() => infos),
+        get: vi.fn((id: string) => all[id]),
+        delete: vi.fn(() => true),
+      } as unknown as SessionManager
+    }
+
+    it('deletes only finished automated sessions and reports what it skipped', async () => {
+      const sessions = cleanupSessions()
+      await mount(() => true, sessions)
+      ;(children.get as ReturnType<typeof vi.fn>).mockImplementation((id: string) => (id === 'child' ? { id, status: 'running' } : null))
+
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/sessions/cleanup`, { method: 'DELETE' })
+      const body = await res.json()
+
+      expect(body.deleted).toEqual([{ id: 'done', name: 'done' }])
+      expect(body.skipped).toEqual([
+        { id: 'busy', name: 'busy', reason: 'still working' },
+        { id: 'asking', name: 'asking', reason: 'waiting on a prompt' },
+        { id: 'child', name: 'child', reason: 'supervised child is running' },
+      ])
+      expect(sessions.delete).toHaveBeenCalledTimes(1)
+      expect(sessions.delete).toHaveBeenCalledWith('done')
+    })
+
+    it('previews without deleting on ?dryRun=true', async () => {
+      const sessions = cleanupSessions()
+      await mount(() => true, sessions)
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/sessions/cleanup?dryRun=true`, { method: 'DELETE' })
+      const body = await res.json()
+      expect(body.dryRun).toBe(true)
+      expect(body.deleted.map((d: { id: string }) => d.id)).toEqual(['done', 'child'])
+      expect(sessions.delete).not.toHaveBeenCalled()
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Child control (through the MCP API client)
+  // -------------------------------------------------------------------------
+
+  describe('child control contract', () => {
+    let api: CodekinApi
+    beforeEach(async () => {
+      await mount(() => true)
+      api = new CodekinApi({ baseUrl: server.baseUrl, token: 'test' })
+    })
+
+    it('routes follow-up, stop, resume, and close to the child manager', async () => {
+      vi.mocked(children.sendFollowUp).mockReturnValue({ id: 'c1' } as never)
+      vi.mocked(children.stop).mockReturnValue({ id: 'c1' } as never)
+      vi.mocked(children.resume).mockReturnValue({ id: 'c1', attempt: 2 } as never)
+      vi.mocked(children.close).mockResolvedValue({ action: 'deleted' } as never)
+
+      await api.sendToChild('c1', 'also update docs')
+      await api.stopChild('c1')
+      expect(await api.resumeChild('c1', 'push it')).toEqual({ child: { id: 'c1', attempt: 2 } })
+      expect(await api.closeChild('c1', { mode: 'delete', cancel: true })).toEqual({ action: 'deleted' })
+
+      expect(children.sendFollowUp).toHaveBeenCalledWith('c1', 'also update docs')
+      expect(children.stop).toHaveBeenCalledWith('c1')
+      expect(children.resume).toHaveBeenCalledWith('c1', 'push it')
+      expect(children.close).toHaveBeenCalledWith('c1', { mode: 'delete', cancel: true })
+    })
+
+    it('maps ownership and state refusals to 404 / 409', async () => {
+      vi.mocked(children.stop).mockImplementation(() => { throw new ChildControlError('Not one of your child sessions', 404) })
+      vi.mocked(children.resume).mockImplementation(() => { throw new ChildControlError('Child is running — send it a follow-up instead', 409) })
+      await expect(api.stopChild('stranger')).rejects.toThrow(/\(404\).*Not one of your child sessions/)
+      await expect(api.resumeChild('c1')).rejects.toThrow(/\(409\).*follow-up/)
+    })
+
+    it('validates control request bodies', async () => {
+      const post = (path: string, body: unknown) => fetch(`${server.baseUrl}/api/orchestrator/children/c1/${path}`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      })
+      expect((await post('input', { text: '  ' })).status).toBe(400)
+      expect((await post('close', { mode: 'shred' })).status).toBe(400)
+      expect((await post('close', { cancel: 'yes' })).status).toBe(400)
+      expect((await post('resume', { instructions: 42 })).status).toBe(400)
+      expect(children.sendFollowUp).not.toHaveBeenCalled()
+      expect(children.close).not.toHaveBeenCalled()
+    })
+
+    it('401s control routes without auth', async () => {
+      await server.close()
+      await mount(() => false)
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/children/c1/stop`, { method: 'POST' })
+      expect(res.status).toBe(401)
+      expect(children.stop).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('session summary and structured answers', () => {
+    const pending = new Map([['req-1', { toolName: 'AskUserQuestion' }]])
+    const infos = [
+      { id: 'a', name: 'joe:fix/x', source: 'agent', isProcessing: true, active: true, workingDir: '/r/wt', groupDir: '/r', worktreeBranch: 'fix/x', worktreePath: '/r/wt', lastActivity: 't' },
+      { id: 'm', name: 'manual', source: 'manual', isProcessing: false, active: true, workingDir: '/r', lastActivity: 't' },
+      { id: 'z', name: 'old', source: 'agent', isProcessing: false, active: false, archivedAt: 'x', workingDir: '/r', lastActivity: 't' },
+    ]
+    function summarySessions(): SessionManager {
+      return {
+        listAll: vi.fn(() => infos),
+        get: vi.fn((id: string) => ({
+          pendingToolApprovals: id === 'm' ? pending : new Map(),
+          pendingControlRequests: new Map(),
+          name: id,
+          clients: new Set(),
+        })),
+        sendPromptResponse: vi.fn(),
+      } as unknown as SessionManager
+    }
+
+    it('returns compact rows with state and child status, filtered by source and activity', async () => {
+      await mount(() => true, summarySessions())
+      vi.mocked(children.get).mockImplementation((id: string) => (id === 'a' ? { status: 'running', attempt: 1, verification: null } : null) as never)
+      const api = new CodekinApi({ baseUrl: server.baseUrl, token: 'test' })
+
+      const all = await api.listSessions() as { sessions: Array<Record<string, unknown>> }
+      expect(all.sessions.map(r => [r.id, r.state])).toEqual([['a', 'working'], ['m', 'waiting_on_prompt'], ['z', 'archived']])
+      expect(all.sessions[0]).toMatchObject({ repo: '/r', branch: 'fix/x', child: { status: 'running', attempt: 1, verification: null } })
+      expect(all.sessions[1]).toMatchObject({ pendingPrompts: 1, child: null })
+
+      const agents = await api.listSessions({ source: 'agent', active: true }) as { sessions: Array<{ id: string }> }
+      expect(agents.sessions.map(r => r.id)).toEqual(['a'])
+    })
+
+    it('keeps the unfiltered full listing without ?view=summary', async () => {
+      await mount(() => true, summarySessions())
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/sessions`)
+      expect((await res.json()).sessions).toEqual(infos)
+    })
+
+    it('forwards one answer per question to the prompt router', async () => {
+      const sessions = summarySessions()
+      await mount(() => true, sessions)
+      const api = new CodekinApi({ baseUrl: server.baseUrl, token: 'test' })
+      await api.respondToPrompt('m', 'req-1', ['Yes', 'Postgres'])
+      expect(sessions.sendPromptResponse).toHaveBeenCalledWith('m', ['Yes', 'Postgres'], 'req-1')
+      const bad = await fetch(`${server.baseUrl}/api/orchestrator/sessions/m/respond`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId: 'req-1', value: [] }),
+      })
+      expect(bad.status).toBe(400)
+    })
+  })
+
+  describe('spawn linked to a task', () => {
+    it('validates the task, defaults the completion policy from it, and passes taskId through', async () => {
+      mkdirSync('/tmp/repos', { recursive: true })
+      const repo = mkdtempSync('/tmp/repos/joe-task-')
+      const realRepo = realpathSync(repo)
+      try {
+        const tasks = {
+          assertStartable: vi.fn((id: string, r: string) => {
+            if (id !== 'task-1' || r !== realRepo) throw new TaskActionError('Task belongs to another repo', 409)
+            return { completionPolicy: 'merge' }
+          }),
+        } as unknown as OrchestratorTaskService
+        children = makeChildren()
+        vi.mocked(children.spawn).mockResolvedValue({ id: 'child' } as never)
+        server = await startApp(createSessionRouter(() => true, makeSessions(), makeMemory(), children, undefined, tasks))
+        const api = new CodekinApi({ baseUrl: server.baseUrl, token: 'test' })
+
+        await api.spawnChild({ repo, task: 'do it', branchName: 'fix/it', taskId: 'task-1' })
+        expect(children.spawn).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'task-1', completionPolicy: 'merge' }))
+
+        await expect(api.spawnChild({ repo, task: 'do it', branchName: 'fix/it', taskId: 'other' })).rejects.toThrow(/\(409\)/)
+        expect(children.spawn).toHaveBeenCalledTimes(1)
+      } finally { rmSync(repo, { recursive: true }) }
     })
   })
 })

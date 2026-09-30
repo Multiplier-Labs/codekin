@@ -53,7 +53,7 @@ describe('relay auth routes', () => {
   let baseUrl: string
   const disconnectUser = vi.fn()
 
-  async function start(fetchImpl: typeof fetch) {
+  async function start(fetchImpl: typeof fetch, config: RelayConfig = CONFIG) {
     db = openControlPlaneDb(':memory:')
     store = new SqliteSessionStore(db)
     const app = express()
@@ -68,7 +68,7 @@ describe('relay auth routes', () => {
         cookie: { httpOnly: true, sameSite: 'lax', maxAge: 60_000 },
       }),
     )
-    app.use(createRelayAuthRouter({ db, config: CONFIG, fetchImpl, store, disconnectUser }))
+    app.use(createRelayAuthRouter({ db, config, fetchImpl, store, disconnectUser }))
     app.get('/api/protected', createRequireActiveUser(db), (_req, res) => res.json({ ok: true }))
     await new Promise<void>(resolve => {
       server = app.listen(0, '127.0.0.1', () => {
@@ -110,18 +110,94 @@ describe('relay auth routes', () => {
     return newCookie
   }
 
-  it('signs in an allowlisted user as active and serves /api/me', async () => {
-    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+  it('signs in an allowlisted member as active and serves /api/me', async () => {
+    await start(githubFetchMock({ id: 2, login: 'teammate' }), { ...CONFIG, allowedGithubIds: [1, 2] })
     const cookie = await login()
 
     const meRes = await fetch(`${baseUrl}/api/me`, { headers: { cookie } })
-    const me = (await meRes.json()) as { user: { login: string; role: string; status: string } }
-    expect(me.user.login).toBe('alari76')
-    expect(me.user.role).toBe('owner')
+    const me = (await meRes.json()) as {
+      user: { login: string; status: string }
+      authLevel: string
+      workspaces: Array<{ id: string; role: string }>
+      isOperator: boolean
+    }
+    expect(me.user.login).toBe('teammate')
     expect(me.user.status).toBe('active')
+    expect(me.authLevel).toBe('full')
+    expect(me.workspaces).toEqual([expect.objectContaining({ id: 'org-default', role: 'member' })])
+    expect(me.isOperator).toBe(false)
 
     const prot = await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })
     expect(prot.status).toBe(200)
+  })
+
+  describe('/api/me/preferences', () => {
+    async function signIn(): Promise<string> {
+      await start(githubFetchMock({ id: 2, login: 'teammate' }), { ...CONFIG, allowedGithubIds: [1, 2] })
+      return await login()
+    }
+    const put = (cookie: string, body: unknown) => fetch(`${baseUrl}/api/me/preferences`, {
+      method: 'PUT',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const me = async (cookie: string) =>
+      ((await (await fetch(`${baseUrl}/api/me`, { headers: { cookie } })).json()) as { preferences: unknown }).preferences
+
+    it('starts empty and round-trips through /api/me', async () => {
+      const cookie = await signIn()
+      expect(await me(cookie)).toEqual({ workspaceId: null, machineId: null })
+
+      const res = await put(cookie, { workspaceId: 'org-default', machineId: 'm-1' })
+      expect(res.status).toBe(200)
+      expect(await me(cookie)).toEqual({ workspaceId: 'org-default', machineId: 'm-1' })
+    })
+
+    it('merges partial updates and clears with null', async () => {
+      const cookie = await signIn()
+      await put(cookie, { workspaceId: 'org-default', machineId: 'm-1' })
+      await put(cookie, { machineId: null })
+      expect(await me(cookie)).toEqual({ workspaceId: 'org-default', machineId: null })
+    })
+
+    it('refuses a workspace the user is not a member of', async () => {
+      const cookie = await signIn()
+      const res = await put(cookie, { workspaceId: 'someone-elses' })
+      expect(res.status).toBe(400)
+      expect(await me(cookie)).toEqual({ workspaceId: null, machineId: null })
+    })
+
+    it('rejects malformed ids', async () => {
+      const cookie = await signIn()
+      expect((await put(cookie, { machineId: 42 })).status).toBe(400)
+      expect((await put(cookie, { machineId: 'x'.repeat(200) })).status).toBe(400)
+      expect((await put(cookie, { machineId: '../etc' })).status).toBe(400)
+    })
+
+    it('requires a signed-in user', async () => {
+      await signIn()
+      const res = await fetch(`${baseUrl}/api/me/preferences`, {
+        method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{}',
+      })
+      expect(res.status).toBe(401)
+    })
+  })
+
+  it('sends the operator to 2FA enrollment when they have no second factor', async () => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    const cookie = await login()
+    const me = (await (await fetch(`${baseUrl}/api/me`, { headers: { cookie } })).json()) as {
+      authLevel: string
+      workspaces: unknown[]
+      mfa: { required: boolean }
+    }
+    expect(me.authLevel).toBe('enrollment_required')
+    expect(me.mfa.required).toBe(true)
+    // Nothing about the account's workspaces until sign-in is complete.
+    expect(me.workspaces).toEqual([])
+    const prot = await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })
+    expect(prot.status).toBe(401)
+    expect(await prot.json()).toEqual({ error: 'mfa_required', authLevel: 'enrollment_required' })
   })
 
   it('rejects a non-allowlisted user without creating an account', async () => {
@@ -142,8 +218,8 @@ describe('relay auth routes', () => {
     // A `pending` row is the residue of a login the policy already refused, not
     // an admission — it must not become a standing exemption from the gate.
     db.prepare(
-      `INSERT INTO users (id, organization_id, github_id, login, role, status)
-       VALUES ('u-stranger', 'org-default', 2, 'stranger', 'member', 'pending')`,
+      `INSERT INTO users (id, github_id, login, status)
+       VALUES ('u-stranger', 2, 'stranger', 'pending')`,
     ).run()
 
     const startRes = await fetch(`${baseUrl}/api/auth/github/start`, { redirect: 'manual' })
@@ -163,8 +239,8 @@ describe('relay auth routes', () => {
     // The escape hatch: an operator who activated someone by hand is making a
     // real decision, and an env allowlist that omits them must not undo it.
     db.prepare(
-      `INSERT INTO users (id, organization_id, github_id, login, role, status)
-       VALUES ('u-manual', 'org-default', 77, 'manual', 'member', 'active')`,
+      `INSERT INTO users (id, github_id, login, status)
+       VALUES ('u-manual', 77, 'manual', 'active')`,
     ).run()
 
     const cookie = await login()
@@ -191,13 +267,13 @@ describe('relay auth routes', () => {
   })
 
   it('blocks a live session as soon as the user is disabled in the database', async () => {
-    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    await start(githubFetchMock({ id: 2, login: 'teammate' }), { ...CONFIG, allowedGithubIds: [1, 2] })
     const cookie = await login()
     expect((await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })).status).toBe(200)
 
     // Revocation happens in the users table; the 30-day rolling cookie the
     // browser already holds must stop working on the very next request.
-    db.prepare("UPDATE users SET status = 'disabled' WHERE login = ?").run('alari76')
+    db.prepare("UPDATE users SET status = 'disabled' WHERE login = ?").run('teammate')
 
     const prot = await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })
     expect(prot.status).toBe(403)
@@ -221,6 +297,7 @@ describe('relay auth routes', () => {
   it('401s a live session whose user row was deleted', async () => {
     await start(githubFetchMock({ id: 1, login: 'alari76' }))
     const cookie = await login()
+    db.prepare('DELETE FROM workspace_memberships WHERE user_id IN (SELECT id FROM users WHERE login = ?)').run('alari76')
     db.prepare('DELETE FROM users WHERE login = ?').run('alari76')
 
     expect((await fetch(`${baseUrl}/api/protected`, { headers: { cookie } })).status).toBe(401)
@@ -271,5 +348,79 @@ describe('relay auth routes', () => {
     expect((await res.json() as { destroyed: number }).destroyed).toBe(2)
     expect((await fetch(`${baseUrl}/api/me`, { headers: { cookie: second } }).then(r => r.json()) as { user: null }).user).toBeNull()
     expect(disconnectUser).toHaveBeenCalledWith(expect.any(String), 'all sessions logged out')
+  })
+
+  /** Start → callback with an optional returnTo; returns the callback's Location. */
+  async function loginVia(startQuery: string): Promise<string | null> {
+    const startRes = await fetch(`${baseUrl}/api/auth/github/start${startQuery}`, { redirect: 'manual' })
+    const location = new URL(startRes.headers.get('location') ?? '')
+    // The destination stays server-side: it is not handed to GitHub.
+    expect(location.search).not.toContain('pair')
+    const cbRes = await fetch(
+      `${baseUrl}/api/auth/github/callback?code=abc&state=${location.searchParams.get('state') ?? ''}`,
+      { redirect: 'manual', headers: { cookie: cookieOf(startRes) } },
+    )
+    expect(cbRes.status).toBe(302)
+    return cbRes.headers.get('location')
+  }
+
+  it('returns to the pairing approval page a sign-in started from', async () => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    const dest = await loginVia(`?returnTo=${encodeURIComponent('/pair?code=ABCD-EF23')}`)
+    expect(dest).toBe('/pair?code=ABCD-EF23')
+  })
+
+  it.each([
+    '//evil.example',
+    '/\\evil.example',
+    'https://evil.example/pair',
+    'javascript:alert(1)',
+    '%2F%2Fevil.example',
+    '/pair?code=ABCD&next=//evil.example',
+    '/link',
+  ])('ignores a hostile or unknown returnTo %j and lands on /', async (raw) => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    expect(await loginVia(`?returnTo=${encodeURIComponent(raw)}`)).toBe('/')
+  })
+
+  it('ignores a returnTo given as an array', async () => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    expect(await loginVia('?returnTo=/pair&returnTo=//evil.example')).toBe('/')
+  })
+
+  it('does not carry a returnTo from an earlier sign-in attempt', async () => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    const first = await fetch(`${baseUrl}/api/auth/github/start?returnTo=%2Fpair`, { redirect: 'manual' })
+    const cookie = cookieOf(first)
+    const second = await fetch(`${baseUrl}/api/auth/github/start`, { redirect: 'manual', headers: { cookie } })
+    const state = new URL(second.headers.get('location') ?? '').searchParams.get('state') ?? ''
+    const cbRes = await fetch(`${baseUrl}/api/auth/github/callback?code=abc&state=${state}`, {
+      redirect: 'manual',
+      headers: { cookie },
+    })
+    expect(cbRes.headers.get('location')).toBe('/')
+  })
+
+  it('still rejects a non-allowlisted user to the login screen, whatever the returnTo', async () => {
+    await start(githubFetchMock({ id: 2, login: 'stranger' }))
+    expect(await loginVia(`?returnTo=${encodeURIComponent('/pair?code=ABCD-EF23')}`)).toBe('/?auth_error=access_not_allowed')
+  })
+
+  it('publishes invite-only admission without an access route by default', async () => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }))
+    const res = await fetch(`${baseUrl}/api/auth/config`)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ inviteOnly: true })
+  })
+
+  it('publishes the configured access-request route, identically for everyone', async () => {
+    await start(githubFetchMock({ id: 1, login: 'alari76' }), { ...CONFIG, accessRequestUrl: 'https://codekin.ai/access' })
+    const anonymous = await (await fetch(`${baseUrl}/api/auth/config`)).json()
+    expect(anonymous).toEqual({ inviteOnly: true, accessUrl: 'https://codekin.ai/access' })
+    // A signed-in (allowlisted) caller gets the same answer: nothing about
+    // any particular account is revealed.
+    const cookie = await login()
+    const signedIn = await (await fetch(`${baseUrl}/api/auth/config`, { headers: { cookie } })).json()
+    expect(signedIn).toEqual(anonymous)
   })
 })

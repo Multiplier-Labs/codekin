@@ -1,6 +1,6 @@
 # Hosted Relay & Control Plane
 
-**Status**: Draft architecture spec
+**Status**: Implemented (app.codekin.ai). Kept as design rationale; operating docs are in [OPERATIONS.md](./OPERATIONS.md#hosted-relay) and [SELF-HOSTED-RELAY.md](./SELF-HOSTED-RELAY.md).
 **Goal**: Let team members use Codekin from a hosted web app while keeping coding agents, subscriptions, credentials, repositories, and command execution on each developer's local machine.
 
 ---

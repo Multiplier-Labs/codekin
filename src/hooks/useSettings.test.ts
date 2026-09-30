@@ -1,4 +1,4 @@
-/** Tests for useSettings — verifies settings persistence and retrieval with mocked localStorage. */
+/** Tests for useSettings — the token in localStorage and the theme in the prefs store. */
 // @vitest-environment jsdom
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
@@ -7,7 +7,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createElement, act } from 'react'
 import { createRoot } from 'react-dom/client'
 
-import { useSettings } from './useSettings.js'
+import { useSettings, resetTokenForTest } from './useSettings.js'
+import { getPref, resetPrefsForTest } from '../lib/prefs.js'
 
 /* ------------------------------------------------------------------ */
 /*  Minimal renderHook                                                 */
@@ -46,6 +47,8 @@ const STORAGE_KEY = 'codekin-settings'
 describe('useSettings', () => {
   beforeEach(() => {
     localStorage.clear()
+    resetTokenForTest()
+    resetPrefsForTest()
   })
 
   afterEach(() => {
@@ -87,10 +90,17 @@ describe('useSettings', () => {
       unmount()
     })
 
-    it('defaults theme to dark when saved theme is not light', () => {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ token: '', theme: 'blue' }))
+    it('defaults theme to dark when saved theme is unknown', () => {
+      resetPrefsForTest({ theme: 'blue' as never })
       const { result, unmount } = renderHook(() => useSettings())
       expect(result.current.settings.theme).toBe('dark')
+      unmount()
+    })
+
+    it.each(['dark', 'light', 'midnight', 'paper', 'contrast', 'solarized', 'dracula', 'gruvbox', 'matrix'])('restores saved theme %s', (theme) => {
+      resetPrefsForTest({ theme: theme as never })
+      const { result, unmount } = renderHook(() => useSettings())
+      expect(result.current.settings.theme).toBe(theme)
       unmount()
     })
   })
@@ -109,14 +119,16 @@ describe('useSettings', () => {
       unmount()
     })
 
-    it('updates fontSize in state', () => {
+    it('writes the theme to the prefs store, not localStorage', () => {
       const { result, unmount } = renderHook(() => useSettings())
 
       act(() => {
-        result.current.updateSettings({ fontSize: 20 })
+        result.current.updateSettings({ theme: 'light' })
       })
 
-      expect(result.current.settings.fontSize).toBe(20)
+      expect(result.current.settings.theme).toBe('light')
+      expect(getPref('theme')).toBe('light')
+      expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
       unmount()
     })
 
@@ -130,7 +142,7 @@ describe('useSettings', () => {
       expect(result.current.settings.fontSize).toBe(16) // preserved
 
       act(() => {
-        result.current.updateSettings({ fontSize: 18 })
+        result.current.updateSettings({ theme: 'paper' })
       })
 
       expect(result.current.settings.token).toBe('abc') // preserved
@@ -143,6 +155,7 @@ describe('useSettings', () => {
         r1.current.updateSettings({ token: 'round-trip-tok' })
       })
       u1()
+      resetTokenForTest()
 
       const { result: r2, unmount: u2 } = renderHook(() => useSettings())
       expect(r2.current.settings.token).toBe('round-trip-tok')
@@ -186,6 +199,20 @@ describe('useSettings', () => {
       expect(window.history.replaceState).toHaveBeenCalled()
       const calledUrl = (window.history.replaceState as ReturnType<typeof vi.fn>).mock.calls[0][2] as string
       expect(calledUrl).not.toContain('token=')
+      unmount()
+    })
+
+    it('reads token from the #token= fragment, persists it and strips it', () => {
+      window.history.replaceState = originalReplaceState
+      window.history.replaceState({}, '', '/#token=frag-tok-456')
+      window.history.replaceState = vi.fn()
+
+      const { result, unmount } = renderHook(() => useSettings())
+      expect(result.current.settings.token).toBe('frag-tok-456')
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).token).toBe('frag-tok-456')
+
+      const calledUrl = (window.history.replaceState as ReturnType<typeof vi.fn>).mock.calls[0][2] as string
+      expect(calledUrl).toBe('/')
       unmount()
     })
   })

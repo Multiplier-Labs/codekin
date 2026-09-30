@@ -10,6 +10,7 @@ import {
   redirectToLogin,
   checkAuthSession,
   getRepoApprovals,
+  getAllRepoApprovals,
   removeRepoApproval,
   bulkRemoveRepoApprovals,
   listArchivedSessions,
@@ -29,6 +30,7 @@ import {
   setWorktreePrefix,
   getAgentName,
   setAgentName,
+  cloneRepo,
 } from './ccApi'
 
 const mockFetch = vi.fn()
@@ -178,6 +180,23 @@ describe('deleteSession', () => {
   it('throws on non-ok response', async () => {
     mockFetch.mockResolvedValue(jsonResponse({}, 404))
     await expect(deleteSession('tok', 's1')).rejects.toThrow('Failed to delete session: 404')
+  })
+})
+
+describe('cloneRepo', () => {
+  it('resolves to the server-reported path (which may be an existing checkout)', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ success: true, path: '/r/project' }, 200))
+    await expect(cloneRepo('tok', 'me', 'project')).resolves.toBe('/r/project')
+  })
+
+  it('resolves to null when the server omits the path', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ success: true }, 200))
+    await expect(cloneRepo('tok', 'me', 'project')).resolves.toBeNull()
+  })
+
+  it('throws the server error on failure', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ error: 'Clone failed: nope' }, 500))
+    await expect(cloneRepo('tok', 'me', 'project')).rejects.toThrow('Clone failed: nope')
   })
 })
 
@@ -466,6 +485,45 @@ describe('getRepoApprovals', () => {
     await expect(getRepoApprovals('tok', '/tmp')).rejects.toThrow(
       'Failed to fetch approvals: 500',
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getAllRepoApprovals
+// ---------------------------------------------------------------------------
+
+describe('getAllRepoApprovals', () => {
+  it('reads every repo in one request', async () => {
+    const repos = [{ workingDir: '/a', tools: ['Read'], commands: [], patterns: [] }]
+    mockFetch.mockResolvedValue(jsonResponse({ repos }))
+    expect(await getAllRepoApprovals('tok', ['/a', '/b', '/c'])).toEqual(repos)
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+    expect(mockFetch).toHaveBeenCalledWith('/cc/api/approvals/all', { headers: { Authorization: 'Bearer tok' } })
+  })
+
+  it('falls back to per-repo reads, at most four in flight, on an older server', async () => {
+    const dirs = Array.from({ length: 20 }, (_, i) => `/r${String(i).padStart(2, '0')}`)
+    let inFlight = 0
+    let peak = 0
+    mockFetch.mockImplementation(async (url: string) => {
+      if (url.endsWith('/api/approvals/all')) return jsonResponse({}, 404)
+      inFlight++
+      peak = Math.max(peak, inFlight)
+      await new Promise(r => setTimeout(r, 1))
+      inFlight--
+      if (url.includes('r03')) return jsonResponse({}, 500)
+      const rules = url.includes('r01') ? ['Read'] : []
+      return jsonResponse({ tools: rules, commands: [], patterns: [] })
+    })
+    const result = await getAllRepoApprovals('tok', dirs)
+    expect(result).toEqual([{ workingDir: '/r01', tools: ['Read'], commands: [], patterns: [] }])
+    expect(mockFetch).toHaveBeenCalledTimes(21)
+    expect(peak).toBeLessThanOrEqual(4)
+  })
+
+  it('throws on other failures', async () => {
+    mockFetch.mockResolvedValue(jsonResponse({}, 500))
+    await expect(getAllRepoApprovals('tok', ['/a'])).rejects.toThrow('Failed to fetch approvals: 500')
   })
 })
 

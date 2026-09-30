@@ -44,11 +44,15 @@ import { LoopArtifactStore } from './loop-artifacts.js'
 import { createLoopRouter } from './loop-routes.js'
 import { createRunsRouter } from './runs-routes.js'
 import { RunStore } from './run-store.js'
+import { TaskStore } from './task-store.js'
+import { OrchestratorTaskService } from './orchestrator-tasks.js'
+import { sendOrchestratorNotification } from './orchestrator-notify.js'
 import { HARNESSES } from './harness-registry.js'
 import { CommitEventHandler } from './commit-event-handler.js'
 import { jsonParse } from './json-parse.js'
 import { createMessageRateLimiter } from './ws-rate-limit.js'
 import { isWsOriginAllowed } from './ws-origin-check.js'
+import { broadcastToAuthenticated } from './ws-broadcast.js'
 import { checkForUpdates, getUpdateNotification } from './version-check.js'
 import { stopOpenCodeServer } from './opencode-process.js'
 import { ensureHookConfig, syncCommitHooks } from './commit-event-hooks.js'
@@ -58,11 +62,14 @@ import { createWebhookRouter } from './webhook-routes.js'
 import { createWebhookSetupRouter } from './webhook-setup-routes.js'
 import { createUploadRouter } from './upload-routes.js'
 import { createDocsRouter } from './docs-routes.js'
+import { EmbeddedConnectorSupervisor, createRelayStatusRouter, embeddedConnectorDisabled } from './relay/embedded-connector.js'
+import { resolveLocalTarget } from './relay/connector-proxy.js'
+import { codekinPackageVersion } from './relay/relay-credential.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
-import { ensureOrchestratorRunning, getOrchestratorSessionId, isOrchestratorSession, getOrCreateOrchestratorId } from './orchestrator-manager.js'
+import { ensureOrchestratorRunning, getOrchestratorProvider, getOrchestratorSessionId, isOrchestratorSession, getOrCreateOrchestratorId } from './orchestrator-manager.js'
 import { OrchestratorMonitor } from './orchestrator-monitor.js'
 import { getOrchestratorOutbox } from './orchestrator-outbox.js'
-import { PORT as CONFIG_PORT, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR, DATA_DIR } from './config.js'
+import { PORT as CONFIG_PORT, BIND_HOST, AUTH_TOKEN as configAuthToken, CORS_ORIGIN, FRONTEND_DIST, AGENT_DISPLAY_NAME, getAgentDisplayName, setAgentDisplayNameResolver, TRUST_PROXY, AUTO_RESTORE_SESSIONS, ORCHESTRATOR_MONITOR, DATA_DIR, resolveRepoPathInRoot } from './config.js'
 
 // ---------------------------------------------------------------------------
 // CLI args (legacy bare-metal compat) and auth setup
@@ -344,6 +351,26 @@ app.use(createWebhookSetupRouter(verifyToken, extractToken, () => loadWebhookCon
 app.use(createUploadRouter(verifyToken, extractToken, () => sessions.archive.getSetting('repos_path', '')))
 app.use(createDocsRouter(verifyToken, extractToken))
 
+// Hosted relay connector, run in-process when this machine holds a managed
+// relay credential (written by the installer / `codekin relay login`). The
+// target is this very process, so it uses our own port and auth token rather
+// than guessing them from env files like the standalone connector must.
+const relayConnector = new EmbeddedConnectorSupervisor({
+  version: codekinPackageVersion(),
+  disabled: embeddedConnectorDisabled(),
+  localTarget: () => {
+    const target = resolveLocalTarget()
+    return {
+      ...target,
+      origin: process.env.CODEKIN_LOCAL_URL || `http://127.0.0.1:${port}`,
+      authToken,
+      tokenSource: 'server process',
+      browserOrigin: target.browserOrigin || CORS_ORIGIN,
+    }
+  },
+})
+app.use(createRelayStatusRouter(verifyToken, extractToken, relayConnector))
+
 // Workflow router — commitEventHandler is set after engine init, but the
 // router closure captures the variable reference so it will resolve correctly.
 app.use('/api/workflows', createWorkflowRouter(verifyToken, extractToken, sessions, commitEventState))
@@ -361,7 +388,18 @@ const orchestratorMonitorRef: { current: OrchestratorMonitor | null } = { curren
 // Child manager is created here (not router-internal) so the deployment
 // breach handler can spawn diagnostic children through the same instance.
 const childManager = new OrchestratorChildManager(sessions, { runStore })
-app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, childManager, runStore))
+// List the interrupted children again, tell Joe so partial work can be
+// salvaged, and keep their sessions from auto-restarting unsupervised.
+// Joe's per-repo task list (docs/JOE-TASKS-SPEC.md). Task status follows the
+// linked child; human actions reach Joe through the durable outbox.
+const taskStore = new TaskStore()
+const taskService = new OrchestratorTaskService({
+  store: taskStore,
+  notify: (args) => sendOrchestratorNotification(sessions, { ...args, parentSessionId: getOrCreateOrchestratorId() }),
+})
+childManager.onChildUpdate((child) => taskService.syncFromChild(child))
+childManager.recoverInterrupted(interruptedAgentRuns)
+app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, childManager, runStore, taskService))
 // Loops 2.0 — durable, event-sourced outcome loops (docs/LOOPS-REWRITE-SPEC.md).
 const loopStore = new LoopStore()
 const loopArtifacts = new LoopArtifactStore(join(DATA_DIR, 'loop-artifacts'))
@@ -428,16 +466,13 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 const server = createServer(app)
 const wss = new WebSocketServer({ server })
 
-// Wire up global broadcast so session manager can notify ALL connected clients
-// (e.g. when a webhook creates a new session that all UIs should show)
-sessions._globalBroadcast = (msg) => {
-  const data = JSON.stringify(msg)
-  for (const ws of wss.clients) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(data)
-    }
-  }
-}
+/** Connections that have completed the `auth` handshake. */
+const authenticatedClients = new Set<WebSocket>()
+
+// Wire up global broadcast so session manager can notify all authenticated
+// clients (e.g. when a webhook creates a new session that all UIs should show).
+// Never wss.clients: that includes sockets still inside the auth window.
+sessions._globalBroadcast = (msg) => broadcastToAuthenticated(authenticatedClients, msg)
 
 /** Maps each WebSocket connection to its current session ID. */
 const clientSessions = new Map<WebSocket, string>()
@@ -543,6 +578,7 @@ wss.on('connection', (ws: WebSocket, req) => {
         return
       }
       authenticated = true
+      authenticatedClients.add(ws)
       clearTimeout(authTimeout)
       send({ type: 'connected', connectionId, claudeAvailable, claudeVersion, apiKeySet, codexAvailable, codexAuthenticated, openCodeAvailable })
 
@@ -562,6 +598,7 @@ wss.on('connection', (ws: WebSocket, req) => {
       sessions.leave(sessionId, ws)
     }
     clientSessions.delete(ws)
+    authenticatedClients.delete(ws)
   })
 
   ws.on('error', (err) => {
@@ -584,8 +621,11 @@ wss.on('close', () => clearInterval(heartbeat))
 // Start server and handle graceful shutdown
 // ---------------------------------------------------------------------------
 
-server.listen(port, '0.0.0.0', () => {
-  console.log(`Codekin WebSocket server listening on port ${port}`)
+server.listen(port, BIND_HOST, () => {
+  console.log(`Codekin WebSocket server listening on ${BIND_HOST}:${port}`)
+
+  // Start after listening, so the connector's first proxied call lands.
+  relayConnector.start()
 
   // Check for newer version on npm (non-blocking)
   void checkForUpdates()
@@ -598,7 +638,7 @@ server.listen(port, '0.0.0.0', () => {
   if (AUTO_RESTORE_SESSIONS) {
     sessions.restoreActiveSessions()
     try {
-      ensureOrchestratorRunning(sessions)
+      if (getOrchestratorProvider(sessions)) ensureOrchestratorRunning(sessions)
     } catch (err) {
       console.error('[orchestrator] Failed to start on boot:', err)
     }
@@ -615,6 +655,9 @@ server.listen(port, '0.0.0.0', () => {
     // Don't notify the orchestrator about its own prompts
     const session = sessions.get(sessionId)
     if (!session || isOrchestratorSession(session.source)) return
+    // Joe's own children are reported by the child manager (deduplicated,
+    // through the outbox's idle gate) — don't interrupt Joe a second time.
+    if (childManager.get(sessionId)) return
 
     const displayName = getAgentDisplayName()
     const actionDesc = toolName ? `Tool: ${toolName}` : 'Unknown tool'
@@ -642,7 +685,7 @@ server.listen(port, '0.0.0.0', () => {
       console.error('[workflow] Failed to resume interrupted runs:', err)
     })
 
-    // Broadcast workflow events to all WebSocket clients
+    // Broadcast workflow events to all authenticated WebSocket clients
     engine.on('workflow_event', (event: WorkflowEvent) => {
       const msg: WsServerMessage = {
         type: 'workflow_event',
@@ -652,12 +695,7 @@ server.listen(port, '0.0.0.0', () => {
         stepKey: event.stepKey,
         status: event.status,
       }
-      const data = JSON.stringify(msg)
-      for (const ws of wss.clients) {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data)
-        }
-      }
+      broadcastToAuthenticated(authenticatedClients, msg)
     })
 
     // Broadcast loop events on the same channel, tagged with engine:'loop' so
@@ -677,12 +715,20 @@ server.listen(port, '0.0.0.0', () => {
         kind: run?.recipeId ?? '',
         status: run?.state,
       }
-      const data = JSON.stringify(msg)
-      for (const ws of wss.clients) {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data)
-        }
+      broadcastToAuthenticated(authenticatedClients, msg)
+    })
+
+    // Task list changes on the same channel, so open task views refresh.
+    taskStore.setEventListener((event) => {
+      const msg: WsServerMessage = {
+        type: 'workflow_event',
+        engine: 'agent',
+        eventType: 'task_updated',
+        runId: event.taskId,
+        kind: 'task',
+        status: event.status,
       }
+      broadcastToAuthenticated(authenticatedClients, msg)
     })
 
     // Agent (orchestrator-child) run events on the same channel.
@@ -695,12 +741,7 @@ server.listen(port, '0.0.0.0', () => {
         kind: event.kind,
         status: event.status,
       }
-      const data = JSON.stringify(msg)
-      for (const ws of wss.clients) {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data)
-        }
-      }
+      broadcastToAuthenticated(authenticatedClients, msg)
     })
 
     // Repo activity index: aggregates commits, session activity, and hook/webhook
@@ -797,12 +838,23 @@ server.listen(port, '0.0.0.0', () => {
         lastDiagnoseAt.set(payload.probeKey, now)
 
         const samples = deploymentMonitor.listSamples({ probeKey: payload.probeKey, limit: 12 })
+        const incidentTask = buildIncidentTask(payload, samples, new Date(now))
+        const [task] = taskService.create([{
+          repo: resolveRepoPathInRoot(deployment.repoPath) ?? deployment.repoPath,
+          title: `Diagnose ${payload.probeKey} breach on ${deployment.name}`,
+          detail: incidentTask,
+          acceptance: 'An incident report in .codekin/reports/incidents/ and a PR with it.',
+          priority: 'high',
+          source: 'incident',
+          sourceRef: payload.probeKey,
+          createdBy: 'system',
+        }])
         const child = await childManager.spawn({
           repo: deployment.repoPath,
-          task: buildIncidentTask(payload, samples, new Date(now)),
+          taskId: task.id,
+          task: incidentTask,
           branchName: incidentBranchName(deployment.id, new Date(now)),
           completionPolicy: 'pr',
-          deployAfter: false,
           useWorktree: true,
           parentSessionId: getOrCreateOrchestratorId(),
         })
@@ -883,6 +935,7 @@ server.listen(port, '0.0.0.0', () => {
 // Graceful shutdown — wait for Claude processes to release session locks
 async function gracefulShutdown(signal: string): Promise<void> {
   console.log(`${signal} received, shutting down...`)
+  relayConnector.stop()
   shutdownWorkflowEngine()
   shutdownRepoActivityIndex()
   shutdownDeploymentMonitor()

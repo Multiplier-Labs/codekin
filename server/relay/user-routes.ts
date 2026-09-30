@@ -1,38 +1,31 @@
 /**
- * User administration endpoints (spec §7).
+ * Platform account administration (operator only).
  *
- * A signed-in owner or admin can list the org's users and change a user's
- * status (the revocation path: disabling a user cuts their access
- * immediately) or role. This is the only way to *set* status: the login
- * upsert only ever upgrades, so a user granted access by mistake — or one
- * that should lose it — can only be corrected here.
+ * Roles belong to workspaces now (workspace-routes.ts); what remains here is
+ * account-level and cuts across every workspace: the operator (the account
+ * configured as OWNER_GITHUB_ID) can list accounts, disable or re-enable one
+ * — the platform kill switch — and allow an account to create workspaces.
+ * This is the only way to *set* status: the login upsert only ever upgrades,
+ * so an account that should lose access can only be corrected here.
  *
- * The configured owner account is untouchable, and no one may change their
- * own access, so neither a mistake nor a hostile admin can lock the owner out
- * or lock themselves in.
+ * The operator account is untouchable, and no one may change their own
+ * access, so a mistake cannot lock the operator out.
  */
 
 import { Router } from 'express'
 import type Database from 'better-sqlite3'
-import { createRequireActiveUser } from './relay-auth-routes.js'
+import { createRequireActiveUser, createRequireRecentAuth, isOperator } from './relay-auth-routes.js'
 import { getUserById, listUsers } from './control-plane-db.js'
-import type { UserRole, UserStatus, UserRow } from './control-plane-db.js'
+import type { UserStatus, UserRow } from './control-plane-db.js'
 import { recordAuditEvent } from './audit.js'
 import type { BrowserHub } from './browser-hub.js'
 import type { RelayConfig } from './relay-config.js'
+import { revokePendingDeviceLinks } from './device-link.js'
 import type { SqliteSessionStore } from './sqlite-session-store.js'
 
 /** The slice of the session store this router needs (kept narrow for tests). */
 type SessionRevoker = Pick<SqliteSessionStore, 'destroyUserSessions'>
 
-/** Roles allowed to administer other users. */
-const MANAGER_ROLES: UserRole[] = ['owner', 'admin']
-/**
- * Roles an admin action may assign. `owner` is absent on purpose: ownership
- * follows the configured OWNER_GITHUB_ID, not a hand-set column, so there is
- * exactly one owner and it cannot be created by an API call.
- */
-const ASSIGNABLE_ROLES: UserRole[] = ['admin', 'member', 'viewer']
 const ASSIGNABLE_STATUSES: UserStatus[] = ['active', 'pending', 'disabled']
 
 interface AdminUserView {
@@ -41,21 +34,22 @@ interface AdminUserView {
   login: string
   displayName: string | null
   avatarUrl: string | null
-  role: UserRole
   status: UserStatus
-  isOwner: boolean
+  canCreateWorkspaces: boolean
+  isOperator: boolean
 }
 
 function toAdminView(row: UserRow, config: RelayConfig): AdminUserView {
+  const operator = isOperator(row, config)
   return {
     id: row.id,
     githubId: row.github_id,
     login: row.login,
     displayName: row.display_name,
     avatarUrl: row.avatar_url,
-    role: row.role,
     status: row.status,
-    isOwner: row.github_id === config.ownerGithubId,
+    canCreateWorkspaces: operator || row.can_create_workspaces === 1,
+    isOperator: operator,
   }
 }
 
@@ -66,29 +60,36 @@ export function createUserRouter(
   store?: SessionRevoker,
 ): Router {
   const router = Router()
-  const requireActiveUser = createRequireActiveUser(db)
+  const requireActiveUser = createRequireActiveUser(db, config)
+  const requireRecentAuth = createRequireRecentAuth(db)
 
-  /** List every user in the org, for the admin management view. */
+  const requireOperator = (actorId: string): boolean => {
+    const actor = getUserById(db, actorId)
+    return actor !== undefined && isOperator(actor, config)
+  }
+
+  /** Every account on the platform. */
   router.get('/api/users', requireActiveUser, (req, res) => {
     const actor = req.session.user!
-    if (!MANAGER_ROLES.includes(actor.role)) {
-      res.status(403).json({ error: 'Only an owner or admin can list users' })
+    if (!requireOperator(actor.id)) {
+      res.status(403).json({ error: 'Only the platform operator can list accounts' })
       return
     }
     res.json({ users: listUsers(db).map(u => toAdminView(u, config)) })
   })
 
-  /** Change a user's status and/or role. */
-  router.patch('/api/users/:id', requireActiveUser, (req, res) => {
+  /** Change an account's platform status and/or workspace-creation permission. */
+  router.patch('/api/users/:id', requireActiveUser, requireRecentAuth, (req, res) => {
     const actor = req.session.user!
-    if (!MANAGER_ROLES.includes(actor.role)) {
+    if (!requireOperator(actor.id)) {
       recordAuditEvent(db, {
         kind: 'access_denied',
         actorUserId: actor.id,
         ip: req.ip ?? null,
+        userAgent: req.get('user-agent') ?? null,
         metadata: { stage: 'user_update', target: String(req.params.id) },
       })
-      res.status(403).json({ error: 'Only an owner or admin can change user access' })
+      res.status(403).json({ error: 'Only the platform operator can change account access' })
       return
     }
 
@@ -97,23 +98,16 @@ export function createUserRouter(
       res.status(404).json({ error: 'User not found' })
       return
     }
-    // The owner is defined by config, not by this column: never let it be
-    // disabled or demoted, or a rename/mistake could lock the org's owner out
-    // (disabled is sticky across logins, so it would not self-heal).
-    if (target.github_id === config.ownerGithubId) {
-      res.status(403).json({ error: 'The owner account cannot be changed here' })
-      return
-    }
-    // No self-service: an admin cannot disable themselves into a dead end, nor
-    // keep themselves active against the owner's wishes by editing their row.
-    if (target.id === actor.id) {
-      res.status(400).json({ error: 'You cannot change your own access' })
+    // The operator is defined by config: never let it be disabled, or a
+    // mistake could lock the platform out (disabled is sticky across logins).
+    if (isOperator(target, config) || target.id === actor.id) {
+      res.status(400).json({ error: 'The operator account cannot be changed here' })
       return
     }
 
-    const body = req.body as { status?: unknown; role?: unknown }
+    const body = req.body as { status?: unknown; canCreateWorkspaces?: unknown }
     let nextStatus = target.status
-    let nextRole = target.role
+    let nextCanCreate = target.can_create_workspaces
 
     if (body.status !== undefined) {
       if (typeof body.status !== 'string' || !ASSIGNABLE_STATUSES.includes(body.status as UserStatus)) {
@@ -122,32 +116,26 @@ export function createUserRouter(
       }
       nextStatus = body.status as UserStatus
     }
-
-    if (body.role !== undefined) {
-      // Only the owner sets roles; an admin manages access (status), not rank.
-      if (actor.role !== 'owner') {
-        res.status(403).json({ error: 'Only the owner can change roles' })
+    if (body.canCreateWorkspaces !== undefined) {
+      if (typeof body.canCreateWorkspaces !== 'boolean') {
+        res.status(400).json({ error: 'canCreateWorkspaces must be a boolean' })
         return
       }
-      if (typeof body.role !== 'string' || !ASSIGNABLE_ROLES.includes(body.role as UserRole)) {
-        res.status(400).json({ error: `role must be one of: ${ASSIGNABLE_ROLES.join(', ')}` })
-        return
-      }
-      nextRole = body.role as UserRole
+      nextCanCreate = body.canCreateWorkspaces ? 1 : 0
     }
 
-    if (nextStatus === target.status && nextRole === target.role) {
+    if (nextStatus === target.status && nextCanCreate === target.can_create_workspaces) {
       res.json({ user: toAdminView(target, config) })
       return
     }
 
     db.prepare(
-      `UPDATE users SET status = ?, role = ?, updated_at = datetime('now') WHERE id = ?`,
-    ).run(nextStatus, nextRole, target.id)
+      `UPDATE users SET status = ?, can_create_workspaces = ?, updated_at = datetime('now') WHERE id = ?`,
+    ).run(nextStatus, nextCanCreate, target.id)
 
     // Access just changed under the target's feet. requireActiveUser catches
     // their next REST call, but an open relay socket resolved its standing at
-    // hello — drop it so a disabled or demoted user stops immediately.
+    // hello — drop it so a disabled user stops immediately.
     browserHub?.reauthorize({ userId: target.id })
 
     // Losing active status must also burn the stored cookies. requireActiveUser
@@ -158,6 +146,7 @@ export function createUserRouter(
     let destroyedSessions = 0
     if (nextStatus !== 'active') {
       destroyedSessions = store?.destroyUserSessions(target.id) ?? 0
+      revokePendingDeviceLinks(db, target.id)
     }
 
     recordAuditEvent(db, {
@@ -169,9 +158,8 @@ export function createUserRouter(
         target: target.login,
         targetUserId: target.id,
         status: nextStatus,
-        role: nextRole,
         previousStatus: target.status,
-        previousRole: target.role,
+        canCreateWorkspaces: nextCanCreate === 1,
         destroyedSessions,
       },
     })

@@ -3,16 +3,15 @@
  *
  * Shows all repos that have active sessions as collapsible tree nodes.
  * The active repo is expanded and shows its sessions and a Workflows link.
- * Bottom section: app settings, theme toggle, logout, connection status.
+ * Bottom section: app settings, theme menu, logout, connection status.
  * Resizable via drag handle on the right edge; collapsible to icon-only strip.
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import {
   IconBook, IconSettings as IconSettingsGear,
-  IconLogout, IconSun, IconMoon,
+  IconLogout,
   IconChevronRight, IconChevronLeft, IconSparkles, IconX, IconRobotFace,
-  IconShare,
 } from '@tabler/icons-react'
 import type { Session, Module, Repo, MobileProps, ConnectionState } from '../types'
 import type { RepoGroup } from '../hooks/useRepos'
@@ -22,9 +21,11 @@ import { RepoSection, type RepoNode } from './RepoSection'
 import type { RepoDrawerTab } from './RepoDrawer'
 import { ModuleBrowser } from './ModuleBrowser'
 import { ConnectionPopup } from './ConnectionPopup'
+import { ThemeMenu } from './ThemeMenu'
+import type { ThemeId } from '../themes/registry'
 import { groupKey } from '../hooks/useSessionOrchestration'
+import { getPref, setPref } from '../lib/prefs'
 
-const SIDEBAR_WIDTH_KEY = 'codekin-left-sidebar-width'
 const DEFAULT_WIDTH = 224
 const MIN_WIDTH = 160
 const MAX_WIDTH = 480
@@ -88,8 +89,8 @@ interface Props {
   activeRepo: Repo | null
   /** Auth token for API requests (file uploads, repo fetches). */
   token: string
-  /** Current color theme ('dark' | 'light'). */
-  theme: string
+  /** Current color theme. */
+  theme: ThemeId
   /** WebSocket connection state ('disconnected' | 'connecting' | 'connected'). */
   connState: string
   /** Whether Claude Code connection is disabled by the user. */
@@ -132,9 +133,10 @@ interface Props {
    * Hosted mode only: share the active session. Omitted in the local app,
    * where there is nothing to share and no Share control is shown.
    */
-  onShareSession?: () => void
-  /** Toggle or set the color theme. */
-  onUpdateTheme: (theme: string) => void
+  /** Share a session (hosted only) — offered in each session's row menu. */
+  onShareSession?: (id: string) => void
+  /** Set the color theme. */
+  onUpdateTheme: (theme: ThemeId) => void
   /** Send a module's content to the active session as context. */
   onSendModule: (mod: Module) => void
   /** Navigate to the Automations view (workflows + loop runs). */
@@ -194,10 +196,10 @@ export function LeftSidebar({
   mobile = {},
 }: Props) {
   const { isMobile = false, mobileOpen = false, onMobileClose } = mobile
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem('codekin-left-sidebar-collapsed') === 'true')
+  const [collapsed, setCollapsed] = useState(() => getPref('sidebarCollapsed') === true)
   const [width, setWidth] = useState(() => {
-    const stored = localStorage.getItem(SIDEBAR_WIDTH_KEY)
-    return stored ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Number(stored))) : DEFAULT_WIDTH
+    const stored = getPref('sidebarWidth')
+    return stored ? Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, stored)) : DEFAULT_WIDTH
   })
   const [modulesOpen, setModulesOpen] = useState(false)
   const [connPopupOpen, setConnPopupOpen] = useState(false)
@@ -207,11 +209,11 @@ export function LeftSidebar({
   const startWidth = useRef(0)
 
   useEffect(() => {
-    localStorage.setItem('codekin-left-sidebar-collapsed', String(collapsed))
+    setPref('sidebarCollapsed', collapsed)
   }, [collapsed])
 
   useEffect(() => {
-    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width))
+    setPref('sidebarWidth', width)
   }, [width])
 
   // Close modules popover on outside click
@@ -291,23 +293,12 @@ export function LeftSidebar({
           <IconChevronRight size={14} stroke={2} />
         </button>
         <div className="mt-auto flex flex-col items-center gap-2">
-          {onShareSession && (
-            <button
-              onClick={onShareSession}
-              disabled={!activeSessionId}
-              className="rounded-control p-1.5 text-ink hover:bg-surface-raised hover:text-ink disabled:opacity-40 disabled:hover:bg-transparent"
-              title={activeSessionId ? 'Share this session' : 'Open a session to share it'}
-            >
-              <IconShare size={14} stroke={2} />
-            </button>
-          )}
-          <button
-            onClick={() => onUpdateTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="rounded-control p-1.5 text-ink hover:bg-surface-raised hover:text-ink"
-            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {theme === 'dark' ? <IconSun size={14} stroke={2} /> : <IconMoon size={14} stroke={2} />}
-          </button>
+          <ThemeMenu
+            theme={theme}
+            onSelect={onUpdateTheme}
+            buttonClassName="rounded-control p-1.5 text-ink hover:bg-surface-raised hover:text-ink"
+            iconSize={14}
+          />
           <div className="relative">
             <button
               onClick={() => setConnPopupOpen(o => !o)}
@@ -455,6 +446,7 @@ export function LeftSidebar({
             onDeleteRepo={onDeleteRepo}
             onOpenDrawer={(wd, tab) => { onOpenDrawer(wd, tab); if (isMobile) onMobileClose?.() }}
             onMoveToWorktree={onMoveToWorktree}
+            onShareSession={onShareSession}
           />
         ))}
 
@@ -501,24 +493,13 @@ export function LeftSidebar({
           >
             <IconSettingsGear className="density-icon" stroke={2} />
           </button>
-          {onShareSession && (
-            <button
-              onClick={onShareSession}
-              disabled={!activeSessionId}
-              className="density-icon-btn gap-1 px-1.5 py-1 rounded-control text-body text-ink hover:text-ink hover:bg-surface-raised transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
-              title={activeSessionId ? 'Share this session' : 'Open a session to share it'}
-            >
-              <IconShare className="density-icon" stroke={2} />
-            </button>
-          )}
           <div className="flex-1" />
-          <button
-            onClick={() => onUpdateTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="density-icon-btn px-1.5 py-1 rounded-control text-ink hover:bg-surface-raised hover:text-ink transition-colors"
-            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {theme === 'dark' ? <IconSun className="density-icon" stroke={2} /> : <IconMoon className="density-icon" stroke={2} />}
-          </button>
+          <ThemeMenu
+            theme={theme}
+            onSelect={onUpdateTheme}
+            buttonClassName="density-icon-btn px-1.5 py-1 rounded-control text-ink hover:bg-surface-raised hover:text-ink transition-colors"
+            iconClassName="density-icon"
+          />
           <button
             onClick={() => { window.location.href = '/authelia/logout' }}
             className="density-icon-btn px-1.5 py-1 rounded-control text-ink hover:bg-surface-raised hover:text-ink transition-colors"

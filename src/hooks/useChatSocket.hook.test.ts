@@ -147,6 +147,7 @@ afterEach(() => {
 // Dynamic import so mocks are in place; we use a top-level import since
 // the hook reads WebSocket at call-time, not import-time.
 import { useChatSocket } from './useChatSocket'
+import { getPref, resetPrefsForTest } from '../lib/prefs'
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -367,23 +368,23 @@ describe('useChatSocket hook', () => {
     })
 
     it('createSession carries the selected Claude model so the CLI starts on it', () => {
-      localStorage.setItem('claude-model', 'claude-opus-5')
+      resetPrefsForTest({ claudeModel: 'claude-opus-5' })
       const { result, unmount } = setupConnected()
       act(() => result.current.createSession('My Session', '/home/dev'))
       expect(sentMessages(MockWebSocket.latest()).pop()).toMatchObject({
         type: 'create_session',
         model: 'claude-opus-5',
       })
-      localStorage.removeItem('claude-model')
+      resetPrefsForTest()
       unmount()
     })
 
     it('createSession omits the Claude model for non-Claude providers', () => {
-      localStorage.setItem('claude-model', 'claude-opus-5')
+      resetPrefsForTest({ claudeModel: 'claude-opus-5' })
       const { result, unmount } = setupConnected()
       act(() => result.current.createSession('My Session', '/home/dev', false, undefined, 'codex'))
       expect(sentMessages(MockWebSocket.latest()).pop()).not.toHaveProperty('model')
-      localStorage.removeItem('claude-model')
+      resetPrefsForTest()
       unmount()
     })
 
@@ -937,14 +938,15 @@ describe('useChatSocket hook', () => {
       unmount()
     })
 
-    it('setPermissionMode persists to localStorage', () => {
+    it('setPermissionMode makes the mode the default for new sessions', () => {
       const { result, unmount } = setupConnected()
       act(() => result.current.setPermissionMode('bypassPermissions'))
-      expect(localStorage.getItem('claude-permission-mode')).toBe('bypassPermissions')
+      expect(getPref('permissionMode')).toBe('bypassPermissions')
       unmount()
     })
 
-    it('session_joined syncs permissionMode from server', () => {
+    it('session_joined shows the session mode without changing the new-session default', () => {
+      resetPrefsForTest({ permissionMode: 'acceptEdits' })
       const { result, unmount } = setupConnected()
       act(() => MockWebSocket.latest().simulateMessage({
         type: 'session_joined',
@@ -956,7 +958,7 @@ describe('useChatSocket hook', () => {
         permissionMode: 'plan',
       } as WsServerMessage))
       expect(result.current.currentPermissionMode).toBe('plan')
-      expect(localStorage.getItem('claude-permission-mode')).toBe('plan')
+      expect(getPref('permissionMode')).toBe('acceptEdits')
       unmount()
     })
 
@@ -972,12 +974,12 @@ describe('useChatSocket hook', () => {
         model: 'claude-opus-4-6',
       } as WsServerMessage))
       expect(result.current.currentModel).toBe('claude-opus-4-6')
-      expect(localStorage.getItem('claude-model')).toBe('claude-opus-4-6')
+      expect(getPref('claudeModel')).toBe('claude-opus-4-6')
       unmount()
     })
 
-    it('defaults to acceptEdits when no localStorage value', () => {
-      localStorage.removeItem('claude-permission-mode')
+    it('defaults to acceptEdits when no stored preference', () => {
+      resetPrefsForTest()
       const { result, unmount } = setupConnected()
       expect(result.current.currentPermissionMode).toBe('acceptEdits')
       unmount()

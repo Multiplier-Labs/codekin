@@ -19,6 +19,7 @@ import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
 import type { SlashCommand } from '../lib/slashCommands'
 import { PERMISSION_MODES, PROVIDERS, type PermissionMode, type ModelOption } from '../types'
+import { getPref, setPref } from '../lib/prefs'
 
 const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
   shield: IconShieldCheck,
@@ -180,8 +181,6 @@ function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle,
   )
 }
 
-const CARRY_CONTEXT_KEY = 'codekin.handoffCarryContext'
-
 /** One spelling per harness, shared with the sidebar mark — see PROVIDERS. */
 function providerLabel(provider: import('../types').CodingProvider): string {
   return PROVIDERS.find(p => p.id === provider)?.label ?? provider
@@ -194,12 +193,12 @@ function HandoffPane({ current, onBack, onSelect }: {
   onSelect: (provider: import('../types').CodingProvider, carryContext: boolean) => void
 }) {
   const health = useAgentHealth()
-  const [carryContext, setCarryContext] = useState(() => localStorage.getItem(CARRY_CONTEXT_KEY) !== 'false')
+  const [carryContext, setCarryContext] = useState(() => getPref('handoffCarryContext') !== false)
 
   const toggleCarry = () => {
     const next = !carryContext
     setCarryContext(next)
-    localStorage.setItem(CARRY_CONTEXT_KEY, String(next))
+    setPref('handoffCarryContext', next)
   }
 
   return (
@@ -275,7 +274,6 @@ function AgentDropdown({ provider, currentModel, models, isOpen, menuRef, onTogg
   const [showHandoff, setShowHandoff] = useState(false)
   const [prevIsOpen, setPrevIsOpen] = useState(isOpen)
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
-  const RECENTS_KEY = 'codekin.recentModels'
 
   // Reset transient menu state when isOpen prop changes (React-recommended
   // "adjusting state based on props" pattern — no useEffect needed)
@@ -286,13 +284,13 @@ function AgentDropdown({ provider, currentModel, models, isOpen, menuRef, onTogg
   }
 
   const getRecents = (): string[] => {
-    try { return JSON.parse(localStorage.getItem(RECENTS_KEY) || '[]') as string[] } catch { return [] }
+    return getPref('recentModels') ?? []
   }
 
   const addRecent = (id: string) => {
     const next = getRecents().filter(m => m !== id)
     next.unshift(id)
-    localStorage.setItem(RECENTS_KEY, JSON.stringify(next.slice(0, 5)))
+    setPref('recentModels', next.slice(0, 5))
   }
 
   const recents = getRecents().filter(id => models.some(m => m.id === id))
@@ -667,10 +665,10 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
 
   // Session state (left) and actions (right). The orchestrator variant is a
   // filter over these plus an accent flag — not a second layout.
-  const showPermission = !isOrchestrator && !!currentPermissionMode && !!onPermissionModeChange
   // The orchestrator keeps the full agent control — it is one agent, so "what
-  // is answering me" (harness and model alike) is as much a question there as
-  // in a session.
+  // is answering me" (harness and model alike) and "what may it do without
+  // asking" are as much questions there as in a session.
+  const showPermission = !!currentPermissionMode && !!onPermissionModeChange
   const showModel = !!currentModel && !!onModelChange
   const showProvider = !!sessionProvider && !!onProviderChange
   // Harness and model read as one fact ("what is answering me"), so they share
@@ -880,7 +878,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                             <button
                               key={p.id}
                               onClick={() => {
-                                onProviderChange(p.id, localStorage.getItem(CARRY_CONTEXT_KEY) !== 'false')
+                                onProviderChange(p.id, getPref('handoffCarryContext') !== false)
                                 setMobileMenuOpen(false)
                               }}
                               className="flex w-full items-center gap-2 px-3 py-2 text-left text-body text-ink transition-colors hover:bg-edge"

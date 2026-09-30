@@ -26,6 +26,7 @@ import {
   type Passkey,
 } from './passkeys'
 import { signOutEverywhere, describeSignOutResult } from './sessions'
+import { Row, Rows, button, dangerButton, quietButton } from '../components/settings/Block'
 
 interface ActiveLink extends DeviceLinkStart {
   qrDataUrl: string
@@ -63,24 +64,23 @@ function LinkDevicePanel() {
 
   if (!link) {
     return (
-      <div>
-        <button
-          onClick={() => void generate()}
-          className="flex items-center gap-2 rounded-control border border-edge px-3 py-2 text-body text-ink transition hover:bg-surface-raised"
-        >
-          <IconQrcode size={16} />
-          Link a device
-        </button>
-        <p className="mt-1.5 text-micro text-ink-faint">
-          Shows a QR code that signs another device in as you — nothing to type there.
-        </p>
+      <Row
+        label="Link a device"
+        description="Shows a QR code that signs another device in as you — nothing to type there."
+        control={
+          <button onClick={() => void generate()} className={button}>
+            <IconQrcode size={16} />
+            Link a device
+          </button>
+        }
+      >
         {error && <p className="mt-2 text-meta text-error-4">{error}</p>}
-      </div>
+      </Row>
     )
   }
 
   return (
-    <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
+    <div className="flex flex-col items-start gap-4 py-3 sm:flex-row sm:items-center">
       <img
         src={link.qrDataUrl}
         alt="QR code for signing another device in"
@@ -99,13 +99,13 @@ function LinkDevicePanel() {
                 onClick={() => {
                   void navigator.clipboard.writeText(link.linkUrl).then(() => { setCopied(true) })
                 }}
-                className="rounded-control border border-edge px-2.5 py-1 text-meta text-ink-muted transition hover:bg-surface-raised hover:text-ink"
+                className={button}
               >
                 {copied ? 'Copied' : 'Copy link'}
               </button>
               <button
                 onClick={() => { setLink(null) }}
-                className="rounded-control px-2 py-1 text-meta text-ink-faint transition hover:text-ink-muted"
+                className={quietButton}
               >
                 Cancel
               </button>
@@ -120,7 +120,7 @@ function LinkDevicePanel() {
             <p className="text-body text-ink-muted">That code expired.</p>
             <button
               onClick={() => void generate()}
-              className="mt-2 rounded-control border border-edge px-2.5 py-1 text-meta text-ink-muted transition hover:bg-surface-raised hover:text-ink"
+              className={`${button} mt-2`}
             >
               Generate a new one
             </button>
@@ -165,53 +165,48 @@ function PasskeysPanel() {
   }
 
   if (passkeys === null) {
-    return <p className="text-body text-ink-muted">Loading…</p>
+    return <p className="py-3 text-body text-ink-muted">Loading…</p>
   }
 
   return (
-    <div>
+    <Row
+      label="Passkeys"
+      description={supported
+        ? 'Sign back in with Face ID, fingerprint, or your device PIN — no GitHub round trip.'
+        : 'This browser does not support passkeys.'}
+      control={supported && (
+        <button onClick={() => void add()} disabled={busy} className={button}>
+          <IconFingerprint size={16} />
+          {busy ? 'Waiting for the authenticator…' : 'Add a passkey on this device'}
+        </button>
+      )}
+    >
       {passkeys.length > 0 && (
-        <ul className="mb-3 flex flex-col gap-1.5">
+        <ul className="mt-3 flex flex-col gap-1.5">
           {passkeys.map(p => (
             <li
               key={p.id}
-              className="flex items-center gap-3 rounded-control border border-edge bg-surface px-3 py-2"
+              className="flex items-center gap-3 rounded-control border border-edge bg-page px-3 py-2"
             >
               <IconFingerprint size={16} className="flex-shrink-0 text-ink-muted" />
               <span className="truncate text-body text-ink">{p.label ?? 'Passkey'}</span>
-              <span className="truncate text-meta text-ink-faint">
+              <span className="truncate text-meta text-ink-muted">
                 {p.lastUsedAt ? `last used ${p.lastUsedAt.slice(0, 10)}` : `added ${p.createdAt.slice(0, 10)}`}
               </span>
               <button
                 onClick={() => void remove(p.id)}
                 title="Remove passkey"
-                className="ml-auto flex-shrink-0 rounded-control p-1 text-ink-faint transition hover:bg-surface-raised hover:text-error-4"
+                aria-label={`Remove passkey ${p.label ?? ''}`.trim()}
+                className="ml-auto flex-shrink-0 rounded-control p-1 text-ink-muted transition hover:bg-surface-raised hover:text-error-4"
               >
-                <IconX size={14} />
+                <IconX size={16} />
               </button>
             </li>
           ))}
         </ul>
       )}
-      {supported ? (
-        <>
-          <button
-            onClick={() => void add()}
-            disabled={busy}
-            className="flex items-center gap-2 rounded-control border border-edge px-3 py-2 text-body text-ink transition hover:bg-surface-raised disabled:opacity-50"
-          >
-            <IconFingerprint size={16} />
-            {busy ? 'Waiting for the authenticator…' : 'Add a passkey on this device'}
-          </button>
-          <p className="mt-1.5 text-micro text-ink-faint">
-            Sign back in with Face ID, fingerprint, or your device PIN — no GitHub round trip.
-          </p>
-        </>
-      ) : (
-        <p className="text-meta text-ink-muted">This browser does not support passkeys.</p>
-      )}
       {error && <p className="mt-2 text-meta text-error-4">{error}</p>}
-    </div>
+    </Row>
   )
 }
 
@@ -247,58 +242,41 @@ function SignOutEverywherePanel({ reload }: { reload?: () => void }) {
   }
 
   if (done) {
-    return <p className="text-body text-ink-muted">{done}</p>
+    return <p className="py-3 text-body text-ink-muted">{done}</p>
   }
 
   return (
-    <div>
-      {confirming ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => void run()}
-            disabled={busy}
-            className="flex items-center gap-2 rounded-control border border-error-7/60 px-3 py-2 text-body text-error-4 transition hover:bg-surface-raised disabled:opacity-50"
-          >
+    <Row
+      label="Sign out everywhere"
+      description="Ends every session on every device, including this one. Use it if a device was lost or someone else may have your session. Passkeys and linked devices stay — remove those above if the device itself is gone."
+      control={confirming ? (
+        <>
+          <button onClick={() => void run()} disabled={busy} className={dangerButton}>
             <IconLogout size={16} />
             {busy ? 'Signing out…' : 'Yes, sign out everywhere'}
           </button>
-          <button
-            onClick={() => { setConfirming(false) }}
-            disabled={busy}
-            className="rounded-control px-2 py-1 text-meta text-ink-faint transition hover:text-ink-muted disabled:opacity-50"
-          >
+          <button onClick={() => { setConfirming(false) }} disabled={busy} className={quietButton}>
             Cancel
           </button>
-        </div>
+        </>
       ) : (
-        <button
-          onClick={() => { setConfirming(true) }}
-          className="flex items-center gap-2 rounded-control border border-edge px-3 py-2 text-body text-ink transition hover:bg-surface-raised"
-        >
+        <button onClick={() => { setConfirming(true) }} className={dangerButton}>
           <IconLogout size={16} />
           Sign out everywhere
         </button>
       )}
-      <p className="mt-1.5 text-micro text-ink-faint">
-        Ends every session on every device, including this one. Use this if a device was lost or
-        you think someone else has your session. Passkeys and linked devices are left alone —
-        remove those above if the device itself is gone.
-      </p>
+    >
       {error && <p className="mt-2 text-meta text-error-4">{error}</p>}
-    </div>
+    </Row>
   )
 }
 
 export function DevicesSection({ reload }: { /** Injectable for tests, which cannot navigate. */ reload?: () => void } = {}) {
   return (
-    <div className="flex flex-col gap-4">
+    <Rows>
       <LinkDevicePanel />
-      <div className="border-t border-edge pt-4">
-        <PasskeysPanel />
-      </div>
-      <div className="border-t border-edge pt-4">
-        <SignOutEverywherePanel reload={reload} />
-      </div>
-    </div>
+      <PasskeysPanel />
+      <SignOutEverywherePanel reload={reload} />
+    </Rows>
   )
 }

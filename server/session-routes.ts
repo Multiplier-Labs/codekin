@@ -61,6 +61,17 @@ interface AgentNameBody {
   name: string
 }
 
+interface PrefsBody {
+  patch: Record<string, unknown>
+}
+
+/** Settings-table key holding the UI preferences blob (see /api/settings/prefs). */
+const UI_PREFS_KEY = 'ui_prefs'
+/** Pref names are camelCase identifiers; anything else is rejected. */
+const PREF_KEY_RE = /^[a-zA-Z][a-zA-Z0-9]{0,63}$/
+/** Upper bound on the stored blob, so a runaway client cannot bloat the DB. */
+const MAX_PREFS_BYTES = 256 * 1024
+
 interface ApprovalDeleteBody {
   tool?: string
   command?: string
@@ -141,10 +152,11 @@ export function createSessionRouter(
 
   // --- Session CRUD ---
 
+  // `?archived=1` lists archived (resumable) sessions instead of active ones.
   router.get('/api/sessions/list', (req, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
-    res.json({ sessions: sessions.list() })
+    res.json({ sessions: req.query.archived === '1' ? sessions.listArchived() : sessions.list() })
   })
 
   router.get('/api/claude/models', async (req, res) => {
@@ -315,6 +327,42 @@ export function createSessionRouter(
     }
   })
 
+  // --- Archive lifecycle: archive/resume keep the worktree; removing working
+  // files is a separate, preflighted step that never forces. ---
+
+  router.post('/api/sessions/:id/archive', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!sessions.get(req.params.id)) return res.status(404).json({ error: 'Session not found' })
+    if (!sessions.archiveSession(req.params.id)) return res.status(409).json({ error: 'This session cannot be archived' })
+    res.json({ success: true })
+  })
+
+  router.post('/api/sessions/:id/resume', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!sessions.get(req.params.id)) return res.status(404).json({ error: 'Session not found' })
+    if (!sessions.resumeSession(req.params.id)) return res.status(409).json({ error: 'Session is not archived' })
+    res.json({ success: true })
+  })
+
+  router.get('/api/sessions/:id/removal-preflight', async (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const preflight = await sessions.getRemovalPreflight(req.params.id)
+    if (!preflight) return res.status(404).json({ error: 'Session not found' })
+    res.json(preflight)
+  })
+
+  router.post('/api/sessions/:id/remove-worktree', async (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!sessions.get(req.params.id)) return res.status(404).json({ error: 'Session not found' })
+    const result = await sessions.removeSessionWorktree(req.params.id)
+    if (!result.removed) return res.status(409).json({ error: result.reason ?? 'Working files were not removed', preflight: result.preflight })
+    res.json({ success: true, preflight: result.preflight })
+  })
+
   router.delete('/api/sessions/:id', (req, res) => {
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
@@ -418,6 +466,49 @@ export function createSessionRouter(
     res.json({ path: toPersist })
   })
 
+  // --- UI preferences ---
+  // One JSON blob of client preferences (theme, new-session defaults, layout,
+  // drafts). The server does not interpret the values; it stores whatever the
+  // UI sends so preferences follow the user across browsers and devices
+  // instead of living in one browser's localStorage.
+
+  const readPrefs = (): Record<string, unknown> => {
+    try {
+      const parsed: unknown = JSON.parse(sessions.archive.getSetting(UI_PREFS_KEY, '{}'))
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+    } catch {
+      return {}
+    }
+  }
+
+  router.get('/api/settings/prefs', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    res.json({ prefs: readPrefs() })
+  })
+
+  // Merge a partial update: each key in `patch` replaces the stored value,
+  // and a null value removes the key.
+  router.put('/api/settings/prefs', (req: Request<Record<string, string>, unknown, PrefsBody>, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const { patch } = req.body ?? {}
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+      return res.status(400).json({ error: 'patch must be an object' })
+    }
+    const badKey = Object.keys(patch).find(key => !PREF_KEY_RE.test(key))
+    if (badKey !== undefined) return res.status(400).json({ error: `invalid pref key: ${badKey}` })
+    const prefs = Object.fromEntries(
+      Object.entries({ ...readPrefs(), ...patch }).filter(([, value]) => value !== null),
+    )
+    const serialized = JSON.stringify(prefs)
+    if (Buffer.byteLength(serialized) > MAX_PREFS_BYTES) {
+      return res.status(413).json({ error: 'preferences too large' })
+    }
+    sessions.archive.setSetting(UI_PREFS_KEY, serialized)
+    res.json({ prefs })
+  })
+
   // --- Agent name setting ---
 
   router.get('/api/settings/agent-name', (req, res) => {
@@ -496,6 +587,14 @@ export function createSessionRouter(
     if (!workingDir) return res.status(400).json({ error: 'Missing path query parameter' })
 
     res.json(sessions.approvalManager.getApprovals(workingDir))
+  })
+
+  /** Every repo's rules in one response (the Settings → Permissions overview). */
+  router.get('/api/approvals/all', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+
+    res.json({ repos: sessions.approvalManager.getAllApprovals() })
   })
 
   /** Approvals effective globally via cross-repo inference (approved in 2+ repos). */
