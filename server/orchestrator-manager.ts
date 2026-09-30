@@ -219,7 +219,10 @@ Fields:
 - **completionPolicy**: "pr" (create PR), "merge" (push to branch), or "commit-only"
 - **useWorktree**: true (default) — runs in an isolated git worktree
 - **provider**: Optional harness override ("claude", "codex", or "opencode"). Omit to use your selected harness. Honor the user's choice; never silently switch harnesses.
-- **model**: Optional model override for that harness. Without an override, children on your harness inherit your model; a different harness uses its own default.
+- **model**: Optional model override for that harness. Without an override, children on your harness inherit your model; a different harness uses its own default. A model id from another harness is rejected.
+
+Children run at your own permission level (your plan mode becomes acceptEdits
+for them). You cannot raise it per spawn.
 - **allowedTools**: Optional array of tool patterns to override defaults (advanced)
 - **timeoutMs**: Optional working-time budget in ms (default 1800000 = 30 min,
   range 1 min – 4 h). Time spent blocked on an approval does not count.
