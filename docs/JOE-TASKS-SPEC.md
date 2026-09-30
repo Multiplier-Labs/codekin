@@ -84,6 +84,7 @@ API change: A or B?". An open decision holds the task in `needs_decision` until 
 | PATCH | `/tasks/:id` | Edit fields; `status` may be set to `todo`, `done`, `dismissed` |
 | POST | `/tasks/:id/decision` | Joe opens a decision (`{ question, recommendation?, options? }`) |
 | POST | `/tasks/:id/answer` | User answers the open decision (`{ answer }`) → Joe notified |
+| POST | `/tasks/:id/start` | User asks Joe to start a `todo` task (or resume a stopped attempt) |
 | POST | `/tasks/:id/accept` | User accepts a reviewed task → `done` |
 | POST | `/tasks/:id/request-changes` | User sends it back (`{ note }`) → Joe notified to resume the child |
 

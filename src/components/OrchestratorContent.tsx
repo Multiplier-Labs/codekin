@@ -5,15 +5,18 @@
  * header and, once an orchestrator session is joined, the chat UI with input bar.
  */
 
-import type { RefObject } from 'react'
-import { OrchestratorView } from './OrchestratorView'
+import { useState, type RefObject } from 'react'
+import { OrchestratorView, type OrchestratorTab } from './OrchestratorView'
+import { JoeTasksView } from './JoeTasksView'
+import { useJoeTasks } from '../hooks/useJoeTasks'
+import { attentionCount } from '../lib/tasksApi'
 import { ChatView } from './ChatView'
 import { TodoPanel } from './TodoPanel'
 import { PromptButtons } from './PromptButtons'
 import { InputBar, type InputBarHandle } from './InputBar'
 import type { SkillGroup } from './SkillMenu'
 import type { SlashCommand } from '../lib/slashCommands'
-import type { ChatMessage, PermissionMode, TaskItem } from '../types'
+import type { ChatMessage, PermissionMode, Repo, TaskItem } from '../types'
 import type { PromptEntry } from '../hooks/usePromptState'
 
 export interface OrchestratorContentProps {
@@ -47,6 +50,10 @@ export interface OrchestratorContentProps {
   onPermissionModeChange: (mode: PermissionMode) => void
   disabled: boolean
   agentName?: string
+  /** Known repositories, for the task list's filter and delegate form. */
+  repos?: Repo[]
+  /** Open a child session from a task card. */
+  onOpenSession?: (sessionId: string) => void
 }
 
 export function OrchestratorContent({
@@ -79,7 +86,13 @@ export function OrchestratorContent({
   onPermissionModeChange,
   disabled,
   agentName,
+  repos = [],
+  onOpenSession,
 }: OrchestratorContentProps) {
+  const [tab, setTab] = useState<OrchestratorTab>('chat')
+  const [repoFilter, setRepoFilter] = useState('')
+  const joeTasks = useJoeTasks(token, repoFilter, sessionJoined)
+
   return (
     <>
       <OrchestratorView
@@ -87,9 +100,25 @@ export function OrchestratorContent({
         onOrchestratorSessionReady={onOrchestratorSessionReady}
         sessionJoined={sessionJoined}
         agentName={agentName}
+        tab={tab}
+        onTabChange={setTab}
+        taskAttention={attentionCount(joeTasks.data?.counts)}
       />
+      {activeSessionId && tab === 'tasks' && (
+        <JoeTasksView
+          token={token}
+          data={joeTasks.data}
+          error={joeTasks.error}
+          repos={repos}
+          repoFilter={repoFilter}
+          onRepoFilterChange={setRepoFilter}
+          onChanged={() => { void joeTasks.refresh() }}
+          onOpenSession={onOpenSession}
+          agentName={agentName}
+        />
+      )}
       {/* Render chat UI once orchestrator session is joined */}
-      {activeSessionId && (
+      {activeSessionId && tab === 'chat' && (
         <div className="flex flex-1 flex-col overflow-hidden min-h-0">
           <div className="relative flex-1 min-h-0 flex flex-col">
             <ChatView

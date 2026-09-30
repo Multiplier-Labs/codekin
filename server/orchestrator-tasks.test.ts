@@ -185,6 +185,22 @@ describe('OrchestratorTaskService', () => {
     })
   })
 
+  describe('requestStart', () => {
+    it('asks Joe to start a to-do task, or resume a stopped attempt', () => {
+      const task = newTask()
+      service.requestStart(task.id)
+      expect(notify.mock.calls[0][0]).toMatchObject({ label: 'Task Start Requested' })
+      expect(notify.mock.calls[0][0].body).toContain('spawn_child (pass taskId')
+
+      service.syncFromChild(child('running', {}, task.id))
+      expect(() => service.requestStart(task.id)).toThrow(/Only to-do tasks/)
+      service.syncFromChild(child('canceled', {}, task.id))
+      service.requestStart(task.id)
+      expect(notify.mock.calls[1][0].body).toContain('resume_child (id child-1)')
+      expect(service.events(task.id).filter(e => e.summary === 'Start requested')).toHaveLength(2)
+    })
+  })
+
   describe('update', () => {
     it('edits fields, dismisses, and reopens with history', () => {
       const task = newTask()

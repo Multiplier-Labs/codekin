@@ -156,6 +156,27 @@ export class OrchestratorTaskService {
     return updated
   }
 
+  /** The user asks Joe to start (or restart) a to-do task. */
+  requestStart(id: string): Task {
+    const task = this.require(id)
+    if (task.status !== 'todo') throw new TaskActionError(`Only to-do tasks can be started (task is ${task.status})`, 409)
+    const updated = this.patch(id, {}, 'user', 'Start requested')
+    this.notify({
+      label: 'Task Start Requested',
+      title: `Task ${task.id}: ${task.title}`,
+      body: [
+        `Repo: ${task.repo}`,
+        task.detail ? `Detail: ${task.detail}` : null,
+        task.acceptance ? `Done when: ${task.acceptance}` : null,
+        '',
+        task.childId
+          ? `A previous attempt was stopped; its work is kept. Resume it with resume_child (id ${task.childId}), or spawn_child with taskId for a fresh start.`
+          : `Start it with spawn_child (pass taskId, completionPolicy "${task.completionPolicy}"), following the repo's policy in REPOS.md.`,
+      ].filter((l): l is string => l !== null).join('\n'),
+    })
+    return updated
+  }
+
   /** The user accepts a reviewed result. */
   accept(id: string): Task {
     const task = this.require(id)

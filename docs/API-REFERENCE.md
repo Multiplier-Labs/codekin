@@ -775,7 +775,7 @@ These endpoints act only on children the orchestrator spawned. For any other ses
 
 Agent Joe's durable per-repo task list (design: [JOE-TASKS-SPEC.md](JOE-TASKS-SPEC.md)). Task status is `todo`, `in_progress`, `needs_decision`, `in_review`, `done` or `dismissed`. It follows the linked child automatically: running → `in_progress`, verified → `in_review`, unverified/failed/timed out → `needs_decision` (Retry / Dismiss), canceled → `todo`. Mutations push a `workflow_event` with `engine: "agent"` and `kind: "task"`.
 
-Both the user and Joe can call these routes. Consent actions (`answer`, `accept`, `request-changes`) return `403` for Joe's session token.
+Both the user and Joe can call these routes. Consent actions (`answer`, `start`, `accept`, `request-changes`) return `403` for Joe's session token.
 
 | Method | Path | Body / query | Effect |
 | --- | --- | --- | --- |
@@ -785,6 +785,7 @@ Both the user and Joe can call these routes. Consent actions (`answer`, `accept`
 | PATCH | `/api/orchestrator/tasks/:id` | `{ title?, detail?, acceptance?, priority?, completionPolicy?, status?: "todo" \| "done" \| "dismissed", note? }` | Edits, reopens, completes or dismisses |
 | POST | `/api/orchestrator/tasks/:id/decision` | `{ question, recommendation?, options?: string[] }` | Opens a decision → `needs_decision` |
 | POST | `/api/orchestrator/tasks/:id/answer` | `{ answer }` | User answers → Joe is notified (`Dismiss` on a failed attempt dismisses the task) |
+| POST | `/api/orchestrator/tasks/:id/start` | — | Asks Joe to start a `todo` task (or resume its stopped attempt) |
 | POST | `/api/orchestrator/tasks/:id/accept` | — | `in_review` → `done` |
 | POST | `/api/orchestrator/tasks/:id/request-changes` | `{ note }` | `in_review` → `in_progress`, and Joe is asked to resume the child |
 

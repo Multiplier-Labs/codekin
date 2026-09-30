@@ -66,3 +66,18 @@ describe('Joe harness selection', () => {
     expect(ready).toHaveBeenCalledWith('joe')
   })
 })
+
+describe('Chat / Tasks tabs', () => {
+  it('switches tabs and shows how many tasks wait on the user', async () => {
+    vi.mocked(api.getOrchestratorStatus).mockResolvedValue({ provider: 'codex' })
+    const onTabChange = vi.fn()
+    await act(async () => {
+      root.render(<OrchestratorView token="test" onOrchestratorSessionReady={ready} sessionJoined tab="chat" onTabChange={onTabChange} taskAttention={3} />)
+    })
+    const tabs = Array.from(container.querySelectorAll('[role="tab"]'))
+    expect(tabs.map(t => t.getAttribute('aria-selected'))).toEqual(['true', 'false'])
+    expect(tabs[1].textContent).toContain('3')
+    await act(async () => { (tabs[1] as HTMLButtonElement).click() })
+    expect(onTabChange).toHaveBeenCalledWith('tasks')
+  })
+})

@@ -871,6 +871,13 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             onPermissionModeChange={handlePermissionModeChange}
             disabled={!settings.token}
             agentName={agentName}
+            repos={repos}
+            onOpenSession={(sessionId) => {
+              clearMessages()
+              leaveSession()
+              joinSession(sessionId)
+              navigate(`/s/${sessionId}`)
+            }}
           />
         ) : view === 'automations' ? (
           <AutomationsView

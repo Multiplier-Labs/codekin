@@ -30,7 +30,14 @@ interface Props {
   sessionJoined: boolean
   /** Agent display name (from parent settings). */
   agentName?: string
+  /** Chat / Tasks tab (header tabs render only when onTabChange is given). */
+  tab?: OrchestratorTab
+  onTabChange?: (tab: OrchestratorTab) => void
+  /** Tasks waiting on the user (decisions + reviews), shown as a badge. */
+  taskAttention?: number
 }
+
+export type OrchestratorTab = 'chat' | 'tasks'
 
 function StatCard({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
   return (
@@ -44,7 +51,7 @@ function StatCard({ label, value, icon }: { label: string; value: number; icon: 
   )
 }
 
-export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoined, agentName: agentNameProp }: Props) {
+export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoined, agentName: agentNameProp, tab = 'chat', onTabChange, taskAttention = 0 }: Props) {
   const [status, setStatus] = useState<'loading' | 'choose' | 'active' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
   const [stats, setStats] = useState<DashboardStats | null>(null)
@@ -165,6 +172,25 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
         <IconRobotFace size={18} stroke={2} className="text-accent-5" />
         <span className="text-body font-medium">Agent {agentName}</span>
       </div>
+      {onTabChange && (
+        <div role="tablist" aria-label={`Agent ${agentName} views`} className="flex items-center gap-1">
+          {(['chat', 'tasks'] as const).map(id => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              onClick={() => { onTabChange(id) }}
+              className={`inline-flex items-center gap-1.5 rounded-control px-2.5 py-1 text-meta ${tab === id ? 'bg-surface-raised text-ink' : 'text-ink-muted hover:text-ink'}`}
+            >
+              {id === 'chat' ? 'Chat' : 'Tasks'}
+              {id === 'tasks' && taskAttention > 0 && (
+                <span aria-label={`${taskAttention} waiting on you`} className="rounded-full bg-warning-7 px-1.5 text-micro font-semibold text-warning-1">{taskAttention}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
       {stats && (
         <div className="flex items-center gap-2 ml-auto">
           {stats.managedRepos > 0 && (
