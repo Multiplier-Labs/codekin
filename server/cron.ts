@@ -60,6 +60,9 @@ export function cronMatchesDate(expression: string, date: Date): boolean {
 
 /** Compute the next matching minute for a cron expression after `after`. */
 export function nextCronMatch(expression: string, after: Date): Date {
+  // An invalid expression never matches — skip the year-long minute scan
+  // (each step re-parses and throws), which would stall the scheduler.
+  if (!isValidCron(expression)) return new Date(after.getTime() + 86400000)
   const d = new Date(after)
   d.setSeconds(0, 0)
   d.setMinutes(d.getMinutes() + 1)
