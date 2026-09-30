@@ -1,6 +1,6 @@
 # Hosted Relay & Control Plane — Implementation Plan
 
-**Status**: Proposed
+**Status**: Implemented (app.codekin.ai). Kept as a record of the build decisions; operating docs are in [OPERATIONS.md](./OPERATIONS.md#hosted-relay).
 **Companion to**: `HOSTED-RELAY-CONTROL-PLANE-SPEC.md`
 
 This document maps the spec onto the current codebase, fixes concrete technical decisions, and sequences the work into reviewable PRs. It also covers the first deployment target: `app.codekin.ai` on the current dev server.
