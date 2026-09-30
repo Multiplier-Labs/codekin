@@ -1448,6 +1448,8 @@ export class SessionManager {
 
     const doSwitch = () => {
       session.provider = provider
+      // Model IDs belong to a harness; let the newly selected harness use its default.
+      session.model = undefined
       session.claudeSessionId = null
       this.persistToDiskDebounced()
       // Sidebar/provider-derived UI (model list, permission modes) keys off the
@@ -2022,6 +2024,9 @@ export class SessionManager {
   restoreActiveSessions(): void {
     const toRestore: Session[] = []
     for (const session of this.sessions.values()) {
+      // Joe's manager restores it using the saved harness choice. This generic
+      // path must not revive a legacy implicit-Claude session before selection.
+      if (session.source === 'orchestrator') continue
       if (session._wasActiveBeforeRestart && session.claudeSessionId && session.source !== 'webhook' && !session.archivedAt) {
         toRestore.push(session)
       }

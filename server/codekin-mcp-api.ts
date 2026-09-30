@@ -8,6 +8,8 @@
  * of the orchestrator's CLI process and inherits them.
  */
 
+import type { CodingProvider } from './coding-process.js'
+
 export interface CodekinApiOptions {
   baseUrl: string
   token: string
@@ -21,6 +23,7 @@ export interface SpawnChildInput {
   completionPolicy?: 'pr' | 'merge' | 'commit-only'
   useWorktree?: boolean
   deployAfter?: boolean
+  provider?: CodingProvider
   model?: string
   parentSessionId?: string
 }

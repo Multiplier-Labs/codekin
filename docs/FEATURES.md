@@ -212,7 +212,8 @@ See [docs/GITHUB-WEBHOOKS-SPEC.md#pr-review-implementation](./GITHUB-WEBHOOKS-SP
 
 Agent Joe is an always-on AI orchestrator session that manages repositories, triages audit findings, and spawns child sessions to implement fixes.
 
-- **Always-on session** — Agent Joe runs as a dedicated session that starts automatically with the server and survives restarts. It appears as a pinned entry in the left sidebar below "AI Workflows".
+- **Dedicated session** — Choose Claude Code, Codex, or OpenCode before Joe starts for the first time. The choice persists; switch agents in the chat composer. Automatic startup is opt-in and requires a saved choice. It appears as a pinned entry in the left sidebar below "AI Workflows".
+- **Harness-aware delegation** — Child sessions inherit Joe’s current harness and model unless explicitly overridden. A different child harness uses its own default model. Joe never implicitly selects Claude when no harness has been chosen.
 - **Dedicated chat UI** — A full chat interface (reusing the standard ChatView) where users interact with Agent Joe. Includes a welcome screen for first-time users.
 - **Audit report triage** — Reads reports from `.codekin/reports/` across all managed repositories, critically evaluates findings by severity and relevance, and surfaces actionable items in the chat.
 - **Child session management** — Spawns and manages up to 5 concurrent Claude sessions in target repositories to implement approved fixes. Each child session gets a focused task description, a dedicated branch, and is monitored to completion.

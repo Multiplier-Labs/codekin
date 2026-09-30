@@ -549,8 +549,9 @@ export function useChatSocket({
     send({ type: 'set_provider', provider, carryContext })
     // Optimistic — the server confirms via sessions_updated, but the composer
     // control should reflect the choice immediately.
+    if (sessionProvider !== provider) setCurrentModel(null)
     setSessionProvider(provider)
-  }, [send])
+  }, [send, sessionProvider])
 
   const setPermissionMode = useCallback((mode: PermissionMode) => {
     send({ type: 'set_permission_mode', permissionMode: mode })

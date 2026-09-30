@@ -7,8 +7,10 @@ import { Router } from 'express'
 import type { Request, RequestHandler } from 'express'
 import { resolve } from 'path'
 import { existsSync, statSync, realpathSync } from 'fs'
+import { VALID_PROVIDERS } from './types.js'
+import type { CodingProvider } from './coding-process.js'
 import type { SessionManager } from './session-manager.js'
-import { ensureOrchestratorRunning, getOrchestratorSessionId, getOrCreateOrchestratorId } from './orchestrator-manager.js'
+import { ensureOrchestratorRunning, getOrchestratorSessionId, getOrCreateOrchestratorId, getOrchestratorProvider, setOrchestratorProvider } from './orchestrator-manager.js'
 import { getAgentDisplayName, REPOS_ROOT, resolveRepoPathInRoot } from './config.js'
 import { scanRepoReports, readReport, getReportsSince } from './orchestrator-reports.js'
 import type { OrchestratorMemory } from './orchestrator-memory.js'
@@ -70,6 +72,7 @@ interface SpawnChildBody {
   completionPolicy?: 'pr' | 'merge' | 'commit-only'
   deployAfter?: boolean
   useWorktree?: boolean
+  provider?: CodingProvider
   model?: string
   allowedTools?: string[]
   timeoutMs?: number
@@ -106,7 +109,7 @@ export function createSessionRouter(
 
     const sessionId = getOrchestratorSessionId(sessions)
     if (!sessionId) {
-      return res.json({ sessionId: null, status: 'stopped', agentName: getAgentDisplayName() })
+      return res.json({ sessionId: null, status: 'stopped', provider: getOrchestratorProvider(sessions), agentName: getAgentDisplayName() })
     }
 
     const session = sessions.get(sessionId)
@@ -114,16 +117,34 @@ export function createSessionRouter(
     res.json({
       sessionId,
       status,
+      provider: getOrchestratorProvider(sessions),
       childSessions: children.activeCount(),
       agentName: getAgentDisplayName(),
     })
   })
 
   /** Ensure orchestrator is running and return its session ID. */
-  router.post('/api/orchestrator/start', (req, res) => {
+  router.post('/api/orchestrator/start', async (req: Request<Record<string, string>, unknown, { provider?: CodingProvider }>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
+    const provider = req.body?.provider
+    if (provider !== undefined && !VALID_PROVIDERS.has(provider)) {
+      return res.status(400).json({ error: 'Invalid provider: choose claude, codex, or opencode' })
+    }
+    if (provider === undefined && !getOrchestratorProvider(sessions)) {
+      return res.status(409).json({ error: 'Choose an agent harness for Joe before starting' })
+    }
     try {
+      if (provider !== undefined) {
+        setOrchestratorProvider(sessions, provider)
+        const existingId = getOrchestratorSessionId(sessions)
+        if (existingId && sessions.get(existingId)?.provider !== provider) {
+          // Join only after the old process has stopped and the new harness is applied.
+          // Composer switches retain their separate optional context-handoff flow.
+          await sessions.stopClaudeAndWait(existingId)
+          sessions.setProvider(existingId, provider)
+        }
+      }
       const sessionId = ensureOrchestratorRunning(sessions)
       res.json({ sessionId, status: 'active', agentName: getAgentDisplayName() })
     } catch (err) {
@@ -188,9 +209,13 @@ export function createSessionRouter(
   router.post('/api/orchestrator/children', spawnRateLimiter, async (req: Request<Record<string, string>, unknown, SpawnChildBody>, res) => {
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-    const { repo, task, branchName, completionPolicy, deployAfter, useWorktree, model, allowedTools, timeoutMs } = req.body
+    const { repo, task, branchName, completionPolicy, deployAfter, useWorktree, provider, model, allowedTools, timeoutMs } = req.body
     if (!repo || !task || !branchName) {
       return res.status(400).json({ error: 'Missing required fields: repo, task, branchName' })
+    }
+
+    if (provider !== undefined && !VALID_PROVIDERS.has(provider)) {
+      return res.status(400).json({ error: 'Invalid provider: choose claude, codex, or opencode' })
     }
 
     // Validate timeoutMs if provided: 1 minute to 4 hours
@@ -231,6 +256,7 @@ export function createSessionRouter(
         completionPolicy: completionPolicy ?? 'pr',
         deployAfter: deployAfter ?? false,
         useWorktree: useWorktree ?? true,
+        provider,
         model,
         allowedTools,
         timeoutMs,

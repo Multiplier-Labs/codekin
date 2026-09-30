@@ -8,6 +8,8 @@
 
 import { randomUUID } from 'crypto'
 import { execFile } from 'child_process'
+import { VALID_PROVIDERS } from './types.js'
+import type { CodingProvider } from './coding-process.js'
 import type { SessionManager } from './session-manager.js'
 import type { WsServerMessage } from './types.js'
 import { getAgentDisplayName } from './config.js'
@@ -42,6 +44,8 @@ export interface ChildSessionRequest {
    * time has its own separate cap (MAX_BLOCKED_MS).
    */
   timeoutMs?: number
+  /** Harness override; otherwise inherit the parent or saved Joe preference. */
+  provider?: CodingProvider
   /** Optional model override. */
   model?: string
   /** Optional allowedTools override. When omitted, uses AGENT_CHILD_ALLOWED_TOOLS. */
@@ -347,6 +351,16 @@ export class OrchestratorChildManager {
    * Returns the child session info or throws if at capacity.
    */
   async spawn(request: ChildSessionRequest): Promise<ChildSession> {
+    const parent = request.parentSessionId ? this.sessions.get(request.parentSessionId) : undefined
+    const provider = request.provider ?? parent?.provider ?? this.sessions.archive.getSetting('agent_provider', '')
+    if (!VALID_PROVIDERS.has(provider as CodingProvider)) {
+      throw new Error('Choose an agent harness for Joe or specify a child provider before spawning')
+    }
+    request = {
+      ...request,
+      provider: provider as CodingProvider,
+      model: request.model ?? (provider === parent?.provider ? parent?.model : undefined),
+    }
     this.purgeStaleChildren()
     if (this.activeCount() >= MAX_CONCURRENT) {
       throw new Error(`Cannot spawn child session: ${MAX_CONCURRENT} concurrent sessions already running`)
@@ -377,6 +391,7 @@ export class OrchestratorChildManager {
         source: 'agent',
         id: sessionId,
         groupDir: request.repo,
+        provider: request.provider,
         model: request.model,
         permissionMode: 'acceptEdits',
         allowedTools: request.allowedTools ?? AGENT_CHILD_ALLOWED_TOOLS,
@@ -405,7 +420,7 @@ export class OrchestratorChildManager {
         child.worktreePath = result.path
       }
 
-      // Start Claude
+      // Start the selected coding agent
       this.sessions.startClaude(sessionId)
       child.status = 'running'
       this.persistRun(child)
@@ -666,7 +681,7 @@ export class OrchestratorChildManager {
         // events arrive in quick succession.
         let verifying = false
 
-        // Result hook: Claude completed a turn
+        // Result hook: the coding agent completed a turn
         const onResult = (sessionId: string, isError: boolean) => {
           if (sessionId !== child.id || settled || verifying) return
           const session = this.sessions.get(child.id)
@@ -717,7 +732,7 @@ export class OrchestratorChildManager {
               child.status = isError ? 'failed' : 'completed'
               child.result = text || null
               child.error = isError
-                ? 'Claude returned an error'
+                ? 'Coding agent returned an error'
                 : missing
                   ? `Completion not verified: expected ${child.request.completionPolicy === 'pr' ? 'a pull request' : 'a pushed branch'} but found none`
                   : null
@@ -730,7 +745,7 @@ export class OrchestratorChildManager {
           })()
         }
 
-        // Exit hook: Claude process exited
+        // Exit hook: the coding agent process exited
         const onExit = (sessionId: string, _code: number | null, _signal: string | null, willRestart: boolean) => {
           if (sessionId !== child.id || settled) return
           if (willRestart) return  // Will auto-restart, keep monitoring
@@ -747,7 +762,7 @@ export class OrchestratorChildManager {
             if (isSettled()) return
             child.status = missing ? 'failed' : 'completed'
             child.result = text || null
-            child.error = missing ? 'Claude exited before the final step could be verified' : null
+            child.error = missing ? 'Coding agent exited before the final step could be verified' : null
             child.completedAt = new Date().toISOString()
             clearTimers()
             settle()

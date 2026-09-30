@@ -3,7 +3,7 @@
  *
  * Manages the always-on orchestrator session: directory setup, stable ID
  * persistence, and auto-start on server boot. The orchestrator is a standard
- * Claude session with source='orchestrator' that runs in ~/.codekin/orchestrator/.
+ * coding-agent session with source='orchestrator' that runs in ~/.codekin/orchestrator/.
  */
 
 import { join, dirname } from 'path'
@@ -54,7 +54,7 @@ Agent ${AGENT_DISPLAY_NAME} tracks repositories you work with in Codekin.
  * forever. CLAUDE.md is system-managed; user memory lives in PROFILE.md,
  * REPOS.md and journal/, which are never overwritten.
  */
-export const CLAUDE_MD_TEMPLATE_VERSION = 8
+export const CLAUDE_MD_TEMPLATE_VERSION = 9
 
 const CLAUDE_MD_TEMPLATE = `<!-- codekin-template-version: ${CLAUDE_MD_TEMPLATE_VERSION} -->
 # Agent ${AGENT_DISPLAY_NAME} — Codekin Orchestrator
@@ -66,7 +66,7 @@ smoothly, and their audit findings actioned pragmatically.
 ## Your Core Role: ORCHESTRATOR, NOT CODER
 
 **You do NOT write code yourself.** When it's time to implement something,
-you spawn a new session — a dedicated Claude instance that does the coding
+you spawn a new session — a dedicated coding agent that does the coding
 work in the target repository. That session appears in the user's sidebar
 so they can watch progress, jump in, or give guidance.
 
@@ -189,7 +189,8 @@ Fields:
 - **branchName** (required): Git branch name for the changes
 - **completionPolicy**: "pr" (create PR), "merge" (push to branch), or "commit-only"
 - **useWorktree**: true (default) — runs in an isolated git worktree
-- **model**: Optional model override (e.g. "claude-sonnet-4-6")
+- **provider**: Optional harness override ("claude", "codex", or "opencode"). Omit to use your selected harness. Honor the user's choice; never silently switch harnesses.
+- **model**: Optional model override for that harness. Without an override, children on your harness inherit your model; a different harness uses its own default.
 - **allowedTools**: Optional array of tool patterns to override defaults (advanced)
 - **timeoutMs**: Optional working-time budget in ms (default 1800000 = 30 min,
   range 1 min – 4 h). Time spent blocked on an approval does not count.
@@ -239,7 +240,7 @@ curl -s "http://localhost:$CODEKIN_PORT/api/orchestrator/children/SESSION_ID/tra
 \`\`\`
 
 ## Scheduling Reminders & Recurring Tasks
-You have access to CronCreate, CronDelete, and CronList tools for in-session scheduling.
+If your current harness exposes CronCreate, CronDelete, and CronList, you can use them for in-session scheduling. Otherwise skip these tools; Codekin workflow scheduling and child notifications are independent of the harness.
 
 **CronCreate parameters:**
 - \`cron\` (string, required): Standard 5-field cron expression — \`"minute hour dom month dow"\`. Example: \`"0 9 * * 1-5"\` for weekdays at 9am.
@@ -361,7 +362,7 @@ Users can manage trust directly in chat:
 4. Read skill-profile.json for guidance style adaptation
 5. Check for new audit reports that may have landed
 6. Check for decisions pending outcome assessment
-7. **Re-establish cron jobs** — cron jobs do not survive session restarts, so re-create your scheduled work on startup:
+7. **Re-establish cron jobs only if CronCreate is available** — cron jobs do not survive session restarts, so re-create your scheduled work on startup when supported:
    - Report check: \`cron: "3 9 * * *"\`, \`prompt: "Check for new audit reports across all managed repos and triage any new findings"\`
    - Do NOT create a child-session polling cron — the server pushes blocked/terminal notifications to you in realtime.
 8. Greet the user with a brief, friendly status update
@@ -568,11 +569,11 @@ export function setOrchestratorModel(sessions: SessionManager, model: string): v
 /**
  * The harness the orchestrator runs on. The agent is harness-agnostic — any
  * provider the session layer supports (claude / codex / opencode) can host it;
- * `claude` is only the default, not a requirement.
+ * a user must choose before the first start. Never silently select a vendor.
  */
-export function getOrchestratorProvider(sessions: SessionManager): CodingProvider {
+export function getOrchestratorProvider(sessions: SessionManager): CodingProvider | null {
   const stored = sessions.archive.getSetting(PROVIDER_SETTING_KEY, '') as CodingProvider
-  return VALID_PROVIDERS.has(stored) ? stored : 'claude'
+  return VALID_PROVIDERS.has(stored) ? stored : null
 }
 
 /**
@@ -585,6 +586,7 @@ export function setOrchestratorProvider(sessions: SessionManager, provider: Codi
   if (getOrchestratorProvider(sessions) !== provider) {
     sessions.archive.setSetting(MODEL_SETTING_KEY, '')
   }
+  if (provider === 'codex') ensureCodexMcpConfig()
   sessions.archive.setSetting(PROVIDER_SETTING_KEY, provider)
 }
 
@@ -611,11 +613,12 @@ function queueStartupGreeting(): void {
  * Returns the orchestrator session ID.
  */
 export function ensureOrchestratorRunning(sessions: SessionManager): string {
+  const provider = getOrchestratorProvider(sessions)
+  if (!provider) throw new Error('Choose an agent harness for Joe before starting')
   ensureOrchestratorDir()
   const stableId = getOrCreateOrchestratorId()
 
   const model = getOrchestratorModel(sessions) || undefined
-  const provider = getOrchestratorProvider(sessions)
 
   // Codex reads MCP servers only from its global config — register there when
   // (and only when) the agent actually runs on codex.

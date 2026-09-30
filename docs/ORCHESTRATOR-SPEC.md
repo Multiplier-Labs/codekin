@@ -111,16 +111,23 @@ Agent Joe is a standard coding-process session with:
 - `permissionMode: 'acceptEdits'` (it needs to read reports, write memory, spawn sessions)
 - Working directory: `~/.codekin/orchestrator/` (its own workspace)
 
-**Harness**: Joe is agent-agnostic — any provider the session layer supports
-(`claude` / `codex` / `opencode`) can host it, picked from the agent control in
-Joe's composer exactly as in a regular session. The choice persists as archive
-setting `agent_provider` (written by the `set_provider` WebSocket handler, read
-by `ensureOrchestratorRunning`), with `claude` as the default. Switching the
-harness clears the stored model — a model belongs to the harness it was picked
-on — and drops the old harness's transcript link on the next cold start.
-Caveat: the first-party Codekin MCP server is registered via `.mcp.json`, which
-only Claude Code reads natively; on other harnesses Joe falls back to the
-documented curl commands against the same API.
+**Harness**: Joe is agent-agnostic. Users choose `claude`, `codex`, or
+`opencode` before the first start, then switch with the agent control in Joe's
+composer. The choice persists as archive setting `agent_provider`; there is no
+implicit Claude default. Existing installations without a saved choice also
+show the picker. Opt-in boot startup waits for a saved choice. Switching clears
+the stored and live model override and the old harness transcript link.
+
+The first-party Codekin MCP server is registered in `.mcp.json` for Claude,
+`opencode.json` for OpenCode, and the Codex config before Joe starts or switches
+to Codex. In-session cron tools are used only when the selected harness provides
+them; child notifications do not depend on those tools.
+
+Child sessions inherit Joe's current harness and model. `spawn_child` accepts a
+`provider` override for a task; switching the child's harness uses its own model
+default unless `model` is also supplied. The resolved choice is persisted in the
+child run. When the parent is not loaded, the saved Joe harness is used. No choice
+means spawning is rejected rather than silently using Claude.
 
 **Model**: picked from the model control in Joe's composer, exactly as in a
 regular session. Because Joe's session is recreated on demand, the choice is

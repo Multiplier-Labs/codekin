@@ -232,12 +232,12 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           send({ type: 'error', message: `Invalid provider: ${msg.provider}` })
           break
         }
-        sessions.setProvider(sessionId, msg.provider, msg.carryContext)
         // The orchestrator's harness is a standing preference, not a per-session
         // one — its session is recreated on demand, so persist the choice.
         if (isOrchestratorSession(sessions.get(sessionId)?.source)) {
           setOrchestratorProvider(sessions, msg.provider)
         }
+        sessions.setProvider(sessionId, msg.provider, msg.carryContext)
       }
       break
     }
