@@ -14,7 +14,7 @@
 import { useState, useEffect } from 'react'
 import {
   IconPlus, IconShieldCheck, IconArchive, IconFileText,
-  IconRobot, IconSparkles, IconPencil, IconGitBranch, IconRobotFace, IconTrash, IconShare,
+  IconRobot, IconSparkles, IconPencil, IconGitBranch, IconRobotFace, IconTrash, IconShare, IconHeartbeat, IconHandStop,
 } from '@tabler/icons-react'
 import type { Session, CodingProvider } from '../types'
 import { PROVIDERS } from '../types'
@@ -22,6 +22,8 @@ import { RowMenu, type RowMenuItem } from './RowMenu'
 import { providerAvailability } from '../lib/agentHealth'
 import { useAgentHealth } from '../hooks/useAgentHealth'
 import type { RepoDrawerTab } from './RepoDrawer'
+import { indicatorText, type RepoMaintenance } from '../lib/maintenanceApi'
+import { effectiveOwner } from '../lib/joeApi'
 
 // --------------------------------------------------------------------------
 // Helpers
@@ -146,6 +148,14 @@ export interface RepoSectionProps {
   onMoveToWorktree?: () => void
   /** Share a session with another account — hosted only. */
   onShareSession?: (id: string) => void
+  /** This repo's maintenance plan, when it has one. */
+  maintenance?: RepoMaintenance
+  /** Open the repo's maintenance view. */
+  onOpenMaintenance?: (workingDir: string) => void
+  /** Hand a session's execution to Joe, or take it back. */
+  onHandOver?: (sessionId: string) => void
+  onTakeBack?: (sessionId: string) => void
+  agentName?: string
 }
 
 // --------------------------------------------------------------------------
@@ -167,6 +177,11 @@ export function RepoSection({
   onOpenDrawer,
   onMoveToWorktree,
   onShareSession,
+  maintenance,
+  onOpenMaintenance,
+  onHandOver,
+  onTakeBack,
+  agentName = 'Joe',
 }: RepoSectionProps) {
   const health = useAgentHealth()
   const [expanded, setExpanded] = useState(true)
@@ -198,6 +213,9 @@ export function RepoSection({
   }
 
   const repoMenuItems: RowMenuItem[] = [
+    ...(onOpenMaintenance
+      ? [{ label: 'Maintenance', icon: <IconHeartbeat size={14} stroke={2} />, onSelect: () => onOpenMaintenance(node.workingDir) }]
+      : []),
     { label: 'Docs', icon: <IconFileText size={14} stroke={2} />, onSelect: () => onOpenDrawer(node.workingDir, 'docs') },
     { label: 'Archived sessions', icon: <IconArchive size={14} stroke={2} />, onSelect: () => onOpenDrawer(node.workingDir, 'archive') },
     { label: 'Approvals', icon: <IconShieldCheck size={14} stroke={2} />, onSelect: () => onOpenDrawer(node.workingDir, 'approvals') },
@@ -223,6 +241,24 @@ export function RepoSection({
         <RowMenu items={repoMenuItems} label={`Actions for ${node.displayName}`} />
       </div>
 
+      {/* Explicit maintenance only: repos without an enabled or paused plan show nothing. */}
+      {maintenance && maintenance.state !== 'off' && onOpenMaintenance && (
+        <button
+          type="button"
+          onClick={() => { onOpenMaintenance(node.workingDir) }}
+          className={`mx-[18px] -mt-1 mb-1 flex max-w-[calc(100%-36px)] items-center gap-1.5 rounded-control text-left text-micro transition-colors hover:text-ink ${
+            maintenance.state === 'paused' ? 'text-ink-faint'
+              : maintenance.health === 'healthy' ? 'text-accent-4'
+              : maintenance.health === 'starting' ? 'text-ink-muted'
+              : 'text-warning-5'
+          }`}
+          title={maintenance.reasons.join('\n') || maintenance.label}
+        >
+          <IconHeartbeat size={12} stroke={2} className="flex-shrink-0" />
+          <span className="truncate">{indicatorText(maintenance, agentName)}</span>
+        </button>
+      )}
+
       {/* Sessions — flush beneath the label, one depth level */}
       {expanded && (
         <div className="px-2">
@@ -242,6 +278,9 @@ export function RepoSection({
               ...(onShareSession
                 ? [{ label: 'Share', icon: <IconShare size={14} stroke={2} />, onSelect: () => onShareSession(s.id) }]
                 : []),
+              ...(effectiveOwner(s) === 'joe'
+                ? (onTakeBack ? [{ label: 'Take back control', icon: <IconHandStop size={14} stroke={2} />, onSelect: () => onTakeBack(s.id) }] : [])
+                : (onHandOver ? [{ label: `Hand over to ${agentName}`, icon: <IconRobotFace size={14} stroke={2} />, onSelect: () => onHandOver(s.id) }] : [])),
               {
                 label: 'Close & archive',
                 icon: <IconArchive size={14} stroke={2} />,

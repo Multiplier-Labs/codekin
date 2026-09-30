@@ -12,16 +12,33 @@ import { useState, useCallback, useEffect } from 'react'
 interface RouteState {
   path: string
   sessionId: string | null
-  view: 'chat' | 'automations' | 'orchestrator' | 'tasks' | 'settings'
+  view: 'chat' | 'automations' | 'orchestrator' | 'tasks' | 'maintenance' | 'settings'
   /** Which Automations tab a legacy deep link asked for (/workflows, /loops). */
   automationsTab: 'workflows' | 'loops' | null
   /** `/settings/:section` — null for bare `/settings` (the section list). */
   settingsSection: string | null
+  /** `/maintenance/:repo` — the repo path whose maintenance view is open. */
+  maintenanceRepo?: string
+}
+
+/** The route for a repo's maintenance view. */
+export function maintenancePath(repo: string): string {
+  return `/maintenance/${encodeURIComponent(repo)}`
 }
 
 export function parsePath(pathname: string): RouteState {
   if (pathname === '/joe' || pathname === '/joe/' || pathname === '/orchestrator' || pathname === '/orchestrator/') {
     return { path: pathname, sessionId: null, view: 'orchestrator', automationsTab: null, settingsSection: null }
+  }
+  const maintenance = pathname.match(/^\/maintenance\/([^/]+)\/?$/)
+  if (maintenance) {
+    let repo: string
+    try {
+      repo = decodeURIComponent(maintenance[1])
+    } catch {
+      repo = ''
+    }
+    if (repo) return { path: pathname, sessionId: null, view: 'maintenance', automationsTab: null, settingsSection: null, maintenanceRepo: repo }
   }
   if (pathname === '/tasks' || pathname === '/tasks/') {
     return { path: pathname, sessionId: null, view: 'tasks', automationsTab: null, settingsSection: null }

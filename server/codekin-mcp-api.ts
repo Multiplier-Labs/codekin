@@ -36,10 +36,11 @@ export interface CreateTaskApiInput {
   acceptance?: string
   priority?: 'high' | 'normal' | 'low'
   completionPolicy?: 'pr' | 'merge' | 'commit-only'
-  source?: 'joe' | 'report' | 'incident'
+  source?: 'joe' | 'report' | 'incident' | 'maintenance'
   sourceRef?: string
   originSessionId?: string
   originRequestId?: string
+  responsibilityId?: string
 }
 
 /** Why and on whose behalf an automation change is made — recorded in its audit trail. */
@@ -160,8 +161,8 @@ export class CodekinApi {
   }
 
   createTask(input: CreateTaskApiInput): Promise<unknown> {
-    const { repo, completionPolicy, source, sourceRef, originSessionId, originRequestId, ...task } = input
-    return this.request('POST', '/api/orchestrator/tasks', { repo, completionPolicy, source, sourceRef, originSessionId, originRequestId, tasks: [task] })
+    const { repo, completionPolicy, source, sourceRef, originSessionId, originRequestId, responsibilityId, ...task } = input
+    return this.request('POST', '/api/orchestrator/tasks', { repo, completionPolicy, source, sourceRef, originSessionId, originRequestId, responsibilityId, tasks: [task] })
   }
 
   updateTask(id: string, patch: { title?: string; detail?: string; acceptance?: string; priority?: string; status?: string; note?: string }): Promise<unknown> {
@@ -179,6 +180,32 @@ export class CodekinApi {
     if (opts.source) params.set('source', opts.source)
     if (opts.active) params.set('active', 'true')
     return this.request('GET', `/api/orchestrator/sessions?${params.toString()}`)
+  }
+
+  // --- repo maintenance ----------------------------------------------------
+
+  listMaintenance(): Promise<unknown> {
+    return this.request('GET', '/api/orchestrator/maintenance')
+  }
+
+  getMaintenancePlan(repo: string): Promise<unknown> {
+    return this.request('GET', `/api/orchestrator/maintenance/plan?repo=${encodeURIComponent(repo)}`)
+  }
+
+  proposeResponsibility(input: { repo: string; name: string; scope?: string; automationIds: string[]; policy: string; maxActiveTasks?: number; requiredDecision?: string }): Promise<unknown> {
+    return this.request('POST', '/api/orchestrator/maintenance/responsibilities', input)
+  }
+
+  removeResponsibility(id: string): Promise<unknown> {
+    return this.request('POST', `/api/orchestrator/maintenance/responsibilities/${encodeURIComponent(id)}/remove`)
+  }
+
+  pauseMaintenance(repo: string): Promise<unknown> {
+    return this.request('POST', '/api/orchestrator/maintenance/pause', { repo })
+  }
+
+  recordMaintenanceActivity(input: { repo: string; responsibilityId?: string; kind: 'finding' | 'check_ok' | 'action'; summary: string; ref?: string }): Promise<unknown> {
+    return this.request('POST', '/api/orchestrator/maintenance/activity', input)
   }
 
   // --- Joe in repo sessions ------------------------------------------------

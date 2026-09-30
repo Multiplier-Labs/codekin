@@ -363,6 +363,7 @@ export class WorkflowEngine extends EventEmitter {
   private sessionResolver: SessionResolver | null = null
   /** Runs started by the dispatcher — lets run-success update the schedule's lastReviewedSha. */
   private dispatchIndex = new Map<string, { scheduleId: string; headSha: string | null }>()
+  private dispatchGate: ((schedule: CronSchedule) => string | null) | null = null
   private headShaResolver: HeadShaResolver = defaultHeadShaResolver
   private activityResolver: ActivityResolver | null = null
   private signalHandlers = new Map<string, SignalHandler>()
@@ -940,6 +941,15 @@ export class WorkflowEngine extends EventEmitter {
     this.headShaResolver = resolver ?? defaultHeadShaResolver
   }
 
+  /**
+   * An extra dispatch gate: return a reason to hold a due schedule, or null.
+   * Used by repo maintenance to pause adopted automations without rewriting
+   * their own enabled setting. A throwing gate fails open.
+   */
+  setDispatchGate(gate: ((schedule: CronSchedule) => string | null) | null) {
+    this.dispatchGate = gate
+  }
+
   /** Connect the repo activity index to the dispatch gate. Without one, the gate is open. */
   setActivityResolver(resolver: ActivityResolver | null) {
     this.activityResolver = resolver
@@ -1164,6 +1174,19 @@ export class WorkflowEngine extends EventEmitter {
     ) {
       this.holdSchedule(schedule, 'missed fire window (catch-up: skip)', nextSlot(), now)
       return false
+    }
+
+    if (this.dispatchGate) {
+      let reason: string | null = null
+      try {
+        reason = this.dispatchGate(schedule)
+      } catch (err) {
+        console.error(`[workflow] Dispatch gate error for ${schedule.id}:`, err)
+      }
+      if (reason) {
+        this.holdSchedule(schedule, reason, nextSlot(), now)
+        return false
+      }
     }
 
     // Activity gate: dormant repos hold until they wake; cooling repos are

@@ -167,10 +167,11 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
         acceptance: z.string().optional().describe('How we know it is done'),
         priority: z.enum(['high', 'normal', 'low']).optional(),
         completionPolicy: z.enum(['pr', 'merge', 'commit-only']).optional(),
-        source: z.enum(['joe', 'report', 'incident']).optional(),
+        source: z.enum(['joe', 'report', 'incident', 'maintenance']).optional(),
         sourceRef: z.string().optional().describe('e.g. the report path the finding came from'),
         originSessionId: z.string().optional().describe('Repo session the request came from — its milestones are posted back there'),
         originRequestId: z.string().optional().describe('The @Joe request id from the Session Request notification'),
+        responsibilityId: z.string().optional().describe('Maintenance responsibility this work falls under — enforces its policy and task limit'),
       },
     },
     (args) => run(() => api.createTask(args)),
@@ -207,6 +208,77 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
       },
     },
     ({ id, ...input }) => run(() => api.requestDecision(id, input)),
+  )
+
+  // --- repo maintenance ---------------------------------------------------
+
+  server.registerTool(
+    'list_maintenance',
+    {
+      description:
+        'Repos with a maintenance plan: state (off / enabled / paused), evidence-based health, label, and open/running/needs-you task counts. A repo is maintained only when its plan is enabled.',
+      inputSchema: {},
+    },
+    () => run(() => api.listMaintenance()),
+  )
+
+  server.registerTool(
+    'get_maintenance_plan',
+    {
+      description:
+        'One repo\'s maintenance plan: responsibilities (scope, policy, task limit, linked automations with health, last check, next check), governed automations, and recent activity.',
+      inputSchema: { repo: z.string().describe('Absolute repo path') },
+    },
+    ({ repo }) => run(() => api.getMaintenancePlan(repo)),
+  )
+
+  server.registerTool(
+    'propose_maintenance_responsibility',
+    {
+      description:
+        'Propose a responsibility for a repo\'s maintenance plan, linked to existing repo automations that provide its checks (create them first with create_repo_automation). It stays a proposal until the user reviews and enables the plan in the repo\'s maintenance view — you cannot enable maintenance yourself.',
+      inputSchema: {
+        repo: z.string(),
+        name: z.string().min(1).max(200).describe('e.g. "Keep dependencies healthy"'),
+        scope: z.string().optional().describe('What is watched'),
+        automationIds: z.array(z.string()).min(1),
+        policy: z.enum(['notify', 'propose', 'investigate', 'implement']).describe('notify: report only; propose: create tasks the user starts; investigate: diagnose and recommend; implement: fix through a verified PR'),
+        maxActiveTasks: z.number().int().min(1).max(10).optional(),
+        requiredDecision: z.string().optional().describe('Changes that always need the user'),
+      },
+    },
+    (args) => run(() => api.proposeResponsibility(args)),
+  )
+
+  server.registerTool(
+    'remove_maintenance_responsibility',
+    { description: 'Withdraw one of your proposed responsibilities. Accepted responsibilities are the user\'s to change.', inputSchema: { id: z.string() } },
+    ({ id }) => run(() => api.removeResponsibility(id)),
+  )
+
+  server.registerTool(
+    'pause_maintenance',
+    {
+      description: 'Pause a repo\'s maintenance (e.g. when its checks keep failing and need the user). Governed checks and new maintenance work stop; running tasks finish. Only the user can resume.',
+      inputSchema: { repo: z.string() },
+    },
+    ({ repo }) => run(() => api.pauseMaintenance(repo)),
+  )
+
+  server.registerTool(
+    'record_maintenance_activity',
+    {
+      description:
+        'Record the outcome of triaging a maintenance check — kind check_ok with "No issues found", a finding, or an action you took — so the repo\'s activity shows what happened.',
+      inputSchema: {
+        repo: z.string(),
+        responsibilityId: z.string().optional(),
+        kind: z.enum(['finding', 'check_ok', 'action']),
+        summary: z.string().min(1),
+        ref: z.string().optional().describe('Unique reference (e.g. the run id) so the same outcome is not recorded twice'),
+      },
+    },
+    (args) => run(() => api.recordMaintenanceActivity(args)),
   )
 
   server.registerTool(

@@ -24,7 +24,7 @@ import {
 
 /** A task action that does not fit the task's current state. */
 export class TaskActionError extends Error {
-  constructor(message: string, readonly status: 404 | 409) {
+  constructor(message: string, readonly status: 400 | 403 | 404 | 409) {
     super(message)
     this.name = 'TaskActionError'
   }
@@ -40,6 +40,16 @@ export type TaskMilestone = 'accepted' | 'decision' | 'blocked' | 'review'
 export type TaskExecution = 'running' | 'queued' | 'idle'
 
 export type TaskView = Task & { execution: TaskExecution }
+
+/**
+ * Maintenance rules the task list must enforce (see maintenance-service.ts):
+ * governed tasks need an enabled plan and respect limits and policy.
+ * Implementations throw an error carrying an HTTP-ish `status`.
+ */
+export interface TaskGuard {
+  assertTaskAllowed(responsibilityId: string, repo: string): unknown
+  assertStartAllowed(task: Task): void
+}
 
 export interface TaskServiceDeps {
   store: TaskStore
@@ -59,12 +69,27 @@ export class OrchestratorTaskService {
   private notify: TaskServiceDeps['notify']
   private isChildActive: NonNullable<TaskServiceDeps['isChildActive']>
   private onMilestone: TaskServiceDeps['onMilestone']
+  private guard: TaskGuard | null = null
 
   constructor(deps: TaskServiceDeps) {
     this.store = deps.store
     this.notify = deps.notify
     this.isChildActive = deps.isChildActive ?? (() => false)
     this.onMilestone = deps.onMilestone
+  }
+
+  setGuard(guard: TaskGuard | null): void {
+    this.guard = guard
+  }
+
+  /** Run a guard check, surfacing its refusal as a task action error. */
+  private guarded(check: () => unknown): void {
+    try {
+      check()
+    } catch (err) {
+      const status = (err as { status?: number }).status
+      throw new TaskActionError(err instanceof Error ? err.message : String(err), status === 400 || status === 403 || status === 404 ? status : 409)
+    }
   }
 
   /** Attach the execution substate. */
@@ -115,6 +140,10 @@ export class OrchestratorTaskService {
    * used by the user's "Delegate tasks" flow.
    */
   create(inputs: CreateTaskInput[], opts: { delegate?: boolean } = {}): Task[] {
+    for (const input of inputs) {
+      const responsibilityId = input.responsibilityId
+      if (responsibilityId) this.guarded(() => this.guard?.assertTaskAllowed(responsibilityId, input.repo))
+    }
     const tasks = inputs.map(input => {
       const created = this.store.create(input)
       const task = opts.delegate ? (this.store.patch(created.id, { queuedAt: new Date().toISOString() }, 'system') ?? created) : created
@@ -286,6 +315,7 @@ export class OrchestratorTaskService {
     const task = this.require(id)
     if (CLOSED_TASK_STATUSES.has(task.status)) throw new TaskActionError(`Task is ${task.status} — reopen it first`, 409)
     if (task.repo !== repo) throw new TaskActionError(`Task belongs to ${task.repo}, not ${repo}`, 409)
+    this.guarded(() => this.guard?.assertStartAllowed(task))
     return task
   }
 

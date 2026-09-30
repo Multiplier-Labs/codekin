@@ -35,7 +35,7 @@ export interface JoeTask {
   detail: string
   acceptance: string
   priority: TaskPriority
-  source: 'user' | 'joe' | 'report' | 'incident'
+  source: 'user' | 'joe' | 'report' | 'incident' | 'maintenance'
   sourceRef: string | null
   status: TaskStatus
   completionPolicy: TaskCompletionPolicy
@@ -48,6 +48,8 @@ export interface JoeTask {
   reviewNote: string | null
   /** Repo session the request came from. */
   originSessionId?: string | null
+  /** Maintenance responsibility governing the task, if any. */
+  responsibilityId?: string | null
   /** Whether an attempt is running now, queued for Joe, or neither. */
   execution?: 'running' | 'queued' | 'idle'
   createdBy: 'user' | 'joe' | 'system'

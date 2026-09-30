@@ -100,6 +100,8 @@ export function createTaskRouter(
     if (sourceRef === null) return res.status(400).json({ error: 'Invalid sourceRef' })
     const originSessionId = optionalText(body.originSessionId, 200)
     const originRequestId = optionalText(body.originRequestId, 200)
+    const responsibilityId = optionalText(body.responsibilityId, 200)
+    if (responsibilityId === null) return res.status(400).json({ error: 'Invalid responsibilityId' })
     if (originSessionId === null || originRequestId === null) return res.status(400).json({ error: 'Invalid originSessionId / originRequestId' })
 
     const actor = actorOf(req)
@@ -120,14 +122,19 @@ export function createTaskRouter(
         acceptance,
         priority,
         completionPolicy,
-        source: source ?? (actor === 'user' ? 'user' : 'joe'),
+        source: source ?? (responsibilityId ? 'maintenance' : actor === 'user' ? 'user' : 'joe'),
         sourceRef,
         originSessionId,
         originRequestId,
+        responsibilityId,
         createdBy: actor,
       })
     }
-    res.json({ tasks: tasks.create(inputs, { delegate: body.delegate === true }) })
+    try {
+      res.json({ tasks: tasks.create(inputs, { delegate: body.delegate === true }) })
+    } catch (err) {
+      sendError(res, err)
+    }
   })
 
   /** Edit a task; status may move to todo (reopen), done, or dismissed. */

@@ -54,7 +54,7 @@ Agent ${AGENT_DISPLAY_NAME} tracks repositories you work with in Codekin.
  * forever. CLAUDE.md is system-managed; user memory lives in PROFILE.md,
  * REPOS.md and journal/, which are never overwritten.
  */
-export const CLAUDE_MD_TEMPLATE_VERSION = 11
+export const CLAUDE_MD_TEMPLATE_VERSION = 12
 
 const CLAUDE_MD_TEMPLATE = `<!-- codekin-template-version: ${CLAUDE_MD_TEMPLATE_VERSION} -->
 # Agent ${AGENT_DISPLAY_NAME} — Codekin Orchestrator
@@ -101,6 +101,32 @@ linked to that session. Your own chat is an activity log the user rarely reads.
   controller revision. If the user takes back control, stop instructing it.
 - Configuration requests ("run the security review every Monday") are
   applied with the automation tools and answered in the session.
+
+## Maintaining Repos
+You maintain a repo only when the user has **enabled its maintenance plan**
+(\`list_maintenance\`). Having worked there, remembering it in REPOS.md, an open
+session, or an automation existing does not make it maintained — never say
+you are watching a repo whose plan is not enabled.
+
+- **What you watch** is the plan's responsibilities, each linked to repo
+  automations that run its checks. Coverage health comes from those runs:
+  \`starting\`, \`degraded\` and \`unavailable\` are not "watching it".
+- **Enrolling is the user's decision.** When asked to maintain a repo, create
+  or reuse the automations, then \`propose_maintenance_responsibility\` for each
+  obligation (scope, policy, task limit, what always needs a decision) and
+  reply in the session with the proposal. The user reviews and enables it in
+  the repo's maintenance view. A casual request to fix something never
+  enrolls a repo.
+- **Checks reach you as "Maintenance Check" notifications** with the report
+  and the responsibility's policy. Triage, then \`record_maintenance_activity\`
+  ("No issues found", or the finding). Act only within the policy:
+  notify → report; propose → \`create_task\` with \`responsibilityId\`, the user
+  starts it; investigate → diagnose and recommend; implement → fix through a
+  verified PR. Update the existing task for a known problem rather than
+  opening another; the server enforces the task limit and plan state.
+- **Paused or off means stop.** Start no new maintenance work; running tasks
+  may finish. You may \`pause_maintenance\` when checks keep failing and need
+  the user; only the user resumes.
 
 ## Your Task List
 You keep a durable task list for every repository you manage — it is how the
@@ -530,6 +556,12 @@ export const ORCHESTRATOR_MCP_TOOL_NAMES = [
   'remove_repo_automation',
   'get_automation_health',
   'get_automation_trigger_history',
+  'list_maintenance',
+  'get_maintenance_plan',
+  'propose_maintenance_responsibility',
+  'remove_maintenance_responsibility',
+  'pause_maintenance',
+  'record_maintenance_activity',
   'list_reports',
   'read_report',
   'get_trust_level',

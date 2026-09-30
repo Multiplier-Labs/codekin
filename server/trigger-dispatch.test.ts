@@ -164,6 +164,30 @@ describe('trigger dispatch', () => {
     expect(engine.getSchedule('sched-1')?.lastHeldReason).toBe('missed fire window (catch-up: skip)')
   })
 
+  describe('dispatch gate (maintenance pause)', () => {
+    it('holds a gated schedule without touching its enabled setting, then fires once released', async () => {
+      let paused = true
+      engine.setDispatchGate((schedule) => (paused && schedule.id === 'sched-1' ? 'maintenance paused — resumes with the plan' : null))
+
+      engine.dispatchTick(dueAt())
+      await settle()
+      expect(engine.listRuns({ kind: 'test-wf' })).toHaveLength(0)
+      expect(engine.getSchedule('sched-1')).toMatchObject({ enabled: true, lastHeldReason: 'maintenance paused — resumes with the plan' })
+
+      paused = false
+      engine.dispatchTick(dueAt(4 * 60_000))
+      await settle()
+      expect(engine.listRuns({ kind: 'test-wf' })).toHaveLength(1)
+    })
+
+    it('fails open when the gate throws', async () => {
+      engine.setDispatchGate(() => { throw new Error('broken') })
+      engine.dispatchTick(dueAt())
+      await settle()
+      expect(engine.listRuns({ kind: 'test-wf' })).toHaveLength(1)
+    })
+  })
+
   describe('activity gate', () => {
     it('holds dormant repos and re-opens when they wake', async () => {
       let tier: 'active' | 'cooling' | 'dormant' = 'dormant'

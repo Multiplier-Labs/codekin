@@ -53,7 +53,10 @@ import { useJoeTasks } from './hooks/useJoeTasks'
 import { useJoeStatus } from './hooks/useJoeStatus'
 import { useSessionTasks } from './hooks/useSessionTasks'
 import { attentionCount } from './lib/tasksApi'
-import { effectiveOwner, takeBackControl } from './lib/joeApi'
+import { effectiveOwner, handOverToJoe, takeBackControl } from './lib/joeApi'
+import { MaintenanceView } from './components/MaintenanceView'
+import { useMaintenance } from './hooks/useMaintenance'
+import { maintenancePath } from './hooks/useRouter'
 import { DocsBrowserContent } from './components/DocsBrowserContent'
 import { SessionContent } from './components/SessionContent'
 import { RepoDrawer, type RepoDrawerTab } from './components/RepoDrawer'
@@ -108,7 +111,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   } = useRepos(settings.token)
   const { sessions, rename: renameSession, archive: archiveSession, refresh: refreshSessions } = useSessions(settings.token)
   const { queues: tentativeQueues, addToQueue, clearQueue } = useTentativeQueue()
-  const { sessionId: urlSessionId, view, automationsTab, settingsSection, path: routePath, navigate } = useRouter()
+  const { sessionId: urlSessionId, view, automationsTab, settingsSection, maintenanceRepo, path: routePath, navigate } = useRouter()
 
   // Canonicalize the pre-unification routes: /workflows and /loops render the
   // Automations view (with the matching tab); the URL becomes /automations.
@@ -654,6 +657,15 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   const joeMessageCount = useMemo(() => messages.filter(m => m.type === 'joe').length, [messages])
   const sessionTasks = useSessionTasks(settings.token, view === 'chat' ? activeSessionId : null, joeMessageCount)
 
+  const maintenance = useMaintenance(settings.token)
+  const openMaintenance = useCallback((repo: string) => { navigate(maintenancePath(repo)) }, [navigate])
+  const changeController = useCallback((action: 'handover' | 'takeback', sessionId: string) => {
+    const call = action === 'handover' ? handOverToJoe : takeBackControl
+    call(settings.token, sessionId)
+      .then(() => refreshSessions())
+      .catch((err: unknown) => { showError(err instanceof Error ? err.message : 'Could not change who controls the session') })
+  }, [settings.token, refreshSessions, showError])
+
   const openSessionFromTasks = useCallback((sessionId: string) => {
     clearMessages()
     leaveSession()
@@ -824,7 +836,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
         grokDisabled={grokDisabled}
         onToggleGrok={handleToggleGrok}
         view={view}
-        onSelectSession={(id) => { docsBrowser.close(); if (view === 'orchestrator' || view === 'tasks') navigate(`/s/${id}`); handleSelectSession(id) }}
+        onSelectSession={(id) => { docsBrowser.close(); if (view === 'orchestrator' || view === 'tasks' || view === 'maintenance') navigate(`/s/${id}`); handleSelectSession(id) }}
         onDeleteSession={handleDeleteSession}
         onRenameSession={renameSession}
         onNewSessionInRepo={handleNewSessionInRepo}
@@ -840,6 +852,10 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
         joeWaiting={joeWaiting}
         onNavigateToAutomations={() => navigate('/automations')}
         onNavigateToTasks={() => { void joeStatus.refresh(); navigate('/tasks') }}
+        maintenance={maintenance.byRepo}
+        onOpenMaintenance={openMaintenance}
+        onHandOver={(id) => { changeController('handover', id) }}
+        onTakeBack={(id) => { changeController('takeback', id) }}
         onOpenDrawer={handleOpenDrawer}
         onMoveToWorktree={moveToWorktree}
         mobile={{
@@ -909,6 +925,20 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             joeWaiting={joeWaiting}
             onOpenSession={openSessionFromTasks}
             onOpenJoeLog={() => handleNavigateToOrchestrator()}
+            maintenance={maintenance.byRepo}
+            onOpenMaintenance={openMaintenance}
+          />
+        ) : view === 'maintenance' && maintenanceRepo ? (
+          <MaintenanceView
+            key={maintenanceRepo}
+            token={settings.token}
+            repo={maintenanceRepo}
+            agentName={agentName}
+            onBack={() => navigate('/tasks')}
+            onOpenTasks={() => { setTaskRepoFilter(maintenanceRepo); navigate('/tasks') }}
+            onOpenSession={openSessionFromTasks}
+            onOpenAutomations={() => navigate('/automations')}
+            onChanged={() => { void maintenance.refresh() }}
           />
         ) : view === 'orchestrator' ? (
           <OrchestratorContent
@@ -1045,11 +1075,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             }}
             controllerOwner={effectiveOwner(activeSession)}
             supervisedTaskTitle={activeSession?.controller?.taskId ? sessionTasks.tasks[activeSession.controller.taskId]?.title : undefined}
-            onTakeBackControl={() => {
-              takeBackControl(settings.token, activeSessionId)
-                .then(() => refreshSessions())
-                .catch((err: unknown) => { showError(err instanceof Error ? err.message : 'Could not take back control') })
-            }}
+            onTakeBackControl={() => { changeController('takeback', activeSessionId) }}
           />
         ) : (
           <RepoSelector groups={groups} token={settings.token} ghStatus={ghStatus} ghError={ghError} loading={reposLoading} error={reposError} onOpen={handleOpenSession} onRefreshRepos={refreshRepos} />

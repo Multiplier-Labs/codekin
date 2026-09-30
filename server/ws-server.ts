@@ -40,6 +40,8 @@ import { loadMdWorkflows } from './workflow-loader.js'
 import { createWorkflowRouter, createAutomationService, syncSchedules } from './workflow-routes.js'
 import { AutomationChangeLog } from './automation-changes.js'
 import { JoeSessionBridge } from './joe-session-bridge.js'
+import { MaintenanceStore } from './maintenance-store.js'
+import { MaintenanceService } from './maintenance-service.js'
 import { LoopStore } from './loop-store.js'
 import { LoopEngine } from './loop-engine.js'
 import { LoopArtifactStore } from './loop-artifacts.js'
@@ -440,9 +442,23 @@ joeBridge = new JoeSessionBridge({
   },
   agentName: getAgentDisplayName,
 })
+// Explicit repo maintenance: plans link to existing automations; the task
+// list and the scheduler both consult it (docs/JOE-REPO-COLLABORATION-MAINTENANCE-SPEC.md).
+const maintenanceService = new MaintenanceService({
+  store: new MaintenanceStore(),
+  automations: automationService,
+  tasks: taskStore,
+  notifyJoe: (args) => sendOrchestratorNotification(sessions, { ...args, parentSessionId: getOrCreateOrchestratorId() }),
+  isChildActive: (id) => {
+    const status = childManager.get(id)?.status
+    return status === 'starting' || status === 'running' || status === 'blocked'
+  },
+})
+taskService.setGuard(maintenanceService)
+automationService.setChangeObserver((id, action) => maintenanceService.affectedBy(id, action))
 childManager.onChildUpdate((child) => taskService.syncFromChild(child))
 childManager.recoverInterrupted(interruptedAgentRuns)
-app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, childManager, runStore, taskService, automationService, joeBridge))
+app.use(createOrchestratorRouter(verifyToken, extractToken, sessions, orchestratorMonitorRef, verifyTokenOrSessionToken, undefined, childManager, runStore, taskService, automationService, joeBridge, maintenanceService))
 // Loops 2.0 — durable, event-sourced outcome loops (docs/LOOPS-REWRITE-SPEC.md).
 const loopStore = new LoopStore()
 const loopArtifacts = new LoopArtifactStore(join(DATA_DIR, 'loop-artifacts'))
@@ -726,6 +742,19 @@ server.listen(port, BIND_HOST, () => {
     loadMdWorkflows(engine, sessions)
     engine.resumeInterrupted().catch(err => {
       console.error('[workflow] Failed to resume interrupted runs:', err)
+    })
+
+    // Maintenance: paused/off plans hold the automations adopted into them,
+    // and every finished run of a linked automation is observed once.
+    engine.setDispatchGate((schedule) => maintenanceService.dispatchHold(schedule.id))
+    engine.on('workflow_event', (event: WorkflowEvent) => {
+      if (event.eventType !== 'run_succeeded' && event.eventType !== 'run_failed' && event.eventType !== 'run_skipped') return
+      try {
+        const run = engine.getRun(event.runId)
+        if (run) maintenanceService.observeRun(run)
+      } catch (err) {
+        console.error('[maintenance] Failed to observe run:', err)
+      }
     })
 
     // Broadcast workflow events to all authenticated WebSocket clients

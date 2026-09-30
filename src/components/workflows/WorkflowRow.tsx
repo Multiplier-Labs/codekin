@@ -79,6 +79,11 @@ export function WorkflowRow({
             ? (repo.kind === 'pr-review' ? 'On pull request' : 'On commit')
             : schedule ? describeCron(schedule.cronExpression) : describeCron(repo.cronExpression)}
         </span>
+        {repo.managedBy === 'maintenance' && (
+          <span className="text-meta text-accent-4 shrink-0" title="Adopted into this repo's maintenance plan — runs only while maintenance is enabled">
+            maintenance
+          </span>
+        )}
         {modelLabel(repo.model) && (
           <span className="text-meta text-ink-muted bg-edge rounded-control px-1.5 py-0.5 shrink-0">
             {modelLabel(repo.model)}
