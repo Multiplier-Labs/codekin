@@ -836,6 +836,7 @@ describe('fetchCodexModels', () => {
       result: {
         data: [
           { id: 'gpt-6-astra', displayName: 'GPT-6 Astra', description: 'Frontier', isDefault: true },
+          { id: 'gpt-6-sol', displayName: 'GPT-6 Sol', description: 'Previous Sol', isDefault: false },
           { id: 'gpt-6-luna', displayName: 'GPT-6 Luna', description: 'Fast', isDefault: false },
         ],
       },
@@ -844,9 +845,26 @@ describe('fetchCodexModels', () => {
     const result = await promise
     expect(result.models).toEqual([
       { id: 'gpt-6-astra', name: 'GPT-6 Astra', description: 'Frontier', isDefault: true },
+      { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', description: 'Near-Astra performance for complex work at a lower cost.', isDefault: false },
+      { id: 'gpt-6-sol', name: 'GPT-6 Sol', description: 'Previous Sol', isDefault: false },
       { id: 'gpt-6-luna', name: 'GPT-6 Luna', description: 'Fast', isDefault: false },
     ])
     expect(proc.kill).toHaveBeenCalledWith('SIGTERM')
+  })
+
+  it('uses the app-server entry when GPT-6.1 Sol is already listed', async () => {
+    const promise = fetchCodexModels()
+    await tickLocal()
+    const proc = spawnState.procs[0] as MockProc
+    proc.stdout.write(JSON.stringify({ id: 1, result: {} }) + '\n')
+    await tickLocal()
+    proc.stdout.write(JSON.stringify({
+      id: 2,
+      result: { data: [{ id: 'gpt-6.1-sol', displayName: 'GPT-6.1 Sol', description: 'From Codex', isDefault: true }] },
+    }) + '\n')
+    await expect(promise).resolves.toEqual({
+      models: [{ id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol', description: 'From Codex', isDefault: true }],
+    })
   })
 
   it('caches a successful result (no second spawn)', async () => {
