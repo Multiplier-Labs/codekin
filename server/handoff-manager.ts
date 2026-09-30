@@ -31,6 +31,7 @@ const HARNESS_LABELS: Record<CodingProvider, string> = {
   claude: 'Claude Code',
   codex: 'Codex',
   opencode: 'OpenCode',
+  grok: 'Grok Build',
 }
 
 const DISTILL_SYSTEM_PROMPT =

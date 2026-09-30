@@ -63,13 +63,15 @@ export function buildOneShotEnv(): Record<string, string> {
   const env: Record<string, string> = { PATH: process.env.PATH ?? '' }
   for (const key of [
     'HOME', 'USER', 'LANG', 'LC_ALL',
-    'ANTHROPIC_API_KEY', 'CLAUDE_CODE_API_KEY', 'OPENAI_API_KEY',
+    'ANTHROPIC_API_KEY', 'CLAUDE_CODE_API_KEY', 'OPENAI_API_KEY', 'XAI_API_KEY', 'GROK_HOME',
     'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME',
     'SHELL', 'TERM',
   ]) {
     if (process.env[key]) env[key] = process.env[key]
   }
   env.NODE_NO_WARNINGS = '1'
+  // Grok runs ~/.claude hooks by default; a utility prompt must not fire them.
+  env.GROK_CLAUDE_HOOKS_ENABLED = 'false'
   return env
 }
 

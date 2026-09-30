@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { AGENT_DISPLAY_NAME, getAgentDisplayName } from './config.js'
 import { getDefaultClaudeModel } from './anthropic-models.js'
 import type { SessionManager } from './session-manager.js'
-import { VALID_PROVIDERS } from './types.js'
+import { AGENT_PROVIDERS } from './types.js'
 import type { CodingProvider } from './coding-process.js'
 import { ORCHESTRATOR_DIR, getOrCreateOrchestratorId } from './orchestrator-identity.js'
 import { getOrchestratorOutbox } from './orchestrator-outbox.js'
@@ -641,7 +641,7 @@ export function setOrchestratorModel(sessions: SessionManager, model: string): v
  */
 export function getOrchestratorProvider(sessions: SessionManager): CodingProvider | null {
   const stored = sessions.archive.getSetting(PROVIDER_SETTING_KEY, '') as CodingProvider
-  return VALID_PROVIDERS.has(stored) ? stored : null
+  return AGENT_PROVIDERS.has(stored) ? stored : null
 }
 
 /**
@@ -650,7 +650,7 @@ export function getOrchestratorProvider(sessions: SessionManager): CodingProvide
  * its own default until the user picks a model from the composer.
  */
 export function setOrchestratorProvider(sessions: SessionManager, provider: CodingProvider): void {
-  if (!VALID_PROVIDERS.has(provider)) return
+  if (!AGENT_PROVIDERS.has(provider)) return
   if (getOrchestratorProvider(sessions) !== provider) {
     sessions.archive.setSetting(MODEL_SETTING_KEY, '')
   }

@@ -25,6 +25,7 @@ const PROVIDER_LABELS: Record<CodingProvider, string> = {
   claude: 'Claude',
   codex: 'Codex',
   opencode: 'OpenCode',
+  grok: 'Grok',
 }
 
 /**

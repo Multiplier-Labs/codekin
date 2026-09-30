@@ -8,7 +8,7 @@
 
 import { randomUUID } from 'crypto'
 import { execFile } from 'child_process'
-import { VALID_PROVIDERS } from './types.js'
+import { AGENT_PROVIDERS } from './types.js'
 import type { CodingProvider } from './coding-process.js'
 import type { SessionManager, SessionStopReason } from './session-manager.js'
 import type { PermissionMode, WorktreeRemovalPreflight, WsServerMessage } from './types.js'
@@ -225,6 +225,7 @@ export function modelFitsProvider(model: string, provider: CodingProvider): bool
   const isOpenAi = /^(gpt-|o\d|codex-)/.test(m)
   if (provider === 'claude') return !isOpenAi
   if (provider === 'codex') return !isClaude
+  if (provider === 'grok') return !isClaude && !isOpenAi
   return true  // opencode addresses models as vendor/model; any vendor is fair
 }
 
@@ -719,7 +720,7 @@ export class OrchestratorChildManager {
   async spawn(request: ChildSessionRequest): Promise<ChildSession> {
     const parent = request.parentSessionId ? this.sessions.get(request.parentSessionId) : undefined
     const provider = request.provider ?? parent?.provider ?? this.sessions.archive.getSetting('agent_provider', '')
-    if (!VALID_PROVIDERS.has(provider as CodingProvider)) {
+    if (!AGENT_PROVIDERS.has(provider as CodingProvider)) {
       throw new Error('Choose an agent harness for Joe or specify a child provider before spawning')
     }
     // Joe's own model (live session first, stored choice when it isn't loaded)

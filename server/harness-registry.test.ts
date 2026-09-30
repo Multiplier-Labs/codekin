@@ -22,7 +22,7 @@ function session(overrides: Partial<Session> = {}): Session {
 
 describe('registry coverage', () => {
   it('defines every provider exactly once, with an install hint and label', () => {
-    expect(HARNESSES.map((h) => h.id).sort()).toEqual(['claude', 'codex', 'opencode'])
+    expect(HARNESSES.map((h) => h.id).sort()).toEqual(['claude', 'codex', 'grok', 'opencode'])
     for (const h of HARNESSES) {
       expect(h.label.length).toBeGreaterThan(0)
       expect(h.installHint.length).toBeGreaterThan(0)
@@ -32,7 +32,7 @@ describe('registry coverage', () => {
 
 describe('getHarness', () => {
   it('resolves each provider to its own definition', () => {
-    for (const id of ['claude', 'opencode', 'codex'] as const) {
+    for (const id of ['claude', 'opencode', 'codex', 'grok'] as const) {
       expect(getHarness(id).id).toBe(id)
     }
   })

@@ -19,8 +19,9 @@ import type { TaskItem } from './types.js'
  * - 'claude': Claude Code CLI (subprocess, NDJSON on stdin/stdout)
  * - 'opencode': OpenCode server (HTTP REST + SSE)
  * - 'codex': OpenAI Codex CLI (subprocess, `codex app-server` JSON-RPC on stdin/stdout)
+ * - 'grok': Grok Build CLI (subprocess, `grok agent stdio` ACP JSON-RPC on stdin/stdout)
  */
-export type CodingProvider = 'claude' | 'opencode' | 'codex'
+export type CodingProvider = 'claude' | 'opencode' | 'codex' | 'grok'
 
 /**
  * Capabilities that differ between providers. SessionManager and frontend
@@ -135,4 +136,17 @@ export const CODEX_CAPABILITIES: ProviderCapabilities = {
   thinkingDisplay: true,
   multiProvider: false,
   planMode: false,
+}
+
+/** Default capabilities for the Grok Build CLI provider. */
+export const GROK_CAPABILITIES: ProviderCapabilities = {
+  streaming: true,
+  multiTurn: true,
+  permissionControl: true,
+  toolEvents: true,
+  thinkingDisplay: true,
+  multiProvider: false,
+  // Grok's plan mode blocks its edit tools but not shell writes; Codekin
+  // denies those itself (see docs/GROK-BUILD-INTEGRATION-SPEC.md).
+  planMode: true,
 }
