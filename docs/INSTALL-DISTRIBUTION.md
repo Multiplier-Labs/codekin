@@ -68,7 +68,7 @@ Both read configuration from:
 
 On first run (`codekin setup`), a random token is generated and saved to `~/.config/codekin/token`. The server reads it via `AUTH_TOKEN_FILE` (already supported in `server/config.ts`).
 
-The token is embedded in the access URL: `http://localhost:32352?token=<token>`
+The token is embedded in the access URL: `http://localhost:32352/#token=<token>`
 
 `codekin token` reprints this URL at any time. `codekin setup --regenerate` issues a new token.
 
@@ -159,6 +159,7 @@ All configuration is via environment variables. Defaults suit a local install; o
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `32352` | Server port |
+| `BIND_HOST` | `127.0.0.1` | Interface to listen on. Set `0.0.0.0` only to expose the port directly (behind TLS or a trusted network) |
 | `AUTH_TOKEN` | — | Auth token (inline). Prefer `AUTH_TOKEN_FILE` |
 | `AUTH_TOKEN_FILE` | `~/.config/codekin/token` | Path to auth token file |
 | `FRONTEND_DIST` | (set by CLI) | Path to built frontend `dist/` directory |

@@ -106,7 +106,7 @@ This will:
 4. Generate a local access token and install and start a background service
 5. Print your local access URL
 
-Open the printed `http://localhost:32352?token=...` URL **on the installed computer**. The token is in that URL; if you open the address without it, paste it on the **Settings → Connection** page, which opens automatically. Run `codekin token` to print the URL again. For another device, use a Codekin web app (see remote access above) rather than a `localhost` link.
+Open the printed `http://localhost:32352/#token=...` URL **on the installed computer**. The token is in that URL; (after `#`, so it never reaches server logs); if you open the address without it, paste it on the **Settings → Connection** page, which opens automatically. Run `codekin token` to print the URL again. For another device, use a Codekin web app (see remote access above) rather than a `localhost` link.
 
 The installer checks GitHub CLI (`gh`) but does not require it. Existing local Git checkouts work without GitHub authentication. Continue with [your first session](docs/GETTING-STARTED.md#3-start-your-first-session).
 

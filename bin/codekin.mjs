@@ -97,7 +97,9 @@ function printAccessUrl() {
   const token = readToken()
   const port = getPort()
   if (token) {
-    console.log(`\nCodekin is running at: http://localhost:${port}?token=${token}\n`)
+    // Fragment, not query: the part after '#' is never sent in the HTTP
+    // request, so the token stays out of server and proxy access logs.
+    console.log(`\nCodekin is running at: http://localhost:${port}/#token=${token}\n`)
   } else {
     console.log(`\nCodekin is running at: http://localhost:${port}\n`)
   }

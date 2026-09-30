@@ -45,16 +45,21 @@ function loadToken(): string {
     const saved = raw ? JSON.parse(raw) as { token?: string } | null : null
     let token = saved?.token ?? ''
 
-    // Check URL for ?token= parameter (e.g. shared invite links)
+    // Check the URL for a token: `#token=` is what the CLI prints (a fragment
+    // never reaches server or proxy logs); `?token=` is still accepted for
+    // links printed by older versions.
     const url = new URL(window.location.href)
-    const urlToken = url.searchParams.get('token')
+    const hashParams = new URLSearchParams(url.hash.slice(1))
+    const urlToken = hashParams.get('token') || url.searchParams.get('token')
     if (urlToken) {
       token = urlToken
       // Persist immediately so subsequent loads pick it up
       saveToken(token)
       // Strip the token from the URL for security
       url.searchParams.delete('token')
-      window.history.replaceState({}, '', url.pathname + url.search + url.hash)
+      hashParams.delete('token')
+      const hash = hashParams.toString()
+      window.history.replaceState({}, '', url.pathname + url.search + (hash ? `#${hash}` : ''))
     }
     return token
   } catch {

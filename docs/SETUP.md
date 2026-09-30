@@ -68,6 +68,7 @@ Key server environment variables (see `server/config.ts` for the full list):
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `32352` | Main server port |
+| `BIND_HOST` | `127.0.0.1` | Interface to listen on; the nginx config proxies to loopback. Set `0.0.0.0` only to expose the port directly |
 | `CORS_ORIGIN` | `http://localhost:5173` | Allowed CORS origin (must be set in production) |
 | `AUTH_TOKEN` | — | Shared auth token for WebSocket and REST API |
 | `REPOS_ROOT` | `~/repos` | Root directory for cloned repositories |
