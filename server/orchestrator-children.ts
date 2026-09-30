@@ -11,7 +11,7 @@ import { execFile } from 'child_process'
 import { VALID_PROVIDERS } from './types.js'
 import type { CodingProvider } from './coding-process.js'
 import type { SessionManager, SessionStopReason } from './session-manager.js'
-import type { WorktreeRemovalPreflight, WsServerMessage } from './types.js'
+import type { PermissionMode, WorktreeRemovalPreflight, WsServerMessage } from './types.js'
 import { getAgentDisplayName } from './config.js'
 import { AGENT_ALLOWED_TOOLS } from './agent-allowlist.js'
 import type { RunStore, StoredRun } from './run-store.js'
@@ -51,6 +51,8 @@ export interface ChildSessionRequest {
   model?: string
   /** Optional allowedTools override. When omitted, uses AGENT_CHILD_ALLOWED_TOOLS. */
   allowedTools?: string[]
+  /** Permission mode for the child. Resolved at spawn from Joe's own mode (see childPermissionMode). */
+  permissionMode?: PermissionMode
   /**
    * Session ID of the orchestrator that spawned this child. When set, the
    * parent receives a push notification on terminal-state transitions.
@@ -201,6 +203,30 @@ const MAX_NOTIFIED_PROMPT_IDS = 500  // cap on the blocked-prompt dedup set
  * allowlist, re-exported under the historical name for existing importers.
  */
 export const AGENT_CHILD_ALLOWED_TOOLS = AGENT_ALLOWED_TOOLS
+
+/**
+ * A child runs at the same permission level as Joe. Plan mode is the one
+ * exception: a headless child would stall waiting for a plan approval nobody
+ * is watching, so it works in acceptEdits instead (where Joe's plan mode
+ * would land after approval anyway).
+ */
+export function childPermissionMode(parentMode: PermissionMode | undefined): PermissionMode {
+  if (!parentMode || parentMode === 'plan') return 'acceptEdits'
+  return parentMode
+}
+
+/**
+ * Reject a model id that plainly belongs to another harness (a Claude id on
+ * Codex, a GPT id on Claude). Unknown ids pass — each CLI owns its catalogue.
+ */
+export function modelFitsProvider(model: string, provider: CodingProvider): boolean {
+  const m = model.toLowerCase()
+  const isClaude = m.startsWith('claude-') || ['opus', 'sonnet', 'haiku', 'fable'].includes(m)
+  const isOpenAi = /^(gpt-|o\d|codex-)/.test(m)
+  if (provider === 'claude') return !isOpenAi
+  if (provider === 'codex') return !isClaude
+  return true  // opencode addresses models as vendor/model; any vendor is fair
+}
 
 // ---------------------------------------------------------------------------
 // Manager
@@ -696,10 +722,20 @@ export class OrchestratorChildManager {
     if (!VALID_PROVIDERS.has(provider as CodingProvider)) {
       throw new Error('Choose an agent harness for Joe or specify a child provider before spawning')
     }
+    // Joe's own model (live session first, stored choice when it isn't loaded)
+    // carries over only to a child on the same harness — another harness's
+    // model id would be rejected or silently remapped by that CLI.
+    const parentProvider = parent?.provider ?? this.sessions.archive.getSetting('agent_provider', '')
+    const parentModel = parent?.model ?? (this.sessions.archive.getSetting('agent_model', '') || undefined)
+    const model = request.model?.trim() || (provider === parentProvider ? parentModel : undefined)
+    if (model && !modelFitsProvider(model, provider as CodingProvider)) {
+      throw new Error(`Model "${model}" does not belong to the ${provider} harness — omit model to use Joe's (same harness) or the harness default`)
+    }
     request = {
       ...request,
       provider: provider as CodingProvider,
-      model: request.model ?? (provider === parent?.provider ? parent?.model : undefined),
+      model,
+      permissionMode: request.permissionMode ?? childPermissionMode(parent?.permissionMode),
     }
     this.purgeStaleChildren()
     if (this.activeCount() >= MAX_CONCURRENT) {
@@ -735,7 +771,7 @@ export class OrchestratorChildManager {
         groupDir: request.repo,
         provider: request.provider,
         model: request.model,
-        permissionMode: 'acceptEdits',
+        permissionMode: request.permissionMode,
         allowedTools: request.allowedTools ?? AGENT_CHILD_ALLOWED_TOOLS,
         useWorktree: request.useWorktree,
       })

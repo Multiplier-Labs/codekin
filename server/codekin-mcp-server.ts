@@ -50,7 +50,7 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
         timeoutMs: z.number().int().min(60_000).max(14_400_000).optional()
           .describe('Working-time budget in ms, 1 min to 4 h (default 30 min); time blocked on prompts does not count'),
         provider: z.enum(['claude', 'codex', 'opencode']).optional().describe('Agent harness; defaults to Joe’s selected harness. Honor the user’s choice.'),
-        model: z.string().optional().describe('Model for the selected harness; inherits Joe’s model only when using the same harness'),
+        model: z.string().optional().describe('Model for the selected harness; inherits Joe’s model only when using the same harness. Children always run at Joe’s permission level.'),
       },
     },
     (args) => run(() => api.spawnChild(args)),

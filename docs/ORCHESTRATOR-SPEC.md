@@ -126,8 +126,15 @@ them; child notifications do not depend on those tools.
 Child sessions inherit Joe's current harness and model. `spawn_child` accepts a
 `provider` override for a task; switching the child's harness uses its own model
 default unless `model` is also supplied. The resolved choice is persisted in the
-child run. When the parent is not loaded, the saved Joe harness is used. No choice
-means spawning is rejected rather than silently using Claude.
+child run. When the parent is not loaded, the saved Joe harness and model are
+used. A model id that plainly belongs to another harness (a `claude-*` id on
+Codex, a `gpt-*` id on Claude) is rejected. No choice means spawning is rejected
+rather than silently using Claude.
+
+Children also inherit Joe's permission mode — change it from Joe's composer and
+new children follow. Plan mode is the exception: a headless child would stall on
+a plan approval nobody sees, so it runs in `acceptEdits`. The spawn API has no
+permission field, so Joe cannot raise a child above its own level.
 
 **Model**: picked from the model control in Joe's composer, exactly as in a
 regular session. Because Joe's session is recreated on demand, the choice is

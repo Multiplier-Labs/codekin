@@ -43,6 +43,7 @@ function makeMockSessions(worktreeSucceeds = true) {
 
   return {
     create: vi.fn(),
+    archive: { getSetting: (_key: string, fallback = '') => fallback } as { getSetting: (key: string, fallback?: string) => string },
     prepareSessionWorktree: vi.fn(async () => worktreeSucceeds
       ? { ok: true, path: '/repos/myproject-wt-child123', branch: 'fix/test', repoRoot: '/repos/myproject', reused: false }
       : { ok: false, code: 'git_failed', message: 'git worktree add failed' }),
@@ -585,11 +586,51 @@ describe('OrchestratorChildManager', () => {
       expect(sessions.create).not.toHaveBeenCalled()
     })
 
+    it('uses the saved model when the parent is not loaded and the harness matches', async () => {
+      sessions = makeMockSessions()
+      sessions.get.mockReturnValue(undefined)
+      const settings: Record<string, string> = { agent_provider: 'codex', agent_model: 'gpt-6-sol' }
+      sessions.archive = { getSetting: (key: string) => settings[key] ?? '' }
+      const child = await makeManager(sessions).spawn(makeRequest({ provider: undefined, parentSessionId: 'joe' }))
+      expect(child.request).toMatchObject({ provider: 'codex', model: 'gpt-6-sol' })
+    })
+
+    it('refuses a model id from another harness', async () => {
+      sessions = makeMockSessions()
+      sessions.get.mockReturnValue({ provider: 'codex', model: 'gpt-6-sol' })
+      await expect(makeManager(sessions).spawn(makeRequest({ provider: undefined, model: 'claude-opus-5-5', parentSessionId: 'joe' })))
+        .rejects.toThrow(/does not belong to the codex harness/)
+      await expect(makeManager(sessions).spawn(makeRequest({ provider: 'claude', model: 'gpt-6-sol', parentSessionId: 'joe' })))
+        .rejects.toThrow(/does not belong to the claude harness/)
+      expect(sessions.create).not.toHaveBeenCalled()
+    })
+
     it('preserves an explicit child model on the selected harness', async () => {
       sessions = makeMockSessions()
       sessions.get.mockReturnValue({ provider: 'codex', model: 'parent-model' })
       const child = await makeManager(sessions).spawn(makeRequest({ provider: 'codex', model: 'child-model', parentSessionId: 'joe' }))
       expect(child.request.model).toBe('child-model')
+    })
+  })
+
+  describe('permission mode', () => {
+    beforeEach(() => { vi.useFakeTimers() })
+    afterEach(() => { vi.clearAllTimers(); vi.useRealTimers() })
+
+    it.each(['default', 'acceptEdits', 'bypassPermissions', 'dangerouslySkipPermissions'] as const)('inherits Joe\'s %s mode', async (permissionMode) => {
+      sessions = makeMockSessions()
+      sessions.get.mockReturnValue({ provider: 'claude', model: 'claude-opus-5-5', permissionMode })
+      const child = await makeManager(sessions).spawn(makeRequest({ parentSessionId: 'joe' }))
+      expect(child.request.permissionMode).toBe(permissionMode)
+      expect(sessions.create).toHaveBeenCalledWith(expect.any(String), expect.any(String), expect.objectContaining({ permissionMode }))
+    })
+
+    it('runs in acceptEdits when Joe is planning or not loaded', async () => {
+      sessions = makeMockSessions()
+      sessions.get.mockReturnValue({ provider: 'claude', permissionMode: 'plan' })
+      expect((await makeManager(sessions).spawn(makeRequest({ parentSessionId: 'joe' }))).request.permissionMode).toBe('acceptEdits')
+      sessions.get.mockReturnValue(undefined)
+      expect((await makeManager(sessions).spawn(makeRequest({ branchName: 'fix/other', parentSessionId: 'joe' }))).request.permissionMode).toBe('acceptEdits')
     })
   })
 
