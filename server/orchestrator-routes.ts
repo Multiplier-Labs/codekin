@@ -18,6 +18,8 @@ import { createMemoryRouter } from './orchestrator-memory-router.js'
 import { createLearningRouter } from './orchestrator-learning-router.js'
 import { createTaskRouter } from './orchestrator-task-router.js'
 import type { OrchestratorTaskService } from './orchestrator-tasks.js'
+import { createAutomationRouter } from './automation-routes.js'
+import type { AutomationService } from './automation-service.js'
 
 type VerifyFn = (token: string | undefined) => boolean
 type VerifySessionFn = (token: string | undefined, sessionId: string | undefined) => boolean
@@ -33,6 +35,7 @@ export function createOrchestratorRouter(
   injectedChildren?: OrchestratorChildManager,
   runStore?: RunStore,
   tasks?: OrchestratorTaskService,
+  automations?: AutomationService,
 ): Router {
   const router = Router()
   const memory = injectedMemory ?? new OrchestratorMemory()
@@ -60,6 +63,7 @@ export function createOrchestratorRouter(
   // Mount sub-routers
   router.use(createSessionRouter(verifyOrchestratorAuth, sessions, memory, children, monitorRef, tasks))
   if (tasks) router.use(createTaskRouter(verifyOrchestratorAuth, actorOf, tasks))
+  if (automations) router.use(createAutomationRouter(verifyOrchestratorAuth, actorOf, automations))
   router.use(createMemoryRouter(verifyOrchestratorAuth, memory, monitorRef))
   router.use(createLearningRouter(verifyOrchestratorAuth, memory))
 

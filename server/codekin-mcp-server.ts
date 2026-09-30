@@ -288,10 +288,151 @@ export function buildCodekinMcpServer(api: CodekinApi): McpServer {
   server.registerTool(
     'trigger_workflow',
     {
-      description: 'Trigger a workflow run now (e.g. repo-health.weekly) instead of waiting for its schedule.',
-      inputSchema: { kind: z.string(), input: z.record(z.string(), z.unknown()).optional().describe('e.g. { repoPath }') },
+      description:
+        'Run a workflow now instead of waiting for its schedule: pass automationId to run a configured repo automation, or kind + input.repoPath for a one-off run. Returns the run (id, status) — watch it with list_runs.',
+      inputSchema: {
+        automationId: z.string().optional().describe('Configured repo automation to run (from list_repo_automations)'),
+        kind: z.string().optional().describe('Workflow kind for a one-off run, e.g. repo-health.weekly'),
+        input: z.record(z.string(), z.unknown()).optional().describe('One-off run input, e.g. { repoPath }'),
+      },
     },
-    ({ kind, input }) => run(() => api.triggerWorkflow(kind, input)),
+    ({ automationId, kind, input }) => run(async () => {
+      if (!automationId && !kind) throw new Error('Pass automationId or kind')
+      return api.triggerWorkflow({ automationId, kind, input })
+    }),
+  )
+
+  // --- workflow definitions and repo automations -------------------------
+
+  const changeFields = {
+    reason: z.string().min(1).describe('Why — recorded in the automation\'s change history'),
+    idempotencyKey: z.string().min(8).max(200)
+      .describe('Unique per intended change; reuse the same key when retrying so the change applies once'),
+    authorization: z.string().optional().describe('What authorizes it, e.g. "user asked in session <id>"'),
+    originSessionId: z.string().optional().describe('Session the request came from'),
+    taskId: z.string().optional().describe('Task the change belongs to'),
+  }
+
+  server.registerTool(
+    'list_workflows',
+    {
+      description:
+        'Workflow definitions available to a repo — built-ins, repo overrides of a built-in, and repo-only kinds — with source file, content hash and the per-automation settings you can change without a definition edit.',
+      inputSchema: { repo: z.string().optional().describe('Absolute repo path; omit for built-ins only') },
+    },
+    ({ repo }) => run(() => api.listWorkflows(repo)),
+  )
+
+  server.registerTool(
+    'get_workflow',
+    {
+      description: 'The effective definition of one workflow kind for a repo, including its prompt, source file and hash.',
+      inputSchema: { kind: z.string(), repo: z.string().optional().describe('Absolute repo path') },
+    },
+    ({ kind, repo }) => run(() => api.getWorkflow(kind, repo)),
+  )
+
+  server.registerTool(
+    'validate_workflow',
+    {
+      description:
+        'Validate a workflow definition before it is activated. Pass content (a proposed .md file) — or repo + kind to validate the file in the repo checkout runs load from; that response says whether it is active (runs would use it now). A definition on an unmerged branch is not active.',
+      inputSchema: {
+        content: z.string().optional().describe('Proposed definition: frontmatter + prompt'),
+        repo: z.string().optional().describe('Absolute repo path'),
+        kind: z.string().optional().describe('With repo and no content: validate .codekin/workflows/<kind>.md'),
+        filename: z.string().optional().describe('Intended filename, checked against the kind'),
+      },
+    },
+    (args) => run(() => api.validateWorkflow(args)),
+  )
+
+  server.registerTool(
+    'list_repo_automations',
+    {
+      description:
+        'Configured repo automations: workflow, trigger (cron schedule in the shown timezone, or event), enabled, revision, next/last run and any activity hold.',
+      inputSchema: { repo: z.string().optional().describe('Absolute repo path; omit for all repos') },
+    },
+    ({ repo }) => run(() => api.listRepoAutomations(repo)),
+  )
+
+  server.registerTool(
+    'get_repo_automation',
+    {
+      description: 'One repo automation with its current revision — read it before update_repo_automation or remove_repo_automation.',
+      inputSchema: { id: z.string() },
+    },
+    ({ id }) => run(() => api.getRepoAutomation(id)),
+  )
+
+  server.registerTool(
+    'create_repo_automation',
+    {
+      description:
+        'Configure an existing workflow to run in a repo on a cron schedule (evaluated in the returned timezone) or on its event. Refused if the kind is already configured for the repo — update that one instead. This changes when a known workflow runs; changing what it does is a definition change (delegate the .md edit, then validate_workflow).',
+      inputSchema: {
+        repo: z.string().describe('Absolute repo path'),
+        kind: z.string().describe('Workflow kind from list_workflows'),
+        cronExpression: z.string().describe('Five-field cron, e.g. "0 9 * * 1" for Mondays 09:00, or "event" for event-driven kinds'),
+        name: z.string().optional(),
+        enabled: z.boolean().optional(),
+        customPrompt: z.string().optional().describe('Extra focus appended to the workflow prompt for this repo'),
+        model: z.string().optional(),
+        provider: z.enum(['claude', 'codex', 'opencode']).optional(),
+        ...changeFields,
+      },
+    },
+    (args) => run(() => api.createRepoAutomation(args)),
+  )
+
+  server.registerTool(
+    'update_repo_automation',
+    {
+      description:
+        'Change an automation\'s schedule, settings, or enablement (enabled:false disables it and keeps its configuration and history). Pass the revision you read; a conflict means someone changed it since — re-read and retry. Disabling never cancels a run in progress; the response lists active runs.',
+      inputSchema: {
+        id: z.string(),
+        expectedRevision: z.number().int().positive(),
+        name: z.string().optional(),
+        cronExpression: z.string().optional(),
+        enabled: z.boolean().optional(),
+        customPrompt: z.string().optional(),
+        model: z.string().optional(),
+        provider: z.enum(['claude', 'codex', 'opencode']).optional(),
+        ...changeFields,
+      },
+    },
+    ({ id, ...input }) => run(() => api.updateRepoAutomation(id, input)),
+  )
+
+  server.registerTool(
+    'remove_repo_automation',
+    {
+      description:
+        'Remove an automation\'s configured trigger. Run history and the workflow file are kept; a run in progress is not canceled (the response lists active runs). To pause instead, update_repo_automation with enabled:false.',
+      inputSchema: { id: z.string(), expectedRevision: z.number().int().positive(), ...changeFields },
+    },
+    ({ id, ...input }) => run(() => api.removeRepoAutomation(id, input)),
+  )
+
+  server.registerTool(
+    'get_automation_health',
+    {
+      description:
+        'Evidence-based health of an automation: healthy, starting (no evidence yet), held (activity hold withholding coverage), degraded (overdue or failing), unavailable (scheduler/hook/config broken), or disabled — with reasons, last success/failure and effective next run.',
+      inputSchema: { id: z.string() },
+    },
+    ({ id }) => run(() => api.getAutomationHealth(id)),
+  )
+
+  server.registerTool(
+    'get_automation_trigger_history',
+    {
+      description: 'Why an automation ran, was held, or did not run: scheduler decisions, its runs, and its configuration changes (who, why, before/after), newest first.',
+      inputSchema: { id: z.string(), limit: z.number().int().positive().max(200).optional() },
+    },
+    ({ id, limit }) => run(() => api.getAutomationTriggerHistory(id, limit)),
   )
 
   server.registerTool(

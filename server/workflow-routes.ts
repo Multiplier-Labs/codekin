@@ -19,8 +19,10 @@ import {
   updateReviewRepo,
   type ReviewRepoConfig,
 } from './workflow-config.js'
-import { listAvailableKinds, ensureRepoWorkflowsRegistered } from './workflow-loader.js'
-import { syncCommitHooks } from './commit-event-hooks.js'
+import { listAvailableKinds, ensureRepoWorkflowsRegistered, listEffectiveWorkflows } from './workflow-loader.js'
+import { syncCommitHooks, isCommitHookInstalled } from './commit-event-hooks.js'
+import { AutomationError, AutomationService, type AutomationPatch } from './automation-service.js'
+import type { AutomationChangeLog } from './automation-changes.js'
 import type { CommitEventHandler } from './commit-event-handler.js'
 import type { SessionManager } from './session-manager.js'
 import { resolveRepoPathInRoot } from './config.js'
@@ -205,6 +207,47 @@ export function syncSchedules(sessions?: SessionManager) {
   }
 }
 
+/**
+ * The automation service wired to the real config file, engine and loader —
+ * shared by the Automations UI routes and Joe's automation tools.
+ */
+export function createAutomationService(sessions?: SessionManager, changes?: AutomationChangeLog | null): AutomationService {
+  return new AutomationService({
+    config: {
+      load: loadWorkflowConfig,
+      add: (repo) => { addReviewRepo(repo) },
+      update: (id, patch) => { updateReviewRepo(id, patch) },
+      remove: (id) => { removeReviewRepo(id) },
+    },
+    engine: () => {
+      try {
+        return getWorkflowEngine()
+      } catch {
+        return null
+      }
+    },
+    sync: () => {
+      syncSchedules(sessions)
+      syncCommitHooks()
+    },
+    resolveRepo: resolveRepoPathInRoot,
+    workflows: (repoPath) => listEffectiveWorkflows(repoPath),
+    commitHookInstalled: isCommitHookInstalled,
+    changes,
+  })
+}
+
+export interface WorkflowRouterOptions {
+  /** Service behind config mutations; defaults to one without an audit log. */
+  automations?: AutomationService
+  /**
+   * True when the request carries the user's master token. When set, the
+   * router may also be reached with Joe's scoped token: config changes are
+   * then attributed to Joe, and raw schedule mutations stay user-only.
+   */
+  isUserRequest?: (req: Request) => boolean
+}
+
 export function createWorkflowRouter(
   verifyToken: VerifyFn,
   extractToken: ExtractFn,
@@ -213,8 +256,28 @@ export function createWorkflowRouter(
   // engine's durable signal queue rather than dispatching inline.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _commitEventState?: { handler: CommitEventHandler | undefined },
+  options: WorkflowRouterOptions = {},
 ): Router {
   const router = Router()
+  const automations = options.automations ?? createAutomationService(sessions)
+  const actorOf = (req: Request): 'user' | 'joe' => (!options.isUserRequest || options.isUserRequest(req) ? 'user' : 'joe')
+
+  /** Raw schedule edits bypass the automation service — the user's only. */
+  function userOnly(req: Request, res: Response, next: () => void) {
+    if (actorOf(req) !== 'user') {
+      res.status(403).json({ error: 'Use the automation tools to change schedules' })
+      return
+    }
+    next()
+  }
+
+  function sendAutomationError(res: Response, err: unknown, fallbackStatus = 400) {
+    if (err instanceof AutomationError) {
+      res.status(err.status).json({ error: err.message, ...err.details })
+      return
+    }
+    res.status(fallbackStatus).json({ error: err instanceof Error ? err.message : 'Automation change failed' })
+  }
 
   /** Auth middleware for all workflow routes (except commit-event). */
   function auth(req: Request, res: Response, next: () => void) {
@@ -404,7 +467,7 @@ export function createWorkflowRouter(
     res.json({ signals: engine.listSignals({ status, limit }) })
   })
 
-  router.post('/schedules', (req: Request<Record<string, string>, unknown, UpsertScheduleBody>, res) => {
+  router.post('/schedules', userOnly, (req: Request<Record<string, string>, unknown, UpsertScheduleBody>, res) => {
     const engine = getEngine(res)
     if (!engine) return
 
@@ -426,7 +489,7 @@ export function createWorkflowRouter(
     res.json({ schedule })
   })
 
-  router.patch('/schedules/:id', (req: Request<{ id: string }, unknown, PatchScheduleBody>, res) => {
+  router.patch('/schedules/:id', userOnly, (req: Request<{ id: string }, unknown, PatchScheduleBody>, res) => {
     const engine = getEngine(res)
     if (!engine) return
 
@@ -451,7 +514,7 @@ export function createWorkflowRouter(
     res.json({ schedule })
   })
 
-  router.delete('/schedules/:id', (req, res) => {
+  router.delete('/schedules/:id', userOnly, (req: Request<{ id: string }>, res) => {
     const engine = getEngine(res)
     if (!engine) return
 
@@ -503,25 +566,19 @@ export function createWorkflowRouter(
       } catch { /* engine may not be ready */ }
     }
 
-    const config = addReviewRepo({
-      id,
-      name,
-      repoPath,
-      cronExpression,
-      enabled: enabled !== false,
-      kind,
-      customPrompt,
-      model,
-      provider,
-    })
-
-    // Re-sync schedules and commit hooks with updated config
+    // POST keeps its upsert semantics for the UI: an existing id is an edit.
+    const ctx = { actor: actorOf(req), reason: 'Automations UI' }
     try {
-      syncSchedules(sessions)
-      syncCommitHooks()
-    } catch {
-      // Engine might not be ready yet
+      const exists = loadWorkflowConfig().reviewRepos.some(r => r.id === id)
+      if (exists) {
+        automations.update(id, { name, cronExpression, enabled: enabled !== false, kind, customPrompt, model, provider }, ctx)
+      } else {
+        automations.create({ id, name, repo: repoPath, kind: kind ?? 'code-review.daily', cronExpression, enabled: enabled !== false, customPrompt, model, provider }, ctx)
+      }
+    } catch (err) {
+      return sendAutomationError(res, err)
     }
+    const config = loadWorkflowConfig()
 
     // Auto-setup GitHub webhook for pr-review workflows
     let webhookSetup: WebhookSetupResult | undefined
@@ -544,7 +601,7 @@ export function createWorkflowRouter(
     res.json({ config, webhookSetup })
   })
 
-  router.patch('/config/repos/:id', (req: Request<{ id: string }, unknown, Partial<ReviewRepoConfig>>, res) => {
+  router.patch('/config/repos/:id', (req: Request<{ id: string }, unknown, Partial<ReviewRepoConfig> & { expectedRevision?: number }>, res) => {
     if (req.body.repoPath !== undefined && !resolveRepoPathInRoot(req.body.repoPath)) {
       return res.status(400).json({ error: 'Invalid repoPath: must be an existing directory under the configured repos root' })
     }
@@ -558,30 +615,29 @@ export function createWorkflowRouter(
     if (req.body.provider !== undefined && !AGENT_PROVIDERS.has(req.body.provider)) {
       return res.status(400).json({ error: `Invalid provider: ${req.body.provider}` })
     }
+    const existing = loadWorkflowConfig().reviewRepos.find(r => r.id === req.params.id)
+    if (!existing) return res.status(404).json({ error: `Repo not found: ${req.params.id}` })
+    if (req.body.repoPath !== undefined && req.body.repoPath !== existing.repoPath) {
+      return res.status(400).json({ error: 'An automation cannot move to another repo — create one there instead' })
+    }
+    const { name, kind, cronExpression, enabled, customPrompt, model, provider, expectedRevision } = req.body
+    const patch: AutomationPatch = { name, kind, cronExpression, enabled, customPrompt, model, provider }
     try {
-      const config = updateReviewRepo(req.params.id, req.body)
-      try {
-        syncSchedules(sessions)
-        syncCommitHooks()
-      } catch { /* engine may not be ready */ }
-      res.json({ config })
+      automations.update(req.params.id, patch, { actor: actorOf(req), reason: 'Automations UI', expectedRevision })
+      res.json({ config: loadWorkflowConfig() })
     } catch (err) {
-      res.status(404).json({ error: err instanceof Error ? err.message : 'Repo not found' })
+      sendAutomationError(res, err, 404)
     }
   })
 
-  router.delete('/config/repos/:id', (req, res) => {
-    const config = removeReviewRepo(req.params.id)
-
-    // Re-sync schedules and commit hooks with updated config
+  router.delete('/config/repos/:id', (req: Request<{ id: string }>, res) => {
     try {
-      syncSchedules(sessions)
-      syncCommitHooks()
-    } catch {
-      // Engine might not be ready yet
+      automations.remove(req.params.id, { actor: actorOf(req), reason: 'Automations UI' })
+    } catch (err) {
+      // Removing something already gone is not an error for the UI.
+      if (!(err instanceof AutomationError && err.status === 404)) return sendAutomationError(res, err)
     }
-
-    res.json({ config })
+    res.json({ config: loadWorkflowConfig() })
   })
 
   return router

@@ -26,6 +26,12 @@ export interface ReviewRepoConfig {
   model?: string
   /** AI provider to use for this workflow ('claude', 'opencode', or 'codex'). Defaults to 'claude'. */
   provider?: 'claude' | 'opencode' | 'codex'
+  /**
+   * Bumped on every change made through the automation service. Writers pass
+   * the revision they read; a mismatch is a conflict, not an overwrite.
+   * Entries written before revisions existed count as revision 1.
+   */
+  revision?: number
 }
 
 export interface WorkflowConfig {
