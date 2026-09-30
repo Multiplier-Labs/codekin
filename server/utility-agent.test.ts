@@ -83,4 +83,9 @@ describe('oneShotCommand mapping', () => {
     expect(cmd.args).toEqual(['run', '--pure', 'be terse\n\nthe prompt'])
     expect(cmd.stdin).toBe('')
   })
+  it('grok: headless, read-only tools, one round, prompt file on stdin', () => {
+    const cmd = getHarness('grok').oneShotCommand(opts)
+    expect(cmd.args).toEqual(['--no-auto-update', '--output-format', 'plain', '--tools', 'read_file', '--max-turns', '1', '--prompt-file', '/dev/stdin'])
+    expect(cmd.stdin).toBe('be terse\n\nthe prompt')
+  })
 })

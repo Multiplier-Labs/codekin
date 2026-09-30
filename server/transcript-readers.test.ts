@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { _findCodexRollout, claudeProjectSlug, readCondensed } from './transcript-readers.js'
+import { _findCodexRollout, _findGrokUpdates, claudeProjectSlug, readCondensed } from './transcript-readers.js'
 
 let dir: string
 
@@ -127,5 +127,55 @@ describe('readCondensed (claude)', () => {
     const path = join(dir, 'bad.jsonl')
     writeFileSync(path, 'not json\n' + JSON.stringify({ type: 'user', message: { role: 'user', content: 'hello' } }) + '\n{broken')
     expect(readCondensed(path, 'claude', 1000)).toContain('User: hello')
+  })
+})
+
+describe('_findGrokUpdates', () => {
+  const id = '01a0f12b-a815-7d50-a6d6-964da6a8bf7e'
+
+  it('finds updates.jsonl under the URL-encoded cwd', () => {
+    const sessionDir = join(dir, encodeURIComponent('/tmp/my repo'), id)
+    mkdirSync(sessionDir, { recursive: true })
+    writeFileSync(join(sessionDir, 'updates.jsonl'), '')
+    expect(_findGrokUpdates('/tmp/my repo', id, dir)).toBe(join(sessionDir, 'updates.jsonl'))
+  })
+
+  it('falls back to scanning cwd groups (long-path slug form)', () => {
+    const sessionDir = join(dir, 'very-long-path-slug-3f2a', id)
+    mkdirSync(sessionDir, { recursive: true })
+    writeFileSync(join(sessionDir, 'updates.jsonl'), '')
+    expect(_findGrokUpdates('/somewhere/else', id, dir)).toBe(join(sessionDir, 'updates.jsonl'))
+  })
+
+  it('rejects ids that are not UUIDs, so they never become path segments', () => {
+    expect(_findGrokUpdates('/tmp', '../../etc', dir)).toBeNull()
+    expect(_findGrokUpdates('/tmp', id, join(dir, 'missing'))).toBeNull()
+  })
+})
+
+describe('readCondensed (grok)', () => {
+  const update = (u: Record<string, unknown>, method = 'session/update') => ({ timestamp: 1, method, params: { sessionId: 's', update: u } })
+  const text = (t: string) => ({ type: 'text', text: t })
+
+  it('extracts user/agent messages and tool lines, skipping thoughts and extension updates', () => {
+    const path = writeJsonl('updates.jsonl', [
+      update({ sessionUpdate: 'hook_execution' }, '_x.ai/session/update'),
+      update({ sessionUpdate: 'user_message_chunk', content: text('Fix the ') }),
+      update({ sessionUpdate: 'user_message_chunk', content: text('login bug') }),
+      update({ sessionUpdate: 'agent_thought_chunk', content: text('private reasoning') }),
+      update({ sessionUpdate: 'agent_message_chunk', content: text("I'll run the tests.") }),
+      update({ sessionUpdate: 'tool_call', toolCallId: 'c1', title: 'run_terminal_command', rawInput: { command: 'npm test' } }),
+      update({ sessionUpdate: 'tool_call_update', toolCallId: 'c1', status: 'in_progress', content: [{ type: 'content', content: text('...') }] }),
+      update({ sessionUpdate: 'tool_call_update', toolCallId: 'c1', status: 'completed', content: [{ type: 'content', content: text('2 tests failed') }] }),
+      update({ sessionUpdate: 'agent_message_chunk', content: text('The auth check inverts the flag.') }),
+      update({ sessionUpdate: 'turn_completed', stop_reason: 'end_turn' }, '_x.ai/session/update'),
+    ])
+    expect(readCondensed(path, 'grok', 10_000)).toBe([
+      'User: Fix the login bug',
+      "Assistant: I'll run the tests.",
+      '[Tool: run_terminal_command npm test]',
+      '[Tool result: 2 tests failed]',
+      'Assistant: The auth check inverts the flag.',
+    ].join('\n'))
   })
 })

@@ -21,6 +21,7 @@ import type { Session } from './types.js'
 import { ClaudeProcess } from './claude-process.js'
 import { OpenCodeProcess } from './opencode-process.js'
 import { CodexProcess } from './codex-process.js'
+import { GROK_BINARY, GrokProcess } from './grok-process.js'
 import { CLAUDE_BINARY } from './config.js'
 import { jsonParse } from './json-parse.js'
 
@@ -184,7 +185,42 @@ const codex: HarnessDefinition = {
   },
 }
 
-export const HARNESSES: readonly HarnessDefinition[] = [claude, opencode, codex]
+const grok: HarnessDefinition = {
+  id: 'grok',
+  label: 'Grok',
+  installHint: 'curl -fsSL https://x.ai/cli/install.sh | bash, then run `grok login` (or set XAI_API_KEY)',
+  probe() {
+    const version = tryVersion(GROK_BINARY)
+    if (version === null) return { available: false, version: '', authenticated: false }
+    // Existence only — never read the credential file's contents.
+    const grokHome = process.env.GROK_HOME || join(homedir(), '.grok')
+    const authenticated = existsSync(join(grokHome, 'auth.json')) || !!process.env.XAI_API_KEY
+    return { available: true, version, authenticated }
+  },
+  oneShotCommand(opts) {
+    // Headless and read-only: no edit/shell tools, a single model round, and
+    // no update check. There is no system-prompt channel, so it leads the text.
+    const text = opts.systemPrompt ? `${opts.systemPrompt}\n\n${opts.prompt}` : opts.prompt
+    return {
+      binary: GROK_BINARY,
+      args: ['--no-auto-update', '--output-format', 'plain', '--tools', 'read_file', '--max-turns', '1', '--prompt-file', '/dev/stdin'],
+      stdin: text,
+    }
+  },
+  createProcess(session, ctx) {
+    return new GrokProcess(session.workingDir, {
+      sessionId: ctx.sessionId,
+      grokSessionId: session.claudeSessionId || undefined,
+      model: session.model,
+      extraEnv: ctx.extraEnv,
+      permissionMode: session.permissionMode,
+    })
+  },
+}
+
+// Order matters: utility-agent.ts tries harnesses in this order for session
+// naming and handoff distillation, so the newest harness goes last.
+export const HARNESSES: readonly HarnessDefinition[] = [claude, opencode, codex, grok]
 
 /** Resolve a provider to its definition. Claude is the persisted-data fallback. */
 export function getHarness(provider: CodingProvider | undefined): HarnessDefinition {

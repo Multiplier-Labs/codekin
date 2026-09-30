@@ -1,7 +1,7 @@
 /**
  * Transcript readers for session handoff.
  *
- * Locates harness-native session transcripts on disk (Claude Code, Codex) and
+ * Locates harness-native session transcripts on disk (Claude Code, Codex, Grok) and
  * condenses them into a plain-text extract suitable for distillation into a
  * handoff document — user/assistant messages plus tool-call titles, recency
  * weighted. Readers never write foreign formats; the raw transcript path is
@@ -55,8 +55,44 @@ export function findTranscript(provider: CodingProvider, workingDir: string, ses
   if (provider === 'codex') {
     return findCodexRollout(sessionId)
   }
+  if (provider === 'grok') {
+    return findGrokUpdates(workingDir, sessionId)
+  }
   return null
 }
+
+/** Grok session ids are UUIDs; anything else must never become a path segment. */
+const GROK_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Grok stores each session under $GROK_HOME/sessions/<encoded-cwd>/<id>/, with
+ * the cwd URL-encoded (or slug+hash when the encoded name exceeds 255 bytes).
+ * Try the encoded cwd first, then scan the cwd groups for the session id —
+ * covering the long-path form and any encoding difference.
+ */
+function findGrokUpdates(
+  workingDir: string,
+  sessionId: string,
+  root = join(process.env.GROK_HOME || join(homedir(), '.grok'), 'sessions'),
+): string | null {
+  if (!GROK_SESSION_ID_RE.test(sessionId)) return null
+  const direct = join(root, encodeURIComponent(workingDir), sessionId, 'updates.jsonl')
+  if (existsSync(direct)) return direct
+  let groups: string[]
+  try {
+    groups = readdirSync(root)
+  } catch {
+    return null
+  }
+  for (const group of groups) {
+    const candidate = join(root, group, sessionId, 'updates.jsonl')
+    if (existsSync(candidate)) return candidate
+  }
+  return null
+}
+
+/** Exported for tests: locate a Grok transcript under a custom sessions root. */
+export const _findGrokUpdates = findGrokUpdates
 
 /**
  * Codex stores rollouts as sessions/YYYY/MM/DD/rollout-<ts>-<threadId>.jsonl.
@@ -104,7 +140,11 @@ export function readCondensed(path: string, provider: CodingProvider, budgetChar
   } catch {
     return null
   }
-  const entries = provider === 'codex' ? parseCodexLines(raw) : parseClaudeLines(raw)
+  const entries = provider === 'codex'
+    ? parseCodexLines(raw)
+    : provider === 'grok'
+      ? parseGrokLines(raw)
+      : parseClaudeLines(raw)
   if (entries.length === 0) return null
   return packEntries(entries, budgetChars)
 }
@@ -228,5 +268,59 @@ function parseClaudeLines(raw: string): Entry[] {
       // thinking blocks are internal — never carried across a handoff
     }
   }
+  return entries
+}
+
+/**
+ * Grok updates.jsonl: one ACP notification per line,
+ * {timestamp, method: 'session/update' | '_x.ai/session/update', params: {update}}.
+ * Message chunks are coalesced per message on disk; adjacent chunks of the
+ * same role are still joined defensively. Thought chunks are internal and
+ * never carried across a handoff.
+ */
+function parseGrokLines(raw: string): Entry[] {
+  const entries: Entry[] = []
+  let pending: { role: 'User' | 'Assistant'; text: string } | null = null
+  const flush = () => {
+    if (pending && pending.text.trim()) entries.push({ text: `${pending.role}: ${cap(pending.text, MESSAGE_CAP)}` })
+    pending = null
+  }
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue
+    const obj = parseLine(line)
+    if (!obj || obj.method !== 'session/update') continue
+    const update = (obj.params as { update?: Record<string, unknown> } | undefined)?.update
+    if (!update) continue
+    const kind = update.sessionUpdate
+    if (kind === 'user_message_chunk' || kind === 'agent_message_chunk') {
+      const text = (update.content as { text?: unknown } | undefined)?.text
+      if (typeof text !== 'string') continue
+      const role = kind === 'user_message_chunk' ? 'User' : 'Assistant'
+      if (pending && pending.role === role) {
+        pending.text += text
+      } else {
+        flush()
+        pending = { role, text }
+      }
+    } else if (kind === 'tool_call') {
+      flush()
+      const hint = toolInputHint(update.rawInput)
+      const title = typeof update.title === 'string' ? update.title : 'unknown'
+      entries.push({ text: `[Tool: ${title}${hint && !title.includes(hint) ? ` ${hint}` : ''}]` })
+    } else if (kind === 'tool_call_update' && (update.status === 'completed' || update.status === 'failed')) {
+      const content = Array.isArray(update.content) ? (update.content as Array<Record<string, unknown>>) : []
+      const text = content
+        .map((b) => {
+          const inner = b.content as { text?: unknown } | undefined
+          return b.type === 'content' && typeof inner?.text === 'string' ? inner.text : ''
+        })
+        .join(' ')
+      if (text.trim()) {
+        flush()
+        entries.push({ text: `[Tool result: ${cap(text, TOOL_CAP)}]` })
+      }
+    }
+  }
+  flush()
   return entries
 }

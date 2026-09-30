@@ -24,6 +24,7 @@ import type { CodingProvider } from './coding-process.js'
 import type { PermissionMode } from './types.js'
 import { fetchOpenCodeModels, fetchOpenCodeCommands } from './opencode-process.js'
 import { fetchCodexModels } from './codex-process.js'
+import { fetchGrokModels } from './grok-process.js'
 
 // ---------------------------------------------------------------------------
 // Request body interfaces for route handlers
@@ -190,6 +191,13 @@ export function createSessionRouter(
     const token = extractToken(req)
     if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
     const result = await fetchCodexModels()
+    res.json(result)
+  })
+
+  router.get('/api/grok/models', async (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    const result = await fetchGrokModels()
     res.json(result)
   })
 

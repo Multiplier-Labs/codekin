@@ -7,7 +7,7 @@ import { Router } from 'express'
 import type { Request, RequestHandler, Response } from 'express'
 import { resolve } from 'path'
 import { existsSync, statSync, realpathSync } from 'fs'
-import { VALID_PROVIDERS } from './types.js'
+import { AGENT_PROVIDERS } from './types.js'
 import type { CodingProvider } from './coding-process.js'
 import type { SessionManager } from './session-manager.js'
 import { ensureOrchestratorRunning, getOrchestratorSessionId, getOrCreateOrchestratorId, getOrchestratorProvider, setOrchestratorProvider } from './orchestrator-manager.js'
@@ -144,7 +144,7 @@ export function createSessionRouter(
     if (!verifyOrchestratorAuth(req)) return res.status(401).json({ error: 'Unauthorized' })
 
     const provider = req.body?.provider
-    if (provider !== undefined && !VALID_PROVIDERS.has(provider)) {
+    if (provider !== undefined && !AGENT_PROVIDERS.has(provider)) {
       return res.status(400).json({ error: 'Invalid provider: choose claude, codex, or opencode' })
     }
     if (provider === undefined && !getOrchestratorProvider(sessions)) {
@@ -244,7 +244,7 @@ export function createSessionRouter(
       return res.status(400).json({ error: 'Missing required fields: repo, task, branchName' })
     }
 
-    if (provider !== undefined && !VALID_PROVIDERS.has(provider)) {
+    if (provider !== undefined && !AGENT_PROVIDERS.has(provider)) {
       return res.status(400).json({ error: 'Invalid provider: choose claude, codex, or opencode' })
     }
 

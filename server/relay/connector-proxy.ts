@@ -32,6 +32,7 @@ export const ALLOWED_GET_PREFIXES = [
   '/api/repos',
   '/api/claude/models',
   '/api/codex/models',
+  '/api/grok/models',
   '/api/opencode/models',
   '/api/opencode/commands',
   '/api/settings',

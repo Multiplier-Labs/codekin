@@ -149,6 +149,8 @@ const claudeVersion = harnessProbes.get('claude')?.version ?? ''
 const apiKeySet = harnessProbes.get('claude')?.authenticated ?? false
 const codexAvailable = harnessProbes.get('codex')?.available ?? false
 const codexAuthenticated = harnessProbes.get('codex')?.authenticated ?? false
+const grokAvailable = harnessProbes.get('grok')?.available ?? false
+const grokAuthenticated = harnessProbes.get('grok')?.authenticated ?? false
 const openCodeAvailable = harnessProbes.get('opencode')?.available ?? false
 
 // ---------------------------------------------------------------------------
@@ -580,7 +582,7 @@ wss.on('connection', (ws: WebSocket, req) => {
       authenticated = true
       authenticatedClients.add(ws)
       clearTimeout(authTimeout)
-      send({ type: 'connected', connectionId, claudeAvailable, claudeVersion, apiKeySet, codexAvailable, codexAuthenticated, openCodeAvailable })
+      send({ type: 'connected', connectionId, claudeAvailable, claudeVersion, apiKeySet, codexAvailable, codexAuthenticated, openCodeAvailable, grokAvailable, grokAuthenticated })
 
       // Notify client if a newer version is available
       void getUpdateNotification().then(text => {

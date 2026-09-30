@@ -24,7 +24,7 @@ import { syncCommitHooks } from './commit-event-hooks.js'
 import type { CommitEventHandler } from './commit-event-handler.js'
 import type { SessionManager } from './session-manager.js'
 import { resolveRepoPathInRoot } from './config.js'
-import { VALID_PROVIDERS } from './types.js'
+import { AGENT_PROVIDERS } from './types.js'
 import {
   previewWebhookSetup,
   createRepoWebhook,
@@ -489,7 +489,7 @@ export function createWorkflowRouter(
     if (cronExpression !== 'event' && !isValidCron(cronExpression)) {
       return res.status(400).json({ error: 'Invalid cron expression' })
     }
-    if (provider && !VALID_PROVIDERS.has(provider)) {
+    if (provider && !AGENT_PROVIDERS.has(provider)) {
       return res.status(400).json({ error: `Invalid provider: ${provider}` })
     }
     if (!resolveRepoPathInRoot(repoPath)) {
@@ -555,7 +555,7 @@ export function createWorkflowRouter(
     ) {
       return res.status(400).json({ error: 'Invalid cron expression' })
     }
-    if (req.body.provider !== undefined && !VALID_PROVIDERS.has(req.body.provider)) {
+    if (req.body.provider !== undefined && !AGENT_PROVIDERS.has(req.body.provider)) {
       return res.status(400).json({ error: `Invalid provider: ${req.body.provider}` })
     }
     try {
