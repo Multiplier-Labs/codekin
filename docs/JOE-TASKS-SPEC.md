@@ -1,6 +1,9 @@
 # Agent Joe — Per-Repo Task List and Delegation
 
-Status: Phase 1 (backend) and Phase 2 (UI) in progress. Background: the Agent Joe audit
+Status: Phases 1 (backend) and 2 (UI) implemented (#692, #693). The Chat / Tasks tabs described
+under UI were superseded by [JOE-REPO-COLLABORATION-MAINTENANCE-SPEC.md](./JOE-REPO-COLLABORATION-MAINTENANCE-SPEC.md)
+(#702): Tasks is now its own sidebar view, and users talk to Joe from repo sessions.
+ Background: the Agent Joe audit
 (`.codekin/reports/product/2026-09-30_agent-joe-audit.md`), which proposed "supervise
 delegated tasks until verified changes are ready for review" as Joe's first job. Builds on
 the child lifecycle (#688) and session-control tools (#691).
@@ -92,6 +95,9 @@ Mutations broadcast a `workflow_event` (`engine: 'agent'`, `kind: 'task'`), so o
 refresh immediately.
 
 ## UI (Phase 2)
+
+> Superseded in part: Tasks became a standalone sidebar view with no chat composer, and the
+> Joe chat became a read-only activity log (#702). The card and form design below still applies.
 
 Joe's view gets **Chat / Tasks** tabs. The Tasks tab has a count badge for items waiting on
 the user (decisions + reviews).

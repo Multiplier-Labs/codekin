@@ -1,6 +1,8 @@
 # Agent Joe: repo collaboration, maintenance, and automation management
 
-Status: Proposed
+Status: Implemented (released in v0.9.2). Delivery slices 1–4 (§12) shipped as #702 (collaboration
+in sessions), #698 (workflow management tools) and #703 (maintenance, observation → action).
+Agent Joe does not run on Grok Build yet.
 Date: 2026-09-30
 
 ## Purpose
@@ -11,8 +13,8 @@ watches, what it may do, and whether that coverage is working.
 
 This proposal supersedes the separate Joe Chat / Tasks navigation proposed in
 [JOE-TASKS-SPEC.md](./JOE-TASKS-SPEC.md). It extends that document's durable task,
-decision, execution, and review model. It is a target design, not a claim that the
-capabilities below already exist.
+decision, execution, and review model. It was written as a target design; see
+[Implementation notes](#15-implementation-notes) for where the shipped behaviour differs.
 
 ## 1. Product model
 
@@ -224,10 +226,10 @@ checks remain inspectable in activity without generating routine chat messages.
 
 ## 10. First-class workflow management
 
-### Current implementation
+### Implementation before this spec
 
-Joe exposes `trigger_workflow` and `list_runs`. The backend provides schedule CRUD
-and repo automation configuration CRUD, but these operations are not exposed as
+Joe exposed `trigger_workflow` and `list_runs`. The backend provided schedule CRUD
+and repo automation configuration CRUD, but these operations were not exposed as
 dedicated Joe MCP tools. Repo workflow definitions live in
 `.codekin/workflows/*.md`; changing them requires repo file changes.
 
@@ -397,3 +399,31 @@ maintenance badge only when this migration and health evidence are in place.
 - New categories of monitoring integrations solely to populate the maintenance UI.
 - A second scheduler or workflow engine.
 - New autonomous merge, deployment, or host-operation authority.
+
+## 15. Implementation notes
+
+What shipped, and where it differs from the design above:
+
+- **Session collaboration (#702).** `@Joe` / Ask Joe reach Joe as a durable Session Request;
+  Joe replies with `reply_in_session`. Tasks record `originSessionId` / `originRequestId`, and
+  milestone task cards read the live task. Execution substate is `running` / `queued` / `idle`.
+  Sessions have a revisioned controller (`user` / `joe`); Joe can take over only with the
+  `requestId` of an explicit `@Joe` request, and stale-revision instructions are refused. The
+  sidebar entry is **Tasks**; Joe's transcript is a read-only activity log at `/joe`.
+- **Automation tools (#698).** The tools in §10 shipped under the names listed, plus
+  `trigger_workflow` accepting an `automationId`. Automation health values are `healthy`,
+  `starting`, `held`, `degraded`, `unavailable` and `disabled`; `held` is an addition to the §6
+  vocabulary so activity holds are visible rather than counted as coverage. The Automations UI
+  routes go through the same `AutomationService`.
+- **Maintenance (#703).** Plans, responsibilities and activity live in `runs.db`
+  (`maintenance_plans`, `maintenance_responsibilities`, `maintenance_activity`). Response
+  policies are `notify`, `propose`, `investigate` and `implement`. Joe can propose
+  responsibilities and pause; the user enables, resumes, turns off, and changes accepted
+  responsibilities. Joe's MCP tools: `list_maintenance`, `get_maintenance_plan`,
+  `propose_maintenance_responsibility`, `remove_maintenance_responsibility`,
+  `pause_maintenance`, `record_maintenance_activity`. Each finished run of a linked automation
+  is recorded once by run id and sent to Joe as a Maintenance Check notification.
+- **Not yet built:** the explicit migration state for pre-existing implicit Joe monitoring (§12)
+  — existing automations simply appear as independently managed until adopted.
+- **API:** [API-REFERENCE.md](./API-REFERENCE.md#joe-in-repo-sessions) documents the session,
+  automation and maintenance routes.

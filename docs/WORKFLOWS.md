@@ -1,6 +1,6 @@
 # Automated Workflows
 
-Codekin includes an automated workflow system that runs Claude Code sessions on a schedule to produce structured reports — code reviews, security audits, coverage assessments, and more. Workflows are defined as Markdown files with YAML frontmatter. Codekin ships with ten built-in workflows, and you can define your own custom workflows per-repo.
+Codekin includes an automated workflow system that runs coding-agent sessions (Claude Code, Codex or OpenCode, chosen per automation) on a schedule to produce structured reports — code reviews, security audits, coverage assessments, and more. Workflows are defined as Markdown files with YAML frontmatter. Codekin ships with ten built-in workflows, and you can define your own custom workflows per-repo.
 
 ---
 
@@ -9,11 +9,11 @@ Codekin includes an automated workflow system that runs Claude Code sessions on 
 Every workflow follows the same four-step execution model:
 
 1. **validate_repo** — Verify the repo path exists and is a git repository. If a `sinceTimestamp` is provided, skip the run if there are no new commits since that time.
-2. **create_session** — Create a Codekin session scoped to the repo.
-3. **run_prompt** — Start Claude, send the workflow prompt, and wait for a result (10-minute timeout).
+2. **create_session** — Create a Codekin session in a fresh git worktree of the repo, branched from its default branch. If the worktree can't be created, the step fails; a workflow never runs in the shared checkout.
+3. **run_prompt** — Start the agent, send the workflow prompt, and wait for a result (10-minute timeout).
 4. **save_report** — Write the output as a dated Markdown file into the repo, commit it to a single dedicated branch (forked fresh from `origin/main` each run), and push.
 
-Workflow runs are triggered by cron schedules configured per-repo via the workflow API.
+Workflow runs are triggered by cron schedules configured per-repo via the workflow API. Agent Joe manages the same configuration through its automation tools (see [API reference → Repo Automations](API-REFERENCE.md#repo-automations)); every change is revisioned and recorded, and each run records the definition source and hash it used. Automations adopted into a repo's maintenance plan are paused and resumed with that plan.
 
 ---
 

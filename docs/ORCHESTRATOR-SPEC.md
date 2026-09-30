@@ -3,7 +3,7 @@
 > *"Agent Joe"* — a calm, knowledgeable ops manager who keeps your repositories healthy, your workflows running, and your audit findings actioned. Guides non-expert users toward becoming better vibe coders through pragmatic, friendly advice.
 
 **Status**: v1.0 — all four implementation phases shipped as of **v0.5.2** (Phase 1 in v0.5.0; Phases 2–4 in v0.5.2). One Phase 3 item (auto-suggest workflow setup for new repos) is the only remaining roadmap entry.
-**Location in UI**: Left sidebar, below "AI Workflows"
+**Location in UI**: Left sidebar → **Tasks** (Joe's transcript is a read-only activity log at `/joe`). Since v0.9.2, users talk to Joe from repo sessions with `@Joe`; see [JOE-REPO-COLLABORATION-MAINTENANCE-SPEC.md](./JOE-REPO-COLLABORATION-MAINTENANCE-SPEC.md), which supersedes the dedicated-chat UI described below.
 
 > **Document role**: This file is now a present-tense reference for the shipped Agent Joe system. Earlier prescriptive ("we will...") language describes the current implementation. Pending roadmap items are flagged explicitly.
 

@@ -7,7 +7,7 @@
 
 **A workbench for serious AI coding.**
 
-Codekin is a self-hosted platform for [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), and [OpenCode](https://opencode.ai) that adds persistent sessions, parallel workspaces, structured approvals, and workflow orchestration — so your team can run AI coding at scale.
+Codekin is a self-hosted platform for [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai), and [Grok Build](https://github.com/xai-org/grok-build) (new in 0.9.2) that adds persistent sessions, parallel workspaces, structured approvals, and workflow orchestration — so your team can run AI coding at scale.
 
 ```bash
 curl -fsSL https://codekin.ai/install.sh | bash
@@ -19,9 +19,9 @@ Install once, then open from any browser. Codekin runs your coding agents and re
 
 ## Why teams choose Codekin
 
-Works with Claude Code, Codex, and OpenCode. More durable than the CLI alone, more controllable than SaaS platforms.
+Works with Claude Code, Codex, OpenCode, and Grok Build. More durable than the CLI alone, more controllable than SaaS platforms.
 
-- **Multi-agent support** — Run Claude Code, Codex, OpenCode, and Grok Build side by side with a consistent interface for sessions, approvals, and workflows.
+- **Multi-agent support** — Run Claude Code, Codex, OpenCode, and Grok Build side by side with a consistent interface for sessions, approvals, and handoffs.
 - **Self-hosted control** — Keep data and runtime on your infrastructure. Fits into your existing auth, networking, and deployment stack.
 - **Built-in orchestration** — Combine live sessions with scheduled workflows, webhooks, and CI-driven runs in one platform.
 
@@ -45,7 +45,8 @@ Everything you need to run AI coding in production. Interactive where you work. 
 
 - **Parallel workspaces** — Run multiple sessions across repos simultaneously, each with its own isolated context
 - **Git worktree support** — Each session runs in its own worktree, so agents work on isolated branches without stepping on each other
-- **Orchestrator agent** — A coordinator agent (Agent Joe) that plans and delegates work across repos, breaking large tasks into parallel sessions. Runs on any supported agent with its own Codekin MCP server, and is resilient by design: blocked-child notifications, a persistent notification outbox, pausable child timeouts, and ground-truth completion verification
+- **Orchestrator agent** — A coordinator agent (Agent Joe) you reach from any repo session with `@Joe`. It turns requests into tracked tasks, supervises parallel sessions until a verified PR is ready for your review, and reports back in the same conversation; the **Tasks** view collects decisions and reviews across repos. Joe manages repo automations through typed, audited tools and runs on Claude Code, Codex or OpenCode with its own Codekin MCP server
+- **Repo maintenance** — Explicitly put Joe in charge of a repo: a reviewable plan of responsibilities, each linked to the automations that check it and a response policy (notify, propose, investigate or implement). Health comes from real check evidence, never from assumptions, and pausing keeps every automation's settings
 - **Scheduled workflows** — Run recurring checks and repo tasks on a schedule using workflow definition files (Markdown), alongside loops and Agent Joe's runs in one Automations view. An activity-aware trigger engine decides what runs, and a trigger log explains why each run did or didn't fire
 - **Loops** — Durable outcome loops that run a coding agent until your own build, test and lint commands pass, within turn, cost and time budgets. A second provider reviews the diff, every step is an auditable event, runs survive restarts, and a passing run is committed, pushed and opened as a PR. Ships with CI Autorepair, Coverage Increase and Dependency Upgrade recipes
 - **GitHub CI integration** — Route CI failures from GitHub into Codekin sessions with context already attached, and review pull requests automatically via webhooks
@@ -53,7 +54,7 @@ Everything you need to run AI coding in production. Interactive where you work. 
 
 ### Open platform
 
-- **Claude Code, Codex & OpenCode** — Works with Claude Code, Codex, and OpenCode. Pick the right agent per session from one interface, and hand a running session to another agent with its context. OpenCode reaches any LLM provider; Codex brings ChatGPT-subscription OpenAI models; new Claude models appear automatically; subscription and API-key auth both work; live health indicators let you disable or enable each agent
+- **Claude Code, Codex, OpenCode & Grok Build** — Pick the right agent per session from one interface, and hand a running session to another agent with its context. OpenCode reaches any LLM provider; Codex brings ChatGPT-subscription OpenAI models; Grok Build (new) brings xAI's Grok models with Codekin's approvals, plan mode and resume; new Claude models appear automatically; subscription and API-key auth both work; live health indicators let you disable or enable each agent
 - **Open source** — Full source available. Fork it, extend it, and wire in your own skills and automation
 - **Self-hosted** — Run on your infrastructure with full control over data, networking, and configuration — including [your own Codekin web app](docs/SELF-HOSTED-RELAY.md) under your domain and GitHub sign-in
 - **Teams and workspaces** — Invite people into a workspace by link, give them a role (owner, admin, member, viewer), share individual sessions with per-user permissions, and require two-factor authentication (authenticator app, passkey, recovery codes)

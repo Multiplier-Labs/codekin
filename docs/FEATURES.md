@@ -20,6 +20,7 @@ Codekin is a web-based terminal UI for managing multiple coding-agent sessions (
 - [Loops](#loops)
 - [PR Review Automation](#pr-review-automation)
 - [Agent Joe Orchestrator](#agent-joe-orchestrator)
+- [Repo Maintenance](#repo-maintenance)
 - [Deployment Monitoring](#deployment-monitoring)
 - [Git Worktrees](#git-worktrees)
 - [Modules](#modules)
@@ -173,9 +174,9 @@ Skills are slash commands that expand into templated prompts sent to Claude.
 
 ## Automated Workflows
 
-Codekin can run scheduled Claude Code sessions against repositories to produce structured reports — code reviews, security audits, coverage assessments, and more.
+Codekin can run scheduled coding-agent sessions (Claude Code, Codex or OpenCode) against repositories to produce structured reports — code reviews, security audits, coverage assessments, and more.
 
-- **Scheduled runs** — Workflows are triggered by per-repo cron schedules. Each run creates a dedicated Claude session, sends the workflow prompt, waits for output, and saves the result as a dated Markdown file committed to the repo.
+- **Scheduled runs** — Workflows are triggered by per-repo cron schedules. Each run creates a dedicated session in its own git worktree (never the shared checkout), sends the workflow prompt, waits for output, and saves the result as a dated Markdown file committed to the repo.
 - **Built-in workflow types**:
   - `code-review.daily` — Daily review of code quality, bugs, security, and test gaps
   - `security-audit.weekly` — Weekly scan for vulnerabilities, hardcoded secrets, and auth issues
@@ -231,21 +232,37 @@ See [docs/GITHUB-WEBHOOKS-SPEC.md#pr-review-implementation](./GITHUB-WEBHOOKS-SP
 
 ## Agent Joe Orchestrator
 
-Agent Joe is an always-on AI orchestrator session that manages repositories, triages audit findings, and spawns child sessions to implement fixes.
+Agent Joe is an always-on AI orchestrator that supervises delegated work until verified changes are ready for review, keeps a task list per repo, manages repo automations, and — when you ask it to — maintains a repo.
 
-- **Dedicated session** — Choose Claude Code, Codex, or OpenCode before Joe starts for the first time. The choice persists; switch agents in the chat composer. Automatic startup is opt-in and requires a saved choice. It appears as a pinned entry in the left sidebar below "AI Workflows".
-- **Harness-aware delegation** — Child sessions inherit Joe’s current harness and model unless explicitly overridden. A different child harness uses its own default model. Joe never implicitly selects Claude when no harness has been chosen.
-- **Dedicated chat UI** — A full chat interface (reusing the standard ChatView) where users interact with Agent Joe. Includes a welcome screen for first-time users.
-- **Audit report triage** — Reads reports from `.codekin/reports/` across all managed repositories, critically evaluates findings by severity and relevance, and surfaces actionable items in the chat.
-- **Child session management** — Spawns and manages up to 5 concurrent Claude sessions in target repositories to implement approved fixes. Each child session gets a focused task description, a dedicated branch, and is monitored to completion.
-- **Color-coded sidebar status** — Child sessions and the orchestrator itself show color-coded status indicators in the sidebar with hover tooltips showing session state.
+- **Work with Joe from a repo session** — Start a message with `@Joe`, or use the composer's **Ask Joe** action. The composer shows the recipient before you send ("To Agent Joe — the coding agent won't see this") and returns to the coding agent afterwards. Joe receives the repo, branch, recent conversation and linked tasks, and answers in the same conversation, attributed to Joe. Joe's exchanges never reach the session's coding agent.
+- **Tasks** — The sidebar's **Tasks** entry is the global view of delegated work, with an attention badge for decisions and reviews. It has a per-repo overview (including maintained and paused repos), sections for Needs your decision, Ready for review, Running, Queued, To do and Closed, and **New task**. Decision cards offer Joe's recommendation, one-click options and a free-text answer; review cards show the PR, verified commit and verification detail with Accept or Request changes. A task shows as **Queued** until an attempt is actually running.
+- **Milestones in the conversation** — For work started from a session, Joe posts task cards back into it when work is accepted, needs a decision, is blocked, or is ready for review. A decision answered in the chat or in Tasks resolves in both places.
+- **Hand over and take back** — Each session's menu has **Hand over to Joe**. While Joe controls a session, a "Supervised by Agent Joe · Task: …" banner shows and ordinary messages pause (`@Joe` still works). **Take back control** stops any further Joe instructions to that session, including ones already queued. Joe can take over only on an explicit `@Joe` request in that session.
+- **Activity log** — Joe's own transcript is a read-only activity log at `/joe`, opened from Tasks. It holds Joe's approval prompts and its harness, model and permission settings. There is no separate Joe chat.
+- **Harness choice** — Joe runs on Claude Code, Codex or OpenCode (not Grok Build yet). The first-run setup in Tasks asks for a harness; the choice persists and can be changed in the activity log. Automatic startup is opt-in and requires a saved choice. Child sessions inherit Joe's harness and model unless explicitly overridden; a different child harness uses its own default model.
+- **Child sessions** — Joe spawns up to 5 concurrent child sessions in their own worktrees, each with a focused task, a dedicated branch and a working-time budget. A child counts as complete only when its PR or pushed branch points at its verified commit. Children inherit Joe's permission mode.
+- **Repo automations** — Joe discovers, creates, updates, disables and removes repo workflow automations through typed tools, backed by the same service as the Automations view. Changes are revisioned (a stale edit is rejected), retries apply once, and every change is recorded with its reason and origin. Joe distinguishes changing *when* a workflow runs (configuration) from changing *what* it does (a definition change, delegated to a coding session and validated before it counts as active).
+- **Explicit maintenance** — A repo is maintained only when you enable a maintenance plan; Joe never infers it from past work. See [Repo Maintenance](#repo-maintenance).
+- **Audit report triage** — Reads reports from `.codekin/reports/` across managed repositories, evaluates findings by severity and relevance, and turns the ones you approve into tasks.
+- **Permissions** — Joe's composer has the same permission-mode picker as session chats. Joe starts in `acceptEdits` with a read-only inspection allowlist (file reads, `rg`, `git log/diff/status`, `gh pr view`, …) and no write tools: it delegates code changes to child sessions.
 - **Configurable agent name** — The orchestrator's display name can be customized in settings.
-- **Self-improving memory** — Maintains a persistent memory system (`~/.codekin/orchestrator/`) with user profile, repo registry, decision history, and daily journals. Memory is used to restore context across restarts and improve triage over time.
+- **Self-improving memory** — Maintains a persistent memory system (`~/.codekin/orchestrator/`) with user profile, repo registry, decision history, and daily journals, used to restore context across restarts.
 - **Learned trust escalation** — Starts by asking permission for every action. As the user repeatedly approves similar actions, Agent Joe earns autonomy — progressing from ASK (explicit approval) to NOTIFY+DO (acts with notification) to SILENT (acts and logs).
-- **Repo policies** — Per-repo configuration for branch strategy (PR vs. direct merge), deploy requirements, enabled audit types, and activity status (active/passive/frozen).
-- **Permission mode** — Runs with `acceptEdits` permission mode, allowing it to read reports, write memory, and spawn sessions.
 
-See [docs/ORCHESTRATOR-SPEC.md](./ORCHESTRATOR-SPEC.md) for the full architectural specification.
+See [docs/ORCHESTRATOR-SPEC.md](./ORCHESTRATOR-SPEC.md) for the orchestrator architecture, [docs/JOE-TASKS-SPEC.md](./JOE-TASKS-SPEC.md) for the task model, and [docs/JOE-REPO-COLLABORATION-MAINTENANCE-SPEC.md](./JOE-REPO-COLLABORATION-MAINTENANCE-SPEC.md) for session collaboration, automation management and maintenance.
+
+---
+
+## Repo Maintenance
+
+A maintenance plan is an explicit, reviewable mandate for Joe to look after one repo.
+
+- **Responsibilities** — Each responsibility links to existing repo automations that provide its checks (there is no second scheduler) and has a scope, a response policy, a task limit, and a list of changes that always need a decision. Policies: **Notify** (record and surface the finding), **Propose work** (create a task you must start), **Investigate** (diagnose and recommend), **Implement** (a bounded fix through a verified PR). No policy grants merge, deploy or host-operation authority.
+- **You decide** — Joe can propose responsibilities and pause maintenance. Only you can enable, resume, turn off, or change accepted responsibilities. **Review & enable** shows the resulting mandate and lets you choose which existing automations to adopt into the plan.
+- **Evidence-based health** — Health comes from the linked automations' actual runs. Labels: *Joe maintaining*, *Maintenance starting* (no evidence yet), *Maintenance needs attention*, *Maintenance paused*, *Not maintained*. Missing, stale, held, disabled or failing checks never count as healthy, and an enabled plan with no enabled responsibilities needs attention.
+- **Maintenance view** — Open it from the indicator under a maintained repo in the sidebar (e.g. "Joe maintaining · 2 running · 1 needs you"), or at `/maintenance/<repo>`. It shows each responsibility with its checks' status, last success and next run; the managed automations; current actions; recent activity; and permissions.
+- **Pause without losing settings** — Pause and off stop new governed checks and task dispatch; running work finishes. Adopted automations keep their own enabled setting, so resume restores them as they were. Independent automations are unaffected, and **Run independently** hands an adopted one back. The Automations list marks adopted automations.
+- **Observation → bounded action** — Each finished check is recorded once as *Check completed*, *No changes* or *Check failed*. Joe then triages it under the responsibility's policy and limits, and records the outcome in the activity feed.
 
 ---
 
@@ -270,7 +287,7 @@ Sessions can be isolated in dedicated git worktree directories, preventing concu
 - **Isolation is enforced** — A session that asked for a worktree only ever starts in its verified worktree. If creating it fails, the session offers Retry instead of falling back to the shared checkout. Retries never remove uncommitted files or unique commits.
 - **Mid-session creation** — Worktrees can be created during an active session. The session's full context is preserved across the migration.
 - **Worktree name indicator** — The input toolbar displays the current worktree name when a session is running in a worktree.
-- **Auto-enable setting** — A global setting to automatically create worktrees for new sessions.
+- **On by default** — New sessions start in their own worktree. Turn this off in **Settings → Sessions**; an explicit choice is kept.
 - **Archive keeps the work** — Archiving a session keeps its worktree and branch, so it can be resumed later with its files intact. Removing the worktree is a separate, explicit action in the archived sessions panel.
 
 ---
@@ -399,9 +416,9 @@ A right-hand panel that shows the changes in the current session's checkout, let
 - **Uncommitted markers** — In the task views, files that also have uncommitted edits are marked.
 - **Review comments** — Comment on specific diff lines. Comments collect in a tray and are sent to the agent together as one prompt.
 - **Pull request card** — A read-only card with the PR link, base ← head, draft/open/merged state, CI checks and review decision. It says when local work differs from what was checked (unpushed commits, uncommitted edits), and shows unknown states (no `gh`, rate limited, errors) as unknown, never as passing. There are no merge controls.
-- **File tree** — A compact list of changed files grouped by status: Modified (yellow `M`), Added (green `A`), Deleted (red `D`), Renamed (blue `R`). Each row shows the relative path and `+N −M` change counts.
-- **Unified diffs** — Each file is rendered as a card with syntax-highlighted unified diff, dual-gutter line numbers, and color-coded add/delete/context lines.
-- **Discard changes** — Discard all changes or per-file via `git restore`. Requires confirmation. Available in the uncommitted, staged and unstaged scopes; the branch views are read-only.
+- **Pinned file list** — Changed files grouped by folder, with a status marker (`M`, `A`, `D`, `R`), `+N −M` counts and a filter. Drag to resize the list (96–520px); the height is saved with your preferences.
+- **One file at a time** — Below the list, one file's syntax-highlighted unified diff, with previous/next, an `n / N` counter, copy path, and `J`/`K` to move between files. On narrow panels the diff uses a single gutter; on phones the list folds into a file switcher.
+- **Discard changes** — Discard all changes or per-file via `git restore`. An inline confirmation names any new files that will be deleted. Available in the uncommitted, staged and unstaged scopes; the branch views are read-only.
 - **Auto-refresh** — The diff panel refreshes automatically after `Edit`, `Write`, or file-mutating `Bash` tool calls (debounced 500ms). No polling.
 - **Resizable** — Drag the left edge to resize (280px–600px). Width is saved with your preferences on the server.
 - **Large diff handling** — Files with >300 changed lines are collapsed by default. Diffs exceeding 2 MB are truncated with a banner.

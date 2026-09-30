@@ -698,7 +698,7 @@ offered options; `note` becomes guidance to the maker where applicable.
 
 ## Orchestrator (Agent Joe)
 
-Harness selection: `GET /api/orchestrator/status` includes `provider` (`claude`, `codex`, `opencode`, or `null` when not yet selected). `POST /api/orchestrator/start` accepts `{ "provider": "codex" }` to save a choice before starting; an omitted provider reuses the saved choice, or returns 409 if none exists. Invalid providers return 400. Users can subsequently switch harnesses in Joe's composer.
+Harness selection: `GET /api/orchestrator/status` includes `provider` (`claude`, `codex`, `opencode`, or `null` when not yet selected). `POST /api/orchestrator/start` accepts `{ "provider": "codex" }` to save a choice before starting; an omitted provider reuses the saved choice, or returns 409 if none exists. Invalid providers return 400. Joe runs on Claude Code, Codex or OpenCode; `grok` is rejected until Grok Build is verified for unattended use. Users pick the harness in the Tasks view's first-run setup and can switch it later in Joe's activity log (`/joe`).
 
 `POST /api/orchestrator/children` and the `spawn_child` MCP tool accept optional `provider` and `model` overrides. Without a provider override, the child uses its parent's harness, then Joe's saved choice if the parent is not loaded. It inherits the parent's model only when the harness matches; otherwise it uses the selected harness's default. Spawning without any harness choice is rejected. The resolved provider/model are included in the child request and persisted run spec.
 
@@ -779,13 +779,15 @@ These endpoints act only on children the orchestrator spawned. For any other ses
 
 Agent Joe's durable per-repo task list (design: [JOE-TASKS-SPEC.md](JOE-TASKS-SPEC.md)). Task status is `todo`, `in_progress`, `needs_decision`, `in_review`, `done` or `dismissed`. It follows the linked child automatically: running → `in_progress`, verified → `in_review`, unverified/failed/timed out → `needs_decision` (Retry / Dismiss), canceled → `todo`. Mutations push a `workflow_event` with `engine: "agent"` and `kind: "task"`.
 
+Each task in a response also carries an `execution` substate: `running` while an attempt is active, `queued` after a start request or an answer until the attempt actually runs, otherwise `idle`. Tasks created from a repo session record `originSessionId` / `originRequestId`, and `GET /api/orchestrator/tasks?session=<id>` lists them. Tasks created under a maintenance responsibility carry `responsibilityId`; they need an enabled plan, respect the responsibility's task limit, cannot be created under a `notify` policy, and under `propose` only the user can start them.
+
 Both the user and Joe can call these routes. Consent actions (`answer`, `start`, `accept`, `request-changes`) return `403` for Joe's session token.
 
 | Method | Path | Body / query | Effect |
 | --- | --- | --- | --- |
 | GET | `/api/orchestrator/tasks` | `?repo=&status=` | `{ tasks: Task[], counts: Record<status, number> }`, newest update first |
 | GET | `/api/orchestrator/tasks/:id` | — | `{ task, events: [{ actor, summary, createdAt }] }` |
-| POST | `/api/orchestrator/tasks` | `{ repo, tasks: [{ title, detail?, acceptance?, priority? }], acceptance?, completionPolicy?, source?, sourceRef?, delegate? }` | Creates 1–20 tasks in one repo. `delegate: true` notifies Joe to start them |
+| POST | `/api/orchestrator/tasks` | `{ repo, tasks: [{ title, detail?, acceptance?, priority? }], acceptance?, completionPolicy?, source?, sourceRef?, originSessionId?, responsibilityId?, delegate? }` | Creates 1–20 tasks in one repo. `delegate: true` notifies Joe to start them |
 | PATCH | `/api/orchestrator/tasks/:id` | `{ title?, detail?, acceptance?, priority?, completionPolicy?, status?: "todo" \| "done" \| "dismissed", note? }` | Edits, reopens, completes or dismisses |
 | POST | `/api/orchestrator/tasks/:id/decision` | `{ question, recommendation?, options?: string[] }` | Opens a decision → `needs_decision` |
 | POST | `/api/orchestrator/tasks/:id/answer` | `{ answer }` | User answers → Joe is notified (`Dismiss` on a failed attempt dismisses the task) |
@@ -794,6 +796,72 @@ Both the user and Joe can call these routes. Consent actions (`answer`, `start`,
 | POST | `/api/orchestrator/tasks/:id/request-changes` | `{ note }` | `in_review` → `in_progress`, and Joe is asked to resume the child |
 
 `POST /api/orchestrator/children` also accepts `taskId`. The task must be open and in the same repo, and its `completionPolicy` is used when none is given.
+
+### Joe in Repo Sessions
+
+The user addresses Joe from a repo session with a leading `@Joe` or the composer's **Ask Joe** action (the WebSocket `ask_joe` message, or the REST route below). The request is recorded in the session transcript and reaches Joe as a durable Session Request carrying the repo, branch, request id, recent conversation and linked tasks. Joe's exchanges never go to the session's coding agent. Milestones on tasks started from a session (accepted, decision needed, blocked, ready for review) are posted back into that session as task cards.
+
+Each session has a revisioned **controller**, `user` (default) or `joe`. While Joe controls a session, ordinary user messages are paused (`@Joe` still works). Taking back control bumps the revision, so instructions Joe queued under an older revision are refused.
+
+| Method | Path | Who | Body | Effect |
+| --- | --- | --- | --- | --- |
+| POST | `/api/orchestrator/sessions/:id/ask-joe` | user | `{ text }` | Sends a Session Request to Joe |
+| POST | `/api/orchestrator/sessions/:id/joe-reply` | Joe | `{ text, requestId?, taskId? }` | Posts Joe's reply into the session, attributed to Joe |
+| GET | `/api/orchestrator/sessions/:id/context` | both | `?limit=` | The session's repo, branch and recent conversation |
+| GET | `/api/orchestrator/sessions/:id/controller` | both | — | `{ controller: { owner, revision, taskId?, since } }` |
+| POST | `/api/orchestrator/sessions/:id/handover` | both | `{ requestId?, taskId? }` | Hands the session to Joe. Joe may only take over with the `requestId` of an explicit `@Joe` request in that session |
+| POST | `/api/orchestrator/sessions/:id/take-back` | user | — | Returns control to the user and bumps the revision |
+| POST | `/api/orchestrator/sessions/:id/instruct` | Joe | `{ text, controllerRevision }` | Sends an instruction as controller; refused when the revision is stale |
+
+Routes marked for one actor return `403` for the other.
+
+### Repo Automations
+
+Typed management of repo workflow automations, used by Joe's automation MCP tools (`list_workflows`, `create_repo_automation`, …) and backed by the same service as the Automations UI. Mounted at `/api/orchestrator/automations`; reachable with the user's token or Joe's scoped token.
+
+Every change bumps the automation's `revision`. Updates and removals with a stale `expectedRevision` return `409` instead of overwriting. Joe's mutations must include an `idempotencyKey` (a retry applies once), a `reason`, and, for updates and removals, the `expectedRevision` it read. Every change is recorded with actor, reason, before/after, authorization and the originating session or task. Change fields accepted on mutations: `reason`, `authorization`, `originSessionId`, `taskId`, `idempotencyKey`, `expectedRevision`.
+
+| Method | Path | Body / query | Effect |
+| --- | --- | --- | --- |
+| GET | `/api/orchestrator/automations/workflows` | `?repo=` | Effective workflow definitions: source (built-in, repo override, repo-only), file and content hash |
+| GET | `/api/orchestrator/automations/workflows/:kind` | `?repo=` | One definition, including its prompt |
+| POST | `/api/orchestrator/automations/workflows/validate` | `{ content }` or `{ repo, kind }` | Validates proposed content, or the file currently in the repo. `active` is true only when runs would load that definition now |
+| GET | `/api/orchestrator/automations` | `?repo=` | `{ automations }` |
+| POST | `/api/orchestrator/automations` | `{ repo, kind, cronExpression, name?, enabled?, customPrompt?, model?, provider?, …change fields }` | Creates an automation. Joe's duplicates are rejected |
+| GET | `/api/orchestrator/automations/:id` | — | `{ automation }` |
+| GET | `/api/orchestrator/automations/:id/health` | — | `healthy`, `starting` (no evidence yet), `held` (an activity hold is withholding coverage), `degraded` (overdue or failing), `unavailable` (scheduler stale, schedule or hook missing) or `disabled` |
+| GET | `/api/orchestrator/automations/:id/history` | `?limit=` | Trigger history: why the automation ran, was held, or did not run |
+| PATCH | `/api/orchestrator/automations/:id` | `{ name?, kind?, cronExpression?, enabled?, customPrompt?, model?, provider?, …change fields }` | Updates configuration; schedules and commit hooks are re-synced. The response lists maintenance responsibilities affected by disabling it |
+| POST | `/api/orchestrator/automations/:id/remove` | change fields | Removes future execution. Past runs are kept, and affected responsibilities are returned |
+| POST | `/api/orchestrator/automations/:id/trigger` | — | Runs the automation now; returns `{ run, link }` |
+| POST | `/api/orchestrator/automations/runs` | `{ kind, input? }` | Runs a workflow kind ad hoc (`trigger_workflow`) |
+| GET | `/api/orchestrator/automations/changes` | `?repo=&automationId=&limit=` | Configuration change history |
+
+`provider` accepts `claude`, `codex` or `opencode`. Runs record the definition source and hash they used.
+
+### Maintenance
+
+Explicit per-repo maintenance plans (design: [JOE-REPO-COLLABORATION-MAINTENANCE-SPEC.md](JOE-REPO-COLLABORATION-MAINTENANCE-SPEC.md)). A repo is maintained only after the user enables its plan; nothing is inferred from sessions, tasks, memory or existing automations. Each **responsibility** links to existing repo automations that provide its checks, and has a `scope`, a response `policy` (`notify`, `propose`, `investigate` or `implement`), `maxActiveTasks`, and `requiredDecision` (changes that always need a decision).
+
+Plan state is `off`, `enabled` or `paused`. Health is derived from the linked automations' health, and missing, stale, held, disabled or failing checks never count as healthy. The plan label is one of *Joe maintaining*, *Maintenance starting*, *Maintenance needs attention*, *Maintenance paused* or *Not maintained*.
+
+Mounted at `/api/orchestrator/maintenance`; reachable with the user's token or Joe's scoped token. Joe can propose responsibilities, remove its own proposals, pause, and record activity; only the user can enable, resume, turn off, or change accepted responsibilities (`403` otherwise). State changes accept `expectedRevision` and return `409` when it is stale.
+
+| Method | Path | Body / query | Effect |
+| --- | --- | --- | --- |
+| GET | `/api/orchestrator/maintenance` | — | `{ repos }`: every repo with a plan, with state, health label and counts |
+| GET | `/api/orchestrator/maintenance/plan` | `?repo=&limit=` | `{ plan, activity }`: responsibilities with their checks, and recent activity |
+| POST | `/api/orchestrator/maintenance/enable` | `{ repo, expectedRevision?, adoptAutomationIds? }` | Enables the plan. Adopted automations are paused and resumed with the plan |
+| POST | `/api/orchestrator/maintenance/pause` | `{ repo, expectedRevision? }` | Stops new governed checks and dispatch; running work continues |
+| POST | `/api/orchestrator/maintenance/resume` | `{ repo, expectedRevision? }` | Resumes; adopted automations keep their own `enabled` settings |
+| POST | `/api/orchestrator/maintenance/off` | `{ repo, expectedRevision? }` | Turns maintenance off; history is kept |
+| POST | `/api/orchestrator/maintenance/responsibilities` | `{ repo, name, scope?, automationIds, policy, maxActiveTasks?, requiredDecision?, enabled? }` | Adds a responsibility (a proposal when Joe calls it) |
+| PATCH | `/api/orchestrator/maintenance/responsibilities/:id` | any responsibility field | Updates a responsibility |
+| POST | `/api/orchestrator/maintenance/responsibilities/:id/remove` | — | Removes a responsibility |
+| POST | `/api/orchestrator/maintenance/release` | `{ automationId }` | Hands an adopted automation back to independent management ("Run independently") |
+| POST | `/api/orchestrator/maintenance/activity` | `{ repo, kind: "finding" \| "check_ok" \| "action", summary, responsibilityId?, ref? }` | Joe records a triage outcome or action |
+
+Pause and off act as a dispatch gate for adopted automations only; the automations' own `enabled` settings are never rewritten, and independent automations are unaffected. Each finished run of a linked automation is recorded once (by run id) as *Check completed*, *No changes* or *Check failed*, and Joe receives a Maintenance Check notification with the report, the policy and the limits.
 
 ### Session Management
 
