@@ -33,6 +33,15 @@ vi.mock('./config.js', () => ({
   REPOS_ROOT: '/tmp/repos',
   resolveRepoPathInRoot: vi.fn(() => null),
   getAgentDisplayName: vi.fn(() => 'Joe'),
+  DATA_DIR: '/tmp/orch-session-test',
+}))
+
+vi.mock('./orchestrator-outbox.js', () => ({
+  getOrchestratorOutbox: () => ({ enqueue: () => {} }),
+}))
+
+vi.mock('./workflow-config.js', () => ({
+  loadWorkflowConfig: vi.fn(() => ({ reviewRepos: [] })),
 }))
 
 vi.mock('./orchestrator-reports.js', () => ({
@@ -41,6 +50,8 @@ vi.mock('./orchestrator-reports.js', () => ({
   getReportsSince: vi.fn(() => []),
 }))
 
+import { getReportsSince } from './orchestrator-reports.js'
+import { loadWorkflowConfig } from './workflow-config.js'
 import { createSessionRouter } from './orchestrator-session-router.js'
 import type { SessionManager } from './session-manager.js'
 import type { OrchestratorMemory } from './orchestrator-memory.js'
@@ -223,6 +234,13 @@ describe('createSessionRouter', () => {
       expect(children.spawn).not.toHaveBeenCalled()
     })
 
+    it('400s on deployAfter: true instead of silently ignoring it', async () => {
+      const res = await spawn({ ...VALID_SPAWN, deployAfter: true })
+      expect(res.status).toBe(400)
+      expect((await res.json()).error).toMatch(/deployAfter is not supported/)
+      expect(children.spawn).not.toHaveBeenCalled()
+    })
+
     it('400s when allowedTools is not an array of strings', async () => {
       const res = await spawn({ ...VALID_SPAWN, allowedTools: 'Bash' })
       expect(res.status).toBe(400)
@@ -257,10 +275,25 @@ describe('createSessionRouter', () => {
       expect(await res.json()).toEqual({ children: [] })
     })
 
-    it('400s on a reports request with neither ?repo nor ?since', async () => {
-      const res = await fetch(`${server.baseUrl}/api/orchestrator/reports`)
-      expect(res.status).toBe(400)
-      expect((await res.json()).error).toMatch(/Provide \?repo=/)
+    it('lists reports across managed repos when called with no parameters (the list_reports MCP call)', async () => {
+      mkdirSync('/tmp/repos', { recursive: true })
+      const repo = mkdtempSync('/tmp/repos/joe-reports-')
+      try {
+        vi.mocked(loadWorkflowConfig).mockReturnValueOnce({ reviewRepos: [{ repoPath: repo }, { repoPath: '/tmp/repos/does-not-exist' }] } as never)
+        vi.mocked(getReportsSince).mockReturnValueOnce([{ filePath: `${repo}/.codekin/reports/incidents/2026-09-30_x.md` }] as never)
+        const api = new CodekinApi({ baseUrl: server.baseUrl, token: 'test' })
+        const body = await api.listReports() as { reports: unknown[] }
+        expect(body.reports).toHaveLength(1)
+        expect(getReportsSince).toHaveBeenCalledWith([repo], '')
+      } finally { rmSync(repo, { recursive: true }) }
+    })
+
+    it('passes ?since through and rejects a malformed date', async () => {
+      const api = new CodekinApi({ baseUrl: server.baseUrl, token: 'test' })
+      await api.listReports({ since: '2026-09-01' })
+      expect(getReportsSince).toHaveBeenCalledWith([], '2026-09-01')
+      const bad = await fetch(`${server.baseUrl}/api/orchestrator/reports?since=yesterday`)
+      expect(bad.status).toBe(400)
     })
   })
 
@@ -341,6 +374,72 @@ describe('createSessionRouter', () => {
       // limit capped at 50000 — full 6000-char output fits
       expect(hugeBody.transcript.length).toBe(6000)
       expect(hugeBody.truncated).toBe(false)
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Cleanup
+  // -------------------------------------------------------------------------
+
+  describe('session cleanup', () => {
+    function fakeSession(opts: { pending?: number; processing?: boolean } = {}) {
+      return {
+        pendingToolApprovals: new Map(Array.from({ length: opts.pending ?? 0 }, (_, i) => [`r${i}`, {}])),
+        pendingControlRequests: new Map(),
+        isProcessing: opts.processing ?? false,
+        claudeProcess: { isAlive: () => true },
+      }
+    }
+
+    const all: Record<string, ReturnType<typeof fakeSession>> = {
+      done: fakeSession(),
+      busy: fakeSession({ processing: true }),
+      asking: fakeSession({ pending: 1 }),
+      child: fakeSession(),
+      manual: fakeSession(),
+    }
+    const infos = [
+      { id: 'done', name: 'done', source: 'workflow' },
+      { id: 'busy', name: 'busy', source: 'agent' },
+      { id: 'asking', name: 'asking', source: 'webhook' },
+      { id: 'child', name: 'child', source: 'agent' },
+      { id: 'manual', name: 'manual', source: 'manual' },
+    ]
+
+    function cleanupSessions(): SessionManager {
+      return {
+        listAll: vi.fn(() => infos),
+        get: vi.fn((id: string) => all[id]),
+        delete: vi.fn(() => true),
+      } as unknown as SessionManager
+    }
+
+    it('deletes only finished automated sessions and reports what it skipped', async () => {
+      const sessions = cleanupSessions()
+      await mount(() => true, sessions)
+      ;(children.get as ReturnType<typeof vi.fn>).mockImplementation((id: string) => (id === 'child' ? { id, status: 'running' } : null))
+
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/sessions/cleanup`, { method: 'DELETE' })
+      const body = await res.json()
+
+      expect(body.deleted).toEqual([{ id: 'done', name: 'done' }])
+      expect(body.skipped).toEqual([
+        { id: 'busy', name: 'busy', reason: 'still working' },
+        { id: 'asking', name: 'asking', reason: 'waiting on a prompt' },
+        { id: 'child', name: 'child', reason: 'supervised child is running' },
+      ])
+      expect(sessions.delete).toHaveBeenCalledTimes(1)
+      expect(sessions.delete).toHaveBeenCalledWith('done')
+    })
+
+    it('previews without deleting on ?dryRun=true', async () => {
+      const sessions = cleanupSessions()
+      await mount(() => true, sessions)
+      const res = await fetch(`${server.baseUrl}/api/orchestrator/sessions/cleanup?dryRun=true`, { method: 'DELETE' })
+      const body = await res.json()
+      expect(body.dryRun).toBe(true)
+      expect(body.deleted.map((d: { id: string }) => d.id)).toEqual(['done', 'child'])
+      expect(sessions.delete).not.toHaveBeenCalled()
     })
   })
 })

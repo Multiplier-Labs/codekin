@@ -71,6 +71,7 @@ function createContext(): WsHandlerContext & { sent: WsServerMessage[] } {
       leave: vi.fn(),
       startClaude: vi.fn(),
       stopClaude: vi.fn(),
+      stopSession: vi.fn(),
       stopClaudeAndWait: vi.fn().mockResolvedValue(undefined),
       get: vi.fn().mockReturnValue(session),
       sendInput: vi.fn(),
@@ -369,17 +370,17 @@ describe('handleWsMessage', () => {
   /* ---- stop ---- */
 
   describe('stop', () => {
-    it('calls sessions.stopClaude', () => {
+    it('calls sessions.stopSession', () => {
       handleWsMessage({ type: 'stop' } as WsClientMessage, ctx)
 
-      expect(ctx.sessions.stopClaude).toHaveBeenCalledWith('sess-1')
+      expect(ctx.sessions.stopSession).toHaveBeenCalledWith('sess-1')
     })
 
     it('does nothing when not in a session', () => {
       ctx.clientSessions.clear()
       handleWsMessage({ type: 'stop' } as WsClientMessage, ctx)
 
-      expect(ctx.sessions.stopClaude).not.toHaveBeenCalled()
+      expect(ctx.sessions.stopSession).not.toHaveBeenCalled()
     })
   })
 

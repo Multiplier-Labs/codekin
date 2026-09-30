@@ -22,7 +22,7 @@ export interface SpawnChildInput {
   branchName: string
   completionPolicy?: 'pr' | 'merge' | 'commit-only'
   useWorktree?: boolean
-  deployAfter?: boolean
+  timeoutMs?: number
   provider?: CodingProvider
   model?: string
   parentSessionId?: string
@@ -153,8 +153,12 @@ export class CodekinApi {
 
   // --- reports --------------------------------------------------------------
 
-  listReports(): Promise<unknown> {
-    return this.request('GET', '/api/orchestrator/reports')
+  listReports(opts: { repo?: string; since?: string } = {}): Promise<unknown> {
+    const params = new URLSearchParams()
+    if (opts.repo) params.set('repo', opts.repo)
+    if (opts.since) params.set('since', opts.since)
+    const qs = params.toString()
+    return this.request('GET', `/api/orchestrator/reports${qs ? `?${qs}` : ''}`)
   }
 
   readReport(path: string): Promise<unknown> {

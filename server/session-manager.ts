@@ -102,6 +102,9 @@ function isHeadlessSession(session: { source?: string }): boolean {
   return HEADLESS_SOURCES.has(session.source ?? '')
 }
 
+/** Why a session was deliberately taken out of service (see onSessionStopped). */
+export type SessionStopReason = 'stopped' | 'archived' | 'deleted'
+
 export interface CreateSessionOptions {
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   id?: string
@@ -141,6 +144,10 @@ export class SessionManager {
   private _promptListeners: Array<(sessionId: string, promptType: 'permission' | 'question', toolName: string | undefined, requestId: string | undefined) => void> = []
   /** Registered listeners notified when a session completes a turn (result event). */
   private _resultListeners: Array<(sessionId: string, isError: boolean) => void> = []
+  /** Registered listeners notified when a pending prompt is resolved (answered, auto-denied, or timed out). */
+  private _promptResolvedListeners: Array<(sessionId: string, requestId: string) => void> = []
+  /** Registered listeners notified when a session is deliberately stopped, archived, or deleted. */
+  private _stopListeners: Array<(sessionId: string, reason: SessionStopReason) => void> = []
   /** Delegated approval logic (auto-approve patterns, deny-lists, pattern management). */
   private _approvalManager: ApprovalManager
   /** Delegated auto-naming logic (generates session names from first user message via Claude API). */
@@ -175,6 +182,7 @@ export class SessionManager {
       globalBroadcast: (msg) => this._globalBroadcast?.(msg),
       approvalManager: this._approvalManager,
       promptListeners: this._promptListeners,
+      promptResolvedListeners: this._promptResolvedListeners,
       onPlanApproved: (session) => this.onPlanApproved(session),
     })
     // Use a local ref so the getter closures capture `this` (the SessionManager instance)
@@ -597,6 +605,7 @@ export class SessionManager {
     session.coordinator.teardown()
     this.stopClaude(sessionId)
     session.isProcessing = false
+    this.emitStopped(sessionId, 'archived')
     const msg: WsServerMessage = {
       type: 'system_message',
       subtype: 'notification',
@@ -800,6 +809,39 @@ export class SessionManager {
     }
   }
 
+  /** Register a listener called when a pending prompt stops pending — answered,
+   *  auto-denied, or timed out. Fires once per resolved requestId. */
+  onSessionPromptResolved(listener: (sessionId: string, requestId: string) => void): () => void {
+    this._promptResolvedListeners.push(listener)
+    return () => {
+      const idx = this._promptResolvedListeners.indexOf(listener)
+      if (idx >= 0) this._promptResolvedListeners.splice(idx, 1)
+    }
+  }
+
+  /** Register a listener called when a session is deliberately stopped by a
+   *  user, archived, or deleted. Unlike {@link onSessionExit} this fires even
+   *  though the process's own listeners were detached before it was killed. */
+  onSessionStopped(listener: (sessionId: string, reason: SessionStopReason) => void): () => void {
+    this._stopListeners.push(listener)
+    return () => {
+      const idx = this._stopListeners.indexOf(listener)
+      if (idx >= 0) this._stopListeners.splice(idx, 1)
+    }
+  }
+
+  private emitPromptResolved(sessionId: string, requestId: string): void {
+    for (const listener of this._promptResolvedListeners) {
+      try { listener(sessionId, requestId) } catch { /* listener error */ }
+    }
+  }
+
+  private emitStopped(sessionId: string, reason: SessionStopReason): void {
+    for (const listener of this._stopListeners) {
+      try { listener(sessionId, reason) } catch { /* listener error */ }
+    }
+  }
+
   /** Register a listener called when any session completes a turn (result event). */
   onSessionResult(listener: (sessionId: string, isError: boolean) => void): () => void {
     this._resultListeners.push(listener)
@@ -961,7 +1003,9 @@ export class SessionManager {
                 deniedTools.push(pending.toolName)
                 session.claudeProcess?.sendControlResponse(requestId, 'deny')
               }
+              const deniedIds = [...session.pendingControlRequests.keys()]
               session.pendingControlRequests.clear()
+              for (const id of deniedIds) this.emitPromptResolved(sessionId, id)
             }
             if (session.pendingToolApprovals.size > 0) {
               console.log(`[session] last client left, auto-denying ${session.pendingToolApprovals.size} pending tool approval(s)`)
@@ -970,7 +1014,9 @@ export class SessionManager {
                 pending.resolve({ allow: false, always: false })
                 this.broadcast(session, { type: 'prompt_dismiss', requestId: reqId })
               }
+              const deniedIds = [...session.pendingToolApprovals.keys()]
               session.pendingToolApprovals.clear()
+              for (const id of deniedIds) this.emitPromptResolved(sessionId, id)
             }
             // Record the auto-denial in history so a rejoining user can see
             // why Claude stopped instead of being silently confused.
@@ -1014,6 +1060,7 @@ export class SessionManager {
       : Promise.resolve()
 
     this.archiveSessionIfWorthSaving(session)
+    this.emitStopped(sessionId, 'deleted')
 
     // Clean up git worktree if this session used one — deferred until process exits
     if (session.worktreePath) {
@@ -1601,6 +1648,18 @@ export class SessionManager {
   /** Stop the Claude process for a session. Delegates to SessionLifecycle. */
   stopClaude(sessionId: string): void {
     this.sessionLifecycle.stopClaude(sessionId)
+  }
+
+  /**
+   * A user-initiated stop: stop the process and tell stop listeners, so
+   * supervisors (e.g. the orchestrator's child manager) settle immediately
+   * instead of waiting for a timeout. Internal restarts use {@link stopClaude}.
+   */
+  stopSession(sessionId: string): boolean {
+    if (!this.sessions.has(sessionId)) return false
+    this.stopClaude(sessionId)
+    this.emitStopped(sessionId, 'stopped')
+    return true
   }
 
   /**

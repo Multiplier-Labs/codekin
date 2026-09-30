@@ -719,12 +719,12 @@ Ensure the orchestrator session is running. Starts it if not already active.
 
 #### `GET /api/orchestrator/reports`
 
-List available audit reports. Exactly one of `repo` or `since` must be provided.
+List audit reports, newest first. Without `repo`, reports are listed across every managed repo: the orchestrator's repo memory, the configured workflow repos, and the repos of its child sessions. Every subdirectory of `.codekin/reports/` is a category (e.g. `incidents`, `product`).
 
 When `repo` is supplied, it is resolved via `realpath` and must sit under the configured `REPOS_ROOT`; otherwise the request is rejected with `400`.
 
-**Query params:** `repo` (path under `REPOS_ROOT`) **or** `since` (YYYY-MM-DD date; lists reports across managed repos newer than that date)
-**Response:** `{ "reports": ReportMeta[] }`, or `400` with `{ "error": "..." }` when neither query param is provided or when `repo` is not under the configured repos root.
+**Query params:** `repo` (optional, path under `REPOS_ROOT`), `since` (optional, YYYY-MM-DD; keeps reports dated on or after that day)
+**Response:** `{ "reports": ReportMeta[] }`, or `400` with `{ "error": "..." }` when `repo` is not under the configured repos root or `since` is not a YYYY-MM-DD date.
 
 #### `GET /api/orchestrator/reports/read`
 
@@ -737,9 +737,11 @@ Read the contents of a specific report file. The resolved path must sit under `R
 
 #### `GET /api/orchestrator/children`
 
-List child sessions spawned by the orchestrator.
+List child sessions spawned by the orchestrator. The list covers running children and ones that finished in the last hour. It also includes children interrupted by a server restart, which come back as `failed` with `"error": "interrupted by server restart"`.
 
-**Response:** `{ "children": ChildSession[] }`
+`status` is one of `starting`, `running`, `blocked`, or a terminal value: `completed`, `unverified`, `failed`, `timed_out`, `canceled`. A child is `completed` only when `verification.state` is `verified` (an open or merged PR, or the pushed remote branch, points at the worktree's HEAD) or `not_applicable` (`commit-only`). If the PR or push is missing or cannot be checked, the child ends `unverified`. Stopping, archiving or deleting the session cancels the child immediately and frees its slot.
+
+**Response:** `{ "children": ChildSession[] }`. Each child includes `verification: { state, commit, prUrl, detail, checkedAt } | null`.
 
 #### `POST /api/orchestrator/children`
 
@@ -747,12 +749,12 @@ Spawn a new child session for a task. `repo` is resolved via `realpath` and must
 
 Because each spawn allocates a real Claude subprocess, this endpoint is additionally **rate-limited per client IP**: at most **20 spawn requests per 5-minute sliding window per IP**. The limiter is keyed on `req.ip` (which honours `X-Forwarded-For` when the server is configured with `TRUST_PROXY`) and runs *before* auth, so even unauthenticated floods are capped. It is applied on top of the global 300-requests-per-minute API limiter.
 
-**Request body:** `{ "repo": "...", "task": "...", "branchName": "...", "useWorktree"?: boolean, "completionPolicy"?: "pr" | "merge" | "commit-only", "deployAfter"?: boolean, "model"?: "claude-opus-4-8", "allowedTools"?: string[] }` (see [Models](#models) for accepted `model` identifiers)
+**Request body:** `{ "repo": "...", "task": "...", "branchName": "...", "useWorktree"?: boolean, "completionPolicy"?: "pr" | "merge" | "commit-only", "provider"?: "claude" | "codex" | "opencode", "model"?: "claude-opus-4-8", "allowedTools"?: string[], "timeoutMs"?: number }` (see [Models](#models) for accepted `model` identifiers). `merge` pushes the branch; it does not merge a PR. `timeoutMs` is the working-time budget (60000–14400000, default 30 minutes; time blocked on prompts does not count). `deployAfter: true` is rejected with `400`: children never deploy.
 **Response:** `{ "child": ChildSession }`, `400` with `{ "error": "..." }` when required fields are missing, `branchName` / `allowedTools` fail validation, or `repo` is not an existing directory under the configured repos root, `429` with `{ "error": "Too Many Requests", "retryAfter": 300 }` when the per-IP spawn cap is exceeded (`retryAfter` is in seconds), or `503` when the child session cannot be spawned.
 
 #### `GET /api/orchestrator/children/:id`
 
-Get details for a specific child session.
+Get details for a specific child session. Children no longer in the live list are rebuilt from the run store as read-only history.
 
 **Response:** `{ "child": ChildSession }` or `404`
 
@@ -779,9 +781,10 @@ Respond to a pending prompt in a session.
 
 #### `DELETE /api/orchestrator/sessions/cleanup`
 
-Delete all automated sessions (sources: `workflow`, `webhook`, `stepflow`, `agent`).
+Delete **finished** automated sessions (sources: `workflow`, `webhook`, `stepflow`, `agent`). Sessions that are mid-turn, waiting on a prompt, or supervised as an active child are skipped and never stopped. Worktrees with uncommitted or untracked files are kept, and branches are always kept.
 
-**Response:** `{ "deleted": number }` — count of sessions deleted.
+**Query params:** `dryRun=true` (optional): preview the selection without deleting anything.
+**Response:** `{ "dryRun": boolean, "deleted": [{ "id", "name" }], "skipped": [{ "id", "name", "reason" }] }`
 
 #### `DELETE /api/orchestrator/sessions/:id`
 

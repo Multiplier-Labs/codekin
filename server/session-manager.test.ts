@@ -2436,6 +2436,40 @@ describe('SessionManager', () => {
     })
   })
 
+  describe('onSessionStopped()', () => {
+    it.each([
+      ['stopped', (id: string) => sm.stopSession(id)],
+      ['archived', (id: string) => sm.archiveSession(id)],
+      ['deleted', (id: string) => sm.delete(id)],
+    ] as const)('fires with reason %s', (reason, act) => {
+      const s = sm.create('stop-test', '/tmp')
+      const listener = vi.fn()
+      sm.onSessionStopped(listener)
+
+      act(s.id)
+
+      expect(listener).toHaveBeenCalledWith(s.id, reason)
+    })
+
+    it('does not fire for internal process stops', () => {
+      const s = sm.create('stop-test', '/tmp')
+      const listener = vi.fn()
+      sm.onSessionStopped(listener)
+
+      sm.stopClaude(s.id)
+
+      expect(listener).not.toHaveBeenCalled()
+    })
+
+    it('unsubscribes', () => {
+      const s = sm.create('stop-test', '/tmp')
+      const listener = vi.fn()
+      sm.onSessionStopped(listener)()
+      sm.stopSession(s.id)
+      expect(listener).not.toHaveBeenCalled()
+    })
+  })
+
   describe('broadcast() back-pressure', () => {
     it('drops message when client buffer exceeds 1MB', () => {
       const s = sm.create('bp-test', '/tmp')

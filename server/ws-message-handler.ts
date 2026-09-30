@@ -170,7 +170,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
     case 'stop': {
       const sessionId = clientSessions.get(ws)
       if (sessionId) {
-        sessions.stopClaude(sessionId)
+        sessions.stopSession(sessionId)
       }
       break
     }
