@@ -9,7 +9,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { IconRobotFace, IconFolder, IconBell, IconTerminal2 } from '@tabler/icons-react'
 import * as api from '../lib/ccApi'
-import { PROVIDERS, type CodingProvider } from '../types'
+import { AGENT_PROVIDER_IDS, PROVIDERS, type CodingProvider } from '../types'
 import { useAgentHealth } from '../hooks/useAgentHealth'
 import { providerAvailability } from '../lib/agentHealth'
 
@@ -142,7 +142,7 @@ export function OrchestratorView({ token, onOrchestratorSessionReady, sessionJoi
           </p>
           {error && <p role="alert" className="mt-2 text-body text-error-5">{error}</p>}
           <div className="mt-4 flex flex-col gap-2">
-            {PROVIDERS.map((provider) => {
+            {PROVIDERS.filter((p) => AGENT_PROVIDER_IDS.includes(p.id)).map((provider) => {
               const availability = providerAvailability(health, provider.id)
               return (
                 <button

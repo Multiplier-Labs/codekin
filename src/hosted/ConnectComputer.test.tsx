@@ -94,7 +94,7 @@ describe('ConnectComputer', () => {
     expect(text).toContain('macOS or Linux')
     expect(text).toContain("Windows isn't supported yet")
     expect(text).toContain('Node.js 20')
-    expect(text).toContain('Claude Code, Codex, or OpenCode')
+    expect(text).toContain('Claude Code, Codex, OpenCode, or Grok')
     expect(text).toContain('Waiting for installation')
     // Account admin is one link away, not on this surface
     expect(text).not.toContain('Sign out everywhere')

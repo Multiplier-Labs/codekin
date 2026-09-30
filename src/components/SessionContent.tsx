@@ -74,6 +74,8 @@ export interface SessionContentProps {
   openCodeConnected: boolean | null
   /** null = not a Codex session, true = connected, false = not connected */
   codexConnected: boolean | null
+  /** null = not a Grok session, true = connected, false = not connected */
+  grokConnected: boolean | null
   /** Whether Claude Code connection has been disabled by the user. */
   claudeDisabled?: boolean
 }
@@ -126,11 +128,13 @@ export function SessionContent({
   onUseExistingCheckout,
   openCodeConnected,
   codexConnected,
+  grokConnected,
   claudeDisabled,
 }: SessionContentProps) {
   const isOpenCodeDisconnected = openCodeConnected === false
   const isCodexDisconnected = codexConnected === false
-  const isProviderDisabled = claudeDisabled || isOpenCodeDisconnected || isCodexDisconnected
+  const isGrokDisconnected = grokConnected === false
+  const isProviderDisabled = claudeDisabled || isOpenCodeDisconnected || isCodexDisconnected || isGrokDisconnected
 
   const { show: showChangesButton, count: changesCount, detail: changesDetail } = changesButtonState(hasFileChanges, changeSummary)
   return (
@@ -179,6 +183,19 @@ export function SessionContent({
               <p className="text-body text-ink-muted">
                 Install the Codex CLI with <code className="bg-surface-raised px-1.5 py-0.5 rounded-control text-meta">npm i -g @openai/codex</code>
                 {' '}and authenticate by running <code className="bg-surface-raised px-1.5 py-0.5 rounded-control text-meta">codex login</code> on the host.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Grok not connected banner */}
+        {isGrokDisconnected && !claudeDisabled && (
+          <div className="absolute inset-0 flex items-center justify-center z-10 bg-page/90">
+            <div className="flex flex-col items-center gap-3 text-center px-6 max-w-md">
+              <div className="text-body font-medium text-ink">Grok is not connected</div>
+              <p className="text-body text-ink-muted">
+                Install the Grok Build CLI with <code className="bg-surface-raised px-1.5 py-0.5 rounded-control text-meta">curl -fsSL https://x.ai/cli/install.sh | bash</code>
+                {' '}and sign in by running <code className="bg-surface-raised px-1.5 py-0.5 rounded-control text-meta">grok login</code> on the host.
               </p>
             </div>
           </div>
@@ -246,7 +263,7 @@ export function SessionContent({
         onSendInput={onSendInput}
         isWaiting={!!activePrompt}
         disabled={disabled || isProviderDisabled}
-        placeholder={claudeDisabled ? 'Claude Code is disabled' : isOpenCodeDisconnected ? 'OpenCode is not connected' : isCodexDisconnected ? 'Codex is not connected' : undefined}
+        placeholder={claudeDisabled ? 'Claude Code is disabled' : isOpenCodeDisconnected ? 'OpenCode is not connected' : isCodexDisconnected ? 'Codex is not connected' : isGrokDisconnected ? 'Grok is not connected' : undefined}
         onEscape={() => {}}
         pendingFiles={pendingFiles}
         onAddFiles={onAddFiles}

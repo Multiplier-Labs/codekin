@@ -96,7 +96,7 @@ function Prerequisites() {
       </li>
       <li>
         <span className="text-ink">At least one coding agent</span>, installed and signed in on that
-        computer: Claude Code, Codex, or OpenCode.
+        computer: Claude Code, Codex, OpenCode, or Grok.
       </li>
     </ul>
   )

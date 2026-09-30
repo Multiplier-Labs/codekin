@@ -10,19 +10,21 @@ function health(overrides: Partial<AgentHealth> = {}): AgentHealth {
     codexAvailable: true,
     codexAuthenticated: true,
     openCodeAvailable: true,
+    grokAvailable: true,
+    grokAuthenticated: true,
     ...overrides,
   }
 }
 
 describe('providerAvailability', () => {
   it('fails open when health is unknown', () => {
-    for (const p of ['claude', 'opencode', 'codex'] as const) {
+    for (const p of ['claude', 'opencode', 'codex', 'grok'] as const) {
       expect(providerAvailability(null, p)).toEqual({ available: true, hint: null })
     }
   })
 
   it('everything installed and signed in → no hints', () => {
-    for (const p of ['claude', 'opencode', 'codex'] as const) {
+    for (const p of ['claude', 'opencode', 'codex', 'grok'] as const) {
       expect(providerAvailability(health(), p)).toEqual({ available: true, hint: null })
     }
   })
@@ -31,6 +33,7 @@ describe('providerAvailability', () => {
     expect(providerAvailability(health({ claudeAvailable: false }), 'claude').available).toBe(false)
     expect(providerAvailability(health({ codexAvailable: false }), 'codex').available).toBe(false)
     expect(providerAvailability(health({ openCodeAvailable: false }), 'opencode').available).toBe(false)
+    expect(providerAvailability(health({ grokAvailable: false }), 'grok').available).toBe(false)
   })
 
   it('a failed auth probe warns but does not block', () => {
@@ -41,6 +44,17 @@ describe('providerAvailability', () => {
     const codex = providerAvailability(health({ codexAuthenticated: false }), 'codex')
     expect(codex.available).toBe(true)
     expect(codex.hint).toContain('codex login')
+
+    const grok = providerAvailability(health({ grokAuthenticated: false }), 'grok')
+    expect(grok.available).toBe(true)
+    expect(grok.hint).toContain('grok login')
+  })
+
+  it('Grok is unavailable when the server predates the Grok health fields', () => {
+    const legacy = health()
+    delete legacy.grokAvailable
+    delete legacy.grokAuthenticated
+    expect(providerAvailability(legacy, 'grok').available).toBe(false)
   })
 })
 
@@ -86,7 +100,7 @@ describe('resolveDefaultProvider (audit N6)', () => {
   })
 
   it('keeps implicit Claude with a caveat when nothing healthier exists', () => {
-    const h = health({ claudeAuthenticated: false, openCodeAvailable: false, codexAuthenticated: false })
+    const h = health({ claudeAuthenticated: false, openCodeAvailable: false, codexAuthenticated: false, grokAvailable: false })
     expect(resolveDefaultProvider(h, null)).toBe('claude')
   })
 
@@ -104,9 +118,9 @@ describe('resolveDefaultProvider (audit N6)', () => {
   })
 
   it('falls back to an installed-but-warned agent, then to the preference, when none are healthy', () => {
-    const onlyCodexUnauthed = health({ ...noClaude, openCodeAvailable: false, codexAuthenticated: false })
+    const onlyCodexUnauthed = health({ ...noClaude, openCodeAvailable: false, codexAuthenticated: false, grokAvailable: false })
     expect(resolveDefaultProvider(onlyCodexUnauthed, null)).toBe('codex')
-    const none = health({ ...noClaude, openCodeAvailable: false, codexAvailable: false })
+    const none = health({ ...noClaude, openCodeAvailable: false, codexAvailable: false, grokAvailable: false })
     expect(resolveDefaultProvider(none, null)).toBe('claude')
   })
 })

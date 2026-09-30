@@ -18,7 +18,7 @@ import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
 import type { SlashCommand } from '../lib/slashCommands'
-import { PERMISSION_MODES, PROVIDERS, type PermissionMode, type ModelOption } from '../types'
+import { AGENT_PROVIDER_IDS, PERMISSION_MODES, PROVIDERS, permissionModesFor, type PermissionMode, type ModelOption } from '../types'
 import { getPref, setPref } from '../lib/prefs'
 
 const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
@@ -181,14 +181,18 @@ function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle,
   )
 }
 
+/** Joe runs unattended, so its composer only offers harnesses cleared for that. */
+const AGENT_HANDOFF_TARGETS = PROVIDERS.filter(p => AGENT_PROVIDER_IDS.includes(p.id))
+
 /** One spelling per harness, shared with the sidebar mark — see PROVIDERS. */
 function providerLabel(provider: import('../types').CodingProvider): string {
   return PROVIDERS.find(p => p.id === provider)?.label ?? provider
 }
 
 /** Handoff pane — the other harnesses, plus the carry-context toggle. */
-function HandoffPane({ current, onBack, onSelect }: {
+function HandoffPane({ current, targets, onBack, onSelect }: {
   current: import('../types').CodingProvider
+  targets: typeof PROVIDERS
   onBack: () => void
   onSelect: (provider: import('../types').CodingProvider, carryContext: boolean) => void
 }) {
@@ -215,7 +219,7 @@ function HandoffPane({ current, onBack, onSelect }: {
         <span className="ml-auto text-meta text-ink-muted">Hand off to</span>
       </div>
       <div className="py-1">
-        {PROVIDERS.filter(p => p.id !== current).map(p => {
+        {targets.filter(p => p.id !== current).map(p => {
           const { available, hint } = providerAvailability(health, p.id)
           return (
             <button
@@ -259,8 +263,9 @@ function HandoffPane({ current, onBack, onSelect }: {
  * harness is a session handoff, not a peer of picking a model, so it lives
  * behind a CTA that opens a second pane.
  */
-function AgentDropdown({ provider, currentModel, models, isOpen, menuRef, onToggle, onModelChange, onProviderChange }: {
+function AgentDropdown({ provider, handoffTargets, currentModel, models, isOpen, menuRef, onToggle, onModelChange, onProviderChange }: {
   provider?: import('../types').CodingProvider
+  handoffTargets: typeof PROVIDERS
   currentModel?: string | null
   models: ModelOption[]
   isOpen: boolean
@@ -358,6 +363,7 @@ function AgentDropdown({ provider, currentModel, models, isOpen, menuRef, onTogg
           {showHandoff && provider && onProviderChange ? (
             <HandoffPane
               current={provider}
+              targets={handoffTargets}
               onBack={() => setShowHandoff(false)}
               onSelect={onProviderChange}
             />
@@ -512,11 +518,8 @@ interface InputBarProps {
 
 export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default' }, ref) {
   const isOrchestrator = variant === 'orchestrator'
-  // OpenCode and Codex have no equivalent of Claude's --dangerously-skip-permissions
-  // flag; bypassPermissions already covers that use case for both.
-  const visibleModes = sessionProvider === 'opencode' || sessionProvider === 'codex'
-    ? PERMISSION_MODES.filter(m => m.id !== 'dangerouslySkipPermissions')
-    : PERMISSION_MODES
+  const visibleModes = permissionModesFor(sessionProvider)
+  const handoffTargets = isOrchestrator ? AGENT_HANDOFF_TARGETS : PROVIDERS
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
@@ -805,6 +808,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                 <div className="hidden @[34rem]:flex">
                   <AgentDropdown
                     provider={showProvider ? sessionProvider : undefined}
+                    handoffTargets={handoffTargets}
                     currentModel={showModel ? currentModel : null}
                     models={availableModels}
                     isOpen={agentMenuOpen}
@@ -874,7 +878,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                         <>
                           {showModel && <div className="my-1 border-t border-edge-strong" />}
                           <div className="px-3 py-1.5 text-meta text-ink-muted uppercase tracking-wider">Hand off to</div>
-                          {PROVIDERS.filter(p => p.id !== sessionProvider).map(p => (
+                          {handoffTargets.filter(p => p.id !== sessionProvider).map(p => (
                             <button
                               key={p.id}
                               onClick={() => {

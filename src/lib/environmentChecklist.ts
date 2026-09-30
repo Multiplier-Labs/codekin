@@ -39,6 +39,7 @@ const INSTALL_HINTS: Record<string, string> = {
   claude: 'npm install -g @anthropic-ai/claude-code, then run `claude` once to sign in',
   codex: 'install the Codex CLI, then run `codex login`',
   opencode: 'install the OpenCode CLI',
+  grok: 'curl -fsSL https://x.ai/cli/install.sh | bash, then run `grok login`',
 }
 
 function ghRow(env: ChecklistEnv): ChecklistRow {

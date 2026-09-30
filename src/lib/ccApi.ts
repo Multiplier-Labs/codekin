@@ -613,6 +613,21 @@ export async function fetchCodexModels(
   }>(res)
 }
 
+/** Fetch available models from the Grok Build CLI (via a short-lived ACP handshake). */
+export async function fetchGrokModels(
+  token: string,
+): Promise<{
+  models: Array<{ id: string; name: string; description?: string; isDefault?: boolean }>
+}> {
+  const res = await transport.fetch(`/api/grok/models`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) return { models: [] }
+  return jsonBody<{
+    models: Array<{ id: string; name: string; description?: string; isDefault?: boolean }>
+  }>(res)
+}
+
 /** Fetch the OpenCode command list (slash commands / skills / MCP prompts). */
 export async function fetchOpenCodeCommands(
   token: string,

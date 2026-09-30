@@ -10,7 +10,7 @@ import {
   WORKFLOW_KINDS, DAY_PRESETS, DAY_INDIVIDUAL, isBiweeklyDow,
   buildCron, parseCron, describeCron, kindLabel, isEventDriven, EVENT_CRON, normalizeModel,
 } from '../lib/workflowHelpers'
-import type { CodingProvider } from '../types'
+import type { AgentProvider } from '../types'
 import { CategoryBadge } from './WorkflowBadges'
 import TimePicker from './TimePicker'
 import { ProviderModelSection } from './workflows/ProviderModelSection'
@@ -36,7 +36,7 @@ export function EditWorkflowModal({ token, repo, onClose, onSave }: Props) {
   // Infer provider from model when provider field is missing (legacy configs).
   // OpenCode models are "providerID/modelID" (contain a slash); Claude models
   // never do (full IDs like "claude-sonnet-4-6" or aliases like "opus").
-  const inferredProvider: CodingProvider =
+  const inferredProvider: AgentProvider =
     repo.provider ?? (repo.model?.includes('/') ? 'opencode' : 'claude')
 
   const [form, setForm] = useState({

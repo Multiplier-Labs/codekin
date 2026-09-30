@@ -32,6 +32,7 @@ export interface Prefs {
   /** Last model used per provider, offered to the next session. */
   claudeModel: string
   codexModel: string
+  grokModel: string
   opencodeModel: string
   /** Carry conversation context when switching a session's provider. */
   handoffCarryContext: boolean

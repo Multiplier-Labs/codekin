@@ -11,8 +11,9 @@ Install **one** of these CLIs on the computer that will run Codekin, then comple
 | [Claude Code](https://github.com/anthropics/claude-code) | `claude --version` | Run `claude` and follow its sign-in prompts |
 | [OpenAI Codex](https://github.com/openai/codex) | `codex --version` | Run `codex login` |
 | [OpenCode](https://opencode.ai) | `opencode --version` | Configure an LLM provider in OpenCode |
+| [Grok Build](https://github.com/xai-org/grok-build) | `grok --version` | Run `grok login` (or set `XAI_API_KEY`) |
 
-The installer looks for `claude`, `codex`, or `opencode` on your `PATH` and stops with install hints if it finds none. You can add more agents later. A detected CLI still needs working credentials; Codekin's **Environment** checklist reports its current state.
+The installer looks for `claude`, `codex`, `opencode`, or `grok` on your `PATH` and stops with install hints if it finds none. You can add more agents later. A detected CLI still needs working credentials; Codekin's **Environment** checklist reports its current state.
 
 ## 2. Choose how to connect
 

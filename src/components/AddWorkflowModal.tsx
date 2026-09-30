@@ -18,7 +18,7 @@ import {
   isBiweeklyDow, isEventDriven, EVENT_CRON,
 } from '../lib/workflowHelpers'
 import { webhookEndpointUrl } from '../lib/ccApi'
-import type { CodingProvider } from '../types'
+import type { AgentProvider } from '../types'
 import { CategoryBadge } from './WorkflowBadges'
 import TimePicker from './TimePicker'
 import { RepoList } from './RepoList'
@@ -35,7 +35,7 @@ interface FormState {
   cronDow: string
   customPrompt: string
   model: string
-  provider: CodingProvider
+  provider: AgentProvider
 }
 
 interface Props {
@@ -412,7 +412,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
     cronDow: '*',
     customPrompt: '',
     model: '',
-    provider: 'claude' as CodingProvider,
+    provider: 'claude' as AgentProvider,
   })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)

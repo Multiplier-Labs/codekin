@@ -20,6 +20,9 @@ export interface AgentHealth {
   codexAvailable: boolean
   codexAuthenticated: boolean
   openCodeAvailable: boolean
+  /** Absent from servers older than the Grok integration. */
+  grokAvailable?: boolean
+  grokAuthenticated?: boolean
 }
 
 let current: AgentHealth | null = null
@@ -67,6 +70,13 @@ export function providerAvailability(health: AgentHealth | null, provider: Codin
       return { available: true, hint: null }
     case 'opencode':
       if (!health.openCodeAvailable) return { available: false, hint: 'OpenCode CLI not installed on the host' }
+      return { available: true, hint: null }
+    case 'grok':
+      if (!health.grokAvailable) return { available: false, hint: 'Grok Build CLI not installed on the host' }
+      if (!health.grokAuthenticated) return { available: true, hint: 'Grok not signed in — run `grok login` on the host' }
+      return { available: true, hint: null }
+    default:
+      // A provider this client doesn't know: soft state, never a hard block.
       return { available: true, hint: null }
   }
 }

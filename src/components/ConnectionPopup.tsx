@@ -1,6 +1,6 @@
 /**
  * ConnectionPopup — shows which machine the app is talking to, plus the status
- * of the Claude Code, OpenCode, and Codex connections on it, with toggle
+ * of the Claude Code, OpenCode, Codex, and Grok connections on it, with toggle
  * buttons to temporarily disable/enable each.
  */
 
@@ -27,6 +27,12 @@ interface Props {
   codexDisabled: boolean
   /** Toggle Codex connection on/off. */
   onToggleCodex: () => void
+  /** Grok connection state: true=connected, false=disconnected, null=unknown/not configured. */
+  grokConnected: boolean | null
+  /** Whether Grok connection is disabled by the user. */
+  grokDisabled: boolean
+  /** Toggle Grok connection on/off. */
+  onToggleGrok: () => void
   /** Close the popup. */
   onClose: () => void
 }
@@ -45,6 +51,9 @@ export function ConnectionPopup({
   codexConnected,
   codexDisabled,
   onToggleCodex,
+  grokConnected,
+  grokDisabled,
+  onToggleGrok,
   onClose,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null)
@@ -77,6 +86,13 @@ export function ConnectionPopup({
   const codexLabel = codexDisabled
     ? 'Disabled'
     : codexConnected === true ? 'Connected' : codexConnected === false ? 'Run `codex login` on the host' : 'Not configured'
+
+  const grokDotColor = grokDisabled
+    ? 'bg-ink-faint'
+    : grokConnected === true ? 'bg-success-7' : grokConnected === false ? 'bg-error-7' : 'bg-ink-faint'
+  const grokLabel = grokDisabled
+    ? 'Disabled'
+    : grokConnected === true ? 'Connected' : grokConnected === false ? 'Run `grok login` on the host' : 'Not configured'
 
   // Where this browser is pointed: the local host, or the paired machine and
   // the control plane it is reached through.
@@ -157,6 +173,25 @@ export function ConnectionPopup({
           }`}
         >
           {codexDisabled ? 'Enable' : 'Disable'}
+        </button>
+      </div>
+
+      {/* Grok */}
+      <div className="px-3 py-2.5 flex items-center gap-2 border-t border-edge">
+        <StatusDot color={grokDotColor} />
+        <div className="flex-1 min-w-0">
+          <div className="text-body text-ink font-medium">Grok</div>
+          <div className="text-micro text-ink-muted">{grokLabel}</div>
+        </div>
+        <button
+          onClick={onToggleGrok}
+          className={`text-micro px-2 py-0.5 rounded-control border transition-colors ${
+            grokDisabled
+              ? 'border-success-8/50 text-success-5 hover:bg-success-9/20'
+              : 'border-edge text-ink-muted hover:bg-edge'
+          }`}
+        >
+          {grokDisabled ? 'Enable' : 'Disable'}
         </button>
       </div>
     </div>

@@ -9,7 +9,7 @@
 import { useState, useEffect } from 'react'
 import { fetchClaudeModels, fetchOpenCodeModels, fetchCodexModels } from '../../lib/ccApi'
 import { MODEL_OPTIONS } from '../../lib/workflowHelpers'
-import type { ModelOption, CodingProvider } from '../../types'
+import type { ModelOption, AgentProvider } from '../../types'
 import { WorkflowModelPicker } from './WorkflowModelPicker'
 
 const providerBtnClass = (selected: boolean) =>
@@ -29,9 +29,9 @@ interface Props {
   token: string
   /** Working directory (repo path) for scoping OpenCode model queries. */
   workingDir?: string
-  provider: CodingProvider
+  provider: AgentProvider
   model: string
-  onProviderChange: (provider: CodingProvider) => void
+  onProviderChange: (provider: AgentProvider) => void
   onModelChange: (model: string) => void
 }
 
@@ -97,7 +97,7 @@ export function ProviderModelSection({ token, workingDir, provider, model, onPro
   }, [token])
 
   // When switching provider, select a sensible default for the new provider
-  const handleProviderChange = (newProvider: CodingProvider) => {
+  const handleProviderChange = (newProvider: AgentProvider) => {
     if (newProvider === provider) return
     onProviderChange(newProvider)
     // Pick the first model from the new provider's list ('' = Default Opus for Claude)

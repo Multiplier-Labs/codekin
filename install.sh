@@ -88,7 +88,7 @@ ensure_node() {
 check_agents() {
   local found=()
   local agent version
-  for agent in claude codex opencode; do
+  for agent in claude codex opencode grok; do
     if command -v "$agent" &>/dev/null; then
       version="$("$agent" --version 2>/dev/null | head -1 || true)"
       found+=("$agent")
@@ -101,12 +101,13 @@ check_agents() {
     info "  Claude Code:  npm install -g @anthropic-ai/claude-code   (then run 'claude' once to sign in)"
     info "  Codex:        npm install -g @openai/codex                (then run 'codex login')"
     info "  OpenCode:     see https://opencode.ai                     (then configure a provider)"
+    info "  Grok Build:   curl -fsSL https://x.ai/cli/install.sh | bash (then run 'grok login')"
     info "Install one, sign in to it, and re-run this installer."
     exit 1
   fi
 
   local missing=()
-  for agent in claude codex opencode; do
+  for agent in claude codex opencode grok; do
     [[ " ${found[*]} " == *" $agent "* ]] || missing+=("$agent")
   done
   if [ ${#missing[@]} -gt 0 ]; then
