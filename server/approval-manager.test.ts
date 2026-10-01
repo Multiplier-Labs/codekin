@@ -348,4 +348,58 @@ describe('ApprovalManager', () => {
       expect(mgr.derivePattern('Bash', { command: '' })).toBeNull()
     })
   })
+
+  // ─── 14. Commands that escape pattern rules ─────────────────────────
+
+  describe('escalating commands', () => {
+    const bash = (command: string) => mgr.checkAutoApproval('/repo/a', 'Bash', { command })
+
+    it('does not derive an env pattern', () => {
+      expect(mgr.derivePattern('Bash', { command: 'env' })).toBeNull()
+      expect(mgr.derivePattern('Bash', { command: 'env FOO=1 sh -c id' })).toBeNull()
+    })
+
+    it('does not match a stored env pattern', () => {
+      mgr.addRepoApproval('/repo/a', { pattern: 'env *' })
+      expect(bash("env sh -c 'rm -rf ~'")).toBe(false)
+    })
+
+    it('keeps find patterns for searches but not -exec or -delete', () => {
+      expect(mgr.derivePattern('Bash', { command: 'find . -name x' })).toBe('find *')
+      expect(mgr.derivePattern('Bash', { command: 'find . -delete' })).toBeNull()
+
+      mgr.addRepoApproval('/repo/a', { pattern: 'find *' })
+      expect(bash('find src -name "*.ts"')).toBe(true)
+      expect(bash('find . -delete')).toBe(false)
+      expect(bash('find . -exec rm -rf . \\;')).toBe(false)
+      expect(bash('find . -execdir sh -c id \\;')).toBe(false)
+      expect(bash('find . -fprint /tmp/out')).toBe(false)
+    })
+
+    it('rejects output-writing flags on inspection commands', () => {
+      mgr.addRepoApproval('/repo/a', { pattern: 'sort *' })
+      mgr.addRepoApproval('/repo/a', { pattern: 'git diff *' })
+      expect(bash('sort a.txt')).toBe(true)
+      expect(bash('sort -o ~/.bashrc a.txt')).toBe(false)
+      expect(bash('sort --output=~/.bashrc a.txt')).toBe(false)
+      expect(bash('git diff HEAD')).toBe(true)
+      expect(bash('git diff --output=/tmp/x HEAD')).toBe(false)
+    })
+
+    it('rejects escalating args on prefix and cross-repo matches', () => {
+      mgr.addRepoApproval('/repo/a', { command: 'git diff HEAD' })
+      expect(bash('git diff --output=/tmp/x main')).toBe(false)
+
+      for (const repo of ['/repo/b', '/repo/c', '/repo/d', '/repo/e', '/repo/f']) {
+        mgr.addRepoApproval(repo, { pattern: 'find *' })
+      }
+      expect(mgr.checkAutoApproval('/repo/g', 'Bash', { command: 'find . -delete' })).toBe(false)
+      expect(mgr.checkAutoApproval('/repo/g', 'Bash', { command: 'find . -name x' })).toBe(true)
+    })
+
+    it('still honours an exact "Always allow" for an escalating command', () => {
+      mgr.addRepoApproval('/repo/a', { command: 'find . -name "*.tmp" -delete' })
+      expect(bash('find . -name "*.tmp" -delete')).toBe(true)
+    })
+  })
 })

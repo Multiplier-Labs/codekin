@@ -115,7 +115,7 @@ export class ApprovalManager {
 
     // File inspection (read-only)
     'cat', 'head', 'tail', 'wc', 'sort', 'uniq', 'diff', 'less',
-    'ls', 'pwd', 'echo', 'date', 'which', 'whoami', 'env', 'printenv',
+    'ls', 'pwd', 'echo', 'date', 'which', 'whoami', 'printenv',
     'find', 'grep', 'rg', 'ag', 'fd',
     'mkdir', 'touch',
     'file', 'du', 'stat', 'tree',
@@ -134,7 +134,23 @@ export class ApprovalManager {
     'gh api',  // can perform DELETE/PUT — too broad to pattern
     // Code executors — "node *" / "python *" would match arbitrary code execution
     'node', 'npx', 'python', 'python3', 'deno', 'bun', 'pm2',
+    'env',  // `env sh -c '…'` runs any program
   ])
+
+  /**
+   * Arguments that turn an otherwise read-only command into one that runs
+   * other programs, deletes, or writes files. A command carrying one never
+   * matches a pattern or prefix rule (and never derives one) — only an exact
+   * "Always allow" match. Keyed by command prefix (first or first two tokens).
+   */
+  private static readonly ESCALATING_ARGS: ReadonlyArray<[prefix: string, args: RegExp]> = [
+    ['find', /^-(exec|execdir|ok|okdir|delete|fprint0?|fprintf|fls)$/],
+    ['sort', /^(-o|--output(=.*)?)$|^-o./],
+    ['tree', /^-o/],
+    ['git diff', /^--output(=.*)?$/],
+    ['git log', /^--output(=.*)?$/],
+    ['git show', /^--output(=.*)?$/],
+  ]
 
   /**
    * Check if a tool/command is auto-approved for a repo.
@@ -165,6 +181,7 @@ export class ApprovalManager {
       const cmd = (typeof toolInput.command === 'string' ? toolInput.command : '').trim()
       // Exact match always works
       if (approvals.commands.has(cmd)) return true
+      if (this.escapesPatternRules(cmd)) return false
       // Pattern match (e.g. "cat *" matches any cat command)
       for (const pattern of approvals.patterns) {
         if (this.matchesPattern(pattern, cmd)) return true
@@ -198,13 +215,13 @@ export class ApprovalManager {
         // Exact command match
         if (entry.commands.has(cmd)) matched = true
         // Pattern match
-        if (!matched) {
+        if (!matched && !this.escapesPatternRules(cmd)) {
           for (const pattern of entry.patterns) {
             if (this.matchesPattern(pattern, cmd)) { matched = true; break }
           }
         }
         // Prefix match for safe commands
-        if (!matched) {
+        if (!matched && !this.escapesPatternRules(cmd)) {
           const cmdPrefix = this.commandPrefix(cmd)
           if (cmdPrefix && ApprovalManager.PATTERNABLE_PREFIXES.has(cmdPrefix)) {
             for (const approved of entry.commands) {
@@ -234,6 +251,23 @@ export class ApprovalManager {
   }
 
   /**
+   * True when a command must not be approved through a pattern or prefix
+   * rule: it starts with `env` (which runs whatever follows — older stores
+   * may still hold an `env *` pattern), or it carries an ESCALATING_ARGS
+   * argument such as `find -exec` or `sort -o`.
+   */
+  private escapesPatternRules(cmd: string): boolean {
+    const tokens = cmd.split(/\s+/).filter(Boolean)
+    if (tokens[0] === 'env') return true
+    const twoToken = tokens.length >= 2 ? `${tokens[0]} ${tokens[1]}` : ''
+    for (const [prefix, args] of ApprovalManager.ESCALATING_ARGS) {
+      if (prefix !== tokens[0] && prefix !== twoToken) continue
+      if (tokens.some(t => args.test(t))) return true
+    }
+    return false
+  }
+
+  /**
    * Derive a glob pattern from a tool invocation for "Always Allow".
    * Returns a string like "cat *" or "git diff *", or null if no safe pattern applies.
    * Patterns use the format "<prefix> *" meaning "this prefix followed by anything".
@@ -247,6 +281,7 @@ export class ApprovalManager {
     // Never pattern commands with shell meta-characters — the pattern
     // would be far broader than the specific command the user approved
     if (/[|;&`$(){}*?[\]~]/.test(cmd) || cmd.includes('\n')) return null
+    if (this.escapesPatternRules(cmd)) return null
 
     const first = tokens[0]
     const twoToken = tokens.length >= 2 ? `${tokens[0]} ${tokens[1]}` : ''
