@@ -378,7 +378,7 @@ Validate a session token.
 
 ### `POST /api/upload`
 
-Upload a file (images or markdown, max 20MB).
+Upload a file (images, markdown or PDF, max 20MB). Binary types are checked against their magic bytes.
 
 **Content-Type:** `multipart/form-data`
 **Form field:** `file`

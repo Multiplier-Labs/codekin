@@ -310,6 +310,21 @@ describe('POST /api/upload — magic-byte validation (M2)', () => {
     expect(body.success).toBe(true)
   })
 
+  it('accepts a valid PDF file', async () => {
+    const pdf = Buffer.from('%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n')
+    const res = await uploadFile('doc.pdf', 'application/pdf', pdf)
+    expect(res.status).toBe(200)
+    const body = await res.json() as { success: boolean }
+    expect(body.success).toBe(true)
+  })
+
+  it('rejects a .pdf whose bytes are not a PDF (signature mismatch)', async () => {
+    const res = await uploadFile('fake.pdf', 'application/pdf', VALID_PNG)
+    expect(res.status).toBe(400)
+    const body = await res.json() as { error: string }
+    expect(body.error).toContain('signature mismatch')
+  })
+
   it('rejects a file with unknown binary signature claiming to be PNG', async () => {
     const garbage = Buffer.from('not a real image file at all')
     const res = await uploadFile('bad.png', 'image/png', garbage)
