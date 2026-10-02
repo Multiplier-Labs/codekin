@@ -58,11 +58,11 @@ function ToolbarAction({ onClick, disabled, title, accent = false, children }: {
 /**
  * Attach-files button. A `+` rather than a paperclip, matching the convention
  * other LLM composers have settled on; the title still says what it takes,
- * since the picker only accepts images and markdown.
+ * since the picker only accepts images, markdown and PDFs.
  */
 function AttachButton({ onClick, disabled, accent = false }: { onClick: () => void; disabled: boolean; accent?: boolean }) {
   return (
-    <ToolbarAction onClick={onClick} disabled={disabled} title="Attach images or markdown" accent={accent}>
+    <ToolbarAction onClick={onClick} disabled={disabled} title="Attach images, markdown or PDFs" accent={accent}>
       <IconPlus className="density-icon" stroke={2} />
     </ToolbarAction>
   )
@@ -773,7 +773,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
               ref={fileInputRef}
               type="file"
               multiple
-              accept="image/png,image/jpeg,image/gif,image/webp,text/markdown,.md"
+              accept="image/png,image/jpeg,image/gif,image/webp,text/markdown,.md,application/pdf,.pdf"
               onChange={handleFileChange}
               className="hidden"
             />

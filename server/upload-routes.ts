@@ -328,9 +328,10 @@ export function createUploadRouter(
     '.gif': ['image/gif'],
     '.webp': ['image/webp'],
     '.md': ['text/markdown'],
+    '.pdf': ['application/pdf'],
   }
   /** Binary MIME types that have detectable file signatures (magic bytes). */
-  const BINARY_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+  const BINARY_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'application/pdf'])
   const upload = multer({
     storage,
     limits: { fileSize: 20 * 1024 * 1024 },
