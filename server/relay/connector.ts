@@ -291,7 +291,9 @@ export class RelayConnector {
     const channel = this.channels.get(channelId)
     if (!channel) return
     this.channels.delete(channelId)
-    channel.close(payload?.code ?? STREAM_CLOSE.normal, payload?.reason ?? 'browser closed the channel')
+    const reason = payload?.reason ?? 'browser closed the channel'
+    this.opts.onStream?.('close', channelId, `relay: ${reason}`)
+    channel.close(payload?.code ?? STREAM_CLOSE.normal, reason)
   }
 
   /** Drop every local session socket (relay disconnect / shutdown). */

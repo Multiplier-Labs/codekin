@@ -100,8 +100,8 @@ class TestBrowser {
   readonly frames: Frame[] = []
   private ws: WebSocket
 
-  constructor(url: string) {
-    this.ws = new WebSocket(url)
+  constructor(url: string, options?: WebSocket.ClientOptions) {
+    this.ws = new WebSocket(url, options)
     this.ws.on('message', data => {
       this.frames.push(JSON.parse(data.toString('utf-8')) as Frame)
     })
@@ -245,8 +245,8 @@ describe('session streaming over the relay', () => {
   }
 
   /** Open a browser socket with an established channel. */
-  async function openChannel(channelId = 'c1'): Promise<TestBrowser> {
-    const browser = new TestBrowser(browserUrl)
+  async function openChannel(channelId = 'c1', options?: WebSocket.ClientOptions): Promise<TestBrowser> {
+    const browser = new TestBrowser(browserUrl, options)
     await browser.open()
     browser.send('hello', { machineId })
     await browser.waitForFrame(f => f.kind === 'hello_ack')
@@ -303,6 +303,28 @@ describe('session streaming over the relay', () => {
     local.sockets[0].close(1000, 'local server closed')
     const close = await browser.waitForFrame(f => f.kind === 'stream_close' && f.channelId === 'c1')
     expect(close.payload.code).toBe(1000)
+    browser.close()
+  })
+
+  it('drops a browser that stops answering pings and releases its channel', async () => {
+    browserHub.close()
+    browserHub = new BrowserHub(db, hub, { heartbeatIntervalMs: 50 })
+    await startConnector()
+    // A tab that vanished without a close handshake: the socket stays open
+    // but nothing on the other end answers.
+    await openChannel('c1', { autoPong: false })
+
+    await waitFor(() => local.sockets[0].readyState === WebSocket.CLOSED)
+  })
+
+  it('keeps a browser that answers pings', async () => {
+    browserHub.close()
+    browserHub = new BrowserHub(db, hub, { heartbeatIntervalMs: 50 })
+    await startConnector()
+    const browser = await openChannel()
+
+    await new Promise(resolve => setTimeout(resolve, 300))
+    expect(local.sockets[0].readyState).toBe(WebSocket.OPEN)
     browser.close()
   })
 
