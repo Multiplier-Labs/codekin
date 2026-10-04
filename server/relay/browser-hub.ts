@@ -47,6 +47,15 @@ const HELLO_TIMEOUT_MS = 5_000
 /** How often every connected client's standing is re-checked against the DB. */
 const REAUTHORIZE_INTERVAL_MS = 5_000
 
+/**
+ * How often every browser socket is pinged. A socket that has not answered
+ * the previous ping by the next sweep is terminated. Without this, a tab
+ * that vanished without a close handshake (laptop asleep, phone off wifi)
+ * keeps its channels — and the machine's channel budget — until the proxy
+ * in front of the relay gives up on it, which can be a day.
+ */
+const HEARTBEAT_INTERVAL_MS = 30_000
+
 /** Requests a single browser socket may have in flight. */
 const MAX_INFLIGHT_PER_SOCKET = 16
 
@@ -65,6 +74,8 @@ interface BrowserClient {
    * name — or hijack — another's channel.
    */
   channels: Map<string, string>
+  /** Whether the socket has shown any sign of life since the last heartbeat sweep. */
+  alive: boolean
 }
 
 /**
@@ -103,6 +114,8 @@ function toPrincipal(user: SessionUser, access: MachineAccess): RelayPrincipal {
 export interface BrowserHubOptions {
   /** Whether a web session still exists and is unexpired (SqliteSessionStore.isAlive). */
   isSessionAlive?: (sessionId: string) => boolean
+  /** Override the heartbeat period (tests). */
+  heartbeatIntervalMs?: number
 }
 
 export class BrowserHub {
@@ -110,6 +123,7 @@ export class BrowserHub {
   /** Per-user frame budget: one browser cannot flood a machine (spec §11.5). */
   private frameLimiter = new RateLimiter(BROWSER_FRAME_LIMIT)
   private reauthorizeTimer: ReturnType<typeof setInterval>
+  private heartbeatTimer: ReturnType<typeof setInterval>
 
   constructor(
     private db: Database.Database,
@@ -118,6 +132,28 @@ export class BrowserHub {
   ) {
     this.reauthorizeTimer = setInterval(() => { this.reauthorize(); }, REAUTHORIZE_INTERVAL_MS)
     this.reauthorizeTimer.unref()
+    this.heartbeatTimer = setInterval(() => { this.heartbeat(); }, options.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS)
+    this.heartbeatTimer.unref()
+  }
+
+  /**
+   * Terminate sockets that did not answer the last ping, then ping the rest.
+   * Browsers answer protocol pings on their own, so a live tab needs no
+   * client-side code for this. Termination runs the normal close path, which
+   * releases the socket's channels on the machine.
+   */
+  private heartbeat(): void {
+    for (const client of this.clients) {
+      if (!client.alive) {
+        console.log(
+          `[relay] browser socket unresponsive; dropping it and its ${client.channels.size} channel(s) on machine ${client.machineId}`,
+        )
+        client.socket.terminate()
+        continue
+      }
+      client.alive = false
+      client.socket.ping()
+    }
   }
 
   /**
@@ -203,7 +239,12 @@ export class BrowserHub {
       socket.close(CLOSE_AUTH_FAILED, 'hello timeout')
     }, HELLO_TIMEOUT_MS)
 
+    socket.on('pong', () => {
+      if (client) client.alive = true
+    })
+
     socket.on('message', (data: Buffer | string) => {
+      if (client) client.alive = true
       const msg = parseEnvelope(typeof data === 'string' ? data : data.toString('utf-8'))
       if (!msg) return
 
@@ -234,7 +275,7 @@ export class BrowserHub {
           .prepare('SELECT display_name FROM machines WHERE id = ?')
           .get(machineId) as { display_name: string }
 
-        client = { user, sessionId, machineId, socket, inflight: 0, access, channels: new Map() }
+        client = { user, sessionId, machineId, socket, inflight: 0, access, channels: new Map(), alive: true }
         this.clients.add(client)
         socket.send(
           JSON.stringify(
@@ -390,6 +431,7 @@ export class BrowserHub {
     }, toPrincipal(client.user, client.access))
 
     if (error) {
+      console.log(`[relay] stream refused on machine ${client.machineId}: ${error.code} ${error.message}`)
       client.channels.delete(localId)
       this.sendChannelError(client, localId, error)
     }
@@ -428,6 +470,7 @@ export class BrowserHub {
   /** Disconnect every browser socket (shutdown / tests). */
   close(): void {
     clearInterval(this.reauthorizeTimer)
+    clearInterval(this.heartbeatTimer)
     this.frameLimiter.close()
     for (const client of this.clients) {
       for (const remoteId of client.channels.values()) {
