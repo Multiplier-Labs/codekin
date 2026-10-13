@@ -25,6 +25,7 @@ import { ThemeMenu } from './ThemeMenu'
 import type { ThemeId } from '../themes/registry'
 import { groupKey } from '../hooks/useSessionOrchestration'
 import { getPref, setPref } from '../lib/prefs'
+import { byLatestActivity } from '../lib/sessionOrder'
 
 const DEFAULT_WIDTH = 224
 const MIN_WIDTH = 160
@@ -59,7 +60,7 @@ function buildRepoNodes(
   }).map(([key, repoSessions]) => ({
     workingDir: key,
     displayName: repoDisplayName(key),
-    sessions: repoSessions,
+    sessions: [...repoSessions].sort(byLatestActivity),
     hasWaiting: repoSessions.some(s => waitingSessions[s.id]),
     hasActive: repoSessions.some(s => s.isProcessing),
     hasTentative: repoSessions.some(s => (tentativeQueues[s.id]?.length ?? 0) > 0),

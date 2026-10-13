@@ -190,4 +190,27 @@ describe('RepoSection', () => {
     click(findButton(container, 'Claude'))
     expect(onNewSession).toHaveBeenCalledWith('claude')
   })
+
+  it('ages a row from its last turn, not its creation', () => {
+    const old = new Date(Date.now() - 3 * 86_400_000).toISOString()
+    const recent = new Date(Date.now() - 5 * 60_000).toISOString()
+    const s = { ...session, created: old, lastTurnAt: recent } as Session
+    const container = render(<RepoSection {...props({ node: { ...node, sessions: [s] } })} />)
+    const age = container.querySelector('[title^="Last active"]')!
+    expect(age.textContent).toBe('5m')
+    expect(age.getAttribute('title')).toBe('Last active 5m ago · started 3d ago')
+  })
+
+  it('says a live session is working or needs you instead of showing an age', () => {
+    const running = { ...session, id: 'run00001', isProcessing: true } as Session
+    const waiting = { ...session, id: 'wait0001' } as Session
+    const container = render(<RepoSection {...props({
+      node: { ...node, sessions: [running, waiting] },
+      waitingSessions: { wait0001: true },
+    })} />)
+    const metaLines = [...container.querySelectorAll('[title$="session"]')].map(m => m.parentElement!.textContent)
+    expect(metaLines[0]).toContain('working')
+    expect(metaLines[1]).toContain('needs you')
+    expect(metaLines.join('')).not.toContain('0s')
+  })
 })

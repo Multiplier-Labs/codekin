@@ -188,6 +188,8 @@ export interface Session {
   _leaveGraceTimer?: ReturnType<typeof setTimeout> | null
   /** Timestamp of last meaningful activity (input, prompt response, client join). Used by idle reaper. */
   _lastActivityAt: number
+  /** When a turn last started or finished (ISO). Orders the sidebar; viewing a session does not touch it. */
+  lastTurnAt?: string
   /** Handoff generated on a carry-context provider switch, awaiting injection
    *  into the first user message under the new provider. Persisted so a server
    *  restart between switch and first message doesn't lose it. */
@@ -232,6 +234,8 @@ export interface SessionInfo {
   controller?: SessionController
   connectedClients: number
   lastActivity: string
+  /** When a turn last started or finished — the sidebar orders sessions by it. */
+  lastTurnAt?: string
   source: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   provider?: CodingProvider
   /** Model pinned to the session, if any — the sidebar row names it in its tooltip. */

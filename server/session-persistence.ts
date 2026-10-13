@@ -34,6 +34,7 @@ export interface PersistedSession {
   archivedAt?: string
   controller?: import('./types.js').SessionController
   created: string
+  lastTurnAt?: string
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   provider?: import('./coding-process.js').CodingProvider
   model?: string
@@ -74,6 +75,7 @@ export class SessionPersistence {
       archivedAt: s.archivedAt,
       controller: s.controller,
       created: s.created,
+      lastTurnAt: s.lastTurnAt,
       source: s.source,
     provider: s.provider,
       model: s.model,
@@ -146,6 +148,7 @@ export class SessionPersistence {
           archivedAt: s.archivedAt,
           controller: s.controller,
           created: s.created,
+          lastTurnAt: s.lastTurnAt,
           source: s.source ?? 'manual',
           provider: s.provider ?? 'claude',
           model: s.model,

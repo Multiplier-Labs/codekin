@@ -48,6 +48,12 @@ function compactAge(created: string): string {
   return `${Math.floor(hours / 24)}d`
 }
 
+/** Age tooltip: last activity, plus creation when they differ. */
+function activityTitle(session: Session): string {
+  const started = `started ${compactAge(session.created)} ago`
+  return session.lastTurnAt ? `Last active ${compactAge(session.lastTurnAt)} ago · ${started}` : `Created ${compactAge(session.created)} ago`
+}
+
 /**
  * The harness a session runs on, spelled out.
  *
@@ -71,19 +77,20 @@ function harnessTitle(session: Session): string {
  * Exactly three status treatments, and only one of them animates:
  * filled = running, amber pulsing = waiting for you, hollow ring = idle.
  * Anything finer (queued, inactive) is carried by the tooltip, not by a
- * fourth colour.
+ * fourth colour. The two live states are a size up and haloed, so they read
+ * at a glance in a long list rather than as one more 6px dot.
  */
 type SessionStatus = 'running' | 'waiting' | 'idle'
 
 function StatusDot({ status, title }: { status: SessionStatus; title: string }) {
   const shape = status === 'waiting'
-    ? 'bg-warning-5 animate-pulse'
+    ? 'h-2 w-2 bg-warning-5 ring-2 ring-warning-5/30 animate-pulse'
     : status === 'running'
-    ? 'bg-success-6'
-    : 'border border-ink-faint'
+    ? 'h-2 w-2 bg-success-5 ring-2 ring-success-5/30'
+    : 'h-1.5 w-1.5 border border-ink-faint'
   return (
     <span className="inline-flex w-3 flex-shrink-0 items-center justify-center" title={title}>
-      <span className={`inline-block h-1.5 w-1.5 rounded-full ${shape}`} />
+      <span className={`inline-block rounded-full ${shape}`} />
     </span>
   )
 }
@@ -319,6 +326,10 @@ export function RepoSection({
                 className={`row-reveal flex w-full flex-col gap-0.5 rounded-control py-1 pl-6 pr-2.5 transition-colors ${
                   isActiveSession
                     ? 'bg-accent-9/30 text-accent-2'
+                    : status === 'running'
+                    ? 'bg-success-9/20 text-ink hover:bg-success-9/30'
+                    : status === 'waiting'
+                    ? 'bg-warning-9/20 text-ink hover:bg-warning-9/30'
                     : 'text-ink hover:bg-surface-raised'
                 }`}
               >
@@ -337,10 +348,11 @@ export function RepoSection({
                   <RowMenu items={menuItems} label={`Actions for ${sessionDisplayName(s)}`} className="row-menu-reveal" />
                 </div>
 
-                {/* Line two: where it runs and how old it is. Indented just
-                    past the status dot. The harness sits one step ahead of the
-                    age — the same step on an active row, in accent rather than
-                    ink. */}
+                {/* Line two: where it runs and when it last did something.
+                    Indented just past the status dot. The harness sits one
+                    step ahead of the age — the same step on an active row, in
+                    accent rather than ink. A live session says so in words
+                    instead of an age. */}
                 <div className="flex items-center gap-1 pl-[13px] font-mono text-meta leading-tight">
                   {s.worktreePath ? (
                     <span
@@ -359,9 +371,18 @@ export function RepoSection({
                     {harnessLabel(s.provider)}
                   </span>
                   <span className={isActiveSession ? 'text-accent-4' : 'text-ink-faint'}>·</span>
-                  <span className={`tabular-nums ${isActiveSession ? 'text-accent-4' : 'text-ink-faint'}`}>
-                    {compactAge(s.created)}
-                  </span>
+                  {status === 'idle' ? (
+                    <span
+                      title={activityTitle(s)}
+                      className={`tabular-nums ${isActiveSession ? 'text-accent-4' : 'text-ink-faint'}`}
+                    >
+                      {compactAge(s.lastTurnAt ?? s.created)}
+                    </span>
+                  ) : (
+                    <span className={`font-sans font-medium ${status === 'waiting' ? 'text-warning-5' : 'text-success-5'}`}>
+                      {status === 'waiting' ? 'needs you' : statusTitle === 'Queued' ? 'queued' : 'working'}
+                    </span>
+                  )}
                 </div>
               </div>
             )
