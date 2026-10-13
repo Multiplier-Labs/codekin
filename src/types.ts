@@ -167,6 +167,8 @@ export interface Session {
   controller?: SessionController
   connectedClients: number
   lastActivity: string
+  /** When a turn last started or finished; unset for sessions that never ran one. */
+  lastTurnAt?: string
   /** How the session was created: manually by a user, by a GitHub webhook, or by a workflow. */
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   /** Which AI provider powers this session. Defaults to 'claude'. */

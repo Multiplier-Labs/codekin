@@ -894,6 +894,7 @@ export class SessionManager {
       controller: s.controller,
       connectedClients: s.clients.size,
       lastActivity: new Date(s._lastActivityAt).toISOString(),
+      lastTurnAt: s.lastTurnAt,
       source: s.source,
       provider: s.provider,
       model: s.model,
@@ -1206,6 +1207,7 @@ export class SessionManager {
    */
   private handleClaudeResult(session: Session, sessionId: string, result: string, isError: boolean): void {
     session.isProcessing = false
+    session.lastTurnAt = new Date().toISOString()
     session._claudeTurnCount++
     this._globalBroadcast?.({ type: 'sessions_updated' })
 
@@ -1450,6 +1452,7 @@ export class SessionManager {
     session._lastUserInputAt = Date.now()
     if (!session._namingUserInput) session._namingUserInput = data
     session._apiRetry.count = 0
+    session.lastTurnAt = new Date().toISOString()
     if (!session.isProcessing) {
       session.isProcessing = true
       this._globalBroadcast?.({ type: 'sessions_updated' })
