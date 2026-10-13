@@ -16,6 +16,7 @@ import { isOrchestratorSession, setOrchestratorModel, setOrchestratorProvider } 
 import type { ReviewAuthor } from './review-comments.js'
 import type { SessionManager } from './session-manager.js'
 import { VALID_PERMISSION_MODES, VALID_PROVIDERS } from './types.js'
+import type { CodingProvider } from './coding-process.js'
 import type { WsClientMessage, WsServerMessage } from './types.js'
 
 /** Closure state passed to handleWsMessage from the ws.on('connection') scope. */
@@ -40,6 +41,24 @@ function reviewAuthor(msg: { relayUser?: string; relayRole?: 'owner' | 'grantee'
 }
 
 /** Route a single parsed client message to the appropriate session manager method. */
+/** Model ID families that unmistakably belong to one harness. */
+const MODEL_FAMILIES: Partial<Record<CodingProvider, RegExp>> = {
+  claude: /^claude-/i,
+  codex: /^(gpt-|o\d|codex-)/i,
+  grok: /^grok-/i,
+}
+
+/**
+ * False when `model` is recognisably another harness's model. Unrecognised IDs
+ * pass — models are discovered dynamically and aliases (`opus`, Bedrock IDs,
+ * OpenCode's `provider/model`) must keep working.
+ */
+export function modelFitsProvider(model: string, provider: CodingProvider): boolean {
+  return Object.entries(MODEL_FAMILIES).every(
+    ([family, pattern]) => family === provider || !pattern.test(model),
+  )
+}
+
 export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): void {
   const { ws, sessions, clientSessions, send } = ctx
 
@@ -95,6 +114,8 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
             sessionId: session.id,
             sessionName: session.name,
             workingDir: session.workingDir,
+            provider: session.provider ?? 'claude',
+            model: session.model,
           })
           if (result.ok) {
             sessions.startClaude(session.id)
@@ -112,6 +133,8 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           sessionId: session.id,
           sessionName: session.name,
           workingDir: session.workingDir,
+          provider: session.provider ?? 'claude',
+          model: session.model,
         })
         sessions.startClaude(session.id)
       }
@@ -230,6 +253,14 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
         // from the Anthropic API so we can't validate against a static list.
         if (!msg.model || typeof msg.model !== 'string') {
           send({ type: 'error', message: `Invalid model: ${msg.model}` })
+          break
+        }
+        // Refuse a model that plainly belongs to another harness. A client
+        // whose picker briefly showed the wrong harness must not be able to
+        // start, say, a Claude session on a Codex model the CLI can't run.
+        const provider = sessions.get(sessionId)?.provider ?? 'claude'
+        if (!modelFitsProvider(msg.model, provider)) {
+          send({ type: 'error', message: `Model ${msg.model} is not available for ${provider} sessions` })
           break
         }
         sessions.setModel(sessionId, msg.model)

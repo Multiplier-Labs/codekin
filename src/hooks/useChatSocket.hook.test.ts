@@ -292,6 +292,22 @@ describe('useChatSocket hook', () => {
       unmount()
     })
 
+    it("session_created adopts the new session's provider and model", () => {
+      const { result, unmount } = setupConnected()
+      act(() => { result.current.setModel('gpt-6-astra') })
+      act(() => MockWebSocket.latest().simulateMessage({
+        type: 'session_created',
+        sessionId: 's2',
+        sessionName: 'Test',
+        workingDir: '/tmp',
+        provider: 'claude',
+        model: 'claude-opus-5-5',
+      } as WsServerMessage))
+      expect(result.current.sessionProvider).toBe('claude')
+      expect(result.current.currentModel).toBe('claude-opus-5-5')
+      unmount()
+    })
+
     it('session_joined rebuilds from outputBuffer', () => {
       const { result, callbacks, unmount } = setupConnected()
       act(() => MockWebSocket.latest().simulateMessage({
