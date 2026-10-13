@@ -379,7 +379,7 @@ export function RepoSection({
                       {compactAge(s.lastTurnAt ?? s.created)}
                     </span>
                   ) : (
-                    <span className={`font-sans font-medium ${status === 'waiting' ? 'text-warning-5' : 'text-success-5'}`}>
+                    <span className={`text-micro font-medium ${status === 'waiting' ? 'text-warning-5' : 'text-success-5'}`}>
                       {status === 'waiting' ? 'needs you' : statusTitle === 'Queued' ? 'queued' : 'working'}
                     </span>
                   )}
