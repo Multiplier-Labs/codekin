@@ -355,6 +355,11 @@ export function useChatSocket({
         setUsage(null)
         setIsProcessing(false)
         setThinkingSummary(null)
+        // Adopt the new session's harness and model right away. Until the
+        // sessions list catches up, the previous session's model (or the
+        // default harness's) would otherwise be pushed onto this one.
+        setSessionProvider(msg.provider ?? null)
+        setCurrentModel(msg.model ?? null)
         callbacksRef.current.onSessionCreated?.(msg.sessionId)
         break
 

@@ -22,7 +22,7 @@ vi.mock('fs', async (importOriginal) => {
   return { ...actual, realpathSync: (p: string) => realpathSyncMock(p) }
 })
 
-import { handleWsMessage, type WsHandlerContext } from './ws-message-handler.js'
+import { handleWsMessage, modelFitsProvider, type WsHandlerContext } from './ws-message-handler.js'
 import type { WsClientMessage, WsServerMessage, Session } from './types.js'
 
 /* ------------------------------------------------------------------ */
@@ -152,6 +152,7 @@ describe('handleWsMessage', () => {
         sessionId: 'new-1',
         sessionName: 'My Session',
         workingDir: '/projects/app',
+        provider: 'claude',
       })
       expect(ctx.sessions.startClaude).toHaveBeenCalledWith('new-1')
     })
@@ -461,12 +462,25 @@ describe('handleWsMessage', () => {
       expect(ctx.sent).toHaveLength(0)
     })
 
-    it('accepts any non-empty model string (models are dynamic)', () => {
-      handleWsMessage({ type: 'set_model', model: 'gpt-4o' } as WsClientMessage, ctx)
+    it('accepts model IDs it does not recognise (models are dynamic)', () => {
+      handleWsMessage({ type: 'set_model', model: 'opus' } as WsClientMessage, ctx)
 
-      // Dynamic model list means any non-empty string is accepted
-      expect(ctx.sessions.setModel).toHaveBeenCalledWith('sess-1', 'gpt-4o')
+      expect(ctx.sessions.setModel).toHaveBeenCalledWith('sess-1', 'opus')
       expect(ctx.sent).toHaveLength(0)
+    })
+
+    it("rejects another harness's model on a Claude session", () => {
+      handleWsMessage({ type: 'set_model', model: 'gpt-6-astra' } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setModel).not.toHaveBeenCalled()
+      expect(ctx.sent[0]).toMatchObject({ type: 'error' })
+    })
+
+    it("accepts a Codex model on a Codex session", () => {
+      ;(ctx.sessions.get as ReturnType<typeof vi.fn>).mockReturnValue(mockSession({ provider: 'codex' }))
+      handleWsMessage({ type: 'set_model', model: 'gpt-6-astra' } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setModel).toHaveBeenCalledWith('sess-1', 'gpt-6-astra')
     })
 
     it('rejects empty model', () => {
@@ -859,5 +873,17 @@ describe('handleWsMessage', () => {
 
       expect(ctx.sent[0]).toMatchObject({ type: 'error' })
     })
+  })
+})
+
+describe('modelFitsProvider', () => {
+  it("rejects only IDs that are recognisably another harness's", () => {
+    expect(modelFitsProvider('gpt-6-astra', 'claude')).toBe(false)
+    expect(modelFitsProvider('grok-4', 'claude')).toBe(false)
+    expect(modelFitsProvider('claude-opus-5-5', 'codex')).toBe(false)
+    expect(modelFitsProvider('claude-opus-5-5', 'claude')).toBe(true)
+    expect(modelFitsProvider('gpt-6-astra', 'codex')).toBe(true)
+    expect(modelFitsProvider('opus', 'claude')).toBe(true)
+    expect(modelFitsProvider('anthropic/claude-opus-5-5', 'opencode')).toBe(true)
   })
 })

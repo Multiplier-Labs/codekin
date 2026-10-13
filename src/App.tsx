@@ -335,9 +335,14 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   // sessions). The orchestrator session is not in the sidebar sessions list,
   // so its provider comes from the session_joined sync — without this the
   // fallback would hand it another provider's model list.
+  // A session just created or joined may not be in the list yet; its provider
+  // from session_created/session_joined beats the new-session default, which
+  // would otherwise sync another harness's model onto it.
   const activeSessionProvider = view === 'orchestrator'
     ? sessionProvider ?? 'claude'
-    : sessions.find(s => s.id === activeSessionId)?.provider ?? currentProvider
+    : sessions.find(s => s.id === activeSessionId)?.provider
+      ?? (activeSessionId ? sessionProvider : null)
+      ?? currentProvider
 
   const activeOpenCodeWd = activeSessionProvider === 'opencode'
     ? sessions.find(s => s.id === activeSessionId)?.workingDir
