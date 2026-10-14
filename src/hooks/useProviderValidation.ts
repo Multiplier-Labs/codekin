@@ -11,7 +11,7 @@ export function useProviderValidation({
   setModel,
   claudeModels,
 }: {
-  activeSessionProvider: CodingProvider
+  activeSessionProvider: CodingProvider | null
   currentModel: string | null
   setModel: (model: string) => void
   claudeModels: ModelOption[]

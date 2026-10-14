@@ -5,7 +5,8 @@ import { getPref } from '../lib/prefs'
 
 interface UseGrokModelSyncOptions {
   token: string
-  activeSessionProvider: CodingProvider
+  /** Null while the active session's harness is not yet known: no syncing. */
+  activeSessionProvider: CodingProvider | null
   currentModel: string | null
   setModel: (model: string) => void
   grokDisabled: boolean
@@ -28,6 +29,8 @@ export function useGrokModelSync({
   const [grokConnected, setGrokConnected] = useState<boolean | null>(null)
   const currentModelRef = useRef(currentModel)
   useEffect(() => { currentModelRef.current = currentModel }, [currentModel])
+  const providerRef = useRef(activeSessionProvider)
+  useEffect(() => { providerRef.current = activeSessionProvider }, [activeSessionProvider])
 
   // Probe Grok availability on startup
   useEffect(() => {
@@ -50,6 +53,9 @@ export function useGrokModelSync({
       setGrokModels(models)
       setGrokConnected(models.length > 0)
       const currentIsGrok = currentModelRef.current && models.some(m => m.id === currentModelRef.current)
+      // The user may have moved to another harness's session while this
+      // was in flight; its model must not be pushed onto that session.
+      if (providerRef.current !== 'grok') return
       if (!currentIsGrok) {
         const savedModel = getPref('grokModel')
         const savedIsValid = savedModel && models.some(m => m.id === savedModel)
