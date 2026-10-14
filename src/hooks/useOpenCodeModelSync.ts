@@ -5,7 +5,8 @@ import { getPref } from '../lib/prefs'
 
 interface UseOpenCodeModelSyncOptions {
   token: string
-  activeSessionProvider: CodingProvider
+  /** Null while the active session's harness is not yet known: no syncing. */
+  activeSessionProvider: CodingProvider | null
   activeOpenCodeWd: string | undefined
   currentModel: string | null
   setModel: (model: string) => void
@@ -31,6 +32,8 @@ export function useOpenCodeModelSync({
   const openCodeModelsDirRef = useRef<string | undefined>(undefined)
   const currentModelRef = useRef(currentModel)
   useEffect(() => { currentModelRef.current = currentModel }, [currentModel])
+  const providerRef = useRef(activeSessionProvider)
+  useEffect(() => { providerRef.current = activeSessionProvider }, [activeSessionProvider])
 
   // Probe OpenCode availability on startup
   useEffect(() => {
@@ -56,6 +59,9 @@ export function useOpenCodeModelSync({
       setOpenCodeConnected(models.length > 0)
       openCodeModelsDirRef.current = activeWd
       const currentIsOpenCode = currentModelRef.current && models.some(m => m.id === currentModelRef.current)
+      // The user may have moved to another harness's session while this
+      // was in flight; its model must not be pushed onto that session.
+      if (providerRef.current !== 'opencode') return
       if (!currentIsOpenCode) {
         const savedOcModel = getPref('opencodeModel')
         const savedIsValid = savedOcModel && models.some(m => m.id === savedOcModel)

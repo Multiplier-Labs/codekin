@@ -338,11 +338,19 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   // A session just created or joined may not be in the list yet; its provider
   // from session_created/session_joined beats the new-session default, which
   // would otherwise sync another harness's model onto it.
+  const listedProvider = sessions.find(s => s.id === activeSessionId)?.provider
   const activeSessionProvider = view === 'orchestrator'
     ? sessionProvider ?? 'claude'
-    : sessions.find(s => s.id === activeSessionId)?.provider
+    : listedProvider
       ?? (activeSessionId ? sessionProvider : null)
       ?? currentProvider
+  // The harness model sync acts on: null while a session is active but its
+  // harness is not known yet — right after a reload the session id is restored
+  // before the sessions list or session_joined arrive, and acting on the
+  // new-session default then would push e.g. a Codex model onto a Claude session.
+  const syncProvider: CodingProvider | null = view === 'orchestrator'
+    ? sessionProvider
+    : activeSessionId && !listedProvider && !sessionProvider ? null : activeSessionProvider
 
   const activeOpenCodeWd = activeSessionProvider === 'opencode'
     ? sessions.find(s => s.id === activeSessionId)?.workingDir
@@ -350,7 +358,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
 
   const { openCodeModels, openCodeConnected, setOpenCodeConnected, reconnect: reconnectOpenCode } = useOpenCodeModelSync({
     token: settings.token,
-    activeSessionProvider,
+    activeSessionProvider: syncProvider,
     activeOpenCodeWd,
     currentModel,
     setModel,
@@ -358,14 +366,14 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   })
   const { codexModels, codexConnected, setCodexConnected, reconnect: reconnectCodex } = useCodexModelSync({
     token: settings.token,
-    activeSessionProvider,
+    activeSessionProvider: syncProvider,
     currentModel,
     setModel,
     codexDisabled,
   })
   const { grokModels, grokConnected, setGrokConnected, reconnect: reconnectGrok } = useGrokModelSync({
     token: settings.token,
-    activeSessionProvider,
+    activeSessionProvider: syncProvider,
     currentModel,
     setModel,
     grokDisabled,
@@ -400,7 +408,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     if (activeSessionId) requestChangeSummaryRef.current()
   }, [activeSessionId])
 
-  useProviderValidation({ activeSessionProvider, currentModel, setModel, claudeModels })
+  useProviderValidation({ activeSessionProvider: syncProvider, currentModel, setModel, claudeModels })
 
   // Session orchestration: switching, creating, deleting sessions & repos
   const {
