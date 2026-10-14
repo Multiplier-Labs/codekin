@@ -77,16 +77,16 @@ function harnessTitle(session: Session): string {
  * Exactly three status treatments, and only one of them animates:
  * filled = running, amber pulsing = waiting for you, hollow ring = idle.
  * Anything finer (queued, inactive) is carried by the tooltip, not by a
- * fourth colour. The two live states are a size up and haloed, so they read
+ * fourth colour. The two live states are filled and haloed, so they read
  * at a glance in a long list rather than as one more 6px dot.
  */
 type SessionStatus = 'running' | 'waiting' | 'idle'
 
 function StatusDot({ status, title }: { status: SessionStatus; title: string }) {
   const shape = status === 'waiting'
-    ? 'h-[0.45rem] w-[0.45rem] bg-warning-5 ring-2 ring-warning-5/27 animate-pulse'
+    ? 'h-1.5 w-1.5 bg-warning-5 ring-2 ring-warning-5/27 animate-pulse'
     : status === 'running'
-    ? 'h-[0.45rem] w-[0.45rem] bg-success-5 ring-2 ring-success-5/27'
+    ? 'h-1.5 w-1.5 bg-success-5 ring-2 ring-success-5/27'
     : 'h-1.5 w-1.5 border border-ink-faint'
   return (
     <span className="inline-flex w-3 flex-shrink-0 items-center justify-center" title={title}>
@@ -327,9 +327,9 @@ export function RepoSection({
                   isActiveSession
                     ? 'bg-accent-9/30 text-accent-2'
                     : status === 'running'
-                    ? 'bg-success-9/18 text-ink hover:bg-success-9/27'
+                    ? 'bg-success-9/20 text-ink hover:bg-success-9/27'
                     : status === 'waiting'
-                    ? 'bg-warning-9/18 text-ink hover:bg-warning-9/27'
+                    ? 'bg-warning-9/20 text-ink hover:bg-warning-9/27'
                     : 'text-ink hover:bg-surface-raised'
                 }`}
               >
