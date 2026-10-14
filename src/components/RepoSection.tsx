@@ -327,9 +327,9 @@ export function RepoSection({
                   isActiveSession
                     ? 'bg-accent-9/30 text-accent-2'
                     : status === 'running'
-                    ? 'bg-success-9/20 text-ink hover:bg-success-9/27'
+                    ? 'bg-success-9/22 text-ink hover:bg-success-9/27'
                     : status === 'waiting'
-                    ? 'bg-warning-9/20 text-ink hover:bg-warning-9/27'
+                    ? 'bg-warning-9/22 text-ink hover:bg-warning-9/27'
                     : 'text-ink hover:bg-surface-raised'
                 }`}
               >
