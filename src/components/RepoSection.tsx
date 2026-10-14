@@ -84,9 +84,9 @@ type SessionStatus = 'running' | 'waiting' | 'idle'
 
 function StatusDot({ status, title }: { status: SessionStatus; title: string }) {
   const shape = status === 'waiting'
-    ? 'h-2 w-2 bg-warning-5 ring-2 ring-warning-5/27 animate-pulse'
+    ? 'h-[0.45rem] w-[0.45rem] bg-warning-5 ring-2 ring-warning-5/27 animate-pulse'
     : status === 'running'
-    ? 'h-2 w-2 bg-success-5 ring-2 ring-success-5/27'
+    ? 'h-[0.45rem] w-[0.45rem] bg-success-5 ring-2 ring-success-5/27'
     : 'h-1.5 w-1.5 border border-ink-faint'
   return (
     <span className="inline-flex w-3 flex-shrink-0 items-center justify-center" title={title}>
