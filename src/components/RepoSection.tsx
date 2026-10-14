@@ -84,9 +84,9 @@ type SessionStatus = 'running' | 'waiting' | 'idle'
 
 function StatusDot({ status, title }: { status: SessionStatus; title: string }) {
   const shape = status === 'waiting'
-    ? 'h-2 w-2 bg-warning-5 ring-2 ring-warning-5/30 animate-pulse'
+    ? 'h-2 w-2 bg-warning-5 ring-2 ring-warning-5/27 animate-pulse'
     : status === 'running'
-    ? 'h-2 w-2 bg-success-5 ring-2 ring-success-5/30'
+    ? 'h-2 w-2 bg-success-5 ring-2 ring-success-5/27'
     : 'h-1.5 w-1.5 border border-ink-faint'
   return (
     <span className="inline-flex w-3 flex-shrink-0 items-center justify-center" title={title}>
@@ -327,9 +327,9 @@ export function RepoSection({
                   isActiveSession
                     ? 'bg-accent-9/30 text-accent-2'
                     : status === 'running'
-                    ? 'bg-success-9/20 text-ink hover:bg-success-9/30'
+                    ? 'bg-success-9/18 text-ink hover:bg-success-9/27'
                     : status === 'waiting'
-                    ? 'bg-warning-9/20 text-ink hover:bg-warning-9/30'
+                    ? 'bg-warning-9/18 text-ink hover:bg-warning-9/27'
                     : 'text-ink hover:bg-surface-raised'
                 }`}
               >
@@ -379,7 +379,7 @@ export function RepoSection({
                       {compactAge(s.lastTurnAt ?? s.created)}
                     </span>
                   ) : (
-                    <span className={`text-micro font-medium ${status === 'waiting' ? 'text-warning-5' : 'text-success-5'}`}>
+                    <span className={`text-micro font-medium ${status === 'waiting' ? 'text-warning-5/90' : 'text-success-5/90'}`}>
                       {status === 'waiting' ? 'needs you' : statusTitle === 'Queued' ? 'queued' : 'working'}
                     </span>
                   )}
