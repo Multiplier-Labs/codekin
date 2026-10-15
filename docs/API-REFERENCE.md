@@ -46,7 +46,7 @@ Connection establishment is rate-limited per client IP, before authentication, t
 | `WS_RATE_MAP_MAX_SIZE` | `10_000` | Maximum tracked IPs; further new IPs are rejected to prevent unbounded memory growth. |
 | `WS_AUTH_TIMEOUT_MS` | `5_000` | Time an unauthenticated connection is held open waiting for an `auth` message before being closed. |
 
-When `TRUST_PROXY` is enabled, the first entry of the `X-Forwarded-For` header is used as the client IP; otherwise `req.socket.remoteAddress` is used. Connections that exceed the per-IP cap are closed with code `4029` ("Too many connections"); auth-timeouts close with `4001` ("Auth timeout").
+When `TRUST_PROXY` is enabled, the last entry of the `X-Forwarded-For` header (the one appended by the single trusted proxy) is used as the client IP; otherwise `req.socket.remoteAddress` is used. Connections that exceed the per-IP cap are closed with code `4029` ("Too many connections"); auth-timeouts close with `4001` ("Auth timeout"). Client frames larger than 4 MiB are rejected before parsing — even before auth — and the connection is closed with code `1009` ("Max payload size exceeded").
 
 ### Per-connection message rate limit (`server/ws-rate-limit.ts`)
 

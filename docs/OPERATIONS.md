@@ -31,7 +31,7 @@ These are compile-time constants — there are no env-var overrides today. Adjus
 
 #### Key strategy
 
-The IP key is taken from `req.socket.remoteAddress`, **except** when the server runs behind a trusted proxy. When `TRUST_PROXY=true` is set in the environment, the first entry of the `X-Forwarded-For` header is used instead so that nginx-forwarded clients are bucketed by their real source IP rather than the loopback address.
+The IP key is taken from `req.socket.remoteAddress`, **except** when the server runs behind a trusted proxy. When `TRUST_PROXY=true` is set in the environment, the last entry of the `X-Forwarded-For` header — the one appended by the reverse proxy — is used instead (earlier entries are client-supplied and ignored) so that nginx-forwarded clients are bucketed by their real source IP rather than the loopback address.
 
 > **Note**: if you forget to set `TRUST_PROXY=true` behind nginx, every client will key as `127.0.0.1` and the limit will be hit globally rather than per-client. Confirm with `journalctl -u codekin -f` and look for `4029 Too many connections` close codes against `127.0.0.1`.
 

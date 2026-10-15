@@ -65,6 +65,7 @@ import { createSessionRouter } from './session-routes.js'
 import { createWebhookRouter } from './webhook-routes.js'
 import { createWebhookSetupRouter } from './webhook-setup-routes.js'
 import { createUploadRouter } from './upload-routes.js'
+import { TRUSTED_PROXY_HOPS, WS_MAX_PAYLOAD_BYTES, wsClientIp } from './ws-limits.js'
 import { createDocsRouter } from './docs-routes.js'
 import { EmbeddedConnectorSupervisor, createRelayStatusRouter, embeddedConnectorDisabled } from './relay/embedded-connector.js'
 import { resolveLocalTarget } from './relay/connector-proxy.js'
@@ -223,9 +224,11 @@ const commitEventState: { handler: CommitEventHandler | undefined } = { handler:
 const app = express()
 
 // Trust X-Forwarded-For headers when behind a reverse proxy so that
-// req.ip returns the real client IP for rate limiters and logging.
+// req.ip returns the real client IP for rate limiters and logging. Trust only
+// the proxy's own hop: `true` would make req.ip the leftmost, client-supplied
+// entry and let any client pick its rate-limit bucket.
 if (TRUST_PROXY) {
-  app.set('trust proxy', true)
+  app.set('trust proxy', TRUSTED_PROXY_HOPS)
 }
 
 // In Docker / standalone mode (FRONTEND_DIST set), the server is reached directly without nginx.
@@ -523,7 +526,7 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 // ---------------------------------------------------------------------------
 
 const server = createServer(app)
-const wss = new WebSocketServer({ server })
+const wss = new WebSocketServer({ server, maxPayload: WS_MAX_PAYLOAD_BYTES })
 
 /** Connections that have completed the `auth` handshake. */
 const authenticatedClients = new Set<WebSocket>()
@@ -582,7 +585,7 @@ wss.on('connection', (ws: WebSocket, req) => {
   }
 
   // Rate-limit by IP before any processing
-  const ip = (TRUST_PROXY && (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()) || req.socket.remoteAddress || 'unknown'
+  const ip = wsClientIp(req.headers['x-forwarded-for'], req.socket.remoteAddress, TRUST_PROXY)
   if (!checkWsRateLimit(ip)) {
     ws.close(4029, 'Too many connections')
     return
