@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-10-18
+
+### Added
+- PDF files can be attached to messages (#708)
+
+### Changed
+- The sidebar orders sessions by latest activity, and live sessions stand out with a status label and a row highlight (#710, #712, #715, #716, #717, #718, #719)
+
+### Fixed
+- New Claude sessions no longer inherit a Codex model, and reloading a session no longer syncs another harness's model onto it (#713, #714)
+- The relay drops unresponsive browser sockets so they stop holding stream slots (#709)
+
+### Security
+- `env` and `find -exec` can no longer slip arbitrary commands past "Always allow" patterns (#707)
+- WebSocket frames are capped at 4 MiB, and only the proxy-appended `X-Forwarded-For` entry is trusted, so clients can't spoof their address (#720)
+- Dependency advisories fixed: proxy-addr, MCP SDK, dompurify, source-map-js and hono (#711)
+
 ## [0.9.3] - 2026-09-30
 
 ### Added
