@@ -1,11 +1,14 @@
 /** Tests for the utility agent — provider ordering, fallback chain, and per-harness one-shot command mapping. */
 import { describe, it, expect, beforeEach } from 'vitest'
-import { runUtilityPrompt, utilityOrder, seedUtilityProbe, resetUtilityProbeCache } from './utility-agent.js'
+import { existsSync } from 'node:fs'
+import { runUtilityPrompt, utilityOrder, seedUtilityProbe, resetUtilityProbeCache, execOneShot } from './utility-agent.js'
 import { getHarness } from './harness-registry.js'
 
-function seedAll(overrides: Partial<Record<'claude' | 'opencode' | 'codex', boolean>> = {}) {
-  for (const id of ['claude', 'opencode', 'codex'] as const) {
-    const usable = overrides[id] ?? true
+// Seed every harness so results never depend on which CLIs this host has
+// installed. Grok defaults to unusable to keep the three-harness chains below.
+function seedAll(overrides: Partial<Record<'claude' | 'opencode' | 'codex' | 'grok', boolean>> = {}) {
+  for (const id of ['claude', 'opencode', 'codex', 'grok'] as const) {
+    const usable = overrides[id] ?? id !== 'grok'
     seedUtilityProbe(id, { available: usable, version: usable ? 'v' : '', authenticated: usable })
   }
 }
@@ -19,6 +22,8 @@ describe('utilityOrder', () => {
     seedAll()
     expect(utilityOrder('codex').map((h) => h.id)).toEqual(['codex', 'claude', 'opencode'])
     expect(utilityOrder().map((h) => h.id)).toEqual(['claude', 'opencode', 'codex'])
+    seedAll({ grok: true })
+    expect(utilityOrder('grok').map((h) => h.id)).toEqual(['grok', 'claude', 'opencode', 'codex'])
   })
 
   it('drops harnesses that are missing or unauthenticated', () => {
@@ -83,9 +88,20 @@ describe('oneShotCommand mapping', () => {
     expect(cmd.args).toEqual(['run', '--pure', 'be terse\n\nthe prompt'])
     expect(cmd.stdin).toBe('')
   })
-  it('grok: headless, read-only tools, one round, prompt file on stdin', () => {
+  it('grok: headless, read-only tools, one round, prompt via a temp file', () => {
     const cmd = getHarness('grok').oneShotCommand(opts)
-    expect(cmd.args).toEqual(['--no-auto-update', '--output-format', 'plain', '--tools', 'read_file', '--max-turns', '1', '--prompt-file', '/dev/stdin'])
-    expect(cmd.stdin).toBe('be terse\n\nthe prompt')
+    expect(cmd.args).toEqual(['--no-auto-update', '--output-format', 'plain', '--tools', 'read_file', '--max-turns', '1', '--prompt-file'])
+    expect(cmd.stdin).toBe('')
+    expect(cmd.promptFile).toBe('be terse\n\nthe prompt')
+  })
+})
+
+describe('execOneShot', () => {
+  it('writes promptFile to a temp file, appends its path, and removes it afterwards', async () => {
+    // `sh -c 'cat "$0"; echo; echo "$0"' <path>` echoes the file then its path.
+    const out = await execOneShot({ binary: 'sh', args: ['-c', 'cat "$0"; echo; echo "$0"'], stdin: '', promptFile: 'hello prompt' }, 5000)
+    const [text, path] = out.split('\n')
+    expect(text).toBe('hello prompt')
+    expect(existsSync(path)).toBe(false)
   })
 })

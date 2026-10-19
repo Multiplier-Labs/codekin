@@ -55,6 +55,13 @@ export interface OneShotCommand {
   binary: string
   args: string[]
   stdin: string
+  /**
+   * Text the executor writes to a private temp file whose path is appended as
+   * the final arg. For CLIs that only take a prompt path: `/dev/stdin` is not
+   * an option, because Node's stdio pipes are socketpairs and opening one by
+   * path fails with ENXIO.
+   */
+  promptFile?: string
 }
 
 export interface HarnessDefinition {
@@ -203,8 +210,9 @@ const grok: HarnessDefinition = {
     const text = opts.systemPrompt ? `${opts.systemPrompt}\n\n${opts.prompt}` : opts.prompt
     return {
       binary: GROK_BINARY,
-      args: ['--no-auto-update', '--output-format', 'plain', '--tools', 'read_file', '--max-turns', '1', '--prompt-file', '/dev/stdin'],
-      stdin: text,
+      args: ['--no-auto-update', '--output-format', 'plain', '--tools', 'read_file', '--max-turns', '1', '--prompt-file'],
+      stdin: '',
+      promptFile: text,
     }
   },
   createProcess(session, ctx) {
