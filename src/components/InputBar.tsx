@@ -568,6 +568,25 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     prevWaiting.current = isWaiting
   }, [isWaiting, isMobile])
 
+  // Refocus when the user comes back to the window, so it is ready for typing.
+  // Only when nothing else holds focus, no dialog is open, and no text is selected
+  // (focusing would drop a selection the user may be about to copy).
+  useEffect(() => {
+    if (isMobile) return
+    const onReturn = () => {
+      const el = textareaRef.current
+      if (!el || el.disabled) return
+      const active = document.activeElement
+      if (active && active !== document.body && active !== el) return
+      if (document.querySelector('[role="dialog"], [aria-modal="true"]')) return
+      const selection = window.getSelection()
+      if (selection && !selection.isCollapsed) return
+      el.focus()
+    }
+    window.addEventListener('focus', onReturn)
+    return () => { window.removeEventListener('focus', onReturn) }
+  }, [isMobile])
+
   // Close dropdown menus on outside click
   useOutsideClick(mobileMenuRef, mobileMenuOpen, useCallback(() => setMobileMenuOpen(false), []))
   useOutsideClick(permMenuRef, permMenuOpen, useCallback(() => setPermMenuOpen(false), []))

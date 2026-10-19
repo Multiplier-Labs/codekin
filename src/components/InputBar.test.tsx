@@ -92,3 +92,53 @@ describe('InputBar addressing Joe', () => {
     expect(onSendInput).toHaveBeenCalledWith('@Joe how is it going?')
   })
 })
+
+describe('InputBar refocus on window return', () => {
+  async function renderBar(props: Partial<Parameters<typeof InputBar>[0]> = {}) {
+    await act(async () => {
+      root.render(
+        <InputBar
+          onSendInput={vi.fn()} isWaiting={false} disabled={false} onEscape={vi.fn()}
+          pendingFiles={[]} onAddFiles={vi.fn()} onRemoveFile={vi.fn()}
+          {...props}
+        />,
+      )
+    })
+    const textarea = container.querySelector('textarea')!
+    textarea.blur()
+    return textarea
+  }
+
+  const returnToWindow = () => act(async () => { window.dispatchEvent(new Event('focus')) })
+
+  it('focuses the composer when nothing else holds focus', async () => {
+    const textarea = await renderBar()
+    expect(document.activeElement).toBe(document.body)
+    await returnToWindow()
+    expect(document.activeElement).toBe(textarea)
+  })
+
+  it('leaves focus alone when another control has it', async () => {
+    await renderBar()
+    const other = document.createElement('input')
+    container.appendChild(other)
+    other.focus()
+    await returnToWindow()
+    expect(document.activeElement).toBe(other)
+  })
+
+  it('does not steal focus from an open dialog', async () => {
+    const textarea = await renderBar()
+    const dialog = document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    container.appendChild(dialog)
+    await returnToWindow()
+    expect(document.activeElement).not.toBe(textarea)
+  })
+
+  it('does nothing on mobile', async () => {
+    const textarea = await renderBar({ isMobile: true })
+    await returnToWindow()
+    expect(document.activeElement).not.toBe(textarea)
+  })
+})
