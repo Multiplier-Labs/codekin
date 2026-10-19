@@ -191,6 +191,7 @@ describe('SessionManager', () => {
     seedUtilityProbe('claude', { available: true, version: 'test', authenticated: true })
     seedUtilityProbe('codex', { available: false, version: '', authenticated: false })
     seedUtilityProbe('opencode', { available: false, version: '', authenticated: false })
+    seedUtilityProbe('grok', { available: false, version: '', authenticated: false })
   })
 
   afterEach(() => {

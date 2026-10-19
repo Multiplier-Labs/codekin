@@ -14,7 +14,9 @@
  */
 
 import { spawn } from 'node:child_process'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { CodingProvider } from './coding-process.js'
 import {
   HARNESSES,
@@ -78,10 +80,22 @@ export function buildOneShotEnv(): Record<string, string> {
 /** Execute a resolved one-shot command. Injectable for tests. */
 export type ExecOneShotFn = (cmd: OneShotCommand, timeoutMs: number) => Promise<string>
 
-export const execOneShot: ExecOneShotFn = (cmd, timeoutMs) =>
-  new Promise((resolve, reject) => {
+export const execOneShot: ExecOneShotFn = async (cmd, timeoutMs) => {
+  if (cmd.promptFile === undefined) return spawnOneShot(cmd, cmd.args, timeoutMs)
+  const dir = await mkdtemp(join(tmpdir(), 'codekin-oneshot-'))
+  try {
+    const file = join(dir, 'prompt.txt')
+    await writeFile(file, cmd.promptFile, { mode: 0o600 })
+    return await spawnOneShot(cmd, [...cmd.args, file], timeoutMs)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
+function spawnOneShot(cmd: OneShotCommand, args: string[], timeoutMs: number): Promise<string> {
+  return new Promise((resolve, reject) => {
     // tmpdir cwd: no project instruction files/hooks load into the turn.
-    const proc = spawn(cmd.binary, cmd.args, {
+    const proc = spawn(cmd.binary, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       cwd: tmpdir(),
       env: buildOneShotEnv(),
@@ -111,6 +125,7 @@ export const execOneShot: ExecOneShotFn = (cmd, timeoutMs) =>
     if (cmd.stdin) proc.stdin.write(cmd.stdin)
     proc.stdin.end()
   })
+}
 
 export interface UtilityResult {
   text: string
