@@ -164,6 +164,10 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           planState: session.planManager.state,
         })
       } else {
+        // The old session was already left; keeping its mapping would let
+        // later input/stop/prompt_response frames act on it, outside what
+        // the relay's per-session policy checked them against.
+        clientSessions.delete(ws)
         send({ type: 'error', message: 'Session not found' })
       }
       break

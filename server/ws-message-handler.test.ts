@@ -325,6 +325,21 @@ describe('handleWsMessage', () => {
       expect(ctx.sent[0].type).toBe('error')
       expect((ctx.sent[0] as any).message).toBe('Session not found')
     })
+
+    it('a failed join leaves no session behind for later frames to act on', () => {
+      ;(ctx.sessions.join as ReturnType<typeof vi.fn>).mockReturnValue(null)
+
+      handleWsMessage({ type: 'join_session', sessionId: 'nonexistent' } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.leave).toHaveBeenCalledWith('sess-1', ctx.ws)
+      expect(ctx.clientSessions.has(ctx.ws)).toBe(false)
+      handleWsMessage({ type: 'input', data: 'run id' } as WsClientMessage, ctx)
+      handleWsMessage({ type: 'stop' } as WsClientMessage, ctx)
+      handleWsMessage({ type: 'prompt_response', value: 'allow', requestId: 'r1' } as WsClientMessage, ctx)
+      expect(ctx.sessions.sendInput).not.toHaveBeenCalled()
+      expect(ctx.sessions.stopSession).not.toHaveBeenCalled()
+      expect(ctx.sessions.sendPromptResponse).not.toHaveBeenCalled()
+    })
   })
 
   /* ---- leave_session ---- */
