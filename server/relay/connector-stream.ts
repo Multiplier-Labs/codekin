@@ -12,7 +12,7 @@
 import WebSocket from 'ws'
 import { STREAM_CLOSE } from './relay-protocol.js'
 import type { LocalServerTarget } from './connector-proxy.js'
-import { checkClientFrame, checkServerFrame, newChannelState, observeServerFrame, stampReviewIdentity } from './connector-policy.js'
+import { adaptServerFrame, checkClientFrame, checkServerFrame, newChannelState, observeServerFrame, stampReviewIdentity } from './connector-policy.js'
 import type { ChannelPolicy, ChannelState } from './connector-policy.js'
 
 /** The local server drops sockets that do not authenticate promptly. */
@@ -104,7 +104,7 @@ export class StreamChannel {
       // classified against the tool it belongs to. Only frames that passed
       // the check above are tracked, so prompts stay bound to this session.
       observeServerFrame(this.state, text)
-      this.callbacks.onData(text)
+      this.callbacks.onData(adaptServerFrame(this.policy, text))
     })
 
     ws.on('close', (code: number, reason: Buffer) => {

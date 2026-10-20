@@ -532,10 +532,22 @@ describe('PromptRouter', () => {
       }))
     })
 
-    it('falls back to sendMessage when no pending prompts match', () => {
+    it('falls back to sendMessage when there is no prompt and no requestId', () => {
       router.sendPromptResponse('sess-1', 'hello world')
 
       expect(session.claudeProcess!.sendMessage).toHaveBeenCalledWith('hello world')
+    })
+
+    it('drops an answer to a settled or unknown prompt instead of sending it as a message', () => {
+      router.sendPromptResponse('sess-1', 'rm -rf ~', 'already-answered')
+
+      expect(session.claudeProcess!.sendMessage).not.toHaveBeenCalled()
+      expect(session.claudeProcess!.sendControlResponse).not.toHaveBeenCalled()
+      expect(deps.broadcast).toHaveBeenCalledWith(session, expect.objectContaining({
+        type: 'system_message',
+        subtype: 'error',
+        text: expect.stringContaining('already answered or has expired'),
+      }))
     })
   })
 

@@ -261,6 +261,28 @@ type SessionPermission =
 
 Default policy should be owner-only. Sharing should be explicit per session or per repo.
 
+How a grantee's answer to a prompt is judged (`server/relay/connector-policy.ts`):
+
+- The answer must name a `requestId` the connector relayed on that channel and that is still
+  open. Answers with no id, an unknown id or a settled id are refused. Otherwise the local server
+  would route them to whatever prompt is pending, or deliver them to the agent as a plain message.
+  Each prompt accepts one answer.
+- The permission comes from the prompt: `approve_shell` for shell tools (matched
+  case-insensitively, since OpenCode says `bash`), `approve_readonly_tool` for read-only tools,
+  and `approve_mutating_tool` for everything else. Answering a question (`AskUserQuestion`) is
+  free text the agent acts on, so it needs `send_prompt`.
+- An approval is a single choice. Extra array elements are free text the local server may pass to
+  the agent (a plan rejection's feedback), so they also need `send_prompt`. Non-string answers are
+  refused.
+- Grantees may reject a plan (`ExitPlanMode`) but not approve one: approval moves the session out
+  of plan mode for good, which is a permission-mode change and stays with the owner.
+- Grantees answer once. "Always allow" and pattern approvals would save a standing rule in the
+  owner's project that outlives the share, so they are refused and stripped from the prompts
+  grantees see. That also stops a grantee's browser running the auto-approve countdown, which
+  only starts when "always allow" is offered.
+- As a second layer, the local server never turns an answer that names an unknown prompt into a
+  message.
+
 ---
 
 ## 7. Relay Protocol

@@ -40,10 +40,21 @@ const ALLOW: PolicyDecision = { allowed: true }
 const READONLY_TOOLS = new Set([
   'Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'NotebookRead', 'TodoWrite', 'Task',
 ])
-const SHELL_TOOLS = new Set(['Bash', 'BashOutput', 'KillShell'])
+// Matched case-insensitively: OpenCode names its shell permission `bash`.
+const SHELL_TOOLS = new Set(['bash', 'bashoutput', 'killshell'])
+
+/**
+ * Permission needed to answer a prompt. A question's answer is free text the
+ * agent acts on, so it needs the same right as sending a prompt; tool
+ * approvals go by the tool.
+ */
+export function permissionForPrompt(toolName: string | undefined): SessionPermission {
+  if (toolName === 'AskUserQuestion') return 'send_prompt'
+  return permissionForTool(toolName)
+}
 
 export function permissionForTool(toolName: string | undefined): SessionPermission {
-  if (toolName && SHELL_TOOLS.has(toolName)) return 'approve_shell'
+  if (toolName && SHELL_TOOLS.has(toolName.toLowerCase())) return 'approve_shell'
   if (toolName && READONLY_TOOLS.has(toolName)) return 'approve_readonly_tool'
   return 'approve_mutating_tool'
 }
@@ -214,11 +225,17 @@ export function observeServerFrame(state: ChannelState, frame: string): void {
   if (!msg) return
 
   if (msg.type === 'prompt' && typeof msg.requestId === 'string') {
-    if (state.pendingPrompts.size >= MAX_TRACKED_PROMPTS) {
+    // A replayed prompt (on rejoin) is already tracked and needs no room.
+    if (!state.pendingPrompts.has(msg.requestId) && state.pendingPrompts.size >= MAX_TRACKED_PROMPTS) {
       const oldest = state.pendingPrompts.keys().next().value
       if (oldest !== undefined) state.pendingPrompts.delete(oldest)
     }
-    state.pendingPrompts.set(msg.requestId, typeof msg.toolName === 'string' ? msg.toolName : undefined)
+    // A question's answer is free text however the prompt names its tool
+    // (the local server may send none), so record it as one.
+    const toolName = msg.promptType === 'question'
+      ? 'AskUserQuestion'
+      : typeof msg.toolName === 'string' ? msg.toolName : undefined
+    state.pendingPrompts.set(msg.requestId, toolName)
     return
   }
   if (msg.type === 'prompt_dismiss' && typeof msg.requestId === 'string') {
@@ -273,6 +290,27 @@ export function checkServerFrame(policy: ChannelPolicy, state: ChannelState, fra
     if (!granted?.includes('view_diff')) return false
   }
   return true
+}
+
+/** Prompt options that save a standing approval rule in the owner's project. */
+const STANDING_APPROVAL_OPTIONS = new Set(['always_allow', 'approve_pattern'])
+
+/**
+ * The frame as a grantee should see it. Prompts lose their "always allow"
+ * and pattern options: a grantee may not answer with them (see
+ * checkClientFrame), and the browser auto-approves after a countdown
+ * whenever "always allow" is offered, so an idle grantee tab would
+ * otherwise approve the owner's tool calls by itself. Other frames, and
+ * everything an owner sees, pass through unchanged.
+ */
+export function adaptServerFrame(policy: ChannelPolicy, frame: string): string {
+  if (policy.role === 'owner') return frame
+  const msg = parseFrame(frame) as (LocalFrame & { options?: unknown }) | null
+  if (msg?.type !== 'prompt' || !Array.isArray(msg.options)) return frame
+  const options = (msg.options as unknown[]).filter(
+    o => !(typeof o === 'object' && o !== null && STANDING_APPROVAL_OPTIONS.has((o as { value?: unknown }).value as string)),
+  )
+  return options.length === msg.options.length ? frame : JSON.stringify({ ...msg, options })
 }
 
 /** Server frames that carry diff content or review data. */
@@ -341,12 +379,46 @@ export function checkClientFrame(policy: ChannelPolicy, state: ChannelState, fra
       return requirePermission(policy, state, 'stop_session', 'Stopping the session is not granted')
 
     case 'prompt_response': {
+      // Only an answer to a prompt relayed on this channel, and still open,
+      // can be judged: its tool decides the permission. Without that, the
+      // local server would route the answer to whatever prompt happens to be
+      // pending (possibly a shell command) or deliver it to the agent as a
+      // plain message, neither of which this check could have classified.
       const requestId = typeof msg.requestId === 'string' ? msg.requestId : null
-      // An answer to a prompt we never relayed cannot be classified, so it
-      // is judged as the strictest kind rather than waved through.
-      const toolName = requestId ? state.pendingPrompts.get(requestId) : undefined
-      const needed = permissionForTool(toolName)
-      return requirePermission(policy, state, needed, `Approving this action is not granted (${needed})`)
+      if (!requestId || !state.pendingPrompts.has(requestId)) {
+        return { allowed: false, reason: 'That prompt is no longer waiting for an answer' }
+      }
+      // "Always allow" and pattern approvals save a standing rule in the
+      // owner's project that outlives this share; a grantee answers once.
+      const toolName = state.pendingPrompts.get(requestId)
+      const decision = Array.isArray(msg.value) ? (msg.value as unknown[])[0] : msg.value
+      if (typeof decision === 'string' && STANDING_APPROVAL_OPTIONS.has(decision)) {
+        return { allowed: false, reason: 'Only the owner can save an always-allow rule; approve this once instead' }
+      }
+      if (toolName !== 'AskUserQuestion') {
+        // An approval is one decision. Extra elements are free text the
+        // local server may pass to the agent (a plan rejection's feedback),
+        // which needs the right to send prompts, not just to approve.
+        const value: unknown = msg.value
+        const strings = typeof value === 'string' ||
+          (Array.isArray(value) && value.length > 0 && value.every(v => typeof v === 'string'))
+        if (!strings) return { allowed: false, reason: 'Answer this prompt with one of its choices' }
+        if (Array.isArray(value) && value.length > 1) {
+          const message = requirePermission(policy, state, 'send_prompt', 'Adding a message to this answer is not granted')
+          if (!message.allowed) return message
+        }
+        // Approving a plan moves the session out of plan mode for good, a
+        // permission-mode change that is the owner's; rejecting it is not.
+        if (toolName === 'ExitPlanMode' && decision !== 'deny') {
+          return { allowed: false, reason: 'Only the owner can approve a plan' }
+        }
+      }
+      const needed = permissionForPrompt(toolName)
+      const result = requirePermission(policy, state, needed, `Answering this prompt is not granted (${needed})`)
+      // One answer per prompt: a replay cannot reach the local server, which
+      // would otherwise treat an answer to a settled prompt as a message.
+      if (result.allowed) state.pendingPrompts.delete(requestId)
+      return result
     }
 
     // Everything else changes the session's shape or the machine's state:
@@ -377,6 +449,8 @@ interface LocalFrame {
   sessionId?: unknown
   requestId?: unknown
   toolName?: unknown
+  promptType?: unknown
+  value?: unknown
 }
 
 function parseFrame(text: string): LocalFrame | null {
