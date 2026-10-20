@@ -75,7 +75,7 @@ function createContext(): WsHandlerContext & { sent: WsServerMessage[] } {
       stopClaudeAndWait: vi.fn().mockResolvedValue(undefined),
       get: vi.fn().mockReturnValue(session),
       sendInput: vi.fn(),
-      sendPromptResponse: vi.fn(),
+      sendPromptResponse: vi.fn().mockReturnValue({ delivered: true }),
       setModel: vi.fn().mockReturnValue(true),
       getSessionProvider: vi.fn().mockReturnValue('claude'),
       setProvider: vi.fn().mockReturnValue(true),
@@ -453,9 +453,29 @@ describe('handleWsMessage', () => {
       } as WsClientMessage, ctx)
 
       expect(ctx.sessions.sendPromptResponse).toHaveBeenCalledWith('sess-1', 'yes', 'req-42')
+      expect(ctx.sent).toHaveLength(0)
     })
 
-    it('does nothing without active session (logs warning)', () => {
+    it('tells only the answering client when its answer went nowhere, and whether the agent is busy', () => {
+      ;(ctx.sessions.sendPromptResponse as ReturnType<typeof vi.fn>).mockReturnValue({ delivered: false, reason: 'already answered' })
+      ;(ctx.sessions.get as ReturnType<typeof vi.fn>).mockReturnValue(mockSession({ isProcessing: false }))
+
+      handleWsMessage({ type: 'prompt_response', value: 'allow', requestId: 'stale' } as WsClientMessage, ctx)
+
+      expect(ctx.sent).toEqual([{ type: 'prompt_response_dropped', requestId: 'stale', reason: 'already answered', processing: false }])
+      expect(ctx.sessions.broadcast).not.toHaveBeenCalled()
+    })
+
+    it('keeps the spinner when the agent is still working', () => {
+      ;(ctx.sessions.sendPromptResponse as ReturnType<typeof vi.fn>).mockReturnValue({ delivered: false, reason: 'already answered' })
+      ;(ctx.sessions.get as ReturnType<typeof vi.fn>).mockReturnValue(mockSession({ isProcessing: true }))
+
+      handleWsMessage({ type: 'prompt_response', value: 'allow', requestId: 'stale' } as WsClientMessage, ctx)
+
+      expect(ctx.sent[0]).toMatchObject({ type: 'prompt_response_dropped', processing: true })
+    })
+
+    it('tells the client when it has no session to answer in', () => {
       ctx.clientSessions.clear()
       handleWsMessage({
         type: 'prompt_response',
@@ -464,6 +484,8 @@ describe('handleWsMessage', () => {
       } as WsClientMessage, ctx)
 
       expect(ctx.sessions.sendPromptResponse).not.toHaveBeenCalled()
+      // The client still learns its answer went nowhere, so its spinner stops.
+      expect(ctx.sent[0]).toMatchObject({ type: 'prompt_response_dropped', requestId: 'req-42', processing: false })
     })
   })
 

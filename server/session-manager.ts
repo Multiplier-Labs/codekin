@@ -32,7 +32,7 @@ import type { DiffFileStatus, DiffScope, DiffView, PrStatus, ReviewComment, Sess
 import { cleanupWorkspace } from './webhook-workspace.js'
 import { PORT } from './config.js'
 import { ApprovalManager } from './approval-manager.js'
-import { PromptRouter } from './prompt-router.js'
+import { PromptRouter, type PromptResponseOutcome } from './prompt-router.js'
 import { isIsolationBlocked, SessionLifecycle } from './session-lifecycle.js'
 import { SessionNaming } from './session-naming.js'
 import { SessionPersistence } from './session-persistence.js'
@@ -1474,8 +1474,8 @@ export class SessionManager {
    * Route a user's prompt response to the correct handler.
    * Delegates to PromptRouter.
    */
-  sendPromptResponse(sessionId: string, value: string | string[], requestId?: string): void {
-    this.promptRouter.sendPromptResponse(sessionId, value, requestId)
+  sendPromptResponse(sessionId: string, value: string | string[], requestId?: string): PromptResponseOutcome {
+    return this.promptRouter.sendPromptResponse(sessionId, value, requestId)
   }
 
   /**

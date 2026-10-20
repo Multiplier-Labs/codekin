@@ -523,31 +523,26 @@ describe('PromptRouter', () => {
       session.pendingControlRequests.set('cr-a', { requestId: 'cr-a', toolName: 'Bash', toolInput: {} })
       session.pendingControlRequests.set('cr-b', { requestId: 'cr-b', toolName: 'Read', toolInput: {} })
 
-      router.sendPromptResponse('sess-1', 'allow')
+      const outcome = router.sendPromptResponse('sess-1', 'allow')
 
-      expect(deps.broadcast).toHaveBeenCalledWith(session, expect.objectContaining({
-        type: 'system_message',
-        subtype: 'error',
-        text: expect.stringContaining('multiple prompts pending'),
-      }))
+      expect(outcome).toEqual({ delivered: false, reason: expect.stringContaining('multiple prompts pending') })
+      expect(session.claudeProcess!.sendControlResponse).not.toHaveBeenCalled()
     })
 
     it('falls back to sendMessage when there is no prompt and no requestId', () => {
-      router.sendPromptResponse('sess-1', 'hello world')
+      expect(router.sendPromptResponse('sess-1', 'hello world')).toEqual({ delivered: true })
 
       expect(session.claudeProcess!.sendMessage).toHaveBeenCalledWith('hello world')
     })
 
     it('drops an answer to a settled or unknown prompt instead of sending it as a message', () => {
-      router.sendPromptResponse('sess-1', 'rm -rf ~', 'already-answered')
+      const outcome = router.sendPromptResponse('sess-1', 'rm -rf ~', 'already-answered')
 
       expect(session.claudeProcess!.sendMessage).not.toHaveBeenCalled()
       expect(session.claudeProcess!.sendControlResponse).not.toHaveBeenCalled()
-      expect(deps.broadcast).toHaveBeenCalledWith(session, expect.objectContaining({
-        type: 'system_message',
-        subtype: 'error',
-        text: expect.stringContaining('already answered or has expired'),
-      }))
+      expect(outcome).toEqual({ delivered: false, reason: expect.stringContaining('already answered or has expired') })
+      // Other viewers are not told about someone else's stale click.
+      expect(deps.broadcast).not.toHaveBeenCalled()
     })
   })
 

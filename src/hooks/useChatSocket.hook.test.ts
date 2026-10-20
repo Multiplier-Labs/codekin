@@ -784,6 +784,40 @@ describe('useChatSocket hook', () => {
     })
   })
 
+  describe('prompt_response_dropped', () => {
+    function answerStalePrompt() {
+      const setup = setupConnected()
+      const ws = MockWebSocket.latest()
+      act(() => ws.simulateMessage({ type: 'session_created', sessionId: 's1', sessionName: 'Test', workingDir: '/tmp' } as WsServerMessage))
+      act(() => ws.simulateMessage({
+        type: 'prompt', promptType: 'permission', question: 'Allow?', requestId: 'r1',
+        options: [{ label: 'Allow', value: 'allow' }],
+      } as WsServerMessage))
+      act(() => setup.result.current.sendPromptResponse('allow'))
+      expect(setup.result.current.isProcessing).toBe(true)
+      return { ...setup, ws }
+    }
+
+    it('stops the spinner and shows why when the agent is idle', () => {
+      const { result, ws, unmount } = answerStalePrompt()
+      act(() => ws.simulateMessage({
+        type: 'prompt_response_dropped', requestId: 'r1', reason: 'That prompt was already answered.', processing: false,
+      } as WsServerMessage))
+      expect(result.current.isProcessing).toBe(false)
+      expect(JSON.stringify(result.current.messages)).toContain('That prompt was already answered.')
+      unmount()
+    })
+
+    it('keeps the spinner when the agent is still working', () => {
+      const { result, ws, unmount } = answerStalePrompt()
+      act(() => ws.simulateMessage({
+        type: 'prompt_response_dropped', requestId: 'r1', reason: 'x', processing: true,
+      } as WsServerMessage))
+      expect(result.current.isProcessing).toBe(true)
+      unmount()
+    })
+  })
+
   describe('claude_stopped and exit', () => {
     it('claude_stopped resets processing state', () => {
       const { result, unmount } = setupConnected()

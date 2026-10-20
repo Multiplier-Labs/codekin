@@ -241,10 +241,19 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
     case 'prompt_response': {
       const sessionId = clientSessions.get(ws)
       console.log(`[prompt_response] sessionId=${sessionId} value=${JSON.stringify(msg.value)} requestId=${msg.requestId}`)
-      if (sessionId) {
-        sessions.sendPromptResponse(sessionId, msg.value, msg.requestId)
-      } else {
-        console.warn('[prompt_response] no session found for client')
+      const outcome = sessionId
+        ? sessions.sendPromptResponse(sessionId, msg.value, msg.requestId)
+        : { delivered: false as const, reason: 'Join the session again, then answer the prompt.' }
+      if (!outcome.delivered) {
+        if (!sessionId) console.warn('[prompt_response] no session found for client')
+        // Only to this client: it dismissed its prompt and shows the agent as
+        // busy; whether it still is decides if its spinner keeps going.
+        send({
+          type: 'prompt_response_dropped',
+          requestId: msg.requestId,
+          reason: outcome.reason,
+          processing: (sessionId ? sessions.get(sessionId)?.isProcessing : undefined) ?? false,
+        })
       }
       break
     }
