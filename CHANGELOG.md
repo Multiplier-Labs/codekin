@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-10-20
+
+### Changed
+- Workspace admins can no longer transfer a machine to another member. A locked machine gets an **Unlock** button instead, for when its owner rejoins; anyone else pairs their own install as a new machine (#727)
+- The input box gets focus when you return to the window (#723)
+
+### Fixed
+- When an answer to a prompt goes nowhere (already answered, expired, or the agent has stopped), the spinner stops and only you see why, not every viewer (#726)
+- Grok naming and handoff prompts no longer fail with ENXIO; they're passed through a temp file (#722)
+
+### Security
+- Hosted relay: transferring a member's machine revoked nothing, so an admin could take over a live machine; machine transfer is now gone (#724, #727)
+- Hosted relay: opening a device link asks before switching the browser to the link creator's account, and every pairing screen, the install command, `install.sh` and the CLI name the account the machine joins (#724)
+- A failed `join_session` no longer leaves the socket acting on its previous session, which let a shared user's frames land in a session other than the one checked (#724)
+- People a session is shared with can answer only a specific, open prompt with the permission it needs. Answers without a valid request id are refused, and "always allow" rules and plan approval stay with the owner. Answering questions needs "send prompts", and OpenCode shell prompts need shell approval (#725)
+- Answers to prompts that are already settled are dropped instead of reaching the agent as a message (#725)
+
 ## [0.9.4] - 2026-10-18
 
 ### Added
