@@ -29,7 +29,7 @@ import { resolveMachineAccess, upsertShare } from './shares.js'
 import { listAuditEvents, recordAuditEvent } from './audit.js'
 import { BrowserHub } from './browser-hub.js'
 import type { ConnectorHub } from './connector-hub.js'
-import { approvePairing, completePairing, precreatePairing, startPairing, verifyMachineCredential } from './pairing.js'
+import { approvePairing, completePairing, startPairing, verifyMachineCredential } from './pairing.js'
 import type { RelayConfig } from './relay-config.js'
 
 const config = { publicUrl: 'https://relay.test', ownerGithubId: 1, allowedGithubIds: [] } as unknown as RelayConfig
@@ -368,19 +368,14 @@ describe('workspace boundary', () => {
       expect(listAuditEvents(db, { workspaceId: wsA }).map(e => e.kind)).toContain('member_removed')
     })
 
-    it('an admin sees every machine and can transfer a quarantined one, but cannot drive it', async () => {
+    it('an admin sees every machine and can remove one, but cannot drive it', async () => {
       await removeMember(alice, wsA, carol)
       const list = (await (await call(dave, `/api/workspaces/${wsA}/machines`)).json()) as {
         machines: Array<{ id: string; ownerLogin: string; quarantined: boolean }>
       }
       expect(list.machines.find(m => m.id === 'mCarolA')).toMatchObject({ ownerLogin: 'carol', quarantined: true })
       expect(resolveMachineAccess(db, dave, 'mA').kind).toBe('none')
-
-      const toCarol = await call(dave, `/api/workspaces/${wsA}/machines/mCarolA/transfer`, { method: 'POST', body: { userId: carol.id } })
-      expect(toCarol.status).toBe(400)
-      const toDave = await call(dave, `/api/workspaces/${wsA}/machines/mCarolA/transfer`, { method: 'POST', body: { userId: dave.id } })
-      expect(toDave.status).toBe(200)
-      expect(resolveMachineAccess(db, dave, 'mCarolA').kind).toBe('owner')
+      expect(resolveMachineAccess(db, dave, 'mCarolA').kind).toBe('none')
       expect((await call(carol, `/api/workspaces/${wsB}/machines`)).status).toBe(403)
       expect((await call(dave, `/api/workspaces/${wsA}/machines/mB`, { method: 'DELETE' })).status).toBe(404)
       expect((await call(dave, `/api/workspaces/${wsA}/machines/mCarolA`, { method: 'DELETE' })).status).toBe(200)
@@ -395,45 +390,42 @@ describe('workspace boundary', () => {
       if (done.status !== 'complete') throw new Error('claim failed')
       return { machineId: done.machineId, secret: done.machineSecret }
     }
-    const credentialCount = (machineId: string) =>
-      (db.prepare('SELECT COUNT(*) AS n FROM machine_credentials WHERE machine_id = ?').get(machineId) as { n: number }).n
+    const unlock = (who: UserRow, machineId: string) =>
+      call(who, `/api/workspaces/${wsA}/machines/${machineId}/unlock`, { method: 'POST' })
 
-    it('transferring a live machine to someone else revokes its install, so the admin cannot drive it', async () => {
-      const { machineId, secret } = pairMachine(carol)
-      const res = await call(dave, `/api/workspaces/${wsA}/machines/${machineId}/transfer`, { method: 'POST', body: { userId: dave.id } })
-      expect(res.status).toBe(200)
-      // The old connector can no longer authenticate, and its live socket is dropped.
-      expect(verifyMachineCredential(db, machineId, secret)).toBe(false)
-      expect(disconnectMachine).toHaveBeenCalledWith(machineId, 'machine transferred')
-      const event = listAuditEvents(db, { workspaceId: wsA }).find(e => e.kind === 'machine_transferred')
-      expect(event?.metadata).toMatchObject({ newOwnerUserId: dave.id, credentialRevoked: true })
-    })
-
-    it('an unclaimed install command or approved CLI pairing cannot mint a credential after a transfer', async () => {
-      const precreated = precreatePairing(db, carol.id, wsA)
-      const { userCode, deviceCode } = startPairing(db, { hostname: 'cli', platform: 'linux' })
-      const approved = approvePairing(db, userCode, carol.id, wsA)
-      if (!approved.ok) throw new Error('approve failed')
-
-      for (const machineId of [precreated.machineId, approved.machineId]) {
-        const res = await call(dave, `/api/workspaces/${wsA}/machines/${machineId}/transfer`, { method: 'POST', body: { userId: dave.id } })
-        expect(res.status).toBe(200)
-      }
-      expect(completePairing(db, precreated.pairingToken)).toEqual({ status: 'expired' })
-      expect(completePairing(db, deviceCode)).toEqual({ status: 'expired' })
-      expect(credentialCount(precreated.machineId)).toBe(0)
-      expect(credentialCount(approved.machineId)).toBe(0)
-    })
-
-    it('handing a quarantined machine back to its returning owner keeps its install working', async () => {
+    it('unlocking hands a locked machine back to its returning owner, install intact', async () => {
       const { machineId, secret } = pairMachine(carol)
       await removeMember(alice, wsA, carol)
+      // Not while the owner is gone.
+      expect(await (await unlock(dave, machineId)).json()).toEqual({ error: 'owner_not_member' })
+
       addMember(wsA, carol, 'member')
-      const res = await call(dave, `/api/workspaces/${wsA}/machines/${machineId}/transfer`, { method: 'POST', body: { userId: carol.id } })
+      const res = await unlock(dave, machineId)
       expect(res.status).toBe(200)
       expect(verifyMachineCredential(db, machineId, secret)).toBe(true)
-      expect(disconnectMachine).not.toHaveBeenCalled()
       expect(resolveMachineAccess(db, carol, machineId).kind).toBe('owner')
+      expect(resolveMachineAccess(db, dave, machineId).kind).toBe('none')
+      expect(reauthorize).toHaveBeenCalledWith({ machineId })
+      expect(listAuditEvents(db, { workspaceId: wsA }).map(e => e.kind)).toContain('machine_unlocked')
+    })
+
+    it('refuses to unlock for a non-admin, a machine that is not locked, or an owner back only as a viewer', async () => {
+      const { machineId } = pairMachine(carol)
+      expect((await unlock(dave, machineId)).status).toBe(409) // not locked
+      expect((await unlock(carol, machineId)).status).toBe(403) // a member, not an admin
+      await removeMember(alice, wsA, carol)
+      addMember(wsA, carol, 'viewer')
+      expect(await (await unlock(dave, machineId)).json()).toEqual({ error: 'owner_not_member' })
+    })
+
+    it('offers no way to hand a machine to someone else', async () => {
+      const { machineId, secret } = pairMachine(carol)
+      const res = await call(dave, `/api/workspaces/${wsA}/machines/${machineId}/transfer`, { method: 'POST', body: { userId: dave.id } })
+      expect(res.status).toBe(404)
+      expect(resolveMachineAccess(db, dave, machineId).kind).toBe('none')
+      expect(resolveMachineAccess(db, carol, machineId).kind).toBe('owner')
+      expect(verifyMachineCredential(db, machineId, secret)).toBe(true)
+      expect(disconnectMachine).not.toHaveBeenCalled()
     })
 
     it('a viewer is read-only even on a machine they own', async () => {

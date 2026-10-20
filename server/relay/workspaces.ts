@@ -24,7 +24,7 @@ export type WorkspaceAction =
   | 'machine.pair'
   /** Share sessions of one's own machines. */
   | 'machine.share'
-  /** See every machine's metadata; remove or transfer any machine. Never drives sessions. */
+  /** See every machine's metadata; remove any machine or unlock a returning owner's. Never drives sessions. */
   | 'machine.oversee'
   | 'member.list'
   /** Invite members and viewers (inviting an admin also needs member.manage_privileged). */
@@ -278,7 +278,7 @@ export type MemberRemovalResult =
 
 /**
  * Remove a member (or let them leave). Their machines in the workspace are
- * quarantined — unreachable until an admin transfers or removes them — and
+ * quarantined — unreachable until an admin unlocks or removes them — and
  * every share in the workspace to or from them is dropped. Their account and
  * their other workspaces are untouched.
  */
@@ -306,48 +306,30 @@ export function removeMember(db: Database.Database, workspaceId: string, userId:
   })()
 }
 
-export type MachineTransferResult =
-  | { ok: true; ownerChanged: boolean }
-  | { ok: false; reason: 'machine_not_found' | 'invalid_owner' }
+export type MachineUnlockResult =
+  | { ok: true }
+  | { ok: false; reason: 'machine_not_found' | 'not_locked' | 'owner_not_member' }
 
 /**
- * Hand a machine to another member (and lift any quarantine). The new owner
- * must be able to hold machines there. Shares the old owner made on it are
- * dropped: they were that person's decisions about their own sessions.
+ * Lift the quarantine on a machine whose owner is back in the workspace. Its
+ * install keeps working: it is still the same person's.
  *
- * The connector on the machine still runs as the old owner's install, so a
- * change of owner also revokes its credentials and expires any unclaimed
- * pairing for it: the new owner must prove physical control by pairing again
- * from that computer. Handing a machine back to its current owner (lifting a
- * quarantine) leaves the credentials alone.
+ * There is deliberately no way to hand a machine to someone else. A machine
+ * is one person's local install, running as their OS user with their home
+ * directory and sessions; a new person runs their own install, which pairs
+ * as a new machine. Reassigning the old entry would only hand them its
+ * history, or (before the credential was revoked) its control.
  */
-export function transferMachine(
-  db: Database.Database,
-  workspaceId: string,
-  machineId: string,
-  newOwnerUserId: string,
-): MachineTransferResult {
-  return db.transaction((): MachineTransferResult => {
+export function unlockMachine(db: Database.Database, workspaceId: string, machineId: string): MachineUnlockResult {
+  return db.transaction((): MachineUnlockResult => {
     const machine = db
-      .prepare('SELECT owner_user_id FROM machines WHERE id = ? AND workspace_id = ?')
-      .get(machineId, workspaceId) as { owner_user_id: string } | undefined
+      .prepare('SELECT owner_user_id, quarantined_at FROM machines WHERE id = ? AND workspace_id = ?')
+      .get(machineId, workspaceId) as { owner_user_id: string; quarantined_at: string | null } | undefined
     if (!machine) return { ok: false, reason: 'machine_not_found' }
-    const target = getActiveMembership(db, workspaceId, newOwnerUserId)
-    if (!target || !can(target.role, 'machine.pair')) return { ok: false, reason: 'invalid_owner' }
-    const ownerChanged = machine.owner_user_id !== newOwnerUserId
-    if (ownerChanged) {
-      db.prepare('DELETE FROM session_shares WHERE machine_id = ?').run(machineId)
-      db.prepare(
-        `UPDATE machine_credentials SET revoked_at = datetime('now') WHERE machine_id = ? AND revoked_at IS NULL`,
-      ).run(machineId)
-      // An approved-but-unclaimed pairing would otherwise mint a fresh
-      // credential, now under the new owner, for whoever holds its token.
-      db.prepare(
-        `UPDATE pairing_requests SET expires_at = MIN(expires_at, ?)
-         WHERE machine_id = ? AND status IN ('pending', 'approved')`,
-      ).run(Date.now(), machineId)
-    }
-    db.prepare('UPDATE machines SET owner_user_id = ?, quarantined_at = NULL WHERE id = ?').run(newOwnerUserId, machineId)
-    return { ok: true, ownerChanged }
+    if (machine.quarantined_at === null) return { ok: false, reason: 'not_locked' }
+    const owner = getActiveMembership(db, workspaceId, machine.owner_user_id)
+    if (!owner || !can(owner.role, 'machine.pair')) return { ok: false, reason: 'owner_not_member' }
+    db.prepare('UPDATE machines SET quarantined_at = NULL WHERE id = ?').run(machineId)
+    return { ok: true }
   })()
 }

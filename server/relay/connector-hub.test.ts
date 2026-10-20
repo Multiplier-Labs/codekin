@@ -259,7 +259,7 @@ describe('connector hub', () => {
     connector.stop()
   })
 
-  it('a transferred machine goes offline and its revoked secret cannot reconnect', async () => {
+  it('a disconnected machine goes offline and a revoked secret cannot reconnect', async () => {
     const statuses: string[] = []
     const connector = new RelayConnector({
       relayUrl, machineId, machineSecret, connectorVersion: '1',
@@ -269,9 +269,9 @@ describe('connector hub', () => {
     await waitFor(() => hub.isOnline(machineId))
     expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)[0].status).toBe('online')
 
-    // What a transfer to another owner does: revoke, then drop the socket.
+    // Revoke, then drop the socket.
     db.prepare(`UPDATE machine_credentials SET revoked_at = datetime('now') WHERE machine_id = ?`).run(machineId)
-    hub.disconnectMachine(machineId, 'machine transferred')
+    hub.disconnectMachine(machineId, 'credential revoked')
     expect(listMachines(db, BOOTSTRAP_WORKSPACE_ID)[0].status).toBe('offline')
     connector.stop()
 

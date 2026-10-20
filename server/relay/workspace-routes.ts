@@ -34,7 +34,7 @@ import {
   removeMember,
   renameWorkspace,
   setRequireMfa,
-  transferMachine,
+  unlockMachine,
   updateMember,
 } from './workspaces.js'
 import type { Membership, MembershipStatus } from './workspaces.js'
@@ -419,7 +419,8 @@ export function createWorkspaceRouter({ db, config, browserHub, connectorHub }: 
     res.json({ success: true })
   })
 
-  router.post('/api/workspaces/:id/machines/:machineId/transfer', requireActiveUser, (req, res) => {
+  // Hand a locked machine back to its owner once they are a member again.
+  router.post('/api/workspaces/:id/machines/:machineId/unlock', requireActiveUser, (req, res) => {
     const membership = memberOf(req, res)
     if (!membership) return
     const machineId = String(req.params.machineId)
@@ -427,26 +428,18 @@ export function createWorkspaceRouter({ db, config, browserHub, connectorHub }: 
       forbid(res)
       return
     }
-    const newOwner = (req.body as { userId?: unknown }).userId
-    if (typeof newOwner !== 'string') {
-      res.status(400).json({ error: 'userId is required' })
-      return
-    }
-    const result = transferMachine(db, membership.workspaceId, machineId, newOwner)
+    const result = unlockMachine(db, membership.workspaceId, machineId)
     if (!result.ok) {
-      res.status(result.reason === 'machine_not_found' ? 404 : 400).json({ error: result.reason })
+      res.status(result.reason === 'machine_not_found' ? 404 : 409).json({ error: result.reason })
       return
     }
-    // The old install's credential is revoked; drop its live connection too.
-    if (result.ownerChanged) connectorHub?.disconnectMachine(machineId, 'machine transferred')
     browserHub?.reauthorize({ machineId })
     recordAuditEvent(db, {
-      kind: 'machine_transferred',
+      kind: 'machine_unlocked',
       workspaceId: membership.workspaceId,
       actorUserId: membership.userId,
       machineId,
       ...audit(req),
-      metadata: { newOwnerUserId: newOwner, credentialRevoked: result.ownerChanged },
     })
     res.json({ success: true })
   })

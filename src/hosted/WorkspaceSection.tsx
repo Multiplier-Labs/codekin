@@ -28,7 +28,7 @@ import {
   renameWorkspace,
   setWorkspaceRequireMfa,
   switchWorkspace,
-  transferMachine,
+  unlockMachine,
   updateMember,
   type InvitableRole,
   type PendingInvitation,
@@ -175,7 +175,7 @@ function MemberRow({
           <button
             disabled={busy}
             onClick={() => {
-              if (!window.confirm(`Remove ${member.login} from this workspace? Their machines here are locked until an admin transfers or removes them.`)) return
+              if (!window.confirm(`Remove ${member.login} from this workspace? Their machines here are locked until they are added back and an admin unlocks them, or an admin removes them.`)) return
               void run(() => removeMember(workspaceId, member.userId))
             }}
             className={`${button} hover:text-error-4`}
@@ -322,7 +322,10 @@ function MachineOversight({ members }: { members: WorkspaceMember[] }) {
   const workspaceId = currentWorkspaceId() ?? ''
   const [machines, setMachines] = useState<WorkspaceMachine[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const eligibleOwners = members.filter(m => m.status === 'active' && m.accountStatus === 'active' && m.role !== 'viewer')
+  // Owners who could hold their machines again: active, and not viewers.
+  const ownersBack = new Set(
+    members.filter(m => m.status === 'active' && m.accountStatus === 'active' && m.role !== 'viewer').map(m => m.userId),
+  )
 
   const load = useCallback(async () => {
     try {
@@ -366,29 +369,18 @@ function MachineOversight({ members }: { members: WorkspaceMember[] }) {
                 <span className="ml-1.5 text-meta text-ink-muted">{machine.ownerLogin ?? 'unknown owner'}</span>
                 {machine.quarantined && <span className="ml-1.5 text-meta text-warning-5">locked — owner left</span>}
               </span>
-              <select
-                aria-label={`Transfer ${machine.displayName}`}
-                value=""
-                onChange={e => {
-                  const userId = e.target.value
-                  if (!userId) return
-                  if (userId !== machine.ownerUserId) {
-                    const login = eligibleOwners.find(m => m.userId === userId)?.login ?? 'the new owner'
-                    if (!window.confirm(
-                      `Transfer ${machine.displayName} to ${login}? Its connector is signed out. ${login} must run ` +
-                      '`codekin relay logout` and pair again on that computer, which adds a new machine entry; ' +
-                      'this one stays offline until removed.',
-                    )) return
-                  }
-                  void run(() => transferMachine(workspaceId, machine.id, userId))
-                }}
-                className={input}
-              >
-                <option value="">Transfer to…</option>
-                {eligibleOwners
-                  .filter(m => m.userId !== machine.ownerUserId || machine.quarantined)
-                  .map(m => <option key={m.userId} value={m.userId}>{m.login}</option>)}
-              </select>
+              {machine.quarantined && (
+                // Only for the owner's return: a machine is one person's
+                // install, so it is never handed to someone else.
+                <button
+                  onClick={() => { void run(() => unlockMachine(workspaceId, machine.id)) }}
+                  disabled={!ownersBack.has(machine.ownerUserId)}
+                  title={ownersBack.has(machine.ownerUserId) ? undefined : 'Add the owner back to the workspace first'}
+                  className={`${button} disabled:opacity-50`}
+                >
+                  Unlock
+                </button>
+              )}
               <button
                 onClick={() => {
                   if (!window.confirm(`Remove ${machine.displayName}? Its connector is signed out and must be paired again.`)) return
@@ -564,11 +556,11 @@ export function WorkspaceGeneral() {
           )}
           <Row
             label="Leave workspace"
-            description="Your machines here are locked until an admin transfers or removes them."
+            description="Your machines here are locked until you are added back and an admin unlocks them, or an admin removes them."
             control={
               <button
                 onClick={() => {
-                  if (!window.confirm(`Leave ${workspace.name}? Your machines here are locked until an admin transfers or removes them.`)) return
+                  if (!window.confirm(`Leave ${workspace.name}? Your machines here are locked until you are added back and an admin unlocks them, or an admin removes them.`)) return
                   void act(() => removeMember(workspace.id, account.userId), () => { void switchWorkspace(others.at(0)?.id ?? '') })
                 }}
                 className={dangerButton}

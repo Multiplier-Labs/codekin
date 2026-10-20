@@ -31,7 +31,7 @@ here and not copied from Erwin.
 | D7 | MFA is **mandatory for owners and admins**, and a per-workspace `require_mfa` extends it to everyone. | Codex |
 | D8 | No "trust this device" bypass in v1. Absolute session lifetime plus step-up provide the convenience/safety balance. | Codex (Claude had it optional) |
 | D9 | A workspace admin cannot reset another user's 2FA. Only the platform operator can, through the relay CLI, and the reset is audited. | Claude |
-| D10 | When a member is removed, their machines in that workspace are **quarantined** (not reachable) until someone explicitly transfers or deletes them. | Codex |
+| D10 | When a member is removed, their machines in that workspace are **quarantined** (not reachable) until an admin unlocks them for the returning owner or deletes them. | Codex |
 | D11 | Invitation tokens travel in the URL fragment, are stored hashed, are single-use and expire after 7 days. They are bound to a recipient: a verified GitHub email or an immutable GitHub id. | Both |
 | D12 | Invitations are copy-link only until transactional email exists. The UI never claims an email was delivered. | Both |
 | D13 | Schema changes go through versioned migrations (`PRAGMA user_version`). Each release includes a backup/restore rehearsal. Old single-org code is never deployed against the new data. | Codex |
@@ -103,11 +103,11 @@ needs a second factor to prompt for, and re-running GitHub OAuth is not a meanin
 - The Settings "Workspace" section (`WorkspaceSection.tsx`) holds:
   - the switcher, create, rename, leave and delete controls;
   - members, with role, suspend and remove;
-  - admin machine oversight: transfer or remove, including locked machines. Handing a machine back
-    to its own owner lifts the lock and keeps its install. Transferring it to *someone else* revokes
-    the machine's credential and unclaimed pairings and drops its connection: the new owner must
-    re-pair from that computer, which proves they control it. Otherwise an admin could take over a
-    member's live machine.
+  - admin machine oversight: remove any machine, or **unlock** a locked one once its owner is a
+    member again (its install keeps working). There is no transfer to another person. A machine is
+    one person's local install, running as their OS user with their home directory and sessions.
+    Someone else runs their own install, which pairs as a new machine. Transfer was removed after
+    the 2026-10-20 audit: handing a member's live machine to an admin let the admin drive it.
 - Accounts with no workspace get a dedicated screen (create one if allowed). The share dialog picks
   grantees from the workspace's members.
 
