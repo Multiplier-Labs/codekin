@@ -32,6 +32,11 @@ export interface PromptRouterDeps {
   onPlanApproved(session: Session): void
 }
 
+/** Whether a prompt response reached anything; `reason` is shown to whoever sent it. */
+export type PromptResponseOutcome = { delivered: true } | { delivered: false; reason: string }
+
+const DELIVERED: PromptResponseOutcome = { delivered: true }
+
 export class PromptRouter {
   private deps: PromptRouterDeps
 
@@ -207,10 +212,14 @@ export class PromptRouter {
    * Route a user's prompt response to the correct handler: pending tool approval
    * (from PermissionRequest hook), pending control request (from control_request
    * fallback path), or plain message fallback.
+   *
+   * Returns why a response went nowhere, so the caller can tell the client
+   * that sent it (which has already dismissed its prompt and is showing the
+   * agent as busy).
    */
-  sendPromptResponse(sessionId: string, value: string | string[], requestId?: string): void {
+  sendPromptResponse(sessionId: string, value: string | string[], requestId?: string): PromptResponseOutcome {
     const session = this.deps.getSession(sessionId)
-    if (!session) return
+    if (!session) return { delivered: false, reason: 'The session no longer exists, so the response was not sent.' }
     session._lastActivityAt = Date.now()
 
     // Check for pending tool approval from PreToolUse hook
@@ -224,7 +233,7 @@ export class PromptRouter {
         if (soleApproval) {
           console.warn(`[prompt_response] no requestId, routing to sole pending tool approval: ${soleApproval.toolName}`)
           this.resolveToolApproval(session, soleApproval, value)
-          return
+          return DELIVERED
         }
         const soleControl = session.pendingControlRequests.size === 1
           ? session.pendingControlRequests.values().next().value
@@ -235,12 +244,7 @@ export class PromptRouter {
         }
       } else if (totalPending > 1) {
         console.warn(`[prompt_response] no requestId with ${totalPending} pending prompts — rejecting to prevent misrouted response`)
-        this.deps.broadcast(session, {
-          type: 'system_message',
-          subtype: 'error',
-          text: 'Prompt response could not be routed: multiple prompts pending. Please refresh and try again.',
-        })
-        return
+        return { delivered: false, reason: 'Prompt response could not be routed: multiple prompts pending. Please refresh and try again.' }
       } else {
         console.warn(`[prompt_response] no requestId, no pending prompts — forwarding as user message`)
       }
@@ -248,10 +252,12 @@ export class PromptRouter {
     const approval = requestId ? session.pendingToolApprovals.get(requestId) : undefined
     if (approval) {
       this.resolveToolApproval(session, approval, value)
-      return
+      return DELIVERED
     }
 
-    if (!session.claudeProcess?.isAlive()) return
+    if (!session.claudeProcess?.isAlive()) {
+      return { delivered: false, reason: 'The agent is not running, so the response was not sent.' }
+    }
 
     // Find matching pending control request
     const pending = requestId ? session.pendingControlRequests.get(requestId) : undefined
@@ -271,16 +277,13 @@ export class PromptRouter {
       // timed out, or never existed). Delivering it as a message would let
       // an "approval" become an arbitrary prompt, so it goes nowhere.
       console.warn(`[prompt_response] requestId ${requestId} matches no pending prompt — dropping`)
-      this.deps.broadcast(session, {
-        type: 'system_message',
-        subtype: 'error',
-        text: 'That prompt was already answered or has expired, so the response was not sent.',
-      })
+      return { delivered: false, reason: 'That prompt was already answered or has expired, so the response was not sent.' }
     } else {
       // Fallback: no prompt at all, send as plain user message
       const answer = Array.isArray(value) ? value.join(', ') : value
       session.claudeProcess.sendMessage(answer)
     }
+    return DELIVERED
   }
 
   // ---------------------------------------------------------------------------

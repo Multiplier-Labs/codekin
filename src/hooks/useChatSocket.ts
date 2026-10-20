@@ -347,6 +347,14 @@ export function useChatSocket({
         break
       }
 
+      // Our answer went nowhere. Sending it turned the spinner on; the server
+      // says whether the agent is actually still working.
+      case 'prompt_response_dropped':
+        setIsProcessing(msg.processing)
+        flushBeforeStructuralMessage()
+        setMessages(prev => trimMessages(processMessage(prev, { type: 'system_message', subtype: 'error', text: msg.reason })))
+        break
+
       case 'session_created':
         currentSessionId.current = msg.sessionId
         setRenderSessionId(msg.sessionId)

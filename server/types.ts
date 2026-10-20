@@ -396,6 +396,8 @@ export type WsServerMessage =
   | { type: 'pong' }
   | { type: 'prompt'; promptType: 'permission' | 'question'; question: string; options: PromptOption[]; multiSelect?: boolean; toolName?: string; toolInput?: Record<string, unknown>; requestId?: string; sessionId?: string; sessionName?: string; questions?: PromptQuestion[]; approvePattern?: string }
   | { type: 'prompt_dismiss'; requestId?: string }
+  /** A prompt response went nowhere (prompt settled, agent gone); sent only to the client that answered. */
+  | { type: 'prompt_response_dropped'; requestId?: string; reason: string; processing: boolean }
   | { type: 'thinking'; summary: string }
   | { type: 'tool_active'; toolName: string; toolInput?: string }
   | { type: 'tool_done'; toolName: string; summary?: string }
