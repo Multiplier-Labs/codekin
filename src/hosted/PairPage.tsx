@@ -13,13 +13,27 @@ interface PairingRequest {
 
 type Phase = 'loading' | 'review' | 'approved' | 'denied' | 'unavailable'
 
-export function PairPage() {
+/** Where the relay says an approved machine went. */
+interface PairedInto {
+  ownerLogin: string | null
+  workspaceName: string | null
+}
+
+interface PairPageProps {
+  /** This tab's workspace, which the machine joins. */
+  workspaceName: string
+}
+
+export function PairPage({ workspaceName }: PairPageProps) {
   const initialCode = new URLSearchParams(window.location.search).get('code') ?? ''
   const [code, setCode] = useState(initialCode)
   const [request, setRequest] = useState<PairingRequest | null>(null)
   const [phase, setPhase] = useState<Phase>(initialCode ? 'loading' : 'review')
   const [displayName, setDisplayName] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [pairedInto, setPairedInto] = useState<PairedInto | null>(null)
+  // The signed-in account as the relay sees it; it becomes the owner on approval.
+  const [approverLogin, setApproverLogin] = useState<string | null>(null)
 
   const lookup = useCallback(async (userCode: string) => {
     setError(null)
@@ -34,8 +48,9 @@ export function PairPage() {
         setError(res.status === 404 ? 'No pairing request found for that code.' : 'Could not look up the code.')
         return
       }
-      const data = await res.json() as { request: PairingRequest }
+      const data = await res.json() as { request: PairingRequest; approverLogin?: string | null }
       setRequest(data.request)
+      setApproverLogin(data.approverLogin ?? null)
       if (data.request.status === 'pending') {
         setPhase('review')
       } else {
@@ -69,6 +84,9 @@ export function PairPage() {
         setError(data.error === 'expired' ? 'This pairing request has expired.' : 'That did not work — try again.')
         return
       }
+      if (action === 'approve') {
+        setPairedInto(await res.json().catch(() => null) as PairedInto | null)
+      }
       setPhase(action === 'approve' ? 'approved' : 'denied')
     } catch {
       setError('That did not work — try again.')
@@ -82,7 +100,10 @@ export function PairPage() {
 
         {phase === 'approved' && (
           <p className="text-body text-ink">
-            Machine paired. Return to your terminal — the CLI picks it up automatically.
+            Machine paired
+            {pairedInto?.ownerLogin && <> to <span className="font-mono">@{pairedInto.ownerLogin}</span></>}
+            {pairedInto?.workspaceName && <> in workspace {pairedInto.workspaceName}</>}
+            . Return to your terminal — the CLI picks it up automatically.
           </p>
         )}
 
@@ -119,6 +140,12 @@ export function PairPage() {
                     <dd className="text-ink">{request.platform ?? 'unknown'}</dd>
                   </div>
                 </dl>
+                {approverLogin && (
+                  <p className="mb-4 text-body text-ink">
+                    This machine will be added to <span className="font-mono">@{approverLogin}</span> in workspace{' '}
+                    {workspaceName}.
+                  </p>
+                )}
                 <label className="mb-4 block">
                   <span className="mb-1 block text-meta text-ink-muted">Display name (optional)</span>
                   <input

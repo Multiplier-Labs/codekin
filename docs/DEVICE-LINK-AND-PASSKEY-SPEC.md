@@ -106,7 +106,15 @@ Desktop (signed in)                Relay                       Phone
 3. **Claim** — the phone scans the QR with the camera, which opens `/link#<code>` in
    the browser. The SPA reads the code from `location.hash` (and immediately clears
    it via `history.replaceState`), then calls
-   `POST /api/auth/device-link/complete { code }`.
+   `POST /api/auth/device-link/lookup { code }`, which names the creating account
+   without using the code. The page asks before claiming — "Sign in as @B?", or,
+   when the browser is already signed in to another account, "You're signed in as
+   @A. This link will sign this browser in as @B instead." Only **Continue** calls
+   `POST /api/auth/device-link/complete { code }`; **Cancel** leaves the code unused.
+   Without this step, anyone could send a colleague a link that silently swapped
+   their browser onto the sender's account, so the next machine they paired would
+   belong to the sender. Pairing screens, the install command and the CLI name the
+   account for the same reason.
 4. **Mint** — the server hashes the code, looks up the pending request, checks TTL and
    single-use status, re-reads the creating user from the DB and requires
    `status = 'active'`, then marks the request `claimed`, **regenerates the session**
@@ -118,7 +126,7 @@ Desktop (signed in)                Relay                       Phone
 
 The fragment is never sent to the server, so the code cannot appear in nginx access
 logs, relay logs, or `Referer` headers. Only the deliberate
-`POST /api/auth/device-link/complete` carries it, in the request body, over TLS.
+`lookup` and `complete` POSTs carry it, in the request body, over TLS.
 
 ### 4.3 Parameters
 
@@ -139,10 +147,13 @@ timer; the table stays tiny.
 ```text
 POST /api/auth/device-link/start              requireActiveUser
 GET  /api/auth/device-link/:requestId/status  requireActiveUser (creator only)
+POST /api/auth/device-link/lookup             unauthenticated (possession of code; does not consume it)
 POST /api/auth/device-link/complete           unauthenticated (possession of code)
 ```
 
-All three live under `/api/auth`, inheriting the existing per-IP rate limiter.
+All four live under `/api/auth`, inheriting the existing per-IP rate limiter.
+`lookup` answers `{ creator: { login, displayName, avatarUrl } }` with the same error
+statuses as `complete`.
 `complete` responds `404` for unknown/claimed codes, `410` for expired, `403` when the
 creating user is no longer active — mirroring `pair/complete` semantics.
 

@@ -160,6 +160,15 @@ function writeRelayCredential(relayUrl, data, managed) {
   chmodSync(RELAY_CREDENTIAL_FILE, 0o600)
 }
 
+/**
+ * " as @login" for the account the relay paired this machine into, so whoever
+ * ran the command can tell it joined the account they expected.
+ */
+function pairedAs(data) {
+  // A GitHub login, checked so the relay's answer cannot write escape codes to the terminal.
+  return typeof data.ownerLogin === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(data.ownerLogin) ? ` as @${data.ownerLogin}` : ''
+}
+
 function printPairedNextSteps(managed) {
   if (managed) {
     console.log('The Codekin service brings this machine online within a few seconds.')
@@ -207,7 +216,7 @@ async function cmdRelayLogin(args) {
     const data = await res.json().catch(() => ({}))
     if (res.ok && data.status === 'complete') {
       writeRelayCredential(relayUrl, data, managed)
-      console.log(`Paired. Machine id: ${data.machineId}`)
+      console.log(`Paired${pairedAs(data)}. Machine id: ${data.machineId}`)
       printPairedNextSteps(managed)
       return
     }
@@ -255,7 +264,7 @@ async function cmdRelayLogin(args) {
     const data = await res.json().catch(() => ({}))
     if (res.ok && data.status === 'complete') {
       writeRelayCredential(relayUrl, data, managed)
-      console.log(`\nPaired. Machine id: ${data.machineId}`)
+      console.log(`\nPaired${pairedAs(data)}. Machine id: ${data.machineId}`)
       printPairedNextSteps(managed)
       return
     }

@@ -103,7 +103,11 @@ needs a second factor to prompt for, and re-running GitHub OAuth is not a meanin
 - The Settings "Workspace" section (`WorkspaceSection.tsx`) holds:
   - the switcher, create, rename, leave and delete controls;
   - members, with role, suspend and remove;
-  - admin machine oversight: transfer or remove, including locked machines.
+  - admin machine oversight: transfer or remove, including locked machines. Handing a machine back
+    to its own owner lifts the lock and keeps its install. Transferring it to *someone else* revokes
+    the machine's credential and unclaimed pairings and drops its connection: the new owner must
+    re-pair from that computer, which proves they control it. Otherwise an admin could take over a
+    member's live machine.
 - Accounts with no workspace get a dedicated screen (create one if allowed). The share dialog picks
   grantees from the workspace's members.
 

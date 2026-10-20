@@ -149,6 +149,38 @@ describe('device link routes', () => {
     ).toBe(400)
   })
 
+  it('lookup names the creator without using up the code', async () => {
+    const { linkUrl } = await startLink()
+    const body = JSON.stringify({ code: codeFromLinkUrl(linkUrl) })
+    const lookup = async () => fetch(`${baseUrl}/api/auth/device-link/lookup`, { method: 'POST', headers: anon, body })
+
+    const first = await lookup()
+    expect(first.status).toBe(200)
+    expect(await first.json()).toEqual({ creator: { id: activeUser.id, login: 'owner', displayName: null, avatarUrl: null } })
+    // No session was minted by looking.
+    expect(first.headers.get('set-cookie')).toBeNull()
+    expect((await lookup()).status).toBe(200)
+
+    expect((await fetch(`${baseUrl}/api/auth/device-link/complete`, { method: 'POST', headers: anon, body })).status).toBe(200)
+    expect((await lookup()).status).toBe(404)
+  })
+
+  it('lookup answers expired, disabled-creator, unknown and missing codes like complete does', async () => {
+    const lookup = async (payload: unknown) =>
+      (await fetch(`${baseUrl}/api/auth/device-link/lookup`, { method: 'POST', headers: anon, body: JSON.stringify(payload) })).status
+
+    const expired = codeFromLinkUrl((await startLink()).linkUrl)
+    db.prepare('UPDATE device_link_requests SET expires_at = ?').run(Date.now() - 1)
+    expect(await lookup({ code: expired })).toBe(410)
+
+    const disabled = codeFromLinkUrl((await startLink()).linkUrl)
+    db.prepare(`UPDATE users SET status = 'disabled' WHERE id = ?`).run(activeUser.id)
+    expect(await lookup({ code: disabled })).toBe(403)
+
+    expect(await lookup({ code: 'nope' })).toBe(404)
+    expect(await lookup({})).toBe(400)
+  })
+
   it("another user's status poll cannot see the request", async () => {
     const { requestId } = await startLink()
     const other = upsertUserFromGithub(

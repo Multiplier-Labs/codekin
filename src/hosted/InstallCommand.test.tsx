@@ -65,6 +65,11 @@ describe('InstallCommand', () => {
     ])
   })
 
+  it('names the account and workspace the machine pairs into', () => {
+    render(<InstallCommand pairing={pairing({ ownerLogin: 'alari76', workspaceName: 'Multiplier Labs' })} onGenerate={vi.fn()} generating={false} error={null} />)
+    expect(container!.textContent).toContain('Pairs into @alari76 in workspace Multiplier Labs')
+  })
+
   it('offers to generate when there is no command yet', () => {
     const onGenerate = vi.fn()
     render(<InstallCommand pairing={null} onGenerate={onGenerate} generating={false} error={null} />)

@@ -166,7 +166,10 @@ if (res.ok && data.status === "complete") {
   const credential = { url: relayUrl, machineId: data.machineId, machineSecret: data.machineSecret, managed: true }
   writeFileSync(file, JSON.stringify(credential, null, 2) + "\n", { mode: 0o600 })
   chmodSync(file, 0o600)
-  console.log(data.machineId)
+  // Name the account the relay paired this machine into, so whoever ran the
+  // command can tell it joined the one they expected.
+  const owner = typeof data.ownerLogin === "string" && /^[A-Za-z0-9-]{1,39}$/.test(data.ownerLogin) ? `@${data.ownerLogin}, ` : ""
+  console.log(`${owner}id ${data.machineId}`)
   process.exit(0)
 }
 if (data.status === "expired") { console.log("the setup command expired"); process.exit(2) }
@@ -179,7 +182,7 @@ process.exit(1)
   case "$status" in
     0)
       PAIR_STATE="paired"
-      success "Machine paired (id ${output})."
+      success "Machine paired (${output})."
       ;;
     3)
       PAIR_STATE="already"

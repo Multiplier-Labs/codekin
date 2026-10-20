@@ -437,6 +437,8 @@ export function createWorkspaceRouter({ db, config, browserHub, connectorHub }: 
       res.status(result.reason === 'machine_not_found' ? 404 : 400).json({ error: result.reason })
       return
     }
+    // The old install's credential is revoked; drop its live connection too.
+    if (result.ownerChanged) connectorHub?.disconnectMachine(machineId, 'machine transferred')
     browserHub?.reauthorize({ machineId })
     recordAuditEvent(db, {
       kind: 'machine_transferred',
@@ -444,7 +446,7 @@ export function createWorkspaceRouter({ db, config, browserHub, connectorHub }: 
       actorUserId: membership.userId,
       machineId,
       ...audit(req),
-      metadata: { newOwnerUserId: newOwner },
+      metadata: { newOwnerUserId: newOwner, credentialRevoked: result.ownerChanged },
     })
     res.json({ success: true })
   })

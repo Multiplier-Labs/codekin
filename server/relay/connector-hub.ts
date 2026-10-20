@@ -436,6 +436,9 @@ export class ConnectorHub {
     if (!machine) return
     this.machines.delete(machineId)
     this.failPending(machine, reason)
+    // The close handler skips this once the map entry is gone; a transferred
+    // machine's row survives, so mark it offline here.
+    this.setStatus(machineId, 'offline')
     machine.socket.close(CLOSE_AUTH_FAILED, reason)
     recordAuditEvent(this.db, { kind: 'machine_disconnected', machineId, metadata: { reason } })
   }

@@ -76,6 +76,25 @@ export function getDeviceLinkStatus(
   return row.expires_at <= Date.now() ? 'expired' : 'pending'
 }
 
+export type LookupDeviceLinkResult =
+  | { status: 'not_found' }
+  | { status: 'expired' }
+  | { status: 'pending'; createdByUserId: string }
+
+/**
+ * Who a code would sign a browser in as, without claiming it. The claim
+ * page shows this first, so following a link never silently swaps the
+ * account a browser is signed in to.
+ */
+export function lookupDeviceLink(db: Database.Database, code: string): LookupDeviceLinkResult {
+  const row = db
+    .prepare('SELECT * FROM device_link_requests WHERE code_hash = ?')
+    .get(sha256Hex(code)) as DeviceLinkRequestRow | undefined
+  if (!row || row.status === 'claimed') return { status: 'not_found' }
+  if (row.expires_at <= Date.now()) return { status: 'expired' }
+  return { status: 'pending', createdByUserId: row.created_by_user_id }
+}
+
 export type CompleteDeviceLinkResult =
   | { status: 'not_found' }
   | { status: 'expired' }

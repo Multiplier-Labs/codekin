@@ -28,6 +28,8 @@ import { toSessionUser } from './relay-auth-routes.js'
 import { resolveMachineAccess, upsertShare } from './shares.js'
 import { listAuditEvents, recordAuditEvent } from './audit.js'
 import { BrowserHub } from './browser-hub.js'
+import type { ConnectorHub } from './connector-hub.js'
+import { approvePairing, completePairing, precreatePairing, startPairing, verifyMachineCredential } from './pairing.js'
 import type { RelayConfig } from './relay-config.js'
 
 const config = { publicUrl: 'https://relay.test', ownerGithubId: 1, allowedGithubIds: [] } as unknown as RelayConfig
@@ -128,6 +130,7 @@ describe('workspace boundary', () => {
   let base: string
   let hub: BrowserHub
   const reauthorize = vi.fn()
+  const disconnectMachine = vi.fn()
   // Personas: alice owns workspace A (bootstrap), bob owns B, carol is in both.
   let alice: UserRow
   let bob: UserRow
@@ -164,6 +167,7 @@ describe('workspace boundary', () => {
 
   beforeEach(async () => {
     reauthorize.mockClear()
+    disconnectMachine.mockClear()
     db = openControlPlaneDb(':memory:')
     alice = addUser(1, 'alice') // operator; owner of the bootstrap workspace
     bob = addUser(2, 'bob')
@@ -191,7 +195,9 @@ describe('workspace boundary', () => {
       if (typeof id === 'string') { req.session.user = toSessionUser(getUserById(db, id)!); signInFully(db, req.session, req.session.user.id) }
       next()
     })
-    app.use(createWorkspaceRouter({ db, config, browserHub: hubSpy }))
+    app.use(createWorkspaceRouter({
+      db, config, browserHub: hubSpy, connectorHub: { disconnectMachine } as unknown as ConnectorHub,
+    }))
     app.use(createMachineRouter(db))
     app.use(createShareRouter(db, hubSpy))
     app.use(createPairingRouter(db, config))
@@ -378,6 +384,56 @@ describe('workspace boundary', () => {
       expect((await call(carol, `/api/workspaces/${wsB}/machines`)).status).toBe(403)
       expect((await call(dave, `/api/workspaces/${wsA}/machines/mB`, { method: 'DELETE' })).status).toBe(404)
       expect((await call(dave, `/api/workspaces/${wsA}/machines/mCarolA`, { method: 'DELETE' })).status).toBe(200)
+    })
+
+    /** Pair a machine for `owner` in workspace A the way the CLI does; returns its id and secret. */
+    const pairMachine = (owner: UserRow) => {
+      const { userCode, deviceCode } = startPairing(db, { hostname: 'box', platform: 'linux' })
+      const approved = approvePairing(db, userCode, owner.id, wsA)
+      if (!approved.ok) throw new Error('approve failed')
+      const done = completePairing(db, deviceCode)
+      if (done.status !== 'complete') throw new Error('claim failed')
+      return { machineId: done.machineId, secret: done.machineSecret }
+    }
+    const credentialCount = (machineId: string) =>
+      (db.prepare('SELECT COUNT(*) AS n FROM machine_credentials WHERE machine_id = ?').get(machineId) as { n: number }).n
+
+    it('transferring a live machine to someone else revokes its install, so the admin cannot drive it', async () => {
+      const { machineId, secret } = pairMachine(carol)
+      const res = await call(dave, `/api/workspaces/${wsA}/machines/${machineId}/transfer`, { method: 'POST', body: { userId: dave.id } })
+      expect(res.status).toBe(200)
+      // The old connector can no longer authenticate, and its live socket is dropped.
+      expect(verifyMachineCredential(db, machineId, secret)).toBe(false)
+      expect(disconnectMachine).toHaveBeenCalledWith(machineId, 'machine transferred')
+      const event = listAuditEvents(db, { workspaceId: wsA }).find(e => e.kind === 'machine_transferred')
+      expect(event?.metadata).toMatchObject({ newOwnerUserId: dave.id, credentialRevoked: true })
+    })
+
+    it('an unclaimed install command or approved CLI pairing cannot mint a credential after a transfer', async () => {
+      const precreated = precreatePairing(db, carol.id, wsA)
+      const { userCode, deviceCode } = startPairing(db, { hostname: 'cli', platform: 'linux' })
+      const approved = approvePairing(db, userCode, carol.id, wsA)
+      if (!approved.ok) throw new Error('approve failed')
+
+      for (const machineId of [precreated.machineId, approved.machineId]) {
+        const res = await call(dave, `/api/workspaces/${wsA}/machines/${machineId}/transfer`, { method: 'POST', body: { userId: dave.id } })
+        expect(res.status).toBe(200)
+      }
+      expect(completePairing(db, precreated.pairingToken)).toEqual({ status: 'expired' })
+      expect(completePairing(db, deviceCode)).toEqual({ status: 'expired' })
+      expect(credentialCount(precreated.machineId)).toBe(0)
+      expect(credentialCount(approved.machineId)).toBe(0)
+    })
+
+    it('handing a quarantined machine back to its returning owner keeps its install working', async () => {
+      const { machineId, secret } = pairMachine(carol)
+      await removeMember(alice, wsA, carol)
+      addMember(wsA, carol, 'member')
+      const res = await call(dave, `/api/workspaces/${wsA}/machines/${machineId}/transfer`, { method: 'POST', body: { userId: carol.id } })
+      expect(res.status).toBe(200)
+      expect(verifyMachineCredential(db, machineId, secret)).toBe(true)
+      expect(disconnectMachine).not.toHaveBeenCalled()
+      expect(resolveMachineAccess(db, carol, machineId).kind).toBe('owner')
     })
 
     it('a viewer is read-only even on a machine they own', async () => {

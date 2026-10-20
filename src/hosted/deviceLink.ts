@@ -39,6 +39,39 @@ export type ClaimResult =
   | { ok: true; user: HostedUser }
   | { ok: false; reason: ClaimFailure }
 
+/** The account a link code signs a browser in as. */
+export interface LinkCreator {
+  id: string
+  login: string
+  displayName: string | null
+  avatarUrl: string | null
+}
+
+export type LookupResult =
+  | { ok: true; creator: LinkCreator }
+  | { ok: false; reason: ClaimFailure }
+
+/** Ask who created a link code, without using it up. */
+export async function lookupDeviceLink(code: string): Promise<LookupResult> {
+  try {
+    const res = await fetch('/api/auth/device-link/lookup', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    })
+    if (res.ok) {
+      const data = await res.json() as { creator: LinkCreator }
+      return { ok: true, creator: data.creator }
+    }
+    if (res.status === 410) return { ok: false, reason: 'expired' }
+    if (res.status === 403) return { ok: false, reason: 'not_allowed' }
+    return { ok: false, reason: 'invalid' }
+  } catch {
+    return { ok: false, reason: 'network' }
+  }
+}
+
 export async function claimDeviceLink(code: string): Promise<ClaimResult> {
   try {
     const res = await fetch('/api/auth/device-link/complete', {
