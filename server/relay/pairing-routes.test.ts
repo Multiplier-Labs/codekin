@@ -128,8 +128,10 @@ describe('pairing routes', () => {
 
     const infoRes = await fetch(`${baseUrl}/api/machines/pair/info?code=${userCode}`, { headers: asUser })
     expect(infoRes.status).toBe(200)
-    const info = await infoRes.json() as { request: { hostname: string; status: string } }
+    const info = await infoRes.json() as { request: { hostname: string; status: string }; approverLogin: string }
     expect(info.request.hostname).toBe('devbox')
+    // Named on the approval screen: the account the machine will join.
+    expect(info.approverLogin).toBe('alari76')
     expect(info.request.status).toBe('pending')
 
     // Device polls before approval → 202

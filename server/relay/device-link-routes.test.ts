@@ -156,7 +156,7 @@ describe('device link routes', () => {
 
     const first = await lookup()
     expect(first.status).toBe(200)
-    expect(await first.json()).toEqual({ creator: { login: 'owner', displayName: null, avatarUrl: null } })
+    expect(await first.json()).toEqual({ creator: { id: activeUser.id, login: 'owner', displayName: null, avatarUrl: null } })
     // No session was minted by looking.
     expect(first.headers.get('set-cookie')).toBeNull()
     expect((await lookup()).status).toBe(200)

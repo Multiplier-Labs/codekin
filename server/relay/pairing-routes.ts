@@ -215,7 +215,9 @@ export function createPairingRouter(
       res.status(404).json({ error: 'Pairing request not found' })
       return
     }
-    res.json({ request: info })
+    // The approval screen names the account from the relay's view of this
+    // request, not the tab's possibly stale state.
+    res.json({ request: info, approverLogin: req.session.user?.login ?? null })
   })
 
   router.post('/api/machines/pair/approve', requireActiveUser, requireWorkspace, (req, res) => {

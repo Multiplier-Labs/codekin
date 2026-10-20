@@ -41,6 +41,7 @@ export type ClaimResult =
 
 /** The account a link code signs a browser in as. */
 export interface LinkCreator {
+  id: string
   login: string
   displayName: string | null
   avatarUrl: string | null

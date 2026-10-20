@@ -20,13 +20,11 @@ interface PairedInto {
 }
 
 interface PairPageProps {
-  /** The signed-in account, which becomes the machine's owner on approval. */
-  login: string
   /** This tab's workspace, which the machine joins. */
   workspaceName: string
 }
 
-export function PairPage({ login, workspaceName }: PairPageProps) {
+export function PairPage({ workspaceName }: PairPageProps) {
   const initialCode = new URLSearchParams(window.location.search).get('code') ?? ''
   const [code, setCode] = useState(initialCode)
   const [request, setRequest] = useState<PairingRequest | null>(null)
@@ -34,6 +32,8 @@ export function PairPage({ login, workspaceName }: PairPageProps) {
   const [displayName, setDisplayName] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [pairedInto, setPairedInto] = useState<PairedInto | null>(null)
+  // The signed-in account as the relay sees it; it becomes the owner on approval.
+  const [approverLogin, setApproverLogin] = useState<string | null>(null)
 
   const lookup = useCallback(async (userCode: string) => {
     setError(null)
@@ -48,8 +48,9 @@ export function PairPage({ login, workspaceName }: PairPageProps) {
         setError(res.status === 404 ? 'No pairing request found for that code.' : 'Could not look up the code.')
         return
       }
-      const data = await res.json() as { request: PairingRequest }
+      const data = await res.json() as { request: PairingRequest; approverLogin?: string | null }
       setRequest(data.request)
+      setApproverLogin(data.approverLogin ?? null)
       if (data.request.status === 'pending') {
         setPhase('review')
       } else {
@@ -139,10 +140,12 @@ export function PairPage({ login, workspaceName }: PairPageProps) {
                     <dd className="text-ink">{request.platform ?? 'unknown'}</dd>
                   </div>
                 </dl>
-                <p className="mb-4 text-body text-ink">
-                  This machine will be added to <span className="font-mono">@{login}</span> in workspace{' '}
-                  {workspaceName}.
-                </p>
+                {approverLogin && (
+                  <p className="mb-4 text-body text-ink">
+                    This machine will be added to <span className="font-mono">@{approverLogin}</span> in workspace{' '}
+                    {workspaceName}.
+                  </p>
+                )}
                 <label className="mb-4 block">
                   <span className="mb-1 block text-meta text-ink-muted">Display name (optional)</span>
                   <input

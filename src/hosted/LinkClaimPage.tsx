@@ -107,7 +107,7 @@ export function LinkClaimPage({ currentUser }: LinkClaimPageProps) {
           <>
             {currentUser === undefined ? (
               <p className="mb-6 text-body text-ink-muted">Checking who is signed in here…</p>
-            ) : currentUser && currentUser.login !== phase.creator.login ? (
+            ) : currentUser && currentUser.id !== phase.creator.id ? (
               <p className="mb-6 text-body text-ink">
                 You&apos;re signed in as <span className="font-mono">@{currentUser.login}</span>. This link
                 will sign this browser in as <span className="font-mono">@{phase.creator.login}</span> instead.

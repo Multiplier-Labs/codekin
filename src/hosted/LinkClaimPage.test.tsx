@@ -50,7 +50,7 @@ function stubRelay({ lookup = 200, complete = 200 }: { lookup?: number; complete
       return Promise.resolve({
         ok: lookup === 200,
         status: lookup,
-        json: () => Promise.resolve({ creator: { login: 'mallory', displayName: null, avatarUrl: null } }),
+        json: () => Promise.resolve({ creator: { id: 'u-m', login: 'mallory', displayName: null, avatarUrl: null } }),
       })
     }
     return Promise.resolve({
@@ -137,6 +137,14 @@ describe('LinkClaimPage', () => {
     const el = await render(victim)
     await click('Continue as @mallory')
     expect(el.textContent).toContain('This link expired')
+  })
+
+  it('tells accounts apart by id, not login, which can be re-registered', async () => {
+    history.replaceState(null, '', `/link#${CODE}`)
+    stubRelay()
+    const el = await render({ ...victim, login: 'mallory' })
+    expect(el.textContent).toContain('signed in as @mallory')
+    expect(el.textContent).toContain('sign this browser in as @mallory instead')
   })
 
   it('waits to learn who is signed in before offering to continue', async () => {

@@ -165,7 +165,8 @@ function writeRelayCredential(relayUrl, data, managed) {
  * ran the command can tell it joined the account they expected.
  */
 function pairedAs(data) {
-  return typeof data.ownerLogin === 'string' && data.ownerLogin ? ` as @${data.ownerLogin}` : ''
+  // A GitHub login, checked so the relay's answer cannot write escape codes to the terminal.
+  return typeof data.ownerLogin === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(data.ownerLogin) ? ` as @${data.ownerLogin}` : ''
 }
 
 function printPairedNextSteps(managed) {

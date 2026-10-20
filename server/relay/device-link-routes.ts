@@ -70,7 +70,9 @@ export function createDeviceLinkRouter(db: Database.Database, config: RelayConfi
       res.status(403).json({ error: 'Access not granted' })
       return
     }
-    res.json({ creator: { login: user.login, displayName: user.display_name, avatarUrl: user.avatar_url } })
+    // The id lets the page tell "same account" apart reliably: logins can be
+    // renamed and re-registered.
+    res.json({ creator: { id: user.id, login: user.login, displayName: user.display_name, avatarUrl: user.avatar_url } })
   })
 
   router.post('/api/auth/device-link/complete', (req, res, next) => {

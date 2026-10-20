@@ -319,7 +319,7 @@ export default function HostedApp() {
   }
 
   if (window.location.pathname === '/pair') {
-    return <PairPage login={user.login} workspaceName={workspace.name} />
+    return <PairPage workspaceName={workspace.name} />
   }
 
   // Same blank page the auth latch uses: a remembered connection should not
