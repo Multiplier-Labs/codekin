@@ -371,7 +371,16 @@ function MachineOversight({ members }: { members: WorkspaceMember[] }) {
                 value=""
                 onChange={e => {
                   const userId = e.target.value
-                  if (userId) void run(() => transferMachine(workspaceId, machine.id, userId))
+                  if (!userId) return
+                  if (userId !== machine.ownerUserId) {
+                    const login = eligibleOwners.find(m => m.userId === userId)?.login ?? 'the new owner'
+                    if (!window.confirm(
+                      `Transfer ${machine.displayName} to ${login}? Its connector is signed out. ${login} must run ` +
+                      '`codekin relay logout` and pair again on that computer, which adds a new machine entry; ' +
+                      'this one stays offline until removed.',
+                    )) return
+                  }
+                  void run(() => transferMachine(workspaceId, machine.id, userId))
                 }}
                 className={input}
               >

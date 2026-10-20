@@ -307,13 +307,19 @@ export function removeMember(db: Database.Database, workspaceId: string, userId:
 }
 
 export type MachineTransferResult =
-  | { ok: true }
+  | { ok: true; ownerChanged: boolean }
   | { ok: false; reason: 'machine_not_found' | 'invalid_owner' }
 
 /**
  * Hand a machine to another member (and lift any quarantine). The new owner
  * must be able to hold machines there. Shares the old owner made on it are
  * dropped: they were that person's decisions about their own sessions.
+ *
+ * The connector on the machine still runs as the old owner's install, so a
+ * change of owner also revokes its credentials and expires any unclaimed
+ * pairing for it: the new owner must prove physical control by pairing again
+ * from that computer. Handing a machine back to its current owner (lifting a
+ * quarantine) leaves the credentials alone.
  */
 export function transferMachine(
   db: Database.Database,
@@ -328,10 +334,20 @@ export function transferMachine(
     if (!machine) return { ok: false, reason: 'machine_not_found' }
     const target = getActiveMembership(db, workspaceId, newOwnerUserId)
     if (!target || !can(target.role, 'machine.pair')) return { ok: false, reason: 'invalid_owner' }
-    if (machine.owner_user_id !== newOwnerUserId) {
+    const ownerChanged = machine.owner_user_id !== newOwnerUserId
+    if (ownerChanged) {
       db.prepare('DELETE FROM session_shares WHERE machine_id = ?').run(machineId)
+      db.prepare(
+        `UPDATE machine_credentials SET revoked_at = datetime('now') WHERE machine_id = ? AND revoked_at IS NULL`,
+      ).run(machineId)
+      // An approved-but-unclaimed pairing would otherwise mint a fresh
+      // credential, now under the new owner, for whoever holds its token.
+      db.prepare(
+        `UPDATE pairing_requests SET expires_at = MIN(expires_at, ?)
+         WHERE machine_id = ? AND status IN ('pending', 'approved')`,
+      ).run(Date.now(), machineId)
     }
     db.prepare('UPDATE machines SET owner_user_id = ?, quarantined_at = NULL WHERE id = ?').run(newOwnerUserId, machineId)
-    return { ok: true }
+    return { ok: true, ownerChanged }
   })()
 }
