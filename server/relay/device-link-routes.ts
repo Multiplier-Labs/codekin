@@ -2,10 +2,11 @@
  * REST endpoints for device linking (docs/DEVICE-LINK-AND-PASSKEY-SPEC.md §4).
  *
  * start/status are called by the signed-in browser that shows the QR and
- * require an active user. complete is called by the new device and is
- * unauthenticated — possession of the single-use code is the credential; it
- * mints a session for the code's creator. All three live under /api/auth and
- * inherit its per-IP rate limit.
+ * require an active user. lookup and complete are called by the new device
+ * and are unauthenticated — possession of the single-use code is the
+ * credential. lookup names the code's creator without using the code, so the
+ * device can confirm the account before complete mints a session for it.
+ * All four live under /api/auth and inherit its per-IP rate limit.
  */
 
 import { Router } from 'express'
@@ -13,7 +14,7 @@ import type Database from 'better-sqlite3'
 import type { RelayConfig } from './relay-config.js'
 import { createRequireActiveUser, createRequireRecentAuth, establishSession } from './relay-auth-routes.js'
 import { getUserById } from './control-plane-db.js'
-import { startDeviceLink, getDeviceLinkStatus, completeDeviceLink } from './device-link.js'
+import { startDeviceLink, getDeviceLinkStatus, lookupDeviceLink, completeDeviceLink } from './device-link.js'
 import { recordAuditEvent } from './audit.js'
 
 export function createDeviceLinkRouter(db: Database.Database, config: RelayConfig): Router {
@@ -46,6 +47,30 @@ export function createDeviceLinkRouter(db: Database.Database, config: RelayConfi
       return
     }
     res.json({ status })
+  })
+
+  // The code travels in a POST body, not the URL, to stay out of access logs.
+  router.post('/api/auth/device-link/lookup', (req, res) => {
+    const body = (req.body ?? {}) as { code?: unknown }
+    if (typeof body.code !== 'string' || !body.code) {
+      res.status(400).json({ error: 'code required' })
+      return
+    }
+    const result = lookupDeviceLink(db, body.code)
+    if (result.status === 'expired') {
+      res.status(410).json({ error: 'expired' })
+      return
+    }
+    if (result.status === 'not_found') {
+      res.status(404).json({ error: 'not_found' })
+      return
+    }
+    const user = getUserById(db, result.createdByUserId)
+    if (!user || user.status !== 'active') {
+      res.status(403).json({ error: 'Access not granted' })
+      return
+    }
+    res.json({ creator: { login: user.login, displayName: user.display_name, avatarUrl: user.avatar_url } })
   })
 
   router.post('/api/auth/device-link/complete', (req, res, next) => {

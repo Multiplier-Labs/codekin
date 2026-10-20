@@ -122,6 +122,12 @@ export function InstallCommand({ pairing, onGenerate, generating, error }: Insta
         label="Already running Codekin there? Connect it directly:"
         command={commands.login}
       />
+      {pairing.ownerLogin && (
+        <p className="mt-2 text-meta text-ink-muted">
+          Pairs into <span className="font-mono text-ink">@{pairing.ownerLogin}</span>
+          {pairing.workspaceName && <> in workspace <span className="text-ink">{pairing.workspaceName}</span></>}
+        </p>
+      )}
       <p className="mt-2 text-meta text-ink-faint">
         Works once · expires in <span data-testid="time-left">{formatTimeLeft(left)}</span> ·{' '}
         <button

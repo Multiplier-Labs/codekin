@@ -1,6 +1,6 @@
 /** Tests for the pairing REST endpoints (auth boundaries + status codes). */
 import { signInFully } from './__fixtures__/auth.js'
-import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
+import { BOOTSTRAP_WORKSPACE_ID, BOOTSTRAP_WORKSPACE_NAME } from './control-plane-db.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
 import session from 'express-session'
@@ -142,13 +142,17 @@ describe('pairing routes', () => {
       method: 'POST', headers: asUser, body: JSON.stringify({ code: userCode, displayName: 'Dev box' }),
     })
     expect(approveRes.status).toBe(200)
+    // The approving page can say where the machine went.
+    expect(await approveRes.json()).toMatchObject({ ownerLogin: 'alari76', workspaceName: BOOTSTRAP_WORKSPACE_NAME })
 
     const completeRes = await fetch(`${baseUrl}/api/machines/pair/complete`, {
       method: 'POST', headers: anon, body: JSON.stringify({ deviceCode }),
     })
     expect(completeRes.status).toBe(200)
-    const complete = await completeRes.json() as { machineId: string; machineSecret: string }
+    const complete = await completeRes.json() as { machineId: string; machineSecret: string; ownerLogin: string }
     expect(complete.machineSecret.length).toBeGreaterThan(20)
+    // The CLI prints whose account the machine joined.
+    expect(complete.ownerLogin).toBe('alari76')
 
     const deleteRes = await fetch(`${baseUrl}/api/machines/${complete.machineId}`, {
       method: 'DELETE', headers: asUser,
@@ -253,6 +257,8 @@ describe('pairing routes', () => {
     const res = await precreate()
     expect(res.status).toBe(200)
     const data = await res.json() as { machineId: string; pairingToken: string; expiresAt: number }
+    // Shown next to the install command, from the session the relay actually used.
+    expect(data).toMatchObject({ ownerLogin: 'alari76', workspaceName: BOOTSTRAP_WORKSPACE_NAME })
     const created = listAuditEvents(db, {}).find(e => e.kind === 'machine_pairing_created')
     expect(created?.actorUserId).toBe(activeUser.id)
     expect(created?.machineId).toBe(data.machineId)

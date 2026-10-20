@@ -2,13 +2,15 @@
  * Claim screen for a device-link QR (/link#<code>).
  *
  * Runs before the auth gate: the whole point is that this device is not
- * signed in yet. Claims the code from the URL fragment, then — while the
- * user is literally holding the phone — offers passkey enrollment so the
- * next sign-in is one biometric prompt.
+ * signed in yet. Looks up whose code it is and asks before claiming it — a
+ * link someone else made would otherwise silently sign this browser in to
+ * their account, and a machine paired next would become theirs. Once
+ * claimed, while the user is literally holding the phone, it offers passkey
+ * enrollment so the next sign-in is one biometric prompt.
  */
 
 import { useState, useEffect, useRef } from 'react'
-import { claimDeviceLink, codeFromHash, type ClaimFailure } from './deviceLink'
+import { claimDeviceLink, codeFromHash, lookupDeviceLink, type ClaimFailure, type LinkCreator } from './deviceLink'
 import {
   passkeysSupported,
   registerPasskey,
@@ -18,6 +20,8 @@ import {
 import type { HostedUser } from './useHostedAuth'
 
 type Phase =
+  | { name: 'looking-up'; code: string }
+  | { name: 'confirm'; code: string; creator: LinkCreator }
   | { name: 'claiming'; code: string }
   | { name: 'offer-passkey'; user: HostedUser }
   | { name: 'enrolling'; user: HostedUser }
@@ -34,23 +38,38 @@ function enterApp() {
   window.location.replace('/')
 }
 
-export function LinkClaimPage() {
+interface LinkClaimPageProps {
+  /** Who this browser is signed in as: null when signed out, undefined while still checking. */
+  currentUser: HostedUser | null | undefined
+}
+
+export function LinkClaimPage({ currentUser }: LinkClaimPageProps) {
   const [phase, setPhase] = useState<Phase>(() => {
     const code = codeFromHash(window.location.hash)
-    return code ? { name: 'claiming', code } : { name: 'failed', reason: 'invalid' }
+    return code ? { name: 'looking-up', code } : { name: 'failed', reason: 'invalid' }
   })
   const [enrollError, setEnrollError] = useState<string | null>(null)
-  const claimStarted = useRef(false)
+  const lookupStarted = useRef(false)
 
   useEffect(() => {
-    if (phase.name !== 'claiming') return
-    // Effects can run twice (StrictMode); the code is single-use, so claim once.
-    if (claimStarted.current) return
-    claimStarted.current = true
+    if (phase.name !== 'looking-up') return
+    // Effects can run twice (StrictMode); look up once.
+    if (lookupStarted.current) return
+    lookupStarted.current = true
 
     // Drop the code from the address bar before anything else can observe it
     history.replaceState(null, '', '/link')
-    void claimDeviceLink(phase.code).then(result => {
+    const { code } = phase
+    void lookupDeviceLink(code).then(result => {
+      setPhase(result.ok ? { name: 'confirm', code, creator: result.creator } : { name: 'failed', reason: result.reason })
+    })
+  }, [phase])
+
+  // Only on an explicit click: claiming replaces whatever session this
+  // browser has with the link creator's.
+  const claim = (code: string) => {
+    setPhase({ name: 'claiming', code })
+    void claimDeviceLink(code).then(result => {
       if (!result.ok) {
         setPhase({ name: 'failed', reason: result.reason })
         return
@@ -61,7 +80,7 @@ export function LinkClaimPage() {
         enterApp()
       }
     })
-  }, [phase])
+  }
 
   const enroll = async (user: HostedUser) => {
     setPhase({ name: 'enrolling', user })
@@ -79,6 +98,40 @@ export function LinkClaimPage() {
     <div className="flex min-h-screen items-center justify-center bg-page">
       <div className="w-full max-w-sm rounded-floating border border-edge bg-surface p-8 text-center">
         <h1 className="mb-2 font-mono text-head text-ink">Codekin</h1>
+
+        {phase.name === 'looking-up' && (
+          <p className="text-body text-ink-muted">Checking this link…</p>
+        )}
+
+        {phase.name === 'confirm' && (
+          <>
+            {currentUser === undefined ? (
+              <p className="mb-6 text-body text-ink-muted">Checking who is signed in here…</p>
+            ) : currentUser && currentUser.login !== phase.creator.login ? (
+              <p className="mb-6 text-body text-ink">
+                You&apos;re signed in as <span className="font-mono">@{currentUser.login}</span>. This link
+                will sign this browser in as <span className="font-mono">@{phase.creator.login}</span> instead.
+              </p>
+            ) : (
+              <p className="mb-6 text-body text-ink">
+                Sign in on this device as <span className="font-mono">@{phase.creator.login}</span>?
+              </p>
+            )}
+            <button
+              onClick={() => { claim(phase.code) }}
+              disabled={currentUser === undefined}
+              className="mb-2 w-full rounded-control bg-primary-8 px-4 py-2.5 text-body font-medium text-on-primary transition hover:bg-primary-7 disabled:opacity-50"
+            >
+              Continue as @{phase.creator.login}
+            </button>
+            <button
+              onClick={enterApp}
+              className="w-full rounded-control border border-edge px-4 py-2.5 text-body text-ink-muted transition hover:bg-surface-raised hover:text-ink"
+            >
+              Cancel
+            </button>
+          </>
+        )}
 
         {phase.name === 'claiming' && (
           <p className="text-body text-ink-muted">Linking this device…</p>

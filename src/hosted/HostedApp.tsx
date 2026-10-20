@@ -267,7 +267,9 @@ export default function HostedApp() {
   // Before the auth gate: claiming a device-link QR is exactly the case where
   // this browser is not signed in yet.
   if (window.location.pathname === '/link') {
-    return <LinkClaimPage />
+    // undefined while /api/me is still in flight, so the page can tell
+    // "signed out" from "not known yet" before offering to switch accounts.
+    return <LinkClaimPage currentUser={initialized ? user : undefined} />
   }
   // Likewise an invitation: the invitee usually has no account yet.
   if (window.location.pathname === '/invite') {
@@ -317,7 +319,7 @@ export default function HostedApp() {
   }
 
   if (window.location.pathname === '/pair') {
-    return <PairPage />
+    return <PairPage login={user.login} workspaceName={workspace.name} />
   }
 
   // Same blank page the auth latch uses: a remembered connection should not

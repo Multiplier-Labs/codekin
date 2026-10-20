@@ -22,8 +22,8 @@ import {
 } from './pairing.js'
 import { createRequireActiveUser } from './relay-auth-routes.js'
 import { createRequireWorkspace } from './workspace-routes.js'
-import { can, getActiveMembership } from './workspaces.js'
-import { getMachine } from './control-plane-db.js'
+import { can, getActiveMembership, getWorkspace } from './workspaces.js'
+import { getMachine, getUserById } from './control-plane-db.js'
 import { recordAuditEvent } from './audit.js'
 import type { RelayConfig } from './relay-config.js'
 import type { ConnectorHub } from './connector-hub.js'
@@ -71,6 +71,14 @@ export function createPairingRouter(
   const router = Router()
   const requireActiveUser = createRequireActiveUser(db, config)
   const requireWorkspace = createRequireWorkspace(db)
+
+  // Who a pairing makes the machine's owner, and where. Every pairing
+  // surface shows this, so a browser signed in to the wrong account cannot
+  // quietly pair a machine into it.
+  const pairingTarget = (userId: string, workspaceId: string) => ({
+    ownerLogin: getUserById(db, userId)?.login ?? null,
+    workspaceName: getWorkspace(db, workspaceId)?.name ?? null,
+  })
   const precreateLimit = options.precreateLimit ?? PRECREATE_LIMIT
   const allowPrecreate = createKeyedWindow(precreateLimit.limit, precreateLimit.windowMs)
 
@@ -155,7 +163,12 @@ export function createPairingRouter(
       userAgent: req.get('user-agent') ?? null,
       metadata: replaceMachineId ? { replacedMachineId: replaceMachineId } : undefined,
     })
-    res.json({ pairingToken: result.pairingToken, machineId: result.machineId, expiresAt: result.expiresAt })
+    res.json({
+      pairingToken: result.pairingToken,
+      machineId: result.machineId,
+      expiresAt: result.expiresAt,
+      ...pairingTarget(userId, req.workspace!.workspaceId),
+    })
   })
 
   router.post('/api/machines/pair/complete', (req, res) => {
@@ -172,9 +185,18 @@ export function createPairingRouter(
       case 'pending':
         res.status(202).json({ status: 'pending' })
         return
-      case 'complete':
-        res.json({ status: 'complete', machineId: result.machineId, machineSecret: result.machineSecret })
+      case 'complete': {
+        // The CLI prints this, so the person at the machine sees which
+        // account it joined.
+        const owner = getMachine(db, result.machineId)?.owner_user_id
+        res.json({
+          status: 'complete',
+          machineId: result.machineId,
+          machineSecret: result.machineSecret,
+          ownerLogin: owner ? getUserById(db, owner)?.login ?? null : null,
+        })
         return
+      }
       case 'denied':
         res.status(403).json({ status: 'denied' })
         return
@@ -220,7 +242,7 @@ export function createPairingRouter(
       ip: req.ip ?? null,
       userAgent: req.get('user-agent') ?? null,
     })
-    res.json({ machineId: result.machineId })
+    res.json({ machineId: result.machineId, ...pairingTarget(userId, req.workspace!.workspaceId) })
   })
 
   router.post('/api/machines/pair/deny', requireActiveUser, (req, res) => {

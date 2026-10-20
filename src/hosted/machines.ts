@@ -122,6 +122,9 @@ export interface Pairing {
   pairingToken: string
   machineId: string
   expiresAt: number
+  /** The account the machine pairs into, as the relay saw the request. */
+  ownerLogin?: string | null
+  workspaceName?: string | null
 }
 
 /**
