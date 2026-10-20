@@ -214,11 +214,9 @@ export async function fetchWorkspaceMachines(id: string): Promise<WorkspaceMachi
   return (await call<{ machines: WorkspaceMachine[] }>(`${ws(id)}/machines`)).machines
 }
 
-export async function transferMachine(id: string, machineId: string, userId: string): Promise<void> {
-  await call(`${ws(id)}/machines/${encodeURIComponent(machineId)}/transfer`, {
-    method: 'POST',
-    body: JSON.stringify({ userId }),
-  })
+/** Hand a locked machine back to its owner, who must be a member again. */
+export async function unlockMachine(id: string, machineId: string): Promise<void> {
+  await call(`${ws(id)}/machines/${encodeURIComponent(machineId)}/unlock`, { method: 'POST' })
 }
 
 export async function removeWorkspaceMachine(id: string, machineId: string): Promise<void> {

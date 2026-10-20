@@ -36,7 +36,7 @@ export interface UserRow {
 export interface MachineRow {
   id: string
   workspace_id: string
-  /** Set when the owner left the workspace; unreachable until transferred or removed. */
+  /** Set when the owner left the workspace; unreachable until unlocked or removed. */
   quarantined_at: string | null
   owner_user_id: string
   display_name: string

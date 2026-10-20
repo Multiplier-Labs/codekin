@@ -270,7 +270,7 @@ export function createPairingRouter(
     // share reads its id from GET /api/machines, and removing it deletes the
     // connector's credential. Only the owner may do that, and only while they
     // still belong to its workspace: removal keeps owner_user_id for the audit
-    // trail and quarantines the machine for an administrator to transfer or
+    // trail and quarantines the machine for an administrator to unlock or
     // remove, which a former member must not pre-empt.
     if (
       machine.owner_user_id !== userId

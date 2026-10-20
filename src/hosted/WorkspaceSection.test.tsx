@@ -134,6 +134,23 @@ describe('WorkspaceSection', () => {
     expect(buttons(el)).not.toContain('Delete workspace')
   })
 
+  it('offers Unlock on a locked machine once its owner is back, and no way to hand it to someone else', async () => {
+    mockRelay({ role: 'admin', members: [member('me', 'admin'), member('bob', 'member')] })
+    const el = await render()
+    expect(selects(el).some(s => /Transfer/.test(s.getAttribute('aria-label') ?? ''))).toBe(false)
+    const unlock = [...el.querySelectorAll('button')].find(b => b.textContent === 'Unlock')!
+    expect(unlock.disabled).toBe(false)
+    await act(async () => { unlock.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(calls.find(c => c.method === 'POST' && c.url.endsWith('/unlock'))?.url).toBe('/api/workspaces/ws1/machines/m1/unlock')
+  })
+
+  it('keeps Unlock disabled while the locked machine\'s owner is not a member', async () => {
+    mockRelay({ role: 'admin', members: [member('me', 'admin')] })
+    const el = await render()
+    const unlock = [...el.querySelectorAll('button')].find(b => b.textContent === 'Unlock')!
+    expect(unlock.disabled).toBe(true)
+  })
+
   it('offers an owner every role and the delete control', async () => {
     mockRelay({ role: 'owner', members: [member('me', 'owner'), member('bob', 'admin')] })
     const el = await render()

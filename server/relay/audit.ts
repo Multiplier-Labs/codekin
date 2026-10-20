@@ -38,7 +38,9 @@ export type AuditEventKind =
   | 'workspace_deleted'
   | 'member_updated'
   | 'member_removed'
+  /** Historical: machines can no longer be handed to another member. */
   | 'machine_transferred'
+  | 'machine_unlocked'
   | 'invitation_created'
   | 'invitation_revoked'
   | 'invitation_accepted'
