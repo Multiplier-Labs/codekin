@@ -266,8 +266,18 @@ export class PromptRouter {
       } else {
         this.sendControlResponseForRequest(session, pending, value)
       }
+    } else if (requestId) {
+      // An answer to a prompt that was already settled (answered elsewhere,
+      // timed out, or never existed). Delivering it as a message would let
+      // an "approval" become an arbitrary prompt, so it goes nowhere.
+      console.warn(`[prompt_response] requestId ${requestId} matches no pending prompt — dropping`)
+      this.deps.broadcast(session, {
+        type: 'system_message',
+        subtype: 'error',
+        text: 'That prompt was already answered or has expired, so the response was not sent.',
+      })
     } else {
-      // Fallback: no pending control request, send as plain user message
+      // Fallback: no prompt at all, send as plain user message
       const answer = Array.isArray(value) ? value.join(', ') : value
       session.claudeProcess.sendMessage(answer)
     }
