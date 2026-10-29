@@ -68,7 +68,7 @@ vi.mock('child_process', async (importOriginal) => {
   }
 })
 
-import { CodexProcess, fetchCodexModels, clearCodexModelCache } from './codex-process.js'
+import { CodexProcess, fetchCodexModels, clearCodexModelCache, isCodexAuthError } from './codex-process.js'
 import { CODEX_CAPABILITIES } from './coding-process.js'
 import { writeFileSync, mkdtempSync, rmSync, symlinkSync } from 'fs'
 import { tmpdir } from 'os'
@@ -485,6 +485,27 @@ describe('CodexProcess', () => {
       expect(errors.some(e => e.includes('codex login'))).toBe(true)
     })
 
+    it('reports retried 401 connection failures once as an auth failure', async () => {
+      for (const n of [1, 2, 3]) {
+        await feed(proc, {
+          method: 'error',
+          params: { error: { message: `Reconnecting... ${n}/5`, codexErrorInfo: { responseStreamConnectionFailed: { httpStatusCode: 401 } } }, willRetry: true },
+        })
+      }
+      expect(cxp.hasSessionConflict()).toBe(true)
+      expect(errors).toHaveLength(1)
+      expect(errors[0]).toContain('codex login')
+    })
+
+    it('maps an auth-failed turn/completed to a codex login hint', async () => {
+      const results: Array<[string, boolean]> = []
+      cxp.on('result', (msg, isError) => results.push([msg, isError]))
+      await feed(proc, { method: 'turn/completed', params: { turn: { status: 'failed', error: { message: 'workspace routing discovery unauthorized (401)', codexErrorInfo: null } } } })
+      expect(results).toHaveLength(1)
+      expect(results[0][0]).toContain('codex login')
+      expect(cxp.hasSessionConflict()).toBe(true)
+    })
+
     it('suppresses transient errors that will be retried', async () => {
       await feed(proc, { method: 'error', params: { error: { message: 'flaky network' }, willRetry: true } })
       expect(errors).toEqual([])
@@ -898,5 +919,21 @@ describe('fetchCodexModels', () => {
     proc.emit('close', 1, null)
     const result = await promise
     expect(result.models).toEqual([])
+  })
+})
+
+describe('isCodexAuthError', () => {
+  it('recognizes the unauthorized code and 401 connection failures', () => {
+    expect(isCodexAuthError('unauthorized')).toBe(true)
+    expect(isCodexAuthError({ responseStreamConnectionFailed: { httpStatusCode: 401 } }, 'Reconnecting... 1/5')).toBe(true)
+    expect(isCodexAuthError({ httpConnectionFailed: { httpStatusCode: 401 } })).toBe(true)
+    expect(isCodexAuthError(null, 'Your refresh token was already used. Please log out and sign in again.')).toBe(true)
+  })
+
+  it('leaves genuine transient failures alone', () => {
+    expect(isCodexAuthError({ responseStreamDisconnected: { httpStatusCode: 502 } }, 'Reconnecting... 1/5')).toBe(false)
+    expect(isCodexAuthError({ responseStreamConnectionFailed: { httpStatusCode: null } }, 'stream closed')).toBe(false)
+    expect(isCodexAuthError('serverOverloaded', 'overloaded')).toBe(false)
+    expect(isCodexAuthError(undefined)).toBe(false)
   })
 })
