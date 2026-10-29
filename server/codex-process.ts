@@ -174,6 +174,24 @@ export async function fetchCodexModels(): Promise<{ models: CodexModelInfo[] }> 
   })
 }
 
+const CODEX_AUTH_ERROR = 'Codex is not authenticated. Run `codex login` (or `codex login --device-auth`) on the host.'
+
+/**
+ * Whether a Codex error means the host's login is unusable (expired or
+ * already-rotated refresh token). Codex reports these either as the
+ * `unauthorized` error code or as a connection failure carrying HTTP 401,
+ * which it then retries as if it were a network blip.
+ */
+export function isCodexAuthError(codexErrorInfo: unknown, message?: string): boolean {
+  if (codexErrorInfo === 'unauthorized') return true
+  if (codexErrorInfo && typeof codexErrorInfo === 'object') {
+    for (const detail of Object.values(codexErrorInfo as Record<string, unknown>)) {
+      if ((detail as { httpStatusCode?: unknown } | null)?.httpStatusCode === 401) return true
+    }
+  }
+  return !!message && /\b401\b|refresh token|sign in again/i.test(message)
+}
+
 /** Reset the model cache (test helper). */
 export function clearCodexModelCache(): void {
   modelCache = null
@@ -343,7 +361,7 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
       const msg = err.message || String(err)
       if (/unauthorized|not.*logged.*in|auth/i.test(msg)) {
         this._authFailed = true
-        this.emit('error', 'Codex is not authenticated. Run `codex login` (or `codex login --device-auth`) on the host.')
+        this.emit('error', CODEX_AUTH_ERROR)
       } else {
         this.emit('error', `Codex initialization failed: ${msg}`)
       }
@@ -595,11 +613,13 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
       }
 
       case 'turn/completed': {
-        const turn = params.turn as { status?: string; error?: { message?: string } | null } | undefined
+        const turn = params.turn as { status?: string; error?: { message?: string; codexErrorInfo?: unknown } | null } | undefined
         this.turnActive = false
         this.currentTurnId = null
         if (turn?.status === 'failed') {
-          this.emit('result', turn.error?.message || 'Codex turn failed', true)
+          const authFailed = isCodexAuthError(turn.error?.codexErrorInfo, turn.error?.message)
+          if (authFailed) this._authFailed = true
+          this.emit('result', authFailed ? CODEX_AUTH_ERROR : turn.error?.message || 'Codex turn failed', true)
         } else {
           this.emit('result', '', false)
         }
@@ -616,9 +636,12 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
         if (error?.codexErrorInfo === 'usageLimitExceeded') {
           this.emit('rate_limit', { ...params })
           this.emit('error', message)
-        } else if (error?.codexErrorInfo === 'unauthorized') {
+        } else if (isCodexAuthError(error?.codexErrorInfo, message)) {
+          // Codex retries 401s as connection failures ("Reconnecting... n/5"),
+          // but no retry can succeed until the host logs in again — report it
+          // once, up front, instead of logging it as transient.
+          if (!this._authFailed) this.emit('error', CODEX_AUTH_ERROR)
           this._authFailed = true
-          this.emit('error', 'Codex is not authenticated. Run `codex login` on the host.')
         } else if (!willRetry) {
           this.emit('error', message)
         } else {
