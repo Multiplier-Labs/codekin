@@ -217,17 +217,15 @@ describe('useChatSocket hook', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(0) })
       expect(MockWebSocket.instances).toHaveLength(1)
 
-      // After 1s (initial backoff), should reconnect
-      await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+      // After 250ms (initial backoff), should reconnect
+      await act(async () => { await vi.advanceTimersByTimeAsync(250) })
       expect(MockWebSocket.instances).toHaveLength(2)
 
-      // Close again without opening — backoff doubles inside the timer callback
-      // The timer fires at backoff.current (was 1000), then sets backoff *= 2 = 2000
-      // So the *next* reconnect scheduled at 2000ms
+      // Close again without opening — the next retry waits twice as long
       act(() => MockWebSocket.latest().simulateClose())
-      await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
-      expect(MockWebSocket.instances).toHaveLength(2) // not yet (needs 2000ms)
-      await act(async () => { await vi.advanceTimersByTimeAsync(500) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(400) })
+      expect(MockWebSocket.instances).toHaveLength(2) // not yet (needs 500ms)
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
       expect(MockWebSocket.instances).toHaveLength(3)
       unmount()
     })
@@ -856,6 +854,34 @@ describe('useChatSocket hook', () => {
     })
   })
 
+  describe('disconnect notice', () => {
+    const LOST = 'Connection to Codekin lost. Reconnecting…'
+    const joined = { type: 'session_joined', sessionId: 's1', sessionName: 'Test', workingDir: '/tmp', active: true, outputBuffer: [] } as unknown as WsServerMessage
+
+    it('does not announce a drop that rejoins quickly', async () => {
+      const { result, unmount } = setupConnected()
+      act(() => MockWebSocket.latest().simulateMessage(joined))
+      act(() => MockWebSocket.latest().simulateClose())
+      await act(async () => { await vi.advanceTimersByTimeAsync(250) })
+      act(() => MockWebSocket.latest().simulateOpen())
+      act(() => MockWebSocket.latest().simulateMessage(joined))
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+      expect(result.current.messages.some(m => m.type === 'system')).toBe(false)
+      unmount()
+    })
+
+    it('announces a drop that lasts', async () => {
+      const { result, unmount } = setupConnected()
+      act(() => MockWebSocket.latest().simulateMessage(joined))
+      act(() => MockWebSocket.latest().simulateClose())
+      await act(async () => { await vi.advanceTimersByTimeAsync(2900) })
+      expect(result.current.messages.some(m => m.type === 'system' && m.text === LOST)).toBe(false)
+      await act(async () => { await vi.advanceTimersByTimeAsync(100) })
+      expect(result.current.messages.at(-1)).toMatchObject({ type: 'system', text: LOST })
+      unmount()
+    })
+  })
+
   describe('restoreSession', () => {
     it('sends ping when WS is open and rejoins on pong', () => {
       const { result, unmount } = setupConnected()
@@ -920,6 +946,29 @@ describe('useChatSocket hook', () => {
       // Since WS readyState isn't OPEN or CONNECTING, it should call connect()
       // This creates a new WebSocket instance
       expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2)
+      unmount()
+    })
+
+    it('does not open a second socket when a restore races the close-triggered retry', async () => {
+      const { result, unmount } = setupConnected()
+      act(() => MockWebSocket.latest().simulateClose())
+      act(() => result.current.restoreSession())
+      expect(MockWebSocket.instances).toHaveLength(2)
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+      expect(MockWebSocket.instances).toHaveLength(2)
+      unmount()
+    })
+
+    it('reconnects after a zombie timeout even if the dead socket never fires close', async () => {
+      const { result, unmount } = setupConnected()
+      const ws = MockWebSocket.latest()
+      // A dead TCP connection: close() starts the handshake but never completes it.
+      ws.close = () => { ws.readyState = MockWebSocket.CLOSING }
+      act(() => result.current.restoreSession())
+      act(() => { vi.advanceTimersByTime(6000) })
+      expect(result.current.connState).toBe('disconnected')
+      await act(async () => { await vi.advanceTimersByTimeAsync(250) })
+      expect(MockWebSocket.instances).toHaveLength(2)
       unmount()
     })
 

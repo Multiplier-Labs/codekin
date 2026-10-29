@@ -57,6 +57,14 @@ const REQUEST_TIMEOUT_MS = 35_000
 const BACKOFF_MIN_MS = 500
 const BACKOFF_MAX_MS = 15_000
 
+/**
+ * How long a resumed page waits for the relay to answer a liveness ping.
+ * Mobile browsers freeze a locked tab and its socket can come back looking
+ * OPEN while the TCP connection behind it is gone; without a probe the app
+ * would sit on that dead socket until the OS noticed, often minutes later.
+ */
+const RESUME_PROBE_TIMEOUT_MS = 2_500
+
 /** Close code the hub uses when the user may not reach the machine. */
 const CLOSE_FORBIDDEN = 4003
 
@@ -85,6 +93,8 @@ export class RelayConnection {
   private nextId = 1
   private state: RelayConnectionState = 'closed'
   private opts: RelayConnectionOptions
+  private probeTimer: ReturnType<typeof setTimeout> | null = null
+  private lifecycleBound = false
 
   constructor(opts: RelayConnectionOptions) {
     this.opts = opts
@@ -96,6 +106,7 @@ export class RelayConnection {
 
   connect(): void {
     if (this.ws || this.closedByUs) return
+    this.bindLifecycle()
     this.setState('connecting')
 
     const ws = new WebSocket(this.opts.url ?? browserRelayUrl(this.opts.machineId))
@@ -111,10 +122,16 @@ export class RelayConnection {
       )
     }
 
-    ws.onmessage = event => { this.handleMessage(event.data as string) }
+    ws.onmessage = event => {
+      // Any frame proves the socket is alive.
+      this.clearProbe()
+      this.handleMessage(event.data as string)
+    }
 
     ws.onclose = event => {
+      if (this.ws !== ws) return // already dropped by a failed probe
       this.ws = null
+      this.clearProbe()
       this.failAllPending(new RelayRequestError('disconnected', 'Relay connection closed'))
       this.failAllChannels('relay connection closed')
       if (this.closedByUs) {
@@ -138,6 +155,8 @@ export class RelayConnection {
 
   close(): void {
     this.closedByUs = true
+    this.unbindLifecycle()
+    this.clearProbe()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
@@ -147,6 +166,83 @@ export class RelayConnection {
     this.ws?.close(1000, 'client closed')
     this.ws = null
     this.setState('closed')
+  }
+
+  /**
+   * Re-establish the connection after the page was backgrounded or the
+   * network came back. A pending backoff is skipped (the outage that caused
+   * it is likely over), and an apparently open socket is probed so a dead one
+   * is replaced within seconds rather than when the OS gives up on it.
+   */
+  resume(): void {
+    if (this.closedByUs) return
+    if (!this.ws) {
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer)
+        this.reconnectTimer = null
+      }
+      this.backoffMs = BACKOFF_MIN_MS
+      this.connect()
+      return
+    }
+    if (this.ws.readyState !== WebSocket.OPEN || this.state !== 'open' || this.probeTimer) return
+    const ws = this.ws
+    this.probeTimer = setTimeout(() => {
+      this.probeTimer = null
+      if (this.ws === ws) this.dropDeadSocket(ws)
+    }, RESUME_PROBE_TIMEOUT_MS)
+    try {
+      ws.send(JSON.stringify({ version: RELAY_PROTOCOL_VERSION, kind: 'ping', payload: {} }))
+    } catch {
+      this.clearProbe()
+      this.dropDeadSocket(ws)
+    }
+  }
+
+  /**
+   * Abandon a socket that stopped answering and reconnect at once. Its own
+   * close event may arrive much later (or never), so it is detached first.
+   */
+  private dropDeadSocket(ws: WebSocket): void {
+    ws.onopen = null
+    ws.onmessage = null
+    ws.onclose = null
+    try { ws.close(4000, 'unresponsive') } catch { /* already closing */ }
+    this.ws = null
+    this.failAllPending(new RelayRequestError('disconnected', 'Relay connection lost'))
+    this.failAllChannels('relay connection lost')
+    this.setState('closed', 'unresponsive')
+    this.backoffMs = BACKOFF_MIN_MS
+    this.connect()
+  }
+
+  private clearProbe(): void {
+    if (this.probeTimer) {
+      clearTimeout(this.probeTimer)
+      this.probeTimer = null
+    }
+  }
+
+  private readonly onPageResume = (): void => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+    this.resume()
+  }
+
+  private bindLifecycle(): void {
+    if (this.lifecycleBound || typeof window === 'undefined') return
+    this.lifecycleBound = true
+    document.addEventListener('visibilitychange', this.onPageResume)
+    window.addEventListener('online', this.onPageResume)
+    // iOS restores pages from the back/forward cache without a visibility change.
+    window.addEventListener('pageshow', this.onPageResume)
+  }
+
+  private unbindLifecycle(): void {
+    if (!this.lifecycleBound) return
+    this.lifecycleBound = false
+    document.removeEventListener('visibilitychange', this.onPageResume)
+    window.removeEventListener('online', this.onPageResume)
+    window.removeEventListener('pageshow', this.onPageResume)
   }
 
   /**
