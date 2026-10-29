@@ -188,3 +188,59 @@ describe('close semantics', () => {
     expect(conn.connectionState).toBe('closed')
   })
 })
+
+describe('resume', () => {
+  beforeEach(() => { vi.useFakeTimers() })
+  afterEach(() => { vi.useRealTimers() })
+
+  function openConnection(opts: Partial<ConstructorParameters<typeof RelayConnection>[0]> = {}) {
+    const ctx = connect('m1', opts)
+    ctx.socket.open()
+    ctx.socket.deliver({ kind: 'hello_ack', payload: { online: true } })
+    ctx.socket.sent = []
+    return ctx
+  }
+
+  it('keeps a socket that answers the liveness ping', () => {
+    const { conn, socket } = openConnection()
+    conn.resume()
+    expect(socket.sent).toEqual([{ version: 1, kind: 'ping', payload: {} }])
+    socket.deliver({ kind: 'pong', payload: {} })
+    vi.advanceTimersByTime(10_000)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    expect(conn.connectionState).toBe('open')
+  })
+
+  it('replaces a socket that does not answer, closing its channels', () => {
+    const { conn, socket } = openConnection()
+    const onClose = vi.fn()
+    conn.openChannel('ch-1', { onReady: vi.fn(), onData: vi.fn(), onClose, onError: vi.fn() })
+    conn.resume()
+    vi.advanceTimersByTime(2_499)
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    vi.advanceTimersByTime(1)
+    expect(onClose).toHaveBeenCalledWith(4002, 'relay connection lost')
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    // The dead socket's late close event must not disturb the new connection.
+    socket.drop()
+    expect(conn.connectionState).toBe('connecting')
+  })
+
+  it('skips a pending backoff and reconnects at once', () => {
+    const { conn, socket } = openConnection()
+    socket.drop()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+    conn.resume()
+    expect(FakeWebSocket.instances).toHaveLength(2)
+    vi.advanceTimersByTime(30_000)
+    expect(FakeWebSocket.instances).toHaveLength(2)
+  })
+
+  it('does nothing once closed by the caller', () => {
+    const { conn } = openConnection()
+    conn.close()
+    conn.resume()
+    expect(FakeWebSocket.instances).toHaveLength(1)
+  })
+
+})

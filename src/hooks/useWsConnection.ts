@@ -15,6 +15,13 @@ import { openSocket, checkAuthSession, redirectToLogin } from '../lib/ccApi'
 
 /** How often to check whether the Authelia session is still valid (ms). */
 const AUTH_CHECK_INTERVAL_MS = 60_000
+/**
+ * First reconnect delay after a drop. Kept short because the common drop is a
+ * phone waking from lock, where the network is already back; repeated
+ * failures back off from here, doubling up to 30s.
+ */
+const BACKOFF_INITIAL_MS = 250
+const BACKOFF_MAX_MS = 30_000
 
 export interface UseWsConnectionOptions {
   token: string
@@ -38,7 +45,7 @@ export function useWsConnection({
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pingTimer = useRef<ReturnType<typeof setInterval> | null>(null)
   /** Exponential backoff delay (ms) for reconnect attempts, doubling up to 30s. Reset on successful open. */
-  const backoff = useRef(1000)
+  const backoff = useRef(BACKOFF_INITIAL_MS)
   const intentionalClose = useRef(false)
   const connectRef = useRef<() => void>(() => {})
 
@@ -80,6 +87,10 @@ export function useWsConnection({
 
   const connect = useCallback(() => {
     if (!token) return
+    // A visibility restore and a close-triggered retry can both land here at
+    // once on wake; a second socket would double-deliver every message.
+    const existing = wsRef.current
+    if (existing && (existing.readyState === WebSocket.CONNECTING || existing.readyState === WebSocket.OPEN)) return
     cleanup()
     setConnState('connecting')
 
@@ -87,15 +98,17 @@ export function useWsConnection({
     wsRef.current = ws
 
     ws.onopen = () => {
+      if (wsRef.current !== ws) return
       ws.send(JSON.stringify({ type: 'auth', token }))
       setConnState('connected')
-      backoff.current = 1000
+      backoff.current = BACKOFF_INITIAL_MS
       pingTimer.current = setInterval(() => {
         send({ type: 'ping' })
       }, 30000)
     }
 
     ws.onmessage = (event) => {
+      if (wsRef.current !== ws) return
       let msg: WsServerMessage
       try { msg = JSON.parse(event.data as string) as WsServerMessage } catch { return }
 
@@ -113,8 +126,10 @@ export function useWsConnection({
     }
 
     ws.onclose = (event) => {
+      if (wsRef.current !== ws) return
       setConnState('disconnected')
       cleanup()
+      awaitingHealthPong.current = false
       wsRef.current = null
       onDisconnectRef.current?.()
 
@@ -124,15 +139,17 @@ export function useWsConnection({
       }
 
       if (!intentionalClose.current) {
+        // Retry without waiting on the auth probe: it is a full round trip,
+        // and an expired session still redirects as soon as it answers.
+        const delay = backoff.current
+        backoff.current = Math.min(backoff.current * 2, BACKOFF_MAX_MS)
+        reconnectTimer.current = setTimeout(() => {
+          reconnectTimer.current = null
+          connectRef.current()
+        }, delay)
         checkAuthSession().then(valid => {
-          if (!valid) { redirectToLogin(); return }
-          reconnectTimer.current = setTimeout(() => {
-            backoff.current = Math.min(backoff.current * 2, 30000)
-            connectRef.current()
-          }, backoff.current)
-        }).catch(() => {
-          reconnectTimer.current = setTimeout(connectRef.current, backoff.current)
-        })
+          if (!valid) { cleanup(); redirectToLogin() }
+        }).catch(() => { /* network error — keep retrying */ })
       }
     }
 
@@ -177,8 +194,14 @@ export function useWsConnection({
           } else {
             // All retries exhausted — connection is dead
             awaitingHealthPong.current = false
-            backoff.current = 1000
+            backoff.current = BACKOFF_INITIAL_MS
             ws.close()
+            // A dead TCP connection can sit in CLOSING for minutes before the
+            // browser fires close, so run the close path now; the late event
+            // is ignored by the stale-socket guard.
+            if (wsRef.current === ws) {
+              ws.onclose?.({ type: 'close', code: 4000, reason: 'unresponsive', wasClean: false } as CloseEvent)
+            }
           }
         }, 2000)
       }
@@ -190,15 +213,14 @@ export function useWsConnection({
 
     if (ws && ws.readyState === WebSocket.CONNECTING) return
 
+    // Reconnect now rather than waiting out the backoff; the outage that
+    // armed it was most likely the page being suspended.
+    backoff.current = BACKOFF_INITIAL_MS
+    connect()
     checkAuthSession().then(valid => {
-      if (!valid) { redirectToLogin(); return }
-      backoff.current = 1000
-      if (reconnectTimer.current) { clearTimeout(reconnectTimer.current); reconnectTimer.current = null }
-      connect()
-    }).catch(() => {
-      reconnectTimer.current = setTimeout(connectRef.current, backoff.current)
-    })
-  }, [send, connect])
+      if (!valid) { cleanup(); redirectToLogin() }
+    }).catch(() => { /* network error — the socket retries on its own */ })
+  }, [send, connect, cleanup])
 
   // Connect on mount when token available, disconnect on unmount
   useEffect(() => {

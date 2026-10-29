@@ -24,6 +24,12 @@ const MAX_BROWSER_MESSAGES = 500
 const DISCONNECT_TEXT = 'Connection to Codekin lost. Reconnecting…'
 /** Persistent marker added once the session rejoins after a drop. */
 const RECONNECT_TEXT = 'Reconnected to Codekin'
+/**
+ * How long a drop must last before the chat says so. Phones drop the socket
+ * on every screen lock and usually rejoin within a second or two of waking;
+ * announcing each of those reads as instability.
+ */
+const DISCONNECT_NOTICE_DELAY_MS = 3_000
 
 /** Monotonically increasing counter for stable React keys across trims. */
 let msgKeyCounter = 0
@@ -204,8 +210,10 @@ export function useChatSocket({
   const [usage, setUsage] = useState<SessionUsage | null>(null)
   const promptState = usePromptState()
   const currentSessionId = useRef<string | null>(null)
-  /** True after the socket drops (e.g. server restart) until the session rejoins. */
+  /** True once a drop has been announced in the chat, until the session rejoins. */
   const wasDisconnectedRef = useRef(false)
+  /** Pending announcement of a drop; cancelled if the session rejoins first. */
+  const disconnectNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [renderSessionId, setRenderSessionId] = useState<string | null>(null)
   const activePrompt = promptState.getActive(renderSessionId)
   const promptQueueSize = promptState.getQueueSize(renderSessionId)
@@ -406,6 +414,10 @@ export function useChatSocket({
         // If we rejoined after a connection drop (e.g. server restart), append a
         // persistent marker so the user sees that the outage happened — the
         // transient DISCONNECT_TEXT bubble is wiped by this history rebuild.
+        if (disconnectNoticeTimer.current) {
+          clearTimeout(disconnectNoticeTimer.current)
+          disconnectNoticeTimer.current = null
+        }
         if (wasDisconnectedRef.current) {
           wasDisconnectedRef.current = false
           rebuilt.push({ type: 'system', subtype: 'init', text: RECONNECT_TEXT, key: nextKey() })
@@ -477,17 +489,26 @@ export function useChatSocket({
       cancelAnimationFrame(rafRef.current)
       rafRef.current = null
     }
-    // Surface a visible notice when the connection drops (e.g. the Codekin
-    // server restarted). Only while viewing a session, and de-duped so repeated
-    // close events don't stack. Cleared/replaced once the session rejoins.
-    if (currentSessionId.current) {
-      wasDisconnectedRef.current = true
-      setMessages(prev => {
-        const last = prev[prev.length - 1]
-        if (prev.length > 0 && last.type === 'system' && last.subtype === 'exit' && last.text === DISCONNECT_TEXT) return prev
-        return trimMessages([...prev, { type: 'system', subtype: 'exit', text: DISCONNECT_TEXT, key: nextKey() }])
-      })
+    // Surface a visible notice when the connection stays down (e.g. the
+    // Codekin server restarted). Only while viewing a session, and de-duped so
+    // repeated close events don't stack. Cleared/replaced once the session
+    // rejoins; a drop that rejoins within the delay is never announced.
+    if (currentSessionId.current && !disconnectNoticeTimer.current) {
+      disconnectNoticeTimer.current = setTimeout(() => {
+        disconnectNoticeTimer.current = null
+        if (!currentSessionId.current) return
+        wasDisconnectedRef.current = true
+        setMessages(prev => {
+          const last = prev[prev.length - 1]
+          if (prev.length > 0 && last.type === 'system' && last.subtype === 'exit' && last.text === DISCONNECT_TEXT) return prev
+          return trimMessages([...prev, { type: 'system', subtype: 'exit', text: DISCONNECT_TEXT, key: nextKey() }])
+        })
+      }, DISCONNECT_NOTICE_DELAY_MS)
     }
+  }, [])
+
+  useEffect(() => () => {
+    if (disconnectNoticeTimer.current) clearTimeout(disconnectNoticeTimer.current)
   }, [])
 
   const onHealthPong = useCallback((sendFn: (msg: WsClientMessage) => void) => {
