@@ -326,8 +326,6 @@ export function RepoSection({
                 className={`row-reveal flex w-full flex-col gap-0.5 rounded-control py-1 pl-6 pr-2.5 transition-colors ${
                   isActiveSession
                     ? 'bg-accent-9/30 text-accent-2'
-                    : status === 'running'
-                    ? 'bg-success-9/24 text-ink hover:bg-success-9/27'
                     : status === 'waiting'
                     ? 'bg-warning-9/24 text-ink hover:bg-warning-9/27'
                     : 'text-ink hover:bg-surface-raised'
