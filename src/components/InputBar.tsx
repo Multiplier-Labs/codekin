@@ -560,6 +560,13 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     },
   }))
 
+  // A restored draft (e.g. text typed while a new session was starting) should
+  // keep extending where it left off, not insert at the start.
+  useEffect(() => {
+    const el = textareaRef.current
+    if (el && el.value) el.setSelectionRange(el.value.length, el.value.length)
+  }, [])
+
   // Auto-focus on waiting transition false → true (skip on mobile to avoid keyboard popup)
   useEffect(() => {
     if (isWaiting && !prevWaiting.current && !isMobile) {

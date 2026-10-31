@@ -218,6 +218,12 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
 
   const inputBarRef = useRef<InputBarHandle>(null)
   const [sessionInputs, setSessionInputs] = useState<Record<string, string>>({})
+  // Creating a session takes seconds (worktree setup, harness spawn). Until
+  // session_created arrives the composer still belongs to the previous
+  // session, so text typed meanwhile lands in that session's draft and the
+  // new session's composer mounts empty. Remember what the draft held when
+  // the create was asked for, and hand anything typed since to the new session.
+  const pendingCreateDraftRef = useRef<{ fromId: string | null; before: string } | null>(null)
 
   const {
     connState,
@@ -252,6 +258,17 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
   } = useChatSocket({
     token: settings.token,
     onSessionCreated: (sessionId) => {
+      const pending = pendingCreateDraftRef.current
+      pendingCreateDraftRef.current = null
+      if (pending?.fromId) {
+        const { fromId, before } = pending
+        setSessionInputs(prev => {
+          const now = prev[fromId] ?? ''
+          if (now === before) return prev
+          const typed = now.startsWith(before) ? now.slice(before.length).trimStart() : now
+          return { ...prev, [fromId]: before, [sessionId]: typed }
+        })
+      }
       setActiveSessionId(sessionId)
       void refreshSessions()
       if (pendingContextRef.current) {
@@ -410,6 +427,14 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
 
   useProviderValidation({ activeSessionProvider: syncProvider, currentModel, setModel, claudeModels })
 
+  const createSessionKeepingDraft = useCallback((...args: Parameters<typeof wsCreateSession>) => {
+    pendingCreateDraftRef.current = {
+      fromId: activeSessionId,
+      before: activeSessionId ? (sessionInputs[activeSessionId] ?? '') : '',
+    }
+    wsCreateSession(...args)
+  }, [activeSessionId, sessionInputs, wsCreateSession])
+
   // Session orchestration: switching, creating, deleting sessions & repos
   const {
     activeWorkingDir,
@@ -429,7 +454,7 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     joinSession,
     leaveSession,
     clearMessages,
-    wsCreateSession,
+    wsCreateSession: createSessionKeepingDraft,
     closeSession: archiveSession,
     pendingContextRef,
     useWorktreeRef,
