@@ -475,6 +475,10 @@ export class PromptRouter {
     const msg: WsServerMessage = { type: 'system_message', subtype: 'error', text }
     this.deps.addToHistory(session, msg)
     this.deps.broadcast(session, msg)
+    // Nobody saw it happen; the next client to join is told (SessionManager.join).
+    if (session.clients.size === 0) {
+      session._missedAutoDenials = [...(session._missedAutoDenials ?? []), text].slice(-20)
+    }
   }
 
   /** Decode the allow/deny/always/pattern intent from a prompt response value. */
