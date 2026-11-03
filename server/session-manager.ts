@@ -963,10 +963,33 @@ export class SessionManager {
       }
     }
 
+    // Approvals denied while nobody was watching (a timed-out prompt) are in
+    // the transcript, but a returning user scrolls past history — say so up front.
+    const missed = session._missedAutoDenials
+    if (missed && missed.length > 0) {
+      session._missedAutoDenials = []
+      const message = missed.length === 1
+        ? `While you were away: ${missed[0]}`
+        : `While you were away, ${missed.length} approval requests were automatically denied — see the transcript.`
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'error', message }))
+    }
+
     return session
   }
 
-  /** Remove a WebSocket client from a session. Auto-denies pending prompts if last client leaves (after grace period). */
+  /**
+   * Sessions a person drives keep their pending prompts when the last viewer
+   * leaves: a phone that locks or switches apps drops its socket, and the
+   * prompt must still be there when it comes back (join re-sends it).
+   * Agent sessions are answered by their orchestrator. Only unattended
+   * automation (webhook, workflow, stepflow, orchestrator) is auto-denied,
+   * so a viewer who glanced at it does not leave it blocked.
+   */
+  private keepsPromptsWhenUnwatched(session: Session): boolean {
+    return session.source === 'manual' || session.source === 'agent'
+  }
+
+  /** Remove a WebSocket client from a session. Unattended sessions auto-deny pending prompts once the last client has been gone for a grace period. */
   leave(sessionId: string, ws: WebSocket): void {
     const session = this.sessions.get(sessionId)
     if (session) {
@@ -978,26 +1001,19 @@ export class SessionManager {
       // The grace period must be long enough for the client to complete its
       // reconnect flow: zombie retry pings (up to 6s) + auth check + WS handshake.
       if (session.clients.size === 0) {
+        if (this.keepsPromptsWhenUnwatched(session)) {
+          const pending = session.pendingControlRequests.size + session.pendingToolApprovals.size
+          if (pending > 0) {
+            console.log(`[session] last client left, keeping ${pending} pending prompt(s) until a client rejoins`)
+          }
+          return
+        }
         if (session._leaveGraceTimer) clearTimeout(session._leaveGraceTimer)
 
         session._leaveGraceTimer = setTimeout(() => {
           session._leaveGraceTimer = null
           // Re-check: if still no clients after grace period, auto-deny
           if (session.clients.size === 0) {
-            // Agent sessions (orchestrator children and loop-run maker/reviewer
-            // sessions) are NOT auto-denied: both watchers subscribe to
-            // onSessionPrompt — the orchestrator notifies its parent and can
-            // respond via the API; the loop engine marks its run
-            // `blocked` in the ledger. A user briefly opening and closing the
-            // session's tab must not kill its pending approvals. The 5-min
-            // approval timeout in PromptRouter remains the backstop.
-            if (session.source === 'agent') {
-              const pending = session.pendingControlRequests.size + session.pendingToolApprovals.size
-              if (pending > 0) {
-                console.log(`[session] last client left agent session, keeping ${pending} pending prompt(s) for orchestrator`)
-              }
-              return
-            }
             const deniedTools: string[] = []
             if (session.pendingControlRequests.size > 0) {
               console.log(`[session] last client left, auto-denying ${session.pendingControlRequests.size} pending control requests`)

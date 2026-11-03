@@ -184,8 +184,10 @@ export interface Session {
    *  the cooldown window), this never resets and provides a hard cap to
    *  prevent sessions from restarting indefinitely. */
   _lifetimeRestarts: number
-  /** Grace period timer before auto-denying prompts after last client leaves. */
+  /** Grace period timer before auto-denying prompts after last client leaves (unattended sessions only). */
   _leaveGraceTimer?: ReturnType<typeof setTimeout> | null
+  /** Automatic denials made while nobody was watching, told to the next client that joins. */
+  _missedAutoDenials?: string[]
   /** Timestamp of last meaningful activity (input, prompt response, client join). Used by idle reaper. */
   _lastActivityAt: number
   /** When a turn last started or finished (ISO). Orders the sidebar; viewing a session does not touch it. */

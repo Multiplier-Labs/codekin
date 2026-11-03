@@ -348,7 +348,7 @@ describe('SessionManager', () => {
   describe('leave() with pending control requests', () => {
     it('auto-denies pending control requests when last client leaves (after grace period)', () => {
       vi.useFakeTimers()
-      const s = sm.create('test', '/tmp')
+      const s = sm.create('test', '/tmp', { source: 'workflow' })
       const ws = fakeWs()
       const cp = fakeClaudeProcess()
       s.claudeProcess = cp
@@ -393,7 +393,7 @@ describe('SessionManager', () => {
 
     it('auto-denies pending tool approval when last client leaves (after grace period)', () => {
       vi.useFakeTimers()
-      const s = sm.create('test', '/tmp')
+      const s = sm.create('test', '/tmp', { source: 'workflow' })
       const ws = fakeWs()
       sm.join(s.id, ws)
 
@@ -437,7 +437,7 @@ describe('SessionManager', () => {
 
     it('cancels auto-deny if client rejoins during grace period', () => {
       vi.useFakeTimers()
-      const s = sm.create('test', '/tmp')
+      const s = sm.create('test', '/tmp', { source: 'workflow' })
       const ws = fakeWs()
       sm.join(s.id, ws)
 
@@ -476,7 +476,7 @@ describe('SessionManager', () => {
 
     it('auto-denies both pending control requests and tool approval when last client leaves (after grace period)', () => {
       vi.useFakeTimers()
-      const s = sm.create('test', '/tmp')
+      const s = sm.create('test', '/tmp', { source: 'workflow' })
       const ws = fakeWs()
       const cp = fakeClaudeProcess()
       s.claudeProcess = cp
@@ -495,6 +495,51 @@ describe('SessionManager', () => {
       expect(resolve).toHaveBeenCalledWith({ allow: false, always: false })
       expect(s.pendingToolApprovals.size).toBe(0)
       vi.useRealTimers()
+    })
+
+    it('keeps pending prompts of a manual session when its last client leaves, and re-sends them on rejoin', () => {
+      vi.useFakeTimers()
+      const s = sm.create('phone', '/tmp')
+      const cp = fakeClaudeProcess()
+      s.claudeProcess = cp
+      const phone = fakeWs()
+      sm.join(s.id, phone)
+
+      const promptMsg = { type: 'prompt', promptType: 'permission', question: 'Allow Bash?', toolName: 'Bash', requestId: 'req-1' }
+      s.pendingControlRequests.set('req-1', { requestId: 'req-1', toolName: 'Bash', toolInput: { command: 'ls' }, promptMsg: promptMsg as any })
+      const resolve = vi.fn()
+      s.pendingToolApprovals.set('tool-1', { resolve, toolName: 'Write', toolInput: { file_path: '/tmp/x' }, requestId: 'tool-1' })
+
+      // The phone locks: its socket drops and nobody else is watching
+      sm.leave(s.id, phone)
+      expect(s._leaveGraceTimer).toBeNull()
+      vi.advanceTimersByTime(60_000)
+
+      expect(cp.sendControlResponse).not.toHaveBeenCalled()
+      expect(resolve).not.toHaveBeenCalled()
+      expect(s.pendingControlRequests.size).toBe(1)
+      expect(s.pendingToolApprovals.size).toBe(1)
+
+      // Unlocked: the prompt is shown again
+      const back = fakeWs()
+      sm.join(s.id, back)
+      const sent = back.send.mock.calls.map((c: unknown[]) => JSON.parse(c[0] as string))
+      expect(sent).toContainEqual(expect.objectContaining({ type: 'prompt', requestId: 'req-1' }))
+      vi.useRealTimers()
+    })
+
+    it('tells the next client about approvals that were denied while nobody was watching', () => {
+      const s = sm.create('away', '/tmp')
+      s._missedAutoDenials = ['Approval request for Bash timed out after 5 minutes and was automatically denied.']
+      const back = fakeWs()
+      sm.join(s.id, back)
+      const sent = back.send.mock.calls.map((c: unknown[]) => JSON.parse(c[0] as string))
+      expect(sent).toContainEqual({ type: 'error', message: 'While you were away: Approval request for Bash timed out after 5 minutes and was automatically denied.' })
+
+      // Only once
+      const again = fakeWs()
+      sm.join(s.id, again)
+      expect(again.send).not.toHaveBeenCalled()
     })
 
     it('does nothing for unknown session', () => {
@@ -3527,7 +3572,7 @@ describe('SessionManager', () => {
 
     it('join cancels leave grace timer', () => {
       vi.useFakeTimers()
-      const s = sm.create('grace-cancel', '/tmp')
+      const s = sm.create('grace-cancel', '/tmp', { source: 'workflow' })
       const ws1 = fakeWs()
       sm.join(s.id, ws1)
 
@@ -3553,7 +3598,7 @@ describe('SessionManager', () => {
 
     it('leave starts grace timer only when last client leaves', () => {
       vi.useFakeTimers()
-      const s = sm.create('grace-multi', '/tmp')
+      const s = sm.create('grace-multi', '/tmp', { source: 'workflow' })
       const ws1 = fakeWs()
       const ws2 = fakeWs()
       sm.join(s.id, ws1)
@@ -3607,6 +3652,23 @@ describe('SessionManager', () => {
         .map((c: any) => JSON.parse(c[0]))
         .filter((m: any) => m.type === 'prompt_dismiss')
       expect(dismissMsgs.length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('a timeout while the phone was away is told to it when it comes back', async () => {
+      const s = sm.create('timeout-away', '/tmp')
+      const phone = fakeWs()
+      sm.join(s.id, phone)
+      const approvalPromise = sm.requestToolApproval(s.id, 'Bash', { command: 'ls' })
+      sm.leave(s.id, phone)
+
+      vi.advanceTimersByTime(301_000)
+      expect(await approvalPromise).toEqual({ allow: false, always: false })
+
+      const back = fakeWs()
+      sm.join(s.id, back)
+      const errors = back.send.mock.calls.map((c: any) => JSON.parse(c[0])).filter((m: any) => m.type === 'error')
+      expect(errors).toHaveLength(1)
+      expect(errors[0].message).toMatch(/^While you were away: Approval request for Bash timed out/)
     })
 
     it('agent sessions also time out at 5 minutes (same as all approval types)', async () => {
