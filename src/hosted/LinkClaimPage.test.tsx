@@ -6,15 +6,17 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { act, StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { LinkClaimPage } from './LinkClaimPage'
+import { PasskeySetupError } from './passkeys'
 import type { HostedUser } from './useHostedAuth'
 
 // Supported, so a successful claim lands on the passkey offer instead of
 // navigating away (which jsdom cannot do).
-vi.mock('./passkeys', () => ({
+const registerPasskey = vi.fn()
+vi.mock('./passkeys', async () => ({
+  ...await vi.importActual<typeof import('./passkeys')>('./passkeys'),
   passkeysSupported: () => true,
-  registerPasskey: vi.fn(),
+  registerPasskey: (...args: unknown[]) => registerPasskey(...args) as unknown,
   defaultPasskeyLabel: () => 'Test device',
-  isPasskeyCancel: () => false,
 }))
 
 const CODE = 'a'.repeat(43)
@@ -158,5 +160,41 @@ describe('LinkClaimPage', () => {
     expect(button('Continue as @mallory').disabled).toBe(false)
     expect(el.textContent).toContain('signed in as @alice')
     expect(calls(fetchMock, '/api/auth/device-link/complete')).toBe(0)
+  })
+
+  describe('passkey offer', () => {
+    async function offer(): Promise<HTMLElement> {
+      history.replaceState(null, '', `/link#${CODE}`)
+      stubRelay()
+      const el = await render(null)
+      await click('Continue as @mallory')
+      return el
+    }
+
+    it('says why when the server wants a fresh check, instead of a bare failure', async () => {
+      registerPasskey.mockRejectedValueOnce(new PasskeySetupError('step_up', 'Could not start passkey setup'))
+      const el = await offer()
+      await click('Enable biometric sign-in')
+      expect(el.textContent).toContain('confirm it is you first')
+      expect(el.textContent).not.toContain('That did not work')
+      expect(button('Skip for now')).toBeTruthy()
+    })
+
+    it('shows nothing when the user dismisses the prompt', async () => {
+      registerPasskey.mockRejectedValueOnce(Object.assign(new Error('dismissed'), { name: 'NotAllowedError' }))
+      const el = await offer()
+      await click('Enable biometric sign-in')
+      expect(el.querySelector('.text-error-4')).toBeNull()
+    })
+
+    it('goes into the app when this device already has a passkey for the account', async () => {
+      registerPasskey.mockRejectedValueOnce(Object.assign(new Error('exists'), { name: 'InvalidStateError' }))
+      const el = await offer()
+      const replace = vi.fn()
+      vi.stubGlobal('location', { replace })
+      await click('Enable biometric sign-in')
+      expect(replace).toHaveBeenCalledWith('/')
+      expect(el.querySelector('.text-error-4')).toBeNull()
+    })
   })
 })

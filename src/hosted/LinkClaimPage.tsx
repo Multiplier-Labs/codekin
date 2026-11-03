@@ -15,7 +15,8 @@ import {
   passkeysSupported,
   registerPasskey,
   defaultPasskeyLabel,
-  isPasskeyCancel,
+  isPasskeyAlreadyRegistered,
+  describePasskeySetupError,
 } from './passkeys'
 import type { HostedUser } from './useHostedAuth'
 
@@ -89,8 +90,13 @@ export function LinkClaimPage({ currentUser }: LinkClaimPageProps) {
       await registerPasskey(defaultPasskeyLabel())
       enterApp()
     } catch (err) {
+      // A passkey synced from another device already signs this one in.
+      if (isPasskeyAlreadyRegistered(err)) {
+        enterApp()
+        return
+      }
       setPhase({ name: 'offer-passkey', user })
-      if (!isPasskeyCancel(err)) setEnrollError('That did not work — you can try again or skip.')
+      setEnrollError(describePasskeySetupError(err))
     }
   }
 
