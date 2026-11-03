@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-11-03
+
+### Changed
+- Running sessions in the sidebar no longer get a green background tint, which competed with the active-session highlight. The pulsing status dot still marks them (#732)
+
+### Fixed
+- The **New** session popover no longer runs off the left edge of the window when the sidebar is narrow (#734)
+- Text typed right after starting a new session is no longer lost when the session comes up (#733)
+- On mobile, unlocking the phone in a relay session no longer shows "Connection lost" and stalls for seconds; a dead relay socket is detected on resume and reconnected quickly (#731)
+- A dead Codex login (401 on connect) is now reported once with a `codex login` hint, instead of being retried as a transient error (#729)
+
+### Security
+- `npm audit fix` clears new advisories in undici, vite, zod and launch-editor (#730)
+
 ## [0.9.5] - 2026-10-20
 
 ### Changed
