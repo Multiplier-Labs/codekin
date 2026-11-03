@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-11-03
+
+### Fixed
+- A phone that just claimed a device link can now add a passkey on an account that has two-factor authentication. Before, **Enable biometric sign-in** always failed there, because the device-link sign-in did not count as a recent second-factor check (#736)
+- Passkey setup says why it failed (needs a fresh check, sign-in ended, wrong address, unsupported device) instead of "That did not work". A passkey the device already holds, for example one synced through iCloud Keychain, no longer counts as a failure (#736)
+
 ## [0.9.6] - 2026-11-03
 
 ### Changed
