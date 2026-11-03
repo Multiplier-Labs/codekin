@@ -29,12 +29,13 @@ import {
   createRequireActiveUser,
   createRequireRecentAuth,
   createRequireSignedIn,
+  ensureRecentAuth,
   establishSession,
   markMfaVerified,
   requestAuditMeta,
   saveSession,
 } from './relay-auth-routes.js'
-import { FailedAttemptLimiter, deleteRecoveryCodes, hasSecondFactor, hasTotp, isMfaRequired, passkeyCount } from './mfa.js'
+import { FailedAttemptLimiter, STEP_UP_WINDOW_MS, deleteRecoveryCodes, hasSecondFactor, hasTotp, isMfaRequired, passkeyCount } from './mfa.js'
 import { secureAfterFirstFactor } from './mfa-routes.js'
 import type { MfaRouterDeps } from './mfa-routes.js'
 import { getUserById } from './control-plane-db.js'
@@ -90,6 +91,22 @@ export function createWebauthnRouter(
   const requireActiveUser = createRequireActiveUser(db, config)
   const requireSignedIn = createRequireSignedIn(db, config)
   const requireRecentAuth = createRequireRecentAuth(db)
+  /**
+   * Step-up for adding a passkey. A device-link sign-in also counts while it
+   * is fresh: the link could only be minted by a session that had just passed
+   * step-up itself (device-link/start), and it signs in with no second factor
+   * of its own, so on an account that has one, the phone that just claimed a
+   * link could otherwise never add a passkey — its offer screen always failed.
+   */
+  const requireRecentAuthForPasskey = (req: Request, res: Response, next: () => void) => {
+    const { authMethod, authenticatedAt } = req.session
+    if (authMethod === 'device_link' && authenticatedAt !== undefined &&
+        Date.now() - authenticatedAt <= STEP_UP_WINDOW_MS) {
+      next()
+      return
+    }
+    if (ensureRecentAuth(db, req, res)) next()
+  }
   const limiter = deps.limiter ?? new FailedAttemptLimiter()
 
   /** Registering is for a full session or one sent to enroll — not one owing a second factor. */
@@ -105,7 +122,7 @@ export function createWebauthnRouter(
 
   // A new passkey is a new way in: adding one needs a fresh check (step-up),
   // or it would turn a stolen cookie into lasting access.
-  router.post('/api/auth/webauthn/register/options', requireSignedIn, notPendingSecondFactor, requireRecentAuth, (req, res, next) => {
+  router.post('/api/auth/webauthn/register/options', requireSignedIn, notPendingSecondFactor, requireRecentAuthForPasskey, (req, res, next) => {
     void (async () => {
       // requireActiveUser just refreshed this from the DB
       const user = req.session.user

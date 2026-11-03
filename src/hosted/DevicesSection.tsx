@@ -22,10 +22,11 @@ import {
   fetchPasskeys,
   removePasskey,
   defaultPasskeyLabel,
-  isPasskeyCancel,
+  describePasskeySetupError,
   type Passkey,
 } from './passkeys'
 import { signOutEverywhere, describeSignOutResult } from './sessions'
+import { isStepUpCancel } from './mfa'
 import { Row, Rows, button, dangerButton, quietButton } from '../components/settings/Block'
 
 interface ActiveLink extends DeviceLinkStart {
@@ -152,7 +153,7 @@ function PasskeysPanel() {
       const passkey = await registerPasskey(defaultPasskeyLabel())
       setPasskeys(list => [...(list ?? []), passkey])
     } catch (err) {
-      if (!isPasskeyCancel(err)) setError('Could not add a passkey on this device.')
+      if (!isStepUpCancel(err)) setError(describePasskeySetupError(err, 'settings'))
     } finally {
       setBusy(false)
     }

@@ -322,6 +322,27 @@ describe('2FA flows', () => {
     expect((await call('/api/auth/device-link/start', cookie, { method: 'POST' })).status).toBe(200)
   })
 
+  it('a phone that just claimed a device link can add a passkey on an account with a factor', async () => {
+    const first = await githubSignIn({ id: 2, login: 'pat' })
+    const { cookie } = await enrollTotp(first)
+    const link = (await (await call('/api/auth/device-link/start', cookie, { method: 'POST' })).json()) as { linkUrl: string }
+    const code = new URL(link.linkUrl).hash.slice(1)
+    const claim = await call('/api/auth/device-link/complete', '', { method: 'POST', body: { code } })
+    expect(claim.status).toBe(200)
+    const phone = cookieOf(claim)
+
+    // Before the fix this was step_up_required: the claim records no second factor.
+    expect((await call('/api/auth/webauthn/register/options', phone, { method: 'POST' })).status).toBe(200)
+
+    // Only while the claim is fresh; after that it is an ordinary step-up.
+    ageSession(phone, { authenticatedAt: Date.now() - 11 * 60 * 1000 })
+    const refused = await call('/api/auth/webauthn/register/options', phone, { method: 'POST' })
+    expect(await refused.json()).toEqual({ error: 'step_up_required', method: 'mfa' })
+    // The exception is for adding a passkey only, not other step-up actions.
+    ageSession(phone, { authenticatedAt: Date.now() })
+    expect((await call('/api/auth/device-link/start', phone, { method: 'POST' })).status).toBe(401)
+  })
+
   it('without a factor, step-up means a recent GitHub sign-in', async () => {
     const cookie = await githubSignIn({ id: 2, login: 'pat' })
     ageSession(cookie, { authenticatedAt: Date.now() - 11 * 60 * 1000 })
