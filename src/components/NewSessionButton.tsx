@@ -5,12 +5,13 @@
  * repos are cloned on-demand before the session starts. Dismisses on
  * click-outside or Escape.
  *
- * The popover is positioned by the header's own stacking context — the
- * sidebar header sits outside the scroll container, so no measured
- * viewport-flip is needed.
+ * The popover hangs from the button's right edge and grows leftward. The
+ * sidebar can be narrower than the popover (it resizes down to 160px), so
+ * on open — and on window resize — it is measured and nudged right just
+ * enough to stay inside the viewport.
  */
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect } from 'react'
 import { IconPlus, IconChevronLeft } from '@tabler/icons-react'
 import type { Repo, CodingProvider } from '../types'
 import { PROVIDERS } from '../types'
@@ -19,6 +20,9 @@ import { cloneRepo } from '../lib/ccApi'
 import { providerAvailability } from '../lib/agentHealth'
 import { useAgentHealth } from '../hooks/useAgentHealth'
 import { RepoList } from './RepoList'
+
+/** Minimum gap kept between the popover and the viewport edge. */
+const VIEWPORT_GUTTER = 8
 
 interface Props {
   groups: RepoGroup[]
@@ -35,6 +39,25 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
   const [pendingRepo, setPendingRepo] = useState<Repo | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const popupRef = useRef<HTMLDivElement>(null)
+  /** How far the popover is pushed right so its left edge stays on screen. */
+  const [shiftRight, setShiftRight] = useState(0)
+
+  // Keep the popover inside the viewport. Measured before paint so it never
+  // flashes off-screen; re-measured when the window resizes.
+  useLayoutEffect(() => {
+    if (!open) return
+    function place() {
+      const anchor = containerRef.current
+      const popup = popupRef.current
+      if (!anchor || !popup) return
+      const anchorRight = anchor.getBoundingClientRect().right
+      const overflowLeft = VIEWPORT_GUTTER - (anchorRight - popup.offsetWidth)
+      setShiftRight(Math.max(0, overflowLeft))
+    }
+    place()
+    window.addEventListener('resize', place)
+    return () => { window.removeEventListener('resize', place) }
+  }, [open])
 
   // Reset to step one whenever the menu closes
   useEffect(() => {
@@ -110,7 +133,11 @@ export function NewSessionButton({ groups, token, onOpen }: Props) {
       </button>
 
       {open && (
-        <div ref={popupRef} className="absolute right-0 top-full z-50 mt-1.5 w-72 rounded-floating border border-edge-strong bg-surface-raised shadow-floating">
+        <div
+          ref={popupRef}
+          style={{ right: -shiftRight, maxWidth: `calc(100vw - ${2 * VIEWPORT_GUTTER}px)` }}
+          className="absolute top-full z-50 mt-1.5 w-72 rounded-floating border border-edge-strong bg-surface-raised shadow-floating"
+        >
           {pendingRepo ? (
             <>
               <div className="flex items-center gap-1.5 px-3 pt-3 pb-1">
