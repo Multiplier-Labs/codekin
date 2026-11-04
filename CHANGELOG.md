@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-11-04
+
+### Fixed
+- Approval prompts no longer disappear when a phone locks or switches apps. Pending prompts used to be denied 10 seconds after the last viewer disconnected; in your own sessions they now stay pending and show again when you come back. Unattended automation sessions (webhook, workflow, stepflow, orchestrator) still auto-deny (#738)
+- If an approval timed out while nobody was watching, the next device to open the session gets a "While you were away" notice instead of only a line in the transcript (#738)
+
 ## [0.9.7] - 2026-11-03
 
 ### Fixed
