@@ -77,6 +77,9 @@ function DefaultModeBlock() {
         'Every new session will start in this mode. Are you sure?'
       )
       if (!confirmed) return
+      // Already accepted here, so the composer won't ask again for this mode.
+      const accepted = getPref('confirmedDangerousModes') ?? []
+      if (!accepted.includes(next)) setPref('confirmedDangerousModes', [...accepted, next])
     }
     setPref('permissionMode', next)
     setMode(next)
@@ -138,6 +141,8 @@ function EnabledModesBlock() {
   const enabled = resolveEnabledModes(usePref('enabledPermissionModes'))
   // Track the default live: it can't be switched off while it is the default.
   const defaultMode = (usePref('permissionMode') ?? readPermissionMode())
+  const confirmedIds = usePref('confirmedDangerousModes') ?? []
+  const confirmedLabels = PERMISSION_MODES.filter(m => m.dangerous && confirmedIds.includes(m.id)).map(m => m.label)
 
   function toggle(id: PermissionMode) {
     const next = enabled.includes(id) ? enabled.filter(m => m !== id) : [...enabled, id]
@@ -182,9 +187,18 @@ function EnabledModesBlock() {
           )
         })}
       </div>
-      {enabled.some(id => PERMISSION_MODES.find(m => m.id === id)?.dangerous) && (
+      {confirmedLabels.length > 0 ? (
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <p className="min-w-0 flex-1 text-meta text-ink-muted">
+            You've confirmed: {confirmedLabels.join(', ')}. The composer switches to {confirmedLabels.length === 1 ? 'it' : 'these'} without asking.
+          </p>
+          <button type="button" className={button} onClick={() => { setPref('confirmedDangerousModes', undefined) }}>
+            Ask again
+          </button>
+        </div>
+      ) : enabled.some(id => PERMISSION_MODES.find(m => m.id === id)?.dangerous) && (
         <p className="mt-2 text-meta text-ink-muted">
-          Shift+Tab still asks before switching to a mode that runs tools without asking; declining skips past it.
+          The composer asks once before a mode that runs tools without asking; declining skips past it.
         </p>
       )}
     </Block>

@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { InputBar } from './InputBar'
-import { resetPrefsForTest } from '../lib/prefs'
+import { getPref, resetPrefsForTest } from '../lib/prefs'
 import type { PermissionMode } from '../types'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -77,6 +77,36 @@ describe('InputBar Shift+Tab mode cycling', () => {
     shiftTab()
     expect(confirm).toHaveBeenCalledOnce()
     expect(onChange).toHaveBeenCalledWith('default')
+  })
+
+  it('asks once per dangerous mode, then switches to it without asking', async () => {
+    resetPrefsForTest({ enabledPermissionModes: ['plan', 'bypassPermissions'] })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const onChange = await renderWith('plan')
+    shiftTab()
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(onChange).toHaveBeenLastCalledWith('bypassPermissions')
+    expect(getPref('confirmedDangerousModes')).toEqual(['bypassPermissions'])
+
+    await renderWith('bypassPermissions', onChange)
+    shiftTab()
+    expect(onChange).toHaveBeenLastCalledWith('plan')
+    await renderWith('plan', onChange)
+    shiftTab()
+    expect(onChange).toHaveBeenLastCalledWith('bypassPermissions')
+    expect(confirm).toHaveBeenCalledOnce()
+  })
+
+  it('still asks for a dangerous mode that has not been confirmed itself', async () => {
+    resetPrefsForTest({
+      enabledPermissionModes: ['plan', 'dangerouslySkipPermissions'],
+      confirmedDangerousModes: ['bypassPermissions'],
+    })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const onChange = await renderWith('plan')
+    shiftTab()
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(onChange).toHaveBeenCalledWith('dangerouslySkipPermissions')
   })
 
   it('tints the composer by mode', async () => {

@@ -132,17 +132,22 @@ function StateLabel({ children }: { children: React.ReactNode }) {
 
 /**
  * Dangerous modes (bypassPermissions, dangerouslySkipPermissions) need an
- * explicit yes before they activate, whether picked or cycled to.
+ * explicit yes before they first activate, whether picked or cycled to. The
+ * yes is remembered per mode, so switching back to it later doesn't ask again.
  */
 function confirmDangerousMode(mode: PermissionMode): boolean {
   const entry = PERMISSION_MODES.find(m => m.id === mode)
   if (!entry?.dangerous) return true
-  return window.confirm(
+  const confirmed = getPref('confirmedDangerousModes') ?? []
+  if (confirmed.includes(mode)) return true
+  const ok = window.confirm(
     `Warning: "${entry.label}" will accept ALL tool calls without asking.\n\n` +
     'This includes file writes, bash commands, and web requests. ' +
     'Only use this if you fully trust the task.\n\n' +
-    'Are you sure?'
+    'You will only be asked once. Are you sure?'
   )
+  if (ok) setPref('confirmedDangerousModes', [...confirmed, mode])
+  return ok
 }
 
 /** Desktop permission mode dropdown with full descriptions. */
