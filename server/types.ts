@@ -115,6 +115,12 @@ export interface Session {
   claudeSessionId: string | null
   /** Preferred model to pass via --model flag (e.g. 'claude-opus-4-6'). Defaults to Claude's default. */
   model?: string
+  /**
+   * Reasoning effort for the session (e.g. 'high'). Harness-specific values —
+   * Claude takes low…max via --effort, Codex takes whatever model/list
+   * advertises for the model. Unset = the harness's own default.
+   */
+  effort?: string
   /** Permission mode passed to the Claude CLI via --permission-mode flag. */
   permissionMode?: PermissionMode
   /** Additional tools to pre-approve via --allowedTools (e.g. 'Bash(curl:*)', 'WebFetch'). */
@@ -385,8 +391,8 @@ export interface TaskItem {
 /** Messages sent from the server to browser clients over WebSocket. */
 export type WsServerMessage =
   | { type: 'connected'; connectionId: string; claudeAvailable: boolean; claudeVersion: string; apiKeySet: boolean; codexAvailable?: boolean; codexAuthenticated?: boolean; openCodeAvailable?: boolean; grokAvailable?: boolean; grokAuthenticated?: boolean }
-  | { type: 'session_created'; sessionId: string; sessionName: string; workingDir: string; provider?: CodingProvider; model?: string }
-  | { type: 'session_joined'; sessionId: string; sessionName: string; workingDir: string; active: boolean; outputBuffer: WsServerMessage[]; model?: string; provider?: CodingProvider; permissionMode?: PermissionMode; planState?: 'idle' | 'planning' | 'reviewing' }
+  | { type: 'session_created'; sessionId: string; sessionName: string; workingDir: string; provider?: CodingProvider; model?: string; effort?: string }
+  | { type: 'session_joined'; sessionId: string; sessionName: string; workingDir: string; active: boolean; outputBuffer: WsServerMessage[]; model?: string; effort?: string; provider?: CodingProvider; permissionMode?: PermissionMode; planState?: 'idle' | 'planning' | 'reviewing' }
   | { type: 'session_left' }
   | { type: 'session_deleted'; message: string }
   | { type: 'claude_started'; sessionId: string }
@@ -451,11 +457,12 @@ export type WsServerMessage =
 /** Messages sent from browser clients to the server over WebSocket. */
 export type WsClientMessage =
   | { type: 'auth'; token: string }
-  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean; permissionMode?: PermissionMode; allowedTools?: string[]; provider?: CodingProvider }
+  | { type: 'create_session'; name: string; workingDir: string; model?: string; effort?: string; useWorktree?: boolean; permissionMode?: PermissionMode; allowedTools?: string[]; provider?: CodingProvider }
   | { type: 'join_session'; sessionId: string }
   | { type: 'leave_session' }
   | { type: 'start_claude'; options?: Record<string, unknown> }
-  | { type: 'set_model'; model: string }
+  | { type: 'set_model'; model: string; effort?: string | null }
+  | { type: 'set_effort'; effort: string | null }
   | { type: 'set_provider'; provider: CodingProvider; carryContext?: boolean }
   | { type: 'set_permission_mode'; permissionMode: PermissionMode }
   | { type: 'stop' }

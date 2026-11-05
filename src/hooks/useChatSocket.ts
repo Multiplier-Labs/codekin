@@ -198,6 +198,8 @@ export function useChatSocket({
   const [isProcessing, setIsProcessing] = useState(false)
   const [tasks, setTasks] = useState<TaskItem[]>([])
   const [currentModel, setCurrentModel] = useState<string | null>(() => getPref('claudeModel') ?? null)
+  /** Reasoning effort of the joined session (null = the harness default). */
+  const [currentEffort, setCurrentEffort] = useState<string | null>(null)
   /** Provider of the currently joined session, synced from session_joined. */
   const [sessionProvider, setSessionProvider] = useState<import('../types').CodingProvider | null>(null)
   /** Mirror of currentModel for callbacks that must not re-create on every model change. */
@@ -376,6 +378,7 @@ export function useChatSocket({
         // default harness's) would otherwise be pushed onto this one.
         setSessionProvider(msg.provider ?? null)
         setCurrentModel(msg.model ?? null)
+        setCurrentEffort(msg.effort ?? null)
         callbacksRef.current.onSessionCreated?.(msg.sessionId)
         break
 
@@ -390,6 +393,7 @@ export function useChatSocket({
           setPref('claudeModel', msg.model)
         }
         setSessionProvider(msg.provider ?? null)
+        setCurrentEffort(msg.effort ?? null)
         // Show the joined session's mode without making it the default for
         // new sessions — only an explicit choice (setPermissionMode) does that.
         if (msg.permissionMode) setCurrentPermissionMode(msg.permissionMode)
@@ -538,7 +542,9 @@ export function useChatSocket({
     // to an OpenCode session) causes a spurious model message.
     const model = currentModelRef.current
     const carryModel = (provider ?? 'claude') === 'claude' && model?.startsWith('claude-') ? model : undefined
-    send({ type: 'create_session', name, workingDir, useWorktree, permissionMode, provider, model: carryModel })
+    // The effort remembered for that model travels with it.
+    const carryEffort = carryModel ? getPref('modelEfforts')?.[carryModel] : undefined
+    send({ type: 'create_session', name, workingDir, useWorktree, permissionMode, provider, model: carryModel, ...(carryEffort ? { effort: carryEffort } : {}) })
   }, [send])
 
   const sendInput = useCallback((data: string, displayText?: string) => {
@@ -578,10 +584,21 @@ export function useChatSocket({
     setMessages(prev => trimMessages([...prev, { type: 'system', subtype, text, key: nextKey() }]))
   }, [])
 
-  const setModel = useCallback((model: string) => {
-    send({ type: 'set_model', model })
+  /**
+   * Switch the session's model. Pass `effort` to change effort in the same
+   * restart (null = harness default); omit it to leave effort as it is.
+   */
+  const setModel = useCallback((model: string, effort?: string | null) => {
+    send({ type: 'set_model', model, ...(effort !== undefined ? { effort } : {}) })
     setCurrentModel(model)
+    if (effort !== undefined) setCurrentEffort(effort)
     setPref('claudeModel', model)
+  }, [send])
+
+  /** Change the session's reasoning effort (null = harness default). */
+  const setEffort = useCallback((effort: string | null) => {
+    send({ type: 'set_effort', effort })
+    setCurrentEffort(effort)
   }, [send])
 
   const moveToWorktree = useCallback(() => {
@@ -604,7 +621,10 @@ export function useChatSocket({
     send({ type: 'set_provider', provider, carryContext })
     // Optimistic — the server confirms via sessions_updated, but the composer
     // control should reflect the choice immediately.
-    if (sessionProvider !== provider) setCurrentModel(null)
+    if (sessionProvider !== provider) {
+      setCurrentModel(null)
+      setCurrentEffort(null)  // the server clears it too — levels are per harness
+    }
     setSessionProvider(provider)
   }, [send, sessionProvider])
 
@@ -626,6 +646,7 @@ export function useChatSocket({
     activePrompt,
     promptQueueSize,
     currentModel,
+    currentEffort,
     sessionProvider,
     send,
     joinSession,
@@ -640,6 +661,7 @@ export function useChatSocket({
     reconnect,
     restoreSession,
     setModel,
+    setEffort,
     setProvider,
     currentPermissionMode,
     setPermissionMode,

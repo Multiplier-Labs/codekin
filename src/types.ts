@@ -79,7 +79,32 @@ export type AgentProvider = Exclude<CodingProvider, 'grok'>
 export const AGENT_PROVIDER_IDS: readonly CodingProvider[] = ['claude', 'opencode', 'codex'] satisfies AgentProvider[]
 
 /** Model option for UI selectors. */
-export interface ModelOption { id: string; label: string }
+/** One reasoning-effort level a model accepts. */
+export interface EffortOption { id: string; description?: string }
+
+export interface ModelOption {
+  id: string
+  label: string
+  /** Effort levels the model accepts. Absent = the harness has no effort control. */
+  efforts?: EffortOption[]
+  /** The level the harness uses when no effort is set, when known. */
+  defaultEffort?: string
+}
+
+/** Effort levels the Claude CLI accepts via `--effort`. */
+export const CLAUDE_EFFORTS: EffortOption[] = [
+  { id: 'low' }, { id: 'medium' }, { id: 'high' }, { id: 'xhigh' }, { id: 'max' },
+]
+
+const EFFORT_LABELS: Record<string, string> = {
+  none: 'None', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High',
+  xhigh: 'Extra high', max: 'Max', ultra: 'Ultra',
+}
+
+/** Human label for an effort id ('xhigh' → 'Extra high'); unknown ids are title-cased. */
+export function effortLabel(effort: string): string {
+  return EFFORT_LABELS[effort] ?? effort.charAt(0).toUpperCase() + effort.slice(1)
+}
 
 /** Static models for Claude Code CLI. Used as fallback before dynamic discovery completes. */
 export const CLAUDE_MODELS: ModelOption[] = [
@@ -193,11 +218,12 @@ export interface Session {
  */
 export type WsClientMessage =
   | { type: 'auth'; token: string }
-  | { type: 'create_session'; name: string; workingDir: string; model?: string; useWorktree?: boolean; permissionMode?: PermissionMode; allowedTools?: string[]; provider?: CodingProvider }
+  | { type: 'create_session'; name: string; workingDir: string; model?: string; effort?: string; useWorktree?: boolean; permissionMode?: PermissionMode; allowedTools?: string[]; provider?: CodingProvider }
   | { type: 'join_session'; sessionId: string }
   | { type: 'leave_session' }
   | { type: 'start_claude'; options?: Record<string, unknown> }
-  | { type: 'set_model'; model: string }
+  | { type: 'set_model'; model: string; effort?: string | null }
+  | { type: 'set_effort'; effort: string | null }
   | { type: 'set_provider'; provider: CodingProvider; carryContext?: boolean }
   | { type: 'set_permission_mode'; permissionMode: PermissionMode }
   | { type: 'stop' }
@@ -263,8 +289,8 @@ export interface SessionUsage {
  */
 export type WsServerMessage =
   | { type: 'connected'; connectionId: string; claudeAvailable: boolean; claudeVersion: string; apiKeySet: boolean; codexAvailable?: boolean; codexAuthenticated?: boolean; openCodeAvailable?: boolean; grokAvailable?: boolean; grokAuthenticated?: boolean }
-  | { type: 'session_created'; sessionId: string; sessionName: string; workingDir: string; provider?: CodingProvider; model?: string }
-  | { type: 'session_joined'; sessionId: string; sessionName: string; workingDir: string; active: boolean; outputBuffer: WsServerMessage[]; model?: string; provider?: CodingProvider; permissionMode?: PermissionMode; planState?: 'idle' | 'planning' | 'reviewing' }
+  | { type: 'session_created'; sessionId: string; sessionName: string; workingDir: string; provider?: CodingProvider; model?: string; effort?: string }
+  | { type: 'session_joined'; sessionId: string; sessionName: string; workingDir: string; active: boolean; outputBuffer: WsServerMessage[]; model?: string; effort?: string; provider?: CodingProvider; permissionMode?: PermissionMode; planState?: 'idle' | 'planning' | 'reviewing' }
   | { type: 'session_left' }
   | { type: 'session_deleted'; message: string }
   | { type: 'claude_started'; sessionId: string }

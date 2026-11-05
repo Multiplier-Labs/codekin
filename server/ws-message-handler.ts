@@ -53,6 +53,15 @@ const MODEL_FAMILIES: Partial<Record<CodingProvider, RegExp>> = {
  * pass — models are discovered dynamically and aliases (`opus`, Bedrock IDs,
  * OpenCode's `provider/model`) must keep working.
  */
+/**
+ * Effort levels are short lowercase ids ('high', 'xhigh', 'ultra'). The set
+ * differs per harness and model, so only the shape is checked — it ends up as
+ * a CLI argument, which must never look like a flag.
+ */
+export function validEffort(effort: unknown): effort is string {
+  return typeof effort === 'string' && /^[a-z][a-z0-9_-]{0,23}$/.test(effort)
+}
+
 export function modelFitsProvider(model: string, provider: CodingProvider): boolean {
   return Object.entries(MODEL_FAMILIES).every(
     ([family, pattern]) => family === provider || !pattern.test(model),
@@ -96,7 +105,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       const model = msg.model ?? (provider === 'claude' ? getDefaultClaudeModel() : undefined)
       // Use the security-checked canonical path (not the raw msg.workingDir) so
       // grouping/archive behavior stays consistent with the resolved directory.
-      const session = sessions.create(msg.name, resolvedDir, { model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider, useWorktree: msg.useWorktree })
+      const session = sessions.create(msg.name, resolvedDir, { model, effort: validEffort(msg.effort) ? msg.effort : undefined, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider, useWorktree: msg.useWorktree })
       session.clients.add(ws)
       clientSessions.set(ws, session.id)
 
@@ -116,6 +125,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
             workingDir: session.workingDir,
             provider: session.provider ?? 'claude',
             model: session.model,
+            ...(session.effort ? { effort: session.effort } : {}),
           })
           if (result.ok) {
             sessions.startClaude(session.id)
@@ -135,6 +145,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           workingDir: session.workingDir,
           provider: session.provider ?? 'claude',
           model: session.model,
+          ...(session.effort ? { effort: session.effort } : {}),
         })
         sessions.startClaude(session.id)
       }
@@ -159,6 +170,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           active: session.claudeProcess?.isAlive() ?? false,
           outputBuffer: session.outputHistory.slice(-500),
           model: session.model,
+          ...(session.effort ? { effort: session.effort } : {}),
           provider: session.provider,
           permissionMode: session.permissionMode,
           planState: session.planManager.state,
@@ -276,12 +288,29 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           send({ type: 'error', message: `Model ${msg.model} is not available for ${provider} sessions` })
           break
         }
-        sessions.setModel(sessionId, msg.model)
+        if (msg.effort !== undefined && msg.effort !== null && !validEffort(msg.effort)) {
+          send({ type: 'error', message: `Invalid effort: ${String(msg.effort)}` })
+          break
+        }
+        sessions.setModel(sessionId, msg.model, msg.effort)
         // The orchestrator's model is a standing preference, not a per-session
         // one — its session is recreated on demand, so persist the choice.
         if (isOrchestratorSession(sessions.get(sessionId)?.source)) {
           setOrchestratorModel(sessions, msg.model)
         }
+      }
+      break
+    }
+
+    // Change the reasoning effort for the session (null = harness default).
+    case 'set_effort': {
+      const sessionId = clientSessions.get(ws)
+      if (sessionId) {
+        if (msg.effort !== null && !validEffort(msg.effort)) {
+          send({ type: 'error', message: `Invalid effort: ${String(msg.effort)}` })
+          break
+        }
+        sessions.setEffort(sessionId, msg.effort)
       }
       break
     }

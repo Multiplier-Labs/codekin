@@ -142,3 +142,72 @@ describe('InputBar refocus on window return', () => {
     expect(document.activeElement).not.toBe(textarea)
   })
 })
+
+describe('InputBar effort picker', () => {
+  const models = [
+    { id: 'claude-opus-5', label: 'Opus 5', efforts: [{ id: 'low' }, { id: 'high' }, { id: 'xhigh' }] },
+    { id: 'glm', label: 'GLM' },
+  ]
+
+  async function renderBar(props: Partial<Parameters<typeof InputBar>[0]> = {}) {
+    const onEffortChange = vi.fn()
+    await act(async () => {
+      root.render(
+        <InputBar
+          onSendInput={vi.fn()} isWaiting={false} disabled={false} onEscape={vi.fn()}
+          pendingFiles={[]} onAddFiles={vi.fn()} onRemoveFile={vi.fn()}
+          sessionProvider="claude"
+          currentModel="claude-opus-5" onModelChange={vi.fn()} availableModels={models}
+          currentEffort="high" onEffortChange={onEffortChange}
+          {...props}
+        />,
+      )
+    })
+    return onEffortChange
+  }
+
+  const chip = () => container.querySelector('button[title*="change model, effort"]') as HTMLButtonElement
+  const buttonByText = (text: string) =>
+    Array.from(container.querySelectorAll('button')).find(b => b.textContent?.trim().startsWith(text)) as HTMLButtonElement
+
+  it('names the effort on the chip and beside the model', async () => {
+    await renderBar()
+    expect(chip().textContent).toContain('High')
+    await act(async () => { chip().click() })
+    expect(buttonByText('Opus 5').textContent).toContain('High')
+    // A model without effort control shows no level.
+    expect(buttonByText('GLM').textContent).toBe('GLM')
+  })
+
+  it('picks a level from the Effort pane', async () => {
+    const onEffortChange = await renderBar()
+    await act(async () => { chip().click() })
+    await act(async () => { buttonByText('Effort').click() })
+    await act(async () => { buttonByText('Extra high').click() })
+    expect(onEffortChange).toHaveBeenCalledWith('xhigh')
+  })
+
+  it('offers Default for a harness whose default is unknown', async () => {
+    const onEffortChange = await renderBar()
+    await act(async () => { chip().click() })
+    await act(async () => { buttonByText('Effort').click() })
+    await act(async () => { buttonByText('Default').click() })
+    expect(onEffortChange).toHaveBeenCalledWith(null)
+  })
+
+  it('cycles effort with Mod+Shift+E', async () => {
+    const onEffortChange = await renderBar()
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'E', shiftKey: true, metaKey: true, ctrlKey: true }))
+    })
+    // high → xhigh: the next level in the model's cycle.
+    expect(onEffortChange).toHaveBeenCalledWith('xhigh')
+  })
+
+  it('hides the Effort row for models without effort control', async () => {
+    await renderBar({ currentModel: 'glm' })
+    await act(async () => { chip().click() })
+    expect(buttonByText('Effort')).toBeUndefined()
+    expect(container.textContent).not.toContain('Cycle effort')
+  })
+})
