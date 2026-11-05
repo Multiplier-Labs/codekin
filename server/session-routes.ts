@@ -25,6 +25,7 @@ import type { PermissionMode } from './types.js'
 import { fetchOpenCodeModels, fetchOpenCodeCommands } from './opencode-process.js'
 import { fetchCodexModels } from './codex-process.js'
 import { fetchGrokModels } from './grok-process.js'
+import { isNativeFolderPickerAvailable, isFolderDialogOpen, pickFolderNative } from './native-folder-picker.js'
 
 // ---------------------------------------------------------------------------
 // Request body interfaces for route handlers
@@ -582,6 +583,34 @@ export function createSessionRouter(
       res.json({ path: base, dirs: entries })
     } catch {
       res.status(400).json({ error: 'Cannot read directory' })
+    }
+  })
+
+  // --- Native folder dialog (macOS, same-machine browser only) ---
+  // Deliberately outside the relay's proxy allowlist (server/relay/connector-proxy.ts):
+  // the hosted UI must never pop a dialog up on the machine.
+
+  router.get('/api/native/folder-picker', (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    res.json({ available: isNativeFolderPickerAvailable(req) })
+  })
+
+  router.post('/api/native/pick-folder', async (req, res) => {
+    const token = extractToken(req)
+    if (!verifyToken(token)) return res.status(401).json({ error: 'Unauthorized' })
+    if (!isNativeFolderPickerAvailable(req)) {
+      return res.status(403).json({ error: 'The native folder dialog is only available on the machine running Codekin' })
+    }
+    if (isFolderDialogOpen()) return res.status(409).json({ error: 'A folder dialog is already open' })
+
+    const body = (req.body ?? {}) as { defaultPath?: unknown }
+    const defaultPath = typeof body.defaultPath === 'string' ? body.defaultPath : undefined
+    try {
+      const picked = await pickFolderNative(defaultPath)
+      res.json(picked ? { path: picked } : { cancelled: true })
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to open folder dialog' })
     }
   })
 
