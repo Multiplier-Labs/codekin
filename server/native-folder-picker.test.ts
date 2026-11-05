@@ -70,8 +70,21 @@ describe('pickFolderNative', () => {
 
   it('returns null when the user cancels', async () => {
     const err = Object.assign(new Error('Command failed'), { code: 1 })
-    const exec = execReturning(err, '', 'execution error: User canceled. (-128)')
+    const exec = execReturning(err, '', 'execution error: Error: Error: User canceled. (-128)')
     await expect(pickFolderNative(undefined, exec)).resolves.toBeNull()
+  })
+
+  it('recognises a cancel in any system language', async () => {
+    const err = Object.assign(new Error('Command failed'), { code: 1 })
+    const exec = execReturning(err, '', 'execution error: Error: Error: Von Benutzer:in abgebrochen. (-128)')
+    await expect(pickFolderNative(undefined, exec)).resolves.toBeNull()
+  })
+
+  it('runs the script as JavaScript for Automation', async () => {
+    const exec = execReturning(null, '/x\n')
+    await pickFolderNative(undefined, exec)
+    const [, args] = exec.mock.calls[0]
+    expect(args.slice(0, 2)).toEqual(['-l', 'JavaScript'])
   })
 
   it('rejects on other failures', async () => {

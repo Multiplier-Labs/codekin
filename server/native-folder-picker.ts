@@ -36,18 +36,31 @@ export function isNativeFolderPickerAvailable(req: LocalityRequest, platform: st
 }
 
 /**
- * The AppleScript run by osascript. The default location arrives as argv, so
- * no user-supplied text is ever spliced into the script. Plain `activate`
- * brings osascript itself to the front — no Apple Events to another app, so
- * no Automation permission prompt.
+ * The script run by osascript, in JavaScript for Automation (JXA). The
+ * default location arrives as argv, so no user-supplied text is ever spliced
+ * into the script. Activating the current application brings osascript itself
+ * to the front so the dialog takes keyboard focus — no Apple Events to another
+ * app, so no Automation permission prompt.
+ *
+ * JXA rather than AppleScript for speed: AppleScript's `activate` stalls for
+ * ~2s (osascript has no app bundle), putting the dialog on screen after ~2.6s;
+ * the JXA equivalent returns at once, so the dialog shows in ~0.8s — the Open
+ * panel service's own startup, which a compiled NSOpenPanel helper matches.
  */
 const SCRIPT = [
-  'on run argv',
-  '  activate',
-  '  set p to choose folder with prompt "Choose your repositories folder" default location (POSIX file (item 1 of argv))',
-  '  return POSIX path of p',
-  'end run',
+  'function run(argv) {',
+  '  var app = Application.currentApplication()',
+  '  app.includeStandardAdditions = true',
+  '  app.activate()',
+  '  return app.chooseFolder({ withPrompt: "Choose your repositories folder", defaultLocation: Path(argv[0]) }).toString()',
+  '}',
 ]
+
+/**
+ * Cancelling raises error -128. Its message is localized ("User canceled.",
+ * "Von Benutzer:in abgebrochen.", …), so match on the number.
+ */
+const CANCELLED = /\(-128\)/
 
 /** The dialog waits on the user; give them ample time before giving up. */
 const DIALOG_TIMEOUT_MS = 10 * 60 * 1000
@@ -83,13 +96,13 @@ export function resolveDefaultLocation(defaultPath: string | undefined): string 
  */
 export function pickFolderNative(defaultPath: string | undefined, execImpl: ExecFileFn = execFile as unknown as ExecFileFn): Promise<string | null> {
   const location = resolveDefaultLocation(defaultPath)
-  const args = [...SCRIPT.flatMap(line => ['-e', line]), location]
+  const args = ['-l', 'JavaScript', ...SCRIPT.flatMap(line => ['-e', line]), location]
   inFlight = true
   return new Promise<string | null>((resolve, reject) => {
     execImpl('osascript', args, { timeout: DIALOG_TIMEOUT_MS }, (error, stdout, stderr) => {
       inFlight = false
       if (error) {
-        if (/-128|User cancel+ed/i.test(stderr)) resolve(null)
+        if (CANCELLED.test(stderr)) resolve(null)
         else reject(new Error(stderr.trim() || error.message))
         return
       }
