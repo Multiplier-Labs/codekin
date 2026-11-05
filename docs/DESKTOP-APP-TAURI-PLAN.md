@@ -31,7 +31,7 @@ for Phase 1.**
 
 ## Phased plan
 
-### Phase 1: thin shell over the installed CLI (≈0.5–1 day)
+### Phase 1: thin shell over the installed CLI
 
 The app is only a window. It needs `codekin` to be installed (npm global or `install.sh`).
 
@@ -97,7 +97,7 @@ the existing build, tests and lint are unaffected.
   `http://localhost:*` only. Don't grant any Tauri IPC permissions to that origin. The frontend doesn't
   need native APIs.
 
-### Phase 2: self-contained app (≈3–5 days + CI)
+### Phase 2: self-contained app
 
 Bundle everything so non-CLI users can install by drag-and-drop.
 
