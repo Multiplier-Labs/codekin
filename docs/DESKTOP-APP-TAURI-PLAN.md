@@ -248,7 +248,3 @@ the sidecar `node` binary and `better_sqlite3.node` must be signed too.
   - close the window, then a phone session keeps streaming; Cmd-Q stops it with no orphaned processes
   - kill the server process, which the app restarts and the window reconnects to
   - reboot with "Open at login" enabled, after which Codekin is reachable from the phone
-
-## Open questions
-
-1. Should the bundled Node version track the version pinned for the npm package / CI?
