@@ -176,6 +176,15 @@ async function startOpenCodeServer(workingDir: string): Promise<void> {
   })
   serverState.process = proc
 
+  // Without an 'error' listener a missing binary (ENOENT) surfaces as an
+  // uncaught exception. Record it so the health poll below fails fast.
+  let spawnError: Error | null = null
+  proc.on('error', (err) => {
+    spawnError = err
+    serverState.ready = false
+    serverState.process = null
+  })
+
   proc.on('close', () => {
     serverState.ready = false
     serverState.process = null
@@ -185,7 +194,13 @@ async function startOpenCodeServer(workingDir: string): Promise<void> {
   const baseUrl = `http://localhost:${serverState.port}`
   const maxAttempts = 30
   for (let i = 0; i < maxAttempts; i++) {
-    await new Promise(r => setTimeout(r, 1000))
+    await new Promise(r => setTimeout(r, i === 0 ? 100 : 1000))
+    if (spawnError) {
+      const code = (spawnError as NodeJS.ErrnoException).code
+      throw new Error(code === 'ENOENT'
+        ? 'OpenCode CLI not found — install it from opencode.ai'
+        : `OpenCode server failed to start: ${(spawnError as Error).message}`)
+    }
     try {
       const res = await fetch(`${baseUrl}/health`, {
         headers: authHeaders(),

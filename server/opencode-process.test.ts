@@ -40,7 +40,8 @@ vi.mock('./config.js', async (importOriginal) => ({
   SCREENSHOTS_DIR: uploadRoot,
 }))
 
-import { OpenCodeProcess, stopOpenCodeServer, permissionRulesetFor, OPENCODE_SYSTEM_CONTEXT, isVersionOlder, MIN_TESTED_OPENCODE_VERSION } from './opencode-process.js'
+import { OpenCodeProcess, stopOpenCodeServer, permissionRulesetFor, OPENCODE_SYSTEM_CONTEXT, isVersionOlder, MIN_TESTED_OPENCODE_VERSION, fetchOpenCodeModels } from './opencode-process.js'
+import { spawn as mockedSpawn } from 'child_process'
 import { writeFileSync, mkdtempSync, rmSync, symlinkSync } from 'fs'
 import { tmpdir } from 'os'
 import { join, basename } from 'path'
@@ -1656,6 +1657,27 @@ describe('OpenCodeProcess', () => {
   // ---------------------------------------------------------------------------
   // Version comparison
   // ---------------------------------------------------------------------------
+
+  describe('missing OpenCode CLI', () => {
+    it('fails fast without an uncaught exception when the binary is not installed', async () => {
+      stopOpenCodeServer()
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const EventEmitter = require('events').EventEmitter
+      vi.mocked(mockedSpawn).mockImplementationOnce((() => {
+        const proc = Object.assign(new EventEmitter(), { kill: vi.fn(), killed: false })
+        // Mirrors Node: ENOENT is emitted asynchronously as an 'error' event.
+        setImmediate(() => proc.emit('error', Object.assign(new Error('spawn opencode ENOENT'), { code: 'ENOENT' })))
+        return proc
+      }) as unknown as typeof mockedSpawn)
+
+      const started = Date.now()
+      const result = await fetchOpenCodeModels('/tmp/test-repo')
+
+      expect(result).toEqual({ models: [], defaults: {} })
+      expect(Date.now() - started).toBeLessThan(1000)
+      expect(mockFetch).not.toHaveBeenCalled()
+    })
+  })
 
   describe('isVersionOlder', () => {
     it('compares major/minor/patch numerically', () => {
