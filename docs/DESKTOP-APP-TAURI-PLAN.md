@@ -4,7 +4,7 @@ Status: **Draft / proposal**. Nothing in this document is implemented yet.
 
 ## Goal
 
-A self-contained native macOS app that runs Codekin entirely on the local machine. The app bundles
+A self-contained native macOS app for Apple Silicon that runs Codekin entirely on the local machine. The app bundles
 the Codekin server and its own Node runtime, starts and stops the server itself, and shows the existing UI
 in a native window with its own Dock icon and Cmd-Tab entry. The user doesn't need a browser tab, an npm
 install or a terminal. Phone access through the relay or LAN keeps working while the app runs in the
@@ -13,8 +13,25 @@ background.
 ## Non-goals
 
 - Re-implementing any UI in native code. The app renders the existing React frontend unchanged.
-- Replacing the npm / `install.sh` distribution. The CLI stays available alongside the app.
-- Windows and Linux builds for now (Tauri supports them, so they can follow).
+- Replacing the npm / `install.sh` distribution or `codekin service`. Both stay supported alongside the
+  app.
+
+## Relationship to the CLI and the service
+
+The app is **standalone**. A user who only installs the app never needs a terminal, `codekin setup`,
+`codekin start` or `codekin service install`. It doesn't replace the service either, and the two coexist:
+
+| Situation | App behaviour |
+|---|---|
+| Only the app is installed | App does first-run setup itself and runs its own bundled server |
+| `codekin service` is installed and running | App attaches to the running server and doesn't start a second one |
+| Service installed but stopped | App starts its own bundled server on the configured port |
+| Service starts while the app's server is running | The service fails to bind the port and the app's server keeps working. Documented: run one or the other |
+| Attached service stops while the app is open | The supervisor notices and starts the bundled server, then the window reconnects |
+
+Both share `~/.config/codekin` and `~/.codekin`, so sessions, settings and the token are the same no
+matter which server is running.
+- Intel Macs, Windows and Linux builds. Only Apple Silicon (`aarch64-apple-darwin`) is targeted; Tauri supports the others if they are ever needed.
 
 ## What already exists
 
@@ -47,8 +64,8 @@ Codekin.app
 
 Inside `Contents/Resources/`:
 
-- `node`: a pinned Node runtime as a Tauri sidecar (`bundle.externalBin`), built for the host
-  architecture (`aarch64-apple-darwin` or `x86_64-apple-darwin`).
+- `node`: a pinned Node runtime as a Tauri sidecar (`bundle.externalBin`), built for
+  `aarch64-apple-darwin` only.
 - `server/dist/`, `dist/`, `server/workflows/`, `server/loops/`: the same set as the npm `files` field.
 - Production `node_modules/`, pruned.
 
@@ -58,14 +75,16 @@ installed, just as it does today.
 ### Native module: `better-sqlite3`
 
 - Must be compiled against the **bundled** Node's ABI. Run `npm rebuild better-sqlite3` with the bundled
-  Node binary (or `prebuild-install --target <node-version> --arch <arch>`) as part of the bundle step.
+  Node binary (or `prebuild-install --target <node-version> --arch arm64`) as part of the bundle step.
 - The build script ends with a smoke test: launch the bundled server, wait for `/api/health` and open a
   database. That way an ABI mismatch fails the build instead of the first launch.
 
 ## Startup flow
 
-1. Ensure `~/.config/codekin/` exists. On first launch, generate the token and env file as
-   `codekin setup` does. Existing files are reused as-is.
+1. Ensure `~/.config/codekin/` exists. On first launch, the app does what `codekin setup` does, with no
+   terminal involved: it generates the token (`0600`) and writes the env file with the default port.
+   Existing files are reused as-is. Any remaining first-run choices (for example the repos root) are made
+   in the existing web UI.
 2. Read `PORT` from `~/.config/codekin/env` (default `32352`) and the token from `~/.config/codekin/token`.
 3. Probe `http://127.0.0.1:<port>/api/health`:
    - **Server already running** (for example an installed `codekin service`): attach to it and don't
@@ -86,7 +105,8 @@ installed, just as it does today.
   processes don't get orphaned. Escalate to SIGKILL after a timeout.
 - Supervise the server: if it exits unexpectedly, restart it with backoff and reload the window when it
   comes back. That gives the same robustness as the launchd service.
-- If the app attached to an existing service instead of spawning one, it leaves that server running on quit.
+- If the app attached to an existing service instead of spawning one, it leaves that server running on
+  quit. If the attached server goes away while the app is open, the supervisor starts the bundled server.
 
 ### PATH
 
@@ -173,6 +193,11 @@ build, tests and lint are unaffected.
 - The main window may only navigate to `http://127.0.0.1:<port>` / `http://localhost:<port>`. No Tauri
   IPC permissions are granted to that origin. The frontend doesn't need native APIs.
 
+## Versioning
+
+The desktop app has its own version in `desktop/src-tauri/tauri.conf.json`, independent of the npm
+package. The app reports the bundled server version in its About panel so bug reports stay traceable.
+
 ## Building and installing locally
 
 ```bash
@@ -212,7 +237,9 @@ the sidecar `node` binary and `better_sqlite3.node` must be signed too.
 - **Build smoke test** (in `bundle-server.mjs`): bundled server starts, `/api/health` responds and SQLite
   opens.
 - **Manual checklist:**
-  - first launch with no `~/.config/codekin`
+  - first launch on a machine without the CLI and with no `~/.config/codekin`, where no terminal step is
+    needed
+  - stop the attached service while the app is open, and the app takes over with its own server
   - launch with existing config and sessions, which carry over
   - launch while `codekin service` is running, so the app attaches and doesn't spawn a second server
   - port taken by another app, which shows the error view
@@ -224,7 +251,4 @@ the sidecar `node` binary and `better_sqlite3.node` must be signed too.
 
 ## Open questions
 
-1. When the app is installed, should `codekin service install` be discouraged on macOS, or should both
-   keep working side by side (the app attaching to the service)?
-2. Should the bundled Node version track the version pinned for the npm package / CI?
-3. Should the desktop app be versioned in lockstep with the npm package (`0.9.x`)?
+1. Should the bundled Node version track the version pinned for the npm package / CI?
