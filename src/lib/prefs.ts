@@ -27,6 +27,8 @@ export interface Prefs {
   useWorktree: boolean
   /** Permission mode new sessions start in. */
   permissionMode: PermissionMode
+  /** Modes offered in the composer menu and cycled by Shift+Tab. Unset means all. */
+  enabledPermissionModes: PermissionMode[]
   /** Coding provider new sessions start with. */
   provider: CodingProvider
   /** Last model used per provider, offered to the next session. */

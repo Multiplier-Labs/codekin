@@ -3,6 +3,8 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { InputBar } from './InputBar'
+import { resetPrefsForTest } from '../lib/prefs'
+import type { PermissionMode } from '../types'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -34,6 +36,56 @@ describe('InputBar permission picker', () => {
       )
     })
     expect(container.textContent).toContain('Auto accept edits')
+  })
+})
+
+describe('InputBar Shift+Tab mode cycling', () => {
+  async function renderWith(mode: PermissionMode, onChange = vi.fn()) {
+    await act(async () => {
+      root.render(
+        <InputBar
+          onSendInput={vi.fn()} isWaiting={false} disabled={false} onEscape={vi.fn()}
+          pendingFiles={[]} onAddFiles={vi.fn()} onRemoveFile={vi.fn()}
+          currentPermissionMode={mode} onPermissionModeChange={onChange}
+        />,
+      )
+    })
+    return onChange
+  }
+
+  function shiftTab() {
+    const textarea = container.querySelector('textarea')!
+    const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true })
+    act(() => { textarea.dispatchEvent(event) })
+    return event
+  }
+
+  afterEach(() => { resetPrefsForTest(); vi.restoreAllMocks() })
+
+  it('switches to the next enabled mode and keeps focus in the field', async () => {
+    resetPrefsForTest({ enabledPermissionModes: ['default', 'plan'] })
+    const onChange = await renderWith('default')
+    const event = shiftTab()
+    expect(event.defaultPrevented).toBe(true)
+    expect(onChange).toHaveBeenCalledWith('plan')
+  })
+
+  it('asks before a dangerous mode and moves past it when declined', async () => {
+    resetPrefsForTest({ enabledPermissionModes: ['default', 'plan', 'bypassPermissions'] })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const onChange = await renderWith('plan')
+    shiftTab()
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(onChange).toHaveBeenCalledWith('default')
+  })
+
+  it('tints the composer by mode', async () => {
+    await renderWith('plan')
+    expect(container.querySelector('.composer-card')?.getAttribute('data-mode-tone')).toBe('plan')
+    await renderWith('dangerouslySkipPermissions')
+    expect(container.querySelector('.composer-card')?.getAttribute('data-mode-tone')).toBe('danger')
+    await renderWith('acceptEdits')
+    expect(container.querySelector('.composer-card')?.hasAttribute('data-mode-tone')).toBe(false)
   })
 })
 

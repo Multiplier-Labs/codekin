@@ -2,8 +2,8 @@
  * Chat input bar with textarea, file attachment, skill menu, and
  * inline slash-command autocomplete.
  *
- * Supports Enter to send, Shift+Enter for newline, Ctrl+C to interrupt,
- * Escape to blur. The textarea sizes itself to its content, from two lines up
+ * Supports Enter to send, Shift+Enter for newline, Shift+Tab to cycle the
+ * enabled permission modes, Ctrl+C to interrupt, Escape to blur. The textarea sizes itself to its content, from two lines up
  * to 40% of the pane; the toolbar below it is one row, split into session
  * state (left, unboxed monospace) and actions (right, exactly one filled).
  */
@@ -19,7 +19,8 @@ import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
 import type { SlashCommand } from '../lib/slashCommands'
 import { AGENT_PROVIDER_IDS, PERMISSION_MODES, PROVIDERS, permissionModesFor, type PermissionMode, type ModelOption } from '../types'
-import { getPref, setPref } from '../lib/prefs'
+import { getPref, setPref, usePref } from '../lib/prefs'
+import { composerTone, cycleCandidates, offeredModes, resolveEnabledModes } from '../lib/permissionModes'
 import { isAddressedToJoe } from '../lib/joeAddress'
 
 const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
@@ -129,6 +130,21 @@ function StateLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
+/**
+ * Dangerous modes (bypassPermissions, dangerouslySkipPermissions) need an
+ * explicit yes before they activate, whether picked or cycled to.
+ */
+function confirmDangerousMode(mode: PermissionMode): boolean {
+  const entry = PERMISSION_MODES.find(m => m.id === mode)
+  if (!entry?.dangerous) return true
+  return window.confirm(
+    `Warning: "${entry.label}" will accept ALL tool calls without asking.\n\n` +
+    'This includes file writes, bash commands, and web requests. ' +
+    'Only use this if you fully trust the task.\n\n' +
+    'Are you sure?'
+  )
+}
+
 /** Desktop permission mode dropdown with full descriptions. */
 function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle, onSelect }: {
   currentMode: PermissionMode; modes: typeof PERMISSION_MODES; isOpen: boolean
@@ -139,7 +155,7 @@ function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle,
   const ModeIcon = PERMISSION_MODE_ICONS[mode?.icon ?? 'shield']
   return (
     <div className="relative" ref={menuRef}>
-      <StateItem onClick={onToggle} title={`Permission mode: ${mode?.label ?? currentMode}`} danger={!!mode?.dangerous}>
+      <StateItem onClick={onToggle} title={`Permission mode: ${mode?.label ?? currentMode} (Shift+Tab to switch)`} danger={!!mode?.dangerous}>
         <ModeIcon size={14} stroke={2} />
         <StateLabel>{mode?.label ?? currentMode}</StateLabel>
         <IconChevronDown size={12} stroke={2} className="opacity-70" />
@@ -527,7 +543,10 @@ interface InputBarProps {
 
 export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default', joeName, lockedReason }, ref) {
   const isOrchestrator = variant === 'orchestrator'
-  const visibleModes = permissionModesFor(sessionProvider)
+  const enabledModes = resolveEnabledModes(usePref('enabledPermissionModes'))
+  const providerModes = permissionModesFor(sessionProvider)
+  const visibleModes = offeredModes(providerModes, enabledModes, currentPermissionMode)
+  const tone = composerTone(currentPermissionMode)
   const handoffTargets = isOrchestrator ? AGENT_HANDOFF_TARGETS : PROVIDERS
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
@@ -549,6 +568,8 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const prevWaiting = useRef(false)
+  /** Set once the mode cycler exists; null when this composer has no mode control. */
+  const cycleModeRef = useRef<(() => void) | null>(null)
 
   // Height follows content — no stored height, no drag handle.
   useAutoGrow(textareaRef, value)
@@ -666,6 +687,12 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       return
     }
 
+    if (e.key === 'Tab' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey && cycleModeRef.current) {
+      e.preventDefault()
+      cycleModeRef.current()
+      return
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       // Don't send when slash menu is open — Enter selects the autocomplete item
       // (cmdk handles this internally via its own keydown)
@@ -696,21 +723,21 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   }, [onAddFiles])
 
   const handlePermissionModeSelect = useCallback((mode: PermissionMode) => {
-    // Require confirmation for any dangerous mode (bypassPermissions,
-    // dangerouslySkipPermissions) before activating.
-    if (PERMISSION_MODES.find(m => m.id === mode)?.dangerous) {
-      const label = PERMISSION_MODES.find(m => m.id === mode)?.label ?? mode
-      const confirmed = window.confirm(
-        `Warning: "${label}" will accept ALL tool calls without asking.\n\n` +
-        'This includes file writes, bash commands, and web requests. ' +
-        'Only use this if you fully trust the task.\n\n' +
-        'Are you sure?'
-      )
-      if (!confirmed) return
-    }
+    if (!confirmDangerousMode(mode)) return
     onPermissionModeChange?.(mode)
     setPermMenuOpen(false)
   }, [onPermissionModeChange])
+
+  /** Shift+Tab: step to the next enabled mode. Declining a dangerous one moves past it. */
+  const cyclePermissionMode = useCallback(() => {
+    if (!currentPermissionMode || !onPermissionModeChange) return
+    for (const m of cycleCandidates(providerModes, enabledModes, currentPermissionMode)) {
+      if (confirmDangerousMode(m.id)) {
+        onPermissionModeChange(m.id)
+        return
+      }
+    }
+  }, [currentPermissionMode, onPermissionModeChange, providerModes, enabledModes])
 
   const hasSkills = !isOrchestrator && skillGroups && skillGroups.some(g => g.skills.length > 0)
   const hasSlashCommands = !isOrchestrator && slashCommands && slashCommands.length > 0
@@ -721,6 +748,9 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   // is answering me" (harness and model alike) and "what may it do without
   // asking" are as much questions there as in a session.
   const showPermission = !!currentPermissionMode && !!onPermissionModeChange
+  useEffect(() => {
+    cycleModeRef.current = showPermission ? cyclePermissionMode : null
+  }, [showPermission, cyclePermissionMode])
   const showModel = !!currentModel && !!onModelChange
   const showProvider = !!sessionProvider && !!onProviderChange
   // Harness and model read as one fact ("what is answering me"), so they share
@@ -736,7 +766,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       {/* Exactly the transcript row's padding, so the card's edges land on the
           prose edges at every width. Nothing here reads the pane width. */}
       <div className="px-4 pb-3 pt-1 @[32rem]:px-12">
-        <div className="composer-card relative mx-auto flex w-full min-w-0 max-w-[var(--measure)] flex-col gap-2 rounded-control border border-edge bg-surface pt-2.5 pr-3 pb-2 pl-3">
+        <div data-mode-tone={tone} className="composer-card relative mx-auto flex w-full min-w-0 max-w-[var(--measure)] flex-col gap-2 rounded-control border border-edge bg-surface pt-2.5 pr-3 pb-2 pl-3">
           <DropZone onUpload={onAddFiles} disabled={disabled} />
 
           {/* Slash autocomplete popup — anchored to the measured column */}
