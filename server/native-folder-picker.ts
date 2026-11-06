@@ -99,15 +99,22 @@ export function pickFolderNative(defaultPath: string | undefined, execImpl: Exec
   const args = ['-l', 'JavaScript', ...SCRIPT.flatMap(line => ['-e', line]), location]
   inFlight = true
   return new Promise<string | null>((resolve, reject) => {
-    execImpl('osascript', args, { timeout: DIALOG_TIMEOUT_MS }, (error, stdout, stderr) => {
+    try {
+      execImpl('osascript', args, { timeout: DIALOG_TIMEOUT_MS }, (error, stdout, stderr) => {
+        inFlight = false
+        if (error) {
+          if (CANCELLED.test(stderr)) resolve(null)
+          else reject(new Error(stderr.trim() || error.message))
+          return
+        }
+        const picked = stdout.trim().replace(/(.)\/+$/, '$1')
+        resolve(picked || null)
+      })
+    } catch (err) {
+      // A synchronous throw never reaches the callback; release the lock so
+      // the next request isn't refused with 409 until a restart.
       inFlight = false
-      if (error) {
-        if (CANCELLED.test(stderr)) resolve(null)
-        else reject(new Error(stderr.trim() || error.message))
-        return
-      }
-      const picked = stdout.trim().replace(/(.)\/+$/, '$1')
-      resolve(picked || null)
-    })
+      reject(err instanceof Error ? err : new Error(String(err)))
+    }
   })
 }

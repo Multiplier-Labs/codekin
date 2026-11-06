@@ -115,6 +115,12 @@ describe('pickFolderNative', () => {
     await pending
     expect(isFolderDialogOpen()).toBe(false)
   })
+
+  it('clears the in-flight flag when osascript fails to launch synchronously', async () => {
+    const exec = vi.fn(() => { throw new Error('spawn EAGAIN') })
+    await expect(pickFolderNative(undefined, exec)).rejects.toThrow('spawn EAGAIN')
+    expect(isFolderDialogOpen()).toBe(false)
+  })
 })
 
 describe('resolveDefaultLocation', () => {
