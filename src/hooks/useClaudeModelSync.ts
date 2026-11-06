@@ -8,8 +8,15 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { fetchClaudeModels } from '../lib/ccApi'
-import { CLAUDE_MODELS } from '../types'
+import { CLAUDE_EFFORTS, CLAUDE_MODELS } from '../types'
 import type { ModelOption } from '../types'
+
+/**
+ * Every Claude model is offered the CLI's full `--effort` range. The CLI
+ * doesn't publish per-model support and no default is known, so the picker
+ * shows "Default" (no flag) rather than naming one.
+ */
+const withEfforts = (m: { id: string; label: string }): ModelOption => ({ id: m.id, label: m.label, efforts: CLAUDE_EFFORTS })
 
 export function useClaudeModelSync({
   token,
@@ -20,7 +27,7 @@ export function useClaudeModelSync({
   currentModel: string | null
   setModel: (model: string) => void
 }): { claudeModels: ModelOption[] } {
-  const [claudeModels, setClaudeModels] = useState(CLAUDE_MODELS)
+  const [claudeModels, setClaudeModels] = useState(() => CLAUDE_MODELS.map(withEfforts))
   const hasFetched = useRef(false)
   const currentModelRef = useRef(currentModel)
   useEffect(() => { currentModelRef.current = currentModel }, [currentModel])
@@ -32,7 +39,7 @@ export function useClaudeModelSync({
     fetchClaudeModels(token)
       .then(models => {
         if (models.length === 0) return // keep fallback
-        const mapped: ModelOption[] = models.map(m => ({ id: m.id, label: m.label }))
+        const mapped: ModelOption[] = models.map(withEfforts)
         setClaudeModels(mapped)
 
         // If the current model isn't in the fetched list, auto-select the first

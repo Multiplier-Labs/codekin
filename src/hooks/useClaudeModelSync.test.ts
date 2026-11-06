@@ -13,7 +13,10 @@ const mockFetchClaudeModels = vi.hoisted(() => vi.fn())
 vi.mock('../lib/ccApi', () => ({ fetchClaudeModels: mockFetchClaudeModels }))
 
 import { useClaudeModelSync } from './useClaudeModelSync.js'
-import { CLAUDE_MODELS, type ModelOption } from '../types'
+import { CLAUDE_EFFORTS, CLAUDE_MODELS, type ModelOption } from '../types'
+
+/** Every Claude model is offered the CLI's --effort levels. */
+const withEfforts = (models: { id: string; label: string }[]) => models.map(m => ({ ...m, efforts: CLAUDE_EFFORTS }))
 
 interface Props {
   token: string
@@ -52,7 +55,7 @@ describe('useClaudeModelSync', () => {
   it('does not fetch when there is no token', async () => {
     const { result } = await renderHook({ token: '', currentModel: null, setModel: vi.fn() })
     expect(mockFetchClaudeModels).not.toHaveBeenCalled()
-    expect(result.current.claudeModels).toEqual(CLAUDE_MODELS)
+    expect(result.current.claudeModels).toEqual(withEfforts(CLAUDE_MODELS))
   })
 
   it('replaces the fallback list with fetched models', async () => {
@@ -65,7 +68,7 @@ describe('useClaudeModelSync', () => {
     const { result } = await renderHook({ token: 't', currentModel: 'claude-opus-5-0', setModel: vi.fn() })
 
     expect(mockFetchClaudeModels).toHaveBeenCalledWith('t')
-    expect(result.current.claudeModels).toEqual(fetched)
+    expect(result.current.claudeModels).toEqual(withEfforts(fetched))
   })
 
   it('auto-selects the first fetched model when the current one is gone', async () => {
@@ -98,7 +101,7 @@ describe('useClaudeModelSync', () => {
 
     const { result } = await renderHook({ token: 't', currentModel: 'claude-opus-4-6', setModel })
 
-    expect(result.current.claudeModels).toEqual(CLAUDE_MODELS)
+    expect(result.current.claudeModels).toEqual(withEfforts(CLAUDE_MODELS))
     expect(setModel).not.toHaveBeenCalled()
   })
 
@@ -108,7 +111,7 @@ describe('useClaudeModelSync', () => {
 
     const { result } = await renderHook({ token: 't', currentModel: 'claude-opus-4-6', setModel })
 
-    expect(result.current.claudeModels).toEqual(CLAUDE_MODELS)
+    expect(result.current.claudeModels).toEqual(withEfforts(CLAUDE_MODELS))
     expect(setModel).not.toHaveBeenCalled()
   })
 })

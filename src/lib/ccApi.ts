@@ -645,7 +645,7 @@ export async function fetchOpenCodeModels(
 export async function fetchCodexModels(
   token: string,
 ): Promise<{
-  models: Array<{ id: string; name: string; description?: string; isDefault?: boolean }>
+  models: Array<{ id: string; name: string; description?: string; isDefault?: boolean; efforts?: { id: string; description?: string }[]; defaultEffort?: string }>
 }> {
   const res = await transport.fetch(`/api/codex/models`, {
     headers: { Authorization: `Bearer ${token}` },

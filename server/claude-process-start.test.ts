@@ -58,6 +58,19 @@ describe('ClaudeProcess.start() — process event handlers', () => {
     expect(mockSpawn).toHaveBeenCalledWith('claude', expect.any(Array), expect.objectContaining({ cwd: '/tmp' }))
   })
 
+  it('passes --effort when an effort is set', () => {
+    const cp = new ClaudeProcess('/tmp', { model: 'claude-opus-5', effort: 'xhigh' }) as CP
+    cp.start()
+    const args = mockSpawn.mock.calls[0][1] as string[]
+    expect(args[args.indexOf('--effort') + 1]).toBe('xhigh')
+  })
+
+  it('omits --effort when no effort is set (CLI default)', () => {
+    const cp = new ClaudeProcess('/tmp', { model: 'claude-opus-5' }) as CP
+    cp.start()
+    expect(mockSpawn.mock.calls[0][1]).not.toContain('--effort')
+  })
+
   it('sets alive=true after start()', () => {
     const cp = new ClaudeProcess('/tmp') as CP
     cp.start()

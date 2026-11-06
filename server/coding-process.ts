@@ -83,6 +83,13 @@ export interface CodingProcess extends EventEmitter<ClaudeProcessEvents> {
    */
   setPermissionMode?(mode: import('./types.js').PermissionMode): Promise<boolean>
 
+  /**
+   * Optionally change the reasoning effort in-place without a restart
+   * (undefined = harness default). Providers that can only take effort at
+   * spawn time omit this — callers fall back to restart.
+   */
+  setEffort?(effort: string | undefined): void
+
   /** Seed task/todo state from a previous process's last known list (session restore). */
   seedTasks(tasks: TaskItem[]): void
 

@@ -146,7 +146,7 @@ afterEach(() => {
 
 // Dynamic import so mocks are in place; we use a top-level import since
 // the hook reads WebSocket at call-time, not import-time.
-import { useChatSocket } from './useChatSocket'
+import { useChatSocket, EFFORT_SEND_DELAY_MS } from './useChatSocket'
 import { getPref, resetPrefsForTest } from '../lib/prefs'
 
 /* ------------------------------------------------------------------ */
@@ -764,6 +764,48 @@ describe('useChatSocket hook', () => {
       act(() => result.current.sendInput('response'))
       expect(result.current.activePrompt).toBeNull()
       expect(result.current.waitingSessions).toEqual({})
+      unmount()
+    })
+  })
+
+  describe('setEffort', () => {
+    const effortMsgs = (ws: MockWebSocket) => sentMessages(ws).filter(m => m.type === 'set_effort' || m.type === 'set_model' || m.type === 'join_session')
+
+    it('shows each step at once but sends only the level settled on', () => {
+      const { result, unmount } = setupConnected()
+      const ws = MockWebSocket.latest()
+      act(() => result.current.setEffort('low'))
+      act(() => result.current.setEffort('medium'))
+      act(() => result.current.setEffort('high'))
+      expect(result.current.currentEffort).toBe('high')
+      expect(effortMsgs(ws)).toEqual([])
+
+      act(() => { vi.advanceTimersByTime(EFFORT_SEND_DELAY_MS) })
+      expect(effortMsgs(ws)).toEqual([{ type: 'set_effort', effort: 'high' }])
+      unmount()
+    })
+
+    it('sends a pending level before switching session, so it lands on the right one', () => {
+      const { result, unmount } = setupConnected()
+      const ws = MockWebSocket.latest()
+      act(() => result.current.setEffort('max'))
+      act(() => result.current.joinSession('other'))
+      expect(effortMsgs(ws)).toEqual([
+        { type: 'set_effort', effort: 'max' },
+        { type: 'join_session', sessionId: 'other' },
+      ])
+      act(() => { vi.advanceTimersByTime(EFFORT_SEND_DELAY_MS) })
+      expect(effortMsgs(ws)).toHaveLength(2)
+      unmount()
+    })
+
+    it('drops a pending level when set_model carries its own effort', () => {
+      const { result, unmount } = setupConnected()
+      const ws = MockWebSocket.latest()
+      act(() => result.current.setEffort('low'))
+      act(() => result.current.setModel('claude-opus-5', 'xhigh'))
+      act(() => { vi.advanceTimersByTime(EFFORT_SEND_DELAY_MS) })
+      expect(effortMsgs(ws)).toEqual([{ type: 'set_model', model: 'claude-opus-5', effort: 'xhigh' }])
       unmount()
     })
   })
