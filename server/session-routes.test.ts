@@ -54,6 +54,15 @@ vi.mock('./anthropic-models.js', () => ({
   refreshCooldownRemainingMs: mockCooldownMs,
 }))
 
+const mockNativeAvailable = vi.hoisted(() => vi.fn(() => false))
+const mockDialogOpen = vi.hoisted(() => vi.fn(() => false))
+const mockPickFolder = vi.hoisted(() => vi.fn(async (): Promise<string | null> => '/picked/repos'))
+vi.mock('./native-folder-picker.js', () => ({
+  isNativeFolderPickerAvailable: mockNativeAvailable,
+  isFolderDialogOpen: mockDialogOpen,
+  pickFolderNative: mockPickFolder,
+}))
+
 import { createSessionRouter } from './session-routes.js'
 import type { SessionManager } from './session-manager.js'
 
@@ -289,6 +298,61 @@ describe('createSessionRouter', () => {
       const body = await res.json()
       expect(body.dirs).toContain('sub1')
       expect(body.dirs).toContain('sub2')
+    })
+  })
+
+  describe('native folder dialog routes', () => {
+    beforeEach(async () => {
+      mockNativeAvailable.mockReset().mockReturnValue(false)
+      mockDialogOpen.mockReset().mockReturnValue(false)
+      mockPickFolder.mockReset().mockResolvedValue('/picked/repos')
+      sessions = fakeSessions()
+      server = await startApp(createSessionRouter(verifyToken, extractToken, sessions))
+    })
+
+    const post = (body: unknown = {}, headers: Record<string, string> = auth()) => fetch(`${server.baseUrl}/api/native/pick-folder`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+    it('requires auth', async () => {
+      expect((await fetch(`${server.baseUrl}/api/native/folder-picker`)).status).toBe(401)
+      expect((await post({}, {})).status).toBe(401)
+    })
+
+    it('reports availability from the locality gate', async () => {
+      let res = await fetch(`${server.baseUrl}/api/native/folder-picker`, { headers: auth() })
+      expect(await res.json()).toEqual({ available: false })
+      mockNativeAvailable.mockReturnValue(true)
+      res = await fetch(`${server.baseUrl}/api/native/folder-picker`, { headers: auth() })
+      expect(await res.json()).toEqual({ available: true })
+    })
+
+    it('refuses to open a dialog when unavailable', async () => {
+      const res = await post()
+      expect(res.status).toBe(403)
+      expect(mockPickFolder).not.toHaveBeenCalled()
+    })
+
+    it('refuses a second dialog while one is open', async () => {
+      mockNativeAvailable.mockReturnValue(true)
+      mockDialogOpen.mockReturnValue(true)
+      expect((await post()).status).toBe(409)
+    })
+
+    it('returns the picked path, forwarding the default location', async () => {
+      mockNativeAvailable.mockReturnValue(true)
+      const res = await post({ defaultPath: '~/code' })
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ path: '/picked/repos' })
+      expect(mockPickFolder).toHaveBeenCalledWith('~/code')
+    })
+
+    it('reports a cancelled dialog', async () => {
+      mockNativeAvailable.mockReturnValue(true)
+      mockPickFolder.mockResolvedValue(null)
+      expect(await (await post()).json()).toEqual({ cancelled: true })
     })
   })
 

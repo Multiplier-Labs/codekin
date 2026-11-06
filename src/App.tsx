@@ -244,8 +244,10 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     clearMessages,
     restoreSession,
     currentModel,
+    currentEffort,
     sessionProvider,
     setModel,
+    setEffort,
     setProvider,
     send: wsSend,
     disconnect: wsDisconnect,
@@ -502,9 +504,17 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     [activeSessionProvider, openCodeCommands, allCommands],
   )
 
-  // Wrap setModel to also remember the OpenCode / Codex / Grok model choice
+  // Wrap setModel to also remember the OpenCode / Codex / Grok model choice.
+  // A model the user has picked an effort for gets that effort back in the
+  // same restart; Codex models otherwise get their advertised default named
+  // explicitly, because clearing an override doesn't reset a Codex thread.
   const handleModelChange = useCallback((model: string) => {
-    setModel(model)
+    const option = availableModels.find(m => m.id === model)
+    const remembered = getPref('modelEfforts')?.[model]
+    const effort = !option?.efforts ? undefined
+      : remembered && option.efforts.some(e => e.id === remembered) ? remembered
+      : option.defaultEffort ?? null
+    setModel(model, effort)
     if (activeSessionProvider === 'opencode') {
       setPref('opencodeModel', model)
     } else if (activeSessionProvider === 'codex') {
@@ -512,7 +522,15 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     } else if (activeSessionProvider === 'grok') {
       setPref('grokModel', model)
     }
-  }, [setModel, activeSessionProvider])
+  }, [setModel, activeSessionProvider, availableModels])
+
+  /** Pick an effort level for the session and remember it for its model. */
+  const handleEffortChange = useCallback((effort: string | null) => {
+    setEffort(effort)
+    if (!currentModel) return
+    const rest = Object.fromEntries(Object.entries(getPref('modelEfforts') ?? {}).filter(([id]) => id !== currentModel))
+    setPref('modelEfforts', effort ? { ...rest, [currentModel]: effort } : rest)
+  }, [setEffort, currentModel])
 
   // Switch the active session's coding provider; refresh the session list so
   // provider-derived UI (model list, permission modes) follows immediately.
@@ -1086,6 +1104,8 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
             onSessionInputChange={handleSessionInputChange}
             currentModel={currentModel}
             onModelChange={handleModelChange}
+            currentEffort={currentEffort}
+            onEffortChange={handleEffortChange}
             availableModels={availableModels}
             sessionProvider={activeSessionProvider}
             onProviderChange={handleProviderChange}

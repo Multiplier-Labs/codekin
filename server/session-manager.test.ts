@@ -3024,6 +3024,116 @@ describe('SessionManager', () => {
       expect(stopWaitSpy).not.toHaveBeenCalled()
       stopWaitSpy.mockRestore()
     })
+
+    it('applies an effort given with the model in the same restart', () => {
+      const s = sm.create('test', '/tmp', { model: 'opus' })
+      s.claudeProcess = fakeClaudeProcess(true) as never
+      const reconfigSpy = vi.spyOn(s.coordinator, 'requestReconfigure').mockResolvedValue(true)
+
+      sm.setModel(s.id, 'sonnet', 'high')
+
+      expect(reconfigSpy).toHaveBeenCalledOnce()
+      reconfigSpy.mock.calls[0][0]()
+      expect(s.model).toBe('sonnet')
+      expect(s.effort).toBe('high')
+    })
+
+    it('leaves effort alone when none is given, and clears it on null', () => {
+      const s = sm.create('test', '/tmp', { model: 'opus', effort: 'max' })
+      sm.setModel(s.id, 'sonnet')
+      expect(s.effort).toBe('max')
+      sm.setModel(s.id, 'haiku', null)
+      expect(s.effort).toBeUndefined()
+    })
+  })
+
+  describe('setEffort()', () => {
+    it('returns false for unknown sessionId', () => {
+      expect(sm.setEffort('no-such-id', 'high')).toBe(false)
+    })
+
+    it('assigns directly when no process is running', () => {
+      const s = sm.create('test', '/tmp')
+      expect(sm.setEffort(s.id, 'high')).toBe(true)
+      expect(s.effort).toBe('high')
+      sm.setEffort(s.id, null)
+      expect(s.effort).toBeUndefined()
+    })
+
+    it('restarts a live process that only takes effort at spawn (Claude)', () => {
+      const s = sm.create('test', '/tmp')
+      s.claudeProcess = fakeClaudeProcess(true) as never
+      const reconfigSpy = vi.spyOn(s.coordinator, 'requestReconfigure').mockResolvedValue(true)
+
+      sm.setEffort(s.id, 'xhigh')
+
+      expect(reconfigSpy).toHaveBeenCalledOnce()
+      expect(s.effort).toBeUndefined()
+      reconfigSpy.mock.calls[0][0]()
+      expect(s.effort).toBe('xhigh')
+    })
+
+    it('applies live, without a restart, when the process supports setEffort (Codex)', () => {
+      const s = sm.create('test', '/tmp', { provider: 'codex' })
+      const setEffort = vi.fn()
+      s.claudeProcess = { ...fakeClaudeProcess(true), setEffort } as never
+      const reconfigSpy = vi.spyOn(s.coordinator, 'requestReconfigure').mockResolvedValue(true)
+
+      sm.setEffort(s.id, 'high')
+
+      expect(reconfigSpy).not.toHaveBeenCalled()
+      expect(setEffort).toHaveBeenCalledWith('high')
+      expect(s.effort).toBe('high')
+    })
+
+    it('waits for a running Claude turn to finish before restarting', () => {
+      const s = sm.create('test', '/tmp')
+      s.claudeProcess = fakeClaudeProcess(true) as never
+      s.isProcessing = true
+      const reconfigSpy = vi.spyOn(s.coordinator, 'requestReconfigure').mockResolvedValue(true)
+
+      sm.setEffort(s.id, 'low')
+      sm.setEffort(s.id, 'max')
+
+      // Recorded, but the turn is not interrupted.
+      expect(reconfigSpy).not.toHaveBeenCalled()
+      expect(s.effort).toBe('max')
+
+      ;(sm as any).handleClaudeResult(s, s.id, 'done', false)
+
+      // One restart for the whole burst, on the last level picked.
+      expect(reconfigSpy).toHaveBeenCalledOnce()
+      reconfigSpy.mock.calls[0][0]()
+      expect(s.effort).toBe('max')
+      expect(s._effortRestartPending).toBe(false)
+    })
+
+    it('drops a deferred effort restart when the process has already exited', () => {
+      const s = sm.create('test', '/tmp')
+      const cp = fakeClaudeProcess(true)
+      s.claudeProcess = cp as never
+      s.isProcessing = true
+      const reconfigSpy = vi.spyOn(s.coordinator, 'requestReconfigure').mockResolvedValue(true)
+
+      sm.setEffort(s.id, 'high')
+      s.claudeProcess = fakeClaudeProcess(false) as never
+      ;(sm as any).handleClaudeResult(s, s.id, 'done', false)
+
+      // The next spawn reads session.effort anyway.
+      expect(reconfigSpy).not.toHaveBeenCalled()
+      expect(s.effort).toBe('high')
+      expect(s._effortRestartPending).toBe(false)
+    })
+
+    it('is a no-op when the effort is unchanged', () => {
+      const s = sm.create('test', '/tmp', { effort: 'high' })
+      s.claudeProcess = fakeClaudeProcess(true) as never
+      const reconfigSpy = vi.spyOn(s.coordinator, 'requestReconfigure').mockResolvedValue(true)
+
+      sm.setEffort(s.id, 'high')
+
+      expect(reconfigSpy).not.toHaveBeenCalled()
+    })
   })
 
   describe('setProvider()', () => {
