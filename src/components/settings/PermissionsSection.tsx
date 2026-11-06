@@ -77,9 +77,6 @@ function DefaultModeBlock() {
         'Every new session will start in this mode. Are you sure?'
       )
       if (!confirmed) return
-      // Already accepted here, so the composer won't ask again for this mode.
-      const accepted = getPref('confirmedDangerousModes') ?? []
-      if (!accepted.includes(next)) setPref('confirmedDangerousModes', [...accepted, next])
     }
     setPref('permissionMode', next)
     setMode(next)
@@ -141,8 +138,6 @@ function EnabledModesBlock() {
   const enabled = resolveEnabledModes(usePref('enabledPermissionModes'))
   // Track the default live: it can't be switched off while it is the default.
   const defaultMode = (usePref('permissionMode') ?? readPermissionMode())
-  const confirmedIds = usePref('confirmedDangerousModes') ?? []
-  const confirmedLabels = PERMISSION_MODES.filter(m => m.dangerous && confirmedIds.includes(m.id)).map(m => m.label)
 
   function toggle(id: PermissionMode) {
     const next = enabled.includes(id) ? enabled.filter(m => m !== id) : [...enabled, id]
@@ -153,7 +148,7 @@ function EnabledModesBlock() {
   return (
     <Block
       title="Modes in the composer"
-      description="Which modes the composer's mode menu offers and Shift+Tab steps through while typing."
+      description="Which modes the composer's mode menu offers. Shift+Tab steps through the enabled ones while typing, except the two that run tools without asking."
     >
       <div className="flex flex-col gap-1">
         {PERMISSION_MODES.map(m => {
@@ -182,25 +177,12 @@ function EnabledModesBlock() {
               <span className="min-w-0 flex-1">
                 <span className="block text-body text-ink">{m.label}</span>
                 {isDefault && <span className="block text-meta text-ink-muted">New sessions start in this mode</span>}
+                {m.dangerous && <span className="block text-meta text-ink-muted">Menu only, and asks every time — Shift+Tab skips it</span>}
               </span>
             </label>
           )
         })}
       </div>
-      {confirmedLabels.length > 0 ? (
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <p className="min-w-0 flex-1 text-meta text-ink-muted">
-            You've confirmed: {confirmedLabels.join(', ')}. The composer switches to {confirmedLabels.length === 1 ? 'it' : 'these'} without asking.
-          </p>
-          <button type="button" className={button} onClick={() => { setPref('confirmedDangerousModes', undefined) }}>
-            Ask again
-          </button>
-        </div>
-      ) : enabled.some(id => PERMISSION_MODES.find(m => m.id === id)?.dangerous) && (
-        <p className="mt-2 text-meta text-ink-muted">
-          The composer asks once before a mode that runs tools without asking; declining skips past it.
-        </p>
-      )}
     </Block>
   )
 }

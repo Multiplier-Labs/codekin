@@ -29,8 +29,6 @@ export interface Prefs {
   permissionMode: PermissionMode
   /** Modes offered in the composer menu and cycled by Shift+Tab. Unset means all. */
   enabledPermissionModes: PermissionMode[]
-  /** Dangerous modes the user has confirmed once; switching to them no longer asks. */
-  confirmedDangerousModes: PermissionMode[]
   /** Coding provider new sessions start with. */
   provider: CodingProvider
   /** Last model used per provider, offered to the next session. */

@@ -51,6 +51,14 @@ describe('enabled modes and Shift+Tab cycling', () => {
     expect(ids(cycleCandidates(PERMISSION_MODES, ['default', 'plan'], 'bypassPermissions'))).toEqual(['default', 'plan'])
   })
 
+  it('leaves dangerous modes out of the ring even when enabled', () => {
+    const all = resolveEnabledModes(undefined)
+    expect(ids(cycleCandidates(PERMISSION_MODES, all, 'plan'))).toEqual(['default', 'acceptEdits'])
+    // From a dangerous mode, the way out is the first safe one.
+    expect(ids(cycleCandidates(PERMISSION_MODES, all, 'dangerouslySkipPermissions'))).toEqual(['default', 'acceptEdits', 'plan'])
+    expect(cycleCandidates(PERMISSION_MODES, ['bypassPermissions', 'dangerouslySkipPermissions'], 'bypassPermissions')).toEqual([])
+  })
+
   it('respects the provider list (no skip flag outside Claude)', () => {
     const all = resolveEnabledModes(undefined)
     expect(ids(cycleCandidates(permissionModesFor('codex'), all, 'bypassPermissions'))).toEqual(['default', 'acceptEdits', 'plan'])

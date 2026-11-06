@@ -30,11 +30,15 @@ export function offeredModes(providerModes: readonly ModeEntry[], enabled: reado
 
 /**
  * The modes Shift+Tab would land on next, in order, starting after `current`
- * and wrapping around. The caller takes the first it can activate — a
- * dangerous mode needs confirmation, and declining moves on to the next.
+ * and wrapping around. Dangerous modes (bypass / skip permissions) are never
+ * in the ring: a keystroke made while typing must not be able to switch
+ * approvals off, and confirming on every lap would train people to click
+ * through the warning. They stay one deliberate pick away in the mode menu.
+ * Leaving a dangerous mode is fine — from one, Shift+Tab steps to the first
+ * enabled safe mode.
  */
 export function cycleCandidates(modes: readonly ModeEntry[], enabled: readonly PermissionMode[], current: PermissionMode): ModeEntry[] {
-  const ring = modes.filter(m => enabled.includes(m.id))
+  const ring = modes.filter(m => enabled.includes(m.id) && !m.dangerous)
   if (ring.length === 0) return []
   const at = ring.findIndex(m => m.id === current)
   // Not in the ring (e.g. current mode was switched off): start from the top.

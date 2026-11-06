@@ -134,22 +134,18 @@ function StateLabel({ children }: { children: React.ReactNode }) {
 
 /**
  * Dangerous modes (bypassPermissions, dangerouslySkipPermissions) need an
- * explicit yes before they first activate, whether picked or cycled to. The
- * yes is remembered per mode, so switching back to it later doesn't ask again.
+ * explicit yes every time they are switched on. They can only be picked from
+ * the mode menu — Shift+Tab never lands on them (see cycleCandidates).
  */
 function confirmDangerousMode(mode: PermissionMode): boolean {
   const entry = PERMISSION_MODES.find(m => m.id === mode)
   if (!entry?.dangerous) return true
-  const confirmed = getPref('confirmedDangerousModes') ?? []
-  if (confirmed.includes(mode)) return true
-  const ok = window.confirm(
+  return window.confirm(
     `Warning: "${entry.label}" will accept ALL tool calls without asking.\n\n` +
     'This includes file writes, bash commands, and web requests. ' +
     'Only use this if you fully trust the task.\n\n' +
-    'You will only be asked once. Are you sure?'
+    'Are you sure?'
   )
-  if (ok) setPref('confirmedDangerousModes', [...confirmed, mode])
-  return ok
 }
 
 /** Desktop permission mode dropdown with full descriptions. */
@@ -735,15 +731,11 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
     setPermMenuOpen(false)
   }, [onPermissionModeChange])
 
-  /** Shift+Tab: step to the next enabled mode. Declining a dangerous one moves past it. */
+  /** Shift+Tab: step to the next enabled safe mode (dangerous ones are menu-only). */
   const cyclePermissionMode = useCallback(() => {
     if (!currentPermissionMode || !onPermissionModeChange) return
-    for (const m of cycleCandidates(providerModes, enabledModes, currentPermissionMode)) {
-      if (confirmDangerousMode(m.id)) {
-        onPermissionModeChange(m.id)
-        return
-      }
-    }
+    const next = cycleCandidates(providerModes, enabledModes, currentPermissionMode)[0] as (typeof providerModes)[number] | undefined
+    if (next) onPermissionModeChange(next.id)
   }, [currentPermissionMode, onPermissionModeChange, providerModes, enabledModes])
 
   const hasSkills = !isOrchestrator && skillGroups && skillGroups.some(g => g.skills.length > 0)

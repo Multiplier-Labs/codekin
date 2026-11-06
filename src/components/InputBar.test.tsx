@@ -70,43 +70,50 @@ describe('InputBar Shift+Tab mode cycling', () => {
     expect(onChange).toHaveBeenCalledWith('plan')
   })
 
-  it('asks before a dangerous mode and moves past it when declined', async () => {
-    resetPrefsForTest({ enabledPermissionModes: ['default', 'plan', 'bypassPermissions'] })
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    const onChange = await renderWith('plan')
-    shiftTab()
-    expect(confirm).toHaveBeenCalledOnce()
-    expect(onChange).toHaveBeenCalledWith('default')
-  })
-
-  it('asks once per dangerous mode, then switches to it without asking', async () => {
-    resetPrefsForTest({ enabledPermissionModes: ['plan', 'bypassPermissions'] })
+  it('never lands on a dangerous mode, so it never has to ask', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const onChange = await renderWith('plan')
+    const onChange = await renderWith('plan')  // every mode enabled (unset)
     shiftTab()
-    expect(confirm).toHaveBeenCalledOnce()
-    expect(onChange).toHaveBeenLastCalledWith('bypassPermissions')
-    expect(getPref('confirmedDangerousModes')).toEqual(['bypassPermissions'])
-
-    await renderWith('bypassPermissions', onChange)
+    expect(onChange).toHaveBeenCalledWith('default')
+    await renderWith('acceptEdits', onChange)
     shiftTab()
     expect(onChange).toHaveBeenLastCalledWith('plan')
-    await renderWith('plan', onChange)
-    shiftTab()
-    expect(onChange).toHaveBeenLastCalledWith('bypassPermissions')
-    expect(confirm).toHaveBeenCalledOnce()
+    expect(onChange.mock.calls.flat()).not.toContain('bypassPermissions')
+    expect(onChange.mock.calls.flat()).not.toContain('dangerouslySkipPermissions')
+    expect(confirm).not.toHaveBeenCalled()
   })
 
-  it('still asks for a dangerous mode that has not been confirmed itself', async () => {
-    resetPrefsForTest({
-      enabledPermissionModes: ['plan', 'dangerouslySkipPermissions'],
-      confirmedDangerousModes: ['bypassPermissions'],
-    })
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const onChange = await renderWith('plan')
+  it('steps out of a dangerous mode to the first safe one without asking', async () => {
+    resetPrefsForTest({ enabledPermissionModes: ['plan', 'acceptEdits', 'bypassPermissions'] })
+    const confirm = vi.spyOn(window, 'confirm')
+    const onChange = await renderWith('bypassPermissions')
     shiftTab()
-    expect(confirm).toHaveBeenCalledOnce()
-    expect(onChange).toHaveBeenCalledWith('dangerouslySkipPermissions')
+    expect(onChange).toHaveBeenCalledWith('acceptEdits')
+    expect(confirm).not.toHaveBeenCalled()
+  })
+
+  it('does nothing when only dangerous modes are enabled besides the current one', async () => {
+    resetPrefsForTest({ enabledPermissionModes: ['bypassPermissions', 'dangerouslySkipPermissions'] })
+    const onChange = await renderWith('bypassPermissions')
+    shiftTab()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('asks every time a dangerous mode is picked from the menu', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(true).mockReturnValueOnce(false).mockReturnValueOnce(true)
+    const onChange = await renderWith('default')
+    const item = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.includes(label))
+    const pick = (label: string) => {
+      // Declining leaves the menu open; only open it when it's closed.
+      if (!item(label)) act(() => { container.querySelector<HTMLButtonElement>('button[title^="Permission mode:"]')!.click() })
+      act(() => { item(label)!.click() })
+    }
+    pick('Bypass permissions')
+    pick('Bypass permissions')
+    pick('Bypass permissions')
+    expect(confirm).toHaveBeenCalledTimes(3)
+    expect(onChange).toHaveBeenCalledTimes(2)
+    expect(getPref('confirmedDangerousModes' as never)).toBeUndefined()
   })
 
   it('tints the composer by mode', async () => {
