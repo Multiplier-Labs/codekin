@@ -674,9 +674,11 @@ interface InputBarProps {
 export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, currentEffort = null, onEffortChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default', joeName, lockedReason }, ref) {
   const isOrchestrator = variant === 'orchestrator'
   const enabledModes = resolveEnabledModes(usePref('enabledPermissionModes'))
+  const bypassBackground = usePref('bypassComposerBackground')
   const providerModes = permissionModesFor(sessionProvider)
   const visibleModes = offeredModes(providerModes, enabledModes, currentPermissionMode)
-  const tone = composerTone(currentPermissionMode)
+  const modeTone = composerTone(currentPermissionMode)
+  const tone = modeTone === 'danger' && bypassBackground !== 'red' ? undefined : modeTone
   const handoffTargets = isOrchestrator ? AGENT_HANDOFF_TARGETS : PROVIDERS
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)

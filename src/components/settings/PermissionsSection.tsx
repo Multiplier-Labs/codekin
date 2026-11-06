@@ -12,7 +12,7 @@ import { PERMISSION_MODES } from '../../types'
 import { getAllRepoApprovals, removeRepoApproval, bulkRemoveRepoApprovals, type RepoApprovalsEntry } from '../../lib/ccApi'
 import { ApprovalGroupRow } from '../ApprovalsPanel'
 import { PERMISSION_MODE_ICONS, buildGroups, type ApprovalGroup, type RemovalTarget } from '../../lib/approvalGroups'
-import { Block, button, checkbox } from './Block'
+import { Block, Row, button, checkbox, input } from './Block'
 import { getPref, setPref, usePref } from '../../lib/prefs'
 import { resolveEnabledModes } from '../../lib/permissionModes'
 
@@ -53,12 +53,37 @@ export function PermissionsSection({ token, repos, onError }: Props) {
     <div className="space-y-4">
       <DefaultModeBlock />
       <EnabledModesBlock />
+      <ComposerBackgroundBlock />
       <ApprovedRulesBlock token={token} repos={repos} onError={onError} />
     </div>
   )
 }
 
 /* ── Default mode ───────────────────────────────────────────────── */
+
+function ComposerBackgroundBlock() {
+  const background = usePref('bypassComposerBackground') ?? 'standard'
+  return (
+    <Block title="Composer appearance">
+      <Row
+        label="Bypass permissions background"
+        description="Choose the composer background for Bypass and Skip permissions modes."
+        htmlFor="bypass-composer-background"
+        control={
+          <select
+            id="bypass-composer-background"
+            className={input}
+            value={background}
+            onChange={event => setPref('bypassComposerBackground', event.target.value === 'red' ? 'red' : 'standard')}
+          >
+            <option value="standard">Standard</option>
+            <option value="red">Red warning tint</option>
+          </select>
+        }
+      />
+    </Block>
+  )
+}
 
 function DefaultModeBlock() {
   // Read on mount: the composer writes the same pref when a session switches mode.

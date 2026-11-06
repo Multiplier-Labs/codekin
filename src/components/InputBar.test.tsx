@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { InputBar } from './InputBar'
-import { getPref, resetPrefsForTest } from '../lib/prefs'
+import { getPref, setPref, resetPrefsForTest } from '../lib/prefs'
 import type { PermissionMode } from '../types'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -116,11 +116,17 @@ describe('InputBar Shift+Tab mode cycling', () => {
     expect(getPref('confirmedDangerousModes' as never)).toBeUndefined()
   })
 
-  it('tints the composer by mode', async () => {
+  it('uses the standard bypass background by default and updates when the preference changes', async () => {
     await renderWith('plan')
     expect(container.querySelector('.composer-card')?.getAttribute('data-mode-tone')).toBe('plan')
     await renderWith('dangerouslySkipPermissions')
+    expect(container.querySelector('.composer-card')?.hasAttribute('data-mode-tone')).toBe(false)
+    act(() => { setPref('bypassComposerBackground', 'red') })
     expect(container.querySelector('.composer-card')?.getAttribute('data-mode-tone')).toBe('danger')
+    await renderWith('bypassPermissions')
+    expect(container.querySelector('.composer-card')?.getAttribute('data-mode-tone')).toBe('danger')
+    act(() => { setPref('bypassComposerBackground', 'standard') })
+    expect(container.querySelector('.composer-card')?.hasAttribute('data-mode-tone')).toBe(false)
     await renderWith('acceptEdits')
     expect(container.querySelector('.composer-card')?.hasAttribute('data-mode-tone')).toBe(false)
   })
