@@ -8,7 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Hidden `codekin app-server` command for the planned desktop app: sets up a credential on first launch, attaches to a running Codekin server that accepts it, or starts the server in-process, reporting the outcome as event lines and handing the token to the parent over a private file descriptor
 - `GET /api/ping` answers `{ "app": "codekin", "version": "…" }` without a token, so launchers such as the planned desktop app can tell a Codekin server that uses a different token apart from another program on the port
+
+### Changed
+- `codekin setup`, `codekin start` and the service units now share one launcher module (`bin/lib/launch.mjs`); behaviour is unchanged
+- The server now exits with status 1 when it can't bind its port (for example when it is already in use), instead of logging the error and staying up without serving anything
 
 ## [0.9.8] - 2026-11-04
 

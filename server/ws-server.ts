@@ -61,6 +61,7 @@ import { checkForUpdates, getUpdateNotification } from './version-check.js'
 import { stopOpenCodeServer } from './opencode-process.js'
 import { ensureHookConfig, syncCommitHooks } from './commit-event-hooks.js'
 import { createAuthRouter, createPingRouter } from './auth-routes.js'
+import { serverLifecycle } from './server-lifecycle.js'
 import { createSessionRouter } from './session-routes.js'
 import { createWebhookRouter } from './webhook-routes.js'
 import { createWebhookSetupRouter } from './webhook-setup-routes.js'
@@ -527,6 +528,19 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 // ---------------------------------------------------------------------------
 
 const server = createServer(app)
+// Registered before the WebSocketServer attaches its own 'error' forwarder:
+// a failed bind (EADDRINUSE, EACCES) used to surface only as a logged
+// uncaughtException, leaving a process that served nothing. Exit instead, so
+// a supervisor (systemd, launchd, the desktop app) sees the failure.
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (server.listening) {
+    console.error('[server] HTTP server error:', err)
+    return
+  }
+  console.error(`[server] Can't listen on ${BIND_HOST}:${port}: ${err.code ?? err.message}`)
+  serverLifecycle.emit('listen_error', err)
+  process.exit(1)
+})
 const wss = new WebSocketServer({ server, maxPayload: WS_MAX_PAYLOAD_BYTES })
 
 /** Connections that have completed the `auth` handshake. */
@@ -686,6 +700,7 @@ wss.on('close', () => clearInterval(heartbeat))
 
 server.listen(port, BIND_HOST, () => {
   console.log(`Codekin WebSocket server listening on ${BIND_HOST}:${port}`)
+  serverLifecycle.emit('listening', { host: BIND_HOST, port })
 
   // Start after listening, so the connector's first proxied call lands.
   relayConnector.start()

@@ -199,13 +199,45 @@ PID, and SIGTERM goes straight to `gracefulShutdown`.
 Event lines on stdout are JSON prefixed with `@@codekin `; everything else on stdout/stderr is server log output
 and goes to the log file.
 
+### Launcher contract (implemented)
+
+`bin/lib/launch.mjs` (shared helpers) and `bin/lib/app-server.mjs` (the flow above). Invocation:
+
+```
+node codekin/bin/codekin.mjs app-server --credential-fd=3 --lifetime-stdin
+```
+
+- `--credential-fd=N` (N > 2): one JSON line `{"token":…,"source":"AUTH_TOKEN"|"AUTH_TOKEN_FILE"}` is written
+  and the fd closed, before any outcome event.
+- `--lifetime-stdin`: EOF on stdin sends the launcher SIGTERM (graceful shutdown), with a 15 s SIGKILL of
+  the process group as backstop. When the launcher leads its process group, its `exit` handler SIGKILLs any
+  remaining group members, which also covers the `process.exit(0)` at the end of `gracefulShutdown`.
+- `PATH`: an explicit `PATH` in the env file wins; otherwise the login-shell `PATH`. `CODEKIN_LOGIN_PATH=0`
+  skips the login shell (tests and the smoke test).
+- The server signals binding in-process through `server/server-lifecycle.ts` (`listening`, `listen_error`).
+  A failed bind now exits the server with status 1 for every entry point, instead of leaving a process that
+  serves nothing.
+
+| Event | Fields | Exit | Meaning |
+|---|---|---|---|
+| `started` | `port`, `host`, `version`, `pathSource` | keeps running | Owned server is listening and answered an authenticated `/api/health` |
+| `attach` | `port`, `host`, `version` | 0 | A Codekin server accepted the credential |
+| `config_error` | `reason`, `source` | 2 | Credential configured but unreadable, bad arguments, or no compiled server |
+| `auth_error` | `port`, `host`, `version`, `source` | 3 | Codekin answered but rejected the credential |
+| `port_conflict` | `port`, `host` | 4 | Something that isn't Codekin, or a Codekin release without `/api/ping` |
+| `unresponsive` | `port`, `host` | 5 | Probe timed out or failed, or the started server failed its readiness check |
+| `bind_failed` | `port`, `host`, `reason` | 1 | Lost a bind race after a refused probe; re-run the full flow |
+
+`data_in_use` arrives with the data-directory lock (D7).
+
 ## Startup flow (shell)
 
 1. Show the native splash.
 2. Spawn the launcher and wait for its first event (up to about 15 s):
    - `started` or `attach`: navigate the main window to `http://127.0.0.1:<port>/#token=<token>`.
-   - `port_conflict`, `auth_error`, `data_in_use` or incompatible data: show the corresponding recovery
+   - `port_conflict`, `auth_error`, `config_error`, `data_in_use` or incompatible data: show the corresponding recovery
      instructions, **Show logs** and **Retry**. Never retry by overwriting configuration or killing a service.
+   - `unresponsive` or `bind_failed`: show the error view with **Retry**; Retry re-runs the full flow.
    - Timeout or the launcher exits without an event: show an error view with **Show logs** and **Retry**.
      Stop and reap any still-running owned launcher before Retry can create another one.
 3. In attach mode, poll `/api/ping` every 3 s with a 2 s request timeout. After three consecutive failures,

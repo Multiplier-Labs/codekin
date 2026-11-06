@@ -10,6 +10,7 @@ export default defineConfig({
       'src/**/*.test.tsx',
       'server/**/*.test.ts',
       '.claude/hooks/**/*.test.mjs',
+      'bin/**/*.test.mjs',
     ],
     env: { NODE_ENV: 'test' },
     coverage: {
@@ -22,6 +23,7 @@ export default defineConfig({
         'src/**/*.{ts,tsx}',
         'server/**/*.ts',
         '.claude/hooks/**/*.mjs',
+        'bin/**/*.mjs',
       ],
       exclude: [
         '**/*.test.*',

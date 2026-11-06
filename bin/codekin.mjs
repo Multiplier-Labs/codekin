@@ -20,16 +20,20 @@ import { execSync, execFileSync, spawnSync } from 'child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, createReadStream, rmSync } from 'fs'
 import { homedir, platform } from 'os'
 import { join, dirname } from 'path'
-import { fileURLToPath } from 'url'
-import { randomBytes } from 'crypto'
 import { createInterface } from 'readline'
+import {
+  PACKAGE_ROOT,
+  buildServerEnv,
+  configPaths,
+  findFrontendDist,
+  findServerScript,
+  generateToken,
+  readEnvFile as readEnvFileAt,
+  resolvePort,
+  writeEnvFile as writeEnvFileAt,
+} from './lib/launch.mjs'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const PACKAGE_ROOT = join(__dirname, '..')
-const CONFIG_DIR = join(homedir(), '.config', 'codekin')
-const TOKEN_FILE = join(CONFIG_DIR, 'token')
-const ENV_FILE = join(CONFIG_DIR, 'env')
-const DEFAULT_PORT = 32352
+const { configDir: CONFIG_DIR, tokenFile: TOKEN_FILE, envFile: ENV_FILE } = configPaths()
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -45,26 +49,15 @@ function readToken() {
 }
 
 function readEnvFile() {
-  if (!existsSync(ENV_FILE)) return {}
-  const vars = {}
-  for (const line of readFileSync(ENV_FILE, 'utf-8').split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('#')) continue
-    const eq = trimmed.indexOf('=')
-    if (eq === -1) continue
-    vars[trimmed.slice(0, eq)] = trimmed.slice(eq + 1)
-  }
-  return vars
+  return readEnvFileAt(ENV_FILE)
 }
 
 function writeEnvFile(vars) {
-  const lines = Object.entries(vars).map(([k, v]) => `${k}=${v}`)
-  writeFileSync(ENV_FILE, lines.join('\n') + '\n')
+  writeEnvFileAt(ENV_FILE, vars)
 }
 
 function getPort() {
-  const env = readEnvFile()
-  return parseInt(env.PORT || String(DEFAULT_PORT), 10)
+  return resolvePort(readEnvFile())
 }
 
 function openTtyInput() {
@@ -103,21 +96,6 @@ function printAccessUrl() {
   } else {
     console.log(`\nCodekin is running at: http://localhost:${port}\n`)
   }
-}
-
-function findServerScript() {
-  // Prefer pre-compiled JS, fall back to tsx for dev
-  const compiled = join(PACKAGE_ROOT, 'server', 'dist', 'ws-server.js')
-  if (existsSync(compiled)) return { script: compiled, runner: process.execPath }
-  const ts = join(PACKAGE_ROOT, 'server', 'ws-server.ts')
-  if (existsSync(ts)) return { script: ts, runner: 'tsx' }
-  throw new Error('Server script not found. Run npm run build first.')
-}
-
-function findFrontendDist() {
-  const dist = join(PACKAGE_ROOT, 'dist')
-  if (existsSync(dist)) return dist
-  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -391,7 +369,7 @@ async function cmdSetup({ regenerate = false } = {}) {
   if (existingToken && !regenerate) {
     console.log('Auth token: (already exists, use --regenerate to replace)')
   } else {
-    const token = randomBytes(16).toString('base64url')
+    const token = generateToken()
     writeFileSync(TOKEN_FILE, token + '\n', { mode: 0o600 })
     console.log('Auth token: generated')
   }
@@ -423,12 +401,7 @@ function cmdToken() {
 
 function cmdStart() {
   const { script, runner } = findServerScript()
-  const frontendDist = findFrontendDist()
-  const env = {
-    ...process.env,
-    ...readEnvFile(),
-  }
-  if (frontendDist && !env.FRONTEND_DIST) env.FRONTEND_DIST = frontendDist
+  const env = buildServerEnv({ baseEnv: process.env, fileVars: readEnvFile(), frontendDist: findFrontendDist() })
 
   console.log(`Starting Codekin server (${script})...`)
   printAccessUrl()
@@ -763,6 +736,11 @@ const cmd = args[0]
 
 if (cmd === 'start') {
   cmdStart()
+} else if (cmd === 'app-server') {
+  // Hidden: the desktop app's launcher entry point (bin/lib/app-server.mjs).
+  const { runAppServer } = await import('./lib/app-server.mjs')
+  const code = await runAppServer({ argv: args.slice(1) })
+  if (code !== null) process.exit(code)
 } else if (cmd === 'stop') {
   cmdStop()
 } else if (cmd === 'setup') {
