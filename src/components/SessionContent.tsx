@@ -54,6 +54,10 @@ export interface SessionContentProps {
   onSessionInputChange: (sessionId: string, value: string) => void
   currentModel: string | null
   onModelChange: (model: string) => void
+  /** Reasoning effort of the session (null = harness default). */
+  currentEffort?: string | null
+  /** Called when the user picks an effort level (null = harness default). */
+  onEffortChange?: (effort: string | null) => void
   availableModels?: import('../types').ModelOption[]
   /** Coding provider of the active session — drives provider-specific UI (permission modes). */
   sessionProvider?: import('../types').CodingProvider
@@ -120,6 +124,8 @@ export function SessionContent({
   onSessionInputChange,
   currentModel,
   onModelChange,
+  currentEffort,
+  onEffortChange,
   availableModels,
   sessionProvider,
   onProviderChange,
@@ -309,6 +315,8 @@ export function SessionContent({
         onValueChange={(v) => { onSessionInputChange(activeSessionId, v) }}
         currentModel={currentModel}
         onModelChange={onModelChange}
+        currentEffort={currentEffort}
+        onEffortChange={onEffortChange}
         availableModels={availableModels}
         sessionProvider={sessionProvider}
         onProviderChange={onProviderChange}

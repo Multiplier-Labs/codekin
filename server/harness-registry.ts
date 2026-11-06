@@ -118,6 +118,7 @@ const claude: HarnessDefinition = {
       sessionId: session.claudeSessionId || undefined,
       extraEnv: ctx.extraEnv,
       model: session.model,
+      effort: session.effort,
       permissionMode: session.permissionMode,
       // A recorded CLI session id means a JSONL exists — --resume continues it
       // (--session-id would collide with the existing file).
@@ -186,6 +187,7 @@ const codex: HarnessDefinition = {
       sessionId: ctx.sessionId,
       codexThreadId: session.claudeSessionId || undefined,
       model: session.model,
+      effort: session.effort,
       extraEnv: ctx.extraEnv,
       permissionMode: session.permissionMode,
     })

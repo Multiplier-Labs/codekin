@@ -96,6 +96,10 @@ export interface CodexModelInfo {
   name: string
   description: string
   isDefault: boolean
+  /** Reasoning efforts the model accepts (model/list `supportedReasoningEfforts`). */
+  efforts?: { id: string; description?: string }[]
+  /** Effort the model uses when none is set (model/list `defaultReasoningEffort`). */
+  defaultEffort?: string
 }
 
 let modelCache: { models: CodexModelInfo[]; fetchedAt: number } | null = null
@@ -149,18 +153,36 @@ export async function fetchCodexModels(): Promise<{ models: CodexModelInfo[] }> 
         write({ method: 'initialized' })
         write({ id: 2, method: 'model/list', params: { includeHidden: false } })
       } else if (msg.id === 2) {
-        const data = (msg.result as { data?: Array<{ id: string; displayName: string; description: string; isDefault: boolean }> } | undefined)?.data ?? []
-        const models = data.map(m => ({ id: m.id, name: m.displayName, description: m.description, isDefault: m.isDefault }))
+        type RawModel = {
+          id: string; displayName: string; description: string; isDefault: boolean
+          supportedReasoningEfforts?: Array<{ reasoningEffort?: unknown; description?: unknown }>
+          defaultReasoningEffort?: unknown
+        }
+        const data = (msg.result as { data?: RawModel[] } | undefined)?.data ?? []
+        const models: CodexModelInfo[] = data.map(m => {
+          const efforts = (m.supportedReasoningEfforts ?? [])
+            .filter(e => typeof e.reasoningEffort === 'string')
+            .map(e => ({ id: e.reasoningEffort as string, ...(typeof e.description === 'string' ? { description: e.description } : {}) }))
+          return {
+            id: m.id, name: m.displayName, description: m.description, isDefault: m.isDefault,
+            ...(efforts.length > 0 ? { efforts } : {}),
+            ...(typeof m.defaultReasoningEffort === 'string' ? { defaultEffort: m.defaultReasoningEffort } : {}),
+          }
+        })
         // Codex's bundled model catalog can lag behind newly released models.
         // Keep the app-server's availability check and default, but offer the
         // documented model ID until it appears in model/list itself.
         if (models.some(m => m.id === 'gpt-6-sol' || m.id === 'gpt-6-astra') && !models.some(m => m.id === 'gpt-6.1-sol')) {
           const solIndex = models.findIndex(m => m.id === 'gpt-6-sol')
+          // Borrow the sibling's effort levels so the picker isn't empty for it.
+          const sibling = models[solIndex] ?? models.find(m => m.id === 'gpt-6-astra')
           models.splice(solIndex >= 0 ? solIndex : models.length, 0, {
             id: 'gpt-6.1-sol',
             name: 'GPT-6.1 Sol',
             description: 'Near-Astra performance for complex work at a lower cost.',
             isDefault: false,
+            ...(sibling?.efforts ? { efforts: sibling.efforts } : {}),
+            ...(sibling?.defaultEffort ? { defaultEffort: sibling.defaultEffort } : {}),
           })
         }
         done(models)
@@ -210,6 +232,8 @@ export interface CodexProcessOptions {
   codexThreadId?: string
   /** Codex model ID (e.g. 'gpt-6-astra'). Omit to use the CLI default. */
   model?: string
+  /** Reasoning effort (one of the model's supportedReasoningEfforts). Omit to use the model default. */
+  effort?: string
   /** Additional environment variables (CODEKIN_SESSION_ID, etc.). */
   extraEnv?: Record<string, string>
   /** Permission mode — mapped to Codex's approvalPolicy + sandbox. */
@@ -245,6 +269,7 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
   private threadId: string | null = null
   private workingDir: string
   private model?: string
+  private effort?: string
   private extraEnv: Record<string, string>
   private permissionMode?: PermissionMode
 
@@ -280,6 +305,7 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
     this.sessionId = opts?.sessionId || randomUUID()
     this.threadId = opts?.codexThreadId || null
     this.model = opts?.model
+    this.effort = opts?.effort
     this.extraEnv = opts?.extraEnv || {}
     this.permissionMode = opts?.permissionMode
   }
@@ -410,6 +436,9 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
       approvalPolicy,
       sandbox,
       ...(this.model ? { model: this.model } : {}),
+      // Thread-level default, so a resumed thread keeps the session's effort
+      // even before the first turn/start carries it.
+      ...(this.effort ? { config: { model_reasoning_effort: this.effort } } : {}),
     }
     const res = this.threadId
       ? await this.resumeOrStartFresh(params)
@@ -774,7 +803,10 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
     const input = this.buildInput(content)
     // No timeout: turn/start's response arrives when the turn is created, but
     // be safe against servers that respond late in long turns.
-    this.request('turn/start', { threadId: this.threadId, input }, 0).catch((err: Error) => {
+    // `effort` overrides the thread's reasoning effort for this turn and the
+    // ones after it, which is what makes setEffort() take effect without a
+    // restart. Unset = keep whatever the thread already uses.
+    this.request('turn/start', { threadId: this.threadId, input, ...(this.effort ? { effort: this.effort } : {}) }, 0).catch((err: Error) => {
       if (!this.alive) return
       this.turnActive = false
       this.emit('error', `Failed to start Codex turn: ${err.message}`)
@@ -876,6 +908,17 @@ export class CodexProcess extends EventEmitter<ClaudeProcessEvents> implements C
    * so there is no incremental task state to seed after a restart.
    */
   seedTasks(): void {}
+
+  /**
+   * Change the reasoning effort without a restart: the next turn/start
+   * carries it, and Codex keeps it for the turns after. Clearing (undefined)
+   * stops sending an override, so the thread keeps the last level it was
+   * given — the composer therefore always sends Codex an explicit level
+   * (the model's advertised default stands in for "Default").
+   */
+  setEffort(effort: string | undefined): void {
+    this.effort = effort
+  }
 
   isAlive(): boolean {
     return this.alive

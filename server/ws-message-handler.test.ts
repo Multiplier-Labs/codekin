@@ -77,6 +77,7 @@ function createContext(): WsHandlerContext & { sent: WsServerMessage[] } {
       sendInput: vi.fn(),
       sendPromptResponse: vi.fn().mockReturnValue({ delivered: true }),
       setModel: vi.fn().mockReturnValue(true),
+      setEffort: vi.fn().mockReturnValue(true),
       getSessionProvider: vi.fn().mockReturnValue('claude'),
       setProvider: vi.fn().mockReturnValue(true),
       setPermissionMode: vi.fn().mockReturnValue(true),
@@ -495,14 +496,14 @@ describe('handleWsMessage', () => {
     it('accepts valid model', () => {
       handleWsMessage({ type: 'set_model', model: 'claude-sonnet-4-6' } as WsClientMessage, ctx)
 
-      expect(ctx.sessions.setModel).toHaveBeenCalledWith('sess-1', 'claude-sonnet-4-6')
+      expect(ctx.sessions.setModel).toHaveBeenCalledWith('sess-1', 'claude-sonnet-4-6', undefined)
       expect(ctx.sent).toHaveLength(0)
     })
 
     it('accepts model IDs it does not recognise (models are dynamic)', () => {
       handleWsMessage({ type: 'set_model', model: 'opus' } as WsClientMessage, ctx)
 
-      expect(ctx.sessions.setModel).toHaveBeenCalledWith('sess-1', 'opus')
+      expect(ctx.sessions.setModel).toHaveBeenCalledWith('sess-1', 'opus', undefined)
       expect(ctx.sent).toHaveLength(0)
     })
 
@@ -517,7 +518,7 @@ describe('handleWsMessage', () => {
       ;(ctx.sessions.get as ReturnType<typeof vi.fn>).mockReturnValue(mockSession({ provider: 'codex' }))
       handleWsMessage({ type: 'set_model', model: 'gpt-6-astra' } as WsClientMessage, ctx)
 
-      expect(ctx.sessions.setModel).toHaveBeenCalledWith('sess-1', 'gpt-6-astra')
+      expect(ctx.sessions.setModel).toHaveBeenCalledWith('sess-1', 'gpt-6-astra', undefined)
     })
 
     it('rejects empty model', () => {
@@ -547,8 +548,76 @@ describe('handleWsMessage', () => {
 
       handleWsMessage({ type: 'set_model', model: 'claude-opus-5' } as WsClientMessage, ctx)
 
-      expect(ctx.sessions.setModel).toHaveBeenCalledWith('sess-1', 'claude-opus-5')
+      expect(ctx.sessions.setModel).toHaveBeenCalledWith('sess-1', 'claude-opus-5', undefined)
       expect(setOrchestratorModelMock).toHaveBeenCalledWith(ctx.sessions, 'claude-opus-5')
+    })
+  })
+
+  /* ---- effort ---- */
+
+  describe('effort', () => {
+    it('passes an effort given with set_model through in the same call', () => {
+      handleWsMessage({ type: 'set_model', model: 'claude-opus-5', effort: 'xhigh' } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setModel).toHaveBeenCalledWith('sess-1', 'claude-opus-5', 'xhigh')
+    })
+
+    it('passes null (back to default) with set_model', () => {
+      handleWsMessage({ type: 'set_model', model: 'claude-opus-5', effort: null } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setModel).toHaveBeenCalledWith('sess-1', 'claude-opus-5', null)
+    })
+
+    it('rejects a malformed effort on set_model without changing the model', () => {
+      handleWsMessage({ type: 'set_model', model: 'claude-opus-5', effort: '--dangerously-skip-permissions' } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setModel).not.toHaveBeenCalled()
+      expect(ctx.sent[0]).toMatchObject({ type: 'error' })
+    })
+
+    it('set_effort changes the effort', () => {
+      handleWsMessage({ type: 'set_effort', effort: 'high' } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setEffort).toHaveBeenCalledWith('sess-1', 'high')
+      expect(ctx.sent).toHaveLength(0)
+    })
+
+    it('set_effort accepts null (harness default)', () => {
+      handleWsMessage({ type: 'set_effort', effort: null } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setEffort).toHaveBeenCalledWith('sess-1', null)
+    })
+
+    it('set_effort rejects values that are not effort ids', () => {
+      for (const effort of ['', 'HIGH', '-x', 42, 'a'.repeat(40)]) {
+        handleWsMessage({ type: 'set_effort', effort } as unknown as WsClientMessage, ctx)
+      }
+
+      expect(ctx.sessions.setEffort).not.toHaveBeenCalled()
+      expect(ctx.sent.every(m => m.type === 'error')).toBe(true)
+    })
+
+    it('rejects a level the Claude CLI does not accept on a Claude session', () => {
+      handleWsMessage({ type: 'set_effort', effort: 'minimal' } as WsClientMessage, ctx)
+      handleWsMessage({ type: 'set_model', model: 'claude-opus-5', effort: 'ultra' } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setEffort).not.toHaveBeenCalled()
+      expect(ctx.sessions.setModel).not.toHaveBeenCalled()
+      expect(ctx.sent.map(m => m.type)).toEqual(['error', 'error'])
+    })
+
+    it('accepts per-model levels outside Claude\'s set on a Codex session', () => {
+      ;(ctx.sessions.get as ReturnType<typeof vi.fn>).mockReturnValue(mockSession({ provider: 'codex' }))
+      handleWsMessage({ type: 'set_effort', effort: 'minimal' } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setEffort).toHaveBeenCalledWith('sess-1', 'minimal')
+    })
+
+    it('set_effort does nothing without an active session', () => {
+      ctx.clientSessions.clear()
+      handleWsMessage({ type: 'set_effort', effort: 'high' } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setEffort).not.toHaveBeenCalled()
     })
   })
 
