@@ -15,6 +15,7 @@ background.
 - Re-implementing any UI in native code. The app renders the existing React frontend unchanged.
 - Replacing the npm / `install.sh` distribution or `codekin service`. Both stay supported alongside the
   app.
+- Intel Macs, Windows and Linux builds. Only Apple Silicon (`aarch64-apple-darwin`) is targeted; Tauri supports the others if they are ever needed.
 
 ## Relationship to the CLI and the service
 
@@ -31,7 +32,6 @@ The app is **standalone**. A user who only installs the app never needs a termin
 
 Both share `~/.config/codekin` and `~/.codekin`, so sessions, settings and the token are the same no
 matter which server is running.
-- Intel Macs, Windows and Linux builds. Only Apple Silicon (`aarch64-apple-darwin`) is targeted; Tauri supports the others if they are ever needed.
 
 ## What already exists
 
