@@ -45,6 +45,7 @@ import {
   ensureOrchestratorRunning,
   ensureOrchestratorMcpConfig,
   ensureCodexMcpConfig,
+  upsertCodexMcpSection,
   getOrchestratorSessionId,
   getOrchestratorModel,
   setOrchestratorModel,
@@ -494,9 +495,19 @@ describe('ensureCodexMcpConfig', () => {
     expect(content).toContain('/opt/dist/codekin-mcp-server.js')
   })
 
-  it('leaves the config alone when a codekin section already exists', () => {
+  it('rewrites a stale command and args in an existing codekin section', () => {
     mockExistsSync.mockReturnValue(true)
-    mockReadFileSync.mockReturnValue('[mcp_servers.codekin]\ncommand = "custom"\n')
+    mockReadFileSync.mockReturnValue('[mcp_servers.codekin]\ncommand = "/old/node"\nargs = ["/old/codekin-mcp-server.js"]\n')
+
+    ensureCodexMcpConfig('/opt/dist/codekin-mcp-server.js', '/home/u/.codex/config.toml')
+
+    const [, content] = mockWriteFileSync.mock.calls[0] as [string, string]
+    expect(content).toBe(`[mcp_servers.codekin]\ncommand = ${JSON.stringify(process.execPath)}\nargs = ["/opt/dist/codekin-mcp-server.js"]\n`)
+  })
+
+  it('does not write when the section is already current', () => {
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue(`[mcp_servers.codekin]\ncommand = ${JSON.stringify(process.execPath)}\nargs = ["/opt/dist/codekin-mcp-server.js"]\n`)
 
     ensureCodexMcpConfig('/opt/dist/codekin-mcp-server.js', '/home/u/.codex/config.toml')
 
@@ -507,6 +518,72 @@ describe('ensureCodexMcpConfig', () => {
     mockExistsSync.mockReturnValue(false)
     ensureCodexMcpConfig('/opt/dist/codekin-mcp-server.js', '/home/u/.codex/config.toml')
     expect(mockWriteFileSync).not.toHaveBeenCalled()
+  })
+})
+
+describe('upsertCodexMcpSection', () => {
+  const NODE = '/Applications/Codekin.app/Contents/MacOS/node'
+  const MCP = '/Applications/Codekin.app/Contents/Resources/codekin/server/dist/codekin-mcp-server.js'
+  const current = `command = "${NODE}"\nargs = ["${MCP}"]`
+
+  it('appends a section to a file without one, keeping its content', () => {
+    const out = upsertCodexMcpSection('model = "gpt-5.6"\n', NODE, [MCP])
+    expect(out).toBe(`model = "gpt-5.6"\n\n# Added by Codekin — first-party MCP tools for the orchestrator agent.\n[mcp_servers.codekin]\n${current}\n`)
+  })
+
+  it('returns null when command and args already match, whatever the quoting', () => {
+    expect(upsertCodexMcpSection(`[mcp_servers.codekin]\n${current}\n`, NODE, [MCP])).toBeNull()
+    expect(upsertCodexMcpSection(`[mcp_servers.codekin]\ncommand = '${NODE}'\nargs = [ '${MCP}', ]  # pinned\n`, NODE, [MCP])).toBeNull()
+    expect(upsertCodexMcpSection(`[mcp_servers.codekin]\ncommand = "${NODE}"\nargs = [\n  "${MCP}",\n]\n`, NODE, [MCP])).toBeNull()
+  })
+
+  it('only touches command and args of the codekin section', () => {
+    const before = [
+      'model = "gpt-5.6"',
+      '',
+      '[mcp_servers.other]',
+      'command = "/other/node"',
+      'args = ["/other.js"]',
+      '',
+      '# my codekin tweaks',
+      '[mcp_servers.codekin]',
+      'command = "/usr/local/bin/node"',
+      'startup_timeout_sec = 30',
+      'args = ["/usr/local/lib/node_modules/codekin/server/dist/codekin-mcp-server.js"]',
+      '',
+      '[mcp_servers.codekin.env]',
+      'FOO = "bar"',
+      '',
+    ].join('\n')
+    const after = upsertCodexMcpSection(before, NODE, [MCP])
+    expect(after).toBe(before
+      .replace('command = "/usr/local/bin/node"', `command = "${NODE}"`)
+      .replace('args = ["/usr/local/lib/node_modules/codekin/server/dist/codekin-mcp-server.js"]', `args = ["${MCP}"]`))
+  })
+
+  it('replaces a multi-line args array whole', () => {
+    const before = `[mcp_servers.codekin]\ncommand = "${NODE}"\nargs = [\n  "/old.js",\n  "--flag",\n]\nenabled = true\n`
+    expect(upsertCodexMcpSection(before, NODE, [MCP])).toBe(`[mcp_servers.codekin]\ncommand = "${NODE}"\nargs = ["${MCP}"]\nenabled = true\n`)
+  })
+
+  it('adds missing keys right after the header', () => {
+    const before = '[mcp_servers.codekin]\nenabled = true\n\n[profiles.x]\nmodel = "y"\n'
+    expect(upsertCodexMcpSection(before, NODE, [MCP])).toBe(`[mcp_servers.codekin]\n${current}\nenabled = true\n\n[profiles.x]\nmodel = "y"\n`)
+  })
+
+  it('recognises quoted-key headers and leaves look-alike sections alone', () => {
+    expect(upsertCodexMcpSection(`[mcp_servers."codekin"]\n${current}\n`, NODE, [MCP])).toBeNull()
+    const lookalike = '[mcp_servers.codekin-dev]\ncommand = "/x"\n'
+    const out = upsertCodexMcpSection(lookalike, NODE, [MCP])
+    expect(out?.startsWith(lookalike)).toBe(true)
+    expect(out).toContain(`\n[mcp_servers.codekin]\n${current}\n`)
+  })
+
+  it('escapes paths as valid TOML strings', () => {
+    const out = upsertCodexMcpSection('', '/Users/a "b"/node', ['C:\\x\\mcp.js'])
+    expect(out).toContain('command = "/Users/a \\"b\\"/node"')
+    expect(out).toContain('args = ["C:\\\\x\\\\mcp.js"]')
+    expect(upsertCodexMcpSection(out ?? '', '/Users/a "b"/node', ['C:\\x\\mcp.js'])).toBeNull()
   })
 })
 

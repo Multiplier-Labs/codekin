@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Joe's Codekin tools work again under Codex after Node or Codekin moves (for example a Node upgrade, an npm reinstall, or the planned desktop app at a new location). The `[mcp_servers.codekin]` section in `~/.codex/config.toml` was written once and never updated, so it could keep pointing at a Node binary that no longer exists. Its `command` and `args` are now kept current on start; the rest of the file, including other keys in that section, is left as is
+
 ### Added
 - Hidden `codekin app-server` command for the planned desktop app: sets up a credential on first launch, attaches to a running Codekin server that accepts it, or starts the server in-process, reporting the outcome as event lines and handing the token to the parent over a private file descriptor
 - `GET /api/ping` answers `{ "app": "codekin", "version": "…" }` without a token, so launchers such as the planned desktop app can tell a Codekin server that uses a different token apart from another program on the port
