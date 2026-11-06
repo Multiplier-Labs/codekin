@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GET /api/ping` answers `{ "app": "codekin", "version": "…" }` without a token, so launchers such as the planned desktop app can tell a Codekin server that uses a different token apart from another program on the port
 
 ### Changed
+- Only one Codekin server can use a data directory at a time. The server locks `DATA_DIR` and `~/.codekin` at startup, before opening any state, and a second server (even on another port) exits with `Another Codekin server is using …`. The lock lives in `.codekin-owner.sqlite` and is released automatically when the server exits or crashes
+- An older Codekin now refuses to start against data last written by a newer one, instead of running on top of it
 - `codekin setup`, `codekin start` and the service units now share one launcher module (`bin/lib/launch.mjs`); behaviour is unchanged
 - The server now exits with status 1 when it can't bind its port (for example when it is already in use), instead of logging the error and staying up without serving anything
 

@@ -11,8 +11,10 @@
  *     (`--credential-fd`), never on stdout/stderr or in arguments.
  *  4. Probe the port: attach to a Codekin server that accepts the credential,
  *     or report why not. Only a refused connection starts a server.
- *  5. Start: import the compiled server into this process and emit `started`
- *     once it listens and answers an authenticated health check.
+ *  5. Start: import the compiled server into this process. It takes exclusive
+ *     ownership of its state directories first (`data_in_use` / `data_newer`
+ *     if it can't), then `started` once it listens and answers an
+ *     authenticated health check.
  *
  * Event lines go to stdout as `@@codekin {json}`; everything else on
  * stdout/stderr is server log output. With `--lifetime-stdin`, EOF on stdin
@@ -243,6 +245,14 @@ export async function runAppServer({ argv = [], env = process.env, home = homedi
         emit('unresponsive', { port, host })
       }
     })()
+  })
+  serverLifecycle.once('ownership_error', (err) => {
+    // ws-server exits right after this, before opening any state.
+    if (err.code === 'data_newer') {
+      emit('data_newer', { port, host, dir: err.dir, writerVersion: err.writerVersion, version: err.serverVersion })
+    } else {
+      emit('data_in_use', { port, host, dir: err.dir })
+    }
   })
   serverLifecycle.once('listen_error', (err) => {
     // ws-server exits right after this. Another server won the bind race;

@@ -303,7 +303,7 @@ export const EVENT_PREFIX = '@@codekin '
  * written; anything else in `fields` is dropped, so a token can't slip into
  * stdout (which goes to the log file).
  */
-const EVENT_FIELDS = ['port', 'host', 'version', 'source', 'reason', 'pathSource']
+const EVENT_FIELDS = ['port', 'host', 'version', 'source', 'reason', 'pathSource', 'dir', 'writerVersion']
 export function formatEvent(event, fields = {}) {
   const out = { event }
   for (const key of EVENT_FIELDS) {
