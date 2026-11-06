@@ -1,7 +1,8 @@
 # Desktop App (Tauri) — Implementation Plan
 
-Status: **Draft / proposal**. Nothing in this document is implemented yet. The decisions in
-[Decisions](#decisions) are proposals awaiting confirmation; the rest of the document assumes them.
+Status: **Planned, not started**. Nothing in this document is implemented yet. The decisions in
+[Decisions](#decisions) were confirmed on 2026-11-06. One input is still open: who owns the Apple Developer
+account (D3). It blocks only the signing and notarization step, not the rest of the work.
 
 ## Goal
 
@@ -23,13 +24,13 @@ background.
 
 ## Decisions
 
-Proposed answers to the questions that block implementation. Each one is referenced from the section it shapes.
+Confirmed 2026-11-06. Each one is referenced from the section it shapes.
 
-| # | Question | Proposal | Why |
+| # | Question | Decision | Why |
 |---|---|---|---|
 | D1 | Where does setup, env and start logic live? | In **Node**, in a launcher shared with the CLI. The Rust shell only spawns, watches and stops one Node process. | `codekin setup` / `start` already own the token, the env file and `FRONTEND_DIST` resolution. A Rust copy would drift from them. |
 | D2 | Is relay pairing in scope? | **Yes, required before the first public release**, built as an in-app device-code flow (Phase 2). | Without it, phone access through app.codekin.ai needs `codekin relay login` in a terminal, which contradicts the goal. The flow is small: the CLI's device-code loop moves into the server. |
-| D3 | Signing, distribution and updates | Phase 1 builds are local and ad-hoc signed. A public `.dmg` needs an Apple Developer ID under Multiplier Labs, notarization in CI, and `tauri-plugin-updater` reading a signed manifest from GitHub Releases. | An app that bundles its server goes stale without an updater. Notarization is needed for anyone else to open it without Gatekeeper workarounds. **Owner of the Apple account still to be named.** |
+| D3 | Signing, distribution and updates | Phase 1 builds are local and ad-hoc signed. A public `.dmg` needs an Apple Developer ID under Multiplier Labs, notarization in CI, and `tauri-plugin-updater` reading a signed manifest from GitHub Releases. Work proceeds **without** the Apple account: everything up to and including unsigned CI builds and the updater is built first, and only Developer ID signing and notarization (Phase 3b) wait for it. | An app that bundles its server goes stale without an updater. Notarization is needed for anyone else to open it without Gatekeeper workarounds. **Owner of the Apple account not yet named.** |
 | D4 | App version | **Same version as the npm package**, released from the same `v*` tag. | One number in bug reports, and the About panel always matches the bundled server. A shell-only fix ships as a patch release. |
 | D5 | Dock icon when no window is open | **Keep the Dock icon** in v1. No `ActivationPolicy::Accessory` switching. | Switching policy at runtime has focus quirks, and the menu bar icon already shows that Codekin is running. Revisit after v1. |
 | D6 | `window.confirm` / `window.alert` | Gate on the spike (Phase 0). If WKWebView under Tauri doesn't show them, replace them with an in-app confirm dialog before Phase 1 ships. | ~24 call sites (approvals, archived sessions, …). If the host doesn't implement the WebKit panels, `confirm()` returns `false` silently and those actions do nothing. |
@@ -274,6 +275,17 @@ The app's version in `tauri.conf.json` is set from the root `package.json` at bu
 both the npm release and the `.dmg`. The About panel shows the app version and, when attached to a service, the
 version reported by that server.
 
+## Build environment
+
+The app can't be built or run on the Linux development host. Tauri's macOS target needs the macOS SDK, and
+the payload needs a native `better-sqlite3` built for `darwin-arm64`. Work splits like this:
+
+| Where | What |
+|---|---|
+| Linux dev host | The prerequisite server, CLI and frontend changes, with their unit tests. Writing `desktop/` code and the `bundle-server.mjs` script. Nothing that needs the app to run. |
+| Apple Silicon Mac | The Phase 0 spike, local builds, and the manual checklist. Every phase's exit criterion is checked here. |
+| CI, `macos-14` (arm64) runner | An unsigned build of `desktop/` on every PR that touches `desktop/` or the files the payload is built from, ending with the smoke test. This gives Linux-side changes build feedback before anyone opens a Mac. Later, signed release builds (Phase 3). |
+
 ## Building and installing locally
 
 ```bash
@@ -296,7 +308,12 @@ A locally built app is ad-hoc signed and runs on the machine that built it witho
   `com.apple.security.cs.allow-jit` and `allow-unsigned-executable-memory` entitlements.
 - **Notarization** with `notarytool` in CI, then staple the `.dmg`.
 - **CI:** a `desktop` job in `publish.yml` on a `macos-14` (arm64) runner, triggered by the same `v*` tag.
-  Signing certificate and notarization credentials live in repository secrets.
+  Until the Apple account exists (Phase 3a), it attaches an **unsigned** `.dmg` to the release for internal
+  testers. Opening that build on another Mac needs `xattr -dr com.apple.quarantine /Applications/Codekin.app`,
+  so it is not offered to users. Once the account exists (Phase 3b), the signing certificate and notarization
+  credentials go into repository secrets and the job signs and notarizes.
+- **Updater signing** uses Tauri's own update key (`tauri signer generate`), not the Apple certificate, so it
+  is set up in Phase 3a. The private key lives in repository secrets.
 - **Updates:** `tauri-plugin-updater` checks a signed `latest.json` attached to the GitHub Release. The update
   check runs at launch and daily; installing restarts the app, which stops the bundled server gracefully.
 - **App translocation:** a quarantined app opened from Downloads runs from a random read-only path, and harness
@@ -330,11 +347,12 @@ A locally built app is ad-hoc signed and runs on the machine that built it witho
 
 | Phase | Scope | Exit criterion |
 |---|---|---|
-| 0 — Spike | Bare Tauri window loading a running local server. Check `confirm`/`alert`, drag-and-drop, clipboard, folder picker focus, login-shell `PATH`, `better-sqlite3` under the bundled Node, App Nap. | Written findings; D6 resolved |
-| Prereqs | `/api/ping`, shared launcher + `app-server`, Codex MCP config fix; confirm dialog if D6 requires it | Merged, released in npm |
-| 1 — Local app | `desktop/` package, payload, launcher supervision, splash/error views, window behaviour, attach mode | Manual checklist passes on a locally built app |
+| 0 — Spike (Mac) | Bare Tauri window loading a running local server. Check `confirm`/`alert`, drag-and-drop, clipboard, folder picker focus, login-shell `PATH`, `better-sqlite3` under the bundled Node, App Nap. | Written findings; D6 resolved |
+| Prereqs (Linux) | `/api/ping`, shared launcher + `app-server`, Codex MCP config fix; confirm dialog if D6 requires it | Merged, released in npm |
+| 1 — Local app | `desktop/` package, payload, launcher supervision, splash/error views, window behaviour, attach mode, unsigned PR build job in CI | CI build green; manual checklist passes on a Mac |
 | 2 — Background + pairing | Menu bar icon, open at login, keep awake, App Nap, in-app relay pairing | Phone reaches a freshly installed app via app.codekin.ai with no terminal |
-| 3 — Distribution | Signing, notarization, CI job, updater, move-to-Applications | Notarized `.dmg` from a tag installs and updates on a clean Mac |
+| 3a — Release pipeline | Release job on the `v*` tag producing an unsigned `.dmg`, updater key and `latest.json`, move-to-Applications | A tag produces a `.dmg` that internal testers install and update |
+| 3b — Signing (blocked on Apple account) | Developer ID signing with hardened runtime and entitlements, notarization, stapling | Notarized `.dmg` from a tag installs and updates on a clean Mac with no Gatekeeper warning |
 
 ## Testing
 
