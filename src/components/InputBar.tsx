@@ -678,7 +678,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   const providerModes = permissionModesFor(sessionProvider)
   const visibleModes = offeredModes(providerModes, enabledModes, currentPermissionMode)
   const modeTone = composerTone(currentPermissionMode)
-  const tone = modeTone === 'danger' && bypassBackground !== 'red' ? undefined : modeTone
+  const tone = modeTone === 'danger' && bypassBackground === 'standard' ? undefined : modeTone
   const handoffTargets = isOrchestrator ? AGENT_HANDOFF_TARGETS : PROVIDERS
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
