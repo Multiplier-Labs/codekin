@@ -78,10 +78,10 @@ export const PROVIDERS: { id: CodingProvider; label: string; description: string
 export type AgentProvider = Exclude<CodingProvider, 'grok'>
 export const AGENT_PROVIDER_IDS: readonly CodingProvider[] = ['claude', 'opencode', 'codex'] satisfies AgentProvider[]
 
-/** Model option for UI selectors. */
 /** One reasoning-effort level a model accepts. */
 export interface EffortOption { id: string; description?: string }
 
+/** Model option for UI selectors. */
 export interface ModelOption {
   id: string
   label: string

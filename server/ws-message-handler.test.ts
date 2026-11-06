@@ -597,6 +597,22 @@ describe('handleWsMessage', () => {
       expect(ctx.sent.every(m => m.type === 'error')).toBe(true)
     })
 
+    it('rejects a level the Claude CLI does not accept on a Claude session', () => {
+      handleWsMessage({ type: 'set_effort', effort: 'minimal' } as WsClientMessage, ctx)
+      handleWsMessage({ type: 'set_model', model: 'claude-opus-5', effort: 'ultra' } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setEffort).not.toHaveBeenCalled()
+      expect(ctx.sessions.setModel).not.toHaveBeenCalled()
+      expect(ctx.sent.map(m => m.type)).toEqual(['error', 'error'])
+    })
+
+    it('accepts per-model levels outside Claude\'s set on a Codex session', () => {
+      ;(ctx.sessions.get as ReturnType<typeof vi.fn>).mockReturnValue(mockSession({ provider: 'codex' }))
+      handleWsMessage({ type: 'set_effort', effort: 'minimal' } as WsClientMessage, ctx)
+
+      expect(ctx.sessions.setEffort).toHaveBeenCalledWith('sess-1', 'minimal')
+    })
+
     it('set_effort does nothing without an active session', () => {
       ctx.clientSessions.clear()
       handleWsMessage({ type: 'set_effort', effort: 'high' } as WsClientMessage, ctx)

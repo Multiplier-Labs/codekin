@@ -179,6 +179,9 @@ export function rebuildFromHistory(buffer: WsServerMessage[]): ChatMessage[] {
   return messages
 }
 
+/** Quiet period before an effort change is sent, so stepping through levels costs one restart. */
+export const EFFORT_SEND_DELAY_MS = 400
+
 export function useChatSocket({
   token,
   onSessionCreated,
@@ -530,9 +533,31 @@ export function useChatSocket({
   // ---------------------------------------------------------------------------
   // Session-level operations
   // ---------------------------------------------------------------------------
-  const joinSession = useCallback((sessionId: string) => {
-    send({ type: 'join_session', sessionId })
+
+  /**
+   * An effort pick not yet sent. Stepping through levels (⌘⇧E) updates the
+   * picker at once but sends only the level the user settles on — for Claude
+   * every set_effort is a CLI restart.
+   */
+  const pendingEffort = useRef<{ effort: string | null; timer: ReturnType<typeof setTimeout> } | null>(null)
+
+  /** Send a pending effort now — before anything that changes which session it lands on. */
+  const flushEffort = useCallback(() => {
+    const pending = pendingEffort.current
+    if (!pending) return
+    clearTimeout(pending.timer)
+    pendingEffort.current = null
+    send({ type: 'set_effort', effort: pending.effort })
   }, [send])
+
+  useEffect(() => () => {
+    if (pendingEffort.current) clearTimeout(pendingEffort.current.timer)
+  }, [])
+
+  const joinSession = useCallback((sessionId: string) => {
+    flushEffort()
+    send({ type: 'join_session', sessionId })
+  }, [send, flushEffort])
 
   const createSession = useCallback((name: string, workingDir: string, useWorktree?: boolean, permissionMode?: PermissionMode, provider?: import('../types').CodingProvider) => {
     // Pass the model the picker is currently showing, so the CLI starts on it
@@ -544,8 +569,9 @@ export function useChatSocket({
     const carryModel = (provider ?? 'claude') === 'claude' && model?.startsWith('claude-') ? model : undefined
     // The effort remembered for that model travels with it.
     const carryEffort = carryModel ? getPref('modelEfforts')?.[carryModel] : undefined
+    flushEffort()
     send({ type: 'create_session', name, workingDir, useWorktree, permissionMode, provider, model: carryModel, ...(carryEffort ? { effort: carryEffort } : {}) })
-  }, [send])
+  }, [send, flushEffort])
 
   const sendInput = useCallback((data: string, displayText?: string) => {
     send({ type: 'input', data, ...(displayText ? { displayText } : {}) } as WsClientMessage)
@@ -567,13 +593,14 @@ export function useChatSocket({
   }, [send, activePrompt?.requestId, promptState])
 
   const leaveSession = useCallback(() => {
+    flushEffort()
     send({ type: 'leave_session' })
     currentSessionId.current = null
     setRenderSessionId(null)
     setIsProcessing(false)
     setThinkingSummary(null)
     // No prompt clearing — prompts are session-scoped and persist for when user returns
-  }, [send])
+  }, [send, flushEffort])
 
   const clearMessages = useCallback(() => {
     setMessages([])
@@ -589,17 +616,28 @@ export function useChatSocket({
    * restart (null = harness default); omit it to leave effort as it is.
    */
   const setModel = useCallback((model: string, effort?: string | null) => {
+    if (effort !== undefined && pendingEffort.current) {
+      // set_model carries the effort itself; the pending one is superseded.
+      clearTimeout(pendingEffort.current.timer)
+      pendingEffort.current = null
+    } else {
+      flushEffort()
+    }
     send({ type: 'set_model', model, ...(effort !== undefined ? { effort } : {}) })
     setCurrentModel(model)
     if (effort !== undefined) setCurrentEffort(effort)
     setPref('claudeModel', model)
-  }, [send])
+  }, [send, flushEffort])
 
-  /** Change the session's reasoning effort (null = harness default). */
+  /**
+   * Change the session's reasoning effort (null = harness default). Shown at
+   * once; sent after EFFORT_SEND_DELAY_MS without a further change.
+   */
   const setEffort = useCallback((effort: string | null) => {
-    send({ type: 'set_effort', effort })
     setCurrentEffort(effort)
-  }, [send])
+    if (pendingEffort.current) clearTimeout(pendingEffort.current.timer)
+    pendingEffort.current = { effort, timer: setTimeout(flushEffort, EFFORT_SEND_DELAY_MS) }
+  }, [flushEffort])
 
   const moveToWorktree = useCallback(() => {
     send({ type: 'move_to_worktree' })

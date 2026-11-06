@@ -3086,6 +3086,45 @@ describe('SessionManager', () => {
       expect(s.effort).toBe('high')
     })
 
+    it('waits for a running Claude turn to finish before restarting', () => {
+      const s = sm.create('test', '/tmp')
+      s.claudeProcess = fakeClaudeProcess(true) as never
+      s.isProcessing = true
+      const reconfigSpy = vi.spyOn(s.coordinator, 'requestReconfigure').mockResolvedValue(true)
+
+      sm.setEffort(s.id, 'low')
+      sm.setEffort(s.id, 'max')
+
+      // Recorded, but the turn is not interrupted.
+      expect(reconfigSpy).not.toHaveBeenCalled()
+      expect(s.effort).toBe('max')
+
+      ;(sm as any).handleClaudeResult(s, s.id, 'done', false)
+
+      // One restart for the whole burst, on the last level picked.
+      expect(reconfigSpy).toHaveBeenCalledOnce()
+      reconfigSpy.mock.calls[0][0]()
+      expect(s.effort).toBe('max')
+      expect(s._effortRestartPending).toBe(false)
+    })
+
+    it('drops a deferred effort restart when the process has already exited', () => {
+      const s = sm.create('test', '/tmp')
+      const cp = fakeClaudeProcess(true)
+      s.claudeProcess = cp as never
+      s.isProcessing = true
+      const reconfigSpy = vi.spyOn(s.coordinator, 'requestReconfigure').mockResolvedValue(true)
+
+      sm.setEffort(s.id, 'high')
+      s.claudeProcess = fakeClaudeProcess(false) as never
+      ;(sm as any).handleClaudeResult(s, s.id, 'done', false)
+
+      // The next spawn reads session.effort anyway.
+      expect(reconfigSpy).not.toHaveBeenCalled()
+      expect(s.effort).toBe('high')
+      expect(s._effortRestartPending).toBe(false)
+    })
+
     it('is a no-op when the effort is unchanged', () => {
       const s = sm.create('test', '/tmp', { effort: 'high' })
       s.claudeProcess = fakeClaudeProcess(true) as never

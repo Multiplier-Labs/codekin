@@ -1254,6 +1254,7 @@ export class SessionManager {
     this.checkContextWarning(session)
 
     this.finalizeResult(session, sessionId, result, isError)
+    this.applyPendingEffort(session)
   }
 
   /**
@@ -1592,6 +1593,7 @@ export class SessionManager {
       void session.coordinator.requestReconfigure(() => {
         session.model = newModel
         session.effort = newEffort
+        session._effortRestartPending = false
         this.persistToDiskDebounced()
       })
     }
@@ -1602,7 +1604,8 @@ export class SessionManager {
    * Update the reasoning effort for a session (null = harness default).
    * Harnesses that take effort per turn (Codex) apply it live; the rest
    * (Claude's --effort is a spawn flag) restart via the coordinator, the same
-   * way a model change does.
+   * way a model change does — but never mid-turn: while a turn is running the
+   * new level is recorded and the restart waits for the turn's result.
    */
   setEffort(sessionId: string, effort: string | null): boolean {
     const session = this.sessions.get(sessionId)
@@ -1614,13 +1617,37 @@ export class SessionManager {
       session.effort = newEffort
       proc?.setEffort?.(newEffort)
       this.persistToDiskDebounced()
+    } else if (session.isProcessing) {
+      session.effort = newEffort
+      session._effortRestartPending = true
+      this.persistToDiskDebounced()
     } else {
-      void session.coordinator.requestReconfigure(() => {
-        session.effort = newEffort
-        this.persistToDiskDebounced()
-      })
+      this.restartForEffort(session, newEffort)
     }
     return true
+  }
+
+  /** Restart the CLI on `effort` (applied between the stop and the start). */
+  private restartForEffort(session: Session, effort: string | undefined): void {
+    session._effortRestartPending = false
+    void session.coordinator.requestReconfigure(() => {
+      session.effort = effort
+      session._effortRestartPending = false
+      this.persistToDiskDebounced()
+    })
+  }
+
+  /**
+   * Apply an effort change deferred by setEffort() once the turn is over.
+   * A process that already exited will pick the level up on its next spawn.
+   */
+  private applyPendingEffort(session: Session): void {
+    if (!session._effortRestartPending) return
+    if (!session.claudeProcess?.isAlive()) {
+      session._effortRestartPending = false
+      return
+    }
+    this.restartForEffort(session, session.effort)
   }
 
   /**

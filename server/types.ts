@@ -167,6 +167,13 @@ export interface Session {
   _namingUserInput?: string
   /** Timestamp of last user input, used to detect stale retries. */
   _lastUserInputAt?: number
+  /**
+   * An effort change arrived while a turn was running on a harness that only
+   * takes effort at spawn time (Claude). `effort` already holds the new level;
+   * the restart that applies it waits for the turn's result instead of
+   * killing the turn.
+   */
+  _effortRestartPending?: boolean
   /** Transient API error retry state for the current turn. */
   _apiRetry: {
     /** Number of consecutive retries so far. */
