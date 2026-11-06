@@ -736,39 +736,6 @@ html, body, #root {
   background-color: color-mix(in srgb, var(--color-surface), black 7%);
 }
 
-/* Bypass / skip permissions: a mostly white card, faintly tinted with the
-   error hue, in every theme — a mode that runs everything without asking
-   should be impossible to mistake. The ink and edge tokens are re-pointed
-   to dark values for the card's own contents; floating menus opened from
-   the card get the page's values back (captured on .app-input-bar). */
-.app-input-bar {
-  --outer-ink: var(--color-ink);
-  --outer-ink-muted: var(--color-ink-muted);
-  --outer-ink-faint: var(--color-ink-faint);
-  --outer-edge: var(--color-edge);
-  --outer-edge-strong: var(--color-edge-strong);
-  --outer-warning-4: var(--color-warning-4);
-}
-.composer-card[data-mode-tone="danger"] {
-  background-color: color-mix(in srgb, white 92%, var(--color-error-5));
-  border-color: var(--color-error-7);
-  --color-ink: #1c1a18;
-  --color-ink-muted: #57524c;
-  --color-ink-faint: #8a847c;
-  --color-edge: rgb(0 0 0 / 0.07);
-  --color-edge-strong: rgb(0 0 0 / 0.12);
-  /* The mode chip (text-warning-4) needs to read on near-white. */
-  --color-warning-4: #a12c2c;
-}
-.composer-card[data-mode-tone="danger"] .rounded-floating {
-  --color-ink: var(--outer-ink);
-  --color-ink-muted: var(--outer-ink-muted);
-  --color-ink-faint: var(--outer-ink-faint);
-  --color-edge: var(--outer-edge);
-  --color-edge-strong: var(--outer-edge-strong);
-  --color-warning-4: var(--outer-warning-4);
-}
-
 /* Orchestrator badge pill */
 .orchestrator-badge {
   letter-spacing: 0.08em;
@@ -789,6 +756,24 @@ html, body, #root {
 [data-scheme="light"] .orchestrator-input-bar .composer-card {
   border-color: var(--color-accent-5);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent-5) 20%, transparent);
+}
+
+/* Bypass / skip permissions: the theme's own surface tinted toward its error
+   hue, with an error edge and ring, so a mode that runs everything without
+   asking can't be mistaken for any other. Only the card's background and
+   border change — ink, edge and raised-surface tokens keep their theme
+   values, so hover states and popovers inside the card stay legible in every
+   theme. Placed after the orchestrator rules (and one class more specific)
+   so the danger edge also wins on Joe's composer. */
+.app-input-bar .composer-card[data-mode-tone="danger"] {
+  background-color: color-mix(in srgb, var(--color-surface), var(--color-error-5) 14%);
+  border-color: var(--color-error-6);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-error-6) 35%, transparent);
+}
+[data-scheme="light"] .app-input-bar .composer-card[data-mode-tone="danger"] {
+  background-color: color-mix(in srgb, var(--color-surface), var(--color-error-5) 8%);
+  border-color: var(--color-error-5);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-error-5) 25%, transparent);
 }
 
 /* ── Safe area insets for notched devices ──────────────────────────────── */

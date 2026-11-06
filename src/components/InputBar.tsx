@@ -107,7 +107,9 @@ function StateItem({ children, title, onClick, danger = false, innerRef }: {
   children: React.ReactNode; title?: string; onClick?: () => void; danger?: boolean
   innerRef?: React.Ref<HTMLButtonElement>
 }) {
-  const tone = danger ? 'text-warning-4' : 'text-ink-muted hover:text-ink'
+  // Error rather than warning: it sits on the danger-tinted card, where
+  // error-4 clears 4.5:1 in every theme and warning-4 doesn't (Light: 3.8:1).
+  const tone = danger ? 'text-error-4' : 'text-ink-muted hover:text-ink'
   const className = `group/state flex items-center gap-1.5 font-mono text-meta whitespace-nowrap transition-colors ${tone}`
   if (!onClick) return <span className={className} title={title}>{children}</span>
   return (
