@@ -110,6 +110,8 @@ export interface CreateSessionOptions {
   id?: string
   groupDir?: string
   model?: string
+  /** Reasoning effort (harness-specific level); omit for the harness default. */
+  effort?: string
   /** When true, the session is isolated: it will only start in its own git
    *  worktree (created afterwards via createWorktree) and never falls back to
    *  the shared checkout. */
@@ -416,6 +418,7 @@ export class SessionManager {
       source: options?.source ?? 'manual',
       provider: options?.provider ?? 'claude',
       model: options?.model,
+      effort: options?.effort,
       permissionMode: options?.permissionMode,
       allowedTools: options?.allowedTools,
       addDirs: options?.addDirs,
@@ -1251,6 +1254,7 @@ export class SessionManager {
     this.checkContextWarning(session)
 
     this.finalizeResult(session, sessionId, result, isError)
+    this.applyPendingEffort(session)
   }
 
   /**
@@ -1515,8 +1519,10 @@ export class SessionManager {
 
     const doSwitch = () => {
       session.provider = provider
-      // Model IDs belong to a harness; let the newly selected harness use its default.
+      // Model IDs and effort levels belong to a harness; let the newly
+      // selected harness use its defaults.
       session.model = undefined
+      session.effort = undefined
       session.claudeSessionId = null
       this.persistToDiskDebounced()
       // Sidebar/provider-derived UI (model list, permission modes) keys off the
@@ -1564,25 +1570,84 @@ export class SessionManager {
     return true
   }
 
-  /** Update the model for a session and restart Claude with the new model. */
-  setModel(sessionId: string, model: string): boolean {
+  /**
+   * Update the model for a session and restart the CLI with the new model.
+   * `effort` (when not undefined) is applied in the same restart — null clears
+   * it back to the harness default; undefined leaves the effort unchanged.
+   */
+  setModel(sessionId: string, model: string, effort?: string | null): boolean {
     const session = this.sessions.get(sessionId)
     if (!session) return false
     const newModel = model || undefined
-    if (session.model === newModel) return true
+    const newEffort = effort === undefined ? session.effort : (effort || undefined)
+    if (session.model === newModel && session.effort === newEffort) return true
+    if (session.model === newModel) return this.setEffort(sessionId, newEffort ?? null)
     // When no process is running, just assign the model directly.
     // When a process IS alive, always reconfigure (stop + restart) so the CLI
     // actually uses the new model — even if session.model was previously unset.
     if (!session.claudeProcess?.isAlive()) {
       session.model = newModel
+      session.effort = newEffort
       this.persistToDiskDebounced()
     } else {
       void session.coordinator.requestReconfigure(() => {
         session.model = newModel
+        session.effort = newEffort
+        session._effortRestartPending = false
         this.persistToDiskDebounced()
       })
     }
     return true
+  }
+
+  /**
+   * Update the reasoning effort for a session (null = harness default).
+   * Harnesses that take effort per turn (Codex) apply it live; the rest
+   * (Claude's --effort is a spawn flag) restart via the coordinator, the same
+   * way a model change does — but never mid-turn: while a turn is running the
+   * new level is recorded and the restart waits for the turn's result.
+   */
+  setEffort(sessionId: string, effort: string | null): boolean {
+    const session = this.sessions.get(sessionId)
+    if (!session) return false
+    const newEffort = effort || undefined
+    if (session.effort === newEffort) return true
+    const proc = session.claudeProcess
+    if (!proc?.isAlive() || proc.setEffort) {
+      session.effort = newEffort
+      proc?.setEffort?.(newEffort)
+      this.persistToDiskDebounced()
+    } else if (session.isProcessing) {
+      session.effort = newEffort
+      session._effortRestartPending = true
+      this.persistToDiskDebounced()
+    } else {
+      this.restartForEffort(session, newEffort)
+    }
+    return true
+  }
+
+  /** Restart the CLI on `effort` (applied between the stop and the start). */
+  private restartForEffort(session: Session, effort: string | undefined): void {
+    session._effortRestartPending = false
+    void session.coordinator.requestReconfigure(() => {
+      session.effort = effort
+      session._effortRestartPending = false
+      this.persistToDiskDebounced()
+    })
+  }
+
+  /**
+   * Apply an effort change deferred by setEffort() once the turn is over.
+   * A process that already exited will pick the level up on its next spawn.
+   */
+  private applyPendingEffort(session: Session): void {
+    if (!session._effortRestartPending) return
+    if (!session.claudeProcess?.isAlive()) {
+      session._effortRestartPending = false
+      return
+    }
+    this.restartForEffort(session, session.effort)
   }
 
   /**

@@ -48,6 +48,21 @@ const MODEL_FAMILIES: Partial<Record<CodingProvider, RegExp>> = {
   grok: /^grok-/i,
 }
 
+/** Levels the Claude CLI accepts via `--effort`; anything else fails the spawn. */
+const CLAUDE_EFFORT_LEVELS: ReadonlySet<string> = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
+
+/**
+ * Effort levels are short lowercase ids ('high', 'xhigh', 'ultra'). They end
+ * up as a CLI argument, which must never look like a flag. Claude's set is
+ * fixed, so it is checked exactly: a persisted level the CLI rejects would
+ * fail every restart of the session. Other harnesses advertise per-model
+ * levels at runtime, so only the shape is checked for them.
+ */
+export function validEffort(effort: unknown, provider?: CodingProvider): effort is string {
+  if (typeof effort !== 'string' || !/^[a-z][a-z0-9_-]{0,23}$/.test(effort)) return false
+  return provider !== 'claude' || CLAUDE_EFFORT_LEVELS.has(effort)
+}
+
 /**
  * False when `model` is recognisably another harness's model. Unrecognised IDs
  * pass — models are discovered dynamically and aliases (`opus`, Bedrock IDs,
@@ -96,7 +111,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
       const model = msg.model ?? (provider === 'claude' ? getDefaultClaudeModel() : undefined)
       // Use the security-checked canonical path (not the raw msg.workingDir) so
       // grouping/archive behavior stays consistent with the resolved directory.
-      const session = sessions.create(msg.name, resolvedDir, { model, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider, useWorktree: msg.useWorktree })
+      const session = sessions.create(msg.name, resolvedDir, { model, effort: validEffort(msg.effort, provider) ? msg.effort : undefined, permissionMode: msg.permissionMode, allowedTools: msg.allowedTools, provider: msg.provider, useWorktree: msg.useWorktree })
       session.clients.add(ws)
       clientSessions.set(ws, session.id)
 
@@ -116,6 +131,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
             workingDir: session.workingDir,
             provider: session.provider ?? 'claude',
             model: session.model,
+            ...(session.effort ? { effort: session.effort } : {}),
           })
           if (result.ok) {
             sessions.startClaude(session.id)
@@ -135,6 +151,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           workingDir: session.workingDir,
           provider: session.provider ?? 'claude',
           model: session.model,
+          ...(session.effort ? { effort: session.effort } : {}),
         })
         sessions.startClaude(session.id)
       }
@@ -159,6 +176,7 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           active: session.claudeProcess?.isAlive() ?? false,
           outputBuffer: session.outputHistory.slice(-500),
           model: session.model,
+          ...(session.effort ? { effort: session.effort } : {}),
           provider: session.provider,
           permissionMode: session.permissionMode,
           planState: session.planManager.state,
@@ -276,12 +294,30 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
           send({ type: 'error', message: `Model ${msg.model} is not available for ${provider} sessions` })
           break
         }
-        sessions.setModel(sessionId, msg.model)
+        if (msg.effort !== undefined && msg.effort !== null && !validEffort(msg.effort, provider)) {
+          send({ type: 'error', message: `Invalid effort: ${String(msg.effort)}` })
+          break
+        }
+        sessions.setModel(sessionId, msg.model, msg.effort)
         // The orchestrator's model is a standing preference, not a per-session
         // one — its session is recreated on demand, so persist the choice.
         if (isOrchestratorSession(sessions.get(sessionId)?.source)) {
           setOrchestratorModel(sessions, msg.model)
         }
+      }
+      break
+    }
+
+    // Change the reasoning effort for the session (null = harness default).
+    case 'set_effort': {
+      const sessionId = clientSessions.get(ws)
+      if (sessionId) {
+        const provider = sessions.get(sessionId)?.provider ?? 'claude'
+        if (msg.effort !== null && !validEffort(msg.effort, provider)) {
+          send({ type: 'error', message: `Invalid effort: ${String(msg.effort)}` })
+          break
+        }
+        sessions.setEffort(sessionId, msg.effort)
       }
       break
     }

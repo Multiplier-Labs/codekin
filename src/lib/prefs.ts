@@ -36,6 +36,8 @@ export interface Prefs {
   codexModel: string
   grokModel: string
   opencodeModel: string
+  /** Reasoning effort picked per model ID; absent = the harness default. */
+  modelEfforts: Record<string, string>
   /** Carry conversation context when switching a session's provider. */
   handoffCarryContext: boolean
   /** Starred doc paths, keyed by repo dir. */

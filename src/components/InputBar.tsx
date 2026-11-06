@@ -18,9 +18,10 @@ import { SkillMenu, type SkillGroup } from './SkillMenu'
 import { SlashAutocomplete } from './SlashAutocomplete'
 import { DropZone } from './DropZone'
 import type { SlashCommand } from '../lib/slashCommands'
-import { AGENT_PROVIDER_IDS, PERMISSION_MODES, PROVIDERS, permissionModesFor, type PermissionMode, type ModelOption } from '../types'
+import { AGENT_PROVIDER_IDS, PERMISSION_MODES, PROVIDERS, effortLabel, permissionModesFor, type PermissionMode, type ModelOption } from '../types'
 import { getPref, setPref, usePref } from '../lib/prefs'
 import { composerTone, cycleCandidates, offeredModes, resolveEnabledModes } from '../lib/permissionModes'
+import { CYCLE_EFFORT_KEYS, effectiveEffort, effortChoices, effortDisplay, isCycleEffortKey, nextEffort, rememberedEffort } from '../lib/effort'
 import { isAddressedToJoe } from '../lib/joeAddress'
 
 const PERMISSION_MODE_ICONS: Record<string, typeof IconShieldCheck> = {
@@ -278,25 +279,107 @@ function HandoffPane({ current, targets, onBack, onSelect }: {
 }
 
 /**
+ * Effort pane — the current model's levels. "Default" leads the list only for
+ * models whose harness default is unknown (see lib/effort).
+ */
+function EffortPane({ model, harnessLabel, current, onBack, onSelect }: {
+  model: ModelOption
+  harnessLabel: string | null
+  current: string | null
+  onBack: () => void
+  onSelect: (effort: string | null) => void
+}) {
+  const active = effectiveEffort(current, model)
+  return (
+    <>
+      <div className="flex items-center gap-1.5 border-b border-edge-strong px-2 py-1.5">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-1 rounded-control px-1 py-0.5 text-meta text-ink-muted transition-colors hover:bg-edge hover:text-ink"
+          title={harnessLabel ? `Back to ${harnessLabel} models` : 'Back to models'}
+        >
+          <IconChevronLeft size={14} stroke={2} />
+          Back
+        </button>
+        <span className="ml-auto truncate text-meta text-ink-muted">Effort · {model.label}</span>
+      </div>
+      <div className="overflow-y-auto py-1">
+        {effortChoices(model).map(choice => {
+          const isActive = choice === active
+          const description = choice === null
+            ? `Let ${harnessLabel ?? 'the agent'} choose`
+            : model.efforts?.find(e => e.id === choice)?.description
+          return (
+            <button
+              key={choice ?? 'default'}
+              onClick={() => onSelect(choice)}
+              className="flex w-full items-start gap-2 px-3 py-1.5 text-left transition-colors hover:bg-edge"
+            >
+              <span className="min-w-0 flex-1">
+                <span className={`block text-body ${isActive ? 'text-primary-4' : 'text-ink'}`}>
+                  {choice === null ? 'Default' : effortLabel(choice)}
+                  {choice !== null && choice === model.defaultEffort && <span className="ml-1.5 text-meta text-ink-muted">default</span>}
+                </span>
+                {description && <span className="block text-meta text-ink-muted">{description}</span>}
+              </span>
+              {isActive && <IconCheck size={14} stroke={2.5} className="mt-0.5 flex-shrink-0 text-primary-4" />}
+            </button>
+          )
+        })}
+      </div>
+    </>
+  )
+}
+
+/** A model in the picker, with the effort it runs at (or would start on) beside it. */
+function ModelRow({ model, effort, isCurrent, isActive, buttonRef, onClick }: {
+  model: ModelOption
+  /** Effort to show: the session's for the current model, the remembered one otherwise. */
+  effort: string | null
+  isCurrent: boolean
+  isActive: boolean
+  buttonRef: (el: HTMLButtonElement | null) => void
+  onClick: () => void
+}) {
+  return (
+    <button
+      ref={buttonRef}
+      onClick={onClick}
+      className={`flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-body transition-colors ${isActive ? 'bg-edge' : 'hover:bg-edge'} ${isCurrent ? 'text-primary-4' : 'text-ink'}`}
+    >
+      <span className="truncate">{model.label}</span>
+      {model.efforts?.length ? (
+        <span className="flex-shrink-0 text-meta text-ink-muted">{effortDisplay(effort, model)}</span>
+      ) : null}
+    </button>
+  )
+}
+
+/**
  * One control for both halves of "what is answering me": the harness and the
  * model it runs. The menu lists only the current harness's models — switching
  * harness is a session handoff, not a peer of picking a model, so it lives
  * behind a CTA that opens a second pane.
  */
-function AgentDropdown({ provider, handoffTargets, currentModel, models, isOpen, menuRef, onToggle, onModelChange, onProviderChange }: {
+function AgentDropdown({ provider, handoffTargets, currentModel, currentEffort, models, isOpen, menuRef, onToggle, onModelChange, onEffortChange, onProviderChange }: {
   provider?: import('../types').CodingProvider
   handoffTargets: typeof PROVIDERS
   currentModel?: string | null
+  /** Session's reasoning effort (null = harness default). */
+  currentEffort?: string | null
   models: ModelOption[]
   isOpen: boolean
   menuRef: React.RefObject<HTMLDivElement | null>
   onToggle: () => void
   onModelChange?: (model: string) => void
+  /** Omit to hide the effort control. */
+  onEffortChange?: (effort: string | null) => void
   onProviderChange?: (provider: import('../types').CodingProvider, carryContext: boolean) => void
 }) {
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const [showHandoff, setShowHandoff] = useState(false)
+  const [showEffort, setShowEffort] = useState(false)
   const [prevIsOpen, setPrevIsOpen] = useState(isOpen)
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([])
 
@@ -306,6 +389,7 @@ function AgentDropdown({ provider, handoffTargets, currentModel, models, isOpen,
     setPrevIsOpen(isOpen)
     setActiveIndex(0)
     setShowHandoff(false)
+    setShowEffort(false)
   }
 
   const getRecents = (): string[] => {
@@ -363,12 +447,18 @@ function AgentDropdown({ provider, handoffTargets, currentModel, models, isOpen,
   const harnessLabel = provider ? providerLabel(provider) : null
   const modelLabel = currentModel ? shortModelLabel(currentModel, models) : null
   const canPickModel = !!onModelChange && models.length > 0
+  const currentOption = currentModel ? models.find(m => m.id === currentModel) : undefined
+  const canPickEffort = !!onEffortChange && !!currentOption?.efforts?.length
+  // The chip names the level only when one is known — "Default" for a
+  // harness that keeps its default to itself would just be noise there.
+  const chipEffort = canPickEffort ? effectiveEffort(currentEffort, currentOption) : null
+  const rowEffort = (m: ModelOption) => m.id === currentModel ? (currentEffort ?? null) : rememberedEffort(m)
 
   return (
     <div className="relative" ref={menuRef}>
       <StateItem
         onClick={onToggle}
-        title={`${harnessLabel ?? 'Agent'}${modelLabel ? ` · ${modelLabel}` : ''} — change model or hand off`}
+        title={`${harnessLabel ?? 'Agent'}${modelLabel ? ` · ${modelLabel}` : ''}${chipEffort ? ` · ${effortLabel(chipEffort)} effort` : ''} — change model, effort, or hand off`}
       >
         {/* Harness and model are one fact, so they carry one tone — the
             separator included. StateItem's muted colour (and its hover
@@ -376,6 +466,7 @@ function AgentDropdown({ provider, handoffTargets, currentModel, models, isOpen,
         {harnessLabel}
         {harnessLabel && modelLabel && <span>·</span>}
         {modelLabel}
+        {chipEffort && <><span>·</span>{effortLabel(chipEffort)}</>}
         <IconChevronDown size={12} stroke={2} className="opacity-70" />
       </StateItem>
       {isOpen && (
@@ -386,6 +477,14 @@ function AgentDropdown({ provider, handoffTargets, currentModel, models, isOpen,
               targets={handoffTargets}
               onBack={() => setShowHandoff(false)}
               onSelect={onProviderChange}
+            />
+          ) : showEffort && canPickEffort && currentOption ? (
+            <EffortPane
+              model={currentOption}
+              harnessLabel={harnessLabel}
+              current={currentEffort ?? null}
+              onBack={() => setShowEffort(false)}
+              onSelect={(effort) => { onEffortChange?.(effort); setShowEffort(false) }}
             />
           ) : (
             <>
@@ -416,14 +515,15 @@ function AgentDropdown({ provider, handoffTargets, currentModel, models, isOpen,
                       if (!m) return null
                       const index = idx
                       return (
-                        <button
+                        <ModelRow
                           key={m.id}
-                          ref={el => { itemRefs.current[index] = el }}
+                          model={m}
+                          effort={rowEffort(m)}
+                          isCurrent={m.id === currentModel}
+                          isActive={index === activeIndex}
+                          buttonRef={el => { itemRefs.current[index] = el }}
                           onClick={() => selectModel(m.id)}
-                          className={`w-full text-left px-3 py-1.5 text-body transition-colors ${index === activeIndex ? 'bg-edge' : 'hover:bg-edge'} ${m.id === currentModel ? 'text-primary-4' : 'text-ink'}`}
-                        >
-                          {m.label}
-                        </button>
+                        />
                       )
                     })}
                   </div>
@@ -440,18 +540,34 @@ function AgentDropdown({ provider, handoffTargets, currentModel, models, isOpen,
                       const baseIndex = (!query && recents.length > 0) ? recents.length : 0
                       const index = baseIndex + idx
                       return (
-                      <button
-                        key={m.id}
-                        ref={el => { itemRefs.current[index] = el }}
-                        onClick={() => selectModel(m.id)}
-                        className={`w-full text-left px-3 py-1.5 text-body transition-colors ${index === activeIndex ? 'bg-edge' : 'hover:bg-edge'} ${m.id === currentModel ? 'text-primary-4' : 'text-ink'}`}
-                      >
-                        {m.label}
-                      </button>
-                    )})}
+                        <ModelRow
+                          key={m.id}
+                          model={m}
+                          effort={rowEffort(m)}
+                          isCurrent={m.id === currentModel}
+                          isActive={index === activeIndex}
+                          buttonRef={el => { itemRefs.current[index] = el }}
+                          onClick={() => selectModel(m.id)}
+                        />
+                      )
+                    })}
                   </div>
                 )}
               </div>
+
+              {canPickEffort && currentOption && (
+                <div className="border-t border-edge-strong p-1">
+                  <button
+                    onClick={() => setShowEffort(true)}
+                    className="flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left text-body text-ink transition-colors hover:bg-edge"
+                    title={`Reasoning effort for ${currentOption.label}`}
+                  >
+                    Effort
+                    <span className="ml-auto text-ink-muted">{effortDisplay(currentEffort, currentOption)}</span>
+                    <IconChevronRight size={14} stroke={2} className="flex-shrink-0 text-ink-muted opacity-70" />
+                  </button>
+                </div>
+              )}
 
               {provider && onProviderChange && (
                 <div className="border-t border-edge-strong p-1">
@@ -464,6 +580,13 @@ function AgentDropdown({ provider, handoffTargets, currentModel, models, isOpen,
                     Hand off to another agent
                     <IconChevronRight size={14} stroke={2} className="ml-auto flex-shrink-0 opacity-70" />
                   </button>
+                </div>
+              )}
+
+              {canPickEffort && (
+                <div className="flex items-center justify-end gap-2 border-t border-edge-strong px-3 py-1.5 text-meta text-ink-muted">
+                  <kbd className="rounded-control border border-edge-strong px-1.5 font-sans text-micro">{CYCLE_EFFORT_KEYS}</kbd>
+                  Cycle effort
                 </div>
               )}
             </>
@@ -508,6 +631,10 @@ interface InputBarProps {
   currentModel?: string | null
   /** Called when the user selects a different model from the picker. */
   onModelChange?: (model: string) => void
+  /** Reasoning effort of the session (null = harness default). */
+  currentEffort?: string | null
+  /** Called when the user picks or cycles the effort level. Omit to hide the control. */
+  onEffortChange?: (effort: string | null) => void
   /** Available models for the current provider. */
   availableModels?: ModelOption[]
   /** Coding provider of the active session — filters provider-specific permission modes. */
@@ -544,7 +671,7 @@ interface InputBarProps {
   lockedReason?: string
 }
 
-export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default', joeName, lockedReason }, ref) {
+export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, currentEffort = null, onEffortChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default', joeName, lockedReason }, ref) {
   const isOrchestrator = variant === 'orchestrator'
   const enabledModes = resolveEnabledModes(usePref('enabledPermissionModes'))
   const providerModes = permissionModesFor(sessionProvider)
@@ -755,6 +882,22 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   // Harness and model read as one fact ("what is answering me"), so they share
   // one control; it appears as soon as either half is known.
   const showAgent = showModel || showProvider
+  const effortModel = showModel && onEffortChange ? availableModels.find(m => m.id === currentModel) : undefined
+  const canCycleEffort = !disabled && !!effortModel?.efforts?.length
+
+  // Mod+Shift+E steps through the current model's effort levels from anywhere
+  // in the app while this composer is mounted.
+  useEffect(() => {
+    if (!canCycleEffort || !onEffortChange) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!isCycleEffortKey(e)) return
+      e.preventDefault()
+      onEffortChange(nextEffort(currentEffort, effortModel))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [canCycleEffort, onEffortChange, currentEffort, effortModel])
+
   const showWorktree = !isOrchestrator && (!!worktreePath || (showWorktreeToggle && !!onWorktreeChange) || !!onMoveToWorktree)
   // Anything beyond the permission chip folds into the overflow menu on a
   // narrow composer; a dangerous mode must stay visible at every width.
@@ -897,11 +1040,13 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
                     provider={showProvider ? sessionProvider : undefined}
                     handoffTargets={handoffTargets}
                     currentModel={showModel ? currentModel : null}
+                    currentEffort={currentEffort}
                     models={availableModels}
                     isOpen={agentMenuOpen}
                     menuRef={agentMenuRef}
                     onToggle={() => { closeAllPopups('agent'); setAgentMenuOpen(!agentMenuOpen) }}
                     onModelChange={showModel ? (id) => { onModelChange(id); setAgentMenuOpen(false) } : undefined}
+                    onEffortChange={showModel ? onEffortChange : undefined}
                     onProviderChange={showProvider ? (provider, carryContext) => { onProviderChange(provider, carryContext); setAgentMenuOpen(false) } : undefined}
                   />
                 </div>
