@@ -116,10 +116,12 @@ describe('InputBar Shift+Tab mode cycling', () => {
     expect(getPref('confirmedDangerousModes' as never)).toBeUndefined()
   })
 
-  it('uses the standard bypass background by default and updates when the preference changes', async () => {
+  it('uses the red bypass background by default and updates when the preference changes', async () => {
     await renderWith('plan')
     expect(container.querySelector('.composer-card')?.getAttribute('data-mode-tone')).toBe('plan')
     await renderWith('dangerouslySkipPermissions')
+    expect(container.querySelector('.composer-card')?.getAttribute('data-mode-tone')).toBe('danger')
+    act(() => { setPref('bypassComposerBackground', 'standard') })
     expect(container.querySelector('.composer-card')?.hasAttribute('data-mode-tone')).toBe(false)
     act(() => { setPref('bypassComposerBackground', 'red') })
     expect(container.querySelector('.composer-card')?.getAttribute('data-mode-tone')).toBe('danger')

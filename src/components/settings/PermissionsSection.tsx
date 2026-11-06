@@ -62,7 +62,7 @@ export function PermissionsSection({ token, repos, onError }: Props) {
 /* ── Default mode ───────────────────────────────────────────────── */
 
 function ComposerBackgroundBlock() {
-  const background = usePref('bypassComposerBackground') ?? 'standard'
+  const background = usePref('bypassComposerBackground') ?? 'red'
   return (
     <Block title="Composer appearance">
       <Row
