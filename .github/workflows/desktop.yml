@@ -1,0 +1,82 @@
+name: Desktop
+
+# Builds the desktop app's server payload (desktop/scripts/bundle-server.mjs)
+# and runs its isolated smoke test, on every PR that touches the payload or
+# the files it is built from. macos-15 is the real target (Apple Silicon); the
+# Linux job checks the same script on a cheaper runner. The Tauri shell build
+# joins this workflow when desktop/src-tauri lands (docs/DESKTOP-APP-TAURI-PLAN.md).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - 'bin/**'
+      - 'server/**'
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'tsconfig*.json'
+      - '.github/workflows/desktop.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - 'bin/**'
+      - 'server/**'
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vite.config.ts'
+      - 'tsconfig*.json'
+      - '.github/workflows/desktop.yml'
+
+jobs:
+  payload:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: darwin-arm64
+            arch: arm64
+          - runner: ubuntu-latest
+            target: linux-x64
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check runner architecture
+        run: |
+          test "$(uname -m)" = "${{ matrix.arch }}" || { echo "Expected ${{ matrix.arch }}, got $(uname -m)"; exit 1; }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix server
+
+      - name: Build frontend and server
+        run: |
+          npm run build
+          npx tsc -p server/tsconfig.json
+
+      - name: Cache pinned Node runtime
+        uses: actions/cache@v4
+        with:
+          path: desktop/.cache
+          key: node-runtime-${{ matrix.target }}-${{ hashFiles('desktop/node-runtime.json') }}
+
+      - name: Bundle server payload and smoke test
+        run: node desktop/scripts/bundle-server.mjs --target ${{ matrix.target }}

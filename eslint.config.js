@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', 'server/dist', 'server/vitest.config.ts', 'vitest.config.ts', 'workflows', '.claude/worktrees/**']),
+  globalIgnores(['dist', 'server/dist', 'server/vitest.config.ts', 'vitest.config.ts', 'workflows', '.claude/worktrees/**', 'desktop/build', 'desktop/.cache', 'desktop/src-tauri/target', 'desktop/src-tauri/binaries']),
   {
     files: ['**/*.{ts,tsx}'],
     ignores: ['**/*.test.{ts,tsx}', 'server/**'],

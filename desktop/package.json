@@ -1,0 +1,10 @@
+{
+  "name": "codekin-desktop",
+  "private": true,
+  "type": "module",
+  "description": "Codekin desktop app (Tauri). See docs/DESKTOP-APP-TAURI-PLAN.md.",
+  "scripts": {
+    "bundle-server": "node scripts/bundle-server.mjs",
+    "smoke-test": "node scripts/smoke-test.mjs"
+  }
+}
