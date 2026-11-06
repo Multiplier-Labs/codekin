@@ -17,7 +17,8 @@ background.
 - Re-implementing any UI in native code. The app renders the existing React frontend.
 - Replacing the npm / `install.sh` distribution or `codekin service`. Both stay supported alongside the
   app.
-- Intel Macs, Windows and Linux builds. Only Apple Silicon (`aarch64-apple-darwin`) is targeted; Tauri supports the others if they are ever needed.
+- Intel Macs, Windows and Linux builds in v1. Only Apple Silicon (`aarch64-apple-darwin`) is targeted. Windows is a
+  separate later track, because the server itself doesn't run on Windows yet; see [Windows](#windows).
 - Installing or logging in to the AI CLIs. `claude`, `codex`, `opencode` and `grok` keep their own installers
   and login flows, which do need a terminal. The app detects them and explains what is missing (see
   [First run](#first-run)).
@@ -342,6 +343,68 @@ A locally built app is ad-hoc signed and runs on the machine that built it witho
   or the log file.
 - The server keeps binding to `127.0.0.1`. LAN exposure stays an explicit opt-in via `BIND_HOST`, as
   today.
+
+## Windows
+
+Not part of v1. Recorded here so the macOS work doesn't close doors, and so the order of work is agreed.
+
+### The blocker is the server, not the shell
+
+Codekin doesn't run on Windows today. The README says so ("Windows isn't supported yet"), `server/` and `bin/`
+have no `win32` handling, and CI runs on Linux only. Known breakages from reading the code (not yet measured):
+
+| Area | Problem on Windows |
+|---|---|
+| Finding harness CLIs | `server/config.ts` resolves `claude` with `which`, which doesn't exist. Node refuses to `spawn` an npm-installed `claude.cmd` / `codex.cmd` without `shell: true`, so harness launches fail even with the fallback. |
+| Stopping processes | Session stop and shutdown use SIGTERM / SIGKILL. Windows has no POSIX signals or process groups; killing a process tree needs `taskkill /T` or a Job Object. |
+| Shell assumptions | Command approvals, worktree handling and git helpers assume a POSIX shell and `/` paths. Scope unknown until measured. |
+| Service | `codekin service` supports launchd and systemd only. No Windows service or Task Scheduler entry. |
+| Token file | Mode `0600` has no effect; the token file needs an ACL limited to the current user. |
+| Native folder picker | `server/native-folder-picker.ts` uses `osascript`; Windows needs another implementation or none. |
+| Harnesses | Support varies by harness. Claude Code has a native Windows build; others may require or recommend WSL. Each one needs checking. |
+
+### Order of work
+
+1. **Measure.** Add a `windows-latest` job to `ci.yml` that runs the existing test suite, reporting but not
+   blocking PRs. The failures become the porting backlog.
+2. **Port the server and CLI** to run natively: harness discovery and launch (`where`, `.cmd` shims), process-tree
+   termination, path and shell handling, token file ACL, and at least one supported harness end to end. Make the
+   Windows CI job blocking once it passes. This is useful on its own: `npx codekin` would then work on Windows.
+3. **Build the Windows app**, reusing the Tauri shell and the shared launcher (D1).
+
+Running the server inside WSL from a Windows shell is **not** the plan. It would skip the port but bring in a WSL
+dependency, networking between Windows and WSL, and path translation between the two filesystems, for a worse
+result than a native port.
+
+### What carries over to the Tauri shell
+
+| Concern | macOS plan | Windows |
+|---|---|---|
+| Webview | WKWebView; `confirm`/`alert` gated on the spike (D6) | WebView2 (Chromium); `confirm`/`alert` work, D6 doesn't apply |
+| Background | Menu bar icon, App Nap opt-out, Keep Mac awake | System tray icon; `SetThreadExecutionState` for keep-awake; no App Nap |
+| Open at login | `tauri-plugin-autostart` (Login Item) | Same plugin (registry Run key) |
+| `PATH` | Login-shell `PATH` capture | Not needed: GUI apps get the user's `PATH` |
+| Shutdown | SIGTERM launcher, then SIGKILL the process group | Ask the launcher to stop (stdin message or local HTTP), then kill the process tree / Job Object |
+| Bundled Node and `better-sqlite3` | `darwin-arm64` | `win32-x64` (and `win32-arm64` if wanted) |
+| Updater | `tauri-plugin-updater` | Same plugin, same `latest.json` |
+| Installer | `.dmg` | NSIS `.exe` (or MSI) |
+
+Keep the shell's platform code behind small modules (`launcher.rs` shutdown, keep-awake, `PATH`) so a Windows
+implementation slots in without restructuring.
+
+### Where it gets built and tested
+
+| Where | What |
+|---|---|
+| CI `windows-latest` (x64) | Test suite (step 1), then unsigned app builds on PRs and the release job on the `v*` tag, alongside the macOS job. Free for this public repository. `windows-11-arm` is available if ARM builds are wanted. |
+| A Windows machine or VM | Manual checklists. A Windows PC, a cloud VM, or Windows 11 on Arm in Parallels on an Apple Silicon Mac. Parallels runs x64 builds under emulation, so it's fine for checking behaviour but not for judging performance. |
+| Linux dev host | Writing code. Cross-compiling with `cargo-xwin` (NSIS only, experimental in Tauri) is possible, but nothing can run here, so CI is the build of record. |
+
+### Signing
+
+Unsigned installers trigger SmartScreen warnings. Options are Azure Trusted Signing (subscription) or an OV / EV
+code-signing certificate. Like the Apple account (D3), this is an account decision that blocks only the signing
+step.
 
 ## Phases
 
