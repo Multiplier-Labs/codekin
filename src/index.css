@@ -725,6 +725,17 @@ html, body, #root {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent-7) 25%, transparent);
 }
 
+/* ── Composer tone by permission mode ──────────────────────────────────── */
+
+/* Plan mode: the card sinks a step darker, so a read-only session reads
+   differently at a glance. */
+.composer-card[data-mode-tone="plan"] {
+  background-color: color-mix(in srgb, var(--color-surface), black 22%);
+}
+[data-scheme="light"] .composer-card[data-mode-tone="plan"] {
+  background-color: color-mix(in srgb, var(--color-surface), black 7%);
+}
+
 /* Orchestrator badge pill */
 .orchestrator-badge {
   letter-spacing: 0.08em;
@@ -745,6 +756,24 @@ html, body, #root {
 [data-scheme="light"] .orchestrator-input-bar .composer-card {
   border-color: var(--color-accent-5);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent-5) 20%, transparent);
+}
+
+/* Bypass / skip permissions: the theme's own surface tinted toward its error
+   hue, with an error edge and ring, so a mode that runs everything without
+   asking can't be mistaken for any other. Only the card's background and
+   border change — ink, edge and raised-surface tokens keep their theme
+   values, so hover states and popovers inside the card stay legible in every
+   theme. Placed after the orchestrator rules (and one class more specific)
+   so the danger edge also wins on Joe's composer. */
+.app-input-bar .composer-card[data-mode-tone="danger"] {
+  background-color: color-mix(in srgb, var(--color-surface), var(--color-error-5) 14%);
+  border-color: var(--color-error-6);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-error-6) 35%, transparent);
+}
+[data-scheme="light"] .app-input-bar .composer-card[data-mode-tone="danger"] {
+  background-color: color-mix(in srgb, var(--color-surface), var(--color-error-5) 8%);
+  border-color: var(--color-error-5);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-error-5) 25%, transparent);
 }
 
 /* ── Safe area insets for notched devices ──────────────────────────────── */

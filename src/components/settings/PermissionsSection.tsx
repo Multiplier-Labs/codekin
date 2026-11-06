@@ -12,8 +12,9 @@ import { PERMISSION_MODES } from '../../types'
 import { getAllRepoApprovals, removeRepoApproval, bulkRemoveRepoApprovals, type RepoApprovalsEntry } from '../../lib/ccApi'
 import { ApprovalGroupRow } from '../ApprovalsPanel'
 import { PERMISSION_MODE_ICONS, buildGroups, type ApprovalGroup, type RemovalTarget } from '../../lib/approvalGroups'
-import { Block, button } from './Block'
-import { getPref, setPref } from '../../lib/prefs'
+import { Block, button, checkbox } from './Block'
+import { getPref, setPref, usePref } from '../../lib/prefs'
+import { resolveEnabledModes } from '../../lib/permissionModes'
 
 
 /** Show the filter once there are more repos than fit at a glance. */
@@ -51,6 +52,7 @@ export function PermissionsSection({ token, repos, onError }: Props) {
   return (
     <div className="space-y-4">
       <DefaultModeBlock />
+      <EnabledModesBlock />
       <ApprovedRulesBlock token={token} repos={repos} onError={onError} />
     </div>
   )
@@ -78,6 +80,9 @@ function DefaultModeBlock() {
     }
     setPref('permissionMode', next)
     setMode(next)
+    // The default is always on in the composer.
+    const enabled = getPref('enabledPermissionModes')
+    if (enabled && !enabled.includes(next)) setPref('enabledPermissionModes', [...enabled, next])
   }
 
   return (
@@ -123,6 +128,61 @@ function DefaultModeBlock() {
           </p>
         </div>
       )}
+    </Block>
+  )
+}
+
+/* ── Modes in the composer ─────────────────────────────────────── */
+
+function EnabledModesBlock() {
+  const enabled = resolveEnabledModes(usePref('enabledPermissionModes'))
+  // Track the default live: it can't be switched off while it is the default.
+  const defaultMode = (usePref('permissionMode') ?? readPermissionMode())
+
+  function toggle(id: PermissionMode) {
+    const next = enabled.includes(id) ? enabled.filter(m => m !== id) : [...enabled, id]
+    // Store all-on as unset, so modes added in later versions show up too.
+    setPref('enabledPermissionModes', next.length === PERMISSION_MODES.length ? undefined : next)
+  }
+
+  return (
+    <Block
+      title="Modes in the composer"
+      description="Which modes the composer's mode menu offers. Shift+Tab steps through the enabled ones while typing, except the two that run tools without asking."
+    >
+      <div className="flex flex-col gap-1">
+        {PERMISSION_MODES.map(m => {
+          const ModeIcon = PERMISSION_MODE_ICONS[m.icon]
+          const on = enabled.includes(m.id)
+          const isDefault = m.id === defaultMode
+          // Keep at least one mode, and always the one new sessions start in.
+          const locked = isDefault || (on && enabled.length === 1)
+          return (
+            <label
+              key={m.id}
+              className={`flex w-full items-start gap-3 rounded-control px-3 py-2 transition-colors ${locked ? '' : 'cursor-pointer hover:bg-surface-raised'}`}
+            >
+              <input
+                type="checkbox"
+                checked={on}
+                disabled={locked}
+                onChange={() => { toggle(m.id) }}
+                className={`${checkbox} mt-0.5 shrink-0 disabled:cursor-default disabled:opacity-60`}
+              />
+              <ModeIcon
+                size={16}
+                stroke={2}
+                className={`mt-0.5 shrink-0 ${m.dangerous ? 'text-error-5' : 'text-ink-muted'}`}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block text-body text-ink">{m.label}</span>
+                {isDefault && <span className="block text-meta text-ink-muted">New sessions start in this mode</span>}
+                {m.dangerous && <span className="block text-meta text-ink-muted">Menu only, and asks every time — Shift+Tab skips it</span>}
+              </span>
+            </label>
+          )
+        })}
+      </div>
     </Block>
   )
 }
