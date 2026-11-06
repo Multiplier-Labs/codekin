@@ -1,6 +1,8 @@
 # Desktop App (Tauri) — Implementation Plan
 
-Status: **Planned, not started**. Nothing in this document is implemented yet. The decisions in
+Status: **In progress.** The server, CLI and launcher prerequisites are merged (#755–#758), and so is the
+server payload builder with its CI job on `macos-15` (Phase 1, below). The Tauri shell and the Phase 0 spike
+on a Mac are not started. The decisions in
 [Decisions](#decisions) were confirmed on 2026-11-06. One input is still open: who owns the Apple Developer
 account (D3). It blocks only the signing and notarization step, not the rest of the work.
 
@@ -129,6 +131,16 @@ files:
 
 Record the Node version and download checksum in the build configuration. Assert `darwin` / `arm64` before
 installing native dependencies. npm is build tooling and does not need to ship in the app.
+
+**Implemented** (`desktop/scripts/bundle-server.mjs`). Details found while building it:
+- npm 11 (bundled with Node 24) documents dependency install scripts as blocked unless allowed. 11.19.1
+  still ran them, with an `install-scripts` warning. It refuses `--allow-scripts` for project installs. The builder writes a build-only `.npmrc` with
+  `allow-scripts=better-sqlite3` into staging, checks the compiled addon exists, and deletes the `.npmrc` and
+  lockfile before packaging. The packed `package.json` ships unchanged.
+- `--target linux-x64` / `linux-arm64` run the same steps on Linux. The target must match the host, because
+  native modules are built by running the pinned Node.
+- `npm install -g codekin` would hit the same npm 11 behaviour once blocking is enforced. That's separate from
+  the app, but worth an `allowScripts` decision for the npm package.
 See [npm's package inclusion rules](https://docs.npmjs.com/cli/v11/configuring-npm/package-json/#files).
 
 This picks up exactly the `files` field (`bin/`, `dist/`, `server/dist/`, `server/workflows/`, `server/loops/`)
@@ -322,9 +334,11 @@ The app keeps running when its window is closed, so phone sessions stay connecte
 ```
 desktop/
   package.json            # @tauri-apps/cli as devDependency; scripts: dev, bundle-server, build
+  node-runtime.json       # pinned Node version + SHA-256 per target (from nodejs.org SHASUMS256.txt)
   scripts/
-    bundle-server.mjs     # fetch pinned Node, npm pack → npm ci --omit=dev, rebuild better-sqlite3,
-                          # run smoke test
+    bundle-server.mjs     # fetch + verify pinned Node, npm pack → lockfile → npm ci --omit=dev with
+                          # that Node (better-sqlite3 built for its ABI), sidecar, smoke test
+    smoke-test.mjs        # isolated app-server run against the payload (also runnable alone)
   splash/                 # local splash / error pages (Tauri frontendDist)
   src-tauri/
     Cargo.toml

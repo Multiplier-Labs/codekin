@@ -11,6 +11,7 @@ export default defineConfig({
       'server/**/*.test.ts',
       '.claude/hooks/**/*.test.mjs',
       'bin/**/*.test.mjs',
+      'desktop/scripts/**/*.test.mjs',
     ],
     env: { NODE_ENV: 'test' },
     coverage: {

@@ -1,0 +1,7 @@
+# Produced by scripts/bundle-server.mjs
+/build/
+/.cache/
+/src-tauri/binaries/
+# Rust build output
+/src-tauri/target/
+/node_modules/
