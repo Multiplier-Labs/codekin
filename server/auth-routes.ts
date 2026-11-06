@@ -47,6 +47,27 @@ function createIpRateLimiter(maxPerMinute: number): RequestHandler {
   }
 }
 
+/**
+ * Create the unauthenticated identity probe, `GET /api/ping`.
+ *
+ * It answers `{ app: 'codekin', version }` and nothing else, so a launcher (the
+ * desktop app, the CLI) can tell a Codekin server that uses a different token
+ * apart from an unrelated program on the port. `/api/health` cannot do this:
+ * without a valid token it answers 401 like any other protected route. The
+ * response reveals nothing beyond what an open port and the public npm
+ * package already do; never add session, auth or host details here.
+ *
+ * @param version - The Codekin package version this server runs.
+ */
+export function createPingRouter(version: string): Router {
+  const router = Router()
+  router.get('/api/ping', (_req, res) => {
+    res.set('Cache-Control', 'no-store')
+    res.json({ app: 'codekin', version })
+  })
+  return router
+}
+
 type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
 

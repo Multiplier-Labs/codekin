@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `GET /api/ping` answers `{ "app": "codekin", "version": "…" }` without a token, so launchers such as the planned desktop app can tell a Codekin server that uses a different token apart from another program on the port
+
 ## [0.9.8] - 2026-11-04
 
 ### Fixed

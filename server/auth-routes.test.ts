@@ -1,10 +1,10 @@
-/** Tests for createAuthRouter — verifies /auth-verify, /api/health, and IP rate limiting. */
+/** Tests for createAuthRouter and createPingRouter — /auth-verify, /api/health, /api/ping and IP rate limiting. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
 import type { Request } from 'express'
 import type { AddressInfo } from 'net'
 import type { Server } from 'http'
-import { createAuthRouter } from './auth-routes.js'
+import { createAuthRouter, createPingRouter } from './auth-routes.js'
 import type { SessionManager } from './session-manager.js'
 
 const TOKEN = 'good'
@@ -128,5 +128,34 @@ describe('createAuthRouter', () => {
       expect(body.claudeSessions).toBe(2)
       expect(body.totalSessions).toBe(3)
     })
+  })
+})
+
+describe('createPingRouter', () => {
+  let server: { baseUrl: string; close: () => Promise<void> }
+
+  beforeEach(async () => {
+    server = await startApp(createPingRouter('1.2.3'))
+  })
+
+  afterEach(async () => {
+    await server?.close()
+  })
+
+  it('identifies the server without a token', async () => {
+    const res = await fetch(`${server.baseUrl}/api/ping`)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ app: 'codekin', version: '1.2.3' })
+  })
+
+  it('ignores a wrong token rather than rejecting it', async () => {
+    const res = await fetch(`${server.baseUrl}/api/ping`, { headers: { Authorization: 'Bearer wrong' } })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ app: 'codekin', version: '1.2.3' })
+  })
+
+  it('is not cached', async () => {
+    const res = await fetch(`${server.baseUrl}/api/ping`)
+    expect(res.headers.get('cache-control')).toBe('no-store')
   })
 })
