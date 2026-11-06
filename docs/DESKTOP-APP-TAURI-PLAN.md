@@ -31,7 +31,7 @@ Confirmed 2026-11-06. Each one is referenced from the section it shapes.
 |---|---|---|---|
 | D1 | Where does setup, env and start logic live? | In **Node**, in a launcher shared with the CLI. The Rust shell only spawns, watches and stops one Node process. | `codekin setup` / `start` already own the token, the env file and `FRONTEND_DIST` resolution. A Rust copy would drift from them. |
 | D2 | Is relay pairing in scope? | **Yes, required before the first public release**, built as an in-app device-code flow (Phase 2). | Without it, phone access through app.codekin.ai needs `codekin relay login` in a terminal, which contradicts the goal. The flow is small: the CLI's device-code loop moves into the server. |
-| D3 | Signing, distribution and updates | Phase 1 builds are local and ad-hoc signed. A public `.dmg` needs an Apple Developer ID under Multiplier Labs, notarization in CI, and `tauri-plugin-updater` reading a signed manifest from GitHub Releases. Work proceeds **without** the Apple account: everything up to and including unsigned CI builds and the updater is built first, and only Developer ID signing and notarization (Phase 3b) wait for it. | An app that bundles its server goes stale without an updater. Notarization is needed for anyone else to open it without Gatekeeper workarounds. **Owner of the Apple account not yet named.** |
+| D3 | Signing, distribution and updates | Phase 1 builds are local and ad-hoc signed. A public `.dmg` needs an Apple Developer ID under Multiplier Labs, notarization in CI, and `tauri-plugin-updater` verifying signed update artifacts referenced by a manifest on GitHub Releases. Work proceeds **without** the Apple account: everything up to and including unsigned CI builds and the updater is built first, and only Developer ID signing and notarization (Phase 3b) wait for it. | An app that bundles its server goes stale without an updater. Notarization is needed for anyone else to open it without Gatekeeper workarounds. **Owner of the Apple account not yet named.** |
 | D4 | App version | **Same version as the npm package**, released from the same `v*` tag. | One number in bug reports, and the About panel always matches the bundled server. A shell-only fix ships as a patch release. |
 | D5 | Dock icon when no window is open | **Keep the Dock icon** in v1. No `ActivationPolicy::Accessory` switching. | Switching policy at runtime has focus quirks, and the menu bar icon already shows that Codekin is running. Revisit after v1. |
 | D6 | `window.confirm` / `window.alert` | Gate on the spike (Phase 0). If WKWebView under Tauri doesn't show them, replace them with an in-app confirm dialog before Phase 1 ships. | ~24 call sites (approvals, archived sessions, …). If the host doesn't implement the WebKit panels, `confirm()` returns `false` silently and those actions do nothing. |
@@ -46,11 +46,11 @@ The app is **standalone**. A user who only installs the app never needs a termin
 | Only the app is installed | App does first-run setup itself and runs its own bundled server |
 | `codekin service` is installed and running | App attaches to the running server and doesn't start a second one |
 | Service installed but stopped | App starts its own bundled server on the configured port |
-| Service starts while the app's server is running | The service fails to bind the port and the app's server keeps working. Documented: run one or the other |
-| Attached service stops while the app is open | The supervisor notices and starts the bundled server, then the window reconnects |
+| Service starts while the app's server is running | The shared data-directory lock rejects the second server before it opens state; a separate port does not bypass this protection |
+| Attached service stops while the app is open | The supervisor takes over only after the ownership and compatibility checks below pass; otherwise it shows a recovery view |
 
-Both share `~/.config/codekin` and `~/.codekin`, so sessions, settings, the token and the relay pairing are the
-same no matter which server is running. When attached, the window shows the service's frontend and the About
+Both use `~/.config/codekin` and, by default, `~/.codekin`; honor an existing `DATA_DIR` override. Sessions,
+settings, credentials and relay pairing carry over when both use the same configuration. When attached, the window shows the service's frontend and the About
 panel reports the version the running server returns from `/api/ping`, not the bundled one.
 
 ## What already exists
@@ -77,7 +77,9 @@ The app is not a pure wrapper. These land as ordinary PRs **before** the Tauri w
    spawn and port-conflict.
 2. **Shared launcher (D1).** Move the setup and start logic out of `bin/codekin.mjs` into a module (e.g.
    `bin/lib/launch.mjs`) used by `codekin setup`, `codekin start`, the service unit and the app. Add a hidden
-   `codekin app-server` entry point for the app (see [Launcher](#launcher-d1)).
+   `codekin app-server` entry point for the app (see [Launcher](#launcher-d1)). Put exclusive data-directory
+   ownership enforcement in server startup too, so direct server entry points cannot bypass it. Existing service
+   installations must be upgraded to this prerequisite release before automatic takeover is supported.
 3. **Codex MCP config keeps up with the Node path.** `ensureCodexMcpConfig` (`server/orchestrator-manager.ts`)
    is append-only: once a `[mcp_servers.codekin]` section exists, it is never rewritten. It records
    `process.execPath` and the server script path, which for the app are paths inside `Codekin.app`. If the
@@ -112,8 +114,15 @@ Inside `Contents/Resources/codekin/`, built from the **npm package itself** so t
 files:
 
 1. `npm pack` in the repo root (after `npm run build`).
-2. Unpack into a staging directory and run `npm ci --omit=dev` there with the bundled Node.
-3. Rebuild native modules against the bundled Node (below), then run the smoke test.
+2. Unpack into a staging directory. Copy the root `package-lock.json` from the **same source commit** into
+   staging: npm excludes it from packed packages. Keep the packed `package.json` unchanged and run
+   `npm ci --omit=dev` using the pinned Node and its matching npm, with that Node first on the build `PATH`.
+   A missing or out-of-sync lockfile fails the build; do not fall back to an unlocked install.
+3. Rebuild native modules against the bundled Node (below), then run the isolated smoke test.
+
+Record the Node version and download checksum in the build configuration. Assert `darwin` / `arm64` before
+installing native dependencies. npm is build tooling and does not need to ship in the app.
+See [npm's package inclusion rules](https://docs.npmjs.com/cli/v11/configuring-npm/package-json/#files).
 
 This picks up exactly the `files` field (`bin/`, `dist/`, `server/dist/`, `server/workflows/`, `server/loops/`)
 and the root `dependencies`. It deliberately does **not** use `server/package.json`, whose extra dependencies
@@ -133,20 +142,51 @@ installed, as it does today.
 
 The shell spawns `node codekin/bin/codekin.mjs app-server`. That entry point, using the shared launcher module:
 
-1. Ensures `~/.config/codekin/` exists. On first launch it does what `codekin setup` does, non-interactively:
-   generates the token (`0600`) and writes the env file with the default port and `AUTH_TOKEN_FILE`. Existing
-   files are reused as-is.
-2. Loads the **whole** env file into `process.env`, as `codekin start` does (`PORT`, `REPOS_ROOT`, `BIND_HOST`,
-   relay settings, …). It then **forces** `FRONTEND_DIST` to the bundled `dist/`: the env file's value, if any,
-   points at an npm install whose version may differ.
-3. Sets `PATH` to the user's login-shell `PATH` (see [PATH](#path)).
-4. Probes `http://127.0.0.1:<port>/api/ping`:
-   - **Codekin answers**: prints `{"event":"attach","port":…,"version":…}` and exits 0. Two servers on the same
-     `DATA_DIR` would fight over SQLite and session state.
-   - **Something else answers, or the port is in use**: prints `{"event":"port_conflict","port":…}` and exits.
-   - **Nothing listening**: imports `server/dist/ws-server.js` **in the same process**, and prints
-     `{"event":"started","port":…,"version":…}` once the server is listening.
-5. Never prints the token. The shell reads `~/.config/codekin/token` itself.
+1. Ensures `~/.config/codekin/` exists. On first launch it generates a token (`0600`) and writes the env
+   file with the default port and `AUTH_TOKEN_FILE`. Reuse existing configuration and custom credentials;
+   generate a default token only when no credential is configured. An explicitly configured but unreadable
+   token file is a configuration error, not permission to silently replace it.
+2. Loads the **whole** env file over the inherited environment, as `codekin start` does (`PORT`, `DATA_DIR`,
+   `REPOS_ROOT`, `BIND_HOST`, relay settings, …). It then **forces** `FRONTEND_DIST` to the bundled `dist/`.
+   This affects the owned server only; attach mode keeps using the running service's frontend.
+3. Sets `PATH` to the user's login-shell `PATH` (see [PATH](#path)). Resolves credentials with the same
+   shared resolver as the server: effective `AUTH_TOKEN` first, otherwise effective `AUTH_TOKEN_FILE`.
+   The shell must not independently assume `~/.config/codekin/token` is the effective credential.
+4. Probes `http://127.0.0.1:<port>/api/ping` with a bounded timeout, then authenticates `/api/health`:
+   - **Codekin answers and authentication succeeds**: prints `{"event":"attach","port":…,"version":…}`
+     and exits 0. Record this server version for takeover checks below.
+   - **Codekin answers but authentication fails**: emit `auth_error`; show how to correct the effective
+     credential. Do not spawn, overwrite credentials or send the token to another origin.
+   - **An occupied port has no valid ping**: emit `port_conflict`. Explain that this may be an older Codekin
+     service lacking `/api/ping`, and offer instructions to upgrade or stop it. Never automatically kill it.
+   - **Connection refused**: attempt exclusive ownership of the canonical `DATA_DIR`, then import
+     `server/dist/ws-server.js` **in the same process**. Emit `started` only after listening and authenticated
+     health readiness. A probe timeout is not evidence that nothing is listening.
+5. Supply the effective credential to Rust through a dedicated inherited private pipe, separate from stdout,
+   stderr and ordinary lifecycle events. Read this handoff before handling `attach` exit. Never put credentials
+   in command-line arguments, event lines, error messages or logs. Close the pipe when the handoff finishes.
+
+### Exclusive ownership and compatibility
+
+- Acquire an OS-backed exclusive lock on the canonical data directory **before** constructing `SessionManager`,
+  opening SQLite, migrating data or restoring sessions. Hold it for the server's lifetime. All server entry
+  points use this guard; a different port does not permit a second owner. Do not use a check-then-create PID
+  file or decide a lock is stale merely because an HTTP probe timed out.
+- A lock conflict emits `data_in_use`. Re-probe for an attachable server; otherwise show a recovery view.
+  A bind race similarly returns to probing after releasing ownership safely. Never retry by starting an
+  unguarded second server. Older servers lack this lock: automatic takeover from them is unsupported.
+- Attach may display a different-version service's own frontend after successful authentication. It must not
+  change that service's files, MCP config or data. A missing `/api/ping` requires upgrading the service first.
+- For v1, automatic takeover requires an attached server at the **same version** as the bundled server and
+  support for the ownership prerequisite (the desktop release sets a minimum supported server version). If versions differ, explain how to align them and require an explicit
+  retry after that action; do not silently run an older bundled server against newer data.
+- Persist the last writer version in the data directory under the lock. Reject startup with an older server
+  version before touching application state. Forward upgrades use the server's migrations; automatic
+  downgrades are unsupported. Compare versions as semver, not strings. For legacy data without a writer
+  marker, require the old service to be stopped and use the existing migration path before recording ownership.
+  Do not claim this guard protects against an old binary that predates it.
+- Install desktop single-instance handling before spawning a launcher. A second app invocation focuses the
+  existing window. The server lock remains necessary for races involving the CLI and service.
 
 Running the server in the launcher's process (rather than a grandchild) means the shell supervises exactly one
 PID, and SIGTERM goes straight to `gracefulShutdown`.
@@ -159,11 +199,14 @@ and goes to the log file.
 1. Show the native splash.
 2. Spawn the launcher and wait for its first event (up to about 15 s):
    - `started` or `attach`: navigate the main window to `http://127.0.0.1:<port>/#token=<token>`.
-   - `port_conflict`: show an error view naming the port, with how to change it (`PORT` in
-     `~/.config/codekin/env`) and **Retry**.
+   - `port_conflict`, `auth_error`, `data_in_use` or incompatible data: show the corresponding recovery
+     instructions, **Show logs** and **Retry**. Never retry by overwriting configuration or killing a service.
    - Timeout or the launcher exits without an event: show an error view with **Show logs** and **Retry**.
-3. In attach mode, the shell keeps polling `/api/ping` every few seconds. If the attached server goes away, it
-   starts the launcher again, which now spawns the bundled server; the window reloads when it is up.
+     Stop and reap any still-running owned launcher before Retry can create another one.
+3. In attach mode, poll `/api/ping` every 3 s with a 2 s request timeout. After three consecutive failures,
+   show reconnecting status. HTTP errors or timeouts alone never trigger takeover. Require connection refusal,
+   the version checks above and successful exclusive-lock acquisition before starting the bundled server.
+   If the service recovers or wins the startup race, authenticate and attach again. Reload only after readiness.
 
 ## Server lifecycle
 
@@ -172,10 +215,21 @@ and goes to the log file.
 - **Quit:** send SIGTERM to the **launcher PID only** and wait for it to exit. `gracefulShutdown` stops the relay
   connector and calls `sessions.shutdown()`, which stops each session process and persists state. Signalling the
   whole group at once would kill the `claude` / `codex` children while that is still running.
-- **Backstop:** if the launcher hasn't exited after 15 s, send SIGKILL to the whole process group so no session
-  process is orphaned.
-- **Crash:** if the launcher exits unexpectedly, restart it with backoff (1 s, 2 s, 5 s, then every 10 s) and
-  reload the window when it reports `started`. That gives the same robustness as the launchd service.
+- **Backstop:** track the owned process group independently of the launcher PID. After graceful shutdown,
+  clean up any remaining owned group members even if the launcher has already exited. Escalate to SIGKILL
+  after 15 s and verify cleanup before releasing the supervisor to start a replacement. Never target an
+  attached service's group. Harnesses must not leave untracked detached children; verify this on the Mac.
+- **Server crash:** clean up surviving members of the old owned group before restarting with backoff
+  (1 s, 2 s, 5 s, then every 10 s). Re-enter the full probe / lock / readiness flow: another service may have
+  started in the meantime, so handle `attach` as well as `started`.
+- **Shell crash:** a separate inherited lifetime pipe remains open for the owned launcher's lifetime.
+  EOF makes the launcher stop via `gracefulShutdown`, with a 15 s whole-group kill backstop. The app-mode
+  shutdown path must perform its final descendant cleanup before exiting, rather than canceling that backstop
+  when `gracefulShutdown` calls `process.exit`. This is separate
+  from the short-lived credential handoff. A new shell invocation must wait for ownership and cleanup;
+  it must not spawn a competing server during that shutdown. Test forced shell termination on a Mac.
+- **Restart server:** available only for an owned server and uses the same shutdown / cleanup / startup flow.
+  In attach mode disable it with an explanation that the CLI/service manages that server.
 - In attach mode there is no child to stop: the app leaves the service running on quit.
 
 ### PATH
@@ -183,9 +237,10 @@ and goes to the log file.
 GUI apps launched from Finder or the Dock inherit launchd's minimal `PATH`, so they can't see Homebrew,
 nvm, `~/.local/bin`, etc. Without a fix, the server can't find `claude`, `codex`, `git` or `gh`.
 
-- The launcher runs `$SHELL -ilc 'printf %s "$PATH"'` with a 5 s timeout and uses the result. On failure it
-  falls back to `/opt/homebrew/bin:/usr/local/bin:~/.local/bin` prepended to the inherited `PATH`, and logs a
-  warning.
+- The launcher invokes `$SHELL -ilc` with a command that prints `$PATH` between unique delimiters, using a
+  5 s timeout. It captures only that delimited value so shell startup banners cannot corrupt it. On failure, prepend
+  `/opt/homebrew/bin`, `/usr/local/bin` and `join(homedir(), '.local/bin')` to the inherited `PATH`, and log a
+  warning. Expand the home directory explicitly: a literal `~` in an environment PATH is not expanded.
 - The resolved `PATH` is captured once per launch. Installing a CLI while the app runs needs a restart from the
   menu bar icon (**Restart server**).
 
@@ -285,7 +340,11 @@ the payload needs a native `better-sqlite3` built for `darwin-arm64`. Work split
 |---|---|
 | Linux dev host | The prerequisite server, CLI and frontend changes, with their unit tests. Writing `desktop/` code and the `bundle-server.mjs` script. Nothing that needs the app to run. |
 | Apple Silicon Mac | The Phase 0 spike, local builds, and the manual checklist. Every phase's exit criterion is checked here. |
-| CI, `macos-14` (arm64) runner | An unsigned build of `desktop/` on every PR that touches `desktop/` or the files the payload is built from, ending with the smoke test. This gives Linux-side changes build feedback before anyone opens a Mac. Later, signed release builds (Phase 3). |
+| CI, `macos-15` (arm64) runner | An unsigned build of `desktop/` on every PR that touches `desktop/` or the files the payload is built from, ending with the smoke test. This gives Linux-side changes build feedback before anyone opens a Mac. Later, signed release builds (Phase 3). |
+
+Use the supported ARM64 `macos-15` label and assert `uname -m` is `arm64`; fail rather than accidentally
+building an Intel payload. Recheck runner availability when implementing CI against the
+[GitHub runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
 
 ## Building and installing locally
 
@@ -308,15 +367,25 @@ A locally built app is ad-hoc signed and runs on the machine that built it witho
   Mach-O in `Resources/` must be signed with the hardened runtime. Node needs the
   `com.apple.security.cs.allow-jit` and `allow-unsigned-executable-memory` entitlements.
 - **Notarization** with `notarytool` in CI, then staple the `.dmg`.
-- **CI:** a `desktop` job in `publish.yml` on a `macos-14` (arm64) runner, triggered by the same `v*` tag.
+- **CI:** a `desktop` job in `publish.yml` on a `macos-15` (arm64) runner, triggered by the same `v*` tag.
   Until the Apple account exists (Phase 3a), it attaches an **unsigned** `.dmg` to the release for internal
   testers. Opening that build on another Mac needs `xattr -dr com.apple.quarantine /Applications/Codekin.app`,
   so it is not offered to users. Once the account exists (Phase 3b), the signing certificate and notarization
   credentials go into repository secrets and the job signs and notarizes.
 - **Updater signing** uses Tauri's own update key (`tauri signer generate`), not the Apple certificate, so it
   is set up in Phase 3a. The private key lives in repository secrets.
-- **Updates:** `tauri-plugin-updater` checks a signed `latest.json` attached to the GitHub Release. The update
-  check runs at launch and daily; installing restarts the app, which stops the bundled server gracefully.
+- **Update artifacts:** in Phase 3a set `bundle.createUpdaterArtifacts: true`, configure the updater public
+  key and HTTPS manifest endpoint, and publish the macOS `.app.tar.gz` plus its `.sig` alongside the `.dmg`.
+  `latest.json` includes the version and a `darwin-aarch64` entry containing the archive URL and signature.
+  The updater verifies the **artifact**, not a signature on `latest.json`. Publish the manifest only after
+  the complete artifact set is available. See the [Tauri updater contract](https://v2.tauri.app/plugin/updater/).
+- **Updates:** check at launch and daily; offer Install / Later through native shell UI, since the server
+  origin has no IPC permissions. If owned sessions are active, explain that installation interrupts them and
+  require confirmation. If health cannot be read, treat session activity as unknown and still confirm.
+  Download and verify first, disable automatic server restart, then await owned-server shutdown and group
+  cleanup before replacing the app and relaunching. Failed cleanup blocks installation; download or signature
+  failures leave the current app running. In attach mode update only the app and leave the service running.
+  After relaunch use the usual compatibility checks; an app update does not update an attached service.
 - **App translocation:** a quarantined app opened from Downloads runs from a random read-only path, and harness
   MCP configs would record that path. The `.dmg` uses the standard "drag to Applications" layout, and the app
   warns (and offers to move itself) when launched from outside `/Applications`.
@@ -337,10 +406,12 @@ A locally built app is ad-hoc signed and runs on the machine that built it witho
 - Only the local server origin (`http://127.0.0.1:<port>`, `http://localhost:<port>`) and the splash pages may
   load in the main window. External links and `target=_blank` open in the default browser (intercept
   navigation / new-window requests and hand them to `tauri-plugin-opener`).
-- No Tauri commands are exposed to the server origin. The shell talks to the server only over HTTP.
+- No Tauri commands are exposed to the server origin. The shell uses authenticated HTTP for server APIs;
+  the launcher's private credential and lifetime pipes are available only to its parent process.
 - `/api/ping` returns only the app name and version; it reveals nothing that the port being open doesn't.
-- The token stays in `~/.config/codekin/token` with mode `0600`. It is never written to the launcher's stdout
-  or the log file.
+- The generated default token stays in `~/.config/codekin/token` with mode `0600`; existing `AUTH_TOKEN` or
+  custom `AUTH_TOKEN_FILE` settings retain their precedence. No effective token is written to the launcher's
+  stdout or the log file. Disable HTTP redirects for credential-bearing readiness requests.
 - The server keeps binding to `127.0.0.1`. LAN exposure stays an explicit opt-in via `BIND_HOST`, as
   today.
 
@@ -413,24 +484,37 @@ step.
 | Phase | Scope | Exit criterion |
 |---|---|---|
 | 0 — Spike (Mac) | Bare Tauri window loading a running local server. Check `confirm`/`alert`, drag-and-drop, clipboard, folder picker focus, login-shell `PATH`, `better-sqlite3` under the bundled Node, App Nap. | Written findings; D6 resolved |
-| Prereqs (Linux) | `/api/ping`, shared launcher + `app-server`, Codex MCP config fix; confirm dialog if D6 requires it | Merged, released in npm |
-| 1 — Local app | `desktop/` package, payload, launcher supervision, splash/error views, window behaviour, attach mode, unsigned PR build job in CI | CI build green; manual checklist passes on a Mac |
+| Prereqs (Linux) | `/api/ping`, shared launcher + `app-server`, credential handoff, data ownership/version guard, Codex MCP config fix; confirm dialog if D6 requires it | Merged, released in npm |
+| 1 — Local app | `desktop/` package, payload, launcher supervision, splash/error views, window behaviour, attach mode, unsigned PR build job in CI | CI build green; Phase 1 checklist items pass on a Mac |
 | 2 — Background + pairing | Menu bar icon, open at login, keep awake, App Nap, in-app relay pairing | Phone reaches a freshly installed app via app.codekin.ai with no terminal |
 | 3a — Release pipeline | Release job on the `v*` tag producing an unsigned `.dmg`, updater key and `latest.json`, move-to-Applications | A tag produces a `.dmg` that internal testers install and update |
 | 3b — Signing (blocked on Apple account) | Developer ID signing with hardened runtime and entitlements, notarization, stapling | Notarized `.dmg` from a tag installs and updates on a clean Mac with no Gatekeeper warning |
 
 ## Testing
 
-- **Build smoke test** (in `bundle-server.mjs`): `app-server` starts, `/api/ping` and `/api/health` respond, and
-  SQLite opens.
-- **Unit tests** for the shared launcher (env merge, `FRONTEND_DIST` override, attach / conflict / start
-  decisions) and the Codex MCP config rewrite, in the existing Vitest suite.
-- **Manual checklist:**
+- **Build smoke test** (in `bundle-server.mjs`): run with a fresh temporary home, configuration directory,
+  `DATA_DIR`, repository root and test token; choose an available loopback test port and retry allocation on
+  a bind race. Clear inherited Codekin settings and disable relay, webhooks and session auto-restore. Require
+  the `started` event from the test-owned process (an `attach` result fails the test), valid `/api/ping`,
+  authenticated `/api/health` and an opened SQLite database in the temporary data directory. Always stop and
+  reap the owned process group and remove temporary files. Never read or write the builder's real credentials,
+  sessions or harness config, or attach to its existing server.
+- **Automated tests** in the existing Vitest suite for env merge, frontend override, credential precedence
+  and private handoff/redaction, attach authentication, legacy ping failure and the Codex MCP config rewrite.
+  Add integration coverage for simultaneous starts, different ports sharing one data directory, stale owner
+  recovery, bind races, version/downgrade rejection, timed-out startup cleanup and isolated smoke-test behavior.
+- **Manual checklist** (run the items applicable to each phase; all must pass before public release):
   - first launch on a machine without the CLI and with no `~/.config/codekin`, where no terminal step is
     needed
   - launch with existing config, sessions and `REPOS_ROOT`, which carry over
   - launch while `codekin service` is running, so the app attaches and doesn't spawn a second server
-  - stop the attached service while the app is open, and the app takes over with its own server
+  - stop a compatible attached service: takeover happens only after exclusive ownership is available
+  - hang or pause the attached service: timeout shows reconnecting and never starts a second server
+  - attach to a different-version service: its own UI works, Restart server is disabled, and automatic
+    takeover is refused; an older service without `/api/ping` gets upgrade instructions
+  - existing `AUTH_TOKEN` and custom `AUTH_TOKEN_FILE` both authenticate; wrong credentials show recovery
+    without being logged or replaced
+  - launch two app instances and race app/service startup: one window owner and one data-directory owner
   - port taken by another app, which shows the error view
   - `claude` installed via Homebrew / nvm is found when launched from the Dock
   - Joe starts and its Codekin MCP tools work, under both the app and the service (configs point at a live Node)
@@ -439,6 +523,10 @@ step.
   - drag-and-drop attachment into the composer
   - close the window, then a phone session keeps streaming; Cmd-Q stops it with no orphaned processes and
     sessions resume after relaunch
-  - kill the server process, which the app restarts and the window reconnects to
+  - kill the server process during an active harness session: old owned children are cleaned up before
+    restart; force-kill the shell separately and verify the launcher lifetime-pipe shutdown
+  - install an update with active sessions, defer it, then confirm: shutdown completes before replacement;
+    invalid signatures and failed cleanup do not install; attached services survive app updates
+  - attempt an older bundled server against newer data: startup refuses before opening application state
   - pair with app.codekin.ai from Settings (Phase 2)
   - reboot with "Open at login" enabled, after which Codekin is reachable from the phone
