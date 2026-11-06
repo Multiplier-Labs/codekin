@@ -11,6 +11,7 @@ import { createServer } from 'http'
 import { createServer as createNetServer } from 'net'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import Database from 'better-sqlite3'
 import { PACKAGE_ROOT } from './launch.mjs'
 
 const CLI = join(PACKAGE_ROOT, 'bin', 'codekin.mjs')
@@ -154,6 +155,17 @@ describe('codekin app-server', () => {
       expect(await second.firstEvent).toMatchObject({ event: 'attach', port })
       expect((await second.exited).code).toBe(0)
 
+      // Same data, different port: refused by the data-directory lock (D7).
+      const otherPort = await freePort()
+      // A separate config (its own HOME, so its own ~/.codekin) pointing at the same DATA_DIR.
+      const rivalHome = join(root, 'rival-home')
+      mkdirSync(join(rivalHome, '.config', 'codekin'), { recursive: true })
+      writeFileSync(join(rivalHome, '.config', 'codekin', 'env'), `PORT=${otherPort}\nDATA_DIR=${dataDir}\nAUTH_TOKEN=rival\n`)
+      const rival = launch(cleanEnv({ CODEKIN_AUTO_RESTORE_SESSIONS: 'false', HOME: rivalHome }))
+      expect(await rival.firstEvent).toMatchObject({ event: 'data_in_use', port: otherPort })
+      expect((await rival.exited).code).toBe(1)
+      expect(rival.output().stdout).not.toContain('listening on')
+
       const ping = await (await fetch(`http://127.0.0.1:${port}/api/ping`)).json()
       expect(ping.app).toBe('codekin')
       const { stdout, stderr } = owner.output()
@@ -164,5 +176,21 @@ describe('codekin app-server', () => {
     const exit = await owner.exited
     expect(exit.code).toBe(0)
     expect(owner.output().stderr).toContain('stdin closed')
+  }, 60_000)
+
+  it.skipIf(!HAS_COMPILED_SERVER)('refuses to start an older server against data written by a newer one', async () => {
+    const port = await freePort()
+    const dataDir = join(root, 'data')
+    mkdirSync(dataDir, { recursive: true })
+    const db = new Database(join(dataDir, '.codekin-owner.sqlite'))
+    db.exec("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta VALUES ('writer_version', '999.0.0')")
+    db.close()
+    writeEnv({ PORT: port, DATA_DIR: dataDir, REPOS_ROOT: join(root, 'repos') })
+    const run = launch(cleanEnv())
+    expect(await run.firstEvent).toMatchObject({ event: 'data_newer', writerVersion: '999.0.0' })
+    expect((await run.exited).code).toBe(1)
+    // Refused before any application state was opened.
+    expect(existsSync(join(dataDir, 'sessions.json'))).toBe(false)
+    expect(existsSync(join(home, '.codekin', 'session-archive.db'))).toBe(false)
   }, 60_000)
 })

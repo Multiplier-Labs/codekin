@@ -125,6 +125,13 @@ sudo systemctl start codekin
 
 File uploads and session data are stored under `~/.codekin/` by default (override with `DATA_DIR` and `SCREENSHOTS_DIR` env vars).
 
+Only one Codekin server can run against a data directory at a time. At startup the server locks both
+`DATA_DIR` and `~/.codekin` (the session archive and several config files always live there, even when
+`DATA_DIR` is set elsewhere), and a second server exits with `Another Codekin server is using …`. The
+lock is held in `.codekin-owner.sqlite` and is released automatically when the server exits or crashes. The
+same file records the version that last wrote the data; an older Codekin refuses to start against it,
+so upgrade rather than downgrade.
+
 ```bash
 mkdir -p ~/.codekin/screenshots
 ```

@@ -187,9 +187,18 @@ The shell spawns `node codekin/bin/codekin.mjs app-server`. That entry point, us
   retry after that action; do not silently run an older bundled server against newer data.
 - Persist the last writer version in the data directory under the lock. Reject startup with an older server
   version before touching application state. Forward upgrades use the server's migrations; automatic
-  downgrades are unsupported. Compare versions as semver, not strings. For legacy data without a writer
-  marker, require the old service to be stopped and use the existing migration path before recording ownership.
-  Do not claim this guard protects against an old binary that predates it.
+  downgrades are unsupported. Compare versions as semver, not strings. Legacy data without a writer marker
+  is recorded by the first guarded server; an old service still running on the configured port is caught by
+  the launcher's probe (attach or `port_conflict`) before that. Do not claim this guard protects against an
+  old binary that predates it.
+- **Implemented** (`server/data-ownership.ts`, `server/data-ownership-boot.ts`, imported first by
+  `ws-server.ts`). Locked roots are `DATA_DIR` **and** `~/.codekin`, deduplicated by realpath: `DATA_DIR`
+  only relocates part of the state, and the session archive, run database, webhook / hook / workflow /
+  deployment config and PR cache always live in `~/.codekin`. Each root gets `.codekin-owner.sqlite` with a
+  `meta` table (`writer_version`, `owner_pid`, `owned_since`); acquisition is all or nothing. A conflict or a
+  newer marker exits the server with status 1 and, in app mode, emits `data_in_use` (`dir`) or `data_newer`
+  (`dir`, `writerVersion`, `version`). Moving those hardcoded paths under `DATA_DIR` is a separate change, since
+  it would relocate existing users' archives.
 - Install desktop single-instance handling before spawning a launcher. A second app invocation focuses the
   existing window. The server lock remains necessary for races involving the CLI and service.
 
@@ -228,14 +237,15 @@ node codekin/bin/codekin.mjs app-server --credential-fd=3 --lifetime-stdin
 | `unresponsive` | `port`, `host` | 5 | Probe timed out or failed, or the started server failed its readiness check |
 | `bind_failed` | `port`, `host`, `reason` | 1 | Lost a bind race after a refused probe; re-run the full flow |
 
-`data_in_use` arrives with the data-directory lock (D7).
+| `data_in_use` | `port`, `host`, `dir` | 1 | Another server owns a state directory (D7) |
+| `data_newer` | `port`, `host`, `dir`, `writerVersion`, `version` | 1 | The data was written by a newer Codekin; downgrades are refused |
 
 ## Startup flow (shell)
 
 1. Show the native splash.
 2. Spawn the launcher and wait for its first event (up to about 15 s):
    - `started` or `attach`: navigate the main window to `http://127.0.0.1:<port>/#token=<token>`.
-   - `port_conflict`, `auth_error`, `config_error`, `data_in_use` or incompatible data: show the corresponding recovery
+   - `port_conflict`, `auth_error`, `config_error`, `data_in_use` or `data_newer`: show the corresponding recovery
      instructions, **Show logs** and **Retry**. Never retry by overwriting configuration or killing a service.
    - `unresponsive` or `bind_failed`: show the error view with **Retry**; Retry re-runs the full flow.
    - Timeout or the launcher exits without an event: show an error view with **Show logs** and **Retry**.

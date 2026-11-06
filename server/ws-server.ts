@@ -12,6 +12,9 @@
  * Single-process server on PORT (default 32352), behind nginx reverse proxy at /cc.
  */
 
+// Must stay the first import: takes exclusive ownership of the state
+// directories before any module opens state (desktop plan D7).
+import './data-ownership-boot.js'
 import express from 'express'
 import { createServer } from 'http'
 import { WebSocketServer, WebSocket } from 'ws'
