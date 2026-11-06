@@ -33,6 +33,7 @@
   },
   "files": [
     "bin/",
+    "!bin/**/*.test.mjs",
     "dist/",
     "server/dist/",
     "server/workflows/",
