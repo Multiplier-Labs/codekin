@@ -148,9 +148,20 @@ Verify whether a token is valid. Does not require auth itself.
 **Request body:** `{ "token": "..." }` (or token in Authorization header)
 **Response:** `{ "valid": true }` or `{ "valid": false }`
 
+### `GET /api/ping`
+
+Identifies the server. Does not require auth.
+
+Launchers (the desktop app, the CLI) use it to tell a Codekin server that uses a different token apart
+from an unrelated program on the port; `/api/health` answers 401 to both. The response holds only the app
+name and the package version, and is sent with `Cache-Control: no-store`. Releases up to and including
+0.9.9 don't have this route.
+
+**Response:** `{ "app": "codekin", "version": "1.0.0" }`
+
 ### `GET /api/health`
 
-Server health check.
+Server health check. Requires auth.
 
 **Response:**
 ```json

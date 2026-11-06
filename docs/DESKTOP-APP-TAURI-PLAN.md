@@ -25,7 +25,8 @@ background.
 
 ## Decisions
 
-Confirmed 2026-11-06. Each one is referenced from the section it shapes.
+D1–D6 confirmed 2026-11-06; D7 and D8 settled when implementation started (same day). Each one is referenced
+from the section it shapes.
 
 | # | Question | Decision | Why |
 |---|---|---|---|
@@ -35,6 +36,8 @@ Confirmed 2026-11-06. Each one is referenced from the section it shapes.
 | D4 | App version | **Same version as the npm package**, released from the same `v*` tag. | One number in bug reports, and the About panel always matches the bundled server. A shell-only fix ships as a patch release. |
 | D5 | Dock icon when no window is open | **Keep the Dock icon** in v1. No `ActivationPolicy::Accessory` switching. | Switching policy at runtime has focus quirks, and the menu bar icon already shows that Codekin is running. Revisit after v1. |
 | D6 | `window.confirm` / `window.alert` | Gate on the spike (Phase 0). If WKWebView under Tauri doesn't show them, replace them with an in-app confirm dialog before Phase 1 ships. | ~24 call sites (approvals, archived sessions, …). If the host doesn't implement the WebKit panels, `confirm()` returns `false` silently and those actions do nothing. |
+| D7 | How is the data-directory lock taken? | A SQLite lock database in `DATA_DIR`, opened with `better-sqlite3` in `PRAGMA locking_mode = EXCLUSIVE` and held by an open write transaction for the server's lifetime. A second owner gets `SQLITE_BUSY` immediately (`busy_timeout = 0`) and reports `data_in_use`. | Node has no built-in file lock. `proper-lockfile` decides staleness by mtime, which the ownership rules forbid, and `fs-ext` adds a second native module to rebuild. SQLite's lock is an OS `fcntl` lock the kernel drops when the process dies, so a crash never leaves a stale owner, and `better-sqlite3` already ships. |
+| D8 | How does the shell spawn the launcher? | Rust's `std::process::Command`, with `process_group(0)`, stdin as the lifetime pipe and fd 3 as the credential pipe. `bundle.externalBin` only places and signs `node`; the shell resolves its path next to the app executable. | `tauri-plugin-shell`'s sidecar API can't set a process group or pass extra file descriptors. Stdin as the lifetime pipe needs no extra fd: its EOF is the shell-crash signal, and the launcher doesn't otherwise read stdin. |
 
 ## Relationship to the CLI and the service
 
@@ -78,7 +81,9 @@ The app is not a pure wrapper. These land as ordinary PRs **before** the Tauri w
 2. **Shared launcher (D1).** Move the setup and start logic out of `bin/codekin.mjs` into a module (e.g.
    `bin/lib/launch.mjs`) used by `codekin setup`, `codekin start`, the service unit and the app. Add a hidden
    `codekin app-server` entry point for the app (see [Launcher](#launcher-d1)). Put exclusive data-directory
-   ownership enforcement in server startup too, so direct server entry points cannot bypass it. Existing service
+   ownership enforcement (D7) in server startup too, so direct server entry points cannot bypass it, together
+   with the writer-version marker that refuses to run an older server against newer data (see
+   [Exclusive ownership and compatibility](#exclusive-ownership-and-compatibility)). Existing service
    installations must be upgraded to this prerequisite release before automatic takeover is supported.
 3. **Codex MCP config keeps up with the Node path.** `ensureCodexMcpConfig` (`server/orchestrator-manager.ts`)
    is append-only: once a `[mcp_servers.codekin]` section exists, it is never rewritten. It records
@@ -162,13 +167,13 @@ The shell spawns `node codekin/bin/codekin.mjs app-server`. That entry point, us
    - **Connection refused**: attempt exclusive ownership of the canonical `DATA_DIR`, then import
      `server/dist/ws-server.js` **in the same process**. Emit `started` only after listening and authenticated
      health readiness. A probe timeout is not evidence that nothing is listening.
-5. Supply the effective credential to Rust through a dedicated inherited private pipe, separate from stdout,
-   stderr and ordinary lifecycle events. Read this handoff before handling `attach` exit. Never put credentials
+5. Supply the effective credential to Rust through a dedicated inherited private pipe (fd 3, D8), separate
+   from stdout, stderr and ordinary lifecycle events. Read this handoff before handling `attach` exit. Never put credentials
    in command-line arguments, event lines, error messages or logs. Close the pipe when the handoff finishes.
 
 ### Exclusive ownership and compatibility
 
-- Acquire an OS-backed exclusive lock on the canonical data directory **before** constructing `SessionManager`,
+- Acquire an OS-backed exclusive lock (D7) on the canonical data directory **before** constructing `SessionManager`,
   opening SQLite, migrating data or restoring sessions. Hold it for the server's lifetime. All server entry
   points use this guard; a different port does not permit a second owner. Do not use a check-then-create PID
   file or decide a lock is stale merely because an HTTP probe timed out.
@@ -210,7 +215,7 @@ and goes to the log file.
 
 ## Server lifecycle
 
-- Spawn the launcher in its own process group, with stdout/stderr appended to
+- Spawn the launcher in its own process group (D8), with stdout/stderr appended to
   `~/Library/Logs/Codekin/server.log`.
 - **Quit:** send SIGTERM to the **launcher PID only** and wait for it to exit. `gracefulShutdown` stops the relay
   connector and calls `sessions.shutdown()`, which stops each session process and persists state. Signalling the
@@ -222,7 +227,7 @@ and goes to the log file.
 - **Server crash:** clean up surviving members of the old owned group before restarting with backoff
   (1 s, 2 s, 5 s, then every 10 s). Re-enter the full probe / lock / readiness flow: another service may have
   started in the meantime, so handle `attach` as well as `started`.
-- **Shell crash:** a separate inherited lifetime pipe remains open for the owned launcher's lifetime.
+- **Shell crash:** a separate inherited lifetime pipe (the launcher's stdin, D8) remains open for the owned launcher's lifetime.
   EOF makes the launcher stop via `gracefulShutdown`, with a 15 s whole-group kill backstop. The app-mode
   shutdown path must perform its final descendant cleanup before exiting, rather than canceling that backstop
   when `gracefulShutdown` calls `process.exit`. This is separate

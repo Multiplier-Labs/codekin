@@ -60,7 +60,7 @@ import { broadcastToAuthenticated } from './ws-broadcast.js'
 import { checkForUpdates, getUpdateNotification } from './version-check.js'
 import { stopOpenCodeServer } from './opencode-process.js'
 import { ensureHookConfig, syncCommitHooks } from './commit-event-hooks.js'
-import { createAuthRouter } from './auth-routes.js'
+import { createAuthRouter, createPingRouter } from './auth-routes.js'
 import { createSessionRouter } from './session-routes.js'
 import { createWebhookRouter } from './webhook-routes.js'
 import { createWebhookSetupRouter } from './webhook-setup-routes.js'
@@ -362,6 +362,7 @@ if (FRONTEND_DIST && existsSync(FRONTEND_DIST)) {
 }
 
 // --- REST API routes (delegated to dedicated routers) ---
+app.use(createPingRouter(codekinPackageVersion()))
 app.use(createAuthRouter(verifyToken, extractToken, sessions, claudeAvailable, claudeVersion, apiKeySet))
 app.use(createSessionRouter(verifyToken, extractToken, sessions, verifyTokenOrSessionToken))
 app.use(createWebhookRouter(verifyToken, extractToken, webhookHandler, stepflowHandler))
