@@ -1,13 +1,15 @@
 /**
  * Folder picker component for selecting a directory path.
  *
- * Shows a text input with a browse button that opens a dropdown
+ * Shows a text input with a browse button. When the browser runs on the same
+ * macOS machine as the server, the button opens the native "Choose Folder"
+ * dialog; otherwise (remote, hosted, non-macOS) it opens an in-page dropdown
  * directory browser. Validates paths on save and shows error messages.
  */
 
 import { useState, useEffect, useRef } from 'react'
 import { IconFolder, IconFolderOpen, IconChevronRight, IconArrowUp, IconX } from '@tabler/icons-react'
-import { browseDirs } from '../lib/ccApi'
+import { browseDirs, getNativeFolderPickerAvailable, pickFolderNative } from '../lib/ccApi'
 
 interface Props {
   value: string
@@ -32,12 +34,20 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
   const [dirs, setDirs] = useState<string[]>([])
   const [browseLoading, setBrowseLoading] = useState(false)
   const [browseError, setBrowseError] = useState<string | null>(null)
+  const [nativeAvailable, setNativeAvailable] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setPath(value)
     setSavedPath(value)
   }, [value])
+
+  useEffect(() => {
+    if (!token) return
+    let cancelled = false
+    void getNativeFolderPickerAvailable(token).then(ok => { if (!cancelled) setNativeAvailable(ok) })
+    return () => { cancelled = true }
+  }, [token])
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -51,13 +61,13 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
     return () => document.removeEventListener('mousedown', handleClick)
   }, [browserOpen])
 
-  async function save() {
-    if (!token || path === savedPath) return
+  async function save(nextPath: string = path) {
+    if (!token || nextPath === savedPath) return
     setSaving(true)
     setError(null)
     try {
-      await onSave(path)
-      setSavedPath(path)
+      await onSave(nextPath)
+      setSavedPath(nextPath)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save path')
     } finally {
@@ -79,6 +89,30 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
     } finally {
       setBrowseLoading(false)
     }
+  }
+
+  async function pickNative() {
+    if (!token) return
+    setBrowseLoading(true)
+    setBrowseError(null)
+    try {
+      const picked = await pickFolderNative(token, path || undefined)
+      if (picked) {
+        setPath(picked)
+        setError(null)
+        await save(picked)
+      }
+    } catch (err) {
+      setBrowseError(err instanceof Error ? err.message : 'Failed to open folder dialog')
+    } finally {
+      setBrowseLoading(false)
+    }
+  }
+
+  function onBrowseClick() {
+    if (nativeAvailable) { void pickNative(); return }
+    if (browserOpen) setBrowserOpen(false)
+    else void browse(path || undefined)
   }
 
   function navigateUp() {
@@ -124,10 +158,11 @@ export function FolderPicker({ value, token, placeholder = '~/repos (default)', 
         />
         <button
           type="button"
-          onClick={() => browserOpen ? setBrowserOpen(false) : void browse(path || undefined)}
-          disabled={!token || browseLoading}
+          onClick={onBrowseClick}
+          disabled={!token || browseLoading || saving}
           className="flex items-center gap-1 rounded-control border border-edge bg-surface px-2.5 py-2 text-body text-ink-muted hover:border-edge-strong hover:text-ink disabled:opacity-50"
-          title="Browse folders"
+          title={nativeAvailable ? 'Choose folder…' : 'Browse folders'}
+          aria-label={nativeAvailable ? 'Choose folder' : 'Browse folders'}
         >
           {browseLoading ? (
             <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink-faint border-t-transparent" />
