@@ -34,6 +34,8 @@ export interface ClaudeProcessOptions {
   extraEnv?: Record<string, string>
   /** Claude model ID override (e.g. 'claude-opus-4-6'). Omit to use the CLI default. */
   model?: string
+  /** Reasoning effort passed via --effort (low, medium, high, xhigh, max). Omit to use the CLI default. */
+  effort?: string
   /** Permission mode for the Claude CLI process. */
   permissionMode?: PermissionMode
   /** When true and sessionId is provided, use `--resume` instead of `--session-id`. */
@@ -152,6 +154,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
 
   private workingDir: string
   private model?: string
+  private effort?: string
   private permissionMode?: PermissionMode
   private allowedTools?: string[]
   private addDirs?: string[]
@@ -163,6 +166,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
     this.sessionId = o.sessionId || randomUUID()
     this.extraEnv = o.extraEnv || {}
     this.model = o.model
+    this.effort = o.effort
     this.permissionMode = o.permissionMode
     this.resume = !!(o.resume && o.sessionId)
     this.allowedTools = o.allowedTools
@@ -204,6 +208,7 @@ export class ClaudeProcess extends EventEmitter<ClaudeProcessEvents> implements 
       '--verbose',
       ...(this.resume ? ['--resume', this.sessionId] : ['--session-id', this.sessionId]),
       ...(this.model ? ['--model', this.model] : []),
+      ...(this.effort ? ['--effort', this.effort] : []),
       '--append-system-prompt', [
         'You are running inside a web-based terminal (Codekin).',
         'Tool permissions are managed by the system through an approval hook.',

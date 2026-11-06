@@ -497,6 +497,49 @@ export async function browseDirs(token: string, path?: string): Promise<{ path: 
   return jsonBody<{ path: string; dirs: string[] }>(res)
 }
 
+let nativeFolderPickerAvailable: Promise<boolean> | null = null
+
+/**
+ * Whether the server can open the native macOS folder dialog for this browser
+ * (macOS server, same machine, no proxy). Cached for the page's lifetime; any
+ * failure — the hosted relay, an older server — counts as unavailable.
+ */
+export function getNativeFolderPickerAvailable(token: string): Promise<boolean> {
+  nativeFolderPickerAvailable ??= transport.authFetch(`/api/native/folder-picker`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+    .then(async res => {
+      // A stale token is not an answer — ask again next time.
+      if (res.status === 401) nativeFolderPickerAvailable = null
+      return res.ok && (await jsonBody<{ available?: boolean }>(res)).available === true
+    })
+    .catch(() => {
+      nativeFolderPickerAvailable = null
+      return false
+    })
+  return nativeFolderPickerAvailable
+}
+
+/** Test hook: forget the cached availability. */
+export function resetNativeFolderPickerCache(): void {
+  nativeFolderPickerAvailable = null
+}
+
+/** Open the native macOS folder dialog; resolves with the chosen path, or null if cancelled. */
+export async function pickFolderNative(token: string, defaultPath?: string): Promise<string | null> {
+  const res = await transport.authFetch(`/api/native/pick-folder`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(defaultPath ? { defaultPath } : {}),
+  })
+  if (!res.ok) {
+    const data = await errorBody(res, 'Failed to open folder dialog')
+    throw new Error(data.error ?? `Failed to open folder dialog: ${res.status}`)
+  }
+  const data = await jsonBody<{ path?: string; cancelled?: boolean }>(res)
+  return data.path ?? null
+}
+
 /** Webhook configuration (public subset, no secret). */
 export interface WebhookConfigInfo {
   enabled: boolean
@@ -602,7 +645,7 @@ export async function fetchOpenCodeModels(
 export async function fetchCodexModels(
   token: string,
 ): Promise<{
-  models: Array<{ id: string; name: string; description?: string; isDefault?: boolean }>
+  models: Array<{ id: string; name: string; description?: string; isDefault?: boolean; efforts?: { id: string; description?: string }[]; defaultEffort?: string }>
 }> {
   const res = await transport.fetch(`/api/codex/models`, {
     headers: { Authorization: `Bearer ${token}` },

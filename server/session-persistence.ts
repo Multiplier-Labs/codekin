@@ -38,6 +38,7 @@ export interface PersistedSession {
   source?: 'manual' | 'webhook' | 'workflow' | 'stepflow' | 'orchestrator' | 'agent'
   provider?: import('./coding-process.js').CodingProvider
   model?: string
+  effort?: string
   permissionMode?: string
   /** Additional tools to pre-approve via --allowedTools. */
   allowedTools?: string[]
@@ -79,6 +80,7 @@ export class SessionPersistence {
       source: s.source,
     provider: s.provider,
       model: s.model,
+      effort: s.effort,
       permissionMode: s.permissionMode,
       allowedTools: s.allowedTools,
       claudeSessionId: s.claudeSessionId,
@@ -152,6 +154,7 @@ export class SessionPersistence {
           source: s.source ?? 'manual',
           provider: s.provider ?? 'claude',
           model: s.model,
+          effort: s.effort,
           permissionMode: s.permissionMode as Session['permissionMode'],
           allowedTools: s.allowedTools,
           claudeProcess: null,

@@ -533,6 +533,33 @@ describe('CodexProcess', () => {
       })
     })
 
+    it('omits effort from turn/start and thread/start when none is set', async () => {
+      const proc = await handshake(cxp)
+      cxp.sendMessage('go')
+      await tick()
+      expect(writes(proc).find(w => w.method === 'turn/start')!.params).not.toHaveProperty('effort')
+      expect(writes(proc).find(w => w.method === 'thread/start')!.params).not.toHaveProperty('config')
+    })
+
+    it('carries the session effort on thread/start and every turn/start', async () => {
+      const cx = new CodexProcess('/tmp', { sessionId: 's', model: 'gpt-6-astra', effort: 'high' })
+      const proc = await handshake(cx)
+      expect(writes(proc).find(w => w.method === 'thread/start')!.params).toMatchObject({ config: { model_reasoning_effort: 'high' } })
+      cx.sendMessage('go')
+      await tick()
+      expect(writes(proc).find(w => w.method === 'turn/start')!.params).toMatchObject({ effort: 'high' })
+      cx.stop()
+    })
+
+    it('setEffort applies to the next turn without a restart', async () => {
+      const proc = await handshake(cxp)
+      cxp.setEffort('xhigh')
+      cxp.sendMessage('go')
+      await tick()
+      expect(writes(proc).find(w => w.method === 'turn/start')!.params).toMatchObject({ effort: 'xhigh' })
+      expect(cxp.isAlive()).toBe(true)
+    })
+
     it('queues messages sent before the handshake completes', async () => {
       cxp.start()
       const proc = lastProc()
@@ -871,6 +898,35 @@ describe('fetchCodexModels', () => {
       { id: 'gpt-6-luna', name: 'GPT-6 Luna', description: 'Fast', isDefault: false },
     ])
     expect(proc.kill).toHaveBeenCalledWith('SIGTERM')
+  })
+
+  it('maps each model\'s reasoning efforts and default', async () => {
+    const promise = fetchCodexModels()
+    await tickLocal()
+    const proc = spawnState.procs[0] as MockProc
+    proc.stdout.write(JSON.stringify({ id: 1, result: {} }) + '\n')
+    await tickLocal()
+    proc.stdout.write(JSON.stringify({
+      id: 2,
+      result: {
+        data: [{
+          id: 'gpt-6-luna', displayName: 'GPT-6 Luna', description: 'Fast', isDefault: true,
+          supportedReasoningEfforts: [
+            { reasoningEffort: 'low', description: 'Quick' },
+            { reasoningEffort: 'high', description: 'Deep' },
+            { reasoningEffort: 42 },
+          ],
+          defaultReasoningEffort: 'low',
+        }],
+      },
+    }) + '\n')
+    await expect(promise).resolves.toEqual({
+      models: [{
+        id: 'gpt-6-luna', name: 'GPT-6 Luna', description: 'Fast', isDefault: true,
+        efforts: [{ id: 'low', description: 'Quick' }, { id: 'high', description: 'Deep' }],
+        defaultEffort: 'low',
+      }],
+    })
   })
 
   it('uses the app-server entry when GPT-6.1 Sol is already listed', async () => {

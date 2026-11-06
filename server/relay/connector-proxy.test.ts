@@ -31,6 +31,11 @@ describe('checkProxyRequest', () => {
     expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/sessions/archived/abc' })).allowed).toBe(true)
   })
 
+  it('never proxies the native folder dialog, even for the owner', () => {
+    expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/native/folder-picker' })).allowed).toBe(false)
+    expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/native/pick-folder' })).allowed).toBe(false)
+  })
+
   it('allows the mutations the session UI performs', () => {
     expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/sessions/create' })).allowed).toBe(true)
     expect(checkProxyRequest(asOwner({ method: 'DELETE', path: '/api/sessions/abc' })).allowed).toBe(true)

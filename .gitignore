@@ -43,3 +43,6 @@ coverage-reports/
 
 # PM2 ecosystem config (contains deployment-specific paths)
 ecosystem.config.cjs
+
+# Conductor (machine-local workspace settings and run scripts)
+.conductor/

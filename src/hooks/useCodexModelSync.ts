@@ -18,6 +18,16 @@ interface UseCodexModelSyncOptions {
  * - Fetches models when switching to a Codex session.
  * - Auto-selects an appropriate default model when current selection is invalid.
  */
+/** Map a /api/codex/models entry to a picker option, keeping its effort levels. */
+function toModelOption(m: { id: string; name: string; efforts?: { id: string; description?: string }[]; defaultEffort?: string }): ModelOption {
+  return {
+    id: m.id,
+    label: m.name,
+    ...(m.efforts?.length ? { efforts: m.efforts } : {}),
+    ...(m.defaultEffort ? { defaultEffort: m.defaultEffort } : {}),
+  }
+}
+
 export function useCodexModelSync({
   token,
   activeSessionProvider,
@@ -46,10 +56,7 @@ export function useCodexModelSync({
     const currentIsValidCodex = currentModelRef.current && codexModels.some(m => m.id === currentModelRef.current)
     if (codexModels.length > 0 && currentIsValidCodex) return
     fetchCodexModels(token).then(result => {
-      const models: ModelOption[] = result.models.map(m => ({
-        id: m.id,
-        label: m.name,
-      }))
+      const models: ModelOption[] = result.models.map(toModelOption)
       setCodexModels(models)
       setCodexConnected(models.length > 0)
       const currentIsCodex = currentModelRef.current && models.some(m => m.id === currentModelRef.current)
@@ -74,10 +81,7 @@ export function useCodexModelSync({
   const reconnect = useCallback(() => {
     if (!token) return
     fetchCodexModels(token).then(result => {
-      const models: ModelOption[] = result.models.map(m => ({
-        id: m.id,
-        label: m.name,
-      }))
+      const models: ModelOption[] = result.models.map(toModelOption)
       setCodexModels(models)
       setCodexConnected(models.length > 0)
     }).catch(() => { setCodexConnected(false) })
