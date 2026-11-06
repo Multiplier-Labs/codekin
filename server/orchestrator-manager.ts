@@ -640,14 +640,128 @@ export function ensureOrchestratorMcpConfig(serverJsPath?: string): void {
   writeFileSync(opencodePath, `${JSON.stringify(opencodeConfig, null, 2)}\n`, 'utf-8')
 }
 
+/** `[mcp_servers.codekin]` header, also matching quoted-key and spaced spellings. */
+const CODEX_SECTION_HEADER = /^\s*\[\s*mcp_servers\s*\.\s*(?:codekin|"codekin"|'codekin')\s*\]\s*(?:#.*)?$/
+/** Any table or array-of-tables header: ends the current section. */
+const TOML_HEADER = /^\s*\[/
+
+/** Parse a TOML basic ("…") or literal ('…') string; null for anything else. */
+function parseTomlString(raw: string): string | null {
+  const v = raw.trim()
+  if (v.startsWith("'")) {
+    const end = v.indexOf("'", 1)
+    return end > 0 && /^\s*(?:#.*)?$/.test(v.slice(end + 1)) ? v.slice(1, end) : null
+  }
+  if (!v.startsWith('"')) return null
+  // A JSON string is a valid TOML basic string for every value we compare.
+  const m = /^("(?:[^"\\]|\\.)*")\s*(?:#.*)?$/.exec(v)
+  if (!m) return null
+  try { return JSON.parse(m[1]) as string } catch { return null }
+}
+
+/** Parse a single-line array of strings (`["a", 'b']`); null for anything else. */
+function parseTomlStringArray(raw: string): string[] | null {
+  const m = /^\[(.*)\]\s*(?:#.*)?$/.exec(raw.trim())
+  if (!m) return null
+  const out: string[] = []
+  const re = /\s*("(?:[^"\\]|\\.)*"|'[^']*')\s*(,|$)/y
+  let i = 0
+  const body = m[1].trim().replace(/,\s*$/, '')
+  while (i < body.length) {
+    re.lastIndex = i
+    const part = re.exec(body)
+    if (!part) return null
+    const value = parseTomlString(part[1])
+    if (value === null) return null
+    out.push(value)
+    i = re.lastIndex
+    if (!part[2]) break
+  }
+  return i >= body.length ? out : null
+}
+
+/**
+ * Make the `[mcp_servers.codekin]` section of a Codex config.toml run
+ * `command` with `args`. Pure text edit, no TOML library: only that
+ * section's `command` and `args` keys are touched (a multi-line `args`
+ * array is replaced whole), and everything else (other sections, extra keys
+ * such as `env` or `startup_timeout_sec`, comments) is kept byte for byte.
+ *
+ * @returns the new file content, or null when nothing needs to change.
+ */
+export function upsertCodexMcpSection(existing: string, command: string, args: string[]): string | null {
+  const commandLine = `command = ${JSON.stringify(command)}`
+  const argsLine = `args = [${args.map(a => JSON.stringify(a)).join(', ')}]`
+  const lines = existing.split('\n')
+  const headerIdx = lines.findIndex(l => CODEX_SECTION_HEADER.test(l))
+
+  if (headerIdx === -1) {
+    const section = [
+      '',
+      '# Added by Codekin — first-party MCP tools for the orchestrator agent.',
+      '[mcp_servers.codekin]',
+      commandLine,
+      argsLine,
+      '',
+    ].join('\n')
+    return existing + section
+  }
+
+  let sectionEnd = lines.length
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    if (TOML_HEADER.test(lines[i])) { sectionEnd = i; break }
+  }
+
+  let commandAt = -1
+  let commandOk = false
+  let argsAt = -1
+  let argsSpan = 0
+  let argsOk = false
+  for (let i = headerIdx + 1; i < sectionEnd; i++) {
+    const m = /^\s*(command|args)\s*=\s*(.*)$/.exec(lines[i])
+    if (!m) continue
+    if (m[1] === 'command' && commandAt === -1) {
+      commandAt = i
+      commandOk = parseTomlString(m[2]) === command
+    } else if (m[1] === 'args' && argsAt === -1) {
+      argsAt = i
+      // A multi-line array runs until the line holding its closing bracket.
+      let raw = m[2]
+      let j = i
+      if (raw.trim().startsWith('[') && !raw.includes(']')) {
+        while (j + 1 < sectionEnd && !lines[j].includes(']')) {
+          j++
+          raw += ' ' + lines[j].trim()
+        }
+      }
+      argsSpan = j - i + 1
+      const parsed = parseTomlStringArray(raw)
+      argsOk = parsed !== null && parsed.length === args.length && parsed.every((a, k) => a === args[k])
+    }
+  }
+  if (commandOk && argsOk) return null
+
+  // Replace the args lines first (they may come after command), then command.
+  const edits: { at: number; span: number; line: string }[] = []
+  if (!argsOk) edits.push(argsAt === -1 ? { at: headerIdx + 1, span: 0, line: argsLine } : { at: argsAt, span: argsSpan, line: argsLine })
+  if (!commandOk) edits.push(commandAt === -1 ? { at: headerIdx + 1, span: 0, line: commandLine } : { at: commandAt, span: 1, line: commandLine })
+  edits.sort((a, b) => b.at - a.at || a.span - b.span)
+  for (const e of edits) lines.splice(e.at, e.span, e.line)
+  return lines.join('\n')
+}
+
 /**
  * Register the Codekin MCP server for the Codex CLI, which only reads the
- * global ~/.codex/config.toml (no per-project MCP config). Strictly
- * append-only: when no `[mcp_servers.codekin]` section exists, one is
- * appended; existing user content is never parsed or rewritten, and an
- * existing section (even user-modified) is left alone. Called only when the
- * orchestrator actually runs on codex — no global config is touched for a
- * Claude- or OpenCode-hosted agent.
+ * global ~/.codex/config.toml (no per-project MCP config). Adds a
+ * `[mcp_servers.codekin]` section when there is none, and otherwise keeps
+ * its `command` and `args` pointing at this server's Node binary and MCP
+ * script. They change when Codekin moves (an npm upgrade under another Node
+ * version, the desktop app at a new location), and a stale path breaks
+ * Joe's Codekin tools. The Claude and OpenCode configs are rewritten on
+ * every start for the same reason. Other content in the file, including
+ * other keys in the codekin section, is left untouched. Called only when
+ * the orchestrator actually runs on codex: no global config is touched for
+ * a Claude- or OpenCode-hosted agent.
  */
 export function ensureCodexMcpConfig(serverJsPath?: string, configPath?: string): void {
   const resolved = serverJsPath ?? join(dirname(fileURLToPath(import.meta.url)), 'codekin-mcp-server.js')
@@ -656,23 +770,21 @@ export function ensureCodexMcpConfig(serverJsPath?: string, configPath?: string)
 
   try {
     const existing = existsSync(codexConfigPath) ? readFileSync(codexConfigPath, 'utf-8') : ''
-    if (existing.includes('[mcp_servers.codekin]')) return
+    const next = upsertCodexMcpSection(existing, process.execPath, [resolved])
+    if (next === null) return
 
     const dir = dirname(codexConfigPath)
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-    const section = [
-      '',
-      '# Added by Codekin — first-party MCP tools for the orchestrator agent.',
-      '[mcp_servers.codekin]',
-      `command = ${JSON.stringify(process.execPath)}`,
-      `args = [${JSON.stringify(resolved)}]`,
-      '',
-    ].join('\n')
-    writeFileSync(codexConfigPath, existing + section, 'utf-8')
-    console.log(`[orchestrator] Registered codekin MCP server in ${codexConfigPath}`)
+    writeFileSync(codexConfigPath, next, 'utf-8')
+    const verb = hasCodexSection(existing) ? 'Updated' : 'Registered'
+    console.log(`[orchestrator] ${verb} codekin MCP server in ${codexConfigPath}`)
   } catch (err) {
     console.error('[orchestrator] Failed to register codex MCP config:', err)
   }
+}
+
+function hasCodexSection(text: string): boolean {
+  return text.split('\n').some(l => CODEX_SECTION_HEADER.test(l))
 }
 
 /** Ensure the orchestrator workspace directory exists with starter files. */

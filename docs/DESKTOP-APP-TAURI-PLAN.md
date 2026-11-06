@@ -90,7 +90,9 @@ The app is not a pure wrapper. These land as ordinary PRs **before** the Tauri w
    `process.execPath` and the server script path, which for the app are paths inside `Codekin.app`. If the
    section was written by the npm install, or by an app at an older location, Codex keeps the stale path. Change
    it to rewrite the `command` and `args` of an existing `codekin` section when they differ. The Claude and
-   OpenCode configs are already rewritten on every start.
+   OpenCode configs are already rewritten on every start. **Implemented** (`upsertCodexMcpSection` in
+   `server/orchestrator-manager.ts`): a text edit of only those two keys, keeping other keys in the section,
+   other sections and comments byte for byte.
 4. **In-app relay pairing (D2, Phase 2).** Move the device-code loop from `cmdRelayLogin` into a server module
    behind authenticated endpoints: `POST /api/relay/pair` starts pairing and returns `verificationUrl` and
    `userCode`; the server polls `/api/machines/pair/complete` and writes `relay.json` (managed); the existing
