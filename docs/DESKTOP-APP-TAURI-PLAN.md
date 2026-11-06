@@ -365,6 +365,8 @@ have no `win32` handling, and CI runs on Linux only. Known breakages from readin
 
 ### Order of work
 
+The server port is planned in detail in [WINDOWS-PORT-PLAN.md](WINDOWS-PORT-PLAN.md).
+
 1. **Measure.** Add a `windows-latest` job to `ci.yml` that runs the existing test suite, reporting but not
    blocking PRs. The failures become the porting backlog.
 2. **Port the server and CLI** to run natively: harness discovery and launch (`where`, `.cmd` shims), process-tree
