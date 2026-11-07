@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "The bundled pages only (splash / error, location sign-in, the location manager). The local server and hosted relays are remote origins to Tauri and get no IPC access (no `remote` entry here), even in these windows. The app's own commands need no plugin permissions.",
-  "windows": ["main", "location-*", "locations"],
+  "windows": ["main", "location-*", "locations", "welcome"],
   "permissions": []
 }

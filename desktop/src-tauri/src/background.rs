@@ -24,12 +24,67 @@ pub struct Prefs {
     pub locations: Vec<Location>,
     /// The location shown at launch; `None` is This Mac.
     pub last_location: Option<String>,
+    /// The first-run choice; `None` until the welcome screen has been answered.
+    pub start_mode: Option<StartMode>,
+}
+
+/// What the app is mainly for, chosen on the welcome screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StartMode {
+    /// Run agents on this Mac: start the bundled server at launch.
+    Local,
+    /// Use Codekin on the web: open a hosted location; the server starts only
+    /// when This Mac is chosen.
+    Web,
+}
+
+/// What to do at launch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Launch {
+    /// First run: ask, and start nothing yet.
+    Welcome,
+    /// Start the bundled server (and reopen the last location, if any).
+    Local,
+    /// Open this hosted location; don't start the server.
+    Web(String),
 }
 
 impl Prefs {
     pub fn location(&self, id: &str) -> Option<&Location> {
         self.locations.iter().find(|l| l.id == id)
     }
+
+    /// The launch plan. `existing_install` (see [`is_existing_install`])
+    /// keeps installs from before the welcome screen on today's behaviour.
+    pub fn launch_plan(&self, existing_install: bool) -> Launch {
+        match self.start_mode {
+            Some(StartMode::Local) => Launch::Local,
+            Some(StartMode::Web) => match self
+                .last_location
+                .as_deref()
+                .filter(|id| self.location(id).is_some())
+            {
+                Some(id) => Launch::Web(id.to_string()),
+                // Every location was removed: ask again.
+                None if self.locations.is_empty() => Launch::Welcome,
+                // Last on This Mac.
+                None => Launch::Local,
+            },
+            None if existing_install => Launch::Local,
+            None => Launch::Welcome,
+        }
+    }
+}
+
+/// Codekin has run on this Mac before the welcome screen existed: the app's
+/// preferences, or the server's config (`~/.config/codekin`, also written by
+/// the npm CLI) or data (`~/.codekin`), are already there. Check before
+/// anything writes the preferences file.
+pub fn is_existing_install(prefs_file: &Path, home: &Path) -> bool {
+    prefs_file.exists()
+        || home.join(".config").join("codekin").exists()
+        || home.join(".codekin").exists()
 }
 
 impl Prefs {
@@ -188,6 +243,88 @@ mod tests {
         assert_eq!(with.location("a").unwrap().name, "Acme");
         assert_eq!(with.last_location.as_deref(), Some("a"));
         assert!(with.location("b").is_none());
+    }
+
+    #[test]
+    fn prefs_from_before_the_welcome_screen_still_load() {
+        let old: Prefs = serde_json::from_str(r#"{"keepAwake": true}"#).unwrap();
+        assert_eq!(old.start_mode, None);
+        let web: Prefs = serde_json::from_str(r#"{"startMode": "web"}"#).unwrap();
+        assert_eq!(web.start_mode, Some(StartMode::Web));
+        let saved = serde_json::to_string(&Prefs {
+            start_mode: Some(StartMode::Local),
+            ..Prefs::default()
+        })
+        .unwrap();
+        assert!(saved.contains(r#""startMode":"local""#), "{saved}");
+    }
+
+    fn with_location(mode: Option<StartMode>, last: Option<&str>) -> Prefs {
+        Prefs {
+            locations: vec![Location {
+                id: "a".into(),
+                name: "Acme".into(),
+                url: "https://relay.acme.dev".into(),
+            }],
+            last_location: last.map(str::to_string),
+            start_mode: mode,
+            ..Prefs::default()
+        }
+    }
+
+    #[test]
+    fn first_run_asks_unless_codekin_was_here_before() {
+        assert_eq!(Prefs::default().launch_plan(false), Launch::Welcome);
+        assert_eq!(Prefs::default().launch_plan(true), Launch::Local);
+        // A location saved by 0.10.x without a choice still counts as local.
+        assert_eq!(
+            with_location(None, Some("a")).launch_plan(true),
+            Launch::Local
+        );
+    }
+
+    #[test]
+    fn web_mode_opens_the_last_location_without_the_server() {
+        let web = Some(StartMode::Web);
+        assert_eq!(
+            with_location(web, Some("a")).launch_plan(true),
+            Launch::Web("a".into())
+        );
+        assert_eq!(with_location(web, None).launch_plan(true), Launch::Local);
+        assert_eq!(
+            with_location(web, Some("gone")).launch_plan(true),
+            Launch::Local
+        );
+        let none_left = Prefs {
+            start_mode: web,
+            ..Prefs::default()
+        };
+        assert_eq!(none_left.launch_plan(true), Launch::Welcome);
+        assert_eq!(
+            with_location(Some(StartMode::Local), Some("a")).launch_plan(false),
+            Launch::Local
+        );
+    }
+
+    #[test]
+    fn existing_installs_are_recognised() {
+        let home = tempdir();
+        let prefs = home.join("app/prefs.json");
+        assert!(!is_existing_install(&prefs, &home));
+        // The CI launch test's fresh HOME has a server config: no welcome screen there.
+        std::fs::create_dir_all(home.join(".config/codekin")).unwrap();
+        std::fs::write(home.join(".config/codekin/env"), "PORT=1\n").unwrap();
+        assert!(is_existing_install(&prefs, &home));
+        let other = tempdir();
+        std::fs::create_dir_all(other.join(".codekin")).unwrap();
+        assert!(is_existing_install(&other.join("p.json"), &other));
+        let third = tempdir();
+        std::fs::create_dir_all(third.join("app")).unwrap();
+        std::fs::write(third.join("app/prefs.json"), "{}").unwrap();
+        assert!(is_existing_install(&third.join("app/prefs.json"), &third));
+        for d in [home, other, third] {
+            let _ = std::fs::remove_dir_all(d);
+        }
     }
 
     /// The command line of a running process, via `ps` (works on Linux and macOS).

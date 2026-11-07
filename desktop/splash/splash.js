@@ -85,9 +85,56 @@
     $('brand').hidden = true
     show('locations')
     initLocations()
+  } else if (view === 'welcome') {
+    $('brand').hidden = true
+    show('welcome')
+    initWelcome()
   } else {
     show('status')
     $('status-text').textContent = STATUS[params.get('status')] || STATUS.starting
+  }
+
+  function initWelcome() {
+    const error = $('welcome-error')
+    const form = $('welcome-web-form')
+    const connect = $('welcome-connect')
+
+    function fail(err) {
+      error.textContent = String((err && err.message) || err)
+      error.hidden = false
+    }
+
+    on('welcome-local', function () {
+      error.hidden = true
+      invoke('welcome_local').then(function () {
+        $('welcome').hidden = true
+        show('welcome-remote')
+      }, fail)
+    })
+    on('welcome-web', function () {
+      error.hidden = true
+      form.hidden = false
+      $('welcome-url').focus()
+      $('welcome-url').select()
+    })
+    on('welcome-back', function () {
+      error.hidden = true
+      form.hidden = true
+    })
+    form.addEventListener('submit', function (event) {
+      event.preventDefault()
+      error.hidden = true
+      connect.disabled = true
+      connect.textContent = 'Checking…'
+      invoke('welcome_web', { url: $('welcome-url').value })
+        .then(null, fail)
+        .then(function () {
+          connect.disabled = false
+          connect.textContent = 'Connect and Sign In'
+        })
+    })
+    on('welcome-later', function () { quiet('welcome_close') })
+    on('welcome-remote-open', function () { quiet('welcome_open_remote_access') })
   }
 
   function initLocations() {

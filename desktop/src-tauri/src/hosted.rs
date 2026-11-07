@@ -189,6 +189,8 @@ fn switch_now(app: &AppHandle, target: Option<String>) {
     let st = state(app);
     match target.and_then(|id| prefs_location(app, &id)) {
         None => {
+            // This Mac needs its server (deferred in web-only mode).
+            crate::ensure_local_server(app);
             *st.current.lock().unwrap() = None;
             *st.pending.lock().unwrap() = None;
             if let Some(main) = app.get_webview_window(MAIN) {
@@ -309,8 +311,38 @@ fn build_location_window(
     Ok(w)
 }
 
-/// Last-used location at launch. Call after the menus are registered.
-pub(crate) fn restore(app: &AppHandle) {
+/// Show This Mac and bring it forward (starting its server if need be).
+pub(crate) fn open_this_mac(app: &AppHandle) {
+    let app2 = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        switch_now(&app2, None);
+        if let Some(main) = app2.get_webview_window(MAIN) {
+            let _ = main.show();
+            let _ = main.set_focus();
+        }
+    });
+}
+
+/// Show `id` and bring its window forward, optionally starting the browser
+/// sign-in right away (the welcome screen's "Connect to Codekin on the web").
+pub(crate) fn open_location(app: &AppHandle, id: String, sign_in: bool) {
+    let app2 = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        switch_now(&app2, Some(id));
+        // The window replacing a hidden one (first run) is built hidden too.
+        if let Some(w) = location_window(&app2) {
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+        if sign_in {
+            start_handoff(&app2);
+        }
+    });
+}
+
+/// Last-used location at launch. Call after the menus are registered. On the
+/// first run (`welcome`) nothing is shown: the welcome screen is.
+pub(crate) fn restore(app: &AppHandle, welcome: bool) {
     let last = app
         .state::<BackgroundState>()
         .prefs
@@ -318,8 +350,13 @@ pub(crate) fn restore(app: &AppHandle) {
         .unwrap()
         .last_location
         .clone();
+    if welcome {
+        refresh_menus(app);
+        return;
+    }
     match last {
-        Some(id) if prefs_location(app, &id).is_some() => switch_to(app, Some(id)),
+        // `main` is still hidden at launch; open_location shows the window it builds.
+        Some(id) if prefs_location(app, &id).is_some() => open_location(app, id, false),
         _ => {
             if let Some(main) = app.get_webview_window(MAIN) {
                 let _ = main.show();
@@ -540,13 +577,27 @@ pub(crate) async fn location_add(
     url: String,
 ) -> Result<Location, String> {
     let origin = locations::normalize_origin(&url).map_err(str::to_string)?;
-    {
-        let bg = app.state::<BackgroundState>();
-        let prefs = bg.prefs.lock().unwrap();
-        if let Some(existing) = prefs.locations.iter().find(|l| l.url == origin) {
-            return Err(format!("{origin} is already saved as “{}”.", existing.name));
-        }
+    if let Some(existing) = saved_location_for(&app, &origin) {
+        return Err(format!("{origin} is already saved as “{}”.", existing.name));
     }
+    let location = save_new_location(&app, name, origin).await?;
+    switch_to(&app, Some(location.id.clone()));
+    Ok(location)
+}
+
+/// The saved location with this (normalized) origin.
+pub(crate) fn saved_location_for(app: &AppHandle, origin: &str) -> Option<Location> {
+    let bg = app.state::<BackgroundState>();
+    let prefs = bg.prefs.lock().unwrap();
+    prefs.locations.iter().find(|l| l.url == origin).cloned()
+}
+
+/// Check `origin` is a Codekin relay (`/api/relay/info`) and save it.
+pub(crate) async fn save_new_location(
+    app: &AppHandle,
+    name: Option<String>,
+    origin: String,
+) -> Result<Location, String> {
     let probe = origin.clone();
     let relay_name = tauri::async_runtime::spawn_blocking(move || {
         crate::http::relay_info(&probe, Duration::from_secs(10))
@@ -568,7 +619,6 @@ pub(crate) async fn location_add(
         prefs.locations.push(location.clone());
         prefs.save(&bg.prefs_file).map_err(|e| e.to_string())?;
     }
-    switch_to(&app, Some(location.id.clone()));
     Ok(location)
 }
 

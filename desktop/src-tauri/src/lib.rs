@@ -11,8 +11,9 @@
 //! - `updater`: signed app updates; `relocate`: move to Applications
 //! - `locations` (pure) and `hosted`: hosted locations, their windows and the
 //!   browser sign-in handoff (Phase 4b)
+//! - `welcome`: the first-run choice between local agents and the web app
 //! - this file: window, menus (app + menu bar icon), navigation guard,
-//!   splash commands, Quit flow
+//!   splash commands, Quit flow, the deferred local server start
 
 pub mod background;
 mod hosted;
@@ -23,14 +24,15 @@ pub mod protocol;
 pub mod relocate;
 pub mod supervisor;
 pub mod updater;
+mod welcome;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use background::{KeepAwake, Prefs};
+use background::{KeepAwake, Launch, Prefs};
 use supervisor::{Connection, Ctl, Shared, Supervisor, Ui, View};
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -70,6 +72,54 @@ impl AppState {
     pub(crate) fn send(&self, c: Ctl) {
         let _ = self.ctl.lock().unwrap().send(c);
     }
+}
+
+/// The bundled server, started at launch in local mode and on first use of
+/// This Mac otherwise (a web-only Mac never runs it).
+pub(crate) struct LocalServer {
+    run: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    started: AtomicBool,
+    /// Set once the move-to-Applications check is over: the server must not
+    /// start from a translocated path (its MCP configs would record it).
+    relocation_done: Arc<(Mutex<bool>, Condvar)>,
+}
+
+/// Whether the bundled server has been started (it may have stopped since).
+pub(crate) fn local_server_started(app: &AppHandle) -> bool {
+    app.try_state::<LocalServer>()
+        .is_some_and(|s| s.started.load(Ordering::SeqCst))
+}
+
+/// Start the bundled server unless it already was. Any thread.
+pub(crate) fn ensure_local_server(app: &AppHandle) {
+    let Some(server) = app.try_state::<LocalServer>() else {
+        return;
+    };
+    let Some(run) = server.run.lock().unwrap().take() else {
+        return;
+    };
+    server.started.store(true, Ordering::SeqCst);
+    let gate = server.relocation_done.clone();
+    let _ = std::thread::Builder::new()
+        .name("supervisor".into())
+        .spawn(move || {
+            let (done, cv) = &*gate;
+            let mut ready = done.lock().unwrap();
+            while !*ready {
+                ready = cv.wait(ready).unwrap();
+            }
+            drop(ready);
+            run()
+        });
+    // Keep Mac awake only matters while this Mac serves sessions.
+    if let Some(bg) = app.try_state::<BackgroundState>() {
+        if bg.prefs.lock().unwrap().keep_awake && background::keep_awake_supported() {
+            let held = bg.keep_awake.set(true);
+            let _ = bg.tray_keep_awake.set_checked(held);
+        }
+    }
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || update_menu(&a));
 }
 
 /// The URL of a bundled page (splash / error view) with a query string.
@@ -165,6 +215,12 @@ fn request_quit(app: &AppHandle) {
     if state.quitting.swap(true, Ordering::SeqCst) {
         return;
     }
+    // No server ever ran (web only): nothing to stop or confirm.
+    if !local_server_started(app) {
+        state.exit_ready.store(true, Ordering::SeqCst);
+        app.exit(0);
+        return;
+    }
     let app = app.clone();
     std::thread::spawn(move || {
         let state = app.state::<AppState>();
@@ -230,9 +286,18 @@ pub(crate) fn confirm_stop(app: &AppHandle, active: Option<u64>, action: &str) -
 // Window and menu
 // ---------------------------------------------------------------------------
 
-/// Show the window of the location on screen (This Mac or a hosted one).
+/// Show the window of the location on screen (This Mac or a hosted one), or
+/// the welcome screen while the first-run choice is still open.
 fn show_main(app: &AppHandle) {
+    if welcome::needed(app) {
+        welcome::open(app);
+        return;
+    }
     if let Some(w) = hosted::current_window(app) {
+        // This Mac on screen needs its server; a hosted location doesn't.
+        if w.label() == MAIN {
+            ensure_local_server(app);
+        }
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
@@ -291,6 +356,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         true,
         None::<&str>,
     )?;
+    let welcome = MenuItem::with_id(app, "welcome", "Welcome…", true, None::<&str>)?;
     let app_menu = Submenu::with_items(
         app,
         "Codekin",
@@ -298,6 +364,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         &[
             &PredefinedMenuItem::about(app, Some("About Codekin"), None)?,
             &check_updates,
+            &welcome,
             &PredefinedMenuItem::separator(app)?,
             &restart,
             &logs,
@@ -434,7 +501,8 @@ fn toggle_open_at_login(app: &AppHandle) {
         .set_checked(autolaunch.is_enabled().unwrap_or(false));
 }
 
-/// Restart Server is available only for an owned server.
+/// Restart Server is available only for an owned server, Keep Mac Awake only
+/// once the server has been started.
 fn update_menu(app: &AppHandle) {
     let owned = matches!(
         app.state::<AppState>().shared.connection(),
@@ -442,6 +510,9 @@ fn update_menu(app: &AppHandle) {
     );
     if let Some(bg) = app.try_state::<BackgroundState>() {
         let _ = bg.tray_restart.set_enabled(owned);
+        let _ = bg
+            .tray_keep_awake
+            .set_enabled(background::keep_awake_supported() && local_server_started(app));
     }
     if let Some(menu) = app.menu() {
         if let Some(item) = menu
@@ -463,6 +534,7 @@ fn on_menu(app: &AppHandle, id: &str) {
         "keep_awake" => toggle_keep_awake(app),
         "open_at_login" => toggle_open_at_login(app),
         "check_updates" => updater::check_now(app),
+        "welcome" => welcome::open(app),
         "restart_server" => request_restart(app),
         "show_logs" => reveal_logs(app, &app.state::<AppState>().log),
         "reload" => {
@@ -620,6 +692,10 @@ pub fn run() {
             hosted::location_sign_in,
             hosted::location_sign_in_reopen,
             hosted::location_sign_in_cancel,
+            welcome::welcome_local,
+            welcome::welcome_web,
+            welcome::welcome_open_remote_access,
+            welcome::welcome_close,
         ])
         .menu(build_menu)
         .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
@@ -648,32 +724,20 @@ pub fn run() {
 
                 // Menu bar icon and the shell's preferences (Keep Mac awake survives restarts).
                 let prefs_file = handle.path().app_config_dir()?.join("prefs.json");
-                let prefs = Prefs::load(&prefs_file);
+                let existing = handle
+                    .path()
+                    .home_dir()
+                    .is_ok_and(|home| background::is_existing_install(&prefs_file, &home));
+                let mut prefs = Prefs::load(&prefs_file);
+                let plan = prefs.launch_plan(existing);
+                if prefs.start_mode.is_none() && plan == Launch::Local {
+                    // An install from before the welcome screen: it was local all along.
+                    prefs.start_mode = Some(background::StartMode::Local);
+                    let _ = prefs.save(&prefs_file);
+                }
                 let mut bg = build_tray(&handle, &prefs)?;
                 bg.prefs_file = prefs_file;
-                if prefs.keep_awake && background::keep_awake_supported() {
-                    let held = bg.keep_awake.set(true);
-                    let _ = bg.tray_keep_awake.set_checked(held);
-                }
                 app.manage(bg);
-
-                // Hosted locations: reopen the last one, and take the relay's
-                // sign-in hand-back, whether it launched the app or arrived later.
-                hosted::restore(&handle);
-                {
-                    use tauri_plugin_deep_link::DeepLinkExt;
-                    let links = handle.clone();
-                    handle.deep_link().on_open_url(move |event| {
-                        for url in event.urls() {
-                            hosted::handle_deep_link(&links, &url);
-                        }
-                    });
-                    if let Ok(Some(urls)) = handle.deep_link().get_current() {
-                        for url in urls {
-                            hosted::handle_deep_link(&handle, &url);
-                        }
-                    }
-                }
 
                 let payload = payload_dir(&handle);
                 let spec = launcher::LaunchSpec {
@@ -692,16 +756,52 @@ pub fn run() {
                     shared,
                     ctl: ctl_rx.lock().unwrap().take().expect("setup runs once"),
                 };
+                let relocation_done = Arc::new((Mutex::new(false), Condvar::new()));
+                app.manage(LocalServer {
+                    run: Mutex::new(Some(Box::new(move || supervisor.run()))),
+                    started: AtomicBool::new(false),
+                    relocation_done: relocation_done.clone(),
+                });
+
+                // Once per launch, whichever way the app is used. If the app
+                // moves it relaunches from Applications, and nothing here starts.
                 let relocate_app = handle.clone();
                 std::thread::Builder::new()
-                    .name("supervisor".into())
+                    .name("relocate".into())
                     .spawn(move || {
-                        // Before the server starts: its MCP configs would record a translocated path.
                         if offer_move_to_applications(&relocate_app) {
                             return;
                         }
-                        supervisor.run()
+                        let (done, cv) = &*relocation_done;
+                        *done.lock().unwrap() = true;
+                        cv.notify_all();
                     })?;
+
+                // First run asks; local starts the server; web opens the
+                // location and leaves the server for when This Mac is chosen.
+                match plan {
+                    Launch::Welcome => welcome::open(&handle),
+                    Launch::Local => ensure_local_server(&handle),
+                    Launch::Web(_) => {}
+                }
+                // Hosted locations: reopen the last one, and take the relay's
+                // sign-in hand-back, whether it launched the app or arrived later.
+                hosted::restore(&handle, plan == Launch::Welcome);
+                update_menu(&handle);
+                {
+                    use tauri_plugin_deep_link::DeepLinkExt;
+                    let links = handle.clone();
+                    handle.deep_link().on_open_url(move |event| {
+                        for url in event.urls() {
+                            hosted::handle_deep_link(&links, &url);
+                        }
+                    });
+                    if let Ok(Some(urls)) = handle.deep_link().get_current() {
+                        for url in urls {
+                            hosted::handle_deep_link(&handle, &url);
+                        }
+                    }
+                }
                 updater::schedule(&handle);
                 Ok(())
             }

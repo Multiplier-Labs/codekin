@@ -61,6 +61,22 @@ same payload smoke test before it publishes, so anything they break fails the de
 | `hosted.rs` | Location windows, the Location menus, the location manager, the `codekin://` handoff and its commands |
 | `lib.rs` | Window, app menu and menu bar icon, Open at login, navigation guard, splash commands (`retry`, `show_logs`, `quit`), Quit and Restart confirmations |
 
+### First launch
+
+A new install asks first (a bundled page, `?view=welcome`), before anything starts:
+
+- **Run agents on this Mac** starts the bundled server and shows This Mac, then offers remote access as an
+  optional step (*Open Remote Access* goes to Settings → Remote access in the local UI).
+- **Connect to Codekin on the web** takes a relay address (prefilled `https://app.codekin.ai`), checks it like
+  *Add Location…*, opens it and starts the browser sign-in. The bundled server is **not** started; it starts
+  the first time *Location → This Mac* is chosen. Until then Keep Mac Awake and Restart Server are disabled,
+  and Quit and updates have no server to stop.
+
+The answer is saved as `startMode` (`local` / `web`) in the shell's `prefs.json`; web mode reopens the last
+location at launch. *Codekin → Welcome…* asks again. Installs from before this screen (an existing
+`prefs.json`, `~/.config/codekin` or `~/.codekin`) are treated as local and never see it, which also keeps
+the CI launch test (a fresh HOME with `~/.config/codekin/env`) on the local path.
+
 ### Hosted locations
 
 *Location* in the menu bar (and in the menu bar icon) switches the window between **This Mac** and saved

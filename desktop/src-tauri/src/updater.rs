@@ -138,10 +138,15 @@ fn run(app: &AppHandle, interactive: bool) -> Result<(), String> {
     }
 
     // 3. Stop the owned server (no automatic restart) and wait for its group to be gone.
-    let (tx, rx) = mpsc::channel();
-    *state.shared.update_stopped.lock().unwrap() = Some(tx);
-    state.send(Ctl::StopForUpdate);
-    let clean = rx.recv_timeout(STOP_TIMEOUT).unwrap_or(false);
+    // A web-only launch never started one: nothing to stop.
+    let clean = if crate::local_server_started(app) {
+        let (tx, rx) = mpsc::channel();
+        *state.shared.update_stopped.lock().unwrap() = Some(tx);
+        state.send(Ctl::StopForUpdate);
+        rx.recv_timeout(STOP_TIMEOUT).unwrap_or(false)
+    } else {
+        true
+    };
     if !clean {
         message(
             app,
