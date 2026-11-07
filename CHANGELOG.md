@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- New icon everywhere, matching codekin.ai: ink rings with orange dots. The web app's favicon follows the system light/dark scheme and gains sharp 180/192/512 px home-screen icons. The desktop app has a proper macOS icon (the mark on a dark plate, every size up to 1024 px), used by the Dock, Finder and the `.dmg` installer, and a new menu bar icon
+
 ### Fixed
 - In the desktop app, the session view no longer jumps back up to a random point in the transcript. WebKit reports the page hidden whenever the window is covered, hidden or on another Space, and each return rejoined the session, rebuilt the whole transcript and lost the scroll position. A return within 25 seconds no longer rejoins (nothing can have been missed), and when a rebuild does happen, a reader who had scrolled up stays where they were
 
