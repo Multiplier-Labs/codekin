@@ -5,14 +5,14 @@
 
 import type { ComponentType } from 'react'
 import {
-  IconArchive, IconBrandGithub, IconId, IconKey, IconPalette, IconServer2, IconShieldCheck,
+  IconArchive, IconBrandGithub, IconDeviceMobile, IconId, IconKey, IconPalette, IconServer2, IconShieldCheck,
   IconShieldLock, IconUserCog, IconUserPlus, IconUsersGroup,
 } from '@tabler/icons-react'
 
 export type SettingsSectionId =
   | 'profile' | 'security' | 'appearance'
   | 'workspace' | 'members' | 'machines'
-  | 'connection' | 'sessions' | 'permissions' | 'webhooks'
+  | 'connection' | 'remote' | 'sessions' | 'permissions' | 'webhooks'
   | 'accounts'
 
 export type SettingsGroup = 'Account' | 'Workspace' | 'This machine' | 'Platform'
@@ -26,6 +26,8 @@ export interface SectionDef {
   icon: ComponentType<{ size?: number; className?: string }>
   /** Only on app.codekin.ai (accounts, workspaces). */
   hostedOnly?: boolean
+  /** Only in the local app: pairing with the relay can't be done through the relay. */
+  localOnly?: boolean
   /** Lives on the machine: needs one connected (and, locally, a token). */
   machine?: boolean
   /** Reads the machine's settings API, which needs an access token. */
@@ -42,6 +44,7 @@ export const SETTINGS_SECTIONS: SectionDef[] = [
   { id: 'members', group: 'Workspace', label: 'Members', icon: IconUserPlus, hostedOnly: true },
   { id: 'machines', group: 'Workspace', label: 'Machines', icon: IconServer2, hostedOnly: true },
   { id: 'connection', group: 'This machine', label: 'Connection', icon: IconKey, machine: true },
+  { id: 'remote', group: 'This machine', label: 'Remote access', icon: IconDeviceMobile, machine: true, needsToken: true, localOnly: true },
   { id: 'sessions', group: 'This machine', label: 'Sessions', icon: IconArchive, machine: true, needsToken: true },
   { id: 'permissions', group: 'This machine', label: 'Permissions', icon: IconShieldLock, machine: true, needsToken: true },
   { id: 'webhooks', group: 'This machine', label: 'GitHub webhooks', icon: IconBrandGithub, machine: true, needsToken: true },
@@ -57,7 +60,7 @@ export interface SectionContext {
 }
 
 function applies(s: SectionDef, ctx: SectionContext): boolean {
-  return (!s.hostedOnly || ctx.hosted) && (!s.operatorOnly || ctx.isOperator === true)
+  return (!s.hostedOnly || ctx.hosted) && (!s.localOnly || !ctx.hosted) && (!s.operatorOnly || ctx.isOperator === true)
 }
 
 /** The sections that can be opened here. */

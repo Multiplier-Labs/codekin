@@ -177,6 +177,32 @@ Server health check. Requires auth.
 
 ---
 
+## Remote access (relay pairing)
+
+All require auth and are local only: the hosted relay's connector never proxies `/api/relay/*`.
+
+### `GET /api/relay/status`
+
+The embedded relay connector's state: `{ paired, managed, state, machineId, relayUrl, detail? }`, where `state` is
+one of `disabled`, `unpaired`, `unmanaged`, `connecting`, `connected`, `disconnected`, `replaced`, `auth_failed`,
+`stopped`.
+
+### `GET /api/relay/pair` · `POST /api/relay/pair` · `DELETE /api/relay/pair`
+
+Pair this machine with a hosted relay through the device-code flow. `POST` takes `{ "relayUrl"?: string }`
+(default `https://app.codekin.ai`; must be `https://`) and returns
+`{ "state": "pending", relayUrl, verificationUrl, userCode, expiresAt }`. The server polls the relay and writes
+`~/.config/codekin/relay.json` (managed) once the code is approved; `GET` then returns
+`{ "state": "complete", relayUrl, machineId, ownerLogin }` (or `denied` / `expired` / `failed`). `DELETE` cancels a
+pending pairing. Errors: `409 already_paired`, `400 invalid_url`, `502 unreachable` / `rejected`.
+
+### `POST /api/relay/unpair`
+
+Removes the local credential: `{ "removed": boolean }`. The machine stays registered on the relay until it's
+removed there (Settings → Machines).
+
+---
+
 ## Sessions
 
 ### `GET /api/sessions/list`

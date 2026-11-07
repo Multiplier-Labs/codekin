@@ -100,7 +100,11 @@ The app is not a pure wrapper. These land as ordinary PRs **before** the Tauri w
    behind authenticated endpoints: `POST /api/relay/pair` starts pairing and returns `verificationUrl` and
    `userCode`; the server polls `/api/machines/pair/complete` and writes `relay.json` (managed); the existing
    `GET /api/relay/status` reports progress. A "Pair with app.codekin.ai" control in local Settings drives it.
-   The CLI command calls the same module.
+   The CLI command calls the same module. **Implemented** (`server/relay/pairing-client.ts`,
+   `server/relay/pairing-local-routes.ts`, Settings → This machine → Remote access): also `GET` / `DELETE
+   /api/relay/pair` (state, cancel) and `POST /api/relay/unpair`. The verification URL must be on the relay's own
+   origin, relay URLs must be `https://` (loopback `http://` for relay development), and none of `/api/relay/*` is on
+   the connector's proxy allowlist, so the hosted relay can't pair or unpair a machine.
 5. **In-app confirm dialog (D6, only if the spike fails).** A themed `confirmDialog()` / `alertDialog()` returning
    promises, replacing every `window.confirm` / `window.alert` in `src/`, plus an ESLint `no-restricted-globals`
    rule so new ones don't creep back.

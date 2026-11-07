@@ -17,9 +17,10 @@
  */
 
 import { execSync, execFileSync, spawnSync } from 'child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, createReadStream, rmSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, createReadStream, rmSync } from 'fs'
 import { homedir, platform } from 'os'
 import { join, dirname } from 'path'
+import { pathToFileURL } from 'url'
 import { createInterface } from 'readline'
 import {
   PACKAGE_ROOT,
@@ -103,7 +104,6 @@ function printAccessUrl() {
 // ---------------------------------------------------------------------------
 
 const RELAY_CREDENTIAL_FILE = join(CONFIG_DIR, 'relay.json')
-const DEFAULT_RELAY_URL = 'https://app.codekin.ai'
 
 function readRelayCredential() {
   if (!existsSync(RELAY_CREDENTIAL_FILE)) return null
@@ -125,26 +125,16 @@ function findConnectorScript() {
 }
 
 /**
- * Persist the machine credential. `managed: true` tells the local Codekin
- * server to run the connector itself (server/relay/embedded-connector.ts);
- * `--unmanaged` leaves that to the user (`codekin relay connect`, pm2, ...).
- * The installer writes the same shape — keep the two in sync.
+ * The shared pairing client (server/relay/pairing-client.ts): the same code
+ * the local server runs for the in-app "Pair with app.codekin.ai" control.
  */
-function writeRelayCredential(relayUrl, data, managed) {
-  ensureConfigDir()
-  const credential = { url: relayUrl, machineId: data.machineId, machineSecret: data.machineSecret }
-  if (managed) credential.managed = true
-  writeFileSync(RELAY_CREDENTIAL_FILE, JSON.stringify(credential, null, 2) + '\n', { mode: 0o600 })
-  chmodSync(RELAY_CREDENTIAL_FILE, 0o600)
-}
-
-/**
- * " as @login" for the account the relay paired this machine into, so whoever
- * ran the command can tell it joined the account they expected.
- */
-function pairedAs(data) {
-  // A GitHub login, checked so the relay's answer cannot write escape codes to the terminal.
-  return typeof data.ownerLogin === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(data.ownerLogin) ? ` as @${data.ownerLogin}` : ''
+async function loadPairingClient() {
+  const compiled = join(PACKAGE_ROOT, 'server', 'dist', 'relay', 'pairing-client.js')
+  if (!existsSync(compiled)) {
+    console.error('Pairing needs the compiled server (server/dist). Run: npx tsc -p server/tsconfig.json')
+    process.exit(1)
+  }
+  return import(pathToFileURL(compiled).href)
 }
 
 function printPairedNextSteps(managed) {
@@ -159,7 +149,7 @@ function printPairedNextSteps(managed) {
 
 async function cmdRelayLogin(args) {
   const urlFlag = args.indexOf('--url')
-  const relayUrl = (urlFlag !== -1 && args[urlFlag + 1] ? args[urlFlag + 1] : DEFAULT_RELAY_URL).replace(/\/$/, '')
+  const relayUrl = urlFlag !== -1 && args[urlFlag + 1] ? args[urlFlag + 1] : undefined
   const codeFlag = args.indexOf('--code')
   // The pairing token is a bearer secret: prefer the environment, which
   // (unlike argv) is not visible in `ps` or kept in shell history.
@@ -173,90 +163,50 @@ async function cmdRelayLogin(args) {
     process.exit(1)
   }
 
+  const { RelayPairing, claimPairingToken, PairingError } = await loadPairingClient()
+  const as = (login) => (login ? ` as @${login}` : '')
+
   // Browser-first pairing: a token minted in the hosted UI claims directly —
   // no verification URL, no polling.
   if (pairingToken) {
-    let res
     try {
-      res = await fetch(`${relayUrl}/api/machines/pair/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceCode: pairingToken,
-          hostname: execSync('hostname').toString().trim(),
-          platform: platform(),
-        }),
-      })
-    } catch (err) {
-      console.error(`Could not reach the relay at ${relayUrl}: ${err.message}`)
-      process.exit(1)
-    }
-    const data = await res.json().catch(() => ({}))
-    if (res.ok && data.status === 'complete') {
-      writeRelayCredential(relayUrl, data, managed)
-      console.log(`Paired${pairedAs(data)}. Machine id: ${data.machineId}`)
+      const result = await claimPairingToken(relayUrl, pairingToken, managed)
+      console.log(`Paired${as(result.ownerLogin)}. Machine id: ${result.machineId}`)
       printPairedNextSteps(managed)
       return
+    } catch (err) {
+      if (err instanceof PairingError && err.message === 'expired') {
+        console.error('Pairing token expired — generate a fresh install command in the hosted UI.')
+      } else {
+        console.error(`${err.message}. Generate a fresh install command in the hosted UI.`)
+      }
+      process.exit(1)
     }
-    if (data.status === 'expired') {
-      console.error('Pairing token expired — generate a fresh install command in the hosted UI.')
-    } else {
-      console.error(`Pairing failed (${data.status || res.status}). Generate a fresh install command in the hosted UI.`)
-    }
-    process.exit(1)
   }
 
-  let start
+  const pairing = new RelayPairing({ managed, log: { log: () => {}, warn: () => {} } })
+  let started
   try {
-    const res = await fetch(`${relayUrl}/api/machines/pair/start`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hostname: execSync('hostname').toString().trim(), platform: platform() }),
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    start = await res.json()
+    started = await pairing.start(relayUrl)
   } catch (err) {
-    console.error(`Could not reach the relay at ${relayUrl}: ${err.message}`)
+    console.error(err.message)
     process.exit(1)
   }
-
   console.log('\nTo pair this machine, open:\n')
-  console.log(`    ${start.verificationUrl}\n`)
-  console.log(`and confirm the code: ${start.userCode}\n`)
+  console.log(`    ${started.state.verificationUrl}\n`)
+  console.log(`and confirm the code: ${started.state.userCode}\n`)
   console.log('Waiting for approval (Ctrl-C to cancel)...')
 
-  const pollMs = start.pollIntervalMs || 3000
-  for (;;) {
-    await new Promise((r) => setTimeout(r, pollMs))
-    let res
-    try {
-      res = await fetch(`${relayUrl}/api/machines/pair/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deviceCode: start.deviceCode }),
-      })
-    } catch {
-      continue // transient network error — keep polling until expiry
-    }
-    if (res.status === 202) continue
-    const data = await res.json().catch(() => ({}))
-    if (res.ok && data.status === 'complete') {
-      writeRelayCredential(relayUrl, data, managed)
-      console.log(`\nPaired${pairedAs(data)}. Machine id: ${data.machineId}`)
-      printPairedNextSteps(managed)
-      return
-    }
-    if (data.status === 'denied') {
-      console.error('\nPairing was denied in the hosted UI.')
-      process.exit(1)
-    }
-    if (data.status === 'expired') {
-      console.error('\nPairing request expired. Run `codekin relay login` again.')
-      process.exit(1)
-    }
-    console.error(`\nPairing failed (${data.status || res.status}).`)
-    process.exit(1)
+  const result = await started.done
+  if (result.state === 'complete') {
+    console.log(`\nPaired${as(result.ownerLogin)}. Machine id: ${result.machineId}`)
+    printPairedNextSteps(managed)
+    return
   }
+  if (result.state === 'denied') console.error('\nPairing was denied in the hosted UI.')
+  else if (result.state === 'expired') console.error('\nPairing request expired. Run `codekin relay login` again.')
+  else console.error(`\n${result.detail || 'Pairing failed.'}`)
+  process.exit(1)
 }
 
 function cmdRelayConnect(args) {

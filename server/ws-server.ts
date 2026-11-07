@@ -72,6 +72,8 @@ import { createUploadRouter } from './upload-routes.js'
 import { TRUSTED_PROXY_HOPS, WS_MAX_PAYLOAD_BYTES, wsClientIp } from './ws-limits.js'
 import { createDocsRouter } from './docs-routes.js'
 import { EmbeddedConnectorSupervisor, createRelayStatusRouter, embeddedConnectorDisabled } from './relay/embedded-connector.js'
+import { RelayPairing } from './relay/pairing-client.js'
+import { createRelayPairingRouter } from './relay/pairing-local-routes.js'
 import { resolveLocalTarget } from './relay/connector-proxy.js'
 import { codekinPackageVersion } from './relay/relay-credential.js'
 import { createOrchestratorRouter } from './orchestrator-routes.js'
@@ -393,6 +395,7 @@ const relayConnector = new EmbeddedConnectorSupervisor({
   },
 })
 app.use(createRelayStatusRouter(verifyToken, extractToken, relayConnector))
+app.use(createRelayPairingRouter(verifyToken, extractToken, new RelayPairing()))
 
 // Workflow router — commitEventHandler is set after engine init, but the
 // router closure captures the variable reference so it will resolve correctly.

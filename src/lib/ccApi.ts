@@ -790,3 +790,64 @@ export async function testWebhookDelivery(
   }
   return jsonBody<{ success: boolean; message: string; delivery?: { id: number; statusCode: number; event: string } }>(res)
 }
+
+// ---------------------------------------------------------------------------
+// Remote access: pairing this machine with a hosted relay (desktop plan D2).
+// Local only: the relay connector never proxies /api/relay/*.
+// ---------------------------------------------------------------------------
+
+/** The embedded relay connector's state (GET /api/relay/status). */
+export interface RelayStatus {
+  paired: boolean
+  managed: boolean
+  state: 'disabled' | 'unpaired' | 'unmanaged' | 'connecting' | 'connected' | 'disconnected' | 'replaced' | 'auth_failed' | 'stopped'
+  machineId: string | null
+  relayUrl: string | null
+  detail?: string
+}
+
+/** An in-progress or finished pairing (GET/POST/DELETE /api/relay/pair). */
+export type RelayPairingState =
+  | { state: 'idle' }
+  | { state: 'pending'; relayUrl: string; verificationUrl: string; userCode: string; expiresAt: number | null }
+  | { state: 'complete'; relayUrl: string; machineId: string; ownerLogin: string | null }
+  | { state: 'denied' | 'expired' | 'failed'; relayUrl: string; detail?: string }
+
+export async function getRelayStatus(token: string): Promise<RelayStatus> {
+  const res = await transport.authFetch('/api/relay/status', { headers: headers(token) })
+  if (!res.ok) throw new Error(`Failed to get relay status: ${res.status}`)
+  return jsonBody<RelayStatus>(res)
+}
+
+export async function getRelayPairing(token: string): Promise<RelayPairingState> {
+  const res = await transport.authFetch('/api/relay/pair', { headers: headers(token) })
+  if (!res.ok) throw new Error(`Failed to get pairing state: ${res.status}`)
+  return jsonBody<RelayPairingState>(res)
+}
+
+/** Start pairing; resolves with the code to approve. Rejects with the server's message. */
+export async function startRelayPairing(token: string, relayUrl?: string): Promise<RelayPairingState> {
+  const res = await transport.authFetch('/api/relay/pair', {
+    method: 'POST',
+    headers: headers(token),
+    body: JSON.stringify(relayUrl ? { relayUrl } : {}),
+  })
+  if (!res.ok) {
+    const body = await jsonBody<{ message?: string; error?: string }>(res).catch(() => ({ message: undefined, error: undefined }))
+    throw new Error(body.message ?? body.error ?? `Pairing failed: ${res.status}`)
+  }
+  return jsonBody<RelayPairingState>(res)
+}
+
+export async function cancelRelayPairing(token: string): Promise<RelayPairingState> {
+  const res = await transport.authFetch('/api/relay/pair', { method: 'DELETE', headers: headers(token) })
+  if (!res.ok) throw new Error(`Failed to cancel pairing: ${res.status}`)
+  return jsonBody<RelayPairingState>(res)
+}
+
+/** Remove this machine's local relay credential. */
+export async function unpairRelay(token: string): Promise<{ removed: boolean }> {
+  const res = await transport.authFetch('/api/relay/unpair', { method: 'POST', headers: headers(token) })
+  if (!res.ok) throw new Error(`Failed to unpair: ${res.status}`)
+  return jsonBody<{ removed: boolean }>(res)
+}
