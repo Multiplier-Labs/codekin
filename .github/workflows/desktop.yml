@@ -133,6 +133,13 @@ jobs:
           test -f "$APP/Contents/Resources/codekin/bin/codekin.mjs"
           # better-sqlite3 13+ ships Node-API prebuilds as prebuilds/<platform>-<arch>.node.
           test -f "$APP/Contents/Resources/codekin/node_modules/better-sqlite3/prebuilds/$("$APP/Contents/MacOS/node" -p 'process.platform + "-" + process.arch').node"
+          # npm prebuilds carry their publisher's Team ID; the hardened-runtime Node refuses
+          # to load them (CI runners don't enforce this, real Macs do), so they ship ad-hoc.
+          ADDON="$APP/Contents/Resources/codekin/node_modules/better-sqlite3/prebuilds/darwin-arm64.node"
+          codesign -dv "$ADDON" 2>&1 | tee "$RUNNER_TEMP/addon-sig.txt"
+          grep -q "Signature=adhoc" "$RUNNER_TEMP/addon-sig.txt"
+          grep -q "TeamIdentifier=not set" "$RUNNER_TEMP/addon-sig.txt"
+          test "$(ls "$APP/Contents/Resources/codekin/node_modules/better-sqlite3/prebuilds")" = "darwin-arm64.node"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then ls desktop/src-tauri/target/release/bundle/dmg/*.dmg; fi
           "$APP/Contents/MacOS/node" -p 'process.version + " " + process.arch'
           codesign -dv "$APP" 2>&1 | head -5

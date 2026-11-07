@@ -26,7 +26,7 @@
 
 import { execFileSync, spawnSync } from 'child_process'
 import { createHash } from 'crypto'
-import { chmodSync, copyFileSync, createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, copyFileSync, createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { arch as hostArch, platform as hostPlatform, tmpdir } from 'os'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
@@ -122,6 +122,28 @@ function log(message) {
   process.stderr.write(`[bundle-server] ${message}\n`)
 }
 
+/**
+ * What to do with the payload's native addons (`*.node`, paths relative to the
+ * payload) for one target. Prebuilds for other platforms can never load, so
+ * they go. On macOS the rest are re-signed ad-hoc: npm prebuilds carry their
+ * publisher's Team ID, and the bundled Node, signed ad-hoc under the hardened
+ * runtime, refuses to load code from a different team ("mapping process and
+ * mapped file (non-platform) have different Team IDs").
+ */
+export function nativeAddonPlan(files, target) {
+  const t = TARGETS[target]
+  const remove = []
+  const sign = []
+  for (const file of files) {
+    const parts = file.split(/[\\/]/)
+    const i = parts.lastIndexOf('prebuilds')
+    const prebuild = i >= 0 ? parts[parts.length - 1].replace(/\.node$/, '') : null
+    if (prebuild && !prebuild.startsWith(`${t.platform}-${t.arch}`)) remove.push(file)
+    else if (t.platform === 'darwin') sign.push(file)
+  }
+  return { remove, sign }
+}
+
 function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { stdio: 'inherit', ...opts })
   if (r.error) throw r.error
@@ -185,6 +207,15 @@ export async function bundleServer({ target = 'darwin-arm64', smokeTest = true }
     run(join(nodeHome, 'bin', 'npm'), ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: payloadDir, env })
     // Only needed to install; the app doesn't ship npm.
     rmSync(join(payloadDir, 'package-lock.json'))
+
+    const addons = readdirSync(join(payloadDir, 'node_modules'), { recursive: true })
+      .map(String)
+      .filter(f => f.endsWith('.node'))
+      .map(f => join('node_modules', f))
+    const plan = nativeAddonPlan(addons, target)
+    for (const f of plan.remove) rmSync(join(payloadDir, f))
+    for (const f of plan.sign) run('codesign', ['--force', '--sign', '-', join(payloadDir, f)])
+    log(`native addons: ${plan.sign.length} re-signed ad-hoc, ${plan.remove.length} other-platform prebuilds removed`)
 
     execFileSync(nodeBin, ['-e', "const D=require('better-sqlite3');const d=new D(':memory:');d.exec('select 1');d.close()"], { cwd: payloadDir, stdio: 'inherit' })
 
