@@ -2,7 +2,7 @@
 // @vitest-environment jsdom
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ChatView } from './ChatView'
@@ -72,5 +72,36 @@ describe('ChatView scroll on transcript rebuild', () => {
     state.top = 550
     render([...first, { type: 'user', text: 'new', key: 'a-new' }])
     expect(state.top).toBe(550)
+  })
+})
+
+describe('ChatView stays pinned when content resizes without a new message', () => {
+  it('follows the bottom only for a reader who is there', () => {
+    const callbacks: Array<() => void> = []
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(cb: () => void) { callbacks.push(cb) }
+      observe() {}
+      disconnect() {}
+    })
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    render(transcript('a'))
+    const scroller = container.querySelector('.chat-scroll') as HTMLElement
+    const state = fakeScroller(scroller)
+
+    // At the bottom (scrollHeight 2000 - clientHeight 500): a tool group expands below.
+    state.top = 1500
+    act(() => { scroller.dispatchEvent(new Event('scroll')) })
+    state.top = 1400
+    act(() => { callbacks.forEach(cb => { cb() }) })
+    expect(state.top).toBe(2000)
+
+    // Scrolled up: a resize leaves the reader alone.
+    state.top = 300
+    act(() => { scroller.dispatchEvent(new Event('scroll')) })
+    act(() => { callbacks.forEach(cb => { cb() }) })
+    expect(state.top).toBe(300)
+    vi.unstubAllGlobals()
   })
 })

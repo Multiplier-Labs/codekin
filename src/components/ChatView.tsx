@@ -496,6 +496,7 @@ function ActivityIndicator({ label, variant = 'default' }: { label: string; vari
 
 export function ChatView({ messages, fontSize, disabled, planningMode, activityLabel, isMobile, variant = 'default', agentName, joe }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
   const isNearBottomRef = useRef(true)
   const lastScrollTopRef = useRef(0)
@@ -534,6 +535,21 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
     }
   }, [messages])
 
+  // Content also changes height without a new message: tool groups expanding
+  // and collapsing, the activity line, code blocks finishing their highlight.
+  // Chrome's scroll anchoring hides that; WebKit (the desktop app) doesn't, so
+  // a reader at the bottom drifted up to the last response. Stay pinned.
+  useEffect(() => {
+    const content = contentRef.current
+    if (!content || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      const el = containerRef.current
+      if (el && isNearBottomRef.current) el.scrollTop = el.scrollHeight
+    })
+    ro.observe(content)
+    return () => { ro.disconnect() }
+  }, [])
+
   const scrollToBottom = useCallback(() => {
     if (containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight
@@ -555,6 +571,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
         className="chat-scroll @container flex-1 overflow-y-auto overflow-x-hidden min-h-0"
         onScroll={checkScroll}
       >
+        <div ref={contentRef}>
         {variant === 'orchestrator' && messages.length === 0 && !activityLabel ? (
           <OrchestratorWelcome agentName={agentName} />
         ) : (
@@ -681,6 +698,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
           )}
         </div>
         )}
+        </div>
       </div>
 
       {/* Scroll to bottom indicator */}
