@@ -1,40 +1,28 @@
 name: Desktop
 
-# Builds the desktop app's server payload (desktop/scripts/bundle-server.mjs)
-# and runs its isolated smoke test, on every PR that touches the payload or
-# the files it is built from. macos-15 is the real target (Apple Silicon); the
-# Linux job checks the same script on a cheaper runner. The Tauri shell
-# (Rust checks, unsigned .app, launch test) is the `shell` job (docs/DESKTOP-APP-TAURI-PLAN.md).
+# Checks for the desktop app's own code. The app itself is built for real only
+# when a release is tagged (the `desktop` job in publish.yml, next to the npm
+# publish), not on every merge. This workflow runs on PRs that change the app
+# (desktop/** or this file) and on demand (Actions → Desktop → Run workflow):
+# the payload build and its smoke test on macos-15 and ubuntu, and the `shell`
+# job (Rust checks, one unsigned .app build and its launch test).
+#
+# The release-path checks (the .dmg, a throwaway-key updater build, the real
+# signing key) and the downloadable zipped .app run only on manual runs: worth
+# one run before tagging. The .dmg and updater files for users are built only
+# by the release job.
+#
+# Server / frontend changes don't trigger it. The release job runs the same
+# payload smoke test before publishing anything, so a server change that
+# breaks the app fails the desktop release (the npm publish is a separate job).
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'desktop/**'
-      - 'bin/**'
-      - 'server/**'
-      - 'src/**'
-      - 'public/**'
-      - 'index.html'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'vite.config.ts'
-      - 'tsconfig*.json'
-      - '.github/workflows/desktop.yml'
   pull_request:
     branches: [main]
     paths:
       - 'desktop/**'
-      - 'bin/**'
-      - 'server/**'
-      - 'src/**'
-      - 'public/**'
-      - 'index.html'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'vite.config.ts'
-      - 'tsconfig*.json'
       - '.github/workflows/desktop.yml'
+  workflow_dispatch:
 
 jobs:
   payload:
@@ -131,9 +119,9 @@ jobs:
           cargo clippy --all-targets -- -D warnings
           cargo test
 
-      - name: Build Codekin.app and .dmg (unsigned, ad-hoc signed)
+      - name: Build Codekin.app (unsigned, ad-hoc signed; plus the .dmg on manual runs)
         working-directory: desktop
-        run: npx tauri build --bundles app,dmg --config '{"build":{"beforeBuildCommand":""}}'
+        run: npx tauri build --bundles ${{ github.event_name == 'workflow_dispatch' && 'app,dmg' || 'app' }} --config '{"build":{"beforeBuildCommand":""}}'
 
       - name: Check the bundle
         id: bundle
@@ -144,7 +132,7 @@ jobs:
           test -x "$APP/Contents/MacOS/node"
           test -f "$APP/Contents/Resources/codekin/bin/codekin.mjs"
           test -f "$APP/Contents/Resources/codekin/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
-          ls desktop/src-tauri/target/release/bundle/dmg/*.dmg
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then ls desktop/src-tauri/target/release/bundle/dmg/*.dmg; fi
           "$APP/Contents/MacOS/node" -p 'process.version + " " + process.arch'
           codesign -dv "$APP" 2>&1 | head -5
           # App Nap opt-out (Phase 2) must be in the bundle's Info.plist.
@@ -197,6 +185,7 @@ jobs:
           tail -50 "$RUNNER_TEMP/app-home/Library/Logs/Codekin/server.log" || true
 
       - name: Zip the app
+        if: github.event_name == 'workflow_dispatch'
         run: ditto -c -k --keepParent "${{ steps.bundle.outputs.app }}" "$RUNNER_TEMP/Codekin-unsigned-arm64.zip"
 
       - uses: actions/upload-artifact@v4
@@ -212,6 +201,7 @@ jobs:
       # key and its password must work, or the first release fails. Sign a file
       # and verify it with minisign; skipped where secrets aren't available (forks).
       - name: Check the release signing key
+        if: github.event_name == 'workflow_dispatch'
         working-directory: desktop
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -231,6 +221,7 @@ jobs:
       # The release job's updater path, with a throwaway key: signed
       # .app.tar.gz + .sig carrying the version, and a valid latest.json.
       - name: Updater artifacts with a throwaway key
+        if: github.event_name == 'workflow_dispatch'
         working-directory: desktop
         run: |
           set -euo pipefail

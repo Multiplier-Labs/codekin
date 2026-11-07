@@ -33,7 +33,18 @@ Output (all gitignored):
 
 `scripts/smoke-test.mjs` can also be run on its own against an existing payload. It never reads or
 writes your real `~/.config/codekin`, `~/.codekin` or harness config, and never attaches to a running
-Codekin. CI runs the build and smoke test on `macos-15` and `ubuntu-latest` (`.github/workflows/desktop.yml`).
+Codekin.
+
+**When CI builds the app:**
+
+| Trigger | What's built |
+|---|---|
+| PR changing `desktop/**` or `.github/workflows/desktop.yml` | Payload + smoke test, Rust checks, one `.app` and its launch test (no `.dmg`, nothing downloadable but a screenshot) |
+| Actions → Desktop → Run workflow | The same, plus the `.dmg`, a throwaway-key updater build, the real signing-key check and a downloadable zipped `.app`. Run it once before tagging a release |
+| A `v*` tag | The `desktop` job in `publish.yml`, next to the npm publish: the `.dmg` and updater files users get |
+| Any other PR or a merge to `main` | Nothing |
+ Server and frontend PRs don't build the app; the release job runs the
+same payload smoke test before it publishes, so anything they break fails the desktop release, not npm.
 
 ## Tauri shell
 
@@ -59,9 +70,9 @@ cd src-tauri && cargo test         # Rust unit tests (any Unix host)
 On Linux the shell builds and runs for development (with the WebKitGTK dev packages and a
 `--target linux-x64` payload); the shipped target is macOS only. CI (`.github/workflows/desktop.yml`,
 `shell` job) runs fmt / clippy / tests on `macos-15`, builds an unsigned `.app`, launches it with a
-throwaway HOME, takes a screenshot, and checks that killing the shell stops the server. The zipped `.app`
-and screenshot are uploaded as the `codekin-desktop-unsigned` artifact (7 days). It's ad-hoc signed:
-on another Mac it needs `xattr -dr com.apple.quarantine Codekin.app` before it opens.
+throwaway HOME, takes a screenshot, and checks that killing the shell stops the server. On manual runs the
+zipped `.app` is uploaded with the screenshot as the `codekin-desktop-unsigned` artifact (7 days). It's
+ad-hoc signed: on another Mac it needs `xattr -dr com.apple.quarantine Codekin.app` before it opens.
 
 ## Releases and updates
 

@@ -9,7 +9,7 @@
     "coverage:build": "tsc --noEmit"
   },
   "dependencies": {
-    "@multiplier-labs/stepflow": "^0.3.4",
+    "@multiplier-labs/stepflow": "^0.3.8",
     "better-sqlite3": "^12.9.0"
   },
   "devDependencies": {
