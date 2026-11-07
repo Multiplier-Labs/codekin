@@ -86,7 +86,7 @@ afterEach(() => {
 describe('section map', () => {
   it('offers the local build only appearance and this machine', () => {
     expect(availableSections({ hosted: false, hasToken: true }).map(s => s.id)).toEqual([
-      'appearance', 'connection', 'sessions', 'permissions', 'webhooks',
+      'appearance', 'connection', 'remote', 'sessions', 'permissions', 'webhooks',
     ])
   })
 
@@ -132,7 +132,7 @@ describe('SettingsView', () => {
     const onNavigate = vi.fn()
     const el = await render(view({ onNavigate, isMobile: true }))
     expect(onNavigate).not.toHaveBeenCalled()
-    expect(navLabels(el)).toEqual(['Appearance', 'Connection', 'Sessions', 'Permissions', 'GitHub webhooks'])
+    expect(navLabels(el)).toEqual(['Appearance', 'Connection', 'Remote access', 'Sessions', 'Permissions', 'GitHub webhooks'])
     const sessions = [...el.querySelectorAll('nav button')].find(b => b.textContent === 'Sessions')!
     await act(async () => { sessions.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     expect(onNavigate).toHaveBeenCalledWith('sessions')

@@ -35,6 +35,7 @@ Sections are grouped by **what they apply to**:
 | | `members` | Members, roles, invitations | hosted |
 | | `machines` | Your machines; all machines for owners/admins | hosted |
 | This machine | `connection` | Access token (local), agent name | when a machine is reachable |
+| | `remote` | Pair with app.codekin.ai or a self-hosted relay, connector state, unpair | local only, with a token (the relay never proxies `/api/relay/*`) |
 | | `sessions` | Retention, message queueing, repos path, worktrees | when a machine is reachable |
 | | `permissions` | Default permission mode, auto-approved patterns | when a machine is reachable |
 | | `webhooks` | GitHub webhooks, health check, setup wizard | when a machine is reachable |

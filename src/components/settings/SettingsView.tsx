@@ -20,6 +20,7 @@ import { Block, Rows } from './Block'
 import { SessionPreferences } from './SessionPreferences'
 import { PermissionsSection } from './PermissionsSection'
 import { WebhooksSection } from './WebhooksSection'
+import { RemoteAccessSection } from './RemoteAccessSection'
 import {
   SETTINGS_GROUPS, availableSections, resolveSection, unavailableSections, type SettingsSectionId,
 } from './sections'
@@ -293,6 +294,9 @@ export function SettingsView({
           onError={onError}
         />
       )
+      break
+    case 'remote':
+      body = <RemoteAccessSection token={settings.token} onError={onError} />
       break
     case 'sessions':
       body = (
