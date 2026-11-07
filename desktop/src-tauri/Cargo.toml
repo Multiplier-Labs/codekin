@@ -1,0 +1,30 @@
+[package]
+name = "codekin-desktop"
+version = "0.0.0" # the app version comes from the root package.json via tauri.conf.json (D4)
+description = "Codekin desktop app"
+edition = "2021"
+publish = false
+
+[lib]
+name = "codekin_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = [] }
+tauri-plugin-single-instance = "2.5"
+tauri-plugin-opener = "2.7"
+tauri-plugin-dialog = "2.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "3", default-features = false }
+command-fds = "0.3"
+libc = "0.2"
+url = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true

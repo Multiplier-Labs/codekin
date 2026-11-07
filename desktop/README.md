@@ -3,7 +3,10 @@
 Native macOS (Apple Silicon) app that bundles the Codekin server and its own Node runtime.
 Plan and status: [docs/DESKTOP-APP-TAURI-PLAN.md](../docs/DESKTOP-APP-TAURI-PLAN.md).
 
-The Tauri shell (`src-tauri/`) isn't here yet. What exists is the server payload the app ships:
+Two parts: the **server payload** the app ships (`scripts/`), and the **Tauri shell** (`src-tauri/`,
+`splash/`) that starts, supervises and stops it.
+
+## Server payload
 
 ```bash
 # In the repository root: build the frontend and the server first.
@@ -31,3 +34,30 @@ Output (all gitignored):
 `scripts/smoke-test.mjs` can also be run on its own against an existing payload. It never reads or
 writes your real `~/.config/codekin`, `~/.codekin` or harness config, and never attaches to a running
 Codekin. CI runs the build and smoke test on `macos-15` and `ubuntu-latest` (`.github/workflows/desktop.yml`).
+
+## Tauri shell
+
+`src-tauri/src/`:
+
+| Module | What |
+|---|---|
+| `protocol.rs` | The launcher's event / credential contract, URLs, navigation allowlist, restart backoff (pure, unit-tested) |
+| `launcher.rs` | Spawns `codekin app-server` in its own process group, stdin = lifetime pipe, fd 3 = credential; graceful SIGTERM, group SIGKILL backstop |
+| `http.rs` | `/api/ping` (attach liveness) and active-session count, no redirects |
+| `supervisor.rs` | Start / attach / crash-restart / Quit state machine, independent of Tauri |
+| `lib.rs` | Window, menu, navigation guard, splash commands (`retry`, `show_logs`, `quit`), Quit and Restart confirmations |
+
+```bash
+# After building the payload (above):
+cd desktop
+npm ci
+npx tauri build --bundles app     # macOS: src-tauri/target/release/bundle/macos/Codekin.app
+cd src-tauri && cargo test         # Rust unit tests (any Unix host)
+```
+
+On Linux the shell builds and runs for development (with the WebKitGTK dev packages and a
+`--target linux-x64` payload); the shipped target is macOS only. CI (`.github/workflows/desktop.yml`,
+`shell` job) runs fmt / clippy / tests on `macos-15`, builds an unsigned `.app`, launches it with a
+throwaway HOME, takes a screenshot, and checks that killing the shell stops the server. The zipped `.app`
+and screenshot are uploaded as the `codekin-desktop-unsigned` artifact (7 days). It's ad-hoc signed:
+on another Mac it needs `xattr -dr com.apple.quarantine Codekin.app` before it opens.

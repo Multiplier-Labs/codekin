@@ -1,0 +1,20 @@
+/* Standalone: the app's theme isn't loaded here. Follows the system light / dark scheme. */
+:root { color-scheme: light dark; --bg: #f7f7f5; --fg: #1d1d1b; --muted: #6b6b66; --edge: #d9d9d4; --accent: #3b6fd8; }
+@media (prefers-color-scheme: dark) { :root { --bg: #161615; --fg: #ededea; --muted: #9b9b95; --edge: #34342f; --accent: #7aa2f7; } }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { display: grid; place-items: center; background: var(--bg); color: var(--fg);
+  font: 14.5px/1.5 -apple-system, BlinkMacSystemFont, "Lato", system-ui, sans-serif; -webkit-user-select: none; user-select: none; }
+main { max-width: 520px; padding: 32px; text-align: center; }
+h1 { font-size: 22px; font-weight: 600; margin: 0 0 24px; letter-spacing: 0.01em; }
+h2 { font-size: 17px; font-weight: 600; margin: 0 0 8px; }
+p { margin: 0 0 12px; color: var(--muted); }
+#error-message { color: var(--fg); -webkit-user-select: text; user-select: text; }
+.code { font: 12.5px/1.4 "Inconsolata", ui-monospace, monospace; }
+.spinner { width: 22px; height: 22px; margin: 0 auto 14px; border-radius: 50%;
+  border: 2px solid var(--edge); border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.actions { display: flex; gap: 8px; justify-content: center; margin-top: 20px; }
+button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--edge); background: transparent; color: var(--fg); cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: 0.5; cursor: default; }
