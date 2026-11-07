@@ -17,7 +17,7 @@ Computers only ever connect **outbound** to your relay, so they need no open por
 
 ## 1. Prerequisites
 
-- A Linux server with Node.js 20+ and a domain name for the web app, e.g. `codekin.example.com`.
+- A Linux server with Node.js 22.14+ (24 LTS recommended) and a domain name for the web app, e.g. `codekin.example.com`.
 - TLS for that domain. Use HTTPS in production: session cookies are only marked `Secure` when
   `PUBLIC_URL` is `https://`, and passkeys require a secure origin.
 - A reverse proxy that handles WebSocket upgrades. The nginx example below is the configuration

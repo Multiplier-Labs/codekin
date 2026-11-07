@@ -28,6 +28,9 @@
     "terminal"
   ],
   "type": "module",
+  "engines": {
+    "node": ">=22.14"
+  },
   "bin": {
     "codekin": "bin/codekin.mjs"
   },
@@ -51,7 +54,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "better-sqlite3": "^12.9.0",
+    "better-sqlite3": "^13.0.3",
     "express": "^5.1.0",
     "file-type": "^22.0.1",
     "multer": "^2.4.0",

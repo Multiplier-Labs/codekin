@@ -139,14 +139,16 @@ Record the Node version and download checksum in the build configuration. Assert
 installing native dependencies. npm is build tooling and does not need to ship in the app.
 
 **Implemented** (`desktop/scripts/bundle-server.mjs`). Details found while building it:
-- npm 11 (bundled with Node 24) documents dependency install scripts as blocked unless allowed. 11.19.1
-  still ran them, with an `install-scripts` warning. It refuses `--allow-scripts` for project installs. The builder writes a build-only `.npmrc` with
-  `allow-scripts=better-sqlite3` into staging, checks the compiled addon exists, and deletes the `.npmrc` and
-  lockfile before packaging. The packed `package.json` ships unchanged.
+- `better-sqlite3` 13 is a Node-API module with prebuilt binaries inside its package and `gypfile: false`, so
+  `npm install` compiles nothing and npm 11's install-script blocking doesn't apply. `npm ci` is the exception:
+  the lockfile doesn't record `gypfile`, so npm infers `node-gyp rebuild` from the shipped `binding.gyp` and
+  fails without a compiler. No production dependency needs an install script, so the builder runs
+  `npm ci --ignore-scripts`. (Up to 0.9.10, on
+  `better-sqlite3` 12, the builder wrote a build-only `.npmrc` with `allow-scripts=better-sqlite3` and checked
+  the compiled addon existed.) The builder still loads it under the pinned Node before packaging, and deletes
+  the lockfile. The packed `package.json` ships unchanged.
 - `--target linux-x64` / `linux-arm64` run the same steps on Linux. The target must match the host, because
-  native modules are built by running the pinned Node.
-- `npm install -g codekin` would hit the same npm 11 behaviour once blocking is enforced. That's separate from
-  the app, but worth an `allowScripts` decision for the npm package.
+  the payload is checked by running the pinned Node.
 See [npm's package inclusion rules](https://docs.npmjs.com/cli/v11/configuring-npm/package-json/#files).
 
 This picks up exactly the `files` field (`bin/`, `dist/`, `server/dist/`, `server/workflows/`, `server/loops/`)
@@ -595,7 +597,7 @@ step.
 
 ## Phase 4: hosted locations in the app (planned)
 
-Status: **specified, not started.** Decisions D9–D12 below are proposals awaiting confirmation.
+Status: **specified, not started.** Decisions D9–D12 confirmed 2026-11-07.
 
 ### Goal
 
@@ -605,9 +607,9 @@ relay, or with more than one (regions, teams), pick the location instead of keep
 (the bundled or attached local server) stays a location of its own, and the local server keeps running while
 another location is shown, so the Mac stays reachable from the phone.
 
-### Decisions (proposed)
+### Decisions
 
-| # | Question | Proposal | Why |
+| # | Question | Decision | Why |
 |---|---|---|---|
 | D9 | How does the app sign in to a hosted location? | **In the system browser, handed back by deep link**: the app opens the relay's desktop sign-in page in the default browser; after GitHub OAuth and 2FA there, the relay redirects to `codekin://auth` with a one-time code; the app redeems it in its webview, which then holds its own session cookie. | GitHub discourages OAuth in embedded webviews, and WebAuthn (passkeys) in WKWebView only works for Developer ID-signed apps with an Associated Domains entitlement per relay domain, which self-hosted relays can't easily get. The browser already has the user's GitHub session and passkeys. |
 | D10 | One location at a time, or several windows? | **One main window, one location at a time** in v1, switched from the app menu and the menu bar icon. | Matches the single-window shell. Separate windows can come later on the same location model. |
@@ -694,7 +696,8 @@ Asked: why does Codekin still use Node 20?
   is the same `better-sqlite3` install script; the desktop payload already needs a build-only `.npmrc` for it.
 - **`better-sqlite3` 13** (2026-07) moved to Node-API with prebuilt binaries inside the package for macOS,
   Linux (glibc and musl) and Windows, `gypfile: false` and **no install script**. One binary works on every
-  Node ≥ 22, and both the compile fallback and the install-script problem disappear. Its 13.0.0 notes list only
+  Node with Node-API 10, and both the compile fallback and the install-script problem disappear. Node-API 10
+  arrived in **Node 22.14.0**: its `engines` says `>=22`, but on 22.13 (Node-API 9) it segfaults on load. Its 13.0.0 notes list only
   additions (`db.explain()`, `statement.toString()`) and an error-class fix.
 
 ### Plan
@@ -703,8 +706,8 @@ One PR, independent of the rest of Phase 4, ideally right after 0.9.10:
 
 1. Upgrade `better-sqlite3` to 13.x and run the full suite (server SQLite stores, session archive, D7 lock).
    Remove the desktop payload's `allow-scripts` `.npmrc` and addon check, which no longer apply.
-2. Declare `"engines": { "node": ">=22.12" }` (Vite's floor); `install.sh` `MIN_NODE_VERSION=22`; docs say
-   "Node.js 22+ (24 LTS recommended)".
+2. Declare `"engines": { "node": ">=22.14" }` (the Node-API 10 floor, above Vite's 22.12); `install.sh` checks
+   for 22.14 including the minor version; docs say "Node.js 22.14+ (24 LTS recommended)".
 3. CI matrix `[22, 24, 26]`; `publish.yml` builds on Node 24; the desktop runtime stays pinned to 24 and moves
    to 26 once 26 has a few patch releases.
 4. Release as **0.10.0**, since dropping Node 20 is breaking for anyone still on it. The CHANGELOG says so first.
@@ -719,7 +722,7 @@ One PR, independent of the rest of Phase 4, ideally right after 0.9.10:
 | 2 — Background + pairing | Menu bar icon, open at login, keep awake, App Nap, in-app relay pairing | Phone reaches a freshly installed app via app.codekin.ai with no terminal |
 | 3a — Release pipeline | Release job on the `v*` tag producing an unsigned `.dmg`, updater key and `latest.json`, move-to-Applications | A tag produces a `.dmg` that internal testers install and update |
 | 3b — Signing (blocked on Apple account) | Developer ID signing with hardened runtime and entitlements, notarization, stapling | Notarized `.dmg` from a tag installs and updates on a clean Mac with no Gatekeeper warning |
-| Node 22+ (any time) | `better-sqlite3` 13, `engines`, installer and docs, CI `[22, 24, 26]`, publish on 24; see [Node.js version](#nodejs-version-phase-4-analysis) | 0.10.0 installs on Node 26 with no compiler; CI green on 22/24/26 |
+| Node 22.14+ (any time) | `better-sqlite3` 13, `engines`, installer and docs, CI `[22, 24, 26]`, publish on 24; see [Node.js version](#nodejs-version-phase-4-analysis) | 0.10.0 installs on Node 26 with no compiler; CI green on 22/24/26 |
 | 4a — Relay: desktop sign-in | `/api/relay/info`, `/auth/desktop/start` + `/claim` with PKCE one-time codes, `client: desktop` sessions | Route tests for replay, expiry, wrong verifier/state; deployed to app.codekin.ai |
 | 4b — App: locations | Location model, per-location data stores, switcher, add/manage pages, deep link, handoff | Sign in to two relays through the browser and switch between them and This Mac on a Mac |
 

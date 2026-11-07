@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Codekin! This guide will help you
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22.14+ (24 LTS recommended)
 - npm
 - At least one supported coding agent CLI installed and authenticated: Claude Code (`claude`), OpenAI Codex (`codex`), or OpenCode (`opencode`)
 

@@ -102,7 +102,7 @@ curl -fsSL https://codekin.ai/install.sh | bash
 ```
 
 This will:
-1. Install Node.js 20+ if needed (via nvm)
+1. Install Node.js 22.14+ if needed (via nvm; 24 LTS recommended)
 2. Check for a supported coding agent CLI (installation stops with instructions if none is found)
 3. Install the `codekin` npm package globally
 4. Generate a local access token and install and start a background service
