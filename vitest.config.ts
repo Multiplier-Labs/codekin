@@ -14,6 +14,10 @@ export default defineConfig({
       'desktop/scripts/**/*.test.mjs',
     ],
     env: { NODE_ENV: 'test' },
+    // Node 25+ enables its own Web Storage global by default; without
+    // --localstorage-file it is `undefined` and shadows jsdom's localStorage,
+    // breaking every jsdom test that touches storage. Disable it in workers.
+    execArgv: ['--no-experimental-webstorage'],
     coverage: {
       provider: 'v8',
       // Measure every source file, not just those a test happens to import.
