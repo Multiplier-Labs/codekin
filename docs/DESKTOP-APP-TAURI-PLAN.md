@@ -488,6 +488,12 @@ A locally built app is ad-hoc signed and runs on the machine that built it witho
   testers. Opening that build on another Mac needs `xattr -dr com.apple.quarantine /Applications/Codekin.app`,
   so it is not offered to users. Once the account exists (Phase 3b), the signing certificate and notarization
   credentials go into repository secrets and the job signs and notarizes.
+- **Phase 3b pipeline: implemented, waiting for the Apple account.** The job switches to Developer ID signing
+  and notarization when all six `APPLE_*` secrets exist (setup in `desktop/README.md`), fails if only some do,
+  and otherwise builds ad-hoc as before. Native addons are signed by `bundle-server.mjs` (npm prebuilds carry
+  their publisher's Team ID, which the hardened runtime refuses; see #777), the app and `node` by `tauri build`,
+  which also notarizes and staples the app; the job then signs, notarizes and staples the `.dmg` and verifies
+  Team ID, hardened runtime, stapling and Gatekeeper acceptance. Not yet run with real credentials.
 - **Updater signing** uses Tauri's own update key (`tauri signer generate`), not the Apple certificate, so it
   is set up in Phase 3a. The private key lives in repository secrets.
 - **Update artifacts:** in Phase 3a set `bundle.createUpdaterArtifacts: true`, configure the updater public
@@ -762,7 +768,7 @@ One PR, independent of the rest of Phase 4, ideally right after 0.9.10:
 | 1 — Local app | `desktop/` package, payload, launcher supervision, splash/error views, window behaviour, attach mode, unsigned PR build job in CI | CI build green; Phase 1 checklist items pass on a Mac |
 | 2 — Background + pairing | Menu bar icon, open at login, keep awake, App Nap, in-app relay pairing | Phone reaches a freshly installed app via app.codekin.ai with no terminal |
 | 3a — Release pipeline | Release job on the `v*` tag producing an unsigned `.dmg`, updater key and `latest.json`, move-to-Applications | A tag produces a `.dmg` that internal testers install and update |
-| 3b — Signing (blocked on Apple account) | Developer ID signing with hardened runtime and entitlements, notarization, stapling | Notarized `.dmg` from a tag installs and updates on a clean Mac with no Gatekeeper warning |
+| 3b — Signing (pipeline done; blocked on Apple account) | Developer ID signing with hardened runtime and entitlements, notarization, stapling | Notarized `.dmg` from a tag installs and updates on a clean Mac with no Gatekeeper warning |
 | Node 22.14+ (any time) | `better-sqlite3` 13, `engines`, installer and docs, CI `[22, 24, 26]`, publish on 24; see [Node.js version](#nodejs-version-phase-4-analysis) | 0.10.0 installs on Node 26 with no compiler; CI green on 22/24/26 |
 | 4a — Relay: desktop sign-in | `/api/relay/info`, `/api/auth/desktop/start` + `/claim` with PKCE one-time codes, `client: desktop` sessions | Route tests for replay, expiry, wrong verifier/state; deployed to app.codekin.ai |
 | 4b — App: locations | Location model, per-location data stores, switcher, add/manage pages, deep link, handoff | Sign in to two relays through the browser and switch between them and This Mac on a Mac |

@@ -78,6 +78,18 @@ jobs:
       - name: Check runner architecture
         run: test "$(uname -m)" = "arm64"
 
+      # Release-path check: a half-configured Apple signing setup fails here, before a tag.
+      - name: Check the Apple signing configuration
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: bash desktop/scripts/apple-signing-config.sh
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22

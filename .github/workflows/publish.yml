@@ -69,6 +69,20 @@ jobs:
           test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret is not set (see desktop/README.md)"; exit 1; }
           node -e "if (!require('./desktop/src-tauri/tauri.conf.json').plugins.updater.pubkey) { console.error('::error::plugins.updater.pubkey is empty in tauri.conf.json'); process.exit(1) }"
 
+      # Phase 3b: Developer ID signing and notarization switch on once all six
+      # Apple secrets exist (desktop/README.md). None: an ad-hoc build, as before.
+      # Some but not all: fail, rather than quietly ship an unsigned build.
+      - name: Check the Apple signing configuration
+        id: apple
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: bash desktop/scripts/apple-signing-config.sh
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -97,6 +111,32 @@ jobs:
           npm run build
           npx tsc -p server/tsconfig.json
 
+      - name: Import the Developer ID certificate
+        if: steps.apple.outputs.signed == 'true'
+        uses: ./.github/actions/macos-developer-id
+        with:
+          certificate: ${{ secrets.APPLE_CERTIFICATE }}
+          password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          team-id: ${{ secrets.APPLE_TEAM_ID }}
+
+      # `tauri build` notarizes and staples the .app when these are set.
+      - name: Provide the notarization key
+        if: steps.apple.outputs.signed == 'true'
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY}.p8"
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          {
+            echo "APPLE_API_KEY=$APPLE_API_KEY"
+            echo "APPLE_API_ISSUER=$APPLE_API_ISSUER"
+            echo "APPLE_API_KEY_PATH=$KEY_PATH"
+          } >> "$GITHUB_ENV"
+
       - name: Bundle server payload and smoke test
         run: node desktop/scripts/bundle-server.mjs
 
@@ -105,7 +145,46 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx tauri build --bundles app,dmg --config '{"build":{"beforeBuildCommand":""},"bundle":{"createUpdaterArtifacts":true}}'
+        run: |
+          set -euo pipefail
+          # tauri.conf.json signs ad-hoc ("-"); a configured Developer ID replaces it.
+          CONFIG=$(node -e '
+            const c = { build: { beforeBuildCommand: "" }, bundle: { createUpdaterArtifacts: true } }
+            if (process.env.APPLE_SIGNING_IDENTITY) c.bundle.macOS = { signingIdentity: process.env.APPLE_SIGNING_IDENTITY }
+            console.log(JSON.stringify(c))')
+          npx tauri build --bundles app,dmg --config "$CONFIG"
+
+      - name: Sign, notarize and staple the .dmg
+        if: steps.apple.outputs.signed == 'true'
+        run: |
+          set -euo pipefail
+          DMG=$(ls desktop/src-tauri/target/release/bundle/dmg/*.dmg)
+          codesign --force --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$DMG"
+          xcrun notarytool submit "$DMG" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait
+          xcrun stapler staple "$DMG"
+
+      # Every piece that runs code must carry our Team ID: the hardened runtime
+      # refuses to load anything else (see #777), and Gatekeeper must accept
+      # the app and the .dmg as notarized.
+      - name: Verify signing and notarization
+        if: steps.apple.outputs.signed == 'true'
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          B=desktop/src-tauri/target/release/bundle
+          APP="$B/macos/Codekin.app"
+          DMG=$(ls "$B"/dmg/*.dmg)
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          for f in "$APP/Contents/MacOS/"* $(find "$APP/Contents/Resources" -name '*.node'); do
+            codesign -dv --verbose=2 "$f" 2>&1 | tee "$RUNNER_TEMP/sig.txt" >/dev/null
+            grep -q "TeamIdentifier=$APPLE_TEAM_ID" "$RUNNER_TEMP/sig.txt" || { echo "::error::$f is not signed by team $APPLE_TEAM_ID"; cat "$RUNNER_TEMP/sig.txt"; exit 1; }
+            grep -q "flags=.*runtime" "$RUNNER_TEMP/sig.txt" || { echo "::error::$f lacks the hardened runtime"; exit 1; }
+          done
+          xcrun stapler validate "$APP"
+          xcrun stapler validate "$DMG"
+          spctl --assess --type execute --verbose=2 "$APP" 2>&1 | tee /dev/stderr | grep -q "Notarized Developer ID"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG" 2>&1 | tee /dev/stderr | grep -q "Notarized Developer ID"
 
       - name: Collect release files
         id: files
@@ -125,7 +204,11 @@ jobs:
       - name: Publish the release files
         run: |
           set -euo pipefail
-          NOTES="Unsigned internal build of the Codekin desktop app for Apple Silicon (ad-hoc signed, not notarized). After copying Codekin.app to Applications, run: xattr -dr com.apple.quarantine /Applications/Codekin.app"
+          if [ "${{ steps.apple.outputs.signed }}" = "true" ]; then
+            NOTES="Codekin desktop app for Apple Silicon, signed with Developer ID and notarized by Apple."
+          else
+            NOTES="Unsigned internal build of the Codekin desktop app for Apple Silicon (ad-hoc signed, not notarized). After copying Codekin.app to Applications, run: xattr -dr com.apple.quarantine /Applications/Codekin.app"
+          fi
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --prerelease --verify-tag --title "Codekin $TAG" --notes "$NOTES"
           gh release upload "$TAG" "${{ steps.files.outputs.dir }}"/* --clobber
 
