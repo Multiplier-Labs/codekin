@@ -500,6 +500,9 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
   const [showScrollButton, setShowScrollButton] = useState(false)
   const isNearBottomRef = useRef(true)
   const lastScrollTopRef = useRef(0)
+  /** performance.now() until which the reader counts as scrolling (wheel, trackpad momentum, touch). */
+  const userScrollingUntilRef = useRef(0)
+  const pinRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevLastKeyRef = useRef<string | undefined>(undefined)
 
   // Track whether the user is near the bottom of the scroll container.
@@ -528,12 +531,39 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
     el.scrollTop = lastScrollTopRef.current
   }, [messages])
 
-  // Auto-scroll on new messages if near bottom
-  useEffect(() => {
-    if (isNearBottomRef.current && containerRef.current) {
-      containerRef.current.scrollTop = containerRef.current.scrollHeight
+  // Follow new output for a reader at the bottom. WebKit (Safari, the desktop
+  // app) scrolls on a separate thread: a scrollTop write during the reader's own
+  // scroll, momentum included, is dropped and the view then snaps back to a
+  // stale position. So never write while they scroll (retry once they stop),
+  // and never write when already at the bottom.
+  const pinToBottom = useCallback(() => {
+    const el = containerRef.current
+    if (!el || !isNearBottomRef.current) return
+    const wait = userScrollingUntilRef.current - performance.now()
+    if (wait > 0) {
+      if (!pinRetryRef.current) {
+        pinRetryRef.current = setTimeout(() => { pinRetryRef.current = null; pinToBottom() }, wait + 20)
+      }
+      return
     }
-  }, [messages])
+    const max = el.scrollHeight - el.clientHeight
+    if (max - el.scrollTop > 1) el.scrollTop = max
+  }, [])
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const userScrolls = () => { userScrollingUntilRef.current = performance.now() + 250 }
+    const events = ['wheel', 'touchmove', 'pointerdown'] as const
+    for (const ev of events) el.addEventListener(ev, userScrolls, { passive: true })
+    return () => {
+      for (const ev of events) el.removeEventListener(ev, userScrolls)
+      if (pinRetryRef.current) clearTimeout(pinRetryRef.current)
+    }
+  }, [])
+
+  // Auto-scroll on new messages if near bottom
+  useEffect(() => { pinToBottom() }, [messages, pinToBottom])
 
   // Content also changes height without a new message: tool groups expanding
   // and collapsing, the activity line, code blocks finishing their highlight.
@@ -542,13 +572,10 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
   useEffect(() => {
     const content = contentRef.current
     if (!content || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => {
-      const el = containerRef.current
-      if (el && isNearBottomRef.current) el.scrollTop = el.scrollHeight
-    })
+    const ro = new ResizeObserver(() => { pinToBottom() })
     ro.observe(content)
     return () => { ro.disconnect() }
-  }, [])
+  }, [pinToBottom])
 
   const scrollToBottom = useCallback(() => {
     if (containerRef.current) {
