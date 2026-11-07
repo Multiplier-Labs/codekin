@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-11-07
+
+### Changed
+- The Dark and Light themes now use the codekin.ai colors: orange on cool ink and paper grays instead of gold on teal. Only the color tones changed, not their brightness, so contrast is the same, and tests now check Dark and Light against the same contrast floors as the other themes. Workflow event badges move from terracotta to a dusty rose so they don't read as the new orange. The other seven themes are unchanged. The logo in the sidebar, mobile bar and Settings matches the new icon (rings in the text color, dots in the theme's primary color), and the desktop app's loading screens and the server's 404 page use the same colors. Light's link color is a touch darker to reach 4.5:1 (#787)
+- Bypass and Skip permissions are flagged more quietly: instead of a red-tinted composer, the composer's top-right corner turns red, and picking a risky mode from the composer menu shows a small note above the composer ("Got it" / "Switch to Default") instead of a browser confirm dialog. The Settings default-mode picker drops its confirm too. The "Bypass permissions background" setting is removed (#792)
+
 ### Fixed
-- In the desktop app, a session followed to the bottom no longer drifts back up to the last response while an agent works. The chat only re-pinned to the bottom when a message arrived, but tool groups, the activity line and code highlighting also change its height; Chrome's scroll anchoring hid that, WebKit doesn't. The chat now stays pinned whenever its content resizes, unless you have scrolled up
+- In the desktop app, a session followed to the bottom no longer drifts back up to the last response while an agent works. The chat only re-pinned to the bottom when a message arrived, but tool groups, the activity line and code highlighting also change its height; Chrome's scroll anchoring hid that, WebKit doesn't. The chat now stays pinned whenever its content resizes, unless you have scrolled up (#789)
+- Filled orange buttons in Dark (such as **Changes**) had dark text at about 3.3:1 after the retint. Their fill is now a brighter orange: 5.4:1 or better (#793)
 
 ## [0.10.3] - 2026-11-07
 
