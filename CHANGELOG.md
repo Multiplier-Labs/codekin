@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- The desktop app's server still couldn't start in 0.10.1 (`different Team IDs` from `better-sqlite3`). Under the hardened runtime, library validation also refuses an ad-hoc-signed addon, which has no Team ID to match. The bundled Node now has the `disable-library-validation` entitlement, as the official Node binary does, and CI checks for it
+
 ## [0.10.1] - 2026-11-07
 
 ### Fixed
