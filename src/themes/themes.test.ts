@@ -109,6 +109,17 @@ describe('contrast floors', () => {
     })
   }
 
+  // Filled primary buttons (bg-primary-8, hover/alt bg-primary-7) carry on-primary text.
+  const FILLED_BUTTONS = [
+    { name: 'on-primary on primary-8 fill', fg: 'on-primary', bg: 'primary-8', floor: 4.5, strict: 7 },
+    { name: 'on-primary on primary-7 fill', fg: 'on-primary', bg: 'primary-7', floor: 4.5, strict: 7 },
+  ]
+  for (const theme of THEMES.filter(t => t.id === 'dark' || t.id === 'light')) {
+    it.each(FILLED_BUTTONS)(`${theme.id}: $name`, ({ fg, bg, floor }) => {
+      expect(contrast(color(theme, fg), color(theme, bg))).toBeGreaterThanOrEqual(floor)
+    })
+  }
+
   // The transcript pane of Dark and Light has its own ramps (.terminal-area).
   for (const theme of THEMES.filter(t => t.id === 'dark' || t.id === 'light')) {
     const content = parseVars(extractBlock(indexCss, theme.id === 'dark'
@@ -123,6 +134,7 @@ describe('contrast floors', () => {
       { name: 'primary-5 text on page', fg: 'primary-5', bg: 'page', floor: 4.5, strict: 7 },
       { name: 'accent-6 text on page', fg: 'accent-6', bg: 'page', floor: 4.5, strict: 7 },
       { name: 'success-5 text on page', fg: 'success-5', bg: 'page', floor: 4.5, strict: 7 },
+      ...FILLED_BUTTONS,
     ])(`${theme.id} transcript: $name`, ({ fg, bg, floor }) => {
       expect(contrast(inPane(fg), inPane(bg))).toBeGreaterThanOrEqual(floor)
     })

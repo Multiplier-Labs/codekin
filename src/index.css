@@ -17,8 +17,8 @@
   --color-primary-4: #ff9b76;
   --color-primary-5: #ff6a2b;
   --color-primary-6: #eb5a17;
-  --color-primary-7: #a6502f;
-  --color-primary-8: #af4e28;
+  --color-primary-7: #e9764b;
+  --color-primary-8: #e66633;  /* filled buttons: 5.4:1 with on-primary */
   --color-primary-9: #8c3f21;
   --color-primary-10: #69301b;
   --color-primary-11: #442013;
@@ -186,8 +186,8 @@
   --color-primary-4: #fd9d7a;
   --color-primary-5: #ed7a4f;
   --color-primary-6: #dd6c41;
-  --color-primary-7: #985238;
-  --color-primary-8: #a15234;
+  --color-primary-7: #dc7e5c;
+  --color-primary-8: #d97049;  /* filled buttons: 5.4:1 with on-primary */
   --color-primary-9: #81422a;
   --color-primary-10: #613322;
   --color-primary-11: #3f2217;
