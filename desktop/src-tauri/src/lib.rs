@@ -8,6 +8,7 @@
 //! - `http`: `/api/ping` and session-count probes
 //! - `supervisor`: the startup / attach / restart / quit state machine
 //! - `background`: shell preferences and Keep Mac awake
+//! - `updater`: signed app updates; `relocate`: move to Applications
 //! - this file: window, menus (app + menu bar icon), navigation guard,
 //!   splash commands, Quit flow
 
@@ -15,7 +16,9 @@ pub mod background;
 pub mod http;
 pub mod launcher;
 pub mod protocol;
+pub mod relocate;
 pub mod supervisor;
+pub mod updater;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,12 +42,12 @@ use tauri_plugin_opener::OpenerExt;
 const MAIN: &str = "main";
 
 /// App-wide state managed by Tauri.
-struct AppState {
-    shared: Arc<Shared>,
+pub(crate) struct AppState {
+    pub(crate) shared: Arc<Shared>,
     ctl: Mutex<Sender<Ctl>>,
     log: PathBuf,
     /// Set once the supervisor has stopped everything: the next exit request proceeds.
-    exit_ready: Arc<AtomicBool>,
+    pub(crate) exit_ready: Arc<AtomicBool>,
     /// A Quit is already in progress (ignore repeated Cmd-Q).
     quitting: AtomicBool,
 }
@@ -60,7 +63,7 @@ struct BackgroundState {
 }
 
 impl AppState {
-    fn send(&self, c: Ctl) {
+    pub(crate) fn send(&self, c: Ctl) {
         let _ = self.ctl.lock().unwrap().send(c);
     }
 }
@@ -202,7 +205,7 @@ fn request_restart(app: &AppHandle) {
 }
 
 /// Native confirmation before stopping running sessions. Blocking: call off the main thread.
-fn confirm_stop(app: &AppHandle, active: Option<u64>, action: &str) -> bool {
+pub(crate) fn confirm_stop(app: &AppHandle, active: Option<u64>, action: &str) -> bool {
     let detail = match active {
         Some(1) => "1 session is running. It will be stopped and can be resumed after Codekin starts again.".to_string(),
         Some(n) => format!("{n} sessions are running. They will be stopped and can be resumed after Codekin starts again."),
@@ -274,12 +277,20 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let logs = MenuItem::with_id(app, "show_logs", "Show Logs", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Codekin", true, Some("CmdOrCtrl+Q"))?;
     let reload = MenuItem::with_id(app, "reload", "Reload", true, Some("CmdOrCtrl+R"))?;
+    let check_updates = MenuItem::with_id(
+        app,
+        "check_updates",
+        "Check for Updates…",
+        true,
+        None::<&str>,
+    )?;
     let app_menu = Submenu::with_items(
         app,
         "Codekin",
         true,
         &[
             &PredefinedMenuItem::about(app, Some("About Codekin"), None)?,
+            &check_updates,
             &PredefinedMenuItem::separator(app)?,
             &restart,
             &logs,
@@ -436,6 +447,7 @@ fn on_menu(app: &AppHandle, id: &str) {
         "open" => show_main(app),
         "keep_awake" => toggle_keep_awake(app),
         "open_at_login" => toggle_open_at_login(app),
+        "check_updates" => updater::check_now(app),
         "restart_server" => request_restart(app),
         "show_logs" => reveal_logs(app, &app.state::<AppState>().log),
         "reload" => {
@@ -444,6 +456,71 @@ fn on_menu(app: &AppHandle, id: &str) {
             }
         }
         _ => {}
+    }
+}
+
+/// Offer to move a bundle running outside an Applications folder. Returns
+/// true when the app moved and is relaunching from the new location (the
+/// caller must not start a server). Release builds on macOS only; set
+/// CODEKIN_SKIP_MOVE_CHECK=1 to skip (CI launches the build output directly).
+fn offer_move_to_applications(app: &AppHandle) -> bool {
+    if !cfg!(target_os = "macos")
+        || cfg!(debug_assertions)
+        || std::env::var_os("CODEKIN_SKIP_MOVE_CHECK").is_some()
+    {
+        return false;
+    }
+    let (Ok(exe), Ok(home)) = (std::env::current_exe(), app.path().home_dir()) else {
+        return false;
+    };
+    let Some(bundle) = relocate::bundle_of(&exe) else {
+        return false;
+    };
+    if !relocate::should_offer_move(&bundle, &home) {
+        return false;
+    }
+    let translocated = bundle.to_string_lossy().contains("/AppTranslocation/");
+    let move_it = app
+        .dialog()
+        .message(if translocated {
+            "Codekin is running from a temporary read-only location. Move it to your Applications folder so updates and agent tools keep working?"
+        } else {
+            "Move Codekin to your Applications folder? Updates and agent tools work best from there."
+        })
+        .title("Move to Applications")
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom("Move to Applications".into(), "Not Now".into()))
+        .blocking_show();
+    if !move_it {
+        return false;
+    }
+    match relocate::copy_to_applications(&bundle, &home) {
+        Ok(dest) => {
+            if std::process::Command::new("/usr/bin/open")
+                .arg("-n")
+                .arg(&dest)
+                .status()
+                .is_ok_and(|s| s.success())
+            {
+                app.state::<AppState>()
+                    .exit_ready
+                    .store(true, Ordering::SeqCst);
+                app.exit(0);
+                return true;
+            }
+            false
+        }
+        Err(text) => {
+            app.dialog()
+                .message(format!(
+                    "{text} Codekin keeps running from its current location."
+                ))
+                .title("Couldn't move Codekin")
+                .kind(MessageDialogKind::Warning)
+                .buttons(MessageDialogButtons::Ok)
+                .blocking_show();
+            false
+        }
     }
 }
 
@@ -508,6 +585,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         // A LaunchAgent, not an AppleScript login item: no Automation permission prompt.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None,
@@ -558,9 +636,17 @@ pub fn run() {
                     shared,
                     ctl: ctl_rx.lock().unwrap().take().expect("setup runs once"),
                 };
+                let relocate_app = handle.clone();
                 std::thread::Builder::new()
                     .name("supervisor".into())
-                    .spawn(move || supervisor.run())?;
+                    .spawn(move || {
+                        // Before the server starts: its MCP configs would record a translocated path.
+                        if offer_move_to_applications(&relocate_app) {
+                            return;
+                        }
+                        supervisor.run()
+                    })?;
+                updater::schedule(&handle);
                 Ok(())
             }
         })

@@ -131,9 +131,9 @@ jobs:
           cargo clippy --all-targets -- -D warnings
           cargo test
 
-      - name: Build Codekin.app (unsigned, ad-hoc signed)
+      - name: Build Codekin.app and .dmg (unsigned, ad-hoc signed)
         working-directory: desktop
-        run: npx tauri build --bundles app --config '{"build":{"beforeBuildCommand":""}}'
+        run: npx tauri build --bundles app,dmg --config '{"build":{"beforeBuildCommand":""}}'
 
       - name: Check the bundle
         id: bundle
@@ -144,6 +144,7 @@ jobs:
           test -x "$APP/Contents/MacOS/node"
           test -f "$APP/Contents/Resources/codekin/bin/codekin.mjs"
           test -f "$APP/Contents/Resources/codekin/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+          ls desktop/src-tauri/target/release/bundle/dmg/*.dmg
           "$APP/Contents/MacOS/node" -p 'process.version + " " + process.arch'
           codesign -dv "$APP" 2>&1 | head -5
           # App Nap opt-out (Phase 2) must be in the bundle's Info.plist.
@@ -166,7 +167,8 @@ jobs:
           PREFS_DIR="$HOME_DIR/Library/Application Support/ai.codekin.desktop"
           mkdir -p "$PREFS_DIR"
           echo '{"keepAwake": true}' > "$PREFS_DIR/prefs.json"
-          HOME="$HOME_DIR" "${{ steps.bundle.outputs.bin }}" > "$RUNNER_TEMP/app.out" 2>&1 &
+          # The build output isn't in /Applications: skip the move prompt; no update checks in CI.
+          HOME="$HOME_DIR" CODEKIN_SKIP_MOVE_CHECK=1 CODEKIN_DISABLE_UPDATES=1 "${{ steps.bundle.outputs.bin }}" > "$RUNNER_TEMP/app.out" 2>&1 &
           APP_PID=$!
           for i in $(seq 1 60); do curl -sf -m 1 "http://127.0.0.1:$PORT/api/ping" && break; sleep 1; done
           curl -sf -m 2 "http://127.0.0.1:$PORT/api/ping"
@@ -205,3 +207,26 @@ jobs:
             ${{ runner.temp }}/codekin-app.png
           if-no-files-found: warn
           retention-days: 7
+
+      # The release job's updater path, with a throwaway key: signed
+      # .app.tar.gz + .sig carrying the version, and a valid latest.json.
+      - name: Updater artifacts with a throwaway key
+        working-directory: desktop
+        run: |
+          set -euo pipefail
+          npx tauri signer generate --ci -p "" -w "$RUNNER_TEMP/ci-updater.key"
+          PUB=$(cat "$RUNNER_TEMP/ci-updater.key.pub")
+          TAURI_SIGNING_PRIVATE_KEY="$(cat "$RUNNER_TEMP/ci-updater.key")" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
+            npx tauri build --bundles app --config "{\"build\":{\"beforeBuildCommand\":\"\"},\"bundle\":{\"createUpdaterArtifacts\":true},\"plugins\":{\"updater\":{\"pubkey\":\"$PUB\"}}}"
+          B=src-tauri/target/release/bundle/macos
+          ls -la "$B"
+          test -s "$B/Codekin.app.tar.gz"
+          test -s "$B/Codekin.app.tar.gz.sig"
+          VERSION=$(node -p "require('../package.json').version")
+          # requireSignedVersion: the signature's trusted comment must name the version.
+          base64 -d < "$B/Codekin.app.tar.gz.sig" | tee /dev/stderr | grep -q "$VERSION"
+          node scripts/update-manifest.mjs --version "$VERSION" --signature-file "$B/Codekin.app.tar.gz.sig" \
+            --url "https://github.com/Multiplier-Labs/codekin/releases/download/v$VERSION/Codekin_${VERSION}_aarch64.app.tar.gz" \
+            --out "$RUNNER_TEMP/latest.json"
+          cat "$RUNNER_TEMP/latest.json"
+          rm -f "$RUNNER_TEMP/ci-updater.key"

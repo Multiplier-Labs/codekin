@@ -1,9 +1,10 @@
 # Desktop App (Tauri) — Implementation Plan
 
 Status: **In progress.** Merged: the server, CLI and launcher prerequisites (#755–#758), the server payload
-builder (#759), the Tauri shell with its `macos-15` build and launch job (Phase 1), in-app relay pairing (#762)
-and the background features (Phase 2); see [Shell implementation notes](#shell-implementation-notes). Not
-started: the Phase 0 spike on a Mac, the Phase 1 and 2 manual checklists, Phase 3. The decisions in
+builder (#759), the Tauri shell with its `macos-15` build and launch job (Phase 1), in-app relay pairing (#762),
+the background features (Phase 2) and the Phase 3a release pipeline and updater; see
+[Shell implementation notes](#shell-implementation-notes). Not started: the Phase 0 spike on a Mac, the manual
+checklists, Phase 3b. The first release needs the updater signing key (setup in `desktop/README.md`). The decisions in
 [Decisions](#decisions) were confirmed on 2026-11-06. One input is still open: who owns the Apple Developer
 account (D3). It blocks only the signing and notarization step, not the rest of the work.
 
@@ -345,8 +346,17 @@ What the Phase 1 shell does today, and where it differs from the text above:
   - *App Nap* is disabled with `NSAppSleepDisabled` in Info.plist, not `beginActivity`. Whether that also
     keeps the server child unthrottled needs checking on a Mac (Phase 2 manual checklist).
   - In-app pairing: Settings → This machine → Remote access (#762).
-- **Not yet:** the updater and move-to-Applications (Phase 3a), a designed macOS icon (the current one is the
-  favicon mark on a transparent background).
+- **Phase 3a (release pipeline):** the `desktop` job in `publish.yml` publishes each `v*` tag as a GitHub
+  **prerelease** with the `.dmg` and the signed `.app.tar.gz` + `.sig`, then replaces `latest.json` on the
+  rolling `desktop-channel` prerelease (the updater endpoint), after checking the artifact URL answers. A rolling
+  channel release, rather than `releases/latest`, keeps the updater independent of which release GitHub marks
+  Latest and lets the builds stay prereleases. `requireSignedVersion` is on from the first release. The update
+  flow (`src-tauri/src/updater.rs`) follows "Updates" above; the supervisor's `StopForUpdate` stops an owned
+  server without relaunching and reports whether its process group is gone. Move to Applications
+  (`relocate.rs`) copies with `ditto` and removes quarantine from the copy only (as LetsMove does), so the
+  moved copy isn't translocated again; it falls back to `~/Applications` when `/Applications` isn't writable,
+  and never overwrites an existing copy. Key setup: `desktop/README.md`.
+- **Not yet:** a designed macOS icon (the current one is the favicon mark on a transparent background), Phase 3b.
 - **Checked on Linux under Xvfb** (WebKitGTK, not WKWebView): first launch generates the credential and
   shows the live UI; the port-conflict error view, Retry, Ctrl+Q graceful quit, and SIGKILL of the shell
   (the launcher stops the server through stdin EOF) all work. That run found the WebSocket Origin bug fixed

@@ -70,6 +70,11 @@ impl KeepAwake {
         }
     }
 
+    /// PID of the assertion-holding child, if any.
+    pub fn pid(&self) -> Option<u32> {
+        self.child.lock().unwrap().as_ref().map(|c| c.id())
+    }
+
     pub fn is_active(&self) -> bool {
         let mut guard = self.child.lock().unwrap();
         match guard.as_mut().map(|c| c.try_wait()) {
@@ -155,49 +160,51 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// The command line of a running process, via `ps` (works on Linux and macOS).
+    fn command_line(pid: u32) -> Option<String> {
+        let out = Command::new("ps")
+            .args(["-o", "args=", "-p", &pid.to_string()])
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        (!text.is_empty()).then_some(text)
+    }
+
+    fn alive(pid: u32) -> bool {
+        // SAFETY: signal 0 only checks for existence.
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+
     #[test]
     fn keep_awake_holds_one_child_with_the_wait_flag() {
-        // A stand-in for caffeinate that records its arguments and stays alive.
+        // A stand-in for caffeinate that stays alive under its own name and arguments.
         let dir = tempdir();
         let fake = dir.join("caffeinate");
-        let args_file = dir.join("args");
-        std::fs::write(
-            &fake,
-            format!(
-                "#!/bin/sh\necho \"$@\" >> {}\nexec sleep 30\n",
-                args_file.display()
-            ),
-        )
-        .unwrap();
+        std::fs::write(&fake, "#!/bin/sh\nwhile :; do sleep 1; done\n").unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        // Wait until the fake has recorded `n` starts (it writes after exec).
-        let wait_for_starts = |n: usize| -> String {
-            for _ in 0..100 {
-                let args = std::fs::read_to_string(&args_file).unwrap_or_default();
-                if args.lines().count() >= n {
-                    return args;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(20));
-            }
-            panic!("fake caffeinate did not start {n} time(s)");
-        };
 
         let ka = KeepAwake::with_program(&fake);
         assert!(!ka.is_active());
         assert!(ka.set(true));
         assert!(ka.is_active());
-        let args = wait_for_starts(1);
-        assert_eq!(
-            args.lines().next().unwrap(),
-            format!("-i -w {}", std::process::id())
+        let first = ka.pid().unwrap();
+        let args = command_line(first).expect("child is running");
+        assert!(
+            args.ends_with(&format!("-i -w {}", std::process::id())),
+            "args: {args}"
         );
+
         // Enabling again replaces the child rather than stacking a second one.
         assert!(ka.set(true));
-        wait_for_starts(2);
+        let second = ka.pid().unwrap();
+        assert_ne!(first, second);
+        assert!(!alive(first), "the first child was killed and reaped");
         assert!(ka.is_active());
+
         assert!(!ka.set(false));
         assert!(!ka.is_active());
+        assert!(ka.pid().is_none());
+        assert!(!alive(second));
         let _ = std::fs::remove_dir_all(dir);
     }
 

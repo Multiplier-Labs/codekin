@@ -40,3 +40,105 @@ jobs:
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # Desktop app (docs/DESKTOP-APP-TAURI-PLAN.md, Phase 3a): an unsigned
+  # (ad-hoc signed) Apple Silicon build, published as a prerelease on the tag,
+  # plus the updater artifacts. The updater manifest goes last, onto the
+  # rolling `desktop-channel` prerelease, and only once everything it points
+  # at is downloadable. Developer ID signing and notarization come in Phase 3b.
+  desktop:
+    runs-on: macos-15
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check runner architecture
+        run: test "$(uname -m)" = "arm64"
+
+      - name: Check the tag matches package.json
+        run: test "v$(node -p "require('./package.json').version")" = "$TAG"
+
+      - name: Check the updater key is configured
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo "::error::The TAURI_SIGNING_PRIVATE_KEY secret is not set (see desktop/README.md)"; exit 1; }
+          node -e "if (!require('./desktop/src-tauri/tauri.conf.json').plugins.updater.pubkey) { console.error('::error::plugins.updater.pubkey is empty in tauri.conf.json'); process.exit(1) }"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Cache pinned Node runtime
+        uses: actions/cache@v4
+        with:
+          path: desktop/.cache
+          key: node-runtime-darwin-arm64-${{ hashFiles('desktop/node-runtime.json') }}
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix server
+          npm ci --prefix desktop
+
+      - name: Build frontend and server
+        run: |
+          npm run build
+          npx tsc -p server/tsconfig.json
+
+      - name: Bundle server payload and smoke test
+        run: node desktop/scripts/bundle-server.mjs
+
+      - name: Build Codekin.app, .dmg and updater artifacts
+        working-directory: desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --bundles app,dmg --config '{"build":{"beforeBuildCommand":""},"bundle":{"createUpdaterArtifacts":true}}'
+
+      - name: Collect release files
+        id: files
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          OUT="$RUNNER_TEMP/release"
+          mkdir -p "$OUT"
+          B=desktop/src-tauri/target/release/bundle
+          cp "$B/macos/Codekin.app.tar.gz" "$OUT/Codekin_${VERSION}_aarch64.app.tar.gz"
+          cp "$B/macos/Codekin.app.tar.gz.sig" "$OUT/Codekin_${VERSION}_aarch64.app.tar.gz.sig"
+          cp "$B"/dmg/*.dmg "$OUT/Codekin_${VERSION}_aarch64.dmg"
+          ls -la "$OUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "dir=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the release files
+        run: |
+          set -euo pipefail
+          NOTES="Unsigned internal build of the Codekin desktop app for Apple Silicon (ad-hoc signed, not notarized). After copying Codekin.app to Applications, run: xattr -dr com.apple.quarantine /Applications/Codekin.app"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --prerelease --verify-tag --title "Codekin $TAG" --notes "$NOTES"
+          gh release upload "$TAG" "${{ steps.files.outputs.dir }}"/* --clobber
+
+      - name: Publish the updater manifest
+        run: |
+          set -euo pipefail
+          V="${{ steps.files.outputs.version }}"
+          URL="https://github.com/${{ github.repository }}/releases/download/$TAG/Codekin_${V}_aarch64.app.tar.gz"
+          # Only point the updater at an artifact that is really there.
+          curl -fsSIL "$URL" -o /dev/null
+          node desktop/scripts/update-manifest.mjs --version "$V" \
+            --signature-file "${{ steps.files.outputs.dir }}/Codekin_${V}_aarch64.app.tar.gz.sig" \
+            --url "$URL" --notes "Codekin $TAG" --out "$RUNNER_TEMP/latest.json"
+          gh release view desktop-channel >/dev/null 2>&1 || gh release create desktop-channel --prerelease \
+            --title "Desktop update channel" --notes "Holds latest.json for the desktop app's updater. Not a release; see the v* releases."
+          gh release upload desktop-channel "$RUNNER_TEMP/latest.json" --clobber
