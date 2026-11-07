@@ -131,7 +131,8 @@ jobs:
           ls -la "$APP/Contents/MacOS"
           test -x "$APP/Contents/MacOS/node"
           test -f "$APP/Contents/Resources/codekin/bin/codekin.mjs"
-          test -f "$APP/Contents/Resources/codekin/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+          # better-sqlite3 13+ ships Node-API prebuilds as prebuilds/<platform>-<arch>.node.
+          test -f "$APP/Contents/Resources/codekin/node_modules/better-sqlite3/prebuilds/$("$APP/Contents/MacOS/node" -p 'process.platform + "-" + process.arch').node"
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then ls desktop/src-tauri/target/release/bundle/dmg/*.dmg; fi
           "$APP/Contents/MacOS/node" -p 'process.version + " " + process.arch'
           codesign -dv "$APP" 2>&1 | head -5
