@@ -79,6 +79,7 @@ NODE_ENV=production
 | `RELAY_PORT` | no | Default `32360`, bound to 127.0.0.1. |
 | `AUDIT_RETENTION_DAYS` | no | Default `90`; `0` keeps everything. |
 | `RELAY_ACCESS_REQUEST_URL` | no | An `https:` or `mailto:` link shown on the sign-in page for people without access. |
+| `RELAY_NAME` | no | The name the Codekin desktop app suggests when this relay is added as a location (up to 64 characters). Defaults to the public host. |
 
 Access is keyed by GitHub's **numeric** user id, never the login. Logins can be renamed and
 re-registered by someone else.

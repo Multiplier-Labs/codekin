@@ -52,6 +52,9 @@ export type AuditEventKind =
   | 'mfa_recovery_codes_regenerated'
   | 'mfa_reset'
   | 'workspace_security_updated'
+  | 'desktop_auth_approved'
+  | 'desktop_signed_in'
+  | 'desktop_session_revoked'
 
 export interface AuditEventInput {
   kind: AuditEventKind

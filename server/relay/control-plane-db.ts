@@ -321,6 +321,32 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
       );
     `)
   },
+
+  // 6: desktop-app sign-in handoffs (docs/DESKTOP-APP-TAURI-PLAN.md, D9). A
+  // row is created by the app's browser visit, approved by the signed-in
+  // user (which mints the one-time code), and claimed by the app's webview
+  // with the PKCE verifier.
+  db => {
+    db.exec(`
+      CREATE TABLE desktop_auth_requests (
+        id TEXT PRIMARY KEY,
+        state TEXT NOT NULL,
+        code_challenge TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        expires_at INTEGER NOT NULL,
+        user_id TEXT REFERENCES users(id),
+        code_hash TEXT UNIQUE,
+        code_expires_at INTEGER,
+        mfa_verified_at INTEGER,
+        approved_ip TEXT,
+        claimed_at TEXT,
+        claimed_ip TEXT,
+        claimed_user_agent TEXT
+      );
+      CREATE INDEX idx_desktop_auth_requests_user ON desktop_auth_requests(user_id);
+    `)
+  },
 ]
 
 function runMigrations(db: Database.Database): void {
