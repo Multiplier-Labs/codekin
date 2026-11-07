@@ -4,10 +4,15 @@
  * parser: it assumes the block it is asked for contains no nested braces.
  */
 
-/** Body of the first rule whose selector list is exactly `selector`. */
+/**
+ * Body of the first rule whose selector list is exactly `selector`. The
+ * selector must start the rule (after a `}`, `;`, a comment or the start of
+ * the file), so `[data-theme="light"] .terminal-area` doesn't match the
+ * second line of a `[data-theme="dark"] .terminal-area,\n…` list.
+ */
 export function extractBlock(css: string, selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const match = new RegExp(`(^|[}\\s])${escaped}\\s*\\{([^}]*)\\}`, 'm').exec(css)
+  const match = new RegExp(`(^|[};/])\\s*${escaped}\\s*\\{([^}]*)\\}`).exec(css)
   if (!match) throw new Error(`No CSS block for selector: ${selector}`)
   return match[2]
 }
