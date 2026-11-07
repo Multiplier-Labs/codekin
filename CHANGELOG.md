@@ -7,12 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.10] - 2026-11-07
+
 ### Fixed
 - Codekin run with `codekin start` or as a service, without `CORS_ORIGIN` set, now keeps its live connection. Since 0.6.4 the server closed the WebSocket of its own page (`4003 Origin not allowed`), because the default `CORS_ORIGIN` is the Vite dev server, so the UI never received session updates or agent status. Pages served by the server itself are now accepted when it's reached through `localhost` or an IP address; deployments on a domain name still set `CORS_ORIGIN`
 - The update check no longer fails with an unhandled `ENOENT` on npm installs: it read `server/package.json`, which isn't in the npm package, instead of Codekin's own version
 - Joe's Codekin tools work again under Codex after Node or Codekin moves (for example a Node upgrade, an npm reinstall, or the planned desktop app at a new location). The `[mcp_servers.codekin]` section in `~/.codex/config.toml` was written once and never updated, so it could keep pointing at a Node binary that no longer exists. Its `command` and `args` are now kept current on start; the rest of the file, including other keys in that section, is left as is
 
 ### Added
+- Settings → Permissions → **Composer appearance** chooses whether the composer turns red in Bypass and Skip permissions modes (red by default); the warning label and confirmation stay either way (#751, #753)
+- First internal build of the **Codekin desktop app** for Apple Silicon Macs, attached to this release as an unsigned prerelease `.dmg`. It bundles the server and its own Node runtime, pairs with app.codekin.ai from Settings, runs from the menu bar, and updates itself. See `desktop/README.md` (#755–#765)
 - **Settings → Remote access** pairs this machine with app.codekin.ai (or a self-hosted relay) from the browser: confirm a short code on the relay and the machine comes online, no `codekin relay login` in a terminal needed. The page also shows the connection state and can unpair the machine. `codekin relay login` now runs the same code
 - Hidden `codekin app-server` command for the planned desktop app: sets up a credential on first launch, attaches to a running Codekin server that accepts it, or starts the server in-process, reporting the outcome as event lines and handing the token to the parent over a private file descriptor
 - `GET /api/ping` answers `{ "app": "codekin", "version": "…" }` without a token, so launchers such as the planned desktop app can tell a Codekin server that uses a different token apart from another program on the port
@@ -22,6 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An older Codekin now refuses to start against data last written by a newer one, instead of running on top of it
 - `codekin setup`, `codekin start` and the service units now share one launcher module (`bin/lib/launch.mjs`); behaviour is unchanged
 - The server now exits with status 1 when it can't bind its port (for example when it is already in use), instead of logging the error and staying up without serving anything
+
+## [0.9.9] - 2026-11-06
+
+### Added
+- Per-session reasoning effort for Claude and Codex sessions (#743)
+- The composer lets you choose which permission modes are enabled, cycles through them with Shift+Tab, and tints by mode (#741)
+- On macOS, the repositories path can be picked with the native folder dialog (#740)
 
 ## [0.9.8] - 2026-11-04
 
