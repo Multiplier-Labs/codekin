@@ -7,16 +7,20 @@
  * own origin: `Origin` when present (all current browsers send it on
  * non-GET requests), else `Sec-Fetch-Site`. Requests carrying neither are not
  * from a browser (the connector CLI's pairing calls) and hold no cookie.
+ *
+ * `exemptPaths` are mutations whose credential is in the body, not the
+ * cookie (the desktop app's sign-in claim, posted from the app's own page).
  */
 
 import type { RequestHandler } from 'express'
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
-export function createMutationOriginGuard(publicUrl: string): RequestHandler {
+export function createMutationOriginGuard(publicUrl: string, exemptPaths: readonly string[] = []): RequestHandler {
   const expected = new URL(publicUrl).origin
+  const exempt = new Set(exemptPaths)
   return (req, res, next) => {
-    if (SAFE_METHODS.has(req.method) || !req.path.startsWith('/api/')) {
+    if (SAFE_METHODS.has(req.method) || !req.path.startsWith('/api/') || exempt.has(req.path)) {
       next()
       return
     }

@@ -7,6 +7,7 @@
  * no GitHub round trip.
  */
 
+import { isDesktopApp } from './desktopAuth'
 import {
   startRegistration,
   startAuthentication,
@@ -27,7 +28,9 @@ export interface Passkey {
 }
 
 export function passkeysSupported(): boolean {
-  return browserSupportsWebAuthn()
+  // WKWebView passkeys need Developer ID signing and an Associated Domains
+  // entitlement per relay; the desktop app does passkeys in the browser (D12).
+  return browserSupportsWebAuthn() && !isDesktopApp()
 }
 
 /** True for the dismissal/timeout the user chose — not worth an error message. */

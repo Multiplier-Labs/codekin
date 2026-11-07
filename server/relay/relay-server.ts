@@ -26,6 +26,7 @@ import { createInvitationRouter } from './invitation-routes.js'
 import { createMfaRouter } from './mfa-routes.js'
 import { FailedAttemptLimiter } from './mfa.js'
 import { createDeviceLinkRouter } from './device-link-routes.js'
+import { createDesktopAuthRouter, DESKTOP_CLAIM_PATH } from './desktop-auth-routes.js'
 import { createWebauthnRouter } from './webauthn-routes.js'
 import { ConnectorHub } from './connector-hub.js'
 import { BrowserHub } from './browser-hub.js'
@@ -100,7 +101,7 @@ app.use('/api/invitations', ipRateLimiter(20, 60_000))
 
 // Cookie-authenticated REST mutations must come from the app itself.
 // SameSite=Lax alone still admits sibling subdomains of the site.
-app.use(createMutationOriginGuard(config.publicUrl))
+app.use(createMutationOriginGuard(config.publicUrl, [DESKTOP_CLAIM_PATH]))
 
 // Held in a const so WebSocket upgrades can reuse it to resolve the session.
 const sessionMiddleware = session({
@@ -147,6 +148,12 @@ app.use(createUserRouter(db, config, browserHub, store))
 app.use(createWorkspaceRouter({ db, config, browserHub, connectorHub: hub }))
 app.use(createInvitationRouter({ db, config }))
 app.use(createDeviceLinkRouter(db, config))
+app.use(createDesktopAuthRouter({
+  db,
+  config,
+  store,
+  disconnectSession: (sessionId, reason) => { browserHub.disconnectSession(sessionId, reason) },
+}))
 // One failed-attempt budget for typed codes and passkey checks alike.
 const mfaLimiter = new FailedAttemptLimiter()
 const disconnectUserExcept = (userId: string, reason: string, exceptSessionId?: string) => {

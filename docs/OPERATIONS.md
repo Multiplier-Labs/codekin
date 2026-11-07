@@ -346,6 +346,7 @@ misconfiguration fails at start rather than at first login.
 | `RELAY_PORT` | no | default 32360, bound to 127.0.0.1 |
 | `AUDIT_RETENTION_DAYS` | no | default 90; `0` disables pruning |
 | `RELAY_ACCESS_REQUEST_URL` | no | `https:` or `mailto:` link shown on the sign-in page ("Request access") and on the not-allowed error; served by `GET /api/auth/config` |
+| `RELAY_NAME` | no | Name the desktop app suggests for this relay as a location; served by `GET /api/relay/info`. Defaults to the public host |
 | `NODE_ENV=production` | recommended | required for `Secure` session cookies |
 
 The OAuth App's **Authorization callback URL** must be exactly

@@ -21,6 +21,7 @@ import type { SqliteSessionStore } from './sqlite-session-store.js'
 import { validateReturnTo } from './return-to.js'
 import { recordAuditEvent } from './audit.js'
 import { revokePendingDeviceLinks } from './device-link.js'
+import { revokePendingDesktopAuth } from './desktop-auth.js'
 import { getActiveMembership, listUserWorkspaces } from './workspaces.js'
 import { acceptInvitation, checkInvitation } from './invitations.js'
 import {
@@ -79,10 +80,22 @@ declare module 'express-session' {
     partialSince?: number
     /** Epoch ms of the last second-factor check, for step-up on sensitive actions. */
     mfaVerifiedAt?: number
+    /** Set on sessions signed in through the desktop app's handoff, which Settings lists and revokes. */
+    client?: 'desktop'
+    /** User agent of the app's webview when it claimed the session. */
+    clientUserAgent?: string
   }
 }
 
-export type AuthMethod = 'github' | 'passkey' | 'device_link'
+export type AuthMethod = 'github' | 'passkey' | 'device_link' | 'desktop'
+
+/** Session fields beyond the sign-in itself, set by establishSession. */
+export interface SessionExtras {
+  client?: 'desktop'
+  clientUserAgent?: string
+  /** A second-factor check that happened elsewhere (the desktop handoff's browser) and carries over. */
+  mfaVerifiedAt?: number
+}
 
 function toError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err))
@@ -123,6 +136,7 @@ export async function establishSession(
   user: UserRow,
   method: AuthMethod,
   level: AuthLevel = 'full',
+  extras: SessionExtras = {},
 ): Promise<void> {
   await regenerateSession(req)
   const now = Date.now()
@@ -133,6 +147,9 @@ export async function establishSession(
   if (level !== 'full') req.session.partialSince = now
   // A passkey sign-in is itself a second-factor check.
   if (method === 'passkey') req.session.mfaVerifiedAt = now
+  else if (extras.mfaVerifiedAt !== undefined) req.session.mfaVerifiedAt = extras.mfaVerifiedAt
+  if (extras.client) req.session.client = extras.client
+  if (extras.clientUserAgent) req.session.clientUserAgent = extras.clientUserAgent
   await saveSession(req)
 }
 
@@ -144,11 +161,13 @@ export async function establishSession(
  */
 export async function markMfaVerified(req: Request): Promise<void> {
   if (req.session.authLevel !== 'full') {
-    const { user, authMethod, authenticatedAt } = req.session
+    const { user, authMethod, authenticatedAt, client, clientUserAgent } = req.session
     await regenerateSession(req)
     req.session.user = user
     req.session.authMethod = authMethod
     req.session.authenticatedAt = authenticatedAt
+    if (client) req.session.client = client
+    if (clientUserAgent) req.session.clientUserAgent = clientUserAgent
   }
   req.session.authLevel = 'full'
   delete req.session.partialSince
@@ -432,12 +451,13 @@ export function createRelayAuthRouter({
       // An unclaimed device-link code would otherwise mint a fresh session
       // after "log out everywhere".
       const linksRevoked = revokePendingDeviceLinks(db, userId)
+      const desktopCodesRevoked = revokePendingDesktopAuth(db, userId)
       disconnectUser?.(userId, 'all sessions logged out')
       recordAuditEvent(db, {
         kind: 'logout_all',
         actorUserId: userId,
         ...requestAuditMeta(req),
-        metadata: { sessions: destroyed, deviceLinks: linksRevoked },
+        metadata: { sessions: destroyed, deviceLinks: linksRevoked, desktopCodes: desktopCodesRevoked },
       })
       destroySession(req)
         .then(() => {
@@ -480,6 +500,7 @@ export function createRelayAuthRouter({
       isOperator: full && isOperator(current, config),
       canCreateWorkspaces: full && canCreateWorkspaces(current, config),
       preferences: full ? getUserPreferences(db, current.id) : null,
+      client: req.session.client ?? 'browser',
     })
   })
 

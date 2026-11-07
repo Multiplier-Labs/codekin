@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react'
-import { IconQrcode, IconFingerprint, IconX, IconLogout } from '@tabler/icons-react'
+import { IconQrcode, IconFingerprint, IconX, IconLogout, IconDeviceDesktop } from '@tabler/icons-react'
 import { toDataURL } from 'qrcode'
 import {
   startDeviceLink,
@@ -26,6 +26,7 @@ import {
   type Passkey,
 } from './passkeys'
 import { signOutEverywhere, describeSignOutResult } from './sessions'
+import { fetchDesktopSessions, revokeDesktopSession, type DesktopSession } from './desktopAuth'
 import { isStepUpCancel } from './mfa'
 import { Row, Rows, button, dangerButton, quietButton } from '../components/settings/Block'
 
@@ -211,6 +212,62 @@ function PasskeysPanel() {
   )
 }
 
+function day(ms: number | null): string {
+  return ms ? new Date(ms).toISOString().slice(0, 10) : 'unknown'
+}
+
+/** Desktop apps signed in to this relay through the browser handoff, each revocable on its own. */
+function DesktopAppsPanel() {
+  const [sessions, setSessions] = useState<DesktopSession[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchDesktopSessions()
+      .then(list => { if (!cancelled) setSessions(list) })
+      .catch(() => { if (!cancelled) setSessions([]) })
+    return () => { cancelled = true }
+  }, [])
+
+  const revoke = async (id: string) => {
+    setError(null)
+    try {
+      await revokeDesktopSession(id)
+      setSessions(list => (list ?? []).filter(s => s.id !== id))
+    } catch {
+      setError('Could not sign that app out. Try again.')
+    }
+  }
+
+  // Nothing to say until an app has signed in.
+  if (!sessions || sessions.length === 0) return null
+
+  return (
+    <Row label="Desktop apps" description="Codekin apps signed in to this account. Signing one out takes effect immediately.">
+      <ul className="mt-3 flex flex-col gap-1.5">
+        {sessions.map(s => (
+          <li key={s.id} className="flex items-center gap-3 rounded-control border border-edge bg-page px-3 py-2">
+            <IconDeviceDesktop size={16} className="flex-shrink-0 text-ink-muted" />
+            <span className="truncate text-body text-ink">Codekin app{s.current ? ' (this app)' : ''}</span>
+            <span className="truncate text-meta text-ink-muted">
+              signed in {day(s.signedInAt)} · last active {day(s.lastActiveAt)}
+            </span>
+            <button
+              onClick={() => void revoke(s.id)}
+              title="Sign out this app"
+              aria-label="Sign out this app"
+              className="ml-auto flex-shrink-0 rounded-control p-1 text-ink-muted transition hover:bg-surface-raised hover:text-error-4"
+            >
+              <IconX size={16} />
+            </button>
+          </li>
+        ))}
+      </ul>
+      {error && <p className="mt-2 text-meta text-error-4">{error}</p>}
+    </Row>
+  )
+}
+
 /**
  * Global sign-out.
  *
@@ -277,6 +334,7 @@ export function DevicesSection({ reload }: { /** Injectable for tests, which can
     <Rows>
       <LinkDevicePanel />
       <PasskeysPanel />
+      <DesktopAppsPanel />
       <SignOutEverywherePanel reload={reload} />
     </Rows>
   )

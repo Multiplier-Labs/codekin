@@ -43,6 +43,8 @@ export interface RelayConfig {
    * authenticator-app 2FA is unavailable; passkeys and recovery codes still work.
    */
   mfaEncryptionKey?: Buffer
+  /** How the desktop app names this relay when adding it (RELAY_NAME); defaults to the public host. */
+  name?: string
 }
 
 /** Decode MFA_ENCRYPTION_KEY: 64 hex characters or base64 of exactly 32 bytes. */
@@ -119,6 +121,7 @@ export function loadRelayConfig(opts: { envFile?: string; requireSecrets?: boole
     isProduction,
     accessRequestUrl: parseAccessRequestUrl(get('RELAY_ACCESS_REQUEST_URL')),
     mfaEncryptionKey: parseMfaEncryptionKey(get('MFA_ENCRYPTION_KEY')),
+    name: get('RELAY_NAME').trim().slice(0, 64) || undefined,
   }
 
   if (requireSecrets) {

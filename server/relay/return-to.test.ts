@@ -56,6 +56,20 @@ describe('validateReturnTo', () => {
     expect(validateReturnTo(raw)).toBeNull()
   })
 
+  it('accepts the desktop sign-in approval page', () => {
+    const path = '/desktop-auth?request=3f2a9c1e-6b7d-4e8f-9a0b-1c2d3e4f5a6b'
+    expect(validateReturnTo(path)).toBe(path)
+  })
+
+  it.each([
+    '/desktop-auth',
+    '/desktop-auth?request=3F2A9C1E-6B7D-4E8F-9A0B-1C2D3E4F5A6B',
+    '/desktop-auth?request=3f2a9c1e-6b7d-4e8f-9a0b-1c2d3e4f5a6b&next=//evil.example',
+    '/desktop-auth?request=../../evil',
+  ])('rejects desktop variant %j', (raw) => {
+    expect(validateReturnTo(raw)).toBeNull()
+  })
+
   it('rejects non-string query shapes', () => {
     expect(validateReturnTo(undefined)).toBeNull()
     expect(validateReturnTo(['/pair'])).toBeNull()

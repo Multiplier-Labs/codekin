@@ -97,6 +97,22 @@ export class SqliteSessionStore extends Store {
       .run(userId, exceptSid ?? null).changes
   }
 
+  /** A user's live sessions with their stored data, for listing them back to the user. */
+  listUserSessions(userId: string): Array<{ sid: string; session: SessionData; expire: number }> {
+    const now = Date.now()
+    const rows = this.db
+      .prepare('SELECT sid, sess, expire FROM web_sessions WHERE user_id = ? AND expire > ?')
+      .all(userId, now) as Array<{ sid: string; sess: string; expire: number }>
+    return rows.flatMap(row => {
+      try {
+        const session = JSON.parse(row.sess) as SessionData
+        return isPastAbsoluteLifetime(session, now) ? [] : [{ sid: row.sid, session, expire: row.expire }]
+      } catch {
+        return []
+      }
+    })
+  }
+
   /**
    * Whether a session still exists and is within both lifetimes. Browser
    * sockets are bound to the session that opened them and are dropped once

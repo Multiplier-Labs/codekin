@@ -24,6 +24,8 @@ import {
   type StepUpMethod,
 } from './mfa'
 import { Row, Rows, button as settingsButton, dangerButton } from '../components/settings/Block'
+import { desktopSignInUrl, isDesktopApp } from './desktopAuth'
+import { githubSignInHref } from './signInHref'
 import { defaultPasskeyLabel, isPasskeyCancel, passkeysSupported, registerPasskey } from './passkeys'
 
 const button =
@@ -432,15 +434,28 @@ export function StepUpHost() {
         <h2 className="mb-1 text-title text-ink">Confirm it's you</h2>
         {request.method === 'github' ? (
           <>
-            <p className="mb-4 text-meta text-ink-muted">This needs a recent sign-in. Sign in with GitHub again, then retry.</p>
-            <button onClick={() => { window.location.assign('/api/auth/github/start') }} className={primary}>
-              Sign in with GitHub
+            <p className="mb-4 text-meta text-ink-muted">
+              This needs a recent sign-in. Sign in {isDesktopApp() ? 'through your browser' : 'with GitHub'} again, then retry.
+            </p>
+            <button
+              onClick={() => { window.location.assign(isDesktopApp() ? desktopSignInUrl('step_up') : githubSignInHref(window.location)) }}
+              className={primary}
+            >
+              {isDesktopApp() ? 'Sign in with your browser' : 'Sign in with GitHub'}
             </button>
           </>
         ) : (
           <>
             <p className="mb-4 text-meta text-ink-muted">This action needs a fresh two-factor check.</p>
             <SecondFactorForm status={request.status} onVerified={() => { finish() }} />
+            {isDesktopApp() && (request.status?.passkeys ?? 0) > 0 && (
+              <button
+                onClick={() => { window.location.assign(desktopSignInUrl('step_up')) }}
+                className="mt-2 w-full rounded-control border border-edge px-4 py-2 text-body text-ink-muted transition hover:bg-surface-raised hover:text-ink"
+              >
+                Use a passkey in your browser
+              </button>
+            )}
           </>
         )}
         <button onClick={() => { finish(new StepUpCancelled()) }} className="mt-4 w-full text-meta text-ink-faint transition hover:text-ink-muted">
