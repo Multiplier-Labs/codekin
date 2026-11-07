@@ -5,6 +5,7 @@ import { INVITE_ERROR_MESSAGES } from './workspace'
 import { IconFingerprint } from '@tabler/icons-react'
 import { passkeysSupported, loginWithPasskey, isPasskeyCancel } from './passkeys'
 import { githubSignInHref } from './signInHref'
+import { desktopSignInUrl, isDesktopApp } from './desktopAuth'
 
 interface LoginPageProps {
   /** Error code from a failed OAuth callback, if any. */
@@ -19,6 +20,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   profile_fetch_failed: 'Could not read your GitHub profile. Please try again.',
   login_failed: 'Sign-in failed. Please try again.',
   access_not_allowed: "This GitHub account doesn't have access to this Codekin instance yet.",
+  desktop_request_invalid: 'The Codekin app sent an invalid sign-in request. Start again from the app.',
+  desktop_claim_failed: "The app couldn't finish signing in. Start again from the app.",
+  desktop_claim_expired: 'The sign-in took too long to reach the app. Start again from the app.',
   ...INVITE_ERROR_MESSAGES,
 }
 
@@ -97,11 +101,12 @@ export function LoginPage({ authError, onSignedIn }: LoginPageProps) {
             {passkeyError}
           </p>
         )}
+        {/* GitHub discourages OAuth in embedded webviews; the app hands sign-in to the browser. */}
         <a
-          href={githubSignInHref(window.location)}
+          href={isDesktopApp() ? desktopSignInUrl() : githubSignInHref(window.location)}
           className="block w-full rounded-control bg-primary-8 px-4 py-2.5 text-body font-medium text-on-primary transition hover:bg-primary-7"
         >
-          Sign in with GitHub
+          {isDesktopApp() ? 'Sign in with your browser' : 'Sign in with GitHub'}
         </a>
         {passkeysSupported() && (
           <button

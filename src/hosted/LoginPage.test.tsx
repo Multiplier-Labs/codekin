@@ -46,7 +46,32 @@ describe('LoginPage', () => {
   })
 })
 
+describe('LoginPage in the desktop app', () => {
+  it('hands sign-in to the browser instead of GitHub in the webview', async () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 AppleWebKit/605.1.15 CodekinDesktop/0.10.0')
+    await render(<LoginPage authError={null} />, { inviteOnly: true })
+    const link = [...container!.querySelectorAll('a')].find(a => a.textContent === 'Sign in with your browser')
+    expect(link?.getAttribute('href')).toBe('codekin://sign-in')
+    // Passkeys in WKWebView wait for Developer ID signing (D12).
+    expect(container!.textContent).not.toContain('Sign in with a passkey')
+    vi.restoreAllMocks()
+  })
+
+  it('names a failed desktop claim', async () => {
+    await render(<LoginPage authError="desktop_claim_failed" />, { inviteOnly: true })
+    expect(container!.textContent).toContain("The app couldn't finish signing in")
+  })
+})
+
 describe('githubSignInHref', () => {
+  it('carries the desktop sign-in request through sign-in', () => {
+    const id = '3f2a9c1e-6b7d-4e8f-9a0b-1c2d3e4f5a6b'
+    expect(githubSignInHref({ pathname: '/desktop-auth', search: `?request=${id}` }))
+      .toBe(`/api/auth/github/start?returnTo=${encodeURIComponent(`/desktop-auth?request=${id}`)}`)
+    expect(githubSignInHref({ pathname: '/desktop-auth', search: '?request=../evil' })).toBe('/api/auth/github/start')
+  })
+
+
   it('starts plain sign-in from anywhere but the pairing page', () => {
     expect(githubSignInHref({ pathname: '/', search: '' })).toBe('/api/auth/github/start')
     expect(githubSignInHref({ pathname: '/link', search: '' })).toBe('/api/auth/github/start')

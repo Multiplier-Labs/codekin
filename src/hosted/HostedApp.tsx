@@ -16,6 +16,7 @@ import { ConnectComputer } from './ConnectComputer'
 import { MachineConnect } from './MachineConnect'
 import { MachineWorkspace } from './MachineWorkspace'
 import { HostedRelayTransport, LocalHttpTransport, setTransport } from '../lib/transport'
+import { DesktopAuthPage } from './DesktopAuthPage'
 import { PairPage } from './PairPage'
 import { LinkClaimPage } from './LinkClaimPage'
 import { useHostedAuth } from './useHostedAuth'
@@ -193,7 +194,7 @@ export default function HostedApp() {
   // /api/me (it is kept on the relay), so hold until the effect below has
   // looked at it; resolving a remembered machine takes one more request.
   const [restoring, setRestoring] = useState(
-    () => !['/pair', '/link'].includes(window.location.pathname),
+    () => !['/pair', '/link', '/desktop-auth'].includes(window.location.pathname),
   )
 
   const selectMachine = useCallback((machine: Machine) => {
@@ -306,6 +307,11 @@ export default function HostedApp() {
   }
   if (account.authLevel === 'enrollment_required') {
     return <MfaEnrollPage login={user.login} onDone={() => void refresh()} onLogout={() => void logout()} />
+  }
+
+  // Signing the desktop app in needs an account, not a workspace.
+  if (window.location.pathname === '/desktop-auth') {
+    return withNotice(<DesktopAuthPage login={user.login} />)
   }
 
   if (!workspace) {
