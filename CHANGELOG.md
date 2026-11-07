@@ -7,14 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-11-07
+
 ### Added
-- The desktop app now asks on first launch how you want to use it: **Run agents on this Mac**, or **Connect to Codekin on the web** (app.codekin.ai or your own relay). Choosing the web skips starting the local server until you pick This Mac from the Location menu, so a Mac that only opens relayed sessions never runs one. **Codekin → Welcome…** asks again; existing installs keep working as before
+- The desktop app now asks on first launch how you want to use it: **Run agents on this Mac**, or **Connect to Codekin on the web** (app.codekin.ai or your own relay). Choosing the web skips starting the local server until you pick This Mac from the Location menu, so a Mac that only opens relayed sessions never runs one. **Codekin → Welcome…** asks again; existing installs keep working as before (#786)
 
 ### Changed
-- New icon everywhere, matching codekin.ai: ink rings with orange dots. The web app's favicon follows the system light/dark scheme and gains sharp 180/192/512 px home-screen icons. The desktop app has a proper macOS icon (the mark on a dark plate, every size up to 1024 px), used by the Dock, Finder and the `.dmg` installer, and a new menu bar icon
+- New icon everywhere, matching codekin.ai: ink rings with orange dots. The web app's favicon follows the system light/dark scheme and gains sharp 180/192/512 px home-screen icons. The desktop app has a proper macOS icon (the mark on a dark plate, every size up to 1024 px), used by the Dock, Finder and the `.dmg` installer, and a new menu bar icon (#785)
 
 ### Fixed
-- In the desktop app, the session view no longer jumps back up to a random point in the transcript. WebKit reports the page hidden whenever the window is covered, hidden or on another Space, and each return rejoined the session, rebuilt the whole transcript and lost the scroll position. A return within 25 seconds no longer rejoins (nothing can have been missed), and when a rebuild does happen, a reader who had scrolled up stays where they were
+- In the desktop app, the session view no longer jumps back up to a random point in the transcript. WebKit reports the page hidden whenever the window is covered, hidden or on another Space, and each return rejoined the session, rebuilt the whole transcript and lost the scroll position. A return within 25 seconds no longer rejoins (nothing can have been missed), and when a rebuild does happen, a reader who had scrolled up stays where they were (#784)
 
 ## [0.10.2] - 2026-11-07
 
