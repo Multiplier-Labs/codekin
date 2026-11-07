@@ -536,13 +536,13 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
   // scroll, momentum included, is dropped and the view then snaps back to a
   // stale position. So never write while they scroll (retry once they stop),
   // and never write when already at the bottom.
-  const pinToBottom = useCallback(() => {
+  const pinToBottom = useCallback(function pin() {
     const el = containerRef.current
     if (!el || !isNearBottomRef.current) return
     const wait = userScrollingUntilRef.current - performance.now()
     if (wait > 0) {
       if (!pinRetryRef.current) {
-        pinRetryRef.current = setTimeout(() => { pinRetryRef.current = null; pinToBottom() }, wait + 20)
+        pinRetryRef.current = setTimeout(() => { pinRetryRef.current = null; pin() }, wait + 20)
       }
       return
     }
