@@ -708,8 +708,8 @@ local server, whichever location is on screen.
 
 ### First-run choice
 
-A new install asks before anything starts: **Run agents on this Mac** (start the bundled server, show This
-Mac, optionally go on to Settings → Remote access) or **Connect to Codekin on the web** (a relay address,
+A new install asks before anything starts: **Start with this Mac** (start the bundled server, show This
+Mac, optionally go on to Settings → Remote access) or **Start with Codekin on the web** (a relay address,
 prefilled `https://app.codekin.ai`, checked and saved like *Add Location…*, then the browser sign-in). The web
 choice doesn't start the server: it starts, once, the first time This Mac is shown, and until then Quit and
 updates skip the server and Keep Mac Awake is disabled. The choice is `startMode` in the shell's

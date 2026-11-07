@@ -65,9 +65,9 @@ same payload smoke test before it publishes, so anything they break fails the de
 
 A new install asks first (a bundled page, `?view=welcome`), before anything starts:
 
-- **Run agents on this Mac** starts the bundled server and shows This Mac, then offers remote access as an
+- **Start with this Mac** starts the bundled server and shows This Mac, then offers remote access as an
   optional step (*Open Remote Access* goes to Settings → Remote access in the local UI).
-- **Connect to Codekin on the web** takes a relay address (prefilled `https://app.codekin.ai`), checks it like
+- **Start with Codekin on the web** takes a relay address (prefilled `https://app.codekin.ai`), checks it like
   *Add Location…*, opens it and starts the browser sign-in. The bundled server is **not** started; it starts
   the first time *Location → This Mac* is chosen. Until then Keep Mac Awake and Restart Server are disabled,
   and Quit and updates have no server to stop.

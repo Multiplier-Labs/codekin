@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The desktop welcome screen no longer reads as a choice between running agents on this Mac and using the web app: the options are now **Start with this Mac** and **Start with Codekin on the web**, and the screen says you can use both from the Location menu (#791)
+
 ## [0.10.4] - 2026-11-07
 
 ### Changed
