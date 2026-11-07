@@ -597,7 +597,8 @@ step.
 
 ## Phase 4: hosted locations in the app (planned)
 
-Status: **specified, not started.** Decisions D9–D12 confirmed 2026-11-07.
+Status: **implemented, not yet tested on a Mac.** Decisions D9–D12 confirmed 2026-11-07; relay and hosted UI in
+#774 (4a), app in #775 (4b), both released in 0.10.0. The end-to-end manual checks below are still open.
 
 ### Goal
 
@@ -636,9 +637,13 @@ another location is shown, so the Mac stays reachable from the phone.
    `https://<relay>/api/auth/desktop/start?state=…&code_challenge=…&code_challenge_method=S256` in the default
    browser. (Every handoff route is under `/api/`: deployments, including the nginx config in
    SELF-HOSTED-RELAY.md, only send `/api/` and `/relay/` to the relay.)
-2. The relay runs its normal sign-in (GitHub OAuth, then TOTP or passkey). It then mints a **one-time code**
-   bound to the user, `state` and `code_challenge` (60 s TTL, single use) and redirects to
-   `codekin://auth?relay=<origin>&code=…&state=…`. A browser page says "You can return to Codekin".
+2. `start` records the request (10 minutes to finish) and sends the browser to the hosted page
+   `/desktop-auth?request=<id>`. Signed out, that runs the normal sign-in (GitHub OAuth, then TOTP or passkey) and
+   comes back through the `returnTo` allowlist. The page asks "The Codekin desktop app is asking to sign in to
+   <relay> as @login" (so a link someone else started can't sign an app in silently); approving needs a recent
+   check, like device linking, and mints a **one-time code** bound to the user, `state` and `code_challenge`
+   (60 s TTL, single use). The browser goes to `codekin://auth?relay=<origin>&code=…&state=…` and says "You can
+   return to Codekin".
 3. `tauri-plugin-deep-link` delivers the URL to the running app (via the single-instance plugin when the app
    is already open). The shell checks `state` and that `relay` is the origin it started with.
 4. The shell navigates the location's webview to `https://<relay>/api/auth/desktop/claim` with a POST of `code` and
@@ -647,17 +652,26 @@ another location is shown, so the Mac stays reachable from the phone.
    and redirects to `/`.
 
 PKCE is what makes the custom URL scheme safe: another app that registers `codekin://` and steals the code
-can't redeem it without the verifier, which never leaves the shell. Sessions created this way are marked
-`client: desktop` so Settings → Security in the hosted app can list and revoke them.
+can't redeem it without the verifier, which never leaves the shell. `claim` is the one mutation exempt from the
+same-origin guard (its credential is in the body), so it also requires the `CodekinDesktop/` user-agent token:
+otherwise any web page could post an attacker's own code and verifier from a victim's browser and sign that
+browser in as the attacker. Sessions created this way are marked `client: desktop` and listed under
+**Settings → Devices → Desktop apps** in the hosted app, each with its own sign-out.
 
 ### Relay changes (Phase 4a)
 
-- `GET /api/relay/info` (public, constant response).
-- `GET /auth/desktop/start`, the one-time code store (in the control-plane DB, hashed, 60 s, single use,
-  bound to `state` + `code_challenge`), `POST /auth/desktop/claim`, rate limits, and audit log entries
-  ("signed in on the desktop app").
+**Implemented** (#774; `server/relay/desktop-auth.ts`, `desktop-auth-routes.ts`):
+- `GET /api/relay/info` → `{ app: "codekin-relay", version, name }`, public; `name` is `RELAY_NAME`, else the
+  public host.
+- `GET /api/auth/desktop/start`, `GET /api/auth/desktop/requests/:id`, `POST …/requests/:id/approve` (signed in,
+  recent check) and `POST /api/auth/desktop/claim`, under the `/api/auth` rate limit. Requests and hashed codes
+  live in `desktop_auth_requests` (migration 6). A wrong verifier burns the code; "sign out everywhere" revokes
+  unclaimed codes. Audit events `desktop_auth_approved`, `desktop_signed_in`, `desktop_session_revoked`.
 - The redirect target is fixed to `codekin://auth`; never taken from the request.
-- Tests for replay, expiry, wrong verifier, wrong state, and allowlist / 2FA still enforced.
+- `GET/DELETE /api/me/desktop-sessions` for the Desktop apps list (opaque handles, never session ids).
+- Hosted UI in the app (user agent contains `CodekinDesktop/`): the login page shows "Sign in with your
+  browser" (`codekin://sign-in`); passkeys are hidden (D12) and step-up offers "Use a passkey in your browser"
+  (`codekin://sign-in?reason=step_up`); TOTP works inline.
 
 ### App changes (Phase 4b)
 
@@ -750,7 +764,7 @@ One PR, independent of the rest of Phase 4, ideally right after 0.9.10:
 | 3a — Release pipeline | Release job on the `v*` tag producing an unsigned `.dmg`, updater key and `latest.json`, move-to-Applications | A tag produces a `.dmg` that internal testers install and update |
 | 3b — Signing (blocked on Apple account) | Developer ID signing with hardened runtime and entitlements, notarization, stapling | Notarized `.dmg` from a tag installs and updates on a clean Mac with no Gatekeeper warning |
 | Node 22.14+ (any time) | `better-sqlite3` 13, `engines`, installer and docs, CI `[22, 24, 26]`, publish on 24; see [Node.js version](#nodejs-version-phase-4-analysis) | 0.10.0 installs on Node 26 with no compiler; CI green on 22/24/26 |
-| 4a — Relay: desktop sign-in | `/api/relay/info`, `/auth/desktop/start` + `/claim` with PKCE one-time codes, `client: desktop` sessions | Route tests for replay, expiry, wrong verifier/state; deployed to app.codekin.ai |
+| 4a — Relay: desktop sign-in | `/api/relay/info`, `/api/auth/desktop/start` + `/claim` with PKCE one-time codes, `client: desktop` sessions | Route tests for replay, expiry, wrong verifier/state; deployed to app.codekin.ai |
 | 4b — App: locations | Location model, per-location data stores, switcher, add/manage pages, deep link, handoff | Sign in to two relays through the browser and switch between them and This Mac on a Mac |
 
 ## Testing

@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Upgrading:** check `node --version` first. On anything older than 22.14, upgrade Node (for example `nvm install 24`) before `npm install -g codekin@0.10.0`: npm only warns about the `engines` field, and the new SQLite module crashes on load on older Node. The desktop app bundles its own Node and isn't affected.
 
+### Added
+- **Hosted locations in the desktop app.** The app can now open app.codekin.ai or any self-hosted relay as well as this Mac: **Location** in the app menu and the menu bar icon switches between This Mac and saved relays, and **Add Location…** / **Manage Locations…** add, rename and remove them. Each relay gets its own window storage (macOS 14+), so sign-ins never mix, and the Mac's own server keeps running while a relay is on screen. The last location reopens at launch (#775)
+- **Desktop sign-in through the browser.** The app signs in to a relay in your default browser, where GitHub, passkeys and your password manager already are, and the browser hands the sign-in back to the app. The relay asks you to confirm first ("The Codekin desktop app is asking to sign in…"), the one-time code lasts 60 seconds, and PKCE means another program that catches it can't use it. Inside the app, passkey checks also go through the browser; authenticator-app codes work in the app (#774, #775)
+- **Settings → Devices → Desktop apps** on hosted Codekin lists the apps signed in to your account, each with its own sign-out. "Sign out everywhere" also cancels sign-ins still on their way to an app (#774)
+- `GET /api/relay/info` identifies a Codekin relay (`{ app, version, name }`) so the app can check an address before saving it. Self-hosted relays can set `RELAY_NAME` for the name the app suggests (#774)
+
+**Self-hosted relays:** the new routes are all under `/api/`, so the documented nginx config needs no change. The control-plane database migrates itself on first start (migration 6).
+
 ### Changed
 - **Breaking: Codekin now needs Node.js 22.14 or later** (24 LTS recommended). Node 20 has been end of life since 2026-04-30, and Codekin already depended on packages that need Node 22. `package.json` now declares `engines`, `install.sh` installs the current LTS when it finds an older Node, and CI tests Node 22, 24 and 26 (#771)
 - `better-sqlite3` upgraded to 13, which ships prebuilt binaries for macOS, Linux and Windows inside the package. `npm install -g codekin` no longer compiles SQLite from source, so it works on Node 26 without Python or a C++ toolchain, and it isn't affected by npm 11's install-script blocking (#771)
