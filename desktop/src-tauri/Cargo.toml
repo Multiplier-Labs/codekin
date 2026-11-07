@@ -13,7 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.7", features = [] }
 
 [dependencies]
-tauri = { version = "2.12", features = [] }
+tauri = { version = "2.12", features = ["image-png", "tray-icon"] }
 tauri-plugin-single-instance = "2.5"
 tauri-plugin-opener = "2.7"
 tauri-plugin-dialog = "2.8"
@@ -23,6 +23,7 @@ ureq = { version = "3", default-features = false }
 command-fds = "0.3"
 libc = "0.2"
 url = "2"
+tauri-plugin-autostart = "2.7"
 
 [profile.release]
 codegen-units = 1

@@ -7,8 +7,11 @@
 //! - `launcher`: process spawning, lifetime/credential pipes, group cleanup
 //! - `http`: `/api/ping` and session-count probes
 //! - `supervisor`: the startup / attach / restart / quit state machine
-//! - this file: window, menu, navigation guard, splash commands, Quit flow
+//! - `background`: shell preferences and Keep Mac awake
+//! - this file: window, menus (app + menu bar icon), navigation guard,
+//!   splash commands, Quit flow
 
+pub mod background;
 pub mod http;
 pub mod launcher;
 pub mod protocol;
@@ -20,11 +23,16 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use background::{KeepAwake, Prefs};
 use supervisor::{Connection, Ctl, Shared, Supervisor, Ui, View};
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::image::Image;
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::tray::TrayIconBuilder;
+use tauri::webview::NewWindowResponse;
 use tauri::{
     AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartExt};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 
@@ -39,6 +47,16 @@ struct AppState {
     exit_ready: Arc<AtomicBool>,
     /// A Quit is already in progress (ignore repeated Cmd-Q).
     quitting: AtomicBool,
+}
+
+/// Menu bar icon items whose state changes, and the shell's own preferences.
+struct BackgroundState {
+    prefs_file: PathBuf,
+    prefs: Mutex<Prefs>,
+    keep_awake: KeepAwake,
+    tray_restart: MenuItem<tauri::Wry>,
+    tray_keep_awake: CheckMenuItem<tauri::Wry>,
+    tray_login: CheckMenuItem<tauri::Wry>,
 }
 
 impl AppState {
@@ -213,8 +231,15 @@ fn show_main(app: &AppHandle) {
     }
 }
 
+fn open_external(app: &AppHandle, url: &url::Url) {
+    if matches!(url.scheme(), "http" | "https" | "mailto") {
+        let _ = app.opener().open_url(url.as_str(), None::<&str>);
+    }
+}
+
 fn build_window(app: &AppHandle, shared: Arc<Shared>) -> tauri::Result<WebviewWindow> {
     let opener = app.clone();
+    let new_window_opener = app.clone();
     WebviewWindowBuilder::new(
         app,
         MAIN,
@@ -229,11 +254,17 @@ fn build_window(app: &AppHandle, shared: Arc<Shared>) -> tauri::Result<WebviewWi
         let server = shared.connection().server();
         let allowed =
             protocol::is_allowed_navigation(url, server.as_ref().map(|(h, p)| (h.as_str(), *p)));
-        if !allowed && matches!(url.scheme(), "http" | "https" | "mailto") {
+        if !allowed {
             // External links open in the default browser.
-            let _ = opener.opener().open_url(url.as_str(), None::<&str>);
+            open_external(&opener, url);
         }
         allowed
+    })
+    // `target=_blank` links and window.open: never a second app window; the
+    // default browser instead (e.g. "Open app.codekin.ai" while pairing).
+    .on_new_window(move |url, _features| {
+        open_external(&new_window_opener, &url);
+        NewWindowResponse::Deny
     })
     .build()
 }
@@ -293,12 +324,102 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     Menu::with_items(app, &[&app_menu, &edit, &view, &window])
 }
 
+/// The menu bar icon (`tray-icon`): open, Keep Mac awake, Open at login,
+/// Restart Server, Show Logs, Quit. Its items share the app menu's handlers.
+fn build_tray(app: &AppHandle, prefs: &Prefs) -> tauri::Result<BackgroundState> {
+    let restart = MenuItem::with_id(app, "restart_server", "Restart Server", false, None::<&str>)?;
+    let keep_awake = CheckMenuItem::with_id(
+        app,
+        "keep_awake",
+        "Keep Mac Awake",
+        background::keep_awake_supported(),
+        prefs.keep_awake,
+        None::<&str>,
+    )?;
+    // Menus have no tooltips on macOS: say what keep-awake can't do in the menu itself.
+    let keep_awake_note = MenuItem::with_id(
+        app,
+        "keep_awake_note",
+        "  Sleeps anyway with the lid closed on battery",
+        false,
+        None::<&str>,
+    )?;
+    let login_enabled = app.autolaunch().is_enabled().unwrap_or(false);
+    let login = CheckMenuItem::with_id(
+        app,
+        "open_at_login",
+        "Open at Login",
+        true,
+        login_enabled,
+        None::<&str>,
+    )?;
+    let menu = Menu::with_items(
+        app,
+        &[
+            &MenuItem::with_id(app, "open", "Open Codekin", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &keep_awake,
+            &keep_awake_note,
+            &login,
+            &PredefinedMenuItem::separator(app)?,
+            &restart,
+            &MenuItem::with_id(app, "show_logs", "Show Logs", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "quit", "Quit Codekin", true, None::<&str>)?,
+        ],
+    )?;
+    let icon = Image::from_bytes(include_bytes!("../icons/tray@2x.png"))?;
+    TrayIconBuilder::with_id("codekin")
+        .icon(icon)
+        .icon_as_template(true)
+        .tooltip("Codekin")
+        .menu(&menu)
+        .show_menu_on_left_click(true)
+        .build(app)?;
+    Ok(BackgroundState {
+        prefs_file: PathBuf::new(),
+        prefs: Mutex::new(prefs.clone()),
+        keep_awake: KeepAwake::default(),
+        tray_restart: restart,
+        tray_keep_awake: keep_awake,
+        tray_login: login,
+    })
+}
+
+fn toggle_keep_awake(app: &AppHandle) {
+    let bg = app.state::<BackgroundState>();
+    let wanted = bg.tray_keep_awake.is_checked().unwrap_or(false);
+    let held = bg.keep_awake.set(wanted);
+    let _ = bg.tray_keep_awake.set_checked(held);
+    let mut prefs = bg.prefs.lock().unwrap();
+    prefs.keep_awake = held;
+    let _ = prefs.save(&bg.prefs_file);
+}
+
+fn toggle_open_at_login(app: &AppHandle) {
+    let bg = app.state::<BackgroundState>();
+    let autolaunch = app.autolaunch();
+    let wanted = bg.tray_login.is_checked().unwrap_or(false);
+    let _ = if wanted {
+        autolaunch.enable()
+    } else {
+        autolaunch.disable()
+    };
+    // Show what the OS actually has, whether or not the change worked.
+    let _ = bg
+        .tray_login
+        .set_checked(autolaunch.is_enabled().unwrap_or(false));
+}
+
 /// Restart Server is available only for an owned server.
 fn update_menu(app: &AppHandle) {
     let owned = matches!(
         app.state::<AppState>().shared.connection(),
         Connection::Owned { .. }
     );
+    if let Some(bg) = app.try_state::<BackgroundState>() {
+        let _ = bg.tray_restart.set_enabled(owned);
+    }
     if let Some(menu) = app.menu() {
         if let Some(item) = menu
             .get("restart_server")
@@ -312,6 +433,9 @@ fn update_menu(app: &AppHandle) {
 fn on_menu(app: &AppHandle, id: &str) {
     match id {
         "quit" => request_quit(app),
+        "open" => show_main(app),
+        "keep_awake" => toggle_keep_awake(app),
+        "open_at_login" => toggle_open_at_login(app),
         "restart_server" => request_restart(app),
         "show_logs" => reveal_logs(app, &app.state::<AppState>().log),
         "reload" => {
@@ -383,6 +507,11 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // A LaunchAgent, not an AppleScript login item: no Automation permission prompt.
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .invoke_handler(tauri::generate_handler![retry, show_logs, quit])
         .menu(build_menu)
         .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
@@ -400,6 +529,17 @@ pub fn run() {
                     quitting: AtomicBool::new(false),
                 });
                 build_window(&handle, shared.clone())?;
+
+                // Menu bar icon and the shell's preferences (Keep Mac awake survives restarts).
+                let prefs_file = handle.path().app_config_dir()?.join("prefs.json");
+                let prefs = Prefs::load(&prefs_file);
+                let mut bg = build_tray(&handle, &prefs)?;
+                bg.prefs_file = prefs_file;
+                if prefs.keep_awake && background::keep_awake_supported() {
+                    let held = bg.keep_awake.set(true);
+                    let _ = bg.tray_keep_awake.set_checked(held);
+                }
+                app.manage(bg);
 
                 let payload = payload_dir(&handle);
                 let spec = launcher::LaunchSpec {
