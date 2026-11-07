@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- In the desktop app, a session followed to the bottom no longer drifts back up to the last response while an agent works. The chat only re-pinned to the bottom when a message arrived, but tool groups, the activity line and code highlighting also change its height; Chrome's scroll anchoring hid that, WebKit doesn't. The chat now stays pinned whenever its content resizes, unless you have scrolled up
+
 ## [0.10.3] - 2026-11-07
 
 ### Added
