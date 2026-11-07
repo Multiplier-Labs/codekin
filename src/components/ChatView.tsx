@@ -10,7 +10,7 @@
  * bottom, with a manual "scroll to bottom" button when scrolled up.
  */
 
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useCallback, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import DOMPurify from 'dompurify'
@@ -498,6 +498,8 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
   const containerRef = useRef<HTMLDivElement>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
   const isNearBottomRef = useRef(true)
+  const lastScrollTopRef = useRef(0)
+  const prevLastKeyRef = useRef<string | undefined>(undefined)
 
   // Track whether the user is near the bottom of the scroll container.
   // 100px threshold accounts for the activity indicator height so auto-scroll
@@ -508,8 +510,22 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
     const threshold = 100
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
     isNearBottomRef.current = nearBottom
+    lastScrollTopRef.current = el.scrollTop
     setShowScrollButton(!nearBottom)
   }, [])
+
+  // A rejoin rebuilds the transcript with new keys, so React replaces every
+  // node; the container shrinks for a moment and the browser clamps the scroll
+  // position. Put a reader who had scrolled up back where they were, before
+  // paint. (A trim keeps the newest messages, so it doesn't count as a rebuild.)
+  useLayoutEffect(() => {
+    const prevLastKey = prevLastKeyRef.current
+    prevLastKeyRef.current = messages[messages.length - 1]?.key
+    const el = containerRef.current
+    if (!el || !prevLastKey || isNearBottomRef.current) return
+    if (messages.some(m => m.key === prevLastKey)) return
+    el.scrollTop = lastScrollTopRef.current
+  }, [messages])
 
   // Auto-scroll on new messages if near bottom
   useEffect(() => {

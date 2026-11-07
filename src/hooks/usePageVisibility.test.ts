@@ -75,6 +75,31 @@ describe('usePageVisibility', () => {
     unmount()
   })
 
+  it('reports how long the page was hidden', () => {
+    vi.useFakeTimers()
+    const callback = vi.fn()
+    const { unmount } = renderHook(() => usePageVisibility(callback))
+
+    setVisibilityState('hidden')
+    fireVisibilityChange()
+    vi.advanceTimersByTime(4000)
+    setVisibilityState('visible')
+    fireVisibilityChange()
+    expect(callback).toHaveBeenCalledWith(4000)
+
+    unmount()
+    vi.useRealTimers()
+  })
+
+  it('reports Infinity when the hide was not observed', () => {
+    const callback = vi.fn()
+    const { unmount } = renderHook(() => usePageVisibility(callback))
+    setVisibilityState('visible')
+    fireVisibilityChange()
+    expect(callback).toHaveBeenCalledWith(Infinity)
+    unmount()
+  })
+
   it('does NOT fire callback on initial mount', () => {
     const callback = vi.fn()
     const { unmount } = renderHook(() => usePageVisibility(callback))
