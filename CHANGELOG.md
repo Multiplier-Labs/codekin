@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- The desktop welcome screen no longer reads as a choice between running agents on this Mac and using the web app: the options are now **Start with this Mac** and **Start with Codekin on the web**, and the screen says you can use both from the Location menu (#791)
+
 ## [0.10.4] - 2026-11-07
 
 ### Changed
-- The desktop welcome screen no longer reads as a choice between running agents on this Mac and using the web app: the options are now **Start with this Mac** and **Start with Codekin on the web**, and the screen says you can use both from the Location menu (#791)
 - The Dark and Light themes now use the codekin.ai colors: orange on cool ink and paper grays instead of gold on teal. Only the color tones changed, not their brightness, so contrast is the same, and tests now check Dark and Light against the same contrast floors as the other themes. Workflow event badges move from terracotta to a dusty rose so they don't read as the new orange. The other seven themes are unchanged. The logo in the sidebar, mobile bar and Settings matches the new icon (rings in the text color, dots in the theme's primary color), and the desktop app's loading screens and the server's 404 page use the same colors. Light's link color is a touch darker to reach 4.5:1 (#787)
 - Bypass and Skip permissions are flagged more quietly: instead of a red-tinted composer, the composer's top-right corner turns red, and picking a risky mode from the composer menu shows a small note above the composer ("Got it" / "Switch to Default") instead of a browser confirm dialog. The Settings default-mode picker drops its confirm too. The "Bypass permissions background" setting is removed (#792)
 
