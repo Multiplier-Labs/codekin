@@ -706,6 +706,17 @@ local server, whichever location is on screen.
 - `tauri-plugin-deep-link` registers `codekin://` (in the bundle's Info.plist on macOS);
   `tauri-plugin-single-instance` forwards links on Linux / Windows.
 
+### First-run choice
+
+A new install asks before anything starts: **Run agents on this Mac** (start the bundled server, show This
+Mac, optionally go on to Settings → Remote access) or **Connect to Codekin on the web** (a relay address,
+prefilled `https://app.codekin.ai`, checked and saved like *Add Location…*, then the browser sign-in). The web
+choice doesn't start the server: it starts, once, the first time This Mac is shown, and until then Quit and
+updates skip the server and Keep Mac Awake is disabled. The choice is `startMode` in the shell's
+`prefs.json`; *Codekin → Welcome…* asks again. Installs from before it (an existing `prefs.json`,
+`~/.config/codekin` or `~/.codekin`) count as local and skip it. The move-to-Applications check still runs once
+per launch, and the server waits for it.
+
 ### Testing
 
 Relay: unit and route tests for the handoff (Linux). App: Rust unit tests for the location model, URL

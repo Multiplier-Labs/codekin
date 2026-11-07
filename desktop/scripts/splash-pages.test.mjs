@@ -10,7 +10,7 @@ const html = readFileSync(join(SPLASH, 'index.html'), 'utf-8').replace(/<script[
 const script = readFileSync(join(SPLASH, 'splash.js'), 'utf-8')
 
 /** Load the page at `?query`, run splash.js, and record form submissions and IPC calls. */
-function load(query) {
+function load(query, reply = () => Promise.resolve()) {
   const dom = new JSDOM(html, { url: `tauri://localhost/index.html?${query}`, runScripts: 'outside-only' })
   const { window } = dom
   const submitted = []
@@ -18,7 +18,7 @@ function load(query) {
   window.HTMLFormElement.prototype.submit = function () {
     submitted.push({ action: this.action, fields: Object.fromEntries(new window.FormData(this)) })
   }
-  window.__TAURI__ = { core: { invoke: (cmd, args) => { invoked.push([cmd, args]); return Promise.resolve() } } }
+  window.__TAURI__ = { core: { invoke: (cmd, args) => { invoked.push([cmd, args]); return reply(cmd, args) } } }
   window.eval(script)
   return { document: window.document, submitted, invoked }
 }
@@ -71,9 +71,57 @@ describe('sign-in pages', () => {
   })
 
   it('keeps the existing splash and error views', () => {
+    expect(load('view=status&status=restarting').document.getElementById('welcome').hidden).toBe(true)
     expect(load('view=status&status=restarting').document.getElementById('status-text').textContent)
       .toBe('Restarting the Codekin server…')
     expect(load('view=error&code=port_conflict').document.getElementById('error-title').textContent)
       .toBe('The Codekin port is taken')
+  })
+})
+
+describe('welcome page', () => {
+  const tick = () => new Promise(resolve => setTimeout(resolve, 0))
+
+  it('offers both choices and nothing else', () => {
+    const { document, invoked } = load('view=welcome')
+    expect(document.getElementById('welcome').hidden).toBe(false)
+    expect(document.getElementById('brand').hidden).toBe(true)
+    expect(document.getElementById('welcome-web-form').hidden).toBe(true)
+    expect(document.getElementById('status').hidden).toBe(true)
+    expect(invoked).toEqual([])
+  })
+
+  it('runs agents locally, then offers remote access as an optional step', async () => {
+    const { document, invoked } = load('view=welcome')
+    document.getElementById('welcome-local').click()
+    await tick()
+    expect(invoked).toEqual([['welcome_local', undefined]])
+    expect(document.getElementById('welcome').hidden).toBe(true)
+    expect(document.getElementById('welcome-remote').hidden).toBe(false)
+    document.getElementById('welcome-remote-open').click()
+    document.getElementById('welcome-later').click()
+    expect(invoked.slice(1).map(([cmd]) => cmd)).toEqual(['welcome_open_remote_access', 'welcome_close'])
+  })
+
+  it('connects to app.codekin.ai by default, or any relay address', async () => {
+    const { document, invoked } = load('view=welcome')
+    document.getElementById('welcome-web').click()
+    expect(document.getElementById('welcome-web-form').hidden).toBe(false)
+    expect(document.getElementById('welcome-url').value).toBe('https://app.codekin.ai')
+    document.getElementById('welcome-url').value = 'relay.acme.dev'
+    document.getElementById('welcome-connect').click()
+    await tick()
+    expect(invoked).toEqual([['welcome_web', { url: 'relay.acme.dev' }]])
+    expect(document.getElementById('welcome-connect').disabled).toBe(false)
+  })
+
+  it('shows why an address was refused', async () => {
+    const { document } = load('view=welcome', cmd =>
+      cmd === 'welcome_web' ? Promise.reject(new Error('Use an https:// address.')) : Promise.resolve())
+    document.getElementById('welcome-web').click()
+    document.getElementById('welcome-connect').click()
+    await tick()
+    expect(document.getElementById('welcome-error').hidden).toBe(false)
+    expect(document.getElementById('welcome-error').textContent).toBe('Use an https:// address.')
   })
 })

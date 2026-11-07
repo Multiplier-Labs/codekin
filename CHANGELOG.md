@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- The desktop app now asks on first launch how you want to use it: **Run agents on this Mac**, or **Connect to Codekin on the web** (app.codekin.ai or your own relay). Choosing the web skips starting the local server until you pick This Mac from the Location menu, so a Mac that only opens relayed sessions never runs one. **Codekin → Welcome…** asks again; existing installs keep working as before
+
 ### Changed
 - New icon everywhere, matching codekin.ai: ink rings with orange dots. The web app's favicon follows the system light/dark scheme and gains sharp 180/192/512 px home-screen icons. The desktop app has a proper macOS icon (the mark on a dark plate, every size up to 1024 px), used by the Dock, Finder and the `.dmg` installer, and a new menu bar icon
 

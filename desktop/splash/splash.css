@@ -30,3 +30,9 @@ input[type=text] { display: block; width: 100%; margin-top: 4px; font: inherit; 
   border: 1px solid var(--edge); background: transparent; color: var(--fg); -webkit-user-select: text; user-select: text; }
 input[type=text]:focus { outline: none; border-color: var(--accent); }
 #add-form .actions { justify-content: flex-start; }
+.choices { display: grid; gap: 10px; margin: 20px 0; }
+button.choice { display: block; width: 100%; text-align: left; padding: 14px 16px; border-radius: 8px; }
+button.choice:hover { border-color: var(--accent); }
+.choice strong { display: block; font-weight: 600; margin-bottom: 4px; }
+.choice span { display: block; color: var(--muted); }
+#welcome-web-form .actions { justify-content: flex-start; }

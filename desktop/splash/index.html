@@ -24,6 +24,38 @@
       </div>
     </section>
 
+    <!-- First-run choice -->
+    <section id="welcome" class="wide" hidden>
+      <h2>Welcome to Codekin</h2>
+      <p>How do you want to use Codekin on this Mac? You can switch any time from the Location menu.</p>
+      <div class="choices">
+        <button id="welcome-local" type="button" class="choice">
+          <strong>Run agents on this Mac</strong>
+          <span>Coding agents run here, in your own repositories. You can reach them from your phone later.</span>
+        </button>
+        <button id="welcome-web" type="button" class="choice">
+          <strong>Connect to Codekin on the web</strong>
+          <span>Open the sessions you already run through app.codekin.ai or your company's relay. Nothing runs on this Mac.</span>
+        </button>
+      </div>
+      <form id="welcome-web-form" autocomplete="off" hidden>
+        <label>Address <input id="welcome-url" type="text" value="https://app.codekin.ai" required spellcheck="false"></label>
+        <div class="actions">
+          <button id="welcome-back" type="button">Back</button>
+          <button id="welcome-connect" type="submit" class="primary">Connect and Sign In</button>
+        </div>
+      </form>
+      <p class="error-text" id="welcome-error" hidden></p>
+    </section>
+    <section id="welcome-remote" class="wide" hidden>
+      <h2>Codekin is starting on this Mac</h2>
+      <p>You can also reach this Mac from your phone or any browser, through app.codekin.ai or your own relay. Set it up now, or any time in Settings → Remote access.</p>
+      <div class="actions">
+        <button id="welcome-later" type="button">Set Up Later</button>
+        <button id="welcome-remote-open" type="button" class="primary">Open Remote Access</button>
+      </div>
+    </section>
+
     <!-- Hosted locations (Phase 4b) -->
     <section id="signin" hidden>
       <h2 id="signin-title">Sign in</h2>
