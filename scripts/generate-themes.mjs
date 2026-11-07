@@ -10,8 +10,10 @@
  *     so they are authored, not derived). Step 1 is the strongest ink, step
  *     12 the page — in both schemes, matching the Dark/Light convention.
  *   - keys:    one signature color per intent family. The 12-step ramp keeps
- *     the lightness profile of the matching Dark (or Light) ramp — which the
- *     components were tuned against — and takes hue and chroma from the key.
+ *     the lightness profile of the matching reference ramp (Dark or Light as
+ *     the components were first tuned against them, frozen in
+ *     scripts/theme-reference.json so retinting Dark/Light to the brand
+ *     palette doesn't move these themes) and takes hue and chroma from the key.
  *     Step 5 is pinned to the key's lightness, after nudging the key to
  *     4.5:1 against the page if it falls short (canonical Solarized blue
  *     does, on its own cream).
@@ -25,14 +27,10 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { hexToOklch, oklchToHex, ensureContrast } from '../src/themes/color.ts'
-import { extractBlock, parseVars } from '../src/themes/cssVars.ts'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const indexCss = readFileSync(resolve(root, 'src/index.css'), 'utf8')
-const reference = {
-  dark: parseVars(extractBlock(indexCss, '@theme')),
-  light: parseVars(extractBlock(indexCss, '[data-theme="light"]')),
-}
+/** Lightness/chroma profiles per scheme and family: { dark: { primary: [12 hex] }, light: … }. */
+const reference = JSON.parse(readFileSync(resolve(root, 'scripts/theme-reference.json'), 'utf8'))
 
 const FAMILIES = ['primary', 'secondary', 'accent', 'error', 'warning', 'success']
 const SYNTAX_TOKENS = ['keyword', 'builtin', 'function', 'string', 'number', 'comment', 'variable', 'regexp', 'meta', 'selector', 'deletion']
@@ -114,7 +112,7 @@ const ANCHOR = 5
  * extremes (the tints and shades components pair against page and ink).
  */
 function deriveRamp(family, scheme, key) {
-  const ref = Array.from({ length: 12 }, (_, i) => hexToOklch(reference[scheme][`--color-${family}-${i + 1}`]))
+  const ref = Array.from({ length: 12 }, (_, i) => hexToOklch(reference[scheme][family][i]))
   const k = hexToOklch(key)
   const refPeak = Math.max(...ref.map(s => s.c))
   const shift = k.l - ref[ANCHOR - 1].l

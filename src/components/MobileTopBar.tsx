@@ -30,7 +30,7 @@ export function MobileTopBar({ repoName, sessionName, onMenuOpen, onNewSession, 
       </button>
 
       <div className="flex items-center gap-2 flex-1 min-w-0 px-1.5">
-        <AppIcon size={24} className="text-primary-7 flex-shrink-0" />
+        <AppIcon size={24} className="text-ink flex-shrink-0" />
         <div className="flex-1 min-w-0 truncate text-body text-ink">
           {repoName ? (
             <>

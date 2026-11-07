@@ -35,8 +35,8 @@ export interface ThemeDefinition {
 }
 
 export const THEMES: readonly ThemeDefinition[] = [
-  { id: 'dark', label: 'Dark', scheme: 'dark', swatches: { page: '#0b0d0e', surface: '#161d1e', ink: '#cbd2d3', primary: '#e4ae42', accent: '#45b5c9' } },
-  { id: 'light', label: 'Light', scheme: 'light', swatches: { page: '#fdfcfa', surface: '#f2efe8', ink: '#1b1a18', primary: '#b7884a', accent: '#248192' } },
+  { id: 'dark', label: 'Dark', scheme: 'dark', swatches: { page: '#0c0d0e', surface: '#191c1f', ink: '#cfd0d2', primary: '#ff6a2b', accent: '#45b5c9' } },
+  { id: 'light', label: 'Light', scheme: 'light', swatches: { page: '#fbfcfe', surface: '#eeeff1', ink: '#191a1c', primary: '#d8714a', accent: '#227f90' } },
   { id: 'midnight', label: 'Midnight', scheme: 'dark', swatches: { page: '#1b1f27', surface: '#222731', ink: '#d8dee9', primary: '#ebcb8b', accent: '#88c0d0' } },
   { id: 'paper', label: 'Paper', scheme: 'light', swatches: { page: '#f8faff', surface: '#eaf0f8', ink: '#243047', primary: '#3f5f95', accent: '#a44257' } },
   { id: 'contrast', label: 'High Contrast', scheme: 'dark', swatches: { page: '#000000', surface: '#0d0d0d', ink: '#f5f5f5', primary: '#4dd8ff', accent: '#ffd000' } },

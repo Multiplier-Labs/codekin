@@ -3,8 +3,8 @@
 // src/themes/registry.ts; registry.test.ts keeps this map in step with it.
 (function () {
   var themes = {
-    dark: ['dark', '#0b0d0e'],
-    light: ['light', '#fdfcfa'],
+    dark: ['dark', '#0c0d0e'],
+    light: ['light', '#fbfcfe'],
     midnight: ['dark', '#1b1f27'],
     paper: ['light', '#f8faff'],
     contrast: ['dark', '#000000'],

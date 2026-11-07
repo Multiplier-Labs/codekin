@@ -3,33 +3,40 @@
 @import "./themes/palettes.css";
 
 @theme {
-  /* Primary — warm gold / amber */
-  --color-primary-1: #fef8ec;
-  --color-primary-2: #fcedcc;
-  --color-primary-3: #f8dca0;
-  --color-primary-4: #f0c56e;
-  --color-primary-5: #e4ae42;
-  --color-primary-6: #cf9a2d;
-  --color-primary-7: #9d7440;
-  --color-primary-8: #9e7335;
-  --color-primary-9: #7d5b2a;
-  --color-primary-10: #5c4420;
-  --color-primary-11: #3a2c15;
-  --color-primary-12: #1e170a;
+  /* Dark and Light follow the brand palette of codekin.ai (ink #16181B, paper
+     #F5F6F7, orange #FF6A2B). The ramps were retinted from the original
+     gold/teal tuning in OKLCH — hue and chroma changed, lightness kept (Dark
+     primary-5 is pinned to the brand orange, the shift tapering to steps 1 and
+     12) — so the contrast work recorded in the comments below still holds;
+     src/themes/themes.test.ts checks the floors.
 
-  /* Secondary — warm terracotta / rose (replaces purple/magenta) */
-  --color-secondary-1: #fef5f0;
-  --color-secondary-2: #fce6da;
-  --color-secondary-3: #f5cbb5;
-  --color-secondary-4: #e8ab8d;
-  --color-secondary-5: #d4896a;
-  --color-secondary-6: #b8704f;
-  --color-secondary-7: #9c5d42;
-  --color-secondary-8: #7f4b35;
-  --color-secondary-9: #633a29;
-  --color-secondary-10: #4a2b1e;
-  --color-secondary-11: #321d14;
-  --color-secondary-12: #1c100b;
+     Primary — brand orange */
+  --color-primary-1: #fff7f4;
+  --color-primary-2: #ffe0d5;
+  --color-primary-3: #ffc2ac;
+  --color-primary-4: #ff9b76;
+  --color-primary-5: #ff6a2b;
+  --color-primary-6: #eb5a17;
+  --color-primary-7: #a6502f;
+  --color-primary-8: #af4e28;
+  --color-primary-9: #8c3f21;
+  --color-primary-10: #69301b;
+  --color-primary-11: #442013;
+  --color-primary-12: #26120b;
+
+  /* Secondary — dusty rose (moved off terracotta so it can't be mistaken for the orange primary) */
+  --color-secondary-1: #fff4f6;
+  --color-secondary-2: #fde3e9;
+  --color-secondary-3: #f6c6d2;
+  --color-secondary-4: #e9a5b7;
+  --color-secondary-5: #d38399;
+  --color-secondary-6: #b86a80;
+  --color-secondary-7: #9b586b;
+  --color-secondary-8: #7e4757;
+  --color-secondary-9: #633743;
+  --color-secondary-10: #4a2832;
+  --color-secondary-11: #321b22;
+  --color-secondary-12: #1c0f12;
 
   /* Accent — teal-blue */
   --color-accent-1: #eef9fb;
@@ -45,22 +52,21 @@
   --color-accent-11: #0c282e;
   --color-accent-12: #07171a;
 
-  /* Neutral — teal-tinted grays.
-     Chroma is half the original tuning (design handoff 09, option 5b): same
-     lightness, same hue, less saturation, so the cool chrome reads quieter
-     against the warm .terminal-area content without touching contrast. */
-  --color-neutral-1: #dfe3e4;
-  --color-neutral-2: #cbd2d3;
-  --color-neutral-3: #c0cacb;
-  --color-neutral-4: #9eabad;
-  --color-neutral-5: #7e8a8c;
-  --color-neutral-6: #657173;
-  --color-neutral-7: #4f5a5c;
-  --color-neutral-8: #3e484a;
-  --color-neutral-9: #2f383a;
-  --color-neutral-10: #222a2c;
-  --color-neutral-11: #161d1e;
-  --color-neutral-12: #0b0d0e;
+  /* Neutral — brand ink grays (cool, near-neutral; formerly teal-tinted).
+     Low chroma (≤ 0.008 OKLCH, less at the light end) at the ink's hue, so
+     the chrome reads as plain gray next to the orange. */
+  --color-neutral-1: #e1e2e4;
+  --color-neutral-2: #cfd0d2;
+  --color-neutral-3: #c5c8cc;
+  --color-neutral-4: #a6a8ac;
+  --color-neutral-5: #85888b;
+  --color-neutral-6: #6c6f73;
+  --color-neutral-7: #55585c;
+  --color-neutral-8: #43464a;
+  --color-neutral-9: #34363a;
+  --color-neutral-10: #26292c;
+  --color-neutral-11: #191c1f;
+  --color-neutral-12: #0c0d0e;
 
   /* Error — warm red */
   --color-error-1: #fef2f2;
@@ -156,50 +162,50 @@
   --color-ink-muted: var(--color-neutral-4);      /* secondary text */
   --color-ink-faint: var(--color-neutral-5);      /* de-emphasized metadata */
   --color-ink-inverse: var(--color-neutral-12);   /* text on intent-color fills (replaces text-white) */
-  --color-on-primary: var(--color-primary-12);    /* text on gold (primary-8) fills */
+  --color-on-primary: var(--color-primary-12);    /* text on primary (primary-8) fills */
   /* The composer's Send fill. Named separately from the scale step because
-     the light scales are inverted: primary-4 is a light gold in dark mode but
-     a dark brown in light mode, which put dark text on a dark fill at 3.17:1.
-     Each polarity picks the step that is actually gold. */
+     the light scales are inverted: primary-4 is a light orange in dark mode but
+     a dark rust in light mode, which put dark text on a dark fill at 3.17:1.
+     Each polarity picks the step that is actually orange. */
   --color-primary-fill: var(--color-primary-4);
   --color-on-primary-fill: var(--color-primary-12);
   --color-focus: var(--color-accent-6);           /* focus rings and focused borders */
 }
 
-/* Terminal / chat area — warm gray palette.
-   Desaturated ~40% from base teal, shifted warm (R≥G≥B), text lightened 10%.
-   Scoped via .terminal-area so header & sidebar keep original palette.
+/* Terminal / chat area — the transcript's own, slightly softer ramps.
+   Text lightened ~10% against the chrome; primary a less saturated orange.
+   Scoped via .terminal-area so header & sidebar keep the chrome palette.
    Belongs to the Dark and Light themes only (Light overrides the neutrals
    below and inherits the rest); the other themes use one palette throughout. */
 [data-theme="dark"] .terminal-area,
 [data-theme="light"] .terminal-area {
-  /* Primary — warm gold, text lightened */
-  --color-primary-1: #fef9f1;
-  --color-primary-2: #faefd8;
-  --color-primary-3: #f5e1b6;
-  --color-primary-4: #eccc8e;
-  --color-primary-5: #deb769;
-  --color-primary-6: #cba557;
-  --color-primary-7: #96754b;
-  --color-primary-8: #977443;
-  --color-primary-9: #775c35;
-  --color-primary-10: #584528;
-  --color-primary-11: #382c1a;
-  --color-primary-12: #1d170d;
+  /* Primary — brand orange, softened for the transcript */
+  --color-primary-1: #fff8f5;
+  --color-primary-2: #ffe1d6;
+  --color-primary-3: #ffc4af;
+  --color-primary-4: #fd9d7a;
+  --color-primary-5: #ed7a4f;
+  --color-primary-6: #dd6c41;
+  --color-primary-7: #985238;
+  --color-primary-8: #a15234;
+  --color-primary-9: #81422a;
+  --color-primary-10: #613322;
+  --color-primary-11: #3f2217;
+  --color-primary-12: #24130d;
 
-  /* Secondary — terracotta, text lightened */
-  --color-secondary-1: #fef6f3;
-  --color-secondary-2: #fbe9e2;
-  --color-secondary-3: #f2d3c3;
-  --color-secondary-4: #e4b8a2;
-  --color-secondary-5: #d09984;
-  --color-secondary-6: #b5826b;
-  --color-secondary-7: #93604b;
-  --color-secondary-8: #774e3c;
-  --color-secondary-9: #5d3c2e;
-  --color-secondary-10: #452d22;
-  --color-secondary-11: #2f1e17;
-  --color-secondary-12: #1a110d;
+  /* Secondary — dusty rose, text lightened */
+  --color-secondary-1: #fef5f7;
+  --color-secondary-2: #fbe8ec;
+  --color-secondary-3: #f3d0d8;
+  --color-secondary-4: #e5b3c0;
+  --color-secondary-5: #cf95a4;
+  --color-secondary-6: #b57d8c;
+  --color-secondary-7: #935c6b;
+  --color-secondary-8: #774a57;
+  --color-secondary-9: #5d3943;
+  --color-secondary-10: #452b32;
+  --color-secondary-11: #2f1d21;
+  --color-secondary-12: #1a1013;
 
   /* Accent — warmer teal, text lightened */
   --color-accent-1: #f4f9f8;
@@ -215,19 +221,19 @@
   --color-accent-11: #152928;
   --color-accent-12: #0c1918;
 
-  /* Neutral — warm gray, teal removed, text lightened */
-  --color-neutral-1: #e2e1de;
-  --color-neutral-2: #d1cfcb;
-  --color-neutral-3: #cccac5;
-  --color-neutral-4: #b0ada7;
-  --color-neutral-5: #93918c;
-  --color-neutral-6: #777571;
-  --color-neutral-7: #555350;
-  --color-neutral-8: #424040;
-  --color-neutral-9: #333130;
-  --color-neutral-10: #272524;
-  --color-neutral-11: #1b1a18;
-  --color-neutral-12: #0f0e0d;
+  /* Neutral — brand ink grays, text lightened */
+  --color-neutral-1: #e0e1e3;
+  --color-neutral-2: #cecfd1;
+  --color-neutral-3: #c8cace;
+  --color-neutral-4: #abadb1;
+  --color-neutral-5: #8f9195;
+  --color-neutral-6: #737579;
+  --color-neutral-7: #515356;
+  --color-neutral-8: #404142;
+  --color-neutral-9: #303233;
+  --color-neutral-10: #242627;
+  --color-neutral-11: #191a1c;
+  --color-neutral-12: #0d0e0f;
 
   /* Error — warm red, text lightened */
   --color-error-1: #fdf5f5;
@@ -280,57 +286,57 @@
 
 [data-theme="light"] {
   /* Neutral — inverted: dark text on light backgrounds */
-  --color-neutral-1:  #0f0e0d;
-  --color-neutral-2:  #1b1a18;
-  --color-neutral-3:  #272524;
-  --color-neutral-4:  #424040;
-  --color-neutral-5:  #555350;
-  --color-neutral-6:  #777571;
+  --color-neutral-1:  #0d0e0f;
+  --color-neutral-2:  #191a1c;
+  --color-neutral-3:  #242627;
+  --color-neutral-4:  #404142;
+  --color-neutral-5:  #515356;
+  --color-neutral-6:  #737579;
   /* The light ramp used to live in the top few percent of the lightness
      range, so nothing separated from anything: border-edge measured 1.05:1
      against its own surface and the sidebar was 1.03:1 from the content pane.
      Steps 7-11 are spread out; step 12 (the content ground) stays white. */
-  --color-neutral-7:  #b5afa2;
-  --color-neutral-8:  #cac4b8;  /* border-edge-strong: 1.51:1 on surface */
-  --color-neutral-9:  #dbd6cb;  /* border-edge: 1.26:1 on surface */
-  --color-neutral-10: #eae7de;  /* raised: 1.08:1 on surface */
-  --color-neutral-11: #f2efe8;  /* surface: 1.12:1 on page */
-  --color-neutral-12: #fdfcfa;
+  --color-neutral-7:  #adb0b3;
+  --color-neutral-8:  #c2c5c9;  /* border-edge-strong: 1.51:1 on surface */
+  --color-neutral-9:  #d5d6d8;  /* border-edge: 1.26:1 on surface */
+  --color-neutral-10: #e6e7e9;  /* raised: 1.08:1 on surface */
+  --color-neutral-11: #eeeff1;  /* surface: 1.12:1 on page */
+  --color-neutral-12: #fbfcfe;
 
-  /* Primary (amber/gold) — light tints as backgrounds, dark shades as text */
-  --color-primary-1:  #3a2c15;
-  --color-primary-2:  #5c4420;
-  --color-primary-3:  #7d5b2a;
-  --color-primary-4:  #9e7335;
-  --color-primary-5:  #b7884a;
-  --color-primary-6:  #cf9a2d;
-  --color-primary-7:  #c39538;
-  --color-primary-8:  #f0c56e;
-  --color-primary-9:  #f8dca0;
-  --color-primary-10: #fcedcc;
-  --color-primary-11: #fef3dc;
-  --color-primary-12: #fef8ec;
+  /* Primary (orange) — light tints as backgrounds, dark shades as text */
+  --color-primary-1:  #472316;
+  --color-primary-2:  #703621;
+  --color-primary-3:  #97482b;
+  --color-primary-4:  #be5c36;
+  --color-primary-5:  #d8714a;
+  --color-primary-6:  #ff753f;
+  --color-primary-7:  #f4713e;
+  --color-primary-8:  #ffb89f;
+  --color-primary-9:  #ffd5c5;
+  --color-primary-10: #ffe9e1;
+  --color-primary-11: #fff1eb;
+  --color-primary-12: #fff7f4;
 
-  /* Secondary (terracotta) — inverted */
-  --color-secondary-1:  #321d14;
-  --color-secondary-2:  #4a2b1e;
-  --color-secondary-3:  #633a29;
-  --color-secondary-4:  #7f4b35;
-  --color-secondary-5:  #9c5d42;
-  --color-secondary-6:  #b8704f;
-  --color-secondary-7:  #d4896a;
-  --color-secondary-8:  #e8ab8d;
-  --color-secondary-9:  #f5cbb5;
-  --color-secondary-10: #fce6da;
-  --color-secondary-11: #fef0e8;
-  --color-secondary-12: #fef5f0;
+  /* Secondary (dusty rose) — inverted */
+  --color-secondary-1:  #321b22;
+  --color-secondary-2:  #4a2832;
+  --color-secondary-3:  #633743;
+  --color-secondary-4:  #7e4757;
+  --color-secondary-5:  #9b586b;
+  --color-secondary-6:  #b86a80;
+  --color-secondary-7:  #d38399;
+  --color-secondary-8:  #e9a5b7;
+  --color-secondary-9:  #f6c6d2;
+  --color-secondary-10: #fde3e9;
+  --color-secondary-11: #ffeef2;
+  --color-secondary-12: #fff4f6;
 
   /* Accent (teal-blue) — inverted */
   --color-accent-1:  #07171a;
   --color-accent-2:  #113c44;
   --color-accent-3:  #17515c;
   --color-accent-4:  #1d6876;
-  --color-accent-5:  #248192;
+  --color-accent-5:  #227f90;  /* 4.5:1 on --color-page (links) */
   --color-accent-6:  #2d9bb0;
   --color-accent-7:  #45b5c9;
   --color-accent-8:  #74cbda;
@@ -387,8 +393,10 @@
   background-color: rgba(255, 255, 255, 0.55);
 }
 
+/* The mark is ink rings + primary dots (AppIcon), so it sits on a quiet
+   raised disc rather than a primary tint. */
 [data-scheme="dark"] .app-logo-circle {
-  background-color: var(--color-primary-2);
+  background-color: var(--color-surface-raised);
 }
 
 /* The sidebars are level-1 surfaces; they used to borrow neutral-9/7 because
@@ -421,33 +429,33 @@
 /* Terminal area overrides in light mode.
    Steps 5–6 are darkened relative to the plain inverted scale so muted
    text (tool summaries, timestamps, request IDs) meets ~4.5:1 on the
-   cream background. */
+   paper background. */
 [data-theme="light"] .terminal-area {
-  --color-neutral-1:  #0f0e0d;
-  --color-neutral-2:  #1b1a18;
-  --color-neutral-3:  #333131;
-  --color-neutral-4:  #424040;
-  --color-neutral-5:  #6b6964;
-  --color-neutral-6:  #7c7a75;
-  --color-neutral-7:  #c2bcae;
-  --color-neutral-8:  #d0cabe;  /* border-edge-strong: 1.45:1 on surface */
-  --color-neutral-9:  #ded9cf;  /* border-edge: 1.25:1 on surface */
-  --color-neutral-10: #ece8e0;  /* raised: 1.08:1 on surface */
-  --color-neutral-11: #f4f1ea;  /* cards/composer: 1.08:1 on the pane */
-  --color-neutral-12: #fdf9f4;  /* the cream pane the AA overrides are set against */
+  --color-neutral-1:  #0d0e0f;
+  --color-neutral-2:  #191a1c;
+  --color-neutral-3:  #313233;
+  --color-neutral-4:  #404142;
+  --color-neutral-5:  #66696e;
+  --color-neutral-6:  #777a7f;
+  --color-neutral-7:  #babdc0;
+  --color-neutral-8:  #c8cbcf;  /* border-edge-strong: 1.45:1 on surface */
+  --color-neutral-9:  #d8dadb;  /* border-edge: 1.25:1 on surface */
+  --color-neutral-10: #e7e8ea;  /* raised: 1.08:1 on surface */
+  --color-neutral-11: #f0f1f3;  /* cards/composer: 1.08:1 on the pane */
+  --color-neutral-12: #f8fafc;  /* the paper pane the AA overrides are set against */
 
-  --color-primary-1:  #382c1a;
-  --color-primary-2:  #584528;
-  --color-primary-3:  #775c35;
-  --color-primary-4:  #977443;
-  --color-primary-5:  #8a6a3c; /* 4.76:1 on --color-page (notification text); do not lighten */
-  --color-primary-6:  #cba557;
-  --color-primary-7:  #be9d5a;
-  --color-primary-8:  #eccc8e;
-  --color-primary-9:  #f5e1b6;
-  --color-primary-10: #faefd8;
-  --color-primary-11: #fdf5e8;
-  --color-primary-12: #fef9f1;
+  --color-primary-1:  #43251a;
+  --color-primary-2:  #693a29;
+  --color-primary-3:  #8d4d36;
+  --color-primary-4:  #b36244;
+  --color-primary-5:  #a4593d; /* 4.76:1 on --color-page (notification text); do not lighten */
+  --color-primary-6:  #fa865b;
+  --color-primary-7:  #e8835d;
+  --color-primary-8:  #ffbfa9;
+  --color-primary-9:  #ffdacc;
+  --color-primary-10: #ffebe4;
+  --color-primary-11: #fff3ef;
+  --color-primary-12: #fff8f5;
 
   --color-accent-1:  #0c1918;
   --color-accent-2:  #1e3c39;
@@ -504,7 +512,7 @@
 
 /* Sidebar text — pure grayscale overrides so fonts render without teal tint.
    Only the lower stops (used for text/icons) are overridden;
-   higher stops (backgrounds, borders) keep the teal-tinted palette. */
+   higher stops (backgrounds, borders) keep the ink-gray palette. */
 [data-theme="dark"] .app-left-sidebar,
 [data-theme="dark"] .app-right-sidebar {
   --color-neutral-1: #e0e0e0;
@@ -701,8 +709,8 @@
 }
 [data-scheme="light"] {
   color-scheme: light;
-  /* Light ramps are inverted, so "dark text on gold" is primary-1 here and
-     the gold fill is primary-8 (8.81:1 with the text on it in Light). */
+  /* Light ramps are inverted, so "dark text on orange" is primary-1 here and
+     the orange fill is primary-8 (8.30:1 with the text on it in Light). */
   --color-on-primary: var(--color-primary-1);
   --color-primary-fill: var(--color-primary-8);
   --color-on-primary-fill: var(--color-primary-1);

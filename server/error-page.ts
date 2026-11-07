@@ -7,14 +7,14 @@ export function generate404Page(): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
   <title>404 — Codekin</title>
   <link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;600&family=Lato:wght@400;700&display=swap" rel="stylesheet" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      background: #090e0f;
-      color: #c6d4d5;
+      background: #0c0d0e;
+      color: #cfd0d2;
       font-family: 'Lato', sans-serif;
       min-height: 100vh;
       display: flex;
@@ -30,7 +30,7 @@ export function generate404Page(): string {
       font-family: 'Inconsolata', monospace;
       font-size: 6rem;
       font-weight: 600;
-      color: #e4ae42;
+      color: #ff6a2b;
       line-height: 1;
       margin-bottom: 0.5rem;
     }
@@ -38,11 +38,11 @@ export function generate404Page(): string {
       font-family: 'Lato', sans-serif;
       font-size: 1.5rem;
       font-weight: 700;
-      color: #dce4e5;
+      color: #e0e2e5;
       margin-bottom: 1rem;
     }
     p {
-      color: #94aeb1;
+      color: #a5a8ad;
       font-size: 1rem;
       line-height: 1.6;
       margin-bottom: 2rem;
@@ -50,15 +50,15 @@ export function generate404Page(): string {
     a {
       display: inline-block;
       padding: 0.65rem 1.75rem;
-      background: #e4ae42;
-      color: #1e170a;
+      background: #ff6a2b;
+      color: #16181b;
       font-weight: 700;
       font-size: 0.9rem;
       border-radius: 6px;
       text-decoration: none;
       transition: background 0.15s;
     }
-    a:hover { background: #cf9a2d; }
+    a:hover { background: #ff7d45; }
   </style>
 </head>
 <body>
@@ -78,14 +78,14 @@ export function generate500Page(): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
   <title>Error — Codekin</title>
   <link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;600&family=Lato:wght@400;700&display=swap" rel="stylesheet" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      background: #090e0f;
-      color: #c6d4d5;
+      background: #0c0d0e;
+      color: #cfd0d2;
       font-family: 'Lato', sans-serif;
       min-height: 100vh;
       display: flex;
@@ -109,11 +109,11 @@ export function generate500Page(): string {
       font-family: 'Lato', sans-serif;
       font-size: 1.5rem;
       font-weight: 700;
-      color: #dce4e5;
+      color: #e0e2e5;
       margin-bottom: 1rem;
     }
     p {
-      color: #94aeb1;
+      color: #a5a8ad;
       font-size: 1rem;
       line-height: 1.6;
       margin-bottom: 2rem;
@@ -121,15 +121,15 @@ export function generate500Page(): string {
     a {
       display: inline-block;
       padding: 0.65rem 1.75rem;
-      background: #e4ae42;
-      color: #1e170a;
+      background: #ff6a2b;
+      color: #16181b;
       font-weight: 700;
       font-size: 0.9rem;
       border-radius: 6px;
       text-decoration: none;
       transition: background 0.15s;
     }
-    a:hover { background: #cf9a2d; }
+    a:hover { background: #ff7d45; }
   </style>
 </head>
 <body>

@@ -1,6 +1,7 @@
 /* Standalone: the app's theme isn't loaded here. Follows the system light / dark scheme. */
-:root { color-scheme: light dark; --bg: #f7f7f5; --fg: #1d1d1b; --muted: #6b6b66; --edge: #d9d9d4; --accent: #3b6fd8; }
-@media (prefers-color-scheme: dark) { :root { --bg: #161615; --fg: #ededea; --muted: #9b9b95; --edge: #34342f; --accent: #7aa2f7; } }
+/* Codekin brand palette (codekin-website): ink on paper, orange accent. */
+:root { color-scheme: light dark; --bg: #f5f6f7; --fg: #16181b; --muted: #50565e; --edge: #d5d9de; --accent: #ff6a2b; --on-accent: #16181b; }
+@media (prefers-color-scheme: dark) { :root { --bg: #16181b; --fg: #f5f6f7; --muted: #a2a8b0; --edge: #34363a; --accent: #ff6a2b; --on-accent: #16181b; } }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body { display: grid; place-items: center; background: var(--bg); color: var(--fg);
@@ -16,7 +17,7 @@ p { margin: 0 0 12px; color: var(--muted); }
 @keyframes spin { to { transform: rotate(360deg); } }
 .actions { display: flex; gap: 8px; justify-content: center; margin-top: 20px; }
 button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--edge); background: transparent; color: var(--fg); cursor: pointer; }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 button:disabled { opacity: 0.5; cursor: default; }
 .error-text { color: #c4473a; -webkit-user-select: text; user-select: text; }
 main:has(.wide:not([hidden])) { width: 100%; max-width: 560px; text-align: left; }

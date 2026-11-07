@@ -70,9 +70,9 @@ describe('generated palettes', () => {
 })
 
 /*
- * Contrast floors (docs/THEME-SELECTOR-SPEC.md §6). Dark and Light are frozen
- * at their hand-tuned values and not re-checked here; every added theme must
- * clear these, High Contrast at the stricter column.
+ * Contrast floors (docs/THEME-SELECTOR-SPEC.md §6). Every theme's chrome must
+ * clear these, High Contrast at the stricter column. Dark and Light also get
+ * their transcript (.terminal-area) scope checked below.
  */
 describe('contrast floors', () => {
   const pairs: { name: string; fg: string; bg: string; floor: number; strict: number }[] = [
@@ -89,12 +89,16 @@ describe('contrast floors', () => {
     { name: 'focus on page', fg: 'focus', bg: 'page', floor: 3, strict: 4.5 },
   ]
 
-  for (const theme of GENERATED) {
+  for (const theme of THEMES) {
     const strict = theme.id === 'contrast'
     it.each(pairs)(`${theme.id}: $name`, ({ fg, bg, floor, strict: strictFloor }) => {
       const ratio = contrast(color(theme, fg), color(theme, bg))
       expect(ratio).toBeGreaterThanOrEqual(strict ? strictFloor : floor)
     })
+  }
+
+  for (const theme of GENERATED) {
+    const strict = theme.id === 'contrast'
 
     it(`${theme.id}: syntax tokens on the code background`, () => {
       const codeBg = color(theme, theme.scheme === 'dark' ? 'neutral-11' : 'neutral-10')
@@ -102,6 +106,25 @@ describe('contrast floors', () => {
       for (const token of SYNTAX) {
         expect(contrast(vars[`--syntax-${token}`], codeBg), token).toBeGreaterThanOrEqual(strict ? 7 : 4.5)
       }
+    })
+  }
+
+  // The transcript pane of Dark and Light has its own ramps (.terminal-area).
+  for (const theme of THEMES.filter(t => t.id === 'dark' || t.id === 'light')) {
+    const content = parseVars(extractBlock(indexCss, theme.id === 'dark'
+      ? '[data-theme="dark"] .terminal-area,\n[data-theme="light"] .terminal-area'
+      : '[data-theme="light"] .terminal-area'))
+    const scopes = theme.id === 'dark' ? [content, base]
+      : [content, parseVars(extractBlock(indexCss, '[data-theme="dark"] .terminal-area,\n[data-theme="light"] .terminal-area')),
+         parseVars(extractBlock(indexCss, '[data-theme="light"]')), lightScheme, base]
+    const inPane = (token: string) => resolveVar(`--color-${token}`, scopes)
+    it.each([
+      ...pairs.filter(p => !p.name.startsWith('edge')),
+      { name: 'primary-5 text on page', fg: 'primary-5', bg: 'page', floor: 4.5, strict: 7 },
+      { name: 'accent-6 text on page', fg: 'accent-6', bg: 'page', floor: 4.5, strict: 7 },
+      { name: 'success-5 text on page', fg: 'success-5', bg: 'page', floor: 4.5, strict: 7 },
+    ])(`${theme.id} transcript: $name`, ({ fg, bg, floor }) => {
+      expect(contrast(inPane(fg), inPane(bg))).toBeGreaterThanOrEqual(floor)
     })
   }
 })
