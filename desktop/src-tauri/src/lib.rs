@@ -9,12 +9,16 @@
 //! - `supervisor`: the startup / attach / restart / quit state machine
 //! - `background`: shell preferences and Keep Mac awake
 //! - `updater`: signed app updates; `relocate`: move to Applications
+//! - `locations` (pure) and `hosted`: hosted locations, their windows and the
+//!   browser sign-in handoff (Phase 4b)
 //! - this file: window, menus (app + menu bar icon), navigation guard,
 //!   splash commands, Quit flow
 
 pub mod background;
+mod hosted;
 pub mod http;
 pub mod launcher;
+pub mod locations;
 pub mod protocol;
 pub mod relocate;
 pub mod supervisor;
@@ -39,7 +43,7 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartExt};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 
-const MAIN: &str = "main";
+pub(crate) const MAIN: &str = "main";
 
 /// App-wide state managed by Tauri.
 pub(crate) struct AppState {
@@ -53,9 +57,9 @@ pub(crate) struct AppState {
 }
 
 /// Menu bar icon items whose state changes, and the shell's own preferences.
-struct BackgroundState {
-    prefs_file: PathBuf,
-    prefs: Mutex<Prefs>,
+pub(crate) struct BackgroundState {
+    pub(crate) prefs_file: PathBuf,
+    pub(crate) prefs: Mutex<Prefs>,
     keep_awake: KeepAwake,
     tray_restart: MenuItem<tauri::Wry>,
     tray_keep_awake: CheckMenuItem<tauri::Wry>,
@@ -69,7 +73,7 @@ impl AppState {
 }
 
 /// The URL of a bundled page (splash / error view) with a query string.
-fn local_page(query: &str) -> url::Url {
+pub(crate) fn local_page(query: &str) -> url::Url {
     #[cfg(windows)]
     let base = "http://tauri.localhost/index.html";
     #[cfg(not(windows))]
@@ -226,15 +230,16 @@ pub(crate) fn confirm_stop(app: &AppHandle, active: Option<u64>, action: &str) -
 // Window and menu
 // ---------------------------------------------------------------------------
 
+/// Show the window of the location on screen (This Mac or a hosted one).
 fn show_main(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window(MAIN) {
+    if let Some(w) = hosted::current_window(app) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
     }
 }
 
-fn open_external(app: &AppHandle, url: &url::Url) {
+pub(crate) fn open_external(app: &AppHandle, url: &url::Url) {
     if matches!(url.scheme(), "http" | "https" | "mailto") {
         let _ = app.opener().open_url(url.as_str(), None::<&str>);
     }
@@ -251,6 +256,8 @@ fn build_window(app: &AppHandle, shared: Arc<Shared>) -> tauri::Result<WebviewWi
     .title("Codekin")
     .inner_size(1400.0, 900.0)
     .min_inner_size(640.0, 480.0)
+    // Shown by hosted::restore, unless the last-used location is a hosted one.
+    .visible(false)
     // Required: otherwise Tauri swallows file drops and composer attachments break.
     .disable_drag_drop_handler()
     .on_navigation(move |url| {
@@ -332,7 +339,9 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &PredefinedMenuItem::close_window(app, None)?,
         ],
     )?;
-    Menu::with_items(app, &[&app_menu, &edit, &view, &window])
+    // Filled in setup, once the saved locations are loaded.
+    let location = hosted::location_submenu(app, "location_menu")?;
+    Menu::with_items(app, &[&app_menu, &edit, &view, &location, &window])
 }
 
 /// The menu bar icon (`tray-icon`): open, Keep Mac awake, Open at login,
@@ -364,10 +373,13 @@ fn build_tray(app: &AppHandle, prefs: &Prefs) -> tauri::Result<BackgroundState> 
         login_enabled,
         None::<&str>,
     )?;
+    let location = hosted::location_submenu(app, "tray_location_menu")?;
+    hosted::register_menu(app, location.clone());
     let menu = Menu::with_items(
         app,
         &[
             &MenuItem::with_id(app, "open", "Open Codekin", true, None::<&str>)?,
+            &location,
             &PredefinedMenuItem::separator(app)?,
             &keep_awake,
             &keep_awake_note,
@@ -442,6 +454,9 @@ fn update_menu(app: &AppHandle) {
 }
 
 fn on_menu(app: &AppHandle, id: &str) {
+    if hosted::on_menu(app, id) {
+        return;
+    }
     match id {
         "quit" => request_quit(app),
         "open" => show_main(app),
@@ -579,9 +594,12 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         // First: a second launch focuses the existing window instead of starting another supervisor.
+        // With its deep-link feature it also forwards `codekin://` links that
+        // reach a second instance (Linux / Windows) to the deep-link plugin.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main(app)
         }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         // A LaunchAgent, not an AppleScript login item: no Automation permission prompt.
@@ -590,7 +608,19 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             None,
         ))
-        .invoke_handler(tauri::generate_handler![retry, show_logs, quit])
+        .invoke_handler(tauri::generate_handler![
+            retry,
+            show_logs,
+            quit,
+            hosted::locations_list,
+            hosted::location_add,
+            hosted::location_rename,
+            hosted::location_remove,
+            hosted::location_switch,
+            hosted::location_sign_in,
+            hosted::location_sign_in_reopen,
+            hosted::location_sign_in_cancel,
+        ])
         .menu(build_menu)
         .on_menu_event(|app, event| on_menu(app, event.id().as_ref()))
         .setup({
@@ -607,6 +637,14 @@ pub fn run() {
                     quitting: AtomicBool::new(false),
                 });
                 build_window(&handle, shared.clone())?;
+                app.manage(hosted::HostedState::default());
+                if let Some(menu) = handle
+                    .menu()
+                    .and_then(|m| m.get("location_menu"))
+                    .and_then(|i| i.as_submenu().cloned())
+                {
+                    hosted::register_menu(&handle, menu);
+                }
 
                 // Menu bar icon and the shell's preferences (Keep Mac awake survives restarts).
                 let prefs_file = handle.path().app_config_dir()?.join("prefs.json");
@@ -618,6 +656,24 @@ pub fn run() {
                     let _ = bg.tray_keep_awake.set_checked(held);
                 }
                 app.manage(bg);
+
+                // Hosted locations: reopen the last one, and take the relay's
+                // sign-in hand-back, whether it launched the app or arrived later.
+                hosted::restore(&handle);
+                {
+                    use tauri_plugin_deep_link::DeepLinkExt;
+                    let links = handle.clone();
+                    handle.deep_link().on_open_url(move |event| {
+                        for url in event.urls() {
+                            hosted::handle_deep_link(&links, &url);
+                        }
+                    });
+                    if let Ok(Some(urls)) = handle.deep_link().get_current() {
+                        for url in urls {
+                            hosted::handle_deep_link(&handle, &url);
+                        }
+                    }
+                }
 
                 let payload = payload_dir(&handle);
                 let spec = launcher::LaunchSpec {
@@ -653,7 +709,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             // Closing the window (or Cmd-W) hides it: the server and phone sessions keep running.
             if let WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == MAIN {
+                if window.label() == MAIN || hosted::is_location_window(window.label()) {
                     api.prevent_close();
                     let _ = window.hide();
                 }

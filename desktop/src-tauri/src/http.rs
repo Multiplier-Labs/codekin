@@ -94,6 +94,35 @@ pub fn active_sessions(host: &str, port: u16, token: &str, timeout: Duration) ->
         .as_u64()
 }
 
+/// Check that `origin` is a Codekin relay (`GET /api/relay/info`) and return
+/// its display name. Uses the system's trust store, so a company relay with a
+/// private CA installed on the Mac works.
+pub fn relay_info(origin: &str, timeout: Duration) -> Result<String, String> {
+    let tls = ureq::tls::TlsConfig::builder()
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .max_redirects(0)
+        .http_status_as_error(false)
+        .tls_config(tls)
+        .build()
+        .into();
+    let mut res = agent
+        .get(&format!("{origin}/api/relay/info"))
+        .call()
+        .map_err(|e| format!("Couldn't reach {origin}: {e}"))?;
+    let status = res.status().as_u16();
+    let body = res.body_mut().read_to_string().unwrap_or_default();
+    if status != 200 {
+        return Err(format!(
+            "{origin} isn't a Codekin relay, or its version doesn't support the desktop app yet (relay info answered {status})."
+        ));
+    }
+    crate::locations::parse_relay_info(&body)
+        .ok_or_else(|| format!("{origin} answered, but not as a Codekin relay."))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,6 +203,28 @@ mod tests {
         let res = ping("127.0.0.1", port, Duration::from_millis(300));
         drop(listener);
         assert_eq!(res, Ping::Failed);
+    }
+
+    #[test]
+    fn checks_relay_info_on_a_loopback_relay() {
+        let port = serve(Box::leak(
+            json(
+                "200 OK",
+                r#"{"app":"codekin-relay","version":"0.10.0","name":"Dev relay"}"#,
+            )
+            .into_boxed_str(),
+        ));
+        let origin = format!("http://127.0.0.1:{port}");
+        assert_eq!(
+            relay_info(&origin, Duration::from_secs(2)),
+            Ok("Dev relay".into())
+        );
+        let port = serve(Box::leak(
+            json("200 OK", r#"{"app":"codekin","version":"0.10.0"}"#).into_boxed_str(),
+        ));
+        assert!(relay_info(&format!("http://127.0.0.1:{port}"), Duration::from_secs(2)).is_err());
+        let port = serve(Box::leak(json("404 Not Found", "{}").into_boxed_str()));
+        assert!(relay_info(&format!("http://127.0.0.1:{port}"), Duration::from_secs(2)).is_err());
     }
 
     #[test]

@@ -54,10 +54,21 @@ same payload smoke test before it publishes, so anything they break fails the de
 |---|---|
 | `protocol.rs` | The launcher's event / credential contract, URLs, navigation allowlist, restart backoff (pure, unit-tested) |
 | `launcher.rs` | Spawns `codekin app-server` in its own process group, stdin = lifetime pipe, fd 3 = credential; graceful SIGTERM, group SIGKILL backstop |
-| `http.rs` | `/api/ping` (attach liveness) and active-session count, no redirects |
-| `background.rs` | Shell preferences (`prefs.json`) and Keep Mac awake (`caffeinate -i -w <pid>`) |
+| `http.rs` | `/api/ping` (attach liveness), active-session count, and a relay's `/api/relay/info`; no redirects |
+| `background.rs` | Shell preferences (`prefs.json`, including saved locations) and Keep Mac awake (`caffeinate -i -w <pid>`) |
 | `supervisor.rs` | Start / attach / crash-restart / Quit state machine, independent of Tauri |
+| `locations.rs` | Hosted locations: origin rules, data store ids, the sign-in handoff (state + PKCE, deep-link checks), user agent (pure, unit-tested) |
+| `hosted.rs` | Location windows, the Location menus, the location manager, the `codekin://` handoff and its commands |
 | `lib.rs` | Window, app menu and menu bar icon, Open at login, navigation guard, splash commands (`retry`, `show_logs`, `quit`), Quit and Restart confirmations |
+
+### Hosted locations
+
+*Location* in the menu bar (and in the menu bar icon) switches the window between **This Mac** and saved
+hosted locations: app.codekin.ai or a self-hosted relay. *Add Location…* checks the address with the relay's
+`/api/relay/info` and opens it. Each location keeps its own cookies (a WebKit data store per location on
+macOS 14+). Signing in goes through the default browser, where GitHub, passkeys and 2FA already work, and
+comes back as a `codekin://auth` link (plan: Phase 4). The local server keeps running whichever location is on
+screen. Removing a location signs it out and deletes its data. A relay needs Codekin 0.10.0 or later.
 
 ```bash
 # After building the payload (above):
