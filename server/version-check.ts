@@ -6,9 +6,7 @@
  * without repeated network calls.
  */
 
-import { readFileSync } from 'fs'
-import { join } from 'path'
-import { jsonParse } from './json-parse.js'
+import { codekinPackageVersion } from './relay/relay-credential.js'
 
 /** How long to cache the npm lookup result (6 hours). */
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000
@@ -30,13 +28,13 @@ const state: VersionState = {
   checkedAt: 0,
 }
 
-/** Read the current version from package.json (once). */
+/**
+ * The running Codekin version (once). Uses the root `codekin` package.json:
+ * `server/package.json` is the server workspace's own manifest (always 1.0.0)
+ * and isn't shipped in the npm package at all.
+ */
 function getCurrentVersion(): string {
-  if (!state.currentVersion) {
-    const pkgPath = join(import.meta.dirname, '..', 'package.json')
-    const pkg = jsonParse(readFileSync(pkgPath, 'utf-8')) as Record<string, unknown>
-    state.currentVersion = String(pkg.version)
-  }
+  if (!state.currentVersion) state.currentVersion = codekinPackageVersion()
   return state.currentVersion
 }
 
@@ -72,6 +70,10 @@ async function fetchLatestVersion(): Promise<string | null> {
  */
 export async function checkForUpdates(): Promise<void> {
   const current = getCurrentVersion()
+  if (current === 'unknown') {
+    console.log('[update] Skipping the update check: the running Codekin version is unknown')
+    return
+  }
   const latest = await fetchLatestVersion()
   state.checkedAt = Date.now()
 

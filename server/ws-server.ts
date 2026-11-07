@@ -597,7 +597,7 @@ wss.on('connection', (ws: WebSocket, req) => {
   // missing Origin in prod indicates a non-browser client trying to bypass
   // the check). Dev: accept missing Origin so CLI tools still work.
   const origin = req.headers.origin
-  if (!isWsOriginAllowed(origin, CORS_ORIGIN, process.env.NODE_ENV === 'production')) {
+  if (!isWsOriginAllowed(origin, CORS_ORIGIN, process.env.NODE_ENV === 'production', req.headers.host)) {
     ws.close(4003, 'Origin not allowed')
     return
   }
