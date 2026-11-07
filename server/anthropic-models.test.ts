@@ -6,6 +6,8 @@
  * The module keeps process-level state (cache + in-flight probe promise), so
  * each test loads a fresh copy via vi.resetModules().
  */
+import { existsSync, readdirSync } from 'fs'
+import { basename, dirname } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Mock config so we don't depend on a real claude binary lookup.
@@ -197,6 +199,33 @@ describe('anthropic-models', () => {
   /* ---------------------------------------------------------------- */
 
   describe('triggerCliProbeIfNeeded', () => {
+    it('probes from an empty temp directory with a clean environment', async () => {
+      vi.stubEnv('CLAUDE_CODE_SESSION_ID', 'parent-session')
+      vi.stubEnv('CLAUDE_CODE_MESSAGING_SOCKET', '/tmp/cc-socks/1.sock')
+      const opts: Array<{ cwd?: string; env?: Record<string, string> }> = []
+      mockExecFile.mockImplementation((_bin: string, args: string[], o: any, cb: ExecCallback) => {
+        opts.push(o)
+        expect(existsSync(o.cwd)).toBe(true)
+        queueMicrotask(() => cb(...(args[2] === 'claude-opus-4-8' ? okProbe(args[2]) : notFoundProbe())))
+        return { unref: vi.fn() }
+      })
+
+      const mod = await loadFreshModule()
+      await mod.refreshAnthropicModels()
+      vi.unstubAllEnvs()
+
+      const cwds = new Set(opts.map(o => o.cwd))
+      expect(cwds.size).toBe(1)
+      const [cwd] = cwds
+      expect(cwd).not.toBe(process.cwd())
+      expect(readdirSync(dirname(cwd!))).not.toContain(basename(cwd!))
+      for (const o of opts) {
+        expect(o.env?.CLAUDE_CODE_SESSION_ID).toBeUndefined()
+        expect(o.env?.CLAUDE_CODE_MESSAGING_SOCKET).toBeUndefined()
+        expect(o.env?.PATH).toBe(process.env.PATH)
+      }
+    })
+
     it('probes candidate models and caches the discovered IDs', async () => {
       setExecFileImpl(new Set(['claude-opus-4-8', 'claude-sonnet-4-6']))
 

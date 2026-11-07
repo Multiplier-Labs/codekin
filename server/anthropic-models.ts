@@ -19,7 +19,11 @@
  */
 
 import { execFile } from 'child_process'
+import { mkdtempSync, rmSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { CLAUDE_BINARY } from './config.js'
+import { buildHarnessEnv } from './harness-env.js'
 
 export interface ClaudeModelInfo {
   id: string
@@ -209,7 +213,7 @@ type ProbeResult =
  * stdout, so parse it regardless of the exit code — `api_error_status` is the
  * only way to tell "model doesn't exist" (404) from "API had a bad moment".
  */
-function probeModel(modelId: string): Promise<ProbeResult> {
+function probeModel(modelId: string, cwd: string): Promise<ProbeResult> {
   if (!MODEL_ID_PATTERN.test(modelId)) {
     console.warn(`[model-probe] refusing to probe malformed model ID: ${modelId}`)
     return Promise.resolve({ status: 'unavailable' })
@@ -219,7 +223,9 @@ function probeModel(modelId: string): Promise<ProbeResult> {
       CLAUDE_BINARY,
       // Note: do NOT pass --bare — it strips the modelUsage field we need.
       ['-p', '--model', modelId, '--output-format', 'json', 'reply with only: ok'],
-      { timeout: 30_000 },
+      // An empty cwd: the server's own directory brings its CLAUDE.md, MCP servers
+      // and project hooks, and a slow Stop hook there outlasted the timeout.
+      { timeout: 30_000, cwd, env: buildHarnessEnv() },
       (err, stdout) => {
         try {
           const result = JSON.parse(stdout) as {
@@ -282,7 +288,17 @@ function delay(ms: number): Promise<void> {
  * definitive 404/403 removes a model.
  */
 async function fetchViaCli(): Promise<ClaudeModelInfo[] | null> {
-  const results = await mapWithConcurrency(CANDIDATE_MODEL_IDS, PROBE_CONCURRENCY, probeModel)
+  const cwd = mkdtempSync(join(tmpdir(), 'codekin-model-probe-'))
+  try {
+    return await probeCandidates(cwd)
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+}
+
+async function probeCandidates(cwd: string): Promise<ClaudeModelInfo[] | null> {
+  const probe = (id: string) => probeModel(id, cwd)
+  const results = await mapWithConcurrency(CANDIDATE_MODEL_IDS, PROBE_CONCURRENCY, probe)
 
   const failedIdx = results.flatMap((r, i) => (r.status === 'error' ? [i] : []))
   if (failedIdx.length > 0) {
@@ -290,7 +306,7 @@ async function fetchViaCli(): Promise<ClaudeModelInfo[] | null> {
     const retried = await mapWithConcurrency(
       failedIdx.map(i => CANDIDATE_MODEL_IDS[i]),
       PROBE_CONCURRENCY,
-      probeModel,
+      probe,
     )
     failedIdx.forEach((idx, j) => {
       if (retried[j].status !== 'error') results[idx] = retried[j]
@@ -319,9 +335,9 @@ async function fetchViaCli(): Promise<ClaudeModelInfo[] | null> {
     }
   })
 
-  const errors = results.filter(r => r.status === 'error').length
-  if (errors > 0) {
-    console.warn(`[model-probe] ${errors} probe(s) failed transiently after retry, ${carriedOver} model(s) carried over from previous run`)
+  const failed = CANDIDATE_MODEL_IDS.filter((_, i) => results[i].status === 'error')
+  if (failed.length > 0) {
+    console.warn(`[model-probe] ${failed.length} probe(s) failed transiently after retry (${failed.join(', ')}), ${carriedOver} model(s) carried over from previous run`)
   }
 
   return models.length > 0 ? sortByPreference(models) : null
