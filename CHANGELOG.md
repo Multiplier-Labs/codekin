@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Codekin run with `codekin start` or as a service, without `CORS_ORIGIN` set, now keeps its live connection. Since 0.6.4 the server closed the WebSocket of its own page (`4003 Origin not allowed`), because the default `CORS_ORIGIN` is the Vite dev server, so the UI never received session updates or agent status. Pages served by the server itself are now accepted when it's reached through `localhost` or an IP address; deployments on a domain name still set `CORS_ORIGIN`
+- The update check no longer fails with an unhandled `ENOENT` on npm installs: it read `server/package.json`, which isn't in the npm package, instead of Codekin's own version
 - Joe's Codekin tools work again under Codex after Node or Codekin moves (for example a Node upgrade, an npm reinstall, or the planned desktop app at a new location). The `[mcp_servers.codekin]` section in `~/.codex/config.toml` was written once and never updated, so it could keep pointing at a Node binary that no longer exists. Its `command` and `args` are now kept current on start; the rest of the file, including other keys in that section, is left as is
 
 ### Added

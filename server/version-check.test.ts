@@ -12,7 +12,7 @@ const { readFileSync } = await import('fs')
 const mockReadFileSync = readFileSync as unknown as ReturnType<typeof vi.fn>
 
 function setPackageVersion(version: string): void {
-  mockReadFileSync.mockImplementation(() => JSON.stringify({ version }))
+  mockReadFileSync.mockImplementation(() => JSON.stringify({ name: 'codekin', version }))
 }
 
 function mockFetch(impl: (url: string) => Response | Promise<Response>): void {
@@ -50,6 +50,30 @@ describe('version-check', () => {
 
       expect(logSpy).toHaveBeenCalledWith('[update] Codekin 1.0.0 is up to date')
       expect(await mod.getUpdateNotification()).toBeNull()
+    })
+
+    it('reads the root codekin package, not the server workspace manifest', async () => {
+      // Only a package named "codekin" counts; server/package.json is "codekin-server".
+      mockReadFileSync.mockImplementation((p: unknown) =>
+        String(p).endsWith('server/package.json')
+          ? JSON.stringify({ name: 'codekin-server', version: '1.0.0' })
+          : JSON.stringify({ name: 'codekin', version: '0.9.9' }))
+      mockFetch(() => new Response(JSON.stringify({ version: '0.9.9' }), { status: 200 }))
+
+      const mod = await loadFreshModule()
+      await mod.checkForUpdates()
+
+      expect(logSpy).toHaveBeenCalledWith('[update] Codekin 0.9.9 is up to date')
+    })
+
+    it('skips the check instead of throwing when the version is unknown', async () => {
+      mockReadFileSync.mockImplementation(() => { throw new Error('ENOENT') })
+      const fetchSpy = vi.fn()
+      globalThis.fetch = fetchSpy as unknown as typeof fetch
+
+      const mod = await loadFreshModule()
+      await expect(mod.checkForUpdates()).resolves.toBeUndefined()
+      expect(fetchSpy).not.toHaveBeenCalled()
     })
 
     it('logs that update is available when latest is newer', async () => {
