@@ -208,6 +208,26 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      # The real release key (repository secrets) must match the committed public
+      # key and its password must work, or the first release fails. Sign a file
+      # and verify it with minisign; skipped where secrets aren't available (forks).
+      - name: Check the release signing key
+        working-directory: desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then echo "No signing key secret here; skipping."; exit 0; fi
+          brew install minisign >/dev/null
+          T="$RUNNER_TEMP/keycheck"; mkdir -p "$T"
+          echo "codekin release key check $GITHUB_SHA" > "$T/probe.txt"
+          npx tauri signer sign "$T/probe.txt"
+          node -p "require('./src-tauri/tauri.conf.json').plugins.updater.pubkey" | base64 -d > "$T/codekin.pub"
+          base64 -d < "$T/probe.txt.sig" > "$T/probe.txt.minisig"
+          minisign -V -p "$T/codekin.pub" -m "$T/probe.txt" -x "$T/probe.txt.minisig"
+          rm -rf "$T"
+
       # The release job's updater path, with a throwaway key: signed
       # .app.tar.gz + .sig carrying the version, and a valid latest.json.
       - name: Updater artifacts with a throwaway key
