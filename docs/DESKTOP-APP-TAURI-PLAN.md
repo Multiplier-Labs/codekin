@@ -593,6 +593,122 @@ Unsigned installers trigger SmartScreen warnings. Options are Azure Trusted Sign
 code-signing certificate. Like the Apple account (D3), this is an account decision that blocks only the signing
 step.
 
+## Phase 4: hosted locations in the app (planned)
+
+Status: **specified, not started.** Decisions D9–D12 below are proposals awaiting confirmation.
+
+### Goal
+
+Use the desktop app as a client for hosted Codekin too: open app.codekin.ai, or any self-hosted relay
+(docs/SELF-HOSTED-RELAY.md), in the app window, and switch between several. Users at companies with their own
+relay, or with more than one (regions, teams), pick the location instead of keeping browser tabs. "This Mac"
+(the bundled or attached local server) stays a location of its own, and the local server keeps running while
+another location is shown, so the Mac stays reachable from the phone.
+
+### Decisions (proposed)
+
+| # | Question | Proposal | Why |
+|---|---|---|---|
+| D9 | How does the app sign in to a hosted location? | **In the system browser, handed back by deep link**: the app opens the relay's desktop sign-in page in the default browser; after GitHub OAuth and 2FA there, the relay redirects to `codekin://auth` with a one-time code; the app redeems it in its webview, which then holds its own session cookie. | GitHub discourages OAuth in embedded webviews, and WebAuthn (passkeys) in WKWebView only works for Developer ID-signed apps with an Associated Domains entitlement per relay domain, which self-hosted relays can't easily get. The browser already has the user's GitHub session and passkeys. |
+| D10 | One location at a time, or several windows? | **One main window, one location at a time** in v1, switched from the app menu and the menu bar icon. | Matches the single-window shell. Separate windows can come later on the same location model. |
+| D11 | Where are locations stored, and how are sessions kept apart? | In the shell's `prefs.json` (`locations: [{ id, name, url }]`; "This Mac" is implicit). Each hosted location gets its own **WebKit data store** (macOS 14+, `WKWebsiteDataStore(forIdentifier:)`, exposed by Tauri as `data_store_identifier`, a 16-byte id derived from the location id), so cookies never mix between relays or with the local origin. The app supports macOS 12, so on 12–13 all locations share the default store; cookies are still per origin, but removing a location has to clear that origin's data explicitly. | Removing a location deletes its data store, which signs it out cleanly. |
+| D12 | Step-up checks inside the hosted UI (the relay's "recent second factor" for sensitive actions) | TOTP works in the webview. A passkey step-up is sent to the browser via the same handoff, marking the webview's session as recently verified. In-webview passkeys wait for Phase 3b (Developer ID) and only for app.codekin.ai's domain. | Keeps passkey-only accounts usable without Associated Domains. |
+
+### Location model and UI
+
+- **Adding a location:** a bundled page (Tauri origin, like the splash) asks for a name and an `https://` URL. The
+  shell checks it is a Codekin relay through a new unauthenticated identity endpoint,
+  `GET /api/relay/info` → `{ "app": "codekin-relay", "version", "name" }` (the relay analogue of `/api/ping`),
+  before saving. `http://` is accepted only for loopback, for relay development.
+- **Switching:** app menu → Location → *This Mac* / each saved location / *Add Location…* / *Manage Locations…*;
+  the menu bar icon gets the same submenu. The last-used location reopens at launch.
+- **Window guard:** the navigation allowlist becomes "the selected location's origin" (plus the bundled pages).
+  Everything else still opens in the default browser, and remote origins still get **no IPC**
+  (no `remote` capability), so a compromised relay page can't reach the shell.
+- **Signed out:** when the hosted UI reports no session, the shell shows a bundled "Sign in to <name>" page with
+  a button that starts the D9 handoff.
+
+### Sign-in handoff (D9)
+
+1. The shell generates `state` and a PKCE pair (`code_verifier`, `code_challenge = S256(verifier)`), and opens
+   `https://<relay>/auth/desktop/start?state=…&code_challenge=…` in the default browser.
+2. The relay runs its normal sign-in (GitHub OAuth, then TOTP or passkey). It then mints a **one-time code**
+   bound to the user, `state` and `code_challenge` (60 s TTL, single use) and redirects to
+   `codekin://auth?relay=<origin>&code=…&state=…`. A browser page says "You can return to Codekin".
+3. `tauri-plugin-deep-link` delivers the URL to the running app (via the single-instance plugin when the app
+   is already open). The shell checks `state` and that `relay` is the origin it started with.
+4. The shell navigates the location's webview to `https://<relay>/auth/desktop/claim` with a POST of `code` and
+   `code_verifier` (a bundled auto-submitting form). The relay verifies both, creates a normal session for the
+   webview's data store (`codekin_relay_sid`, SameSite=Lax, same lifetime and revocation as a browser session),
+   and redirects to `/`.
+
+PKCE is what makes the custom URL scheme safe: another app that registers `codekin://` and steals the code
+can't redeem it without the verifier, which never leaves the shell. Sessions created this way are marked
+`client: desktop` so Settings → Security in the hosted app can list and revoke them.
+
+### Relay changes (Phase 4a)
+
+- `GET /api/relay/info` (public, constant response).
+- `GET /auth/desktop/start`, the one-time code store (in the control-plane DB, hashed, 60 s, single use,
+  bound to `state` + `code_challenge`), `POST /auth/desktop/claim`, rate limits, and audit log entries
+  ("signed in on the desktop app").
+- The redirect target is fixed to `codekin://auth`; never taken from the request.
+- Tests for replay, expiry, wrong verifier, wrong state, and allowlist / 2FA still enforced.
+
+### App changes (Phase 4b)
+
+Location model in `prefs.json`, data stores per location, the switcher (app menu + menu bar icon), the
+add/manage pages, the generalized navigation guard, `tauri-plugin-deep-link` registered for `codekin://`, and the
+handoff (state + PKCE). The Quit / update / supervisor flows are unchanged: they always concern the local
+server, whichever location is on screen.
+
+### Testing
+
+Relay: unit and route tests for the handoff (Linux). App: Rust unit tests for the location model, URL
+validation and PKCE; CI launch test with a stub relay. Manual (Mac): add app.codekin.ai and a second relay,
+sign in to both through the browser with a passkey account, switch between them and This Mac, sign-out and
+revocation from Settings → Security, deep link while the app is closed and while it is open.
+
+## Node.js version (Phase 4 analysis)
+
+Asked: why does Codekin still use Node 20?
+
+### Findings
+
+- **Nothing chose Node 20 after launch.** The minimum `20` dates from the initial release commit (2026-03-08):
+  `install.sh` (`MIN_NODE_VERSION=20`), README / GETTING-STARTED / SELF-HOSTED-RELAY ("Node.js 20+"), the CI matrix
+  `[20, 22]` and `publish.yml` building the npm package on Node 20. It was a reasonable floor then and was never
+  revisited. `package.json` has no `engines` field, so npm never warns anyone.
+- **Node 20 is end of life** since 2026-04-30: no security releases for over six months. Node 22 is in
+  maintenance until 2027-04-30, Node 24 in maintenance LTS until 2028-04-30, and **Node 26 became Active LTS on
+  2026-10-28**.
+- **"Node 20+" is already untrue.** `file-type` 22 (a runtime dependency) requires Node ≥ 22, and Vite 8 (build)
+  requires `^20.19 || >=22.12`. CI on Node 20 passes only because the code paths used happen to work.
+- **The versions users actually get aren't tested.** `install.sh` runs `nvm install --lts`, which installs
+  **Node 26** since 2026-10-28. CI tests 20 and 22 only, the prod host runs 24.22.1, and the desktop app bundles
+  24.22.2.
+- **New installs on Node 26 compile SQLite from source.** `better-sqlite3` 12.9.0 declares Node 20–25 and ships
+  prebuilt binaries per Node ABI; there is none for Node 26 (ABI 147), so `npm install -g codekin` falls back
+  to `node-gyp` and fails on machines without Python and a C++ toolchain.
+- **npm 11 (Node 24+) blocks dependency install scripts unless allowed** (still only a warning in 11.19.1). That
+  is the same `better-sqlite3` install script; the desktop payload already needs a build-only `.npmrc` for it.
+- **`better-sqlite3` 13** (2026-07) moved to Node-API with prebuilt binaries inside the package for macOS,
+  Linux (glibc and musl) and Windows, `gypfile: false` and **no install script**. One binary works on every
+  Node ≥ 22, and both the compile fallback and the install-script problem disappear. Its 13.0.0 notes list only
+  additions (`db.explain()`, `statement.toString()`) and an error-class fix.
+
+### Plan
+
+One PR, independent of the rest of Phase 4, ideally right after 0.9.10:
+
+1. Upgrade `better-sqlite3` to 13.x and run the full suite (server SQLite stores, session archive, D7 lock).
+   Remove the desktop payload's `allow-scripts` `.npmrc` and addon check, which no longer apply.
+2. Declare `"engines": { "node": ">=22.12" }` (Vite's floor); `install.sh` `MIN_NODE_VERSION=22`; docs say
+   "Node.js 22+ (24 LTS recommended)".
+3. CI matrix `[22, 24, 26]`; `publish.yml` builds on Node 24; the desktop runtime stays pinned to 24 and moves
+   to 26 once 26 has a few patch releases.
+4. Release as **0.10.0**, since dropping Node 20 is breaking for anyone still on it. The CHANGELOG says so first.
+
 ## Phases
 
 | Phase | Scope | Exit criterion |
@@ -603,6 +719,9 @@ step.
 | 2 — Background + pairing | Menu bar icon, open at login, keep awake, App Nap, in-app relay pairing | Phone reaches a freshly installed app via app.codekin.ai with no terminal |
 | 3a — Release pipeline | Release job on the `v*` tag producing an unsigned `.dmg`, updater key and `latest.json`, move-to-Applications | A tag produces a `.dmg` that internal testers install and update |
 | 3b — Signing (blocked on Apple account) | Developer ID signing with hardened runtime and entitlements, notarization, stapling | Notarized `.dmg` from a tag installs and updates on a clean Mac with no Gatekeeper warning |
+| Node 22+ (any time) | `better-sqlite3` 13, `engines`, installer and docs, CI `[22, 24, 26]`, publish on 24; see [Node.js version](#nodejs-version-phase-4-analysis) | 0.10.0 installs on Node 26 with no compiler; CI green on 22/24/26 |
+| 4a — Relay: desktop sign-in | `/api/relay/info`, `/auth/desktop/start` + `/claim` with PKCE one-time codes, `client: desktop` sessions | Route tests for replay, expiry, wrong verifier/state; deployed to app.codekin.ai |
+| 4b — App: locations | Location model, per-location data stores, switcher, add/manage pages, deep link, handoff | Sign in to two relays through the browser and switch between them and This Mac on a Mac |
 
 ## Testing
 
