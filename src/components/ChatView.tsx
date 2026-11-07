@@ -10,8 +10,8 @@
  * bottom, with a manual "scroll to bottom" button when scrolled up.
  */
 
-import { useEffect, useLayoutEffect, useRef, useCallback, useState } from 'react'
-import Markdown from 'react-markdown'
+import { memo, useEffect, useLayoutEffect, useRef, useCallback, useState } from 'react'
+import Markdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import DOMPurify from 'dompurify'
 import hljs from '../lib/hljs'
@@ -201,7 +201,72 @@ function stripNoise(text: string): string {
     .trim()
 }
 
-function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: { msg: ChatMessage & { type: 'assistant' }; fontSize: number; variant?: ChatViewVariant; repeatCount?: number }) {
+const REMARK_PLUGINS = [remarkGfm]
+
+/**
+ * react-markdown's element overrides, one stable object per font size. An
+ * inline object makes every `code`, `a` and `img` a new component type on each
+ * render, so React remounts them: every streamed update tore down and rebuilt
+ * each code block (its own overflow scroller), and WebKit (Safari, the desktop
+ * app) answered by snapping the chat's scroll position back mid-scroll.
+ */
+const componentsBySize = new Map<number, Components>()
+function markdownComponents(fontSize: number): Components {
+  let components = componentsBySize.get(fontSize)
+  if (!components) {
+    components = {
+      code({ className, children, ...props }) {
+        const match = /language-(\w+)/.exec(className || '')
+        const codeString = String(children).replace(/\n$/, '')
+        if (match) {
+          return (
+            <div className="group/codeblock relative">
+              <div
+                className="hljs"
+                style={{
+                  margin: '0.5em 0',
+                  borderRadius: '6px',
+                  fontSize: `${fontSize - 1}px`,
+                  padding: '1em',
+                  overflowX: 'auto',
+                }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlightCode(codeString, match[1])) }}
+              />
+              <CodeCopyButton code={codeString} />
+            </div>
+          )
+        }
+        return (
+          <code className={`${className || ''} rounded-control bg-surface-raised px-1.5 py-0.5`} {...props}>
+            {children}
+          </code>
+        )
+      },
+      a({ href, children, ...props }) {
+        const safeHref = href && /^(https?:|mailto:|\/|#)/i.test(href) ? href : '#'
+        return <a href={safeHref} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
+      },
+      img({ src, alt, ...props }) {
+        // Only allow https: and data: URIs to prevent tracking beacons and arbitrary protocol access
+        const safeSrc = src && /^(https:|data:image\/)/i.test(src) ? src : undefined
+        if (!safeSrc) return <span className="text-ink-muted">[image blocked: untrusted source]</span>
+        return (
+          <img
+            src={safeSrc}
+            alt={alt || 'Image'}
+            className="max-w-full max-h-96 rounded-control border border-edge-strong my-2"
+            loading="lazy"
+            {...props}
+          />
+        )
+      },
+    }
+    componentsBySize.set(fontSize, components)
+  }
+  return components
+}
+
+const AssistantMessage = memo(function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: { msg: ChatMessage & { type: 'assistant' }; fontSize: number; variant?: ChatViewVariant; repeatCount?: number }) {
   const displayText = stripNoise(msg.text)
   if (!displayText) return null
 
@@ -212,54 +277,8 @@ function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: {
         style={{ fontSize: `${fontSize}px` }}
       >
         <Markdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            code({ className, children, ...props }) {
-              const match = /language-(\w+)/.exec(className || '')
-              const codeString = String(children).replace(/\n$/, '')
-              if (match) {
-                return (
-                  <div className="group/codeblock relative">
-                    <div
-                      className="hljs"
-                      style={{
-                        margin: '0.5em 0',
-                        borderRadius: '6px',
-                        fontSize: `${fontSize - 1}px`,
-                        padding: '1em',
-                        overflowX: 'auto',
-                      }}
-                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlightCode(codeString, match[1])) }}
-                    />
-                    <CodeCopyButton code={codeString} />
-                  </div>
-                )
-              }
-              return (
-                <code className={`${className || ''} rounded-control bg-surface-raised px-1.5 py-0.5`} {...props}>
-                  {children}
-                </code>
-              )
-            },
-            a({ href, children, ...props }) {
-              const safeHref = href && /^(https?:|mailto:|\/|#)/i.test(href) ? href : '#'
-              return <a href={safeHref} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
-            },
-            img({ src, alt, ...props }) {
-              // Only allow https: and data: URIs to prevent tracking beacons and arbitrary protocol access
-              const safeSrc = src && /^(https:|data:image\/)/i.test(src) ? src : undefined
-              if (!safeSrc) return <span className="text-ink-muted">[image blocked: untrusted source]</span>
-              return (
-                <img
-                  src={safeSrc}
-                  alt={alt || 'Image'}
-                  className="max-w-full max-h-96 rounded-control border border-edge-strong my-2"
-                  loading="lazy"
-                  {...props}
-                />
-              )
-            },
-          }}
+          remarkPlugins={REMARK_PLUGINS}
+          components={markdownComponents(fontSize)}
         >
           {displayText}
         </Markdown>
@@ -271,7 +290,7 @@ function AssistantMessage({ msg, fontSize, variant = 'default', repeatCount }: {
       </div>
     </div>
   )
-}
+})
 
 function ToolGroupInline({ msg, fontSize }: { msg: ChatMessage & { type: 'tool_group' }; fontSize: number }) {
   const smallSize = fontSize - 1

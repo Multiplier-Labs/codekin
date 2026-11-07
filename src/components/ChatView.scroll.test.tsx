@@ -153,3 +153,35 @@ describe('ChatView never fights the reader’s own scrolling (WebKit snap-back)'
     expect(writes()).toBe(0)
   })
 })
+
+describe('ChatView keeps rendered messages in place while output streams', () => {
+  it('does not remount an earlier message’s code block when a new message arrives', () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    const first: ChatMessage[] = [
+      { type: 'assistant', text: 'Here:\n\n```ts\nconst a = 1\n```\n\nSee `x` and [docs](https://example.com).', complete: true, key: 'm1' },
+    ]
+    render(first)
+    const codeBlock = container.querySelector('.hljs')
+    const inlineCode = container.querySelector('p code')
+    const link = container.querySelector('a[href="https://example.com"]')
+    expect(codeBlock).not.toBeNull()
+
+    render([...first, { type: 'assistant', text: 'streaming…', complete: false, key: 'm2' }])
+    expect(container.querySelector('.hljs')).toBe(codeBlock)
+    expect(container.querySelector('p code')).toBe(inlineCode)
+    expect(container.querySelector('a[href="https://example.com"]')).toBe(link)
+  })
+
+  it('keeps the code block of the streaming message itself while its text grows', () => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    const text = 'Plan:\n\n```sh\nnpm test\n```\n\nRunning'
+    render([{ type: 'assistant', text, complete: false, key: 'm1' }])
+    const codeBlock = container.querySelector('.hljs')
+    render([{ type: 'assistant', text: text + ' the suite now', complete: false, key: 'm1' }])
+    expect(container.querySelector('.hljs')).toBe(codeBlock)
+  })
+})

@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- In Safari and the desktop app, the chat no longer snaps back up to the last response while you scroll toward new output. WebKit scrolls on a separate thread, and a scroll-to-bottom write that lands during your own scroll (trackpad momentum included) is dropped, after which the view snaps to a stale position. The chat now holds its auto-scroll while you scroll and resumes once you stop, and never writes when it is already at the bottom
+- In Safari and the desktop app, the chat no longer snaps back up to the latest response while an agent works. Every streamed update re-created each code block, inline code and link in the transcript (react-markdown's overrides were a new object on every render), and WebKit, which scrolls on a separate thread, answered the teardown of those nested scroll areas by snapping the chat to a stale position. The overrides are now stable and unchanged messages don't re-render. The chat also holds its auto-scroll while you scroll (trackpad momentum included) and never writes when already at the bottom
 
 ### Changed
 - The desktop welcome screen no longer reads as a choice between running agents on this Mac and using the web app: the options are now **Start with this Mac** and **Start with Codekin on the web**, and the screen says you can use both from the Location menu (#791)
