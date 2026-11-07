@@ -7,13 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-07
+
+**Upgrading:** check `node --version` first. On anything older than 22.14, upgrade Node (for example `nvm install 24`) before `npm install -g codekin@0.10.0`: npm only warns about the `engines` field, and the new SQLite module crashes on load on older Node. The desktop app bundles its own Node and isn't affected.
+
 ### Changed
-- **Breaking: Codekin now needs Node.js 22.14 or later** (24 LTS recommended). Node 20 has been end of life since 2026-04-30, and Codekin already depended on packages that need Node 22. `package.json` now declares `engines`, `install.sh` installs the current LTS when it finds an older Node, and CI tests Node 22, 24 and 26
-- `better-sqlite3` upgraded to 13, which ships prebuilt binaries for macOS, Linux and Windows inside the package. `npm install -g codekin` no longer compiles SQLite from source, so it works on Node 26 without Python or a C++ toolchain, and it isn't affected by npm 11's install-script blocking
+- **Breaking: Codekin now needs Node.js 22.14 or later** (24 LTS recommended). Node 20 has been end of life since 2026-04-30, and Codekin already depended on packages that need Node 22. `package.json` now declares `engines`, `install.sh` installs the current LTS when it finds an older Node, and CI tests Node 22, 24 and 26 (#771)
+- `better-sqlite3` upgraded to 13, which ships prebuilt binaries for macOS, Linux and Windows inside the package. `npm install -g codekin` no longer compiles SQLite from source, so it works on Node 26 without Python or a C++ toolchain, and it isn't affected by npm 11's install-script blocking (#771)
 
 ### Fixed
-- The Claude model picker no longer shrinks to a single model. Model discovery ran its probes in the server's working directory, so each one loaded that repository's `CLAUDE.md`, MCP servers and project hooks; a slow `Stop` hook there outlasted the 30-second probe timeout, and models whose probe timed out were dropped from the list for 24 hours. Probes now run in an empty temporary directory, and the server log names the models whose probes failed
-- Sessions started by a Codekin server that was itself launched from a Claude Code session (for example, an agent running `pm2 restart`) no longer inherit that session's identity. Variables such as `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_EXECPATH` and `CLAUDE_PROJECT_DIR` are now removed before Claude, Codex, OpenCode or Grok is started; user configuration such as `CLAUDE_CODE_OAUTH_TOKEN` still passes through
+- The Claude model picker no longer shrinks to a single model. Model discovery ran its probes in the server's working directory, so each one loaded that repository's `CLAUDE.md`, MCP servers and project hooks; a slow `Stop` hook there outlasted the 30-second probe timeout, and models whose probe timed out were dropped from the list for 24 hours. Probes now run in an empty temporary directory, and the server log names the models whose probes failed (#772)
+- Sessions started by a Codekin server that was itself launched from a Claude Code session (for example, an agent running `pm2 restart`) no longer inherit that session's identity. Variables such as `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_EXECPATH` and `CLAUDE_PROJECT_DIR` are now removed before Claude, Codex, OpenCode or Grok is started; user configuration such as `CLAUDE_CODE_OAUTH_TOKEN` still passes through (#772)
 
 ## [0.9.10] - 2026-11-07
 
