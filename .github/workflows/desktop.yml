@@ -3,8 +3,8 @@ name: Desktop
 # Builds the desktop app's server payload (desktop/scripts/bundle-server.mjs)
 # and runs its isolated smoke test, on every PR that touches the payload or
 # the files it is built from. macos-15 is the real target (Apple Silicon); the
-# Linux job checks the same script on a cheaper runner. The Tauri shell build
-# joins this workflow when desktop/src-tauri lands (docs/DESKTOP-APP-TAURI-PLAN.md).
+# Linux job checks the same script on a cheaper runner. The Tauri shell
+# (Rust checks, unsigned .app, launch test) is the `shell` job (docs/DESKTOP-APP-TAURI-PLAN.md).
 
 on:
   push:
@@ -80,3 +80,116 @@ jobs:
 
       - name: Bundle server payload and smoke test
         run: node desktop/scripts/bundle-server.mjs --target ${{ matrix.target }}
+
+  shell:
+    # The Tauri shell: Rust checks, an unsigned .app, and a real launch on Apple Silicon.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check runner architecture
+        run: test "$(uname -m)" = "arm64"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Cache pinned Node runtime
+        uses: actions/cache@v4
+        with:
+          path: desktop/.cache
+          key: node-runtime-darwin-arm64-${{ hashFiles('desktop/node-runtime.json') }}
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix server
+          npm ci --prefix desktop
+
+      - name: Build frontend and server
+        run: |
+          npm run build
+          npx tsc -p server/tsconfig.json
+
+      # tauri-build needs the sidecar and payload to exist, even for cargo check.
+      - name: Bundle server payload and smoke test
+        run: node desktop/scripts/bundle-server.mjs
+
+      - name: Rust format, lint and tests
+        working-directory: desktop/src-tauri
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+
+      - name: Build Codekin.app (unsigned, ad-hoc signed)
+        working-directory: desktop
+        run: npx tauri build --bundles app --config '{"build":{"beforeBuildCommand":""}}'
+
+      - name: Check the bundle
+        id: bundle
+        run: |
+          APP=desktop/src-tauri/target/release/bundle/macos/Codekin.app
+          test -d "$APP"
+          ls -la "$APP/Contents/MacOS"
+          test -x "$APP/Contents/MacOS/node"
+          test -f "$APP/Contents/Resources/codekin/bin/codekin.mjs"
+          test -f "$APP/Contents/Resources/codekin/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+          "$APP/Contents/MacOS/node" -p 'process.version + " " + process.arch'
+          codesign -dv "$APP" 2>&1 | head -5
+          BIN=$(find "$APP/Contents/MacOS" -type f -perm +111 ! -name node | head -1)
+          echo "bin=$BIN" >> "$GITHUB_OUTPUT"
+          echo "app=$APP" >> "$GITHUB_OUTPUT"
+
+      # Launch the real app with a throwaway HOME, wait for its server, take a
+      # screenshot, then kill the shell and check the launcher shuts the server
+      # down through the stdin lifetime pipe.
+      - name: Launch smoke test
+        run: |
+          set -euo pipefail
+          HOME_DIR="$RUNNER_TEMP/app-home"
+          mkdir -p "$HOME_DIR/.config/codekin" "$HOME_DIR/repos"
+          PORT=$(node -e "const s=require('net').createServer().listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})")
+          printf 'PORT=%s\nDATA_DIR=%s\nREPOS_ROOT=%s\n' "$PORT" "$HOME_DIR/data" "$HOME_DIR/repos" > "$HOME_DIR/.config/codekin/env"
+          HOME="$HOME_DIR" "${{ steps.bundle.outputs.bin }}" > "$RUNNER_TEMP/app.out" 2>&1 &
+          APP_PID=$!
+          for i in $(seq 1 60); do curl -sf -m 1 "http://127.0.0.1:$PORT/api/ping" && break; sleep 1; done
+          curl -sf -m 2 "http://127.0.0.1:$PORT/api/ping"
+          test -f "$HOME_DIR/data/.codekin-owner.sqlite"
+          sleep 8
+          screencapture -x "$RUNNER_TEMP/codekin-app.png" || echo "screencapture unavailable"
+          LAUNCHER=$(pgrep -f "Codekin.app/Contents/MacOS/node .*app-server" | head -1)
+          echo "app=$APP_PID launcher=$LAUNCHER"
+          kill -9 "$APP_PID"
+          for i in $(seq 1 30); do kill -0 "$LAUNCHER" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$LAUNCHER" 2>/dev/null; then echo "launcher did not stop after the shell died"; exit 1; fi
+          if curl -sf -m 1 "http://127.0.0.1:$PORT/api/ping"; then echo "server still up"; exit 1; fi
+          grep -q "stdin closed" "$HOME_DIR/Library/Logs/Codekin/server.log"
+          echo "launch smoke test passed"
+
+      - name: Server log
+        if: always()
+        run: |
+          cat "$RUNNER_TEMP/app.out" || true
+          tail -50 "$RUNNER_TEMP/app-home/Library/Logs/Codekin/server.log" || true
+
+      - name: Zip the app
+        run: ditto -c -k --keepParent "${{ steps.bundle.outputs.app }}" "$RUNNER_TEMP/Codekin-unsigned-arm64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codekin-desktop-unsigned
+          path: |
+            ${{ runner.temp }}/Codekin-unsigned-arm64.zip
+            ${{ runner.temp }}/codekin-app.png
+          if-no-files-found: warn
+          retention-days: 7

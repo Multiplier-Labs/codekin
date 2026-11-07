@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The bundled splash / error pages only. The local server origin is remote to Tauri and gets no IPC access (no `remote` entry here). The app's own commands (retry, show_logs, quit) need no plugin permissions.",
+  "windows": ["main"],
+  "permissions": []
+}

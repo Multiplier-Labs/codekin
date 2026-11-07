@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codekin</title>
+  <link rel="stylesheet" href="splash.css">
+</head>
+<body>
+  <main>
+    <h1>Codekin</h1>
+    <section id="status" hidden>
+      <div class="spinner" aria-hidden="true"></div>
+      <p id="status-text">Starting Codekin…</p>
+    </section>
+    <section id="error" hidden>
+      <h2 id="error-title">Codekin couldn't start</h2>
+      <p id="error-message"></p>
+      <p class="code" id="error-code"></p>
+      <div class="actions">
+        <button id="retry" type="button" class="primary">Retry</button>
+        <button id="logs" type="button">Show Logs</button>
+        <button id="quit" type="button">Quit</button>
+      </div>
+    </section>
+  </main>
+  <script src="splash.js"></script>
+</body>
+</html>

@@ -1,8 +1,9 @@
 # Desktop App (Tauri) — Implementation Plan
 
-Status: **In progress.** The server, CLI and launcher prerequisites are merged (#755–#758), and so is the
-server payload builder with its CI job on `macos-15` (Phase 1, below). The Tauri shell and the Phase 0 spike
-on a Mac are not started. The decisions in
+Status: **In progress.** Merged: the server, CLI and launcher prerequisites (#755–#758), the server payload
+builder (#759), and the Tauri shell with its `macos-15` build and launch job (Phase 1, see
+[Shell implementation notes](#shell-implementation-notes)). Not started: the Phase 0 spike on a Mac, the Phase 1
+manual checklist, Phase 2 and later. The decisions in
 [Decisions](#decisions) were confirmed on 2026-11-06. One input is still open: who owns the Apple Developer
 account (D3). It blocks only the signing and notarization step, not the rest of the work.
 
@@ -310,6 +311,30 @@ nvm, `~/.local/bin`, etc. Without a fix, the server can't find `claude`, `codex`
 - If `claude` isn't found, the existing UI already reports it via `/api/health` (`claudeAvailable`). Phase 1
   checks that the message gives install steps that make sense for a user without the npm CLI.
 - No repos root is asked for up front. Choices like `REPOS_ROOT` stay in the web UI and the env file.
+
+### Shell implementation notes
+
+What the Phase 1 shell does today, and where it differs from the text above:
+- **Spawning (D8):** `std::process::Command` with `process_group(0)`, stdin as the lifetime pipe and fd 3
+  (via `command-fds`) for the credential. Tauri's `externalBin` only places `node` next to the executable.
+- **First-event timeout** is 45 s, not 15 s: server boot runs the harness CLI probes, which have 5 s timeouts
+  each.
+- **Quit:** a custom app menu replaces the default one, so Cmd-Q runs the Quit flow (session check, native
+  confirmation, supervisor shutdown) instead of terminating at once. `ExitRequested` from any other source is
+  also routed through it. The menu adds **Restart Server** (owned server only), **Show Logs** and View → Reload
+  (Cmd-R); the Edit menu is needed for copy and paste in the webview.
+- **Attach mode** polls `/api/ping` every 3 s. Three failures show the reconnecting view; three
+  connection-refused results at the same version re-run the launcher flow (which must still win the D7 lock),
+  at a different version they show the error view.
+- **Logs:** `~/Library/Logs/Codekin/server.log` on macOS, the Tauri app log directory elsewhere. Launcher
+  stdout written after the shell dies is lost (its reader is gone); stderr goes straight to the file.
+- **Not yet:** `on_new_window` handling for `target=_blank` links (check in the spike), the menu bar icon,
+  Open at login, App Nap and keep-awake (Phase 2), the updater and move-to-Applications (Phase 3a), a
+  designed macOS icon (the current one is the favicon mark on a transparent background).
+- **Checked on Linux under Xvfb** (WebKitGTK, not WKWebView): first launch generates the credential and
+  shows the live UI; the port-conflict error view, Retry, Ctrl+Q graceful quit, and SIGKILL of the shell
+  (the launcher stops the server through stdin EOF) all work. That run found the WebSocket Origin bug fixed
+  in #760.
 
 ## Window and background behaviour
 
