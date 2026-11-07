@@ -44,7 +44,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg2OUFDMkVENDdFMUI2OTEKUldTUnR1Rkg3Y0thaHVNRWttRWFYYUpjY2xoMmN3K0VoeExTK0dhaFhjSDVWNG90aVdwOHhsUUEK",
       "endpoints": [
         "https://github.com/Multiplier-Labs/codekin/releases/download/desktop-channel/latest.json"
       ],

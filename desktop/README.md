@@ -113,6 +113,10 @@ manager.
 3. Put the **public** key (`~/.tauri/codekin-updater.key.pub`, safe to commit) into
    `src-tauri/tauri.conf.json` → `plugins.updater.pubkey`, in a PR.
 
+Done on 2026-11-07 (public key ID `869AC2ED47E1B691`). The `shell` CI job signs a test file with the secret
+key and verifies it against the committed public key with `minisign`, so a wrong password or mismatched key
+shows up on the next PR instead of at release time.
+
 Until all three are done, the release job fails at its first check (the npm publish is a separate job and
 isn't affected), and the app reports that updates aren't configured.
 
