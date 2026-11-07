@@ -358,7 +358,8 @@ What the Phase 1 shell does today, and where it differs from the text above:
   (`relocate.rs`) copies with `ditto` and removes quarantine from the copy only (as LetsMove does), so the
   moved copy isn't translocated again; it falls back to `~/Applications` when `/Applications` isn't writable,
   and never overwrites an existing copy. Key setup: `desktop/README.md`.
-- **Not yet:** a designed macOS icon (the current one is the favicon mark on a transparent background), Phase 3b.
+- **Icon:** the Codekin mark on a dark ink plate on Apple's 1024 grid, rendered from `desktop/icons-src/` (see its README).
+- **Not yet:** Phase 3b.
 - **Checked on Linux under Xvfb** (WebKitGTK, not WKWebView): first launch generates the credential and
   shows the live UI; the port-conflict error view, Retry, Ctrl+Q graceful quit, and SIGKILL of the shell
   (the launcher stops the server through stdin EOF) all work. That run found the WebSocket Origin bug fixed
