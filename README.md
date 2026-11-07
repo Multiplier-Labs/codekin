@@ -5,33 +5,71 @@
 
 **[codekin.ai](https://codekin.ai)**
 
-**A workbench for serious AI coding.**
+**All your AI coding agents in one simple app.**
 
-Codekin is a self-hosted platform for [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai), and [Grok Build](https://github.com/xai-org/grok-build) (new in 0.9.2) that adds persistent sessions, parallel workspaces, structured approvals, and workflow orchestration — so your team can run AI coding at scale.
+Use [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai) and [Grok](https://github.com/xai-org/grok-build) without a terminal for your daily work. Codekin is easy to start with and stays out of your way. When you need more, it has it.
+
+✓ Free and open source
 
 ```bash
 curl -fsSL https://codekin.ai/install.sh | bash
 ```
 
-Install once, then open from any browser. Codekin runs your coding agents and reaches your repositories **on the computer where you install it**; open it there, or from any device through a Codekin web app — the public instance at [app.codekin.ai](https://app.codekin.ai) or [one you host yourself](docs/SELF-HOSTED-RELAY.md). See [Getting started](docs/GETTING-STARTED.md) for a first-session walkthrough and troubleshooting.
+Install once, then open it from any browser — on that computer, or from other devices through [your own Codekin web app](docs/SELF-HOSTED-RELAY.md). See [Getting started](docs/GETTING-STARTED.md) for a first-session walkthrough and troubleshooting.
 
 ![Codekin screenshot](docs/screenshot.png)
 
-## Why teams choose Codekin
+## One place for all your agents
 
-Works with Claude Code, Codex, OpenCode, and Grok Build. More durable than the CLI alone, more controllable than SaaS platforms.
+Claude Code, Codex, OpenCode and Grok, side by side. Your projects and conversations are in one list. Switch agents whenever you like, and the next one gets a summary of the work so far.
 
-- **Multi-agent support** — Run Claude Code, Codex, OpenCode, and Grok Build side by side with a consistent interface for sessions, approvals, and handoffs.
-- **Self-hosted control** — Keep data and runtime on your infrastructure. Fits into your existing auth, networking, and deployment stack.
-- **Built-in orchestration** — Combine live sessions with scheduled workflows, webhooks, and CI-driven runs in one platform.
+## No terminal for your daily work
 
-## Features
+Chat with your agents in a clean window. See the files and what changed. Approve steps with a click. It works on your laptop or your phone.
 
-Everything you need to run AI coding in production. Interactive where you work. Structured where it matters. Automated where it repeats.
+## Just start typing
+
+There's nothing to set up before your first session. Pick a project, say what you want, and watch it happen. Your work is saved, so you can close the window and come back later.
+
+## Work on several things at once
+
+Start a new session while another is still running. Each session has its own conversation and its own copy of your project, so their changes never get mixed up. You see every session in one list, with what each one is doing, and you accept each one's changes when they're ready. Your main version stays as it is until then.
+
+## Powerful when you want it
+
+**Have the work tested, then reviewed by an AI from a different company.** One agent makes the change, Codekin runs your build and tests, and an agent from another provider reviews it. If the review asks for a fix, the work goes back until the tests pass and the review approves.
+
+- **Limits** — Set limits on spending and time.
+- **Schedules** — Run regular jobs on a schedule.
+- **Warnings** — Get warned if tests were switched off or a password ended up in the code.
+- **Coordinator** — Let a coordinator agent split a bigger job across several sessions.
+
+## Free and open source
+
+Codekin runs on your computer, and your code stays there. Anyone can read the source or change it.
+
+## How it's different
+
+- **Claude Code, Codex** — Each one works with one company's AI. Codekin puts all of them in one simple window, with your projects and history in one place.
+- **Lovable, Replit, Bolt** — They host your project and use their own AI. Codekin runs on your computer, with the agents you choose.
+- **Cursor** — Codekin is kept simple on purpose, and it's yours: free, open source, and running on your computer.
+
+## For teams
+
+Run coding agents on a schedule or when CI fails, with tests, a review and spending limits on every run. Your code and credentials stay on your own servers.
+
+- **Failed builds go to an agent** — Connect GitHub. When CI fails, an agent gets the failure and works on a fix.
+- **Pull requests reviewed automatically** — New pull requests get a review before anyone on the team looks at them.
+- **Regular upkeep on a schedule** — Dependency updates, security checks and code reviews run on their own.
+- **Every run explains itself** — What started it, what proved it passed, what it cost, and what happens if it fails.
+- **Shared sessions and roles** — Invite people to a workspace, give each a role, and sign in with a passkey or two-factor code.
+- **Runs on your own servers** — Host the web app yourself. Your computers connect outbound only, so no ports are opened.
+
+## Full feature list
 
 ### Interactive workbench
 
-- **Use it from any device** — Open Codekin from desktop or mobile. No SSH hops or terminal tied to one machine. Reach your computer through a Codekin web app ([app.codekin.ai](https://app.codekin.ai) or [your own](docs/SELF-HOSTED-RELAY.md)) with a one-line install-and-pair, QR device linking and passkey sign-in; the computer connects outbound only, so no ports are opened. Responsive layout with touch-sized controls on phones and tablets
+- **Use it from any device** — Open Codekin from desktop or mobile. No SSH hops or terminal tied to one machine. Reach your computer through [your own Codekin web app](docs/SELF-HOSTED-RELAY.md) with a one-line install-and-pair, QR device linking and passkey sign-in; the computer connects outbound only, so no ports are opened. Responsive layout with touch-sized controls on phones and tablets
 - **Persistent sessions** — Refresh, disconnect, or restart without losing work. Sessions survive across reconnects
 - **Session history** — All session transcripts are stored locally. Search, replay, and reference past work without relying on a third party; archived sessions can be re-activated
 - **Diff view** — See exactly what changed in each session with an inline diff viewer. Review agent edits before approving; staged and unstaged changes, with per-file discard
@@ -59,36 +97,13 @@ Everything you need to run AI coding in production. Interactive where you work. 
 - **Self-hosted** — Run on your infrastructure with full control over data, networking, and configuration — including [your own Codekin web app](docs/SELF-HOSTED-RELAY.md) under your domain and GitHub sign-in
 - **Teams and workspaces** — Invite people into a workspace by link, give them a role (owner, admin, member, viewer), share individual sessions with per-user permissions, and require two-factor authentication (authenticator app, passkey, recovery codes)
 
-## Use cases
-
-Built for real engineering workflows:
-
-1. **Daily AI coding workbench** — Keep long-running sessions alive across repos and resume instantly after interruptions.
-2. **Parallel work across repos** — Run multiple sessions on different repos simultaneously, each with isolated context.
-3. **CI failure triage** — Route failed GitHub CI runs into Codekin sessions with context attached for faster debugging.
-4. **Automated PR review** — Use scheduled workflows and GitHub triggers to handle repeatable review tasks automatically.
-5. **Shared team context** — Capture repo guidance, reusable skills, and approval history so each session starts with context.
-6. **Webhook-driven runs** — Connect webhooks, CI pipelines, and internal automation to trigger AI coding sessions.
-
 ## Get started in minutes
 
-### Remote access
-
-Codekin runs coding agents on your own computer; a Codekin web app is how you reach them from a browser, phone or tablet. Use the public instance at [app.codekin.ai](https://app.codekin.ai), or run your own for your team — on your domain, with your own GitHub sign-in and data. See [Hosting your own Codekin web app](docs/SELF-HOSTED-RELAY.md).
-
-1. Install and sign in to at least one supported coding agent on your macOS or Linux computer: [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai), or [Grok Build](https://github.com/xai-org/grok-build). Windows isn't supported yet.
-2. Open your Codekin web app ([app.codekin.ai](https://app.codekin.ai), or your team's own) and sign in with GitHub. Access is by invitation: open the invite link a workspace owner or admin sent you, then sign in. Owners and admins set up two-factor authentication (an authenticator app or a passkey) on first sign-in.
-3. On **Connect your computer**, copy the generated install command and run it in a terminal **on that computer**. It pairs the computer with the web app you generated it in, whichever instance that is. The pairing command expires after 10 minutes and can be used once.
-4. Wait for the computer to show **online**, then click **Open**. Keep the computer awake and connected while using Codekin remotely.
-5. Use **New** to choose a repository and a coding agent. Local Git checkouts under `~/repos` appear automatically; the GitHub CLI is optional for listing and cloning GitHub repositories.
-
-Only need Codekin on the computer in front of you? Use the local install below — no web app involved.
-
-### Install (local)
+### Install
 
 **Prerequisites:**
 - macOS or Linux
-- Node.js v20+ (the install script can install this via nvm)
+- Node.js 22.14+ (the install script can install this via nvm)
 - At least one supported coding agent CLI, installed and authenticated:
   - [Claude Code CLI](https://github.com/anthropics/claude-code) (`claude`)
   - [OpenAI Codex CLI](https://github.com/openai/codex) (`codex login`) to use ChatGPT-subscription OpenAI models
@@ -108,9 +123,19 @@ This will:
 4. Generate a local access token and install and start a background service
 5. Print your local access URL
 
-Open the printed `http://localhost:32352/#token=...` URL **on the installed computer**. The token is in that URL; (after `#`, so it never reaches server logs); if you open the address without it, paste it on the **Settings → Connection** page, which opens automatically. Run `codekin token` to print the URL again. For another device, use a Codekin web app (see remote access above) rather than a `localhost` link.
+Open the printed `http://localhost:32352/#token=...` URL **on the installed computer**. The token is in that URL (after `#`, so it never reaches server logs); if you open the address without it, paste it on the **Settings → Connection** page, which opens automatically. Run `codekin token` to print the URL again. For another device, use a Codekin web app (see below) rather than a `localhost` link.
 
 The installer checks GitHub CLI (`gh`) but does not require it. Existing local Git checkouts work without GitHub authentication. Continue with [your first session](docs/GETTING-STARTED.md#3-start-your-first-session).
+
+### Use it from another device
+
+Codekin runs coding agents on your own computer; a Codekin web app is how you reach them from a browser, phone or tablet. [Host your own Codekin web app](docs/SELF-HOSTED-RELAY.md) for yourself or your team — on your domain, with your own GitHub sign-in and data.
+
+1. Install and sign in to at least one supported coding agent on your macOS or Linux computer: [Claude Code](https://github.com/anthropics/claude-code), [Codex](https://github.com/openai/codex), [OpenCode](https://opencode.ai), or [Grok Build](https://github.com/xai-org/grok-build). Windows isn't supported yet.
+2. Open your Codekin web app and sign in with GitHub. Access is by invitation: open the invite link a workspace owner or admin sent you, then sign in. Owners and admins set up two-factor authentication (an authenticator app or a passkey) on first sign-in.
+3. On **Connect your computer**, copy the generated install command and run it in a terminal **on that computer**. It pairs the computer with the web app you generated it in, whichever instance that is. The pairing command expires after 10 minutes and can be used once.
+4. Wait for the computer to show **online**, then click **Open**. Keep the computer awake and connected while using Codekin remotely.
+5. Use **New** to choose a repository and a coding agent. Local Git checkouts under `~/repos` appear automatically; the GitHub CLI is optional for listing and cloning GitHub repositories.
 
 ## Usage
 
@@ -123,6 +148,8 @@ codekin service uninstall       # Remove the background service
 codekin start                   # Run in foreground (for debugging)
 codekin stop                    # Stop the running background service
 codekin setup --regenerate      # Generate a new auth token
+codekin relay status            # Show web app pairing + connection
+codekin relay login             # Pair this computer with a web app
 codekin upgrade                 # Upgrade to latest version
 codekin uninstall               # Remove Codekin entirely
 ```

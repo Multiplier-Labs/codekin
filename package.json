@@ -4,7 +4,7 @@
   "license": "MIT",
   "licenseNotes": "dompurify is dual-licensed (MPL-2.0 OR Apache-2.0); both are permissively compatible with MIT for library use. lightningcss (MPL-2.0) is a build-time-only dependency used by TailwindCSS and is not included in distributed artifacts.",
   "author": "multiplier-labs",
-  "description": "A workbench for serious AI coding: a self-hosted platform for Claude Code, Codex, OpenCode, and Grok Build with persistent sessions, parallel workspaces, structured approvals, and workflow orchestration",
+  "description": "All your AI coding agents in one simple app: Claude Code, Codex, OpenCode and Grok in one window, with saved sessions, parallel work, tests and cross-provider review",
   "repository": {
     "type": "git",
     "url": "https://github.com/Multiplier-Labs/codekin"
