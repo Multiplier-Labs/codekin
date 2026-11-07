@@ -12,7 +12,7 @@ import { PERMISSION_MODES } from '../../types'
 import { getAllRepoApprovals, removeRepoApproval, bulkRemoveRepoApprovals, type RepoApprovalsEntry } from '../../lib/ccApi'
 import { ApprovalGroupRow } from '../ApprovalsPanel'
 import { PERMISSION_MODE_ICONS, buildGroups, type ApprovalGroup, type RemovalTarget } from '../../lib/approvalGroups'
-import { Block, Row, button, checkbox, input } from './Block'
+import { Block, button, checkbox } from './Block'
 import { getPref, setPref, usePref } from '../../lib/prefs'
 import { resolveEnabledModes } from '../../lib/permissionModes'
 
@@ -53,7 +53,6 @@ export function PermissionsSection({ token, repos, onError }: Props) {
     <div className="space-y-4">
       <DefaultModeBlock />
       <EnabledModesBlock />
-      <ComposerBackgroundBlock />
       <ApprovedRulesBlock token={token} repos={repos} onError={onError} />
     </div>
   )
@@ -61,48 +60,14 @@ export function PermissionsSection({ token, repos, onError }: Props) {
 
 /* ── Default mode ───────────────────────────────────────────────── */
 
-function ComposerBackgroundBlock() {
-  const background = usePref('bypassComposerBackground') ?? 'red'
-  return (
-    <Block title="Composer appearance">
-      <Row
-        label="Bypass permissions background"
-        description="Choose the composer background for Bypass and Skip permissions modes."
-        htmlFor="bypass-composer-background"
-        control={
-          <select
-            id="bypass-composer-background"
-            className={input}
-            value={background}
-            onChange={event => setPref('bypassComposerBackground', event.target.value === 'red' ? 'red' : 'standard')}
-          >
-            <option value="standard">Standard</option>
-            <option value="red">Red warning tint</option>
-          </select>
-        }
-      />
-    </Block>
-  )
-}
-
 function DefaultModeBlock() {
   // Read on mount: the composer writes the same pref when a session switches mode.
   const [mode, setMode] = useState<PermissionMode>(readPermissionMode)
   const current = PERMISSION_MODES.find(m => m.id === mode)
 
-  /** Dangerous modes are gated behind the same confirmation the composer uses. */
+  /** No confirm for dangerous modes: the warning below says what they do. */
   function select(next: PermissionMode) {
     if (next === mode) return
-    const entry = PERMISSION_MODES.find(m => m.id === next)
-    if (entry?.dangerous) {
-      const confirmed = window.confirm(
-        `Warning: "${entry.label}" will accept ALL tool calls without asking.\n\n` +
-        'This includes file writes, bash commands, and web requests. ' +
-        'Only use this if you fully trust the task.\n\n' +
-        'Every new session will start in this mode. Are you sure?'
-      )
-      if (!confirmed) return
-    }
     setPref('permissionMode', next)
     setMode(next)
     // The default is always on in the composer.

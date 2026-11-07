@@ -29,8 +29,6 @@ export interface Prefs {
   permissionMode: PermissionMode
   /** Modes offered in the composer menu and cycled by Shift+Tab. Unset means all. */
   enabledPermissionModes: PermissionMode[]
-  /** Composer background for bypass/skip permissions. Unset means red. */
-  bypassComposerBackground: 'standard' | 'red'
   /** Coding provider new sessions start with. */
   provider: CodingProvider
   /** Last model used per provider, offered to the next session. */

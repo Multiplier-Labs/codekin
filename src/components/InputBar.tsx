@@ -108,8 +108,9 @@ function StateItem({ children, title, onClick, danger = false, innerRef }: {
   children: React.ReactNode; title?: string; onClick?: () => void; danger?: boolean
   innerRef?: React.Ref<HTMLButtonElement>
 }) {
-  // Error rather than warning: it sits on the danger-tinted card, where
-  // error-4 clears 4.5:1 in every theme and warning-4 doesn't (Light: 3.8:1).
+  // Error rather than warning: it matches the red corner the card wears in a
+  // dangerous mode, and error-4 clears 4.5:1 in every theme on the card's own
+  // surface where warning-4 doesn't (Light: 3.8:1).
   const tone = danger ? 'text-error-4' : 'text-ink-muted hover:text-ink'
   const className = `group/state flex items-center gap-1.5 font-mono text-meta whitespace-nowrap transition-colors ${tone}`
   if (!onClick) return <span className={className} title={title}>{children}</span>
@@ -134,18 +135,41 @@ function StateLabel({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Dangerous modes (bypassPermissions, dangerouslySkipPermissions) need an
- * explicit yes every time they are switched on. They can only be picked from
- * the mode menu — Shift+Tab never lands on them (see cycleCandidates).
+ * Shown above the composer each time a dangerous mode (bypassPermissions,
+ * dangerouslySkipPermissions) is picked from the mode menu — Shift+Tab never
+ * lands on them (see cycleCandidates). It says what the mode does and what the
+ * red corner on the composer means. Not modal: the mode is already on, and the
+ * note only explains it and offers the way back.
  */
-function confirmDangerousMode(mode: PermissionMode): boolean {
-  const entry = PERMISSION_MODES.find(m => m.id === mode)
-  if (!entry?.dangerous) return true
-  return window.confirm(
-    `Warning: "${entry.label}" will accept ALL tool calls without asking.\n\n` +
-    'This includes file writes, bash commands, and web requests. ' +
-    'Only use this if you fully trust the task.\n\n' +
-    'Are you sure?'
+function DangerModeNote({ label, onDismiss, onSwitchToDefault }: {
+  label: string; onDismiss: () => void; onSwitchToDefault?: () => void
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-label={`${label} is on`}
+      className="absolute right-0 bottom-full z-50 mb-3 flex w-[340px] max-w-full flex-col gap-2.5 rounded-floating border border-edge-strong bg-surface-raised px-4 py-3.5 shadow-floating"
+    >
+      <div className="flex items-center gap-2 text-body font-bold text-ink">
+        <span aria-hidden="true" className="h-0.5 w-4 bg-error-6" />
+        <span>{label} is on</span>
+      </div>
+      <p className="text-meta text-ink-muted">
+        Every tool call — file writes, shell commands, web requests — runs without asking.
+        The red corner stays on the composer while this mode is on.
+      </p>
+      <div className="flex items-center justify-end gap-3.5">
+        {onSwitchToDefault && (
+          <button type="button" onClick={onSwitchToDefault} className="text-meta text-ink-muted underline hover:text-ink">
+            Switch to Default
+          </button>
+        )}
+        <button type="button" onClick={onDismiss} className="rounded-control bg-primary-fill px-3.5 py-1.5 text-meta font-bold text-on-primary-fill hover:brightness-105">
+          Got it
+        </button>
+      </div>
+      <span aria-hidden="true" className="absolute right-[18px] -bottom-[6px] h-2.5 w-2.5 rotate-45 border-r border-b border-edge-strong bg-surface-raised" />
+    </div>
   )
 }
 
@@ -159,7 +183,13 @@ function PermissionModeDropdown({ currentMode, modes, isOpen, menuRef, onToggle,
   const ModeIcon = PERMISSION_MODE_ICONS[mode?.icon ?? 'shield']
   return (
     <div className="relative" ref={menuRef}>
-      <StateItem onClick={onToggle} title={`Permission mode: ${mode?.label ?? currentMode} (Shift+Tab to switch)`} danger={!!mode?.dangerous}>
+      <StateItem
+        onClick={onToggle}
+        title={mode?.dangerous
+          ? `Permission mode: ${mode.label} — tools run without asking. That's what the red corner means. Click or press Shift+Tab to change mode.`
+          : `Permission mode: ${mode?.label ?? currentMode} (Shift+Tab to switch)`}
+        danger={!!mode?.dangerous}
+      >
         <ModeIcon size={14} stroke={2} />
         <StateLabel>{mode?.label ?? currentMode}</StateLabel>
         <IconChevronDown size={12} stroke={2} className="opacity-70" />
@@ -674,16 +704,16 @@ interface InputBarProps {
 export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function InputBar({ onSendInput, isWaiting, disabled, onEscape, pendingFiles, onAddFiles, onRemoveFile, skillGroups, slashCommands, initialValue = '', onValueChange, currentModel, onModelChange, currentEffort = null, onEffortChange, availableModels = [], sessionProvider, onProviderChange, placeholder, isMobile = false, showWorktreeToggle = false, useWorktree = false, onWorktreeChange, currentPermissionMode, onPermissionModeChange, onMoveToWorktree, worktreePath, variant = 'default', joeName, lockedReason }, ref) {
   const isOrchestrator = variant === 'orchestrator'
   const enabledModes = resolveEnabledModes(usePref('enabledPermissionModes'))
-  const bypassBackground = usePref('bypassComposerBackground')
   const providerModes = permissionModesFor(sessionProvider)
   const visibleModes = offeredModes(providerModes, enabledModes, currentPermissionMode)
-  const modeTone = composerTone(currentPermissionMode)
-  const tone = modeTone === 'danger' && bypassBackground === 'standard' ? undefined : modeTone
+  const tone = composerTone(currentPermissionMode)
   const handoffTargets = isOrchestrator ? AGENT_HANDOFF_TARGETS : PROVIDERS
   const [value, setValue] = useState(initialValue)
   const [skillMenuOpen, setSkillMenuOpen] = useState(false)
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   const [permMenuOpen, setPermMenuOpen] = useState(false)
+  /** The dangerous mode just picked from the menu, while its note is showing. */
+  const [dangerNote, setDangerNote] = useState<PermissionMode | null>(null)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [slashMenuOpen, setSlashMenuOpen] = useState(false)
 
@@ -758,6 +788,7 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
 
   const handleSend = useCallback(() => {
     if (!value.trim() && pendingFiles.length === 0) return
+    setDangerNote(null)
     if (blocked) return
     setSlashMenuOpen(false)
     onSendInput(value)
@@ -855,10 +886,22 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
   }, [onAddFiles])
 
   const handlePermissionModeSelect = useCallback((mode: PermissionMode) => {
-    if (!confirmDangerousMode(mode)) return
     onPermissionModeChange?.(mode)
     setPermMenuOpen(false)
-  }, [onPermissionModeChange])
+    const dangerous = PERMISSION_MODES.find(m => m.id === mode)?.dangerous
+    setDangerNote(dangerous && mode !== currentPermissionMode ? mode : null)
+  }, [onPermissionModeChange, currentPermissionMode])
+
+  // The note belongs to the mode it explains: it goes as soon as the session
+  // leaves that mode (Shift+Tab, the menu, or another client), on Escape, and
+  // when a message is sent.
+  const noteMode = dangerNote && dangerNote === currentPermissionMode ? PERMISSION_MODES.find(m => m.id === dangerNote) : undefined
+  useEffect(() => {
+    if (!noteMode) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDangerNote(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [noteMode])
 
   /** Shift+Tab: step to the next enabled safe mode (dangerous ones are menu-only). */
   const cyclePermissionMode = useCallback(() => {
@@ -912,6 +955,14 @@ export const InputBar = forwardRef<InputBarHandle, InputBarProps>(function Input
       <div className="px-4 pb-3 pt-1 @[32rem]:px-12">
         <div data-mode-tone={tone} className="composer-card relative mx-auto flex w-full min-w-0 max-w-[var(--measure)] flex-col gap-2 rounded-control border border-edge bg-surface pt-2.5 pr-3 pb-2 pl-3">
           <DropZone onUpload={onAddFiles} disabled={disabled} />
+
+          {noteMode && (
+            <DangerModeNote
+              label={noteMode.label}
+              onDismiss={() => { setDangerNote(null) }}
+              onSwitchToDefault={providerModes.some(m => m.id === 'default') ? () => { setDangerNote(null); onPermissionModeChange?.('default') } : undefined}
+            />
+          )}
 
           {/* Slash autocomplete popup — anchored to the measured column */}
           {slashMenuOpen && hasSlashCommands && (

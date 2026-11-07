@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { InputBar } from './InputBar'
-import { getPref, setPref, resetPrefsForTest } from '../lib/prefs'
+import { resetPrefsForTest } from '../lib/prefs'
 import type { PermissionMode } from '../types'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -99,36 +99,42 @@ describe('InputBar Shift+Tab mode cycling', () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('asks every time a dangerous mode is picked from the menu', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(true).mockReturnValueOnce(false).mockReturnValueOnce(true)
+  it('switches to a dangerous mode without a confirm, and explains it in a note', async () => {
+    const confirm = vi.spyOn(window, 'confirm')
     const onChange = await renderWith('default')
     const item = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.includes(label))
-    const pick = (label: string) => {
-      // Declining leaves the menu open; only open it when it's closed.
-      if (!item(label)) act(() => { container.querySelector<HTMLButtonElement>('button[title^="Permission mode:"]')!.click() })
-      act(() => { item(label)!.click() })
-    }
-    pick('Bypass permissions')
-    pick('Bypass permissions')
-    pick('Bypass permissions')
-    expect(confirm).toHaveBeenCalledTimes(3)
-    expect(onChange).toHaveBeenCalledTimes(2)
-    expect(getPref('confirmedDangerousModes' as never)).toBeUndefined()
+    act(() => { container.querySelector<HTMLButtonElement>('button[title^="Permission mode:"]')!.click() })
+    act(() => { item('Bypass permissions')!.click() })
+    expect(confirm).not.toHaveBeenCalled()
+    expect(onChange).toHaveBeenCalledWith('bypassPermissions')
+    // The parent applies the change; the note shows once the session is in that mode.
+    await renderWith('bypassPermissions', onChange)
+    const note = container.querySelector('[role="dialog"][aria-label="Bypass permissions is on"]')
+    expect(note?.textContent).toContain('red corner')
+    act(() => { item('Got it')!.click() })
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
   })
 
-  it('uses the red bypass background by default and updates when the preference changes', async () => {
+  it('offers the way back to Default from the note', async () => {
+    const onChange = await renderWith('default')
+    const item = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.includes(label))
+    act(() => { container.querySelector<HTMLButtonElement>('button[title^="Permission mode:"]')!.click() })
+    act(() => { item('Skip permissions')!.click() })
+    await renderWith('dangerouslySkipPermissions', onChange)
+    act(() => { item('Switch to Default')!.click() })
+    expect(onChange).toHaveBeenLastCalledWith('default')
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+  })
+
+  it('marks the card with the danger tone in both dangerous modes only', async () => {
     await renderWith('plan')
     expect(container.querySelector('.composer-card')?.getAttribute('data-mode-tone')).toBe('plan')
     await renderWith('dangerouslySkipPermissions')
     expect(container.querySelector('.composer-card')?.getAttribute('data-mode-tone')).toBe('danger')
-    act(() => { setPref('bypassComposerBackground', 'standard') })
-    expect(container.querySelector('.composer-card')?.hasAttribute('data-mode-tone')).toBe(false)
-    act(() => { setPref('bypassComposerBackground', 'red') })
-    expect(container.querySelector('.composer-card')?.getAttribute('data-mode-tone')).toBe('danger')
     await renderWith('bypassPermissions')
     expect(container.querySelector('.composer-card')?.getAttribute('data-mode-tone')).toBe('danger')
-    act(() => { setPref('bypassComposerBackground', 'standard') })
-    expect(container.querySelector('.composer-card')?.hasAttribute('data-mode-tone')).toBe(false)
+    // Arriving in a dangerous mode (a default, a restored session) shows the corner, not the note.
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
     await renderWith('acceptEdits')
     expect(container.querySelector('.composer-card')?.hasAttribute('data-mode-tone')).toBe(false)
   })

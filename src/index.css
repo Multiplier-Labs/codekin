@@ -766,22 +766,32 @@ html, body, #root {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent-5) 20%, transparent);
 }
 
-/* Bypass / skip permissions: the theme's own surface tinted toward its error
-   hue, with an error edge and ring, so a mode that runs everything without
-   asking can't be mistaken for any other. Only the card's background and
-   border change — ink, edge and raised-surface tokens keep their theme
-   values, so hover states and popovers inside the card stay legible in every
-   theme. Placed after the orchestrator rules (and one class more specific)
-   so the danger edge also wins on Joe's composer. */
-.app-input-bar .composer-card[data-mode-tone="danger"] {
-  background-color: color-mix(in srgb, var(--color-surface), var(--color-error-5) 14%);
-  border-color: var(--color-error-6);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-error-6) 35%, transparent);
+/* Bypass / skip permissions: the card keeps its everyday look, and only its
+   top-right corner turns red — a thicker error stroke that follows the
+   rounded corner and fades into the normal edge along the top and down the
+   side. The mode chip carries the same red, so the two read as one signal.
+   One pseudo-element draws the corner; two intersected masks fade its arms.
+   Placed after the orchestrator rules (and one class more specific) so it
+   also wins on Joe's composer. */
+.app-input-bar .composer-card[data-mode-tone="danger"]::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 150px;
+  max-width: 50%;
+  height: 64px;
+  border-top: 2px solid var(--color-error-6);
+  border-right: 2px solid var(--color-error-6);
+  border-top-right-radius: var(--radius-control);
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to left, #000 10px, transparent), linear-gradient(to bottom, #000 10px, transparent);
+  -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(to left, #000 10px, transparent), linear-gradient(to bottom, #000 10px, transparent);
+  mask-composite: intersect;
 }
-[data-scheme="light"] .app-input-bar .composer-card[data-mode-tone="danger"] {
-  background-color: color-mix(in srgb, var(--color-surface), var(--color-error-5) 8%);
+[data-scheme="light"] .app-input-bar .composer-card[data-mode-tone="danger"]::before {
   border-color: var(--color-error-5);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-error-5) 25%, transparent);
 }
 
 /* ── Safe area insets for notched devices ──────────────────────────────── */
