@@ -633,13 +633,15 @@ another location is shown, so the Mac stays reachable from the phone.
 ### Sign-in handoff (D9)
 
 1. The shell generates `state` and a PKCE pair (`code_verifier`, `code_challenge = S256(verifier)`), and opens
-   `https://<relay>/auth/desktop/start?state=…&code_challenge=…` in the default browser.
+   `https://<relay>/api/auth/desktop/start?state=…&code_challenge=…&code_challenge_method=S256` in the default
+   browser. (Every handoff route is under `/api/`: deployments, including the nginx config in
+   SELF-HOSTED-RELAY.md, only send `/api/` and `/relay/` to the relay.)
 2. The relay runs its normal sign-in (GitHub OAuth, then TOTP or passkey). It then mints a **one-time code**
    bound to the user, `state` and `code_challenge` (60 s TTL, single use) and redirects to
    `codekin://auth?relay=<origin>&code=…&state=…`. A browser page says "You can return to Codekin".
 3. `tauri-plugin-deep-link` delivers the URL to the running app (via the single-instance plugin when the app
    is already open). The shell checks `state` and that `relay` is the origin it started with.
-4. The shell navigates the location's webview to `https://<relay>/auth/desktop/claim` with a POST of `code` and
+4. The shell navigates the location's webview to `https://<relay>/api/auth/desktop/claim` with a POST of `code` and
    `code_verifier` (a bundled auto-submitting form). The relay verifies both, creates a normal session for the
    webview's data store (`codekin_relay_sid`, SameSite=Lax, same lifetime and revocation as a browser session),
    and redirects to `/`.
@@ -659,10 +661,35 @@ can't redeem it without the verifier, which never leaves the shell. Sessions cre
 
 ### App changes (Phase 4b)
 
-Location model in `prefs.json`, data stores per location, the switcher (app menu + menu bar icon), the
-add/manage pages, the generalized navigation guard, `tauri-plugin-deep-link` registered for `codekin://`, and the
-handoff (state + PKCE). The Quit / update / supervisor flows are unchanged: they always concern the local
-server, whichever location is on screen.
+**Implemented** (`desktop/src-tauri/src/locations.rs`, pure and unit-tested; `hosted.rs`, the Tauri side;
+bundled pages in `desktop/splash`). The Quit / update / supervisor flows are unchanged: they always concern the
+local server, whichever location is on screen.
+
+- **Windows.** `main` stays This Mac and the supervisor keeps driving it. A hosted location opens in its own
+  window (`location-<n>`), because a webview's data store is fixed when it is created; it takes `main`'s frame,
+  `main` is hidden, and at most one location window exists. Closing it hides it, like `main`. The Dock icon,
+  the menu bar icon's *Open Codekin* and a second launch show whichever window is current. `main` starts
+  hidden and is shown once the last-used location is known.
+- **Data stores.** `data_store_identifier` is the first 16 bytes of `sha256("codekin-location:" + id)`. wry
+  uses it on macOS 14+ and falls back to the default store on 12–13. Removing a location first signs it out on
+  the relay (`POST /api/auth/logout` from a hidden window on the same store, so 12–13 are covered too), then
+  deletes the store (`remove_data_store`, macOS).
+- **Hosted UI contract.** The location window's user agent is Safari's plus `CodekinDesktop/<version>`. The
+  hosted UI uses that token to hand sign-in to the shell: signed out, it navigates to `codekin://sign-in`
+  (the shell shows its bundled "Sign in to <name>" page; nothing opens until the user clicks); for a passkey
+  step-up (D12) it navigates to `codekin://sign-in?reason=step_up` (the shell starts the handoff right away).
+  The navigation guard refuses every `codekin:` navigation and acts on it; other origins open in the default
+  browser. Location windows may show only the `signin` / `waiting` / `claim` bundled pages, never the location
+  manager.
+- **Handoff.** `state` and the verifier are 32 random bytes each, base64url. The deep link is accepted once,
+  only with the pending `state`, from the pending location's origin, within 10 minutes; a link that doesn't
+  match leaves the real sign-in pending. The claim page in the location window (whose user agent the relay
+  checks) posts `code` and `code_verifier`, and only to `<relay>/api/auth/desktop/claim`.
+- **Adding.** *Location → Add Location…* opens a bundled manager window. The address is normalized to an origin
+  (`https://` only, `http://` on loopback; no credentials, path, query or fragment) and checked with
+  `GET /api/relay/info` using the system trust store, so a company CA installed on the Mac works.
+- `tauri-plugin-deep-link` registers `codekin://` (in the bundle's Info.plist on macOS);
+  `tauri-plugin-single-instance` forwards links on Linux / Windows.
 
 ### Testing
 

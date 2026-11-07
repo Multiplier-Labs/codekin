@@ -9,6 +9,7 @@
 //!
 //! App Nap is opted out of statically with `NSAppSleepDisabled` in Info.plist.
 
+use crate::locations::Location;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -19,6 +20,16 @@ use std::sync::Mutex;
 #[serde(rename_all = "camelCase", default)]
 pub struct Prefs {
     pub keep_awake: bool,
+    /// Saved hosted locations (Phase 4b). "This Mac" is implicit.
+    pub locations: Vec<Location>,
+    /// The location shown at launch; `None` is This Mac.
+    pub last_location: Option<String>,
+}
+
+impl Prefs {
+    pub fn location(&self, id: &str) -> Option<&Location> {
+        self.locations.iter().find(|l| l.id == id)
+    }
 }
 
 impl Prefs {
@@ -148,16 +159,35 @@ mod tests {
         let dir = tempdir();
         let file = dir.join("nested/prefs.json");
         assert_eq!(Prefs::load(&file), Prefs::default());
-        Prefs { keep_awake: true }.save(&file).unwrap();
+        let on = Prefs {
+            keep_awake: true,
+            ..Prefs::default()
+        };
+        on.save(&file).unwrap();
         assert!(std::fs::read_to_string(&file)
             .unwrap()
             .contains("\"keepAwake\": true"));
-        assert_eq!(Prefs::load(&file), Prefs { keep_awake: true });
+        assert_eq!(Prefs::load(&file), on);
         std::fs::write(&file, "{not json").unwrap();
         assert_eq!(Prefs::load(&file), Prefs::default());
         std::fs::write(&file, "{\"unknown\": 1}").unwrap();
         assert_eq!(Prefs::load(&file), Prefs::default());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn prefs_from_before_locations_still_load() {
+        let old: Prefs = serde_json::from_str(r#"{"keepAwake": true}"#).unwrap();
+        assert!(old.keep_awake);
+        assert!(old.locations.is_empty());
+        assert_eq!(old.last_location, None);
+        let with: Prefs = serde_json::from_str(
+            r#"{"keepAwake":false,"locations":[{"id":"a","name":"Acme","url":"https://relay.acme.dev"}],"lastLocation":"a"}"#,
+        )
+        .unwrap();
+        assert_eq!(with.location("a").unwrap().name, "Acme");
+        assert_eq!(with.last_location.as_deref(), Some("a"));
+        assert!(with.location("b").is_none());
     }
 
     /// The command line of a running process, via `ps` (works on Linux and macOS).

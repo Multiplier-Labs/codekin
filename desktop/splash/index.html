@@ -8,7 +8,7 @@
 </head>
 <body>
   <main>
-    <h1>Codekin</h1>
+    <h1 id="brand">Codekin</h1>
     <section id="status" hidden>
       <div class="spinner" aria-hidden="true"></div>
       <p id="status-text">Starting Codekin…</p>
@@ -23,7 +23,62 @@
         <button id="quit" type="button">Quit</button>
       </div>
     </section>
+
+    <!-- Hosted locations (Phase 4b) -->
+    <section id="signin" hidden>
+      <h2 id="signin-title">Sign in</h2>
+      <p>Codekin opens your browser to sign in, then brings you back here.</p>
+      <p class="code" id="signin-origin"></p>
+      <p class="error-text" id="signin-error" hidden></p>
+      <div class="actions">
+        <button id="signin-start" type="button" class="primary">Sign in with your browser</button>
+        <button id="signin-this-mac" type="button">Switch to This Mac</button>
+      </div>
+    </section>
+    <section id="waiting" hidden>
+      <div class="spinner" aria-hidden="true"></div>
+      <h2 id="waiting-title">Waiting for your browser…</h2>
+      <p>Finish signing in there. Codekin continues on its own.</p>
+      <div class="actions">
+        <button id="waiting-reopen" type="button">Open Browser Again</button>
+        <button id="waiting-cancel" type="button">Cancel</button>
+      </div>
+    </section>
+    <section id="claim" hidden>
+      <div class="spinner" aria-hidden="true"></div>
+      <p>Signing in…</p>
+      <form id="claim-form" method="post">
+        <input type="hidden" name="code" id="claim-code">
+        <input type="hidden" name="code_verifier" id="claim-verifier">
+      </form>
+    </section>
+
+    <section id="locations" class="wide" hidden>
+      <h2>Locations</h2>
+      <p>Open a hosted Codekin (app.codekin.ai or your company's relay) in this app. This Mac is always available.</p>
+      <ul id="location-list"></ul>
+      <form id="add-form" autocomplete="off">
+        <h2>Add a location</h2>
+        <label>Address <input id="add-url" type="text" placeholder="https://app.codekin.ai" required spellcheck="false"></label>
+        <label>Name <input id="add-name" type="text" placeholder="Optional"></label>
+        <p class="error-text" id="add-error" hidden></p>
+        <div class="actions">
+          <button id="add-submit" type="submit" class="primary">Add and Open</button>
+        </div>
+      </form>
+    </section>
   </main>
+  <template id="location-row">
+    <li class="row">
+      <span class="row-name"></span>
+      <span class="row-url code"></span>
+      <span class="row-actions">
+        <button type="button" data-action="open">Open</button>
+        <button type="button" data-action="rename">Rename</button>
+        <button type="button" data-action="remove">Remove</button>
+      </span>
+    </li>
+  </template>
   <script src="splash.js"></script>
 </body>
 </html>
