@@ -13,7 +13,7 @@
 set -euo pipefail
 
 CODEKIN_VERSION="${CODEKIN_VERSION:-latest}"
-MIN_NODE_VERSION=20
+MIN_NODE_VERSION=22.14
 DEFAULT_RELAY_URL="https://app.codekin.ai"
 
 # ---------------------------------------------------------------------------
@@ -54,12 +54,13 @@ PAIR_DETAIL=""
 # 1. Check / install Node.js
 # ---------------------------------------------------------------------------
 
-node_version() {
-  node -e "process.stdout.write(process.version.slice(1).split('.')[0])" 2>/dev/null || echo "0"
+# better-sqlite3 13 needs Node-API 10, first in Node 22.14; older 22.x segfaults on load.
+node_supported() {
+  node -e "const [a, b] = process.versions.node.split('.').map(Number); process.exit(a > 22 || (a === 22 && b >= 14) ? 0 : 1)" 2>/dev/null
 }
 
 ensure_node() {
-  if command -v node &>/dev/null && [[ $(node_version) -ge $MIN_NODE_VERSION ]]; then
+  if command -v node &>/dev/null && node_supported; then
     info "Node.js $(node --version) found."
     return
   fi

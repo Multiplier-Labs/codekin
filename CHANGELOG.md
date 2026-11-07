@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Breaking: Codekin now needs Node.js 22.14 or later** (24 LTS recommended). Node 20 has been end of life since 2026-04-30, and Codekin already depended on packages that need Node 22. `package.json` now declares `engines`, `install.sh` installs the current LTS when it finds an older Node, and CI tests Node 22, 24 and 26
+- `better-sqlite3` upgraded to 13, which ships prebuilt binaries for macOS, Linux and Windows inside the package. `npm install -g codekin` no longer compiles SQLite from source, so it works on Node 26 without Python or a C++ toolchain, and it isn't affected by npm 11's install-script blocking
+
 ## [0.9.10] - 2026-11-07
 
 ### Fixed

@@ -9,8 +9,9 @@
  *      package-lock.json from the same commit (npm leaves it out of packs).
  *   3. Download the pinned Node runtime (desktop/node-runtime.json), verify
  *      its SHA-256, and run `npm ci --omit=dev` with that Node and its own npm
- *      first on PATH, so native modules (better-sqlite3) are built for the
- *      bundled Node's ABI. A missing or out-of-sync lockfile fails the build.
+ *      first on PATH, then load better-sqlite3 (a Node-API module with
+ *      prebuilt binaries in its package) under that Node. A missing or
+ *      out-of-sync lockfile fails the build.
  *   4. Place the Node binary as the Tauri sidecar
  *      (src-tauri/binaries/node-<target-triple>).
  *   5. Run the isolated smoke test (scripts/smoke-test.mjs) against the result.
@@ -39,9 +40,6 @@ export const TARGETS = {
   'linux-x64': { platform: 'linux', arch: 'x64', triple: 'x86_64-unknown-linux-gnu' },
   'linux-arm64': { platform: 'linux', arch: 'arm64', triple: 'aarch64-unknown-linux-gnu' },
 }
-
-/** Dependencies with native addons, built for the bundled Node by their install scripts. */
-export const NATIVE_MODULES = ['better-sqlite3']
 
 export function parseArgs(argv) {
   const opts = { target: 'darwin-arm64', smokeTest: true }
@@ -181,21 +179,13 @@ export async function bundleServer({ target = 'darwin-arm64', smokeTest = true }
     if (reported !== `v${pin.version} ${t.platform}/${t.arch}`) throw new Error(`pinned Node reports ${reported}`)
     log(`installing production dependencies with Node ${reported}`)
     const env = pinnedNodeEnv(join(nodeHome, 'bin'))
-    // npm 11 blocks dependency install scripts unless allowed. Allow exactly the
-    // native modules through a build-only .npmrc (npm refuses --allow-scripts for
-    // project installs), so the shipped package.json stays as packed.
-    const npmrc = join(payloadDir, '.npmrc')
-    writeFileSync(npmrc, `allow-scripts=${NATIVE_MODULES.join(',')}\n`)
-    run(join(nodeHome, 'bin', 'npm'), ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: payloadDir, env })
+    // No production dependency needs an install script. `npm ci` would still run an
+    // implied `node-gyp rebuild` for better-sqlite3 (the lockfile drops its
+    // `gypfile: false`), compiling an addon its prebuilt binary makes unused.
+    run(join(nodeHome, 'bin', 'npm'), ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: payloadDir, env })
     // Only needed to install; the app doesn't ship npm.
-    rmSync(npmrc)
     rmSync(join(payloadDir, 'package-lock.json'))
 
-    // Native module check: each must have its compiled addon and load under the bundled Node.
-    for (const mod of NATIVE_MODULES) {
-      const addon = join(payloadDir, 'node_modules', mod, 'build', 'Release')
-      if (!existsSync(addon)) throw new Error(`${mod} has no compiled addon in ${addon}: its install script didn't run`)
-    }
     execFileSync(nodeBin, ['-e', "const D=require('better-sqlite3');const d=new D(':memory:');d.exec('select 1');d.close()"], { cwd: payloadDir, stdio: 'inherit' })
 
     // 4. Sidecar.
