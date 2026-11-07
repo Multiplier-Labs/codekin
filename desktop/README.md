@@ -33,7 +33,12 @@ Output (all gitignored):
 
 `scripts/smoke-test.mjs` can also be run on its own against an existing payload. It never reads or
 writes your real `~/.config/codekin`, `~/.codekin` or harness config, and never attaches to a running
-Codekin. CI runs the build and smoke test on `macos-15` and `ubuntu-latest` (`.github/workflows/desktop.yml`).
+Codekin.
+
+**When CI builds the app:** only for PRs that change `desktop/**` (or `.github/workflows/desktop.yml`), when
+started by hand (Actions → Desktop → Run workflow), and for releases (a `v*` tag runs the `desktop` job in
+`publish.yml` next to the npm publish). Server and frontend PRs don't build the app; the release job runs the
+same payload smoke test before it publishes, so anything they break fails the desktop release, not npm.
 
 ## Tauri shell
 

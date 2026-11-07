@@ -1,40 +1,23 @@
 name: Desktop
 
-# Builds the desktop app's server payload (desktop/scripts/bundle-server.mjs)
-# and runs its isolated smoke test, on every PR that touches the payload or
-# the files it is built from. macos-15 is the real target (Apple Silicon); the
-# Linux job checks the same script on a cheaper runner. The Tauri shell
-# (Rust checks, unsigned .app, launch test) is the `shell` job (docs/DESKTOP-APP-TAURI-PLAN.md).
+# Checks for the desktop app's own code. The app itself is built for real only
+# when a release is tagged (the `desktop` job in publish.yml, next to the npm
+# publish), not on every merge. This workflow runs on PRs that change the app
+# (desktop/** or this file) and on demand (Actions → Desktop → Run workflow):
+# the payload build and its smoke test on macos-15 and ubuntu, and the `shell`
+# job (Rust checks, unsigned .app, launch test, signing checks).
+#
+# Server / frontend changes don't trigger it. The release job runs the same
+# payload smoke test before publishing anything, so a server change that
+# breaks the app fails the desktop release (the npm publish is a separate job).
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'desktop/**'
-      - 'bin/**'
-      - 'server/**'
-      - 'src/**'
-      - 'public/**'
-      - 'index.html'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'vite.config.ts'
-      - 'tsconfig*.json'
-      - '.github/workflows/desktop.yml'
   pull_request:
     branches: [main]
     paths:
       - 'desktop/**'
-      - 'bin/**'
-      - 'server/**'
-      - 'src/**'
-      - 'public/**'
-      - 'index.html'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'vite.config.ts'
-      - 'tsconfig*.json'
       - '.github/workflows/desktop.yml'
+  workflow_dispatch:
 
 jobs:
   payload:
