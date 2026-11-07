@@ -9,6 +9,7 @@ import {
   REPO_ROOT,
   TARGETS,
   assertHostMatches,
+  nativeAddonPlan,
   assertLockfileMatches,
   fetchNode,
   parseArgs,
@@ -118,4 +119,29 @@ describe('npm environment', () => {
 it('keeps generated output out of git', () => {
   const ignore = readFileSync(join(DESKTOP_DIR, '.gitignore'), 'utf-8')
   for (const entry of ['/build/', '/.cache/', '/src-tauri/binaries/']) expect(ignore).toContain(entry)
+})
+
+describe('nativeAddonPlan', () => {
+  const files = [
+    'node_modules/better-sqlite3/prebuilds/darwin-arm64.node',
+    'node_modules/better-sqlite3/prebuilds/darwin-x64.node',
+    'node_modules/better-sqlite3/prebuilds/linux-x64.node',
+    'node_modules/better-sqlite3/prebuilds/linuxmusl-x64.node',
+    'node_modules/better-sqlite3/prebuilds/win32-x64.node',
+    'node_modules/other/build/Release/addon.node',
+  ]
+
+  it('on macOS keeps and re-signs only what this Mac can load', () => {
+    expect(nativeAddonPlan(files, 'darwin-arm64')).toEqual({
+      remove: files.slice(1, 5),
+      sign: ['node_modules/better-sqlite3/prebuilds/darwin-arm64.node', 'node_modules/other/build/Release/addon.node'],
+    })
+  })
+
+  it('on Linux prunes other platforms and signs nothing', () => {
+    const plan = nativeAddonPlan(files, 'linux-x64')
+    expect(plan.sign).toEqual([])
+    expect(plan.remove).not.toContain('node_modules/better-sqlite3/prebuilds/linux-x64.node')
+    expect(plan.remove).toContain('node_modules/better-sqlite3/prebuilds/linuxmusl-x64.node')
+  })
 })

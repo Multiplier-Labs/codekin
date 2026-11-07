@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- The 0.10.0 desktop app couldn't start its server on a Mac (`dlopen … different Team IDs` from `better-sqlite3`). The SQLite module's prebuilt binary is signed with its publisher's Apple Team ID, and the app's bundled Node, signed ad-hoc under the hardened runtime, refuses to load code from another team. The app now ships the binary re-signed ad-hoc, as the binaries compiled at build time were before 0.10.0, and leaves out prebuilds for other platforms. The npm package is not affected
+
 ## [0.10.0] - 2026-11-07
 
 **Upgrading:** check `node --version` first. On anything older than 22.14, upgrade Node (for example `nvm install 24`) before `npm install -g codekin@0.10.0`: npm only warns about the `engines` field, and the new SQLite module crashes on load on older Node. The desktop app bundles its own Node and isn't affected.
