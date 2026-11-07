@@ -10,6 +10,7 @@ import {
   TARGETS,
   assertHostMatches,
   nativeAddonPlan,
+  codesignArgs,
   assertLockfileMatches,
   fetchNode,
   parseArgs,
@@ -143,5 +144,16 @@ describe('nativeAddonPlan', () => {
     expect(plan.sign).toEqual([])
     expect(plan.remove).not.toContain('node_modules/better-sqlite3/prebuilds/linux-x64.node')
     expect(plan.remove).toContain('node_modules/better-sqlite3/prebuilds/linuxmusl-x64.node')
+  })
+})
+
+describe('codesignArgs', () => {
+  it('signs ad-hoc without an identity', () => {
+    expect(codesignArgs('', 'a.node')).toEqual(['--force', '--sign', '-', 'a.node'])
+  })
+
+  it('signs for notarization with a Developer ID', () => {
+    const id = 'Developer ID Application: Multiplier Labs (ABCDE12345)'
+    expect(codesignArgs(id, 'a.node')).toEqual(['--force', '--options', 'runtime', '--timestamp', '--sign', id, 'a.node'])
   })
 })

@@ -144,6 +144,19 @@ export function nativeAddonPlan(files, target) {
   return { remove, sign }
 }
 
+/**
+ * `codesign` arguments for one native addon. With a Developer ID identity
+ * (CODEKIN_CODESIGN_IDENTITY, set by the release job once the Apple secrets
+ * exist) addons are signed for notarization: hardened runtime and a secure
+ * timestamp. Without one they are signed ad-hoc, like the rest of an
+ * unsigned build.
+ */
+export function codesignArgs(identity, file) {
+  return identity
+    ? ['--force', '--options', 'runtime', '--timestamp', '--sign', identity, file]
+    : ['--force', '--sign', '-', file]
+}
+
 function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { stdio: 'inherit', ...opts })
   if (r.error) throw r.error
@@ -214,8 +227,9 @@ export async function bundleServer({ target = 'darwin-arm64', smokeTest = true }
       .map(f => join('node_modules', f))
     const plan = nativeAddonPlan(addons, target)
     for (const f of plan.remove) rmSync(join(payloadDir, f))
-    for (const f of plan.sign) run('codesign', ['--force', '--sign', '-', join(payloadDir, f)])
-    log(`native addons: ${plan.sign.length} re-signed ad-hoc, ${plan.remove.length} other-platform prebuilds removed`)
+    const identity = process.env.CODEKIN_CODESIGN_IDENTITY || ''
+    for (const f of plan.sign) run('codesign', codesignArgs(identity, join(payloadDir, f)))
+    log(`native addons: ${plan.sign.length} signed ${identity ? `with ${identity}` : 'ad-hoc'}, ${plan.remove.length} other-platform prebuilds removed`)
 
     execFileSync(nodeBin, ['-e', "const D=require('better-sqlite3');const d=new D(':memory:');d.exec('select 1');d.close()"], { cwd: payloadDir, stdio: 'inherit' })
 

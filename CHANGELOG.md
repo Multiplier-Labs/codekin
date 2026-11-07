@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- The desktop release job can sign the app with a Developer ID and have Apple notarize it, so macOS opens it without the "Apple could not verify" block. It switches on once the Apple signing secrets are configured (`desktop/README.md`); until then releases stay ad-hoc signed as before
+
 ## [0.10.1] - 2026-11-07
 
 ### Fixed

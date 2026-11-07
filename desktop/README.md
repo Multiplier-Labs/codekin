@@ -90,9 +90,13 @@ ad-hoc signed: on another Mac it needs `xattr -dr com.apple.quarantine Codekin.a
 Pushing a `v*` tag runs the `desktop` job in `.github/workflows/publish.yml` next to the npm publish:
 
 1. checks the tag matches `package.json`, and that the updater key and public key are configured
-2. builds the payload (smoke test), `Codekin.app`, the `.dmg`, and the signed updater artifact
+2. builds the payload (smoke test), `Codekin.app`, the `.dmg`, and the signed updater artifact. With the
+   Apple secrets configured (below), everything is signed with the Developer ID, the app and the `.dmg` are
+   notarized and stapled, and a verification step checks every executable and native addon carries the Team ID
+   and the hardened runtime and that Gatekeeper accepts both as notarized. Without them the build is ad-hoc
+   signed, as before; with only some of them the job fails
 3. uploads `Codekin_<v>_aarch64.dmg`, `.app.tar.gz` and `.app.tar.gz.sig` to the tag's GitHub release, created
-   as a **prerelease** (these builds are unsigned and for internal testers)
+   as a **prerelease**
 4. last, once the artifact URL answers, replaces `latest.json` on the rolling `desktop-channel` prerelease, which
    is the updater's endpoint
 
@@ -138,6 +142,42 @@ Until all three are done, the release job fails at its first check (the npm publ
 isn't affected), and the app reports that updates aren't configured.
 
 Rotating the key later means every installed app needs one manual update to a build with the new public key.
+
+### One-time setup: Developer ID signing and notarization (Phase 3b)
+
+Without this, macOS blocks the downloaded app ("Apple could not verify…") until the user allows it under
+System Settings → Privacy & Security, or removes the quarantine flag. It needs an Apple Developer Program
+membership for Multiplier Labs (organization enrollment needs the company's D-U-N-S number).
+
+1. **Developer ID Application certificate.** Only the account's Account Holder can create one: Xcode →
+   Settings → Accounts → the team → Manage Certificates → + → Developer ID Application. Then in Keychain
+   Access → My Certificates, export it (with its private key) as a `.p12` with a password.
+2. **Team ID:** developer.apple.com/account → Membership details (10 characters).
+3. **Notarization key:** App Store Connect → Users and Access → Integrations → App Store Connect API →
+   generate a key with Developer access. Note its Key ID and Issuer ID, and download the `.p8` (only once).
+4. Add all six as repository secrets:
+
+   ```bash
+   base64 -i DeveloperID.p12 | gh secret set APPLE_CERTIFICATE --repo Multiplier-Labs/codekin
+   gh secret set APPLE_CERTIFICATE_PASSWORD --repo Multiplier-Labs/codekin   # prompts
+   gh secret set APPLE_TEAM_ID --repo Multiplier-Labs/codekin
+   gh secret set APPLE_API_KEY --repo Multiplier-Labs/codekin                # the Key ID
+   gh secret set APPLE_API_ISSUER --repo Multiplier-Labs/codekin
+   gh secret set APPLE_API_KEY_P8 --repo Multiplier-Labs/codekin < AuthKey_XXXXXXXXXX.p8
+   ```
+
+5. Run the Desktop workflow manually on `main`: its first step checks the six are consistent. The next tag
+   then publishes a signed, notarized build.
+
+The release job imports the certificate into a throwaway keychain (`.github/actions/macos-developer-id`).
+`bundle-server.mjs` signs the native addons with it (`CODEKIN_CODESIGN_IDENTITY`), `tauri build` signs the
+app and the bundled `node` (`APPLE_SIGNING_IDENTITY`) and notarizes and staples the app, and the job then
+signs, notarizes and staples the `.dmg`. Everything that runs code must carry the same Team ID: the hardened
+runtime refuses to load a native addon signed by anyone else.
+
+A Developer ID certificate lasts five years; renewing it means replacing `APPLE_CERTIFICATE` and its password.
+Installed apps keep updating across the switch from ad-hoc to Developer ID, because updates are verified with
+the updater key, not the Apple signature.
 
 ## Move to Applications
 
