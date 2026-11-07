@@ -161,15 +161,9 @@ mod tests {
 
     #[test]
     fn a_closed_port_is_refused() {
-        let port = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
-        assert_eq!(
-            ping("127.0.0.1", port, Duration::from_secs(2)),
-            Ping::Refused
-        );
+        // Port 1 (tcpmux) is privileged and never served here. A freshly freed
+        // ephemeral port could be taken by a parallel test before the probe.
+        assert_eq!(ping("127.0.0.1", 1, Duration::from_secs(2)), Ping::Refused);
     }
 
     #[test]

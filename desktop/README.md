@@ -44,8 +44,9 @@ Codekin. CI runs the build and smoke test on `macos-15` and `ubuntu-latest` (`.g
 | `protocol.rs` | The launcher's event / credential contract, URLs, navigation allowlist, restart backoff (pure, unit-tested) |
 | `launcher.rs` | Spawns `codekin app-server` in its own process group, stdin = lifetime pipe, fd 3 = credential; graceful SIGTERM, group SIGKILL backstop |
 | `http.rs` | `/api/ping` (attach liveness) and active-session count, no redirects |
+| `background.rs` | Shell preferences (`prefs.json`) and Keep Mac awake (`caffeinate -i -w <pid>`) |
 | `supervisor.rs` | Start / attach / crash-restart / Quit state machine, independent of Tauri |
-| `lib.rs` | Window, menu, navigation guard, splash commands (`retry`, `show_logs`, `quit`), Quit and Restart confirmations |
+| `lib.rs` | Window, app menu and menu bar icon, Open at login, navigation guard, splash commands (`retry`, `show_logs`, `quit`), Quit and Restart confirmations |
 
 ```bash
 # After building the payload (above):

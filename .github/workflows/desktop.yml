@@ -146,6 +146,8 @@ jobs:
           test -f "$APP/Contents/Resources/codekin/node_modules/better-sqlite3/build/Release/better_sqlite3.node"
           "$APP/Contents/MacOS/node" -p 'process.version + " " + process.arch'
           codesign -dv "$APP" 2>&1 | head -5
+          # App Nap opt-out (Phase 2) must be in the bundle's Info.plist.
+          test "$(plutil -extract NSAppSleepDisabled raw "$APP/Contents/Info.plist")" = "true"
           BIN=$(find "$APP/Contents/MacOS" -type f -perm +111 ! -name node | head -1)
           echo "bin=$BIN" >> "$GITHUB_OUTPUT"
           echo "app=$APP" >> "$GITHUB_OUTPUT"
@@ -160,6 +162,10 @@ jobs:
           mkdir -p "$HOME_DIR/.config/codekin" "$HOME_DIR/repos"
           PORT=$(node -e "const s=require('net').createServer().listen(0,'127.0.0.1',()=>{console.log(s.address().port);s.close()})")
           printf 'PORT=%s\nDATA_DIR=%s\nREPOS_ROOT=%s\n' "$PORT" "$HOME_DIR/data" "$HOME_DIR/repos" > "$HOME_DIR/.config/codekin/env"
+          # Keep Mac awake saved as on: the app should hold a caffeinate tied to its pid.
+          PREFS_DIR="$HOME_DIR/Library/Application Support/ai.codekin.desktop"
+          mkdir -p "$PREFS_DIR"
+          echo '{"keepAwake": true}' > "$PREFS_DIR/prefs.json"
           HOME="$HOME_DIR" "${{ steps.bundle.outputs.bin }}" > "$RUNNER_TEMP/app.out" 2>&1 &
           APP_PID=$!
           for i in $(seq 1 60); do curl -sf -m 1 "http://127.0.0.1:$PORT/api/ping" && break; sleep 1; done
@@ -168,12 +174,18 @@ jobs:
           sleep 8
           screencapture -x "$RUNNER_TEMP/codekin-app.png" || echo "screencapture unavailable"
           LAUNCHER=$(pgrep -f "Codekin.app/Contents/MacOS/node .*app-server" | head -1)
-          echo "app=$APP_PID launcher=$LAUNCHER"
+          CAFFEINATE=$(pgrep -f "caffeinate -i -w $APP_PID" | head -1)
+          echo "app=$APP_PID launcher=$LAUNCHER caffeinate=$CAFFEINATE"
+          test -n "$CAFFEINATE"
+          pmset -g assertions | grep -i "caffeinate" | head -3 || true
           kill -9 "$APP_PID"
           for i in $(seq 1 30); do kill -0 "$LAUNCHER" 2>/dev/null || break; sleep 1; done
           if kill -0 "$LAUNCHER" 2>/dev/null; then echo "launcher did not stop after the shell died"; exit 1; fi
           if curl -sf -m 1 "http://127.0.0.1:$PORT/api/ping"; then echo "server still up"; exit 1; fi
           grep -q "stdin closed" "$HOME_DIR/Library/Logs/Codekin/server.log"
+          # caffeinate -w ends with the app, so a crash never leaves the Mac held awake.
+          for i in $(seq 1 10); do kill -0 "$CAFFEINATE" 2>/dev/null || break; sleep 1; done
+          if kill -0 "$CAFFEINATE" 2>/dev/null; then echo "caffeinate outlived the app"; exit 1; fi
           echo "launch smoke test passed"
 
       - name: Server log

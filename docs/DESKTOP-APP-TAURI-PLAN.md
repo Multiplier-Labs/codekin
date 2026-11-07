@@ -1,9 +1,9 @@
 # Desktop App (Tauri) — Implementation Plan
 
 Status: **In progress.** Merged: the server, CLI and launcher prerequisites (#755–#758), the server payload
-builder (#759), and the Tauri shell with its `macos-15` build and launch job (Phase 1, see
-[Shell implementation notes](#shell-implementation-notes)). Not started: the Phase 0 spike on a Mac, the Phase 1
-manual checklist, Phase 2 and later. The decisions in
+builder (#759), the Tauri shell with its `macos-15` build and launch job (Phase 1), in-app relay pairing (#762)
+and the background features (Phase 2); see [Shell implementation notes](#shell-implementation-notes). Not
+started: the Phase 0 spike on a Mac, the Phase 1 and 2 manual checklists, Phase 3. The decisions in
 [Decisions](#decisions) were confirmed on 2026-11-06. One input is still open: who owns the Apple Developer
 account (D3). It blocks only the signing and notarization step, not the rest of the work.
 
@@ -332,9 +332,21 @@ What the Phase 1 shell does today, and where it differs from the text above:
   at a different version they show the error view.
 - **Logs:** `~/Library/Logs/Codekin/server.log` on macOS, the Tauri app log directory elsewhere. Launcher
   stdout written after the shell dies is lost (its reader is gone); stderr goes straight to the file.
-- **Not yet:** `on_new_window` handling for `target=_blank` links (check in the spike), the menu bar icon,
-  Open at login, App Nap and keep-awake (Phase 2), the updater and move-to-Applications (Phase 3a), a
-  designed macOS icon (the current one is the favicon mark on a transparent background).
+- **Links:** `target=_blank` and `window.open` go to the default browser through `on_new_window` (never a
+  second app window), like other external navigations.
+- **Phase 2 (background):** the menu bar icon (template image) has Open Codekin, Keep Mac Awake, Open at
+  Login, Restart Server, Show Logs and Quit Codekin. Where it differs from the text below:
+  - *Keep Mac awake* runs `/usr/bin/caffeinate -i -w <app pid>` instead of calling IOKit: the same
+    idle-system-sleep assertion, no FFI, and `-w` ends it with the app even after a crash. The choice is saved in
+    the app config directory (`prefs.json`) and restored at launch. Menus have no tooltips on macOS, so a
+    disabled line under it says it can't stop lid-closed sleep on battery.
+  - *Open at login* uses `tauri-plugin-autostart` in `LaunchAgent` mode (a plist in `~/Library/LaunchAgents`)
+    rather than an AppleScript login item, which would need an Automation permission prompt.
+  - *App Nap* is disabled with `NSAppSleepDisabled` in Info.plist, not `beginActivity`. Whether that also
+    keeps the server child unthrottled needs checking on a Mac (Phase 2 manual checklist).
+  - In-app pairing: Settings → This machine → Remote access (#762).
+- **Not yet:** the updater and move-to-Applications (Phase 3a), a designed macOS icon (the current one is the
+  favicon mark on a transparent background).
 - **Checked on Linux under Xvfb** (WebKitGTK, not WKWebView): first launch generates the credential and
   shows the live UI; the port-conflict error view, Retry, Ctrl+Q graceful quit, and SIGKILL of the shell
   (the launcher stops the server through stdin EOF) all work. That run found the WebSocket Origin bug fixed

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Opt out of App Nap: a backgrounded window must not throttle the
+       supervisor and server that stream sessions to the phone (desktop plan Phase 2). -->
+  <key>NSAppSleepDisabled</key>
+  <true/>
+</dict>
+</plist>
