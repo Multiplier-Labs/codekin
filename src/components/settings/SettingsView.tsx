@@ -328,7 +328,7 @@ export function SettingsView({
               </button>
             )}
             {/* A page of its own (no sidebar), so it carries the app mark. */}
-            <AppIcon size={24} className="text-primary-7" />
+            <AppIcon size={24} className="text-ink" />
             <h1 className="text-title font-semibold text-ink">Settings</h1>
           </div>
         )}

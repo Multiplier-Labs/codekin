@@ -2,7 +2,8 @@
 
 **Status**: Implemented
 **Goal**: Replace the binary dark/light toggle with a theme selector offering nine
-pre-defined color themes. Today's Dark and Light modes become themes 1 and 2, unchanged.
+pre-defined color themes. Today's Dark and Light modes become themes 1 and 2 (since retinted to the
+codekin.ai brand palette, §3.1).
 Themes change **color only** — fonts, the type scale, radii, shadow geometry and
 density are shared by every theme.
 
@@ -58,8 +59,8 @@ Each theme declares a **scheme** (`dark` or `light`) that drives native UI
 
 | # | id | Label | Scheme | Character |
 |---|----|-------|--------|-----------|
-| 1 | `dark` | Dark | dark | **Existing** dark mode, pixel-identical. Teal-tinted chrome, warm-gray transcript, gold primary, teal accent. |
-| 2 | `light` | Light | light | **Existing** light mode, pixel-identical. Cream transcript, warm-gray chrome. |
+| 1 | `dark` | Dark | dark | The default, in the codekin.ai brand palette (§3.1): ink-gray chrome and transcript, brand-orange primary (`#ff6a2b`), teal accent. |
+| 2 | `light` | Light | light | Brand palette on paper (§3.1): near-white transcript, paper-gray chrome, orange primary, teal accent. |
 | 3 | `midnight` | Midnight | dark | Cool blue-slate (Nord-adjacent). Frost-blue accent, soft gold primary. For users who find the warm transcript too brown. |
 | 4 | `paper` | Paper | light | Cool cotton-white page (`#f8faff`), blue-gray surfaces, blue ink primary and a red editorial accent. |
 | 5 | `contrast` | High Contrast | dark | Black ground, near-white ink, electric cyan primary, yellow accent, strong borders. Meets the stricter floors in §6. |
@@ -72,8 +73,27 @@ Solarized ships as the light variant: the dark side is already well covered (six
 themes), and Solarized Light pairs warm cream grounds and teal accents, while Paper uses cool
 blue-white grounds and red accents.
 
-Themes 3–9 use **one palette throughout**. Dark and Light keep their distinct, warmer
+Themes 3–9 use **one palette throughout**. Dark and Light keep their own, slightly softer
 `.terminal-area` palette; the new themes do not define one.
+
+### 3.1 Brand alignment (Dark and Light)
+
+Dark and Light follow the website's palette (codekin.ai, `codekin-website/tailwind.config.mjs`):
+ink `#16181B`, paper `#F5F6F7`, line `#D5D9DE`, orange `#FF6A2B`. They were first shipped as
+gold-on-teal and were retinted in OKLCH rather than redrawn, which kept the hand-tuned
+contrast:
+
+- **Primary**: gold → orange. Hue is the brand orange's; chroma is scaled by the
+  orange/gold chroma ratio; lightness is kept. Dark `primary-5` is pinned to `#ff6a2b`
+  exactly, the shift tapering to zero at steps 1 and 12 (the generator's rule, §5.3).
+- **Neutral**: teal (chrome) and warm (transcript) grays → the ink's cool hue at
+  chroma ≤ 0.008, less at the light end. Lightness is kept.
+- **Secondary**: terracotta sat at the orange's hue, so it moved to a dusty rose
+  (lightness and chroma kept).
+- Accent, status families and syntax colors are unchanged.
+
+The mark (`AppIcon`, `public/favicon.svg`) is the website's: rings in ink, dots in
+orange. In the app the dots take `primary-5`, so the mark picks up each theme's primary.
 
 **Fidelity vs. contrast.** Where a canonical palette color fails a contrast floor, the
 generator (§5.3) moves it along OKLCH lightness — keeping hue and chroma — until it
@@ -138,8 +158,7 @@ src/components/
   ThemeMenu.tsx               # sidebar palette button + popover
 ```
 
-Dark and Light stay hand-tuned in `src/index.css` — moving them bought nothing and would
-have risked the pixel-neutral guarantee. `palettes.css` is imported from `index.css`
+Dark and Light stay hand-tuned in `src/index.css`. `palettes.css` is imported from `index.css`
 right after Tailwind. Its selectors are theme-specific and unlayered, so they override
 the `@theme` defaults (which Tailwind emits in a cascade layer) whatever the source order.
 
@@ -165,8 +184,10 @@ type stripping) writes `src/themes/palettes.css`. Each theme source supplies:
 - **`neutral`** — all 12 steps by hand. Page, surface, edges and ink live here, so they
   are authored, not derived.
 - **`keys`** — one signature color per intent family. The ramp keeps the lightness
-  profile of the matching Dark (dark scheme) or Light (light scheme) ramp — the profile
-  components were tuned against — and takes hue and chroma from the key. Step 5 (the
+  profile of the matching Dark (dark scheme) or Light (light scheme) ramp as first
+  shipped — the profile components were tuned against, frozen in
+  `scripts/theme-reference.json` so the brand retint (§3.1) didn't move themes 3–9 — and
+  takes hue and chroma from the key. Step 5 (the
   usual text step) is pinned to the key's lightness, with the shift tapering to zero at
   steps 1 and 12. Before that, the key is nudged to 4.5:1 against the page if it falls
   short. Out-of-gamut results are chroma-reduced at constant lightness and hue.
@@ -213,9 +234,9 @@ The rules keep a `[data-theme]` prefix to preserve their old specificity.
 
 ## 6. Contrast Floors
 
-Enforced by `src/themes/themes.test.ts` for every theme except Dark and Light, which are
-frozen at their hand-tuned values (their measured ratios are documented in
-`src/index.css`). WCAG 2.x contrast.
+Enforced by `src/themes/themes.test.ts` for every theme's chrome, and for the
+`.terminal-area` scope of Dark and Light (plus their primary, accent and success text
+steps on the transcript page). WCAG 2.x contrast.
 
 | Pair | Floor | High Contrast |
 |------|-------|---------------|

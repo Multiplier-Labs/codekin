@@ -295,7 +295,7 @@ export function LeftSidebar({
     return (
       <div className="app-left-sidebar flex flex-col items-center w-12 flex-shrink-0 bg-surface py-3 gap-3 border-r border-edge">
         <div className="app-logo-circle flex items-center justify-center rounded-full" style={{ width: 28, height: 28 }}>
-          <AppIcon size={26} className="text-primary-7" />
+          <AppIcon size={26} className="text-ink" />
         </div>
         <button
           onClick={() => setCollapsed(false)}
@@ -364,7 +364,7 @@ export function LeftSidebar({
       {/* Header: logo + title + collapse + new session */}
       <div className="group/header flex items-center gap-2 px-3 py-2.5 border-b border-edge flex-shrink-0">
         <div className="app-logo-circle flex items-center justify-center rounded-full flex-shrink-0" style={{ width: 26, height: 26 }}>
-          <AppIcon size={24} className="text-primary-7" />
+          <AppIcon size={24} className="text-ink" />
         </div>
         <span className="flex-1 text-title font-semibold text-ink truncate">Codekin</span>
         {isMobile ? (
