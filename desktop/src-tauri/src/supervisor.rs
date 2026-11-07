@@ -65,6 +65,10 @@ pub enum Ctl {
     RestartServer,
     /// Stop an owned server (if any) and exit the app.
     Quit,
+    /// Stop an owned server (if any) and halt without exiting, so the shell
+    /// can install an update. The result (true = the old process group is
+    /// gone) is sent on [`Shared::update_stopped`].
+    StopForUpdate,
 }
 
 pub trait Ui: Send + 'static {
@@ -78,6 +82,8 @@ pub trait Ui: Send + 'static {
 pub struct Shared {
     pub connection: Mutex<Option<Connection>>,
     pub token: Mutex<Option<String>>,
+    /// Where the supervisor reports the outcome of [`Ctl::StopForUpdate`].
+    pub update_stopped: Mutex<Option<std::sync::mpsc::Sender<bool>>>,
 }
 
 impl Shared {
@@ -108,6 +114,8 @@ enum Next {
     Relaunch,
     RelaunchAfter(Duration),
     Exit,
+    /// Stopped for an update; `true` when cleanup succeeded. The app keeps running.
+    Halt(bool),
 }
 
 impl<U: Ui> Supervisor<U> {
@@ -116,8 +124,10 @@ impl<U: Ui> Supervisor<U> {
         let mut delay = Duration::ZERO;
         loop {
             if !delay.is_zero() {
-                if let Some(Ctl::Quit) = self.wait_ctl(delay) {
-                    break;
+                match self.wait_ctl(delay) {
+                    Some(Ctl::Quit) => break,
+                    Some(Ctl::StopForUpdate) => return self.halt(true),
+                    _ => {}
                 }
             }
             self.ui.show(View::Status(if crash_attempt > 0 {
@@ -129,10 +139,19 @@ impl<U: Ui> Supervisor<U> {
                 Next::Relaunch => delay = Duration::ZERO,
                 Next::RelaunchAfter(d) => delay = d,
                 Next::Exit => break,
+                Next::Halt(clean) => return self.halt(clean),
             }
         }
         self.shared.set(Connection::None, None);
         self.ui.exit();
+    }
+
+    /// End the supervisor for an update: no relaunch, no app exit.
+    fn halt(&self, clean: bool) {
+        self.shared.set(Connection::None, None);
+        if let Some(tx) = self.shared.update_stopped.lock().unwrap().take() {
+            let _ = tx.send(clean);
+        }
     }
 
     /// Wait up to `d` for a control message.
@@ -235,6 +254,7 @@ impl<U: Ui> Supervisor<U> {
         });
         match self.ctl.recv() {
             Ok(Ctl::Retry) | Ok(Ctl::RestartServer) => Next::Relaunch,
+            Ok(Ctl::StopForUpdate) => Next::Halt(true),
             Ok(Ctl::Quit) | Err(_) => Next::Exit,
         }
     }
@@ -247,6 +267,11 @@ impl<U: Ui> Supervisor<U> {
                     self.shared.set(Connection::None, None);
                     launcher.shutdown(SHUTDOWN_GRACE);
                     return Next::Exit;
+                }
+                Ok(Ctl::StopForUpdate) => {
+                    // Disable automatic restart, then wait for shutdown and group cleanup.
+                    self.shared.set(Connection::None, None);
+                    return Next::Halt(launcher.shutdown(SHUTDOWN_GRACE));
                 }
                 Ok(Ctl::RestartServer) | Ok(Ctl::Retry) => {
                     self.shared.set(Connection::None, None);
@@ -291,6 +316,8 @@ impl<U: Ui> Supervisor<U> {
             match self.ctl.recv_timeout(ATTACH_POLL) {
                 Ok(Ctl::Quit) | Err(RecvTimeoutError::Disconnected) => return Next::Exit, // the service keeps running
                 Ok(Ctl::Retry) => return Next::Relaunch,
+                // An app update leaves the attached service running.
+                Ok(Ctl::StopForUpdate) => return Next::Halt(true),
                 Ok(Ctl::RestartServer) => {} // not ours to restart; the menu item is disabled
                 Err(RecvTimeoutError::Timeout) => {}
             }
@@ -474,6 +501,35 @@ mod tests {
         tx.send(Ctl::Quit).unwrap();
         handle.join().unwrap();
         let _ = std::fs::remove_file(marker);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn stop_for_update_stops_the_owned_server_without_exiting() {
+        let script = format!(
+            "{CRED}\necho '@@codekin {{\"event\":\"started\",\"port\":4321,\"host\":\"127.0.0.1\",\"version\":\"1.0.0\"}}'\ntrap 'exit 0' TERM\nwhile :; do sleep 0.1; done"
+        );
+        let (rec, tx, shared, handle, dir) = start(&script);
+        wait_for(&rec, |v| v.iter().any(|v| matches!(v, View::App { .. })));
+        let (done_tx, done_rx) = mpsc::channel();
+        *shared.update_stopped.lock().unwrap() = Some(done_tx);
+        tx.send(Ctl::StopForUpdate).unwrap();
+        assert!(
+            done_rx.recv_timeout(Duration::from_secs(10)).unwrap(),
+            "cleanup succeeded"
+        );
+        handle.join().unwrap();
+        assert!(!*rec.exited.lock().unwrap(), "the app is not told to exit");
+        assert_eq!(shared.connection(), Connection::None);
+        // No relaunch after the stop.
+        let apps = rec
+            .views
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|v| matches!(v, View::App { .. }))
+            .count();
+        assert_eq!(apps, 1);
         let _ = std::fs::remove_dir_all(dir);
     }
 

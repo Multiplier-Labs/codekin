@@ -16,7 +16,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "category": "DeveloperTool",
     "copyright": "Multiplier Labs",
     "icon": [
@@ -26,12 +29,26 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/node"],
-    "resources": { "../build/codekin/": "codekin/" },
+    "externalBin": [
+      "binaries/node"
+    ],
+    "resources": {
+      "../build/codekin/": "codekin/"
+    },
     "macOS": {
       "minimumSystemVersion": "12.0",
       "signingIdentity": "-",
       "entitlements": "entitlements.plist"
+    },
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/Multiplier-Labs/codekin/releases/download/desktop-channel/latest.json"
+      ],
+      "requireSignedVersion": true
     }
   }
 }
