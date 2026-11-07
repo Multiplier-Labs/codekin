@@ -89,6 +89,9 @@ interface AppProps {
  * a token (first-run setup) the app renders on defaults, then remounts once
  * a token is saved and its preferences are loaded.
  */
+/** Below the relay's 30 s heartbeat: nothing can have been dropped. */
+const SHORT_ABSENCE_MS = 25_000
+
 export default function App(props: AppProps = {}) {
   const { settings } = useSettings()
   const [loadedFor, setLoadedFor] = useState<string | null>(null)
@@ -664,8 +667,14 @@ function AppMain({ onSwitchMachine, onDisconnectMachine }: AppProps) {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Restore session when returning from idle/background tab
-  usePageVisibility(() => {
+  // Restore session when returning from idle/background tab. A short absence
+  // can't have lost anything: the server never drops an open socket, and the
+  // relay only drops a silent one after a missed 30 s heartbeat, which closes
+  // it and reconnects anyway. Skipping it matters in the desktop app, where
+  // WebKit reports the page hidden whenever the window is covered, and the
+  // rejoin rebuilds the whole transcript (losing the reader's scroll position).
+  usePageVisibility(hiddenForMs => {
+    if (hiddenForMs < SHORT_ABSENCE_MS) return
     restoreSession()
   })
 

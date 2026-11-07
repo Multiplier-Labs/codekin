@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- In the desktop app, the session view no longer jumps back up to a random point in the transcript. WebKit reports the page hidden whenever the window is covered, hidden or on another Space, and each return rejoined the session, rebuilt the whole transcript and lost the scroll position. A return within 25 seconds no longer rejoins (nothing can have been missed), and when a rebuild does happen, a reader who had scrolled up stays where they were
+
 ## [0.10.2] - 2026-11-07
 
 ### Fixed
