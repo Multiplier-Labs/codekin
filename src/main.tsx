@@ -16,6 +16,12 @@ const App =
     ? lazy(() => import('./hosted/HostedApp.tsx'))
     : lazy(() => import('./App.tsx'))
 
+// Hosted only: uncaught errors go to the relay, which scrubs and forwards
+// them if error reporting is configured there.
+if (import.meta.env.VITE_APP_MODE === 'hosted') {
+  void import('./hosted/errorReporting').then(m => { m.installErrorReporting() })
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <Suspense fallback={null}>

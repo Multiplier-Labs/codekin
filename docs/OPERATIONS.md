@@ -347,6 +347,9 @@ misconfiguration fails at start rather than at first login.
 | `AUDIT_RETENTION_DAYS` | no | default 90; `0` disables pruning |
 | `RELAY_ACCESS_REQUEST_URL` | no | `https:` or `mailto:` link shown on the sign-in page ("Request access") and on the not-allowed error; served by `GET /api/auth/config` |
 | `RELAY_NAME` | no | Name the desktop app suggests for this relay as a location; served by `GET /api/relay/info`. Defaults to the public host |
+| `RELAY_ERROR_DSN` | no | Sentry-API DSN (GlitchTip, Sentry) for the relay's errors; unset = no reporting. Only type, scrubbed message and stack frames are sent |
+| `RELAY_BROWSER_ERROR_DSN` | no | DSN for web-app errors tunnelled through `POST /api/telemetry/errors`; defaults to `RELAY_ERROR_DSN` |
+| `RELAY_ERROR_ENVIRONMENT` | no | `environment` label on reported errors; defaults from `NODE_ENV` |
 | `NODE_ENV=production` | recommended | required for `Secure` session cookies |
 
 The OAuth App's **Authorization callback URL** must be exactly

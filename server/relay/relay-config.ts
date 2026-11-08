@@ -45,6 +45,15 @@ export interface RelayConfig {
   mfaEncryptionKey?: Buffer
   /** How the desktop app names this relay when adding it (RELAY_NAME); defaults to the public host. */
   name?: string
+  /**
+   * Sentry-API DSN for the relay's own errors (RELAY_ERROR_DSN). Unset, the
+   * relay reports nothing anywhere.
+   */
+  errorDsn?: string
+  /** DSN for browser errors tunnelled through the relay (RELAY_BROWSER_ERROR_DSN); defaults to errorDsn. */
+  browserErrorDsn?: string
+  /** `environment` on reported errors (RELAY_ERROR_ENVIRONMENT); defaults from NODE_ENV. */
+  errorEnvironment: string
 }
 
 /** Decode MFA_ENCRYPTION_KEY: 64 hex characters or base64 of exactly 32 bytes. */
@@ -122,6 +131,9 @@ export function loadRelayConfig(opts: { envFile?: string; requireSecrets?: boole
     accessRequestUrl: parseAccessRequestUrl(get('RELAY_ACCESS_REQUEST_URL')),
     mfaEncryptionKey: parseMfaEncryptionKey(get('MFA_ENCRYPTION_KEY')),
     name: get('RELAY_NAME').trim().slice(0, 64) || undefined,
+    errorDsn: get('RELAY_ERROR_DSN').trim() || undefined,
+    browserErrorDsn: get('RELAY_BROWSER_ERROR_DSN').trim() || undefined,
+    errorEnvironment: get('RELAY_ERROR_ENVIRONMENT').trim() || (isProduction ? 'production' : 'development'),
   }
 
   if (requireSecrets) {
