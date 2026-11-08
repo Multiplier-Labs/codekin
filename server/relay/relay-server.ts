@@ -95,7 +95,7 @@ app.use(webhookIngress)
 
 app.use(express.json({ limit: '1mb' }))
 
-// Public probes come first: no rate limit, no session, no origin guard.
+// Public probes, ahead of the rate limits, session and origin guard.
 // `accepting` is read lazily, once `server` exists.
 app.use(createHealthRouter(db, {
   accepting: () => !shuttingDown && server.listening,
