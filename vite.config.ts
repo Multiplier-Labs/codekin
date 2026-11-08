@@ -4,6 +4,11 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    // Never inline fonts as data: URIs: the CSP's font-src is 'self' only, so
+    // an inlined font is blocked (scripts/check-csp-build.mjs checks this).
+    assetsInlineLimit: (file) => (/\.(woff2?|ttf|otf|eot)$/i.test(file) ? false : undefined),
+  },
   server: {
     proxy: {
       // Forward /cc/* requests to the backend WebSocket server (port 32352).

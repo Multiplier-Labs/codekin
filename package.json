@@ -46,6 +46,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:hosted": "tsc -b && VITE_APP_MODE=hosted vite build --outDir dist-hosted",
+    "check:csp": "node scripts/check-csp-build.mjs",
     "dev:hosted": "VITE_APP_MODE=hosted vite",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -53,6 +54,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@fontsource-variable/inconsolata": "^5.3.0",
+    "@fontsource/lato": "^5.3.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "better-sqlite3": "^13.0.3",
     "express": "^5.1.0",

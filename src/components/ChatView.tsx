@@ -13,6 +13,8 @@
 import { memo, useEffect, useLayoutEffect, useRef, useCallback, useState } from 'react'
 import Markdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { ExternalImageLink } from './ExternalImageLink'
+import { remoteImageHost } from '../lib/remoteImage'
 import DOMPurify from 'dompurify'
 import hljs from '../lib/hljs'
 import { IconArrowDown, IconRobotFace } from '@tabler/icons-react'
@@ -256,7 +258,11 @@ function markdownComponents(fontSize: number): Components {
         return <a href={safeHref} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>
       },
       img({ src, alt, ...props }) {
-        // Only allow https: and data: URIs to prevent tracking beacons and arbitrary protocol access
+        // Remote images become a link the user can open: loading them would let
+        // agent output send data to any host (see lib/remoteImage.ts).
+        const remoteHost = remoteImageHost(src)
+        if (src && remoteHost) return <ExternalImageLink src={src} host={remoteHost} alt={alt} />
+        // Otherwise only same-origin https: and data: images load.
         const safeSrc = src && /^(https:|data:image\/)/i.test(src) ? src : undefined
         if (!safeSrc) return <span className="text-ink-muted">[image blocked: untrusted source]</span>
         return (
@@ -306,7 +312,7 @@ function ToolGroupInline({ msg, fontSize }: { msg: ChatMessage & { type: 'tool_g
   return (
     <div
       className="flex flex-wrap gap-x-4 gap-y-0.5 text-ink-muted"
-      style={{ fontSize: `${smallSize}px`, fontFamily: "'Inconsolata', monospace" }}
+      style={{ fontSize: `${smallSize}px`, fontFamily: "'Inconsolata Variable', 'Inconsolata', monospace" }}
     >
       {msg.tools.map((tool, i) => (
         <span key={i} className="flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
@@ -337,7 +343,7 @@ function ToolOutputInline({ msg, fontSize }: { msg: ChatMessage & { type: 'tool_
   return (
     <div
       className={`pl-4 py-0.5 ${colorClass}`}
-      style={{ fontSize: `${smallSize}px`, fontFamily: "'Inconsolata', monospace" }}
+      style={{ fontSize: `${smallSize}px`, fontFamily: "'Inconsolata Variable', 'Inconsolata', monospace" }}
     >
       <div className="whitespace-pre-wrap break-all">{displayContent}</div>
       {collapsible && (
@@ -375,7 +381,7 @@ function ToolActivity({ run, fontSize }: { run: ToolRun; fontSize: number }) {
       <button
         onClick={() => setExpanded(!isOpen)}
         className="flex items-center gap-1.5 text-meta text-ink-faint hover:text-ink-muted transition-colors w-full text-left"
-        style={{ fontFamily: "'Inconsolata', monospace" }}
+        style={{ fontFamily: "'Inconsolata Variable', 'Inconsolata', monospace" }}
       >
         {hasActive ? (
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary-5 animate-pulse flex-shrink-0" />

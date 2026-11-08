@@ -344,7 +344,8 @@ app.use((_req, res, next) => {
   // connect-src is restricted to same-origin: the frontend always connects to
   // `${location.host}/cc/` (see src/lib/ccApi.ts wsUrl()), and CSP 'self'
   // covers both http(s): and ws(s): schemes at the page origin.
-  res.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; connect-src 'self'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com")
+  // Fonts are bundled with the frontend, so no third-party font origins.
+  res.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data: https:; font-src 'self'")
   if (process.env.NODE_ENV === 'production') {
     res.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
   }

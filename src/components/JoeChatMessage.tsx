@@ -11,11 +11,16 @@
 import { useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { MarkdownImage } from './ExternalImageLink'
 import { IconRobotFace, IconExternalLink, IconChecklist, IconMessageCircle } from '@tabler/icons-react'
 import type { ChatMessage } from '../types'
 import { answerDecision, type JoeTask } from '../lib/tasksApi'
 
 type JoeMsg = ChatMessage & { type: 'joe' }
+
+// Module-level so react-markdown sees stable component types across renders.
+const REMARK_PLUGINS = [remarkGfm]
+const MARKDOWN_COMPONENTS = { img: MarkdownImage }
 
 export interface JoeChatContext {
   token: string
@@ -74,7 +79,7 @@ export function JoeChatMessage({ msg, fontSize, ctx, current = true }: {
           Agent {ctx.agentName}{msg.instruction ? ' → coding agent' : ''}
         </div>
         <div className="prose prose-themed max-w-none text-body" style={{ fontSize: `${fontSize}px` }}>
-          <Markdown remarkPlugins={[remarkGfm]}>{msg.text}</Markdown>
+          <Markdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>{msg.text}</Markdown>
         </div>
         {msg.task && <TaskCard snapshot={msg.task} live={live} ctx={ctx} interactive={current} />}
       </div>

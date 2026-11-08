@@ -9,14 +9,19 @@
 #
 # - These headers assume HTTPS (HSTS, upgrade-insecure-requests). Don't use
 #   them on a plain-http host.
-# - The web app loads its fonts from Google Fonts, hence the two
-#   fonts.* origins.
+# - No third-party origins: the web app bundles its fonts. Builds up to
+#   0.10.5 still load them from Google Fonts; for those, add
+#   https://fonts.googleapis.com to style-src and https://fonts.gstatic.com
+#   to font-src, or the app falls back to system fonts.
 # - img-src allows data: and GitHub avatars only. Agent output that embeds a
 #   remote image doesn't load it, so viewing a transcript never contacts
 #   third-party hosts.
 # - connect-src names the wss:// origin explicitly because older Safari
 #   doesn't count same-host WebSockets as 'self'.
-add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' wss://YOUR_DOMAIN; manifest-src 'self'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; upgrade-insecure-requests" always;
+# - Relay deployments can collect violation reports in the relay log: append
+#   `; report-uri /api/csp-report` to the policy. The local server has no
+#   such endpoint, so leave it out there.
+add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' wss://YOUR_DOMAIN; manifest-src 'self'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; upgrade-insecure-requests" always;
 add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
 add_header Cross-Origin-Opener-Policy "same-origin" always;
 add_header Cross-Origin-Resource-Policy "same-origin" always;

@@ -29,6 +29,7 @@ import { createDeviceLinkRouter } from './device-link-routes.js'
 import { createDesktopAuthRouter, DESKTOP_CLAIM_PATH } from './desktop-auth-routes.js'
 import { createWebauthnRouter } from './webauthn-routes.js'
 import { createAdminStatsRouter, createHealthRouter, EventLoopLagMonitor } from './health-routes.js'
+import { createCspReportRouter, CSP_REPORT_PATH } from './csp-report-routes.js'
 import { ConnectorHub } from './connector-hub.js'
 import { BrowserHub } from './browser-hub.js'
 import { MAX_PROXY_BODY_BYTES } from './relay-protocol.js'
@@ -52,10 +53,19 @@ let shuttingDown = false
 app.set('trust proxy', 1)
 app.disable('x-powered-by')
 
+// CSP violation reports: unauthenticated (browsers send them without
+// credentials), small, and mounted ahead of the 1 MB JSON parser so its own
+// 8 KB limit applies. Rate-limited hard: a hostile page can trigger reports.
+app.use(CSP_REPORT_PATH, ipRateLimiter(5, 60_000))
+app.use(createCspReportRouter())
+
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('X-Frame-Options', 'DENY')
   res.setHeader('Referrer-Policy', 'same-origin')
+  // The relay answers with JSON and redirects only: nothing it serves should
+  // run, load or be framed if opened directly.
+  res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'")
   next()
 })
 

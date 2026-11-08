@@ -9,7 +9,6 @@ export function generate404Page(): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
   <title>404 — Codekin</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;600&family=Lato:wght@400;700&display=swap" rel="stylesheet" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -80,7 +79,6 @@ export function generate500Page(): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
   <title>Error — Codekin</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;600&family=Lato:wght@400;700&display=swap" rel="stylesheet" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
