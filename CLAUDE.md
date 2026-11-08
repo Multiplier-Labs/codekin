@@ -70,9 +70,16 @@ The visual system is token-driven; an ESLint guard enforces most of this in `src
 - All changes go through PRs with review and passing CI.
 - Releases are tagged with semver: `v0.2.0`, `v1.0.0`, etc.
 
+## Public Repository
+
+This repo is public and MIT-licensed. Everything committed here, including PR descriptions, commit messages and reports, is world-readable.
+
+- Write features and specs so any self-hoster can use them: mechanisms, config options, extension points, and example configs with `example.com` hosts.
+- **Never commit material specific to running codekin.ai as a service.** That covers pricing and plans, vendors, quota or abuse-threshold values, launch timelines or estimates, production host facts, and unfixed production gaps. That material goes in the private `Multiplier-Labs/codekin-cloud` repo, along with audits of the hosted deployment.
+
 ## Audit & Report Output
 
-When generating audit reports, health checks, or any recurring assessment:
+When generating audit reports, health checks, or any recurring assessment of this codebase (audits of the codekin.ai deployment go to the private repo, see above):
 
 1. **Always write the report to a file** — never just print it as conversation text.
 2. **Location**: `.codekin/reports/<category>/YYYY-MM-DD_<type>.md` (e.g., `.codekin/reports/security/2026-04-10_security-audit.md`).
