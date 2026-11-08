@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-08
+
+Relays and machines should update together. A relay on 0.11.0 applies schema migrations 12–16 at start. Machines on older Codekin keep working unsigned, but only 0.11.0 or later can confirm browsers and enforce signed control (the relay's `intents` floor).
+
 ### Added
 - **Signed remote control.** A computer paired with a relay can now refuse anything the relay sends unless a browser you confirmed on that computer signed it, so a compromised relay can't run commands on it (docs/RELAY-SIGNED-INTENTS-AND-E2E-SPEC.md).
   - **Confirming a browser:** choose **Confirm this browser** under Settings → Machines, type the code it shows on the computer, then type the computer's code back into the browser. Your first confirmed browser turns the protection on.
@@ -14,9 +18,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Shares:** sessions you share are signed for the other person's devices with **Allow** in the share dialog.
   - **Workspaces:** owners can **Require confirmed devices**, with an optional grace period.
   - **On the computer:** Settings → Remote access, and `codekin relay devices` / `codekin relay audit`, show the devices, the policy and a tamper-evident log.
+  - **Replay protection** is kept in `relay-devices.json.replay.sqlite` beside the device list. On an existing installation the connector waits out a one-time ten-minute recovery window before it accepts signed actions (docs/OPERATIONS.md).
+- **Relay activity audit:** the relay records session activity it forwards (prompts sent, approvals answered, sessions created or stopped, permission-mode changes, uploads) without their content, with filters in the audit API (#813).
+- **GitHub webhooks through the relay:** a machine with no public URL can receive GitHub webhooks at a per-machine relay URL, managed under Settings → This machine → Webhooks. GitHub's signature is still checked on the machine, with a secret the relay never sees (#802, #805).
+- **Connector version floors:** the relay refuses traffic to a connector below the floor for a capability a workspace requires, and shows the machine as **update required** instead of offline (#806).
+- **Relay operations, all optional and off by default** (docs/RELAY-HARDENING.md):
+  - `/api/health/live` and `/api/health/ready` probes; usage counts moved to the authenticated operator stats (#803).
+  - Scrubbed error reporting to a Sentry-compatible endpoint with `RELAY_ERROR_DSN` (#807).
+  - Per-workspace quotas from `RELAY_QUOTAS_FILE`, with traffic metering and throttling over a daily quota (#808, #810).
+  - Abuse signals with an operator review queue, using thresholds from `RELAY_ABUSE_POLICY_FILE` (#811).
+  - `RELAY_STAGING=1` staging mode and a staging gate suite (#809).
+- **macOS Keychain:** the desktop app keeps the relay machine secret in the Keychain instead of `relay.json` (#812).
+
+### Changed
+- The web app bundles its fonts and needs no third-party origin. Remote images in transcripts, Joe messages and docs render as links instead of loading, and the server accepts CSP violation reports (#804).
+- The self-hosting nginx examples ship security headers: a strict CSP, HSTS, COOP/CORP and related headers (#800).
 
 ### Fixed
-- Harden signed relay control: retries keep their operation identity across credentials; replay protection survives restarts and audit rotation; revoked or expired shares stop receiving output; failed session creation clears the prior session; concurrent tabs preserve browser keys and revocations; device removal requires a machine-signed acknowledgement. Existing installations have a one-time ten-minute recovery window when durable replay state is first created.
+- The relay validates every message from browsers and connectors before acting on it, and closes a malformed peer on its own while serving the rest (#815), and hardens metering, audit state and credential recovery (#816).
 - Opening a session always lands at the latest messages. The chat remembered whether you were at the bottom of the *previous* session, so after you had scrolled up anywhere (or WebKit reported a stale scroll position) the next session opened at the very top, where the browser had parked it while the transcript was empty — most visibly in Safari and the desktop app. A newly opened transcript now starts at the bottom and holds there for a moment while code blocks and images settle, unless you scroll it yourself
 
 ## [0.10.5] - 2026-11-07

@@ -216,7 +216,7 @@ describe('a malicious hub against a real connector (§11 attacker harness)', () 
       relayUrl: hub.url,
       machineId: MACHINE,
       machineSecret: 'secret',
-      connectorVersion: '0.10.6-test',
+      connectorVersion: '0.11.0-test',
       localTarget: { origin: local.origin, authToken: LOCAL_TOKEN },
       webhookGuard: new WebhookReplayGuard(null),
       identityKey: machineKey.toString('base64url'),

@@ -30,7 +30,7 @@ let container: HTMLElement | null = null
 function machine(overrides: Partial<Machine> = {}): Machine {
   return {
     id: 'm1', displayName: 'hatchery', hostname: 'hatchery', platform: 'linux',
-    connectorVersion: '0.10.6', localCodekinVersion: '0.10.6', status: 'online', lastSeenAt: null, access: 'owner',
+    connectorVersion: '0.11.0', localCodekinVersion: '0.11.0', status: 'online', lastSeenAt: null, access: 'owner',
     ...overrides,
   }
 }

@@ -46,7 +46,7 @@ async function relay(ack: Partial<ConnectorHelloAck>): Promise<{ url: string; ki
 
 function start(url: string, policyOf: () => 'off' | 'warn' | 'required', statuses: Array<{ status: string; detail?: string }> = []) {
   connector = new RelayConnector({
-    relayUrl: url, machineId: 'm1', machineSecret: 's', connectorVersion: '0.10.6', policyWatchMs: 10,
+    relayUrl: url, machineId: 'm1', machineSecret: 's', connectorVersion: '0.11.0', policyWatchMs: 10,
     intents: { checkRequest: () => ({}) as never, checkChannelOpen: () => ({}) as never, checkFrame: () => ({}) as never, policy: policyOf },
     onStatus: (status, detail) => { statuses.push({ status, detail }) },
   })
