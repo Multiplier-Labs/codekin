@@ -491,6 +491,14 @@ machine. The log is `~/.codekin/relay/intents.jsonl` (0600, hash-chained,
 rotated at 30 days or 50 MB). It is also shown in Settings → Remote access →
 Activity.
 
+If your account has a passkey, confirming a browser can also confirm the
+passkey on the computer. After that:
+- The passkey can add further browsers without a code. To turn that off, run
+  `codekin relay devices passkey-adds off`, or untick it in Settings.
+- Privileged actions need the passkey: saving an always-allow rule, bypass
+  permissions, and removing devices. A workspace can require this even
+  where no passkey is enrolled ("Privileged actions need a passkey").
+
 ```bash
 codekin relay audit                # recent signed / unsigned / refused messages
 codekin relay audit verify         # check the log's hash chain

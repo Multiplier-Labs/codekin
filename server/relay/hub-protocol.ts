@@ -15,8 +15,9 @@ const b64 = z.string().max(1024).regex(/^[A-Za-z0-9_-]*$/)
 const intent = z.object({
   body: z.string().max(4096),
   sig: b64.optional(),
-  webauthn: z.object({ authenticatorData: b64, clientDataJSON: b64, signature: b64 }).optional(),
+  webauthn: z.object({ credentialId: b64, authenticatorData: b64, clientDataJSON: b64.max(4096), signature: b64 }).optional(),
 }).optional()
+const passkeyProof = z.object({ credentialId: b64, authenticatorData: b64, clientDataJSON: b64.max(4096), signature: b64 })
 const base = { version: z.literal(1), id: id.optional(), channelId: id.optional() }
 const frame = <K extends string, S extends z.ZodType>(kind: K, payload: S) => z.object({ ...base, kind: z.literal(kind), payload })
 // Stream frames are bounded by the socket's maxPayload (relay-server.ts). A
@@ -58,12 +59,14 @@ const connector = z.discriminatedUnion('kind', [
     // check failed (signed-intents spec §6.4) so the browser can react.
     permission: z.string().max(100).optional(), detail: z.string().max(100).optional(),
     intentNonce: z.string().max(100).optional(), machineTime: z.number().optional(), machineTimeSig: b64.optional(),
+    stepUpPasskeys: z.array(z.object({ credentialId: b64, keyId: b64 })).max(20).optional(),
   })),
   frame('event', z.object({ sessions: summary.optional(), status: version.optional() })),
   streamData, connectorStreamClose, frame('ping', empty), frame('pong', empty),
   frame('enrol_challenge', z.object({ enrolId: id, machineKey: b64, nonceM: b64, signature: b64 })).extend({ id }),
   frame('enrol_result', z.object({
     enrolId: id, state: z.enum(['awaiting_code', 'approved', 'rejected', 'expired']), keyId: b64.optional(), signature: b64.optional(),
+    machineKey: b64.optional(), passkeys: z.array(z.object({ credentialId: b64, keyId: b64 })).max(20).optional(),
   })).extend({ id }),
 ])
 
@@ -77,9 +80,12 @@ const browser = z.discriminatedUnion('kind', [
   frame('enrol_commit', z.object({ commit: b64 })).extend({ id }),
   frame('enrol_reveal', z.object({
     enrolId: id, spki: b64, label: z.string().max(256), nonceB: b64, pop: b64,
-    passkeys: z.array(z.object({ credentialId: b64, cosePublicKey: z.string().max(2048), rpId: z.string().max(253) })).max(10),
+    passkeys: z.array(z.object({ credentialId: b64, cosePublicKey: z.string().max(2048), rpId: z.string().max(253) })).max(3),
+    passkeyProofs: z.array(passkeyProof).max(3).optional(),
   })).extend({ id }),
   frame('enrol_status', z.object({ enrolId: id })).extend({ id }),
+  frame('enrol_certify', z.object({ spki: b64, label: z.string().max(256), intent })).extend({ id }),
+  frame('enrol_revoke', z.object({ keyId: z.string().max(64), intent })).extend({ id }),
 ])
 
 /** Validate fields before any cast, database binding, or socket operation. */

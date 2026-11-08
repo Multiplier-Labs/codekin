@@ -23,13 +23,14 @@ import { createHash } from 'crypto'
 import { existsSync, statSync } from 'fs'
 import {
   CHANNEL_OPEN_ACTION, CHANNEL_TOKEN_CHARS, INTENT_MAX_SKEW_MS, INTENT_VERSION, MACHINE_TIME_LABEL, MAX_INTENT_BODY_CHARS,
-  channelOpenPayload, channelSessionAfter, frameAction, framePayload, frameSession, isExemptFrame, requestAction, requestPayload,
-  requestSession,
+  PASSKEY_ANY, actionNeedsStepUp, channelOpenPayload, channelSessionAfter, frameAction, frameNeedsStepUp, framePayload, frameSession,
+  isExemptFrame, requestAction, requestNeedsStepUp, requestPayload, requestSession,
 } from './intent-actions.js'
 import type { IntentBody, IntentRefusal, SignedIntent } from './intent-actions.js'
 import { fromB64url, SIGNATURE_BYTES, transcript, verifyP1363 } from './enrolment-crypto.js'
 import { mutateTrustStore, readTrustStore } from './trust-store.js'
-import type { BrowserCredential, IntentPolicy, TrustStore } from './trust-store.js'
+import type { BrowserCredential, IntentPolicy, PasskeyCredential, TrustedCredential, TrustStore } from './trust-store.js'
+import { verifyPasskeyAssertion } from './webauthn-verify.js'
 import type { IntentLog, IntentVerdict } from './intent-log.js'
 import type { RelayPrincipal } from './relay-protocol.js'
 
@@ -50,7 +51,12 @@ export interface IntentDecision {
   machineTime?: number
   /** sign_kM over (nonce, machineTime): lets the browser trust machineTime and not the relay. */
   machineTimeSig?: string
+  /** On `intent_step_up_required`: the signer's passkeys this machine accepts, so the browser knows which to use. */
+  stepUpPasskeys?: Array<{ credentialId: string; keyId: string }>
 }
+
+/** How a privileged action was confirmed (spec §6.6), recorded in the intent log. */
+export type StepUp = 'passkey' | 'browser-key'
 
 /**
  * One stream channel as the verifier tracks it. Created by checkChannelOpen;
@@ -74,6 +80,8 @@ interface Expected {
   channel?: IntentChannel
   /** Channel opens: the token must be present and well formed. */
   opensChannel?: boolean
+  /** A privileged action (§6.2): needs a passkey when the signer has one here. */
+  privileged?: boolean
 }
 
 export interface IntentVerifierOptions {
@@ -103,6 +111,7 @@ function parseBody(text: string): IntentBody | null {
   if (typeof v.ts !== 'number' || !Number.isFinite(v.ts)) return null
   if (v.nonce.length < 16 || v.nonce.length > 64) return null
   if (v.channel !== undefined && typeof v.channel !== 'string') return null
+  if (v.keyId.length === 0 || v.keyId.length > 64) return null
   if (v.seq !== undefined && !(Number.isSafeInteger(v.seq) && v.seq > 0)) return null
   return v as IntentBody
 }
@@ -112,6 +121,11 @@ function asSignedIntent(value: unknown): SignedIntent | null {
   const v = value as Partial<SignedIntent>
   if (typeof v.body !== 'string' || v.body.length > MAX_INTENT_BODY_CHARS) return null
   if (v.sig !== undefined && typeof v.sig !== 'string') return null
+  if (v.webauthn !== undefined) {
+    const w = v.webauthn as Partial<NonNullable<SignedIntent['webauthn']>> | null
+    if (!w || typeof w.credentialId !== 'string' || typeof w.authenticatorData !== 'string'
+      || typeof w.clientDataJSON !== 'string' || typeof w.signature !== 'string') return null
+  }
   return v as SignedIntent
 }
 
@@ -124,6 +138,8 @@ export class IntentVerifier {
   private lastUsed = new Map<string, number>()
   private lastFlush = 0
   private flushScheduled = false
+  /** The workspace's "Privileged actions need a passkey" (§6.6), as the relay reports it. */
+  private requirePasskey = false
   private lastReadWarning = -Infinity
   private readonly now: () => number
 
@@ -166,6 +182,15 @@ export class IntentVerifier {
     return this.store
   }
 
+  /**
+   * Set from the relay's hello_ack. The relay can only make this stricter
+   * for itself by lying: claiming false just leaves the machine-side rule
+   * (a passkey enrolled here is always required) in force.
+   */
+  setRequirePasskey(value: boolean): void {
+    this.requirePasskey = value
+  }
+
   /** The machine's intent policy right now. */
   policy(): IntentPolicy {
     return this.currentStore()?.policy ?? this.lastPolicy
@@ -180,7 +205,27 @@ export class IntentVerifier {
       action: requestAction(req.method, req.path),
       sessionId: requestSession(req.path),
       payload: requestPayload(req.method, req.path, req.contentType, body),
+      privileged: requestNeedsStepUp(req.method, req.path, body),
     }).decision
+  }
+
+  /**
+   * Check a device intent (device_certify, device_revoke) carried by an
+   * enrol_* frame. Always privileged. Returns the credential that signed it
+   * when it verified, whatever the policy: device changes are never let
+   * through unverified.
+   */
+  checkDeviceIntent(
+    principal: RelayPrincipal | undefined,
+    intent: unknown,
+    action: string,
+    payload: Uint8Array,
+  ): { decision: IntentDecision; signer: TrustedCredential | null } {
+    const { decision, body } = this.check(principal, intent, { action, sessionId: null, payload, privileged: true })
+    if (decision.verdict !== 'accepted' || !body) return { decision, signer: null }
+    const store = this.currentStore()
+    const signer = this.signerOf(store, body, asSignedIntent(intent))
+    return { decision, signer }
   }
 
   /** Check a channel open; the returned channel goes with every frame on it. */
@@ -200,6 +245,7 @@ export class IntentVerifier {
       sessionId: frameSession(frame, channel.session),
       payload: framePayload(frame),
       channel,
+      privileged: frameNeedsStepUp(frame),
     })
     if (decision.verdict === 'accepted' && body?.seq !== undefined) channel.lastSeq = body.seq
     // What reaches the local server moves the session, signed or not.
@@ -218,8 +264,27 @@ export class IntentVerifier {
     const intent = asSignedIntent(rawIntent)
     const body = intent ? parseBody(intent.body) : null
     if (!intent || !body) return { decision: this.finish(policy, principal, expected, intent, null, 'intent_malformed'), body: null }
-    const refusal = this.verify(store, principal, intent, body, expected)
-    return { decision: this.finish(policy, principal, expected, intent, body, refusal), body }
+    const outcome = this.verify(store, principal, intent, body, expected)
+    const refusal = typeof outcome === 'string' ? outcome : null
+    const accepted = typeof outcome === 'object' ? outcome : null
+    const decision = this.finish(policy, principal, expected, intent, body, refusal, accepted?.stepUp, accepted?.keyId)
+    if (refusal === 'intent_step_up_required' && store && principal) {
+      decision.stepUpPasskeys = store.credentials
+        .filter((c): c is PasskeyCredential => c.kind === 'passkey' && c.userId === principal.userId)
+        .map(c => ({ credentialId: c.credentialId, keyId: c.keyId }))
+    }
+    return { decision, body }
+  }
+
+  /** The device-list credential an intent names: a browser key by keyId, or a passkey by keyId or credential id. */
+  private signerOf(store: TrustStore | null, body: IntentBody, intent: SignedIntent | null): TrustedCredential | null {
+    if (!store || !intent) return null
+    if (intent.webauthn) {
+      const credentialId = intent.webauthn.credentialId
+      return store.credentials.find((c): c is PasskeyCredential =>
+        c.kind === 'passkey' && c.credentialId === credentialId && (body.keyId === PASSKEY_ANY || c.keyId === body.keyId)) ?? null
+    }
+    return store.credentials.find((c): c is BrowserCredential => c.kind === 'browser' && c.keyId === body.keyId) ?? null
   }
 
   private verify(
@@ -228,19 +293,33 @@ export class IntentVerifier {
     intent: SignedIntent,
     body: IntentBody,
     expected: Expected,
-  ): IntentRefusal | null {
-    // Passkey-signed intents arrive with step-up (slice 5).
-    if (intent.webauthn !== undefined || intent.sig === undefined) return 'intent_unsupported'
-    const credential = store?.credentials.find((c): c is BrowserCredential => c.kind === 'browser' && c.keyId === body.keyId)
+  ): IntentRefusal | { stepUp?: StepUp; keyId: string } {
+    if (intent.webauthn === undefined && intent.sig === undefined) return 'intent_malformed'
+    const credential = this.signerOf(store, body, intent)
     if (!store || !credential) return 'intent_unknown_key'
     // The signature proves the device; the principal must be the same person,
     // and only the recorded owner's devices act as owner.
     if (!principal || principal.userId !== credential.userId) return 'intent_wrong_signer'
     if (principal.role !== 'owner' || store.ownerUserId === null || credential.userId !== store.ownerUserId) return 'intent_wrong_signer'
 
-    const sig = fromB64url(intent.sig, SIGNATURE_BYTES)
-    const spki = fromB64url(credential.spki)
-    if (!sig || !spki || !verifyP1363(spki, Buffer.from(intent.body, 'utf-8'), sig)) return 'intent_bad_signature'
+    if (credential.kind === 'browser') {
+      const sig = fromB64url(intent.sig, SIGNATURE_BYTES)
+      const spki = fromB64url(credential.spki)
+      if (!sig || !spki || !verifyP1363(spki, Buffer.from(intent.body, 'utf-8'), sig)) return 'intent_bad_signature'
+    } else {
+      // A passkey signs SHA-256(body) as its WebAuthn challenge, with user
+      // verification, for this relay's origin and the passkey's RP ID.
+      if (!intent.webauthn) return 'intent_bad_signature'
+      let origin: string
+      try { origin = new URL(store.relayOrigin).origin } catch { return 'intent_bad_signature' }
+      const failure = verifyPasskeyAssertion(intent.webauthn, {
+        challenge: createHash('sha256').update(intent.body, 'utf-8').digest(),
+        origin,
+        rpId: credential.rpId,
+        cosePublicKey: credential.cosePublicKey,
+      })
+      if (failure) return 'intent_bad_signature'
+    }
 
     if (body.machineId !== this.opts.machineId) return 'intent_wrong_machine'
     if (body.action !== expected.action) return 'intent_wrong_action'
@@ -252,10 +331,20 @@ export class IntentVerifier {
       if (body.seq === undefined || body.seq <= expected.channel.lastSeq) return 'intent_out_of_order'
     }
     if (Math.abs(body.ts - this.now()) > INTENT_MAX_SKEW_MS) return 'intent_stale'
-    const replay = this.remember(body.keyId, body.nonce)
+
+    // Step-up (§6.6): a privileged action needs a passkey when the signer has
+    // one enrolled here, or when the workspace requires it.
+    let stepUp: StepUp | undefined
+    if (expected.privileged || actionNeedsStepUp(expected.action)) {
+      const hasPasskey = store.credentials.some(c => c.kind === 'passkey' && c.userId === credential.userId)
+      if (credential.kind !== 'passkey' && (hasPasskey || this.requirePasskey)) return 'intent_step_up_required'
+      stepUp = credential.kind === 'passkey' ? 'passkey' : 'browser-key'
+    }
+
+    const replay = this.remember(credential.keyId, body.nonce)
     if (replay) return replay
-    this.noteUsed(body.keyId)
-    return null
+    this.noteUsed(credential.keyId)
+    return { keyId: credential.keyId, ...(stepUp ? { stepUp } : {}) }
   }
 
   /** Record (keyId, nonce); refuse one already seen in the window, or when the cache is full. */
@@ -304,6 +393,9 @@ export class IntentVerifier {
     intent: SignedIntent | null,
     body: IntentBody | null,
     refusal: IntentRefusal | null,
+    stepUp?: StepUp,
+    /** The credential that signed it, once known (a passkey intent may say keyId "*"). */
+    signerKeyId?: string,
   ): IntentDecision {
     const verdict: IntentVerdict = refusal === null ? 'accepted' : refusal === 'intent_required' ? 'unsigned' : 'rejected'
     const forward = refusal === null || policy !== 'required'
@@ -314,11 +406,14 @@ export class IntentVerifier {
       action: expected.action,
       sessionId: expected.sessionId,
       userId: principal?.userId ?? null,
-      keyId: body?.keyId ?? null,
+      keyId: signerKeyId ?? body?.keyId ?? null,
       payloadHash: sha256b64url(expected.payload),
+      ...(stepUp ? { stepUp } : {}),
       // Only an accepted intent is evidence worth keeping; anything else may
       // be whatever the relay chose to send, so it isn't stored.
-      ...(verdict === 'accepted' && intent ? { intent: { body: intent.body, ...(intent.sig ? { sig: intent.sig } : {}) } } : {}),
+      ...(verdict === 'accepted' && intent ? { intent: {
+        body: intent.body, ...(intent.sig ? { sig: intent.sig } : {}), ...(intent.webauthn ? { webauthn: intent.webauthn } : {}),
+      } } : {}),
     })
     return {
       forward,

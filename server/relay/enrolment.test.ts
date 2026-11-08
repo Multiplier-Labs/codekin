@@ -234,11 +234,11 @@ describe('MachineEnrolment', () => {
     expect(get).toHaveBeenCalledTimes(2)
   })
 
-  it('refuses passkeys until step-up ships, malformed input, and a reused request', () => {
+  it('refuses passkeys without proof, malformed input, and a reused request', () => {
     const b = browser()
     const challenge = enrolment.commit(OWNER, { commit: b.commit.toString('base64url') })
     expect(() => enrolment.reveal(OWNER, reveal(b, challenge.enrolId, challenge.nonceM, { passkeys: [{ credentialId: 'x', cosePublicKey: 'y', rpId: 'z' }] })))
-      .toThrow(/passkeys/)
+      .toThrow(/Malformed/)
     expect(() => enrolment.commit(OWNER, { commit: 'short' })).toThrow(/Malformed/)
     expect(() => enrolment.reveal(OWNER, reveal(b, challenge.enrolId, challenge.nonceM, { spki: 'AAAA' }))).toThrow(/Malformed/)
     enrolment.reveal(OWNER, reveal(b, challenge.enrolId, challenge.nonceM))

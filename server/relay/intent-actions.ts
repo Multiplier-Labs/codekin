@@ -56,9 +56,16 @@ export interface SignedIntent {
   body: string
   /** base64url P1363 ECDSA P-256/SHA-256 over UTF-8(body). */
   sig?: string
-  /** Passkey-signed intents (step-up, slice 5). */
-  webauthn?: { authenticatorData: string; clientDataJSON: string; signature: string }
+  /**
+   * A passkey assertion whose challenge is SHA-256(UTF-8(body)) (§6.4 step 3).
+   * `credentialId` names the passkey; the body's keyId is its key id, or
+   * PASSKEY_ANY when the browser let the user pick (device_certify).
+   */
+  webauthn?: { credentialId: string; authenticatorData: string; clientDataJSON: string; signature: string }
 }
+
+/** keyId of a passkey intent signed by whichever enrolled passkey the user chose. */
+export const PASSKEY_ANY = '*'
 
 /** Why a connector refused (or, in warn mode, would have refused) an intent. */
 export type IntentRefusal =
@@ -77,6 +84,8 @@ export type IntentRefusal =
   | 'intent_wrong_channel'
   | 'intent_out_of_order'
   | 'intent_rate_limited'
+  | 'intent_step_up_required'
+  | 'intent_local_only'
 
 /**
  * Stream frames that carry nothing and need no intent (§2.2). `auth` is
@@ -178,7 +187,10 @@ export function framePayload(frame: string): Uint8Array {
  * so no field can bleed into the next.
  */
 export function requestPayload(method: string, path: string, contentType: string | undefined, body: Uint8Array | null): Uint8Array {
-  const fields = [encoder.encode(method.toUpperCase()), encoder.encode(path), encoder.encode(contentType ?? ''), body ?? new Uint8Array(0)]
+  return framed([encoder.encode(method.toUpperCase()), encoder.encode(path), encoder.encode(contentType ?? ''), body ?? new Uint8Array(0)])
+}
+
+function framed(fields: Uint8Array[]): Uint8Array {
   const out = new Uint8Array(fields.reduce((n, f) => n + 4 + f.length, 0))
   const view = new DataView(out.buffer)
   let offset = 0
@@ -188,6 +200,77 @@ export function requestPayload(method: string, path: string, contentType: string
     offset += 4 + f.length
   }
   return out
+}
+
+// --- Device intents (§5.4, §5.6) ---------------------------------------------
+
+export const DEVICE_CERTIFY_ACTION = 'device_certify'
+export const DEVICE_REVOKE_ACTION = 'device_revoke'
+
+/** What a device_certify intent covers: the browser key being added and its label. */
+export function certifyPayload(spki: string, label: string): Uint8Array {
+  return framed([encoder.encode(spki), encoder.encode(label)])
+}
+
+/** What a device_revoke intent covers: the key id being removed. */
+export function revokePayload(keyId: string): Uint8Array {
+  return framed([encoder.encode(keyId)])
+}
+
+/**
+ * Domain label for the passkey proof in an enrolment (§5.2 as built): the
+ * browser asserts with challenge SHA-256(T(label, SPKI(kB), nonceB)) before it
+ * commits, so a passkey public key the relay slipped into the list can't be
+ * enrolled — the user's authenticator can't sign for it.
+ */
+export const PASSKEY_PROOF_LABEL = 'ck-enrol-passkey-v1'
+
+// --- Step-up (§6.2, §6.6) ------------------------------------------------------
+
+/** Prompt answers that save a standing approval rule. */
+const STANDING_ANSWERS = new Set(['always_allow', 'approve_pattern'])
+
+function parsed(text: string): Record<string, unknown> | null {
+  try {
+    const v = JSON.parse(text) as unknown
+    return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Whether a stream frame is a privileged action (§6.2): a standing approval
+ * rule, or anything that turns on bypass permissions. Those need a passkey
+ * when the signer has one on the machine.
+ */
+export function frameNeedsStepUp(frame: string): boolean {
+  const msg = parsed(frame)
+  if (!msg) return false
+  switch (msg.type) {
+    case 'prompt_response': {
+      const values = Array.isArray(msg.value) ? msg.value : [msg.value]
+      return values.some(v => typeof v === 'string' && STANDING_ANSWERS.has(v))
+    }
+    case 'create_session':
+      return msg.permissionMode === 'bypassPermissions'
+    case 'set_permission_mode':
+      return msg.permissionMode === 'bypassPermissions'
+    default:
+      return false
+  }
+}
+
+/** Whether a REST request is a privileged action (§6.2). */
+export function requestNeedsStepUp(method: string, path: string, body: Uint8Array | null): boolean {
+  if (method.toUpperCase() !== 'POST' || requestAction(method, path) !== 'rest:POST /api/sessions/create' || !body) return false
+  const msg = parsed(new TextDecoder().decode(body))
+  return msg?.permissionMode === 'bypassPermissions'
+}
+
+/** Device and policy changes always count as privileged. */
+export function actionNeedsStepUp(action: string): boolean {
+  return action === DEVICE_CERTIFY_ACTION || action === DEVICE_REVOKE_ACTION
 }
 
 /** A channel open covers no bytes. */

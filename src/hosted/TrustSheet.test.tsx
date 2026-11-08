@@ -6,7 +6,16 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 
+const keys = vi.hoisted(() => ({ list: [] as Array<{ credentialId: string; cosePublicKey: string; rpId: string }> }))
+vi.mock('./passkeys', () => ({
+  passkeysSupported: () => true,
+  fetchPasskeyKeys: () => Promise.resolve(keys.list),
+  assertWithPasskey: vi.fn(),
+  isPasskeyCancel: (err: unknown) => err instanceof Error && err.name === 'NotAllowedError',
+}))
+
 const trust = vi.hoisted(() => ({
+  certifyWithPasskey: vi.fn(),
   startEnrolment: vi.fn(),
   currentUserId: vi.fn(),
   deviceTrustSupported: vi.fn(),
@@ -15,6 +24,7 @@ const trust = vi.hoisted(() => ({
 vi.mock('./deviceTrust', async importOriginal => ({
   ...(await importOriginal<typeof import('./deviceTrust')>()),
   startEnrolment: trust.startEnrolment,
+  certifyWithPasskey: trust.certifyWithPasskey,
   currentUserId: trust.currentUserId,
   deviceTrustSupported: trust.deviceTrustSupported,
   trustStorage: () => ({ deletePin: trust.deletePin }),
@@ -44,6 +54,7 @@ async function render(props: Partial<Parameters<typeof TrustSheet>[0]> = {}) {
 }
 
 beforeEach(() => {
+  keys.list = []
   vi.useFakeTimers({ shouldAdvanceTime: true })
   trust.currentUserId.mockResolvedValue('u1')
   trust.deviceTrustSupported.mockReturnValue(true)
@@ -116,6 +127,31 @@ describe('TrustSheet', () => {
     await act(async () => { await Promise.resolve() })
     expect(trust.deletePin).toHaveBeenCalledWith('u1', 'm1')
     expect(el!.textContent).toContain('WXYZ-2345')
+  })
+
+  it('offers the passkey when the account has one, and falls back to a code', async () => {
+    keys.list = [{ credentialId: 'c1', cosePublicKey: 'k', rpId: 'relay.test' }]
+    trust.certifyWithPasskey.mockRejectedValueOnce(Object.assign(new Error('closed'), { name: 'NotAllowedError' }))
+    const { onTrusted } = await render()
+    const pick = (text: string) => [...el!.querySelectorAll('button')].find(b => b.textContent?.includes(text))!
+    expect(pick('Use my passkey')).toBeTruthy()
+    await act(async () => { pick('Use my passkey').click() })
+    await act(async () => { await Promise.resolve() })
+    expect(el!.textContent).toContain('The passkey prompt was closed.')
+    trust.certifyWithPasskey.mockResolvedValueOnce(undefined)
+    await act(async () => { pick('Start again').click() })
+    await act(async () => { await Promise.resolve() })
+    expect(el!.textContent).toContain('This browser is confirmed on Dev box.')
+    expect(onTrusted).toHaveBeenCalled()
+  })
+
+  it('adds the passkey to a code enrolment unless unticked', async () => {
+    keys.list = [{ credentialId: 'c1', cosePublicKey: 'k', rpId: 'relay.test' }]
+    trust.startEnrolment.mockResolvedValue({ enrolId: 'e1', code: 'K7QM-2XPA', machineKeyId: 'mk', check: vi.fn().mockResolvedValue(null), confirm: vi.fn() })
+    await render()
+    await act(async () => { [...el!.querySelectorAll('button')].find(b => b.textContent?.includes('Show a code'))!.click() })
+    await act(async () => { await Promise.resolve() })
+    expect(trust.startEnrolment.mock.calls[0][1]).toMatchObject({ passkeys: { candidates: keys.list } })
   })
 
   it('says when this browser cannot keep a key', async () => {

@@ -47,6 +47,7 @@ function main(): void {
 
   const credentialFile = relayCredentialPath()
   const identityKey = prepareMachineTrust(credentialFile, credential.machineId, credential.url)
+  const intents = intentVerifierFor(credentialFile, credential.machineId)
 
   const connector = new RelayConnector({
     relayUrl: credential.url,
@@ -56,8 +57,8 @@ function main(): void {
     localCodekinVersion: version,
     localTarget,
     identityKey,
-    enrolment: machineEnrolmentFor(credentialFile, credential.machineId),
-    intents: intentVerifierFor(credentialFile, credential.machineId),
+    enrolment: machineEnrolmentFor(credentialFile, credential.machineId, undefined, console, intents),
+    intents,
     onOwner: (ownerUserId) => { recordOwnerFromRelay(credentialFile, credential.machineId, ownerUserId) },
     onProxy: (method, path, status) => {
       console.log(`[connector] ${method} ${path} → ${status}`)

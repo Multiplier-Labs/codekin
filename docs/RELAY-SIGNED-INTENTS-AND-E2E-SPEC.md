@@ -1,6 +1,6 @@
 # Relay trust: device-signed intents and end-to-end encryption
 
-**Status:** Spec, decisions D1–D7 settled (§13). Built: slice 1 (relay audit events, §7.1), slice 2 (machine identity and trust store), slice 3 (enrolment ceremony, §5.2–5.5) and slice 4 (intent signing and verification, §6.1–6.5, §7.2). Nothing turns enforcement on by itself yet: an owner can set `required` locally. The rest is not built.
+**Status:** Spec, decisions D1–D7 settled (§13). Built: slice 1 (relay audit events, §7.1), slice 2 (machine identity and trust store), slice 3 (enrolment ceremony, §5.2–5.5), slice 4 (intent signing and verification, §6.1–6.5, §7.2) and slice 5 (passkeys: enrolment, `device_certify`, step-up, remote `device_revoke`, §5.4, §5.6, §6.6). Nothing turns enforcement on by itself yet: an owner can set `required` locally. The rest is not built.
 **Date:** 2026-11-08
 **Context:** a hosted relay is trusted to say who the machine owner is (§3). This spec removes that trust in two levels: **L1 device-signed intents** and **L2 end-to-end content encryption**. It also adds the relay audit events that are declared but never emitted.
 **Basis:** `origin/main` at v0.10.5 (`a93f6e3`). All `path:line` references point there.
@@ -463,6 +463,36 @@ If the owner has no enrolled passkey, the browser key is accepted (D2 in §13). 
 - The pairing flow offers passkey enrolment while the user is at the machine (§5.3).
 - A workspace setting, **"Privileged actions need a passkey"** (default off), refuses browser-key step-up in that workspace. Workspaces turning it on should expect the desktop app's web mode to be unable to perform privileged actions.
 - The machine-local intent log (§7.2) records the step-up as `stepUp: "browser-key"` or `"passkey"`, so the owner can see which actions had only the weaker confirmation.
+
+### 6.6a As built (slice 5)
+
+- **Verifying passkeys on the machine.** The connector ships in the npm package and can't use the relay's `@simplewebauthn/server`. `server/relay/webauthn-verify.ts` is a small, dependency-free verifier for `get()` assertions:
+  - It checks the type, challenge and origin (not cross-origin), the RP ID hash, user presence and user verification, and the signature.
+  - It supports ES256, RS256 and EdDSA, and ignores the counter.
+  - Tests check it against `@simplewebauthn/server`.
+
+  A passkey's key id is `base64url(SHA-256(COSE_Key))[0:22]`.
+- **Passkeys in the ceremony need proof.** The browser gets passkey public keys from the relay (`GET /api/auth/passkeys/keys`), so the relay could list one of its own. Before committing, the browser therefore asserts with one of the user's passkeys:
+  - The challenge is `SHA-256(T("ck-enrol-passkey-v1", SPKI(kB), nonceB))`.
+  - `P` holds just the passkey that answered. The reveal carries its assertion in `passkeyProofs`.
+  - The machine checks the assertion against the claimed public key, with origin and RP ID taken from the relay URL in its device list.
+
+  A key the user's authenticator can't sign for never gets in. Approving the code adds the passkey alongside the browser. At most 3 passkeys per enrolment.
+- **Passkey intents.** `SignedIntent.webauthn` carries `credentialId`, and the assertion's challenge is `SHA-256(UTF-8(body))`. The body's `keyId` is the passkey's key id, or `"*"` when the user picked one (`device_certify`). The signer rules are the same as for browser keys.
+- **`device_certify`** (the `enrol_certify` frame) adds a browser with `addedBy: passkey:<keyId>`.
+  - It is refused when "Only allow devices confirmed on this computer" (`localConfirmationOnly`) is set. That switch is available in Settings, `codekin relay devices passkey-adds on|off`, and `PUT /api/relay/devices/settings`.
+  - Only a passkey certifies: a browser key, even one added by passkey, can't.
+  - The browser pins `kM` **on first use** (`via: "passkey"` on the pin), because no code was typed. Signed intents don't depend on this pin, since the machine is what checks. L2 must treat such a pin as unconfirmed, and ask for the confirmation code before trusting it for encryption.
+- **`device_revoke`** (the `enrol_revoke` frame) removes one of the signer's own credentials. Machines → "Remove this browser" uses it.
+- **Step-up** (§6.2): privileged actions are `prompt_response` answers of `always_allow` or `approve_pattern`, `create_session` or `set_permission_mode` with `bypassPermissions` (WebSocket or REST), `device_certify` and `device_revoke`.
+  - Such an action needs a passkey intent when the signer has a passkey on the machine, or the workspace requires it. Otherwise the refusal is `intent_step_up_required`, listing the passkeys the machine accepts (`stepUpPasskeys`).
+  - The browser signs privileged actions with the passkey it knows the machine trusts. It learns these from the enrolment result and from refusals, and retries a REST request once.
+  - The log records `stepUp: "passkey" | "browser-key"`, and Activity shows "browser key only" in warning colour.
+- **"Privileged actions need a passkey"** is a workspace setting (`workspaces.require_passkey_step_up`, migration 14).
+  - It reaches connectors in `hello_ack`, and as a hub `event` when it changes.
+  - Turning it off needs a recent sign-in.
+  - Only the relay reports it. A lying relay can only leave the machine-side rule in force (a passkey enrolled here is always required).
+- **Not built:** telling the owner's other enrolled browsers when a browser is added by passkey (§5.4); a remote `policy` intent (§6.8, slice 7); Account → Devices, "remove from all my computers".
 
 ### 6.7 Signed share grants and grantee intents
 

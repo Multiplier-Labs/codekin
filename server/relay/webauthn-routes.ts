@@ -385,6 +385,16 @@ export function createWebauthnRouter(
     res.json({ passkeys: listPasskeys(db, userId) })
   })
 
+  /**
+   * The caller's passkeys with their public keys, for confirming a browser on
+   * a machine (signed-intents spec §5.2, §5.4). Public keys only, and only a
+   * hint: the machine accepts one solely with a fresh assertion it checks.
+   */
+  router.get('/api/auth/passkeys/keys', requireActiveUser, (req, res) => {
+    const rows = listCredentialRows(db, req.session.user?.id ?? '')
+    res.json({ keys: rows.map(r => ({ credentialId: r.credential_id, cosePublicKey: r.public_key, rpId: rpID, label: r.label })) })
+  })
+
   router.delete('/api/auth/passkeys/:id', requireActiveUser, requireRecentAuth, (req, res) => {
     const userId = req.session.user?.id ?? ''
     const passkeyId = typeof req.params.id === 'string' ? req.params.id : ''

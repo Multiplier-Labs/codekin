@@ -224,6 +224,7 @@ export class EmbeddedConnectorSupervisor {
     // The machine identity and device list (signed-intents spec §4), made
     // here for machines paired before they existed.
     const identityKey = prepareMachineTrust(this.file, credential.machineId, credential.url, this.store, this.log)
+    const intents = intentVerifierFor(this.file, credential.machineId, this.opts.intentLogFile, this.log, this.store)
 
     const connector = create({
       relayUrl: credential.url,
@@ -233,8 +234,8 @@ export class EmbeddedConnectorSupervisor {
       localCodekinVersion: this.opts.version,
       localTarget: this.opts.localTarget?.(),
       identityKey,
-      enrolment: machineEnrolmentFor(this.file, credential.machineId, this.store, this.log),
-      intents: intentVerifierFor(this.file, credential.machineId, this.opts.intentLogFile, this.log, this.store),
+      enrolment: machineEnrolmentFor(this.file, credential.machineId, this.store, this.log, intents),
+      intents,
       onOwner: (ownerUserId) => {
         if (this.activeToken === token) recordOwnerFromRelay(this.file, credential.machineId, ownerUserId, this.log)
       },

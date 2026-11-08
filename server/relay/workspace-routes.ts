@@ -35,8 +35,7 @@ import {
   renameWorkspace,
   setRequireMfa,
   unlockMachine,
-  updateMember,
-} from './workspaces.js'
+  updateMember, setRequirePasskeyStepUp } from './workspaces.js'
 import type { Membership, MembershipStatus } from './workspaces.js'
 import { listAuditEvents, recordAuditEvent } from './audit.js'
 import { removeMachine } from './pairing.js'
@@ -145,6 +144,7 @@ export function createWorkspaceRouter({ db, config, browserHub, connectorHub }: 
         id: workspace.id,
         name: workspace.name,
         requireMfa: workspace.require_mfa === 1,
+        requirePasskeyStepUp: workspace.require_passkey_step_up === 1,
         createdAt: workspace.created_at,
       },
       role: membership.role,
@@ -159,7 +159,31 @@ export function createWorkspaceRouter({ db, config, browserHub, connectorHub }: 
       forbid(res)
       return
     }
-    const body = req.body as { name?: unknown; requireMfa?: unknown }
+    const body = req.body as { name?: unknown; requireMfa?: unknown; requirePasskeyStepUp?: unknown }
+    if (body.requirePasskeyStepUp !== undefined) {
+      if (typeof body.requirePasskeyStepUp !== 'boolean') {
+        res.status(400).json({ error: 'requirePasskeyStepUp must be a boolean' })
+        return
+      }
+      const workspace = getWorkspace(db, membership.workspaceId)
+      if (workspace && body.requirePasskeyStepUp !== (workspace.require_passkey_step_up === 1)) {
+        // Turning it off lowers everyone's protection: a fresh check first.
+        if (!body.requirePasskeyStepUp && !ensureRecentAuth(db, req, res)) return
+        setRequirePasskeyStepUp(db, membership.workspaceId, body.requirePasskeyStepUp)
+        connectorHub?.announceWorkspacePolicy(membership.workspaceId, { requirePasskeyStepUp: body.requirePasskeyStepUp })
+        recordAuditEvent(db, {
+          kind: 'workspace_security_updated',
+          workspaceId: membership.workspaceId,
+          actorUserId: membership.userId,
+          ...audit(req),
+          metadata: { requirePasskeyStepUp: body.requirePasskeyStepUp },
+        })
+      }
+      if (body.name === undefined && body.requireMfa === undefined) {
+        res.json({ workspace: { id: membership.workspaceId, requirePasskeyStepUp: body.requirePasskeyStepUp } })
+        return
+      }
+    }
     if (body.requireMfa !== undefined) {
       if (typeof body.requireMfa !== 'boolean') {
         res.status(400).json({ error: 'requireMfa must be a boolean' })

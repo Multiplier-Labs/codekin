@@ -146,6 +146,22 @@ describe('connector hub', () => {
     connector.stop()
   })
 
+  it('tells the connector when its workspace requires a passkey for privileged actions, now and on change', async () => {
+    db.prepare('UPDATE workspaces SET require_passkey_step_up = 1 WHERE id = ?').run(BOOTSTRAP_WORKSPACE_ID)
+    const setRequirePasskey = vi.fn()
+    const connector = new RelayConnector({
+      relayUrl, machineId, machineSecret, connectorVersion: '0.10.0-test', onStatus: () => {},
+      intents: { checkRequest: vi.fn(), checkChannelOpen: vi.fn(), checkFrame: vi.fn(), setRequirePasskey } as never,
+    })
+    connector.start()
+    await waitFor(() => setRequirePasskey.mock.calls.length > 0)
+    expect(setRequirePasskey).toHaveBeenLastCalledWith(true)
+    hub.announceWorkspacePolicy(BOOTSTRAP_WORKSPACE_ID, { requirePasskeyStepUp: false })
+    await waitFor(() => setRequirePasskey.mock.calls.length > 1)
+    expect(setRequirePasskey).toHaveBeenLastCalledWith(false)
+    connector.stop()
+  })
+
   it('drops a channel instead of buffering for a connector that stopped draining', async () => {
     const { connector, socket } = await connectMachine()
     const frames: Array<{ kind: string; payload: unknown }> = []

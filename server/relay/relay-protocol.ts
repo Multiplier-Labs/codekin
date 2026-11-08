@@ -23,6 +23,8 @@ export type RelayEnvelopeKind =
   | 'enrol_commit'
   | 'enrol_reveal'
   | 'enrol_status'
+  | 'enrol_certify'
+  | 'enrol_revoke'
   /** …and connector → browser, each answering one request by id. */
   | 'enrol_challenge'
   | 'enrol_result'
@@ -89,6 +91,8 @@ export interface ConnectorHelloAck {
    * pair/complete returned it record it in their trust store from here.
    */
   ownerUserId?: string
+  /** The workspace requires a passkey for privileged actions (signed-intents spec §6.6). */
+  requirePasskeyStepUp?: boolean
 }
 
 /** Browser → hub, first message on a /relay/browser socket. */
@@ -209,6 +213,8 @@ export interface RelayError {
   machineTime?: number
   /** For `intent_stale`: the machine key's signature over (intentNonce, machineTime). */
   machineTimeSig?: string
+  /** For `intent_step_up_required`: the passkeys this machine accepts for the signer. */
+  stepUpPasskeys?: Array<{ credentialId: string; keyId: string }>
 }
 
 /** Error codes used on the request/response and stream paths (spec §7.4). */
@@ -232,7 +238,7 @@ export const RELAY_ERROR = {
 } as const
 
 /** Browser → connector enrolment frames, and the connector's replies. */
-export const ENROL_REQUEST_KINDS = ['enrol_commit', 'enrol_reveal', 'enrol_status'] as const
+export const ENROL_REQUEST_KINDS = ['enrol_commit', 'enrol_reveal', 'enrol_status', 'enrol_certify', 'enrol_revoke'] as const
 export type EnrolRequestKind = (typeof ENROL_REQUEST_KINDS)[number]
 export const ENROL_REPLY_KINDS = ['enrol_challenge', 'enrol_result'] as const
 export type EnrolReplyKind = (typeof ENROL_REPLY_KINDS)[number]

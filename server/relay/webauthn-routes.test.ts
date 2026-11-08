@@ -187,6 +187,13 @@ describe('webauthn routes', () => {
     expect(listAuditEvents(db, {}).map(e => e.kind)).not.toContain('passkey_login')
   })
 
+  it('gives the caller their own passkeys public keys, for confirming a browser on a machine', async () => {
+    insertCredential(db, { userId: activeUser.id, credentialId: 'cred-1', publicKey: 'pk-1', counter: 0, label: 'Phone' })
+    expect((await fetch(`${baseUrl}/api/auth/passkeys/keys`)).status).toBe(401)
+    const res = await fetch(`${baseUrl}/api/auth/passkeys/keys`, { headers: asUser })
+    expect(await res.json()).toEqual({ keys: [{ credentialId: 'cred-1', cosePublicKey: 'pk-1', rpId: 'app.example.com', label: 'Phone' }] })
+  })
+
   it('lists and deletes own passkeys, with audit', async () => {
     const passkey = insertCredential(db, {
       userId: activeUser.id, credentialId: 'cred-1', publicKey: 'pk', counter: 0, label: 'Phone',

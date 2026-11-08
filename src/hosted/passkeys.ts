@@ -162,3 +162,51 @@ export async function removePasskey(id: string): Promise<boolean> {
   })
   return res.ok
 }
+
+/** One of this account's passkeys, with its public key (for confirming a browser on a machine). */
+export interface PasskeyPublicKey {
+  credentialId: string
+  cosePublicKey: string
+  rpId: string
+  label: string | null
+}
+
+/** This account's passkeys with their public keys; empty when unavailable. */
+export async function fetchPasskeyKeys(): Promise<PasskeyPublicKey[]> {
+  try {
+    const res = await fetch('/api/auth/passkeys/keys', { credentials: 'include' })
+    if (!res.ok) return []
+    const data = await res.json() as { keys?: PasskeyPublicKey[] }
+    return Array.isArray(data.keys) ? data.keys : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Ask a passkey to sign a challenge this page chose (signed-intents spec
+ * §5.2, §5.4, §6.6): user verification required, limited to `credentialIds`.
+ * The challenge commits to what is being approved, so the machine checks
+ * the same thing the user confirmed.
+ */
+export async function assertWithPasskey(challenge: Uint8Array, credentialIds: string[]): Promise<{
+  credentialId: string; authenticatorData: string; clientDataJSON: string; signature: string
+}> {
+  let binary = ''
+  for (const b of challenge) binary += String.fromCharCode(b)
+  const response = await startAuthentication({
+    optionsJSON: {
+      challenge: btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''),
+      allowCredentials: credentialIds.map(id => ({ id, type: 'public-key' })),
+      rpId: location.hostname,
+      userVerification: 'required',
+      timeout: 60_000,
+    },
+  })
+  return {
+    credentialId: response.id,
+    authenticatorData: response.response.authenticatorData,
+    clientDataJSON: response.response.clientDataJSON,
+    signature: response.response.signature,
+  }
+}
