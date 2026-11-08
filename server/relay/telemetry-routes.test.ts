@@ -66,6 +66,14 @@ describe('POST /api/telemetry/errors', () => {
       expect(event.exception.values[0].stacktrace.frames[0].filename).toBe('/assets/index-abc.js')
     })
 
+    it('redacts across every ingestion truncation boundary', async () => {
+      await post({
+        type: 'T '.repeat(45) + SECRET, message: 'm '.repeat(95) + SECRET,
+        frames: [{ filename: `/assets/${SECRET}.js`, function: 'f '.repeat(95) + SECRET }],
+      })
+      expect((send.mock.calls[0][1] as { body: string }).body).not.toContain(SECRET.slice(0, 10))
+    })
+
     it('refuses other origins and cross-site fetches', async () => {
       expect((await post({ type: 'E', message: 'm' }, { origin: 'https://evil.example' })).status).toBe(403)
       expect((await post({ type: 'E', message: 'm' }, { 'sec-fetch-site': 'cross-site' })).status).toBe(403)
@@ -89,8 +97,8 @@ describe('POST /api/telemetry/errors', () => {
 describe('parseBrowserReport', () => {
   it('bounds every field and ignores bad frames', () => {
     const report = parseBrowserReport({
-      type: 'T'.repeat(300),
-      message: 'm'.repeat(1000),
+      type: 'T '.repeat(150),
+      message: 'm '.repeat(500),
       frames: [{ filename: 'a.js', lineno: 1.5 }, 'junk', { function: 'no file' }, ...Array.from({ length: 80 }, () => ({ filename: 'b.js' }))],
     })!
     expect(report.type).toHaveLength(100)

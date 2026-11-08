@@ -114,6 +114,25 @@ describe('ErrorReporter', () => {
     expect(event.exception.values[0].value.length).toBeLessThanOrEqual(201)
   })
 
+  it('scrubs stack fields and complete messages before truncation, and omits parser content', () => {
+    const { r } = reporter(undefined, { maxMessage: 200 })
+    const event = JSON.stringify(r.buildEvent({
+      type: 'Error', message: 'x '.repeat(95) + SECRET,
+      frames: [{ filename: `/assets/${SECRET}.js`, function: SECRET }],
+    }))
+    expect(event).not.toContain(SECRET.slice(0, 10))
+    const parser = JSON.stringify(r.buildEvent({ type: 'SyntaxError', message: 'Unexpected token in confidential customer text', frames: [] }))
+    expect(parser).not.toContain('confidential customer text')
+  })
+
+  it('reports HTTP refusal without logging the response body', async () => {
+    const log = vi.fn()
+    const { r } = reporter(vi.fn().mockResolvedValue(new Response(SECRET, { status: 503 })), { log })
+    r.capture({ type: 'Error', message: 'boom', frames: [] })
+    await vi.waitFor(() => expect(log).toHaveBeenCalledWith('[relay] error report not delivered: HTTP refusal'))
+    expect(JSON.stringify(log.mock.calls)).not.toContain(SECRET)
+  })
+
   it('stops sending past the per-minute budget', () => {
     const { r, send } = reporter(undefined, { maxPerMinute: 3 })
     const results = Array.from({ length: 5 }, () => r.capture({ type: 'Error', message: 'boom', frames: [] }))
@@ -126,6 +145,6 @@ describe('ErrorReporter', () => {
     const { r } = reporter(vi.fn().mockRejectedValue(new TypeError(`fetch failed ${SECRET}`)), { log })
     expect(r.capture({ type: 'Error', message: 'boom', frames: [] })).toBe(true)
     await vi.waitFor(() => { expect(log).toHaveBeenCalled() })
-    expect(log.mock.calls[0][0]).toBe('[relay] error report not delivered: TypeError')
+    expect(log.mock.calls[0][0]).toBe('[relay] error report not delivered: transport failure')
   })
 })

@@ -21,10 +21,18 @@ describe('stackFrames', () => {
 
 describe('toReport', () => {
   it('reports the app\'s own errors with a truncated message', () => {
-    const report = toReport(appError('x'.repeat(500)), ORIGIN)!
+    const report = toReport(appError('x '.repeat(250)), ORIGIN)!
     expect(report.type).toBe('TypeError')
     expect(report.message).toHaveLength(200)
     expect(report.frames[0].filename).toBe('/assets/index-abc.js')
+  })
+
+  it('scrubs before truncation and omits content-bearing syntax errors', () => {
+    const secret = 'SYNTHETIC_ONLY_1234567890_ABCDEF'
+    const error = appError('x '.repeat(95) + secret)
+    error.stack += `\n    at ${secret} (${ORIGIN}/assets/${secret}.js:1:2)`
+    expect(JSON.stringify(toReport(error, ORIGIN))).not.toContain(secret.slice(0, 10))
+    expect(toReport(appError('private parsed text', 'SyntaxError'), ORIGIN)?.message).not.toContain('private parsed text')
   })
 
   it('ignores errors from extensions and non-errors', () => {
