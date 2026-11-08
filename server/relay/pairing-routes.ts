@@ -8,6 +8,8 @@
  */
 
 import { Router } from 'express'
+import { checkQuota, countPendingPairings, countWorkspaceMachines, UNLIMITED } from './quotas.js'
+import type { EntitlementsProvider, QuotaExceeded } from './quotas.js'
 import type Database from 'better-sqlite3'
 import {
   startPairing,
@@ -38,6 +40,8 @@ export const PRECREATE_LIMIT = { limit: 10, windowMs: 60_000 }
 export interface PairingRouterOptions {
   /** Override the per-user precreate limit (tests). */
   precreateLimit?: { limit: number; windowMs: number }
+  /** Quota limits (docs/RELAY-HARDENING.md §6); unlimited when absent. */
+  entitlements?: EntitlementsProvider
 }
 
 /**
@@ -71,6 +75,15 @@ export function createPairingRouter(
   const router = Router()
   const requireActiveUser = createRequireActiveUser(db, config)
   const requireWorkspace = createRequireWorkspace(db)
+  const entitlements = options.entitlements ?? UNLIMITED
+
+  /**
+   * Room for one more machine and one more unfinished setup for this user.
+   * `replacing` is a machine about to be discarded, which frees its slot.
+   */
+  const pairingQuota = (userId: string, workspaceId: string, replacing = 0): QuotaExceeded | null =>
+    checkQuota(entitlements, workspaceId, 'machinesPerWorkspace', () => countWorkspaceMachines(db, workspaceId) - replacing)
+    ?? checkQuota(entitlements, workspaceId, 'pendingPairingsPerUser', () => countPendingPairings(db, userId, workspaceId) - replacing)
 
   // Who a pairing makes the machine's owner, and where. Every pairing
   // surface shows this, so a browser signed in to the wrong account cannot
@@ -131,6 +144,11 @@ export function createPairingRouter(
     }
 
     const replaceMachineId = body.replaceMachineId
+    const quota = pairingQuota(userId, req.workspace?.workspaceId ?? '', replaceMachineId ? 1 : 0)
+    if (quota) {
+      res.status(429).json(quota)
+      return
+    }
     if (replaceMachineId) {
       const existing = getMachine(db, replaceMachineId)
       // Not revealing whether someone else's machine id exists: not-owned
@@ -231,6 +249,11 @@ export function createPairingRouter(
     const displayName = typeof body.displayName === 'string' ? body.displayName.slice(0, 128) : undefined
     // requireActiveUser guarantees the session user exists
     const userId = req.session.user?.id ?? ''
+    const quota = pairingQuota(userId, req.workspace?.workspaceId ?? '')
+    if (quota) {
+      res.status(429).json(quota)
+      return
+    }
     const result = approvePairing(db, code, userId, req.workspace!.workspaceId, displayName)
     if (!result.ok) {
       const status = result.reason === 'not_found' ? 404 : 410

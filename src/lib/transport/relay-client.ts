@@ -67,6 +67,8 @@ const RESUME_PROBE_TIMEOUT_MS = 2_500
 
 /** Close code the hub uses when the user may not reach the machine. */
 const CLOSE_FORBIDDEN = 4003
+/** Over a relay quota (browser connections per user); see server/relay/browser-hub.ts. */
+const CLOSE_QUOTA = 4030
 
 export interface RelayConnectionOptions {
   machineId: string
@@ -142,6 +144,13 @@ export class RelayConnection {
         // Retrying cannot fix an access decision.
         this.closedByUs = true
         this.setState('closed', 'no access to this machine')
+        return
+      }
+      if (event.code === CLOSE_QUOTA) {
+        // Over the per-user connection limit: retrying only hits it again
+        // until another tab closes.
+        this.closedByUs = true
+        this.setState('closed', 'too many open connections — close another Codekin tab or window, then reload')
         return
       }
       this.setState('closed', `code ${event.code}`)

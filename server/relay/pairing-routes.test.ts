@@ -14,6 +14,7 @@ import type { RelayConfig } from './relay-config.js'
 import type { SessionUser } from './relay-auth-routes.js'
 import type { ConnectorHub } from './connector-hub.js'
 import type { BrowserHub } from './browser-hub.js'
+import type { QuotaLimits } from './quotas.js'
 
 const CONFIG = {
   publicUrl: 'https://app.example.com',
@@ -27,10 +28,13 @@ describe('pairing routes', () => {
   let otherUser: SessionUser
   const disconnectMachine = vi.fn()
   const reauthorize = vi.fn()
+  /** Quota limits in force for the test's workspace; empty = unlimited. */
+  let limits: QuotaLimits = {}
 
   beforeEach(async () => {
     disconnectMachine.mockClear()
     reauthorize.mockClear()
+    limits = {}
     db = openControlPlaneDb(':memory:')
     const row = upsertUserFromGithub(
       db,
@@ -73,7 +77,7 @@ describe('pairing routes', () => {
       createPairingRouter(db, CONFIG, {
         connectorHub: { disconnectMachine } as unknown as ConnectorHub,
         browserHub: { reauthorize } as unknown as BrowserHub,
-      }),
+      }, { entitlements: { limitsFor: () => limits } }),
     )
     await new Promise<void>(resolve => {
       server = app.listen(0, '127.0.0.1', () => {
@@ -252,6 +256,42 @@ describe('pairing routes', () => {
       method: 'POST', headers, body: JSON.stringify(body),
     })
   }
+
+  describe('quotas', () => {
+    it('refuses a new install command once the workspace has its machines', async () => {
+      limits = { machinesPerWorkspace: 2 }
+      expect((await precreate()).status).toBe(200)
+      expect((await precreate()).status).toBe(200)
+      const res = await precreate()
+      expect(res.status).toBe(429)
+      expect(await res.json()).toMatchObject({ error: 'quota_exceeded', quota: 'machinesPerWorkspace', limit: 2 })
+    })
+
+    it('lets a regenerated command replace its own unclaimed machine at the limit', async () => {
+      limits = { machinesPerWorkspace: 1, pendingPairingsPerUser: 1 }
+      const first = (await (await precreate()).json()) as { machineId: string }
+      const res = await precreate({ replaceMachineId: first.machineId })
+      expect(res.status).toBe(200)
+    })
+
+    it('caps unfinished setups per user', async () => {
+      limits = { pendingPairingsPerUser: 1 }
+      expect((await precreate()).status).toBe(200)
+      const res = await precreate()
+      expect(res.status).toBe(429)
+      expect(await res.json()).toMatchObject({ quota: 'pendingPairingsPerUser', limit: 1 })
+    })
+
+    it('applies the machine limit to approving a CLI pairing too', async () => {
+      limits = { machinesPerWorkspace: 0 }
+      const { userCode } = await startRequest()
+      const res = await fetch(`${baseUrl}/api/machines/pair/approve`, {
+        method: 'POST', headers: asUser, body: JSON.stringify({ code: userCode }),
+      })
+      expect(res.status).toBe(429)
+      expect(((await res.json()) as { message: string }).message).toContain('limit of 0 machines')
+    })
+  })
 
   it('precreate requires an active user and records an audit event', async () => {
     expect((await precreate({}, anon)).status).toBe(401)

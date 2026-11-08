@@ -54,6 +54,8 @@ export interface RelayConfig {
   browserErrorDsn?: string
   /** `environment` on reported errors (RELAY_ERROR_ENVIRONMENT); defaults from NODE_ENV. */
   errorEnvironment: string
+  /** JSON file of quota limits (RELAY_QUOTAS_FILE). Unset: no limits. */
+  quotasFile?: string
 }
 
 /** Decode MFA_ENCRYPTION_KEY: 64 hex characters or base64 of exactly 32 bytes. */
@@ -134,6 +136,7 @@ export function loadRelayConfig(opts: { envFile?: string; requireSecrets?: boole
     errorDsn: get('RELAY_ERROR_DSN').trim() || undefined,
     browserErrorDsn: get('RELAY_BROWSER_ERROR_DSN').trim() || undefined,
     errorEnvironment: get('RELAY_ERROR_ENVIRONMENT').trim() || (isProduction ? 'production' : 'development'),
+    quotasFile: get('RELAY_QUOTAS_FILE').trim() || undefined,
   }
 
   if (requireSecrets) {

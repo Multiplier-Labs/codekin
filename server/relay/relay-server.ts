@@ -33,6 +33,7 @@ import { createCspReportRouter, CSP_REPORT_PATH } from './csp-report-routes.js'
 import { createErrorReporter, reportFromError, MAX_BROWSER_MESSAGE } from './error-reporting.js'
 import { createTelemetryRouter, TELEMETRY_ERRORS_PATH } from './telemetry-routes.js'
 import { codekinPackageVersion } from './relay-credential.js'
+import { loadEntitlements } from './quotas.js'
 import { ConnectorHub } from './connector-hub.js'
 import { BrowserHub } from './browser-hub.js'
 import { MAX_PROXY_BODY_BYTES } from './relay-protocol.js'
@@ -43,10 +44,13 @@ import { createMutationOriginGuard } from './origin-guard.js'
 import { createMachineWebhookRouter, createWebhookIngressRouter } from './machine-webhook-routes.js'
 
 const config = loadRelayConfig()
+// Quota limits (docs/RELAY-HARDENING.md §6): none unless RELAY_QUOTAS_FILE is set.
+// A malformed file stops the relay at boot rather than running unlimited.
+const entitlements = loadEntitlements(config.quotasFile)
 const db = openControlPlaneDb(join(config.dataDir, 'control-plane.db'))
 const store = new SqliteSessionStore(db)
 const hub = new ConnectorHub(db)
-const browserHub = new BrowserHub(db, hub, { isSessionAlive: sid => store.isAlive(sid) })
+const browserHub = new BrowserHub(db, hub, { isSessionAlive: sid => store.isAlive(sid), entitlements })
 
 const app = express()
 const eventLoopLag = new EventLoopLagMonitor()
@@ -187,11 +191,11 @@ app.use(createRelayAuthRouter({
 }))
 app.use(createMachineRouter(db, hub, config))
 app.use(createMachineWebhookRouter(db, config))
-app.use(createPairingRouter(db, config, { connectorHub: hub, browserHub }))
-app.use(createShareRouter(db, browserHub, config))
+app.use(createPairingRouter(db, config, { connectorHub: hub, browserHub }, { entitlements }))
+app.use(createShareRouter(db, browserHub, config, entitlements))
 app.use(createUserRouter(db, config, browserHub, store))
 app.use(createWorkspaceRouter({ db, config, browserHub, connectorHub: hub }))
-app.use(createInvitationRouter({ db, config }))
+app.use(createInvitationRouter({ db, config, entitlements }))
 app.use(createDeviceLinkRouter(db, config))
 app.use(createDesktopAuthRouter({
   db,

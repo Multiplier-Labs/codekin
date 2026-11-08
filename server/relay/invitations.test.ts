@@ -6,6 +6,7 @@
  */
 
 import { signInFully } from './__fixtures__/auth.js'
+import type { QuotaLimits } from './quotas.js'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import express from 'express'
 import session from 'express-session'
@@ -105,7 +106,10 @@ describe('workspace invitations', () => {
   const addUser = (id: number, login: string) =>
     upsertUserFromGithub(db, { id, login, name: null, email: null, avatarUrl: null }, { ownerGithubId: 1, allowedGithubIds: [2, 3] })
 
+  let limits: QuotaLimits = {}
+
   beforeEach(async () => {
+    limits = {}
     db = openControlPlaneDb(':memory:')
     store = new SqliteSessionStore(db)
     owner = addUser(1, 'owner')
@@ -127,7 +131,7 @@ describe('workspace invitations', () => {
     })
     const fetchImpl = githubMock(gh)
     app.use(createRelayAuthRouter({ db, config: CONFIG, fetchImpl, store }))
-    app.use(createInvitationRouter({ db, config: CONFIG, fetchImpl }))
+    app.use(createInvitationRouter({ db, config: CONFIG, fetchImpl, entitlements: { limitsFor: () => limits } }))
     server = app.listen(0, '127.0.0.1')
     await new Promise<void>(resolve => server.once('listening', resolve))
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -179,6 +183,18 @@ describe('workspace invitations', () => {
         expect((await call('/api/invitations/prepare', { method: 'POST', body: { token: tokenOf(stale) } })).status).toBe(410)
       }
       expect((await call('/api/invitations/prepare', { method: 'POST', body: { token: tokenOf(resentUrl) } })).status).toBe(200)
+    })
+
+    it('caps invitations a workspace sends per day, resends included', async () => {
+      limits = { invitationsPerWorkspacePerDay: 2 }
+      expect((await invite({ email: 'a@example.com', role: 'member' })).res.status).toBe(201)
+      const second = await invite({ email: 'b@example.com', role: 'member' })
+      expect(second.res.status).toBe(201)
+      const third = await invite({ email: 'c@example.com', role: 'member' })
+      expect(third.res.status).toBe(429)
+      expect(third.data).toMatchObject({ error: 'quota_exceeded', quota: 'invitationsPerWorkspacePerDay', limit: 2 })
+      const resent = await call(`/api/workspaces/${BOOTSTRAP_WORKSPACE_ID}/invitations/${second.data.invitation!.id}/resend`, { as: owner, method: 'POST' })
+      expect(resent.status).toBe(429)
     })
 
     it('previews a link without disclosing the bound email', async () => {

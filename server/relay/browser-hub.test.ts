@@ -36,6 +36,7 @@ function waitFor(condition: () => boolean, timeoutMs = 3000): Promise<void> {
 interface Frame {
   kind: string
   id?: string
+  channelId?: string
   payload: Record<string, unknown>
 }
 
@@ -65,6 +66,10 @@ class TestBrowser {
 
   send(kind: string, payload: unknown, id?: string): void {
     this.ws.send(JSON.stringify(envelope(kind as 'hello', payload, id ? { id } : undefined)))
+  }
+
+  sendOnChannel(kind: string, payload: unknown, channelId: string): void {
+    this.ws.send(JSON.stringify(envelope(kind as 'stream_open', payload, { channelId })))
   }
 
   async waitForFrame(predicate: (f: Frame) => boolean): Promise<Frame> {
@@ -265,6 +270,51 @@ describe('browser hub REST proxy', () => {
 
     release?.()
     browser.close()
+  })
+
+  describe('quotas', () => {
+    function useLimits(limits: Record<string, number>): void {
+      browserHub.close()
+      browserHub = new BrowserHub(db, hub, { entitlements: { limitsFor: () => limits } })
+    }
+
+    it('refuses a browser connection past the per-user limit, with a close code the app will not retry', async () => {
+      useLimits({ browserSocketsPerUser: 1 })
+      const first = new TestBrowser(browserUrl)
+      await first.open()
+      first.send('hello', { machineId })
+      await first.waitForFrame(f => f.kind === 'hello_ack')
+
+      const second = new TestBrowser(browserUrl)
+      await second.open()
+      const closed = second.closeCode
+      second.send('hello', { machineId })
+      expect(await closed).toBe(4030)
+
+      // Closing the first frees the slot.
+      first.close()
+      await waitFor(() => browserHub.clientCount === 0)
+      const third = new TestBrowser(browserUrl)
+      await third.open()
+      third.send('hello', { machineId })
+      await third.waitForFrame(f => f.kind === 'hello_ack')
+      third.close()
+    })
+
+    it('refuses a session stream past the per-user channel limit', async () => {
+      useLimits({ channelsPerUser: 0 })
+      await startConnector()
+      const browser = new TestBrowser(browserUrl)
+      await browser.open()
+      browser.send('hello', { machineId })
+      await browser.waitForFrame(f => f.kind === 'hello_ack')
+      browser.sendOnChannel('stream_open', {}, 'c1')
+      const refusal = await browser.waitForFrame(f => f.channelId === 'c1')
+      expect(refusal.kind).toBe('error')
+      expect(refusal.payload).toMatchObject({ code: 'quota_exceeded' })
+      expect(hub.channelCount).toBe(0)
+      browser.close()
+    })
   })
 
   it('closes the socket for a machine the user does not own', async () => {
