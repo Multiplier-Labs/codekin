@@ -14,6 +14,8 @@ import { openControlPlaneDb, upsertUserFromGithub } from './control-plane-db.js'
 import { startPairing, approvePairing, completePairing } from './pairing.js'
 import { ConnectorHub } from './connector-hub.js'
 import { listAuditEvents } from './audit.js'
+import { UsageMeter } from './usage-meter.js'
+import { UNLIMITED } from './quotas.js'
 import { BrowserHub } from './browser-hub.js'
 import { RelayConnector } from './connector.js'
 import { envelope, MAX_CHANNELS_PER_CLIENT, RELAY_ERROR, STREAM_CLOSE } from './relay-protocol.js'
@@ -262,6 +264,9 @@ describe('session streaming over the relay', () => {
     const send = (msg: unknown) => { browser.send('stream_data', { data: JSON.stringify(msg) }, { channelId: 'c1' }) }
 
     send({ type: 'join_session', sessionId: 'sess-1' })
+    await waitFor(() => local.received.some(f => f.includes('join_session')))
+    local.broadcast({ sessionId: 'sess-1', type: 'session_joined' })
+    await browser.waitForFrame(f => f.kind === 'stream_data' && String(f.payload.data).includes('session_joined'))
     send({ type: 'input', data: 'TOP SECRET PROMPT about the API key' })
     send({ type: 'prompt_response', value: 'always_allow', requestId: 'req-7' })
     send({ type: 'set_permission_mode', permissionMode: 'acceptEdits' })
@@ -349,6 +354,23 @@ describe('session streaming over the relay', () => {
     await openChannel('c1', { autoPong: false })
 
     await waitFor(() => local.sockets[0].readyState === WebSocket.CLOSED)
+  })
+
+  it('keeps a deliberately paused browser alive, then restores ordinary heartbeat expiry', async () => {
+    browserHub.close()
+    const meter = new UsageMeter(db, { limitsFor: () => ({ throttledBytesPerSecond: 1000 }) }, { log: () => {} })
+    browserHub = new BrowserHub(db, hub, { meter, heartbeatIntervalMs: 50, entitlements: UNLIMITED })
+    await startConnector()
+    const browser = await openChannel('c1', { autoPong: false })
+    try {
+      meter.setForcedThrottle(new Set([BOOTSTRAP_WORKSPACE_ID]))
+      browser.send('stream_data', { data: JSON.stringify({ type: 'input', data: 'x'.repeat(9000) }) }, { channelId: 'c1' })
+      await waitFor(() => local.received.some(f => f.includes('"input"')))
+      await new Promise(r => setTimeout(r, 300))
+      expect(local.sockets[0].readyState).toBe(WebSocket.OPEN)
+      meter.setForcedThrottle(new Set())
+      await waitFor(() => local.sockets[0].readyState === WebSocket.CLOSED)
+    } finally { browser.close(); meter.close() }
   })
 
   it('keeps a browser that answers pings', async () => {

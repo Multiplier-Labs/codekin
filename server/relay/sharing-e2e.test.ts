@@ -284,6 +284,23 @@ describe('a shared-in user over the relay', () => {
     browser.close()
   })
 
+  it('audits the confirmed session after the connector refuses an unshared join', async () => {
+    share([...SHARE_ROLES.editor])
+    const browser = await joinedBrowser('s1')
+    await waitFor(() => local.received.some(f => f.includes('join_session')))
+    local.send({ sessionId: 's1', type: 'session_joined' })
+    await browser.waitForFrame(f => f.kind === 'stream_data' && String(f.payload.data).includes('session_joined'))
+    browser.send('stream_data', { data: '{"type":"join_session","sessionId":"unshared"}' }, { channelId: 'c1' })
+    await browser.waitForFrame(f => f.kind === 'error')
+    browser.send('stream_data', { data: ' {"type":"input","data":"hello"}' }, { channelId: 'c1' })
+    await waitFor(() => local.received.some(f => f.includes('"input"')))
+    expect(listAuditEvents(db, { machineId, kinds: ['prompt_sent'] })[0]).toMatchObject({
+      localSessionId: 's1', metadata: { outcome: 'forwarded' },
+    })
+    expect(local.received.some(f => f.includes('unshared'))).toBe(false)
+    browser.close()
+  })
+
   it('stops a viewer prompt at the connector, not the local server', async () => {
     share([...SHARE_ROLES.viewer])
     const browser = await joinedBrowser()

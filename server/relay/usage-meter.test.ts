@@ -1,9 +1,10 @@
 /** Tests for usage metering and the daily bandwidth throttle. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { EventEmitter } from 'events'
 import type Database from 'better-sqlite3'
 import { openControlPlaneDb } from './control-plane-db.js'
 import { parseQuotas, UNLIMITED } from './quotas.js'
-import { MAX_PAUSE_MS, meterFrame, pruneUsage, UsageMeter, utcDay } from './usage-meter.js'
+import { isMeterPaused, meterFrame, pruneUsage, UsageMeter, utcDay } from './usage-meter.js'
 
 const DAY1 = Date.parse('2026-11-08T12:00:00Z')
 
@@ -86,10 +87,44 @@ describe('UsageMeter', () => {
     // Time refills the bucket.
     now += 2000
     expect(meter.record('ws', 'm2b', 400, source)).toBe(0)
-    // A huge frame pauses for at most MAX_PAUSE_MS, so heartbeats keep flowing.
-    expect(meter.record('ws', 'm2b', 10_000_000, source)).toBe(MAX_PAUSE_MS)
+    // Large frames pay their full debt, rather than a capped pause.
+    expect(meter.record('ws', 'm2b', 10_000_000, source)).toBe(9_999_400)
     expect(log).toHaveBeenCalledTimes(1)
     expect(log.mock.calls[0][0]).toContain('throttling until UTC midnight')
+  })
+
+  it('retains each day through failed midnight flushes, then commits exactly once', () => {
+    make()
+    meter.record('ws', 'm2b', 100, source)
+    db.exec("CREATE TRIGGER fail_usage BEFORE INSERT ON usage_daily BEGIN SELECT RAISE(FAIL, 'unavailable'); END")
+    now = Date.parse('2026-11-09T00:00:01Z')
+    meter.record('ws', 'm2b', 7, source)
+    expect(meter.todayBytes('ws')).toBe(7)
+    now = Date.parse('2026-11-10T00:00:01Z')
+    meter.record('ws', 'b2m', 3, source)
+    expect(meter.todayBytes('ws')).toBe(3)
+    db.exec('DROP TRIGGER fail_usage')
+    meter.flush()
+    meter.flush()
+    expect(rows(db)).toEqual([
+      { workspace_id: 'ws', day: '2026-11-08', bytes_b2m: 0, bytes_m2b: 100, frames: 1 },
+      { workspace_id: 'ws', day: '2026-11-09', bytes_b2m: 0, bytes_m2b: 7, frames: 1 },
+      { workspace_id: 'ws', day: '2026-11-10', bytes_b2m: 3, bytes_m2b: 0, frames: 1 },
+    ])
+    expect(meter.todayBytes('ws')).toBe(3)
+  })
+
+  it('sustains the configured rate even for consecutive maximum-size frames', () => {
+    const rate = 64 * 1024
+    make({ default: { relayedBytesPerWorkspacePerDay: 0, throttledBytesPerSecond: rate } })
+    const start = now
+    for (let i = 0; i < 12; i++) {
+      const delay = meter.record('ws', 'm2b', 8 * 1024 * 1024, source)
+      expect(delay).toBeGreaterThan(5000)
+      now += delay
+      expect(meter.pauseRemaining('ws', source)).toBe(0)
+    }
+    expect(meter.todayBytes('ws')).toBeLessThanOrEqual(rate * ((now - start) / 1000 + 1))
   })
 
   it('lifts the throttle at UTC midnight', () => {
@@ -102,25 +137,43 @@ describe('UsageMeter', () => {
 })
 
 describe('meterFrame', () => {
-  it('pauses reading the socket while throttled and resumes it after', () => {
+  it('owns one pause across coalesced frames, sends keepalives, and resumes only after all debt', () => {
     vi.useFakeTimers()
+    const db = openControlPlaneDb(':memory:')
+    const meter = new UsageMeter(db, parseQuotas({ default: { relayedBytesPerWorkspacePerDay: 0, throttledBytesPerSecond: 1000 } }), { log: () => {} })
+    const socket = Object.assign(new EventEmitter(), { pause: vi.fn(), resume: vi.fn(), send: vi.fn(), close: vi.fn(), readyState: 1, bufferedAmount: 0 })
     try {
-      const socket = { pause: vi.fn(), resume: vi.fn(), readyState: 1 }
-      const meter = { record: vi.fn().mockReturnValueOnce(0).mockReturnValueOnce(250) } as unknown as UsageMeter
-      meterFrame(meter, socket, 'ws', 'b2m', 10)
-      expect(socket.pause).not.toHaveBeenCalled()
-      meterFrame(meter, socket, 'ws', 'b2m', 10)
+      meterFrame(meter, socket, 'ws', 'b2m', 7000)
+      meterFrame(meter, socket, 'ws', 'b2m', 2000)
       expect(socket.pause).toHaveBeenCalledTimes(1)
-      vi.advanceTimersByTime(249)
+      expect(isMeterPaused(socket)).toBe(true)
+      vi.advanceTimersByTime(7999)
       expect(socket.resume).not.toHaveBeenCalled()
+      expect(socket.send).toHaveBeenCalled()
       vi.advanceTimersByTime(1)
       expect(socket.resume).toHaveBeenCalledTimes(1)
-      // No meter: nothing happens.
-      meterFrame(undefined, socket, 'ws', 'b2m', 10)
-      expect(socket.pause).toHaveBeenCalledTimes(1)
-    } finally {
-      vi.useRealTimers()
-    }
+      expect(isMeterPaused(socket)).toBe(false)
+      expect(socket.listenerCount('close')).toBe(0)
+      meterFrame(meter, socket, 'ws', 'm2b', 9000)
+      socket.emit('close')
+      expect(isMeterPaused(socket)).toBe(false)
+      vi.advanceTimersByTime(20000)
+      expect(socket.resume).toHaveBeenCalledTimes(1)
+    } finally { meter.close(); db.close(); vi.useRealTimers() }
+  })
+
+  it('releases a pending pause at midnight without waiting for old quota debt', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-08T23:59:59Z'))
+    const db = openControlPlaneDb(':memory:')
+    const meter = new UsageMeter(db, parseQuotas({ default: { relayedBytesPerWorkspacePerDay: 1, throttledBytesPerSecond: 1 } }), { log: () => {} })
+    const socket = Object.assign(new EventEmitter(), { pause: vi.fn(), resume: vi.fn(), send: vi.fn(), close: vi.fn(), readyState: 1, bufferedAmount: 0 })
+    try {
+      meterFrame(meter, socket, 'ws', 'm2b', 1000)
+      vi.advanceTimersByTime(1000)
+      expect(socket.resume).toHaveBeenCalledOnce()
+      expect(meter.todayBytes('ws')).toBe(0)
+    } finally { socket.emit('close'); meter.close(); db.close(); vi.useRealTimers() }
   })
 })
 

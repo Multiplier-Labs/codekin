@@ -15,8 +15,8 @@
 import { createHash } from 'crypto'
 import type { AuditEventKind } from './audit.js'
 
-/** Browser frames larger than this aren't parsed for auditing (they are forwarded regardless). */
-const MAX_AUDITED_FRAME_BYTES = 2 * 1024 * 1024
+// The transport bounds stream frames; every accepted frame is classified,
+// including whitespace-prefixed JSON and large prompts.
 
 export interface SessionAuditEvent {
   kind: AuditEventKind
@@ -45,19 +45,23 @@ export function decisionClass(value: unknown): ApprovalDecision {
  * `join_session` comes back as a `join` marker so the caller can bind the
  * channel to its session.
  */
-export function classifyBrowserFrame(data: string): SessionAuditEvent | { join: string } | null {
-  if (data.length > MAX_AUDITED_FRAME_BYTES || data[0] !== '{') return null
-  let msg: Record<string, unknown>
+export type BrowserAuditFrame = SessionAuditEvent | { join: string } | { leave: true } | { create: true }
+
+function parseSessionFrame(data: string): Record<string, unknown> | null {
   try {
     const parsed: unknown = JSON.parse(data)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
-    msg = parsed as Record<string, unknown>
-  } catch {
-    return null
-  }
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null
+  } catch { return null }
+}
+
+export function classifyBrowserFrame(data: string): BrowserAuditFrame | null {
+  const msg = parseSessionFrame(data)
+  if (!msg) return null
   switch (msg.type) {
     case 'join_session':
       return typeof msg.sessionId === 'string' ? { join: msg.sessionId } : null
+    case 'leave_session': return { leave: true }
+    case 'create_session': return { create: true }
     case 'input':
     case 'review_feedback_send':
       return { kind: 'prompt_sent', metadata: { via: msg.type, payloadHash: payloadHash(data) } }
@@ -75,24 +79,48 @@ export function classifyBrowserFrame(data: string): SessionAuditEvent | { join: 
     case 'set_permission_mode':
       return {
         kind: 'permission_mode_changed',
-        metadata: { mode: typeof msg.permissionMode === 'string' ? msg.permissionMode.slice(0, 40) : null },
+        metadata: { mode: typeof msg.permissionMode === 'string' && ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk', 'auto'].includes(msg.permissionMode) ? msg.permissionMode : null },
       }
     default:
       return null
   }
 }
 
-const SESSION_REPLY = /^\{"type":"session_(joined|created)","sessionId":"([^"]{1,200})"/
-
-/**
- * The session a machine → browser frame announces (`session_joined` /
- * `session_created`), read from the start of the frame without parsing it:
- * joins carry the whole output buffer.
- */
+/** Read a machine acknowledgement independently of JSON property order. */
 export function sessionFromMachineFrame(data: string): { sessionId: string; created: boolean } | null {
-  if (!data.startsWith('{"type":"session_')) return null
-  const m = SESSION_REPLY.exec(data.slice(0, 300))
-  return m ? { sessionId: m[2], created: m[1] === 'created' } : null
+  return sessionAnnouncement(parseSessionFrame(data))
+}
+
+function sessionAnnouncement(msg: Record<string, unknown> | null): { sessionId: string; created: boolean } | null {
+  if (!msg || (msg.type !== 'session_joined' && msg.type !== 'session_created') || typeof msg.sessionId !== 'string') return null
+  return { sessionId: msg.sessionId.slice(0, 200), created: msg.type === 'session_created' }
+}
+
+/** Audit attribution is confirmed by the machine, never by a browser's requested session. */
+export class SessionAuditState {
+  private confirmed: string | null = null
+  private pending = false
+
+  get sessionId(): string | null { return this.pending ? null : this.confirmed }
+
+  requested(): void { this.pending = true }
+
+  /** Connector policy rejected the transition before it reached the local server. */
+  rejected(): void { this.pending = false }
+
+  observe(data: string): { sessionId: string; created: boolean } | null {
+    const msg = parseSessionFrame(data)
+    const announcement = sessionAnnouncement(msg)
+    if (announcement) {
+      this.confirmed = announcement.sessionId
+      this.pending = false
+    } else if (msg?.type === 'session_left' || (this.pending && msg?.type === 'error')) {
+      // The local server leaves the old session before attempting a join.
+      this.confirmed = null
+      this.pending = false
+    }
+    return announcement
+  }
 }
 
 /** REST calls that are audited: uploads and session creation. */

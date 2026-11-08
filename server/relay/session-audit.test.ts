@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import { openControlPlaneDb, BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
 import { listAuditEvents, recordAuditEvent } from './audit.js'
-import { classifyBrowserFrame, classifyRestRequest, decisionClass, sessionFromMachineFrame } from './session-audit.js'
+import { classifyBrowserFrame, classifyRestRequest, decisionClass, sessionFromMachineFrame, SessionAuditState } from './session-audit.js'
 
 describe('classifyBrowserFrame', () => {
   it('audits prompts, approvals, stops and permission changes, and binds joins', () => {
@@ -35,6 +35,32 @@ describe('sessionFromMachineFrame', () => {
     expect(sessionFromMachineFrame('{"type":"session_joined","sessionId":"s1","outputBuffer":[]}')).toEqual({ sessionId: 's1', created: false })
     expect(sessionFromMachineFrame('{"type":"session_created","sessionId":"s2"}')).toEqual({ sessionId: 's2', created: true })
     expect(sessionFromMachineFrame('{"type":"output","data":"{\\"type\\":\\"session_created\\",\\"sessionId\\":\\"x\\"}"}')).toBeNull()
+  })
+})
+
+describe('confirmed session attribution', () => {
+  it('keeps a denied join from changing the session, and clears a confirmed leave', () => {
+    const state = new SessionAuditState()
+    state.observe('{"sessionId":"a","type":"session_joined"}')
+    state.requested()
+    expect(state.sessionId).toBeNull()
+    state.rejected()
+    expect(state.sessionId).toBe('a')
+    state.requested()
+    state.observe(' { "type": "session_left" } ')
+    expect(state.sessionId).toBeNull()
+    state.requested()
+    state.observe('{"sessionId":"b","type":"session_joined"}')
+    expect(state.sessionId).toBe('b')
+    state.requested()
+    state.observe('{"type":"error","message":"Session not found"}')
+    expect(state.sessionId).toBeNull()
+  })
+
+  it('audits valid whitespace-prefixed JSON and prompts larger than the old audit cap', () => {
+    const data = '  ' + JSON.stringify({ type: 'input', data: 'x'.repeat(2 * 1024 * 1024 + 1) })
+    expect(classifyBrowserFrame(data)).toMatchObject({ kind: 'prompt_sent', metadata: { payloadHash: expect.any(String) } })
+    expect(sessionFromMachineFrame(' {"outputBuffer":[],"sessionId":"b","type":"session_joined"} ')).toEqual({ sessionId: 'b', created: false })
   })
 })
 

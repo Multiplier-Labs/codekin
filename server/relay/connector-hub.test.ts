@@ -1,6 +1,6 @@
 /** Integration tests: RelayConnector ↔ ConnectorHub over a real WebSocket server. */
 import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createServer } from 'http'
 import type { Server } from 'http'
 import { WebSocketServer, WebSocket } from 'ws'
@@ -196,6 +196,40 @@ describe('connector hub', () => {
     hub.sweepAbuseSignals()
     expect(created).toHaveLength(1)
     fake.close()
+  })
+
+  it.each(['replace', 'disconnect'])('retains abuse evidence across %s and expires idle policy state', async mode => {
+    hub.close()
+    const policy = new RulePolicy(parseAbusePolicy({ malformedStreamFrames: { minFrames: 1, ratio: 0, action: 'flag' } }))
+    const forget = vi.spyOn(policy, 'forget')
+    hub = new ConnectorHub(db, { abuse: policy })
+    const connect = async () => {
+      const ws = new WebSocket(connectorWsUrl(relayUrl))
+      await new Promise<void>(r => ws.once('open', r))
+      const ack = new Promise<void>(r => ws.once('message', () => r()))
+      ws.send(JSON.stringify(envelope('hello', { machineId, machineSecret, connectorVersion: '0.10.5' })))
+      await ack
+      return ws
+    }
+    const first = await connect()
+    first.send(JSON.stringify(envelope('stream_data', { data: 'not-json' }, { channelId: 'missing' })))
+    const pong = new Promise<void>(r => first.once('message', () => r()))
+    first.send(JSON.stringify(envelope('ping', {})))
+    await pong
+    if (mode === 'disconnect') {
+      const closed = new Promise<void>(r => first.once('close', () => r()))
+      first.close()
+      await closed
+    }
+    const second = await connect()
+    hub.sweepAbuseSignals()
+    expect(db.prepare('SELECT signal FROM abuse_flags').all()).toEqual([{ signal: 'malformedStreamFrames' }])
+    const closed = new Promise<void>(r => second.once('close', () => r()))
+    second.close()
+    await closed
+    await waitFor(() => !hub.isOnline(machineId))
+    hub.sweepAbuseSignals()
+    expect(forget).toHaveBeenCalledWith(machineId)
   })
 
   describe('connector version floors', () => {
