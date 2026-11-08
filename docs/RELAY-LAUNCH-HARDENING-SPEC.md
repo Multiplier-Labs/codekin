@@ -21,15 +21,15 @@ Moving to a dedicated VM and backups (Litestream, restore drill) are out of scop
 
 | # | Today | After this spec | Est. |
 | --- | --- | --- | --- |
-| §2 | `/api/health` is public and reports `machinesOnline` and `browserClients` | Public `live` and `ready` probes that return no counts. Counts move to metrics and an operator-only endpoint | 0.5 d |
-| §3 | Console logs under pm2, nothing else | Prometheus metrics on a loopback port, dashboards and alerts, error tracking with secret scrubbing, external uptime probes, a public status page | 4 d |
+| §2 | `/api/health` is public and reports `machinesOnline` and `browserClients` | Public `live` and `ready` probes that return no counts. Counts move to an operator-only endpoint | 0.5 d |
+| §3 | Console logs under pm2, nothing else | Two self-hosted open-source apps on one small separate VPS: Uptime Kuma (probes, status page, alerts) and GlitchTip (error tracking with secret scrubbing). A metrics pipeline waits until it is needed | 3 d |
 | §4 | Per-IP HTTP limits and per-socket frame limits, all in memory | Per-account and per-workspace quotas from plan entitlements, a daily bandwidth meter with throttling, signup velocity limits, account heuristics, tunnelling signals, an operator review queue | 5–6 d |
 | §5 | Express sets `nosniff`, `X-Frame-Options` and `Referrer-Policy`, but **only on `/api`**. The HTML document from nginx has no security headers. No CSP, no HSTS | One nginx snippet on every location: strict CSP with no inline script, HSTS, COOP/CORP, `frame-ancestors 'none'`. Fonts self-hosted. Remote images in transcripts blocked | 3 d |
 | §6 | Phase 4 staging gate "not started"; no staging relay | Staging relay with its own OAuth app and data. Test sessions minted by CLI, with no HTTP backdoor. Automated cross-tenant and forged-principal suite with a written report | 3–4 d |
 | §7 | Old connectors only log a warning (`connector-hub.ts:385`) | Version floors per capability. Machines below a floor stay connected but are marked `update_required` and refuse traffic. Workspace policies can require capabilities | 1.5 d |
 | §8 | The desktop app's machine secret sits in plaintext `relay.json` (0600) | macOS Keychain, through a small signed helper bundled with the app. The 0600 file stays for the CLI | 2–3 d |
 
-**Total: about 20 engineer-days (~4 weeks).** The launch spec counts some of this in Phase 1 (CSP/HSTS, health, minimum version) and the rest in Phase 4 at 1–1.5 weeks. That figure didn't include quotas, the staging suite or the keychain helper.
+**Total: about 19 engineer-days (~4 weeks).** The launch spec counts some of this in Phase 1 (CSP/HSTS, health, minimum version) and the rest in Phase 4 at 1–1.5 weeks. That figure didn't include quotas, the staging suite or the keychain helper.
 
 ---
 
@@ -54,58 +54,46 @@ Anyone can read the size of the customer base and watch it live. The two counts 
 | `GET /api/health` | none | same as `live` | Kept as an alias so existing probes keep working. Counts removed |
 | `GET /api/admin/stats` | operator session, full auth level | `{ machinesOnline, browserClients, channelsOpen, connectorVersions: { "0.10.5": 9, … } }` | For the operator UI and support |
 
-- Counts also become gauges (§3.1).
-- The `ready` body says only ok or not ok; it doesn't name the failing check. Failure detail goes to logs and metrics.
+- The `ready` body says only ok or not ok; it doesn't name the failing check. Failure detail goes to the logs.
 - Update `docs/OPERATIONS.md:391`.
 
 ---
 
 ## 3. Observability
 
-### 3.1 Metrics
+At launch we need three answers: is the relay up, is it throwing errors, and is the host healthy. Two open-source apps answer all three. A metrics pipeline (Prometheus, Grafana, Alertmanager) waits until a question comes up that these can't answer (§3.5).
 
-- **Endpoint:** `prom-client` on a **separate listener**, `127.0.0.1:${RELAY_METRICS_PORT:-32361}/metrics`. nginx never proxies it, so it doesn't need authentication. A local agent (Grafana Alloy or Prometheus) scrapes it.
-- **Not on `/api`.** That would put metrics behind the public origin, the same leak as §2.
+### 3.1 Stack
 
-| Metric | Type | Labels |
+| Piece | License | Runs on | Does |
+| --- | --- | --- | --- |
+| **Uptime Kuma** | MIT | monitoring VPS | HTTP, certificate and push (heartbeat) monitors; the public status page; alert delivery |
+| **GlitchTip** | MIT | same VPS, with its own Postgres | Error tracking. It speaks the Sentry API, so the relay and the frontend use the standard Sentry SDKs pointed at a GlitchTip DSN |
+
+- **Separate box.** Probes on the relay host would die with it. One small VPS (2 vCPU, 4 GB, about €5/month) in another data centre runs both apps from a single `docker-compose.yml` kept in `deploy/monitoring/`. GlitchTip's Postgres gets a nightly `pg_dump`. Nothing else lives there.
+- **Alerts** go to email plus a phone push (ntfy.sh or Telegram), which both apps support natively. There is no self-hosted notifier. Alert text names the monitor or issue only, never customer data.
+- **Access.** Both admin UIs use their own logins with TOTP enabled. Only two endpoints are public: the status page and GlitchTip's ingest endpoint, which only the relay calls (§3.3).
+- **No new subprocessors.** Both apps are self-hosted, so the error and probe data stays on our own servers.
+
+### 3.2 What is watched
+
+| Check | How | Alert |
 | --- | --- | --- |
-| `relay_connectors_connected` | gauge | — |
-| `relay_browser_sockets` | gauge | — |
-| `relay_channels_open` | gauge | — |
-| `relay_frames_total` | counter | `direction` (b2m, m2b), `kind` (envelope kind) |
-| `relay_bytes_total` | counter | `direction` |
-| `relay_rate_limited_total` | counter | `limiter` (http route group, browser_frames, machine_frames, quota_*) |
-| `relay_auth_failures_total` | counter | `surface` (github, mfa, passkey, device_link, desktop, connector, ws_upgrade, origin_guard) |
-| `relay_http_requests_total`, `relay_http_request_duration_seconds` | counter, histogram | `route` (Express route pattern, never the raw path), `method`, `status_class` |
-| `relay_proxy_request_duration_seconds` | histogram | — |
-| `relay_proxy_errors_total` | counter | `code` (`RELAY_ERROR` values) |
-| `relay_connector_versions` | gauge | `version` (major.minor only) |
-| `relay_intent_rejections_total` | counter | `detail` (after L1) |
-| `relay_quota_events_total` | counter | `quota`, `action` (warn, throttle, block) |
-| `relay_db_bytes`, `relay_db_wal_bytes` | gauge | — |
-| default Node metrics | — | event loop lag (p50/p99), heap, GC, handles |
+| Relay up | Kuma HTTP monitor on `/api/health/ready`, every 60 s, alert after 2 failures | page |
+| Event-loop stall, DB broken | The same probe: `ready` returns 503 when the DB check fails or event loop lag passes 1 s (§2.2) | page |
+| Web app served | Kuma HTTP monitor on `/` | page |
+| TLS expiry | Kuma certificate monitor, alerts 14 days before expiry | notify |
+| Relay host alive and disk OK | Kuma push monitor. A cron line on the relay host pings it every 5 min, but only while the data volume has more than 15% free. A missed ping means the host is down or the disk is filling | notify |
+| New error | GlitchTip alert on the first event of a new issue | notify |
+| Error burst | GlitchTip alert when one issue gets ≥ 20 events in 10 min. Unhandled 5xx errors land here, which stands in for a 5xx-rate alert | notify |
 
-**Rule:** no label carries a user id, workspace id, machine id, IP or path value. Labels like that blow up cardinality and turn the metrics store into a second copy of personal data. Per-account detail lives in the usage table (§4.3) and the audit log, which already have access control.
+"Page" means a phone push with sound. "Notify" means email plus a silent push. Each alert links to a runbook entry in `docs/OPERATIONS.md` under "Hosted relay → Alerts".
 
-### 3.2 Alerts
-
-| Alert | Condition | Severity |
-| --- | --- | --- |
-| Relay down | 2 consecutive failed external `ready` probes (1-min interval) | page |
-| Error rate | HTTP 5xx > 2% of requests for 5 min | page |
-| Event loop stall | p99 lag > 200 ms for 5 min | page |
-| Mass disconnect | `relay_connectors_connected` falls > 50% within 5 min | page |
-| Auth failure spike | `relay_auth_failures_total` rate > 10× its 7-day median for 10 min | notify |
-| Rate-limit spike | `relay_rate_limited_total` > 10× its median for 10 min | notify |
-| Disk | data volume < 15% free, or WAL > 512 MB | notify |
-| New error class | First occurrence of an error group in error tracking | notify |
-| Certificate | TLS expiry < 14 days (external probe) | notify |
-
-"Page" goes to the on-call phone. "Notify" goes to the ops channel. Each alert links to a runbook entry in `docs/OPERATIONS.md` under "Hosted relay → Alerts".
+Live probes can't assert response headers. The CSP and HSTS checks run in CI and in the staging gate instead (§5.3, §6.3). Auth-failure spikes are visible in the audit log (`login_failed`, `mfa_failed`) until metrics exist.
 
 ### 3.3 Error tracking with secret scrubbing
 
-**Server:** `@sentry/node` (or a compatible API, see H1) with `sendDefaultPii: false`.
+**Server:** `@sentry/node` pointed at the GlitchTip DSN, with `sendDefaultPii: false`.
 - `beforeSend` and `beforeBreadcrumb` drop:
   - request bodies and cookies
   - every header except `user-agent`, `content-type` and `content-length`
@@ -113,26 +101,38 @@ Anyone can read the size of the customer base and watch it live. The two counts 
 - Values of any key matching `/secret|token|password|cookie|authorization|code|sig|otp|recovery|credential|session/i` are replaced with `[redacted]`, at any depth.
 - Any string ≥ 24 characters from the base64url alphabet becomes `[redacted]`, whatever its key. Machine secrets, device codes and session ids all look like this.
 - Relay frame payloads (`StreamData.data`, `ProxyRequest.body`, `ProxyResponse.body`) are never attached. Error handlers in the hubs log the envelope `kind`, `code` and ids only.
-- Tests feed a known secret into each code path and assert it doesn't appear in the event Sentry would send.
+- Tests feed a known secret into each code path and assert it doesn't appear in the event the SDK would send.
 
 **Browser (hosted app):**
 - The frontend sees session content, so the rules are stricter. Only exception type, message (truncated to 200 characters, then scrubbed as above) and stack frames are sent.
 - Turned off: console breadcrumbs, DOM/click breadcrumbs (they capture element text) and fetch/XHR breadcrumbs.
 - No session replay, ever. This is required to keep the L2 promise ("content never leaves your devices and machine").
-- **Delivery goes through the relay** using Sentry's `tunnel` option: `POST /api/telemetry/errors`. That keeps the browser on a `connect-src 'self'` CSP (§5), lets the relay strip the client IP, and rate-limits it (10/min per session).
+- **Delivery goes through the relay** using the SDK's `tunnel` option: `POST /api/telemetry/errors`. The relay forwards events to GlitchTip. This keeps the browser on a `connect-src 'self'` CSP (§5), lets the relay strip the client IP, and rate-limits it (10/min per session).
 
-### 3.4 Uptime probes and status page
+### 3.4 Status page
 
-- **External probes every minute, from 2 regions:**
-  - `GET https://app.codekin.ai/api/health/ready`
-  - `GET https://app.codekin.ai/` (asserts 200 and that the CSP header is present)
-  - TLS expiry check
-- **Synthetic connector (phase 2 of this item).** A canary machine on a separate host, paired to a canary account. The probe opens a browser socket with a canary session cookie and makes one proxied `GET /api/health` round trip. This catches "HTTP is up, but relaying is broken", which no HTTP check can see.
-- **Status page at `status.codekin.ai`:**
-  - components: Web app, Machine connections, Sign-in (GitHub), Desktop updates
-  - driven by the probes, with manual incident posts
-  - linked from the app footer and the security page
-- **Subprocessors.** Every vendor here goes on the subprocessor list (launch spec §9) and uses an EU region where offered.
+- **Where:** `status.codekin.ai`, served by Uptime Kuma's built-in status page under a custom domain.
+- **Components:**
+  - Web app (`/`)
+  - Machine connections (`ready`)
+  - Desktop updates (the update manifest URL)
+- **Content:** driven by the probes, with manual incident posts from Kuma.
+- **Linked** from the app footer and the security page.
+- **Later: a synthetic connector.** A canary machine on the monitoring VPS, paired to a canary account. A Kuma push monitor confirms one proxied round trip through the relay every 5 min. This catches "HTTP is up, but relaying is broken", which no HTTP check can see.
+
+### 3.5 Later: metrics, when there is a question that needs them
+
+Add a metrics pipeline when the tools above can't answer something. Likely triggers:
+- capacity planning toward the single-node limit (connection counts, event-loop lag trends)
+- alerting on mass disconnects
+
+Until then, `/api/admin/stats` (§2.2), GlitchTip and the audit log cover day-to-day questions.
+
+When it's added:
+- `prom-client` on a loopback-only port. nginx never proxies it.
+- Prometheus or VictoriaMetrics single-node (both Apache-2.0) plus Grafana (AGPL-3.0), all on the monitoring VPS.
+- A short metric list: connections, channels, bytes, HTTP status class, auth failures, rate-limit hits, event-loop lag.
+- **One rule:** no label carries a user, workspace, machine, IP or path value.
 
 ---
 
@@ -258,10 +258,10 @@ add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment
 
 ### 5.3 Rollout
 
-1. **Report-only, one week.** Ship the policy as `Content-Security-Policy-Report-Only`, with `POST /api/csp-report`: no auth, 5/min per IP, body ≤ 8 KB. Reports are logged and counted in `relay_csp_reports_total{directive}`. Self-host fonts and the image rewrite in the same release.
+1. **Report-only, one week.** Ship the policy as `Content-Security-Policy-Report-Only`, with `POST /api/csp-report`: no auth, 5/min per IP, body ≤ 8 KB. Reports are logged (directive and blocked host only). Self-host fonts and the image rewrite in the same release.
 2. **Enforce** once reports show only extension noise. Add HSTS at `max-age=86400` and raise it to 2 years after a week.
 3. **CI check.** A Vitest check builds `dist-hosted` and asserts `index.html` has no inline `<script>` and no third-party origins. `nginx -t` runs on the example config.
-4. **Probe.** The uptime probe (§3.4) asserts the CSP and HSTS headers on `/`.
+4. **Ongoing check.** The staging gate (§6.3) and a CI check against production (`curl -sI https://app.codekin.ai/`) assert the CSP and HSTS headers. Uptime Kuma can't check headers.
 5. **Self-hosters.** Update `nginx/app.codekin.ai.example` and `docs/SELF-HOSTED-RELAY.md` with the snippet. Self-hosters on other domains must swap `wss://app.codekin.ai`, so the docs call it out.
 
 ---
@@ -313,7 +313,6 @@ Automated runs need signed-in browsers, and GitHub OAuth can't be scripted relia
 - **This spec's own checks:**
   - `/api/health*` returns no counts
   - CSP and HSTS are present
-  - `/metrics` isn't reachable from outside
   - quotas trigger
   - an outdated canary connector gets `update_required`
 
@@ -361,7 +360,7 @@ A machine **has** a capability when it advertises it in `ConnectorHello.capabili
 - **Connector side:** a newer connector that gets `updateRequired` prints it (CLI) or shows it in `/api/relay/status`, so the local UI displays a banner with the update command for its install type.
 - **Hosted UI:** the machines list shows **Update required**, with the reason ("needed for signed control") and per-install update steps: CLI install, desktop auto-update, self-hosted.
 - **Raising a floor:**
-  1. Check `relay_connector_versions` (§3.1) to see who would be affected.
+  1. Check `connectorVersions` in `/api/admin/stats` (§2.2) to see who would be affected.
   2. Announce it in-app 14 days ahead, and by email once that exists.
   3. Raise it in a relay release.
 
@@ -411,16 +410,16 @@ This protects against backups, sync tools and casual file-reading malware. It do
 | 1 | Health split + `/api/admin/stats` + OPERATIONS.md | — | 0.5 d |
 | 2 | Security headers in report-only mode, CSP report endpoint, self-hosted fonts, remote-image rewrite, CI check | — | 2 d |
 | 3 | Enforce CSP + HSTS (after a week of reports); update nginx example and self-host docs | 2 | 0.5 d |
-| 4 | Metrics listener, dashboards, alert rules, runbook entries | — | 2 d |
-| 5 | Error tracking with scrubbing (server + tunnelled browser), scrub tests | 2 (CSP connect-src) | 1.5 d |
-| 6 | Uptime probes, status page, subprocessor entries; synthetic connector later | 1 | 0.5 d (+1 d) |
+| 4 | Monitoring VPS: Uptime Kuma + GlitchTip compose file, `pg_dump` backup, disk heartbeat cron, monitors and alerts, runbook entries | 1 | 1 d |
+| 5 | Error tracking with scrubbing (server + tunnelled browser) into GlitchTip, scrub tests | 2 (CSP connect-src), 4 | 1.5 d |
+| 6 | Status page on Kuma at `status.codekin.ai`, footer link; synthetic connector later | 4 | 0.5 d (+1 d) |
 | 7 | Connector floors, `update_required`, workspace `required_capabilities`, UI | — | 1.5 d |
 | 8 | Quotas + `usage_daily` + throttling + quota UI | entitlements (launch Phase 3) for real numbers; defaults until then | 3 d |
 | 9 | Signup velocity, account heuristics, `abuse_flags` + operator queue, tunnelling signals | open signup (launch Phase 2) | 2–3 d |
 | 10 | Staging relay, `mint-session`, gate suite + report | 1, 3, 7 for their checks | 3–4 d |
 | 11 | Desktop `codekin-secrets` helper, `SecretStore`, migration | — | 2–3 d |
 
-Slices 1, 2, 4, 7 and 11 depend on nothing and can start in parallel. Slice 10 is the last step before open signup.
+Slices 1, 2, 7 and 11 depend on nothing and can start in parallel; slice 4 follows slice 1. Slice 10 is the last step before open signup.
 
 ---
 
@@ -428,7 +427,7 @@ Slices 1, 2, 4, 7 and 11 depend on nothing and can start in parallel. Slice 10 i
 
 | # | Decision | Recommendation |
 | --- | --- | --- |
-| H1 | Vendors for error tracking, metrics, uptime/status | Sentry (EU data region), Grafana Cloud (EU) with Alloy scraping the loopback port, Better Stack for probes and the status page. Self-hosting GlitchTip + Prometheus is possible but adds ops load we don't have staff for |
+| H1 | Monitoring tools | **Decided 2026-11-08:** self-hosted open source, kept small. Uptime Kuma + GlitchTip on one separate VPS (§3.1). Metrics pipeline deferred (§3.5) |
 | H2 | HSTS preload for `codekin.ai` | Not yet. HSTS on `app.codekin.ai` with `includeSubDomains`. Decide on preload after inventorying every `*.codekin.ai` host |
 | H3 | Remote images in transcripts | Block through CSP and show a link placeholder. It closes a prompt-injection exfiltration path for every viewer |
 | H4 | Self-host fonts | Yes. It removes the only third-party origin and the Google Fonts GDPR question |
