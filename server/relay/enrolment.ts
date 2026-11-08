@@ -36,10 +36,18 @@ import type { SecretStore } from './secret-store.js'
 
 /** How long a request waits for its code (spec §5.2). */
 export const ENROL_TTL_MS = 10 * 60_000
-/** After approval, how long the browser has to collect the signed result. */
-export const RESULT_TTL_MS = 10 * 60_000
+/** After a decision, how long the browser can still collect it (a phone may stay locked for hours). */
+export const RESULT_TTL_MS = 24 * 60 * 60_000
 /** Undecided requests a machine holds at once (spec §5.2). */
 export const MAX_PENDING_ENROLMENTS = 3
+/**
+ * Requests a machine accepts per ENROL_TTL_MS window, failed ones included.
+ * Each request gives a relay one 2⁻⁴⁰ guess at a code; this bounds how many
+ * guesses it gets, however fast it retries.
+ */
+export const MAX_ENROLMENTS_PER_WINDOW = 20
+/** After the identity key can't be read, how long to wait before trying again (each try may prompt the Keychain). */
+const KEY_RETRY_MS = 60_000
 
 export type EnrolState = 'awaiting_code' | 'approved' | 'rejected' | 'expired'
 
@@ -83,6 +91,7 @@ const refuse = (message: string) => new EnrolmentError('enrol_refused', message)
 /** Handles the enrol_* frames for one paired machine. */
 export class MachineEnrolment {
   private signingKey: KeyObject | null = null
+  private keyFailedAt = 0
   private readonly now: () => number
 
   constructor(private readonly opts: MachineEnrolmentOptions) {
@@ -95,7 +104,11 @@ export class MachineEnrolment {
     if (!identity || identity.machineId !== this.opts.machineId) {
       throw new EnrolmentError('enrol_unavailable', 'This computer has no identity key yet; restart Codekin on it')
     }
-    this.signingKey ??= loadMachineSigningKey(this.opts.identityFile, this.opts.secretStore ?? null)
+    // A relay frame must not be able to set off a Keychain read (and prompt) each time.
+    if (!this.signingKey && this.now() - this.keyFailedAt >= KEY_RETRY_MS) {
+      this.signingKey = loadMachineSigningKey(this.opts.identityFile, this.opts.secretStore ?? null)
+      if (!this.signingKey) this.keyFailedAt = this.now()
+    }
     if (!this.signingKey) throw new EnrolmentError('enrol_unavailable', "This computer's identity key could not be read")
     return { key: this.signingKey, spki: Buffer.from(identity.publicKey, 'base64url') }
   }
@@ -125,9 +138,16 @@ export class MachineEnrolment {
     const { key, spki } = this.machineKey()
     return this.mutate(store => {
       const userId = this.checkPrincipal(principal, store)
-      const open = store.pending.filter(p => !p.outcome)
-      if (open.length >= MAX_PENDING_ENROLMENTS) {
-        throw refuse('Too many browsers are waiting to be confirmed on this computer; try again in a few minutes')
+      const windowStart = this.now() - ENROL_TTL_MS
+      if (store.pending.filter(p => Date.parse(p.createdAt) > windowStart).length >= MAX_ENROLMENTS_PER_WINDOW) {
+        throw refuse('Too many attempts to confirm a browser on this computer; try again in a few minutes')
+      }
+      // At the limit, a new request replaces the oldest undecided one: an
+      // owner who reopened the sheet a few times shouldn't be locked out for
+      // ten minutes, and a relay can drop requests anyway.
+      const open = store.pending.filter(p => !p.outcome).sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      for (const stale of open.slice(0, Math.max(0, open.length - MAX_PENDING_ENROLMENTS + 1))) {
+        store.pending = store.pending.filter(p => p !== stale)
       }
       const enrolId = randomUUID()
       const nonceM = randomBytes(NONCE_BYTES)
@@ -168,15 +188,14 @@ export class MachineEnrolment {
       const nonceM = Buffer.from(entry.nonceM, 'base64url')
       // The reveal must open the commitment made before nonceM existed, or
       // a relay could pick its key after seeing the machine's nonce.
-      // A failed check spends the request (written back, then refused).
-      if (!commitment(spkiB, passkeys, label, nonceB).equals(commit)) {
-        store.pending = store.pending.filter(e => e !== entry)
-        return { refused: 'The browser key does not match its commitment' }
+      // A failed check spends the request, which stays on the list (and in
+      // the per-window budget) until it expires: written back, then refused.
+      const spend = (refused: string) => {
+        entry.outcome = { state: 'rejected', at: new Date(this.now()).toISOString() }
+        return { refused }
       }
-      if (!verifyP1363(spkiB, transcript(POP_LABEL, enrolId, nonceM), pop)) {
-        store.pending = store.pending.filter(e => e !== entry)
-        return { refused: 'The browser could not prove it holds its key' }
-      }
+      if (!commitment(spkiB, passkeys, label, nonceB).equals(commit)) return spend('The browser key does not match its commitment')
+      if (!verifyP1363(spkiB, transcript(POP_LABEL, enrolId, nonceM), pop)) return spend('The browser could not prove it holds its key')
       entry.reveal = {
         spki,
         keyId: keyIdForSpki(spki),

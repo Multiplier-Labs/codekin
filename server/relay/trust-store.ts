@@ -20,7 +20,8 @@
  * exists, resetting it would quietly drop the policy.
  */
 
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from 'fs'
+import { closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from 'fs'
+import { randomUUID } from 'crypto'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
 import { writeFileAtomic } from './relay-credential.js'
@@ -239,31 +240,46 @@ const LOCK_STALE_MS = 10_000
 const sleeper = new Int32Array(new SharedArrayBuffer(4))
 
 /**
- * Run `fn` holding relay-devices.json.lock. Writers are short and local, so a
- * lock older than LOCK_STALE_MS was left by a crashed process and is taken over.
+ * Run `fn` holding relay-devices.json.lock. The lock file holds a random
+ * token: a holder only removes a lock that still has its token, and a lock
+ * older than LOCK_STALE_MS (left by a crashed process) is taken over by
+ * renaming it aside first, which only one waiter can do.
  */
 export function withTrustStoreLock<T>(file: string, fn: () => T): T {
   mkdirSync(dirname(file), { recursive: true })
   const lock = `${file}.lock`
+  const token = randomUUID()
   const deadline = Date.now() + LOCK_WAIT_MS
-  let fd: number | null = null
-  while (fd === null) {
+  for (;;) {
     try {
-      fd = openSync(lock, 'wx', 0o600)
+      const fd = openSync(lock, 'wx', 0o600)
+      try { writeSync(fd, token) } finally { closeSync(fd) }
+      break
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
-      try {
-        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) { rmSync(lock, { force: true }); continue }
-      } catch { continue }
-      if (Date.now() > deadline) throw new TrustStoreError('busy', 'The device list is being changed by another process; try again')
-      Atomics.wait(sleeper, 0, 0, 20)
     }
+    try {
+      if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) {
+        const aside = `${lock}.stale-${token}`
+        renameSync(lock, aside) // throws if another waiter got there first
+        // Between the stat and the rename, someone may have replaced the
+        // stale lock with a live one: if so, put it back.
+        if (Date.now() - statSync(aside).mtimeMs <= LOCK_STALE_MS) {
+          try { linkSync(aside, lock) } catch { /* a newer lock is already in place */ }
+        }
+        rmSync(aside, { force: true })
+        continue
+      }
+    } catch { continue }
+    if (Date.now() > deadline) throw new TrustStoreError('busy', 'The device list is being changed by another process; try again')
+    Atomics.wait(sleeper, 0, 0, 20)
   }
   try {
     return fn()
   } finally {
-    closeSync(fd)
-    rmSync(lock, { force: true })
+    try {
+      if (readFileSync(lock, 'utf-8') === token) rmSync(lock, { force: true })
+    } catch { /* already gone */ }
   }
 }
 

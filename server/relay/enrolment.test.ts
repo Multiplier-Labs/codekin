@@ -2,14 +2,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { generateKeyPairSync, randomBytes } from 'crypto'
 import type { KeyObject } from 'crypto'
-import { mkdtempSync, readFileSync, rmSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
   CHALLENGE_LABEL, POP_LABEL, RESULT_LABEL, base32, commitment, formatCode, normalizeCode, shortAuthString, signP1363,
   transcript, verifyP1363, checkLabel,
 } from './enrolment-crypto.js'
-import { approveEnrolment, ENROL_TTL_MS, EnrolmentError, MachineEnrolment, MAX_PENDING_ENROLMENTS, rejectEnrolment } from './enrolment.js'
+import { approveEnrolment, ENROL_TTL_MS, EnrolmentError, MachineEnrolment, MAX_ENROLMENTS_PER_WINDOW, MAX_PENDING_ENROLMENTS, rejectEnrolment } from './enrolment.js'
 import { ensureMachineIdentity } from './machine-identity.js'
 import { describeTrustStore, emptyTrustStore, readTrustStore, TrustStoreError, writeTrustStore } from './trust-store.js'
 import type { RelayPrincipal } from './relay-protocol.js'
@@ -144,8 +144,10 @@ describe('MachineEnrolment', () => {
     const challenge = enrolment.commit(OWNER, { commit: honest.commit.toString('base64url') })
     expect(() => enrolment.reveal(OWNER, reveal(swapped, challenge.enrolId, challenge.nonceM, { nonceB: honest.nonceB.toString('base64url') })))
       .toThrow(/commitment/)
-    // The request is spent: a second try can't grind against it.
-    expect(() => enrolment.reveal(OWNER, reveal(honest, challenge.enrolId, challenge.nonceM))).toThrow(/Unknown or expired/)
+    // The request is spent: a second try can't grind against it, and it keeps
+    // counting against the machine's budget until it expires.
+    expect(() => enrolment.reveal(OWNER, reveal(honest, challenge.enrolId, challenge.nonceM))).toThrow(/already used/)
+    expect(readTrustStore(devicesFile)?.pending).toHaveLength(1)
   })
 
   it('refuses a reveal whose label differs from the committed one', () => {
@@ -178,12 +180,49 @@ describe('MachineEnrolment', () => {
       .toThrow(expect.objectContaining({ code: 'enrol_unavailable' }))
   })
 
-  it('holds at most three undecided requests', () => {
-    for (let i = 0; i < MAX_PENDING_ENROLMENTS; i++) enrolment.commit(OWNER, { commit: browser().commit.toString('base64url') })
-    expect(() => enrolment.commit(OWNER, { commit: browser().commit.toString('base64url') })).toThrow(/Too many/)
-    // Expired ones free their slot.
+  it('holds at most three undecided requests, replacing the oldest', () => {
+    const ids: string[] = []
+    for (let i = 0; i <= MAX_PENDING_ENROLMENTS; i++) {
+      now += 1000
+      ids.push(enrolment.commit(OWNER, { commit: browser().commit.toString('base64url') }).enrolId)
+    }
+    const kept = readTrustStore(devicesFile)!.pending.map(p => p.enrolId)
+    expect(kept).toEqual(ids.slice(1))
+  })
+
+  it('bounds attempts per window, failed ones included', () => {
+    for (let i = 0; i < MAX_ENROLMENTS_PER_WINDOW; i++) {
+      const b = browser()
+      const ch = enrolment.commit(OWNER, { commit: b.commit.toString('base64url') })
+      // A relay grinding for a code: reveal a key that fails the commitment.
+      expect(() => enrolment.reveal(OWNER, reveal(browser(), ch.enrolId, ch.nonceM, { nonceB: b.nonceB.toString('base64url') }))).toThrow()
+    }
+    expect(() => enrolment.commit(OWNER, { commit: browser().commit.toString('base64url') })).toThrow(/Too many attempts/)
     now += ENROL_TTL_MS + 1
     expect(() => enrolment.commit(OWNER, { commit: browser().commit.toString('base64url') })).not.toThrow()
+  })
+
+  it('still reports an approval to a browser that comes back hours later', () => {
+    const { challenge, code } = startCeremony()
+    approveEnrolment(code, devicesFile, 'm1', () => now)
+    now += 6 * 60 * 60_000
+    expect(enrolment.status(OWNER, { enrolId: challenge.enrolId }).state).toBe('approved')
+  })
+
+  it('does not reread an unreadable identity key on every relay frame', () => {
+    const get = vi.fn(() => null)
+    const raw = JSON.parse(readFileSync(identityFile, 'utf8')) as Record<string, unknown>
+    delete raw.privateKey
+    raw.privateKeyRef = 'keychain'
+    writeFileSync(identityFile, JSON.stringify(raw))
+    const locked = new MachineEnrolment({
+      machineId: 'm1', identityFile, devicesFile, secretStore: { get, set: vi.fn(), delete: vi.fn() }, now: () => now, log: quiet,
+    })
+    for (let i = 0; i < 5; i++) expect(() => locked.commit(OWNER, { commit: browser().commit.toString('base64url') })).toThrow(/could not be read/)
+    expect(get).toHaveBeenCalledTimes(1)
+    now += 61_000
+    expect(() => locked.commit(OWNER, { commit: browser().commit.toString('base64url') })).toThrow()
+    expect(get).toHaveBeenCalledTimes(2)
   })
 
   it('refuses passkeys until step-up ships, malformed input, and a reused request', () => {

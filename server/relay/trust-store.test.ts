@@ -53,6 +53,10 @@ describe('trust store', () => {
     utimesSync(lock, old, old)
     expect(setIntentPolicy('warn', file, 'm1').policy).toBe('warn')
     expect(existsSync(lock)).toBe(false)
+    // A holder never removes a lock it no longer owns.
+    expect(withTrustStoreLock(file, () => { writeFileSync(lock, 'someone-else'); return 1 })).toBe(1)
+    expect(readFileSync(lock, 'utf8')).toBe('someone-else')
+    rmSync(lock)
     // A fresh lock held by someone else makes a writer give up with "busy".
     writeFileSync(lock, '')
     expect(() => withTrustStoreLock(file, () => 1)).toThrow(expect.objectContaining({ code: 'busy' }))

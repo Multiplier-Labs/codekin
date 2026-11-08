@@ -17,6 +17,8 @@ import {
 import { button, quietButton } from '../components/settings/Block'
 
 const POLL_MS = 2000
+/** The machine drops an undecided request after 10 minutes. */
+const REQUEST_TTL_MS = 10 * 60_000 + 30_000
 /** How long to keep retrying while the machine comes online (just paired). */
 const ONLINE_WAIT_MS = 90_000
 
@@ -95,22 +97,34 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted }: Trust
     }
   }, [machineId, attempt])
 
-  // Ask the machine whether the code was typed, until it decides.
+  // Ask the machine whether the code was typed, one question at a time
+  // (a slow relay must not pile them up), until it decides or the request
+  // expires.
   useEffect(() => {
     if (phase.kind !== 'code') return
-    let cancelled = false
-    const t = setInterval(() => {
+    const life = { stopped: false }
+    const giveUpAt = Date.now() + REQUEST_TTL_MS
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const ask = () => {
+      if (Date.now() > giveUpAt) {
+        setPhase({ kind: 'done', outcome: 'expired' })
+        return
+      }
       phase.enrolment.check()
         .then(outcome => {
-          if (cancelled || !outcome) return
+          if (life.stopped) return
+          if (!outcome) { timer = setTimeout(ask, POLL_MS); return }
           setPhase({ kind: 'done', outcome })
           if (outcome === 'approved') onTrusted?.()
         })
         .catch((err: unknown) => {
-          if (!cancelled && !retryable(err)) setPhase({ kind: 'failed', message: describeError(err) })
+          if (life.stopped) return
+          if (retryable(err)) timer = setTimeout(ask, POLL_MS)
+          else setPhase({ kind: 'failed', message: describeError(err) })
         })
-    }, POLL_MS)
-    return () => { cancelled = true; clearInterval(t) }
+    }
+    timer = setTimeout(ask, POLL_MS)
+    return () => { life.stopped = true; clearTimeout(timer) }
   }, [phase, onTrusted])
 
   const forgetOldKey = useCallback(async () => {
