@@ -104,22 +104,27 @@ export const MACHINE_STATUS_DOT: Record<Machine['status'], string> = {
 export class RelayRequestError extends Error {
   readonly status: number
   readonly code: string | null
-  constructor(status: number, code: string | null) {
+  /** A sentence the relay wrote for people (quota refusals carry one). */
+  readonly detail: string | null
+  constructor(status: number, code: string | null, detail: string | null = null) {
     super(code ?? String(status))
     this.status = status
     this.code = code
+    this.detail = detail
   }
 }
 
 async function relayError(res: Response): Promise<RelayRequestError> {
   let code: string | null = null
+  let detail: string | null = null
   try {
-    const body = (await res.json()) as { error?: unknown }
+    const body = (await res.json()) as { error?: unknown; message?: unknown }
     if (typeof body.error === 'string') code = body.error
+    if (typeof body.message === 'string') detail = body.message
   } catch {
     // Not JSON — the status alone has to do.
   }
-  return new RelayRequestError(res.status, code)
+  return new RelayRequestError(res.status, code, detail)
 }
 
 /** A freshly minted install command's secret half. Never persisted. */
@@ -166,6 +171,7 @@ export async function removeMachine(machineId: string): Promise<void> {
 /** User-facing text for a failed install-command generation. */
 export function pairingErrorMessage(err: unknown): string {
   if (err instanceof RelayRequestError) {
+    if (err.code === 'quota_exceeded' && err.detail) return err.detail
     if (err.status === 429) return 'Too many install commands in a short time. Wait a minute, then try again.'
     if (err.status === 401) return 'Your session has ended. Reload the page and sign in again.'
     if (err.code === 'machine_already_paired') return 'That computer has already been paired, so its command cannot be replaced.'

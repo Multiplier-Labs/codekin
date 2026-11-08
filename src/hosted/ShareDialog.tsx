@@ -76,8 +76,9 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
         body: JSON.stringify({ machineId, localSessionId: sessionId, granteeUserId: granteeId, role }),
       })
       if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: string } | null
-        throw new Error(body?.error ?? `Request failed (${res.status})`)
+        const body = (await res.json().catch(() => null)) as { error?: string; message?: string } | null
+        // Quota refusals carry a sentence in `message`; other errors only a code or text in `error`.
+        throw new Error(body?.message ?? body?.error ?? `Request failed (${res.status})`)
       }
       setGranteeId('')
       await loadShares()

@@ -14,6 +14,7 @@ import type { SessionUser } from './relay-auth-routes.js'
 import type { UserRow } from './control-plane-db.js'
 import type { BrowserHub } from './browser-hub.js'
 import type { SessionShare } from './shares.js'
+import type { QuotaLimits } from './quotas.js'
 
 const POLICY = { ownerGithubId: 1, allowedGithubIds: [2] }
 
@@ -35,9 +36,11 @@ describe('share routes', () => {
   let guest: UserRow
   let machineId: string
   const reauthorize = vi.fn()
+  let limits: QuotaLimits = {}
 
   beforeEach(async () => {
     reauthorize.mockClear()
+    limits = {}
     db = openControlPlaneDb(':memory:')
     owner = upsertUserFromGithub(db, { id: 1, login: 'owner', name: null, email: null, avatarUrl: null }, POLICY)
     guest = upsertUserFromGithub(db, { id: 2, login: 'guest', name: null, email: null, avatarUrl: null }, POLICY)
@@ -55,7 +58,7 @@ describe('share routes', () => {
       if (req.headers['x-test-user'] === 'owner') { req.session.user = toSessionUser(owner); signInFully(db, req.session, req.session.user.id) }
       next()
     })
-    app.use(createShareRouter(db, { reauthorize } as unknown as BrowserHub))
+    app.use(createShareRouter(db, { reauthorize } as unknown as BrowserHub, undefined, { limitsFor: () => limits }))
     await new Promise<void>(resolve => {
       server = app.listen(0, '127.0.0.1', () => {
         baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -84,6 +87,23 @@ describe('share routes', () => {
   it('creates a share for an unambiguous grantee login', async () => {
     const share = await createShare()
     expect(share.granteeUserId).toBe(guest.id)
+  })
+
+  it('caps how many people one session is shared with, but still lets an existing share change', async () => {
+    limits = { sharesPerSession: 1 }
+    await createShare()
+    const third = upsertUserFromGithub(db, { id: 4, login: 'third', name: null, email: null, avatarUrl: null }, { ownerGithubId: 1, allowedGithubIds: [2, 4] })
+    expect(third.status).toBe('active')
+    const refused = await fetch(`${baseUrl}/api/shares`, {
+      method: 'POST',
+      headers: asOwner,
+      body: JSON.stringify({ machineId, localSessionId: 's1', granteeLogin: 'third', role: 'viewer' }),
+    })
+    expect(refused.status).toBe(429)
+    expect(await refused.json()).toMatchObject({ error: 'quota_exceeded', quota: 'sharesPerSession', limit: 1 })
+
+    // Re-sharing with the same person updates their share; it takes no new slot.
+    await createShare()
   })
 
   it('refuses a grantee login held by more than one account', async () => {

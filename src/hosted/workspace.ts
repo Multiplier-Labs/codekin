@@ -163,9 +163,9 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...(init.headers as Record<string, string> | undefined) },
   })
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null
+    const body = (await res.json().catch(() => null)) as { error?: string; message?: string } | null
     const code = body?.error ?? null
-    throw new WorkspaceRequestError(res.status, code, (code && REASONS[code]) ?? code ?? `Request failed (${res.status})`)
+    throw new WorkspaceRequestError(res.status, code, (code && REASONS[code]) ?? body?.message ?? code ?? `Request failed (${res.status})`)
   }
   return (await res.json()) as T
 }

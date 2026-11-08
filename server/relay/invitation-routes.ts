@@ -11,6 +11,8 @@
  */
 
 import { Router } from 'express'
+import { checkQuota, countInvitationsToday, UNLIMITED } from './quotas.js'
+import type { EntitlementsProvider } from './quotas.js'
 import type { Request, Response } from 'express'
 import type Database from 'better-sqlite3'
 import type { RelayConfig } from './relay-config.js'
@@ -47,9 +49,11 @@ export interface InvitationRouterDeps {
   config: RelayConfig
   /** Injectable for tests; resolves GitHub usernames to their immutable id. */
   fetchImpl?: typeof fetch
+  /** Quota limits (docs/RELAY-HARDENING.md §6); unlimited when absent. */
+  entitlements?: EntitlementsProvider
 }
 
-export function createInvitationRouter({ db, config, fetchImpl = fetch }: InvitationRouterDeps): Router {
+export function createInvitationRouter({ db, config, fetchImpl = fetch, entitlements = UNLIMITED }: InvitationRouterDeps): Router {
   const router = Router()
   const requireActiveUser = createRequireActiveUser(db, config)
 
@@ -158,6 +162,12 @@ export function createInvitationRouter({ db, config, fetchImpl = fetch }: Invita
         recipient.github = resolved
       }
 
+      const quota = checkQuota(entitlements, membership.workspaceId, 'invitationsPerWorkspacePerDay', () =>
+        countInvitationsToday(db, membership.workspaceId))
+      if (quota) {
+        res.status(429).json(quota)
+        return
+      }
       const result = createInvitation(db, {
         workspaceId: membership.workspaceId,
         role,
@@ -231,6 +241,12 @@ export function createInvitationRouter({ db, config, fetchImpl = fetch }: Invita
       return
     }
     if (previous.role === 'admin' && !ensureRecentAuth(db, req, res)) return
+    const quota = checkQuota(entitlements, membership.workspaceId, 'invitationsPerWorkspacePerDay', () =>
+      countInvitationsToday(db, membership.workspaceId))
+    if (quota) {
+      res.status(429).json(quota)
+      return
+    }
     const result = createInvitation(db, {
       workspaceId: membership.workspaceId,
       role: previous.role,

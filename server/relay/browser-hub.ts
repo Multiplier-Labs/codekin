@@ -35,11 +35,15 @@ import type { MachineAccess } from './shares.js'
 import { recordAuditEvent } from './audit.js'
 import { checkRestPolicy, isServerFrameVisible } from './connector-policy.js'
 import { BROWSER_FRAME_LIMIT, RateLimiter, isBackedUp } from './rate-limit.js'
+import { checkQuota, UNLIMITED } from './quotas.js'
+import type { EntitlementsProvider } from './quotas.js'
 
 const CLOSE_AUTH_FAILED = 4001
 const CLOSE_FORBIDDEN = 4003
 /** Sent when a client exceeds its frame budget or stops draining its socket. */
 const CLOSE_OVERLOADED = 4029
+/** Over a quota (browser connections per user). The client doesn't retry. */
+const CLOSE_QUOTA = 4030
 
 /** A browser that hasn't sent hello within this window is dropped. */
 const HELLO_TIMEOUT_MS = 5_000
@@ -64,6 +68,8 @@ interface BrowserClient {
   /** Web session that authorized the upgrade; the socket lives no longer than it. */
   sessionId: string | null
   machineId: string
+  /** The machine's workspace, whose quota limits apply to this socket. */
+  workspaceId: string
   socket: WebSocket
   inflight: number
   /** Standing on this machine, resolved at hello time. */
@@ -116,6 +122,8 @@ export interface BrowserHubOptions {
   isSessionAlive?: (sessionId: string) => boolean
   /** Override the heartbeat period (tests). */
   heartbeatIntervalMs?: number
+  /** Quota limits (docs/RELAY-HARDENING.md §6); unlimited when absent. */
+  entitlements?: EntitlementsProvider
 }
 
 export class BrowserHub {
@@ -231,6 +239,17 @@ export class BrowserHub {
     return this.clients.size
   }
 
+  private get entitlements(): EntitlementsProvider {
+    return this.options.entitlements ?? UNLIMITED
+  }
+
+  /** Sum `measure` over one user's sockets, on every machine. */
+  private countUser(userId: string, measure: (client: BrowserClient) => number): number {
+    let total = 0
+    for (const c of this.clients) if (c.user.id === userId) total += measure(c)
+    return total
+  }
+
   /** Wire up a fresh /relay/browser socket for an already-authenticated user. */
   handleConnection(socket: WebSocket, user: SessionUser, sessionId: string | null = null): void {
     let client: BrowserClient | null = null
@@ -272,10 +291,20 @@ export class BrowserHub {
           return
         }
         const machine = this.db
-          .prepare('SELECT display_name FROM machines WHERE id = ?')
-          .get(machineId) as { display_name: string }
+          .prepare('SELECT display_name, workspace_id FROM machines WHERE id = ?')
+          .get(machineId) as { display_name: string; workspace_id: string }
 
-        client = { user, sessionId, machineId, socket, inflight: 0, access, channels: new Map(), alive: true }
+        const socketQuota = checkQuota(this.entitlements, machine.workspace_id, 'browserSocketsPerUser', () =>
+          this.countUser(user.id, () => 1))
+        if (socketQuota) {
+          socket.close(CLOSE_QUOTA, `quota_exceeded:${socketQuota.quota}:${socketQuota.limit}`)
+          return
+        }
+
+        client = {
+          user, sessionId, machineId, workspaceId: machine.workspace_id, socket, inflight: 0, access,
+          channels: new Map(), alive: true,
+        }
         this.clients.add(client)
         socket.send(
           JSON.stringify(
@@ -390,6 +419,12 @@ export class BrowserHub {
         code: RELAY_ERROR.tooManyChannels,
         message: 'Too many open sessions on this connection',
       })
+      return
+    }
+    const channelQuota = checkQuota(this.entitlements, client.workspaceId, 'channelsPerUser', () =>
+      this.countUser(client.user.id, c => c.channels.size))
+    if (channelQuota) {
+      this.sendChannelError(client, localId, { code: 'quota_exceeded', message: channelQuota.message })
       return
     }
 

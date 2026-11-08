@@ -7,6 +7,8 @@
  */
 
 import { Router } from 'express'
+import { checkQuota, countSessionShares, UNLIMITED } from './quotas.js'
+import type { EntitlementsProvider } from './quotas.js'
 import type Database from 'better-sqlite3'
 import type { BrowserHub } from './browser-hub.js'
 import type { RelayConfig } from './relay-config.js'
@@ -58,6 +60,7 @@ export function createShareRouter(
   db: Database.Database,
   browserHub?: BrowserHub,
   config?: Pick<RelayConfig, 'ownerGithubId'>,
+  entitlements: EntitlementsProvider = UNLIMITED,
 ): Router {
   const router = Router()
   const requireActiveUser = createRequireActiveUser(db, config)
@@ -168,6 +171,14 @@ export function createShareRouter(
     const expiry = parseShareExpiry(body.expiresAt)
     if (!expiry.ok) {
       res.status(400).json(INVALID_EXPIRY)
+      return
+    }
+
+    // Changing an existing grantee's share takes no new slot.
+    const quota = checkQuota(entitlements, machine.workspace_id, 'sharesPerSession', () =>
+      countSessionShares(db, body.machineId as string, body.localSessionId as string, grantee.id))
+    if (quota) {
+      res.status(429).json(quota)
       return
     }
 

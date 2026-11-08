@@ -1,6 +1,6 @@
 # Relay hardening
 
-**Status:** In progress. Built: §1 (health endpoints), §2 (error reporting), §3 (browser security headers) and §4 (connector version floors). The rest is spec.
+**Status:** In progress. Built: §1 (health endpoints), §2 (error reporting), §3 (browser security headers), §4 (connector version floors) and the discrete quotas in §6. The rest is spec.
 **Date:** 2026-11-08
 **Scope:** hardening features for anyone who runs the relay (`server/relay`), whether self-hosted or as a public service. Values specific to a deployment, such as limits, thresholds and monitoring setup, belong in that deployment's own config. They are not defined here.
 **Related:** `docs/RELAY-SIGNED-INTENTS-AND-E2E-SPEC.md`, `docs/SELF-HOSTED-RELAY.md`, `docs/OPERATIONS.md` ("Hosted relay").
@@ -81,15 +81,32 @@ Supporting changes (**built**):
 ## 6. Quotas and abuse hooks
 
 These are mechanisms only. No limits are built in, and a relay without config stays unlimited, as it is today.
-- **Quotas** come from an `EntitlementsProvider`. The default reads `RELAY_QUOTAS_FILE` (JSON); without it, everything is unlimited. Quota types:
-  - machines and pending pairings per account
-  - browser sockets and channels per user
-  - relayed bytes per account per day
-  - invitations per workspace per day
-  - shares per session
+
+**Built:** the discrete quotas (`server/relay/quotas.ts`). **Still spec:** bandwidth metering, throttling and abuse signals.
+
+- **Quotas** come from an `EntitlementsProvider`. The default reads `RELAY_QUOTAS_FILE` (JSON) at boot; without it, everything is unlimited. A malformed file stops the relay rather than running it unlimited. A missing key is unlimited, `workspaces` entries override `default` key by key, and `null` in a workspace entry lifts that limit for the workspace:
+
+  ```json
+  {
+    "default":    { "machinesPerWorkspace": 25, "pendingPairingsPerUser": 5, "browserSocketsPerUser": 10,
+                    "channelsPerUser": 16, "invitationsPerWorkspacePerDay": 50, "sharesPerSession": 10 },
+    "workspaces": { "<workspace-id>": { "machinesPerWorkspace": 100, "channelsPerUser": null } }
+  }
+  ```
+
+  | Quota | Counts | Checked at |
+  | --- | --- | --- |
+  | `machinesPerWorkspace` | machine rows in the workspace, including unfinished setups | install command (`pair/precreate`) and CLI pairing approval |
+  | `pendingPairingsPerUser` | the user's approved pairings no machine has claimed yet | the same two points |
+  | `browserSocketsPerUser` | the user's open relay connections, on every machine | browser `hello`; refused with close code 4030, which the app doesn't retry |
+  | `channelsPerUser` | the user's open session streams, on every machine | `stream_open`; a channel error with code `quota_exceeded` |
+  | `invitationsPerWorkspacePerDay` | invitations created in the last 24 hours, resends included | invitation create and resend |
+  | `sharesPerSession` | other people the session is shared with now; changing an existing grantee's share is free | share create |
+
+  The limits that apply are those of the workspace the action happens in. For a browser connection, that is the machine's workspace.
 - **Over a quota.**
-  - Discrete limits answer `{ error: 'quota_exceeded', quota, limit }`.
-  - Bandwidth can throttle (bytes per second per socket) rather than refuse, so an active session slows down instead of breaking.
+  - Discrete limits answer HTTP 429 `{ error: 'quota_exceeded', quota, limit, message }`, and the hosted app shows `message`.
+  - Relayed bytes per account per day *(not built yet)*: bandwidth can throttle (bytes per second per socket) rather than refuse, so an active session slows down instead of breaking.
 - **Usage metering.** A `usage_daily` table holds bytes, frames and channel-seconds per account per day, flushed from memory every minute.
 - **Abuse signals.** An `AbuseSignals` hook gets per-machine traffic summaries: frame shape, sustained throughput, sessions advertised. It can flag, throttle or quarantine, and every action is audit-logged. The relay ships only the hook.
 
