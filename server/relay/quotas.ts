@@ -31,6 +31,13 @@ export const QUOTA_KEYS = [
   'invitationsPerWorkspacePerDay',
   /** People one session can be shared with. */
   'sharesPerSession',
+  /**
+   * Bytes relayed for a workspace per UTC day, both directions. Over it,
+   * traffic slows to throttledBytesPerSecond per connection; it is never cut off.
+   */
+  'relayedBytesPerWorkspacePerDay',
+  /** The slowed rate once relayedBytesPerWorkspacePerDay is used up (default 64 KiB/s). */
+  'throttledBytesPerSecond',
 ] as const
 
 export type QuotaKey = (typeof QUOTA_KEYS)[number]
@@ -50,7 +57,7 @@ export interface QuotaExceeded {
   message: string
 }
 
-const MESSAGES: Record<QuotaKey, (limit: number) => string> = {
+const MESSAGES: Record<Exclude<QuotaKey, 'relayedBytesPerWorkspacePerDay' | 'throttledBytesPerSecond'>, (limit: number) => string> = {
   machinesPerWorkspace: n => `This workspace has reached its limit of ${n} machine${n === 1 ? '' : 's'}.`,
   pendingPairingsPerUser: n => `You have ${n} machine setup${n === 1 ? '' : 's'} waiting to be finished. Finish or cancel one first.`,
   browserSocketsPerUser: n => `You have ${n} connection${n === 1 ? '' : 's'} open already. Close a tab or window and try again.`,
@@ -66,7 +73,7 @@ const MESSAGES: Record<QuotaKey, (limit: number) => string> = {
 export function checkQuota(
   entitlements: EntitlementsProvider,
   workspaceId: string,
-  quota: QuotaKey,
+  quota: keyof typeof MESSAGES,
   current: () => number,
 ): QuotaExceeded | null {
   const limit = entitlements.limitsFor(workspaceId)[quota]

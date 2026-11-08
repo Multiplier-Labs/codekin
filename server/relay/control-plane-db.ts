@@ -378,6 +378,22 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
   db => {
     db.exec(`ALTER TABLE workspaces ADD COLUMN required_capabilities TEXT NOT NULL DEFAULT '[]'`)
   },
+
+  // 10: relayed traffic per workspace per UTC day (docs/RELAY-HARDENING.md §6),
+  // for the daily bandwidth quota and capacity planning. Not a billing meter.
+  db => {
+    db.exec(`
+      CREATE TABLE usage_daily (
+        workspace_id TEXT NOT NULL,
+        day TEXT NOT NULL,
+        bytes_b2m INTEGER NOT NULL DEFAULT 0,
+        bytes_m2b INTEGER NOT NULL DEFAULT 0,
+        frames INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (workspace_id, day)
+      );
+      CREATE INDEX idx_usage_daily_day ON usage_daily(day);
+    `)
+  },
 ]
 
 function runMigrations(db: Database.Database): void {

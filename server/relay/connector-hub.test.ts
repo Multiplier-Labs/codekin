@@ -12,6 +12,8 @@ import { ConnectorHub } from './connector-hub.js'
 import { RelayConnector, connectorWsUrl } from './connector.js'
 import { envelope, RELAY_ERROR } from './relay-protocol.js'
 import { MAX_BUFFERED_BYTES } from './rate-limit.js'
+import { UsageMeter } from './usage-meter.js'
+import { UNLIMITED } from './quotas.js'
 
 function waitFor(condition: () => boolean, timeoutMs = 3000): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -144,6 +146,23 @@ describe('connector hub', () => {
     await waitFor(() => !hub.isOnline(machineId))
     expect(hub.channelCount).toBe(0)
     expect(hub.connectorVersionCounts()).toEqual({})
+  })
+
+  it('meters what a connected machine sends under its workspace', async () => {
+    hub.close()
+    const meter = new UsageMeter(db, UNLIMITED, { flushIntervalMs: 3_600_000 })
+    hub = new ConnectorHub(db, { meter })
+    const { connector } = await connectMachine()
+    // Ask the machine something: whatever it answers (here an error, since
+    // nothing runs locally) is a frame it sent, and is metered.
+    const before = meter.todayBytes(BOOTSTRAP_WORKSPACE_ID)
+    await hub.sendRequest(machineId, { method: 'GET', path: '/api/health' })
+    expect(meter.todayBytes(BOOTSTRAP_WORKSPACE_ID)).toBeGreaterThan(before)
+    connector.stop()
+    meter.close()
+    const row = db.prepare('SELECT bytes_m2b, frames FROM usage_daily WHERE workspace_id = ?').get(BOOTSTRAP_WORKSPACE_ID) as { bytes_m2b: number; frames: number }
+    expect(row.bytes_m2b).toBeGreaterThan(0)
+    expect(row.frames).toBeGreaterThan(0)
   })
 
   describe('connector version floors', () => {
