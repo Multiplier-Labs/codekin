@@ -33,6 +33,7 @@ const api = vi.hoisted(() => ({
   removeRepoApproval: vi.fn(() => Promise.resolve()),
   bulkRemoveRepoApprovals: vi.fn(() => Promise.resolve()),
   webhookEndpointUrl: () => 'https://example.test/api/webhooks/github',
+  relayMachineId: () => null,
 }))
 vi.mock('../../lib/ccApi', () => api)
 vi.mock('../FolderPicker', () => ({ FolderPicker: ({ value }: { value: string }) => <span data-testid="repos-path">{value}</span> }))

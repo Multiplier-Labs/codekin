@@ -151,13 +151,16 @@ describe('GitHub webhooks through the relay', () => {
     })
   }
 
-  it('only the owner can turn a receiver on, and the URL is shown once', async () => {
+  it('only the owner can turn a receiver on or see its URL', async () => {
     expect((await enable('other')).status).toBe(403)
     const path = await enabledUrlPath()
     const status = await fetch(`${baseUrl}/api/machines/${machineId}/webhook`, { headers: { 'x-test-user': 'owner' } })
-    const summary = (await status.json()) as Record<string, unknown>
+    const summary = (await status.json()) as { enabled: boolean; url: string | null }
     expect(summary.enabled).toBe(true)
-    expect(JSON.stringify(summary)).not.toContain(path.split('/').pop())
+    expect(summary.url).toBe(`https://relay.example.com${path}`)
+    const asOther = await fetch(`${baseUrl}/api/machines/${machineId}/webhook`, { headers: { 'x-test-user': 'other' } })
+    expect(asOther.status).toBe(403)
+    expect(await asOther.text()).not.toContain(path.split('/').pop())
   })
 
   it('forwards the exact body and only the delivery headers, and relays the answer', async () => {

@@ -38,6 +38,12 @@ export interface CodekinTransport {
 
   /** Where this transport points, for display (connection popover). */
   describeTarget(): TransportTarget
+
+  /**
+   * The machine's id on the relay, when this transport reaches it through
+   * one (hosted mode). Undefined when talking to the machine directly.
+   */
+  readonly relayMachineId?: string
 }
 
 /** Human-readable description of a transport's endpoint. */

@@ -81,9 +81,9 @@ describe('checkProxyRequest', () => {
   })
 
   it('refuses paths outside the allowlist', () => {
-    expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/webhooks/events' })).allowed).toBe(false)
+    expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/webhooks/github' })).allowed).toBe(false)
     expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/clone' })).allowed).toBe(false)
-    expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/integrations/github/pr-review/setup' })).allowed).toBe(false)
+    expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/hook-decision' })).allowed).toBe(false)
     // A prefix must match a whole segment, not a string prefix
     expect(checkProxyRequest(asOwner({ method: 'GET', path: '/api/reposecret' })).allowed).toBe(false)
   })
@@ -401,5 +401,37 @@ describe('webhook principal', () => {
     await executeProxyRequest({ method: 'POST', path: '/api/sessions/create', principal: OWNER, headers, body: 'e30=' }, { target, fetchImpl })
     const ownerSent = fetchImpl.mock.calls[0][1].headers as Record<string, string>
     expect(ownerSent['x-github-delivery']).toBeUndefined()
+  })
+})
+
+describe('webhook settings over the relay', () => {
+  it('lets the owner read receiver status and run the PR review setup', () => {
+    for (const [method, path] of [
+      ['GET', '/api/webhooks/config'],
+      ['GET', '/api/webhooks/events'],
+      ['GET', '/api/webhooks/events/abc'],
+      ['GET', '/api/integrations/github/pr-review/health?repo=o/r&webhookUrl=x'],
+      ['POST', '/api/integrations/github/pr-review/setup'],
+      ['POST', '/api/integrations/github/pr-review/test'],
+    ]) {
+      expect(checkProxyRequest(asOwner({ method, path })).allowed, `${method} ${path}`).toBe(true)
+    }
+  })
+
+  it('never lets the owner post to the webhook receivers', () => {
+    expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/webhooks/github' })).allowed).toBe(false)
+    expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/webhooks/stepflow' })).allowed).toBe(false)
+    expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/webhooks/config' })).allowed).toBe(false)
+  })
+
+  it('keeps grantees out of all of it', () => {
+    const grantee = { userId: 'u2', role: 'grantee' as const, grants: { s1: ['view'] } }
+    for (const [method, path] of [
+      ['GET', '/api/webhooks/config'],
+      ['GET', '/api/webhooks/events'],
+      ['POST', '/api/integrations/github/pr-review/setup'],
+    ]) {
+      expect(checkProxyRequest({ method, path, principal: grantee }).allowed, `${method} ${path}`).toBe(false)
+    }
   })
 })

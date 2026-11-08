@@ -197,10 +197,12 @@ Set it up in three steps:
 
 1. **On the computer:** configure Codekin's webhook receiver as usual, with
    `GITHUB_WEBHOOK_ENABLED=true` and a `GITHUB_WEBHOOK_SECRET`.
-2. **In the web app:** while connected to that computer, open **Settings → Machines →
-   GitHub webhook** and choose **Turn on**. The relay shows a payload URL of the form
-   `https://codekin.example.com/api/hooks/github/<token>` **once**. It keeps only a hash of the
-   token; **New URL** replaces it, and the old URL stops working at once.
+2. **In the web app:** while connected to that computer, open **Settings → This machine →
+   Webhooks** and choose **Turn on**. The page then shows the payload URL, of the form
+   `https://codekin.example.com/api/hooks/github/<token>`, whenever its owner opens it.
+   **New URL** replaces it, and the old URL stops working at once. The PR-review setup in
+   **Add workflow** and the page's setup wizard use this URL automatically (and turn it on if
+   needed), so they can create the repository webhook for you.
 3. **In GitHub** (repository or organization settings, then **Webhooks**): use that payload URL,
    content type `application/json`, the same secret as on the computer, and the events you need
    (**Workflow runs** for CI fixes).
@@ -217,7 +219,9 @@ Set it up in three steps:
   doesn't encrypt webhook bodies, so they're outside end-to-end encryption.
 
 **Other behaviour:**
-- Deliveries are rate-limited per machine.
+- The URL token only routes deliveries to the right machine. The relay keeps it so its owner
+  can see the URL again; anyone holding the URL can make the relay forward a request, which
+  the machine rejects without GitHub's signature. Deliveries are rate-limited per machine.
 - A receiver only forwards while its owner is active and still a member of the machine's
   workspace. Removing the machine removes its receiver.
 - An offline machine answers `503`, and GitHub shows the failed delivery, which you can

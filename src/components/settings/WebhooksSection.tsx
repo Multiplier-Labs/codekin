@@ -12,9 +12,10 @@ import {
 import {
   getWebhookConfig, getWebhookEvents, type WebhookConfigInfo,
   getIntegrationHealth, previewWebhookSetup, applyWebhookSetup, testWebhookDelivery, webhookEndpointUrl,
-  type HealthCheckResult, type SetupPreview,
+  relayMachineId, type HealthCheckResult, type SetupPreview,
 } from '../../lib/ccApi'
 import { Block, input } from './Block'
+import { RelayWebhookUrl } from './RelayWebhookUrl'
 
 // ---------------------------------------------------------------------------
 // Copy-to-clipboard button
@@ -85,7 +86,11 @@ export function WebhooksSection({ token }: { token: string }) {
     getWebhookEvents(token).then(setWebhookEvents).catch(() => {})
   }, [token])
 
-  const webhookUrl = webhookEndpointUrl()
+  // Directly on the machine, GitHub posts to its own receiver. Through a
+  // relay (hosted mode) it posts to the relay's receiver for this machine,
+  // which RelayWebhookUrl reports once it has loaded.
+  const viaRelay = relayMachineId()
+  const [webhookUrl, setWebhookUrl] = useState<string | null>(() => (viaRelay ? null : webhookEndpointUrl()))
 
   const status = webhookConfig ? (
     webhookConfig.enabled ? (
@@ -113,12 +118,18 @@ export function WebhooksSection({ token }: { token: string }) {
         </>}
         action={status}
       >
-        <label className="mb-1.5 block text-body font-medium text-ink">Webhook URL</label>
-        <div className="flex items-center gap-1 rounded-control border border-edge bg-page px-3 py-2">
-          <code className="flex-1 truncate select-all font-mono text-body text-ink">{webhookUrl}</code>
-          <CopyButton text={webhookUrl} />
-        </div>
-        <p className="mt-1.5 text-meta text-ink-muted">Paste this as the Payload URL of the webhook in GitHub.</p>
+        {viaRelay ? (
+          <RelayWebhookUrl machineId={viaRelay} onUrl={setWebhookUrl} />
+        ) : (
+          <>
+            <label className="mb-1.5 block text-body font-medium text-ink">Webhook URL</label>
+            <div className="flex items-center gap-1 rounded-control border border-edge bg-page px-3 py-2">
+              <code className="flex-1 truncate select-all font-mono text-body text-ink">{webhookUrl}</code>
+              {webhookUrl && <CopyButton text={webhookUrl} />}
+            </div>
+            <p className="mt-1.5 text-meta text-ink-muted">Paste this as the Payload URL of the webhook in GitHub.</p>
+          </>
+        )}
 
         {/* Disabled hint */}
         {webhookConfig && !webhookConfig.enabled && !healthResult && (
@@ -193,7 +204,7 @@ export function WebhooksSection({ token }: { token: string }) {
           />
           <button
             onClick={async () => {
-              if (!healthRepo.trim() || !token) return
+              if (!healthRepo.trim() || !token || !webhookUrl) return
               setHealthLoading(true)
               setHealthError(null)
               setHealthResult(null)
@@ -206,7 +217,7 @@ export function WebhooksSection({ token }: { token: string }) {
                 setHealthLoading(false)
               }
             }}
-            disabled={!healthRepo.trim() || healthLoading}
+            disabled={!healthRepo.trim() || healthLoading || !webhookUrl}
             className="flex items-center gap-1.5 rounded-control bg-primary-8 px-3 py-1.5 text-body font-medium text-on-primary hover:bg-primary-7 disabled:opacity-50 transition-colors"
           >
             {healthLoading ? (
@@ -271,6 +282,7 @@ export function WebhooksSection({ token }: { token: string }) {
             {healthResult.checks.ghCli.ok && (healthResult.overall === 'broken' || healthResult.overall === 'degraded') && !healthResult.checks.webhook.ok && wizardStep === 'idle' && (
               <button
                 onClick={async () => {
+                  if (!webhookUrl) return
                   setSetupError(null)
                   setWizardStep('preview')
                   try {
@@ -292,6 +304,7 @@ export function WebhooksSection({ token }: { token: string }) {
             {healthResult.checks.webhook.ok && wizardStep === 'idle' && (
               <button
                 onClick={async () => {
+                  if (!webhookUrl) return
                   setTestLoading(true)
                   setTestResult(null)
                   try {
@@ -355,6 +368,7 @@ export function WebhooksSection({ token }: { token: string }) {
                 <div className="flex gap-2">
                   <button
                     onClick={async () => {
+                      if (!webhookUrl) return
                       setWizardStep('applying')
                       setSetupError(null)
                       try {
