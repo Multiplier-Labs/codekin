@@ -51,6 +51,7 @@ export type AuditEventKind =
   | 'mfa_disabled'
   | 'mfa_recovery_codes_regenerated'
   | 'mfa_reset'
+  | 'session_minted'
   | 'workspace_security_updated'
   | 'desktop_auth_approved'
   | 'desktop_signed_in'
