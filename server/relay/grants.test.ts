@@ -13,6 +13,7 @@ import type { GrantBody, IntentBody, SignedGrant, SignedIntent } from './intent-
 import { IntentVerifier } from './intent-verify.js'
 import { MachineEnrolment } from './enrolment.js'
 import { signP1363, transcript, verifyP1363 } from './enrolment-crypto.js'
+import { checkServerFrame, newChannelState } from './connector-policy.js'
 import { liveChannelPolicy } from './connector.js'
 import { ensureMachineIdentity, keyIdForSpki } from './machine-identity.js'
 import { MAX_REVOKED_GRANTS, emptyTrustStore, readTrustStore, withRevocation, writeTrustStore } from './trust-store.js'
@@ -186,6 +187,24 @@ describe('signed share grants on the machine', () => {
     const current = readTrustStore(devicesFile)!
     writeTrustStore(devicesFile, { ...current, revokedGrants: [{ grantId: 'g1', at: new Date().toISOString() }] })
     expect(policy.grants).toEqual({})
+  })
+
+  it.each(['revoked', 'expired', 'signer removed'])('stops untagged output on an open channel immediately when %s', cause => {
+    let now = Date.now()
+    verifier = new IntentVerifier({ machineId: 'm1', devicesFile, now: () => now })
+    const principal = danaPrincipal([grant({ expiresAt: now + 1000 })])
+    const policy = liveChannelPolicy(principal, verifier)
+    const state = { ...newChannelState(), sessionId: 's1' }
+    const frames = ['{"type":"output","data":"private"}', '{"type":"thinking","data":"private"}']
+    for (const frame of frames) expect(checkServerFrame(policy, state, frame)).toBe(true)
+    if (cause === 'expired') now += 1001
+    else {
+      const store = readTrustStore(devicesFile)!
+      writeTrustStore(devicesFile, cause === 'revoked'
+        ? { ...store, revokedGrants: [{ grantId: 'g1', at: new Date(now).toISOString() }] }
+        : { ...store, credentials: [] })
+    }
+    for (const frame of frames) expect(checkServerFrame(policy, state, frame)).toBe(false)
   })
 
   it('revokes every grant signed for a share when its id is revoked, and nothing else', () => {

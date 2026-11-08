@@ -197,7 +197,7 @@ function hasAnyPermission(policy: ChannelPolicy, permission: SessionPermission):
   return Object.values(policy.grants).some(perms => perms.includes(permission))
 }
 
-function hasPermission(policy: ChannelPolicy, sessionId: string | null, permission: SessionPermission): boolean {
+export function hasPermission(policy: ChannelPolicy, sessionId: string | null, permission: SessionPermission): boolean {
   if (!sessionId || !Object.hasOwn(policy.grants, sessionId)) return false
   return policy.grants[sessionId].includes(permission)
 }
@@ -283,6 +283,9 @@ export function checkServerFrame(policy: ChannelPolicy, state: ChannelState, fra
   if (!isServerFrameVisible(policy.grants, frame)) return false
   const msg = parseFrame(frame)
   if (typeof msg?.sessionId === 'string' && msg.sessionId !== state.sessionId) return false
+  // Untagged output is session content too. An earlier successful join is
+  // not continuing authority after its grant expires or is revoked.
+  if (!hasPermission(policy, state.sessionId, 'view')) return false
   // Code, review comments and PR details are part of the diff: a grantee
   // without view_diff must not receive them, even as a broadcast.
   if (typeof msg?.type === 'string' && DIFF_FRAME_TYPES.has(msg.type)) {

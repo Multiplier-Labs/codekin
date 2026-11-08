@@ -30,6 +30,7 @@ import { formatCode } from './enrolment-crypto.js'
 import type { EnrolPasskey } from './enrolment-crypto.js'
 import { grantIssuedAt } from './intent-actions.js'
 import type { GrantRevocation } from './intent-actions.js'
+import { IntentReplayStore } from './intent-replay.js'
 
 export function relayDevicesPath(home = homedir()): string {
   return join(home, '.config', 'codekin', 'relay-devices.json')
@@ -257,6 +258,10 @@ export function readTrustStore(file = relayDevicesPath()): TrustStore | null {
 
 export function writeTrustStore(file: string, store: TrustStore): void {
   mkdirSync(dirname(file), { recursive: true })
+  // Only provisioning a new device list is positive evidence of a fresh
+  // trust boundary. Existing installations without a nonce database recover
+  // conservatively, even when their old audit log is empty or missing.
+  if (!existsSync(file)) new IntentReplayStore(`${file}.replay.sqlite`, store.machineId).initialize(Date.now(), true)
   writeFileAtomic(file, JSON.stringify(store, null, 2) + '\n')
 }
 

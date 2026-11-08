@@ -25,6 +25,7 @@ import { relayCredentialPath } from './relay-credential.js'
 import { MachineEnrolment } from './enrolment.js'
 import { IntentVerifier } from './intent-verify.js'
 import { IntentLog, intentLogPath } from './intent-log.js'
+import { IntentReplayStore } from './intent-replay.js'
 
 export interface TrustPaths {
   identityFile: string
@@ -68,6 +69,7 @@ export function recordPairing(
     log.warn(`[relay] Could not save this machine's identity key (${reason(err)}); a new one is made when the connector starts.`)
   }
   try {
+    new IntentReplayStore(`${devicesFile}.replay.sqlite`, machineId).initialize(Date.now(), true)
     writeTrustStore(devicesFile, emptyTrustStore(machineId, relayUrl, ownerUserId))
   } catch (err) {
     log.warn(`[relay] Could not create this machine's device list (${reason(err)}).`)

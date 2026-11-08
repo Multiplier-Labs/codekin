@@ -95,6 +95,13 @@ describe('passkeys on the machine', () => {
     return { body, sig: signP1363(b.privateKey, Buffer.from(body)).toString('base64url') }
   }
 
+  it('deduplicates an operation across the owner browser and passkey', () => {
+    const { b } = enrolWithPasskey()
+    const fields = { action: 'channel:open', payload: new Uint8Array(), channel: randomBytes(16).toString('base64url'), nonce: randomBytes(16).toString('base64url') }
+    expect(verifier.checkChannelOpen(OWNER, browserIntent(b, fields)).decision.verdict).toBe('accepted')
+    expect(verifier.checkChannelOpen(OWNER, passkeyIntent(fields)).decision).toMatchObject({ forward: false, reason: 'intent_replayed' })
+  })
+
   it('enrols a passkey with the browser, after proof the user holds it', () => {
     enrolWithPasskey()
     const store = readTrustStore(devicesFile)!
@@ -174,8 +181,8 @@ describe('passkeys on the machine', () => {
     const byPasskey = passkeyIntent({ action: DEVICE_REVOKE_ACTION, payload: revokePayload(b.keyId) })
     expect(enrolment.revoke(OWNER, { keyId: b.keyId, intent: byPasskey })).toMatchObject({ state: 'approved', keyId: b.keyId })
     expect(readTrustStore(devicesFile)?.credentials.map(c => c.kind)).toEqual(['passkey'])
-    expect(() => enrolment.revoke(OWNER, { keyId: b.keyId, intent: passkeyIntent({ action: DEVICE_REVOKE_ACTION, payload: revokePayload(b.keyId) }) }))
-      .toThrow(/not on this computer/)
+    expect(enrolment.revoke(OWNER, { keyId: b.keyId, intent: passkeyIntent({ action: DEVICE_REVOKE_ACTION, payload: revokePayload(b.keyId) }) }))
+      .toMatchObject({ state: 'approved', keyId: b.keyId, signature: expect.any(String) })
   })
 
   describe('step-up for privileged actions', () => {

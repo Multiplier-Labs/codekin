@@ -276,3 +276,60 @@ describe('enrolment frames', () => {
     await expect(reply).rejects.toBeInstanceOf(RelayRequestError)
   })
 })
+
+describe('signed request retries', () => {
+  function ready() {
+    const sign = vi.fn(async (input: Parameters<import('./relay-client').RelaySigner['sign']>[0]) => ({
+      body: JSON.stringify({ ...input, nonce: input.nonce ?? 'operation-nonce', ts: input.ts ?? Date.now() }), sig: 'test',
+    }))
+    const signer = { sign, learnPasskeys: vi.fn(async () => {}), verifyMachineTime: vi.fn(async () => true), setClockOffset: vi.fn() }
+    const ctx = connect('m1', { signer })
+    ctx.socket.open()
+    ctx.socket.deliver({ kind: 'hello_ack', payload: { online: true } })
+    return { ...ctx, signer }
+  }
+  const error = { code: 'not_permitted', message: 'Step up', detail: 'intent_step_up_required', stepUpPasskeys: [{ credentialId: 'p', keyId: 'k' }] }
+
+  it('does not retry an ordinary action on an unsigned step-up refusal', async () => {
+    const { conn, socket, signer } = ready()
+    const pending = conn.request('POST', '/api/sessions/create', btoa('{"name":"ordinary"}'))
+    const rejected = expect(pending).rejects.toMatchObject({ detail: 'intent_step_up_required' })
+    await vi.waitFor(() => expect(socket.sent.filter(f => f.kind === 'request')).toHaveLength(1))
+    socket.deliver({ kind: 'error', id: socket.sent.at(-1)!.id, payload: error })
+    await rejected
+    expect(signer.sign).toHaveBeenCalledTimes(1)
+    expect(signer.learnPasskeys).not.toHaveBeenCalled()
+    conn.close()
+  })
+
+  it('preserves nonce and timestamp when a privileged retry switches credentials', async () => {
+    const { conn, socket, signer } = ready()
+    const pending = conn.request('POST', '/api/sessions/create', btoa('{"permissionMode":"bypassPermissions"}'))
+    await vi.waitFor(() => expect(socket.sent.filter(f => f.kind === 'request')).toHaveLength(1))
+    const first = JSON.parse((socket.sent.at(-1)!.payload.intent as { body: string }).body)
+    vi.spyOn(Date, 'now').mockReturnValue(first.ts + 20 * 60_000)
+    socket.deliver({ kind: 'error', id: socket.sent.at(-1)!.id, payload: error })
+    await vi.waitFor(() => expect(socket.sent.filter(f => f.kind === 'request')).toHaveLength(2))
+    const second = JSON.parse((socket.sent.at(-1)!.payload.intent as { body: string }).body)
+    expect(second).toMatchObject({ nonce: first.nonce, ts: first.ts, stepUp: true })
+    expect(signer.learnPasskeys).toHaveBeenCalledOnce()
+    socket.deliver({ kind: 'response', id: socket.sent.at(-1)!.id, payload: { status: 200, headers: {} } })
+    await pending
+    conn.close()
+  })
+
+  it('uses only the authenticated time for this operation on a stale-clock retry', async () => {
+    const { conn, socket } = ready()
+    const pending = conn.request('POST', '/api/sessions/create')
+    await vi.waitFor(() => expect(socket.sent.filter(f => f.kind === 'request')).toHaveLength(1))
+    const first = JSON.parse((socket.sent.at(-1)!.payload.intent as { body: string }).body)
+    socket.deliver({ kind: 'error', id: socket.sent.at(-1)!.id, payload: {
+      code: 'not_permitted', message: 'Stale', detail: 'intent_stale', intentNonce: first.nonce, machineTime: first.ts + 1000, machineTimeSig: 'signed',
+    } })
+    await vi.waitFor(() => expect(socket.sent.filter(f => f.kind === 'request')).toHaveLength(2))
+    expect(JSON.parse((socket.sent.at(-1)!.payload.intent as { body: string }).body)).toMatchObject({ nonce: first.nonce, ts: first.ts + 1000 })
+    socket.deliver({ kind: 'response', id: socket.sent.at(-1)!.id, payload: { status: 200, headers: {} } })
+    await pending
+    conn.close()
+  })
+})

@@ -77,6 +77,7 @@ interface IntentInput {
   channel?: string
   seq?: number
   nonce?: string
+  ts?: number
   stepUp?: boolean
 }
 
@@ -363,6 +364,8 @@ export class RelayConnection {
     const signer = this.opts.signer
     if (!signer) return this.call('request', 'response', { method, path, body, contentType }) as Promise<RelayProxyResponse>
     let nonce: string | undefined
+    let signedAt: number | undefined
+    const started = performance.now()
     const bytes = base64Bytes(body)
     const stepUp = requestNeedsStepUp(method, path, bytes)
     const signAndSend = async () => {
@@ -371,9 +374,16 @@ export class RelayConnection {
         sessionId: requestSession(path),
         payload: requestPayload(method, path, contentType, bytes),
         ...(nonce ? { nonce } : {}),
+        ...(signedAt !== undefined ? { ts: signedAt } : {}),
         ...(stepUp ? { stepUp } : {}),
       })
       nonce ??= intent ? intentNonce(intent) : undefined
+      if (signedAt === undefined && intent) {
+        try {
+          const { ts } = JSON.parse((intent as { body: string }).body) as { ts?: unknown }
+          if (typeof ts === 'number' && Number.isFinite(ts)) signedAt = ts
+        } catch { /* malformed signing results cannot be retried */ }
+      }
       return this.call('request', 'response', { method, path, body, contentType, ...(intent ? { intent } : {}) }) as Promise<RelayProxyResponse>
     }
     return signAndSend().catch(async (err: unknown) => {
@@ -381,14 +391,18 @@ export class RelayConnection {
       // (§6.5) with the same nonce. If the first attempt actually ran and the
       // "stale" reply was forged, the machine refuses the retry as a replay;
       // and the time is only adopted when the machine's key signed it.
-      if (err instanceof RelayRequestError && err.detail === 'intent_stale' && await this.adoptMachineTime(err)) {
+      if (nonce && signedAt !== undefined && performance.now() - started < 60_000 && err instanceof RelayRequestError && err.detail === 'intent_stale' && err.intentNonce === nonce && await this.adoptMachineTime(err)) {
+        // Use exactly the authenticated time, never a fresh browser time.
+        // A bounded retry lifetime keeps it inside nonce retention even
+        // when the first attempt ran and its reply was withheld.
+        signedAt = err.machineTime
         return signAndSend()
       }
-      // The machine wants a passkey and named it: remember it, then ask the
-      // user once (a refused request never ran, so a fresh nonce is fine).
-      if (err instanceof RelayRequestError && err.detail === 'intent_step_up_required' && err.stepUpPasskeys?.length && signer.learnPasskeys) {
+      // Refusals arrive through an untrusted relay. Only retry an action we
+      // independently classified as privileged, with the SAME operation
+      // nonce. The machine deduplicates across this user's signing keys.
+      if (stepUp && nonce && signedAt !== undefined && performance.now() - started < 60_000 && err instanceof RelayRequestError && err.detail === 'intent_step_up_required' && err.stepUpPasskeys?.length && signer.learnPasskeys) {
         await signer.learnPasskeys(err.stepUpPasskeys)
-        nonce = undefined
         return signAndSend()
       }
       throw err

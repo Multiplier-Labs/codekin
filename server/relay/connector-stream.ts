@@ -12,7 +12,7 @@
 import WebSocket from 'ws'
 import { STREAM_CLOSE } from './relay-protocol.js'
 import type { LocalServerTarget } from './connector-proxy.js'
-import { adaptServerFrame, checkClientFrame, checkServerFrame, newChannelState, observeServerFrame, stampReviewIdentity } from './connector-policy.js'
+import { adaptServerFrame, checkClientFrame, checkServerFrame, hasPermission, newChannelState, observeServerFrame, stampReviewIdentity } from './connector-policy.js'
 import type { ChannelPolicy, ChannelState } from './connector-policy.js'
 import type { IntentDecision } from './intent-verify.js'
 import type { IntentRefusal } from './intent-actions.js'
@@ -29,6 +29,7 @@ const INTENT_REFUSAL_TEXT: Record<IntentRefusal, string> = {
   intent_wrong_session: 'The signed action was meant for another session',
   intent_stale: "The signed action is too old, or this browser's clock is off",
   intent_replayed: 'This signed action was already used',
+  intent_replay_unavailable: 'Replay protection is recovering or its storage is unavailable. After upgrading, wait ten minutes; otherwise check this computer’s storage.',
   intent_unsupported: 'This computer cannot check this kind of signature yet',
   intent_wrong_channel: 'The signed action was meant for another connection',
   intent_out_of_order: 'The signed action arrived out of order',
@@ -151,6 +152,7 @@ export class StreamChannel {
     })
 
     ws.on('message', (raw: Buffer | string) => {
+      if (this.closed) return
       const text = typeof raw === 'string' ? raw : raw.toString('utf-8')
       if (!this.ready) {
         // Everything before `connected` belongs to the local handshake.
@@ -166,6 +168,12 @@ export class StreamChannel {
       }
       // The local server fans some frames out to every socket, including
       // this one; a grantee only sees what their grant covers.
+      if (this.policy.role === 'grantee' && this.state.sessionId
+        && !hasPermission(this.policy, this.state.sessionId, 'view')) {
+        this.close(STREAM_CLOSE.normal, 'Session access ended')
+        this.callbacks.onClose(STREAM_CLOSE.normal, 'Session access ended')
+        return
+      }
       if (!checkServerFrame(this.policy, this.state, text)) return
       // Remember what the server asked, so an approval answer can be
       // classified against the tool it belongs to. Only frames that passed

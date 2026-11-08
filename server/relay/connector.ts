@@ -35,23 +35,20 @@ import { describeIntentRefusal } from './connector-stream.js'
 /**
  * The channel policy for a principal. A grantee acts on what the relay says
  * AND the owner signed (spec §6.7), re-read while the channel is open (on any
- * device-list change, and every few seconds for expiry): a revoked or expired
+ * device-list change, and every frame for expiry): a revoked or expired
  * grant stops what the grantee receives, not just what they send.
  */
 export function liveChannelPolicy(
   principal: RelayPrincipal,
   intents?: Partial<Pick<IntentVerifier, 'effectivePrincipal' | 'grantsVersion'>>,
-  now: () => number = Date.now,
 ): ChannelPolicy {
   const grantsOf = (): GrantMap => (intents?.effectivePrincipal?.(principal) ?? principal).grants as GrantMap
-  let current = { grants: grantsOf(), version: intents?.grantsVersion?.() ?? '', at: now() }
   return {
     role: principal.role === 'owner' ? 'owner' : 'grantee',
     get grants(): GrantMap {
-      if (principal.role !== 'grantee') return current.grants
-      const version = intents?.grantsVersion?.() ?? ''
-      if (version !== current.version || now() - current.at > 5_000) current = { grants: grantsOf(), version, at: now() }
-      return current.grants
+      // Verification already caches signatures. Re-evaluate authority on
+      // every use so the signed expiry is an exact deadline for output too.
+      return grantsOf()
     },
     userId: principal.userId,
   }

@@ -80,6 +80,12 @@ export function handleWsMessage(msg: WsClientMessage, ctx: WsHandlerContext): vo
   switch (msg.type) {
     // Create a new session, optionally in a git worktree, then start Claude.
     case 'create_session': {
+      // Creation changes the signed channel's session even if validation
+      // fails. Detach first, so subsequent frames can never act on the old
+      // session under the new session's intent marker.
+      const previous = clientSessions.get(ws)
+      if (previous) sessions.leave(previous, ws)
+      clientSessions.delete(ws)
       // Bounds-check: workingDir must be under home or REPOS_ROOT
       const home = osHomedir()
       const allowedRoots = [home, REPOS_ROOT]

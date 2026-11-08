@@ -35,7 +35,7 @@ import type { PasskeyCredential, PendingEnrolment, TrustedCredential, TrustStore
 import { coseToKey, keyIdForCoseKey, verifyPasskeyAssertion } from './webauthn-verify.js'
 import type { PasskeyAssertion } from './webauthn-verify.js'
 import {
-  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, GRANT_REVOKE_ACTION, MACHINE_CLOCK_LABEL, POLICY_ACTION, POLICY_RAISED_LABEL, policyPayload, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
+  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, DEVICE_REVOKED_LABEL, GRANT_REVOKE_ACTION, MACHINE_CLOCK_LABEL, POLICY_ACTION, POLICY_RAISED_LABEL, policyPayload, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
   grantRevokePayload, grantRevokedParts, revokePayload,
 } from './intent-actions.js'
 import type { IntentVerifier } from './intent-verify.js'
@@ -411,18 +411,31 @@ export class MachineEnrolment {
   revoke(principal: RelayPrincipal | undefined, payload: unknown): EnrolResult {
     const keyId = (payload as { keyId?: unknown } | null)?.keyId
     if (typeof keyId !== 'string' || !keyId || keyId.length > 64) throw refuse('Malformed request')
-    if (!this.opts.intents) throw new EnrolmentError('enrol_unavailable', 'This computer cannot check signed requests')
-    const { decision, signer } = this.opts.intents.checkDeviceIntent(principal, (payload as { intent?: unknown }).intent, DEVICE_REVOKE_ACTION, revokePayload(keyId))
-    if (!signer) throw refuse(describeIntentRefusal(decision.reason))
-    const removed = this.mutate(s => {
-      const target = s.credentials.find(c => c.keyId === keyId && c.userId === signer.userId)
-      if (!target) return false
-      s.credentials = s.credentials.filter(c => c !== target)
-      return true
-    })
-    if (!removed) throw refuse('That device is not on this computer')
-    this.opts.log?.log(`[relay] A device (${keyId}) was removed from this computer by a signed request.`)
-    return { enrolId: `revoke:${keyId}`, state: 'approved', keyId }
+    const nonce = parseIntentNonce((payload as { intent?: unknown }).intent)
+    if (!/^[A-Za-z0-9_-]{16,64}$/.test(nonce)) throw refuse('Malformed request')
+    const store = readTrustStore(this.opts.devicesFile)
+    if (!store || store.machineId !== this.opts.machineId) throw refuse('Device list unavailable')
+    this.checkPrincipal(principal, store)
+    // Load the signing key before changing state. A retry can still prove
+    // absence after self-revocation removed the request's signing key.
+    const { key } = this.machineKey()
+    if (store.credentials.some(c => c.keyId === keyId)) {
+      if (!this.opts.intents) throw new EnrolmentError('enrol_unavailable', 'This computer cannot check signed requests')
+      const { decision, signer } = this.opts.intents.checkDeviceIntent(principal, (payload as { intent?: unknown }).intent, DEVICE_REVOKE_ACTION, revokePayload(keyId))
+      if (!signer) throw refuse(describeIntentRefusal(decision.reason))
+      this.mutate(s => {
+        const target = s.credentials.find(c => c.keyId === keyId)
+        if (target && target.userId !== signer.userId) throw refuse('That device belongs to another account')
+        s.credentials = s.credentials.filter(c => c.keyId !== keyId)
+      })
+      this.opts.log?.log(`[relay] A device (${keyId}) was removed from this computer by a signed request.`)
+    }
+    // If already absent, this is a read-only proof, not authorization to
+    // mutate the store. It is safe even when the original signer is gone.
+    return {
+      enrolId: `revoke:${keyId}`, state: 'approved', keyId,
+      signature: signP1363(key, transcript(DEVICE_REVOKED_LABEL, this.opts.machineId, keyId, nonce)).toString('base64url'),
+    }
   }
 
   /** Dispatch one frame; throws EnrolmentError for a refusal. */

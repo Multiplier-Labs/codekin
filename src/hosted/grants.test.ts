@@ -17,7 +17,7 @@ vi.mock('./deviceTrust', async importOriginal => ({
 vi.mock('./workspace', () => ({ workspaceHeaders: () => ({}) }))
 
 import {
-  flushRevocations, machineClockOffset, proposeGrant, recordShare, renewGrants, revokeShareGrants, signGrant,
+  flushRevocations, queueRevocations, machineClockOffset, proposeGrant, recordShare, renewGrants, revokeShareGrants, signGrant,
   type GranteeKey, type GrantTransport, type ShareWithGrant,
 } from './grants'
 import { getOrCreateBrowserKey, type BrowserKey, type IssuedGrant, type MachinePin, type PendingRevocation, type TrustStorage } from './deviceTrust'
@@ -210,6 +210,53 @@ describe('share grants from the browser to the machine', () => {
     // And it is never renewed or re-signed.
     expect(await renewGrants(transport, 'm1', { storage: ownerStorage, now: Date.now() + 29 * DAY })).toBe(0)
     await expect(proposeGrant(share, devices, { storage: ownerStorage })).rejects.toMatchObject({ code: 'rejected' })
+  })
+
+  it('an older flush preserves concurrent additions and stronger revocations', async () => {
+    await shareAs('viewer')
+    const keep = ownerStorage.issued.get('u-owner:m1')![0].current!.grantId
+    await ownerStorage.putRevocations!('u-owner', 'm1', [{ grantId: share.id, keep }])
+    let release!: () => void
+    let reached!: () => void
+    const waiting = new Promise<void>(resolve => { release = resolve })
+    const started = new Promise<void>(resolve => { reached = resolve })
+    const delayed: GrantTransport = { ...transport, sendDeviceFrame: async (kind, payload) => {
+      const result = await transport.sendDeviceFrame(kind, payload)
+      reached()
+      await waiting
+      return result
+    } }
+    const oldFlush = flushRevocations(delayed, 'm1', ownerStorage)
+    await started
+    const offline: GrantTransport = { ...transport, sendDeviceFrame: async () => { throw new Error('offline') } }
+    await queueRevocations(offline, 'm1', [{ grantId: share.id }, { grantId: 'another-share' }], ownerStorage)
+    release()
+    expect(await oldFlush).toEqual([{ grantId: share.id }, { grantId: 'another-share' }])
+    expect(ownerStorage.revocations.get('u-owner:m1')).toEqual([{ grantId: share.id }, { grantId: 'another-share' }])
+  })
+
+  it('a renewal finishing after a revocation cannot restore the issued ledger', async () => {
+    await shareAs('editor')
+    const before = ownerStorage.issued.get('u-owner:m1')![0].current!
+    const grant = JSON.parse(before.grant) as GrantBody
+    const originalFetch = globalThis.fetch
+    let release!: () => void
+    let reached!: () => void
+    const waiting = new Promise<void>(resolve => { release = resolve })
+    const started = new Promise<void>(resolve => { reached = resolve })
+    vi.stubGlobal('fetch', vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const response = await originalFetch(...args)
+      if (args[1]?.method === 'PUT') { reached(); await waiting }
+      return response
+    }))
+    const renewal = renewGrants(transport, 'm1', { storage: ownerStorage, now: grant.expiresAt - DAY })
+    await started
+    await revokeShareGrants(transport, share, ownerStorage)
+    release()
+    await renewal
+    expect(ownerStorage.issued.get('u-owner:m1')![0]).toMatchObject({ revoked: true, current: before })
+    expect(verifier.effectivePrincipal(danaPrincipal())?.grants).toEqual({})
+    expect(await renewGrants(transport, 'm1', { storage: ownerStorage, now: grant.expiresAt })).toBe(0)
   })
 
   it('treats a share the relay no longer has as revoked', async () => {

@@ -4,7 +4,8 @@
  * performs on the browser's behalf.
  */
 import { BOOTSTRAP_WORKSPACE_ID } from './control-plane-db.js'
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { EventEmitter } from 'events'
 import { createServer } from 'http'
 import type { Server } from 'http'
 import { WebSocketServer, WebSocket } from 'ws'
@@ -163,6 +164,24 @@ describe('local Origin header', () => {
     expect(created[0].options).toEqual({ origin: 'https://app.example' })
     expect(created[1].options).toBeUndefined()
   })
+})
+
+it('closes a grantee stream once when its live view permission ends', () => {
+  const socket = Object.assign(new EventEmitter(), { readyState: WebSocket.OPEN, send: vi.fn(), close: vi.fn() })
+  const callbacks = { onReady: vi.fn(), onData: vi.fn(), onClose: vi.fn() }
+  const policy: import('./connector-policy.js').ChannelPolicy = { role: 'grantee', grants: { s1: ['view'] } }
+  const channel = new StreamChannel({ origin: 'http://localhost', authToken: 't' }, callbacks, () => socket as unknown as WebSocket, policy)
+  channel.open()
+  socket.emit('message', '{"type":"connected"}')
+  channel.send('{"type":"join_session","sessionId":"s1"}')
+  socket.emit('message', '{"type":"output","data":"allowed"}')
+  expect(callbacks.onData).toHaveBeenCalledTimes(1)
+  policy.grants = {}
+  socket.emit('message', '{"type":"output","data":"no access"}')
+  socket.emit('message', '{"type":"thinking","data":"no access"}')
+  expect(callbacks.onData).toHaveBeenCalledTimes(1)
+  expect(socket.close).toHaveBeenCalledOnce()
+  expect(callbacks.onClose).toHaveBeenCalledExactlyOnceWith(STREAM_CLOSE.normal, 'Session access ended')
 })
 
 describe('session streaming over the relay', () => {
