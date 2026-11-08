@@ -284,9 +284,12 @@ async function cmdRelayStatus() {
     console.log('Connector:  unknown — the local Codekin service is not reachable or is older than this CLI')
   }
   try {
-    const res = await fetch(`${credential.url}/api/health`)
+    // `ready` checks the relay's database and sockets; relays older than
+    // 0.10.6 only have `/api/health`, which answers the same `{ ok }` shape.
+    let res = await fetch(`${credential.url}/api/health/ready`)
+    if (res.status === 404) res = await fetch(`${credential.url}/api/health`)
     const data = await res.json()
-    console.log(`Hub health: ${data.ok ? 'ok' : 'unhealthy'} (${data.machinesOnline ?? 0} machine(s) online)`)
+    console.log(`Hub health: ${data.ok ? 'ok' : 'unhealthy'}`)
   } catch {
     console.log('Hub health: unreachable')
   }

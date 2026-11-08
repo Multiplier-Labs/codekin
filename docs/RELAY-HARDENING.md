@@ -1,6 +1,6 @@
 # Relay hardening
 
-**Status:** Spec. Nothing here is built.
+**Status:** In progress. Built: §1 (health endpoints). The rest is spec.
 **Date:** 2026-11-08
 **Scope:** hardening features for anyone who runs the relay (`server/relay`), whether self-hosted or as a public service. Values specific to a deployment, such as limits, thresholds and monitoring setup, belong in that deployment's own config. They are not defined here.
 **Related:** `docs/RELAY-SIGNED-INTENTS-AND-E2E-SPEC.md`, `docs/SELF-HOSTED-RELAY.md`, `docs/OPERATIONS.md` ("Hosted relay").
@@ -9,7 +9,7 @@
 
 ## 1. Health endpoints
 
-`GET /api/health` (`server/relay/relay-server.ts:128`) is unauthenticated and reports `machinesOnline` and `browserClients`. Those counts are usage data, so it should stop returning them.
+**Built** (`server/relay/health-routes.ts`). `GET /api/health` used to be unauthenticated and report `machinesOnline` and `browserClients`. Those counts are usage data, so the public probes no longer return them.
 
 | Route | Auth | Body |
 | --- | --- | --- |

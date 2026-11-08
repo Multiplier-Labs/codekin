@@ -127,6 +127,25 @@ describe('connector hub', () => {
     connector.stop()
   })
 
+  it('counts open channels and connector versions for the operator stats', async () => {
+    expect(hub.channelCount).toBe(0)
+    expect(hub.connectorVersionCounts()).toEqual({})
+
+    const { connector } = await connectMachine()
+    hub.openChannel(machineId, 'chan-a', () => {})
+    hub.openChannel(machineId, 'chan-b', () => {})
+    expect(hub.channelCount).toBe(2)
+    expect(hub.connectorVersionCounts()).toEqual({ '0.8.0-test': 1 })
+
+    hub.closeChannel(machineId, 'chan-a')
+    expect(hub.channelCount).toBe(1)
+
+    connector.stop()
+    await waitFor(() => !hub.isOnline(machineId))
+    expect(hub.channelCount).toBe(0)
+    expect(hub.connectorVersionCounts()).toEqual({})
+  })
+
   it('keeps relaying channel data while the connector is draining normally', async () => {
     const { connector, socket } = await connectMachine()
     const frames: Array<{ kind: string; payload: unknown }> = []
