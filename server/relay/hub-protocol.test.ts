@@ -47,4 +47,10 @@ describe('hub wire validation', () => {
       expect(JSON.stringify(log.mock.calls)).not.toContain('private')
     } finally { log.mockRestore() }
   })
+
+  it('accepts connector reports of abnormal local closes without accepting them as browser close commands', () => {
+    const close = wire('stream_close', { code: 1006, reason: 'local connection lost' }, { channelId: 'c' })
+    expect(parseHubEnvelope(close, 'connector')).not.toBeNull()
+    expect(parseHubEnvelope(close, 'browser')).toBeNull()
+  })
 })

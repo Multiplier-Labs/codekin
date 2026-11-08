@@ -18,6 +18,12 @@ const streamClose = frame('stream_close', z.object({
   code: z.number().int().refine(n => (n >= 1000 && n <= 1014 && ![1004, 1005, 1006].includes(n)) || (n >= 3000 && n <= 4999)).optional(),
   reason: z.string().refine(s => Buffer.byteLength(s) <= 123).optional(),
 })).extend({ channelId: id })
+// Connector closes report a local socket's result, including 1005/1006. They
+// are forwarded as channel metadata, never passed to ws.close() by the hub.
+const connectorStreamClose = streamClose.extend({ payload: z.object({
+  code: z.number().int().min(1000).max(4999).optional(),
+  reason: text.optional(),
+}) })
 
 const connector = z.discriminatedUnion('kind', [
   frame('hello', z.object({
@@ -36,7 +42,7 @@ const connector = z.discriminatedUnion('kind', [
   })).extend({ id }),
   frame('error', z.object({ code: z.string().max(100), message: text })),
   frame('event', z.object({ sessions: summary.optional(), status: version.optional() })),
-  streamData, streamClose, frame('ping', empty), frame('pong', empty),
+  streamData, connectorStreamClose, frame('ping', empty), frame('pong', empty),
 ])
 
 const browser = z.discriminatedUnion('kind', [
