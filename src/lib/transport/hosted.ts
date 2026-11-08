@@ -10,6 +10,7 @@
 import type { CodekinTransport, TransportTarget } from './types'
 import { RelayConnection, RelayRequestError, decodeBody, encodeBody } from './relay-client'
 import { RelayWebSocket } from './relay-socket'
+import { createIntentSigner } from '../../hosted/intentSigner'
 
 /** Control-plane sign-in entry point. */
 const LOGIN_PATH = '/api/auth/github/start'
@@ -51,7 +52,9 @@ export class HostedRelayTransport implements CodekinTransport {
   constructor(machineId: string, connection?: RelayConnection, displayName?: string) {
     this.machineId = machineId
     this.displayName = displayName ?? machineId
-    this.connection = connection ?? new RelayConnection({ machineId })
+    // Everything sent to the machine is signed once this browser is
+    // confirmed on it (signed-intents spec §6); until then it goes unsigned.
+    this.connection = connection ?? new RelayConnection({ machineId, signer: createIntentSigner(machineId) })
   }
 
   /** Open the underlying relay socket (idempotent). */

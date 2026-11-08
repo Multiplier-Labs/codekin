@@ -8,7 +8,8 @@ import type { AddressInfo } from 'net'
 import type { Server } from 'http'
 import { createRelayDevicesRouter } from './devices-local-routes.js'
 import type { RelayDevicesResponse } from './devices-local-routes.js'
-import { runDevicesCommand } from './devices-cli.js'
+import { runAuditCommand, runDevicesCommand } from './devices-cli.js'
+import { IntentLog } from './intent-log.js'
 import { prepareMachineTrust } from './machine-trust.js'
 import { emptyTrustStore, readTrustStore, writeTrustStore } from './trust-store.js'
 import type { TrustedCredential } from './trust-store.js'
@@ -173,6 +174,53 @@ describe('/api/relay/devices', () => {
     expect(ok.status).toBe(200)
     expect(await ok.json()).toMatchObject({ policy: 'warn' })
     expect(readTrustStore(devicesFile)?.policy).toBe('warn')
+  })
+})
+
+describe('the intent log, locally', () => {
+  const entry = (action: string, verdict: 'accepted' | 'rejected' = 'accepted') =>
+    ({ verdict, forwarded: true, action, sessionId: null, userId: 'u1', keyId: 'k1', payloadHash: 'h', intent: { body: '{}', sig: 'sig' } })
+
+  it('lists recent entries without the stored intents, and checks the chain', async () => {
+    const logFile = join(dir, 'intents.jsonl')
+    const log = new IntentLog(logFile)
+    log.append(entry('rest:GET /api/repos'))
+    log.append(entry('ws:input', 'rejected'))
+    const app = express()
+    app.use(createRelayDevicesRouter(t => t === 'good', r => r.headers.authorization?.replace(/^Bearer /, ''), credentialFile, logFile))
+    const srv = await new Promise<Server>(resolve => { const s = app.listen(0, '127.0.0.1', () => { resolve(s) }) })
+    const base = `http://127.0.0.1:${(srv.address() as AddressInfo).port}/api/relay/intents`
+    try {
+      expect((await fetch(base)).status).toBe(401)
+      const auth = { Authorization: 'Bearer good' }
+      const all = await (await fetch(base, { headers: auth })).json() as { entries: Array<Record<string, unknown>> }
+      expect(all.entries.map(e => e.action)).toEqual(['ws:input', 'rest:GET /api/repos'])
+      expect(all.entries[0]).not.toHaveProperty('intent')
+      const refused = await (await fetch(`${base}?verdict=rejected`, { headers: auth })).json() as { entries: unknown[] }
+      expect(refused.entries).toHaveLength(1)
+      expect(await (await fetch(`${base}/verify`, { headers: auth })).json()).toEqual({ ok: true, entries: 2 })
+    } finally {
+      await new Promise<void>(resolve => srv.close(() => { resolve() }))
+    }
+  })
+
+  it('codekin relay audit lists and verifies', () => {
+    const logFile = join(dir, 'intents.jsonl')
+    const out: string[] = []
+    const err: string[] = []
+    const io = { out: (l: string) => { out.push(l) }, err: (l: string) => { err.push(l) } }
+    expect(runAuditCommand([], logFile, io)).toBe(0)
+    expect(out.pop()).toBe('Nothing logged yet.')
+    const log = new IntentLog(logFile)
+    log.append(entry('rest:GET /api/repos'))
+    log.append({ ...entry('ws:input', 'rejected'), reason: 'intent_stale' })
+    expect(runAuditCommand(['list'], logFile, io)).toBe(0)
+    expect(out.join('\n')).toContain('REJECTED  ws:input  key k1  intent_stale (forwarded)')
+    expect(runAuditCommand(['verify'], logFile, io)).toBe(0)
+    expect(out.pop()).toContain('OK: 2 entries')
+    writeFileSync(logFile, 'garbage\n')
+    expect(runAuditCommand(['verify'], logFile, io)).toBe(1)
+    expect(err.pop()).toContain('Broken at line 1')
   })
 })
 

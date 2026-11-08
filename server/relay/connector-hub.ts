@@ -22,6 +22,7 @@ import {
   STREAM_CLOSE,
 } from './relay-protocol.js'
 import { recordAuditEvent } from './audit.js'
+import type { SignedIntent } from './intent-actions.js'
 import { keyIdForSpki, parseP256Spki } from './machine-identity.js'
 import {
   MACHINE_FRAME_LIMIT,
@@ -415,6 +416,7 @@ export class ConnectorHub {
     channelId: string,
     listener: ChannelListener,
     principal?: RelayPrincipal,
+    intent?: SignedIntent,
   ): RelayError | null {
     const machine = this.machines.get(machineId)
     if (!machine) return { code: RELAY_ERROR.machineOffline, message: 'Machine is not connected' }
@@ -430,7 +432,7 @@ export class ConnectorHub {
 
     this.channelListeners.set(channelId, listener)
     machine.channels.add(channelId)
-    machine.socket.send(JSON.stringify(envelope('stream_open', { principal }, { channelId })))
+    machine.socket.send(JSON.stringify(envelope('stream_open', { principal, ...(intent ? { intent } : {}) }, { channelId })))
     return null
   }
 
@@ -443,14 +445,14 @@ export class ConnectorHub {
    * so the byte ceiling has to be enforced here too — drop the channel rather
    * than the hub's memory.
    */
-  sendChannelData(machineId: string, channelId: string, data: string): boolean {
+  sendChannelData(machineId: string, channelId: string, data: string, intent?: SignedIntent): boolean {
     const machine = this.machines.get(machineId)
     if (!machine || machine.socket.readyState !== machine.socket.OPEN || !machine.channels.has(channelId)) return false
     if (isBackedUp(machine.socket)) {
       this.dropChannel(machine, channelId, 'machine connection is congested')
       return false
     }
-    const frame = JSON.stringify(envelope('stream_data', { data }, { channelId }))
+    const frame = JSON.stringify(envelope('stream_data', intent ? { data, intent } : { data }, { channelId }))
     this.countTraffic(machine, Buffer.byteLength(frame))
     machine.socket.send(frame)
     return true
@@ -496,6 +498,10 @@ export class ConnectorHub {
         error: {
           code: typeof err.code === 'string' ? err.code : RELAY_ERROR.badRequest,
           message: typeof err.message === 'string' ? err.message : 'Machine reported an error',
+          // Intent refusals (validated in hub-protocol.ts) pass through.
+          ...(typeof err.detail === 'string' ? { detail: err.detail } : {}),
+          ...(typeof err.intentNonce === 'string' ? { intentNonce: err.intentNonce } : {}),
+          ...(typeof err.machineTime === 'number' ? { machineTime: err.machineTime } : {}),
         },
       })
       return

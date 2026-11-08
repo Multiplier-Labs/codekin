@@ -474,7 +474,26 @@ signing key in IndexedDB and can't export it. Requests expire after 10
 minutes, and at most 3 can wait at once. In this version the list is kept
 but not enforced.
 
+Once a browser is confirmed on a machine, it signs everything it sends there,
+and the machine checks each signature before the request or frame goes any
+further. What happens to a message that isn't signed by a confirmed browser
+depends on the policy:
+
+| Policy | Signed and valid | Unsigned or invalid |
+| --- | --- | --- |
+| `off` (default) | forwarded, logged | forwarded; invalid ones logged |
+| `warn` | forwarded, logged | forwarded, logged |
+| `required` | forwarded, logged | refused, logged |
+
+Set `required` only once every browser you use is confirmed. Until signed
+share grants arrive, shared sessions stop working for guests on a `required`
+machine. The log is `~/.codekin/relay/intents.jsonl` (0600, hash-chained,
+rotated at 30 days or 50 MB). It is also shown in Settings → Remote access →
+Activity.
+
 ```bash
+codekin relay audit                # recent signed / unsigned / refused messages
+codekin relay audit verify         # check the log's hash chain
 codekin relay devices              # identity key id, policy, devices, waiting browsers
 codekin relay devices approve K7QM-2XPA
 codekin relay devices reject <requestId>

@@ -139,6 +139,13 @@ export interface TrustStorage {
   deletePin(userId: string, machineId: string): Promise<void>
 }
 
+/** Fired on window whenever a machine pin is saved or removed (signers reload their key). */
+export const DEVICE_TRUST_CHANGED = 'codekin:device-trust-changed'
+
+function trustChanged(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(DEVICE_TRUST_CHANGED))
+}
+
 const DB_NAME = 'codekin-device-trust'
 const KEYS = 'keys'
 const PINS = 'pins'
@@ -170,8 +177,8 @@ export function indexedDbTrustStorage(): TrustStorage {
     getKey: async userId => request((await store(KEYS, 'readonly')).get(userId) as IDBRequest<BrowserKey | undefined>),
     putKey: async key => { await request((await store(KEYS, 'readwrite')).put(key)) },
     getPin: async (userId, machineId) => request((await store(PINS, 'readonly')).get([userId, machineId]) as IDBRequest<MachinePin | undefined>),
-    putPin: async pin => { await request((await store(PINS, 'readwrite')).put(pin)) },
-    deletePin: async (userId, machineId) => { await request((await store(PINS, 'readwrite')).delete([userId, machineId])) },
+    putPin: async pin => { await request((await store(PINS, 'readwrite')).put(pin)); trustChanged() },
+    deletePin: async (userId, machineId) => { await request((await store(PINS, 'readwrite')).delete([userId, machineId])); trustChanged() },
   }
 }
 

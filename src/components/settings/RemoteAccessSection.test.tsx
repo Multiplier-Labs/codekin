@@ -16,6 +16,8 @@ const api = vi.hoisted(() => ({
   revokeRelayDevice: vi.fn(),
   approveRelayDevice: vi.fn(),
   rejectRelayEnrolment: vi.fn(),
+  getRelayIntents: vi.fn(),
+  verifyRelayIntents: vi.fn(),
 }))
 vi.mock('../../lib/ccApi', () => api)
 
@@ -46,6 +48,7 @@ const button = (text: string) => [...el!.querySelectorAll('button')].find(b => b
 
 beforeEach(() => {
   api.getRelayDevices.mockResolvedValue({ paired: false, machineId: null, identity: null, devices: null })
+  api.getRelayIntents.mockResolvedValue([])
 })
 
 afterEach(() => {
@@ -176,6 +179,27 @@ describe('RemoteAccessSection', () => {
 
     await act(async () => { button('Turn down')!.click() })
     expect(api.rejectRelayEnrolment).toHaveBeenCalledWith('t', 'e1')
+  })
+
+  it('shows the activity log, filtered to refusals, and checks its chain', async () => {
+    api.getRelayStatus.mockResolvedValue(PAIRED)
+    api.getRelayPairing.mockResolvedValue({ state: 'idle' })
+    api.getRelayDevices.mockResolvedValue({ ...NO_DEVICES, devices: { ...NO_DEVICES.devices, credentials: [IPHONE] } })
+    api.getRelayIntents.mockResolvedValue([
+      { seq: 2, at: '2026-11-08T12:00:01Z', verdict: 'rejected', reason: 'intent_wrong_session', forwarded: true, action: 'ws:input', sessionId: 's1', userId: 'u1', keyId: IPHONE.keyId },
+      { seq: 1, at: '2026-11-08T12:00:00Z', verdict: 'accepted', forwarded: true, action: 'rest:GET /api/repos', sessionId: null, userId: 'u1', keyId: IPHONE.keyId },
+    ])
+    api.verifyRelayIntents.mockResolvedValue({ ok: true, entries: 2 })
+    await render()
+    expect(el!.textContent).toContain('Activity')
+    expect(el!.textContent).toContain('rest:GET /api/repos')
+    // Device labels, not key ids.
+    expect(el!.textContent).toContain('Safari · iPhone')
+    expect(el!.textContent).toContain('intent_wrong_session (let through)')
+    await act(async () => { button('Only refused')!.click() })
+    expect(api.getRelayIntents).toHaveBeenLastCalledWith('t', { limit: 50, verdict: 'rejected' })
+    await act(async () => { button('Check log')!.click() })
+    expect(el!.textContent).toContain('Intact: 2 entries')
   })
 
   it('says so when the device list file is unreadable', async () => {

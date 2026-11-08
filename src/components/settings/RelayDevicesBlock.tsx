@@ -20,6 +20,7 @@ import {
   type RelayDevices, type RelayDevice,
 } from '../../lib/ccApi'
 import { Block, Row, Rows, input } from './Block'
+import { RelayActivityBlock } from './RelayActivityBlock'
 
 const plainButton = 'rounded-control border border-edge px-3 py-1.5 text-body text-ink hover:bg-surface-raised disabled:opacity-50 transition-colors'
 const primaryButton = 'rounded-control bg-primary-8 px-3 py-1.5 text-body font-medium text-on-primary hover:bg-primary-7 disabled:opacity-50 transition-colors'
@@ -112,6 +113,7 @@ export function RelayDevicesBlock({ token, onError }: Props) {
   const pending = data.devices?.pending ?? []
   const approved = data.devices?.approved ?? []
   return (
+    <>
     <Block
       title="Devices that can control this computer"
       description="Browsers you confirmed on this computer. Codekin doesn't check them yet: for now the relay is still trusted to say who is in control."
@@ -199,5 +201,7 @@ export function RelayDevicesBlock({ token, onError }: Props) {
         ))}
       </Rows>
     </Block>
+    <RelayActivityBlock token={token} deviceLabels={Object.fromEntries(devices.map(d => [d.keyId, d.label]))} />
+    </>
   )
 }

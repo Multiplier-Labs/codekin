@@ -3,6 +3,8 @@
  * the hub, the connector, and the browser client.
  */
 
+import type { SignedIntent } from './intent-actions.js'
+
 export const RELAY_PROTOCOL_VERSION = 1
 
 export type RelayEnvelopeKind =
@@ -140,6 +142,8 @@ export interface ProxyRequest {
   contentType?: string
   /** base64-encoded request body, omitted when there is none. */
   body?: string
+  /** The browser's signed intent for this request (signed-intents spec §6.3). */
+  intent?: SignedIntent
   /**
    * GitHub delivery headers, honoured only for `webhook` principals and only
    * those named in WEBHOOK_FORWARDED_HEADERS.
@@ -172,6 +176,8 @@ export interface ProxyResponse {
 export interface StreamOpen {
   /** Who the channel belongs to, so the connector can police its frames. */
   principal?: RelayPrincipal
+  /** The browser's signed `channel:open` intent (signed-intents spec §6.3). */
+  intent?: SignedIntent
 }
 
 /** Connector → browser once the local socket is open and authenticated. */
@@ -183,6 +189,8 @@ export interface StreamReady {
 export interface StreamData {
   /** The local Codekin protocol frame, verbatim JSON text. */
   data: string
+  /** The browser's signed intent for this frame (browser → machine only). */
+  intent?: SignedIntent
 }
 
 export interface StreamClose {
@@ -193,6 +201,12 @@ export interface StreamClose {
 export interface RelayError {
   code: string
   message: string
+  /** For intent refusals: which check failed (an `intent_*` reason). */
+  detail?: string
+  /** For intent refusals: the refused intent's nonce, so the browser can match it. */
+  intentNonce?: string
+  /** For `intent_stale`: the machine's clock, so the browser can correct its own (§6.5). */
+  machineTime?: number
 }
 
 /** Error codes used on the request/response and stream paths (spec §7.4). */
@@ -220,6 +234,9 @@ export const ENROL_REQUEST_KINDS = ['enrol_commit', 'enrol_reveal', 'enrol_statu
 export type EnrolRequestKind = (typeof ENROL_REQUEST_KINDS)[number]
 export const ENROL_REPLY_KINDS = ['enrol_challenge', 'enrol_result'] as const
 export type EnrolReplyKind = (typeof ENROL_REPLY_KINDS)[number]
+
+/** Advertised by connectors that verify signed intents (in `capabilities.features`). */
+export const INTENTS_FEATURE = 'intents'
 
 /**
  * A connector advertises this in `capabilities.features` when it answers

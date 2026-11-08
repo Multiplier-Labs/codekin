@@ -14,6 +14,28 @@ import { STREAM_CLOSE } from './relay-protocol.js'
 import type { LocalServerTarget } from './connector-proxy.js'
 import { adaptServerFrame, checkClientFrame, checkServerFrame, newChannelState, observeServerFrame, stampReviewIdentity } from './connector-policy.js'
 import type { ChannelPolicy, ChannelState } from './connector-policy.js'
+import type { IntentDecision } from './intent-verify.js'
+import type { IntentRefusal } from './intent-actions.js'
+
+const INTENT_REFUSAL_TEXT: Record<IntentRefusal, string> = {
+  intent_required: 'This computer only accepts actions signed by a browser confirmed on it',
+  intent_malformed: 'The signed action could not be read',
+  intent_unknown_key: 'This browser is not confirmed on this computer',
+  intent_wrong_signer: 'The signed action came from another account',
+  intent_bad_signature: 'The signature on this action is not valid',
+  intent_wrong_machine: 'The signed action was meant for another computer',
+  intent_wrong_action: 'The signed action does not match what arrived',
+  intent_wrong_payload: 'The signed action does not match what arrived',
+  intent_wrong_session: 'The signed action was meant for another session',
+  intent_stale: "The signed action is too old, or this browser's clock is off",
+  intent_replayed: 'This signed action was already used',
+  intent_unsupported: 'This computer cannot check this kind of signature yet',
+}
+
+/** A sentence for the browser to show for an intent refusal. */
+export function describeIntentRefusal(reason: IntentRefusal | undefined): string {
+  return INTENT_REFUSAL_TEXT[reason ?? 'intent_required']
+}
 
 /** The local server drops sockets that do not authenticate promptly. */
 const LOCAL_HANDSHAKE_TIMEOUT_MS = 10_000
@@ -26,8 +48,21 @@ export interface StreamChannelCallbacks {
   /** The channel ended; no further callbacks follow. */
   onClose: (code: number, reason: string) => void
   /** A browser frame the grant did not permit; it was not forwarded. */
-  onDenied?: (reason: string, permission?: string) => void
+  onDenied?: (reason: string, permission?: string, refusal?: IntentRefusalInfo) => void
 }
+
+/** What an intent refusal adds to the error the browser gets. */
+export interface IntentRefusalInfo {
+  detail: string
+  intentNonce?: string
+  machineTime?: number
+}
+
+/**
+ * Checks a client frame's signed intent before the channel policy sees it
+ * (connector.ts wires in IntentVerifier.checkFrame).
+ */
+export type FrameGate = (frame: string, intent: unknown, channelSession: string | null) => IntentDecision
 
 /** Convert the local server origin to its WebSocket URL. */
 export function localWsUrl(origin: string): string {
@@ -62,6 +97,7 @@ export class StreamChannel {
     private createSocket: WebSocketFactory = (url, options) => new WebSocket(url, options),
     /** Owner by default: an unshared channel belongs to the machine's owner. */
     private policy: ChannelPolicy = { role: 'owner', grants: {} },
+    private gate?: FrameGate,
   ) {}
 
   /** Open the local socket and perform the local auth handshake. */
@@ -124,11 +160,25 @@ export class StreamChannel {
    * answered from the cached handshake instead of being forwarded — the
    * browser has no local token, and the socket is already authenticated.
    */
-  send(data: string): void {
+  send(data: string, intent?: unknown): void {
     if (this.closed) return
     if (this.frameType(data) === 'auth') {
       if (this.connectedFrame) this.callbacks.onData(this.connectedFrame)
       return
+    }
+
+    // The signature first, against the session the channel had joined
+    // before this frame (signed-intents spec §6.4); then the grant.
+    if (this.gate) {
+      const verdict = this.gate(data, intent, this.state.sessionId)
+      if (!verdict.forward) {
+        this.callbacks.onDenied?.(describeIntentRefusal(verdict.reason), undefined, {
+          detail: verdict.reason ?? 'intent_required',
+          ...(verdict.nonce ? { intentNonce: verdict.nonce } : {}),
+          ...(verdict.machineTime !== undefined ? { machineTime: verdict.machineTime } : {}),
+        })
+        return
+      }
     }
 
     // The grant is enforced here, on the machine — the hub's own check is

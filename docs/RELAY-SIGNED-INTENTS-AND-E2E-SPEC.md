@@ -1,6 +1,6 @@
 # Relay trust: device-signed intents and end-to-end encryption
 
-**Status:** Spec, decisions D1–D7 settled (§13). Built: slice 1 (relay audit events, §7.1), slice 2 (machine identity and trust store) and slice 3 (enrolment ceremony, §5.2–5.5), none of it enforced yet. The rest is not built.
+**Status:** Spec, decisions D1–D7 settled (§13). Built: slice 1 (relay audit events, §7.1), slice 2 (machine identity and trust store), slice 3 (enrolment ceremony, §5.2–5.5) and slice 4 (intent signing and verification, §6.1–6.5, §7.2). Nothing turns enforcement on by itself yet: an owner can set `required` locally. The rest is not built.
 **Date:** 2026-11-08
 **Context:** a hosted relay is trusted to say who the machine owner is (§3). This spec removes that trust in two levels: **L1 device-signed intents** and **L2 end-to-end content encryption**. It also adds the relay audit events that are declared but never emitted.
 **Basis:** `origin/main` at v0.10.5 (`a93f6e3`). All `path:line` references point there.
@@ -403,6 +403,28 @@ Verification sits at the relay message boundary in `connector.ts`: `request`, `s
 - If the browser's clock is out, the connector refuses with `intent_stale` and includes `machineTime`.
 - The browser may apply an offset of up to ±1 h and retry once.
 - The offset is advice the relay could alter. The worst case is a delayed delivery: the relay holds a future-dated intent until it falls inside the window. Holding a message is already something a relay can do, and the nonce still limits it to one delivery.
+
+### 6.5a As built (slice 4)
+
+- **Shared rules.** `server/relay/intent-actions.ts` has no Node or DOM imports, and the browser imports it directly. It defines action names, payload bytes, exemptions and session binding, so both ends compute them from one source.
+- **When the browser signs.** A browser signs only for a machine it has pinned (§5.2), and sends unsigned everywhere else, so no capability negotiation is needed. Connectors advertise `intents`, but its version floor stays unset until slice 7, so a workspace can't require it yet.
+- **Policy modes.**
+  - `off`: signed messages are verified and logged, and everything is forwarded.
+  - `warn`: also logs unsigned messages.
+  - `required`: forwards only messages that verify.
+
+  Until slice 5, passkey-signed intents are refused as `intent_unsupported`. Until slice 6, grantees can't sign, so a `required` machine refuses them.
+- **Exempt.** `ping`, `resize`, and `auth` need no intent; the connector answers `auth` from its cached handshake and never forwards it. GitHub webhook deliveries are exempt too, since GitHub's HMAC authenticates them.
+- **Session binding.** A frame's own `sessionId` wins. Otherwise the binding is the channel's session, tracked from client `join_session` and `leave_session` frames only, which is the rule the connector's channel policy already used. REST paths name a session as `/api/sessions/<id>[/…]` or `/api/sessions/archived/<id>`.
+- **Ordering.** The browser signs asynchronously but works out each frame's session when it is sent, and sends frames through a per-channel queue in that order.
+- **Clocks.** The browser hub's `hello_ack` carries the relay's `serverTime` as a first offset. A REST request refused as `intent_stale` is retried once using the machine's `machineTime`. A stale stream frame closes its channel, and the corrected offset applies to the next channel.
+- **Replay cache.** Entries last 10 minutes (twice the skew window), capped at 50k.
+- **Device use.** A device's `lastUsedAt` is written to the device list at most every 10 minutes.
+- **Log.** `~/.codekin/relay/intents.jsonl` adds a `forwarded` field to each line. Unsigned messages are logged only in `warn` and `required`. The local view is Settings → Remote access → Activity, and on the command line `codekin relay audit [list | verify]`.
+- **Deferred.**
+  - `--against <relay export>`: relay audit events don't carry `keyId` or nonces yet.
+  - The §6.2 audit-kind and step-up map: slice 5.
+- **The relay-driven-session gap from §5.2.** A machine set to `required` closes it: a relay can no longer inject frames into a session to run `codekin relay devices approve`.
 
 ### 6.6 Step-up with a passkey
 

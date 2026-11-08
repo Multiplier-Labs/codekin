@@ -946,3 +946,33 @@ export async function revokeRelayDevice(token: string, keyId: string): Promise<v
     throw new Error(body.message ?? `Failed to remove device: ${res.status}`)
   }
 }
+
+/** One line of the machine's intent log (GET /api/relay/intents). */
+export interface RelayIntentEntry {
+  seq: number
+  at: string
+  verdict: 'accepted' | 'rejected' | 'unsigned'
+  reason?: string
+  forwarded: boolean
+  action: string
+  sessionId: string | null
+  userId: string | null
+  keyId: string | null
+}
+
+export async function getRelayIntents(token: string, filter: { limit?: number; keyId?: string; verdict?: RelayIntentEntry['verdict'] } = {}): Promise<RelayIntentEntry[]> {
+  const params = new URLSearchParams()
+  if (filter.limit) params.set('limit', String(filter.limit))
+  if (filter.keyId) params.set('keyId', filter.keyId)
+  if (filter.verdict) params.set('verdict', filter.verdict)
+  const res = await transport.authFetch(`/api/relay/intents?${params.toString()}`, { headers: headers(token) })
+  if (!res.ok) throw new Error(`Failed to read the activity log: ${res.status}`)
+  return (await jsonBody<{ entries: RelayIntentEntry[] }>(res)).entries
+}
+
+/** Check the intent log's hash chain. */
+export async function verifyRelayIntents(token: string): Promise<{ ok: boolean; entries: number; problem?: { line: number; reason: string } }> {
+  const res = await transport.authFetch('/api/relay/intents/verify', { headers: headers(token) })
+  if (!res.ok) throw new Error(`Failed to check the activity log: ${res.status}`)
+  return jsonBody(res)
+}

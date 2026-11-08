@@ -18,6 +18,7 @@ import {
 } from './trust-store.js'
 import type { TrustStoreView } from './trust-store.js'
 import { approveEnrolment, rejectEnrolment } from './enrolment.js'
+import { intentLogPath, readRecentIntents, verifyIntentLog } from './intent-log.js'
 
 export interface DevicesCliIo {
   out: (line: string) => void
@@ -149,4 +150,49 @@ export function runDevicesCommand(
     }
     throw err
   }
+}
+
+/**
+ * `codekin relay audit …`: the machine's intent log (spec §7.2).
+ *
+ *   codekin relay audit [list] [--limit N] [--json]
+ *   codekin relay audit verify [file]
+ */
+export function runAuditCommand(
+  args: string[],
+  logFile = intentLogPath(),
+  io: DevicesCliIo = { out: line => { console.log(line) }, err: line => { console.error(line) } },
+): number {
+  const [action = 'list', ...rest] = args
+  if (action === 'verify') {
+    const file = rest[0] ?? logFile
+    const result = verifyIntentLog(file)
+    if (result.ok) {
+      io.out(`OK: ${result.entries} entries in ${file}, chain intact.`)
+      return 0
+    }
+    io.err(`Broken at line ${result.problem?.line ?? '?'}: ${result.problem?.reason ?? 'unknown'} (${file})`)
+    return 1
+  }
+  if (action === 'list') {
+    const limitFlag = rest.indexOf('--limit')
+    const limit = limitFlag !== -1 ? Number.parseInt(rest[limitFlag + 1] ?? '', 10) || 50 : 50
+    const entries = readRecentIntents(logFile, { limit })
+    if (rest.includes('--json')) {
+      io.out(JSON.stringify(entries, null, 2))
+      return 0
+    }
+    if (entries.length === 0) {
+      io.out('Nothing logged yet.')
+      return 0
+    }
+    for (const e of entries) {
+      const what = e.verdict === 'accepted' ? 'ok      ' : e.verdict === 'unsigned' ? 'unsigned' : 'REJECTED'
+      const why = e.reason ? `  ${e.reason}${e.forwarded ? ' (forwarded)' : ''}` : ''
+      io.out(`${e.at}  ${what}  ${e.action}${e.sessionId ? `  session ${e.sessionId}` : ''}${e.keyId ? `  key ${e.keyId}` : ''}${why}`)
+    }
+    return 0
+  }
+  io.err('Usage: codekin relay audit [list [--limit N] [--json] | verify [file]]')
+  return 1
 }

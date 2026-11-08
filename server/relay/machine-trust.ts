@@ -21,6 +21,8 @@ import { secretStoreFromEnv } from './secret-store.js'
 import type { SecretStore } from './secret-store.js'
 import { relayCredentialPath } from './relay-credential.js'
 import { MachineEnrolment } from './enrolment.js'
+import { IntentVerifier } from './intent-verify.js'
+import { IntentLog, intentLogPath } from './intent-log.js'
 
 export interface TrustPaths {
   identityFile: string
@@ -117,6 +119,21 @@ export function machineEnrolmentFor(
 ): MachineEnrolment {
   const { identityFile, devicesFile } = trustPathsFor(credentialFile)
   return new MachineEnrolment({ machineId, identityFile, devicesFile, secretStore: store, log })
+}
+
+/** The intent checks for this machine's connector, logging to the local intent log (§7.2). */
+export function intentVerifierFor(
+  credentialFile: string,
+  machineId: string,
+  logFile: string = intentLogPath(),
+  log: Log = console,
+): IntentVerifier {
+  return new IntentVerifier({
+    machineId,
+    devicesFile: trustPathsFor(credentialFile).devicesFile,
+    log: new IntentLog(logFile, Date.now, log),
+    warn: log,
+  })
 }
 
 /** Unpair: the identity and device list belong to the pairing that is going away. */

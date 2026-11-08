@@ -787,12 +787,16 @@ if (cmd === 'start') {
     cmdRelayLogout()
   } else if (action === 'devices') {
     await cmdRelayDevices(args.slice(2))
+  } else if (action === 'audit') {
+    const { runAuditCommand } = await loadDevicesCli()
+    process.exit(runAuditCommand(args.slice(2)))
   } else {
-    console.error('Usage: codekin relay <login|connect|status|devices|logout>')
+    console.error('Usage: codekin relay <login|connect|status|devices|audit|logout>')
     console.error('  login   [--url <relay-url>] [--code <pairing-token>] [--unmanaged]')
     console.error('          (the pairing token may also be passed as CODEKIN_PAIR_TOKEN)')
     console.error('  connect [--foreground]')
-    console.error('  devices [list [--json] | revoke <keyId> | policy <off|warn|required>]')
+    console.error('  devices [list [--json] | approve <code> | reject <requestId> | revoke <keyId> | policy <off|warn|required>]')
+    console.error('  audit   [list [--limit N] [--json] | verify [file]]')
     process.exit(1)
   }
 } else {
@@ -812,6 +816,7 @@ Usage:
   codekin relay connect           Run the relay connector (unmanaged pairings)
   codekin relay status            Show pairing, connector + hub status
   codekin relay devices           List or remove devices that can control this machine
+  codekin relay audit             Show or verify this machine's log of signed actions
   codekin relay logout            Remove the local pairing credential
   codekin upgrade                 Upgrade to latest version
   codekin uninstall               Remove Codekin entirely

@@ -11,12 +11,18 @@ const body = z.string().max(Math.ceil(MAX_PROXY_BODY_BYTES / 3) * 4).optional()
 const text = z.string().max(16 * 1024)
 const empty = z.object({})
 const b64 = z.string().max(1024).regex(/^[A-Za-z0-9_-]*$/)
+// A signed intent (signed-intents spec §6.1). Bounded here; verified on the connector.
+const intent = z.object({
+  body: z.string().max(4096),
+  sig: b64.optional(),
+  webauthn: z.object({ authenticatorData: b64, clientDataJSON: b64, signature: b64 }).optional(),
+}).optional()
 const base = { version: z.literal(1), id: id.optional(), channelId: id.optional() }
 const frame = <K extends string, S extends z.ZodType>(kind: K, payload: S) => z.object({ ...base, kind: z.literal(kind), payload })
 // Stream frames are bounded by the socket's maxPayload (relay-server.ts). A
 // tighter cap here would only drop the whole connector at a lower size, e.g.
 // on a large session replay, without protecting anything more.
-const streamData = frame('stream_data', z.object({ data: z.string() })).extend({ channelId: id })
+const streamData = frame('stream_data', z.object({ data: z.string(), intent })).extend({ channelId: id })
 const streamClose = frame('stream_close', z.object({
   // Close codes are ultimately passed to ws.close(), which rejects reserved values.
   code: z.number().int().refine(n => (n >= 1000 && n <= 1014 && ![1004, 1005, 1006].includes(n)) || (n >= 3000 && n <= 4999)).optional(),
@@ -46,7 +52,13 @@ const connector = z.discriminatedUnion('kind', [
     status: z.number().int().min(100).max(599),
     headers: z.record(z.string().max(200), text).refine(h => Object.keys(h).length <= 100), body,
   })).extend({ id }),
-  frame('error', z.object({ code: z.string().max(100), message: text })),
+  frame('error', z.object({
+    code: z.string().max(100), message: text,
+    // Channel denials name the missing permission; intent refusals say which
+    // check failed (signed-intents spec §6.4) so the browser can react.
+    permission: z.string().max(100).optional(), detail: z.string().max(100).optional(),
+    intentNonce: z.string().max(100).optional(), machineTime: z.number().optional(),
+  })),
   frame('event', z.object({ sessions: summary.optional(), status: version.optional() })),
   streamData, connectorStreamClose, frame('ping', empty), frame('pong', empty),
   frame('enrol_challenge', z.object({ enrolId: id, machineKey: b64, nonceM: b64, signature: b64 })).extend({ id }),
@@ -57,8 +69,8 @@ const connector = z.discriminatedUnion('kind', [
 
 const browser = z.discriminatedUnion('kind', [
   frame('hello', z.object({ machineId: id, clientVersion: version.optional() })),
-  frame('request', z.object({ method: z.string().min(1).max(32), path: text, contentType: z.string().max(1024).optional(), body })).extend({ id }),
-  frame('stream_open', empty).extend({ channelId: id }),
+  frame('request', z.object({ method: z.string().min(1).max(32), path: text, contentType: z.string().max(1024).optional(), body, intent })).extend({ id }),
+  frame('stream_open', z.object({ intent })).extend({ channelId: id }),
   streamData, streamClose, frame('ping', empty), frame('pong', empty),
   // Enrolment (signed-intents spec §5.2). Checked for real on the connector;
   // bounded here so nothing oversized reaches it.
