@@ -35,31 +35,40 @@ export function relayCredentialPath(home = homedir()): string {
   return join(home, '.config', 'codekin', 'relay.json')
 }
 
-/**
- * Read relay.json. A `"secretRef": "keychain"` credential resolves its secret
- * through the secret store (docs/RELAY-HARDENING.md §5); without a store, or
- * if the store has no such item, it reads as not paired.
- */
+export type RelayCredentialIdentity = Omit<RelayCredential, 'machineSecret'>
+export type RelayCredentialRead =
+  | { kind: 'ready'; credential: RelayCredential }
+  | { kind: 'missing' }
+  | { kind: 'unavailable'; identity: RelayCredentialIdentity }
+
+/** Distinguish an absent pairing from a secret store that may recover. */
+export function readRelayCredentialState(
+  file = relayCredentialPath(),
+  store: SecretStore | null = secretStoreFromEnv(),
+): RelayCredentialRead {
+  let parsed: Partial<RelayCredential> & { secretRef?: unknown }
+  try {
+    const value: unknown = JSON.parse(readFileSync(file, 'utf-8'))
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return { kind: 'missing' }
+    parsed = value
+  } catch { return { kind: 'missing' } }
+  if (typeof parsed.url !== 'string' || typeof parsed.machineId !== 'string') return { kind: 'missing' }
+  const identity = { url: parsed.url, machineId: parsed.machineId, managed: parsed.managed === true }
+  let secret: string | null = typeof parsed.machineSecret === 'string' ? parsed.machineSecret : null
+  if (secret === null && parsed.secretRef === SECRET_REF_KEYCHAIN) {
+    try { secret = store?.get(parsed.machineId) ?? null } catch { /* retryable */ }
+    if (!secret) return { kind: 'unavailable', identity }
+  }
+  return secret ? { kind: 'ready', credential: { ...identity, machineSecret: secret } } : { kind: 'missing' }
+}
+
+/** Compatibility API for callers that only need a usable credential. */
 export function readRelayCredential(
   file = relayCredentialPath(),
   store: SecretStore | null = secretStoreFromEnv(),
 ): RelayCredential | null {
-  if (!existsSync(file)) return null
-  try {
-    const parsed = JSON.parse(readFileSync(file, 'utf-8')) as (Partial<RelayCredential> & { secretRef?: unknown }) | null
-    if (!parsed || typeof parsed.url !== 'string' || typeof parsed.machineId !== 'string') return null
-    let secret: string | null = typeof parsed.machineSecret === 'string' ? parsed.machineSecret : null
-    if (secret === null && parsed.secretRef === SECRET_REF_KEYCHAIN && store) secret = store.get(parsed.machineId)
-    if (!secret) return null
-    return {
-      url: parsed.url,
-      machineId: parsed.machineId,
-      machineSecret: secret,
-      managed: parsed.managed === true,
-    }
-  } catch {
-    return null
-  }
+  const result = readRelayCredentialState(file, store)
+  return result.kind === 'ready' ? result.credential : null
 }
 
 /** Write a file in one step: temp file, fsync, rename. Mode 0600. */
@@ -94,7 +103,9 @@ export function migrateCredentialToStore(
   if (!store || !existsSync(file)) return false
   let parsed: Record<string, unknown>
   try {
-    parsed = JSON.parse(readFileSync(file, 'utf-8')) as Record<string, unknown>
+    const value: unknown = JSON.parse(readFileSync(file, 'utf-8'))
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+    parsed = value as Record<string, unknown>
   } catch {
     return false
   }

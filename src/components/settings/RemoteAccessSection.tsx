@@ -24,6 +24,7 @@ const CONNECTOR_STATE: Record<RelayStatus['state'], { label: string; tone: 'ok' 
   update_required: { label: 'The relay requires a newer Codekin. Run `codekin upgrade`.', tone: 'warn' },
   connecting: { label: 'Connecting…', tone: 'busy' },
   disconnected: { label: 'Reconnecting…', tone: 'busy' },
+  secret_unavailable: { label: 'Cannot access the saved credential. Retrying automatically…', tone: 'warn' },
   unpaired: { label: 'Not paired', tone: 'warn' },
   unmanaged: { label: 'Run by `codekin relay connect`, not by this server', tone: 'warn' },
   replaced: { label: 'Another connector took over this machine', tone: 'warn' },
@@ -60,7 +61,7 @@ export function RemoteAccessSection({ token, onError }: Props) {
   }, [token, refresh, onError])
 
   // Poll while something is in flight: an approval, or the connector coming online.
-  const inFlight = pairing.state === 'pending' || status?.state === 'connecting' || status?.state === 'disconnected'
+  const inFlight = pairing.state === 'pending' || status?.state === 'connecting' || status?.state === 'disconnected' || status?.state === 'secret_unavailable'
     || (pairing.state === 'complete' && status?.state !== 'connected')
   useEffect(() => {
     if (!token || !inFlight) return
