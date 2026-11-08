@@ -20,6 +20,12 @@ export interface IntentToSign {
   sessionId: string | null
   /** The exact bytes the machine will hash (intent-actions payload helpers). */
   payload: Uint8Array
+  /** Channel opens and frames: the channel's token. */
+  channel?: string
+  /** Frames: position on the channel, from 1. */
+  seq?: number
+  /** Reuse a nonce: a retry of the same request must not be able to run twice. */
+  nonce?: string
 }
 
 export interface IntentSigner {
@@ -67,9 +73,11 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
         sessionId: intent.sessionId,
         action: intent.action,
         payloadHash,
-        nonce: toB64url(crypto.getRandomValues(new Uint8Array(16))),
+        nonce: intent.nonce ?? toB64url(crypto.getRandomValues(new Uint8Array(16))),
         ts: now() + offset,
         keyId: signing.keyId,
+        ...(intent.channel !== undefined ? { channel: intent.channel } : {}),
+        ...(intent.seq !== undefined ? { seq: intent.seq } : {}),
       }
       const text = JSON.stringify(body)
       const sig = new Uint8Array(await crypto.subtle.sign(SIGN, signing.privateKey, utf8.encode(text) as BufferSource))

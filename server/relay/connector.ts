@@ -351,8 +351,8 @@ export class RelayConnector {
     }
     const intents = this.opts.intents
     const opened = intents?.checkChannelOpen(principal, open.intent)
-    if (opened && !opened.forward) {
-      ws.send(JSON.stringify(envelope('error', intentError(opened), { channelId })))
+    if (opened && !opened.decision.forward) {
+      ws.send(JSON.stringify(envelope('error', intentError(opened.decision), { channelId })))
       return
     }
     const policy: ChannelPolicy = {
@@ -387,7 +387,7 @@ export class RelayConnector {
       },
       this.opts.socketFactory,
       policy,
-      intents ? (frame, intent, channelSession) => intents.checkFrame(principal, frame, intent, channelSession) : undefined,
+      intents && opened ? (frame, intent) => intents.checkFrame(principal, frame, intent, opened.channel) : undefined,
     )
 
     this.channels.set(channelId, channel)

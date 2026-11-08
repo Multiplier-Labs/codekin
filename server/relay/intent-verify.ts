@@ -10,16 +10,21 @@
  *   warn      as off, and log unsigned messages too
  *   required  forward only messages that verify
  *
+ * Stream frames are also bound to their channel (a token fixed by the signed
+ * `channel:open`) and to their order (a strictly increasing `seq`), so a relay
+ * can drop frames but not reorder them or move them to another channel.
+ *
  * Browser keys only for now: passkey-signed intents (step-up) come with
  * slice 5, grantee keys with signed grants in slice 6. Until then a grantee
  * on a `required` machine is refused.
  */
 
 import { createHash } from 'crypto'
-import { statSync } from 'fs'
+import { existsSync, statSync } from 'fs'
 import {
-  CHANNEL_OPEN_ACTION, INTENT_MAX_SKEW_MS, INTENT_VERSION, MAX_INTENT_BODY_CHARS,
-  channelOpenPayload, frameAction, framePayload, frameSession, isExemptFrame, requestAction, requestPayload, requestSession,
+  CHANNEL_OPEN_ACTION, CHANNEL_TOKEN_CHARS, INTENT_MAX_SKEW_MS, INTENT_VERSION, MAX_INTENT_BODY_CHARS,
+  channelOpenPayload, channelSessionAfter, frameAction, framePayload, frameSession, isExemptFrame, requestAction, requestPayload,
+  requestSession,
 } from './intent-actions.js'
 import type { IntentBody, IntentRefusal, SignedIntent } from './intent-actions.js'
 import { fromB64url, SIGNATURE_BYTES, verifyP1363 } from './enrolment-crypto.js'
@@ -28,7 +33,7 @@ import type { BrowserCredential, IntentPolicy, TrustStore } from './trust-store.
 import type { IntentLog, IntentVerdict } from './intent-log.js'
 import type { RelayPrincipal } from './relay-protocol.js'
 
-/** How long a (keyId, nonce) pair is remembered; longer than the skew window on both sides. */
+/** How long a (keyId, nonce) pair is remembered: past the latest time its timestamp could still pass. */
 export const REPLAY_TTL_MS = 2 * INTENT_MAX_SKEW_MS
 export const REPLAY_CACHE_MAX = 50_000
 /** How often a device's lastUsedAt is written back to the device list. */
@@ -45,11 +50,28 @@ export interface IntentDecision {
   machineTime?: number
 }
 
+/**
+ * One stream channel as the verifier tracks it. Created by checkChannelOpen;
+ * checkFrame reads and advances it.
+ */
+export interface IntentChannel {
+  /** The token the browser's signed `channel:open` fixed; null when the open wasn't verified. */
+  token: string | null
+  /** Highest frame `seq` accepted on this channel. */
+  lastSeq: number
+  /** The session frames on this channel act on (intent-actions channelSessionAfter). */
+  session: string | null
+}
+
 /** What a message claims to do, worked out from the message itself. */
 interface Expected {
   action: string
   sessionId: string | null
   payload: Uint8Array
+  /** Frames only: the channel the frame arrived on. */
+  channel?: IntentChannel
+  /** Channel opens: the token must be present and well formed. */
+  opensChannel?: boolean
 }
 
 export interface IntentVerifierOptions {
@@ -76,6 +98,8 @@ function parseBody(text: string): IntentBody | null {
   if (typeof v.payloadHash !== 'string' || typeof v.nonce !== 'string' || typeof v.keyId !== 'string') return null
   if (typeof v.ts !== 'number' || !Number.isFinite(v.ts)) return null
   if (v.nonce.length < 16 || v.nonce.length > 64) return null
+  if (v.channel !== undefined && typeof v.channel !== 'string') return null
+  if (v.seq !== undefined && !(Number.isSafeInteger(v.seq) && v.seq > 0)) return null
   return v as IntentBody
 }
 
@@ -91,13 +115,20 @@ export class IntentVerifier {
   private store: TrustStore | null = null
   private storeSignature: string | null = null
   private lastPolicy: IntentPolicy = 'off'
+  /** `${keyId}:${nonce}` → time until which it counts as used. */
   private replay = new Map<string, number>()
   private lastUsed = new Map<string, number>()
   private lastFlush = 0
+  private flushScheduled = false
   private readonly now: () => number
 
   constructor(private readonly opts: IntentVerifierOptions) {
     this.now = opts.now ?? Date.now
+    // A restart must not reopen the replay window: nonces accepted in the
+    // last few minutes are still in the log.
+    for (const { keyId, nonce, at } of opts.log?.recentAcceptedNonces(this.now() - REPLAY_TTL_MS) ?? []) {
+      this.replay.set(`${keyId}:${nonce}`, at + REPLAY_TTL_MS)
+    }
   }
 
   /** The device list, re-read only when the file changed (it is checked on every message). */
@@ -116,8 +147,10 @@ export class IntentVerifier {
         this.store = store && store.machineId === this.opts.machineId ? store : null
         if (this.store) this.lastPolicy = this.store.policy
       } catch (err) {
-        // Keep the last policy we knew rather than dropping to `off`.
-        this.opts.warn?.warn(`[relay] Can't read the device list; keeping policy "${this.lastPolicy}": ${err instanceof Error ? err.message : String(err)}`)
+        // A device list that exists but can't be read may be the one that
+        // said `required`: fail closed until the owner fixes it locally.
+        if (existsSync(this.opts.devicesFile)) this.lastPolicy = 'required'
+        this.opts.warn?.warn(`[relay] Can't read the device list; treating the policy as "${this.lastPolicy}": ${err instanceof Error ? err.message : String(err)}`)
         this.store = null
       }
     }
@@ -130,43 +163,54 @@ export class IntentVerifier {
   }
 
   checkRequest(req: { method: string; path: string; contentType?: string; body?: string; principal?: RelayPrincipal; intent?: unknown }): IntentDecision {
-    // A forwarded GitHub delivery carries GitHub's HMAC, not a device's intent.
+    // A forwarded GitHub delivery carries GitHub's HMAC, not a device's intent;
+    // checkProxyRequest pins it to the one webhook route.
     if (req.principal?.role === 'webhook') return EXEMPT
     const body = req.body ? Buffer.from(req.body, 'base64') : null
     return this.check(req.principal, req.intent, {
       action: requestAction(req.method, req.path),
       sessionId: requestSession(req.path),
       payload: requestPayload(req.method, req.path, req.contentType, body),
+    }).decision
+  }
+
+  /** Check a channel open; the returned channel goes with every frame on it. */
+  checkChannelOpen(principal: RelayPrincipal | undefined, intent: unknown): { decision: IntentDecision; channel: IntentChannel } {
+    const { decision, body } = this.check(principal, intent, {
+      action: CHANNEL_OPEN_ACTION, sessionId: null, payload: channelOpenPayload(), opensChannel: true,
     })
+    const token = decision.verdict === 'accepted' && body?.channel ? body.channel : null
+    return { decision, channel: { token, lastSeq: 0, session: null } }
   }
 
-  checkChannelOpen(principal: RelayPrincipal | undefined, intent: unknown): IntentDecision {
-    return this.check(principal, intent, { action: CHANNEL_OPEN_ACTION, sessionId: null, payload: channelOpenPayload() })
-  }
-
-  /** `channelSession` is the session the channel had joined before this frame. */
-  checkFrame(principal: RelayPrincipal | undefined, frame: string, intent: unknown, channelSession: string | null): IntentDecision {
+  /** Check a client frame against its channel, and advance the channel when it goes through. */
+  checkFrame(principal: RelayPrincipal | undefined, frame: string, intent: unknown, channel: IntentChannel): IntentDecision {
     if (isExemptFrame(frame)) return EXEMPT
-    return this.check(principal, intent, {
+    const { decision, body } = this.check(principal, intent, {
       action: frameAction(frame),
-      sessionId: frameSession(frame, channelSession),
+      sessionId: frameSession(frame, channel.session),
       payload: framePayload(frame),
+      channel,
     })
+    if (decision.verdict === 'accepted' && body?.seq !== undefined) channel.lastSeq = body.seq
+    // What reaches the local server moves the session, signed or not.
+    if (decision.forward) channel.session = channelSessionAfter(frame, channel.session, body?.seq)
+    return decision
   }
 
-  private check(principal: RelayPrincipal | undefined, rawIntent: unknown, expected: Expected): IntentDecision {
+  private check(principal: RelayPrincipal | undefined, rawIntent: unknown, expected: Expected): { decision: IntentDecision; body: IntentBody | null } {
     const store = this.currentStore()
     const policy = store?.policy ?? this.lastPolicy
 
     if (rawIntent === undefined || rawIntent === null) {
-      if (policy === 'off') return { forward: true, verdict: 'unsigned' }
-      return this.finish(policy, principal, expected, null, null, 'intent_required')
+      if (policy === 'off') return { decision: { forward: true, verdict: 'unsigned' }, body: null }
+      return { decision: this.finish(policy, principal, expected, null, null, 'intent_required'), body: null }
     }
     const intent = asSignedIntent(rawIntent)
     const body = intent ? parseBody(intent.body) : null
-    if (!intent || !body) return this.finish(policy, principal, expected, intent, null, 'intent_malformed')
+    if (!intent || !body) return { decision: this.finish(policy, principal, expected, intent, null, 'intent_malformed'), body: null }
     const refusal = this.verify(store, principal, intent, body, expected)
-    return this.finish(policy, principal, expected, intent, body, refusal)
+    return { decision: this.finish(policy, principal, expected, intent, body, refusal), body }
   }
 
   private verify(
@@ -193,41 +237,55 @@ export class IntentVerifier {
     if (body.action !== expected.action) return 'intent_wrong_action'
     if (body.payloadHash !== sha256b64url(expected.payload)) return 'intent_wrong_payload'
     if (body.sessionId !== expected.sessionId) return 'intent_wrong_session'
+    if (expected.opensChannel && (typeof body.channel !== 'string' || body.channel.length !== CHANNEL_TOKEN_CHARS)) return 'intent_wrong_channel'
+    if (expected.channel) {
+      if (expected.channel.token === null || body.channel !== expected.channel.token) return 'intent_wrong_channel'
+      if (body.seq === undefined || body.seq <= expected.channel.lastSeq) return 'intent_out_of_order'
+    }
     if (Math.abs(body.ts - this.now()) > INTENT_MAX_SKEW_MS) return 'intent_stale'
-    if (!this.remember(body.keyId, body.nonce)) return 'intent_replayed'
+    const replay = this.remember(body.keyId, body.nonce)
+    if (replay) return replay
     this.noteUsed(body.keyId)
     return null
   }
 
-  /** False when this (keyId, nonce) was already seen inside the window. */
-  private remember(keyId: string, nonce: string): boolean {
+  /** Record (keyId, nonce); refuse one already seen in the window, or when the cache is full. */
+  private remember(keyId: string, nonce: string): IntentRefusal | null {
     const now = this.now()
     const key = `${keyId}:${nonce}`
-    const seen = this.replay.get(key)
-    if (seen !== undefined && seen > now) return false
-    // Expired entries go first; past the cap, the oldest go regardless.
+    const until = this.replay.get(key)
+    if (until !== undefined && until >= now) return 'intent_replayed'
+    // Entries expire in insertion order (the TTL is fixed).
     for (const [k, expiry] of this.replay) {
-      if (expiry > now && this.replay.size < REPLAY_CACHE_MAX) break
+      if (expiry >= now) break
       this.replay.delete(k)
     }
+    // Never evict a live entry: that would reopen a replay. A device sending
+    // this much (~80 a second for 10 minutes) waits instead.
+    if (this.replay.size >= REPLAY_CACHE_MAX) return 'intent_rate_limited'
     this.replay.set(key, now + REPLAY_TTL_MS)
-    return true
+    return null
   }
 
+  /** Remember when each device was used; written back off the request path, at most every 10 minutes. */
   private noteUsed(keyId: string): void {
     const now = this.now()
     this.lastUsed.set(keyId, now)
-    if (now - this.lastFlush < LAST_USED_FLUSH_MS) return
+    if (now - this.lastFlush < LAST_USED_FLUSH_MS || this.flushScheduled) return
     this.lastFlush = now
-    const used = new Map(this.lastUsed)
-    try {
-      mutateTrustStore(this.opts.devicesFile, this.opts.machineId, store => {
-        for (const c of store.credentials) {
-          const at = used.get(c.keyId)
-          if (at !== undefined) c.lastUsedAt = new Date(at).toISOString()
-        }
-      }, now)
-    } catch { /* best effort; retried at the next flush */ }
+    this.flushScheduled = true
+    setImmediate(() => {
+      this.flushScheduled = false
+      const used = new Map(this.lastUsed)
+      try {
+        mutateTrustStore(this.opts.devicesFile, this.opts.machineId, store => {
+          for (const c of store.credentials) {
+            const at = used.get(c.keyId)
+            if (at !== undefined) c.lastUsedAt = new Date(at).toISOString()
+          }
+        }, this.now())
+      } catch { /* best effort; retried at the next flush */ }
+    })
   }
 
   private finish(
@@ -249,7 +307,9 @@ export class IntentVerifier {
       userId: principal?.userId ?? null,
       keyId: body?.keyId ?? null,
       payloadHash: sha256b64url(expected.payload),
-      ...(intent ? { intent: { body: intent.body, ...(intent.sig ? { sig: intent.sig } : {}) } } : {}),
+      // Only an accepted intent is evidence worth keeping; anything else may
+      // be whatever the relay chose to send, so it isn't stored.
+      ...(verdict === 'accepted' && intent ? { intent: { body: intent.body, ...(intent.sig ? { sig: intent.sig } : {}) } } : {}),
     })
     return {
       forward,

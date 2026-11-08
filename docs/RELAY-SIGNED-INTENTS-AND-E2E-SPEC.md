@@ -415,12 +415,33 @@ Verification sits at the relay message boundary in `connector.ts`: `request`, `s
 
   Until slice 5, passkey-signed intents are refused as `intent_unsupported`. Until slice 6, grantees can't sign, so a `required` machine refuses them.
 - **Exempt.** `ping`, `resize`, and `auth` need no intent; the connector answers `auth` from its cached handshake and never forwards it. GitHub webhook deliveries are exempt too, since GitHub's HMAC authenticates them.
-- **Session binding.** A frame's own `sessionId` wins. Otherwise the binding is the channel's session, tracked from client `join_session` and `leave_session` frames only, which is the rule the connector's channel policy already used. REST paths name a session as `/api/sessions/<id>[/…]` or `/api/sessions/archived/<id>`.
-- **Ordering.** The browser signs asynchronously but works out each frame's session when it is sent, and sends frames through a per-channel queue in that order.
-- **Clocks.** The browser hub's `hello_ack` carries the relay's `serverTime` as a first offset. A REST request refused as `intent_stale` is retried once using the machine's `machineTime`. A stale stream frame closes its channel, and the corrected offset applies to the next channel.
-- **Replay cache.** Entries last 10 minutes (twice the skew window), capped at 50k.
-- **Device use.** A device's `lastUsedAt` is written to the device list at most every 10 minutes.
-- **Log.** `~/.codekin/relay/intents.jsonl` adds a `forwarded` field to each line. Unsigned messages are logged only in `warn` and `required`. The local view is Settings → Remote access → Activity, and on the command line `codekin relay audit [list | verify]`.
+- **Channel and order.** The intent body gains two optional fields for streams: `channel` and `seq`.
+  - The signed `channel:open` carries a random channel token. Every frame carries that token and a `seq` that starts at 1 on each channel.
+  - The connector accepts only frames whose `seq` is higher than the last one it accepted. A relay can drop frames, but it can't reorder them (`intent_out_of_order`) or move them to another channel (`intent_wrong_channel`).
+- **Session binding.** A frame's own `sessionId` wins. Otherwise the binding is the channel's session, tracked from client frames only:
+  - `join_session` sets it.
+  - `leave_session` clears it.
+  - `create_session` moves it to `@created:<seq of that frame>`, because the local server joins the socket to the new session, whose id neither end knows yet.
+
+  REST paths name a session as `/api/sessions/<id>[/…]` or `/api/sessions/archived/<id>`.
+- **REST payload.** The four fields (method, path with query, content type, body) are each length-prefixed, so none can run into the next.
+- **Ordering in the browser.** The browser signs asynchronously, but fixes each frame's session and `seq` when it is sent, and sends frames through a per-channel queue. Closing a channel lets frames still being signed go out first.
+- **Clocks.**
+  - The browser hub's `hello_ack` carries the relay's `serverTime` as a first offset, used only until the machine has given its own time.
+  - A REST request refused as `intent_stale` is retried once with the machine's `machineTime` and the **same nonce**. If a relay forged the "stale" reply after the request actually ran, the retry is refused as a replay.
+  - A stale stream frame closes its channel, and the corrected offset applies to the next channel.
+- **Replay cache.**
+  - Entries last 10 minutes (twice the skew window).
+  - The cache is seeded at startup from nonces accepted in the log, so a restart doesn't reopen the window.
+  - At 50k entries it refuses (`intent_rate_limited`) rather than evicting a live entry.
+- **Device list handling.** An unreadable device list fails closed, treated as `required`. A device's `lastUsedAt` is written back at most every 10 minutes, off the request path.
+- **Log.** `~/.codekin/relay/intents.jsonl` adds a `forwarded` field to each line.
+  - Unsigned messages are logged only in `warn` and `required`. The full intent is stored only for accepted ones.
+  - Refusal lines are capped at 120 a minute, and the next line records how many were dropped (`suppressedBefore`).
+  - 12 rotated files are kept. A torn last line is closed off before the next append.
+  - Reads come from the tail.
+  - The local view is Settings → Remote access → Activity, and on the command line `codekin relay audit [list | verify]`.
+- **Webhook replay (connector).** Forwarded GitHub deliveries are deduplicated on the SHA-256 of the body GitHub signs, not on the unsigned delivery id. Undated events are never aged out.
 - **Deferred.**
   - `--against <relay export>`: relay audit events don't carry `keyId` or nonces yet.
   - The §6.2 audit-kind and step-up map: slice 5.

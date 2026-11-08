@@ -30,6 +30,9 @@ const INTENT_REFUSAL_TEXT: Record<IntentRefusal, string> = {
   intent_stale: "The signed action is too old, or this browser's clock is off",
   intent_replayed: 'This signed action was already used',
   intent_unsupported: 'This computer cannot check this kind of signature yet',
+  intent_wrong_channel: 'The signed action was meant for another connection',
+  intent_out_of_order: 'The signed action arrived out of order',
+  intent_rate_limited: 'Too many signed actions at once; slow down',
 }
 
 /** A sentence for the browser to show for an intent refusal. */
@@ -60,9 +63,9 @@ export interface IntentRefusalInfo {
 
 /**
  * Checks a client frame's signed intent before the channel policy sees it
- * (connector.ts wires in IntentVerifier.checkFrame).
+ * (connector.ts wires in IntentVerifier.checkFrame with this channel's state).
  */
-export type FrameGate = (frame: string, intent: unknown, channelSession: string | null) => IntentDecision
+export type FrameGate = (frame: string, intent: unknown) => IntentDecision
 
 /** Convert the local server origin to its WebSocket URL. */
 export function localWsUrl(origin: string): string {
@@ -167,10 +170,9 @@ export class StreamChannel {
       return
     }
 
-    // The signature first, against the session the channel had joined
-    // before this frame (signed-intents spec §6.4); then the grant.
+    // The signature first (signed-intents spec §6.4); then the grant.
     if (this.gate) {
-      const verdict = this.gate(data, intent, this.state.sessionId)
+      const verdict = this.gate(data, intent)
       if (!verdict.forward) {
         this.callbacks.onDenied?.(describeIntentRefusal(verdict.reason), undefined, {
           detail: verdict.reason ?? 'intent_required',

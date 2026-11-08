@@ -146,10 +146,11 @@ describe('signed intents over the relay', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  function sign(action: string, payload: Uint8Array, sessionId: string | null = null): SignedIntent {
+  function sign(action: string, payload: Uint8Array, sessionId: string | null = null, extra: Partial<IntentBody> = {}): SignedIntent {
     const body: IntentBody = {
       v: 1, machineId, sessionId, action, nonce: randomBytes(16).toString('base64url'), ts: Date.now(), keyId: key.keyId,
       payloadHash: createHash('sha256').update(payload).digest('base64url'),
+      ...extra,
     }
     const text = JSON.stringify(body)
     return { body: text, sig: signP1363(key.privateKey, Buffer.from(text)).toString('base64url') }
@@ -182,12 +183,13 @@ describe('signed intents over the relay', () => {
   })
 
   it('opens a channel and forwards frames only when signed', async () => {
-    send('stream_open', { intent: sign('channel:open', new Uint8Array()) }, { channelId: 'c1' })
+    const channel = randomBytes(16).toString('base64url')
+    send('stream_open', { intent: sign('channel:open', new Uint8Array(), null, { channel }) }, { channelId: 'c1' })
     await reply(f => f.channelId === 'c1' && f.kind === 'event')
     const join = '{"type":"join_session","sessionId":"s1"}'
-    send('stream_data', { data: join, intent: sign(frameAction(join), framePayload(join), 's1') }, { channelId: 'c1' })
+    send('stream_data', { data: join, intent: sign(frameAction(join), framePayload(join), 's1', { channel, seq: 1 }) }, { channelId: 'c1' })
     const input = '{"type":"input","data":"ls"}'
-    send('stream_data', { data: input, intent: sign(frameAction(input), framePayload(input), 's1') }, { channelId: 'c1' })
+    send('stream_data', { data: input, intent: sign(frameAction(input), framePayload(input), 's1', { channel, seq: 2 }) }, { channelId: 'c1' })
     await waitFor(() => localSockets[0]?.received.length === 2)
     expect(localSockets[0].received).toEqual([join, input])
 

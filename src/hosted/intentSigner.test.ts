@@ -18,7 +18,7 @@ import { createIntentSigner, clampOffset } from './intentSigner'
 import { getOrCreateBrowserKey, type BrowserKey, type MachinePin, type TrustStorage } from './deviceTrust'
 import { RelayConnection } from '../lib/transport/relay-client'
 import { IntentVerifier } from '../../server/relay/intent-verify'
-import { channelSessionAfter, requestAction, requestPayload, requestSession } from '../../server/relay/intent-actions'
+import { requestAction, requestPayload, requestSession } from '../../server/relay/intent-actions'
 import { emptyTrustStore, writeTrustStore } from '../../server/relay/trust-store'
 import type { RelayPrincipal } from '../../server/relay/relay-protocol'
 
@@ -113,19 +113,55 @@ describe('browser intents verified by the machine', () => {
     await vi.waitFor(() => { expect(ws.sent.filter(f => f.kind === 'stream_data')).toHaveLength(frames.length) })
 
     const open = ws.sent.find(f => f.kind === 'stream_open')!
-    expect(verifier.checkChannelOpen(OWNER, open.payload.intent).verdict).toBe('accepted')
+    const opened = verifier.checkChannelOpen(OWNER, open.payload.intent)
+    expect(opened.decision.verdict).toBe('accepted')
     const data = ws.sent.filter(f => f.kind === 'stream_data')
     expect(data.map(f => f.payload.data)).toEqual(frames)
-    // Replay the machine's channel tracking over what arrived.
-    let session: string | null = null
+    // The machine tracks the channel itself (token, order, session) over what arrived.
     for (const f of data) {
       const frame = f.payload.data as string
-      const verdict = verifier.checkFrame(OWNER, frame, f.payload.intent, session)
+      const verdict = opened && verifier.checkFrame(OWNER, frame, f.payload.intent, opened.channel)
       expect(verdict.forward, frame).toBe(true)
       expect(verdict.verdict).toBe(frame.includes('ping') ? 'exempt' : 'accepted')
-      session = channelSessionAfter(frame, session)
     }
+    expect(opened.channel.lastSeq).toBe(4)
     conn.close()
+  })
+
+  it('agrees with the machine on the session after create_session', async () => {
+    const conn = new RelayConnection({ machineId: 'm1', url: 'wss://relay.test/relay/browser', signer: createIntentSigner('m1', storage) })
+    conn.connect()
+    const ws = FakeWebSocket.instances[0]
+    ws.readyState = 1
+    ws.onopen?.()
+    ws.onmessage?.({ data: JSON.stringify({ kind: 'hello_ack', payload: { online: true } }) })
+    conn.openChannel('c1', { onReady: () => {}, onData: () => {}, onClose: () => {}, onError: () => {} })
+    const frames = ['{"type":"join_session","sessionId":"A"}', '{"type":"create_session","name":"n","workingDir":"/w"}', '{"type":"input","data":"y"}']
+    for (const f of frames) conn.sendChannelData('c1', f)
+    await vi.waitFor(() => { expect(ws.sent.filter(f => f.kind === 'stream_data')).toHaveLength(3) })
+    const opened = verifier.checkChannelOpen(OWNER, ws.sent.find(f => f.kind === 'stream_open')!.payload.intent)
+    for (const f of ws.sent.filter(x => x.kind === 'stream_data')) {
+      expect(verifier.checkFrame(OWNER, f.payload.data as string, f.payload.intent, opened.channel).verdict).toBe('accepted')
+    }
+    const lastBody = JSON.parse((ws.sent.at(-1)!.payload.intent as { body: string }).body) as { sessionId: string }
+    expect(lastBody.sessionId).toBe('@created:2')
+    conn.close()
+  })
+
+  it('sends frames still being signed when the channel closes, then the close', async () => {
+    const signer = createIntentSigner('m1', storage)
+    const slow = { ...signer, sign: async (i: Parameters<typeof signer.sign>[0]) => { await new Promise(r => setTimeout(r, 20)); return signer.sign(i) } }
+    const conn = new RelayConnection({ machineId: 'm1', url: 'wss://relay.test/relay/browser', signer: slow })
+    conn.connect()
+    const ws = FakeWebSocket.instances[0]
+    ws.readyState = 1
+    ws.onopen?.()
+    ws.onmessage?.({ data: JSON.stringify({ kind: 'hello_ack', payload: { online: true } }) })
+    conn.openChannel('c1', { onReady: () => {}, onData: () => {}, onClose: () => {}, onError: () => {} })
+    conn.sendChannelData('c1', '{"type":"leave_session"}')
+    conn.closeChannel('c1')
+    await vi.waitFor(() => { expect(ws.sent.some(f => f.kind === 'stream_close')).toBe(true) })
+    expect(ws.sent.map(f => f.kind)).toEqual(['hello', 'stream_open', 'stream_data', 'stream_close'])
   })
 
   it('retries a request once with the machine clock after a stale refusal', async () => {
@@ -139,15 +175,45 @@ describe('browser intents verified by the machine', () => {
     ws.onmessage?.({ data: JSON.stringify({ kind: 'hello_ack', payload: { online: true } }) })
     const reply = conn.request('GET', '/api/health')
     await vi.waitFor(() => { expect(ws.sent.filter(f => f.kind === 'request')).toHaveLength(1) })
+    const first = ws.sent.at(-1)!
     const machineTime = Date.now() + 20 * 60_000
-    ws.onmessage?.({ data: JSON.stringify({ kind: 'error', id: ws.sent.at(-1)!.id, payload: { code: 'not_permitted', message: 'stale', detail: 'intent_stale', machineTime } }) })
+    ws.onmessage?.({ data: JSON.stringify({ kind: 'error', id: first.id, payload: { code: 'not_permitted', message: 'stale', detail: 'intent_stale', machineTime } }) })
     await vi.waitFor(() => { expect(ws.sent.filter(f => f.kind === 'request')).toHaveLength(2) })
     expect(setOffset).toHaveBeenCalledWith(expect.any(Number))
     const retried = ws.sent.at(-1)!
-    const body = JSON.parse((retried.payload.intent as { body: string }).body) as { ts: number }
+    const body = JSON.parse((retried.payload.intent as { body: string }).body) as { ts: number; nonce: string }
+    const firstBody = JSON.parse((first.payload.intent as { body: string }).body) as { nonce: string }
     expect(Math.abs(body.ts - machineTime)).toBeLessThan(5_000)
+    // Same nonce: if the relay forged the "stale" reply after the first one ran, the retry is a replay.
+    expect(body.nonce).toBe(firstBody.nonce)
     ws.onmessage?.({ data: JSON.stringify({ kind: 'response', id: retried.id, payload: { status: 200, headers: {} } }) })
     expect(await reply).toMatchObject({ status: 200 })
+
+    // From now on the relay's hello_ack can't move the clock back.
+    setOffset.mockClear()
+    ws.onmessage?.({ data: JSON.stringify({ kind: 'hello_ack', payload: { online: true, serverTime: Date.now() - 50 * 60_000 } }) })
+    expect(setOffset).not.toHaveBeenCalled()
+  })
+
+  it('a relay forging "stale" after a request ran cannot get it run twice', async () => {
+    const signer = createIntentSigner('m1', storage)
+    const conn = new RelayConnection({ machineId: 'm1', url: 'wss://relay.test/relay/browser', signer })
+    conn.connect()
+    const ws = FakeWebSocket.instances[0]
+    ws.readyState = 1
+    ws.onopen?.()
+    ws.onmessage?.({ data: JSON.stringify({ kind: 'hello_ack', payload: { online: true } }) })
+    const reply = conn.request('POST', '/api/sessions/create', btoa('{"name":"x"}'), 'application/json')
+    await vi.waitFor(() => { expect(ws.sent.filter(f => f.kind === 'request')).toHaveLength(1) })
+    const first = ws.sent.at(-1)!
+    const asRequest = (f: typeof first) => ({ method: 'POST', path: '/api/sessions/create', contentType: 'application/json', body: f.payload.body as string, principal: OWNER, intent: f.payload.intent })
+    // The relay forwards it (it runs), then tells the browser it was stale.
+    expect(verifier.checkRequest(asRequest(first)).verdict).toBe('accepted')
+    ws.onmessage?.({ data: JSON.stringify({ kind: 'error', id: first.id, payload: { code: 'not_permitted', message: 'stale', detail: 'intent_stale', machineTime: Date.now() } }) })
+    await vi.waitFor(() => { expect(ws.sent.filter(f => f.kind === 'request')).toHaveLength(2) })
+    expect(verifier.checkRequest(asRequest(ws.sent.at(-1)!))).toMatchObject({ forward: false, reason: 'intent_replayed' })
+    ws.onmessage?.({ data: JSON.stringify({ kind: 'error', id: ws.sent.at(-1)!.id, payload: { code: 'not_permitted', message: 'replayed', detail: 'intent_replayed' } }) })
+    await expect(reply).rejects.toMatchObject({ detail: 'intent_replayed' })
   })
 
   it('bounds clock corrections to an hour', () => {

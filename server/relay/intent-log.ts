@@ -16,9 +16,9 @@
  */
 
 import { createHash } from 'crypto'
-import { appendFileSync, chmodSync, existsSync, mkdirSync, openSync, readFileSync, readSync, closeSync, renameSync, statSync } from 'fs'
+import { appendFileSync, chmodSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, closeSync, renameSync, rmSync, statSync } from 'fs'
 import { homedir } from 'os'
-import { dirname, join } from 'path'
+import { basename, dirname, join } from 'path'
 import type { SignedIntent } from './intent-actions.js'
 
 export function intentLogPath(home = homedir()): string {
@@ -42,7 +42,10 @@ export interface IntentLogEntry {
   userId: string | null
   keyId: string | null
   payloadHash: string | null
+  /** Kept for accepted intents only: it proves who signed what. */
   intent?: SignedIntent
+  /** Refusals not written since the previous line (rate limit). */
+  suppressedBefore?: number
 }
 
 export type IntentLogInput = Omit<IntentLogEntry, 'seq' | 'prev' | 'at'>
@@ -58,23 +61,19 @@ export function lineHash(line: string): string {
 /** The first `prev` in a chain that starts from nothing. */
 export const GENESIS = '0'.repeat(64)
 
-/** Last line of a file, read from its tail. */
-function lastLine(file: string): string | null {
+/** Up to `maxBytes` from the end of a file, starting at a line boundary. */
+function readTail(file: string, maxBytes: number): string {
   let size: number
-  try { size = statSync(file).size } catch { return null }
-  if (size === 0) return null
+  try { size = statSync(file).size } catch { return '' }
+  if (size === 0) return ''
+  const start = Math.max(0, size - maxBytes)
   const fd = openSync(file, 'r')
   try {
-    let chunk = 4096
-    for (;;) {
-      const start = Math.max(0, size - chunk)
-      const buf = Buffer.alloc(size - start)
-      readSync(fd, buf, 0, buf.length, start)
-      const text = buf.toString('utf-8').replace(/\n+$/, '')
-      const nl = text.lastIndexOf('\n')
-      if (nl !== -1 || start === 0) return text.slice(nl + 1) || null
-      chunk *= 4
-    }
+    const buf = Buffer.alloc(size - start)
+    readSync(fd, buf, 0, buf.length, start)
+    const text = buf.toString('utf-8')
+    // A partial first line (we started mid-file) is dropped.
+    return start === 0 ? text : text.slice(text.indexOf('\n') + 1)
   } finally {
     closeSync(fd)
   }
@@ -97,11 +96,22 @@ function firstLine(file: string): string | null {
   }
 }
 
+/** Rotated files kept beside the live log (30 days each: about a year). */
+export const KEEP_ROTATED = 12
+/** Refused and unsigned lines written per minute; a relay flooding the machine can't fill its disk. */
+export const REFUSALS_PER_MINUTE = 120
+/** How far back from the end to read for recent entries (the UI) and for replay seeding. */
+const TAIL_BYTES = 8 * 1024 * 1024
+
 export class IntentLog {
   private seq = 0
   private prev = GENESIS
   private startedAt: number | null = null
+  private size = 0
   private loaded = false
+  private refusalWindow = 0
+  private refusalsInWindow = 0
+  private suppressed = 0
 
   constructor(
     private readonly file = intentLogPath(),
@@ -109,47 +119,100 @@ export class IntentLog {
     private readonly log: Pick<Console, 'warn'> = console,
   ) {}
 
+  get path(): string {
+    return this.file
+  }
+
   private load(): void {
     if (this.loaded) return
     this.loaded = true
-    const last = lastLine(this.file)
-    if (!last) return
+    mkdirSync(dirname(this.file), { recursive: true })
+    const tail = readTail(this.file, 1024 * 1024)
+    if (!tail) return
+    try { this.size = statSync(this.file).size } catch { this.size = 0 }
+    const lines = tail.split('\n')
+    const torn = !tail.endsWith('\n')
+    if (lines.at(-1) === '') lines.pop()
+    const last = lines.at(-1)
+    if (last === undefined) return
+    // Chain from the last line as written, even a torn one, so `verify`
+    // reports the break instead of the log hiding it; take `seq` from the
+    // last line that parses.
+    this.prev = lineHash(last)
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        const entry = JSON.parse(lines[i]) as Partial<IntentLogEntry>
+        if (typeof entry.seq === 'number') { this.seq = entry.seq; break }
+      } catch { /* keep looking */ }
+    }
+    // Never append onto the end of a torn line.
+    if (torn) {
+      appendFileSync(this.file, '\n')
+      this.size += 1
+    }
+    const first = firstLine(this.file)
     try {
-      const entry = JSON.parse(last) as Partial<IntentLogEntry>
-      if (typeof entry.seq === 'number') this.seq = entry.seq
-      this.prev = lineHash(last)
-      const first = firstLine(this.file)
       const at = first ? Date.parse((JSON.parse(first) as { at?: string }).at ?? '') : NaN
       this.startedAt = Number.isNaN(at) ? this.now() : at
     } catch {
-      // A torn last line (crash mid-append): chain from it as written, so
-      // `verify` reports the break instead of the log hiding it.
-      this.prev = lineHash(last)
+      this.startedAt = this.now()
     }
   }
 
   private rotateIfDue(): void {
-    if (!existsSync(this.file)) return
-    let size: number
-    try { size = statSync(this.file).size } catch { return }
+    if (this.size === 0) return
     const tooOld = this.startedAt !== null && this.now() - this.startedAt > ROTATE_AGE_MS
-    if (size < ROTATE_BYTES && !tooOld) return
+    if (this.size < ROTATE_BYTES && !tooOld) return
     const stamp = new Date(this.now()).toISOString().replace(/[:.]/g, '-')
     renameSync(this.file, this.file.replace(/\.jsonl$/, `-${stamp}.jsonl`))
+    this.size = 0
     this.startedAt = null
+    this.pruneRotated()
+  }
+
+  private pruneRotated(): void {
+    const dir = dirname(this.file)
+    const base = basename(this.file, '.jsonl')
+    try {
+      const rotated = readdirSync(dir).filter(f => f.startsWith(`${base}-`) && f.endsWith('.jsonl')).sort()
+      for (const old of rotated.slice(0, Math.max(0, rotated.length - KEEP_ROTATED))) rmSync(join(dir, old), { force: true })
+    } catch { /* best effort */ }
+  }
+
+  /** False when this refusal should be counted rather than written. */
+  private admitRefusal(): boolean {
+    const minute = Math.floor(this.now() / 60_000)
+    if (minute !== this.refusalWindow) {
+      this.refusalWindow = minute
+      this.refusalsInWindow = 0
+    }
+    this.refusalsInWindow += 1
+    if (this.refusalsInWindow <= REFUSALS_PER_MINUTE) return true
+    this.suppressed += 1
+    return false
   }
 
   /** Append one entry. Never throws: losing a log line must not break the machine. */
   append(input: IntentLogInput): IntentLogEntry | null {
     try {
+      if (input.verdict !== 'accepted' && !this.admitRefusal()) return null
       this.load()
       this.rotateIfDue()
-      const entry: IntentLogEntry = { seq: this.seq + 1, prev: this.prev, at: new Date(this.now()).toISOString(), ...input }
+      const suppressed = this.suppressed
+      const entry: IntentLogEntry = {
+        seq: this.seq + 1,
+        prev: this.prev,
+        at: new Date(this.now()).toISOString(),
+        ...input,
+        // Refusals left out since the last line, so a gap is visible.
+        ...(suppressed > 0 ? { suppressedBefore: suppressed } : {}),
+      }
       const line = JSON.stringify(entry)
-      mkdirSync(dirname(this.file), { recursive: true })
-      const created = !existsSync(this.file)
+      const created = this.size === 0
       appendFileSync(this.file, line + '\n', { mode: 0o600 })
       if (created) chmodSync(this.file, 0o600)
+      this.suppressed = 0
+      this.size += Buffer.byteLength(line) + 1
       this.seq = entry.seq
       this.prev = lineHash(line)
       this.startedAt ??= this.now()
@@ -159,6 +222,30 @@ export class IntentLog {
       return null
     }
   }
+
+  /** Nonces of intents accepted since `since`, to seed the replay cache after a restart. */
+  recentAcceptedNonces(since: number): Array<{ keyId: string; nonce: string; at: number }> {
+    const out: Array<{ keyId: string; nonce: string; at: number }> = []
+    for (const entry of parseLines(readTail(this.file, TAIL_BYTES))) {
+      if (entry.verdict !== 'accepted' || !entry.intent || !entry.keyId) continue
+      const at = Date.parse(entry.at)
+      if (!(at >= since)) continue
+      try {
+        const nonce = (JSON.parse(entry.intent.body) as { nonce?: unknown }).nonce
+        if (typeof nonce === 'string') out.push({ keyId: entry.keyId, nonce, at })
+      } catch { /* skip */ }
+    }
+    return out
+  }
+}
+
+function parseLines(text: string): IntentLogEntry[] {
+  const out: IntentLogEntry[] = []
+  for (const line of text.split('\n')) {
+    if (!line) continue
+    try { out.push(JSON.parse(line) as IntentLogEntry) } catch { /* torn or edited; verify reports it */ }
+  }
+  return out
 }
 
 export interface ChainCheck {
@@ -197,20 +284,16 @@ export function verifyIntentLog(file: string): ChainCheck {
   return { ok: true, entries: lines.length }
 }
 
-/** The newest entries, newest first, optionally filtered (for local Settings → Activity). */
+/** The newest entries, newest first, optionally filtered (for local Settings → Activity). Reads only the file's tail. */
 export function readRecentIntents(
   file: string,
   opts: { limit?: number; keyId?: string; sessionId?: string; verdict?: IntentVerdict } = {},
 ): IntentLogEntry[] {
-  let text: string
-  try { text = readFileSync(file, 'utf-8') } catch { return [] }
-  const out: IntentLogEntry[] = []
-  const lines = text.split('\n')
   const limit = Math.min(Math.max(opts.limit ?? 100, 1), 1000)
-  for (let i = lines.length - 1; i >= 0 && out.length < limit; i--) {
-    if (!lines[i]) continue
-    let entry: IntentLogEntry
-    try { entry = JSON.parse(lines[i]) as IntentLogEntry } catch { continue }
+  const out: IntentLogEntry[] = []
+  const entries = parseLines(readTail(file, TAIL_BYTES))
+  for (let i = entries.length - 1; i >= 0 && out.length < limit; i--) {
+    const entry = entries[i]
     if (opts.keyId && entry.keyId !== opts.keyId) continue
     if (opts.sessionId && entry.sessionId !== opts.sessionId) continue
     if (opts.verdict && entry.verdict !== opts.verdict) continue

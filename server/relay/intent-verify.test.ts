@@ -10,7 +10,7 @@ import {
 } from './intent-actions.js'
 import type { IntentBody, SignedIntent } from './intent-actions.js'
 import { IntentVerifier, REPLAY_TTL_MS } from './intent-verify.js'
-import { GENESIS, IntentLog, lineHash, readRecentIntents, ROTATE_AGE_MS, verifyIntentLog } from './intent-log.js'
+import { GENESIS, IntentLog, KEEP_ROTATED, lineHash, readRecentIntents, REFUSALS_PER_MINUTE, ROTATE_AGE_MS, verifyIntentLog } from './intent-log.js'
 import { signP1363 } from './enrolment-crypto.js'
 import { keyIdForSpki } from './machine-identity.js'
 import { emptyTrustStore, readTrustStore, writeTrustStore } from './trust-store.js'
@@ -29,6 +29,8 @@ describe('intent rules shared with the browser', () => {
     expect(channelSessionAfter('{"type":"join_session","sessionId":"s2"}', 's1')).toBe('s2')
     expect(channelSessionAfter('{"type":"leave_session"}', 's1')).toBeNull()
     expect(channelSessionAfter('{"type":"input"}', 's1')).toBe('s1')
+    // create_session moves the socket to a session neither end knows yet.
+    expect(channelSessionAfter('{"type":"create_session","name":"n","workingDir":"/x"}', 's1', 7)).toBe('@created:7')
     expect(requestSession('/api/sessions/abc/rename')).toBe('abc')
     expect(requestSession('/api/sessions/archived/old1')).toBe('old1')
     expect(requestSession('/api/sessions/list')).toBeNull()
@@ -39,11 +41,15 @@ describe('intent rules shared with the browser', () => {
     expect(isExemptFrame('{"type":"input"}')).toBe(false)
   })
 
-  it('hashes requests over method, path with query, content type and body', () => {
-    const bytes = requestPayload('post', '/api/upload?x=1', 'image/png', new Uint8Array([1, 2]))
-    expect(Buffer.from(bytes).toString('utf-8', 0, bytes.length - 2)).toBe('POST\n/api/upload?x=1\nimage/png\n')
-    expect(Array.from(bytes.slice(-2))).toEqual([1, 2])
-    expect(Buffer.from(requestPayload('GET', '/x', undefined, null)).toString()).toBe('GET\n/x\n\n')
+  it('hashes requests over length-prefixed method, path with query, content type and body', () => {
+    const bytes = Buffer.from(requestPayload('post', '/api/upload?x=1', 'image/png', new Uint8Array([1, 2])))
+    expect(bytes.readUInt32BE(0)).toBe(4)
+    expect(bytes.toString('utf-8', 4, 8)).toBe('POST')
+    expect(Array.from(bytes.subarray(-2))).toEqual([1, 2])
+    // A newline in the content type can't shift bytes between fields.
+    const a = Buffer.from(requestPayload('POST', '/x', 'a\nb', new Uint8Array([1])))
+    const b = Buffer.from(requestPayload('POST', '/x', 'a', new TextEncoder().encode('b\n\u0001')))
+    expect(a.equals(b)).toBe(false)
   })
 })
 
@@ -93,6 +99,38 @@ describe('intent log', () => {
     expect(log.append(entry('b'))).toMatchObject({ seq: 2, prev: lineHash(last) })
     expect(readdirSync(join(dir, 'relay')).filter(f => f.startsWith('intents-'))).toHaveLength(1)
     expect(readFileSync(file, 'utf8').trim().split('\n')).toHaveLength(1)
+  })
+
+  it('rate-limits refusal lines so a relay cannot fill the disk, and says how many it dropped', () => {
+    const now = Date.parse('2026-11-08T12:00:00Z')
+    const log = new IntentLog(file, () => now)
+    for (let i = 0; i < REFUSALS_PER_MINUTE + 50; i++) log.append({ ...entry('ws:input'), verdict: 'rejected', reason: 'intent_bad_signature' })
+    expect(readFileSync(file, 'utf8').trim().split('\n')).toHaveLength(REFUSALS_PER_MINUTE)
+    // Accepted entries always go in, and carry the count of what was left out.
+    expect(log.append(entry('ws:stop'))).toMatchObject({ suppressedBefore: 50 })
+  })
+
+  it('keeps a bounded number of rotated files', () => {
+    let now = Date.parse('2026-01-01T00:00:00Z')
+    const log = new IntentLog(file, () => now)
+    for (let i = 0; i < KEEP_ROTATED + 3; i++) {
+      log.append(entry('a'))
+      now += ROTATE_AGE_MS + 1
+    }
+    log.append(entry('a'))
+    expect(readdirSync(join(dir, 'relay')).filter(f => f.startsWith('intents-'))).toHaveLength(KEEP_ROTATED)
+  })
+
+  it('starts a new line after a torn one, and keeps counting', () => {
+    const log = new IntentLog(file)
+    log.append(entry('a'))
+    appendFileSync(file, '{"seq":2,"pre')
+    const next = new IntentLog(file).append(entry('b'))
+    expect(next?.seq).toBe(2)
+    const lines = readFileSync(file, 'utf8').trim().split('\n')
+    expect(lines).toHaveLength(3)
+    expect(JSON.parse(lines[2])).toMatchObject({ action: 'b' })
+    expect(verifyIntentLog(file)).toMatchObject({ ok: false, problem: { line: 2 } })
   })
 
   it('lists newest first with filters', () => {
@@ -207,18 +245,93 @@ describe('IntentVerifier', () => {
     expect(verifier.checkRequest(signedReq('/api/sessions/list', { ts: now + 10 * 60_000 }))).toMatchObject({ reason: 'intent_stale', machineTime: now })
   })
 
+  /** Open a channel with a signed open; returns the verifier's channel state and a frame signer for it. */
+  function openChannel(token = randomBytes(16).toString('base64url')) {
+    const opened = verifier.checkChannelOpen(OWNER, sign({ action: 'channel:open', payload: new Uint8Array(), channel: token }))
+    let seq = 0
+    const frame = (data: string, sessionId: string | null, over: Partial<IntentBody> = {}) =>
+      sign({ action: frameAction(data), sessionId, payload: framePayload(data), channel: token, seq: ++seq, ...over })
+    return { opened, channel: opened.channel, frame, token }
+  }
+
   it('binds frames to the channel session, with join_session naming its own', () => {
-    const frame = (data: string, sessionId: string | null) => sign({ action: frameAction(data), sessionId, payload: framePayload(data) })
+    const { opened, channel, frame } = openChannel()
+    expect(opened.decision.forward).toBe(true)
+    expect(channel.token).not.toBeNull()
+    const join = '{"type":"join_session","sessionId":"s1"}'
+    expect(verifier.checkFrame(OWNER, join, frame(join, 's1'), channel).forward).toBe(true)
+    expect(channel.session).toBe('s1')
     const input = '{"type":"input","data":"ls"}'
-    expect(verifier.checkFrame(OWNER, input, frame(input, 's1'), 's1').forward).toBe(true)
+    expect(verifier.checkFrame(OWNER, input, frame(input, 's1'), channel).forward).toBe(true)
     // The relay can't move a signed input to another session.
-    expect(verifier.checkFrame(OWNER, input, frame(input, 's1'), 's2')).toMatchObject({ forward: false, reason: 'intent_wrong_session' })
-    const join = '{"type":"join_session","sessionId":"s9"}'
-    expect(verifier.checkFrame(OWNER, join, frame(join, 's9'), 's1').forward).toBe(true)
+    expect(verifier.checkFrame(OWNER, input, frame(input, 's2'), channel)).toMatchObject({ forward: false, reason: 'intent_wrong_session' })
     // ping/resize carry nothing and need no intent, even when required.
-    expect(verifier.checkFrame(OWNER, '{"type":"ping"}', undefined, null)).toEqual({ forward: true, verdict: 'exempt' })
-    expect(verifier.checkChannelOpen(OWNER, sign({ action: 'channel:open', payload: new Uint8Array() })).forward).toBe(true)
-    expect(verifier.checkChannelOpen(OWNER, undefined)).toMatchObject({ forward: false, reason: 'intent_required' })
+    expect(verifier.checkFrame(OWNER, '{"type":"ping"}', undefined, channel)).toEqual({ forward: true, verdict: 'exempt' })
+    expect(verifier.checkChannelOpen(OWNER, undefined).decision).toMatchObject({ forward: false, reason: 'intent_required' })
+    // An open without a well-formed token is refused.
+    expect(verifier.checkChannelOpen(OWNER, sign({ action: 'channel:open', payload: new Uint8Array() })).decision.reason).toBe('intent_wrong_channel')
+  })
+
+  it('refuses frames out of order or moved to another channel', () => {
+    const a = openChannel()
+    const b = openChannel()
+    const first = '{"type":"set_permission_mode","permissionMode":"default"}'
+    const second = '{"type":"input","data":"deploy"}'
+    const i1 = a.frame(first, null)
+    const i2 = a.frame(second, null)
+    // The relay delivers the second first: then the first is out of order.
+    expect(verifier.checkFrame(OWNER, second, i2, a.channel).forward).toBe(true)
+    expect(verifier.checkFrame(OWNER, first, i1, a.channel)).toMatchObject({ forward: false, reason: 'intent_out_of_order' })
+    // A frame signed for channel a can't be played on channel b.
+    const i3 = a.frame(second, null)
+    expect(verifier.checkFrame(OWNER, second, i3, b.channel)).toMatchObject({ forward: false, reason: 'intent_wrong_channel' })
+    // Dropped frames leave gaps, which are fine.
+    const i5 = a.frame(second, null, { seq: 99 })
+    expect(verifier.checkFrame(OWNER, second, i5, a.channel).forward).toBe(true)
+  })
+
+  it('binds frames after create_session to the created session, not the old one', () => {
+    const { channel, frame } = openChannel()
+    const join = '{"type":"join_session","sessionId":"A"}'
+    verifier.checkFrame(OWNER, join, frame(join, 'A'), channel)
+    const create = '{"type":"create_session","name":"n","workingDir":"/w"}'
+    expect(verifier.checkFrame(OWNER, create, frame(create, 'A'), channel).forward).toBe(true)
+    expect(channel.session).toBe('@created:2')
+    const input = '{"type":"input","data":"y"}'
+    // Signed for the old session: refused, since the socket is now in the new one.
+    expect(verifier.checkFrame(OWNER, input, frame(input, 'A'), channel).reason).toBe('intent_wrong_session')
+    expect(verifier.checkFrame(OWNER, input, frame(input, '@created:2'), channel).forward).toBe(true)
+  })
+
+  it('remembers accepted nonces across a restart, from the log', () => {
+    const r = signedReq()
+    expect(verifier.checkRequest(r).forward).toBe(true)
+    const restarted = new IntentVerifier({ machineId: 'm1', devicesFile, log: new IntentLog(logFile, () => now), now: () => now })
+    expect(restarted.checkRequest(r)).toMatchObject({ forward: false, reason: 'intent_replayed' })
+  })
+
+  it('refuses rather than forgets when the replay cache is full', async () => {
+    const mod = await import('./intent-verify.js')
+    const cache = (verifier as unknown as { replay: Map<string, number> }).replay
+    for (let i = 0; i < mod.REPLAY_CACHE_MAX; i++) cache.set(`k:${i}`, now + REPLAY_TTL_MS)
+    expect(verifier.checkRequest(signedReq())).toMatchObject({ forward: false, reason: 'intent_rate_limited' })
+  })
+
+  it('counts a nonce as used up to the end of its window', () => {
+    const r = signedReq()
+    verifier.checkRequest(r)
+    now += REPLAY_TTL_MS
+    // Exactly at the edge the entry still counts (and the timestamp is long stale).
+    expect(verifier.checkRequest(r).reason).toBe('intent_stale')
+    expect((verifier as unknown as { replay: Map<string, number> }).replay.size).toBe(1)
+  })
+
+  it('fails closed on a device list that exists but cannot be read', () => {
+    writeStore('off')
+    const fresh = new IntentVerifier({ machineId: 'm1', devicesFile, now: () => now })
+    writeFileSync(devicesFile, '{ broken')
+    expect(fresh.policy()).toBe('required')
+    expect(fresh.checkRequest(req()).forward).toBe(false)
   })
 
   it('lets webhook deliveries through: GitHub signs those', () => {
@@ -240,19 +353,23 @@ describe('IntentVerifier', () => {
     expect(logged().map(e => e.verdict)).toEqual(['accepted'])
   })
 
-  it('keeps the last known policy when the device list becomes unreadable', () => {
-    expect(verifier.policy()).toBe('required')
-    writeFileSync(devicesFile, '{ broken')
-    expect(verifier.policy()).toBe('required')
-    expect(verifier.checkRequest(req()).forward).toBe(false)
-  })
-
-  it('records when a device was last used, at most every ten minutes', () => {
+  it('records when a device was last used, at most every ten minutes, off the request path', async () => {
     verifier.checkRequest(signedReq())
+    expect(readTrustStore(devicesFile)?.credentials[0].lastUsedAt).toBeUndefined()
+    await new Promise(r => setImmediate(r))
     expect(readTrustStore(devicesFile)?.credentials[0].lastUsedAt).toBe(new Date(now).toISOString())
     now += 60_000
     verifier.checkRequest(signedReq())
+    await new Promise(r => setImmediate(r))
     expect(readTrustStore(devicesFile)?.credentials[0].lastUsedAt).toBe(new Date(now - 60_000).toISOString())
     expect(existsSync(devicesFile)).toBe(true)
+  })
+
+  it('keeps only accepted intents in the log', () => {
+    verifier.checkRequest(signedReq())
+    verifier.checkRequest(signedReq('/api/sessions/list', { machineId: 'm2' }))
+    const [accepted, rejected] = logged()
+    expect(accepted.intent).toBeDefined()
+    expect(rejected.intent).toBeUndefined()
   })
 })
