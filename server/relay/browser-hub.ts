@@ -36,6 +36,8 @@ import { recordAuditEvent } from './audit.js'
 import { checkRestPolicy, isServerFrameVisible } from './connector-policy.js'
 import { BROWSER_FRAME_LIMIT, RateLimiter, isBackedUp } from './rate-limit.js'
 import { checkQuota, UNLIMITED } from './quotas.js'
+import { meterFrame } from './usage-meter.js'
+import type { UsageMeter } from './usage-meter.js'
 import type { EntitlementsProvider } from './quotas.js'
 
 const CLOSE_AUTH_FAILED = 4001
@@ -124,6 +126,8 @@ export interface BrowserHubOptions {
   heartbeatIntervalMs?: number
   /** Quota limits (docs/RELAY-HARDENING.md §6); unlimited when absent. */
   entitlements?: EntitlementsProvider
+  /** Counts relayed traffic and throttles a workspace over its daily bytes. */
+  meter?: UsageMeter
 }
 
 export class BrowserHub {
@@ -328,6 +332,7 @@ export class BrowserHub {
         socket.close(CLOSE_OVERLOADED, 'frame rate limit exceeded')
         return
       }
+      meterFrame(this.options.meter, socket, client.workspaceId, 'b2m', typeof data === 'string' ? Buffer.byteLength(data) : data.length)
 
       if (msg.kind === 'ping') {
         socket.send(JSON.stringify(envelope('pong', {})))

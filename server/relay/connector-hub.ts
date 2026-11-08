@@ -30,6 +30,8 @@ import {
 import { CONNECTOR_FLOORS, connectorUpdateRequired } from './connector-version.js'
 import type { ConnectorFloors, UpdateRequired } from './connector-version.js'
 import { getRequiredCapabilities } from './workspaces.js'
+import { meterFrame } from './usage-meter.js'
+import type { UsageMeter } from './usage-meter.js'
 import type {
   ConnectorHello,
   ConnectorHelloAck,
@@ -73,6 +75,8 @@ interface ConnectedMachine {
   pending: Set<string>
   channels: Set<string>
   connectorVersion: string | null
+  /** The workspace that owns the machine: its traffic is metered there. */
+  workspaceId: string | null
   /** Set when the connector is below a floor: connected, but refused traffic. */
   updateRequired: UpdateRequired | null
   /** Last session counts the connector advertised, if any. */
@@ -97,9 +101,11 @@ export class ConnectorHub {
   private idleTimer: ReturnType<typeof setInterval>
 
   private readonly floors: ConnectorFloors
+  private readonly meter: UsageMeter | undefined
 
-  constructor(private db: Database.Database, options: { floors?: ConnectorFloors } = {}) {
+  constructor(private db: Database.Database, options: { floors?: ConnectorFloors; meter?: UsageMeter } = {}) {
     this.floors = options.floors ?? CONNECTOR_FLOORS
+    this.meter = options.meter
     // Recovering from a restart: nothing is connected yet.
     this.db.prepare(`UPDATE machines SET status = 'offline'`).run()
     this.idleTimer = setInterval(() => { this.dropIdleConnections(); }, IDLE_TIMEOUT_MS / 3)
@@ -175,6 +181,9 @@ export class ConnectorHub {
       if (machine) {
         machine.lastActivity = Date.now()
         this.touchLastSeen(machine)
+        if (machine.workspaceId) {
+          meterFrame(this.meter, socket, machine.workspaceId, 'm2b', typeof data === 'string' ? Buffer.byteLength(data) : data.length)
+        }
       }
       if (msg.kind === 'ping') {
         socket.send(JSON.stringify(envelope('pong', {})))
@@ -396,6 +405,7 @@ export class ConnectorHub {
       machineId, socket, lastActivity: now, lastSeenWrite: now,
       pending: new Set(), channels: new Set(),
       connectorVersion,
+      workspaceId: workspace?.workspace_id ?? null,
       updateRequired,
       sessions: hello.sessions ?? null,
     })

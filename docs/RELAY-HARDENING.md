@@ -82,7 +82,7 @@ Supporting changes (**built**):
 
 These are mechanisms only. No limits are built in, and a relay without config stays unlimited, as it is today.
 
-**Built:** the discrete quotas (`server/relay/quotas.ts`). **Still spec:** bandwidth metering, throttling and abuse signals.
+**Built:** the quotas (`server/relay/quotas.ts`), usage metering and the bandwidth throttle (`server/relay/usage-meter.ts`). **Still spec:** abuse signals.
 
 - **Quotas** come from an `EntitlementsProvider`. The default reads `RELAY_QUOTAS_FILE` (JSON) at boot; without it, everything is unlimited. A malformed file stops the relay rather than running it unlimited. A missing key is unlimited, `workspaces` entries override `default` key by key, and `null` in a workspace entry lifts that limit for the workspace:
 
@@ -102,12 +102,14 @@ These are mechanisms only. No limits are built in, and a relay without config st
   | `channelsPerUser` | the user's open session streams, on every machine | `stream_open`; a channel error with code `quota_exceeded` |
   | `invitationsPerWorkspacePerDay` | invitations created in the last 24 hours, resends included | invitation create and resend |
   | `sharesPerSession` | other people the session is shared with now; changing an existing grantee's share is free | share create |
+  | `relayedBytesPerWorkspacePerDay` | bytes relayed for the workspace's machines today (UTC), both directions | every relayed frame; throttles, never refuses |
+  | `throttledBytesPerSecond` | not a limit: the rate per connection once the daily bytes are used up (default 64 KiB/s) | — |
 
   The limits that apply are those of the workspace the action happens in. For a browser connection, that is the machine's workspace.
 - **Over a quota.**
   - Discrete limits answer HTTP 429 `{ error: 'quota_exceeded', quota, limit, message }`, and the hosted app shows `message`.
-  - Relayed bytes per account per day *(not built yet)*: bandwidth can throttle (bytes per second per socket) rather than refuse, so an active session slows down instead of breaking.
-- **Usage metering.** A `usage_daily` table holds bytes, frames and channel-seconds per account per day, flushed from memory every minute.
+  - Over `relayedBytesPerWorkspacePerDay`, traffic slows instead of stopping, so an active session keeps working. Each connection gets a token bucket at `throttledBytesPerSecond`. When it's empty, the relay stops *reading* that socket for a moment (at most 5 s), so TCP backpressure holds the excess at the sender and the relay buffers nothing. The throttle lifts at UTC midnight and is logged once per workspace per day.
+- **Usage metering.** Both hubs count every frame they receive, from machines (`bytes_m2b`) and browsers (`bytes_b2m`), against the workspace that owns the machine. Counts are flushed every minute to `usage_daily (workspace_id, day, bytes_b2m, bytes_m2b, frames)` and kept 400 days. A crash loses at most a minute of counting, which is fine for quotas and capacity planning; it is not a billing meter. Metering runs with or without a quotas file.
 - **Abuse signals.** An `AbuseSignals` hook gets per-machine traffic summaries: frame shape, sustained throughput, sessions advertised. It can flag, throttle or quarantine, and every action is audit-logged. The relay ships only the hook.
 
 ## 7. Test sessions for staging

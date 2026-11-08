@@ -34,6 +34,7 @@ import { createErrorReporter, reportFromError, MAX_BROWSER_MESSAGE } from './err
 import { createTelemetryRouter, TELEMETRY_ERRORS_PATH } from './telemetry-routes.js'
 import { codekinPackageVersion } from './relay-credential.js'
 import { loadEntitlements } from './quotas.js'
+import { UsageMeter, pruneUsage } from './usage-meter.js'
 import { ConnectorHub } from './connector-hub.js'
 import { BrowserHub } from './browser-hub.js'
 import { MAX_PROXY_BODY_BYTES } from './relay-protocol.js'
@@ -49,8 +50,9 @@ const config = loadRelayConfig()
 const entitlements = loadEntitlements(config.quotasFile)
 const db = openControlPlaneDb(join(config.dataDir, 'control-plane.db'))
 const store = new SqliteSessionStore(db)
-const hub = new ConnectorHub(db)
-const browserHub = new BrowserHub(db, hub, { isSessionAlive: sid => store.isAlive(sid), entitlements })
+const usageMeter = new UsageMeter(db, entitlements)
+const hub = new ConnectorHub(db, { meter: usageMeter })
+const browserHub = new BrowserHub(db, hub, { isSessionAlive: sid => store.isAlive(sid), entitlements, meter: usageMeter })
 
 const app = express()
 const eventLoopLag = new EventLoopLagMonitor()
@@ -239,6 +241,14 @@ if (config.auditRetentionDays > 0) {
   setInterval(prune, 24 * 60 * 60 * 1000).unref()
 }
 
+// Usage rows are kept 400 days (docs/RELAY-HARDENING.md §6).
+const pruneOldUsage = () => {
+  const removed = pruneUsage(db)
+  if (removed > 0) console.log(`[relay] Pruned ${removed} usage row(s) past retention`)
+}
+pruneOldUsage()
+setInterval(pruneOldUsage, 24 * 60 * 60 * 1000).unref()
+
 // Install commands that were never run leave a machine row behind. Sweep the
 // ones whose pairing expired unclaimed (GET /api/machines also sweeps lazily).
 // Machines that have ever held a credential are never touched.
@@ -327,6 +337,7 @@ function shutdown() {
   eventLoopLag.stop()
   browserHub.close()
   hub.close()
+  usageMeter.close()
   webhookIngress.close()
   server.close(() => {
     store.close()
