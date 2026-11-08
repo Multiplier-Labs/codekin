@@ -109,6 +109,8 @@ export interface ConnectorHelloAck {
    * (§6.8): requests and channels are refused, enrolment still works.
    */
   unconfirmed?: boolean
+  /** The relay accepts `intent_policy` frames (§6.8); older relays close the socket on them. */
+  policyReports?: boolean
 }
 
 /** Browser → hub, first message on a /relay/browser socket. */
@@ -253,6 +255,11 @@ export const RELAY_ERROR = {
   unknownChannel: 'unknown_channel',
   notPermitted: 'not_permitted',
   connectorUpdateRequired: 'connector_update_required',
+  /**
+   * The workspace requires confirmed devices and this machine doesn't yet
+   * (§6.8): confirm a browser on it. Updating Codekin won't help.
+   */
+  devicesUnconfirmed: 'devices_unconfirmed',
   /** The machine turned an enrolment request down (bad proof, not the owner, too many pending). */
   enrolRefused: 'enrol_refused',
   /** The machine can't enrol right now (no identity key, owner unknown, device list unreadable). */

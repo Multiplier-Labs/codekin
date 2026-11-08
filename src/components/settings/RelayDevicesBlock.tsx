@@ -192,7 +192,7 @@ export function RelayDevicesBlock({ token, onError }: Props) {
               <p className="mt-1 font-mono text-title tracking-widest text-ink" aria-label="Code for the browser">{added.confirmCode}</p>
               {added.policyRaised && (
                 <p className="mt-2 text-meta text-ink-muted">
-                  It was your first device here, so this computer now takes control through the relay only from confirmed devices. You can change that below.
+                  It was your first device here, so this computer now takes control through the relay only from confirmed devices. Your other browsers need confirming too, and existing shares need Allow again in the share dialog. You can change this below.
                 </p>
               )}
             </div>

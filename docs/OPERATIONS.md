@@ -532,9 +532,11 @@ the relay alone could control: Settings → Workspace → **Require confirmed
 devices** (or `PATCH /api/workspaces/:id` with `requireConfirmedDevices` and an
 optional `confirmedDevicesGraceDays`, 0–90). A machine is let through only
 when its connector is at or above the `intents` floor and reports the policy
-`required`. Others stay connected but every request and stream fails with
-`connector_update_required`; confirming a browser still works, since that is
-how the machine clears it. During the grace period such machines are only
+`required`. A machine whose Codekin is too old fails with
+`connector_update_required`. One that is new enough but doesn't require
+confirmed devices stays connected, but every request and stream fails with
+`devices_unconfirmed`, and open sessions are closed. Confirming a browser still
+works, since that is how the machine clears it. During the grace period such machines are only
 flagged (**confirm a device**). Turning the setting off, or adding grace, needs a
 recent sign-in check. The report comes from the machine's own connector, so a
 forged one only weakens that owner's own machine.

@@ -85,6 +85,10 @@ function main(): void {
           console.error(`[connector] The relay won't serve this machine until it is updated${suffix}.`)
           console.error('[connector] Run `codekin upgrade`, then restart the connector.')
           break
+        case 'devices_unconfirmed':
+          console.error(`[connector] The workspace refuses this machine until a browser is confirmed on it${suffix}.`)
+          console.error('[connector] In the web app choose "Confirm this browser", then run `codekin relay devices approve <code>`.')
+          break
         case 'auth_failed':
           console.error(`[connector] Credential rejected${suffix} — run \`codekin relay login\` to re-pair.`)
           process.exitCode = 1

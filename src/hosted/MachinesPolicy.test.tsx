@@ -49,7 +49,7 @@ async function render(machines: Machine[]): Promise<HTMLElement> {
 
 beforeEach(() => {
   trust.pinned = new Set()
-  trust.raise.mockReset().mockResolvedValue(undefined)
+  trust.raise.mockReset().mockResolvedValue(true)
 })
 afterEach(() => {
   if (root) act(() => { root!.unmount() })
@@ -67,6 +67,15 @@ describe('MachinesSection policy', () => {
     await act(async () => { button.click() })
     expect(trust.raise).toHaveBeenCalledTimes(1)
     expect(el.textContent).toContain('Only devices confirmed on it can control it')
+  })
+
+  it("doesn't claim success on the relay's word alone", async () => {
+    trust.pinned.add('m1')
+    trust.raise.mockResolvedValue(false)
+    const el = await render([machine({ intentPolicy: 'off' })])
+    await act(async () => { [...el.querySelectorAll('button')].find(b => b.textContent === 'Require confirmed devices')!.click() })
+    expect(el.textContent).toContain('this updates once the computer reports its new setting')
+    expect(el.textContent).not.toContain('Only devices confirmed on it')
   })
 
   it('points an unconfirmed browser at confirming itself', async () => {
@@ -93,5 +102,12 @@ describe('MachinesSection policy', () => {
     expect(badge(rows[0])?.getAttribute('title')).toContain('Confirm a browser on this computer to use it again')
     expect(badge(rows[1])?.getAttribute('title')).toContain('will soon require')
     expect(badge(rows[2])).toBeUndefined()
+  })
+
+  it('asks for an update, not a confirmed device, where the connector cannot enforce signed intents', async () => {
+    const el = await render([machine({ confirmedDevices: 'refused', intentsSupported: false })])
+    const badge = [...el.querySelectorAll('li span')].find(s => s.textContent === 'update required')
+    expect(badge?.getAttribute('title')).toContain('needs a newer Codekin')
+    expect(el.textContent).not.toContain('confirm a device')
   })
 })

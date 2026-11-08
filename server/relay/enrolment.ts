@@ -35,7 +35,7 @@ import type { PasskeyCredential, PendingEnrolment, TrustedCredential, TrustStore
 import { coseToKey, keyIdForCoseKey, verifyPasskeyAssertion } from './webauthn-verify.js'
 import type { PasskeyAssertion } from './webauthn-verify.js'
 import {
-  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, GRANT_REVOKE_ACTION, MACHINE_CLOCK_LABEL, POLICY_ACTION, policyPayload, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
+  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, GRANT_REVOKE_ACTION, MACHINE_CLOCK_LABEL, POLICY_ACTION, POLICY_RAISED_LABEL, policyPayload, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
   grantRevokePayload, grantRevokedParts, revokePayload,
 } from './intent-actions.js'
 import type { IntentVerifier } from './intent-verify.js'
@@ -398,7 +398,12 @@ export class MachineEnrolment {
       throw err
     }
     this.opts.log?.log(`[relay] This computer's policy was raised to ${policy} by a signed request.`)
-    return { enrolId: `policy:${policy}`, state: 'approved' }
+    const { key } = this.machineKey()
+    return {
+      enrolId: `policy:${policy}`,
+      state: 'approved',
+      signature: signP1363(key, transcript(POLICY_RAISED_LABEL, policy, parseIntentNonce((payload as { intent?: unknown }).intent))).toString('base64url'),
+    }
   }
 
   /** device_revoke (spec §5.6): remove a credential, on an owner's signed (and stepped-up) intent. */

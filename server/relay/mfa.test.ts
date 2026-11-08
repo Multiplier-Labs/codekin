@@ -411,9 +411,14 @@ describe('2FA flows', () => {
     const ws = createWorkspace(db, 'Team', patId)
     const { cookie } = await enrollTotp(owner)
     const patch = (body: Record<string, unknown>) => call(`/api/workspaces/${ws.id}`, cookie, { method: 'PATCH', body })
-    for (const bad of [{ requireConfirmedDevices: 'yes' }, { requireConfirmedDevices: true, confirmedDevicesGraceDays: 91 }, { requireConfirmedDevices: true, confirmedDevicesGraceDays: 1.5 }]) {
+    for (const bad of [
+      { requireConfirmedDevices: 'yes' }, { requireConfirmedDevices: true, confirmedDevicesGraceDays: 91 }, { requireConfirmedDevices: true, confirmedDevicesGraceDays: 1.5 },
+      // On its own only: nothing applies before another field is refused.
+      { requireConfirmedDevices: true, requirePasskeyStepUp: false }, { requireConfirmedDevices: true, name: '' },
+    ]) {
       expect((await patch(bad)).status).toBe(400)
     }
+    expect(getConfirmedDevicesRule(db, ws.id).required).toBe(false)
     expect((await patch({ requireConfirmedDevices: true })).status).toBe(200)
     expect(getConfirmedDevicesRule(db, ws.id)).toEqual({ required: true, graceUntil: null })
     const listed = await (await call('/api/workspaces', cookie)).json() as { workspaces: Array<{ id: string; requireConfirmedDevices: boolean }> }

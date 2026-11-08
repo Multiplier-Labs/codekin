@@ -23,6 +23,7 @@ const POLL_MS = 2000
 const CONNECTOR_STATE: Record<RelayStatus['state'], { label: string; tone: 'ok' | 'busy' | 'warn' }> = {
   connected: { label: 'Online', tone: 'ok' },
   update_required: { label: 'The relay requires a newer Codekin. Run `codekin upgrade`.', tone: 'warn' },
+  devices_unconfirmed: { label: 'Your workspace requires confirmed devices. Confirm a browser below to use this computer remotely.', tone: 'warn' },
   connecting: { label: 'Connecting…', tone: 'busy' },
   disconnected: { label: 'Reconnecting…', tone: 'busy' },
   secret_unavailable: { label: 'Cannot access the saved credential. Retrying automatically…', tone: 'warn' },

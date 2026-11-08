@@ -36,6 +36,8 @@ export interface Machine {
   intentPolicy?: 'off' | 'warn' | 'required' | null
   /** Where it stands against the workspace's "Require confirmed devices". */
   confirmedDevices?: 'not_required' | 'confirmed' | 'grace' | 'refused'
+  /** False when its Codekin is too old to enforce signed intents: it needs an update, not a confirmed device. */
+  intentsSupported?: boolean
   /**
    * Created by an install command that has not been run yet. Such a machine
    * has never connected; the UI shows it as "waiting for installation", not

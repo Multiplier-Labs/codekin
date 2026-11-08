@@ -92,12 +92,14 @@ async function removeThisBrowser(machineId: string): Promise<void> {
 }
 
 /** Ask the machine (which trusts this browser) to require confirmed devices (§6.8). */
-async function raisePolicy(machineId: string): Promise<void> {
+async function raisePolicy(machineId: string): Promise<boolean> {
+  const userId = await currentUserId()
+  if (!userId) throw new Error('Sign in again first')
   const conn = new RelayConnection({ machineId })
   try {
     conn.connect()
     const signer = createIntentSigner(machineId)
-    await requireConfirmedDevices((kind, payload) => conn.enrol(kind, payload), intent => signer.sign(intent))
+    return await requireConfirmedDevices((kind, payload) => conn.enrol(kind, payload), intent => signer.sign(intent), { userId, machineId })
   } finally {
     conn.close()
   }
@@ -108,7 +110,7 @@ async function raisePolicy(machineId: string): Promise<void> {
  * §6.8), and the way to stop it. Owners only.
  */
 function PolicyLine({ machine, trusted, onChanged }: { machine: Machine; trusted: boolean; onChanged: () => void }) {
-  const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle')
+  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'asked'>('idle')
   const [error, setError] = useState<string | null>(null)
   if (machine.access !== 'owner' || machine.status !== 'online') return null
   if (machine.intentPolicy === 'required' || state === 'done') {
@@ -121,8 +123,8 @@ function PolicyLine({ machine, trusted, onChanged }: { machine: Machine; trusted
     setState('busy')
     setError(null)
     try {
-      await raisePolicy(machine.id)
-      setState('done')
+      // 'done' only on the machine's own signed word; otherwise wait for its report.
+      setState(await raisePolicy(machine.id) ? 'done' : 'asked')
       onChanged()
     } catch (err) {
       setState('idle')
@@ -133,9 +135,13 @@ function PolicyLine({ machine, trusted, onChanged }: { machine: Machine; trusted
     <div className="flex flex-wrap items-center gap-2 pl-8 text-meta">
       <span className="text-warning-5">The relay can control this computer{machine.intentPolicy === 'warn' ? ' (unsigned requests are only logged)' : ''}.</span>
       {trusted ? (
-        <button type="button" disabled={state === 'busy'} onClick={() => { void raise() }} className="text-primary-5 hover:underline">
-          {state === 'busy' ? 'Asking it…' : 'Require confirmed devices'}
-        </button>
+        state === 'asked' ? (
+          <span className="text-ink-muted">Asked it; this updates once the computer reports its new setting.</span>
+        ) : (
+          <button type="button" disabled={state === 'busy'} onClick={() => { void raise() }} className="text-primary-5 hover:underline">
+            {state === 'busy' ? 'Asking it…' : 'Require confirmed devices'}
+          </button>
+        )
       ) : (
         <span className="text-ink-muted">Confirm this browser to protect it.</span>
       )}
@@ -249,11 +255,13 @@ function MachineRow({ machine: m, isCurrent, onSwitch, setup, gutter, trusted, o
           {!m.updateRequired && (m.confirmedDevices === 'refused' || m.confirmedDevices === 'grace') && (
             <span
               className={`flex-shrink-0 rounded-control border px-1.5 py-0.5 text-meta ${m.confirmedDevices === 'refused' ? 'border-error-7/60 text-error-4' : 'border-warning-7/60 text-warning-5'}`}
-              title={m.confirmedDevices === 'refused'
-                ? 'This workspace requires confirmed devices. Confirm a browser on this computer to use it again.'
-                : 'This workspace will soon require confirmed devices. Confirm a browser on this computer before then.'}
+              title={m.intentsSupported === false
+                ? `This workspace ${m.confirmedDevices === 'refused' ? 'requires' : 'will soon require'} confirmed devices, which needs a newer Codekin on this computer. Run \`codekin upgrade\` on it; the desktop app updates itself.`
+                : m.confirmedDevices === 'refused'
+                  ? 'This workspace requires confirmed devices. Confirm a browser on this computer to use it again.'
+                  : 'This workspace will soon require confirmed devices. Confirm a browser on this computer before then.'}
             >
-              confirm a device
+              {m.intentsSupported === false ? 'update required' : 'confirm a device'}
             </span>
           )}
           {isCurrent ? (

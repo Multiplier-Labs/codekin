@@ -12,7 +12,7 @@ import {
 import { approveEnrolment, ENROL_TTL_MS, EnrolmentError, MachineEnrolment, MAX_ENROLMENTS_PER_WINDOW, MAX_PENDING_ENROLMENTS, rejectEnrolment } from './enrolment.js'
 import { ensureMachineIdentity, keyIdForSpki } from './machine-identity.js'
 import { IntentVerifier } from './intent-verify.js'
-import { POLICY_ACTION, policyPayload } from './intent-actions.js'
+import { POLICY_ACTION, POLICY_RAISED_LABEL, policyPayload } from './intent-actions.js'
 import { describeTrustStore, emptyTrustStore, readTrustStore, TrustStoreError, writeTrustStore } from './trust-store.js'
 import type { RelayPrincipal } from './relay-protocol.js'
 
@@ -331,8 +331,13 @@ describe('MachineEnrolment', () => {
       expect(() => withIntents.raisePolicy(OWNER, { policy: 'required', intent: sign('required', browser()) })).toThrow(EnrolmentError)
       expect(() => withIntents.raisePolicy(OWNER, { policy: 'required' })).toThrow(EnrolmentError)
       expect(policyOf()).toBe('warn')
-      expect(withIntents.handle('enrol_policy', OWNER, { policy: 'required', intent: sign('required') }).payload).toMatchObject({ state: 'approved' })
+      const intent = sign('required')
+      const reply = withIntents.handle('enrol_policy', OWNER, { policy: 'required', intent }).payload as { state: string; signature: string }
+      expect(reply.state).toBe('approved')
       expect(policyOf()).toBe('required')
+      // Signed by the machine over the policy and this intent's nonce, so the browser needn't take the relay's word.
+      const nonce = (JSON.parse(intent.body) as { nonce: string }).nonce
+      expect(verifyP1363(machineSpki, transcript(POLICY_RAISED_LABEL, 'required', nonce), Buffer.from(reply.signature, 'base64url'))).toBe(true)
     })
   })
 })

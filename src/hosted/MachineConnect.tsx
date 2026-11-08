@@ -84,7 +84,9 @@ export function MachineConnect({ machine, transport, onBack, onConnected }: Mach
                 ? 'This machine’s connector is not authorized to its local Codekin server.'
                 : relayCode === 'connector_update_required'
                   ? 'Codekin on this machine needs an update.'
-                  : 'Could not reach this machine.'}
+                  : relayCode === 'devices_unconfirmed'
+                    ? 'Your workspace requires confirmed devices.'
+                    : 'Could not reach this machine.'}
             </p>
             <p className="mb-4 text-meta text-ink-muted">{error}</p>
             <p className="mb-6 text-meta text-ink-faint">
@@ -93,6 +95,11 @@ export function MachineConnect({ machine, transport, onBack, onConnected }: Mach
                   The connector is running, but holding the wrong token. Restart it with{' '}
                   <code className="font-mono">AUTH_TOKEN_FILE</code> set to the token that machine’s
                   server uses.
+                </>
+              ) : relayCode === 'devices_unconfirmed' ? (
+                <>
+                  Confirm this browser on it: Settings → Machines → Confirm this browser, then type the code on
+                  that computer.
                 </>
               ) : relayCode === 'connector_update_required' ? (
                 <>

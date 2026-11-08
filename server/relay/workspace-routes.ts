@@ -177,6 +177,11 @@ export function createWorkspaceRouter({ db, config, browserHub, connectorHub }: 
       // "Require confirmed devices" (signed-intents spec §6.8), optionally
       // warning only for a grace period of whole days first.
       const graceDays = body.confirmedDevicesGraceDays ?? 0
+      // Set on its own, so nothing applies before another field is refused.
+      if (body.name !== undefined || body.requireMfa !== undefined || body.requirePasskeyStepUp !== undefined) {
+        res.status(400).json({ error: 'Set requireConfirmedDevices on its own' })
+        return
+      }
       if (typeof body.requireConfirmedDevices !== 'boolean' || typeof graceDays !== 'number' || !Number.isInteger(graceDays) || graceDays < 0 || graceDays > MAX_CONFIRMED_DEVICES_GRACE_DAYS) {
         res.status(400).json({ error: `requireConfirmedDevices must be a boolean, and confirmedDevicesGraceDays 0–${MAX_CONFIRMED_DEVICES_GRACE_DAYS}` })
         return
@@ -190,19 +195,20 @@ export function createWorkspaceRouter({ db, config, browserHub, connectorHub }: 
       const lowers = (current.required && !next.required)
         || (next.required && next.graceUntil !== null && (current.graceUntil === null ? current.required : next.graceUntil > current.graceUntil))
       if (lowers && !ensureRecentAuth(db, req, res)) return
-      setConfirmedDevicesRule(db, membership.workspaceId, next)
-      connectorHub?.applyConfirmedDevicesRule(membership.workspaceId, next)
-      recordAuditEvent(db, {
-        kind: 'workspace_security_updated',
-        workspaceId: membership.workspaceId,
-        actorUserId: membership.userId,
-        ...audit(req),
-        metadata: { requireConfirmedDevices: next.required, ...(next.graceUntil !== null ? { graceUntil: new Date(next.graceUntil).toISOString() } : {}) },
-      })
-      if (body.name === undefined && body.requireMfa === undefined && body.requirePasskeyStepUp === undefined) {
-        res.json({ workspace: { id: membership.workspaceId, ...confirmedDevicesView(next) } })
-        return
+      const unchanged = next.required === current.required && next.graceUntil === null && current.graceUntil === null
+      if (!unchanged) {
+        setConfirmedDevicesRule(db, membership.workspaceId, next)
+        connectorHub?.applyConfirmedDevicesRule(membership.workspaceId, next)
+        recordAuditEvent(db, {
+          kind: 'workspace_security_updated',
+          workspaceId: membership.workspaceId,
+          actorUserId: membership.userId,
+          ...audit(req),
+          metadata: { requireConfirmedDevices: next.required, ...(next.graceUntil !== null ? { graceUntil: new Date(next.graceUntil).toISOString() } : {}) },
+        })
       }
+      res.json({ workspace: { id: membership.workspaceId, ...confirmedDevicesView(unchanged ? current : next) } })
+      return
     }
     if (body.requirePasskeyStepUp !== undefined) {
       if (typeof body.requirePasskeyStepUp !== 'boolean') {

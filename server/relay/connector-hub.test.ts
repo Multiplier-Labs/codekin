@@ -393,20 +393,22 @@ describe('connector hub', () => {
       const connector = await connectWith()
       expect(hub.confirmedDevicesState(machineId)).toBe('refused')
       expect(await hub.sendRequest(machineId, { method: 'GET', path: '/api/sessions/list' }))
-        .toMatchObject({ error: { code: RELAY_ERROR.connectorUpdateRequired, message: expect.stringContaining('confirm a browser') } })
-      expect(hub.openChannel(machineId, 'chan-x', () => {})).toMatchObject({ code: RELAY_ERROR.connectorUpdateRequired })
+        .toMatchObject({ error: { code: RELAY_ERROR.devicesUnconfirmed, message: expect.stringContaining('confirm a browser') } })
+      expect(hub.openChannel(machineId, 'chan-x', () => {})).toMatchObject({ code: RELAY_ERROR.devicesUnconfirmed })
       // Enrolment still reaches the machine: it is how the refusal clears.
       expect(await hub.sendEnrolment(machineId, 'enrol_time', { payload: { nonce: 'A'.repeat(22) } } as never)).toMatchObject({ reply: { kind: 'enrol_result' } })
-      await waitFor(() => statuses.some(s => s.status === 'update_required'))
+      await waitFor(() => statuses.some(s => s.status === 'devices_unconfirmed'))
 
       // The owner confirms a browser; the machine now requires confirmed devices and says so.
       policy = 'required'
       await waitFor(() => hub.intentPolicy(machineId) === 'required')
       expect(hub.confirmedDevicesState(machineId)).toBe('confirmed')
       await waitFor(() => statuses.at(-1)?.status === 'connected')
+      connector.stop()
+      // Stored and audited (throttled; flushed when the machine leaves at the latest).
+      await waitFor(() => !hub.isOnline(machineId))
       const audit = db.prepare(`SELECT metadata FROM audit_events WHERE kind = 'machine_policy_changed'`).get() as { metadata: string }
       expect(JSON.parse(audit.metadata)).toEqual({ from: 'off', to: 'required' })
-      connector.stop()
     })
 
     it('only flags machines during a grace period', async () => {
@@ -417,14 +419,49 @@ describe('connector hub', () => {
       connector.stop()
     })
 
-    it('applies the rule to connected machines as soon as it changes', async () => {
+    it('applies the rule to connected machines as soon as it changes, closing sessions already open', async () => {
       const connector = await connectWith()
       expect(hub.confirmedDevicesState(machineId)).toBe('not_required')
+      const events: Array<{ kind: string; payload: unknown }> = []
+      expect(hub.openChannel(machineId, 'chan-open', (kind, payload) => { events.push({ kind, payload }) })).toBeNull()
       rule(true)
       hub.applyConfirmedDevicesRule(BOOTSTRAP_WORKSPACE_ID, { required: true, graceUntil: null })
       expect(hub.confirmedDevicesState(machineId)).toBe('refused')
-      await waitFor(() => statuses.some(s => s.status === 'update_required'))
+      expect(events).toEqual([{ kind: 'stream_close', payload: expect.objectContaining({ reason: expect.stringContaining('confirmed devices') }) }])
+      expect(hub.sendChannelData(machineId, 'chan-open', 'x')).toBe(false)
+      await waitFor(() => statuses.some(s => s.status === 'devices_unconfirmed'))
       connector.stop()
+    })
+
+    it('closes sessions when a grace period runs out', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      try {
+        rule(true, Date.now() + 60_000)
+        const connector = await connectWith()
+        const events: string[] = []
+        expect(hub.openChannel(machineId, 'chan-grace', kind => { events.push(kind) })).toBeNull()
+        vi.setSystemTime(Date.now() + 61_000)
+        expect(hub.sendChannelData(machineId, 'chan-grace', 'x')).toBe(false)
+        expect(events).toEqual(['stream_close'])
+        connector.stop()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('stores and audits policy reports at most every few seconds, applying the latest at once', async () => {
+      const connector = await connectWith()
+      for (const next of ['required', 'off', 'required', 'off', 'required'] as const) {
+        policy = next
+        await waitFor(() => hub.intentPolicy(machineId) === next)
+      }
+      const audits = () => (db.prepare(`SELECT COUNT(*) AS n FROM audit_events WHERE kind = 'machine_policy_changed'`).get() as { n: number }).n
+      expect(audits()).toBeLessThanOrEqual(1)
+      expect(hub.intentPolicy(machineId)).toBe('required')
+      connector.stop()
+      // Leaving flushes the latest.
+      await waitFor(() => !hub.isOnline(machineId))
+      expect((db.prepare('SELECT intent_policy FROM machines WHERE id = ?').get(machineId) as { intent_policy: string }).intent_policy).toBe('required')
     })
 
     it('refuses everything, enrolment too, from a connector that cannot enforce signed intents', async () => {

@@ -445,6 +445,12 @@ export function grantNeedsStepUp(permissions: readonly string[]): boolean {
  */
 export const POLICY_ACTION = 'device_policy'
 
+/**
+ * Domain label for the machine's confirmation that it raised its policy:
+ * sign_kM(T(label, policy, intentNonce)), so a relay can't fake "done".
+ */
+export const POLICY_RAISED_LABEL = 'ck-policy-raised-v1'
+
 /** What a device_policy intent covers: the policy asked for. */
 export function policyPayload(policy: string): Uint8Array {
   return framed([encoder.encode(policy)])
