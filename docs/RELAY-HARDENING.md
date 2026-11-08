@@ -1,6 +1,6 @@
 # Relay hardening
 
-**Status:** In progress. Built: §1 (health endpoints), §3 (browser security headers) and §4 (connector version floors). The rest is spec.
+**Status:** In progress. Built: §1 (health endpoints), §2 (error reporting), §3 (browser security headers) and §4 (connector version floors). The rest is spec.
 **Date:** 2026-11-08
 **Scope:** hardening features for anyone who runs the relay (`server/relay`), whether self-hosted or as a public service. Values specific to a deployment, such as limits, thresholds and monitoring setup, belong in that deployment's own config. They are not defined here.
 **Related:** `docs/RELAY-SIGNED-INTENTS-AND-E2E-SPEC.md`, `docs/SELF-HOSTED-RELAY.md`, `docs/OPERATIONS.md` ("Hosted relay").
@@ -20,17 +20,18 @@
 
 ## 2. Error reporting
 
-- **Optional.** Error reporting is off unless `RELAY_ERROR_DSN` is set. Any service that speaks the Sentry API works.
-- **Scrubbing.** Before anything is sent, the relay drops:
-  - request bodies and cookies
-  - every header except `user-agent`, `content-type` and `content-length`
-  - all query strings
-- **Redaction.** It also redacts:
+**Built** (`server/relay/error-reporting.ts`, `telemetry-routes.ts`, `src/hosted/errorReporting.ts`).
+
+- **Optional.** Error reporting is off unless `RELAY_ERROR_DSN` is set. Any service that speaks the Sentry ingest API (GlitchTip, Sentry) works. `RELAY_BROWSER_ERROR_DSN` sends browser errors to a separate project, and `RELAY_ERROR_ENVIRONMENT` sets the environment label.
+- **No SDK.** The relay builds each event itself from the error's type, message and stack frames and posts it as an envelope. Nothing else can ride along: no request bodies, headers, cookies, URLs, user or IP. Stack frame paths lose their origin, query string, working directory and home directory. Server errors are tagged with the method and the route *pattern*, never the path. At most 30 events a minute are sent; the rest are dropped.
+- **Redaction.** Messages are scrubbed before they leave. That covers:
+  - query strings
+  - `Bearer`/`Basic` credentials
   - values under keys matching `/secret|token|password|cookie|authorization|code|sig|otp|recovery|credential|session/i`
   - any base64url string of 24 or more characters
 - **Never sent:** relay frame payloads.
 - **Tests** push a known secret through each path and assert it never reaches the outgoing event.
-- **Browser errors** go through the relay (`POST /api/telemetry/errors`, rate-limited), so the CSP can keep `connect-src 'self'`. They carry only exception type, a truncated and scrubbed message, and stack frames: no breadcrumbs, no session replay.
+- **Browser errors** go through the relay (`POST /api/telemetry/errors`), so the CSP can keep `connect-src 'self'` and the visitor's IP stays with the relay. The endpoint is same-origin only, 10/min per IP and 16 KB max. Reports carry only the exception type, a message truncated to 200 characters and scrubbed by the relay, and stack frames: no breadcrumbs, DOM text, console output or session replay. The hosted app reports only errors whose stack runs through its own `/assets/` bundle, five per page load at most. Without a DSN, the relay accepts the report and drops it.
 
 ## 3. Browser security headers
 

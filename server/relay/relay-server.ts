@@ -30,6 +30,9 @@ import { createDesktopAuthRouter, DESKTOP_CLAIM_PATH } from './desktop-auth-rout
 import { createWebauthnRouter } from './webauthn-routes.js'
 import { createAdminStatsRouter, createHealthRouter, EventLoopLagMonitor } from './health-routes.js'
 import { createCspReportRouter, CSP_REPORT_PATH } from './csp-report-routes.js'
+import { createErrorReporter, reportFromError, MAX_BROWSER_MESSAGE } from './error-reporting.js'
+import { createTelemetryRouter, TELEMETRY_ERRORS_PATH } from './telemetry-routes.js'
+import { codekinPackageVersion } from './relay-credential.js'
 import { ConnectorHub } from './connector-hub.js'
 import { BrowserHub } from './browser-hub.js'
 import { MAX_PROXY_BODY_BYTES } from './relay-protocol.js'
@@ -58,6 +61,22 @@ app.disable('x-powered-by')
 // 8 KB limit applies. Rate-limited hard: a hostile page can trigger reports.
 app.use(CSP_REPORT_PATH, ipRateLimiter(5, 60_000))
 app.use(createCspReportRouter())
+
+// Error reporting is off unless a DSN is configured (docs/RELAY-HARDENING.md §2).
+const release = codekinPackageVersion()
+const errorReporter = createErrorReporter(config.errorDsn, {
+  release, environment: config.errorEnvironment, platform: 'node',
+})
+const browserErrorReporter = createErrorReporter(config.browserErrorDsn ?? config.errorDsn, {
+  release, environment: config.errorEnvironment, platform: 'javascript', maxMessage: MAX_BROWSER_MESSAGE,
+})
+// Best effort: the process may exit before the report is delivered.
+process.on('uncaughtExceptionMonitor', (err, origin) => {
+  errorReporter?.capture(reportFromError(err, { kind: origin }))
+})
+// Browser errors from the hosted app: same origin only, small, rate-limited.
+app.use(TELEMETRY_ERRORS_PATH, ipRateLimiter(10, 60_000))
+app.use(createTelemetryRouter(config.publicUrl, browserErrorReporter))
 
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff')
@@ -193,8 +212,12 @@ app.use((_req, res) => {
 })
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Express identifies error handlers by arity
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('[relay] Unhandled error:', err)
+  // The route pattern, never the path: paths carry ids and tokens.
+  const routePath = (req.route as { path?: unknown } | undefined)?.path
+  const route = typeof routePath === 'string' ? `${req.baseUrl}${routePath}` : 'unmatched'
+  errorReporter?.capture(reportFromError(err, { method: req.method, route }))
   if (!res.headersSent) {
     res.status(500).json({ error: 'Internal server error' })
   }
