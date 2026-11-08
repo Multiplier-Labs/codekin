@@ -1,0 +1,26 @@
+# Security headers for the Codekin web app (the local server's frontend or a
+# self-hosted relay's web app).
+#
+# Install: copy to /etc/nginx/snippets/codekin-security-headers.conf and
+# replace YOUR_DOMAIN. Then `include snippets/codekin-security-headers.conf;`
+# in EVERY location that serves the app (`/` and `/assets/`). nginx drops
+# server-level add_header directives in any location that sets its own
+# add_header, such as Cache-Control.
+#
+# - These headers assume HTTPS (HSTS, upgrade-insecure-requests). Don't use
+#   them on a plain-http host.
+# - The web app loads its fonts from Google Fonts, hence the two
+#   fonts.* origins.
+# - img-src allows data: and GitHub avatars only. Agent output that embeds a
+#   remote image doesn't load it, so viewing a transcript never contacts
+#   third-party hosts.
+# - connect-src names the wss:// origin explicitly because older Safari
+#   doesn't count same-host WebSockets as 'self'.
+add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' wss://YOUR_DOMAIN; manifest-src 'self'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; upgrade-insecure-requests" always;
+add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+add_header Cross-Origin-Opener-Policy "same-origin" always;
+add_header Cross-Origin-Resource-Policy "same-origin" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header X-Frame-Options "DENY" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=()" always;

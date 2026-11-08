@@ -93,8 +93,15 @@ pm2 start server/dist/relay/relay-server.js --name codekin-relay
 pm2 save
 ```
 
-Copy the web app to the web root (`rsync -a --delete dist-hosted/ /var/www/codekin-app/`) and
-serve both behind the reverse proxy:
+Copy the web app to the web root (`rsync -a --delete dist-hosted/ /var/www/codekin-app/`).
+Install the security-header snippet, replacing `YOUR_DOMAIN` with your relay's domain:
+
+```bash
+sudo cp nginx/snippets/codekin-security-headers.conf.example /etc/nginx/snippets/codekin-security-headers.conf
+sudo sed -i 's/YOUR_DOMAIN/codekin.example.com/' /etc/nginx/snippets/codekin-security-headers.conf
+```
+
+Then serve both behind the reverse proxy (also in `nginx/relay.example`):
 
 ```nginx
 server {
@@ -107,10 +114,12 @@ server {
         root /var/www/codekin-app;
         try_files $uri $uri/ /index.html;
         add_header Cache-Control "no-cache";
+        include snippets/codekin-security-headers.conf;
     }
     location /assets/ {
         root /var/www/codekin-app;
         add_header Cache-Control "public, max-age=31536000, immutable";
+        include snippets/codekin-security-headers.conf;
     }
 
     # Relay REST API
@@ -144,7 +153,15 @@ The relay trusts exactly **one** proxy hop for client addresses (used for rate l
 audit log). If another proxy or CDN sits in front of nginx, adjust `trust proxy` in
 `relay-server.ts`.
 
-Check it: `curl https://codekin.example.com/api/health` should return `{"ok":true,…}`.
+Check it: `curl https://codekin.example.com/api/health` should return `{"ok":true,…}`, and
+`curl -sI https://codekin.example.com/` should list `content-security-policy` and
+`strict-transport-security`.
+
+The snippet has to be included in **every** location that serves the web app. nginx drops
+server-level `add_header` directives in any location that sets its own (both set `Cache-Control`).
+It sets a strict Content Security Policy, HSTS (so serve the relay over HTTPS only), and
+anti-framing headers. Images in agent output are limited to `data:` URLs and GitHub avatars, so
+viewing a transcript never makes the browser contact other hosts.
 
 ## 6. First sign-in and inviting people
 
