@@ -187,6 +187,14 @@ describe('signed share grants on the machine', () => {
     expect(policy.grants).toEqual({})
   })
 
+  it('revokes every grant signed for a share when its id is revoked, and nothing else', () => {
+    const current = readTrustStore(devicesFile)!
+    writeTrustStore(devicesFile, { ...current, revokedGrants: [{ grantId: 'g1', at: new Date().toISOString() }] })
+    expect(verifier.effectivePrincipal(danaPrincipal([grant({ grantId: 'g1:k2x9' })]))?.grants).toEqual({})
+    // A different share whose id merely starts the same way is untouched.
+    expect(verifier.effectivePrincipal(danaPrincipal([grant({ grantId: 'g10:aa' })]))?.grants).toEqual({ s1: ['view', 'send_prompt'] })
+  })
+
   it('leaves the relay word standing outside required, where unsigned traffic goes through anyway', () => {
     store('warn')
     const principal = danaPrincipal([])

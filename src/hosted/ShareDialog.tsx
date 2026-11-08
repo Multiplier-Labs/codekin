@@ -9,7 +9,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { currentWorkspaceId, fetchMembers, workspaceHeaders, type WorkspaceMember } from './workspace'
 import {
-  fetchGranteeKeys, fingerprint, flushRevocations, grantStatus, proposeGrant, revokeShareGrants, signGrant,
+  fetchGranteeKeys, fingerprint, flushRevocations, grantStatus, proposeGrant, recordShare, revokeShareGrants, signGrant,
   type GrantProposal, type GrantStatus, type GrantTransport, type ShareWithGrant,
 } from './grants'
 import { transport } from '../lib/transport'
@@ -138,6 +138,9 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
         // Quota refusals carry a sentence in `message`; other errors only a code or text in `error`.
         throw new Error(body?.message ?? body?.error ?? `Request failed (${res.status})`)
       }
+      // Remember what the owner chose: Allow signs this, whatever the relay lists later.
+      const created = (await res.json().catch(() => null)) as { share?: { id?: string } } | null
+      if (created?.share?.id) await recordShare(machineId, created.share.id, role, null).catch(() => {})
       setGranteeId('')
       await loadShares()
     } catch (err) {

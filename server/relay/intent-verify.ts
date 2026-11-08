@@ -460,7 +460,9 @@ export class IntentVerifier {
     if (body.ts > now + INTENT_MAX_SKEW_MS) return null
     if (grant.expiresAt <= now || grant.expiresAt - body.ts > MAX_GRANT_LIFETIME_MS + INTENT_MAX_SKEW_MS) return null
     if (typeof grant.notAfter === 'number' && grant.expiresAt > grant.notAfter) return null
-    if (store.revokedGrants.some(r => r.grantId === grant.grantId)) return null
+    // Revoking X also revokes every X:… — a share's id covers all the grants
+    // signed for it, whichever ones the relay chooses to present.
+    if (store.revokedGrants.some(r => r.grantId === grant.grantId || grant.grantId.startsWith(`${r.grantId}:`))) return null
     return { grant, signedAt: body.ts }
   }
 
