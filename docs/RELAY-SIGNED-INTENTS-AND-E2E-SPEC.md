@@ -1,6 +1,6 @@
 # Relay trust: device-signed intents and end-to-end encryption
 
-**Status:** Spec, decisions D1–D7 settled (§13). Built: slice 1 (relay audit events, §7.1) and slice 2 (machine identity and trust store, no enforcement). The rest is not built.
+**Status:** Spec, decisions D1–D7 settled (§13). Built: slice 1 (relay audit events, §7.1), slice 2 (machine identity and trust store) and slice 3 (enrolment ceremony, §5.2–5.5), none of it enforced yet. The rest is not built.
 **Date:** 2026-11-08
 **Context:** a hosted relay is trusted to say who the machine owner is (§3). This spec removes that trust in two levels: **L1 device-signed intents** and **L2 end-to-end content encryption**. It also adds the relay audit events that are declared but never emitted.
 **Basis:** `origin/main` at v0.10.5 (`a93f6e3`). All `path:line` references point there.
@@ -209,14 +209,34 @@ Browser B (owner, signed in)                Relay              Connector M
    local Settings, the desktop app, or `codekin relay devices approve K7QM-2XPA`.
                                      match against pending entries → add kB and P[] to the trust store
    ◄─── enrol_result { ok, sigM(trust-store digest) } ───────────
-   B pins kM for this machine in IndexedDB.
+5. The machine then shows a 6-character finishing code
+   CC = base32(SHA-256("ck-enrol-confirm-v1" ‖ SPKI(kM) ‖ SPKI(kB) ‖ P[] ‖ nonceB ‖ nonceM))[0:6].
+   The user types it into the browser; B computes CC from its own view and,
+   only if they match, pins kM for this machine in IndexedDB.
 ```
 
 **Why this design.**
 - **The user types the code; they don't compare two codes.** People click "they match" without looking. Typing the code is no slower and actually checks it.
+- **The finishing code protects the browser's pin.** Without step 5, a relay could answer a browser's *first* enrolment as the machine: sign the challenge and the `enrol_result` with a key of its own, which the browser has no pin to check against. The machine is safe either way, because the code the browser shows is computed with the relay's key and won't match. But the browser would pin the relay's key, and L2 (§8.2) trusts that pin. The machine shows CC only after it accepted the code, so a relay that swapped `kM` never gets one shown to the user. Decided 2026-11-08 (option A on #818).
 - **A swapped key fails.** If the relay replaces `kB`, the commitment fails, or the machine computes a different code from the one the browser shows. The relay committed before seeing `nonceM`, so it can't grind for a match. The chance of a guess landing is 2⁻⁴⁰ per pending request, with at most 3 pending.
 - **Passkeys are in the transcript.** That stops the relay from adding a passkey public key of its own alongside a real browser key.
 - **Proof of possession.** `popB` ties the reveal to a key the browser actually holds.
+
+**As built (slice 3).** Where the implementation pins down what the diagram leaves open:
+- **Encoding.** Every hashed or signed message is a transcript: a domain label, then each field as a 4-byte big-endian length followed by its bytes. `P` is UTF-8 JSON of `[credentialId, cosePublicKey, rpId]` triples, `[]` until passkeys join (slice 5). The labels are `ck-enrol-commit-v1`, `ck-enrol-challenge-v1`, `ck-enrol-pop-v1`, `ck-sas-v1` and `ck-enrol-result-v1`. Code: `server/relay/enrolment-crypto.ts`, mirrored in `src/hosted/deviceTrust.ts`, with a shared test vector.
+- **Waiting for the code.** The browser polls with a fifth frame, `enrol_status { enrolId }`, answered by `enrol_result`. This survives a locked phone or a reconnect, and an unsolicited push would not.
+- **The result signature.** `enrol_result` for an approval or refusal carries `sign_kM(T(result, enrolId, SPKI(kB), outcome))`, signing the decision about this key rather than a trust-store digest. A valid signature moves the browser on to the finishing code, but it never pins anything by itself: on a first enrolment a relay could sign it with its own key.
+- **The finishing code.** CC is shown by Settings → Remote access after Confirm, printed by `codekin relay devices approve` and the login prompt, and listed by `codekin relay devices list` for an hour after approval.
+- **Where requests wait.** Requests live in `relay-devices.json` → `pending`, under a lock file, so the local UI and CLI can decide them from another process.
+  - At most 3 requests wait undecided. A fourth replaces the oldest, so an owner who reopens the sheet isn't locked out.
+  - A machine accepts at most 20 requests per 10 minutes, failed ones included. Each request gives a relay one 2⁻⁴⁰ guess at a code, so this bounds the guesses however fast it retries.
+  - Requests expire after 10 minutes. A decision stays collectable for 24 hours.
+- **Refusals.** A reveal that fails its commitment or proof-of-possession check uses up the request, which keeps counting against the budget. Only the owner can enrol: the hub refuses grantees, and the connector compares the principal with the `ownerUserId` it recorded at pairing.
+- **The code is authentic, not secret.** Every input to the code crosses the relay, so a relay can compute it. That doesn't matter as long as it can't enter it: only local surfaces (Settings on the machine, `codekin relay devices approve`, the login prompt) accept a code. The local list of waiting requests still never shows it, because the owner has to read it off the browser. **For slices 4 and 7:** a relay that can drive a session on the machine could have it run `codekin relay devices approve` or edit `relay-devices.json`. Signed intents must close that before enforcement means anything.
+- **The browser's first pin** is covered by step 5 (above).
+- **Old connectors.** A connector that can enrol advertises the `enrolment` feature. The hub answers older ones with `connector_update_required` straight away.
+- **Registry.** When a machine accepts a reveal, the relay records the key in `device_keys` (`GET`/`DELETE /api/device-keys`).
+- **Not built yet:** the desktop notification and tray item for a waiting request (§5.5), and the Account → Devices page (§6.9).
 
 ### 5.3 At pairing
 

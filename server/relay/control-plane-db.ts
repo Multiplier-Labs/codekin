@@ -423,6 +423,24 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
   db => {
     db.exec('ALTER TABLE machines ADD COLUMN identity_key TEXT')
   },
+
+  // 13: browser signing keys the relay has seen enrolled (signed-intents spec
+  // §4.2). A registry for the UI and, later, grantee key sets; never trusted:
+  // machines keep their own device lists.
+  db => {
+    db.exec(`
+      CREATE TABLE device_keys (
+        user_id TEXT NOT NULL,
+        key_id TEXT NOT NULL,
+        spki TEXT NOT NULL,
+        label TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_seen_at TEXT,
+        revoked_at TEXT,
+        PRIMARY KEY (user_id, key_id)
+      );
+    `)
+  },
 ]
 
 function runMigrations(db: Database.Database): void {

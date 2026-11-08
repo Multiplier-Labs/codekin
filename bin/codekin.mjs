@@ -139,15 +139,50 @@ async function loadPairingClient() {
   return import(pathToFileURL(compiled).href)
 }
 
-/** `codekin relay devices …`: server/relay/devices-cli.ts, from the compiled server. */
-async function cmdRelayDevices(args) {
+async function loadDevicesCli() {
   const compiled = join(PACKAGE_ROOT, 'server', 'dist', 'relay', 'devices-cli.js')
   if (!existsSync(compiled)) {
     console.error('This needs the compiled server (server/dist). Run: npx tsc -p server/tsconfig.json')
     process.exit(1)
   }
-  const { runDevicesCommand } = await import(pathToFileURL(compiled).href)
+  return import(pathToFileURL(compiled).href)
+}
+
+/** `codekin relay devices …`: server/relay/devices-cli.ts, from the compiled server. */
+async function cmdRelayDevices(args) {
+  const { runDevicesCommand } = await loadDevicesCli()
   process.exit(runDevicesCommand(args, RELAY_CREDENTIAL_FILE))
+}
+
+/**
+ * Right after pairing, the person is at this terminal and in the browser at
+ * once: ask for the code the browser shows, so it can control this computer
+ * (signed-intents spec §5.3). Skippable; `codekin relay devices approve`
+ * does the same later.
+ */
+async function promptForBrowserCode() {
+  const later = 'To let a browser control this computer later, choose "Confirm this browser" in the web app\n' +
+    'and run: codekin relay devices approve <code>'
+  if (!process.stdin.isTTY) {
+    console.log(later)
+    return
+  }
+  const { runDevicesCommand } = await loadDevicesCli()
+  const { createInterface } = await import('node:readline/promises')
+  const rl = createInterface({ input: process.stdin, output: process.stdout })
+  console.log('\nYour browser now shows a code (if not, choose "Confirm this browser" for this computer there).')
+  try {
+    for (;;) {
+      const answer = (await rl.question('Type it here to let that browser control this computer, or press Enter to skip: ')).trim()
+      if (!answer) {
+        console.log(later)
+        break
+      }
+      if (runDevicesCommand(['approve', answer], RELAY_CREDENTIAL_FILE) === 0) break
+    }
+  } finally {
+    rl.close()
+  }
 }
 
 function printPairedNextSteps(managed) {
@@ -186,6 +221,7 @@ async function cmdRelayLogin(args) {
       const result = await claimPairingToken(relayUrl, pairingToken, managed)
       console.log(`Paired${as(result.ownerLogin)}. Machine id: ${result.machineId}`)
       printPairedNextSteps(managed)
+      if (managed) await promptForBrowserCode()
       return
     } catch (err) {
       if (err instanceof PairingError && err.message === 'expired') {
@@ -214,6 +250,7 @@ async function cmdRelayLogin(args) {
   if (result.state === 'complete') {
     console.log(`\nPaired${as(result.ownerLogin)}. Machine id: ${result.machineId}`)
     printPairedNextSteps(managed)
+    if (managed) await promptForBrowserCode()
     return
   }
   if (result.state === 'denied') console.error('\nPairing was denied in the hosted UI.')

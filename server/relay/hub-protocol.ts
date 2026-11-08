@@ -10,6 +10,7 @@ const summary = z.object({ total: z.number().int().nonnegative(), active: z.numb
 const body = z.string().max(Math.ceil(MAX_PROXY_BODY_BYTES / 3) * 4).optional()
 const text = z.string().max(16 * 1024)
 const empty = z.object({})
+const b64 = z.string().max(1024).regex(/^[A-Za-z0-9_-]*$/)
 const base = { version: z.literal(1), id: id.optional(), channelId: id.optional() }
 const frame = <K extends string, S extends z.ZodType>(kind: K, payload: S) => z.object({ ...base, kind: z.literal(kind), payload })
 // Stream frames are bounded by the socket's maxPayload (relay-server.ts). A
@@ -48,6 +49,10 @@ const connector = z.discriminatedUnion('kind', [
   frame('error', z.object({ code: z.string().max(100), message: text })),
   frame('event', z.object({ sessions: summary.optional(), status: version.optional() })),
   streamData, connectorStreamClose, frame('ping', empty), frame('pong', empty),
+  frame('enrol_challenge', z.object({ enrolId: id, machineKey: b64, nonceM: b64, signature: b64 })).extend({ id }),
+  frame('enrol_result', z.object({
+    enrolId: id, state: z.enum(['awaiting_code', 'approved', 'rejected', 'expired']), keyId: b64.optional(), signature: b64.optional(),
+  })).extend({ id }),
 ])
 
 const browser = z.discriminatedUnion('kind', [
@@ -55,6 +60,14 @@ const browser = z.discriminatedUnion('kind', [
   frame('request', z.object({ method: z.string().min(1).max(32), path: text, contentType: z.string().max(1024).optional(), body })).extend({ id }),
   frame('stream_open', empty).extend({ channelId: id }),
   streamData, streamClose, frame('ping', empty), frame('pong', empty),
+  // Enrolment (signed-intents spec §5.2). Checked for real on the connector;
+  // bounded here so nothing oversized reaches it.
+  frame('enrol_commit', z.object({ commit: b64 })).extend({ id }),
+  frame('enrol_reveal', z.object({
+    enrolId: id, spki: b64, label: z.string().max(256), nonceB: b64, pop: b64,
+    passkeys: z.array(z.object({ credentialId: b64, cosePublicKey: z.string().max(2048), rpId: z.string().max(253) })).max(10),
+  })).extend({ id }),
+  frame('enrol_status', z.object({ enrolId: id })).extend({ id }),
 ])
 
 /** Validate fields before any cast, database binding, or socket operation. */

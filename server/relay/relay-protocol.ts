@@ -17,6 +17,13 @@ export type RelayEnvelopeKind =
   | 'error'
   | 'ping'
   | 'pong'
+  /** Enrolment ceremony (signed-intents spec §5.2): browser → connector… */
+  | 'enrol_commit'
+  | 'enrol_reveal'
+  | 'enrol_status'
+  /** …and connector → browser, each answering one request by id. */
+  | 'enrol_challenge'
+  | 'enrol_result'
 
 export interface RelayEnvelope<T = unknown> {
   version: typeof RELAY_PROTOCOL_VERSION
@@ -202,7 +209,31 @@ export const RELAY_ERROR = {
   unknownChannel: 'unknown_channel',
   notPermitted: 'not_permitted',
   connectorUpdateRequired: 'connector_update_required',
+  /** The machine turned an enrolment request down (bad proof, not the owner, too many pending). */
+  enrolRefused: 'enrol_refused',
+  /** The machine can't enrol right now (no identity key, owner unknown, device list unreadable). */
+  enrolUnavailable: 'enrol_unavailable',
 } as const
+
+/** Browser → connector enrolment frames, and the connector's replies. */
+export const ENROL_REQUEST_KINDS = ['enrol_commit', 'enrol_reveal', 'enrol_status'] as const
+export type EnrolRequestKind = (typeof ENROL_REQUEST_KINDS)[number]
+export const ENROL_REPLY_KINDS = ['enrol_challenge', 'enrol_result'] as const
+export type EnrolReplyKind = (typeof ENROL_REPLY_KINDS)[number]
+
+/**
+ * A connector advertises this in `capabilities.features` when it answers
+ * enrol_* frames. It is protocol support, not a security claim, so it has no
+ * version floor; the hub only uses it to answer old connectors at once
+ * instead of letting the request time out.
+ */
+export const ENROLMENT_FEATURE = 'enrolment'
+
+/** What the hub forwards to the connector: the browser's payload plus who sent it. */
+export interface EnrolRequest {
+  principal: RelayPrincipal
+  payload: unknown
+}
 
 /** Close codes on proxied stream channels, mirroring the local server's conventions. */
 export const STREAM_CLOSE = {

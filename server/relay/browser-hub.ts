@@ -21,6 +21,7 @@ import {
 } from './relay-protocol.js'
 import type {
   BrowserHello,
+  EnrolRequestKind,
   ProxyRequest,
   ProxyResponse,
   RelayError,
@@ -34,6 +35,7 @@ import { getUserById } from './control-plane-db.js'
 import { resolveMachineAccess } from './shares.js'
 import type { MachineAccess } from './shares.js'
 import { recordAuditEvent } from './audit.js'
+import { upsertDeviceKey } from './device-keys.js'
 import { checkRestPolicy, isServerFrameVisible } from './connector-policy.js'
 import { BROWSER_FRAME_LIMIT, RateLimiter, isBackedUp } from './rate-limit.js'
 import { checkQuota, UNLIMITED } from './quotas.js'
@@ -350,6 +352,8 @@ export class BrowserHub {
       }
       if (msg.kind === 'request') {
         return this.forwardRequest(client, msg.id, msg.payload as ProxyRequest)
+      } else if (msg.kind === 'enrol_commit' || msg.kind === 'enrol_reveal' || msg.kind === 'enrol_status') {
+        return this.forwardEnrolment(client, msg.kind, msg.id, msg.payload)
       } else if (msg.kind === 'stream_open') {
         this.openChannel(client, msg.channelId)
       } else if (msg.kind === 'stream_data') {
@@ -421,6 +425,50 @@ export class BrowserHub {
       } else {
         client.socket.send(JSON.stringify(envelope('response', outcome.response, { id })))
         this.auditRestRequest(client, request, outcome.response)
+      }
+    } finally {
+      client.inflight -= 1
+    }
+  }
+
+  /**
+   * Forward an enrolment frame (signed-intents spec §5.2). Only the owner
+   * enrols, and the connector checks that again against its own record of the
+   * owner; this hub can't make a key trusted, only carry the ceremony.
+   */
+  private async forwardEnrolment(client: BrowserClient, kind: EnrolRequestKind, id: string | undefined, payload: unknown): Promise<void> {
+    if (!id) return
+    if (client.access.kind !== 'owner') {
+      this.sendError(client.socket, id, { code: RELAY_ERROR.notPermitted, message: 'Only the owner of this computer can confirm a browser on it' })
+      return
+    }
+    if (client.inflight >= MAX_INFLIGHT_PER_SOCKET) {
+      this.sendError(client.socket, id, { code: RELAY_ERROR.badRequest, message: 'Too many requests in flight' })
+      return
+    }
+    client.inflight += 1
+    try {
+      const outcome = await this.connectors.sendEnrolment(client.machineId, kind, {
+        principal: toPrincipal(client.user, client.access),
+        payload,
+      })
+      if (!this.clients.has(client) || client.socket.readyState !== client.socket.OPEN) return
+      if ('error' in outcome) {
+        this.sendError(client.socket, id, outcome.error)
+        return
+      }
+      client.socket.send(JSON.stringify(envelope(outcome.reply.kind, outcome.reply.payload, { id })))
+      if (kind === 'enrol_reveal') {
+        // The machine accepted the reveal: remember the key in the registry
+        // (a hint for the account's device list, never trusted).
+        const reveal = payload as { spki?: unknown; label?: unknown }
+        const keyId = upsertDeviceKey(this.db, client.user.id, reveal.spki, typeof reveal.label === 'string' ? reveal.label : '')
+        recordAuditEvent(this.db, {
+          kind: 'device_enrolment_requested',
+          actorUserId: client.user.id,
+          machineId: client.machineId,
+          metadata: { keyId },
+        })
       }
     } finally {
       client.inflight -= 1

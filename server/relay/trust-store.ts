@@ -7,9 +7,12 @@
  * and local surfaces (the local server's /api/relay/devices* routes and
  * `codekin relay devices`) write it. The relay can't reach any of them.
  *
- * Slice 2 creates the file and lets the owner read it, revoke entries and set
- * the policy. Nothing adds credentials yet (enrolment is slice 3) and nothing
- * enforces the policy yet (slices 4 and 7).
+ * Credentials are added by the enrolment ceremony (enrolment.ts), whose
+ * requests wait in `pending` until the owner types the browser's code on
+ * this machine. Nothing enforces the policy yet (slices 4 and 7).
+ *
+ * The connector and the local surfaces may be different processes (the CLI,
+ * an unmanaged connector), so every read-modify-write holds a lock file.
  *
  * The store belongs to one pairing: a machine id that doesn't match relay.json
  * means the machine was re-paired, and re-pairing starts with an empty store
@@ -17,10 +20,13 @@
  * exists, resetting it would quietly drop the policy.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'fs'
+import { closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync } from 'fs'
+import { randomUUID } from 'crypto'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
 import { writeFileAtomic } from './relay-credential.js'
+import { formatCode } from './enrolment-crypto.js'
+import type { EnrolPasskey } from './enrolment-crypto.js'
 
 export function relayDevicesPath(home = homedir()): string {
   return join(home, '.config', 'codekin', 'relay-devices.json')
@@ -58,6 +64,36 @@ export interface PasskeyCredential extends CredentialBase {
 
 export type TrustedCredential = BrowserCredential | PasskeyCredential
 
+/**
+ * An enrolment request (spec §5.2). Created by `enrol_commit`, completed by
+ * `enrol_reveal`, and decided on this machine: approved when the owner types
+ * `reveal.code`, or rejected. The code never leaves this file.
+ */
+export interface PendingEnrolment {
+  enrolId: string
+  /** The relay user the request came from; must be the machine owner. */
+  userId: string
+  /** base64url commitment C. */
+  commit: string
+  /** base64url machine nonce. */
+  nonceM: string
+  createdAt: string
+  expiresAt: string
+  reveal?: {
+    spki: string
+    keyId: string
+    label: string
+    nonceB: string
+    passkeys: EnrolPasskey[]
+    /** The 8-character code, compared with what the owner types. */
+    code: string
+    /** The 6-character code shown after approval, for the owner to type in the browser. */
+    confirmCode?: string
+    revealedAt: string
+  }
+  outcome?: { state: 'approved' | 'rejected'; at: string }
+}
+
 export interface TrustStore {
   version: 1
   machineId: string
@@ -66,15 +102,15 @@ export interface TrustStore {
   relayOrigin: string
   policy: IntentPolicy
   credentials: TrustedCredential[]
-  /** Enrolment requests awaiting a code (slice 3). Kept as written. */
-  pending: unknown[]
+  /** Enrolment requests, until they expire. */
+  pending: PendingEnrolment[]
   /** Share grants revoked here (slice 6). Kept as written. */
   revokedGrants: unknown[]
 }
 
 export class TrustStoreError extends Error {
   constructor(
-    readonly code: 'unreadable' | 'not_found' | 'no_credentials' | 'invalid_policy' | 'wrong_machine',
+    readonly code: 'unreadable' | 'not_found' | 'no_credentials' | 'invalid_policy' | 'wrong_machine' | 'busy',
     message: string,
   ) {
     super(message)
@@ -116,6 +152,32 @@ function parseCredential(value: unknown): TrustedCredential | null {
   return null
 }
 
+function parsePending(value: unknown): PendingEnrolment | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const p = value as Record<string, unknown>
+  if (!str(p.enrolId, 64) || !str(p.userId, 200) || !str(p.commit, 128) || !str(p.nonceM, 128)) return null
+  if (!str(p.createdAt, 64) || !str(p.expiresAt, 64)) return null
+  const entry: PendingEnrolment = {
+    enrolId: p.enrolId, userId: p.userId, commit: p.commit, nonceM: p.nonceM, createdAt: p.createdAt, expiresAt: p.expiresAt,
+  }
+  if (p.reveal !== undefined) {
+    const r = p.reveal as Record<string, unknown> | null
+    if (!r || !str(r.spki, 1024) || !str(r.keyId, 64) || !str(r.label, 200) || !str(r.nonceB, 128) || !str(r.code, 16) || !str(r.revealedAt, 64)) return null
+    if (!Array.isArray(r.passkeys)) return null
+    entry.reveal = {
+      spki: r.spki, keyId: r.keyId, label: r.label, nonceB: r.nonceB, code: r.code, revealedAt: r.revealedAt,
+      passkeys: r.passkeys as EnrolPasskey[],
+      ...(str(r.confirmCode, 16) ? { confirmCode: r.confirmCode } : {}),
+    }
+  }
+  if (p.outcome !== undefined) {
+    const o = p.outcome as Record<string, unknown> | null
+    if (!o || (o.state !== 'approved' && o.state !== 'rejected') || !str(o.at, 64)) return null
+    entry.outcome = { state: o.state, at: o.at }
+  }
+  return entry
+}
+
 /**
  * Parse a trust store. Throws TrustStoreError('unreadable') on anything it
  * can't fully account for, including a credential entry it doesn't
@@ -154,7 +216,8 @@ export function parseTrustStore(text: string): TrustStore {
     relayOrigin: v.relayOrigin,
     policy: v.policy,
     credentials,
-    pending: Array.isArray(v.pending) ? v.pending : [],
+    // An unreadable request is only a request: dropping it is harmless.
+    pending: Array.isArray(v.pending) ? v.pending.map(parsePending).filter((e): e is PendingEnrolment => e !== null) : [],
     revokedGrants: Array.isArray(v.revokedGrants) ? v.revokedGrants : [],
   }
 }
@@ -176,6 +239,82 @@ export function writeTrustStore(file: string, store: TrustStore): void {
   writeFileAtomic(file, JSON.stringify(store, null, 2) + '\n')
 }
 
+const LOCK_WAIT_MS = 3_000
+const LOCK_STALE_MS = 10_000
+const sleeper = new Int32Array(new SharedArrayBuffer(4))
+
+/**
+ * Run `fn` holding relay-devices.json.lock. The lock file holds a random
+ * token: a holder only removes a lock that still has its token, and a lock
+ * older than LOCK_STALE_MS (left by a crashed process) is taken over by
+ * renaming it aside first, which only one waiter can do.
+ */
+export function withTrustStoreLock<T>(file: string, fn: () => T): T {
+  mkdirSync(dirname(file), { recursive: true })
+  const lock = `${file}.lock`
+  const token = randomUUID()
+  const deadline = Date.now() + LOCK_WAIT_MS
+  for (;;) {
+    try {
+      const fd = openSync(lock, 'wx', 0o600)
+      try { writeSync(fd, token) } finally { closeSync(fd) }
+      break
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+    }
+    try {
+      if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) {
+        const aside = `${lock}.stale-${token}`
+        renameSync(lock, aside) // throws if another waiter got there first
+        // Between the stat and the rename, someone may have replaced the
+        // stale lock with a live one: if so, put it back.
+        if (Date.now() - statSync(aside).mtimeMs <= LOCK_STALE_MS) {
+          try { linkSync(aside, lock) } catch { /* a newer lock is already in place */ }
+        }
+        rmSync(aside, { force: true })
+        continue
+      }
+    } catch { continue }
+    if (Date.now() > deadline) throw new TrustStoreError('busy', 'The device list is being changed by another process; try again')
+    Atomics.wait(sleeper, 0, 0, 20)
+  }
+  try {
+    return fn()
+  } finally {
+    try {
+      if (readFileSync(lock, 'utf-8') === token) rmSync(lock, { force: true })
+    } catch { /* already gone */ }
+  }
+}
+
+/** Drop requests past their expiry. Returns true when any were dropped. */
+export function prunePending(store: TrustStore, now = Date.now()): boolean {
+  const kept = store.pending.filter(p => Date.parse(p.expiresAt) > now)
+  if (kept.length === store.pending.length) return false
+  store.pending = kept
+  return true
+}
+
+/**
+ * Read, change and write the store under the lock. `fn` edits the store it
+ * is given; it is written back afterwards unless `fn` throws. Expired
+ * enrolment requests are dropped on the way.
+ */
+export function mutateTrustStore<T>(
+  file: string,
+  machineId: string | undefined,
+  fn: (store: TrustStore) => T,
+  now = Date.now(),
+): T {
+  return withTrustStoreLock(file, () => {
+    const store = requireStore(file, machineId)
+    prunePending(store, now)
+    const result = fn(store)
+    writeTrustStore(file, store)
+    return result
+  })
+}
+
 export interface EnsureTrustStoreOptions {
   file?: string
   /** Known at pairing; for older pairings it arrives with the first hello_ack. */
@@ -192,21 +331,23 @@ export interface EnsureTrustStoreOptions {
 export function ensureTrustStore(machineId: string, relayOrigin: string, opts: EnsureTrustStoreOptions = {}): TrustStore {
   const file = opts.file ?? relayDevicesPath()
   const log = opts.log ?? console
-  const existing = readTrustStore(file)
-  if (existing && existing.machineId === machineId) {
-    if (existing.ownerUserId === null && opts.ownerUserId) {
-      const updated = { ...existing, ownerUserId: opts.ownerUserId }
-      writeTrustStore(file, updated)
-      return updated
+  return withTrustStoreLock(file, () => {
+    const existing = readTrustStore(file)
+    if (existing && existing.machineId === machineId) {
+      if (existing.ownerUserId === null && opts.ownerUserId) {
+        const updated = { ...existing, ownerUserId: opts.ownerUserId }
+        writeTrustStore(file, updated)
+        return updated
+      }
+      return existing
     }
-    return existing
-  }
-  if (existing) {
-    log.log(`[relay] This machine was re-paired (${existing.machineId} → ${machineId}); starting an empty device list.`)
-  }
-  const fresh = emptyTrustStore(machineId, relayOrigin, opts.ownerUserId ?? null)
-  writeTrustStore(file, fresh)
-  return fresh
+    if (existing) {
+      log.log(`[relay] This machine was re-paired (${existing.machineId} → ${machineId}); starting an empty device list.`)
+    }
+    const fresh = emptyTrustStore(machineId, relayOrigin, opts.ownerUserId ?? null)
+    writeTrustStore(file, fresh)
+    return fresh
+  })
 }
 
 /**
@@ -221,15 +362,17 @@ export function recordOwnerUserId(
   file = relayDevicesPath(),
   log: Pick<Console, 'warn'> = console,
 ): boolean {
-  const store = readTrustStore(file)
-  if (!store || store.machineId !== machineId) return false
-  if (store.ownerUserId === userId) return true
-  if (store.ownerUserId !== null) {
-    log.warn(`[relay] The relay named a different owner for this machine than the one recorded at pairing; keeping ${store.ownerUserId}.`)
-    return false
-  }
-  writeTrustStore(file, { ...store, ownerUserId: userId })
-  return true
+  return withTrustStoreLock(file, () => {
+    const store = readTrustStore(file)
+    if (!store || store.machineId !== machineId) return false
+    if (store.ownerUserId === userId) return true
+    if (store.ownerUserId !== null) {
+      log.warn(`[relay] The relay named a different owner for this machine than the one recorded at pairing; keeping ${store.ownerUserId}.`)
+      return false
+    }
+    writeTrustStore(file, { ...store, ownerUserId: userId })
+    return true
+  })
 }
 
 function requireStore(file: string, machineId?: string): TrustStore {
@@ -243,11 +386,12 @@ function requireStore(file: string, machineId?: string): TrustStore {
 
 /** Remove a credential. Returns the removed entry. */
 export function revokeCredential(keyId: string, file = relayDevicesPath(), machineId?: string): TrustedCredential {
-  const store = requireStore(file, machineId)
-  const removed = store.credentials.find(c => c.keyId === keyId)
-  if (!removed) throw new TrustStoreError('not_found', `No device with key id ${keyId}`)
-  writeTrustStore(file, { ...store, credentials: store.credentials.filter(c => c.keyId !== keyId) })
-  return removed
+  return mutateTrustStore(file, machineId, store => {
+    const removed = store.credentials.find(c => c.keyId === keyId)
+    if (!removed) throw new TrustStoreError('not_found', `No device with key id ${keyId}`)
+    store.credentials = store.credentials.filter(c => c.keyId !== keyId)
+    return removed
+  })
 }
 
 /**
@@ -257,13 +401,13 @@ export function revokeCredential(keyId: string, file = relayDevicesPath(), machi
  */
 export function setIntentPolicy(policy: unknown, file = relayDevicesPath(), machineId?: string): TrustStore {
   if (!isIntentPolicy(policy)) throw new TrustStoreError('invalid_policy', `Policy must be one of ${INTENT_POLICIES.join(', ')}`)
-  const store = requireStore(file, machineId)
-  if (policy === 'required' && !store.credentials.some(c => store.ownerUserId !== null && c.userId === store.ownerUserId)) {
-    throw new TrustStoreError('no_credentials', 'Confirm at least one of your devices on this computer before requiring confirmed devices')
-  }
-  const updated = { ...store, policy }
-  writeTrustStore(file, updated)
-  return updated
+  return mutateTrustStore(file, machineId, store => {
+    if (policy === 'required' && !store.credentials.some(c => store.ownerUserId !== null && c.userId === store.ownerUserId)) {
+      throw new TrustStoreError('no_credentials', 'Confirm at least one of your devices on this computer before requiring confirmed devices')
+    }
+    store.policy = policy
+    return store
+  })
 }
 
 /** Delete the trust store (on unpair). Returns false when there was none. */
@@ -279,10 +423,29 @@ export interface TrustStoreView {
   ownerUserId: string | null
   policy: IntentPolicy
   credentials: Array<Pick<TrustedCredential, 'keyId' | 'kind' | 'userId' | 'label' | 'addedAt' | 'addedBy' | 'lastUsedAt'>>
+  /**
+   * Requests waiting for their code, newest first. The code itself is never
+   * shown here: the owner must read it off the browser, or the check is void.
+   */
+  pending: Array<{ enrolId: string; userId: string; label: string; createdAt: string; expiresAt: string }>
   pendingCount: number
+  /**
+   * Browsers approved here in the last hour, with the code to type in each
+   * to finish. Showing it is safe: the machine shows it only once it has
+   * approved, which is the point.
+   */
+  approved: Array<{ enrolId: string; label: string; confirmCode: string; approvedAt: string }>
 }
 
-export function describeTrustStore(store: TrustStore): TrustStoreView {
+/** How long a just-approved browser's finishing code stays listed. */
+const APPROVED_LISTED_MS = 60 * 60_000
+
+/** Requests that have a code and no decision yet. */
+export function awaitingCode(store: TrustStore, now = Date.now()): PendingEnrolment[] {
+  return store.pending.filter(p => p.reveal && !p.outcome && Date.parse(p.expiresAt) > now)
+}
+
+export function describeTrustStore(store: TrustStore, now = Date.now()): TrustStoreView {
   return {
     machineId: store.machineId,
     ownerUserId: store.ownerUserId,
@@ -296,6 +459,13 @@ export function describeTrustStore(store: TrustStore): TrustStoreView {
       addedBy: c.addedBy,
       ...(c.lastUsedAt ? { lastUsedAt: c.lastUsedAt } : {}),
     })),
-    pendingCount: store.pending.length,
+    pending: awaitingCode(store, now)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .map(p => ({ enrolId: p.enrolId, userId: p.userId, label: p.reveal?.label ?? '', createdAt: p.createdAt, expiresAt: p.expiresAt })),
+    pendingCount: awaitingCode(store, now).length,
+    approved: store.pending
+      .filter(p => p.outcome?.state === 'approved' && p.reveal?.confirmCode && Date.parse(p.outcome.at) > now - APPROVED_LISTED_MS)
+      .sort((a, b) => (b.outcome?.at ?? '').localeCompare(a.outcome?.at ?? ''))
+      .map(p => ({ enrolId: p.enrolId, label: p.reveal?.label ?? '', confirmCode: formatCode(p.reveal?.confirmCode ?? ''), approvedAt: p.outcome?.at ?? '' })),
   }
 }

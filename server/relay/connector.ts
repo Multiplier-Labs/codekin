@@ -6,9 +6,10 @@
  */
 
 import WebSocket from 'ws'
-import { envelope, parseEnvelope, RELAY_ERROR, STREAM_CLOSE } from './relay-protocol.js'
+import { ENROLMENT_FEATURE, envelope, parseEnvelope, RELAY_ERROR, STREAM_CLOSE } from './relay-protocol.js'
 import type {
   ConnectorHello,
+  EnrolRequest,
   ConnectorHelloAck,
   ProxyRequest,
   RelayError,
@@ -24,6 +25,9 @@ import type { WebSocketFactory } from './connector-stream.js'
 import type { ChannelPolicy } from './connector-policy.js'
 import type { GrantMap } from './shares.js'
 import { WebhookReplayGuard } from './connector-webhook-guard.js'
+import { EnrolmentError } from './enrolment.js'
+import type { MachineEnrolment } from './enrolment.js'
+import { TrustStoreError } from './trust-store.js'
 
 export interface ConnectorOptions {
   /** Hosted relay origin, e.g. https://app.codekin.ai */
@@ -50,6 +54,8 @@ export interface ConnectorOptions {
   identityKey?: string
   /** Called with the owner's relay user id from hello_ack, for the trust store. */
   onOwner?: (ownerUserId: string) => void
+  /** Answers enrol_* frames (enrolment.ts); without it the connector doesn't advertise enrolment. */
+  enrolment?: Pick<MachineEnrolment, 'handle'>
 }
 
 export type ConnectorStatus =
@@ -132,7 +138,10 @@ export class RelayConnector {
         machineSecret: this.opts.machineSecret,
         connectorVersion: this.opts.connectorVersion,
         localCodekinVersion: this.opts.localCodekinVersion,
-        capabilities: { restProxy: true, wsProxy: true, fileUpload: true, providers: [] },
+        capabilities: {
+          restProxy: true, wsProxy: true, fileUpload: true, providers: [],
+          ...(this.opts.enrolment ? { features: [ENROLMENT_FEATURE] } : {}),
+        },
         ...(this.opts.identityKey ? { identityKey: this.opts.identityKey } : {}),
       }
       ws.send(JSON.stringify(envelope('hello', hello)))
@@ -163,6 +172,8 @@ export class RelayConnector {
         void this.advertiseSessions(ws)
       } else if (msg.kind === 'request') {
         void this.handleProxyRequest(ws, msg.id, msg.payload as ProxyRequest)
+      } else if (msg.kind === 'enrol_commit' || msg.kind === 'enrol_reveal' || msg.kind === 'enrol_status') {
+        this.handleEnrolment(ws, msg.kind, msg.id, msg.payload as EnrolRequest)
       } else if (msg.kind === 'stream_open') {
         this.openChannel(ws, msg.channelId, msg.payload as StreamOpen)
       } else if (msg.kind === 'stream_data') {
@@ -245,6 +256,27 @@ export class RelayConnector {
     ws.send(JSON.stringify(envelope('response', outcome.response, { id })))
   }
 
+
+  /**
+   * Answer one enrolment frame from this machine's own state. Refusals go
+   * back as `error` frames; nothing here reaches the local server.
+   */
+  private handleEnrolment(ws: WebSocket, kind: string, id: string | undefined, request: EnrolRequest | undefined): void {
+    if (!id || ws.readyState !== WebSocket.OPEN) return
+    if (!this.opts.enrolment) {
+      ws.send(JSON.stringify(envelope('error', { code: RELAY_ERROR.enrolUnavailable, message: 'This computer cannot confirm browsers' }, { id })))
+      return
+    }
+    try {
+      const reply = this.opts.enrolment.handle(kind, request?.principal, request?.payload)
+      ws.send(JSON.stringify(envelope(reply.kind, reply.payload, { id })))
+    } catch (err) {
+      const code = err instanceof EnrolmentError ? err.code : RELAY_ERROR.enrolUnavailable
+      const message = err instanceof EnrolmentError || err instanceof TrustStoreError ? err.message : 'Enrolment failed on this computer'
+      if (!(err instanceof EnrolmentError)) console.warn(`[connector] enrolment ${kind} failed: ${err instanceof Error ? err.message : String(err)}`)
+      ws.send(JSON.stringify(envelope('error', { code, message }, { id })))
+    }
+  }
 
   /**
    * Report local session counts once the socket is up. Best-effort: a local

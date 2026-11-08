@@ -460,13 +460,24 @@ creates two files beside `relay.json` (both mode 0600; see
 
 Only local surfaces change the device list: Settings → Remote access on this
 machine, `codekin relay devices`, and `/api/relay/devices*` with the local
-token. None of these are reachable through the relay. In this version the
-list is kept but not enforced, and devices can't be added yet; confirming a
-browser with a code typed on this machine comes next. Unpairing removes both
+token. None of these are reachable through the relay. Unpairing removes both
 files, and a re-pair starts over with a new identity and an empty list.
 
+To add a browser, choose **Confirm this browser** for the machine in the web
+app (under Settings → Machines, or right after approving a pairing). The
+browser shows an 8-character code. Type it on the machine: in Settings →
+Remote access → Confirm a browser, with `codekin relay devices approve`, or
+at the prompt `codekin relay login` shows after pairing. The machine then
+shows a 6-character code; type that into the browser to finish (the browser
+trusts the machine's key only after that). The browser keeps its
+signing key in IndexedDB and can't export it. Requests expire after 10
+minutes, and at most 3 can wait at once. In this version the list is kept
+but not enforced.
+
 ```bash
-codekin relay devices              # identity key id, policy, devices
+codekin relay devices              # identity key id, policy, devices, waiting browsers
+codekin relay devices approve K7QM-2XPA
+codekin relay devices reject <requestId>
 codekin relay devices revoke <keyId>
 codekin relay devices policy warn  # off | warn | required (required needs a confirmed device)
 ```

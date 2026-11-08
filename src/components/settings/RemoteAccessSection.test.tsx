@@ -14,6 +14,8 @@ const api = vi.hoisted(() => ({
   unpairRelay: vi.fn(),
   getRelayDevices: vi.fn(),
   revokeRelayDevice: vi.fn(),
+  approveRelayDevice: vi.fn(),
+  rejectRelayEnrolment: vi.fn(),
 }))
 vi.mock('../../lib/ccApi', () => api)
 
@@ -23,7 +25,7 @@ const UNPAIRED = { paired: false, managed: false, state: 'unpaired', machineId: 
 const PAIRED = { paired: true, managed: true, state: 'connected', machineId: 'm-1', relayUrl: 'https://app.codekin.ai' }
 const NO_DEVICES = {
   paired: true, machineId: 'm-1', identity: { keyId: 'idkey0000000000000000a', createdAt: '2026-11-08T10:00:00Z' },
-  devices: { machineId: 'm-1', ownerUserId: 'u1', policy: 'off', credentials: [], pendingCount: 0 },
+  devices: { machineId: 'm-1', ownerUserId: 'u1', policy: 'off', credentials: [], pending: [], pendingCount: 0, approved: [] },
 }
 const IPHONE = { keyId: 'q3aaaaaaaaaaaaaaaaaaaa', kind: 'browser', userId: 'u1', label: 'Safari · iPhone', addedAt: '2026-11-08T10:00:00Z', addedBy: 'local' }
 const PENDING = { state: 'pending', relayUrl: 'https://app.codekin.ai', verificationUrl: 'https://app.codekin.ai/pair?code=ABCD-1234', userCode: 'ABCD-1234', expiresAt: null }
@@ -140,6 +142,40 @@ describe('RemoteAccessSection', () => {
     await act(async () => { [...el!.querySelectorAll('button')].find(b => b.textContent === 'Remove')!.click() })
     expect(api.revokeRelayDevice).toHaveBeenCalledWith('t', IPHONE.keyId)
     expect(el!.textContent).toContain('No devices yet')
+  })
+
+  it('confirms a browser by the code it shows, and turns one down', async () => {
+    api.getRelayStatus.mockResolvedValue(PAIRED)
+    api.getRelayPairing.mockResolvedValue({ state: 'idle' })
+    const waiting = { enrolId: 'e1', userId: 'u1', label: 'Chrome · Android', createdAt: '2026-11-08T10:00:00Z', expiresAt: '2026-11-08T10:10:00Z' }
+    api.getRelayDevices.mockResolvedValue({ ...NO_DEVICES, devices: { ...NO_DEVICES.devices, pending: [waiting], pendingCount: 1 } })
+    api.approveRelayDevice.mockRejectedValueOnce(new Error('No browser is waiting with that code.'))
+    api.approveRelayDevice.mockResolvedValueOnce({ keyId: 'k1', label: 'Chrome · Android', confirmCode: 'KBY-PER' })
+    api.rejectRelayEnrolment.mockResolvedValue(undefined)
+    await render()
+    expect(el!.textContent).toContain('A browser is waiting')
+    expect(el!.textContent).toContain('Waiting: Chrome · Android')
+
+    const input = el!.querySelector<HTMLInputElement>('#relay-device-code')!
+    const type = async (value: string) => {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+    }
+    await type('aaaa-aaaa')
+    expect(input.value).toBe('AAAA-AAAA')
+    await act(async () => { button('Confirm')!.click() })
+    expect(el!.textContent).toContain('No browser is waiting with that code.')
+
+    await type('k7qm-2xpa')
+    await act(async () => { button('Confirm')!.click() })
+    expect(api.approveRelayDevice).toHaveBeenLastCalledWith('t', 'K7QM-2XPA')
+    expect(el!.textContent).toContain('Chrome · Android can now control this computer.')
+    expect(el!.querySelector('[aria-label="Code for the browser"]')?.textContent).toBe('KBY-PER')
+
+    await act(async () => { button('Turn down')!.click() })
+    expect(api.rejectRelayEnrolment).toHaveBeenCalledWith('t', 'e1')
   })
 
   it('says so when the device list file is unreadable', async () => {

@@ -27,7 +27,7 @@ import type { ConnectorOptions, ConnectorStatus } from './connector.js'
 import type { LocalServerTarget } from './connector-proxy.js'
 import { migrateCredentialToStore, readRelayCredentialState, relayCredentialPath } from './relay-credential.js'
 import { secretStoreFromEnv } from './secret-store.js'
-import { prepareMachineTrust, recordOwnerFromRelay } from './machine-trust.js'
+import { machineEnrolmentFor, prepareMachineTrust, recordOwnerFromRelay } from './machine-trust.js'
 import type { SecretStore } from './secret-store.js'
 import type { RelayCredential, RelayCredentialIdentity } from './relay-credential.js'
 
@@ -231,6 +231,7 @@ export class EmbeddedConnectorSupervisor {
       localCodekinVersion: this.opts.version,
       localTarget: this.opts.localTarget?.(),
       identityKey,
+      enrolment: machineEnrolmentFor(this.file, credential.machineId, this.store, this.log),
       onOwner: (ownerUserId) => {
         if (this.activeToken === token) recordOwnerFromRelay(this.file, credential.machineId, ownerUserId, this.log)
       },

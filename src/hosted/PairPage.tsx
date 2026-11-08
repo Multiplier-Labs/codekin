@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { workspaceHeaders } from './workspace'
+import { TrustSheet } from './TrustSheet'
+import { deviceTrustSupported } from './deviceTrust'
 
 interface PairingRequest {
   userCode: string
@@ -15,6 +17,7 @@ type Phase = 'loading' | 'review' | 'approved' | 'denied' | 'unavailable'
 
 /** Where the relay says an approved machine went. */
 interface PairedInto {
+  machineId?: string
   ownerLogin: string | null
   workspaceName: string | null
 }
@@ -34,6 +37,9 @@ export function PairPage({ workspaceName }: PairPageProps) {
   const [pairedInto, setPairedInto] = useState<PairedInto | null>(null)
   // The signed-in account as the relay sees it; it becomes the owner on approval.
   const [approverLogin, setApproverLogin] = useState<string | null>(null)
+  // After approval the person is at the machine and here at once: confirm
+  // this browser on it in the same visit (signed-intents spec §5.3).
+  const [confirming, setConfirming] = useState(false)
 
   const lookup = useCallback(async (userCode: string) => {
     setError(null)
@@ -85,7 +91,9 @@ export function PairPage({ workspaceName }: PairPageProps) {
         return
       }
       if (action === 'approve') {
-        setPairedInto(await res.json().catch(() => null) as PairedInto | null)
+        const into = await res.json().catch(() => null) as PairedInto | null
+        setPairedInto(into)
+        if (into?.machineId && deviceTrustSupported()) setConfirming(true)
       }
       setPhase(action === 'approve' ? 'approved' : 'denied')
     } catch {
@@ -105,6 +113,23 @@ export function PairPage({ workspaceName }: PairPageProps) {
             {pairedInto?.workspaceName && <> in workspace {pairedInto.workspaceName}</>}
             . Return to your terminal — the CLI picks it up automatically.
           </p>
+        )}
+
+        {phase === 'approved' && pairedInto?.machineId && deviceTrustSupported() && !confirming && (
+          <button
+            type="button"
+            onClick={() => { setConfirming(true) }}
+            className="mt-4 rounded-control border border-edge px-4 py-2 text-body text-ink transition hover:bg-surface-raised"
+          >
+            Confirm this browser on it
+          </button>
+        )}
+        {confirming && pairedInto?.machineId && (
+          <TrustSheet
+            machineId={pairedInto.machineId}
+            machineName={displayName || request?.hostname || 'this machine'}
+            onClose={() => { setConfirming(false) }}
+          />
         )}
 
         {phase === 'denied' && <p className="text-body text-ink">Pairing request denied.</p>}
