@@ -10,11 +10,11 @@
  */
 
 import { randomUUID } from 'crypto'
+import { onHubMessage, parseHubEnvelope } from './hub-protocol.js'
 import type { WebSocket } from 'ws'
 import type Database from 'better-sqlite3'
 import {
   envelope,
-  parseEnvelope,
   MAX_CHANNELS_PER_CLIENT,
   RELAY_ERROR,
   STREAM_CLOSE,
@@ -271,10 +271,13 @@ export class BrowserHub {
       if (client) client.alive = true
     })
 
-    socket.on('message', (data: Buffer | string) => {
+    onHubMessage(socket, data => {
       if (client) client.alive = true
-      const msg = parseEnvelope(typeof data === 'string' ? data : data.toString('utf-8'))
-      if (!msg) return
+      const msg = parseHubEnvelope(data.toString(), 'browser')
+      if (!msg) {
+        socket.close(1008, 'invalid relay frame')
+        return
+      }
 
       if (client === null) {
         clearTimeout(helloTimeout)
@@ -337,14 +340,14 @@ export class BrowserHub {
         socket.close(CLOSE_OVERLOADED, 'frame rate limit exceeded')
         return
       }
-      meterFrame(this.options.meter, socket, client.workspaceId, 'b2m', typeof data === 'string' ? Buffer.byteLength(data) : data.length)
+      meterFrame(this.options.meter, socket, client.workspaceId, 'b2m', data.length)
 
       if (msg.kind === 'ping') {
         socket.send(JSON.stringify(envelope('pong', {})))
         return
       }
       if (msg.kind === 'request') {
-        void this.forwardRequest(client, msg.id, msg.payload as ProxyRequest)
+        return this.forwardRequest(client, msg.id, msg.payload as ProxyRequest)
       } else if (msg.kind === 'stream_open') {
         this.openChannel(client, msg.channelId)
       } else if (msg.kind === 'stream_data') {
@@ -410,7 +413,7 @@ export class BrowserHub {
         body: request.body,
         principal: toPrincipal(client.user, client.access),
       })
-      if (client.socket.readyState !== client.socket.OPEN) return
+      if (!this.clients.has(client) || client.socket.readyState !== client.socket.OPEN) return
       if ('error' in outcome) {
         this.sendError(client.socket, id, outcome.error)
       } else {

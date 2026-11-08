@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { spawn } from 'child_process'
+import WebSocket from 'ws'
 import type { ChildProcess } from 'child_process'
 import { mkdtempSync, rmSync } from 'fs'
 import { createServer } from 'net'
@@ -117,6 +118,18 @@ describe('staging gate against a real relay', () => {
     expect(outcome.passed).toBe(false)
     expect(outcome.results.find(r => r.name === 'identity C is signed in fully')?.ok).toBe(false)
   }, 60_000)
+
+  it('rejects malformed connector hellos without affecting readiness or authenticated clients', async () => {
+    for (const payload of [null, [], { machineId: 'fixture', machineSecret: 'fixture', connectorVersion: 123 }]) {
+      const ws = new WebSocket(`${url.replace('http:', 'ws:')}/relay/connector`)
+      await new Promise<void>((resolve, reject) => { ws.once('open', resolve); ws.once('error', reject) })
+      const closed = new Promise<number>(resolve => ws.once('close', resolve))
+      ws.send(JSON.stringify({ version: 1, kind: 'hello', payload }))
+      expect(await closed).toBe(1008)
+      expect((await fetch(`${url}/api/health/ready`)).status).toBe(200)
+      expect((await fetch(`${url}/api/me`, { headers: { cookie: cookies.A } })).status).toBe(200)
+    }
+  })
 
   it('marks itself as staging', async () => {
     const res = await fetch(`${url}/api/auth/config`)
