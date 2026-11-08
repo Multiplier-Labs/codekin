@@ -18,6 +18,9 @@ export type AuditEventKind =
   | 'session_shared'
   | 'session_unshared'
   | 'session_viewed'
+  /** A browser asked a machine to trust its key (signed-intents spec §5.2). */
+  | 'device_enrolment_requested'
+  | 'device_key_removed'
   | 'prompt_sent'
   | 'file_uploaded'
   | 'approval_answered'

@@ -4,10 +4,10 @@
  * Edits relay-devices.json directly, like the local Settings routes.
  *
  *   codekin relay devices [list] [--json]
+ *   codekin relay devices approve <code>     the code your browser shows
+ *   codekin relay devices reject <requestId>
  *   codekin relay devices revoke <keyId>
  *   codekin relay devices policy <off|warn|required>
- *
- * `approve <code>` arrives with the enrolment ceremony (slice 3).
  */
 
 import { readRelayCredentialIdentity, relayCredentialPath } from './relay-credential.js'
@@ -17,6 +17,7 @@ import {
   describeTrustStore, INTENT_POLICIES, readTrustStore, revokeCredential, setIntentPolicy, TrustStoreError,
 } from './trust-store.js'
 import type { TrustStoreView } from './trust-store.js'
+import { approveEnrolment, rejectEnrolment } from './enrolment.js'
 
 export interface DevicesCliIo {
   out: (line: string) => void
@@ -26,6 +27,8 @@ export interface DevicesCliIo {
 export const DEVICES_USAGE = [
   'Usage: codekin relay devices <list|revoke|policy>',
   '  list   [--json]                   Show the devices that can control this computer',
+  '  approve <code>                    Confirm the browser showing this code',
+  '  reject <requestId>                Turn down a browser waiting to be confirmed',
   '  revoke <keyId>                    Remove a device',
   `  policy <${INTENT_POLICIES.join('|')}>         Set whether devices must sign what they send`,
 ]
@@ -48,9 +51,14 @@ function printList(view: TrustStoreView, identityKeyId: string | null, io: Devic
   io.out(`Policy:       ${POLICY_TEXT[view.policy]}`)
   io.out('Not enforced yet: this Codekin version keeps the list but does not check signatures.')
   io.out('')
+  if (view.pending.length > 0) {
+    io.out('Waiting to be confirmed (type the code the browser shows: codekin relay devices approve <code>):')
+    for (const p of view.pending) io.out(`  ${p.enrolId}  ${p.label}  requested ${p.createdAt}`)
+    io.out('')
+  }
   if (view.credentials.length === 0) {
-    io.out('No devices yet. Devices are added by typing a code from your browser on this computer;')
-    io.out('that arrives in a later Codekin version.')
+    io.out('No devices yet. In the browser, choose "Confirm this browser" for this computer, then type')
+    io.out('the code it shows here with `codekin relay devices approve <code>`.')
     return
   }
   io.out('Devices:')
@@ -88,6 +96,24 @@ export function runDevicesCommand(
         const view = describeTrustStore(store)
         if (rest.includes('--json')) io.out(JSON.stringify({ ...view, identityKeyId: keyId }, null, 2))
         else printList(view, keyId, io)
+        return 0
+      }
+      case 'approve': {
+        if (!rest[0]) {
+          io.err('Usage: codekin relay devices approve <code>')
+          return 1
+        }
+        const added = approveEnrolment(rest.join(''), devicesFile, paired.machineId)
+        io.out(`Confirmed ${added.label}. It can now control this computer.`)
+        return 0
+      }
+      case 'reject': {
+        if (!rest[0]) {
+          io.err('Usage: codekin relay devices reject <requestId>')
+          return 1
+        }
+        rejectEnrolment(rest[0], devicesFile, paired.machineId)
+        io.out('Request turned down.')
         return 0
       }
       case 'revoke': {

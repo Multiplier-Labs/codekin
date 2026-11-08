@@ -26,6 +26,7 @@ import { createInvitationRouter } from './invitation-routes.js'
 import { createMfaRouter } from './mfa-routes.js'
 import { FailedAttemptLimiter } from './mfa.js'
 import { createDeviceLinkRouter } from './device-link-routes.js'
+import { createDeviceKeyRouter } from './device-key-routes.js'
 import { createDesktopAuthRouter, DESKTOP_CLAIM_PATH } from './desktop-auth-routes.js'
 import { createWebauthnRouter } from './webauthn-routes.js'
 import { createAdminStatsRouter, createHealthRouter, EventLoopLagMonitor } from './health-routes.js'
@@ -208,6 +209,7 @@ app.use(createUserRouter(db, config, browserHub, store))
 app.use(createWorkspaceRouter({ db, config, browserHub, connectorHub: hub }))
 app.use(createInvitationRouter({ db, config, entitlements }))
 app.use(createDeviceLinkRouter(db, config))
+app.use(createDeviceKeyRouter(db, config))
 app.use(createDesktopAuthRouter({
   db,
   config,

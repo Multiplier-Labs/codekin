@@ -12,6 +12,26 @@ import { runDevicesCommand } from './devices-cli.js'
 import { prepareMachineTrust } from './machine-trust.js'
 import { emptyTrustStore, readTrustStore, writeTrustStore } from './trust-store.js'
 import type { TrustedCredential } from './trust-store.js'
+import { generateKeyPairSync, randomBytes } from 'crypto'
+import type { KeyObject } from 'crypto'
+import { MachineEnrolment } from './enrolment.js'
+import { POP_LABEL, commitment, formatCode, shortAuthString, signP1363, transcript } from './enrolment-crypto.js'
+
+/** Have a browser reach "awaiting code" on m1; returns the code it would show. */
+function browserWaiting(label = 'Edge · Windows'): { code: string; enrolId: string } {
+  const owner = { userId: 'u1', role: 'owner' as const, grants: {} }
+  const machine = new MachineEnrolment({ machineId: 'm1', identityFile: join(dir, 'relay-identity.json'), devicesFile, secretStore: null })
+  const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+  const spki = publicKey.export({ format: 'der', type: 'spki' })
+  const nonceB = randomBytes(32)
+  const ch = machine.commit(owner, { commit: commitment(spki, [], label, nonceB).toString('base64url') })
+  const nonceM = Buffer.from(ch.nonceM, 'base64url')
+  machine.reveal(owner, {
+    enrolId: ch.enrolId, spki: spki.toString('base64url'), passkeys: [], label, nonceB: nonceB.toString('base64url'),
+    pop: signP1363(privateKey as KeyObject, transcript(POP_LABEL, ch.enrolId, nonceM)).toString('base64url'),
+  })
+  return { enrolId: ch.enrolId, code: formatCode(shortAuthString(Buffer.from(ch.machineKey, 'base64url'), spki, [], nonceB, nonceM)) }
+}
 
 const quiet = { log: vi.fn(), warn: vi.fn() }
 
@@ -113,6 +133,34 @@ describe('/api/relay/devices', () => {
     expect((await fetch(`${base}/${BROWSER.keyId}`, { method: 'DELETE', headers: auth })).status).toBe(404)
   })
 
+  it('confirms a waiting browser by its code, and never lists the code', async () => {
+    pair()
+    prepareMachineTrust(credentialFile, 'm1', 'https://relay.test', null, quiet)
+    writeTrustStore(devicesFile, emptyTrustStore('m1', 'https://relay.test', 'u1'))
+    const { code, enrolId } = browserWaiting()
+    const listed = await (await fetch(base, { headers: auth })).json() as RelayDevicesResponse
+    expect(listed.devices?.pending).toEqual([expect.objectContaining({ enrolId, label: 'Edge · Windows' })])
+    expect(JSON.stringify(listed)).not.toContain(code.replace('-', ''))
+
+    const wrong = await fetch(`${base}/approve`, { method: 'POST', headers: auth, body: JSON.stringify({ code: 'AAAA-AAAA' }) })
+    expect(wrong.status).toBe(404)
+    const ok = await fetch(`${base}/approve`, { method: 'POST', headers: auth, body: JSON.stringify({ code }) })
+    expect(ok.status).toBe(200)
+    expect(await ok.json()).toMatchObject({ added: { label: 'Edge · Windows' } })
+    expect(readTrustStore(devicesFile)?.credentials).toHaveLength(1)
+  })
+
+  it('turns a waiting browser down', async () => {
+    pair()
+    prepareMachineTrust(credentialFile, 'm1', 'https://relay.test', null, quiet)
+    writeTrustStore(devicesFile, emptyTrustStore('m1', 'https://relay.test', 'u1'))
+    const { code, enrolId } = browserWaiting()
+    expect((await fetch(`${base}/pending/${enrolId}`, { method: 'DELETE', headers: auth })).status).toBe(200)
+    expect((await fetch(`${base}/pending/${enrolId}`, { method: 'DELETE', headers: auth })).status).toBe(404)
+    // A turned-down request's code no longer works.
+    expect((await fetch(`${base}/approve`, { method: 'POST', headers: auth, body: JSON.stringify({ code }) })).status).toBe(404)
+  })
+
   it('sets the policy, refusing required with no owner device', async () => {
     pair()
     writeTrustStore(devicesFile, emptyTrustStore('m1', 'https://relay.test', 'u1'))
@@ -159,6 +207,23 @@ describe('codekin relay devices', () => {
     const json = JSON.parse(run(['list', '--json']).out) as { credentials: unknown[]; identityKeyId: string }
     expect(json.credentials).toHaveLength(2)
     expect(json.identityKeyId).toHaveLength(22)
+  })
+
+  it('approves and rejects by code and request id, and lists waiting browsers', () => {
+    pair()
+    prepareMachineTrust(credentialFile, 'm1', 'https://relay.test', null, quiet)
+    writeTrustStore(devicesFile, emptyTrustStore('m1', 'https://relay.test', 'u1'))
+    const first = browserWaiting('Edge · Windows')
+    const second = browserWaiting('Safari · iPad')
+    const listed = run(['list'])
+    expect(listed.out).toContain('Waiting to be confirmed')
+    expect(listed.out).toContain(`${first.enrolId}  Edge · Windows`)
+    expect(run(['approve'])).toMatchObject({ code: 1 })
+    expect(run(['approve', 'AAAA-AAAA'])).toMatchObject({ code: 1, err: expect.stringContaining('No browser is waiting') })
+    // Typed with a space instead of the hyphen, in lower case.
+    expect(run(['approve', ...first.code.toLowerCase().split('-')])).toMatchObject({ code: 0, out: expect.stringContaining('Confirmed Edge · Windows') })
+    expect(run(['reject', second.enrolId])).toMatchObject({ code: 0 })
+    expect(readTrustStore(devicesFile)?.credentials.map(c => c.label)).toEqual(['Edge · Windows'])
   })
 
   it('revokes and sets the policy', () => {

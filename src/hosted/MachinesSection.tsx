@@ -14,8 +14,10 @@
  * Lazy-loaded by Settings so the local build never pulls it in.
  */
 
-import { useState } from 'react'
-import { IconCheck, IconPlus, IconTrash } from '@tabler/icons-react'
+import { useCallback, useEffect, useState } from 'react'
+import { IconCheck, IconPlus, IconShieldCheck, IconTrash } from '@tabler/icons-react'
+import { TrustSheet } from './TrustSheet'
+import { currentUserId, deviceTrustSupported, machinePin } from './deviceTrust'
 import { MACHINE_STATUS_DOT, type Machine } from './machines'
 import { useMachineSetup, type MachineSetup } from './useMachineSetup'
 import { InstallCommand } from './InstallCommand'
@@ -52,13 +54,62 @@ function OwnMachinesSection(props: MachinesSectionProps) {
 
 const inlineCode = 'rounded-control bg-page px-1.5 py-0.5 font-mono text-meta text-ink'
 
-function MachineRow({ machine: m, isCurrent, onSwitch, setup, gutter }: {
+/**
+ * Which machines this browser has been confirmed on (a pinned machine key in
+ * IndexedDB). Null while unknown, or where the browser can't hold a key.
+ */
+function useTrustedMachines(machineIds: string[]): { trusted: Set<string> | null; refresh: () => void } {
+  const [trusted, setTrusted] = useState<Set<string> | null>(null)
+  const key = machineIds.join(',')
+  const refresh = useCallback(() => {
+    if (!deviceTrustSupported()) return
+    void (async () => {
+      const userId = await currentUserId()
+      if (!userId) return
+      const ids = key ? key.split(',') : []
+      const pins = await Promise.all(ids.map(id => machinePin(userId, id).catch(() => undefined)))
+      setTrusted(new Set(ids.filter((_, i) => pins[i])))
+    })()
+  }, [key])
+  useEffect(() => { refresh() }, [refresh])
+  return { trusted, refresh }
+}
+
+/** "Confirmed on this browser", or the way to get there (signed-intents spec §6.9). */
+function TrustLine({ machine, trusted, onTrusted }: { machine: Machine; trusted: boolean; onTrusted: () => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="flex items-center gap-2 pl-8 pt-0.5 text-meta">
+      {trusted ? (
+        <span className="flex items-center gap-1 text-ink-muted"><IconShieldCheck size={14} /> Confirmed on this browser</span>
+      ) : (
+        <>
+          <span className="text-ink-faint">Not confirmed on this browser</span>
+          <button type="button" onClick={() => { setOpen(true) }} className="text-primary-5 hover:underline">Confirm this browser</button>
+        </>
+      )}
+      {open && (
+        <TrustSheet
+          machineId={machine.id}
+          machineName={machine.displayName}
+          onTrusted={onTrusted}
+          onClose={() => { setOpen(false) }}
+        />
+      )}
+    </div>
+  )
+}
+
+function MachineRow({ machine: m, isCurrent, onSwitch, setup, gutter, trusted, onTrusted }: {
   machine: Machine
   isCurrent: boolean
   /** Some row has a Remove button: keep a column for it so rows line up. */
   gutter: boolean
   onSwitch: (machine: Machine) => void
   setup: MachineSetup
+  /** Whether this browser is confirmed on the machine; null when unknown or not applicable. */
+  trusted: boolean | null
+  onTrusted: () => void
 }) {
   const [confirmingRemove, setConfirmingRemove] = useState(false)
   // The machine you are on is a statement, not a button — switching to
@@ -122,6 +173,7 @@ function MachineRow({ machine: m, isCurrent, onSwitch, setup, gutter }: {
           </button>
         ) : gutter && <span aria-hidden className="w-8 flex-shrink-0" />}
       </div>
+      {trusted !== null && <TrustLine machine={m} trusted={trusted} onTrusted={onTrusted} />}
       {canRemove && confirmingRemove && (
         <ConfirmRemove machine={m} setup={setup} onClose={() => { setConfirmingRemove(false) }} />
       )}
@@ -177,6 +229,10 @@ function RetryButton({ setup }: { setup: MachineSetup }) {
 
 function MachinesView({ currentMachineId, onSwitch, onDisconnect, setup }: MachinesSectionProps & { setup: MachineSetup }) {
   const { machines, pairing } = setup
+  // Only owners enrol browsers on a machine; shared machines have no trust line.
+  const { trusted, refresh: refreshTrust } = useTrustedMachines(
+    (machines ?? []).filter(m => !m.setupPending && m.access === 'owner').map(m => m.id),
+  )
 
   if (machines === null) {
     if (setup.loadFailed) {
@@ -214,7 +270,16 @@ function MachinesView({ currentMachineId, onSwitch, onDisconnect, setup }: Machi
       {ready.length > 0 && (
         <ul className="flex flex-col gap-1.5">
           {ready.map(m => (
-            <MachineRow key={m.id} machine={m} isCurrent={m.id === currentMachineId} onSwitch={onSwitch} setup={setup} gutter={gutter} />
+            <MachineRow
+              key={m.id}
+              machine={m}
+              isCurrent={m.id === currentMachineId}
+              onSwitch={onSwitch}
+              setup={setup}
+              gutter={gutter}
+              trusted={trusted && m.access === 'owner' ? trusted.has(m.id) : null}
+              onTrusted={refreshTrust}
+            />
           ))}
         </ul>
       )}

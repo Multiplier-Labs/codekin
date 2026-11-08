@@ -20,6 +20,7 @@ import { emptyTrustStore, ensureTrustStore, recordOwnerUserId, removeTrustStore,
 import { secretStoreFromEnv } from './secret-store.js'
 import type { SecretStore } from './secret-store.js'
 import { relayCredentialPath } from './relay-credential.js'
+import { MachineEnrolment } from './enrolment.js'
 
 export interface TrustPaths {
   identityFile: string
@@ -105,6 +106,17 @@ export function recordOwnerFromRelay(credentialFile: string, machineId: string, 
   } catch (err) {
     log.warn(`[relay] Could not record this machine's owner in its device list (${reason(err)}).`)
   }
+}
+
+/** The enrolment handler the connector answers enrol_* frames with. */
+export function machineEnrolmentFor(
+  credentialFile: string,
+  machineId: string,
+  store: SecretStore | null = secretStoreFromEnv(),
+  log: Log = console,
+): MachineEnrolment {
+  const { identityFile, devicesFile } = trustPathsFor(credentialFile)
+  return new MachineEnrolment({ machineId, identityFile, devicesFile, secretStore: store, log })
 }
 
 /** Unpair: the identity and device list belong to the pairing that is going away. */

@@ -1,6 +1,6 @@
 # Relay trust: device-signed intents and end-to-end encryption
 
-**Status:** Spec, decisions D1–D7 settled (§13). Built: slice 1 (relay audit events, §7.1) and slice 2 (machine identity and trust store, no enforcement). The rest is not built.
+**Status:** Spec, decisions D1–D7 settled (§13). Built: slice 1 (relay audit events, §7.1), slice 2 (machine identity and trust store) and slice 3 (enrolment ceremony, §5.2–5.5), none of it enforced yet. The rest is not built.
 **Date:** 2026-11-08
 **Context:** a hosted relay is trusted to say who the machine owner is (§3). This spec removes that trust in two levels: **L1 device-signed intents** and **L2 end-to-end content encryption**. It also adds the relay audit events that are declared but never emitted.
 **Basis:** `origin/main` at v0.10.5 (`a93f6e3`). All `path:line` references point there.
@@ -217,6 +217,17 @@ Browser B (owner, signed in)                Relay              Connector M
 - **A swapped key fails.** If the relay replaces `kB`, the commitment fails, or the machine computes a different code from the one the browser shows. The relay committed before seeing `nonceM`, so it can't grind for a match. The chance of a guess landing is 2⁻⁴⁰ per pending request, with at most 3 pending.
 - **Passkeys are in the transcript.** That stops the relay from adding a passkey public key of its own alongside a real browser key.
 - **Proof of possession.** `popB` ties the reveal to a key the browser actually holds.
+
+**As built (slice 3).** Where the implementation pins down what the diagram leaves open:
+- **Encoding.** Every hashed or signed message is a transcript: a domain label, then each field as a 4-byte big-endian length followed by its bytes. `P` is UTF-8 JSON of `[credentialId, cosePublicKey, rpId]` triples, `[]` until passkeys join (slice 5). The labels are `ck-enrol-commit-v1`, `ck-enrol-challenge-v1`, `ck-enrol-pop-v1`, `ck-sas-v1` and `ck-enrol-result-v1`. Code: `server/relay/enrolment-crypto.ts`, mirrored in `src/hosted/deviceTrust.ts`, with a shared test vector.
+- **Waiting for the code.** The browser polls with a fifth frame, `enrol_status { enrolId }`, answered by `enrol_result`. This survives a locked phone or a reconnect, and an unsolicited push would not.
+- **The result signature.** `enrol_result` for an approval or refusal carries `sign_kM(T(result, enrolId, SPKI(kB), outcome))`. The browser pins `kM` only when this verifies. It signs the decision about this key rather than a trust-store digest.
+- **Where requests wait.** Requests live in `relay-devices.json` → `pending`, under a lock file, so the local UI and CLI can decide them from another process. At most 3 undecided requests are held. Requests expire after 10 minutes, and the browser gets 10 more minutes to collect a decision.
+- **Refusals.** A reveal that fails its commitment or proof-of-possession check uses up the request. Only the owner can enrol: the hub refuses grantees, and the connector compares the principal with the `ownerUserId` it recorded at pairing.
+- **The code stays on the machine.** It is stored in the 0600 device list. The local list of waiting requests never shows it, because the owner has to read it off the browser.
+- **Old connectors.** A connector that can enrol advertises the `enrolment` feature. The hub answers older ones with `connector_update_required` straight away.
+- **Registry.** When a machine accepts a reveal, the relay records the key in `device_keys` (`GET`/`DELETE /api/device-keys`).
+- **Not built yet:** the desktop notification and tray item for a waiting request (§5.5), and the Account → Devices page (§6.9).
 
 ### 5.3 At pairing
 

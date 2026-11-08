@@ -907,6 +907,8 @@ export interface RelayDevices {
     ownerUserId: string | null
     policy: 'off' | 'warn' | 'required'
     credentials: RelayDevice[]
+    /** Browsers waiting for their code to be typed here. The code is never included. */
+    pending: Array<{ enrolId: string; userId: string; label: string; createdAt: string; expiresAt: string }>
     pendingCount: number
   } | null
   error?: string
@@ -916,6 +918,22 @@ export async function getRelayDevices(token: string): Promise<RelayDevices> {
   const res = await transport.authFetch('/api/relay/devices', { headers: headers(token) })
   if (!res.ok) throw new Error(`Failed to get devices: ${res.status}`)
   return jsonBody<RelayDevices>(res)
+}
+
+/** Confirm the browser showing `code`. Rejects with the server's message (e.g. no such code). */
+export async function approveRelayDevice(token: string, code: string): Promise<{ keyId: string; label: string }> {
+  const res = await transport.authFetch('/api/relay/devices/approve', {
+    method: 'POST', headers: headers(token), body: JSON.stringify({ code }),
+  })
+  const body = await jsonBody<{ added?: { keyId: string; label: string }; message?: string }>(res).catch(() => ({ added: undefined, message: undefined }))
+  if (!res.ok || !body.added) throw new Error(body.message ?? `Failed to confirm the browser: ${res.status}`)
+  return body.added
+}
+
+/** Turn down a browser waiting to be confirmed. */
+export async function rejectRelayEnrolment(token: string, enrolId: string): Promise<void> {
+  const res = await transport.authFetch(`/api/relay/devices/pending/${encodeURIComponent(enrolId)}`, { method: 'DELETE', headers: headers(token) })
+  if (!res.ok) throw new Error(`Failed to turn the request down: ${res.status}`)
 }
 
 /** Remove a device from this machine's list. Rejects with the server's message. */

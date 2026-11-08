@@ -14,7 +14,7 @@
 import { RelayConnector } from './connector.js'
 import { resolveLocalTarget } from './connector-proxy.js'
 import { readRelayCredential, codekinPackageVersion, relayCredentialPath } from './relay-credential.js'
-import { prepareMachineTrust, recordOwnerFromRelay } from './machine-trust.js'
+import { machineEnrolmentFor, prepareMachineTrust, recordOwnerFromRelay } from './machine-trust.js'
 
 export { readRelayCredential } from './relay-credential.js'
 export type { RelayCredential } from './relay-credential.js'
@@ -56,6 +56,7 @@ function main(): void {
     localCodekinVersion: version,
     localTarget,
     identityKey,
+    enrolment: machineEnrolmentFor(credentialFile, credential.machineId),
     onOwner: (ownerUserId) => { recordOwnerFromRelay(credentialFile, credential.machineId, ownerUserId) },
     onProxy: (method, path, status) => {
       console.log(`[connector] ${method} ${path} → ${status}`)

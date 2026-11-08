@@ -3,15 +3,17 @@
  * (docs/RELAY-SIGNED-INTENTS-AND-E2E-SPEC.md §5.5), used by Settings →
  * Remote access → "Devices that can control this computer":
  *
- *   GET    /api/relay/devices          identity key, device list, policy
- *   DELETE /api/relay/devices/:keyId   remove a device
- *   PUT    /api/relay/devices/policy   { policy: off | warn | required }
+ *   GET    /api/relay/devices                    identity key, device list, waiting requests, policy
+ *   POST   /api/relay/devices/approve            { code } — confirm the browser showing that code
+ *   DELETE /api/relay/devices/pending/:enrolId   turn a waiting request down
+ *   DELETE /api/relay/devices/:keyId             remove a device
+ *   PUT    /api/relay/devices/policy             { policy: off | warn | required }
  *
  * Like the other /api/relay/* routes these need the local auth token and are
  * on neither of the connector's proxy allowlists, so the relay can never
  * read or change the list (a test in connector-proxy.test.ts pins this).
- * Adding devices comes with the enrolment ceremony (slice 3); nothing
- * enforces the policy yet.
+ * Approving needs the code the browser shows: the waiting requests listed
+ * here never include it (enrolment.ts). Nothing enforces the policy yet.
  */
 
 import { Router } from 'express'
@@ -23,6 +25,7 @@ import {
   describeTrustStore, readTrustStore, revokeCredential, setIntentPolicy, TrustStoreError,
 } from './trust-store.js'
 import type { IntentPolicy, TrustStoreView } from './trust-store.js'
+import { approveEnrolment, rejectEnrolment } from './enrolment.js'
 
 type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
@@ -45,6 +48,7 @@ const ERROR_STATUS: Record<TrustStoreError['code'], number> = {
   no_credentials: 409,
   invalid_policy: 400,
   wrong_machine: 409,
+  busy: 503,
 }
 
 function sendError(res: Response, err: unknown): void {
@@ -107,6 +111,29 @@ export function createRelayDevicesRouter(
     const policy = (req.body as { policy?: unknown } | undefined)?.policy as IntentPolicy
     try {
       res.json(describeTrustStore(setIntentPolicy(policy, devicesFile, machineId)))
+    } catch (err) {
+      sendError(res, err)
+    }
+  })
+
+  router.post('/api/relay/devices/approve', (req, res) => {
+    const machineId = pairedMachine(res)
+    if (!machineId) return
+    const code = (req.body as { code?: unknown } | undefined)?.code
+    try {
+      const added = approveEnrolment(typeof code === 'string' ? code : '', devicesFile, machineId)
+      res.json({ added: { keyId: added.keyId, label: added.label } })
+    } catch (err) {
+      sendError(res, err)
+    }
+  })
+
+  router.delete('/api/relay/devices/pending/:enrolId', (req, res) => {
+    const machineId = pairedMachine(res)
+    if (!machineId) return
+    try {
+      rejectEnrolment(req.params.enrolId, devicesFile, machineId)
+      res.json({ rejected: true })
     } catch (err) {
       sendError(res, err)
     }

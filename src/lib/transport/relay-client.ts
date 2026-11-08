@@ -34,9 +34,19 @@ export class RelayRequestError extends Error {
 export type RelayConnectionState = 'connecting' | 'open' | 'closed'
 
 interface Pending {
-  resolve: (value: RelayProxyResponse) => void
+  resolve: (value: unknown) => void
   reject: (err: Error) => void
   timer: ReturnType<typeof setTimeout>
+  /** The envelope kind that answers this request. */
+  expects: string
+}
+
+/** Enrolment frames (signed-intents spec §5.2) and the reply each expects. */
+export type EnrolKind = 'enrol_commit' | 'enrol_reveal' | 'enrol_status'
+const ENROL_REPLY: Record<EnrolKind, string> = {
+  enrol_commit: 'enrol_challenge',
+  enrol_reveal: 'enrol_result',
+  enrol_status: 'enrol_result',
 }
 
 /** Callbacks for one proxied session stream. */
@@ -259,24 +269,30 @@ export class RelayConnection {
    * queued rather than rejected, so callers need not await connection.
    */
   request(method: string, path: string, body?: string, contentType?: string): Promise<RelayProxyResponse> {
-    return new Promise<RelayProxyResponse>((resolve, reject) => {
+    return this.call('request', 'response', { method, path, body, contentType }) as Promise<RelayProxyResponse>
+  }
+
+  /**
+   * Send one enrolment frame to the machine and resolve with its reply
+   * payload. A refusal rejects with a RelayRequestError carrying the
+   * machine's code (`enrol_refused`, `enrol_unavailable`, …).
+   */
+  enrol(kind: EnrolKind, payload: unknown): Promise<unknown> {
+    return this.call(kind, ENROL_REPLY[kind], payload)
+  }
+
+  private call(kind: string, expects: string, payload: unknown): Promise<unknown> {
+    return new Promise<unknown>((resolve, reject) => {
       const id = String(this.nextId++)
       const timer = setTimeout(() => {
         this.pending.delete(id)
         reject(new RelayRequestError('timeout', 'The relay did not respond in time'))
       }, REQUEST_TIMEOUT_MS)
 
-      this.pending.set(id, { resolve, reject, timer })
+      this.pending.set(id, { resolve, reject, timer, expects })
 
       const send = () => {
-        this.ws?.send(
-          JSON.stringify({
-            version: RELAY_PROTOCOL_VERSION,
-            kind: 'request',
-            id,
-            payload: { method, path, body, contentType },
-          }),
-        )
+        this.ws?.send(JSON.stringify({ version: RELAY_PROTOCOL_VERSION, kind, id, payload }))
       }
 
       if (this.state === 'open' && this.ws?.readyState === WebSocket.OPEN) {
@@ -356,8 +372,10 @@ export class RelayConnection {
       entry.reject(new RelayRequestError(err.code ?? 'relay_error', err.message ?? 'Relay error'))
       return
     }
-    if (msg.kind === 'response') {
-      entry.resolve(msg.payload as RelayProxyResponse)
+    if (msg.kind === entry.expects) {
+      entry.resolve(msg.payload)
+    } else {
+      entry.reject(new RelayRequestError('relay_error', `Unexpected ${msg.kind ?? 'frame'} from the relay`))
     }
   }
 

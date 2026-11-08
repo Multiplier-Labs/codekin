@@ -244,3 +244,35 @@ describe('resume', () => {
   })
 
 })
+
+describe('enrolment frames', () => {
+  function ready() {
+    const { conn, socket } = connect()
+    socket.open()
+    socket.deliver({ kind: 'hello_ack', payload: { online: true, displayName: 'Dev box' } })
+    return { conn, socket }
+  }
+
+  it('sends an enrol frame and resolves with the reply that answers it', async () => {
+    const { conn, socket } = ready()
+    const reply = conn.enrol('enrol_commit', { commit: 'c' })
+    const sent = socket.sent.at(-1)!
+    expect(sent).toMatchObject({ kind: 'enrol_commit', payload: { commit: 'c' } })
+    socket.deliver({ kind: 'enrol_challenge', id: sent.id, payload: { enrolId: 'e1' } })
+    expect(await reply).toEqual({ enrolId: 'e1' })
+  })
+
+  it('rejects with the machine refusal code', async () => {
+    const { conn, socket } = ready()
+    const reply = conn.enrol('enrol_reveal', {})
+    socket.deliver({ kind: 'error', id: socket.sent.at(-1)!.id, payload: { code: 'enrol_refused', message: 'no' } })
+    await expect(reply).rejects.toMatchObject({ code: 'enrol_refused' })
+  })
+
+  it('does not accept the wrong kind of reply for a request', async () => {
+    const { conn, socket } = ready()
+    const reply = conn.enrol('enrol_status', { enrolId: 'e1' })
+    socket.deliver({ kind: 'response', id: socket.sent.at(-1)!.id, payload: { status: 200, headers: {} } })
+    await expect(reply).rejects.toBeInstanceOf(RelayRequestError)
+  })
+})

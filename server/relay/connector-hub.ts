@@ -15,6 +15,7 @@ import type { WebSocket } from 'ws'
 import type Database from 'better-sqlite3'
 import { verifyMachineCredential } from './pairing.js'
 import {
+  ENROLMENT_FEATURE,
   envelope,
   PROXY_REQUEST_TIMEOUT_MS,
   RELAY_ERROR,
@@ -38,6 +39,9 @@ import type { AbuseFinding, AbuseSignals } from './abuse-signals.js'
 import type {
   ConnectorHello,
   ConnectorHelloAck,
+  EnrolReplyKind,
+  EnrolRequest,
+  EnrolRequestKind,
   LocalSessionSummary,
   ProxyRequest,
   ProxyResponse,
@@ -86,6 +90,8 @@ interface ConnectedMachine {
   updateRequired: UpdateRequired | null
   /** Last session counts the connector advertised, if any. */
   sessions: LocalSessionSummary | null
+  /** Whether the connector answers enrol_* frames (ENROLMENT_FEATURE). */
+  enrolment: boolean
 }
 
 interface TrafficWindow {
@@ -119,11 +125,25 @@ export type ChannelListener = (
 /** What a proxied request resolves to: the machine's response, or a relay error. */
 export type ProxyOutcome = { response: ProxyResponse } | { error: RelayError }
 
+/** What an enrolment frame resolves to: the connector's reply, or a relay error. */
+export type EnrolOutcome = { reply: { kind: EnrolReplyKind; payload: unknown } } | { error: RelayError }
+
+/** The connector answers from its own state, so a slow reply means trouble. */
+const ENROL_TIMEOUT_MS = 15_000
+
+interface PendingEnrol {
+  machineId: string
+  /** The reply kind that answers this request. */
+  expects: EnrolReplyKind
+  settle: (outcome: EnrolOutcome) => void
+}
+
 export class ConnectorHub {
   private machines = new Map<string, ConnectedMachine>()
   /** Retain traffic across reconnects; offline records expire after an empty window. */
   private traffic = new Map<string, Pick<ConnectedMachine, 'machineId' | 'workspaceId' | 'connectorVersion' | 'window' | 'sessions'>>()
   private pending = new Map<string, PendingRequest>()
+  private pendingEnrol = new Map<string, PendingEnrol>()
   private channelListeners = new Map<string, ChannelListener>()
   /** Per-machine frame budget, so one connector cannot flood the hub. */
   private frameLimiter = new RateLimiter(MACHINE_FRAME_LIMIT)
@@ -233,9 +253,12 @@ export class ConnectorHub {
         socket.send(JSON.stringify(envelope('pong', {})))
       } else if (msg.kind === 'response') {
         this.settleResponse(machineId, msg.id, msg.kind, msg.payload)
+      } else if (msg.kind === 'enrol_challenge' || msg.kind === 'enrol_result') {
+        this.settleEnrol(machineId, msg.id, msg.kind, msg.payload)
       } else if (msg.kind === 'error') {
         // An error envelope answers either a request (id) or a channel.
         if (msg.channelId) this.channelListeners.get(msg.channelId)?.(msg.kind, msg.payload)
+        else if (msg.id && this.pendingEnrol.has(msg.id)) this.settleEnrol(machineId, msg.id, msg.kind, msg.payload)
         else this.settleResponse(machineId, msg.id, msg.kind, msg.payload)
       } else if (msg.kind === 'event' && !msg.channelId) {
         // Machine-level event: currently only the session summary (§11.3).
@@ -322,6 +345,64 @@ export class ConnectorHub {
         })
       }
     })
+  }
+
+  /**
+   * Forward one enrolment frame (signed-intents spec §5.2) to a machine and
+   * await its reply. The connector does every check that matters; the hub
+   * only routes, so it can drop or delay these frames but not forge them.
+   */
+  sendEnrolment(machineId: string, kind: EnrolRequestKind, request: EnrolRequest): Promise<EnrolOutcome> {
+    const machine = this.machines.get(machineId)
+    if (!machine) return Promise.resolve({ error: { code: RELAY_ERROR.machineOffline, message: 'Machine is not connected' } })
+    if (machine.updateRequired) return Promise.resolve({ error: updateRequiredError(machine.updateRequired) })
+    if (!machine.enrolment) {
+      return Promise.resolve({
+        error: { code: RELAY_ERROR.connectorUpdateRequired, message: 'Update Codekin on this computer to confirm browsers on it' },
+      })
+    }
+    if (machine.pending.size >= MAX_PENDING_PER_MACHINE) {
+      return Promise.resolve({ error: { code: RELAY_ERROR.badRequest, message: 'Too many requests in flight for this machine' } })
+    }
+    const id = randomUUID()
+    return new Promise<EnrolOutcome>(resolve => {
+      const timer = setTimeout(() => {
+        settle({ error: { code: RELAY_ERROR.timeout, message: 'Machine did not respond in time' } })
+      }, ENROL_TIMEOUT_MS)
+      timer.unref()
+      const settle = (outcome: EnrolOutcome) => {
+        if (!this.pendingEnrol.delete(id)) return
+        clearTimeout(timer)
+        machine.pending.delete(id)
+        resolve(outcome)
+      }
+      this.pendingEnrol.set(id, { machineId, expects: kind === 'enrol_commit' ? 'enrol_challenge' : 'enrol_result', settle })
+      machine.pending.add(id)
+      try {
+        const frame = JSON.stringify(envelope(kind, request, { id }))
+        this.countTraffic(machine, Buffer.byteLength(frame))
+        machine.socket.send(frame)
+      } catch (err) {
+        settle({ error: { code: RELAY_ERROR.machineOffline, message: `Could not reach machine: ${err instanceof Error ? err.message : String(err)}` } })
+      }
+    })
+  }
+
+  /** Route an enrolment reply (or error) to its waiting caller, if it is the reply that request expects. */
+  private settleEnrol(machineId: string, id: string | undefined, kind: EnrolReplyKind | 'error', payload: unknown): void {
+    if (!id) return
+    const entry = this.pendingEnrol.get(id)
+    if (!entry || entry.machineId !== machineId) return
+    if (kind === 'error') {
+      const err = payload as Partial<RelayError>
+      entry.settle({ error: {
+        code: typeof err.code === 'string' ? err.code : RELAY_ERROR.badRequest,
+        message: typeof err.message === 'string' ? err.message : 'Machine reported an error',
+      } })
+      return
+    }
+    if (kind !== entry.expects) return
+    entry.settle({ reply: { kind, payload } })
   }
 
   /**
@@ -426,6 +507,7 @@ export class ConnectorHub {
   private failPending(machine: ConnectedMachine, reason: string): void {
     for (const id of [...machine.pending]) {
       this.pending.get(id)?.settle({ error: { code: RELAY_ERROR.machineOffline, message: reason } })
+      this.pendingEnrol.get(id)?.settle({ error: { code: RELAY_ERROR.machineOffline, message: reason } })
     }
     for (const channelId of [...machine.channels]) {
       machine.channels.delete(channelId)
@@ -462,6 +544,7 @@ export class ConnectorHub {
       window: this.traffic.get(machineId)?.window ?? emptyWindow(now),
       updateRequired,
       sessions: hello.sessions ?? null,
+      enrolment: features.includes(ENROLMENT_FEATURE),
     })
 
     const registered = this.machines.get(machineId)
