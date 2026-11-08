@@ -21,6 +21,7 @@ import {
   STREAM_CLOSE,
 } from './relay-protocol.js'
 import { recordAuditEvent } from './audit.js'
+import { keyIdForSpki, parseP256Spki } from './machine-identity.js'
 import {
   MACHINE_FRAME_LIMIT,
   MAX_CHANNELS_PER_MACHINE,
@@ -478,14 +479,23 @@ export class ConnectorHub {
        WHERE id = ?`,
     ).run(hello.connectorVersion ?? null, hello.localCodekinVersion ?? null, machineId)
 
-    const row = this.db.prepare('SELECT display_name FROM machines WHERE id = ?').get(machineId) as
-      | { display_name: string }
+    const row = this.db.prepare('SELECT display_name, owner_user_id, identity_key FROM machines WHERE id = ?').get(machineId) as
+      | { display_name: string; owner_user_id: string; identity_key: string | null }
       | undefined
+    // The machine identity key is only a hint for browsers (they pin theirs
+    // at enrolment), so a connector may replace it, but the change is audited.
+    const identityKey = parseP256Spki(hello.identityKey)
+    const identityChanged = !!identityKey && identityKey !== (row?.identity_key ?? null)
+    if (identityChanged) {
+      this.db.prepare('UPDATE machines SET identity_key = ? WHERE id = ?').run(identityKey, machineId)
+    }
     recordAuditEvent(this.db, {
       kind: 'machine_connected',
       machineId,
       metadata: {
         connectorVersion: hello.connectorVersion ?? null,
+        ...(identityKey ? { identityKeyId: keyIdForSpki(identityKey) } : {}),
+        ...(identityChanged && row?.identity_key ? { identityKeyChanged: true } : {}),
         ...(updateRequired ? { updateRequiredMinimum: updateRequired.minimum, updateRequiredMissing: updateRequired.missing.join(',') } : {}),
       },
     })
@@ -498,6 +508,7 @@ export class ConnectorHub {
     // as "reconnect", so closing would only start a loop. Traffic is refused
     // in sendRequest/openChannel instead.
     const ack: ConnectorHelloAck = { machineId, displayName: row?.display_name ?? 'Machine' }
+    if (row?.owner_user_id) ack.ownerUserId = row.owner_user_id
     if (updateRequired) ack.updateRequired = updateRequired
     socket.send(JSON.stringify(envelope('hello_ack', ack)))
   }

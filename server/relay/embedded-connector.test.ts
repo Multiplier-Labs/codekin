@@ -12,6 +12,8 @@ import {
   embeddedConnectorDisabled,
 } from './embedded-connector.js'
 import { readRelayCredential } from './relay-credential.js'
+import { readMachineIdentity } from './machine-identity.js'
+import { readTrustStore } from './trust-store.js'
 import type { SecretStore } from './secret-store.js'
 import { readFileSync } from 'fs'
 
@@ -105,19 +107,54 @@ describe('EmbeddedConnectorSupervisor', () => {
     const store: SecretStore = { get, set: vi.fn(), delete: vi.fn() }
     writeFileSync(file, JSON.stringify({ url: 'https://relay.test', machineId: 'm1', managed: true, secretRef: 'keychain' }))
     const sup = supervisor({ secretStore: store })
+    // Reads of the machine secret only; the identity key has its own account.
+    const secretReads = () => get.mock.calls.filter(([account]) => account === 'm1').length
     try {
       sup.start()
       expect(sup.status()).toMatchObject({ paired: true, state: 'secret_unavailable', machineId: 'm1' })
       expect(created).toHaveLength(0)
       sup.check()
-      expect(get).toHaveBeenCalledTimes(1)
+      expect(secretReads()).toBe(1)
       vi.advanceTimersByTime(5000)
-      expect(get).toHaveBeenCalledTimes(2)
+      expect(secretReads()).toBe(2)
       expect(created).toHaveLength(1)
       expect(created[0].opts.machineSecret).toBe('recovered-secret')
       vi.advanceTimersByTime(60000)
-      expect(get).toHaveBeenCalledTimes(2)
+      expect(secretReads()).toBe(2)
     } finally { sup.stop(); vi.useRealTimers() }
+  })
+
+  it('creates the machine identity and device list, advertises the key and records the owner', () => {
+    writeCredential({ machineId: 'm1', managed: true })
+    const sup = supervisor({ secretStore: null })
+    sup.check()
+    expect(created).toHaveLength(1)
+    const identity = readMachineIdentity(join(dir, 'relay-identity.json'))
+    expect(identity?.machineId).toBe('m1')
+    expect(created[0].opts.identityKey).toBe(identity?.publicKey)
+    expect(readTrustStore(join(dir, 'relay-devices.json'))).toMatchObject({ machineId: 'm1', policy: 'off', ownerUserId: null, credentials: [] })
+
+    created[0].opts.onOwner?.('u-owner')
+    expect(readTrustStore(join(dir, 'relay-devices.json'))?.ownerUserId).toBe('u-owner')
+
+    // A restart keeps the same identity.
+    sup.stop()
+    const again = supervisor({ secretStore: null })
+    again.check()
+    expect(created[1].opts.identityKey).toBe(identity?.publicKey)
+    again.stop()
+  })
+
+  it('ignores an owner reported by a connector it has since replaced', () => {
+    writeCredential({ machineId: 'm1', managed: true })
+    const sup = supervisor({ secretStore: null })
+    sup.check()
+    writeCredential({ machineId: 'm2', managed: true })
+    sup.check()
+    expect(created).toHaveLength(2)
+    created[0].opts.onOwner?.('u-stale')
+    expect(readTrustStore(join(dir, 'relay-devices.json'))).toMatchObject({ machineId: 'm2', ownerUserId: null })
+    sup.stop()
   })
 
   it('does not retry a removed pairing after a secret-store failure', () => {

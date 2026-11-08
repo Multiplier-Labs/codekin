@@ -47,7 +47,8 @@ Installed globally via npm, the `codekin` command manages the local server:
 | `codekin token` | Print the current access URL with auth token |
 | `codekin relay login` | Pair with hosted Codekin (`CODEKIN_PAIR_TOKEN` / `--code`, or device-code flow); `--unmanaged` to run the connector yourself |
 | `codekin relay status` | Pairing mode, embedded connector state, hub health |
-| `codekin relay logout` | Remove the local pairing credential |
+| `codekin relay devices` | List the devices allowed to control this machine (`--json`), `revoke <keyId>`, `policy <off\|warn\|required>` |
+| `codekin relay logout` | Remove the local pairing credential, identity key and device list |
 
 ### Service: user-level, no sudo
 

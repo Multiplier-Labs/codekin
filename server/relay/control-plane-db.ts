@@ -416,6 +416,13 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
       CREATE INDEX idx_abuse_flags_created ON abuse_flags(created_at);
     `)
   },
+
+  // 12: the machine identity public key (docs/RELAY-SIGNED-INTENTS-AND-E2E-SPEC.md
+  // §4.1), base64url SPKI. A hint for browsers, which trust only the key they
+  // pin during enrolment.
+  db => {
+    db.exec('ALTER TABLE machines ADD COLUMN identity_key TEXT')
+  },
 ]
 
 function runMigrations(db: Database.Database): void {

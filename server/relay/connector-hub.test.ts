@@ -10,6 +10,7 @@ import { openControlPlaneDb, upsertUserFromGithub, listMachines } from './contro
 import { startPairing, approvePairing, completePairing } from './pairing.js'
 import { ConnectorHub } from './connector-hub.js'
 import { RelayConnector, connectorWsUrl } from './connector.js'
+import { generateMachineKeyPair, keyIdForSpki } from './machine-identity.js'
 import { envelope, RELAY_ERROR } from './relay-protocol.js'
 import { MAX_BUFFERED_BYTES } from './rate-limit.js'
 import { UsageMeter } from './usage-meter.js'
@@ -106,6 +107,44 @@ describe('connector hub', () => {
       configurable: true,
     })
   }
+
+  it('stores the identity key from hello, audits a change, and tells the connector its owner', async () => {
+    const owners: string[] = []
+    const first = generateMachineKeyPair().publicKey
+    const start = (identityKey?: string) => {
+      const connector = new RelayConnector({
+        relayUrl, machineId, machineSecret, connectorVersion: '0.10.0-test', identityKey,
+        onOwner: id => { owners.push(id) }, onStatus: () => {},
+      })
+      connector.start()
+      return connector
+    }
+    const ownerId = (db.prepare('SELECT owner_user_id FROM machines WHERE id = ?').get(machineId) as { owner_user_id: string }).owner_user_id
+    const identityKeyOf = () => (db.prepare('SELECT identity_key FROM machines WHERE id = ?').get(machineId) as { identity_key: string | null }).identity_key
+    const connectedEvents = () => (db.prepare(`SELECT metadata FROM audit_events WHERE kind = 'machine_connected' ORDER BY rowid`).all() as Array<{ metadata: string }>)
+      .map(r => JSON.parse(r.metadata) as Record<string, unknown>)
+
+    let connector = start(first)
+    await waitFor(() => owners.length === 1)
+    expect(owners).toEqual([ownerId])
+    expect(identityKeyOf()).toBe(first)
+    expect(connectedEvents().at(-1)).toMatchObject({ identityKeyId: keyIdForSpki(first) })
+    expect(connectedEvents().at(-1)?.identityKeyChanged).toBeUndefined()
+    connector.stop()
+
+    // A connector without a key, or with garbage, leaves the stored hint alone.
+    connector = start('not-a-key')
+    await waitFor(() => owners.length === 2)
+    expect(identityKeyOf()).toBe(first)
+    connector.stop()
+
+    const second = generateMachineKeyPair().publicKey
+    connector = start(second)
+    await waitFor(() => owners.length === 3)
+    expect(identityKeyOf()).toBe(second)
+    expect(connectedEvents().at(-1)).toMatchObject({ identityKeyId: keyIdForSpki(second), identityKeyChanged: true })
+    connector.stop()
+  })
 
   it('drops a channel instead of buffering for a connector that stopped draining', async () => {
     const { connector, socket } = await connectMachine()

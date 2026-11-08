@@ -150,6 +150,7 @@ codekin stop                    # Stop the running background service
 codekin setup --regenerate      # Generate a new auth token
 codekin relay status            # Show web app pairing + connection
 codekin relay login             # Pair this computer with a web app
+codekin relay devices           # Devices allowed to control this computer
 codekin upgrade                 # Upgrade to latest version
 codekin uninstall               # Remove Codekin entirely
 ```

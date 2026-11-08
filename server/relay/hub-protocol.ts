@@ -38,6 +38,8 @@ const connector = z.discriminatedUnion('kind', [
       providers: z.array(version).max(100).optional(), features: z.array(version).max(100).optional(),
     }).optional(),
     sessions: summary.optional(),
+    // Validated as a P-256 SPKI where it is stored (connector-hub.ts).
+    identityKey: z.string().max(256).optional(),
   })),
   frame('response', z.object({
     status: z.number().int().min(100).max(599),

@@ -10,6 +10,7 @@ import type Database from 'better-sqlite3'
 import { openControlPlaneDb, upsertUserFromGithub, listMachines } from './control-plane-db.js'
 import { createPairingRouter } from './pairing-routes.js'
 import { listAuditEvents } from './audit.js'
+import { generateMachineKeyPair } from './machine-identity.js'
 import type { RelayConfig } from './relay-config.js'
 import type { SessionUser } from './relay-auth-routes.js'
 import type { ConnectorHub } from './connector-hub.js'
@@ -164,6 +165,34 @@ describe('pairing routes', () => {
       method: 'DELETE', headers: asUser,
     })
     expect(deleteRes.status).toBe(200)
+  })
+
+  it('complete stores the machine identity key and names the owner by user id', async () => {
+    const { userCode, deviceCode } = await startRequest()
+    await fetch(`${baseUrl}/api/machines/pair/approve`, {
+      method: 'POST', headers: asUser, body: JSON.stringify({ code: userCode, displayName: 'Dev box' }),
+    })
+    const identityKey = generateMachineKeyPair().publicKey
+    const res = await fetch(`${baseUrl}/api/machines/pair/complete`, {
+      method: 'POST', headers: anon, body: JSON.stringify({ deviceCode, identityKey }),
+    })
+    const complete = await res.json() as { machineId: string; ownerUserId: string }
+    expect(complete.ownerUserId).toBe(activeUser.id)
+    const row = db.prepare('SELECT identity_key FROM machines WHERE id = ?').get(complete.machineId) as { identity_key: string | null }
+    expect(row.identity_key).toBe(identityKey)
+  })
+
+  it('complete ignores an identity key that is not a P-256 public key', async () => {
+    const { userCode, deviceCode } = await startRequest()
+    await fetch(`${baseUrl}/api/machines/pair/approve`, {
+      method: 'POST', headers: asUser, body: JSON.stringify({ code: userCode, displayName: 'Dev box' }),
+    })
+    const res = await fetch(`${baseUrl}/api/machines/pair/complete`, {
+      method: 'POST', headers: anon, body: JSON.stringify({ deviceCode, identityKey: 'AAAA' }),
+    })
+    expect(res.status).toBe(200)
+    const { machineId } = await res.json() as { machineId: string }
+    expect((db.prepare('SELECT identity_key FROM machines WHERE id = ?').get(machineId) as { identity_key: string | null }).identity_key).toBeNull()
   })
 
   it('denied flow returns 403 to the polling device', async () => {

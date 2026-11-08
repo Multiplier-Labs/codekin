@@ -444,6 +444,33 @@ logs why and waits for `relay.json` to change instead of reconnecting.
 traffic until Codekin is updated (`detail` names the minimum version and why);
 run `codekin upgrade` and restart the service.
 
+#### Machine identity and device list
+
+Pairing, or the first connector start on a machine paired earlier, also
+creates two files beside `relay.json` (both mode 0600; see
+`docs/RELAY-SIGNED-INTENTS-AND-E2E-SPEC.md` §4):
+
+- `relay-identity.json`: the machine's P-256 identity key. Its public half is
+  sent to the relay on pairing and in every connector hello. In the desktop
+  app the private half is in the Keychain (`ai.codekin.desktop.relay`,
+  account `<machineId>.identity`).
+- `relay-devices.json`: the browsers and passkeys allowed to control this
+  machine through the relay, the owner's relay user id, and the intent
+  policy (`off` until a device is confirmed).
+
+Only local surfaces change the device list: Settings → Remote access on this
+machine, `codekin relay devices`, and `/api/relay/devices*` with the local
+token. None of these are reachable through the relay. In this version the
+list is kept but not enforced, and devices can't be added yet; confirming a
+browser with a code typed on this machine comes next. Unpairing removes both
+files, and a re-pair starts over with a new identity and an empty list.
+
+```bash
+codekin relay devices              # identity key id, policy, devices
+codekin relay devices revoke <keyId>
+codekin relay devices policy warn  # off | warn | required (required needs a confirmed device)
+```
+
 **Connector version floors.** The relay keeps a base minimum connector version
 and, per security feature, the oldest connector it believes when the feature is
 advertised (`CONNECTOR_FLOORS` in `server/relay/connector-version.ts`). A

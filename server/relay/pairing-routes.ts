@@ -27,6 +27,7 @@ import { createRequireWorkspace } from './workspace-routes.js'
 import { can, getActiveMembership, getWorkspace } from './workspaces.js'
 import { getMachine, getUserById } from './control-plane-db.js'
 import { recordAuditEvent } from './audit.js'
+import { parseP256Spki } from './machine-identity.js'
 import type { RelayConfig } from './relay-config.js'
 import type { ConnectorHub } from './connector-hub.js'
 import type { BrowserHub } from './browser-hub.js'
@@ -190,7 +191,7 @@ export function createPairingRouter(
   })
 
   router.post('/api/machines/pair/complete', (req, res) => {
-    const body = (req.body ?? {}) as { deviceCode?: unknown; hostname?: unknown; platform?: unknown }
+    const body = (req.body ?? {}) as { deviceCode?: unknown; hostname?: unknown; platform?: unknown; identityKey?: unknown }
     if (typeof body.deviceCode !== 'string' || !body.deviceCode) {
       res.status(400).json({ error: 'deviceCode required' })
       return
@@ -207,11 +208,18 @@ export function createPairingRouter(
         // The CLI prints this, so the person at the machine sees which
         // account it joined.
         const owner = getMachine(db, result.machineId)?.owner_user_id
+        // The machine identity key made for this pairing (signed-intents
+        // spec §4.1). Older connectors send none; they report it in hello.
+        const identityKey = parseP256Spki(body.identityKey)
+        if (identityKey) db.prepare('UPDATE machines SET identity_key = ? WHERE id = ?').run(identityKey, result.machineId)
         res.json({
           status: 'complete',
           machineId: result.machineId,
           machineSecret: result.machineSecret,
           ownerLogin: owner ? getUserById(db, owner)?.login ?? null : null,
+          // Recorded in the machine's trust store: signed frames must come
+          // with a relay principal for this same user (spec §4.3).
+          ownerUserId: owner ?? null,
         })
         return
       }

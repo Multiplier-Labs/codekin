@@ -2,7 +2,7 @@
 // @vitest-environment jsdom
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 
@@ -12,6 +12,8 @@ const api = vi.hoisted(() => ({
   startRelayPairing: vi.fn(),
   cancelRelayPairing: vi.fn(),
   unpairRelay: vi.fn(),
+  getRelayDevices: vi.fn(),
+  revokeRelayDevice: vi.fn(),
 }))
 vi.mock('../../lib/ccApi', () => api)
 
@@ -19,6 +21,11 @@ import { RemoteAccessSection } from './RemoteAccessSection'
 
 const UNPAIRED = { paired: false, managed: false, state: 'unpaired', machineId: null, relayUrl: null }
 const PAIRED = { paired: true, managed: true, state: 'connected', machineId: 'm-1', relayUrl: 'https://app.codekin.ai' }
+const NO_DEVICES = {
+  paired: true, machineId: 'm-1', identity: { keyId: 'idkey0000000000000000a', createdAt: '2026-11-08T10:00:00Z' },
+  devices: { machineId: 'm-1', ownerUserId: 'u1', policy: 'off', credentials: [], pendingCount: 0 },
+}
+const IPHONE = { keyId: 'q3aaaaaaaaaaaaaaaaaaaa', kind: 'browser', userId: 'u1', label: 'Safari · iPhone', addedAt: '2026-11-08T10:00:00Z', addedBy: 'local' }
 const PENDING = { state: 'pending', relayUrl: 'https://app.codekin.ai', verificationUrl: 'https://app.codekin.ai/pair?code=ABCD-1234', userCode: 'ABCD-1234', expiresAt: null }
 
 let root: Root | null = null
@@ -34,6 +41,10 @@ async function render(onError = vi.fn()) {
 }
 
 const button = (text: string) => [...el!.querySelectorAll('button')].find(b => b.textContent?.includes(text))
+
+beforeEach(() => {
+  api.getRelayDevices.mockResolvedValue({ paired: false, machineId: null, identity: null, devices: null })
+})
 
 afterEach(() => {
   act(() => { root?.unmount() })
@@ -102,5 +113,41 @@ describe('RemoteAccessSection', () => {
     await act(async () => { button('Unpair this machine')!.click() })
     expect(api.unpairRelay).toHaveBeenCalledWith('t')
     expect(el!.textContent).toContain('Pair this machine')
+  })
+
+  it('shows the identity key and an empty device list when paired', async () => {
+    api.getRelayStatus.mockResolvedValue(PAIRED)
+    api.getRelayPairing.mockResolvedValue({ state: 'idle' })
+    api.getRelayDevices.mockResolvedValue(NO_DEVICES)
+    const { onError } = await render()
+    expect(el!.textContent).toContain('Devices that can control this computer')
+    expect(el!.textContent).toContain('idkey0000000000000000a')
+    expect(el!.textContent).toContain('No devices yet')
+    expect(onError).not.toHaveBeenCalled()
+  })
+
+  it('removes a device only after inline confirmation', async () => {
+    api.getRelayStatus.mockResolvedValue(PAIRED)
+    api.getRelayPairing.mockResolvedValue({ state: 'idle' })
+    api.getRelayDevices.mockResolvedValue({ ...NO_DEVICES, devices: { ...NO_DEVICES.devices, credentials: [IPHONE] } })
+    api.revokeRelayDevice.mockResolvedValue(undefined)
+    await render()
+    expect(el!.textContent).toContain('Safari · iPhone')
+    expect(el!.textContent).toContain('confirmed on this computer')
+    await act(async () => { button('Remove…')!.click() })
+    expect(api.revokeRelayDevice).not.toHaveBeenCalled()
+    api.getRelayDevices.mockResolvedValue(NO_DEVICES)
+    await act(async () => { [...el!.querySelectorAll('button')].find(b => b.textContent === 'Remove')!.click() })
+    expect(api.revokeRelayDevice).toHaveBeenCalledWith('t', IPHONE.keyId)
+    expect(el!.textContent).toContain('No devices yet')
+  })
+
+  it('says so when the device list file is unreadable', async () => {
+    api.getRelayStatus.mockResolvedValue(PAIRED)
+    api.getRelayPairing.mockResolvedValue({ state: 'idle' })
+    api.getRelayDevices.mockResolvedValue({ ...NO_DEVICES, devices: null, error: 'relay-devices.json is not valid JSON' })
+    await render()
+    expect(el!.textContent).toContain('Device list unreadable')
+    expect(el!.textContent).not.toContain('No devices yet')
   })
 })

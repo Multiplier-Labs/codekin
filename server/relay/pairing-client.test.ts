@@ -12,7 +12,10 @@ import {
   claimPairingToken,
   normalizeRelayUrl,
   safeLogin,
+  removeRelayCredential,
 } from './pairing-client.js'
+import { readMachineIdentity } from './machine-identity.js'
+import { readTrustStore } from './trust-store.js'
 import { createRelayPairingRouter } from './pairing-local-routes.js'
 import { checkProxyRequest } from './connector-proxy.js'
 
@@ -131,6 +134,60 @@ describe('RelayPairing', () => {
   it('reports an unreachable relay', async () => {
     const pairing = new RelayPairing(opts((async () => { throw new Error('ECONNREFUSED') }) as typeof fetch))
     await expect(pairing.start()).rejects.toMatchObject({ code: 'unreachable' })
+  })
+})
+
+describe('machine identity and device list at pairing', () => {
+  const COMPLETE_WITH_OWNER: Reply = { status: 200, body: { ...COMPLETE.body, ownerUserId: 'u-owner' } }
+  const identityFile = () => join(dir, 'config', 'relay-identity.json')
+  const devicesFile = () => join(dir, 'config', 'relay-devices.json')
+
+  it('sends a new identity key with pair/complete and saves it with an empty device list', async () => {
+    const relay = fakeRelay(START, [{ status: 202, body: { status: 'pending' } }, COMPLETE_WITH_OWNER])
+    const { done } = await new RelayPairing({ ...opts(relay.fetchImpl), secretStore: null }).start()
+    await done
+    const identity = readMachineIdentity(identityFile())
+    expect(identity?.machineId).toBe('m-1')
+    // Every poll carries the same key; the relay stores it on completion.
+    const polls = relay.calls.slice(1)
+    expect(polls.every(c => c.body.identityKey === identity?.publicKey)).toBe(true)
+    expect(readTrustStore(devicesFile())).toMatchObject({ machineId: 'm-1', ownerUserId: 'u-owner', policy: 'off', credentials: [] })
+  })
+
+  it('claims a token with an identity key too, and a re-pair replaces both files', async () => {
+    const first = fakeRelay(START, [COMPLETE_WITH_OWNER])
+    await claimPairingToken(undefined, 'tok', true, { ...opts(first.fetchImpl), secretStore: null })
+    const before = readMachineIdentity(identityFile())
+    expect(first.calls[0].body.identityKey).toBe(before?.publicKey)
+
+    rmSync(file)
+    const second = fakeRelay(START, [{ status: 200, body: { ...COMPLETE_WITH_OWNER.body, machineId: 'm-2' } }])
+    await claimPairingToken(undefined, 'tok2', true, { ...opts(second.fetchImpl), secretStore: null })
+    const after = readMachineIdentity(identityFile())
+    expect(after?.machineId).toBe('m-2')
+    expect(after?.publicKey).not.toBe(before?.publicKey)
+    expect(readTrustStore(devicesFile())).toMatchObject({ machineId: 'm-2', credentials: [] })
+  })
+
+  it('ignores an owner id that is not a plain identifier', async () => {
+    const relay = fakeRelay(START, [{ status: 200, body: { ...COMPLETE.body, ownerUserId: '../../etc' } }])
+    await claimPairingToken(undefined, 'tok', true, { ...opts(relay.fetchImpl), secretStore: null })
+    expect(readTrustStore(devicesFile())?.ownerUserId).toBeNull()
+  })
+
+  it('still pairs against a relay that returns no owner id', async () => {
+    const relay = fakeRelay(START, [COMPLETE])
+    await claimPairingToken(undefined, 'tok', true, { ...opts(relay.fetchImpl), secretStore: null })
+    expect(existsSync(file)).toBe(true)
+    expect(readTrustStore(devicesFile())?.ownerUserId).toBeNull()
+  })
+
+  it('unpairing removes the identity and the device list with the credential', async () => {
+    const relay = fakeRelay(START, [COMPLETE_WITH_OWNER])
+    await claimPairingToken(undefined, 'tok', true, { ...opts(relay.fetchImpl), secretStore: null })
+    expect(removeRelayCredential(file, null)).toBe(true)
+    expect(existsSync(identityFile())).toBe(false)
+    expect(existsSync(devicesFile())).toBe(false)
   })
 })
 
