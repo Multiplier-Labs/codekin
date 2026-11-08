@@ -62,6 +62,22 @@ export function readRelayCredentialState(
   return secret ? { kind: 'ready', credential: { ...identity, machineSecret: secret } } : { kind: 'missing' }
 }
 
+/**
+ * Which relay and machine relay.json names, without reading the secret (so
+ * no Keychain prompt). Null when unpaired or unreadable.
+ */
+export function readRelayCredentialIdentity(file = relayCredentialPath()): RelayCredentialIdentity | null {
+  try {
+    const value: unknown = JSON.parse(readFileSync(file, 'utf-8'))
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const parsed = value as Partial<RelayCredential>
+    if (typeof parsed.url !== 'string' || typeof parsed.machineId !== 'string' || !parsed.machineId) return null
+    return { url: parsed.url, machineId: parsed.machineId, managed: parsed.managed === true }
+  } catch {
+    return null
+  }
+}
+
 /** Compatibility API for callers that only need a usable credential. */
 export function readRelayCredential(
   file = relayCredentialPath(),

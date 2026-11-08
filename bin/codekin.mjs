@@ -139,6 +139,17 @@ async function loadPairingClient() {
   return import(pathToFileURL(compiled).href)
 }
 
+/** `codekin relay devices …`: server/relay/devices-cli.ts, from the compiled server. */
+async function cmdRelayDevices(args) {
+  const compiled = join(PACKAGE_ROOT, 'server', 'dist', 'relay', 'devices-cli.js')
+  if (!existsSync(compiled)) {
+    console.error('This needs the compiled server (server/dist). Run: npx tsc -p server/tsconfig.json')
+    process.exit(1)
+  }
+  const { runDevicesCommand } = await import(pathToFileURL(compiled).href)
+  process.exit(runDevicesCommand(args, RELAY_CREDENTIAL_FILE))
+}
+
 function printPairedNextSteps(managed) {
   if (managed) {
     console.log('The Codekin service brings this machine online within a few seconds.')
@@ -305,9 +316,15 @@ function cmdRelayLogout() {
   }
   const credential = readRelayCredential()
   rmSync(RELAY_CREDENTIAL_FILE)
-  console.log('Removed local pairing credential.')
+  // The machine identity key and device list belong to this pairing; a new
+  // pairing makes new ones. (The desktop app's unpair also clears their
+  // Keychain item.)
+  for (const name of ['relay-identity.json', 'relay-devices.json']) {
+    rmSync(join(CONFIG_DIR, name), { force: true })
+  }
+  console.log('Removed local pairing credential, identity key and device list.')
   if (credential?.secretRef) {
-    console.log('Its secret stays in the macOS Keychain (item "ai.codekin.desktop.relay") until you remove it')
+    console.log('Its secret and identity key stay in the macOS Keychain (service "ai.codekin.desktop.relay") until you remove them')
     console.log('there or unpair from the Codekin desktop app, which removes both.')
   }
   console.log('The Codekin service stops its relay connector within a few seconds.')
@@ -731,11 +748,14 @@ if (cmd === 'start') {
     await cmdRelayStatus()
   } else if (action === 'logout') {
     cmdRelayLogout()
+  } else if (action === 'devices') {
+    await cmdRelayDevices(args.slice(2))
   } else {
-    console.error('Usage: codekin relay <login|connect|status|logout>')
+    console.error('Usage: codekin relay <login|connect|status|devices|logout>')
     console.error('  login   [--url <relay-url>] [--code <pairing-token>] [--unmanaged]')
     console.error('          (the pairing token may also be passed as CODEKIN_PAIR_TOKEN)')
     console.error('  connect [--foreground]')
+    console.error('  devices [list [--json] | revoke <keyId> | policy <off|warn|required>]')
     process.exit(1)
   }
 } else {
@@ -754,6 +774,7 @@ Usage:
   codekin relay login             Pair this machine with hosted Codekin
   codekin relay connect           Run the relay connector (unmanaged pairings)
   codekin relay status            Show pairing, connector + hub status
+  codekin relay devices           List or remove devices that can control this machine
   codekin relay logout            Remove the local pairing credential
   codekin upgrade                 Upgrade to latest version
   codekin uninstall               Remove Codekin entirely

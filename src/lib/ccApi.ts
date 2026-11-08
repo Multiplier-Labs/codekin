@@ -880,3 +880,49 @@ export async function unpairRelay(token: string): Promise<{ removed: boolean }> 
   if (!res.ok) throw new Error(`Failed to unpair: ${res.status}`)
   return jsonBody<{ removed: boolean }>(res)
 }
+
+// ---------------------------------------------------------------------------
+// Devices that can control this machine through the relay (signed-intents
+// spec §4.3, §5.5). Local only, like the rest of /api/relay/*.
+// ---------------------------------------------------------------------------
+
+export interface RelayDevice {
+  keyId: string
+  kind: 'browser' | 'passkey'
+  userId: string
+  label: string
+  addedAt: string
+  /** `local` (confirmed on this machine) or `passkey:<keyId>`. */
+  addedBy: string
+  lastUsedAt?: string
+}
+
+/** GET /api/relay/devices */
+export interface RelayDevices {
+  paired: boolean
+  machineId: string | null
+  identity: { keyId: string; createdAt: string } | null
+  devices: {
+    machineId: string
+    ownerUserId: string | null
+    policy: 'off' | 'warn' | 'required'
+    credentials: RelayDevice[]
+    pendingCount: number
+  } | null
+  error?: string
+}
+
+export async function getRelayDevices(token: string): Promise<RelayDevices> {
+  const res = await transport.authFetch('/api/relay/devices', { headers: headers(token) })
+  if (!res.ok) throw new Error(`Failed to get devices: ${res.status}`)
+  return jsonBody<RelayDevices>(res)
+}
+
+/** Remove a device from this machine's list. Rejects with the server's message. */
+export async function revokeRelayDevice(token: string, keyId: string): Promise<void> {
+  const res = await transport.authFetch(`/api/relay/devices/${encodeURIComponent(keyId)}`, { method: 'DELETE', headers: headers(token) })
+  if (!res.ok) {
+    const body = await jsonBody<{ message?: string }>(res).catch(() => ({ message: undefined }))
+    throw new Error(body.message ?? `Failed to remove device: ${res.status}`)
+  }
+}

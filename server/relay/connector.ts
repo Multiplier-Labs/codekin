@@ -46,6 +46,10 @@ export interface ConnectorOptions {
   onStream?: (event: 'open' | 'close' | 'denied', channelId: string, detail?: string) => void
   /** Replay protection for forwarded GitHub deliveries; persisted by default. */
   webhookGuard?: WebhookReplayGuard
+  /** The machine identity public key (base64url SPKI), advertised in hello. */
+  identityKey?: string
+  /** Called with the owner's relay user id from hello_ack, for the trust store. */
+  onOwner?: (ownerUserId: string) => void
 }
 
 export type ConnectorStatus =
@@ -129,6 +133,7 @@ export class RelayConnector {
         connectorVersion: this.opts.connectorVersion,
         localCodekinVersion: this.opts.localCodekinVersion,
         capabilities: { restProxy: true, wsProxy: true, fileUpload: true, providers: [] },
+        ...(this.opts.identityKey ? { identityKey: this.opts.identityKey } : {}),
       }
       ws.send(JSON.stringify(envelope('hello', hello)))
     })
@@ -139,6 +144,9 @@ export class RelayConnector {
       if (msg.kind === 'hello_ack') {
         this.backoffMs = BACKOFF_MIN_MS
         const ack = msg.payload as ConnectorHelloAck
+        if (typeof ack.ownerUserId === 'string' && ack.ownerUserId && this.opts.onOwner) {
+          try { this.opts.onOwner(ack.ownerUserId) } catch { /* the trust store must not break the connection */ }
+        }
         if (ack.updateRequired) {
           // Stay connected (so the hosted UI shows "update required" rather
           // than offline) and keep the heartbeat; the relay refuses traffic.

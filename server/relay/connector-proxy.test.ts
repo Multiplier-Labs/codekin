@@ -95,6 +95,31 @@ describe('checkProxyRequest', () => {
   })
 })
 
+describe('local-only relay routes', () => {
+  // The device list decides who may control this machine (signed-intents
+  // spec §5.5). The relay must never be able to read or change it.
+  const METHODS = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
+  const PATHS = [
+    '/api/relay/devices', '/api/relay/devices/', '/api/relay/devices/q3abc', '/api/relay/devices/policy',
+    '/api/relay/devices?x=1', '/api/relay/%64evices', '/api/relay/DEVICES', '/api/relay/pair', '/api/relay/unpair', '/api/relay/status',
+  ]
+  const principals = [
+    { userId: 'u1', role: 'owner' as const, grants: {} },
+    { userId: 'u2', role: 'grantee' as const, grants: { s1: ['view', 'input', 'approve'] } },
+    { userId: 'u1', role: 'webhook' as const, grants: {} },
+  ]
+
+  it('never proxies /api/relay/devices*, for any method or principal', () => {
+    for (const principal of principals) {
+      for (const method of METHODS) {
+        for (const path of PATHS) {
+          expect(checkProxyRequest({ method, path, principal }).allowed, `${principal.role} ${method} ${path}`).toBe(false)
+        }
+      }
+    }
+  })
+})
+
 describe('executeProxyRequest', () => {
   it('injects the local bearer token and relays status, headers and body', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(

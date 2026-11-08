@@ -27,6 +27,7 @@ import type { ConnectorOptions, ConnectorStatus } from './connector.js'
 import type { LocalServerTarget } from './connector-proxy.js'
 import { migrateCredentialToStore, readRelayCredentialState, relayCredentialPath } from './relay-credential.js'
 import { secretStoreFromEnv } from './secret-store.js'
+import { prepareMachineTrust, recordOwnerFromRelay } from './machine-trust.js'
 import type { SecretStore } from './secret-store.js'
 import type { RelayCredential, RelayCredentialIdentity } from './relay-credential.js'
 
@@ -218,6 +219,9 @@ export class EmbeddedConnectorSupervisor {
     const create = this.opts.createConnector ?? ((o: ConnectorOptions) => new RelayConnector(o))
     // Status callbacks from a connector we have since replaced are ignored.
     const token = {}
+    // The machine identity and device list (signed-intents spec §4), made
+    // here for machines paired before they existed.
+    const identityKey = prepareMachineTrust(this.file, credential.machineId, credential.url, this.store, this.log)
 
     const connector = create({
       relayUrl: credential.url,
@@ -226,6 +230,10 @@ export class EmbeddedConnectorSupervisor {
       connectorVersion: this.opts.version,
       localCodekinVersion: this.opts.version,
       localTarget: this.opts.localTarget?.(),
+      identityKey,
+      onOwner: (ownerUserId) => {
+        if (this.activeToken === token) recordOwnerFromRelay(this.file, credential.machineId, ownerUserId, this.log)
+      },
       onStatus: (status, detail) => {
         if (this.activeToken !== token) return
         this.onConnectorStatus(status, detail, key, credential)

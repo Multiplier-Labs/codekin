@@ -57,6 +57,12 @@ export interface ConnectorHello {
   }
   /** Omitted when the local server could not be reached at connect time. */
   sessions?: LocalSessionSummary
+  /**
+   * The machine identity public key (base64url SPKI, P-256), from
+   * relay-identity.json. The relay keeps it as a hint for browsers; they
+   * trust only the key they pin during enrolment.
+   */
+  identityKey?: string
 }
 
 /** Hub → connector on successful auth. */
@@ -69,6 +75,11 @@ export interface ConnectorHelloAck {
    * `connector_update_required`.
    */
   updateRequired?: { minimum: string; missing: string[]; reason: string }
+  /**
+   * The relay user who owns this machine. Machines paired before
+   * pair/complete returned it record it in their trust store from here.
+   */
+  ownerUserId?: string
 }
 
 /** Browser → hub, first message on a /relay/browser socket. */

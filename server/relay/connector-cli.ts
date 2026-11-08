@@ -13,7 +13,8 @@
 
 import { RelayConnector } from './connector.js'
 import { resolveLocalTarget } from './connector-proxy.js'
-import { readRelayCredential, codekinPackageVersion } from './relay-credential.js'
+import { readRelayCredential, codekinPackageVersion, relayCredentialPath } from './relay-credential.js'
+import { prepareMachineTrust, recordOwnerFromRelay } from './machine-trust.js'
 
 export { readRelayCredential } from './relay-credential.js'
 export type { RelayCredential } from './relay-credential.js'
@@ -44,6 +45,9 @@ function main(): void {
     )
   }
 
+  const credentialFile = relayCredentialPath()
+  const identityKey = prepareMachineTrust(credentialFile, credential.machineId, credential.url)
+
   const connector = new RelayConnector({
     relayUrl: credential.url,
     machineId: credential.machineId,
@@ -51,6 +55,8 @@ function main(): void {
     connectorVersion: version,
     localCodekinVersion: version,
     localTarget,
+    identityKey,
+    onOwner: (ownerUserId) => { recordOwnerFromRelay(credentialFile, credential.machineId, ownerUserId) },
     onProxy: (method, path, status) => {
       console.log(`[connector] ${method} ${path} → ${status}`)
     },

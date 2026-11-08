@@ -15,6 +15,7 @@ import {
   type RelayStatus, type RelayPairingState,
 } from '../../lib/ccApi'
 import { Block, Row, Rows, input } from './Block'
+import { RelayDevicesBlock } from './RelayDevicesBlock'
 
 const DEFAULT_RELAY = 'https://app.codekin.ai'
 const POLL_MS = 2000
@@ -142,6 +143,7 @@ export function RemoteAccessSection({ token, onError }: Props) {
             />
           </Rows>
         </Block>
+        <RelayDevicesBlock token={token} onError={onError} />
       </div>
     )
   }

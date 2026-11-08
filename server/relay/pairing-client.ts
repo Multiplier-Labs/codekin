@@ -10,6 +10,10 @@
  *   4. write ~/.config/codekin/relay.json (managed), which the embedded
  *      connector picks up within a few seconds
  *
+ * Each pairing also makes the machine a new identity key (sent to the relay
+ * on pair/complete) and an empty device list, both saved before relay.json
+ * (docs/RELAY-SIGNED-INTENTS-AND-E2E-SPEC.md §4).
+ *
  * The machine secret goes only into relay.json (0600); it is never returned
  * by status(), logged, or sent to the browser.
  */
@@ -20,6 +24,9 @@ import { dirname } from 'path'
 import { readRelayCredential, relayCredentialPath, SECRET_REF_KEYCHAIN_FIELD, writeFileAtomic } from './relay-credential.js'
 import { secretStoreFromEnv } from './secret-store.js'
 import type { SecretStore } from './secret-store.js'
+import { generateMachineKeyPair } from './machine-identity.js'
+import type { MachineKeyPair } from './machine-identity.js'
+import { recordPairing, removeMachineTrust, safeUserId } from './machine-trust.js'
 
 export const DEFAULT_RELAY_URL = 'https://app.codekin.ai'
 
@@ -28,6 +35,8 @@ export interface PairingCompletion {
   machineId: string
   machineSecret: string
   ownerLogin?: string | null
+  /** The owner's relay user id; relays from before the trust store omit it. */
+  ownerUserId?: string | null
 }
 
 export type PairingState =
@@ -56,6 +65,8 @@ export interface PairingOptions {
   log?: Pick<Console, 'log' | 'warn'>
   /** Write a managed credential (the local server runs the connector). Default true. */
   managed?: boolean
+  /** Where secrets go; default from CODEKIN_SECRET_HELPER (null: files only). */
+  secretStore?: SecretStore | null
 }
 
 /**
@@ -117,8 +128,13 @@ export function writeRelayCredential(
   chmodSync(file, 0o600)
 }
 
-/** Remove the local credential, and its Keychain item if it has one. Returns false when there was none. */
+/**
+ * Remove the local credential, and its Keychain item if it has one, along
+ * with the pairing's identity key and device list. Returns false when there
+ * was no credential.
+ */
 export function removeRelayCredential(file = relayCredentialPath(), store: SecretStore | null = secretStoreFromEnv()): boolean {
+  removeMachineTrust(file, store)
   if (!existsSync(file)) return false
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf-8')) as { machineId?: unknown; secretRef?: unknown }
@@ -158,6 +174,20 @@ async function postJson(fetchImpl: FetchFn, url: string, body: unknown): Promise
   return { status: res.status, data }
 }
 
+/** Save the identity and device list first, then the credential the connector watches for. */
+function savePairing(
+  file: string,
+  relayUrl: string,
+  data: PairingCompletion,
+  managed: boolean,
+  keyPair: MachineKeyPair,
+  opts: PairingOptions,
+): void {
+  const store = opts.secretStore !== undefined ? opts.secretStore : secretStoreFromEnv()
+  recordPairing(file, relayUrl, data.machineId, safeUserId(data.ownerUserId), keyPair, store, opts.log ?? console)
+  writeRelayCredential(file, relayUrl, data, managed, store)
+}
+
 /**
  * Claim a pre-approved pairing token (the installer / `--code` path): no
  * approval step, one request.
@@ -172,18 +202,20 @@ export async function claimPairingToken(
   const file = opts.credentialFile ?? relayCredentialPath()
   if (readRelayCredential(file)) throw new PairingError('already_paired', 'This machine is already paired')
   const fetchImpl = opts.fetchImpl ?? fetch
+  const keyPair = generateMachineKeyPair()
   let res
   try {
     res = await postJson(fetchImpl, `${relayUrl}/api/machines/pair/complete`, {
       deviceCode: token,
       hostname: opts.hostname ?? osHostname(),
       platform: opts.platform ?? osPlatform(),
+      identityKey: keyPair.publicKey,
     })
   } catch (err) {
     throw new PairingError('unreachable', `Could not reach the relay at ${relayUrl}: ${(err as Error).message}`)
   }
   if (res.data.status === 'complete' && isCompletion(res.data)) {
-    writeRelayCredential(file, relayUrl, res.data, managed)
+    savePairing(file, relayUrl, res.data, managed, keyPair, opts)
     return { machineId: res.data.machineId, ownerLogin: safeLogin(res.data.ownerLogin), relayUrl }
   }
   const why = typeof res.data.status === 'string' ? res.data.status : String(res.status)
@@ -269,11 +301,11 @@ export class RelayPairing {
     const pollMs = typeof res.data.pollIntervalMs === 'number' && res.data.pollIntervalMs >= 500 ? res.data.pollIntervalMs : 3000
     const abort = new AbortController()
     this.abort = abort
-    const done = this.poll(relayUrl, deviceCode, pollMs, abort.signal)
+    const done = this.poll(relayUrl, deviceCode, pollMs, abort.signal, generateMachineKeyPair())
     return { state: this.current, done }
   }
 
-  private async poll(relayUrl: string, deviceCode: string, pollMs: number, signal: AbortSignal): Promise<PairingState> {
+  private async poll(relayUrl: string, deviceCode: string, pollMs: number, signal: AbortSignal, keyPair: MachineKeyPair): Promise<PairingState> {
     const pending = this.current
     const expiresAt = pending.state === 'pending' ? pending.expiresAt : null
     for (;;) {
@@ -284,7 +316,7 @@ export class RelayPairing {
       }
       let res
       try {
-        res = await postJson(this.fetchImpl, `${relayUrl}/api/machines/pair/complete`, { deviceCode })
+        res = await postJson(this.fetchImpl, `${relayUrl}/api/machines/pair/complete`, { deviceCode, identityKey: keyPair.publicKey })
       } catch {
         continue // transient network error: keep polling until expiry
       }
@@ -294,7 +326,7 @@ export class RelayPairing {
         if (readRelayCredential(this.file)) {
           return this.finish(signal, { state: 'failed', relayUrl, detail: 'Another pairing finished first' })
         }
-        writeRelayCredential(this.file, relayUrl, res.data, this.opts.managed ?? true)
+        savePairing(this.file, relayUrl, res.data, this.opts.managed ?? true, keyPair, { ...this.opts, log: this.log })
         this.log.log(`[relay] Paired with ${relayUrl} as machine ${res.data.machineId}`)
         return this.finish(signal, {
           state: 'complete',
