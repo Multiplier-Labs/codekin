@@ -82,7 +82,12 @@ function decodeCbor(bytes: Uint8Array): Cbor {
       case 5: {
         const n = readLength(info)
         const out = new Map<Cbor, Cbor>()
-        for (let i = 0; i < n; i++) { const k = item(depth + 1); out.set(k, item(depth + 1)) }
+        for (let i = 0; i < n; i++) {
+          const k = item(depth + 1)
+          // Duplicate keys would let one key have several encodings (and key ids).
+          if (out.has(k)) throw new Error('duplicate CBOR map key')
+          out.set(k, item(depth + 1))
+        }
         return out
       }
       case 7:
@@ -120,7 +125,10 @@ export function coseToKey(cosePublicKey: string): { key: KeyObject; alg: number 
     if (kty === 3 && alg === COSE_ALG.RS256) {
       const n = map.get(-1)
       const e = map.get(-2)
-      if (!(n instanceof Uint8Array) || !(e instanceof Uint8Array) || n.length < 256) return null
+      // At least 2048 bits with no leading zero to pad the length, and the
+      // usual exponent (e = 1 would make every signature valid).
+      if (!(n instanceof Uint8Array) || !(e instanceof Uint8Array) || n.length < 256 || n[0] === 0) return null
+      if (e.length !== 3 || e[0] !== 1 || e[1] !== 0 || e[2] !== 1) return null
       return { key: createPublicKey({ key: { kty: 'RSA', n: b64url(n), e: b64url(e) }, format: 'jwk' }), alg }
     }
     if (kty === 1 && alg === COSE_ALG.EdDSA) {

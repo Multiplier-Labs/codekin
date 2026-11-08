@@ -23,7 +23,7 @@ import { createHash } from 'crypto'
 import { existsSync, statSync } from 'fs'
 import {
   CHANNEL_OPEN_ACTION, CHANNEL_TOKEN_CHARS, INTENT_MAX_SKEW_MS, INTENT_VERSION, MACHINE_TIME_LABEL, MAX_INTENT_BODY_CHARS,
-  PASSKEY_ANY, actionNeedsStepUp, channelOpenPayload, channelSessionAfter, frameAction, frameNeedsStepUp, framePayload, frameSession,
+  PASSKEY_ANY, actionNeedsStepUp, intentChallengeInput, channelOpenPayload, channelSessionAfter, frameAction, frameNeedsStepUp, framePayload, frameSession,
   isExemptFrame, requestAction, requestNeedsStepUp, requestPayload, requestSession,
 } from './intent-actions.js'
 import type { IntentBody, IntentRefusal, SignedIntent } from './intent-actions.js'
@@ -313,7 +313,7 @@ export class IntentVerifier {
       let origin: string
       try { origin = new URL(store.relayOrigin).origin } catch { return 'intent_bad_signature' }
       const failure = verifyPasskeyAssertion(intent.webauthn, {
-        challenge: createHash('sha256').update(intent.body, 'utf-8').digest(),
+        challenge: createHash('sha256').update(intentChallengeInput(intent.body)).digest(),
         origin,
         rpId: credential.rpId,
         cosePublicKey: credential.cosePublicKey,

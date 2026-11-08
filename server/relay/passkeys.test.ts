@@ -14,7 +14,7 @@ import { POP_LABEL, commitment, shortAuthString, signP1363, transcript } from '.
 import type { EnrolPasskey } from './enrolment-crypto.js'
 import {
   DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, PASSKEY_ANY, PASSKEY_PROOF_LABEL, certifyPayload, frameAction, framePayload,
-  frameNeedsStepUp, requestNeedsStepUp, revokePayload,
+  encodePasskeyProofs, frameNeedsStepUp, intentChallengeInput, requestNeedsStepUp, revokePayload,
 } from './intent-actions.js'
 import type { IntentBody, SignedIntent } from './intent-actions.js'
 import { IntentVerifier } from './intent-verify.js'
@@ -58,16 +58,19 @@ describe('passkeys on the machine', () => {
   afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
 
   /** Enrol a browser and, with proof, a passkey; returns the browser key. */
-  function enrolWithPasskey(pk: SoftPasskey = passkey, offered?: EnrolPasskey) {
+  function enrolWithPasskey(pk: SoftPasskey = passkey, offered?: EnrolPasskey, swapProof?: (proof: Record<string, string>) => Record<string, string>[]) {
     const b = browserKey()
     const nonceB = randomBytes(32)
     const P: EnrolPasskey[] = [offered ?? { credentialId: pk.credentialId, cosePublicKey: pk.cosePublicKey, rpId: 'relay.test' }]
     const proof = { credentialId: P[0].credentialId, ...pk.assert(sha256(transcript(PASSKEY_PROOF_LABEL, b.spki, nonceB))) }
+    const proofs = swapProof?.(proof)
     const ch = enrolment.commit(OWNER, { commit: commitment(b.spki, P, b.label, nonceB).toString('base64url') })
     const nonceM = Buffer.from(ch.nonceM, 'base64url')
     enrolment.reveal(OWNER, {
       enrolId: ch.enrolId, spki: b.spkiB64, passkeys: P, passkeyProofs: [proof], label: b.label, nonceB: nonceB.toString('base64url'),
-      pop: signP1363(b.privateKey, transcript(POP_LABEL, ch.enrolId, nonceM)).toString('base64url'),
+      // The browser signs over the proof it made; a relay may swap what is sent.
+      pop: signP1363(b.privateKey, transcript(POP_LABEL, ch.enrolId, nonceM, encodePasskeyProofs([proof]))).toString('base64url'),
+      ...(proofs ? { passkeyProofs: proofs } : {}),
     })
     approveEnrolment(shortAuthString(Buffer.from(ch.machineKey, 'base64url'), b.spki, P, nonceB, nonceM), devicesFile, 'm1')
     return { b, enrolId: ch.enrolId }
@@ -80,7 +83,7 @@ describe('passkeys on the machine', () => {
       v: 1, machineId: 'm1', sessionId: null, nonce: randomBytes(16).toString('base64url'), ts: Date.now(),
       keyId: keyId ?? keyIdForCoseKey(pk.cosePublicKey), payloadHash: sha256(payload).toString('base64url'), ...rest,
     } satisfies Partial<IntentBody>)
-    return { body, webauthn: { credentialId: pk.credentialId, ...pk.assert(sha256(body)) } }
+    return { body, webauthn: { credentialId: pk.credentialId, ...pk.assert(sha256(intentChallengeInput(body))) } }
   }
 
   function browserIntent(b: ReturnType<typeof browserKey>, fields: Partial<IntentBody> & { action: string; payload: Uint8Array }): SignedIntent {
@@ -104,6 +107,19 @@ describe('passkeys on the machine', () => {
     const relays = softPasskey()
     expect(() => enrolWithPasskey(passkey, { credentialId: passkey.credentialId, cosePublicKey: relays.cosePublicKey, rpId: 'relay.test' }))
       .toThrow(/could not prove/)
+    expect(readTrustStore(devicesFile)?.credentials).toEqual([])
+  })
+
+  it('refuses a passkey proof the relay swapped after the browser signed it', () => {
+    // The relay lists its own key, then replaces the user's assertion with one of its own.
+    const relays = softPasskey()
+    const offered = { credentialId: passkey.credentialId, cosePublicKey: relays.cosePublicKey, rpId: 'relay.test' }
+    let swapped: Record<string, string>[] = []
+    // The browser signs over the real proof; the relay sends a different one.
+    expect(() => enrolWithPasskey(passkey, offered, proof => {
+      swapped = [{ ...proof, ...relays.assert(Buffer.from(JSON.parse(Buffer.from(proof.clientDataJSON, 'base64url').toString()).challenge, 'base64url')) }]
+      return swapped
+    })).toThrow(/prove it holds its key/)
     expect(readTrustStore(devicesFile)?.credentials).toEqual([])
   })
 
@@ -170,6 +186,17 @@ describe('passkeys on the machine', () => {
       const token = randomBytes(16).toString('base64url')
       return { token, seq: 0 }
     }
+
+    it('knows which actions are privileged, however they are spelled', () => {
+      const json = (o: unknown) => new TextEncoder().encode(JSON.stringify(o))
+      expect(frameNeedsStepUp('{"type":"set_permission_mode","permissionMode":"dangerouslySkipPermissions"}')).toBe(true)
+      expect(requestNeedsStepUp('POST', '/API/Sessions/Create/', json({ permissionMode: 'bypassPermissions' }))).toBe(true)
+      expect(requestNeedsStepUp('POST', '/api/sessions/create', json({ permissionMode: 'dangerouslySkipPermissions' }))).toBe(true)
+      // A body this can't read (another charset) counts as privileged.
+      expect(requestNeedsStepUp('POST', '/api/sessions/create', new Uint8Array([0xff, 0xfe, 0x7b, 0x00]))).toBe(true)
+      expect(requestNeedsStepUp('POST', '/api/orchestrator/sessions/s1/respond', json({ value: 'always_allow' }))).toBe(true)
+      expect(requestNeedsStepUp('POST', '/api/orchestrator/sessions/s1/respond', json({ value: 'allow' }))).toBe(false)
+    })
 
     it('knows which actions are privileged', () => {
       expect(frameNeedsStepUp(always)).toBe(true)

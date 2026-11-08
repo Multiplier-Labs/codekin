@@ -33,7 +33,7 @@ function reveal(b: ReturnType<typeof browser>, enrolId: string, nonceM: string, 
     passkeys: [],
     label: b.label,
     nonceB: b.nonceB.toString('base64url'),
-    pop: signP1363(b.privateKey as KeyObject, transcript(POP_LABEL, enrolId, Buffer.from(nonceM, 'base64url'))).toString('base64url'),
+    pop: signP1363(b.privateKey as KeyObject, transcript(POP_LABEL, enrolId, Buffer.from(nonceM, 'base64url'), '[]')).toString('base64url'),
     ...override,
   }
 }
@@ -169,7 +169,7 @@ describe('MachineEnrolment', () => {
     const b = browser()
     const challenge = enrolment.commit(OWNER, { commit: b.commit.toString('base64url') })
     const other = browser()
-    const forged = signP1363(other.privateKey as KeyObject, transcript(POP_LABEL, challenge.enrolId, Buffer.from(challenge.nonceM, 'base64url')))
+    const forged = signP1363(other.privateKey as KeyObject, transcript(POP_LABEL, challenge.enrolId, Buffer.from(challenge.nonceM, 'base64url'), '[]'))
     expect(() => enrolment.reveal(OWNER, reveal(b, challenge.enrolId, challenge.nonceM, { pop: forged.toString('base64url') }))).toThrow(/prove/)
   })
 

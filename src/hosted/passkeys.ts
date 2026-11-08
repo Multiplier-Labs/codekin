@@ -19,6 +19,7 @@ import type {
 } from '@simplewebauthn/browser'
 import type { HostedUser } from './useHostedAuth'
 import { stepUpFetch } from './mfa'
+import { separateRelayChallenge } from './relayChallenge'
 
 export interface Passkey {
   id: string
@@ -140,7 +141,7 @@ export async function loginWithPasskey(): Promise<HostedUser> {
   if (!optionsRes.ok) throw new Error('Could not start passkey sign-in')
   const { options } = await optionsRes.json() as { options: PublicKeyCredentialRequestOptionsJSON }
 
-  const response = await startAuthentication({ optionsJSON: options })
+  const response = await startAuthentication({ optionsJSON: await separateRelayChallenge(options) })
 
   const verifyRes = await postJson('/api/auth/webauthn/login/verify', { response })
   if (!verifyRes.ok) throw new Error('Passkey sign-in failed')

@@ -6,6 +6,9 @@
  * authenticator.
  */
 import { signInFully } from './__fixtures__/auth.js'
+import { createHash } from 'crypto'
+import { softPasskey } from './__fixtures__/authenticator.js'
+import { RELAY_AUTH_LABEL, domainSeparated } from './intent-actions.js'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import express from 'express'
 import session from 'express-session'
@@ -185,6 +188,27 @@ describe('webauthn routes', () => {
     })
     expect(res.status).toBe(401)
     expect(listAuditEvents(db, {}).map(e => e.kind)).not.toContain('passkey_login')
+  })
+
+  it('signs in only with an assertion over the domain-separated challenge, never the raw one', async () => {
+    // A relay that could get the raw challenge signed could make it the hash
+    // of a machine intent; the browser and relay both wrap it (spec §6.6a).
+    const passkey = softPasskey('ES256', { origin: 'https://app.example.com', rpId: 'app.example.com' })
+    insertCredential(db, { userId: activeUser.id, credentialId: passkey.credentialId, publicKey: passkey.cosePublicKey, counter: 0 })
+    const attempt = async (wrap: boolean) => {
+      const optionsRes = await fetch(`${baseUrl}/api/auth/webauthn/login/options`, { method: 'POST', headers: anon })
+      const cookie = optionsRes.headers.get('set-cookie')!.split(';')[0]
+      const { options } = await optionsRes.json() as { options: { challenge: string } }
+      const raw = Buffer.from(options.challenge, 'base64url')
+      const challenge = wrap ? createHash('sha256').update(domainSeparated(RELAY_AUTH_LABEL, raw)).digest() : raw
+      const assertion = passkey.assert(challenge)
+      return fetch(`${baseUrl}/api/auth/webauthn/login/verify`, {
+        method: 'POST', headers: { ...anon, cookie },
+        body: JSON.stringify({ response: { id: passkey.credentialId, rawId: passkey.credentialId, type: 'public-key', response: assertion, clientExtensionResults: {} } }),
+      })
+    }
+    expect((await attempt(false)).status).toBe(401)
+    expect((await attempt(true)).status).toBe(200)
   })
 
   it('gives the caller their own passkeys public keys, for confirming a browser on a machine', async () => {

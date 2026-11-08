@@ -15,7 +15,8 @@
  */
 
 import {
-  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, INTENT_VERSION, PASSKEY_ANY, PASSKEY_PROOF_LABEL, certifyPayload, revokePayload,
+  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, INTENT_VERSION, PASSKEY_ANY, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
+  intentChallengeInput, revokePayload,
 } from '../../server/relay/intent-actions'
 
 // --- Encoding ---------------------------------------------------------------
@@ -343,7 +344,7 @@ export async function startEnrolment(
   // A passkey's public key comes from the relay, so the passkey proves
   // itself first: an assertion bound to this browser key and nonce.
   let passkeys: PasskeyKey[] = []
-  let passkeyProofs: unknown[] = []
+  let passkeyProofs: Array<{ credentialId: string; authenticatorData: string; clientDataJSON: string; signature: string }> = []
   if (opts.passkeys && opts.passkeys.candidates.length > 0) {
     const proofChallenge = await sha256(transcript(PASSKEY_PROOF_LABEL, spkiB, nonceB))
     try {
@@ -364,9 +365,11 @@ export async function startEnrolment(
   const spkiM = fromB64url(challenge.machineKey)
   const nonceM = fromB64url(challenge.nonceM)
 
-  // A key pinned earlier for this machine must not change behind our back.
+  // A key confirmed earlier for this machine must not change behind our
+  // back. One taken on first use (device_certify) may be replaced by a
+  // key the user now confirms with the codes.
   const pinned = await storage.getPin(opts.userId, opts.machineId)
-  if (pinned && pinned.machineKey !== challenge.machineKey) {
+  if (pinned && pinned.via !== 'passkey' && pinned.machineKey !== challenge.machineKey) {
     throw new EnrolmentFailure('machine_key_changed',
       "This computer's identity key is not the one this browser confirmed before. If Codekin was reinstalled there, forget the old key and try again; otherwise, don't continue.")
   }
@@ -374,7 +377,9 @@ export async function startEnrolment(
     throw new EnrolmentFailure('bad_machine_signature', "The computer's answer was not signed by its key")
   }
 
-  const pop = new Uint8Array(await crypto.subtle.sign(SIGN, key.keyPair.privateKey, transcript('ck-enrol-pop-v1', challenge.enrolId, nonceM) as BufferSource))
+  // The proof of possession also covers the passkey proofs, so they can't be swapped on the way.
+  const pop = new Uint8Array(await crypto.subtle.sign(SIGN, key.keyPair.privateKey,
+    transcript('ck-enrol-pop-v1', challenge.enrolId, nonceM, encodePasskeyProofs(passkeyProofs)) as BufferSource))
   await send('enrol_reveal', {
     enrolId: challenge.enrolId, spki: key.spki, passkeys, passkeyProofs, label, nonceB: toB64url(nonceB), pop: toB64url(pop),
   })
@@ -457,13 +462,13 @@ export async function certifyWithPasskey(
     v: INTENT_VERSION, machineId: opts.machineId, sessionId: null, action: DEVICE_CERTIFY_ACTION,
     payloadHash: toB64url(await sha256(certifyPayload(key.spki, label))), nonce, ts: Date.now(), keyId: PASSKEY_ANY,
   })
-  const assertion = await opts.assert(await sha256(utf8.encode(body)), opts.candidates.map(c => c.credentialId))
+  const assertion = await opts.assert(await sha256(intentChallengeInput(body)), opts.candidates.map(c => c.credentialId))
   const result = await send('enrol_certify', { spki: key.spki, label, intent: { body, webauthn: assertion } }) as Result
   if (result.state !== 'approved' || typeof result.machineKey !== 'string' || typeof result.signature !== 'string') {
     throw new EnrolmentFailure('protocol', 'The computer did not add this browser')
   }
   const pinned = await storage.getPin(opts.userId, opts.machineId)
-  if (pinned && pinned.machineKey !== result.machineKey) {
+  if (pinned && pinned.via !== 'passkey' && pinned.machineKey !== result.machineKey) {
     throw new EnrolmentFailure('machine_key_changed', "This computer's identity key is not the one this browser confirmed before.")
   }
   const signed = await verifyWith(fromB64url(result.machineKey),
@@ -471,7 +476,8 @@ export async function certifyWithPasskey(
   if (!signed) throw new EnrolmentFailure('bad_machine_signature', "The computer's answer was not signed by its key")
   await storage.putPin({
     userId: opts.userId, machineId: opts.machineId, machineKey: result.machineKey, keyId: key.keyId, pinnedAt: new Date().toISOString(),
-    via: pinned?.via ?? 'passkey',
+    // A code-confirmed key stays code-confirmed; anything else was taken on first use.
+    via: pinned?.via === 'code' && pinned.machineKey === result.machineKey ? 'code' : 'passkey',
     passkeys: Array.isArray(result.passkeys) ? result.passkeys : [],
   })
 }

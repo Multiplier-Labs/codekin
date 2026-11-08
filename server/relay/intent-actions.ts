@@ -67,6 +67,34 @@ export interface SignedIntent {
 /** keyId of a passkey intent signed by whichever enrolled passkey the user chose. */
 export const PASSKEY_ANY = '*'
 
+/**
+ * Passkey challenges are domain-separated, so an assertion made for one
+ * purpose can never count for another:
+ *   machine intent     SHA-256(T("ck-intent-v1", UTF-8(body)))
+ *   enrolment proof    SHA-256(T(PASSKEY_PROOF_LABEL, SPKI(kB), nonceB))
+ *   relay sign-in/MFA  SHA-256(T("ck-relay-auth-v1", relay challenge))
+ * The last one matters most: the relay picks its own challenges, and if the
+ * browser passed them to the authenticator raw, a relay could ask for a
+ * "sign-in" whose challenge is the hash of an intent it wrote.
+ */
+export const INTENT_CHALLENGE_LABEL = 'ck-intent-v1'
+export const RELAY_AUTH_LABEL = 'ck-relay-auth-v1'
+
+/** T(label, ...parts): length-prefixed, like the enrolment transcripts. */
+export function domainSeparated(label: string, ...parts: Uint8Array[]): Uint8Array {
+  return framed([encoder.encode(label), ...parts])
+}
+
+/** The bytes whose SHA-256 is a passkey intent's WebAuthn challenge. */
+export function intentChallengeInput(body: string): Uint8Array {
+  return domainSeparated(INTENT_CHALLENGE_LABEL, encoder.encode(body))
+}
+
+/** The passkey proofs as the enrolment's proof-of-possession signature covers them. */
+export function encodePasskeyProofs(proofs: ReadonlyArray<{ credentialId: string; authenticatorData: string; clientDataJSON: string; signature: string }>): string {
+  return JSON.stringify(proofs.map(p => [p.credentialId, p.authenticatorData, p.clientDataJSON, p.signature]))
+}
+
 /** Why a connector refused (or, in warn mode, would have refused) an intent. */
 export type IntentRefusal =
   | 'intent_required'
@@ -230,6 +258,19 @@ export const PASSKEY_PROOF_LABEL = 'ck-enrol-passkey-v1'
 /** Prompt answers that save a standing approval rule. */
 const STANDING_ANSWERS = new Set(['always_allow', 'approve_pattern'])
 
+/** Permission modes that stop asking before tools run. */
+const AUTO_APPROVE_MODES = new Set(['bypassPermissions', 'dangerouslySkipPermissions'])
+
+const answersStanding = (value: unknown) =>
+  (Array.isArray(value) ? value : [value]).some(v => typeof v === 'string' && STANDING_ANSWERS.has(v))
+
+/** Route identity as Express matches it: case-insensitive, trailing slash ignored. */
+function routeOf(path: string): string {
+  const q = path.indexOf('?')
+  const pathname = (q === -1 ? path : path.slice(0, q)).replace(/\/+$/, '')
+  return (pathname || '/').toLowerCase()
+}
+
 function parsed(text: string): Record<string, unknown> | null {
   try {
     const v = JSON.parse(text) as unknown
@@ -248,24 +289,40 @@ export function frameNeedsStepUp(frame: string): boolean {
   const msg = parsed(frame)
   if (!msg) return false
   switch (msg.type) {
-    case 'prompt_response': {
-      const values = Array.isArray(msg.value) ? msg.value : [msg.value]
-      return values.some(v => typeof v === 'string' && STANDING_ANSWERS.has(v))
-    }
+    case 'prompt_response':
+      return answersStanding(msg.value)
     case 'create_session':
-      return msg.permissionMode === 'bypassPermissions'
     case 'set_permission_mode':
-      return msg.permissionMode === 'bypassPermissions'
+      return typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)
     default:
       return false
   }
 }
 
-/** Whether a REST request is a privileged action (§6.2). */
+/**
+ * Whether a REST request is a privileged action (§6.2): creating a session
+ * in an auto-approve mode, or answering a prompt with a standing rule through
+ * the orchestrator. Routes match the way Express does. A body that doesn't
+ * read as UTF-8 JSON counts as privileged: the local server might parse it
+ * (another charset) where this can't.
+ */
 export function requestNeedsStepUp(method: string, path: string, body: Uint8Array | null): boolean {
-  if (method.toUpperCase() !== 'POST' || requestAction(method, path) !== 'rest:POST /api/sessions/create' || !body) return false
-  const msg = parsed(new TextDecoder().decode(body))
-  return msg?.permissionMode === 'bypassPermissions'
+  if (method.toUpperCase() !== 'POST') return false
+  const route = routeOf(path)
+  const isCreate = route === '/api/sessions/create'
+  const isRespond = /^\/api\/orchestrator\/sessions\/[^/]+\/respond$/.test(route)
+  if (!isCreate && !isRespond) return false
+  if (!body || body.length === 0) return false
+  let msg: Record<string, unknown> | null
+  try {
+    msg = parsed(new TextDecoder('utf-8', { fatal: true }).decode(body))
+  } catch {
+    return true
+  }
+  if (!msg) return true
+  return isCreate
+    ? typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)
+    : answersStanding(msg.value)
 }
 
 /** Device and policy changes always count as privileged. */

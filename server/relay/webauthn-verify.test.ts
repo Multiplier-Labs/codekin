@@ -49,6 +49,24 @@ describe('verifyPasskeyAssertion', () => {
     expect(verifyPasskeyAssertion(passkey.assert(challenge), { ...expected, cosePublicKey: 'oQE' })).toBe('bad_key')
   })
 
+  it('refuses weak RSA keys and ambiguous CBOR', () => {
+    const cose = (entries: Array<[number, number | Buffer]>) => {
+      // Tiny CBOR map encoder for these cases.
+      const head = (major: number, n: number) => n < 24 ? Buffer.from([(major << 5) | n]) : n < 256 ? Buffer.from([(major << 5) | 24, n]) : Buffer.from([(major << 5) | 25, n >> 8, n & 255])
+      const enc = (v: number | Buffer) => typeof v === 'number' ? (v >= 0 ? head(0, v) : head(1, -1 - v)) : Buffer.concat([head(2, v.length), v])
+      return Buffer.concat([head(5, entries.length), ...entries.flatMap(([k, v]) => [enc(k), enc(v)])]).toString('base64url')
+    }
+    const n = Buffer.alloc(256, 0xab)
+    expect(coseToKey(cose([[1, 3], [3, -257], [-1, n], [-2, Buffer.from([1, 0, 1])]]))).not.toBeNull()
+    expect(coseToKey(cose([[1, 3], [3, -257], [-1, n], [-2, Buffer.from([1])]]))).toBeNull()
+    expect(coseToKey(cose([[1, 3], [3, -257], [-1, Buffer.concat([Buffer.from([0]), n.subarray(1)])], [-2, Buffer.from([1, 0, 1])]]))).toBeNull()
+    const p = softPasskey()
+    const decoded = Buffer.from(p.cosePublicKey, 'base64url')
+    // Same key with a duplicated "alg" entry appended: a second encoding, refused.
+    const dup = Buffer.concat([Buffer.from([decoded[0] + 1]), decoded.subarray(1), Buffer.from([0x03, 0x26])])
+    expect(coseToKey(dup.toString('base64url'))).toBeNull()
+  })
+
   it('reads only well-formed COSE keys, and gives passkeys stable key ids', () => {
     expect(coseToKey(softPasskey('ES256').cosePublicKey)?.alg).toBe(-7)
     expect(coseToKey('not-cbor')).toBeNull()

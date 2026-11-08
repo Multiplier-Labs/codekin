@@ -125,6 +125,26 @@ describe('passkeys from the browser to the machine', () => {
     expect(verifier.checkFrame(OWNER, always, plain, opened.channel).stepUpPasskeys).toHaveLength(1)
   })
 
+  it('lets the codes replace a machine key taken on first use, which never vouches for the clock', async () => {
+    const storage = memoryStorage()
+    // A pin from device_certify, possibly the relay's key.
+    await storage.putPin({ userId: 'u-owner', machineId: 'm1', machineKey: 'not-the-real-key', keyId: 'k', pinnedAt: 'x', via: 'passkey' })
+    expect(await createIntentSigner('m1', storage).verifyMachineTime('n', 1, 'sig')).toBe(false)
+    await enrolWithCodes(storage)
+    expect(storage.pins.get('u-owner:m1')).toMatchObject({ via: 'code' })
+    expect(storage.pins.get('u-owner:m1')?.machineKey).not.toBe('not-the-real-key')
+  })
+
+  it('adds passkey hints to what it knows, and ignores an empty list', async () => {
+    const storage = memoryStorage()
+    await enrolWithCodes(storage)
+    const signer = createIntentSigner('m1', storage)
+    await signer.learnPasskeys([])
+    expect(storage.pins.get('u-owner:m1')?.passkeys).toHaveLength(1)
+    await signer.learnPasskeys([{ credentialId: 'other', keyId: 'k2' }])
+    expect(storage.pins.get('u-owner:m1')?.passkeys?.map(p => p.credentialId)).toEqual(['other', passkey.credentialId])
+  })
+
   it('removes this browser from the machine with a stepped-up device_revoke', async () => {
     const storage = memoryStorage()
     await enrolWithCodes(storage)

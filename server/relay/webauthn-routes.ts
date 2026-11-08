@@ -24,6 +24,8 @@ import type {
   AuthenticationResponseJSON,
 } from '@simplewebauthn/server'
 import { isoBase64URL, isoUint8Array } from '@simplewebauthn/server/helpers'
+import { createHash } from 'crypto'
+import { RELAY_AUTH_LABEL, domainSeparated } from './intent-actions.js'
 import type { RelayConfig } from './relay-config.js'
 import {
   createRequireActiveUser,
@@ -80,6 +82,20 @@ function freshChallenge(pending: PendingChallenge | undefined): string | null {
   if (!pending || typeof pending.challenge !== 'string') return null
   if (Date.now() - pending.issuedAt > WEBAUTHN_CHALLENGE_TTL_MS) return null
   return pending.challenge
+}
+
+
+/**
+ * The challenge the browser actually asks the authenticator to sign for a
+ * relay sign-in or MFA step-up: SHA-256(T("ck-relay-auth-v1", challenge)).
+ * Machines take passkey assertions over their own domain-separated
+ * challenges (intent-actions.ts), so a relay that picked its challenge to
+ * look like one could otherwise turn a sign-in into an approval on a machine.
+ */
+export function separatedChallenge(challenge: string | null): string | null {
+  if (!challenge) return null
+  const input = domainSeparated(RELAY_AUTH_LABEL, isoBase64URL.toBuffer(challenge))
+  return createHash('sha256').update(input).digest('base64url')
 }
 
 export function createWebauthnRouter(
@@ -233,7 +249,7 @@ export function createWebauthnRouter(
   router.post('/api/auth/webauthn/login/verify', (req, res, next) => {
     void (async () => {
       const body = (req.body ?? {}) as { response?: unknown }
-      const expectedChallenge = freshChallenge(req.session.webauthnAuthChallenge)
+      const expectedChallenge = separatedChallenge(freshChallenge(req.session.webauthnAuthChallenge))
       delete req.session.webauthnAuthChallenge
       const response = body.response as AuthenticationResponseJSON | undefined
       if (!expectedChallenge || !response || typeof response !== 'object' || typeof response.id !== 'string') {
@@ -325,7 +341,7 @@ export function createWebauthnRouter(
   router.post('/api/auth/webauthn/verify/verify', requireSignedIn, (req, res, next) => {
     void (async () => {
       const userId = req.session.user?.id ?? ''
-      const expectedChallenge = freshChallenge(req.session.webauthnMfaChallenge)
+      const expectedChallenge = separatedChallenge(freshChallenge(req.session.webauthnMfaChallenge))
       delete req.session.webauthnMfaChallenge
       const response = (req.body as { response?: unknown } | undefined)?.response as AuthenticationResponseJSON | undefined
       if (!expectedChallenge || !response || typeof response !== 'object' || typeof response.id !== 'string') {

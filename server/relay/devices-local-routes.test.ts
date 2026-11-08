@@ -29,7 +29,7 @@ function browserWaiting(label = 'Edge · Windows'): { code: string; enrolId: str
   const nonceM = Buffer.from(ch.nonceM, 'base64url')
   machine.reveal(owner, {
     enrolId: ch.enrolId, spki: spki.toString('base64url'), passkeys: [], label, nonceB: nonceB.toString('base64url'),
-    pop: signP1363(privateKey as KeyObject, transcript(POP_LABEL, ch.enrolId, nonceM)).toString('base64url'),
+    pop: signP1363(privateKey as KeyObject, transcript(POP_LABEL, ch.enrolId, nonceM, '[]')).toString('base64url'),
   })
   return { enrolId: ch.enrolId, code: formatCode(shortAuthString(Buffer.from(ch.machineKey, 'base64url'), spki, [], nonceB, nonceM)) }
 }

@@ -34,7 +34,9 @@ import { mutateTrustStore, readTrustStore, TrustStoreError } from './trust-store
 import type { PasskeyCredential, PendingEnrolment, TrustedCredential, TrustStore } from './trust-store.js'
 import { coseToKey, keyIdForCoseKey, verifyPasskeyAssertion } from './webauthn-verify.js'
 import type { PasskeyAssertion } from './webauthn-verify.js'
-import { DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, PASSKEY_PROOF_LABEL, certifyPayload, revokePayload } from './intent-actions.js'
+import {
+  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs, revokePayload,
+} from './intent-actions.js'
 import type { IntentVerifier } from './intent-verify.js'
 import { describeIntentRefusal } from './connector-stream.js'
 import type { RelayPrincipal } from './relay-protocol.js'
@@ -193,8 +195,8 @@ export class MachineEnrolment {
     const label = checkLabel(p.label)
     if (!enrolId || !spki || !nonceB || !pop || !label || !Array.isArray(p.passkeys)) throw refuse('Malformed enrolment request')
     const passkeys = parsePasskeys(p.passkeys)
-    const proofs = Array.isArray(p.passkeyProofs) ? p.passkeyProofs as unknown[] : []
-    if (!passkeys || proofs.length !== passkeys.length) throw refuse('Malformed enrolment request')
+    const proofs = parseProofs(Array.isArray(p.passkeyProofs) ? p.passkeyProofs as unknown[] : [])
+    if (!passkeys || !proofs || proofs.length !== passkeys.length) throw refuse('Malformed enrolment request')
     const { spki: machineSpki } = this.machineKey()
     const spkiB = Buffer.from(spki, 'base64url')
 
@@ -214,7 +216,11 @@ export class MachineEnrolment {
         return { refused }
       }
       if (!commitment(spkiB, passkeys, label, nonceB).equals(commit)) return spend('The browser key does not match its commitment')
-      if (!verifyP1363(spkiB, transcript(POP_LABEL, enrolId, nonceM), pop)) return spend('The browser could not prove it holds its key')
+      // The browser's key signs the passkey proofs too, so the relay can't
+      // swap in an assertion of its own (spec §6.6a).
+      if (!verifyP1363(spkiB, transcript(POP_LABEL, enrolId, nonceM, encodePasskeyProofs(proofs)), pop)) {
+        return spend('The browser could not prove it holds its key')
+      }
       // Each passkey must prove the user's authenticator holds it, bound to
       // this browser key: the public keys came through the relay, which
       // could otherwise slip in one of its own.
@@ -259,7 +265,7 @@ export class MachineEnrolment {
   }
 
   /** null when every passkey's proof verifies; otherwise why not. */
-  private checkPasskeyProofs(store: TrustStore, passkeys: EnrolPasskey[], proofs: unknown[], spkiB: Buffer, nonceB: Buffer): string | null {
+  private checkPasskeyProofs(store: TrustStore, passkeys: EnrolPasskey[], proofs: PasskeyProof[], spkiB: Buffer, nonceB: Buffer): string | null {
     if (passkeys.length === 0) return null
     let origin: string
     let host: string
@@ -273,10 +279,10 @@ export class MachineEnrolment {
     const challenge = sha256(transcript(PASSKEY_PROOF_LABEL, spkiB, nonceB))
     for (let i = 0; i < passkeys.length; i++) {
       const passkey = passkeys[i]
-      const proof = proofs[i] as Partial<PasskeyAssertion & { credentialId: string }> | null
+      const proof = proofs[i]
       if (passkey.rpId !== host) return 'A passkey belongs to another site'
-      if (!proof || proof.credentialId !== passkey.credentialId) return 'A passkey proof is missing'
-      const failure = verifyPasskeyAssertion(proof as PasskeyAssertion, { challenge, origin, rpId: passkey.rpId, cosePublicKey: passkey.cosePublicKey })
+      if (proof.credentialId !== passkey.credentialId) return 'A passkey proof is missing'
+      const failure = verifyPasskeyAssertion(proof, { challenge, origin, rpId: passkey.rpId, cosePublicKey: passkey.cosePublicKey })
       if (failure) return `A passkey could not prove it is yours (${failure})`
     }
     return null
@@ -362,6 +368,21 @@ function parsePasskeys(value: unknown[]): EnrolPasskey[] | null {
     if (!/^[A-Za-z0-9_-]{1,1024}$/.test(p.credentialId) || !/^[A-Za-z0-9_-]{1,2048}$/.test(p.cosePublicKey) || p.rpId.length > 253) return null
     if (!coseToKey(p.cosePublicKey)) return null
     out.push({ credentialId: p.credentialId, cosePublicKey: p.cosePublicKey, rpId: p.rpId })
+  }
+  return out
+}
+
+type PasskeyProof = PasskeyAssertion & { credentialId: string }
+
+/** Passkey proofs as sent, each field a bounded base64url string. Null when malformed. */
+function parseProofs(value: unknown[]): PasskeyProof[] | null {
+  if (value.length > MAX_ENROL_PASSKEYS) return null
+  const out: PasskeyProof[] = []
+  const field = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max && /^[A-Za-z0-9_-]+$/.test(v)
+  for (const v of value) {
+    const p = v as Partial<PasskeyProof> | null
+    if (!p || !field(p.credentialId, 1024) || !field(p.authenticatorData, 4096) || !field(p.clientDataJSON, 4096) || !field(p.signature, 2048)) return null
+    out.push({ credentialId: p.credentialId, authenticatorData: p.authenticatorData, clientDataJSON: p.clientDataJSON, signature: p.signature })
   }
   return out
 }
