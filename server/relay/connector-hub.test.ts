@@ -153,9 +153,12 @@ describe('connector hub', () => {
     const meter = new UsageMeter(db, UNLIMITED, { flushIntervalMs: 3_600_000 })
     hub = new ConnectorHub(db, { meter })
     const { connector } = await connectMachine()
-    // The connector heartbeats and advertises sessions; anything it sends counts.
+    // Ask the machine something: whatever it answers (here an error, since
+    // nothing runs locally) is a frame it sent, and is metered.
+    const before = meter.todayBytes(BOOTSTRAP_WORKSPACE_ID)
+    await hub.sendRequest(machineId, { method: 'GET', path: '/api/health' })
+    expect(meter.todayBytes(BOOTSTRAP_WORKSPACE_ID)).toBeGreaterThan(before)
     connector.stop()
-    await waitFor(() => meter.todayBytes(BOOTSTRAP_WORKSPACE_ID) > 0)
     meter.close()
     const row = db.prepare('SELECT bytes_m2b, frames FROM usage_daily WHERE workspace_id = ?').get(BOOTSTRAP_WORKSPACE_ID) as { bytes_m2b: number; frames: number }
     expect(row.bytes_m2b).toBeGreaterThan(0)
