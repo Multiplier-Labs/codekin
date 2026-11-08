@@ -18,11 +18,12 @@
  * workspace B isn't in, and the reverse). --no-frontend skips the checks on
  * the static app (for a relay run without its reverse proxy).
  *
- * Every probe is read-only or must be refused; a probe that is wrongly
- * accepted may change staging data, which is the point of running it there.
+ * Requires a relay that declares staging mode. Positive mutation controls
+ * create temporary shares/pairings and remove them before continuing.
  * Exit code 1 if any check fails.
  */
 
+import { randomUUID } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 import WebSocket from 'ws'
 
@@ -51,6 +52,11 @@ export async function runGate({ url, cookies, wsA, wsB, frontend = true, fetchIm
     return { status: res.status, headers: res.headers, json }
   }
   const refused = status => status === 401 || status === 403 || status === 404
+
+  const config = await call('/api/auth/config')
+  const staging = config.status === 200 && config.json?.staging === true
+  record('target declares staging mode', staging)
+  if (!staging) return finish(results)
 
   // ── Positive controls: every identity is signed in fully ────────────────
   const me = {}
@@ -119,17 +125,40 @@ export async function runGate({ url, cookies, wsA, wsB, frontend = true, fetchIm
     const cInA = await machinesOf('C', wsA)
     record("C (member, not owner) doesn't see A's unshared machine", Array.isArray(cInA) && !cInA.includes(ma))
 
-    const share = await call('/api/shares', {
-      as: 'B', method: 'POST',
-      body: { machineId: ma, localSessionId: 'gate-probe', granteeLogin: me.B.user.login, role: 'viewer' },
-    })
-    record("B cannot share a session on A's machine", refused(share.status) || share.status === 400, `status ${share.status}`)
+    const shareBody = { machineId: ma, localSessionId: `gate-${randomUUID()}`, granteeLogin: me.C.user.login, role: 'viewer' }
+    const share = await call('/api/shares', { as: 'B', method: 'POST', body: shareBody })
+    record("B cannot share a session on A's machine", share.status === 403, `status ${share.status}`)
+    if (share.json?.share?.id) {
+      const cleanup = await call(`/api/shares/${encodeURIComponent(share.json.share.id)}`, { as: 'B', method: 'DELETE' })
+      record('unexpected share removed', cleanup.status === 200, `status ${cleanup.status}`)
+    }
+    const controlShare = await call('/api/shares', { as: 'A', method: 'POST', body: shareBody })
+    record('A can share the same session with C (control)', controlShare.status === 201 && Boolean(controlShare.json?.share?.id), `status ${controlShare.status}`)
+    if (controlShare.json?.share?.id) {
+      const cleanup = await call(`/api/shares/${encodeURIComponent(controlShare.json.share.id)}`, { as: 'A', method: 'DELETE' })
+      record('control share removed', cleanup.status === 200, `status ${cleanup.status}`)
+    }
     const remove = await call(`/api/machines/${encodeURIComponent(ma)}`, { as: 'B', method: 'DELETE' })
     record("B cannot remove A's machine", refused(remove.status), `status ${remove.status}`)
   }
   {
-    const r = await call('/api/machines/pair/approve', { as: 'B', method: 'POST', workspace: wsA, body: { code: 'GATE-PROBE' } })
-    record('B cannot pair a machine into WS-A', refused(r.status), `status ${r.status}`)
+    const started = await call('/api/machines/pair/start', { method: 'POST', body: { hostname: 'gate-probe', platform: 'test' } })
+    record('pairing request created (control)', started.status === 200 && Boolean(started.json?.userCode), `status ${started.status}`)
+    if (started.json?.userCode) {
+      const body = { code: started.json.userCode }
+      const r = await call('/api/machines/pair/approve', { as: 'B', method: 'POST', workspace: wsA, body })
+      record('B cannot pair a machine into WS-A', r.status === 403, `status ${r.status}`)
+      if (r.json?.machineId) {
+        const cleanup = await call(`/api/machines/${encodeURIComponent(r.json.machineId)}`, { as: 'B', method: 'DELETE' })
+        record('unexpected pairing removed', cleanup.status === 200, `status ${cleanup.status}`)
+      }
+      const control = await call('/api/machines/pair/approve', { as: 'A', method: 'POST', workspace: wsA, body })
+      record('A can approve the same pairing (control)', control.status === 200 && Boolean(control.json?.machineId), `status ${control.status}`)
+      if (control.json?.machineId) {
+        const cleanup = await call(`/api/machines/${encodeURIComponent(control.json.machineId)}`, { as: 'A', method: 'DELETE' })
+        record('control pairing removed', cleanup.status === 200, `status ${cleanup.status}`)
+      }
+    }
     const inv = await call(`/api/workspaces/${wsA}/invitations`, { as: 'B', method: 'POST', body: { role: 'admin', githubLogin: me.B.user.login } })
     record('B cannot invite into WS-A', refused(inv.status), `status ${inv.status}`)
   }

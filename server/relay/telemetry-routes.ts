@@ -9,9 +9,10 @@
  * ignored. Without a reporter the body is read and dropped.
  */
 
+import { scrubText, scrubErrorMessage } from './error-scrub.js'
 import express, { Router } from 'express'
 import type { ErrorReporter, ReportFrame } from './error-reporting.js'
-import { MAX_BROWSER_MESSAGE } from './error-reporting.js'
+import { MAX_BROWSER_MESSAGE, cleanFilename } from './error-reporting.js'
 
 export const TELEMETRY_ERRORS_PATH = '/api/telemetry/errors'
 export const MAX_TELEMETRY_BYTES = 16 * 1024
@@ -58,16 +59,16 @@ export function parseBrowserReport(body: unknown): { type: string; message: stri
       const frame = f as Record<string, unknown>
       if (typeof frame.filename !== 'string') continue
       frames.push({
-        filename: frame.filename.slice(0, 500),
-        ...(typeof frame.function === 'string' ? { function: frame.function.slice(0, 200) } : {}),
+        filename: cleanFilename(frame.filename),
+        ...(typeof frame.function === 'string' ? { function: scrubText(frame.function).slice(0, 200) } : {}),
         ...(Number.isInteger(frame.lineno) ? { lineno: frame.lineno as number } : {}),
         ...(Number.isInteger(frame.colno) ? { colno: frame.colno as number } : {}),
       })
     }
   }
   return {
-    type: b.type.slice(0, 100),
-    message: b.message.slice(0, MAX_BROWSER_MESSAGE),
+    type: scrubText(b.type).slice(0, 100),
+    message: scrubErrorMessage(b.type, b.message).slice(0, MAX_BROWSER_MESSAGE),
     frames,
   }
 }

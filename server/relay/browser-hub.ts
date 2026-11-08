@@ -37,8 +37,8 @@ import { recordAuditEvent } from './audit.js'
 import { checkRestPolicy, isServerFrameVisible } from './connector-policy.js'
 import { BROWSER_FRAME_LIMIT, RateLimiter, isBackedUp } from './rate-limit.js'
 import { checkQuota, UNLIMITED } from './quotas.js'
-import { meterFrame } from './usage-meter.js'
-import { classifyBrowserFrame, classifyRestRequest, payloadHash, sessionFromMachineFrame } from './session-audit.js'
+import { isMeterPaused, meterFrame } from './usage-meter.js'
+import { classifyBrowserFrame, classifyRestRequest, payloadHash, SessionAuditState } from './session-audit.js'
 import type { SessionAuditEvent } from './session-audit.js'
 import type { UsageMeter } from './usage-meter.js'
 import type { EntitlementsProvider } from './quotas.js'
@@ -86,7 +86,7 @@ interface BrowserClient {
    */
   channels: Map<string, string>
   /** The session each channel joined or created (local channel id → session id), for the audit log. */
-  channelSessions: Map<string, string>
+  channelSessions: Map<string, SessionAuditState>
   /** Whether the socket has shown any sign of life since the last heartbeat sweep. */
   alive: boolean
 }
@@ -161,6 +161,7 @@ export class BrowserHub {
    */
   private heartbeat(): void {
     for (const client of this.clients) {
+      if (isMeterPaused(client.socket)) { client.alive = true; continue }
       if (!client.alive) {
         console.log(
           `[relay] browser socket unresponsive; dropping it and its ${client.channels.size} channel(s) on machine ${client.machineId}`,
@@ -221,6 +222,7 @@ export class BrowserHub {
       this.connectors.closeChannel(client.machineId, remoteId, STREAM_CLOSE.normal, reason)
     }
     client.channels.clear()
+    client.channelSessions.clear()
     client.socket.close(CLOSE_FORBIDDEN, reason)
   }
 
@@ -444,6 +446,7 @@ export class BrowserHub {
 
     const remoteId = randomUUID()
     client.channels.set(localId, remoteId)
+    client.channelSessions.set(localId, new SessionAuditState())
 
     recordAuditEvent(this.db, {
       kind: 'session_viewed',
@@ -458,6 +461,7 @@ export class BrowserHub {
       // without bound; drop its channel rather than the hub's memory.
       if (isBackedUp(client.socket)) {
         client.channels.delete(localId)
+        client.channelSessions.delete(localId)
         this.connectors.closeChannel(client.machineId, remoteId, STREAM_CLOSE.normal, 'client too slow')
         client.socket.send(
           JSON.stringify(
@@ -473,6 +477,7 @@ export class BrowserHub {
         return
       }
       client.socket.send(JSON.stringify(envelope(kind, payload, { channelId: localId })))
+      if (kind === 'error') client.channelSessions.get(localId)?.rejected()
       if (kind === 'stream_data') this.noteMachineFrame(client, localId, (payload as StreamData).data)
       if (kind === 'stream_close') {
         client.channels.delete(localId)
@@ -484,6 +489,7 @@ export class BrowserHub {
     if (error) {
       console.log(`[relay] stream refused on machine ${client.machineId}: ${error.code} ${error.message}`)
       client.channels.delete(localId)
+      client.channelSessions.delete(localId)
       this.sendChannelError(client, localId, error)
     }
   }
@@ -492,27 +498,27 @@ export class BrowserHub {
     if (!localId) return
     const remoteId = client.channels.get(localId)
     if (!remoteId || typeof payload?.data !== 'string') return
-    this.connectors.sendChannelData(client.machineId, remoteId, payload.data)
-    this.auditBrowserFrame(client, localId, payload.data)
+    if (this.connectors.sendChannelData(client.machineId, remoteId, payload.data)) {
+      this.auditBrowserFrame(client, localId, payload.data)
+    }
   }
 
   /** Record what a forwarded browser frame did (no content), and bind channels to sessions. */
   private auditBrowserFrame(client: BrowserClient, localId: string, data: string): void {
     const event = classifyBrowserFrame(data)
     if (!event) return
-    if ('join' in event) {
-      client.channelSessions.set(localId, event.join)
+    if (!('kind' in event)) {
+      client.channelSessions.get(localId)?.requested()
       return
     }
-    this.recordSessionEvent(client, event, client.channelSessions.get(localId) ?? null)
+    this.recordSessionEvent(client, event, client.channelSessions.get(localId)?.sessionId ?? null)
   }
 
   /** A machine announced the session on a channel: bind it, and audit creations. */
   private noteMachineFrame(client: BrowserClient, localId: string, data: unknown): void {
     if (typeof data !== 'string') return
-    const announced = sessionFromMachineFrame(data)
+    const announced = client.channelSessions.get(localId)?.observe(data)
     if (!announced) return
-    client.channelSessions.set(localId, announced.sessionId)
     if (announced.created) {
       this.recordSessionEvent(client, { kind: 'session_created', metadata: { via: 'stream' } }, announced.sessionId)
     }
@@ -524,7 +530,7 @@ export class BrowserHub {
       actorUserId: client.user.id,
       machineId: client.machineId,
       localSessionId: event.sessionId ?? sessionId,
-      metadata: { role: client.access.kind, ...event.metadata },
+      metadata: { role: client.access.kind, outcome: 'forwarded', ...event.metadata },
     })
   }
 
@@ -588,6 +594,7 @@ export class BrowserHub {
         this.connectors.closeChannel(client.machineId, remoteId, STREAM_CLOSE.normal, 'relay shutting down')
       }
       client.channels.clear()
+      client.channelSessions.clear()
       client.socket.close(1001, 'server shutting down')
     }
     this.clients.clear()

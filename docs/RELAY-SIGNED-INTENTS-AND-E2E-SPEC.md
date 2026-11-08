@@ -338,7 +338,7 @@ interface RelayPrincipal { /* … */ signedGrants?: SignedIntent[] }   // §6.7
 
 interface ConnectorHello {
   /* … */
-  capabilities: { /* … */ intents?: 1; e2e?: 1 }
+  capabilities: { /* … */ features?: Array<'intents' | 'e2e' | 'credentialClass'> }
   identityKey?: string        // SPKI, §4.1
   intentPolicy?: 'off' | 'warn' | 'required'
 }
@@ -453,7 +453,7 @@ This also gives machine-side policy a principal it can rely on. A rule such as "
 
 ### 7.1 Relay audit events
 
-**Built** (`server/relay/session-audit.ts`, `browser-hub.ts`). These ship first, before L1, and work on unsigned traffic too. `device_enrolled`, `device_revoked` and `intent_rejected` come with slices 3–4. `session_created` is recorded from the machine's `session_created` reply on a stream, or from a successful `POST /api/sessions/create`. Stream events carry the session the channel joined. `GET /api/workspaces/:id/audit` filters by `kind` (comma list), `machineId`, `sessionId` and `actor`; there is no audit UI yet.
+**Built** (`server/relay/session-audit.ts`, `browser-hub.ts`). These ship first, before L1, and work on unsigned traffic too. `device_enrolled`, `device_revoked` and `intent_rejected` come with slices 3–4. `session_created` is recorded from the machine's `session_created` reply on a stream, or from a successful `POST /api/sessions/create`. Stream events carry the session acknowledged by the machine. Pending transitions have no session attribution; connector refusals preserve the previous confirmed session, and confirmed leaves clear it. Audit metadata marks forwarded traffic as `outcome: forwarded`, not proof of local execution. Every transport-accepted browser frame is classified, including whitespace-prefixed JSON and large prompts. `GET /api/workspaces/:id/audit` filters by `kind` (comma list), `machineId`, `sessionId` and `actor`; there is no audit UI yet.
 
 | Event | Emitted when the hub forwards | Metadata (no content) |
 | --- | --- | --- |

@@ -96,6 +96,41 @@ describe('EmbeddedConnectorSupervisor', () => {
     expect(created).toHaveLength(1)
   })
 
+  it.each(['throw', 'missing'])('retries a temporarily %s secret without changing relay.json', mode => {
+    vi.useFakeTimers()
+    const get = vi.fn().mockImplementationOnce(() => {
+      if (mode === 'throw') throw new Error('temporarily locked')
+      return null
+    }).mockReturnValue('recovered-secret')
+    const store: SecretStore = { get, set: vi.fn(), delete: vi.fn() }
+    writeFileSync(file, JSON.stringify({ url: 'https://relay.test', machineId: 'm1', managed: true, secretRef: 'keychain' }))
+    const sup = supervisor({ secretStore: store })
+    try {
+      sup.start()
+      expect(sup.status()).toMatchObject({ paired: true, state: 'secret_unavailable', machineId: 'm1' })
+      expect(created).toHaveLength(0)
+      sup.check()
+      expect(get).toHaveBeenCalledTimes(1)
+      vi.advanceTimersByTime(5000)
+      expect(get).toHaveBeenCalledTimes(2)
+      expect(created).toHaveLength(1)
+      expect(created[0].opts.machineSecret).toBe('recovered-secret')
+      vi.advanceTimersByTime(60000)
+      expect(get).toHaveBeenCalledTimes(2)
+    } finally { sup.stop(); vi.useRealTimers() }
+  })
+
+  it('does not retry a removed pairing after a secret-store failure', () => {
+    writeFileSync(file, JSON.stringify({ url: 'https://relay.test', machineId: 'm1', managed: true, secretRef: 'keychain' }))
+    const sup = supervisor({ secretStore: { get: () => { throw new Error('locked') }, set: vi.fn(), delete: vi.fn() } })
+    sup.check()
+    rmSync(file)
+    sup.check()
+    expect(sup.status()).toMatchObject({ paired: false, state: 'unpaired' })
+    expect(created).toHaveLength(0)
+    sup.stop()
+  })
+
   it('starts a connector for a managed credential and tracks its status', () => {
     writeCredential({ machineId: 'm1', managed: true })
     const sup = supervisor()

@@ -30,7 +30,7 @@ import {
 import { CONNECTOR_FLOORS, connectorUpdateRequired } from './connector-version.js'
 import type { ConnectorFloors, UpdateRequired } from './connector-version.js'
 import { getRequiredCapabilities } from './workspaces.js'
-import { meterFrame } from './usage-meter.js'
+import { isMeterPaused, meterFrame } from './usage-meter.js'
 import type { UsageMeter } from './usage-meter.js'
 import { isWellFormedStreamData, recordFinding } from './abuse-signals.js'
 import type { AbuseFinding, AbuseSignals } from './abuse-signals.js'
@@ -120,6 +120,8 @@ export type ProxyOutcome = { response: ProxyResponse } | { error: RelayError }
 
 export class ConnectorHub {
   private machines = new Map<string, ConnectedMachine>()
+  /** Retain traffic across reconnects; offline records expire after an empty window. */
+  private traffic = new Map<string, Pick<ConnectedMachine, 'machineId' | 'workspaceId' | 'connectorVersion' | 'window' | 'sessions'>>()
   private pending = new Map<string, PendingRequest>()
   private channelListeners = new Map<string, ChannelListener>()
   /** Per-machine frame budget, so one connector cannot flood the hub. */
@@ -237,7 +239,11 @@ export class ConnectorHub {
       } else if (msg.kind === 'event' && !msg.channelId) {
         // Machine-level event: currently only the session summary (§11.3).
         const payload = msg.payload as { sessions?: LocalSessionSummary }
-        if (payload.sessions) machine.sessions = payload.sessions
+        if (payload.sessions) {
+          machine.sessions = payload.sessions
+          const traffic = this.traffic.get(machineId)
+          if (traffic) traffic.sessions = payload.sessions
+        }
       } else if (msg.kind === 'event' || msg.kind === 'stream_data' || msg.kind === 'stream_close') {
         if (msg.channelId) this.channelListeners.get(msg.channelId)?.(msg.kind, msg.payload)
       }
@@ -355,16 +361,17 @@ export class ConnectorHub {
    * so the byte ceiling has to be enforced here too — drop the channel rather
    * than the hub's memory.
    */
-  sendChannelData(machineId: string, channelId: string, data: string): void {
+  sendChannelData(machineId: string, channelId: string, data: string): boolean {
     const machine = this.machines.get(machineId)
-    if (!machine || !machine.channels.has(channelId)) return
+    if (!machine || machine.socket.readyState !== machine.socket.OPEN || !machine.channels.has(channelId)) return false
     if (isBackedUp(machine.socket)) {
       this.dropChannel(machine, channelId, 'machine connection is congested')
-      return
+      return false
     }
     const frame = JSON.stringify(envelope('stream_data', { data }, { channelId }))
     this.countTraffic(machine, Buffer.byteLength(frame))
     machine.socket.send(frame)
+    return true
   }
 
   /**
@@ -451,10 +458,18 @@ export class ConnectorHub {
       pending: new Set(), channels: new Set(),
       connectorVersion,
       workspaceId: workspace?.workspace_id ?? null,
-      window: emptyWindow(now),
+      window: this.traffic.get(machineId)?.window ?? emptyWindow(now),
       updateRequired,
       sessions: hello.sessions ?? null,
     })
+
+    const registered = this.machines.get(machineId)
+    if (this.abuse && registered) {
+      this.traffic.set(machineId, {
+        machineId, workspaceId: registered.workspaceId, connectorVersion,
+        window: registered.window, sessions: registered.sessions,
+      })
+    }
 
     this.db.prepare(
       `UPDATE machines SET status = 'online', last_seen_at = datetime('now'),
@@ -504,6 +519,7 @@ export class ConnectorHub {
   private dropIdleConnections(): void {
     const cutoff = Date.now() - IDLE_TIMEOUT_MS
     for (const machine of [...this.machines.values()]) {
+      if (isMeterPaused(machine.socket)) { machine.lastActivity = Date.now(); continue }
       if (machine.lastActivity < cutoff) {
         machine.socket.close(CLOSE_AUTH_FAILED, 'idle timeout')
       }
@@ -553,9 +569,11 @@ export class ConnectorHub {
   sweepAbuseSignals(now = Date.now()): void {
     if (!this.abuse) return
     const created: Array<{ machineId: string; flagId: string; finding: AbuseFinding }> = []
-    for (const machine of this.machines.values()) {
+    for (const machine of this.traffic.values()) {
       const w = machine.window
       machine.window = emptyWindow(now)
+      const connected = this.machines.get(machine.machineId)
+      if (connected) connected.window = machine.window
       const findings = this.abuse.evaluate({
         machineId: machine.machineId,
         workspaceId: machine.workspaceId,
@@ -568,6 +586,10 @@ export class ConnectorHub {
         largeFrames: w.largeFrames,
         sessionsAdvertised: machine.sessions?.total ?? null,
       })
+      if (!connected && w.frames === 0) {
+        this.traffic.delete(machine.machineId)
+        this.abuse.forget?.(machine.machineId)
+      }
       for (const finding of findings) {
         const flagId = recordFinding(this.db, machine.machineId, finding)
         if (flagId) {
@@ -588,6 +610,8 @@ export class ConnectorHub {
       machine.socket.close(1001, 'server shutting down')
     }
     this.machines.clear()
+    for (const id of this.traffic.keys()) this.abuse?.forget?.(id)
+    this.traffic.clear()
   }
 }
 

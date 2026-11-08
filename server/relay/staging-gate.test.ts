@@ -131,6 +131,42 @@ describe('staging gate against a real relay', () => {
     }
   })
 
+  it('does not accept validation failures as proof of authorization', async () => {
+    const fetchImpl: typeof fetch = (input, init) => {
+      const headers = new Headers(init?.headers)
+      if (String(input).endsWith('/api/shares') && init?.method === 'POST' && headers.get('cookie') === cookies.B) {
+        return Promise.resolve(new Response('{"error":"invalid grantee"}', { status: 400 }))
+      }
+      return fetch(input, init)
+    }
+    const outcome = await runGate({ url, cookies, frontend: false, fetchImpl }) as GateOutcome
+    expect(outcome.passed).toBe(false)
+    expect(outcome.results.find(r => r.name === "B cannot share a session on A's machine")?.ok).toBe(false)
+    expect(outcome.results.find(r => r.name === 'A can share the same session with C (control)')?.ok).toBe(true)
+  })
+
+  it('fails the share gate when a fixture bypasses authorization', async () => {
+    const fetchImpl: typeof fetch = (input, init) => {
+      const headers = new Headers(init?.headers)
+      if (String(input).includes('/api/shares') && headers.get('cookie') === cookies.B && init?.method !== 'GET') {
+        headers.set('cookie', cookies.A)
+        return fetch(input, { ...init, headers })
+      }
+      return fetch(input, init)
+    }
+    const outcome = await runGate({ url, cookies, frontend: false, fetchImpl }) as GateOutcome
+    expect(outcome.passed).toBe(false)
+    expect(outcome.results.find(r => r.name === "B cannot share a session on A's machine")?.ok).toBe(false)
+  })
+
+  it('refuses to run mutation controls on a non-staging target', async () => {
+    let calls = 0
+    const fetchImpl = () => { calls++; return Promise.resolve(new Response('{"staging":false}', { status: 200 })) }
+    const outcome = await runGate({ url, cookies, frontend: false, fetchImpl }) as GateOutcome
+    expect(outcome.passed).toBe(false)
+    expect(calls).toBe(1)
+  })
+
   it('marks itself as staging', async () => {
     const res = await fetch(`${url}/api/auth/config`)
     expect(await res.json()).toMatchObject({ staging: true })

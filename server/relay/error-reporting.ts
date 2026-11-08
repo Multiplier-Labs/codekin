@@ -33,12 +33,8 @@ export interface ErrorReport {
   tags?: Record<string, string>
 }
 
-const SENSITIVE_KEY = /secret|token|password|cookie|authorization|code|sig|otp|recovery|credential|session/i
-/** Machine secrets, device codes, session ids and similar: long base64url runs. */
-const LONG_TOKEN = /[A-Za-z0-9_-]{24,}/g
-const KEY_VALUE = /\b([A-Za-z0-9_-]*(?:secret|token|password|cookie|authorization|code|sig|otp|recovery|credential|session)[A-Za-z0-9_-]*)(["']?\s*[:=]\s*)(["']?)[^\s"'&,;)}\]]+/gi
-const QUERY = /\?[^\s"'#)]+/g
-const BEARER = /\b(bearer|basic)\s+\S+/gi
+import { scrubText, scrubErrorMessage } from './error-scrub.js'
+export { scrubText, scrubValue } from './error-scrub.js'
 
 export const MAX_SERVER_MESSAGE = 500
 export const MAX_BROWSER_MESSAGE = 200
@@ -53,36 +49,13 @@ export function parseDsn(dsn: string): ErrorDsn | null {
     return null
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
-  const publicKey = decodeURIComponent(url.username)
+  let publicKey: string
+  try { publicKey = decodeURIComponent(url.username) } catch { return null }
   const parts = url.pathname.split('/').filter(Boolean)
   const project = parts.pop()
   if (!publicKey || !project || !/^\d+$/.test(project)) return null
   const prefix = parts.length > 0 ? `/${parts.join('/')}` : ''
   return { envelopeUrl: `${url.protocol}//${url.host}${prefix}/api/${project}/envelope/`, publicKey }
-}
-
-/** Redact credential-shaped content from free text. */
-export function scrubText(text: string): string {
-  return text
-    .replace(BEARER, '$1 [redacted]')
-    .replace(KEY_VALUE, '$1$2$3[redacted]')
-    .replace(QUERY, '?[redacted]')
-    .replace(LONG_TOKEN, '[redacted]')
-}
-
-/** Deep-scrub a value: sensitive keys lose their value, every string is scrubbed. */
-export function scrubValue(value: unknown, depth = 0): unknown {
-  if (depth > 8) return '[truncated]'
-  if (typeof value === 'string') return scrubText(value)
-  if (Array.isArray(value)) return value.map(v => scrubValue(v, depth + 1))
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {}
-    for (const [key, v] of Object.entries(value)) {
-      out[key] = SENSITIVE_KEY.test(key) ? '[redacted]' : scrubValue(v, depth + 1)
-    }
-    return out
-  }
-  return value
 }
 
 function truncate(text: string, max: number): string {
@@ -118,12 +91,12 @@ export function cleanFilename(filename: string, cwd = process.cwd(), home = home
   try {
     if (/^https?:\/\//.test(name)) name = new URL(name).pathname
   } catch {
-    // keep as is
+    return '[unknown]'
   }
   name = name.replace(/[?#].*$/, '')
   if (cwd && name.startsWith(`${cwd}/`)) name = name.slice(cwd.length + 1)
   else if (home && name.startsWith(`${home}/`)) name = `~/${name.slice(home.length + 1)}`
-  return truncate(name, 300)
+  return truncate(scrubText(name), 300)
 }
 
 export function reportFromError(err: unknown, tags?: Record<string, string>): ErrorReport {
@@ -166,7 +139,7 @@ export class ErrorReporter {
       .slice(0, MAX_FRAMES)
       .map(f => ({
         filename: cleanFilename(f.filename),
-        ...(f.function ? { function: truncate(f.function, 200) } : {}),
+        ...(f.function ? { function: truncate(scrubText(f.function), 200) } : {}),
         ...(Number.isInteger(f.lineno) ? { lineno: f.lineno } : {}),
         ...(Number.isInteger(f.colno) ? { colno: f.colno } : {}),
         in_app: !f.filename.includes('node_modules'),
@@ -174,7 +147,7 @@ export class ErrorReporter {
       .reverse() // Sentry wants the crashing frame last.
     const tags: Record<string, string> = {}
     for (const [k, v] of Object.entries(report.tags ?? {})) {
-      tags[truncate(k, 32)] = truncate(scrubText(v), 64)
+      tags[truncate(scrubText(k), 32)] = truncate(scrubText(v), 64)
     }
     return {
       event_id: randomUUID().replace(/-/g, ''),
@@ -187,7 +160,7 @@ export class ErrorReporter {
       exception: {
         values: [{
           type: truncate(scrubText(report.type), 100),
-          value: scrubText(truncate(report.message, maxMessage)),
+          value: truncate(scrubErrorMessage(report.type, report.message), maxMessage),
           ...(frames.length > 0 ? { stacktrace: { frames } } : {}),
         }],
       },
@@ -212,17 +185,27 @@ export class ErrorReporter {
     }
     const header = JSON.stringify({ event_id: event.event_id, sent_at: new Date(now).toISOString() })
     const body = `${header}\n${JSON.stringify({ type: 'event' })}\n${JSON.stringify(event)}\n`
-    this.send(this.dsn.envelopeUrl, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/x-sentry-envelope',
-        'x-sentry-auth': `Sentry sentry_version=7, sentry_key=${this.dsn.publicKey}, sentry_client=codekin-relay/${this.opts.release}`,
-      },
-      body,
-    }).catch((err: unknown) => {
-      this.log(`[relay] error report not delivered: ${err instanceof Error ? err.name : 'error'}`)
-    })
-    return true
+    try {
+      this.send(this.dsn.envelopeUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-sentry-envelope',
+          'x-sentry-auth': `Sentry sentry_version=7, sentry_key=${this.dsn.publicKey}, sentry_client=codekin-relay/${this.opts.release}`,
+        },
+        body,
+      }).then(response => {
+        if (response && typeof response === 'object' && 'ok' in response && response.ok === false) {
+          // Never read or log the response body or the configured endpoint.
+          this.log('[relay] error report not delivered: HTTP refusal')
+        }
+      }).catch(() => {
+        this.log('[relay] error report not delivered: transport failure')
+      })
+      return true
+    } catch {
+      this.log('[relay] error report not delivered: sender failure')
+      return false
+    }
   }
 }
 

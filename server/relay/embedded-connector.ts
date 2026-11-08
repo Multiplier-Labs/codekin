@@ -25,16 +25,18 @@ import type { Request } from 'express'
 import { RelayConnector } from './connector.js'
 import type { ConnectorOptions, ConnectorStatus } from './connector.js'
 import type { LocalServerTarget } from './connector-proxy.js'
-import { migrateCredentialToStore, readRelayCredential, relayCredentialPath } from './relay-credential.js'
+import { migrateCredentialToStore, readRelayCredentialState, relayCredentialPath } from './relay-credential.js'
 import { secretStoreFromEnv } from './secret-store.js'
 import type { SecretStore } from './secret-store.js'
-import type { RelayCredential } from './relay-credential.js'
+import type { RelayCredential, RelayCredentialIdentity } from './relay-credential.js'
 
 export type EmbeddedConnectorState =
   /** CODEKIN_RELAY_CONNECTOR=off */
   | 'disabled'
   /** No relay.json */
   | 'unpaired'
+  /** Pairing exists, but its secret store is temporarily unavailable. */
+  | 'secret_unavailable'
   /** Paired, but the connector is run elsewhere (`codekin relay connect`). */
   | 'unmanaged'
   | 'connecting'
@@ -103,6 +105,9 @@ export class EmbeddedConnectorSupervisor {
   private haltedKey: string | null = null
   private fileSignature: string | null = null
   private credential: RelayCredential | null = null
+  private unavailableIdentity: RelayCredentialIdentity | null = null
+  private retryAt = 0
+  private retryDelay = DEFAULT_POLL_INTERVAL_MS
   private state: EmbeddedConnectorState = 'unpaired'
   private detail: string | undefined
   private readonly file: string
@@ -129,7 +134,7 @@ export class EmbeddedConnectorSupervisor {
   }
 
   status(): RelayStatus {
-    const c = this.credential
+    const c = this.credential ?? this.unavailableIdentity
     return {
       paired: !!c,
       managed: c?.managed ?? false,
@@ -143,7 +148,11 @@ export class EmbeddedConnectorSupervisor {
   /** Re-read relay.json if it changed and reconcile the connector. Public for tests. */
   check(): void {
     let signature = this.statSignature()
-    if (signature === this.fileSignature) return
+    if (signature === this.fileSignature) {
+      if (this.retryAt === 0 || Date.now() < this.retryAt) return
+    } else {
+      this.retryDelay = DEFAULT_POLL_INTERVAL_MS
+    }
     // With a secret store (the desktop app), a plaintext secret moves to the
     // Keychain the first time it is seen, including after a pairing made by
     // the CLI. The rewrite changes the file, so take the new signature.
@@ -153,7 +162,20 @@ export class EmbeddedConnectorSupervisor {
     }
     this.fileSignature = signature
 
-    const credential = signature === null ? null : readRelayCredential(this.file, this.store)
+    const result = readRelayCredentialState(this.file, this.store)
+    if (result.kind === 'unavailable') {
+      this.credential = null
+      this.unavailableIdentity = result.identity
+      this.stopConnector()
+      this.retryAt = Date.now() + this.retryDelay
+      this.retryDelay = Math.min(60_000, this.retryDelay * 2)
+      this.setState('secret_unavailable', 'Secret store unavailable; retrying automatically')
+      return
+    }
+    this.retryAt = 0
+    this.retryDelay = DEFAULT_POLL_INTERVAL_MS
+    this.unavailableIdentity = null
+    const credential = result.kind === 'ready' ? result.credential : null
     this.credential = credential
 
     if (!credential) {

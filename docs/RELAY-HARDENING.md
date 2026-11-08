@@ -14,7 +14,7 @@
 | Route | Auth | Body |
 | --- | --- | --- |
 | `GET /api/health/live` | none | `{ "ok": true }`: the process serves HTTP. No dependency checks, so a slow DB never gets a healthy process restarted |
-| `GET /api/health/ready` | none | `{ "ok": true }` (200) or `{ "ok": false }` (503). Checks the control-plane DB, both WebSocket servers, and event-loop lag under 1 s. The response doesn't name the failing check; the log does |
+| `GET /api/health/ready` | none | `{ "ok": true }` (200) or `{ "ok": false }` (503). Checks a control-plane DB query, the HTTP listening/shutdown state, and event-loop lag under 1 s. It is not an end-to-end WebSocket probe. The response doesn't name the failing check; the log does |
 | `GET /api/health` | none | alias of `live`, kept so existing probes keep working |
 | `GET /api/admin/stats` | operator, full auth level | `{ machinesOnline, browserClients, channelsOpen, connectorVersions }` |
 
@@ -23,15 +23,15 @@
 **Built** (`server/relay/error-reporting.ts`, `telemetry-routes.ts`, `src/hosted/errorReporting.ts`).
 
 - **Optional.** Error reporting is off unless `RELAY_ERROR_DSN` is set. Any service that speaks the Sentry ingest API (GlitchTip, Sentry) works. `RELAY_BROWSER_ERROR_DSN` sends browser errors to a separate project, and `RELAY_ERROR_ENVIRONMENT` sets the environment label.
-- **No SDK.** The relay builds each event itself from the error's type, message and stack frames and posts it as an envelope. Nothing else can ride along: no request bodies, headers, cookies, URLs, user or IP. Stack frame paths lose their origin, query string, working directory and home directory. Server errors are tagged with the method and the route *pattern*, never the path. At most 30 events a minute are sent; the rest are dropped.
-- **Redaction.** Messages are scrubbed before they leave. That covers:
+- **No SDK.** The relay builds each event itself from the error's type, message and stack frames and posts it as an envelope. It does not attach request bodies, headers, cookies, user or IP. Stack frame paths lose their origin, query string, working directory and home directory. Server errors are tagged with the method and the route *pattern*, never the path. At most 30 events a minute are sent; the rest are dropped.
+- **Redaction.** Messages, stack paths, function names and labels are scrubbed before truncation, including in the browser and telemetry ingress. Syntax-error messages are omitted because they can quote parsed content. Credential-pattern redaction does not make arbitrary free text content-free; error producers should avoid embedding user content. That covers:
   - query strings
   - `Bearer`/`Basic` credentials
   - values under keys matching `/secret|token|password|cookie|authorization|code|sig|otp|recovery|credential|session/i`
   - any base64url string of 24 or more characters
-- **Never sent:** relay frame payloads.
+- **Delivery failures:** HTTP refusals and transport failures produce bounded log messages without response bodies or endpoint details. Relay frame payloads are not attached to events.
 - **Tests** push a known secret through each path and assert it never reaches the outgoing event.
-- **Browser errors** go through the relay (`POST /api/telemetry/errors`), so the CSP can keep `connect-src 'self'` and the visitor's IP stays with the relay. The endpoint is same-origin only, 10/min per IP and 16 KB max. Reports carry only the exception type, a message truncated to 200 characters and scrubbed by the relay, and stack frames: no breadcrumbs, DOM text, console output or session replay. The hosted app reports only errors whose stack runs through its own `/assets/` bundle, five per page load at most. Without a DSN, the relay accepts the report and drops it.
+- **Browser errors** go through the relay (`POST /api/telemetry/errors`), so the CSP can keep `connect-src 'self'` and the visitor's IP stays with the relay. The endpoint is same-origin only, 10/min per IP and 16 KB max. Reports carry only the exception type, a message scrubbed before truncation to 200 characters, and stack frames: no breadcrumbs, DOM text, console output or session replay. The hosted app reports only errors whose stack runs through its own `/assets/` bundle, five per page load at most. Without a DSN, the relay accepts the report and drops it.
 
 ## 3. Browser security headers
 
@@ -80,6 +80,7 @@ Supporting changes (**built**):
   Helper mode only reaches services under `ai.codekin.`, so the app can't be used as a general Keychain reader.
 - **Pairing** writes through the store. If the Keychain refuses, the secret stays in the file: a pairing is never lost.
 - **Migration.** The desktop server moves a plaintext secret the first time it sees one, including one from a CLI pairing or an older version. It writes to the Keychain, reads it back and compares, then rewrites `relay.json` atomically (temp file, fsync, rename) without the secret. Any failure leaves the file as it was.
+- **Recovery.** If a stored secret cannot be read, the embedded connector retains the pairing identity, reports `secret_unavailable`, and retries with backoff from 5 seconds to 1 minute. File changes retry immediately; a successful read restores connection without rewriting the file.
 - **Unpairing** from the app removes the Keychain item too. `codekin relay logout` in a terminal removes only the file and says where the item is.
 - **Other keys.** The L1 machine identity key and the L2 key-agreement key use the same store.
 - **Limit.** This protects against backups, sync tools and casual file reading. It doesn't protect against code already running as the user, which can run the helper too.
@@ -114,9 +115,9 @@ These are mechanisms only. No limits are built in, and a relay without config st
   The limits that apply are those of the workspace the action happens in. For a browser connection, that is the machine's workspace.
 - **Over a quota.**
   - Discrete limits answer HTTP 429 `{ error: 'quota_exceeded', quota, limit, message }`, and the hosted app shows `message`.
-  - Over `relayedBytesPerWorkspacePerDay`, traffic slows instead of stopping, so an active session keeps working. Each connection gets a token bucket at `throttledBytesPerSecond`. When it's empty, the relay stops *reading* that socket for a moment (at most 5 s), so TCP backpressure holds the excess at the sender and the relay buffers nothing. The throttle lifts at UTC midnight and is logged once per workspace per day.
-- **Usage metering.** Both hubs count every frame they receive, from machines (`bytes_m2b`) and browsers (`bytes_b2m`), against the workspace that owns the machine. Counts are flushed every minute to `usage_daily (workspace_id, day, bytes_b2m, bytes_m2b, frames)` and kept 400 days. A crash loses at most a minute of counting, which is fine for quotas and capacity planning; it is not a billing meter. Metering runs with or without a quotas file.
-- **Abuse signals.** The connector protocol is open, so a "machine" can be any program that uses the relay as a generic pipe. The hub keeps a per-machine traffic window: frames, bytes in both directions, large frames, stream frames that aren't a JSON object with a string `type`, and the sessions the connector last advertised. Each window it hands the summary to an `AbuseSignals` policy.
+  - Over `relayedBytesPerWorkspacePerDay`, traffic slows instead of stopping, so an active session keeps working. Each connection gets a token bucket at `throttledBytesPerSecond`. When it's empty, the relay stops *reading* that socket until its full byte debt is paid, so TCP backpressure holds the excess at the sender and the relay buffers nothing. One scheduler owns each socket pause. It rechecks the quota and sends outbound keepalives every second while heartbeat expiry is suspended for that deliberate pause. A large frame can burst through before its debt is repaid. The daily throttle lifts at UTC midnight and is logged once per workspace per day.
+- **Usage metering.** Both hubs count every frame they receive, from machines (`bytes_m2b`) and browsers (`bytes_b2m`), against the workspace that owns the machine. Counts are flushed every minute to `usage_daily (workspace_id, day, bytes_b2m, bytes_m2b, frames)` and kept 400 days. A crash loses at most a minute of counting, which is fine for quotas and capacity planning; it is not a billing meter. Pending counts retain their workspace and UTC day through failed writes and midnight rollover. Metering runs with or without a quotas file.
+- **Abuse signals.** The connector protocol is open, so a "machine" can be any program that uses the relay as a generic pipe. The hub keeps a per-machine traffic window: frames, bytes in both directions, large frames, stream frames that aren't a JSON object with a string `type`, and the sessions the connector last advertised. Windows survive socket replacement and disconnection. Each window the hub hands the summary to an `AbuseSignals` policy, including offline machines with pending traffic; an offline record and its policy state expire after a full empty window.
   - **Policy file.** The built-in policy reads rules from `RELAY_ABUSE_POLICY_FILE`. Without one, nothing is evaluated and no payload is inspected. Every rule is optional, and a malformed file stops the relay at boot:
 
     ```json
@@ -145,7 +146,7 @@ These are mechanisms only. No limits are built in, and a relay without config st
   - An account with a second factor gets a fresh one on its session, so step-up passes.
   - An account that must have 2FA but doesn't is sent to enrollment, as a real sign-in would be.
 - **Guard.** The command refuses unless the relay's config has `RELAY_STAGING=1`, so it does nothing on a relay without that flag.
-- **Suite.** `node scripts/staging/gate.mjs [--report out.md] [--no-frontend]` with `GATE_URL` and `GATE_COOKIE_A/B/C` (A owns WS-A and a machine in it, B owns WS-B, C is a member of both). Each identity has a positive control, so a bad cookie fails the run instead of passing it vacuously. It checks:
+- **Suite.** `node scripts/staging/gate.mjs [--report out.md] [--no-frontend]` with `GATE_URL` and `GATE_COOKIE_A/B/C` (A owns WS-A and a machine in it, B owns WS-B, C is a member of both). The suite requires the target to declare staging mode. Each identity has a positive control, and share/pairing checks create valid temporary fixtures and remove them afterward. A bad cookie or unrelated validation error fails the run. It checks:
   - the public surface: health bodies, CSP and HSTS, anonymous access, operator stats
   - workspace isolation over REST: reading, listing by naming another workspace, sharing, removing, pairing and inviting across workspaces, the origin guard
   - machine isolation over the relay socket: a non-owner (even a fellow member) gets close 4003; a cross-origin socket is refused

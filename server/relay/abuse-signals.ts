@@ -54,6 +54,8 @@ export interface AbuseSignals {
   readonly inspectStreamFrames: boolean
   readonly windowMs: number
   evaluate(summary: MachineTrafficSummary): AbuseFinding[]
+  /** Release policy state after a machine has remained inactive for a full window. */
+  forget?(machineId: string): void
 }
 
 // ── Rule-based policy from a JSON file ────────────────────────────────────
@@ -140,6 +142,8 @@ export class RulePolicy implements AbuseSignals {
     this.inspectStreamFrames = policy.malformedStreamFrames !== undefined
     this.windowMs = (policy.windowMinutes ?? 10) * 60_000
   }
+
+  forget(machineId: string): void { this.streaks.delete(machineId) }
 
   evaluate(s: MachineTrafficSummary): AbuseFinding[] {
     const findings: AbuseFinding[] = []

@@ -11,7 +11,8 @@
  * Over `relayedBytesPerWorkspacePerDay`, traffic is slowed, never cut off: a
  * per-socket token bucket at `throttledBytesPerSecond` says how long the hub
  * should stop *reading* that socket. TCP backpressure then holds the excess
- * at the sender, so the relay buffers nothing extra.
+ * at the sender, so the relay buffers nothing extra. Heartbeat checks account
+ * for these deliberate pauses; outbound keepalives continue during them.
  */
 
 import type Database from 'better-sqlite3'
@@ -19,8 +20,8 @@ import type { EntitlementsProvider } from './quotas.js'
 
 /** Throttled rate when a workspace has no `throttledBytesPerSecond` of its own. */
 export const DEFAULT_THROTTLE_BYTES_PER_SECOND = 64 * 1024
-/** Longest single pause, so heartbeats keep flowing and idle timeouts never fire. */
-export const MAX_PAUSE_MS = 5_000
+/** Recheck quota state and send an outbound keepalive while reads are paused. */
+export const PAUSE_CHECK_MS = 1_000
 export const USAGE_RETENTION_DAYS = 400
 
 export type Direction = 'b2m' | 'm2b'
@@ -48,7 +49,7 @@ export function utcDay(ms: number): string {
 
 export class UsageMeter {
   private day: string
-  private pending = new Map<string, Counters>()
+  private pending = new Map<string, Map<string, Counters>>()
   /** Bytes already in usage_daily for today, per workspace (loaded lazily). */
   private flushed = new Map<string, number>()
   private buckets = new WeakMap<object, Bucket>()
@@ -78,10 +79,12 @@ export class UsageMeter {
   record(workspaceId: string, direction: Direction, bytes: number, source: object): number {
     const now = this.now()
     this.rollDay(now)
-    const counters = this.pending.get(workspaceId) ?? { b2m: 0, m2b: 0, frames: 0 }
+    const daily = this.pending.get(this.day) ?? new Map<string, Counters>()
+    this.pending.set(this.day, daily)
+    const counters = daily.get(workspaceId) ?? { b2m: 0, m2b: 0, frames: 0 }
     counters[direction] += bytes
     counters.frames += 1
-    this.pending.set(workspaceId, counters)
+    daily.set(workspaceId, counters)
 
     const limits = this.entitlements.limitsFor(workspaceId)
     const limit = limits.relayedBytesPerWorkspacePerDay
@@ -98,11 +101,12 @@ export class UsageMeter {
     bucket.at = now
     this.buckets.set(source, bucket)
     if (bucket.tokens >= 0) return 0
-    return Math.min(MAX_PAUSE_MS, Math.ceil((-bucket.tokens / rate) * 1000))
+    return Math.ceil((-bucket.tokens / rate) * 1000)
   }
 
   /** Bytes relayed for a workspace today (UTC), both directions. */
   todayBytes(workspaceId: string): number {
+    this.rollDay(this.now())
     let base = this.flushed.get(workspaceId)
     if (base === undefined) {
       const row = this.db
@@ -111,7 +115,7 @@ export class UsageMeter {
       base = row?.total ?? 0
       this.flushed.set(workspaceId, base)
     }
-    const p = this.pending.get(workspaceId)
+    const p = this.pending.get(this.day)?.get(workspaceId)
     return base + (p ? p.b2m + p.m2b : 0)
   }
 
@@ -120,33 +124,44 @@ export class UsageMeter {
     this.forced = new Set(workspaceIds)
   }
 
-  /** Write pending counts to usage_daily. */
+  /** Remaining debt, without charging another frame. Quota changes can release a pause. */
+  pauseRemaining(workspaceId: string, source: object): number {
+    const now = this.now()
+    this.rollDay(now)
+    const limits = this.entitlements.limitsFor(workspaceId)
+    const limit = limits.relayedBytesPerWorkspacePerDay
+    if (!this.forced.has(workspaceId) && (limit === undefined || this.todayBytes(workspaceId) <= limit)) {
+      this.buckets.delete(source)
+      return 0
+    }
+    const bucket = this.buckets.get(source)
+    if (!bucket) return 0
+    const rate = Math.max(1, limits.throttledBytesPerSecond ?? DEFAULT_THROTTLE_BYTES_PER_SECOND)
+    return Math.max(0, Math.ceil((-bucket.tokens / rate) * 1000 - (now - bucket.at)))
+  }
+
+  /** Write all pending days atomically; leave them intact on any failure. */
   flush(): void {
     if (this.pending.size === 0) return
-    const upsert = this.db.prepare(
-      `INSERT INTO usage_daily (workspace_id, day, bytes_b2m, bytes_m2b, frames) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(workspace_id, day) DO UPDATE SET
-         bytes_b2m = bytes_b2m + excluded.bytes_b2m,
-         bytes_m2b = bytes_m2b + excluded.bytes_m2b,
-         frames = frames + excluded.frames`,
-    )
-    const entries = [...this.pending]
-    this.pending.clear()
     try {
+      const upsert = this.db.prepare(
+        `INSERT INTO usage_daily (workspace_id, day, bytes_b2m, bytes_m2b, frames) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(workspace_id, day) DO UPDATE SET
+           bytes_b2m = bytes_b2m + excluded.bytes_b2m,
+           bytes_m2b = bytes_m2b + excluded.bytes_m2b,
+           frames = frames + excluded.frames`,
+      )
       this.db.transaction(() => {
-        for (const [workspaceId, c] of entries) upsert.run(workspaceId, this.day, c.b2m, c.m2b, c.frames)
+        for (const [day, daily] of this.pending) {
+          for (const [workspaceId, c] of daily) upsert.run(workspaceId, day, c.b2m, c.m2b, c.frames)
+        }
       })()
-      // Only once committed: the flushed totals move from pending to base.
-      for (const [workspaceId, c] of entries) {
+      for (const [workspaceId, c] of this.pending.get(this.day) ?? []) {
         const base = this.flushed.get(workspaceId)
         if (base !== undefined) this.flushed.set(workspaceId, base + c.b2m + c.m2b)
       }
+      this.pending.clear()
     } catch (err) {
-      // Keep the counts for the next attempt rather than losing them.
-      for (const [workspaceId, c] of entries) {
-        const p = this.pending.get(workspaceId) ?? { b2m: 0, m2b: 0, frames: 0 }
-        this.pending.set(workspaceId, { b2m: p.b2m + c.b2m, m2b: p.m2b + c.m2b, frames: p.frames + c.frames })
-      }
       this.log(`[relay] usage flush failed: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
@@ -168,21 +183,61 @@ export class UsageMeter {
   }
 }
 
-/** Meter one received frame and, when throttled, stop reading the socket for a while. */
+interface MeteredSocket {
+  pause(): void
+  resume(): void
+  send(data: string): void
+  close(code: number, reason: string): void
+  readyState: number
+  bufferedAmount: number
+  once(event: 'close', listener: () => void): unknown
+  removeListener(event: 'close', listener: () => void): unknown
+}
+
+const paused = new WeakSet<MeteredSocket>()
+
+/** A deliberate read pause must not be mistaken for a missed heartbeat. */
+export function isMeterPaused(socket: MeteredSocket): boolean {
+  return paused.has(socket)
+}
+
+/** One scheduler per socket. Rechecking never admits data until the full debt is paid. */
 export function meterFrame(
   meter: UsageMeter | undefined,
-  socket: { pause(): void; resume(): void; readyState: number },
+  socket: MeteredSocket,
   workspaceId: string,
   direction: Direction,
   bytes: number,
 ): void {
   if (!meter) return
-  const pauseMs = meter.record(workspaceId, direction, bytes, socket)
-  if (pauseMs <= 0) return
+  const delay = meter.record(workspaceId, direction, bytes, socket)
+  if (delay <= 0 || paused.has(socket)) return
+  paused.add(socket)
   socket.pause()
-  setTimeout(() => {
-    if (socket.readyState === 1) socket.resume()
-  }, pauseMs).unref()
+  let timer: ReturnType<typeof setTimeout>
+  const cancel = () => {
+    clearTimeout(timer)
+    paused.delete(socket)
+    socket.removeListener('close', cancel)
+  }
+  const tick = () => {
+    try {
+      if (socket.readyState !== 1) { cancel(); return }
+      const remaining = meter.pauseRemaining(workspaceId, socket)
+      if (remaining <= 0) { cancel(); socket.resume(); return }
+      // The hosted client's resume probe accepts any incoming frame as liveness.
+      // Keep that path and reverse-proxy idle timers alive without reading data.
+      if (socket.bufferedAmount === 0) socket.send('{"version":1,"kind":"pong","payload":{}}')
+      timer = setTimeout(tick, Math.min(PAUSE_CHECK_MS, remaining))
+      timer.unref()
+    } catch {
+      cancel()
+      socket.close(1011, 'traffic accounting unavailable')
+    }
+  }
+  socket.once('close', cancel)
+  timer = setTimeout(tick, Math.min(PAUSE_CHECK_MS, delay))
+  timer.unref()
 }
 
 /** Drop usage rows older than the retention window. Returns rows removed. */

@@ -120,6 +120,13 @@ describe('secret store', () => {
     expect(quiet.warn).toHaveBeenCalledWith(expect.stringContaining('Kept the machine secret'))
   })
 
+  it.each(['null', '[]', '7', '"text"'])('leaves invalid migration input %s untouched', content => {
+    const store = new HelperSecretStore(fakeHelper(dir).path)
+    writeFileSync(file, content)
+    expect(migrateCredentialToStore(file, store, quiet)).toBe(false)
+    expect(readFileSync(file, 'utf8')).toBe(content)
+  })
+
   it('unpairing removes the Keychain item along with the file', () => {
     const helper = fakeHelper(dir)
     const store = new HelperSecretStore(helper.path)

@@ -9,6 +9,8 @@
  * bundle (extensions, injected scripts) are ignored.
  */
 
+import { scrubText, scrubErrorMessage } from '../../server/relay/error-scrub'
+
 const ENDPOINT = '/api/telemetry/errors'
 const MAX_PER_PAGE = 5
 const MAX_MESSAGE = 200
@@ -35,10 +37,11 @@ export function stackFrames(stack: string | undefined, origin = window.location.
     const m = /^\s*at (?:(.+?) \()?(.+?):(\d+):(\d+)\)?\s*$/.exec(line) ?? /^\s*(.*?)@(.+?):(\d+):(\d+)\s*$/.exec(line)
     if (!m) continue
     let filename = m[2]
-    if (filename.startsWith(`${origin}/`)) filename = filename.slice(origin.length)
+    if (!filename.startsWith(`${origin}/`)) continue
+    filename = filename.slice(origin.length)
     frames.push({
-      filename: filename.replace(/[?#].*$/, ''),
-      ...(m[1] ? { function: m[1] } : {}),
+      filename: scrubText(filename.replace(/[?#].*$/, '')).slice(0, 500),
+      ...(m[1] ? { function: scrubText(m[1]).slice(0, 200) } : {}),
       lineno: Number(m[3]),
       colno: Number(m[4]),
     })
@@ -55,8 +58,8 @@ export function toReport(error: unknown, origin = window.location.origin): Brows
   // extension or injected script, and not ours to report.
   if (!frames.some(f => f.filename.startsWith('/assets/'))) return null
   return {
-    type: (error.name || 'Error').slice(0, 100),
-    message: error.message.slice(0, MAX_MESSAGE),
+    type: scrubText(error.name || 'Error').slice(0, 100),
+    message: scrubErrorMessage(error.name, error.message).slice(0, MAX_MESSAGE),
     frames,
   }
 }
