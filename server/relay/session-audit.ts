@@ -13,6 +13,8 @@
  */
 
 import { createHash } from 'crypto'
+import { VALID_PERMISSION_MODES } from '../types.js'
+import type { PermissionMode } from '../types.js'
 import type { AuditEventKind } from './audit.js'
 
 // The transport bounds stream frames; every accepted frame is classified,
@@ -79,7 +81,7 @@ export function classifyBrowserFrame(data: string): BrowserAuditFrame | null {
     case 'set_permission_mode':
       return {
         kind: 'permission_mode_changed',
-        metadata: { mode: typeof msg.permissionMode === 'string' && ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk', 'auto'].includes(msg.permissionMode) ? msg.permissionMode : null },
+        metadata: { mode: typeof msg.permissionMode === 'string' && VALID_PERMISSION_MODES.has(msg.permissionMode as PermissionMode) ? msg.permissionMode : null },
       }
     default:
       return null

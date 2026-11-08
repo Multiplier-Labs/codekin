@@ -21,6 +21,13 @@ describe('classifyBrowserFrame', () => {
     expect((a as { metadata: { payloadHash: string } }).metadata.payloadHash).not.toBe((b as { metadata: { payloadHash: string } }).metadata.payloadHash)
   })
 
+  it('records supported permission modes while omitting arbitrary strings', () => {
+    expect(classifyBrowserFrame(JSON.stringify({ type: 'set_permission_mode', permissionMode: 'dangerouslySkipPermissions' })))
+      .toMatchObject({ metadata: { mode: 'dangerouslySkipPermissions' } })
+    expect(classifyBrowserFrame(JSON.stringify({ type: 'set_permission_mode', permissionMode: 'private content' })))
+      .toMatchObject({ metadata: { mode: null } })
+  })
+
   it.each(['{"type":"get_diff"}', '{"type":"ping"}', '{"type":"resize","cols":1,"rows":1}', 'not json', '[1]', '{"type":"join_session"}'])('ignores %s', frame => {
     expect(classifyBrowserFrame(frame)).toBeNull()
   })
