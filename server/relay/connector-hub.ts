@@ -105,6 +105,23 @@ export class ConnectorHub {
     return this.machines.size
   }
 
+  /** Stream channels open across every connected machine. */
+  get channelCount(): number {
+    let total = 0
+    for (const machine of this.machines.values()) total += machine.channels.size
+    return total
+  }
+
+  /** Connected machines by connector version, `unknown` when not reported. */
+  connectorVersionCounts(): Record<string, number> {
+    const counts: Record<string, number> = {}
+    for (const machine of this.machines.values()) {
+      const version = machine.connectorVersion ?? 'unknown'
+      counts[version] = (counts[version] ?? 0) + 1
+    }
+    return counts
+  }
+
   isOnline(machineId: string): boolean {
     return this.machines.has(machineId)
   }

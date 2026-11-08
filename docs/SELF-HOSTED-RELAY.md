@@ -153,7 +153,7 @@ The relay trusts exactly **one** proxy hop for client addresses (used for rate l
 audit log). If another proxy or CDN sits in front of nginx, adjust `trust proxy` in
 `relay-server.ts`.
 
-Check it: `curl https://codekin.example.com/api/health` should return `{"ok":true,…}`, and
+Check it: `curl https://codekin.example.com/api/health/ready` should return `{"ok":true}`, and
 `curl -sI https://codekin.example.com/` should list `content-security-policy` and
 `strict-transport-security`.
 
@@ -236,7 +236,9 @@ Set it up in three steps:
 - **Lost second factor:** only the operator can reset one, on the server:
   `node server/dist/relay/relay-admin-cli.js reset-mfa <github-id>`. This is audited and ends the
   account's sessions.
-- **Health and logs:** `GET /api/health` reports connected machines and browsers. The relay logs
+- **Health and logs:** `GET /api/health/live` and `GET /api/health/ready` are public probes that
+  return only `{ "ok": … }`; monitor `ready`, which answers 503 when the database or event loop is
+  unhealthy. Connection counts are in `GET /api/admin/stats`, for the operator only. The relay logs
   to stdout.
 
 More detail on the relay's operation (connector modes, status fields, troubleshooting) is in

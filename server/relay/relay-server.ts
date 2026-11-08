@@ -28,6 +28,7 @@ import { FailedAttemptLimiter } from './mfa.js'
 import { createDeviceLinkRouter } from './device-link-routes.js'
 import { createDesktopAuthRouter, DESKTOP_CLAIM_PATH } from './desktop-auth-routes.js'
 import { createWebauthnRouter } from './webauthn-routes.js'
+import { createAdminStatsRouter, createHealthRouter, EventLoopLagMonitor } from './health-routes.js'
 import { ConnectorHub } from './connector-hub.js'
 import { BrowserHub } from './browser-hub.js'
 import { MAX_PROXY_BODY_BYTES } from './relay-protocol.js'
@@ -44,6 +45,8 @@ const hub = new ConnectorHub(db)
 const browserHub = new BrowserHub(db, hub, { isSessionAlive: sid => store.isAlive(sid) })
 
 const app = express()
+const eventLoopLag = new EventLoopLagMonitor()
+let shuttingDown = false
 
 // Behind nginx: trust X-Forwarded-* so secure cookies and req.ip work.
 app.set('trust proxy', 1)
@@ -92,6 +95,13 @@ app.use(webhookIngress)
 
 app.use(express.json({ limit: '1mb' }))
 
+// Public probes come first: no rate limit, no session, no origin guard.
+// `accepting` is read lazily, once `server` exists.
+app.use(createHealthRouter(db, {
+  accepting: () => !shuttingDown && server.listening,
+  eventLoopLagMs: () => eventLoopLag.lagMs,
+}))
+
 // Auth endpoints: state generation + GitHub round trips.
 app.use('/api/auth', ipRateLimiter(20, 60_000))
 // Pairing: start writes rows; complete is polled every ~3s by the CLI.
@@ -133,15 +143,12 @@ const sessionMiddleware = session({
 
 app.use(sessionMiddleware)
 
-app.get('/api/health', (_req, res) => {
-  res.json({
-    ok: true,
-    service: 'codekin-relay',
-    machinesOnline: hub.onlineCount,
-    browserClients: browserHub.clientCount,
-  })
-})
-
+app.use(createAdminStatsRouter(db, config, () => ({
+  machinesOnline: hub.onlineCount,
+  browserClients: browserHub.clientCount,
+  channelsOpen: hub.channelCount,
+  connectorVersions: hub.connectorVersionCounts(),
+})))
 app.use(createRelayAuthRouter({
   db,
   config,
@@ -277,6 +284,9 @@ server.listen(config.port, '127.0.0.1', () => {
 
 function shutdown() {
   console.log('[relay] Shutting down')
+  // Report not ready first, so a probe stops sending traffic here.
+  shuttingDown = true
+  eventLoopLag.stop()
   browserHub.close()
   hub.close()
   webhookIngress.close()

@@ -388,7 +388,18 @@ cd server && npm run build
 pm2 restart codekin-relay    # or: pm2 start server/dist/relay/relay-server.js --name codekin-relay
 ```
 
-`GET /api/health` reports `machinesOnline` and `browserClients`.
+Health probes are public and answer only `{ "ok": … }`:
+
+| Route | Answers |
+| --- | --- |
+| `GET /api/health/live` | 200 while the process serves HTTP. Checks no dependencies, so point a restart policy here |
+| `GET /api/health/ready` | 200, or 503 when the database, the server or the event loop (lag over 1 s) is unhealthy. The failing check is logged (`readiness check failed: …`), not returned. Point uptime monitors here |
+| `GET /api/health` | Alias of `live`, for existing probes |
+
+Live counters are operator-only. `GET /api/admin/stats`, signed in as the
+operator at full auth level, returns `machinesOnline`, `browserClients`,
+`channelsOpen` and `connectorVersions` (connected machines per connector
+version). Check `connectorVersions` before raising a minimum connector version.
 
 ### Connecting a machine
 
