@@ -35,8 +35,15 @@ function fakeScroller(el: HTMLElement): { top: number } {
   return state
 }
 
-function render(messages: ChatMessage[]) {
-  act(() => { root!.render(<ChatView messages={messages} fontSize={14} />) })
+function render(messages: ChatMessage[], sessionId?: string) {
+  act(() => { root!.render(<ChatView messages={messages} fontSize={14} sessionId={sessionId} />) })
+}
+
+/** The reader scrolls the transcript themselves: a gesture, then the scroll it causes. */
+function readerScrollsTo(scroller: HTMLElement, state: { top: number }, top: number) {
+  act(() => { scroller.dispatchEvent(new Event('wheel')) })
+  state.top = top
+  act(() => { scroller.dispatchEvent(new Event('scroll')) })
 }
 
 describe('ChatView scroll on transcript rebuild', () => {
@@ -48,8 +55,7 @@ describe('ChatView scroll on transcript rebuild', () => {
 
     const scroller = container.querySelector('.chat-scroll') as HTMLElement
     const state = fakeScroller(scroller)
-    state.top = 600
-    act(() => { scroller.dispatchEvent(new Event('scroll')) })
+    readerScrollsTo(scroller, state, 600)
 
     // The browser clamps the position while the nodes are replaced.
     state.top = 0
@@ -66,12 +72,79 @@ describe('ChatView scroll on transcript rebuild', () => {
 
     const scroller = container.querySelector('.chat-scroll') as HTMLElement
     const state = fakeScroller(scroller)
-    state.top = 600
-    act(() => { scroller.dispatchEvent(new Event('scroll')) })
+    readerScrollsTo(scroller, state, 600)
 
     state.top = 550
     render([...first, { type: 'user', text: 'new', key: 'a-new' }])
     expect(state.top).toBe(550)
+  })
+})
+
+describe('ChatView opens a session at the bottom', () => {
+  function mountEmpty(sessionId?: string) {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    render([], sessionId)
+    const scroller = container.querySelector('.chat-scroll') as HTMLElement
+    return { scroller, state: fakeScroller(scroller) }
+  }
+
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('opens at the bottom when the transcript fills in', () => {
+    const { state } = mountEmpty('s1')
+    render(transcript('a'), 's1')
+    expect(state.top).toBe(1500)
+  })
+
+  it('opens the next session at the bottom even if the reader had scrolled up in the last one', () => {
+    const { scroller, state } = mountEmpty('s1')
+    render(transcript('a'), 's1')
+    readerScrollsTo(scroller, state, 300)
+
+    // Switching clears the transcript (the browser clamps to the top), then joins the next one.
+    render([], 's2')
+    state.top = 0
+    render(transcript('b'), 's2')
+    expect(state.top).toBe(1500)
+  })
+
+  it('opens at the bottom when the session changes without the transcript being cleared', () => {
+    const { scroller, state } = mountEmpty('s1')
+    render(transcript('a'), 's1')
+    readerScrollsTo(scroller, state, 300)
+
+    state.top = 0
+    render(transcript('b'), 's2')
+    expect(state.top).toBe(1500)
+  })
+
+  it('holds a just-opened transcript at the bottom against scrolls the reader did not make', () => {
+    let now = 10_000
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const { scroller, state } = mountEmpty('s1')
+    render(transcript('a'), 's1')
+
+    // The browser reports a stale position while the layout settles.
+    state.top = 0
+    act(() => { scroller.dispatchEvent(new Event('scroll')) })
+    expect(state.top).toBe(1500)
+
+    // Once settled, a scroll position is taken as it comes.
+    now += 2000
+    state.top = 300
+    act(() => { scroller.dispatchEvent(new Event('scroll')) })
+    expect(state.top).toBe(300)
+  })
+
+  it('lets the reader scroll away straight after opening', () => {
+    const { scroller, state } = mountEmpty('s1')
+    render(transcript('a'), 's1')
+    readerScrollsTo(scroller, state, 300)
+    expect(state.top).toBe(300)
+    render([...transcript('a'), { type: 'user', text: 'new', key: 'a-new' }], 's1')
+    expect(state.top).toBe(300)
   })
 })
 
@@ -98,8 +171,7 @@ describe('ChatView stays pinned when content resizes without a new message', () 
     expect(state.top).toBe(1500)
 
     // Scrolled up: a resize leaves the reader alone.
-    state.top = 300
-    act(() => { scroller.dispatchEvent(new Event('scroll')) })
+    readerScrollsTo(scroller, state, 300)
     act(() => { callbacks.forEach(cb => { cb() }) })
     expect(state.top).toBe(300)
     vi.unstubAllGlobals()

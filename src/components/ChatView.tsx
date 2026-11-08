@@ -42,7 +42,16 @@ interface Props {
   agentName?: string
   /** Renders Agent Joe's messages in a repo session (live task cards, answers). */
   joe?: JoeChatContext
+  /** Session the transcript belongs to. A change opens the next transcript at the bottom. */
+  sessionId?: string | null
 }
+
+/**
+ * How long a freshly opened transcript holds to the bottom while its layout
+ * settles (code highlighting, images, fonts). A scroll event the reader didn't
+ * cause can't leave the view stranded near the top in this window.
+ */
+const OPEN_SETTLE_MS = 1000
 
 /**
  * Transcript row: a centred column at --measure, with the timestamp — when the
@@ -513,7 +522,7 @@ function ActivityIndicator({ label, variant = 'default' }: { label: string; vari
   )
 }
 
-export function ChatView({ messages, fontSize, disabled, planningMode, activityLabel, isMobile, variant = 'default', agentName, joe }: Props) {
+export function ChatView({ messages, fontSize, disabled, planningMode, activityLabel, isMobile, variant = 'default', agentName, joe, sessionId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
@@ -523,38 +532,17 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
   const userScrollingUntilRef = useRef(0)
   const pinRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const prevLastKeyRef = useRef<string | undefined>(undefined)
+  /** The next non-empty transcript is a newly opened one and starts at the bottom. */
+  const openPendingRef = useRef(true)
+  /** performance.now() until which a just-opened transcript holds to the bottom. */
+  const settleUntilRef = useRef(0)
+  const prevSessionIdRef = useRef(sessionId)
 
-  // Track whether the user is near the bottom of the scroll container.
-  // 100px threshold accounts for the activity indicator height so auto-scroll
-  // doesn't disengage when new tool output pushes content just past the viewport.
-  const checkScroll = useCallback(() => {
-    const el = containerRef.current
-    if (!el) return
-    const threshold = 100
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
-    isNearBottomRef.current = nearBottom
-    lastScrollTopRef.current = el.scrollTop
-    setShowScrollButton(!nearBottom)
-  }, [])
-
-  // A rejoin rebuilds the transcript with new keys, so React replaces every
-  // node; the container shrinks for a moment and the browser clamps the scroll
-  // position. Put a reader who had scrolled up back where they were, before
-  // paint. (A trim keeps the newest messages, so it doesn't count as a rebuild.)
-  useLayoutEffect(() => {
-    const prevLastKey = prevLastKeyRef.current
-    prevLastKeyRef.current = messages[messages.length - 1]?.key
-    const el = containerRef.current
-    if (!el || !prevLastKey || isNearBottomRef.current) return
-    if (messages.some(m => m.key === prevLastKey)) return
-    el.scrollTop = lastScrollTopRef.current
-  }, [messages])
-
-  // Follow new output for a reader at the bottom. WebKit (Safari, the desktop
-  // app) scrolls on a separate thread: a scrollTop write during the reader's own
-  // scroll, momentum included, is dropped and the view then snaps back to a
-  // stale position. So never write while they scroll (retry once they stop),
-  // and never write when already at the bottom.
+  // Put the view at the very bottom, unless the reader is mid-scroll.
+  // WebKit (Safari, the desktop app) scrolls on a separate thread: a scrollTop
+  // write during the reader's own scroll, momentum included, is dropped and the
+  // view then snaps back to a stale position. So never write while they scroll
+  // (retry once they stop), and never write when already at the bottom.
   const pinToBottom = useCallback(function pin() {
     const el = containerRef.current
     if (!el || !isNearBottomRef.current) return
@@ -569,11 +557,71 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
     if (max - el.scrollTop > 1) el.scrollTop = max
   }, [])
 
+  // Track whether the user is near the bottom of the scroll container.
+  // 100px threshold accounts for the activity indicator height so auto-scroll
+  // doesn't disengage when new tool output pushes content just past the viewport.
+  const checkScroll = useCallback(() => {
+    const el = containerRef.current
+    if (!el) return
+    const threshold = 100
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
+    // A just-opened transcript still settling: the reader hasn't touched it
+    // (any gesture ends the window), so this scroll is the browser's own —
+    // a clamp, or WebKit reporting a stale position. Hold to the bottom.
+    if (!nearBottom && performance.now() < settleUntilRef.current) {
+      pinToBottom()
+      return
+    }
+    isNearBottomRef.current = nearBottom
+    lastScrollTopRef.current = el.scrollTop
+    setShowScrollButton(!nearBottom)
+  }, [pinToBottom])
+
+  // Opening a transcript — first mount, another session, or an empty one
+  // filling in — always starts at the bottom, whatever the reader did in the
+  // previous one. Without this the "at bottom" flag carried over from the last
+  // session, and a stale false left the new one at the top, where the browser
+  // had clamped the scroll position while the transcript was empty.
+  //
+  // Otherwise, a rejoin rebuilds the transcript with new keys, so React
+  // replaces every node; the container shrinks for a moment and the browser
+  // clamps the scroll position. Put a reader who had scrolled up back where
+  // they were, before paint. (A trim keeps the newest messages, so it doesn't
+  // count as a rebuild.)
+  useLayoutEffect(() => {
+    if (prevSessionIdRef.current !== sessionId) {
+      prevSessionIdRef.current = sessionId
+      openPendingRef.current = true
+    }
+    const prevLastKey = prevLastKeyRef.current
+    prevLastKeyRef.current = messages[messages.length - 1]?.key
+    const el = containerRef.current
+    if (!el) return
+    if (messages.length === 0) {
+      openPendingRef.current = true
+      return
+    }
+    if (openPendingRef.current) {
+      openPendingRef.current = false
+      isNearBottomRef.current = true
+      settleUntilRef.current = performance.now() + OPEN_SETTLE_MS
+      setShowScrollButton(false)
+      el.scrollTop = el.scrollHeight - el.clientHeight
+      return
+    }
+    if (!prevLastKey || isNearBottomRef.current) return
+    if (messages.some(m => m.key === prevLastKey)) return
+    el.scrollTop = lastScrollTopRef.current
+  }, [messages, sessionId])
+
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    const userScrolls = () => { userScrollingUntilRef.current = performance.now() + 250 }
-    const events = ['wheel', 'touchmove', 'pointerdown'] as const
+    const userScrolls = () => {
+      userScrollingUntilRef.current = performance.now() + 250
+      settleUntilRef.current = 0
+    }
+    const events = ['wheel', 'touchmove', 'pointerdown', 'keydown'] as const
     for (const ev of events) el.addEventListener(ev, userScrolls, { passive: true })
     return () => {
       for (const ev of events) el.removeEventListener(ev, userScrolls)
@@ -581,7 +629,7 @@ export function ChatView({ messages, fontSize, disabled, planningMode, activityL
     }
   }, [])
 
-  // Auto-scroll on new messages if near bottom
+  // Follow new output for a reader at the bottom.
   useEffect(() => { pinToBottom() }, [messages, pinToBottom])
 
   // Content also changes height without a new message: tool groups expanding
