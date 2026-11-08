@@ -218,7 +218,8 @@ describe('IntentVerifier', () => {
       ['intent_stale', () => verifier.checkRequest(signedReq('/api/sessions/list', { ts: now - 6 * 60_000 }))],
       ['intent_unknown_key', () => verifier.checkRequest(signedReq('/api/sessions/list', { keyId: 'nope' }))],
       ['intent_wrong_signer', () => verifier.checkRequest({ ...signedReq(), principal: { userId: 'u-other', role: 'owner', grants: {} } })],
-      ['intent_wrong_signer', () => verifier.checkRequest({ ...signedReq(), principal: { userId: 'u-owner', role: 'grantee', grants: {} } })],
+      // A grantee's key comes from an owner-signed grant, and there is none.
+      ['intent_unknown_key', () => verifier.checkRequest({ ...signedReq(), principal: { userId: 'u-owner', role: 'grantee', grants: {} } })],
       ['intent_bad_signature', () => {
         const other = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey
         return verifier.checkRequest(req(sign({ action: 'rest:GET /api/sessions/list', payload: requestPayload('GET', '/api/sessions/list', undefined, null) }, other)))

@@ -7,6 +7,10 @@
  */
 
 import { Router } from 'express'
+import { createHash } from 'crypto'
+import { GRANT_ACTION, INTENT_MAX_SKEW_MS, MAX_GRANT_LIFETIME_MS, grantIssuedAt, grantPayload } from './intent-actions.js'
+import type { GrantBody, IntentBody, SignedIntent } from './intent-actions.js'
+import { listDeviceKeys } from './device-keys.js'
 import { checkQuota, countSessionShares, UNLIMITED } from './quotas.js'
 import type { EntitlementsProvider } from './quotas.js'
 import type Database from 'better-sqlite3'
@@ -24,10 +28,11 @@ import {
   normalizePermissions,
   parseShareExpiry,
   resolveMachineAccess,
+  setSignedGrant,
   updateSharePermissions,
   upsertShare,
 } from './shares.js'
-import type { SessionPermission, ShareRole } from './shares.js'
+import type { SessionPermission, SessionShare, ShareRole } from './shares.js'
 import { listAuditEvents, recordAuditEvent } from './audit.js'
 import { createRequireWorkspace } from './workspace-routes.js'
 import { can, getActiveMembership } from './workspaces.js'
@@ -54,6 +59,60 @@ function resolvePermissions(body: { role?: unknown; permissions?: unknown }): Se
   }
   const permissions = normalizePermissions(body.permissions)
   return permissions.length > 0 ? permissions : null
+}
+
+
+/**
+ * Whether a signed grant describes this share: same id, session and
+ * grantee, no permission the share doesn't hold, at most 30 days and never
+ * past the share's expiry, and an intent naming this machine, session and
+ * grant text. (The signature itself is the machine's to check.)
+ */
+export function checkGrantForShare(
+  grantText: unknown,
+  intentValue: unknown,
+  share: SessionShare,
+  now: number,
+): { expiresAt: number; keyCount: number } | { error: string } {
+  if (typeof grantText !== 'string' || grantText.length > 8192) return { error: 'grant must be the signed grant text' }
+  let grant: Partial<GrantBody>
+  try { grant = JSON.parse(grantText) as Partial<GrantBody> } catch { return { error: 'grant is not JSON' } }
+  // Grant ids are `<share id>` or `<share id>:<n>`: a narrowed grant gets a new
+  // one, so the owner can revoke the broader grant on the machine by id.
+  const idOk = typeof grant.grantId === 'string' && (grant.grantId === share.id || grant.grantId.startsWith(`${share.id}:`)) && grant.grantId.length <= 200
+  if (!idOk || grant.sessionId !== share.localSessionId || grant.granteeUserId !== share.granteeUserId) {
+    return { error: 'grant does not describe this share' }
+  }
+  if (!Array.isArray(grant.permissions) || grant.permissions.some(p => !share.permissions.includes(p as SessionPermission))) {
+    return { error: 'grant permissions must be within the share' }
+  }
+  if (!Array.isArray(grant.granteeKeys) || grant.granteeKeys.length > 20) return { error: 'grant keys are missing' }
+  const shareExpiry = share.expiresAt ? Date.parse(share.expiresAt) : Infinity
+  if (grant.notAfter !== undefined && grant.notAfter !== null && (typeof grant.notAfter !== 'number' || grant.notAfter > shareExpiry + 60_000)) {
+    return { error: 'grant notAfter must be within the share' }
+  }
+  if (typeof grant.expiresAt !== 'number' || grant.expiresAt <= now
+    || grant.expiresAt > now + MAX_GRANT_LIFETIME_MS + 60_000 || grant.expiresAt > shareExpiry + 60_000) {
+    return { error: 'grant expiry must be within 30 days and the share' }
+  }
+  const intent = intentValue as Partial<SignedIntent> | null
+  if (!intent || typeof intent.body !== 'string' || intent.body.length > 4096 || (typeof intent.sig !== 'string' && !intent.webauthn)) {
+    return { error: 'intent must be a signed grant intent' }
+  }
+  let body: Partial<IntentBody>
+  try { body = JSON.parse(intent.body) as Partial<IntentBody> } catch { return { error: 'intent is not JSON' } }
+  const hash = createHash('sha256').update(grantPayload(grantText)).digest('base64url')
+  if (body.action !== GRANT_ACTION || body.machineId !== share.machineId || body.sessionId !== share.localSessionId || body.payloadHash !== hash) {
+    return { error: 'intent does not sign this grant' }
+  }
+  // Not a security check (the machine checks the clock it trusts); it tells an
+  // owner whose computer's clock is off before their grant silently fails, or
+  // outranks a later one from their other browser.
+  const issued = grantIssuedAt(grant.grantId as string, share.id)
+  if (typeof body.ts !== 'number' || Math.abs(body.ts - now) > INTENT_MAX_SKEW_MS || (issued !== null && issued > body.ts + INTENT_MAX_SKEW_MS)) {
+    return { error: "This computer's clock is more than five minutes off. Correct it, then sign again." }
+  }
+  return { expiresAt: grant.expiresAt, keyCount: grant.granteeKeys.length }
 }
 
 export function createShareRouter(
@@ -291,6 +350,58 @@ export function createShareRouter(
     })
 
     res.json({ share: updated })
+  })
+
+  /**
+   * The owner's browser signs the grant for a share (signed-intents spec
+   * §6.7) and stores it here; the relay attaches it to the grantee's
+   * principal. The relay can't check the owner's signature (the machine
+   * does), only that the grant describes this share.
+   */
+  router.put('/api/shares/:shareId/grant', requireActiveUser, (req, res) => {
+    const user = { id: req.session.user?.id ?? '' }
+    const share = getShare(db, String(req.params.shareId))
+    if (!share) {
+      res.status(404).json({ error: 'Share not found' })
+      return
+    }
+    const machine = db
+      .prepare('SELECT owner_user_id, workspace_id, quarantined_at FROM machines WHERE id = ?')
+      .get(share.machineId) as { owner_user_id: string; workspace_id: string; quarantined_at: string | null } | undefined
+    if (share.sharedByUserId !== user.id || !machine || machine.owner_user_id !== user.id || machine.quarantined_at !== null) {
+      res.status(403).json({ error: 'Only the machine owner who shared this session can sign its grant' })
+      return
+    }
+    const body = req.body as { grant?: unknown; intent?: unknown }
+    const checked = checkGrantForShare(body.grant, body.intent, share, Date.now())
+    if ('error' in checked) {
+      res.status(400).json({ error: checked.error })
+      return
+    }
+    setSignedGrant(db, share.id, { grant: body.grant as string, intent: body.intent }, checked.expiresAt)
+    // Open channels carry the principal they were opened with; reconnecting
+    // picks up the new grant.
+    if (share.granteeUserId) browserHub?.refreshGrants({ userId: share.granteeUserId, machineId: share.machineId })
+    recordAuditEvent(db, {
+      kind: 'session_shared',
+      actorUserId: user.id,
+      machineId: share.machineId,
+      localSessionId: share.localSessionId,
+      ip: req.ip ?? null,
+      metadata: { signedGrant: true, keys: checked.keyCount, expiresAt: new Date(checked.expiresAt).toISOString() },
+    })
+    res.json({ share: getShare(db, share.id) })
+  })
+
+  /** The grantee's registered browser keys, for the owner to sign into the grant (§6.7). */
+  router.get('/api/shares/:shareId/grantee-keys', requireActiveUser, (req, res) => {
+    const user = { id: req.session.user?.id ?? '' }
+    const share = getShare(db, String(req.params.shareId))
+    if (!share || share.sharedByUserId !== user.id || !share.granteeUserId) {
+      res.status(404).json({ error: 'Share not found' })
+      return
+    }
+    res.json({ keys: listDeviceKeys(db, share.granteeUserId).map(k => ({ keyId: k.keyId, spki: k.spki, label: k.label, lastSeenAt: k.lastSeenAt })) })
   })
 
   router.delete('/api/shares/:shareId', requireActiveUser, (req, res) => {

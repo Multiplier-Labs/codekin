@@ -15,11 +15,12 @@ import type { WebSocket } from 'ws'
 import type Database from 'better-sqlite3'
 import {
   envelope,
+  isEnrolRequestKind,
   MAX_CHANNELS_PER_CLIENT,
   RELAY_ERROR,
   STREAM_CLOSE,
 } from './relay-protocol.js'
-import type { SignedIntent } from './intent-actions.js'
+import type { SignedGrant, SignedIntent } from './intent-actions.js'
 import type {
   BrowserHello,
   EnrolRequestKind,
@@ -34,7 +35,7 @@ import type {
 import type { ConnectorHub } from './connector-hub.js'
 import type { SessionUser } from './relay-auth-routes.js'
 import { getUserById } from './control-plane-db.js'
-import { resolveMachineAccess } from './shares.js'
+import { resolveMachineAccess, signedGrantsFor } from './shares.js'
 import type { MachineAccess } from './shares.js'
 import { recordAuditEvent } from './audit.js'
 import { upsertDeviceKey } from './device-keys.js'
@@ -120,11 +121,13 @@ export function accessFingerprint(access: MachineAccess): string {
  * resolved fresh per socket, so revoking a share takes effect on the next
  * connection rather than living on in a cached token.
  */
-function toPrincipal(user: SessionUser, access: MachineAccess): RelayPrincipal {
+function toPrincipal(user: SessionUser, access: MachineAccess, signedGrants?: SignedGrant[]): RelayPrincipal {
   return {
     userId: user.id,
     role: access.kind === 'owner' ? 'owner' : 'grantee',
     grants: access.kind === 'grantee' ? access.grants : {},
+    // The owner-signed grants behind them, which the machine checks (§6.7).
+    ...(access.kind === 'grantee' && signedGrants && signedGrants.length > 0 ? { signedGrants } : {}),
   }
 }
 
@@ -242,6 +245,16 @@ export class BrowserHub {
     }
   }
 
+  /**
+   * A grantee's signed grant changed: their open sockets to that machine
+   * carry the old principal, so close them and let the reconnect pick it up.
+   */
+  refreshGrants(filter: { userId: string; machineId: string }): void {
+    for (const client of [...this.clients]) {
+      if (client.user.id === filter.userId && client.machineId === filter.machineId) this.revoke(client, 'share grant updated')
+    }
+  }
+
   /** Close the sockets opened under one web session (logout). */
   disconnectSession(sessionId: string, reason = 'logged out'): void {
     for (const client of [...this.clients]) {
@@ -263,6 +276,14 @@ export class BrowserHub {
     let total = 0
     for (const c of this.clients) if (c.user.id === userId) total += measure(c)
     return total
+  }
+
+  /** What travels with each forwarded message: who, their grants, and the owner-signed grants. */
+  private principalOf(client: BrowserClient): RelayPrincipal {
+    const signed = client.access.kind === 'grantee'
+      ? signedGrantsFor(this.db, client.user.id, client.machineId) as SignedGrant[]
+      : undefined
+    return toPrincipal(client.user, client.access, signed)
   }
 
   /** Wire up a fresh /relay/browser socket for an already-authenticated user. */
@@ -357,8 +378,7 @@ export class BrowserHub {
       }
       if (msg.kind === 'request') {
         return this.forwardRequest(client, msg.id, msg.payload as ProxyRequest)
-      } else if (msg.kind === 'enrol_commit' || msg.kind === 'enrol_reveal' || msg.kind === 'enrol_status'
-        || msg.kind === 'enrol_certify' || msg.kind === 'enrol_revoke') {
+      } else if (isEnrolRequestKind(msg.kind)) {
         return this.forwardEnrolment(client, msg.kind, msg.id, msg.payload)
       } else if (msg.kind === 'stream_open') {
         this.openChannel(client, msg.channelId, (msg.payload as StreamOpen | undefined)?.intent)
@@ -423,7 +443,7 @@ export class BrowserHub {
         path: request.path,
         contentType: typeof request.contentType === 'string' ? request.contentType : undefined,
         body: request.body,
-        principal: toPrincipal(client.user, client.access),
+        principal: this.principalOf(client),
         // The browser's signature over this request, checked on the machine.
         ...(request.intent ? { intent: request.intent } : {}),
       })
@@ -457,7 +477,7 @@ export class BrowserHub {
     client.inflight += 1
     try {
       const outcome = await this.connectors.sendEnrolment(client.machineId, kind, {
-        principal: toPrincipal(client.user, client.access),
+        principal: this.principalOf(client),
         payload,
       })
       if (!this.clients.has(client) || client.socket.readyState !== client.socket.OPEN) return
@@ -540,7 +560,7 @@ export class BrowserHub {
         client.channelSessions.delete(localId)
         this.connectors.closeChannel(client.machineId, remoteId)
       }
-    }, toPrincipal(client.user, client.access), intent)
+    }, this.principalOf(client), intent)
 
     if (error) {
       console.log(`[relay] stream refused on machine ${client.machineId}: ${error.code} ${error.message}`)

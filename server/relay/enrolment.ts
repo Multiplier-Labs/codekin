@@ -30,12 +30,13 @@ import {
 } from './enrolment-crypto.js'
 import type { EnrolPasskey } from './enrolment-crypto.js'
 import { keyIdForSpki, loadMachineSigningKey, parseP256Spki, readMachineIdentity } from './machine-identity.js'
-import { mutateTrustStore, readTrustStore, TrustStoreError } from './trust-store.js'
+import { addRevokedGrant, mutateTrustStore, readTrustStore, TrustStoreError } from './trust-store.js'
 import type { PasskeyCredential, PendingEnrolment, TrustedCredential, TrustStore } from './trust-store.js'
 import { coseToKey, keyIdForCoseKey, verifyPasskeyAssertion } from './webauthn-verify.js'
 import type { PasskeyAssertion } from './webauthn-verify.js'
 import {
-  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs, revokePayload,
+  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, GRANT_REVOKE_ACTION, MACHINE_CLOCK_LABEL, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
+  grantRevokePayload, grantRevokedParts, revokePayload,
 } from './intent-actions.js'
 import type { IntentVerifier } from './intent-verify.js'
 import { describeIntentRefusal } from './connector-stream.js'
@@ -75,6 +76,8 @@ export interface EnrolResult {
   keyId?: string
   /** Set when approved or rejected: sign_kM(T(result, enrolId, SPKI(kB), state)), base64url. */
   signature?: string
+  /** enrol_time: this machine's clock (ms), signed with the nonce under MACHINE_CLOCK_LABEL. */
+  machineTime?: number
   /**
    * Set when approved: the signer's passkeys this machine trusts, so the
    * browser knows which one to use for step-up. A hint (unsigned); a wrong
@@ -327,6 +330,51 @@ export class MachineEnrolment {
     }
   }
 
+  /**
+   * grant_revoke (spec §6.7): the owner revokes a share grant on this machine
+   * itself, so a relay replaying the old signed grant gets nowhere.
+   */
+  revokeGrant(principal: RelayPrincipal | undefined, payload: unknown): EnrolResult {
+    const p = payload as { grantId?: unknown; keep?: unknown } | null
+    const grantId = p?.grantId
+    const keep = p?.keep
+    if (typeof grantId !== 'string' || !grantId || grantId.length > 200) throw refuse('Malformed request')
+    // A supersede keeps one of the share's own grants.
+    if (keep !== undefined && (typeof keep !== 'string' || keep.length > 200 || !keep.startsWith(`${grantId}:`))) throw refuse('Malformed request')
+    if (!this.opts.intents) throw new EnrolmentError('enrol_unavailable', 'This computer cannot check signed requests')
+    const { decision, signer } = this.opts.intents.checkDeviceIntent(
+      principal, (payload as { intent?: unknown }).intent, GRANT_REVOKE_ACTION, grantRevokePayload(grantId, keep), false)
+    if (!signer) throw refuse(describeIntentRefusal(decision.reason))
+    addRevokedGrant(keep === undefined ? { grantId } : { grantId, keep }, this.opts.devicesFile, this.opts.machineId, this.now())
+    // Signed, so the owner's browser can tell the machine really has it and
+    // stop retrying; a relay can't fake the confirmation.
+    const { key } = this.machineKey()
+    return {
+      enrolId: `grant_revoke:${grantId}`,
+      state: 'approved',
+      signature: signP1363(key, transcript(...grantRevokedParts(grantId, keep))).toString('base64url'),
+    }
+  }
+
+  /**
+   * enrol_time: this machine's clock, signed over the browser's fresh nonce,
+   * so the owner's browser can date share grants by a time the relay didn't
+   * choose (it times the round trip itself). Harmless to anyone: it is only
+   * the time.
+   */
+  time(payload: unknown): EnrolResult {
+    const nonce = (payload as { nonce?: unknown } | null)?.nonce
+    if (typeof nonce !== 'string' || !/^[A-Za-z0-9_-]{16,64}$/.test(nonce)) throw refuse('Malformed request')
+    const machineTime = this.now()
+    const { key } = this.machineKey()
+    return {
+      enrolId: `time:${nonce}`,
+      state: 'approved',
+      machineTime,
+      signature: signP1363(key, transcript(MACHINE_CLOCK_LABEL, nonce, String(machineTime))).toString('base64url'),
+    }
+  }
+
   /** device_revoke (spec §5.6): remove a credential, on an owner's signed (and stepped-up) intent. */
   revoke(principal: RelayPrincipal | undefined, payload: unknown): EnrolResult {
     const keyId = (payload as { keyId?: unknown } | null)?.keyId
@@ -353,6 +401,8 @@ export class MachineEnrolment {
       case 'enrol_status': return { kind: 'enrol_result', payload: this.status(principal, payload) }
       case 'enrol_certify': return { kind: 'enrol_result', payload: this.certify(principal, payload) }
       case 'enrol_revoke': return { kind: 'enrol_result', payload: this.revoke(principal, payload) }
+      case 'enrol_grant_revoke': return { kind: 'enrol_result', payload: this.revokeGrant(principal, payload) }
+      case 'enrol_time': return { kind: 'enrol_result', payload: this.time(payload) }
       default: throw refuse('Unknown enrolment message')
     }
   }

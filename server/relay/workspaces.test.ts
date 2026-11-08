@@ -74,7 +74,7 @@ describe('migration to workspaces', () => {
     legacy.close()
 
     const db = openControlPlaneDb(path)
-    expect(db.pragma('user_version', { simple: true })).toBe(14)
+    expect(db.pragma('user_version', { simple: true })).toBe(15)
     expect(db.prepare('SELECT user_id, role FROM workspace_memberships ORDER BY user_id').all()).toEqual([
       { user_id: 'u-admin', role: 'admin' },
       { user_id: 'u-off', role: 'member' },

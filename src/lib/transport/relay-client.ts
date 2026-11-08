@@ -66,6 +66,8 @@ export interface RelaySigner {
   verifyMachineTime(nonce: string, machineTime: number, sig: string): Promise<boolean>
   /** Remember the passkeys a machine named when it asked for step-up. */
   learnPasskeys?(passkeys: Array<{ credentialId: string; keyId: string }>): Promise<void>
+  /** The user's standing on the machine (hello_ack): grantees sign with their own key. */
+  setRole?(role: 'owner' | 'grantee'): void
 }
 
 interface IntentInput {
@@ -118,13 +120,15 @@ interface Pending {
 }
 
 /** Enrolment frames (signed-intents spec §5.2) and the reply each expects. */
-export type EnrolKind = 'enrol_commit' | 'enrol_reveal' | 'enrol_status' | 'enrol_certify' | 'enrol_revoke'
+export type EnrolKind = 'enrol_commit' | 'enrol_reveal' | 'enrol_status' | 'enrol_certify' | 'enrol_revoke' | 'enrol_grant_revoke' | 'enrol_time'
 const ENROL_REPLY: Record<EnrolKind, string> = {
   enrol_commit: 'enrol_challenge',
   enrol_reveal: 'enrol_result',
   enrol_status: 'enrol_result',
   enrol_certify: 'enrol_result',
   enrol_revoke: 'enrol_result',
+  enrol_grant_revoke: 'enrol_result',
+  enrol_time: 'enrol_result',
 }
 
 /** Callbacks for one proxied session stream. */
@@ -536,7 +540,8 @@ export class RelayConnection {
     }
 
     if (msg.kind === 'hello_ack') {
-      const ack = msg.payload as { online?: boolean; displayName?: string; serverTime?: unknown }
+      const ack = msg.payload as { online?: boolean; displayName?: string; serverTime?: unknown; role?: unknown }
+      if (ack.role === 'owner' || ack.role === 'grantee') this.opts.signer?.setRole?.(ack.role)
       // A first guess at the clock offset, until the machine has given its own.
       if (typeof ack.serverTime === 'number' && !this.machineClockKnown) this.opts.signer?.setClockOffset(ack.serverTime - Date.now())
       this.backoffMs = BACKOFF_MIN_MS

@@ -113,7 +113,8 @@ export async function keyIdForSpki(spki: Uint8Array): Promise<string> {
 const ECDSA = { name: 'ECDSA', namedCurve: 'P-256' } as const
 const SIGN = { name: 'ECDSA', hash: 'SHA-256' } as const
 
-async function verifyWith(spki: Uint8Array, data: Uint8Array, signature: Uint8Array): Promise<boolean> {
+/** Verify a P1363 ECDSA P-256 signature with a public key given as SPKI. False on anything malformed. */
+export async function verifyWith(spki: Uint8Array, data: Uint8Array, signature: Uint8Array): Promise<boolean> {
   try {
     const key = await crypto.subtle.importKey('spki', spki as BufferSource, ECDSA, false, ['verify'])
     return await crypto.subtle.verify(SIGN, key, signature as BufferSource, data as BufferSource)
@@ -159,6 +160,42 @@ export interface TrustStorage {
   getPin(userId: string, machineId: string): Promise<MachinePin | undefined>
   putPin(pin: MachinePin): Promise<void>
   deletePin(userId: string, machineId: string): Promise<void>
+  /** Grant revocations not yet confirmed by the machine (§6.7). Optional: storages without it don't persist them. */
+  getRevocations?(userId: string, machineId: string): Promise<PendingRevocation[]>
+  putRevocations?(userId: string, machineId: string, revocations: PendingRevocation[]): Promise<void>
+  /** The owner's own record of the share grants this browser issued (§6.7, grants.ts). */
+  getIssuedGrants?(userId: string, machineId: string): Promise<IssuedGrant[]>
+  putIssuedGrants?(userId: string, machineId: string, issued: IssuedGrant[]): Promise<void>
+}
+
+/**
+ * One share as the owner's browser knows it: what the owner chose, the grant
+ * it currently stands behind, and every id it ever issued. This, not the
+ * relay's listing, is what renewal and revocation work from.
+ */
+export interface IssuedGrant {
+  shareId: string
+  /** The session and member the owner shared with: a grant for this share names exactly these. */
+  sessionId: string
+  granteeUserId: string
+  role: 'viewer' | 'editor'
+  /** The share's end as the owner chose it (ms), or null. */
+  notAfter: number | null
+  /** The grant text currently signed for this share, or null before the first. */
+  current: { grantId: string; grant: string } | null
+  /** Every grant id signed for this share. */
+  issuedIds: string[]
+  /** The owner revoked the share: never renew or re-sign it. Kept for good. */
+  revoked: boolean
+}
+
+/**
+ * A revocation waiting for the machine's confirmation: a share id (all its
+ * grants), or with `keep` a supersede (all its grants issued up to `keep`).
+ */
+export interface PendingRevocation {
+  grantId: string
+  keep?: string
 }
 
 /** Fired on window whenever a machine pin is saved or removed (signers reload their key). */
@@ -171,6 +208,8 @@ function trustChanged(): void {
 const DB_NAME = 'codekin-device-trust'
 const KEYS = 'keys'
 const PINS = 'pins'
+const REVOCATIONS = 'revocations'
+const ISSUED = 'issued'
 
 function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -184,10 +223,14 @@ export function indexedDbTrustStorage(): TrustStorage {
   let db: Promise<IDBDatabase> | null = null
   const open = () => {
     db ??= new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, 1)
-      req.onupgradeneeded = () => {
-        req.result.createObjectStore(KEYS, { keyPath: 'userId' })
-        req.result.createObjectStore(PINS, { keyPath: ['userId', 'machineId'] })
+      const req = indexedDB.open(DB_NAME, 3)
+      req.onupgradeneeded = event => {
+        if (event.oldVersion < 1) {
+          req.result.createObjectStore(KEYS, { keyPath: 'userId' })
+          req.result.createObjectStore(PINS, { keyPath: ['userId', 'machineId'] })
+        }
+        if (event.oldVersion < 2) req.result.createObjectStore(REVOCATIONS, { keyPath: ['userId', 'machineId'] })
+        if (event.oldVersion < 3) req.result.createObjectStore(ISSUED, { keyPath: ['userId', 'machineId'] })
       }
       req.onsuccess = () => { resolve(req.result) }
       req.onerror = () => { db = null; reject(req.error ?? new Error('IndexedDB unavailable')) }
@@ -201,6 +244,20 @@ export function indexedDbTrustStorage(): TrustStorage {
     getPin: async (userId, machineId) => request((await store(PINS, 'readonly')).get([userId, machineId]) as IDBRequest<MachinePin | undefined>),
     putPin: async pin => { await request((await store(PINS, 'readwrite')).put(pin)); trustChanged() },
     deletePin: async (userId, machineId) => { await request((await store(PINS, 'readwrite')).delete([userId, machineId])); trustChanged() },
+    getRevocations: async (userId, machineId) => {
+      const row = await request((await store(REVOCATIONS, 'readonly')).get([userId, machineId]) as IDBRequest<{ revocations?: PendingRevocation[] } | undefined>)
+      return row?.revocations ?? []
+    },
+    putRevocations: async (userId, machineId, revocations) => {
+      await request((await store(REVOCATIONS, 'readwrite')).put({ userId, machineId, revocations }))
+    },
+    getIssuedGrants: async (userId, machineId) => {
+      const row = await request((await store(ISSUED, 'readonly')).get([userId, machineId]) as IDBRequest<{ issued?: IssuedGrant[] } | undefined>)
+      return row?.issued ?? []
+    },
+    putIssuedGrants: async (userId, machineId, issued) => {
+      await request((await store(ISSUED, 'readwrite')).put({ userId, machineId, issued }))
+    },
   }
 }
 

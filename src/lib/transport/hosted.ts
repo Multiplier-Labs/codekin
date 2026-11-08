@@ -11,6 +11,7 @@ import type { CodekinTransport, TransportTarget } from './types'
 import { RelayConnection, RelayRequestError, decodeBody, encodeBody } from './relay-client'
 import { RelayWebSocket } from './relay-socket'
 import { createIntentSigner } from '../../hosted/intentSigner'
+import type { IntentSigner, SignedIntent } from '../../hosted/intentSigner'
 
 /** Control-plane sign-in entry point. */
 const LOGIN_PATH = '/api/auth/github/start'
@@ -45,6 +46,7 @@ export class HostedRelayTransport implements CodekinTransport {
   /** Machine name for display; falls back to the id when not supplied. */
   readonly displayName: string
   private connection: RelayConnection
+  private signer: IntentSigner
   private redirecting = false
   /** Channel ids only need to be unique within this connection. */
   private nextChannel = 0
@@ -54,7 +56,18 @@ export class HostedRelayTransport implements CodekinTransport {
     this.displayName = displayName ?? machineId
     // Everything sent to the machine is signed once this browser is
     // confirmed on it (signed-intents spec §6); until then it goes unsigned.
-    this.connection = connection ?? new RelayConnection({ machineId, signer: createIntentSigner(machineId) })
+    this.signer = createIntentSigner(machineId)
+    this.connection = connection ?? new RelayConnection({ machineId, signer: this.signer })
+  }
+
+  /** Sign an intent for this machine (share grants, revocations); null when this browser can't. */
+  signIntent(intent: Parameters<IntentSigner['sign']>[0]): Promise<SignedIntent | null> {
+    return this.signer.sign(intent)
+  }
+
+  /** Send a device or grant frame (enrol_*) to the machine and await its reply. */
+  sendDeviceFrame(kind: Parameters<RelayConnection['enrol']>[0], payload: unknown): Promise<unknown> {
+    return this.connection.enrol(kind, payload)
   }
 
   /** Open the underlying relay socket (idempotent). */

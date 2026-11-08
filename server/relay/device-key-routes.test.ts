@@ -54,6 +54,19 @@ describe('device key registry', () => {
     expect(listDeviceKeys(db, alice)).toEqual([expect.objectContaining({ label: 'Safari · iPhone (renamed)', spki })])
   })
 
+  it('registers this browser key for the caller, a valid P-256 key only', async () => {
+    const spki = generateMachineKeyPair().publicKey
+    const post = (body: unknown) => fetch(base, { method: 'POST', headers: { 'x-test-user': 'alice', 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    expect((await post({ spki, label: 'Pixel Chrome' })).status).toBe(200)
+    expect((await post({ spki: 'AAAA' })).status).toBe(400)
+    expect(listDeviceKeys(db, alice)).toEqual([expect.objectContaining({ spki, label: 'Pixel Chrome' })])
+  })
+
+  it('caps how many keys one user can register', () => {
+    for (let i = 0; i < 20; i++) expect(upsertDeviceKey(db, bob, generateMachineKeyPair().publicKey, `k${i}`)).not.toBeNull()
+    expect(upsertDeviceKey(db, bob, generateMachineKeyPair().publicKey, 'one too many')).toBeNull()
+  })
+
   it('lists and removes only the caller’s own keys', async () => {
     const mine = upsertDeviceKey(db, alice, generateMachineKeyPair().publicKey, 'Mine')!
     upsertDeviceKey(db, bob, generateMachineKeyPair().publicKey, 'Bob’s')

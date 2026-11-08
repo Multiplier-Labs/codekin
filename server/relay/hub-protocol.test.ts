@@ -34,6 +34,16 @@ describe('hub wire validation', () => {
     expect(parseHubEnvelope(wire('request', { method: 'GET', path: '/' }, { id: 'r' }), 'connector')).toBeNull()
   })
 
+  it('carries what grant supersedes and clock probes need through the relay', () => {
+    const intent = { body: '{}', sig: 'AAAA' }
+    const supersede = parseHubEnvelope(wire('enrol_grant_revoke', { grantId: 'g1', keep: 'g1:abc0123abcd', intent }, { id: 'e' }), 'browser')
+    expect((supersede?.payload as { keep?: string }).keep).toBe('g1:abc0123abcd')
+    expect(parseHubEnvelope(wire('enrol_time', { nonce: 'A'.repeat(22) }, { id: 'e' }), 'browser')).not.toBeNull()
+    expect(parseHubEnvelope(wire('enrol_time', { nonce: 'not base64url!' }, { id: 'e' }), 'browser')).toBeNull()
+    const result = parseHubEnvelope(wire('enrol_result', { enrolId: 'time:x', state: 'approved', machineTime: 5, signature: 'AA' }, { id: 'e' }), 'connector')
+    expect((result?.payload as { machineTime?: number }).machineTime).toBe(5)
+  })
+
   it('leaves stream frame size to the socket limit, so large session replays pass', () => {
     const replay = wire('stream_data', { data: 'x'.repeat(9 * 1024 * 1024) }, { channelId: 'c' })
     expect(parseHubEnvelope(replay, 'connector')).not.toBeNull()

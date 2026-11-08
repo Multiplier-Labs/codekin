@@ -78,7 +78,7 @@ describe('trust store', () => {
   })
 
   it('round-trips the spec example shape, both credential kinds', () => {
-    const store = storeWith([BROWSER, PASSKEY], { policy: 'required', pending: [PENDING, { ...PENDING, enrolId: 'e2', reveal: undefined, outcome: { state: 'approved', at: 'x' } }], revokedGrants: ['g1'] })
+    const store = storeWith([BROWSER, PASSKEY], { policy: 'required', pending: [PENDING, { ...PENDING, enrolId: 'e2', reveal: undefined, outcome: { state: 'approved', at: 'x' } }], revokedGrants: [{ grantId: 'g1', at: '2026-11-08T10:00:00Z' }] })
     delete store.pending[1].reveal
     writeTrustStore(file, store)
     expect(readTrustStore(file)).toEqual(store)

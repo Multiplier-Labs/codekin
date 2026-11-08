@@ -447,6 +447,15 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
   db => {
     db.exec('ALTER TABLE workspaces ADD COLUMN require_passkey_step_up INTEGER NOT NULL DEFAULT 0')
   },
+
+  // 15: owner-signed share grants (signed-intents spec §6.7), stored beside the
+  // share they cover and attached to the grantee's principal.
+  db => {
+    db.exec(`
+      ALTER TABLE session_shares ADD COLUMN signed_grant TEXT;
+      ALTER TABLE session_shares ADD COLUMN signed_grant_expires_at TEXT;
+    `)
+  },
 ]
 
 function runMigrations(db: Database.Database): void {

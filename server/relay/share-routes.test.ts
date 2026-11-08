@@ -10,6 +10,12 @@ import type Database from 'better-sqlite3'
 import { openControlPlaneDb, upsertUserFromGithub } from './control-plane-db.js'
 import { startPairing, approvePairing, completePairing } from './pairing.js'
 import { createShareRouter } from './share-routes.js'
+import { createHash } from 'crypto'
+import { GRANT_ACTION, grantPayload } from './intent-actions.js'
+import type { GrantBody } from './intent-actions.js'
+import { signedGrantsFor } from './shares.js'
+import { upsertDeviceKey } from './device-keys.js'
+import { generateMachineKeyPair } from './machine-identity.js'
 import type { SessionUser } from './relay-auth-routes.js'
 import type { UserRow } from './control-plane-db.js'
 import type { BrowserHub } from './browser-hub.js'
@@ -58,7 +64,7 @@ describe('share routes', () => {
       if (req.headers['x-test-user'] === 'owner') { req.session.user = toSessionUser(owner); signInFully(db, req.session, req.session.user.id) }
       next()
     })
-    app.use(createShareRouter(db, { reauthorize } as unknown as BrowserHub, undefined, { limitsFor: () => limits }))
+    app.use(createShareRouter(db, { reauthorize, refreshGrants: vi.fn() } as unknown as BrowserHub, undefined, { limitsFor: () => limits }))
     await new Promise<void>(resolve => {
       server = app.listen(0, '127.0.0.1', () => {
         baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -83,6 +89,84 @@ describe('share routes', () => {
     expect(res.status).toBe(201)
     return ((await res.json()) as { share: SessionShare }).share
   }
+
+  describe('signed grants (signed-intents spec §6.7)', () => {
+    const grantFor = (share: SessionShare, over: Partial<GrantBody> = {}, ts = Date.now()) => {
+      const grant: GrantBody = {
+        grantId: share.id, sessionId: 's1', granteeUserId: guest.id, permissions: ['view'], granteeKeys: [],
+        expiresAt: Date.now() + 24 * 60 * 60_000, ...over,
+      }
+      const text = JSON.stringify(grant)
+      const body = JSON.stringify({
+        v: 1, machineId, sessionId: 's1', action: GRANT_ACTION, nonce: 'n'.repeat(22), ts, keyId: 'k',
+        payloadHash: createHash('sha256').update(grantPayload(text)).digest('base64url'),
+      })
+      return { grant: text, intent: { body, sig: 'AAAA' } }
+    }
+    const put = (shareId: string, payload: unknown, headers = asOwner) =>
+      fetch(`${baseUrl}/api/shares/${shareId}/grant`, { method: 'PUT', headers, body: JSON.stringify(payload) })
+
+    it('stores a grant that describes the share, and hands it to the grantee principal', async () => {
+      const share = await createShare()
+      const signed = grantFor(share)
+      const res = await put(share.id, signed)
+      expect(res.status).toBe(200)
+      const stored = ((await res.json()) as { share: { signedGrant: { expiresAt: number; permissions: string[] } } }).share
+      expect(stored.signedGrant?.permissions).toEqual(['view'])
+      expect(signedGrantsFor(db, guest.id, machineId)).toEqual([signed])
+      expect(signedGrantsFor(db, owner.id, machineId)).toEqual([])
+    })
+
+    it('refuses a grant that does not describe the share', async () => {
+      const share = await createShare()
+      for (const bad of [
+        grantFor(share, { grantId: 'other' }),
+        grantFor(share, { sessionId: 's2' }),
+        grantFor(share, { granteeUserId: owner.id }),
+        grantFor(share, { permissions: ['view', 'send_prompt'] }),
+        grantFor(share, { expiresAt: Date.now() + 40 * 24 * 60 * 60_000 }),
+        grantFor(share, { grantId: `x${share.id}:1` }),
+        { ...grantFor(share), intent: { ...grantFor(share).intent, body: grantFor(share, { permissions: [] }).intent.body } },
+      ]) {
+        expect((await put(share.id, bad)).status).toBe(400)
+      }
+      expect(signedGrantsFor(db, guest.id, machineId)).toEqual([])
+      // Only the owner who shared can sign.
+      expect((await put(share.id, grantFor(share), { 'Content-Type': 'application/json' } as typeof asOwner)).status).toBe(401)
+    })
+
+    it('accepts a new grant id per signature, and a notAfter within the share', async () => {
+      const share = await createShare()
+      expect((await put(share.id, grantFor(share, { grantId: `${share.id}:2`, notAfter: null }))).status).toBe(200)
+    })
+
+    it("tells an owner whose clock is off, before the machine silently ignores the grant", async () => {
+      const share = await createShare()
+      const hour = 60 * 60_000
+      const res = await put(share.id, grantFor(share, {}, Date.now() + hour))
+      expect(res.status).toBe(400)
+      expect(((await res.json()) as { error: string }).error).toMatch(/clock/)
+      // An issue time in the id ahead of the signing.
+      const ahead = `${share.id}:${(Date.now() + hour).toString(36)}0123abcd`
+      expect((await put(share.id, grantFor(share, { grantId: ahead }))).status).toBe(400)
+    })
+
+    it('drops the grant when the share permissions change, so the owner signs again', async () => {
+      const share = await createShare()
+      await put(share.id, grantFor(share))
+      const patched = await fetch(`${baseUrl}/api/shares/${share.id}`, { method: 'PATCH', headers: asOwner, body: JSON.stringify({ role: 'viewer' }) })
+      expect(patched.status).toBe(200)
+      expect(signedGrantsFor(db, guest.id, machineId)).toEqual([])
+    })
+
+    it('shows the owner the grantee devices to sign', async () => {
+      const share = await createShare()
+      const spki = generateMachineKeyPair().publicKey
+      upsertDeviceKey(db, guest.id, spki, 'Pixel Chrome')
+      const res = await fetch(`${baseUrl}/api/shares/${share.id}/grantee-keys`, { headers: asOwner })
+      expect(await res.json()).toEqual({ keys: [expect.objectContaining({ spki, label: 'Pixel Chrome' })] })
+    })
+  })
 
   it('creates a share for an unambiguous grantee login', async () => {
     const share = await createShare()

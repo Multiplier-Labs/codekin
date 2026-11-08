@@ -13,6 +13,7 @@ import { useEffect, Suspense, lazy } from 'react'
 import { LocalHttpTransport, setTransport, transport as activeTransport } from '../lib/transport'
 import type { HostedRelayTransport } from '../lib/transport'
 import type { Machine } from './machines'
+import { flushRevocations, registerThisBrowser, renewGrants } from './grants'
 
 const App = lazy(() => import('../App.tsx'))
 
@@ -24,7 +25,25 @@ interface MachineWorkspaceProps {
   onSwitchMachine: (machine: Machine) => void
 }
 
+/** How often the owner's open browser checks for share grants to renew (§6.7). */
+const RENEW_EVERY_MS = 60 * 60_000
+
 export function MachineWorkspace({ transport, onExit, onSwitchMachine }: MachineWorkspaceProps) {
+  // Signed share grants (signed-intents spec §6.7): register this browser's
+  // key so an owner sharing with this user can name it, and, as an owner,
+  // re-sign grants about to run out (same devices only).
+  useEffect(() => {
+    void registerThisBrowser()
+    // Renew grants near expiry, and retry revocations the machine hasn't confirmed.
+    const renew = () => {
+      void renewGrants(transport, transport.machineId).catch(() => {})
+      void flushRevocations(transport, transport.machineId).catch(() => {})
+    }
+    renew()
+    const timer = setInterval(renew, RENEW_EVERY_MS)
+    return () => { clearInterval(timer) }
+  }, [transport])
+
   useEffect(() => {
     return () => {
       transport.close()

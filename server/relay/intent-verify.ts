@@ -23,10 +23,11 @@ import { createHash } from 'crypto'
 import { existsSync, statSync } from 'fs'
 import {
   CHANNEL_OPEN_ACTION, CHANNEL_TOKEN_CHARS, INTENT_MAX_SKEW_MS, INTENT_VERSION, MACHINE_TIME_LABEL, MAX_INTENT_BODY_CHARS,
-  PASSKEY_ANY, actionNeedsStepUp, intentChallengeInput, channelOpenPayload, channelSessionAfter, frameAction, frameNeedsStepUp, framePayload, frameSession,
+  GRANT_ACTION, MAX_GRANT_LIFETIME_MS, PASSKEY_ANY, actionNeedsStepUp, grantIssuedAt, grantNeedsStepUp, grantPayload, grantRevokedBy, intentChallengeInput, channelOpenPayload, channelSessionAfter, frameAction, frameNeedsStepUp, framePayload, frameSession,
   isExemptFrame, requestAction, requestNeedsStepUp, requestPayload, requestSession,
 } from './intent-actions.js'
-import type { IntentBody, IntentRefusal, SignedIntent } from './intent-actions.js'
+import type { GrantBody, IntentBody, IntentRefusal, SignedGrant, SignedIntent } from './intent-actions.js'
+import { keyIdForSpki, parseP256Spki } from './machine-identity.js'
 import { fromB64url, SIGNATURE_BYTES, transcript, verifyP1363 } from './enrolment-crypto.js'
 import { mutateTrustStore, readTrustStore } from './trust-store.js'
 import type { BrowserCredential, IntentPolicy, PasskeyCredential, TrustedCredential, TrustStore } from './trust-store.js'
@@ -116,6 +117,26 @@ function parseBody(text: string): IntentBody | null {
   return v as IntentBody
 }
 
+/** Largest grant text accepted (a grant names at most a few keys). */
+const MAX_GRANT_CHARS = 8192
+
+/** A grant's JSON, read strictly: every field present, keys well formed. Null otherwise. */
+function parseGrant(text: string): GrantBody | null {
+  let parsed: unknown
+  try { parsed = JSON.parse(text) } catch { return null }
+  if (!parsed || typeof parsed !== 'object') return null
+  const v = parsed as Partial<GrantBody>
+  if (typeof v.grantId !== 'string' || !v.grantId || typeof v.sessionId !== 'string' || !v.sessionId) return null
+  if (typeof v.granteeUserId !== 'string' || !v.granteeUserId || typeof v.expiresAt !== 'number' || !Number.isFinite(v.expiresAt)) return null
+  if (!Array.isArray(v.permissions) || !v.permissions.every(p => typeof p === 'string')) return null
+  if (!Array.isArray(v.granteeKeys) || v.granteeKeys.length > 20) return null
+  for (const k of v.granteeKeys) {
+    const spki = parseP256Spki((k as { spki?: unknown } | null)?.spki)
+    if (!spki || (k as { keyId?: unknown }).keyId !== keyIdForSpki(spki)) return null
+  }
+  return v as GrantBody
+}
+
 function asSignedIntent(value: unknown): SignedIntent | null {
   if (!value || typeof value !== 'object') return null
   const v = value as Partial<SignedIntent>
@@ -138,6 +159,8 @@ export class IntentVerifier {
   private lastUsed = new Map<string, number>()
   private lastFlush = 0
   private flushScheduled = false
+  /** Grant checks are cached briefly; the key includes the device list's signature, so a revoked signer counts at once. */
+  private grantCache = new Map<string, { verified: { grant: GrantBody; signedAt: number } | null; until: number }>()
   /** The workspace's "Privileged actions need a passkey" (§6.6), as the relay reports it. */
   private requirePasskey = false
   private lastReadWarning = -Infinity
@@ -220,8 +243,10 @@ export class IntentVerifier {
     intent: unknown,
     action: string,
     payload: Uint8Array,
+    /** Device changes are; revoking a grant (the safe direction) isn't. */
+    privileged = true,
   ): { decision: IntentDecision; signer: TrustedCredential | null } {
-    const { decision, body } = this.check(principal, intent, { action, sessionId: null, payload, privileged: true })
+    const { decision, body } = this.check(principal, intent, { action, sessionId: null, payload, privileged })
     if (decision.verdict !== 'accepted' || !body) return { decision, signer: null }
     const store = this.currentStore()
     const signer = this.signerOf(store, body, asSignedIntent(intent))
@@ -295,30 +320,31 @@ export class IntentVerifier {
     expected: Expected,
   ): IntentRefusal | { stepUp?: StepUp; keyId: string } {
     if (intent.webauthn === undefined && intent.sig === undefined) return 'intent_malformed'
-    const credential = this.signerOf(store, body, intent)
-    if (!store || !credential) return 'intent_unknown_key'
-    // The signature proves the device; the principal must be the same person,
-    // and only the recorded owner's devices act as owner.
-    if (!principal || principal.userId !== credential.userId) return 'intent_wrong_signer'
-    if (principal.role !== 'owner' || store.ownerUserId === null || credential.userId !== store.ownerUserId) return 'intent_wrong_signer'
+    if (!store) return 'intent_unknown_key'
 
-    if (credential.kind === 'browser') {
+    // Who signed: an owner credential from the device list, or, for a
+    // grantee, a key named in a verified owner-signed grant (§6.7).
+    let signerKeyId: string
+    let ownerCredential: TrustedCredential | null = null
+    if (principal?.role === 'grantee') {
+      if (intent.webauthn || !intent.sig) return 'intent_unsupported'
+      const key = this.granteeKey(principal, expected.sessionId, body.keyId)
+      if (!key) return 'intent_unknown_key'
       const sig = fromB64url(intent.sig, SIGNATURE_BYTES)
-      const spki = fromB64url(credential.spki)
+      const spki = fromB64url(key.spki)
       if (!sig || !spki || !verifyP1363(spki, Buffer.from(intent.body, 'utf-8'), sig)) return 'intent_bad_signature'
+      signerKeyId = key.keyId
     } else {
-      // A passkey signs SHA-256(body) as its WebAuthn challenge, with user
-      // verification, for this relay's origin and the passkey's RP ID.
-      if (!intent.webauthn) return 'intent_bad_signature'
-      let origin: string
-      try { origin = new URL(store.relayOrigin).origin } catch { return 'intent_bad_signature' }
-      const failure = verifyPasskeyAssertion(intent.webauthn, {
-        challenge: createHash('sha256').update(intentChallengeInput(intent.body)).digest(),
-        origin,
-        rpId: credential.rpId,
-        cosePublicKey: credential.cosePublicKey,
-      })
-      if (failure) return 'intent_bad_signature'
+      const credential = this.signerOf(store, body, intent)
+      if (!credential) return 'intent_unknown_key'
+      // The signature proves the device; the principal must be the same person,
+      // and only the recorded owner's devices act as owner.
+      if (!principal || principal.userId !== credential.userId) return 'intent_wrong_signer'
+      if (principal.role !== 'owner' || store.ownerUserId === null || credential.userId !== store.ownerUserId) return 'intent_wrong_signer'
+      const bad = this.checkSignature(store, credential, intent)
+      if (bad) return bad
+      ownerCredential = credential
+      signerKeyId = credential.keyId
     }
 
     if (body.machineId !== this.opts.machineId) return 'intent_wrong_machine'
@@ -333,18 +359,150 @@ export class IntentVerifier {
     if (Math.abs(body.ts - this.now()) > INTENT_MAX_SKEW_MS) return 'intent_stale'
 
     // Step-up (§6.6): a privileged action needs a passkey when the signer has
-    // one enrolled here, or when the workspace requires it.
+    // one enrolled here, or when the workspace requires it. Grantees can't
+    // take privileged actions at all; the channel policy refuses them.
     let stepUp: StepUp | undefined
-    if (expected.privileged || actionNeedsStepUp(expected.action)) {
-      const hasPasskey = store.credentials.some(c => c.kind === 'passkey' && c.userId === credential.userId)
-      if (credential.kind !== 'passkey' && (hasPasskey || this.requirePasskey)) return 'intent_step_up_required'
-      stepUp = credential.kind === 'passkey' ? 'passkey' : 'browser-key'
+    if (ownerCredential && (expected.privileged || actionNeedsStepUp(expected.action))) {
+      const refusal = this.stepUpRefusal(store, ownerCredential)
+      if (refusal) return refusal
+      stepUp = ownerCredential.kind === 'passkey' ? 'passkey' : 'browser-key'
     }
 
-    const replay = this.remember(credential.keyId, body.nonce)
+    const replay = this.remember(signerKeyId, body.nonce)
     if (replay) return replay
-    this.noteUsed(credential.keyId)
-    return { keyId: credential.keyId, ...(stepUp ? { stepUp } : {}) }
+    if (ownerCredential) this.noteUsed(signerKeyId)
+    return { keyId: signerKeyId, ...(stepUp ? { stepUp } : {}) }
+  }
+
+  /** A browser key's P1363 signature, or a passkey assertion over T("ck-intent-v1", body). */
+  private checkSignature(store: TrustStore, credential: TrustedCredential, intent: SignedIntent): IntentRefusal | null {
+    if (credential.kind === 'browser') {
+      const sig = fromB64url(intent.sig, SIGNATURE_BYTES)
+      const spki = fromB64url(credential.spki)
+      return sig && spki && verifyP1363(spki, Buffer.from(intent.body, 'utf-8'), sig) ? null : 'intent_bad_signature'
+    }
+    // A passkey signs with user verification, for this relay's origin and the passkey's RP ID.
+    if (!intent.webauthn) return 'intent_bad_signature'
+    let origin: string
+    try { origin = new URL(store.relayOrigin).origin } catch { return 'intent_bad_signature' }
+    const failure = verifyPasskeyAssertion(intent.webauthn, {
+      challenge: createHash('sha256').update(intentChallengeInput(intent.body)).digest(),
+      origin,
+      rpId: credential.rpId,
+      cosePublicKey: credential.cosePublicKey,
+    })
+    return failure ? 'intent_bad_signature' : null
+  }
+
+  /** Why a privileged action by this owner credential needs more, or null. */
+  private stepUpRefusal(store: TrustStore, credential: TrustedCredential): IntentRefusal | null {
+    const hasPasskey = store.credentials.some(c => c.kind === 'passkey' && c.userId === credential.userId)
+    return credential.kind !== 'passkey' && (hasPasskey || this.requirePasskey) ? 'intent_step_up_required' : null
+  }
+
+  // --- Grants (§6.7) -------------------------------------------------------
+
+  /**
+   * The grantee's grants that verify: signed by an owner credential still in
+   * the device list (so revoking that key drops them at once), for this
+   * machine and this grantee, unexpired, not revoked here, at most 30 days
+   * long, and stepped up when they include approve_shell.
+   */
+  verifiedGrants(principal: RelayPrincipal | undefined): Map<string, GrantBody> {
+    const best = new Map<string, { grant: GrantBody; signedAt: number }>()
+    const store = this.currentStore()
+    if (!store || principal?.role !== 'grantee' || !Array.isArray(principal.signedGrants)) return new Map()
+    for (const signed of principal.signedGrants.slice(0, 200)) {
+      const verified = this.verifyGrant(store, principal.userId, signed)
+      if (!verified) continue
+      // One grant per session: the most recently issued one (renewal keeps
+      // a grant's id and so its place), then the most recently signed, so a
+      // narrowed grant replaces a broader one however often the broader one
+      // is renewed. The owner also supersedes the old grants on the machine.
+      const current = best.get(verified.grant.sessionId)
+      if (!current || isNewerGrant(verified, current)) best.set(verified.grant.sessionId, verified)
+    }
+    return new Map([...best].map(([sessionId, v]) => [sessionId, v.grant]))
+  }
+
+  /** Changes whenever the device list (and so any revocation or signer) changes. */
+  grantsVersion(): string {
+    this.currentStore()
+    return this.storeSignature ?? ''
+  }
+
+  /** `value` comes from the relay: anything at all. */
+  private verifyGrant(store: TrustStore, granteeUserId: string, value: unknown): { grant: GrantBody; signedAt: number } | null {
+    const signed = value as Partial<SignedGrant> | null
+    if (!signed || typeof signed.grant !== 'string' || signed.grant.length > MAX_GRANT_CHARS) return null
+    const cacheKey = `${this.storeSignature ?? ''}|${granteeUserId}|${signed.grant}|${JSON.stringify(signed.intent)}`
+    const cached = this.grantCache.get(cacheKey)
+    const now = this.now()
+    if (cached && cached.until > now) return cached.verified && cached.verified.grant.expiresAt > now ? cached.verified : null
+
+    const verified = this.checkGrant(store, granteeUserId, { grant: signed.grant, intent: signed.intent as SignedIntent }, now)
+    if (this.grantCache.size > 1000) this.grantCache.clear()
+    this.grantCache.set(cacheKey, { verified, until: now + 60_000 })
+    return verified
+  }
+
+  private checkGrant(store: TrustStore, granteeUserId: string, signed: SignedGrant, now: number): { grant: GrantBody; signedAt: number } | null {
+    const intent = asSignedIntent(signed.intent)
+    const body = intent ? parseBody(intent.body) : null
+    const grant = parseGrant(signed.grant)
+    if (!intent || !body || !grant) return null
+    if (body.action !== GRANT_ACTION || body.machineId !== this.opts.machineId || body.sessionId !== grant.sessionId) return null
+    if (body.payloadHash !== sha256b64url(grantPayload(signed.grant))) return null
+    if (grant.granteeUserId !== granteeUserId) return null
+    // Only an owner credential still on this machine vouches for a grant.
+    const credential = this.signerOf(store, body, intent)
+    if (!credential || store.ownerUserId === null || credential.userId !== store.ownerUserId) return null
+    if (this.checkSignature(store, credential, intent)) return null
+    if (grantNeedsStepUp(grant.permissions) && this.stepUpRefusal(store, credential)) return null
+    if (body.ts > now + INTENT_MAX_SKEW_MS) return null
+    // The id's issue time orders a share's grants and decides supersedes, so
+    // it may not run ahead of when the grant was signed (renewal only moves
+    // the signing time on).
+    if (issuedAt({ grant, signedAt: body.ts }) > body.ts + INTENT_MAX_SKEW_MS) return null
+    if (grant.expiresAt <= now || grant.expiresAt - body.ts > MAX_GRANT_LIFETIME_MS + INTENT_MAX_SKEW_MS) return null
+    if (typeof grant.notAfter === 'number' && grant.expiresAt > grant.notAfter) return null
+    // Revoking X also revokes every X:… (a share's id covers all the grants
+    // signed for it, whichever ones the relay chooses to present); a
+    // supersede of X revokes every X:… issued up to the one it keeps.
+    if (store.revokedGrants.some(r => grantRevokedBy(grant.grantId, r))) return null
+    return { grant, signedAt: body.ts }
+  }
+
+  /** The grantee key that may sign for `sessionId` (any verified grant's, for machine-level actions). */
+  private granteeKey(principal: RelayPrincipal, sessionId: string | null, keyId: string): { keyId: string; spki: string } | null {
+    const grants = this.verifiedGrants(principal)
+    const forSession = sessionId !== null && !sessionId.startsWith('@') ? grants.get(sessionId) : undefined
+    const candidates = sessionId !== null && !sessionId.startsWith('@')
+      ? (forSession ? [forSession] : [])
+      : [...grants.values()]
+    for (const grant of candidates) {
+      const key = grant.granteeKeys.find(k => k.keyId === keyId)
+      if (key) return key
+    }
+    return null
+  }
+
+  /**
+   * The principal the existing policy should see. For a grantee on a
+   * `required` machine, that is the relay's grants intersected with the
+   * owner-signed ones; elsewhere the relay's word still stands (warn/off).
+   */
+  effectivePrincipal(principal: RelayPrincipal | undefined): RelayPrincipal | undefined {
+    if (principal?.role !== 'grantee' || this.policy() !== 'required') return principal
+    const verified = this.verifiedGrants(principal)
+    const grants: Record<string, string[]> = {}
+    for (const [sessionId, relayPermissions] of Object.entries(principal.grants)) {
+      const signed = verified.get(sessionId)
+      if (!signed) continue
+      const both = relayPermissions.filter(p => signed.permissions.includes(p))
+      if (both.length > 0) grants[sessionId] = both
+    }
+    return { ...principal, grants }
   }
 
   /** Record (keyId, nonce); refuse one already seen in the window, or when the cache is full. */
@@ -429,4 +587,17 @@ export class IntentVerifier {
     const sig = this.opts.signWithMachineKey?.(transcript(MACHINE_TIME_LABEL, nonce, String(machineTime)))
     return { machineTime, ...(sig ? { machineTimeSig: sig } : {}) }
   }
+}
+
+/** When a grant was issued: from its id (`<share>:<issued>`), else its signing time. */
+function issuedAt(v: { grant: GrantBody; signedAt: number }): number {
+  const colon = v.grant.grantId.lastIndexOf(':')
+  return (colon > 0 ? grantIssuedAt(v.grant.grantId, v.grant.grantId.slice(0, colon)) : null) ?? v.signedAt
+}
+
+/** Of two grants for one session, whether `a` should win: issued later, or renewed later. */
+function isNewerGrant(a: { grant: GrantBody; signedAt: number }, b: { grant: GrantBody; signedAt: number }): boolean {
+  const ia = issuedAt(a)
+  const ib = issuedAt(b)
+  return ia !== ib ? ia > ib : a.signedAt > b.signedAt
 }

@@ -24,6 +24,13 @@ export const INTENT_MAX_SKEW_MS = 5 * 60_000
  */
 export const MACHINE_TIME_LABEL = 'ck-intent-time-v1'
 
+/**
+ * Domain label for the machine's answer to a clock probe (enrol_time):
+ * sign_kM(T(label, nonce, String(machineTime))). The owner's browser dates
+ * share grants by it (§6.7).
+ */
+export const MACHINE_CLOCK_LABEL = 'ck-machine-clock-v1'
+
 /** How large a clock offset the browser will apply after a stale refusal (§6.5). */
 export const MAX_CLOCK_OFFSET_MS = 60 * 60_000
 
@@ -329,6 +336,106 @@ export function requestNeedsStepUp(method: string, path: string, body: Uint8Arra
   return isCreate
     ? (typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)) || preApprovesTools(msg.allowedTools)
     : answersStanding(msg.value)
+}
+
+// --- Share grants (§6.7) --------------------------------------------------------
+
+export const GRANT_ACTION = 'grant'
+export const GRANT_REVOKE_ACTION = 'grant_revoke'
+
+/** The longest a signed grant lives, whatever the share says (D3). */
+export const MAX_GRANT_LIFETIME_MS = 30 * 24 * 60 * 60_000
+
+/** What an owner signs to let one person act on one session of one machine. */
+export interface GrantBody {
+  /** `<share id>:<issued>`: the relay's share id, then when this grant was first signed (grantIssuedAt). */
+  grantId: string
+  sessionId: string
+  granteeUserId: string
+  permissions: string[]
+  /** The grantee's browser keys allowed to act under this grant. */
+  granteeKeys: Array<{ keyId: string; spki: string }>
+  /** ms since epoch; at most 30 days after signing, never past the share's expiry. */
+  expiresAt: number
+  /**
+   * The share's own end as the owner chose it (ms), or null for none. Signed,
+   * so renewal can never carry a grant past it, whatever the relay lists.
+   */
+  notAfter?: number | null
+}
+
+/** Domain label for the machine's confirmation that it recorded a grant revocation. */
+export const GRANT_REVOKED_LABEL = 'ck-grant-revoked-v1'
+
+/**
+ * A grant as it travels: the grant JSON text exactly as signed, and the
+ * owner's `grant` intent whose payloadHash is SHA-256 of that text.
+ */
+export interface SignedGrant {
+  grant: string
+  intent: SignedIntent
+}
+
+/** The bytes a grant intent's payloadHash covers: the grant text itself. */
+export function grantPayload(grantText: string): Uint8Array {
+  return encoder.encode(grantText)
+}
+
+/**
+ * What a grant_revoke intent covers: the grant id, and for a supersede the
+ * one grant that survives it.
+ */
+export function grantRevokePayload(grantId: string, keep?: string): Uint8Array {
+  return framed(keep === undefined ? [encoder.encode(grantId)] : [encoder.encode(grantId), encoder.encode(keep)])
+}
+
+/**
+ * The parts the machine signs to confirm a revocation; a supersede has its
+ * kept grant as a third part.
+ */
+export function grantRevokedParts(grantId: string, keep?: string): [label: string, ...parts: string[]] {
+  return keep === undefined ? [GRANT_REVOKED_LABEL, grantId] : [GRANT_REVOKED_LABEL, grantId, keep]
+}
+
+/**
+ * When a grant for a share was first signed: the owner's browser names each
+ * new grant `<share>:<ms base 36><8 hex>` (renewal keeps the id), so this
+ * orders a share's grants by issue, never by renewal. Null for an id of any
+ * other shape.
+ */
+export function grantIssuedAt(grantId: string, shareId: string): number | null {
+  if (!grantId.startsWith(`${shareId}:`)) return null
+  const m = /^([0-9a-z]{1,11})[0-9a-f]{8}$/.exec(grantId.slice(shareId.length + 1))
+  if (!m) return null
+  const t = parseInt(m[1], 36)
+  return Number.isSafeInteger(t) ? t : null
+}
+
+/**
+ * A revocation recorded on the machine. Without `keep` it covers the id and
+ * every `<id>:…` grant. With `keep` it is a supersede: it covers the id and
+ * every `<id>:…` grant issued no later than `keep`, other than `keep` itself,
+ * so grants signed after it (by any of the owner's browsers) still stand.
+ */
+export interface GrantRevocation {
+  grantId: string
+  keep?: string
+}
+
+export function grantRevokedBy(grantId: string, r: GrantRevocation): boolean {
+  if (grantId === r.grantId) return true
+  if (!grantId.startsWith(`${r.grantId}:`)) return false
+  if (r.keep === undefined) return true
+  if (grantId === r.keep) return false
+  const kept = grantIssuedAt(r.keep, r.grantId)
+  const issued = grantIssuedAt(grantId, r.grantId)
+  // Anything not datable is revoked: only a later grant survives a supersede.
+  return kept === null || issued === null || issued <= kept
+}
+
+/** A grant that lets someone approve shell commands is privileged (§6.2). */
+export function grantNeedsStepUp(permissions: readonly string[]): boolean {
+  return permissions.includes('approve_shell')
 }
 
 /** Device and policy changes always count as privileged. */

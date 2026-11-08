@@ -1,6 +1,6 @@
 # Relay trust: device-signed intents and end-to-end encryption
 
-**Status:** Spec, decisions D1–D7 settled (§13). Built: slice 1 (relay audit events, §7.1), slice 2 (machine identity and trust store), slice 3 (enrolment ceremony, §5.2–5.5), slice 4 (intent signing and verification, §6.1–6.5, §7.2) and slice 5 (passkeys: enrolment, `device_certify`, step-up, remote `device_revoke`, §5.4, §5.6, §6.6). Nothing turns enforcement on by itself yet: an owner can set `required` locally. The rest is not built.
+**Status:** Spec, decisions D1–D7 settled (§13). Built: slice 1 (relay audit events, §7.1), slice 2 (machine identity and trust store), slice 3 (enrolment ceremony, §5.2–5.5), slice 4 (intent signing and verification, §6.1–6.5, §7.2) slice 5 (passkeys: enrolment, `device_certify`, step-up, remote `device_revoke`, §5.4, §5.6, §6.6) and slice 6 (signed share grants and grantee intents, §6.7). Nothing turns enforcement on by itself yet: an owner can set `required` locally. The rest is not built.
 **Date:** 2026-11-08
 **Context:** a hosted relay is trusted to say who the machine owner is (§3). This spec removes that trust in two levels: **L1 device-signed intents** and **L2 end-to-end content encryption**. It also adds the relay audit events that are declared but never emitted.
 **Basis:** `origin/main` at v0.10.5 (`a93f6e3`). All `path:line` references point there.
@@ -545,6 +545,35 @@ The grant JSON travels next to the intent so the connector can hash it and read 
 **Residual risk.** The grantee key set comes from the relay at share time, effectively trust-on-first-use. Device labels in the dialog and the "new device" prompt narrow this. Closing it fully needs cross-signing or the L3 transparency log.
 
 This also gives machine-side policy a principal it can rely on. A rule such as "execution on personal-plan sessions is owner-only" becomes enforceable on the machine. Today it would depend on the relay's word about who is the owner.
+
+### 6.7a As built (slice 6)
+
+- **The grant.** It is a `grant` intent bound to the machine and the session. Its `payloadHash` is SHA-256 of the grant JSON text exactly as signed. The text travels next to the intent as `SignedGrant { grant, intent }`. `grantId` is `<share id>:<issued>`: the relay's share id, then when the owner's browser first signed this grant (milliseconds in base 36, then 8 random hex digits), dated by the **machine's** clock. Before signing or renewing, the owner's browser sends a clock probe (`enrol_time`) with a fresh nonce. The machine answers `sign_kM(T("ck-machine-clock-v1", nonce, String(machineTime)))`. The browser accepts the answer only against a pin confirmed with the codes, and only for a round trip under 5 seconds; it uses the midpoint. So the relay can't choose the time, replay an old answer, or shift it by more than about 2.5 seconds. Without such an answer nothing is signed or renewed, so a browser added with a passkey alone (its pin taken on first use) confirms itself with the codes before it can sign grants. The grant intent's `ts` comes from the same clock. The machine refuses a grant whose issue time is more than 5 minutes after its intent's `ts`. The relay refuses to store one whose `ts` is more than 5 minutes from its own clock, so an owner with a wrong clock is told at once.
+- **The relay** stores the signed grant on the share (`PUT /api/shares/:id/grant`, migration 15).
+  - It checks only that the grant describes that share: same id, session and grantee; no permission the share lacks; at most 30 days and within the share's own expiry. The machine checks the signature.
+  - It attaches the grantee's unexpired grants to every principal it forwards (`signedGrants`).
+  - Changing a share's permissions drops its grant until the owner signs again. Storing a new grant closes the grantee's open sockets to that machine, so they reconnect carrying it.
+- **The connector.** A grant counts only if all of these hold:
+  - its intent verifies against an owner credential **currently** in the device list, so revoking that key drops every grant it signed at once;
+  - it names this machine and this grantee, and the hash matches;
+  - it hasn't expired, and lasts at most 30 days from signing;
+  - it isn't covered by `revokedGrants` (below);
+  - if it includes `approve_shell`, it was signed with a passkey whenever step-up applies.
+
+  The grantee's effective grants are the relay's grants intersected with the verified ones. The existing channel and REST policy then works from those. This is **enforced under `required`**; under `off` and `warn` the relay's word stands, as it does for unsigned traffic. Grantee intents must be signed by a key listed in the grant for that session (any of their grants, for machine-level actions). Grantees can't use passkeys or take privileged actions.
+- **Revocation.** Revoking a share also sends a `grant_revoke` intent (the `enrol_grant_revoke` frame), signed by the owner, to the machine. Revoking `X` covers `X` and every `X:…`. A **supersede** (`grant_revoke` with `keep`) covers `X` and every `X:…` issued no later than `keep`, other than `keep` itself. The machine keeps one entry per share (a full revocation outranks any supersede; of two supersedes, the one keeping the later grant wins) and never lets one lapse: another of the owner's browsers may still re-sign an old grant with a fresh date. The list is capped at 10,000 shares; past that a new revocation is refused, so it stays pending in the owner's browser, rather than an old one being dropped. The machine confirms with `sign_kM(T("ck-grant-revoked-v1", grantId))`, or `T("ck-grant-revoked-v1", grantId, keep)` for a supersede. The owner's browser keeps revocations in IndexedDB and retries them hourly until that confirmation verifies against its pinned machine key. A relay's "approved" doesn't count. The share dialog shows anything still pending.
+- **Grantee keys.** A grantee's browser registers its key with the relay (`POST /api/device-keys`, at most 20 active keys per user) whenever it opens a machine workspace. When it holds a grant, it signs with that key without being confirmed on the machine.
+- **What the owner's browser signs.** The relay's share listing is not trusted either.
+  - The browser keeps its own record in IndexedDB (`IssuedGrant`): per share, the session, member, role and end the owner chose (sharing again replaces them, so narrowing a share signs the narrower role), the current grant's exact text, every id it issued, and whether the share is revoked. Revoked entries are kept for good.
+  - The grant names the recorded session and member, with permissions from the narrower of the recorded and the listed role, so a stale record never widens what another browser narrowed (the review says so). A listing that disagrees on session or member is refused. Only a share made in another browser falls back to the listing, which must then match Viewer or Editor exactly, or nothing is signed. The review then warns that this browser has no record of the share, and also when another recorded share covers the same session and member.
+  - Before signing, the owner reviews the role, the full permission list, the expiry, and each device's label with a key fingerprint. For a new device, only the new one is shown.
+  - Each signature gets a fresh `grantId`, and **every** new signature sends a supersede keeping it. That retires every earlier grant for the share, including ones signed in the owner's other browsers that this one never saw, so they can't be renewed back into use.
+  - Revoking a share revokes its id, which covers all grants signed for it, whatever the relay presents.
+  - The machine prefers a session's most recently **issued** grant (by id), then the most recently signed, so renewing an older grant never overtakes a newer one.
+  - Grants carry a signed `notAfter` (the share's end as the owner chose it), which the machine enforces.
+- **Renewal.** The owner's open browser re-signs, about once an hour, any grant within 7 days of expiry. It works from its own record only: the current grant of each share it hasn't revoked. It keeps the id, permissions and devices, changes only the expiry, and never passes `notAfter`. The relay's listing plays no part. A share the relay answers 404 for is marked revoked and revoked on the machine. Without usable IndexedDB nothing renews silently.
+- **Open channels.** A grantee channel re-reads its effective grants whenever the device list changes, and every 5 seconds, so a revoked or expired grant also stops what the grantee receives.
+- **Not built:** a notice outside the share dialog when a grantee adds a device.
 
 ### 6.8 Policy modes and migration
 

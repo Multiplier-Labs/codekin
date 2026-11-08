@@ -3,7 +3,7 @@
  * the hub, the connector, and the browser client.
  */
 
-import type { SignedIntent } from './intent-actions.js'
+import type { SignedGrant, SignedIntent } from './intent-actions.js'
 
 export const RELAY_PROTOCOL_VERSION = 1
 
@@ -25,6 +25,8 @@ export type RelayEnvelopeKind =
   | 'enrol_status'
   | 'enrol_certify'
   | 'enrol_revoke'
+  | 'enrol_grant_revoke'
+  | 'enrol_time'
   /** …and connector → browser, each answering one request by id. */
   | 'enrol_challenge'
   | 'enrol_result'
@@ -125,6 +127,12 @@ export interface RelayPrincipal {
   role: 'owner' | 'grantee' | 'webhook'
   /** Session id → permissions. Empty for owners. */
   grants: Record<string, string[]>
+  /**
+   * Grantees: the owner-signed grants behind `grants` (signed-intents spec
+   * §6.7). The machine uses the intersection of these and `grants`, and the
+   * grantee's own frames must be signed by a key a grant names.
+   */
+  signedGrants?: SignedGrant[]
 }
 
 /**
@@ -238,8 +246,12 @@ export const RELAY_ERROR = {
 } as const
 
 /** Browser → connector enrolment frames, and the connector's replies. */
-export const ENROL_REQUEST_KINDS = ['enrol_commit', 'enrol_reveal', 'enrol_status', 'enrol_certify', 'enrol_revoke'] as const
+export const ENROL_REQUEST_KINDS = ['enrol_commit', 'enrol_reveal', 'enrol_status', 'enrol_certify', 'enrol_revoke', 'enrol_grant_revoke', 'enrol_time'] as const
 export type EnrolRequestKind = (typeof ENROL_REQUEST_KINDS)[number]
+
+export function isEnrolRequestKind(kind: string): kind is EnrolRequestKind {
+  return (ENROL_REQUEST_KINDS as readonly string[]).includes(kind)
+}
 export const ENROL_REPLY_KINDS = ['enrol_challenge', 'enrol_result'] as const
 export type EnrolReplyKind = (typeof ENROL_REPLY_KINDS)[number]
 
