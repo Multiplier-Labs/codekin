@@ -65,6 +65,11 @@ export class HostedRelayTransport implements CodekinTransport {
     return this.signer.sign(intent)
   }
 
+  /** The clock intents are signed with (corrected to the machine's), for ids and expiries inside them. */
+  now(): number {
+    return this.signer.now()
+  }
+
   /** Send a device or grant frame (enrol_*) to the machine and await its reply. */
   sendDeviceFrame(kind: Parameters<RelayConnection['enrol']>[0], payload: unknown): Promise<unknown> {
     return this.connection.enrol(kind, payload)

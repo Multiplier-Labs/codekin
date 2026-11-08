@@ -8,7 +8,7 @@
 
 import { Router } from 'express'
 import { createHash } from 'crypto'
-import { GRANT_ACTION, MAX_GRANT_LIFETIME_MS, grantPayload } from './intent-actions.js'
+import { GRANT_ACTION, INTENT_MAX_SKEW_MS, MAX_GRANT_LIFETIME_MS, grantIssuedAt, grantPayload } from './intent-actions.js'
 import type { GrantBody, IntentBody, SignedIntent } from './intent-actions.js'
 import { listDeviceKeys } from './device-keys.js'
 import { checkQuota, countSessionShares, UNLIMITED } from './quotas.js'
@@ -104,6 +104,13 @@ export function checkGrantForShare(
   const hash = createHash('sha256').update(grantPayload(grantText)).digest('base64url')
   if (body.action !== GRANT_ACTION || body.machineId !== share.machineId || body.sessionId !== share.localSessionId || body.payloadHash !== hash) {
     return { error: 'intent does not sign this grant' }
+  }
+  // Not a security check (the machine checks the clock it trusts); it tells an
+  // owner whose computer's clock is off before their grant silently fails, or
+  // outranks a later one from their other browser.
+  const issued = grantIssuedAt(grant.grantId as string, share.id)
+  if (typeof body.ts !== 'number' || Math.abs(body.ts - now) > INTENT_MAX_SKEW_MS || (issued !== null && issued > body.ts + INTENT_MAX_SKEW_MS)) {
+    return { error: "This computer's clock is more than five minutes off. Correct it, then sign again." }
   }
   return { expiresAt: grant.expiresAt, keyCount: grant.granteeKeys.length }
 }

@@ -117,7 +117,7 @@ export interface TrustStore {
 
 export class TrustStoreError extends Error {
   constructor(
-    readonly code: 'unreadable' | 'not_found' | 'no_credentials' | 'invalid_policy' | 'wrong_machine' | 'busy',
+    readonly code: 'unreadable' | 'not_found' | 'no_credentials' | 'invalid_policy' | 'wrong_machine' | 'busy' | 'full',
     message: string,
   ) {
     super(message)
@@ -307,7 +307,11 @@ export interface RevokedGrant extends GrantRevocation {
   at: string
 }
 
-/** A bound on the list; entries coalesce to at most one per share, so this is a lot of shares. */
+/**
+ * A bound on the list; entries coalesce to at most one per share, so this is
+ * a lot of shares. At the bound a new revocation is refused (the owner's
+ * browser keeps it pending and says so) rather than an old one dropped.
+ */
 export const MAX_REVOKED_GRANTS = 10_000
 
 /**
@@ -330,7 +334,8 @@ export function withRevocation(list: RevokedGrant[], revocation: GrantRevocation
   if (covered) return list
   const entry: RevokedGrant = keep === undefined ? { grantId, at: new Date(now).toISOString() } : { grantId, keep, at: new Date(now).toISOString() }
   const next = [...list.filter(r => r.grantId !== grantId), entry]
-  return next.length > MAX_REVOKED_GRANTS ? next.slice(next.length - MAX_REVOKED_GRANTS) : next
+  if (next.length > MAX_REVOKED_GRANTS) throw new TrustStoreError('full', 'This computer holds too many revoked shares to record another')
+  return next
 }
 
 /** Whether grant `a` was issued before grant `b` (both under `shareId`). */

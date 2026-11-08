@@ -173,7 +173,8 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
     if (status.kind === 'signed') return
     setError(null)
     try {
-      setReview(await proposeGrant(share, status.keys))
+      // Ids carry their issue time: take it from the machine-corrected clock.
+      setReview(await proposeGrant(share, status.keys, { now: grantTransport()?.now?.() }))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -276,6 +277,11 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
             {!review.recorded && (
               <p className="mt-1 text-micro text-warning-5">
                 This browser has no record of making this share. Check the member and access before you sign.
+              </p>
+            )}
+            {review.narrowedByListing && (
+              <p className="mt-1 text-micro text-warning-5">
+                You shared this as Editor here, but it is now listed as Viewer, perhaps changed from another browser. Signing gives Viewer.
               </p>
             )}
             {review.duplicateOf && (

@@ -460,6 +460,10 @@ export class IntentVerifier {
     if (this.checkSignature(store, credential, intent)) return null
     if (grantNeedsStepUp(grant.permissions) && this.stepUpRefusal(store, credential)) return null
     if (body.ts > now + INTENT_MAX_SKEW_MS) return null
+    // The id's issue time orders a share's grants and decides supersedes, so
+    // it may not run ahead of when the grant was signed (renewal only moves
+    // the signing time on).
+    if (issuedAt({ grant, signedAt: body.ts }) > body.ts + INTENT_MAX_SKEW_MS) return null
     if (grant.expiresAt <= now || grant.expiresAt - body.ts > MAX_GRANT_LIFETIME_MS + INTENT_MAX_SKEW_MS) return null
     if (typeof grant.notAfter === 'number' && grant.expiresAt > grant.notAfter) return null
     // Revoking X also revokes every X:… (a share's id covers all the grants

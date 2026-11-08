@@ -47,6 +47,8 @@ export interface IntentSigner {
    * machine: the owner's signed grant names that key (§6.7).
    */
   setRole(role: 'owner' | 'grantee'): void
+  /** This browser's clock corrected by what the machine said its time was: the clock intents are signed with. */
+  now(): number
 }
 
 const SIGN = { name: 'ECDSA', hash: 'SHA-256' } as const
@@ -145,6 +147,9 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
     },
     setClockOffset(ms) {
       offset = clampOffset(ms)
+    },
+    now() {
+      return now() + offset
     },
     setRole(next) {
       if (next !== role) key = null

@@ -26,7 +26,7 @@ import { IntentVerifier } from '../../server/relay/intent-verify'
 import { MachineEnrolment } from '../../server/relay/enrolment'
 import { ensureMachineIdentity } from '../../server/relay/machine-identity'
 import { addRevokedGrant, emptyTrustStore, readTrustStore, writeTrustStore, type TrustStore } from '../../server/relay/trust-store'
-import { frameAction, framePayload } from '../../server/relay/intent-actions'
+import { frameAction, framePayload, grantIssuedAt } from '../../server/relay/intent-actions'
 import type { GrantBody, SignedGrant } from '../../server/relay/intent-actions'
 import type { RelayPrincipal } from '../../server/relay/relay-protocol'
 
@@ -131,6 +131,8 @@ describe('share grants from the browser to the machine', () => {
   it('signs what the owner reviewed; the machine accepts it and the grantee acts within it', async () => {
     const proposal = await shareAs('editor')
     expect(proposal.role).toBe('editor')
+    // The id format the machine dates grants by (an undatable id counts as superseded).
+    expect(grantIssuedAt(proposal.grant.grantId, share.id)).toBeGreaterThan(Date.now() - 60_000)
     expect(verifier.effectivePrincipal(danaPrincipal())?.grants).toEqual({ s1: EDITOR })
 
     who.id = 'u-dana'
@@ -246,6 +248,22 @@ describe('share grants from the browser to the machine', () => {
     const unknown = await proposeGrant({ ...share, id: 'g2' }, devices, { storage: ownerStorage })
     expect(unknown).toMatchObject({ recorded: false, duplicateOf: 'g1' })
     expect((await proposeGrant(share, devices, { storage: ownerStorage })).recorded).toBe(true)
+  })
+
+  it('signs the narrower of its record and the listing, and says so', async () => {
+    await recordShare('m1', { shareId: share.id, sessionId: 's1', granteeUserId: 'u-dana', role: 'editor', notAfter: null }, ownerStorage)
+    const proposal = await proposeGrant({ ...share, permissions: ['view', 'view_diff'] }, devices, { storage: ownerStorage })
+    expect(proposal).toMatchObject({ role: 'viewer', narrowedByListing: true })
+    await signGrant(transport, proposal, ownerStorage)
+    expect(ownerStorage.issued.get('u-owner:m1')?.[0].role).toBe('viewer')
+  })
+
+  it('renews by the clock it signs with, not the raw one', async () => {
+    await shareAs('viewer')
+    const g = JSON.parse(stored()[0].grant) as GrantBody
+    const machineNow = g.expiresAt - 2 * DAY
+    expect(await renewGrants({ ...transport, now: () => machineNow }, 'm1', { storage: ownerStorage })).toBe(1)
+    expect((JSON.parse(stored()[0].grant) as GrantBody).expiresAt).toBe(machineNow + 30 * DAY)
   })
 
   describe('an owner with two browsers', () => {

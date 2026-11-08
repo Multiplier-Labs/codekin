@@ -53,6 +53,7 @@ const ERROR_STATUS: Record<TrustStoreError['code'], number> = {
   invalid_policy: 400,
   wrong_machine: 409,
   busy: 503,
+  full: 507,
 }
 
 function sendError(res: Response, err: unknown): void {

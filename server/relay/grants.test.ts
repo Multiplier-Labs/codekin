@@ -15,7 +15,7 @@ import { MachineEnrolment } from './enrolment.js'
 import { signP1363, transcript, verifyP1363 } from './enrolment-crypto.js'
 import { liveChannelPolicy } from './connector.js'
 import { ensureMachineIdentity, keyIdForSpki } from './machine-identity.js'
-import { emptyTrustStore, readTrustStore, withRevocation, writeTrustStore } from './trust-store.js'
+import { MAX_REVOKED_GRANTS, emptyTrustStore, readTrustStore, withRevocation, writeTrustStore } from './trust-store.js'
 import type { TrustedCredential, IntentPolicy } from './trust-store.js'
 import { keyIdForCoseKey } from './webauthn-verify.js'
 import { softPasskey } from './__fixtures__/authenticator.js'
@@ -258,5 +258,18 @@ describe('signed share grants on the machine', () => {
     list = withRevocation(list, { grantId: 'g1', keep: issued('g1', t + 9) }, t)
     list = withRevocation(list, { grantId: 'g2' }, t + 365 * 24 * 60 * 60_000)
     expect(list.map(r => [r.grantId, r.keep])).toEqual([['g1', undefined], ['g2', undefined]])
+  })
+
+  it('refuses a grant whose issue time runs ahead of its signing (a fast clock would outrank later grants)', () => {
+    const t = Date.now()
+    expect(verifier.effectivePrincipal(danaPrincipal([grant({ grantId: issued('g1', t + 60 * 60_000) })]))?.grants).toEqual({})
+    expect(verifier.effectivePrincipal(danaPrincipal([grant({ grantId: issued('g1', t + 60_000) })]))?.grants).toEqual({ s1: ['view', 'send_prompt'] })
+  })
+
+  it('refuses a new revocation when full rather than dropping an old one', () => {
+    const full = Array.from({ length: MAX_REVOKED_GRANTS }, (_, i) => ({ grantId: `s${i}`, at: 'x' }))
+    expect(() => withRevocation(full, { grantId: 'new' })).toThrow(/too many/)
+    // Coalescing into an existing share still works.
+    expect(withRevocation(full, { grantId: 's1' })).toBe(full)
   })
 })

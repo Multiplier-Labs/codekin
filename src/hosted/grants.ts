@@ -38,6 +38,12 @@ import { workspaceHeaders } from './workspace'
 export interface GrantTransport {
   signIntent(intent: { action: string; sessionId: string | null; payload: Uint8Array; stepUp?: boolean }): Promise<SignedIntent | null>
   sendDeviceFrame(kind: 'enrol_grant_revoke', payload: unknown): Promise<unknown>
+  /**
+   * The clock intents are signed with (corrected to the machine's). Grant ids
+   * carry their issue time, which orders a share's grants on the machine, so
+   * they come from this clock, never the raw one.
+   */
+  now?(): number
 }
 
 export interface ShareWithGrant {
@@ -189,6 +195,11 @@ export interface GrantProposal {
   recorded: boolean
   /** Another share this browser made for the same session and member, if any. */
   duplicateOf: string | null
+  /**
+   * The listing is narrower than this browser's record (perhaps narrowed in
+   * another browser): the narrower role is what gets signed.
+   */
+  narrowedByListing: boolean
 }
 
 /**
@@ -210,7 +221,11 @@ export async function proposeGrant(
   if (entry && (entry.sessionId !== share.localSessionId || entry.granteeUserId !== share.granteeUserId)) {
     throw new GrantError('rejected', "This share doesn't match what you shared. Revoke it and share again.")
   }
-  const role = entry?.role ?? roleOf(share.permissions)
+  // Of the recorded and the listed role, the narrower: a stale record in this
+  // browser never widens what another browser narrowed.
+  const listed = roleOf(share.permissions)
+  const narrowedByListing = entry?.role === 'editor' && listed === 'viewer'
+  const role = narrowedByListing ? 'viewer' : entry?.role ?? listed
   if (!role) throw new GrantError('unknown_permissions', "This share lists permissions this page doesn't recognise. Revoke it and share again.")
   const granteeUserId = entry?.granteeUserId ?? share.granteeUserId
   if (!granteeUserId) throw new GrantError('rejected', 'This share has no member to grant to')
@@ -233,6 +248,7 @@ export async function proposeGrant(
     added: previous ? devices.filter(d => !previousKeys.has(d.keyId)) : devices,
     recorded: !!entry,
     duplicateOf: duplicate?.shareId ?? null,
+    narrowedByListing,
   }
 }
 
@@ -274,6 +290,7 @@ export async function signGrant(transport: GrantTransport, proposal: GrantPropos
     }
     entry.current = { grantId: proposal.grant.grantId, grant: text }
     entry.issuedIds = [...entry.issuedIds, proposal.grant.grantId]
+    entry.role = proposal.role
     await ledger.save()
   }
   await queueRevocations(transport, proposal.share.machineId, [{ grantId: proposal.share.id, keep: proposal.grant.grantId }], storage)
@@ -303,7 +320,7 @@ export function grantStatus(share: ShareWithGrant, keys: GranteeKey[]): GrantSta
  * revoked here and on the machine. Returns how many were renewed.
  */
 export async function renewGrants(transport: GrantTransport, machineId: string, opts: { now?: number; storage?: TrustStorage } = {}): Promise<number> {
-  const now = opts.now ?? Date.now()
+  const now = opts.now ?? transport.now?.() ?? Date.now()
   const storage = opts.storage ?? trustStorage()
   const ledger = await loadLedger(machineId, storage)
   if (!ledger) return 0

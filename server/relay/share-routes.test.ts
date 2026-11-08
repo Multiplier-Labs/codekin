@@ -91,14 +91,14 @@ describe('share routes', () => {
   }
 
   describe('signed grants (signed-intents spec §6.7)', () => {
-    const grantFor = (share: SessionShare, over: Partial<GrantBody> = {}) => {
+    const grantFor = (share: SessionShare, over: Partial<GrantBody> = {}, ts = Date.now()) => {
       const grant: GrantBody = {
         grantId: share.id, sessionId: 's1', granteeUserId: guest.id, permissions: ['view'], granteeKeys: [],
         expiresAt: Date.now() + 24 * 60 * 60_000, ...over,
       }
       const text = JSON.stringify(grant)
       const body = JSON.stringify({
-        v: 1, machineId, sessionId: 's1', action: GRANT_ACTION, nonce: 'n'.repeat(22), ts: Date.now(), keyId: 'k',
+        v: 1, machineId, sessionId: 's1', action: GRANT_ACTION, nonce: 'n'.repeat(22), ts, keyId: 'k',
         payloadHash: createHash('sha256').update(grantPayload(text)).digest('base64url'),
       })
       return { grant: text, intent: { body, sig: 'AAAA' } }
@@ -138,6 +138,17 @@ describe('share routes', () => {
     it('accepts a new grant id per signature, and a notAfter within the share', async () => {
       const share = await createShare()
       expect((await put(share.id, grantFor(share, { grantId: `${share.id}:2`, notAfter: null }))).status).toBe(200)
+    })
+
+    it("tells an owner whose clock is off, before the machine silently ignores the grant", async () => {
+      const share = await createShare()
+      const hour = 60 * 60_000
+      const res = await put(share.id, grantFor(share, {}, Date.now() + hour))
+      expect(res.status).toBe(400)
+      expect(((await res.json()) as { error: string }).error).toMatch(/clock/)
+      // An issue time in the id ahead of the signing.
+      const ahead = `${share.id}:${(Date.now() + hour).toString(36)}0123abcd`
+      expect((await put(share.id, grantFor(share, { grantId: ahead }))).status).toBe(400)
     })
 
     it('drops the grant when the share permissions change, so the owner signs again', async () => {
