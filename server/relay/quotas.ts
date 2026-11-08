@@ -113,10 +113,11 @@ export function parseQuotas(json: unknown): EntitlementsProvider {
   }
   return {
     limitsFor: workspaceId => {
-      const merged: QuotaLimits = { ...defaults }
-      for (const [key, limit] of Object.entries(overrides.get(workspaceId) ?? {})) {
-        if (limit === null) delete merged[key as QuotaKey]
-        else merged[key as QuotaKey] = limit
+      const override = overrides.get(workspaceId) ?? {}
+      const merged: QuotaLimits = {}
+      for (const key of QUOTA_KEYS) {
+        const limit = key in override ? override[key] : defaults[key]
+        if (typeof limit === 'number') merged[key] = limit
       }
       return merged
     },
