@@ -22,7 +22,7 @@ All seven actionable audit findings are addressed. An independent agent reviewed
 
 ## Validation
 
-- Full local suite: **280 files, 4,996 tests passed**.
+- Full local suite: **280 files, 5,000 tests passed**.
 - Typecheck: `npx tsc -b` passed.
 - Changed-file lint: no errors or new warnings. Existing counts match the baseline: one in `connector-policy.ts`, one in `connector-stream.ts`, and four in `ws-message-handler.ts`; the other changed and new files are clean.
 - Independent security source re-review: approved, no remaining blockers identified.
@@ -30,6 +30,6 @@ All seven actionable audit findings are addressed. An independent agent reviewed
 
 ## Upgrade behavior
 
-Existing installations without durable replay state wait through a one-time ten-minute recovery window. The deadline is persisted, so restarts do not extend it. New local pairing initializes fresh state without the delay. Missing state later starts recovery again; corrupt or unavailable storage refuses signed actions until repaired. Operations documentation describes this behavior and the replay file.
+Existing installations without durable replay state wait through a one-time ten-minute recovery window. The deadline is persisted, so restarts do not extend it. New local pairing initializes fresh state without the delay; a reused machine id with missing replay state retains recovery protection. Missing state later starts recovery again; corrupt or unavailable storage refuses signed actions until repaired. Operations documentation describes this behavior and the replay file.
 
 No service was deployed or restarted as part of this remediation. CI results and merge state are recorded on the fix PR.

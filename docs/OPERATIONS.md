@@ -504,7 +504,8 @@ beside the device list (mode 0600). Keep this file with the machine's trust stat
 it is independent of the activity log. When upgrading an existing installation
 without it, the connector starts a one-time **10-minute recovery window** before
 accepting signed actions. Restarts preserve the deadline. New pairing has no
-recovery delay. `intent_replay_unavailable` after that window means the connector
+recovery delay. Re-pairing with a reused machine id keeps the recovery
+precautions. `intent_replay_unavailable` after that window means the connector
 cannot commit its replay state: check the file's permissions, storage health and
 free space. Do not delete the database to clear the error; missing state starts
 a new recovery window.

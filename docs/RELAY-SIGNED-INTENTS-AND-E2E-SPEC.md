@@ -441,7 +441,7 @@ Verification sits at the relay message boundary in `connector.ts`: `request`, `s
 - **Durable replay protection.**
   - Entries last 10 minutes (twice the skew window), keyed by machine, account and nonce. Browser-key and passkey retries share the same entry.
   - The SQLite file beside the device list (`relay-devices.json.replay.sqlite`, mode 0600) commits each accepted nonce with full synchronization before forwarding. Independent connectors serialize consumption in a transaction. Audit rotation, unavailable logs and process restarts cannot discard live entries.
-  - An existing installation without this database refuses signed actions for a one-time 10-minute recovery window; the deadline survives restarts. New local pairing initializes an empty database without the delay. Corrupt or unavailable storage refuses with `intent_replay_unavailable`.
+  - An existing installation without this database refuses signed actions for a one-time 10-minute recovery window; the deadline survives restarts. New local pairing initializes an empty database without the delay; reusing a machine id does not prove that its replay history is empty. Corrupt or unavailable storage refuses with `intent_replay_unavailable`.
   - At 50k entries per machine it refuses (`intent_rate_limited`) rather than evicting a live entry.
 - **Device list handling.** An unreadable device list fails closed, treated as `required`. A device's `lastUsedAt` is written back at most every 10 minutes, off the request path.
 - **Log.** `~/.codekin/relay/intents.jsonl` adds a `forwarded` field to each line.

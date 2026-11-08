@@ -3,6 +3,9 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, statSync, mkdirSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { recordPairing } from './machine-trust.js'
+import { generateMachineKeyPair } from './machine-identity.js'
+import { emptyTrustStore } from './trust-store.js'
 import { IntentReplayStore, REPLAY_TTL_MS } from './intent-replay.js'
 let dir: string
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'codekin-replay-')) })
@@ -48,4 +51,14 @@ it.each(['missing', 'empty', 'rotated'])('waits out the legacy replay window wit
   const restarted = new IntentReplayStore(file, 'm1')
   expect(restarted.initialize(200)).toBe(true)
   expect(restarted.consume('owner', 'n', 101 + REPLAY_TTL_MS)).toBeNull()
+})
+
+
+it.each(['same id', 'different id', 'missing', 'unreadable'])('only treats a provably new pairing as fresh (%s prior device list)', previous => {
+  const file = join(dir, 'relay-devices.json')
+  if (previous !== 'missing') writeFileSync(file, previous === 'unreadable'
+    ? 'unreadable' : JSON.stringify(emptyTrustStore(previous === 'same id' ? 'm1' : 'old-machine', 'https://relay.test', 'owner')))
+  recordPairing(join(dir, 'relay.json'), 'https://relay.test', 'm1', 'owner', generateMachineKeyPair(), null, { log: () => {}, warn: () => {} })
+  const replay = new IntentReplayStore(`${file}.replay.sqlite`, 'm1')
+  expect(replay.consume('owner', 'nonce', Date.now())).toBe(previous === 'same id' || previous === 'unreadable' ? 'intent_replay_unavailable' : null)
 })
