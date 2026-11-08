@@ -10,12 +10,12 @@
  */
 
 import { randomUUID } from 'crypto'
+import { onHubMessage, parseHubEnvelope } from './hub-protocol.js'
 import type { WebSocket } from 'ws'
 import type Database from 'better-sqlite3'
 import { verifyMachineCredential } from './pairing.js'
 import {
   envelope,
-  parseEnvelope,
   PROXY_REQUEST_TIMEOUT_MS,
   RELAY_ERROR,
   STREAM_CLOSE,
@@ -179,9 +179,12 @@ export class ConnectorHub {
       socket.close(CLOSE_AUTH_FAILED, 'hello timeout')
     }, HELLO_TIMEOUT_MS)
 
-    socket.on('message', (data: Buffer | string) => {
-      const msg = parseEnvelope(typeof data === 'string' ? data : data.toString('utf-8'))
-      if (!msg) return
+    onHubMessage(socket, data => {
+      const msg = parseHubEnvelope(data.toString(), 'connector')
+      if (!msg) {
+        socket.close(1008, 'invalid relay frame')
+        return
+      }
 
       if (machineId === null) {
         if (msg.kind !== 'hello') {
@@ -211,17 +214,18 @@ export class ConnectorHub {
       }
 
       const machine = this.machines.get(machineId)
-      if (machine) {
-        machine.lastActivity = Date.now()
-        this.touchLastSeen(machine)
-        const bytes = typeof data === 'string' ? Buffer.byteLength(data) : data.length
-        if (machine.workspaceId) meterFrame(this.meter, socket, machine.workspaceId, 'm2b', bytes)
-        this.countTraffic(machine, bytes)
-        if (msg.kind === 'stream_data' && this.abuse?.inspectStreamFrames) {
-          machine.window.streamFrames += 1
-          if (!isWellFormedStreamData((msg.payload as { data?: unknown } | null)?.data)) machine.window.malformedStreamFrames += 1
-        }
+      // A replaced or revoked socket cannot act as the new connection.
+      if (!machine || machine.socket !== socket) return
+      machine.lastActivity = Date.now()
+      this.touchLastSeen(machine)
+      const bytes = data.length
+      if (machine.workspaceId) meterFrame(this.meter, socket, machine.workspaceId, 'm2b', bytes)
+      this.countTraffic(machine, bytes)
+      if (msg.kind === 'stream_data' && this.abuse?.inspectStreamFrames) {
+        machine.window.streamFrames += 1
+        if (!isWellFormedStreamData((msg.payload as { data?: unknown } | null)?.data)) machine.window.malformedStreamFrames += 1
       }
+      if (msg.channelId && !machine.channels.has(msg.channelId)) return
       if (msg.kind === 'ping') {
         socket.send(JSON.stringify(envelope('pong', {})))
       } else if (msg.kind === 'response') {
@@ -233,7 +237,7 @@ export class ConnectorHub {
       } else if (msg.kind === 'event' && !msg.channelId) {
         // Machine-level event: currently only the session summary (§11.3).
         const payload = msg.payload as { sessions?: LocalSessionSummary }
-        if (machine && payload?.sessions) machine.sessions = payload.sessions
+        if (payload.sessions) machine.sessions = payload.sessions
       } else if (msg.kind === 'event' || msg.kind === 'stream_data' || msg.kind === 'stream_close') {
         if (msg.channelId) this.channelListeners.get(msg.channelId)?.(msg.kind, msg.payload)
       }
