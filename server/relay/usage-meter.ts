@@ -53,6 +53,8 @@ export class UsageMeter {
   private flushed = new Map<string, number>()
   private buckets = new WeakMap<object, Bucket>()
   private throttledToday = new Set<string>()
+  /** Workspaces slowed regardless of their daily bytes (open `throttle` abuse flags). */
+  private forced = new Set<string>()
   private timer: ReturnType<typeof setInterval> | null
   private readonly now: () => number
   private readonly log: (line: string) => void
@@ -83,9 +85,10 @@ export class UsageMeter {
 
     const limits = this.entitlements.limitsFor(workspaceId)
     const limit = limits.relayedBytesPerWorkspacePerDay
-    if (limit === undefined || this.todayBytes(workspaceId) <= limit) return 0
+    const forced = this.forced.has(workspaceId)
+    if (!forced && (limit === undefined || this.todayBytes(workspaceId) <= limit)) return 0
 
-    if (!this.throttledToday.has(workspaceId)) {
+    if (!forced && !this.throttledToday.has(workspaceId)) {
       this.throttledToday.add(workspaceId)
       this.log(`[relay] workspace ${workspaceId} is over its daily relayed-bytes quota (${limit}); throttling until UTC midnight`)
     }
@@ -110,6 +113,11 @@ export class UsageMeter {
     }
     const p = this.pending.get(workspaceId)
     return base + (p ? p.b2m + p.m2b : 0)
+  }
+
+  /** Replace the set of workspaces throttled by the abuse queue. */
+  setForcedThrottle(workspaceIds: Set<string>): void {
+    this.forced = new Set(workspaceIds)
   }
 
   /** Write pending counts to usage_daily. */

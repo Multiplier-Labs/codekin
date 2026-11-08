@@ -32,6 +32,8 @@ import type { ConnectorFloors, UpdateRequired } from './connector-version.js'
 import { getRequiredCapabilities } from './workspaces.js'
 import { meterFrame } from './usage-meter.js'
 import type { UsageMeter } from './usage-meter.js'
+import { isWellFormedStreamData, recordFinding } from './abuse-signals.js'
+import type { AbuseFinding, AbuseSignals } from './abuse-signals.js'
 import type {
   ConnectorHello,
   ConnectorHelloAck,
@@ -77,10 +79,34 @@ interface ConnectedMachine {
   connectorVersion: string | null
   /** The workspace that owns the machine: its traffic is metered there. */
   workspaceId: string | null
+  /** Traffic since the last abuse-signal sweep (counted only when a policy is set). */
+  window: TrafficWindow
   /** Set when the connector is below a floor: connected, but refused traffic. */
   updateRequired: UpdateRequired | null
   /** Last session counts the connector advertised, if any. */
   sessions: LocalSessionSummary | null
+}
+
+interface TrafficWindow {
+  start: number
+  frames: number
+  bytes: number
+  streamFrames: number
+  malformedStreamFrames: number
+  largeFrames: number
+}
+
+function emptyWindow(now = Date.now()): TrafficWindow {
+  return { start: now, frames: 0, bytes: 0, streamFrames: 0, malformedStreamFrames: 0, largeFrames: 0 }
+}
+
+export interface ConnectorHubOptions {
+  floors?: ConnectorFloors
+  meter?: UsageMeter
+  /** Abuse-signal policy (docs/RELAY-HARDENING.md §6); no evaluation without one. */
+  abuse?: AbuseSignals | null
+  /** Called after a sweep that opened flags, e.g. to refresh throttles. */
+  onAbuseFlags?: (created: Array<{ machineId: string; flagId: string; finding: AbuseFinding }>) => void
 }
 
 /** Frames a channel owner receives from the connector side. */
@@ -102,10 +128,17 @@ export class ConnectorHub {
 
   private readonly floors: ConnectorFloors
   private readonly meter: UsageMeter | undefined
+  private readonly abuse: AbuseSignals | null
+  private abuseTimer: ReturnType<typeof setInterval> | null = null
 
-  constructor(private db: Database.Database, options: { floors?: ConnectorFloors; meter?: UsageMeter } = {}) {
+  constructor(private db: Database.Database, private options: ConnectorHubOptions = {}) {
     this.floors = options.floors ?? CONNECTOR_FLOORS
     this.meter = options.meter
+    this.abuse = options.abuse ?? null
+    if (this.abuse) {
+      this.abuseTimer = setInterval(() => { this.sweepAbuseSignals() }, this.abuse.windowMs)
+      this.abuseTimer.unref()
+    }
     // Recovering from a restart: nothing is connected yet.
     this.db.prepare(`UPDATE machines SET status = 'offline'`).run()
     this.idleTimer = setInterval(() => { this.dropIdleConnections(); }, IDLE_TIMEOUT_MS / 3)
@@ -181,8 +214,12 @@ export class ConnectorHub {
       if (machine) {
         machine.lastActivity = Date.now()
         this.touchLastSeen(machine)
-        if (machine.workspaceId) {
-          meterFrame(this.meter, socket, machine.workspaceId, 'm2b', typeof data === 'string' ? Buffer.byteLength(data) : data.length)
+        const bytes = typeof data === 'string' ? Buffer.byteLength(data) : data.length
+        if (machine.workspaceId) meterFrame(this.meter, socket, machine.workspaceId, 'm2b', bytes)
+        this.countTraffic(machine, bytes)
+        if (msg.kind === 'stream_data' && this.abuse?.inspectStreamFrames) {
+          machine.window.streamFrames += 1
+          if (!isWellFormedStreamData((msg.payload as { data?: unknown } | null)?.data)) machine.window.malformedStreamFrames += 1
         }
       }
       if (msg.kind === 'ping') {
@@ -262,7 +299,9 @@ export class ConnectorHub {
       machine.pending.add(id)
 
       try {
-        machine.socket.send(JSON.stringify(envelope('request', request, { id })))
+        const frame = JSON.stringify(envelope('request', request, { id }))
+        this.countTraffic(machine, Buffer.byteLength(frame))
+        machine.socket.send(frame)
       } catch (err) {
         settle({
           error: {
@@ -319,7 +358,9 @@ export class ConnectorHub {
       this.dropChannel(machine, channelId, 'machine connection is congested')
       return
     }
-    machine.socket.send(JSON.stringify(envelope('stream_data', { data }, { channelId })))
+    const frame = JSON.stringify(envelope('stream_data', { data }, { channelId }))
+    this.countTraffic(machine, Buffer.byteLength(frame))
+    machine.socket.send(frame)
   }
 
   /**
@@ -406,6 +447,7 @@ export class ConnectorHub {
       pending: new Set(), channels: new Set(),
       connectorVersion,
       workspaceId: workspace?.workspace_id ?? null,
+      window: emptyWindow(now),
       updateRequired,
       sessions: hello.sessions ?? null,
     })
@@ -492,8 +534,50 @@ export class ConnectorHub {
     recordAuditEvent(this.db, { kind: 'machine_disconnected', machineId, metadata: { reason } })
   }
 
+  /** Add one frame to a machine's abuse-signal window (no-op without a policy). */
+  private countTraffic(machine: ConnectedMachine, bytes: number): void {
+    if (!this.abuse) return
+    machine.window.frames += 1
+    machine.window.bytes += bytes
+    if (this.abuse.largeFrameBytes > 0 && bytes >= this.abuse.largeFrameBytes) machine.window.largeFrames += 1
+  }
+
+  /**
+   * Hand every connected machine's traffic window to the abuse policy, record
+   * what it finds, and start new windows. Runs on a timer; exposed for tests.
+   */
+  sweepAbuseSignals(now = Date.now()): void {
+    if (!this.abuse) return
+    const created: Array<{ machineId: string; flagId: string; finding: AbuseFinding }> = []
+    for (const machine of this.machines.values()) {
+      const w = machine.window
+      machine.window = emptyWindow(now)
+      const findings = this.abuse.evaluate({
+        machineId: machine.machineId,
+        workspaceId: machine.workspaceId,
+        connectorVersion: machine.connectorVersion,
+        windowSeconds: Math.max(1, (now - w.start) / 1000),
+        frames: w.frames,
+        bytes: w.bytes,
+        streamFrames: w.streamFrames,
+        malformedStreamFrames: w.malformedStreamFrames,
+        largeFrames: w.largeFrames,
+        sessionsAdvertised: machine.sessions?.total ?? null,
+      })
+      for (const finding of findings) {
+        const flagId = recordFinding(this.db, machine.machineId, finding)
+        if (flagId) {
+          console.warn(`[relay] abuse signal ${finding.signal} on machine ${machine.machineId}: ${finding.action}`)
+          created.push({ machineId: machine.machineId, flagId, finding })
+        }
+      }
+    }
+    if (created.length > 0) this.options.onAbuseFlags?.(created)
+  }
+
   close(): void {
     clearInterval(this.idleTimer)
+    if (this.abuseTimer) clearInterval(this.abuseTimer)
     this.frameLimiter.close()
     for (const machine of this.machines.values()) {
       this.failPending(machine, 'relay shutting down')

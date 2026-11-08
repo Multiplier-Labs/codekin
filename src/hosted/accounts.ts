@@ -74,3 +74,35 @@ export async function signOut(): Promise<void> {
     window.location.assign('/')
   }
 }
+
+/** A machine the relay's abuse signals flagged for the operator to review. */
+export interface AbuseFlag {
+  id: string
+  machineId: string
+  machineName: string | null
+  ownerLogin: string | null
+  signal: string
+  action: 'flag' | 'throttle'
+  detail: Record<string, unknown>
+  createdAt: string
+}
+
+export async function fetchAbuseFlags(): Promise<AbuseFlag[]> {
+  const res = await fetch('/api/admin/abuse-flags', { credentials: 'include' })
+  if (!res.ok) throw new Error(`Request failed (${res.status})`)
+  return ((await res.json()) as { flags: AbuseFlag[] }).flags
+}
+
+/** Close a flag with a note of what was decided (needs a fresh second factor). */
+export async function resolveAbuseFlag(id: string, note: string): Promise<void> {
+  const res = await stepUpFetch(`/api/admin/abuse-flags/${encodeURIComponent(id)}/resolve`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ note }),
+  })
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null
+    throw new Error(body?.error ?? `Request failed (${res.status})`)
+  }
+}

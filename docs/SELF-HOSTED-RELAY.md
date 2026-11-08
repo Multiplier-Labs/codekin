@@ -83,6 +83,7 @@ NODE_ENV=production
 | `RELAY_ERROR_DSN` | no | DSN of a Sentry-API error tracker (GlitchTip, Sentry). Unset, the relay reports errors nowhere. Events carry only error type, scrubbed message and stack frames ([RELAY-HARDENING.md §2](RELAY-HARDENING.md#2-error-reporting)). |
 | `RELAY_BROWSER_ERROR_DSN` | no | Separate DSN for errors from the web app, tunnelled through the relay. Defaults to `RELAY_ERROR_DSN`. |
 | `RELAY_STAGING` | no | `1` marks a test deployment: a STAGING badge in the app, `noindex` on responses, and `relay-admin-cli mint-session` allowed ([RELAY-HARDENING.md §7](RELAY-HARDENING.md#7-test-sessions-for-staging)). Never set it on a relay people use. |
+| `RELAY_ABUSE_POLICY_FILE` | no | JSON rules that flag or throttle machines whose traffic doesn't look like Codekin use. Unset, nothing is evaluated. Format in [RELAY-HARDENING.md §6](RELAY-HARDENING.md#6-quotas-and-abuse-hooks). |
 | `RELAY_QUOTAS_FILE` | no | Path to a JSON file of usage limits (machines, connections, sessions, invitations, shares). Unset, the relay is unlimited. Format in [RELAY-HARDENING.md §6](RELAY-HARDENING.md#6-quotas-and-abuse-hooks). |
 | `RELAY_ERROR_ENVIRONMENT` | no | `environment` on reported errors. Defaults to `production` or `development` from `NODE_ENV`. |
 

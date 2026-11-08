@@ -394,6 +394,28 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
       CREATE INDEX idx_usage_daily_day ON usage_daily(day);
     `)
   },
+
+  // 11: the operator's abuse review queue (docs/RELAY-HARDENING.md §6). One
+  // open flag per machine and signal; numbers only, never payloads.
+  db => {
+    db.exec(`
+      CREATE TABLE abuse_flags (
+        id TEXT PRIMARY KEY,
+        machine_id TEXT NOT NULL,
+        workspace_id TEXT,
+        owner_user_id TEXT,
+        signal TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('flag', 'throttle')),
+        detail TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        resolved_at TEXT,
+        resolved_by_user_id TEXT,
+        resolution_note TEXT
+      );
+      CREATE UNIQUE INDEX idx_abuse_flags_open ON abuse_flags(machine_id, signal) WHERE resolved_at IS NULL;
+      CREATE INDEX idx_abuse_flags_created ON abuse_flags(created_at);
+    `)
+  },
 ]
 
 function runMigrations(db: Database.Database): void {

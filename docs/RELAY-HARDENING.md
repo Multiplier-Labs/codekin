@@ -1,6 +1,6 @@
 # Relay hardening
 
-**Status:** In progress. Built: §1 (health endpoints), §2 (error reporting), §3 (browser security headers), §4 (connector version floors), the discrete quotas in §6 and §7 (staging tools). The rest is spec.
+**Status:** In progress. Built: §1 (health endpoints), §2 (error reporting), §3 (browser security headers), §4 (connector version floors), §6 (quotas, metering, abuse signals) and §7 (staging tools). The rest is spec.
 **Date:** 2026-11-08
 **Scope:** hardening features for anyone who runs the relay (`server/relay`), whether self-hosted or as a public service. Values specific to a deployment, such as limits, thresholds and monitoring setup, belong in that deployment's own config. They are not defined here.
 **Related:** `docs/RELAY-SIGNED-INTENTS-AND-E2E-SPEC.md`, `docs/SELF-HOSTED-RELAY.md`, `docs/OPERATIONS.md` ("Hosted relay").
@@ -82,7 +82,7 @@ Supporting changes (**built**):
 
 These are mechanisms only. No limits are built in, and a relay without config stays unlimited, as it is today.
 
-**Built:** the quotas (`server/relay/quotas.ts`), usage metering and the bandwidth throttle (`server/relay/usage-meter.ts`). **Still spec:** abuse signals.
+**Built:** the quotas (`server/relay/quotas.ts`), usage metering and the bandwidth throttle (`server/relay/usage-meter.ts`), and abuse signals (`server/relay/abuse-signals.ts`).
 
 - **Quotas** come from an `EntitlementsProvider`. The default reads `RELAY_QUOTAS_FILE` (JSON) at boot; without it, everything is unlimited. A malformed file stops the relay rather than running it unlimited. A missing key is unlimited, `workspaces` entries override `default` key by key, and `null` in a workspace entry lifts that limit for the workspace:
 
@@ -110,7 +110,22 @@ These are mechanisms only. No limits are built in, and a relay without config st
   - Discrete limits answer HTTP 429 `{ error: 'quota_exceeded', quota, limit, message }`, and the hosted app shows `message`.
   - Over `relayedBytesPerWorkspacePerDay`, traffic slows instead of stopping, so an active session keeps working. Each connection gets a token bucket at `throttledBytesPerSecond`. When it's empty, the relay stops *reading* that socket for a moment (at most 5 s), so TCP backpressure holds the excess at the sender and the relay buffers nothing. The throttle lifts at UTC midnight and is logged once per workspace per day.
 - **Usage metering.** Both hubs count every frame they receive, from machines (`bytes_m2b`) and browsers (`bytes_b2m`), against the workspace that owns the machine. Counts are flushed every minute to `usage_daily (workspace_id, day, bytes_b2m, bytes_m2b, frames)` and kept 400 days. A crash loses at most a minute of counting, which is fine for quotas and capacity planning; it is not a billing meter. Metering runs with or without a quotas file.
-- **Abuse signals.** An `AbuseSignals` hook gets per-machine traffic summaries: frame shape, sustained throughput, sessions advertised. It can flag, throttle or quarantine, and every action is audit-logged. The relay ships only the hook.
+- **Abuse signals.** The connector protocol is open, so a "machine" can be any program that uses the relay as a generic pipe. The hub keeps a per-machine traffic window: frames, bytes in both directions, large frames, stream frames that aren't a JSON object with a string `type`, and the sessions the connector last advertised. Each window it hands the summary to an `AbuseSignals` policy.
+  - **Policy file.** The built-in policy reads rules from `RELAY_ABUSE_POLICY_FILE`. Without one, nothing is evaluated and no payload is inspected. Every rule is optional, and a malformed file stops the relay at boot:
+
+    ```json
+    {
+      "windowMinutes": 10,
+      "malformedStreamFrames":  { "minFrames": 200, "ratio": 0.01, "action": "flag" },
+      "largeFrames":            { "minFrames": 100, "ratio": 0.5, "frameBytes": 6000000, "action": "flag" },
+      "sustainedThroughput":    { "bytesPerSecond": 1000000, "windows": 2, "action": "throttle" },
+      "trafficWithoutSessions": { "bytes": 100000000, "action": "flag" }
+    }
+    ```
+
+    These numbers illustrate the format; they aren't recommendations.
+  - **Actions** are `flag` (the operator's review queue) and `throttle` (flag, and slow the workspace's relayed traffic as if it were over its daily bytes, until the flag is resolved). There is one open flag per machine and signal. Flags carry numbers only, never payloads, and are audit-logged (`abuse_flagged`, `abuse_flag_resolved`).
+  - **Review.** The operator reviews flags in **Settings → Accounts → Abuse review**, or with `GET /api/admin/abuse-flags` and `POST /api/admin/abuse-flags/:id/resolve` (a note and a fresh second factor required). Stopping a machine (disabling its owner) stays a deliberate operator action.
 
 ## 7. Test sessions for staging
 
