@@ -19,6 +19,8 @@ export interface Workspace {
   name: string
   role: WorkspaceRole
   requireMfa: boolean
+  /** "Privileged actions need a passkey" (signed-intents spec §6.6). */
+  requirePasskeyStepUp?: boolean
 }
 
 export interface WorkspaceMember {
@@ -185,6 +187,10 @@ export async function renameWorkspace(id: string, name: string): Promise<void> {
 }
 
 /** Require two-factor authentication of every member (owner only). */
+export async function setWorkspaceRequirePasskeyStepUp(id: string, requirePasskeyStepUp: boolean): Promise<void> {
+  await call(ws(id), { method: 'PATCH', body: JSON.stringify({ requirePasskeyStepUp }) })
+}
+
 export async function setWorkspaceRequireMfa(id: string, requireMfa: boolean): Promise<void> {
   await call(ws(id), { method: 'PATCH', body: JSON.stringify({ requireMfa }) })
 }

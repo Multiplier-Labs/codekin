@@ -12,9 +12,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { IconCircleCheckFilled, IconLoader2, IconAlertTriangle } from '@tabler/icons-react'
 import { RelayConnection, RelayRequestError } from '../lib/transport/relay-client'
 import {
-  EnrolmentFailure, currentUserId, deviceTrustSupported, startEnrolment, trustStorage, type Enrolment,
+  EnrolmentFailure, certifyWithPasskey, currentUserId, deviceTrustSupported, startEnrolment, trustStorage, type Enrolment, type PasskeyKey,
 } from './deviceTrust'
-import { button, quietButton } from '../components/settings/Block'
+import { assertWithPasskey, fetchPasskeyKeys, isPasskeyCancel, passkeysSupported } from './passkeys'
+import { button, checkbox, quietButton } from '../components/settings/Block'
 
 const POLL_MS = 2000
 /** The machine drops an undecided request after 10 minutes. */
@@ -23,11 +24,13 @@ const REQUEST_TTL_MS = 10 * 60_000 + 30_000
 const ONLINE_WAIT_MS = 90_000
 
 type Phase =
+  /** The account has passkeys: use one, or show a code. */
+  | { kind: 'choose' }
   | { kind: 'starting'; waitingForMachine: boolean }
   /** `accepted`: the machine reported (signed) that the code was typed; the finishing code is next. */
   | { kind: 'code'; enrolment: Enrolment; accepted: boolean }
   | { kind: 'done'; outcome: 'approved' | 'rejected' | 'expired' }
-  | { kind: 'failed'; message: string; keyChanged?: boolean }
+  | { kind: 'failed'; message: string; keyChanged?: boolean; offerCode?: boolean }
 
 interface TrustSheetProps {
   machineId: string
@@ -35,6 +38,8 @@ interface TrustSheetProps {
   onClose: () => void
   /** Called once the machine confirmed this browser. */
   onTrusted?: () => void
+  /** Go straight to the code (the person is at the computer, e.g. just paired it). */
+  preferCode?: boolean
 }
 
 function describeError(err: unknown): string {
@@ -48,12 +53,30 @@ function describeError(err: unknown): string {
 
 const retryable = (err: unknown) => err instanceof RelayRequestError && ['machine_offline', 'timeout', 'disconnected'].includes(err.code)
 
-export function TrustSheet({ machineId, machineName, onClose, onTrusted }: TrustSheetProps) {
+export function TrustSheet({ machineId, machineName, onClose, onTrusted, preferCode }: TrustSheetProps) {
   const [phase, setPhase] = useState<Phase>({ kind: 'starting', waitingForMachine: false })
   const [attempt, setAttempt] = useState(0)
+  /** How to confirm: a code typed on the computer, or an enrolled passkey (device_certify). Null until known. */
+  const [method, setMethod] = useState<'code' | 'passkey' | null>(null)
+  const [passkeys, setPasskeys] = useState<PasskeyKey[]>([])
+  const [addPasskey, setAddPasskey] = useState(true)
   const connection = useRef<RelayConnection | null>(null)
 
+  // The account's passkeys decide whether there is a choice to make.
   useEffect(() => {
+    const life = { stopped: false }
+    const keys = passkeysSupported() ? fetchPasskeyKeys() : Promise.resolve([])
+    void keys.then(found => {
+      if (life.stopped) return
+      setPasskeys(found)
+      if (found.length > 0 && !preferCode) setPhase({ kind: 'choose' })
+      else setMethod('code')
+    })
+    return () => { life.stopped = true }
+  }, [preferCode])
+
+  useEffect(() => {
+    if (method === null) return
     if (!deviceTrustSupported()) {
       setPhase({ kind: 'failed', message: "This browser can't keep a signing key (private browsing, or storage turned off)." })
       return
@@ -72,9 +95,21 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted }: Trust
         if (!stopped()) setPhase({ kind: 'failed', message: 'Sign in again, then try once more.' })
         return
       }
+      const send = (kind: Parameters<RelayConnection['enrol']>[0], payload: unknown) => conn.enrol(kind, payload)
       for (;;) {
         try {
-          const enrolment = await startEnrolment((kind, payload) => conn.enrol(kind, payload), { userId, machineId })
+          if (method === 'passkey') {
+            await certifyWithPasskey(send, { userId, machineId, candidates: passkeys, assert: assertWithPasskey })
+            if (!stopped()) {
+              setPhase({ kind: 'done', outcome: 'approved' })
+              onTrusted?.()
+            }
+            return
+          }
+          const enrolment = await startEnrolment(send, {
+            userId, machineId,
+            ...(addPasskey && passkeys.length > 0 ? { passkeys: { candidates: passkeys, assert: assertWithPasskey } } : {}),
+          })
           if (!stopped()) setPhase({ kind: 'code', enrolment, accepted: false })
           return
         } catch (err) {
@@ -85,7 +120,12 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted }: Trust
             if (stopped()) return
             continue
           }
-          setPhase({ kind: 'failed', message: describeError(err), keyChanged: err instanceof EnrolmentFailure && err.code === 'machine_key_changed' })
+          setPhase({
+            kind: 'failed',
+            message: method === 'passkey' && isPasskeyCancel(err) ? 'The passkey prompt was closed.' : describeError(err),
+            keyChanged: err instanceof EnrolmentFailure && err.code === 'machine_key_changed',
+            offerCode: method === 'passkey',
+          })
           return
         }
       }
@@ -96,7 +136,9 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted }: Trust
       conn.close()
       connection.current = null
     }
-  }, [machineId, attempt])
+    // Started once per choice; the passkey list and checkbox are read when it starts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [machineId, attempt, method])
 
   // Ask the machine whether the code was typed, one question at a time
   // (a slow relay must not pile them up), until it decides or the request
@@ -160,6 +202,23 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted }: Trust
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-page/80 p-4" role="dialog" aria-modal="true" aria-labelledby="trust-sheet-title">
       <div className="w-full max-w-md rounded-floating border border-edge-strong bg-surface-raised p-6 shadow-floating">
         <h2 id="trust-sheet-title" className="mb-2 text-title font-semibold text-ink">Confirm this browser on {machineName}</h2>
+
+        {phase.kind === 'choose' && (
+          <div className="space-y-3">
+            <p className="text-body text-ink-muted">Let this browser control {machineName}:</p>
+            <button type="button" onClick={() => { setPhase({ kind: 'starting', waitingForMachine: false }); setMethod('passkey') }} className={`${button} w-full`}>
+              Use my passkey
+            </button>
+            <p className="text-meta text-ink-faint">Works if your passkey is already confirmed on {machineName}, and it allows that.</p>
+            <button type="button" onClick={() => { setPhase({ kind: 'starting', waitingForMachine: false }); setMethod('code') }} className={`${button} w-full`}>
+              Show a code to type on {machineName}
+            </button>
+            <label className="flex items-center gap-2 text-meta text-ink-muted">
+              <input type="checkbox" className={checkbox} checked={addPasskey} onChange={e => { setAddPasskey(e.target.checked) }} />
+              Also confirm my passkey there, so it can add browsers and approve sensitive actions
+            </label>
+          </div>
+        )}
 
         {phase.kind === 'starting' && (
           <p className="flex items-center gap-2 text-body text-ink-muted">
@@ -231,6 +290,9 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted }: Trust
         <div className="mt-6 flex justify-end gap-2">
           {phase.kind === 'failed' && phase.keyChanged && (
             <button type="button" onClick={() => { void forgetOldKey() }} className={quietButton}>Forget the old key and start again</button>
+          )}
+          {phase.kind === 'failed' && phase.offerCode && (
+            <button type="button" onClick={() => { setPhase({ kind: 'starting', waitingForMachine: false }); setMethod('code') }} className={button}>Use a code instead</button>
           )}
           {((phase.kind === 'done' && phase.outcome !== 'approved') || (phase.kind === 'failed' && !phase.keyChanged)) && (
             <button type="button" onClick={restart} className={button}>Start again</button>

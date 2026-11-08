@@ -34,7 +34,7 @@ import {
   totpStep,
   verifyTypedFactor,
 } from './mfa.js'
-import { createWorkspace } from './workspaces.js'
+import { createWorkspace, requiresPasskeyStepUp } from './workspaces.js'
 import { insertCredential } from './webauthn.js'
 import { resetMfa } from './relay-admin-cli.js'
 import { listAuditEvents } from './audit.js'
@@ -385,6 +385,23 @@ describe('2FA flows', () => {
 
     ageSession(cookie, { mfaVerifiedAt: Date.now() - 11 * 60 * 1000 })
     expect((await call(`/api/workspaces/${ws.id}`, cookie, { method: 'PATCH', body: { requireMfa: false } })).status).toBe(401)
+  })
+
+  it('lets an owner require a passkey for privileged actions, and tells connected machines', async () => {
+    const owner = await githubSignIn({ id: 2, login: 'pat' })
+    const patId = (db.prepare('SELECT id FROM users WHERE github_id = 2').get() as { id: string }).id
+    db.prepare('UPDATE users SET can_create_workspaces = 1 WHERE id = ?').run(patId)
+    const ws = createWorkspace(db, 'Team', patId)
+    const { cookie } = await enrollTotp(owner)
+    expect((await call(`/api/workspaces/${ws.id}`, cookie, { method: 'PATCH', body: { requirePasskeyStepUp: 'yes' } })).status).toBe(400)
+    expect((await call(`/api/workspaces/${ws.id}`, cookie, { method: 'PATCH', body: { requirePasskeyStepUp: true } })).status).toBe(200)
+    expect(requiresPasskeyStepUp(db, ws.id)).toBe(true)
+    const listed = await (await call('/api/workspaces', cookie)).json() as { workspaces: Array<{ id: string; requirePasskeyStepUp: boolean }> }
+    expect(listed.workspaces.find(w => w.id === ws.id)?.requirePasskeyStepUp).toBe(true)
+    // Turning it off lowers protection: it needs a fresh check.
+    ageSession(cookie, { mfaVerifiedAt: Date.now() - 11 * 60 * 1000 })
+    expect((await call(`/api/workspaces/${ws.id}`, cookie, { method: 'PATCH', body: { requirePasskeyStepUp: false } })).status).toBe(401)
+    expect(requiresPasskeyStepUp(db, ws.id)).toBe(true)
   })
 
   it('refuses to require 2FA while the owner has none', async () => {

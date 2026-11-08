@@ -128,6 +128,7 @@ export function PairPage({ workspaceName }: PairPageProps) {
           <TrustSheet
             machineId={pairedInto.machineId}
             machineName={displayName || request?.hostname || 'this machine'}
+            preferCode
             onClose={() => { setConfirming(false) }}
           />
         )}

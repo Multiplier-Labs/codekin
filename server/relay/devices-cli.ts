@@ -8,13 +8,14 @@
  *   codekin relay devices reject <requestId>
  *   codekin relay devices revoke <keyId>
  *   codekin relay devices policy <off|warn|required>
+ *   codekin relay devices passkey-adds <on|off>  whether an enrolled passkey may add a browser
  */
 
 import { readRelayCredentialIdentity, relayCredentialPath } from './relay-credential.js'
 import { readMachineIdentity } from './machine-identity.js'
 import { trustPathsFor } from './machine-trust.js'
 import {
-  describeTrustStore, INTENT_POLICIES, readTrustStore, revokeCredential, setIntentPolicy, TrustStoreError,
+  describeTrustStore, INTENT_POLICIES, readTrustStore, revokeCredential, setIntentPolicy, setLocalConfirmationOnly, TrustStoreError,
 } from './trust-store.js'
 import type { TrustStoreView } from './trust-store.js'
 import { approveEnrolment, rejectEnrolment } from './enrolment.js'
@@ -32,6 +33,7 @@ export const DEVICES_USAGE = [
   '  reject <requestId>                Turn down a browser waiting to be confirmed',
   '  revoke <keyId>                    Remove a device',
   `  policy <${INTENT_POLICIES.join('|')}>         Set whether devices must sign what they send`,
+  '  passkey-adds <on|off>             Whether your passkey may add a browser without a code typed here',
 ]
 
 const POLICY_TEXT: Record<TrustStoreView['policy'], string> = {
@@ -50,6 +52,7 @@ function printList(view: TrustStoreView, identityKeyId: string | null, io: Devic
   io.out(`Machine:      ${view.machineId}`)
   io.out(`Identity key: ${identityKeyId ?? 'not created yet (made when the connector starts)'}`)
   io.out(`Policy:       ${POLICY_TEXT[view.policy]}`)
+  io.out(`Passkeys:     ${view.localConfirmationOnly ? 'may not add browsers (only devices confirmed here)' : 'may add browsers'}`)
   io.out('Not enforced yet: this Codekin version keeps the list but does not check signatures.')
   io.out('')
   if (view.pending.length > 0) {
@@ -132,6 +135,17 @@ export function runDevicesCommand(
         }
         const removed = revokeCredential(keyId, devicesFile, paired.machineId)
         io.out(`Removed ${removed.label || removed.keyId}. It can no longer control this computer.`)
+        return 0
+      }
+      case 'passkey-adds': {
+        if (rest[0] !== 'on' && rest[0] !== 'off') {
+          io.err('Usage: codekin relay devices passkey-adds <on|off>')
+          return 1
+        }
+        setLocalConfirmationOnly(rest[0] === 'off', devicesFile, paired.machineId)
+        io.out(rest[0] === 'on'
+          ? 'Your enrolled passkey may add a browser to this computer.'
+          : 'Only devices confirmed on this computer can be added now.')
         return 0
       }
       case 'policy': {

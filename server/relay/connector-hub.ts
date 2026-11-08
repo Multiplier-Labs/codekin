@@ -32,7 +32,7 @@ import {
 } from './rate-limit.js'
 import { CONNECTOR_FLOORS, connectorUpdateRequired } from './connector-version.js'
 import type { ConnectorFloors, UpdateRequired } from './connector-version.js'
-import { getRequiredCapabilities } from './workspaces.js'
+import { getRequiredCapabilities, requiresPasskeyStepUp } from './workspaces.js'
 import { isMeterPaused, meterFrame } from './usage-meter.js'
 import type { UsageMeter } from './usage-meter.js'
 import { isWellFormedStreamData, recordFinding } from './abuse-signals.js'
@@ -348,6 +348,14 @@ export class ConnectorHub {
     })
   }
 
+  /** Tell the connected machines of a workspace that its intent policy changed (signed-intents spec §6.6). */
+  announceWorkspacePolicy(workspaceId: string, policy: { requirePasskeyStepUp: boolean }): void {
+    for (const machine of this.machines.values()) {
+      if (machine.workspaceId !== workspaceId || machine.socket.readyState !== machine.socket.OPEN) continue
+      machine.socket.send(JSON.stringify(envelope('event', policy)))
+    }
+  }
+
   /**
    * Forward one enrolment frame (signed-intents spec §5.2) to a machine and
    * await its reply. The connector does every check that matters; the hub
@@ -503,6 +511,7 @@ export class ConnectorHub {
           ...(typeof err.intentNonce === 'string' ? { intentNonce: err.intentNonce } : {}),
           ...(typeof err.machineTime === 'number' ? { machineTime: err.machineTime } : {}),
           ...(typeof err.machineTimeSig === 'string' ? { machineTimeSig: err.machineTimeSig } : {}),
+          ...(Array.isArray(err.stepUpPasskeys) ? { stepUpPasskeys: err.stepUpPasskeys } : {}),
         },
       })
       return
@@ -599,6 +608,7 @@ export class ConnectorHub {
     // in sendRequest/openChannel instead.
     const ack: ConnectorHelloAck = { machineId, displayName: row?.display_name ?? 'Machine' }
     if (row?.owner_user_id) ack.ownerUserId = row.owner_user_id
+    if (workspace && requiresPasskeyStepUp(this.db, workspace.workspace_id)) ack.requirePasskeyStepUp = true
     if (updateRequired) ack.updateRequired = updateRequired
     socket.send(JSON.stringify(envelope('hello_ack', ack)))
   }

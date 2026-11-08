@@ -17,7 +17,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { IconCheck, IconPlus, IconShieldCheck, IconTrash } from '@tabler/icons-react'
 import { TrustSheet } from './TrustSheet'
-import { currentUserId, deviceTrustSupported, machinePin } from './deviceTrust'
+import { currentUserId, deviceTrustSupported, machinePin, removeFromMachine } from './deviceTrust'
+import { createIntentSigner } from './intentSigner'
+import { RelayConnection } from '../lib/transport/relay-client'
 import { MACHINE_STATUS_DOT, type Machine } from './machines'
 import { useMachineSetup, type MachineSetup } from './useMachineSetup'
 import { InstallCommand } from './InstallCommand'
@@ -75,13 +77,54 @@ function useTrustedMachines(machineIds: string[]): { trusted: Set<string> | null
   return { trusted, refresh }
 }
 
+/** Ask the machine to drop this browser, then forget it here. */
+async function removeThisBrowser(machineId: string): Promise<void> {
+  const userId = await currentUserId()
+  if (!userId) throw new Error('Sign in again first')
+  const conn = new RelayConnection({ machineId })
+  try {
+    conn.connect()
+    const signer = createIntentSigner(machineId)
+    await removeFromMachine((kind, payload) => conn.enrol(kind, payload), intent => signer.sign(intent), { userId, machineId })
+  } finally {
+    conn.close()
+  }
+}
+
 /** "Confirmed on this browser", or the way to get there (signed-intents spec §6.9). */
 function TrustLine({ machine, trusted, onTrusted }: { machine: Machine; trusted: boolean; onTrusted: () => void }) {
   const [open, setOpen] = useState(false)
+  const [removing, setRemoving] = useState<'confirm' | 'busy' | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const remove = async () => {
+    setRemoving('busy')
+    setError(null)
+    try {
+      await removeThisBrowser(machine.id)
+      onTrusted()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't remove this browser")
+    } finally {
+      setRemoving(null)
+    }
+  }
   return (
-    <div className="flex items-center gap-2 pl-8 pt-0.5 text-meta">
+    <div className="flex flex-wrap items-center gap-2 pl-8 pt-0.5 text-meta">
       {trusted ? (
-        <span className="flex items-center gap-1 text-ink-muted"><IconShieldCheck size={14} /> Confirmed on this browser</span>
+        <>
+          <span className="flex items-center gap-1 text-ink-muted"><IconShieldCheck size={14} /> Confirmed on this browser</span>
+          {removing === 'confirm' ? (
+            <>
+              <button type="button" onClick={() => { void remove() }} className="text-error-4 hover:underline">Remove it from {machine.displayName}</button>
+              <button type="button" onClick={() => { setRemoving(null) }} className="text-ink-muted hover:underline">Keep</button>
+            </>
+          ) : (
+            <button type="button" disabled={removing === 'busy'} onClick={() => { setRemoving('confirm') }} className="text-ink-faint hover:text-ink hover:underline">
+              {removing === 'busy' ? 'Removing…' : 'Remove this browser'}
+            </button>
+          )}
+          {error && <span className="text-warning-5">{error}</span>}
+        </>
       ) : (
         <>
           <span className="text-ink-faint">Not confirmed on this browser</span>

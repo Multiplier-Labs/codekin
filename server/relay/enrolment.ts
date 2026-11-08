@@ -25,13 +25,20 @@ import { randomBytes, randomUUID } from 'crypto'
 import type { KeyObject } from 'crypto'
 import {
   CHALLENGE_LABEL, DIGEST_BYTES, NONCE_BYTES, POP_LABEL, RESULT_LABEL, SIGNATURE_BYTES,
-  checkLabel, codesEqual, commitment, confirmationCode, formatCode, fromB64url, normalizeCode, shortAuthString, signP1363,
+  checkLabel, codesEqual, sha256, commitment, confirmationCode, formatCode, fromB64url, normalizeCode, shortAuthString, signP1363,
   transcript, verifyP1363,
 } from './enrolment-crypto.js'
 import type { EnrolPasskey } from './enrolment-crypto.js'
 import { keyIdForSpki, loadMachineSigningKey, parseP256Spki, readMachineIdentity } from './machine-identity.js'
 import { mutateTrustStore, readTrustStore, TrustStoreError } from './trust-store.js'
-import type { PendingEnrolment, TrustedCredential, TrustStore } from './trust-store.js'
+import type { PasskeyCredential, PendingEnrolment, TrustedCredential, TrustStore } from './trust-store.js'
+import { coseToKey, keyIdForCoseKey, verifyPasskeyAssertion } from './webauthn-verify.js'
+import type { PasskeyAssertion } from './webauthn-verify.js'
+import {
+  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs, revokePayload,
+} from './intent-actions.js'
+import type { IntentVerifier } from './intent-verify.js'
+import { describeIntentRefusal } from './connector-stream.js'
 import type { RelayPrincipal } from './relay-protocol.js'
 import type { SecretStore } from './secret-store.js'
 
@@ -68,7 +75,18 @@ export interface EnrolResult {
   keyId?: string
   /** Set when approved or rejected: sign_kM(T(result, enrolId, SPKI(kB), state)), base64url. */
   signature?: string
+  /**
+   * Set when approved: the signer's passkeys this machine trusts, so the
+   * browser knows which one to use for step-up. A hint (unsigned); a wrong
+   * one only gets a step-up refused.
+   */
+  passkeys?: Array<{ credentialId: string; keyId: string }>
+  /** device_certify only: the machine key, which the browser pins (on first use: no code). */
+  machineKey?: string
 }
+
+/** Most passkeys one enrolment may add. */
+export const MAX_ENROL_PASSKEYS = 3
 
 /** A refusal the connector sends back as a relay `error` frame. */
 export class EnrolmentError extends Error {
@@ -79,6 +97,8 @@ export class EnrolmentError extends Error {
 }
 
 export interface MachineEnrolmentOptions {
+  /** Verifies device_certify and device_revoke intents (intent-verify.ts). */
+  intents?: Pick<IntentVerifier, 'checkDeviceIntent'>
   machineId: string
   identityFile: string
   devicesFile: string
@@ -174,9 +194,9 @@ export class MachineEnrolment {
     const pop = fromB64url(p.pop, SIGNATURE_BYTES)
     const label = checkLabel(p.label)
     if (!enrolId || !spki || !nonceB || !pop || !label || !Array.isArray(p.passkeys)) throw refuse('Malformed enrolment request')
-    // Passkeys join the ceremony with step-up (slice 5).
-    if (p.passkeys.length > 0) throw refuse('This computer cannot enrol passkeys yet')
-    const passkeys: EnrolPasskey[] = []
+    const passkeys = parsePasskeys(p.passkeys)
+    const proofs = parseProofs(Array.isArray(p.passkeyProofs) ? p.passkeyProofs as unknown[] : [])
+    if (!passkeys || !proofs || proofs.length !== passkeys.length) throw refuse('Malformed enrolment request')
     const { spki: machineSpki } = this.machineKey()
     const spkiB = Buffer.from(spki, 'base64url')
 
@@ -196,7 +216,16 @@ export class MachineEnrolment {
         return { refused }
       }
       if (!commitment(spkiB, passkeys, label, nonceB).equals(commit)) return spend('The browser key does not match its commitment')
-      if (!verifyP1363(spkiB, transcript(POP_LABEL, enrolId, nonceM), pop)) return spend('The browser could not prove it holds its key')
+      // The browser's key signs the passkey proofs too, so the relay can't
+      // swap in an assertion of its own (spec §6.6a).
+      if (!verifyP1363(spkiB, transcript(POP_LABEL, enrolId, nonceM, encodePasskeyProofs(proofs)), pop)) {
+        return spend('The browser could not prove it holds its key')
+      }
+      // Each passkey must prove the user's authenticator holds it, bound to
+      // this browser key: the public keys came through the relay, which
+      // could otherwise slip in one of its own.
+      const passkeyFailure = this.checkPasskeyProofs(store, passkeys, proofs, spkiB, nonceB)
+      if (passkeyFailure) return spend(passkeyFailure)
       entry.reveal = {
         spki,
         keyId: keyIdForSpki(spki),
@@ -230,9 +259,90 @@ export class MachineEnrolment {
     return {
       enrolId,
       state,
-      ...(state === 'approved' ? { keyId: entry.reveal.keyId } : {}),
+      ...(state === 'approved' ? { keyId: entry.reveal.keyId, passkeys: passkeysOf(store, userId) } : {}),
       signature: signature.toString('base64url'),
     }
+  }
+
+  /** null when every passkey's proof verifies; otherwise why not. */
+  private checkPasskeyProofs(store: TrustStore, passkeys: EnrolPasskey[], proofs: PasskeyProof[], spkiB: Buffer, nonceB: Buffer): string | null {
+    if (passkeys.length === 0) return null
+    let origin: string
+    let host: string
+    try {
+      const relay = new URL(store.relayOrigin)
+      origin = relay.origin
+      host = relay.hostname
+    } catch {
+      return 'This computer does not know its relay address'
+    }
+    const challenge = sha256(transcript(PASSKEY_PROOF_LABEL, spkiB, nonceB))
+    for (let i = 0; i < passkeys.length; i++) {
+      const passkey = passkeys[i]
+      const proof = proofs[i]
+      if (passkey.rpId !== host) return 'A passkey belongs to another site'
+      if (proof.credentialId !== passkey.credentialId) return 'A passkey proof is missing'
+      const failure = verifyPasskeyAssertion(proof, { challenge, origin, rpId: passkey.rpId, cosePublicKey: passkey.cosePublicKey })
+      if (failure) return `A passkey could not prove it is yours (${failure})`
+    }
+    return null
+  }
+
+  /**
+   * device_certify (spec §5.4): add a browser on the strength of an enrolled
+   * passkey's user-verified assertion, without a code typed here — unless
+   * the owner turned that off ("Only allow devices confirmed on this computer").
+   */
+  certify(principal: RelayPrincipal | undefined, payload: unknown): EnrolResult {
+    const p = (payload ?? {}) as Record<string, unknown>
+    const spki = parseP256Spki(p.spki)
+    const label = checkLabel(p.label)
+    if (!spki || !label) throw refuse('Malformed request')
+    const store = readTrustStore(this.opts.devicesFile)
+    if (!store || store.machineId !== this.opts.machineId) throw new EnrolmentError('enrol_unavailable', "This computer's device list can't be used right now")
+    if (store.localConfirmationOnly) throw refuse('This computer only accepts browsers confirmed on it. Use the code instead.')
+    if (!this.opts.intents) throw new EnrolmentError('enrol_unavailable', 'This computer cannot check passkeys')
+    const userId = this.checkPrincipal(principal, store)
+    const { decision, signer } = this.opts.intents.checkDeviceIntent(principal, p.intent, DEVICE_CERTIFY_ACTION, certifyPayload(spki, label))
+    if (!signer) throw refuse(`The passkey could not be checked (${decision.reason ?? 'not accepted'})`)
+    // Only a passkey certifies; a browser key added by passkey can't add more.
+    if (signer.kind !== 'passkey' || signer.userId !== userId) throw refuse('Only a passkey confirmed on this computer can add a browser')
+    const keyId = keyIdForSpki(spki)
+    const { key, spki: machineSpki } = this.machineKey()
+    this.mutate(s => {
+      const at = new Date(this.now()).toISOString()
+      s.credentials = [...s.credentials.filter(c => c.keyId !== keyId), {
+        keyId, kind: 'browser', userId, spki, label, addedAt: at, addedBy: `passkey:${signer.keyId}`,
+      }]
+    })
+    this.opts.log?.log(`[relay] A browser ("${label}") was added by passkey. Remove it in Settings → Remote access if that wasn't you.`)
+    const nonce = parseIntentNonce(p.intent)
+    return {
+      enrolId: `certify:${nonce}`,
+      state: 'approved',
+      keyId,
+      machineKey: machineSpki.toString('base64url'),
+      passkeys: passkeysOf(store, userId),
+      signature: signP1363(key, transcript(RESULT_LABEL, `certify:${nonce}`, Buffer.from(spki, 'base64url'), 'approved')).toString('base64url'),
+    }
+  }
+
+  /** device_revoke (spec §5.6): remove a credential, on an owner's signed (and stepped-up) intent. */
+  revoke(principal: RelayPrincipal | undefined, payload: unknown): EnrolResult {
+    const keyId = (payload as { keyId?: unknown } | null)?.keyId
+    if (typeof keyId !== 'string' || !keyId || keyId.length > 64) throw refuse('Malformed request')
+    if (!this.opts.intents) throw new EnrolmentError('enrol_unavailable', 'This computer cannot check signed requests')
+    const { decision, signer } = this.opts.intents.checkDeviceIntent(principal, (payload as { intent?: unknown }).intent, DEVICE_REVOKE_ACTION, revokePayload(keyId))
+    if (!signer) throw refuse(describeIntentRefusal(decision.reason))
+    const removed = this.mutate(s => {
+      const target = s.credentials.find(c => c.keyId === keyId && c.userId === signer.userId)
+      if (!target) return false
+      s.credentials = s.credentials.filter(c => c !== target)
+      return true
+    })
+    if (!removed) throw refuse('That device is not on this computer')
+    this.opts.log?.log(`[relay] A device (${keyId}) was removed from this computer by a signed request.`)
+    return { enrolId: `revoke:${keyId}`, state: 'approved', keyId }
   }
 
   /** Dispatch one frame; throws EnrolmentError for a refusal. */
@@ -241,8 +351,55 @@ export class MachineEnrolment {
       case 'enrol_commit': return { kind: 'enrol_challenge', payload: this.commit(principal, payload) }
       case 'enrol_reveal': return { kind: 'enrol_result', payload: this.reveal(principal, payload) }
       case 'enrol_status': return { kind: 'enrol_result', payload: this.status(principal, payload) }
+      case 'enrol_certify': return { kind: 'enrol_result', payload: this.certify(principal, payload) }
+      case 'enrol_revoke': return { kind: 'enrol_result', payload: this.revoke(principal, payload) }
       default: throw refuse('Unknown enrolment message')
     }
+  }
+}
+
+/** Passkeys sent in a reveal: credential id, COSE key and RP ID, each bounded. Null when malformed. */
+function parsePasskeys(value: unknown[]): EnrolPasskey[] | null {
+  if (value.length > MAX_ENROL_PASSKEYS) return null
+  const out: EnrolPasskey[] = []
+  for (const v of value) {
+    const p = v as Partial<EnrolPasskey> | null
+    if (!p || typeof p.credentialId !== 'string' || typeof p.cosePublicKey !== 'string' || typeof p.rpId !== 'string') return null
+    if (!/^[A-Za-z0-9_-]{1,1024}$/.test(p.credentialId) || !/^[A-Za-z0-9_-]{1,2048}$/.test(p.cosePublicKey) || p.rpId.length > 253) return null
+    if (!coseToKey(p.cosePublicKey)) return null
+    out.push({ credentialId: p.credentialId, cosePublicKey: p.cosePublicKey, rpId: p.rpId })
+  }
+  return out
+}
+
+type PasskeyProof = PasskeyAssertion & { credentialId: string }
+
+/** Passkey proofs as sent, each field a bounded base64url string. Null when malformed. */
+function parseProofs(value: unknown[]): PasskeyProof[] | null {
+  if (value.length > MAX_ENROL_PASSKEYS) return null
+  const out: PasskeyProof[] = []
+  const field = (v: unknown, max: number): v is string => typeof v === 'string' && v.length > 0 && v.length <= max && /^[A-Za-z0-9_-]+$/.test(v)
+  for (const v of value) {
+    const p = v as Partial<PasskeyProof> | null
+    if (!p || !field(p.credentialId, 1024) || !field(p.authenticatorData, 4096) || !field(p.clientDataJSON, 4096) || !field(p.signature, 2048)) return null
+    out.push({ credentialId: p.credentialId, authenticatorData: p.authenticatorData, clientDataJSON: p.clientDataJSON, signature: p.signature })
+  }
+  return out
+}
+
+/** A user's passkeys on this machine, for the browser's step-up. */
+function passkeysOf(store: TrustStore, userId: string): Array<{ credentialId: string; keyId: string }> {
+  return store.credentials
+    .filter((c): c is PasskeyCredential => c.kind === 'passkey' && c.userId === userId)
+    .map(c => ({ credentialId: c.credentialId, keyId: c.keyId }))
+}
+
+function parseIntentNonce(intent: unknown): string {
+  try {
+    const nonce = (JSON.parse((intent as { body: string }).body) as { nonce?: unknown }).nonce
+    return typeof nonce === 'string' ? nonce : ''
+  } catch {
+    return ''
   }
 }
 
@@ -281,8 +438,21 @@ export function approveEnrolment(
       addedAt: at,
       addedBy: 'local',
     }
-    // Re-confirming a browser that is already listed replaces its entry.
-    store.credentials = [...store.credentials.filter(c => c.keyId !== credential.keyId), credential]
+    // The passkeys proven in the ceremony come in with the browser.
+    const passkeys: TrustedCredential[] = match.reveal.passkeys.map(p => ({
+      keyId: keyIdForCoseKey(p.cosePublicKey),
+      kind: 'passkey',
+      userId: match.userId,
+      credentialId: p.credentialId,
+      cosePublicKey: p.cosePublicKey,
+      rpId: p.rpId,
+      label: 'Passkey',
+      addedAt: at,
+      addedBy: 'local',
+    }))
+    // Re-confirming a browser or passkey that is already listed replaces its entry.
+    const added = new Set([credential.keyId, ...passkeys.map(c => c.keyId)])
+    store.credentials = [...store.credentials.filter(c => !added.has(c.keyId)), credential, ...passkeys]
     match.outcome = { state: 'approved', at }
     match.expiresAt = new Date(t + RESULT_TTL_MS).toISOString()
     return { ...credential, confirmCode: formatCode(match.reveal.confirmCode ?? '') }

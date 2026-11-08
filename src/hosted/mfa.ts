@@ -10,6 +10,7 @@
  */
 
 import { startAuthentication } from '@simplewebauthn/browser'
+import { separateRelayChallenge } from './relayChallenge'
 import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser'
 
 export type AuthLevel = 'full' | 'mfa_pending' | 'enrollment_required'
@@ -71,7 +72,7 @@ export async function verifyCode(code: string): Promise<{ recoveryCodesRemaining
 /** Verify with one of this account's passkeys (second step of sign-in, or step-up). */
 export async function verifyWithPasskey(): Promise<void> {
   const { options } = await post<{ options: PublicKeyCredentialRequestOptionsJSON }>('/api/auth/webauthn/verify/options')
-  const response = await startAuthentication({ optionsJSON: options })
+  const response = await startAuthentication({ optionsJSON: await separateRelayChallenge(options) })
   await post('/api/auth/webauthn/verify/verify', { response })
 }
 

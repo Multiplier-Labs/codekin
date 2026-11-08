@@ -29,7 +29,7 @@ function browserWaiting(label = 'Edge · Windows'): { code: string; enrolId: str
   const nonceM = Buffer.from(ch.nonceM, 'base64url')
   machine.reveal(owner, {
     enrolId: ch.enrolId, spki: spki.toString('base64url'), passkeys: [], label, nonceB: nonceB.toString('base64url'),
-    pop: signP1363(privateKey as KeyObject, transcript(POP_LABEL, ch.enrolId, nonceM)).toString('base64url'),
+    pop: signP1363(privateKey as KeyObject, transcript(POP_LABEL, ch.enrolId, nonceM, '[]')).toString('base64url'),
   })
   return { enrolId: ch.enrolId, code: formatCode(shortAuthString(Buffer.from(ch.machineKey, 'base64url'), spki, [], nonceB, nonceM)) }
 }
@@ -289,5 +289,11 @@ describe('codekin relay devices', () => {
     expect(run(['policy', 'warn'])).toMatchObject({ code: 0, out: expect.stringContaining('warn') })
     expect(run(['policy', 'sometimes'])).toMatchObject({ code: 1 })
     expect(run(['frobnicate'])).toMatchObject({ code: 1, err: expect.stringContaining('Usage') })
+    expect(run(['passkey-adds', 'off'])).toMatchObject({ code: 0, out: expect.stringContaining('Only devices confirmed') })
+    expect(readTrustStore(devicesFile)?.localConfirmationOnly).toBe(true)
+    expect(run(['list']).out).toContain('may not add browsers')
+    expect(run(['passkey-adds', 'on']).code).toBe(0)
+    expect(readTrustStore(devicesFile)?.localConfirmationOnly).toBeUndefined()
+    expect(run(['passkey-adds', 'maybe']).code).toBe(1)
   })
 })

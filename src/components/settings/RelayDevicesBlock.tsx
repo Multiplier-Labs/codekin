@@ -16,10 +16,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { IconCircleCheckFilled } from '@tabler/icons-react'
 import {
-  approveRelayDevice, getRelayDevices, rejectRelayEnrolment, revokeRelayDevice,
+  approveRelayDevice, getRelayDevices, rejectRelayEnrolment, revokeRelayDevice, setRelayLocalConfirmationOnly,
   type RelayDevices, type RelayDevice,
 } from '../../lib/ccApi'
-import { Block, Row, Rows, input } from './Block'
+import { Block, Row, Rows, checkbox, input } from './Block'
 import { RelayActivityBlock } from './RelayActivityBlock'
 
 const plainButton = 'rounded-control border border-edge px-3 py-1.5 text-body text-ink hover:bg-surface-raised disabled:opacity-50 transition-colors'
@@ -171,6 +171,25 @@ export function RelayDevicesBlock({ token, onError }: Props) {
             control={<button type="button" onClick={() => { void reject(p.enrolId) }} className={plainButton}>Turn down</button>}
           />
         ))}
+        {data.devices && devices.some(d => d.kind === 'passkey') && (
+          <Row
+            label="Let my passkey add browsers"
+            htmlFor="relay-passkey-adds"
+            description="A browser can then be added with Face ID, Touch ID or your security key, without typing a code here. Turn it off if you don't trust your passkey provider's sync."
+            control={
+              <input
+                id="relay-passkey-adds"
+                type="checkbox"
+                className={checkbox}
+                checked={!data.devices.localConfirmationOnly}
+                onChange={e => {
+                  const allow = e.target.checked
+                  setRelayLocalConfirmationOnly(token, !allow).then(refresh).catch(() => { onError("Couldn't change the setting") })
+                }}
+              />
+            }
+          />
+        )}
         <Row
           label="This computer's identity key"
           description="Browsers check this key when you confirm them."

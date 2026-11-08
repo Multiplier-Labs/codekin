@@ -66,6 +66,7 @@ export interface WorkspaceRow {
   id: string
   name: string
   require_mfa: number
+  require_passkey_step_up: number
   created_by_user_id: string | null
   created_at: string
   deleted_at: string | null
@@ -118,6 +119,7 @@ export interface UserWorkspace {
   name: string
   role: WorkspaceRole
   requireMfa: boolean
+  requirePasskeyStepUp: boolean
 }
 
 /**
@@ -127,13 +129,13 @@ export interface UserWorkspace {
 export function listUserWorkspaces(db: Database.Database, userId: string): UserWorkspace[] {
   const rows = db
     .prepare(
-      `SELECT w.id, w.name, w.require_mfa, m.role FROM workspace_memberships m
+      `SELECT w.id, w.name, w.require_mfa, w.require_passkey_step_up, m.role FROM workspace_memberships m
        JOIN workspaces w ON w.id = m.workspace_id
        WHERE m.user_id = ? AND m.status = 'active' AND w.deleted_at IS NULL
        ORDER BY (w.id = ?) DESC, m.created_at, w.id`,
     )
-    .all(userId, BOOTSTRAP_WORKSPACE_ID) as Array<{ id: string; name: string; require_mfa: number; role: WorkspaceRole }>
-  return rows.map(r => ({ id: r.id, name: r.name, role: r.role, requireMfa: r.require_mfa === 1 }))
+    .all(userId, BOOTSTRAP_WORKSPACE_ID) as Array<{ id: string; name: string; require_mfa: number; require_passkey_step_up: number; role: WorkspaceRole }>
+  return rows.map(r => ({ id: r.id, name: r.name, role: r.role, requireMfa: r.require_mfa === 1, requirePasskeyStepUp: r.require_passkey_step_up === 1 }))
 }
 
 export const MAX_WORKSPACE_NAME = 64
@@ -161,6 +163,16 @@ export function createWorkspace(db: Database.Database, name: string, ownerUserId
 
 export function setRequireMfa(db: Database.Database, workspaceId: string, required: boolean): void {
   db.prepare('UPDATE workspaces SET require_mfa = ? WHERE id = ? AND deleted_at IS NULL').run(required ? 1 : 0, workspaceId)
+}
+
+/** "Privileged actions need a passkey" (signed-intents spec §6.6). */
+export function setRequirePasskeyStepUp(db: Database.Database, workspaceId: string, required: boolean): void {
+  db.prepare('UPDATE workspaces SET require_passkey_step_up = ? WHERE id = ? AND deleted_at IS NULL').run(required ? 1 : 0, workspaceId)
+}
+
+export function requiresPasskeyStepUp(db: Database.Database, workspaceId: string): boolean {
+  const row = db.prepare('SELECT require_passkey_step_up FROM workspaces WHERE id = ?').get(workspaceId) as { require_passkey_step_up: number } | undefined
+  return row?.require_passkey_step_up === 1
 }
 
 /**

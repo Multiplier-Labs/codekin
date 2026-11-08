@@ -9,7 +9,7 @@
  * server/relay/intent-actions.ts, which the machine applies to verify.
  */
 
-import { INTENT_VERSION, MACHINE_TIME_LABEL, MAX_CLOCK_OFFSET_MS } from '../../server/relay/intent-actions'
+import { INTENT_VERSION, MACHINE_TIME_LABEL, MAX_CLOCK_OFFSET_MS, PASSKEY_ANY, intentChallengeInput } from '../../server/relay/intent-actions'
 import type { IntentBody, SignedIntent } from '../../server/relay/intent-actions'
 import { DEVICE_TRUST_CHANGED, currentUserId, fromB64url, toB64url, transcript, trustStorage, type TrustStorage } from './deviceTrust'
 
@@ -26,6 +26,8 @@ export interface IntentToSign {
   seq?: number
   /** Reuse a nonce: a retry of the same request must not be able to run twice. */
   nonce?: string
+  /** A privileged action (§6.6): signed with the passkey the machine trusts, when there is one. */
+  stepUp?: boolean
 }
 
 export interface IntentSigner {
@@ -35,6 +37,8 @@ export interface IntentSigner {
   setClockOffset(ms: number): void
   /** Whether the pinned machine key signed this time for this nonce (MACHINE_TIME_LABEL). */
   verifyMachineTime(nonce: string, machineTime: number, sig: string): Promise<boolean>
+  /** Remember which of this user's passkeys the machine trusts (from a step-up refusal). */
+  learnPasskeys(passkeys: Array<{ credentialId: string; keyId: string }>): Promise<void>
 }
 
 const SIGN = { name: 'ECDSA', hash: 'SHA-256' } as const
@@ -45,7 +49,12 @@ export function clampOffset(ms: number): number {
   return Math.max(-MAX_CLOCK_OFFSET_MS, Math.min(MAX_CLOCK_OFFSET_MS, ms))
 }
 
-interface SigningKey { privateKey: CryptoKey; keyId: string }
+interface SigningKey {
+  privateKey: CryptoKey
+  keyId: string
+  userId: string
+  passkeys: Array<{ credentialId: string; keyId: string }>
+}
 
 export function createIntentSigner(machineId: string, storage: TrustStorage = trustStorage(), now: () => number = Date.now): IntentSigner {
   let offset = 0
@@ -57,7 +66,26 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
     const [browserKey, pin] = await Promise.all([storage.getKey(userId), storage.getPin(userId, machineId)])
     // Sign only where the machine confirmed this very key.
     if (!browserKey || !pin || pin.keyId !== browserKey.keyId) return null
-    return { privateKey: browserKey.keyPair.privateKey, keyId: browserKey.keyId }
+    return { privateKey: browserKey.keyPair.privateKey, keyId: browserKey.keyId, userId, passkeys: pin.passkeys ?? [] }
+  }
+
+  /** A passkey intent for a privileged action, or null to fall back to the browser key. */
+  const withPasskey = async (signing: SigningKey, body: IntentBody): Promise<SignedIntent | null> => {
+    if (signing.passkeys.length === 0 || typeof window === 'undefined') return null
+    try {
+      const { assertWithPasskey, passkeysSupported } = await import('./passkeys')
+      if (!passkeysSupported()) return null
+      // Offer every passkey we know the machine trusts and let the user's
+      // authenticator answer with the one it has (keyId "*"): a wrong hint
+      // first in the list can't then block step-up.
+      const text = JSON.stringify({ ...body, keyId: PASSKEY_ANY })
+      const challenge = new Uint8Array(await crypto.subtle.digest('SHA-256', intentChallengeInput(text) as BufferSource))
+      const assertion = await assertWithPasskey(challenge, signing.passkeys.map(p => p.credentialId))
+      return { body: text, webauthn: assertion }
+    } catch {
+      // Cancelled or unavailable: the machine decides whether the browser key will do.
+      return null
+    }
   }
   if (typeof window !== 'undefined') {
     window.addEventListener(DEVICE_TRUST_CHANGED, () => { key = null })
@@ -81,9 +109,25 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
         ...(intent.channel !== undefined ? { channel: intent.channel } : {}),
         ...(intent.seq !== undefined ? { seq: intent.seq } : {}),
       }
+      if (intent.stepUp) {
+        const stepped = await withPasskey(signing, body)
+        if (stepped) return stepped
+      }
       const text = JSON.stringify(body)
       const sig = new Uint8Array(await crypto.subtle.sign(SIGN, signing.privateKey, utf8.encode(text) as BufferSource))
       return { body: text, sig: toB64url(sig) }
+    },
+    async learnPasskeys(passkeys) {
+      // A hint from the relay path: add to what we know, never wipe it.
+      if (passkeys.length === 0) return
+      const signing = await (key ??= load().catch(() => null))
+      if (!signing) return
+      const pin = await storage.getPin(signing.userId, machineId)
+      if (!pin) return
+      const known = pin.passkeys ?? []
+      const merged = [...passkeys, ...known.filter(k => !passkeys.some(p => p.credentialId === k.credentialId))].slice(0, 10)
+      await storage.putPin({ ...pin, passkeys: merged })
+      key = null
     },
     setClockOffset(ms) {
       offset = clampOffset(ms)
@@ -92,7 +136,9 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
       try {
         const userId = await currentUserId()
         const pin = userId ? await storage.getPin(userId, machineId) : undefined
-        if (!pin) return false
+        // A key taken on first use (device_certify) isn't proof the relay
+        // didn't supply it, so it doesn't vouch for the clock.
+        if (!pin || pin.via === 'passkey') return false
         const key = await crypto.subtle.importKey('spki', fromB64url(pin.machineKey) as BufferSource, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify'])
         const data = transcript(MACHINE_TIME_LABEL, nonce, String(machineTime))
         return await crypto.subtle.verify(SIGN, key, fromB64url(sig) as BufferSource, data as BufferSource)

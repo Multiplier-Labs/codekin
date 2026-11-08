@@ -40,6 +40,7 @@ function intentError(verdict: IntentDecision): RelayError {
     ...(verdict.nonce ? { intentNonce: verdict.nonce } : {}),
     ...(verdict.machineTime !== undefined ? { machineTime: verdict.machineTime } : {}),
     ...(verdict.machineTimeSig ? { machineTimeSig: verdict.machineTimeSig } : {}),
+    ...(verdict.stepUpPasskeys ? { stepUpPasskeys: verdict.stepUpPasskeys } : {}),
   }
 }
 
@@ -71,7 +72,7 @@ export interface ConnectorOptions {
   /** Answers enrol_* frames (enrolment.ts); without it the connector doesn't advertise enrolment. */
   enrolment?: Pick<MachineEnrolment, 'handle'>
   /** Checks signed intents on everything the relay delivers (intent-verify.ts). */
-  intents?: Pick<IntentVerifier, 'checkRequest' | 'checkChannelOpen' | 'checkFrame'>
+  intents?: Pick<IntentVerifier, 'checkRequest' | 'checkChannelOpen' | 'checkFrame'> & Partial<Pick<IntentVerifier, 'setRequirePasskey'>>
 }
 
 export type ConnectorStatus =
@@ -172,6 +173,8 @@ export class RelayConnector {
       if (msg.kind === 'hello_ack') {
         this.backoffMs = BACKOFF_MIN_MS
         const ack = msg.payload as ConnectorHelloAck
+        // The workspace's "Privileged actions need a passkey" (spec §6.6).
+        this.opts.intents?.setRequirePasskey?.(ack.requirePasskeyStepUp === true)
         if (typeof ack.ownerUserId === 'string' && ack.ownerUserId && this.opts.onOwner) {
           try { this.opts.onOwner(ack.ownerUserId) } catch { /* the trust store must not break the connection */ }
         }
@@ -191,7 +194,8 @@ export class RelayConnector {
         void this.advertiseSessions(ws)
       } else if (msg.kind === 'request') {
         void this.handleProxyRequest(ws, msg.id, msg.payload as ProxyRequest)
-      } else if (msg.kind === 'enrol_commit' || msg.kind === 'enrol_reveal' || msg.kind === 'enrol_status') {
+      } else if (msg.kind === 'enrol_commit' || msg.kind === 'enrol_reveal' || msg.kind === 'enrol_status'
+        || msg.kind === 'enrol_certify' || msg.kind === 'enrol_revoke') {
         this.handleEnrolment(ws, msg.kind, msg.id, msg.payload as EnrolRequest)
       } else if (msg.kind === 'stream_open') {
         this.openChannel(ws, msg.channelId, msg.payload as StreamOpen)
@@ -202,6 +206,10 @@ export class RelayConnector {
         }
       } else if (msg.kind === 'stream_close') {
         this.closeChannel(msg.channelId, msg.payload as StreamClose)
+      } else if (msg.kind === 'event' && !msg.channelId) {
+        // A workspace policy change while connected (connector-hub announceWorkspacePolicy).
+        const policy = msg.payload as { requirePasskeyStepUp?: unknown }
+        if (typeof policy.requirePasskeyStepUp === 'boolean') this.opts.intents?.setRequirePasskey?.(policy.requirePasskeyStepUp)
       } else if (msg.kind === 'error') {
         const err = msg.payload as RelayError
         this.opts.onStatus?.('disconnected', `${err.code}: ${err.message}`)

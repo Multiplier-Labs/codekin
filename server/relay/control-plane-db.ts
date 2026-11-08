@@ -441,6 +441,12 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
       );
     `)
   },
+
+  // 14: "Privileged actions need a passkey" (signed-intents spec §6.6): machines
+  // in the workspace refuse browser-key step-up.
+  db => {
+    db.exec('ALTER TABLE workspaces ADD COLUMN require_passkey_step_up INTEGER NOT NULL DEFAULT 0')
+  },
 ]
 
 function runMigrations(db: Database.Database): void {

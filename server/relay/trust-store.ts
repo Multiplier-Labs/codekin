@@ -101,6 +101,11 @@ export interface TrustStore {
   ownerUserId: string | null
   relayOrigin: string
   policy: IntentPolicy
+  /**
+   * "Only allow devices confirmed on this computer" (spec §5.4, D5): when set,
+   * an enrolled passkey can't add a browser. Local surfaces only.
+   */
+  localConfirmationOnly?: boolean
   credentials: TrustedCredential[]
   /** Enrolment requests, until they expire. */
   pending: PendingEnrolment[]
@@ -215,6 +220,7 @@ export function parseTrustStore(text: string): TrustStore {
     ownerUserId: typeof v.ownerUserId === 'string' ? v.ownerUserId : null,
     relayOrigin: v.relayOrigin,
     policy: v.policy,
+    ...(v.localConfirmationOnly === true ? { localConfirmationOnly: true } : {}),
     credentials,
     // An unreadable request is only a request: dropping it is harmless.
     pending: Array.isArray(v.pending) ? v.pending.map(parsePending).filter((e): e is PendingEnrolment => e !== null) : [],
@@ -412,6 +418,15 @@ export function setIntentPolicy(policy: unknown, file = relayDevicesPath(), mach
   })
 }
 
+/** Turn passkey-added browsers off (true) or on (false) for this machine. Local surfaces only. */
+export function setLocalConfirmationOnly(value: boolean, file = relayDevicesPath(), machineId?: string): TrustStore {
+  return mutateTrustStore(file, machineId, store => {
+    if (value) store.localConfirmationOnly = true
+    else delete store.localConfirmationOnly
+    return store
+  })
+}
+
 /** Delete the trust store (on unpair). Returns false when there was none. */
 export function removeTrustStore(file = relayDevicesPath()): boolean {
   if (!existsSync(file)) return false
@@ -424,6 +439,7 @@ export interface TrustStoreView {
   machineId: string
   ownerUserId: string | null
   policy: IntentPolicy
+  localConfirmationOnly: boolean
   credentials: Array<Pick<TrustedCredential, 'keyId' | 'kind' | 'userId' | 'label' | 'addedAt' | 'addedBy' | 'lastUsedAt'>>
   /**
    * Requests waiting for their code, newest first. The code itself is never
@@ -452,6 +468,7 @@ export function describeTrustStore(store: TrustStore, now = Date.now()): TrustSt
     machineId: store.machineId,
     ownerUserId: store.ownerUserId,
     policy: store.policy,
+    localConfirmationOnly: store.localConfirmationOnly === true,
     credentials: store.credentials.map(c => ({
       keyId: c.keyId,
       kind: c.kind,

@@ -357,7 +357,8 @@ export class BrowserHub {
       }
       if (msg.kind === 'request') {
         return this.forwardRequest(client, msg.id, msg.payload as ProxyRequest)
-      } else if (msg.kind === 'enrol_commit' || msg.kind === 'enrol_reveal' || msg.kind === 'enrol_status') {
+      } else if (msg.kind === 'enrol_commit' || msg.kind === 'enrol_reveal' || msg.kind === 'enrol_status'
+        || msg.kind === 'enrol_certify' || msg.kind === 'enrol_revoke') {
         return this.forwardEnrolment(client, msg.kind, msg.id, msg.payload)
       } else if (msg.kind === 'stream_open') {
         this.openChannel(client, msg.channelId, (msg.payload as StreamOpen | undefined)?.intent)
@@ -465,7 +466,7 @@ export class BrowserHub {
         return
       }
       client.socket.send(JSON.stringify(envelope(outcome.reply.kind, outcome.reply.payload, { id })))
-      if (kind === 'enrol_reveal') {
+      if (kind === 'enrol_reveal' || kind === 'enrol_certify') {
         // The machine accepted the reveal: remember the key in the registry
         // (a hint for the account's device list, never trusted).
         const reveal = payload as { spki?: unknown; label?: unknown }

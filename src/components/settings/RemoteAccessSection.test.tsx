@@ -18,6 +18,7 @@ const api = vi.hoisted(() => ({
   rejectRelayEnrolment: vi.fn(),
   getRelayIntents: vi.fn(),
   verifyRelayIntents: vi.fn(),
+  setRelayLocalConfirmationOnly: vi.fn(),
 }))
 vi.mock('../../lib/ccApi', () => api)
 
@@ -200,6 +201,23 @@ describe('RemoteAccessSection', () => {
     expect(api.getRelayIntents).toHaveBeenLastCalledWith('t', { limit: 50, verdict: 'rejected' })
     await act(async () => { button('Check log')!.click() })
     expect(el!.textContent).toContain('Intact: 2 entries')
+  })
+
+  it('lets the owner stop passkeys from adding browsers', async () => {
+    const PASSKEY = { keyId: 'pk1', kind: 'passkey', userId: 'u1', label: 'Passkey', addedAt: '2026-11-08T10:00:00Z', addedBy: 'local' }
+    api.getRelayStatus.mockResolvedValue(PAIRED)
+    api.getRelayPairing.mockResolvedValue({ state: 'idle' })
+    api.getRelayDevices.mockResolvedValue({ ...NO_DEVICES, devices: { ...NO_DEVICES.devices, localConfirmationOnly: false, credentials: [IPHONE, PASSKEY] } })
+    api.setRelayLocalConfirmationOnly.mockResolvedValue(undefined)
+    api.getRelayIntents.mockResolvedValue([
+      { seq: 1, at: '2026-11-08T12:00:00Z', verdict: 'accepted', forwarded: true, action: 'ws:prompt_response', sessionId: 's1', userId: 'u1', keyId: 'pk1', stepUp: 'passkey' },
+    ])
+    await render()
+    const box = el!.querySelector<HTMLInputElement>('#relay-passkey-adds')!
+    expect(box.checked).toBe(true)
+    await act(async () => { box.click() })
+    expect(api.setRelayLocalConfirmationOnly).toHaveBeenCalledWith('t', true)
+    expect(el!.textContent).toContain('confirmed with passkey')
   })
 
   it('says so when the device list file is unreadable', async () => {

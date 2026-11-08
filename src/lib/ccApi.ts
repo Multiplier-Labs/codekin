@@ -906,6 +906,8 @@ export interface RelayDevices {
     machineId: string
     ownerUserId: string | null
     policy: 'off' | 'warn' | 'required'
+    /** "Only allow devices confirmed on this computer": passkeys may not add browsers. */
+    localConfirmationOnly: boolean
     credentials: RelayDevice[]
     /** Browsers waiting for their code to be typed here. The code is never included. */
     pending: Array<{ enrolId: string; userId: string; label: string; createdAt: string; expiresAt: string }>
@@ -930,6 +932,14 @@ export async function approveRelayDevice(token: string, code: string): Promise<{
   const body = await jsonBody<{ added?: { keyId: string; label: string; confirmCode: string }; message?: string }>(res).catch(() => ({ added: undefined, message: undefined }))
   if (!res.ok || !body.added) throw new Error(body.message ?? `Failed to confirm the browser: ${res.status}`)
   return body.added
+}
+
+/** Whether an enrolled passkey may add a browser without a code typed here. */
+export async function setRelayLocalConfirmationOnly(token: string, value: boolean): Promise<void> {
+  const res = await transport.authFetch('/api/relay/devices/settings', {
+    method: 'PUT', headers: headers(token), body: JSON.stringify({ localConfirmationOnly: value }),
+  })
+  if (!res.ok) throw new Error(`Failed to change the setting: ${res.status}`)
 }
 
 /** Turn down a browser waiting to be confirmed. */
@@ -958,6 +968,8 @@ export interface RelayIntentEntry {
   sessionId: string | null
   userId: string | null
   keyId: string | null
+  /** Privileged actions: whether a passkey or only the browser key confirmed it. */
+  stepUp?: 'passkey' | 'browser-key'
 }
 
 export async function getRelayIntents(token: string, filter: { limit?: number; keyId?: string; verdict?: RelayIntentEntry['verdict'] } = {}): Promise<RelayIntentEntry[]> {

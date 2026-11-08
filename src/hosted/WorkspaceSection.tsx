@@ -26,7 +26,7 @@ import {
   removeMember,
   removeWorkspaceMachine,
   renameWorkspace,
-  setWorkspaceRequireMfa,
+  setWorkspaceRequireMfa, setWorkspaceRequirePasskeyStepUp,
   switchWorkspace,
   unlockMachine,
   updateMember,
@@ -549,6 +549,25 @@ export function WorkspaceGeneral() {
                   onChange={e => {
                     const next = e.target.checked
                     void act(() => setWorkspaceRequireMfa(workspace.id, next), () => { window.location.reload() })
+                  }}
+                />
+              }
+            />
+          )}
+          {can(role, 'workspace.edit') && (
+            <Row
+              label="Privileged actions need a passkey"
+              htmlFor="workspace-require-passkey-step-up"
+              description="Saving an always-allow rule, turning on bypass permissions and changing a computer's devices then need Face ID, Touch ID or a security key, on computers that check signed actions. The desktop app's own window can't use passkeys, so it can't do these there."
+              control={
+                <input
+                  id="workspace-require-passkey-step-up"
+                  type="checkbox"
+                  className={checkbox}
+                  checked={workspace.requirePasskeyStepUp === true}
+                  onChange={e => {
+                    const next = e.target.checked
+                    void act(() => setWorkspaceRequirePasskeyStepUp(workspace.id, next), () => { window.location.reload() })
                   }}
                 />
               }

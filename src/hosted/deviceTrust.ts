@@ -14,6 +14,11 @@
  * test vector in both test files pins that.
  */
 
+import {
+  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, INTENT_VERSION, PASSKEY_ANY, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
+  intentChallengeInput, revokePayload,
+} from '../../server/relay/intent-actions'
+
 // --- Encoding ---------------------------------------------------------------
 
 const utf8 = new TextEncoder()
@@ -46,8 +51,17 @@ export function transcript(label: string, ...parts: Array<Uint8Array | string>):
   return out
 }
 
-/** Passkeys join the ceremony in a later version; the list is always empty for now. */
-const NO_PASSKEYS = '[]'
+/** A passkey as the enrolment carries it (credential id, COSE key, RP ID). */
+export interface PasskeyKey {
+  credentialId: string
+  cosePublicKey: string
+  rpId: string
+}
+
+/** P in the transcripts: UTF-8 JSON of [credentialId, cosePublicKey, rpId] triples. */
+function encodePasskeys(passkeys: readonly PasskeyKey[]): string {
+  return JSON.stringify(passkeys.map(p => [p.credentialId, p.cosePublicKey, p.rpId]))
+}
 
 async function sha256(data: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.digest('SHA-256', data as BufferSource))
@@ -72,17 +86,17 @@ export function base32(bytes: Uint8Array): string {
   return out
 }
 
-export function commitment(spkiB: Uint8Array, label: string, nonceB: Uint8Array): Promise<Uint8Array> {
-  return sha256(transcript('ck-enrol-commit-v1', spkiB, NO_PASSKEYS, label, nonceB))
+export function commitment(spkiB: Uint8Array, label: string, nonceB: Uint8Array, passkeys: readonly PasskeyKey[] = []): Promise<Uint8Array> {
+  return sha256(transcript('ck-enrol-commit-v1', spkiB, encodePasskeys(passkeys), label, nonceB))
 }
 
-export async function shortAuthString(spkiM: Uint8Array, spkiB: Uint8Array, nonceB: Uint8Array, nonceM: Uint8Array): Promise<string> {
-  return base32(await sha256(transcript('ck-sas-v1', spkiM, spkiB, NO_PASSKEYS, nonceB, nonceM))).slice(0, 8)
+export async function shortAuthString(spkiM: Uint8Array, spkiB: Uint8Array, nonceB: Uint8Array, nonceM: Uint8Array, passkeys: readonly PasskeyKey[] = []): Promise<string> {
+  return base32(await sha256(transcript('ck-sas-v1', spkiM, spkiB, encodePasskeys(passkeys), nonceB, nonceM))).slice(0, 8)
 }
 
 /** The 6-character code the machine shows once it has approved this browser. */
-export async function confirmationCode(spkiM: Uint8Array, spkiB: Uint8Array, nonceB: Uint8Array, nonceM: Uint8Array): Promise<string> {
-  return base32(await sha256(transcript('ck-enrol-confirm-v1', spkiM, spkiB, NO_PASSKEYS, nonceB, nonceM))).slice(0, 6)
+export async function confirmationCode(spkiM: Uint8Array, spkiB: Uint8Array, nonceB: Uint8Array, nonceM: Uint8Array, passkeys: readonly PasskeyKey[] = []): Promise<string> {
+  return base32(await sha256(transcript('ck-enrol-confirm-v1', spkiM, spkiB, encodePasskeys(passkeys), nonceB, nonceM))).slice(0, 6)
 }
 
 /** "K7QM2XPA" → "K7QM-2XPA"; "ABC234" → "ABC-234". */
@@ -129,6 +143,14 @@ export interface MachinePin {
   /** This browser's key id the machine confirmed. */
   keyId: string
   pinnedAt: string
+  /**
+   * How the machine key was learned: `code` (the finishing code was typed
+   * back, §5.2) or `passkey` (device_certify: taken on first use, not
+   * confirmed by the user).
+   */
+  via?: 'code' | 'passkey'
+  /** This user's passkeys the machine trusts, for step-up (§6.6). A hint. */
+  passkeys?: Array<{ credentialId: string; keyId: string }>
 }
 
 export interface TrustStorage {
@@ -239,7 +261,12 @@ export function currentUserId(): Promise<string | null> {
 // --- The ceremony ------------------------------------------------------------
 
 /** Sends one enrol frame to the machine and resolves with its reply payload. */
-export type EnrolSend = (kind: 'enrol_commit' | 'enrol_reveal' | 'enrol_status', payload: unknown) => Promise<unknown>
+export type EnrolSend = (kind: 'enrol_commit' | 'enrol_reveal' | 'enrol_status' | 'enrol_certify' | 'enrol_revoke', payload: unknown) => Promise<unknown>
+
+/** A passkey assertion over `challenge`, from one of `credentialIds` (src/hosted/passkeys.ts assertWithPasskey). */
+export type AssertPasskey = (challenge: Uint8Array, credentialIds: string[]) => Promise<{
+  credentialId: string; authenticatorData: string; clientDataJSON: string; signature: string
+}>
 
 export type EnrolOutcome = 'approved' | 'rejected' | 'expired'
 
@@ -278,7 +305,14 @@ export function normalizeConfirmCode(input: string): string | null {
 }
 
 interface Challenge { enrolId: string; machineKey: string; nonceM: string; signature: string }
-interface Result { enrolId: string; state: 'awaiting_code' | EnrolOutcome; keyId?: string; signature?: string }
+interface Result {
+  enrolId: string
+  state: 'awaiting_code' | EnrolOutcome
+  keyId?: string
+  signature?: string
+  machineKey?: string
+  passkeys?: Array<{ credentialId: string; keyId: string }>
+}
 
 function isChallenge(v: unknown): v is Challenge {
   const c = v as Partial<Challenge> | null
@@ -292,23 +326,50 @@ function isChallenge(v: unknown): v is Challenge {
  */
 export async function startEnrolment(
   send: EnrolSend,
-  opts: { userId: string; machineId: string; label?: string; storage?: TrustStorage },
+  opts: {
+    userId: string
+    machineId: string
+    label?: string
+    storage?: TrustStorage
+    /** Also enrol one of these passkeys: the user picks it, and it proves itself (§5.2 as built). */
+    passkeys?: { candidates: PasskeyKey[]; assert: AssertPasskey }
+  },
 ): Promise<Enrolment> {
   const storage = opts.storage ?? trustStorage()
   const key = await getOrCreateBrowserKey(opts.userId, storage)
   const spkiB = fromB64url(key.spki)
   const label = (opts.label ?? defaultBrowserLabel()).slice(0, 64).trim()
   const nonceB = crypto.getRandomValues(new Uint8Array(32))
-  const commit = await commitment(spkiB, label, nonceB)
+
+  // A passkey's public key comes from the relay, so the passkey proves
+  // itself first: an assertion bound to this browser key and nonce.
+  let passkeys: PasskeyKey[] = []
+  let passkeyProofs: Array<{ credentialId: string; authenticatorData: string; clientDataJSON: string; signature: string }> = []
+  if (opts.passkeys && opts.passkeys.candidates.length > 0) {
+    const proofChallenge = await sha256(transcript(PASSKEY_PROOF_LABEL, spkiB, nonceB))
+    try {
+      const proof = await opts.passkeys.assert(proofChallenge, opts.passkeys.candidates.map(c => c.credentialId))
+      const chosen = opts.passkeys.candidates.find(c => c.credentialId === proof.credentialId)
+      if (chosen) {
+        passkeys = [chosen]
+        passkeyProofs = [proof]
+      }
+    } catch {
+      // Cancelled or unavailable: confirm the browser alone.
+    }
+  }
+  const commit = await commitment(spkiB, label, nonceB, passkeys)
 
   const challenge = await send('enrol_commit', { commit: toB64url(commit) })
   if (!isChallenge(challenge)) throw new EnrolmentFailure('protocol', 'The computer sent an unexpected reply')
   const spkiM = fromB64url(challenge.machineKey)
   const nonceM = fromB64url(challenge.nonceM)
 
-  // A key pinned earlier for this machine must not change behind our back.
+  // A key confirmed earlier for this machine must not change behind our
+  // back. One taken on first use (device_certify) may be replaced by a
+  // key the user now confirms with the codes.
   const pinned = await storage.getPin(opts.userId, opts.machineId)
-  if (pinned && pinned.machineKey !== challenge.machineKey) {
+  if (pinned && pinned.via !== 'passkey' && pinned.machineKey !== challenge.machineKey) {
     throw new EnrolmentFailure('machine_key_changed',
       "This computer's identity key is not the one this browser confirmed before. If Codekin was reinstalled there, forget the old key and try again; otherwise, don't continue.")
   }
@@ -316,11 +377,14 @@ export async function startEnrolment(
     throw new EnrolmentFailure('bad_machine_signature', "The computer's answer was not signed by its key")
   }
 
-  const pop = new Uint8Array(await crypto.subtle.sign(SIGN, key.keyPair.privateKey, transcript('ck-enrol-pop-v1', challenge.enrolId, nonceM) as BufferSource))
+  // The proof of possession also covers the passkey proofs, so they can't be swapped on the way.
+  const pop = new Uint8Array(await crypto.subtle.sign(SIGN, key.keyPair.privateKey,
+    transcript('ck-enrol-pop-v1', challenge.enrolId, nonceM, encodePasskeyProofs(passkeyProofs)) as BufferSource))
   await send('enrol_reveal', {
-    enrolId: challenge.enrolId, spki: key.spki, passkeys: [], label, nonceB: toB64url(nonceB), pop: toB64url(pop),
+    enrolId: challenge.enrolId, spki: key.spki, passkeys, passkeyProofs, label, nonceB: toB64url(nonceB), pop: toB64url(pop),
   })
-  const sas = await shortAuthString(spkiM, spkiB, nonceB, nonceM)
+  const sas = await shortAuthString(spkiM, spkiB, nonceB, nonceM, passkeys)
+  let passkeyHint: Result['passkeys']
 
   const check = async (): Promise<EnrolOutcome | null> => {
     const result = await send('enrol_status', { enrolId: challenge.enrolId }) as Result
@@ -330,13 +394,14 @@ export async function startEnrolment(
     const signed = typeof result.signature === 'string' && await verifyWith(
       spkiM, transcript('ck-enrol-result-v1', challenge.enrolId, spkiB, result.state), fromB64url(result.signature))
     if (!signed) throw new EnrolmentFailure('bad_machine_signature', "The computer's answer was not signed by its key")
+    if (Array.isArray(result.passkeys)) passkeyHint = result.passkeys
     return result.state
   }
 
   // The machine shows this only after the owner typed `sas` there and it
   // added this key. If a relay had answered with its own key, the machine
   // would have refused the code and shown nothing to type here.
-  const expected = await confirmationCode(spkiM, spkiB, nonceB, nonceM)
+  const expected = await confirmationCode(spkiM, spkiB, nonceB, nonceM, passkeys)
   const confirm = async (typed: string): Promise<boolean> => {
     const code = normalizeConfirmCode(typed)
     if (code === null || code.length !== expected.length) return false
@@ -345,9 +410,78 @@ export async function startEnrolment(
     if (diff !== 0) return false
     await storage.putPin({
       userId: opts.userId, machineId: opts.machineId, machineKey: challenge.machineKey, keyId: key.keyId, pinnedAt: new Date().toISOString(),
+      via: 'code',
+      // The passkey enrolled just now, or whatever the machine said it trusts.
+      passkeys: passkeyHint ?? await Promise.all(passkeys.map(async p => ({ credentialId: p.credentialId, keyId: await keyIdForCose(p.cosePublicKey) }))),
     })
     return true
   }
 
   return { enrolId: challenge.enrolId, code: formatCode(sas), machineKeyId: await keyIdForSpki(spkiM), check, confirm }
+}
+
+/**
+ * device_revoke (§5.6): ask a machine to drop this browser's key, with an
+ * intent the signer makes (passkey-signed when the machine wants step-up),
+ * then forget the machine's pin here.
+ */
+export async function removeFromMachine(
+  send: EnrolSend,
+  sign: (intent: { action: string; sessionId: null; payload: Uint8Array; stepUp: true }) => Promise<unknown>,
+  opts: { userId: string; machineId: string; storage?: TrustStorage },
+): Promise<void> {
+  const storage = opts.storage ?? trustStorage()
+  const key = await storage.getKey(opts.userId)
+  if (!key) return
+  const intent = await sign({ action: DEVICE_REVOKE_ACTION, sessionId: null, payload: revokePayload(key.keyId), stepUp: true })
+  if (!intent) throw new EnrolmentFailure('protocol', 'This browser is not confirmed on that computer')
+  await send('enrol_revoke', { keyId: key.keyId, intent })
+  await storage.deletePin(opts.userId, opts.machineId)
+}
+
+/** A passkey's key id: base64url(SHA-256(COSE_Key))[0:22], as machines compute it. */
+export async function keyIdForCose(cosePublicKey: string): Promise<string> {
+  return toB64url(await sha256(fromB64url(cosePublicKey))).slice(0, 22)
+}
+
+/**
+ * device_certify (§5.4): add this browser to a machine with a passkey the
+ * machine already trusts, without a code. The machine key is then taken on
+ * first use (`via: 'passkey'`): nothing the user saw confirmed it, which is
+ * fine for signed intents but not proof enough for end-to-end encryption.
+ */
+export async function certifyWithPasskey(
+  send: EnrolSend,
+  opts: { userId: string; machineId: string; candidates: PasskeyKey[]; assert: AssertPasskey; label?: string; storage?: TrustStorage },
+): Promise<void> {
+  const storage = opts.storage ?? trustStorage()
+  const key = await getOrCreateBrowserKey(opts.userId, storage)
+  const label = (opts.label ?? defaultBrowserLabel()).slice(0, 64).trim()
+  const nonce = toB64url(crypto.getRandomValues(new Uint8Array(16)))
+  const body = JSON.stringify({
+    v: INTENT_VERSION, machineId: opts.machineId, sessionId: null, action: DEVICE_CERTIFY_ACTION,
+    payloadHash: toB64url(await sha256(certifyPayload(key.spki, label))), nonce, ts: Date.now(), keyId: PASSKEY_ANY,
+  })
+  const assertion = await opts.assert(await sha256(intentChallengeInput(body)), opts.candidates.map(c => c.credentialId))
+  const result = await send('enrol_certify', { spki: key.spki, label, intent: { body, webauthn: assertion } }) as Result
+  if (result.state !== 'approved' || typeof result.machineKey !== 'string' || typeof result.signature !== 'string') {
+    throw new EnrolmentFailure('protocol', 'The computer did not add this browser')
+  }
+  const pinned = await storage.getPin(opts.userId, opts.machineId)
+  if (pinned && pinned.via !== 'passkey' && pinned.machineKey !== result.machineKey) {
+    throw new EnrolmentFailure('machine_key_changed', "This computer's identity key is not the one this browser confirmed before.")
+  }
+  const signed = await verifyWith(fromB64url(result.machineKey),
+    transcript('ck-enrol-result-v1', `certify:${nonce}`, fromB64url(key.spki), 'approved'), fromB64url(result.signature))
+  if (!signed) throw new EnrolmentFailure('bad_machine_signature', "The computer's answer was not signed by its key")
+  await storage.putPin({
+    userId: opts.userId, machineId: opts.machineId, machineKey: result.machineKey, keyId: key.keyId, pinnedAt: new Date().toISOString(),
+    // A code-confirmed key stays code-confirmed; anything else was taken on first use.
+    via: pinned?.via === 'code' && pinned.machineKey === result.machineKey ? 'code' : 'passkey',
+    // An unsigned hint: add it to what is known, never replace it.
+    passkeys: [
+      ...(Array.isArray(result.passkeys) ? result.passkeys : []),
+      ...(pinned?.passkeys ?? []).filter(k => !(result.passkeys ?? []).some(p => p.credentialId === k.credentialId)),
+    ].slice(0, 10),
+  })
 }

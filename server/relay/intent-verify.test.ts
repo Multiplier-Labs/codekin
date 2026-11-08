@@ -223,7 +223,8 @@ describe('IntentVerifier', () => {
         const other = generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey
         return verifier.checkRequest(req(sign({ action: 'rest:GET /api/sessions/list', payload: requestPayload('GET', '/api/sessions/list', undefined, null) }, other)))
       }],
-      ['intent_unsupported', () => verifier.checkRequest(req({ body: signedReq().intent!.body, webauthn: { authenticatorData: 'a', clientDataJSON: 'b', signature: 'c' } }))],
+      ['intent_malformed', () => verifier.checkRequest(req({ body: signedReq().intent!.body, webauthn: { authenticatorData: 'a', clientDataJSON: 'b', signature: 'c' } } as unknown as SignedIntent))],
+      ['intent_unknown_key', () => verifier.checkRequest(req({ body: signedReq().intent!.body, webauthn: { credentialId: 'nope', authenticatorData: 'a', clientDataJSON: 'b', signature: 'c' } }))],
     ]
     for (const [reason, run] of cases) {
       expect(run(), reason).toMatchObject({ forward: false, reason })

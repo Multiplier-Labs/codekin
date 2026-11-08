@@ -8,8 +8,8 @@
  */
 
 import {
-  CHANNEL_OPEN_ACTION, channelOpenPayload, channelSessionAfter, frameAction, framePayload, frameSession, isExemptFrame,
-  requestAction, requestPayload, requestSession,
+  CHANNEL_OPEN_ACTION, channelOpenPayload, channelSessionAfter, frameAction, frameNeedsStepUp, framePayload, frameSession, isExemptFrame,
+  requestAction, requestNeedsStepUp, requestPayload, requestSession,
 } from '../../../server/relay/intent-actions'
 
 export const RELAY_PROTOCOL_VERSION = 1
@@ -36,8 +36,13 @@ export class RelayRequestError extends Error {
   readonly machineTimeSig?: string
   /** For intent refusals: the refused intent's nonce. */
   readonly intentNonce?: string
+  /** For `intent_step_up_required`: the passkeys the machine accepts. */
+  readonly stepUpPasskeys?: Array<{ credentialId: string; keyId: string }>
 
-  constructor(code: string, message: string, extra: { detail?: string; machineTime?: number; machineTimeSig?: string; intentNonce?: string } = {}) {
+  constructor(code: string, message: string, extra: {
+    detail?: string; machineTime?: number; machineTimeSig?: string; intentNonce?: string
+    stepUpPasskeys?: Array<{ credentialId: string; keyId: string }>
+  } = {}) {
     super(message)
     this.name = 'RelayRequestError'
     this.code = code
@@ -45,6 +50,7 @@ export class RelayRequestError extends Error {
     if (extra.machineTime !== undefined) this.machineTime = extra.machineTime
     if (extra.machineTimeSig !== undefined) this.machineTimeSig = extra.machineTimeSig
     if (extra.intentNonce !== undefined) this.intentNonce = extra.intentNonce
+    if (extra.stepUpPasskeys !== undefined) this.stepUpPasskeys = extra.stepUpPasskeys
   }
 }
 
@@ -58,6 +64,8 @@ export interface RelaySigner {
   setClockOffset(ms: number): void
   /** Whether the machine's own key signed this time (so the relay didn't make it up). */
   verifyMachineTime(nonce: string, machineTime: number, sig: string): Promise<boolean>
+  /** Remember the passkeys a machine named when it asked for step-up. */
+  learnPasskeys?(passkeys: Array<{ credentialId: string; keyId: string }>): Promise<void>
 }
 
 interface IntentInput {
@@ -67,6 +75,7 @@ interface IntentInput {
   channel?: string
   seq?: number
   nonce?: string
+  stepUp?: boolean
 }
 
 /** One channel's signing state: the token its signed open fixed, the next seq, and its session. */
@@ -109,11 +118,13 @@ interface Pending {
 }
 
 /** Enrolment frames (signed-intents spec §5.2) and the reply each expects. */
-export type EnrolKind = 'enrol_commit' | 'enrol_reveal' | 'enrol_status'
+export type EnrolKind = 'enrol_commit' | 'enrol_reveal' | 'enrol_status' | 'enrol_certify' | 'enrol_revoke'
 const ENROL_REPLY: Record<EnrolKind, string> = {
   enrol_commit: 'enrol_challenge',
   enrol_reveal: 'enrol_result',
   enrol_status: 'enrol_result',
+  enrol_certify: 'enrol_result',
+  enrol_revoke: 'enrol_result',
 }
 
 /** Callbacks for one proxied session stream. */
@@ -347,12 +358,15 @@ export class RelayConnection {
     const signer = this.opts.signer
     if (!signer) return this.call('request', 'response', { method, path, body, contentType }) as Promise<RelayProxyResponse>
     let nonce: string | undefined
+    const bytes = base64Bytes(body)
+    const stepUp = requestNeedsStepUp(method, path, bytes)
     const signAndSend = async () => {
       const intent = await this.signSafely({
         action: requestAction(method, path),
         sessionId: requestSession(path),
-        payload: requestPayload(method, path, contentType, base64Bytes(body)),
+        payload: requestPayload(method, path, contentType, bytes),
         ...(nonce ? { nonce } : {}),
+        ...(stepUp ? { stepUp } : {}),
       })
       nonce ??= intent ? intentNonce(intent) : undefined
       return this.call('request', 'response', { method, path, body, contentType, ...(intent ? { intent } : {}) }) as Promise<RelayProxyResponse>
@@ -363,6 +377,13 @@ export class RelayConnection {
       // "stale" reply was forged, the machine refuses the retry as a replay;
       // and the time is only adopted when the machine's key signed it.
       if (err instanceof RelayRequestError && err.detail === 'intent_stale' && await this.adoptMachineTime(err)) {
+        return signAndSend()
+      }
+      // The machine wants a passkey and named it: remember it, then ask the
+      // user once (a refused request never ran, so a fresh nonce is fine).
+      if (err instanceof RelayRequestError && err.detail === 'intent_step_up_required' && err.stepUpPasskeys?.length && signer.learnPasskeys) {
+        await signer.learnPasskeys(err.stepUpPasskeys)
+        nonce = undefined
         return signAndSend()
       }
       throw err
@@ -466,6 +487,7 @@ export class RelayConnection {
     this.inOrder(channelId, async () => {
       const intent = exempt ? null : await this.signSafely({
         action: frameAction(data), sessionId: frameSession(data, before), payload: framePayload(data), channel: state.token, seq,
+        ...(frameNeedsStepUp(data) ? { stepUp: true } : {}),
       })
       this.sendOrQueue({ kind: 'stream_data', channelId, payload: intent ? { data, intent } : { data } })
     })
@@ -538,8 +560,9 @@ export class RelayConnection {
     this.pending.delete(msg.id)
 
     if (msg.kind === 'error') {
-      const err = msg.payload as Partial<RelayErrorPayload> & { detail?: unknown; machineTime?: unknown; machineTimeSig?: unknown; intentNonce?: unknown }
+      const err = msg.payload as Partial<RelayErrorPayload> & { detail?: unknown; machineTime?: unknown; machineTimeSig?: unknown; intentNonce?: unknown; stepUpPasskeys?: unknown }
       entry.reject(new RelayRequestError(err.code ?? 'relay_error', err.message ?? 'Relay error', {
+        ...(Array.isArray(err.stepUpPasskeys) ? { stepUpPasskeys: err.stepUpPasskeys as Array<{ credentialId: string; keyId: string }> } : {}),
         ...(typeof err.detail === 'string' ? { detail: err.detail } : {}),
         ...(typeof err.machineTime === 'number' ? { machineTime: err.machineTime } : {}),
         ...(typeof err.machineTimeSig === 'string' ? { machineTimeSig: err.machineTimeSig } : {}),
@@ -577,6 +600,10 @@ export class RelayConnection {
     if (kind === 'error') {
       const err = payload as Partial<RelayErrorPayload> & { detail?: unknown; machineTime?: unknown; machineTimeSig?: unknown; intentNonce?: unknown }
       const error = { code: err.code ?? 'relay_error', message: err.message ?? 'Relay error' }
+      // A step-up refusal names the passkey to use next time.
+      if (err.detail === 'intent_step_up_required' && Array.isArray((err as { stepUpPasskeys?: unknown }).stepUpPasskeys)) {
+        void this.opts.signer?.learnPasskeys?.((err as { stepUpPasskeys: Array<{ credentialId: string; keyId: string }> }).stepUpPasskeys)
+      }
       // A stale-clock refusal closes this channel; fix the clock for the next one.
       if (err.detail === 'intent_stale' && typeof err.machineTime === 'number') {
         void this.adoptMachineTime({

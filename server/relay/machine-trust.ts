@@ -118,9 +118,11 @@ export function machineEnrolmentFor(
   machineId: string,
   store: SecretStore | null = secretStoreFromEnv(),
   log: Log = console,
+  /** Checks device_certify and device_revoke intents. */
+  intents?: IntentVerifier,
 ): MachineEnrolment {
   const { identityFile, devicesFile } = trustPathsFor(credentialFile)
-  return new MachineEnrolment({ machineId, identityFile, devicesFile, secretStore: store, log })
+  return new MachineEnrolment({ machineId, identityFile, devicesFile, secretStore: store, log, ...(intents ? { intents } : {}) })
 }
 
 /**

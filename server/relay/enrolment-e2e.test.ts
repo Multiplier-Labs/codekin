@@ -160,7 +160,7 @@ describe('enrolment over the relay', () => {
 
     const revealed = await browser.call('enrol_reveal', {
       enrolId, spki: b.spki.toString('base64url'), passkeys: [], label: b.label, nonceB: b.nonceB.toString('base64url'),
-      pop: signP1363(b.privateKey, transcript(POP_LABEL, enrolId, Buffer.from(nonceM, 'base64url'))).toString('base64url'),
+      pop: signP1363(b.privateKey, transcript(POP_LABEL, enrolId, Buffer.from(nonceM, 'base64url'), '[]')).toString('base64url'),
     })
     expect(revealed).toMatchObject({ kind: 'enrol_result', payload: { enrolId, state: 'awaiting_code' } })
 

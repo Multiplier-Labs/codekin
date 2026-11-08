@@ -33,6 +33,8 @@ const INTENT_REFUSAL_TEXT: Record<IntentRefusal, string> = {
   intent_wrong_channel: 'The signed action was meant for another connection',
   intent_out_of_order: 'The signed action arrived out of order',
   intent_rate_limited: 'Too many signed actions at once; slow down',
+  intent_step_up_required: 'This action needs your passkey (Face ID, Touch ID or your security key)',
+  intent_local_only: 'This computer only accepts browsers confirmed on it, not added by passkey',
 }
 
 /** A sentence for the browser to show for an intent refusal. */
@@ -60,6 +62,7 @@ export interface IntentRefusalInfo {
   intentNonce?: string
   machineTime?: number
   machineTimeSig?: string
+  stepUpPasskeys?: Array<{ credentialId: string; keyId: string }>
 }
 
 /**
@@ -220,6 +223,7 @@ export class StreamChannel {
           ...(verdict.nonce ? { intentNonce: verdict.nonce } : {}),
           ...(verdict.machineTime !== undefined ? { machineTime: verdict.machineTime } : {}),
           ...(verdict.machineTimeSig ? { machineTimeSig: verdict.machineTimeSig } : {}),
+          ...(verdict.stepUpPasskeys ? { stepUpPasskeys: verdict.stepUpPasskeys } : {}),
         })
         return
       }

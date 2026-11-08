@@ -8,6 +8,7 @@
  *   DELETE /api/relay/devices/pending/:enrolId   turn a waiting request down
  *   DELETE /api/relay/devices/:keyId             remove a device
  *   PUT    /api/relay/devices/policy             { policy: off | warn | required }
+ *   PUT    /api/relay/devices/settings           { localConfirmationOnly: boolean }
  *   GET    /api/relay/intents                    recent intent log entries (?limit, keyId, sessionId, verdict)
  *   GET    /api/relay/intents/verify             check the intent log's hash chain
  *
@@ -24,7 +25,7 @@ import { readRelayCredentialIdentity, relayCredentialPath } from './relay-creden
 import { readMachineIdentity } from './machine-identity.js'
 import { trustPathsFor } from './machine-trust.js'
 import {
-  describeTrustStore, readTrustStore, revokeCredential, setIntentPolicy, TrustStoreError,
+  describeTrustStore, readTrustStore, revokeCredential, setIntentPolicy, setLocalConfirmationOnly, TrustStoreError,
 } from './trust-store.js'
 import type { IntentPolicy, TrustStoreView } from './trust-store.js'
 import { approveEnrolment, rejectEnrolment } from './enrolment.js'
@@ -115,6 +116,21 @@ export function createRelayDevicesRouter(
     const policy = (req.body as { policy?: unknown } | undefined)?.policy as IntentPolicy
     try {
       res.json(describeTrustStore(setIntentPolicy(policy, devicesFile, machineId)))
+    } catch (err) {
+      sendError(res, err)
+    }
+  })
+
+  router.put('/api/relay/devices/settings', (req, res) => {
+    const machineId = pairedMachine(res)
+    if (!machineId) return
+    const value = (req.body as { localConfirmationOnly?: unknown } | undefined)?.localConfirmationOnly
+    if (typeof value !== 'boolean') {
+      res.status(400).json({ error: 'invalid', message: 'localConfirmationOnly must be true or false' })
+      return
+    }
+    try {
+      res.json(describeTrustStore(setLocalConfirmationOnly(value, devicesFile, machineId)))
     } catch (err) {
       sendError(res, err)
     }
