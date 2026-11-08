@@ -35,6 +35,8 @@ import { createTelemetryRouter, TELEMETRY_ERRORS_PATH } from './telemetry-routes
 import { codekinPackageVersion } from './relay-credential.js'
 import { loadEntitlements } from './quotas.js'
 import { UsageMeter, pruneUsage } from './usage-meter.js'
+import { loadAbusePolicy, throttledWorkspaces } from './abuse-signals.js'
+import { createAbuseRouter } from './abuse-routes.js'
 import { ConnectorHub } from './connector-hub.js'
 import { BrowserHub } from './browser-hub.js'
 import { MAX_PROXY_BODY_BYTES } from './relay-protocol.js'
@@ -51,7 +53,12 @@ const entitlements = loadEntitlements(config.quotasFile)
 const db = openControlPlaneDb(join(config.dataDir, 'control-plane.db'))
 const store = new SqliteSessionStore(db)
 const usageMeter = new UsageMeter(db, entitlements)
-const hub = new ConnectorHub(db, { meter: usageMeter })
+// Abuse signals (docs/RELAY-HARDENING.md §6): rules from RELAY_ABUSE_POLICY_FILE,
+// none without it. Open `throttle` flags slow their workspace until resolved.
+const abusePolicy = loadAbusePolicy(config.abusePolicyFile)
+const refreshAbuseThrottles = () => { usageMeter.setForcedThrottle(throttledWorkspaces(db)) }
+refreshAbuseThrottles()
+const hub = new ConnectorHub(db, { meter: usageMeter, abuse: abusePolicy, onAbuseFlags: refreshAbuseThrottles })
 const browserHub = new BrowserHub(db, hub, { isSessionAlive: sid => store.isAlive(sid), entitlements, meter: usageMeter })
 
 const app = express()
@@ -179,6 +186,7 @@ const sessionMiddleware = session({
 
 app.use(sessionMiddleware)
 
+app.use(createAbuseRouter(db, config, refreshAbuseThrottles))
 app.use(createAdminStatsRouter(db, config, () => ({
   machinesOnline: hub.onlineCount,
   browserClients: browserHub.clientCount,

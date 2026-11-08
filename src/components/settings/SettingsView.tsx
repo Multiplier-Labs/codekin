@@ -34,6 +34,7 @@ const WorkspaceMembers = lazy(() => import('../../hosted/WorkspaceSection').then
 const WorkspaceMachines = lazy(() => import('../../hosted/WorkspaceSection').then(m => ({ default: m.WorkspaceMachines })))
 const ProfileSection = lazy(() => import('../../hosted/AccountPages').then(m => ({ default: m.ProfileSection })))
 const AccountsSection = lazy(() => import('../../hosted/AccountPages').then(m => ({ default: m.AccountsSection })))
+const AbuseReviewSection = lazy(() => import('../../hosted/AccountPages').then(m => ({ default: m.AbuseReviewSection })))
 
 interface Props {
   /** From the URL; null for bare /settings. */
@@ -234,6 +235,17 @@ export function SettingsView({
         >
           <Suspense fallback={loading}><AccountsSection /></Suspense>
         </Block>
+      )
+      body = (
+        <div className="space-y-4">
+          {body}
+          <Block
+            title="Abuse review"
+            description="Machines the relay's abuse signals flagged. Throttled ones stay slowed until resolved. If the decision is to stop the machine, disable its owner above."
+          >
+            <Suspense fallback={loading}><AbuseReviewSection /></Suspense>
+          </Block>
+        </div>
       )
       break
     case 'security':
