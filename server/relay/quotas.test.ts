@@ -24,6 +24,13 @@ describe('quotas file', () => {
     expect(provider.limitsFor('ws-big')).toEqual({ machinesPerWorkspace: 50, channelsPerUser: 8 })
   })
 
+  it('lets a workspace lift a default with null, but not the default itself', () => {
+    const provider = parseQuotas({ default: { machinesPerWorkspace: 2 }, workspaces: { ops: { machinesPerWorkspace: null } } })
+    expect(provider.limitsFor('ops')).toEqual({})
+    expect(provider.limitsFor('other')).toEqual({ machinesPerWorkspace: 2 })
+    expect(() => parseQuotas({ default: { machinesPerWorkspace: null } })).toThrow('non-negative integer')
+  })
+
   it.each([
     [[], 'must hold a JSON object'],
     [{ defaults: {} }, 'unknown key "defaults"'],

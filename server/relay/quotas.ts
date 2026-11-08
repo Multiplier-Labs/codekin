@@ -7,11 +7,11 @@
  *
  *   {
  *     "default":    { "machinesPerWorkspace": 25, "channelsPerUser": 16 },
- *     "workspaces": { "<workspace-id>": { "machinesPerWorkspace": 100 } }
+ *     "workspaces": { "<workspace-id>": { "machinesPerWorkspace": 100, "channelsPerUser": null } }
  *   }
  *
  * A key that is absent is unlimited. Workspace entries override `default`
- * key by key. A deployment that sells plans can supply its own provider
+ * key by key, and `null` there lifts that default for the workspace. A deployment that sells plans can supply its own provider
  * that maps workspaces to plan entitlements.
  */
 
@@ -75,13 +75,20 @@ export function checkQuota(
   return { error: 'quota_exceeded', quota, limit, message: MESSAGES[quota](limit) }
 }
 
-function parseLimits(value: unknown, where: string): QuotaLimits {
+/** Limits by key; `null` (allowed only where `allowNull`) marks a default lifted. */
+function parseLimits(value: unknown, where: string, allowNull = false): Partial<Record<QuotaKey, number | null>> {
   if (value === undefined) return {}
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${where} must be an object`)
-  const limits: QuotaLimits = {}
+  const limits: Partial<Record<QuotaKey, number | null>> = {}
   for (const [key, raw] of Object.entries(value)) {
     if (!(QUOTA_KEYS as readonly string[]).includes(key)) throw new Error(`${where}: unknown quota "${key}"`)
-    if (!Number.isInteger(raw) || (raw as number) < 0) throw new Error(`${where}.${key} must be a non-negative integer`)
+    if (raw === null && allowNull) {
+      limits[key as QuotaKey] = null
+      continue
+    }
+    if (!Number.isInteger(raw) || (raw as number) < 0) {
+      throw new Error(`${where}.${key} must be a non-negative integer${allowNull ? ' or null' : ''}`)
+    }
     limits[key as QuotaKey] = raw as number
   }
   return limits
@@ -94,17 +101,26 @@ export function parseQuotas(json: unknown): EntitlementsProvider {
   for (const key of Object.keys(root)) {
     if (key !== 'default' && key !== 'workspaces') throw new Error(`quotas file: unknown key "${key}"`)
   }
-  const defaults = parseLimits(root.default, 'default')
-  const overrides = new Map<string, QuotaLimits>()
+  const defaults = parseLimits(root.default, 'default') as QuotaLimits
+  const overrides = new Map<string, Partial<Record<QuotaKey, number | null>>>()
   if (root.workspaces !== undefined) {
     if (!root.workspaces || typeof root.workspaces !== 'object' || Array.isArray(root.workspaces)) {
       throw new Error('workspaces must be an object')
     }
     for (const [id, limits] of Object.entries(root.workspaces)) {
-      overrides.set(id, parseLimits(limits, `workspaces.${id}`))
+      overrides.set(id, parseLimits(limits, `workspaces.${id}`, true))
     }
   }
-  return { limitsFor: workspaceId => ({ ...defaults, ...overrides.get(workspaceId) }) }
+  return {
+    limitsFor: workspaceId => {
+      const merged: QuotaLimits = { ...defaults }
+      for (const [key, limit] of Object.entries(overrides.get(workspaceId) ?? {})) {
+        if (limit === null) delete merged[key as QuotaKey]
+        else merged[key as QuotaKey] = limit
+      }
+      return merged
+    },
+  }
 }
 
 /** The provider for RELAY_QUOTAS_FILE, or UNLIMITED when no file is configured. */

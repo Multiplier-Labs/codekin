@@ -84,13 +84,13 @@ These are mechanisms only. No limits are built in, and a relay without config st
 
 **Built:** the discrete quotas (`server/relay/quotas.ts`). **Still spec:** bandwidth metering, throttling and abuse signals.
 
-- **Quotas** come from an `EntitlementsProvider`. The default reads `RELAY_QUOTAS_FILE` (JSON) at boot; without it, everything is unlimited. A malformed file stops the relay rather than running it unlimited. A missing key is unlimited, and `workspaces` entries override `default` key by key:
+- **Quotas** come from an `EntitlementsProvider`. The default reads `RELAY_QUOTAS_FILE` (JSON) at boot; without it, everything is unlimited. A malformed file stops the relay rather than running it unlimited. A missing key is unlimited, `workspaces` entries override `default` key by key, and `null` in a workspace entry lifts that limit for the workspace:
 
   ```json
   {
     "default":    { "machinesPerWorkspace": 25, "pendingPairingsPerUser": 5, "browserSocketsPerUser": 10,
                     "channelsPerUser": 16, "invitationsPerWorkspacePerDay": 50, "sharesPerSession": 10 },
-    "workspaces": { "<workspace-id>": { "machinesPerWorkspace": 100 } }
+    "workspaces": { "<workspace-id>": { "machinesPerWorkspace": 100, "channelsPerUser": null } }
   }
   ```
 
