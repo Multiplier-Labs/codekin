@@ -72,6 +72,10 @@ function main(): void {
           console.error('[connector] Only one connector may serve a machine at a time.')
           process.exitCode = 1
           break
+        case 'update_required':
+          console.error(`[connector] The relay won't serve this machine until it is updated${suffix}.`)
+          console.error('[connector] Run `codekin upgrade`, then restart the connector.')
+          break
         case 'auth_failed':
           console.error(`[connector] Credential rejected${suffix} — run \`codekin relay login\` to re-pair.`)
           process.exitCode = 1

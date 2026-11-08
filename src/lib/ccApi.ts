@@ -829,7 +829,7 @@ export async function testWebhookDelivery(
 export interface RelayStatus {
   paired: boolean
   managed: boolean
-  state: 'disabled' | 'unpaired' | 'unmanaged' | 'connecting' | 'connected' | 'disconnected' | 'replaced' | 'auth_failed' | 'stopped'
+  state: 'disabled' | 'unpaired' | 'unmanaged' | 'connecting' | 'connected' | 'update_required' | 'disconnected' | 'replaced' | 'auth_failed' | 'stopped'
   machineId: string | null
   relayUrl: string | null
   detail?: string

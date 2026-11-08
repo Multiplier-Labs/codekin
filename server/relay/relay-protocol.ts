@@ -49,6 +49,11 @@ export interface ConnectorHello {
     wsProxy: boolean
     fileUpload: boolean
     providers: string[]
+    /**
+     * Security features this connector enforces (`ConnectorCapability`). The
+     * relay believes a claim only at or above that feature's version floor.
+     */
+    features?: string[]
   }
   /** Omitted when the local server could not be reached at connect time. */
   sessions?: LocalSessionSummary
@@ -58,6 +63,12 @@ export interface ConnectorHello {
 export interface ConnectorHelloAck {
   machineId: string
   displayName: string
+  /**
+   * Present when the relay won't serve this connector until it is updated.
+   * The socket stays open; every request and channel is refused with
+   * `connector_update_required`.
+   */
+  updateRequired?: { minimum: string; missing: string[]; reason: string }
 }
 
 /** Browser → hub, first message on a /relay/browser socket. */
@@ -179,6 +190,7 @@ export const RELAY_ERROR = {
   tooManyChannels: 'too_many_channels',
   unknownChannel: 'unknown_channel',
   notPermitted: 'not_permitted',
+  connectorUpdateRequired: 'connector_update_required',
 } as const
 
 /** Close codes on proxied stream channels, mirroring the local server's conventions. */

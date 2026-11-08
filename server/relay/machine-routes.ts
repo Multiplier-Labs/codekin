@@ -50,7 +50,10 @@ export function createMachineRouter(db: Database.Database, hub?: ConnectorHub, c
           status: m.status,
           lastSeenAt: m.last_seen_at,
           access: m.owner_user_id === user.id ? 'owner' : 'shared',
-          connectorOutdated: hub?.isOutdated(m.id) ?? false,
+          // Connected but refused traffic until its connector is updated.
+          updateRequired: hub?.updateRequired(m.id) ?? null,
+          // Kept for clients older than updateRequired; same condition.
+          connectorOutdated: (hub?.updateRequired(m.id) ?? null) !== null,
           sessions: hub?.sessionSummary(m.id) ?? null,
           // Created by an install command that has not been run yet; the UI
           // offers resume/regenerate/cancel rather than "offline".

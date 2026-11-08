@@ -184,8 +184,8 @@ All require auth and are local only: the hosted relay's connector never proxies 
 ### `GET /api/relay/status`
 
 The embedded relay connector's state: `{ paired, managed, state, machineId, relayUrl, detail? }`, where `state` is
-one of `disabled`, `unpaired`, `unmanaged`, `connecting`, `connected`, `disconnected`, `replaced`, `auth_failed`,
-`stopped`.
+one of `disabled`, `unpaired`, `unmanaged`, `connecting`, `connected`, `update_required` (connected, but the relay
+refuses traffic until Codekin is updated; `detail` says why), `disconnected`, `replaced`, `auth_failed`, `stopped`.
 
 ### `GET /api/relay/pair` · `POST /api/relay/pair` · `DELETE /api/relay/pair`
 
