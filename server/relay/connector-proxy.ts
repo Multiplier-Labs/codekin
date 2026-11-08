@@ -51,6 +51,12 @@ export const ALLOWED_GET_PREFIXES = [
   // Same for the Deployments tab: listing the registry, reading probe samples
   // and discovering what the machine runs all happen over REST.
   '/api/deployments',
+  // Settings → Webhooks: receiver status, recent events, and the per-repo PR
+  // review health check. Named exactly: the receiver itself
+  // (/api/webhooks/github) is reached only by forwarded deliveries.
+  '/api/webhooks/config',
+  '/api/webhooks/events',
+  '/api/integrations/github/pr-review/health',
 ] as const
 
 /**
@@ -77,6 +83,10 @@ export const ALLOWED_MUTATION_PREFIXES = [
   // Adding, editing and removing monitored deployments. Owner-only like the
   // rest of this list — grantees never reach it (see GRANTEE_WRITE_PREFIXES).
   '/api/deployments',
+  // Settings → Webhooks: the PR review setup wizard (create or update the
+  // repository webhook on GitHub with the machine's gh login) and its test
+  // ping. Owner-only, like everything here.
+  '/api/integrations/github/pr-review',
 ] as const
 
 /** Methods that may be proxied at all. */

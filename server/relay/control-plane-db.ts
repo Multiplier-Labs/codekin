@@ -362,6 +362,15 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
       );
     `)
   },
+
+  // 8: keep the webhook token itself, so the owner can see the receiver URL
+  // whenever they open the Webhooks settings (and the PR-review setup can
+  // use it) instead of only once. The token routes deliveries; it is not
+  // what authenticates them (GitHub's HMAC, checked on the machine, is).
+  // Rows created before this have no token until rotated.
+  db => {
+    db.exec('ALTER TABLE machine_webhooks ADD COLUMN token TEXT')
+  },
 ]
 
 function runMigrations(db: Database.Database): void {

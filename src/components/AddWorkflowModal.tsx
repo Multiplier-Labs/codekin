@@ -17,7 +17,7 @@ import {
   buildCron, describeCron, slugify, kindCategory,
   isBiweeklyDow, isEventDriven, EVENT_CRON,
 } from '../lib/workflowHelpers'
-import { webhookEndpointUrl } from '../lib/ccApi'
+import { resolveWebhookEndpointUrl } from '../lib/ccApi'
 import type { AgentProvider } from '../types'
 import { CategoryBadge } from './WorkflowBadges'
 import TimePicker from './TimePicker'
@@ -454,7 +454,7 @@ export function AddWorkflowModal({ token, onClose, onAdd }: Props) {
         ? EVENT_CRON
         : buildCron(form.cronHour, form.cronDow, form.cronMinute)
       const isPrReview = form.kind === 'pr-review'
-      const webhookUrl = isPrReview ? webhookEndpointUrl() : undefined
+      const webhookUrl = isPrReview ? await resolveWebhookEndpointUrl() : undefined
       const setupResult = await onAdd({
         id: `${slugify(name)}-${slugify(form.kind)}`,
         name,

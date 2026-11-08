@@ -16,7 +16,7 @@ import { useState, useEffect } from 'react'
 import { IconCopy, IconCheck, IconTerminal2, IconRefresh } from '@tabler/icons-react'
 import { formatTimeLeft, installCommands, type Pairing } from './machines'
 
-export function CopyBlock({ label, command }: { label: string; command: string }) {
+function CopyBlock({ label, command }: { label: string; command: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <div className="mt-2">

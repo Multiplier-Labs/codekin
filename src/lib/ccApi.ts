@@ -8,6 +8,7 @@
 
 import type { Session, WsServerMessage, CodingProvider } from '../types'
 import { transport } from './transport'
+import { enableRelayWebhook, fetchRelayWebhook } from './relayWebhook'
 
 /**
  * Type-safe wrapper around Response.json().
@@ -581,9 +582,37 @@ export function openSocket(): WebSocket {
   return transport.openSocket()
 }
 
-/** Browser-facing URL of the GitHub webhook receiver (shown in setup UIs). */
+/**
+ * Browser-facing URL of the machine's own GitHub webhook receiver. Only
+ * meaningful when talking to the machine directly; through a relay, GitHub
+ * posts to the relay's receiver instead (resolveWebhookEndpointUrl).
+ */
 export function webhookEndpointUrl(): string {
   return transport.externalUrl('/api/webhooks/github')
+}
+
+/** The machine's id on the relay in hosted mode; null when talking to it directly. */
+export function relayMachineId(): string | null {
+  return transport.relayMachineId ?? null
+}
+
+/**
+ * The URL GitHub should post to for this machine. Directly: the machine's own
+ * receiver. Through a relay: the relay's receiver for this machine, turned on
+ * if it is off. An existing receiver is never rotated here, since that would
+ * break webhooks already pointing at it.
+ */
+export async function resolveWebhookEndpointUrl(): Promise<string> {
+  const machineId = relayMachineId()
+  if (!machineId) return webhookEndpointUrl()
+  const current = await fetchRelayWebhook(machineId)
+  if (current.url) return current.url
+  if (current.enabled) {
+    throw new Error("This machine's webhook URL can't be shown. Open Settings → This machine → Webhooks and choose New URL.")
+  }
+  const created = await enableRelayWebhook(machineId)
+  if (!created.url) throw new Error('The relay did not return a webhook URL.')
+  return created.url
 }
 
 /**

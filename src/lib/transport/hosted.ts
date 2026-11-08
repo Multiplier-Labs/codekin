@@ -140,11 +140,17 @@ export class HostedRelayTransport implements CodekinTransport {
 
   /**
    * Absolute URL for display. In hosted mode the machine's own address is
-   * not reachable from the browser, so this returns the hosted-app form;
-   * features that need a machine-public URL (webhooks) stay local-only.
+   * not reachable from the browser, so this returns the hosted-app form.
+   * Webhooks don't use it: they get a per-machine relay receiver instead
+   * (resolveWebhookEndpointUrl in ccApi).
    */
   externalUrl(path: string): string {
     return `${location.protocol}//${location.host}${path}`
+  }
+
+  /** This machine's id on the relay serving this page. */
+  get relayMachineId(): string {
+    return this.machineId
   }
 
   /** The machine is reached through the control plane serving this page. */

@@ -225,11 +225,11 @@ describe('browser hub REST proxy', () => {
     browser.send('hello', { machineId })
     await browser.waitForFrame(f => f.kind === 'hello_ack')
 
-    browser.send('request', { method: 'GET', path: '/api/webhooks/events' }, 'r1')
+    browser.send('request', { method: 'GET', path: '/api/hook-config' }, 'r1')
     const err = await browser.waitForFrame(f => f.kind === 'error' && f.id === 'r1')
 
     expect(err.payload.code).toBe(RELAY_ERROR.pathNotAllowed)
-    expect(callsFor(localFetch, '/api/webhooks/events')).toHaveLength(0)
+    expect(callsFor(localFetch, '/api/hook-config')).toHaveLength(0)
     browser.close()
   })
 

@@ -191,26 +191,3 @@ export function installCommands(token: string, origin: string): { install: strin
     login: `CODEKIN_PAIR_TOKEN=${token} codekin relay login${custom ? ` --url ${origin}` : ''}`,
   }
 }
-
-/** A machine's GitHub webhook receiver on the relay. The URL comes back only when it is created. */
-export interface MachineWebhook {
-  enabled: boolean
-  createdAt: string | null
-  lastDeliveryAt: string | null
-  /** Present only in the answer to turning it on or rotating it. */
-  url?: string
-}
-
-async function webhookCall(machineId: string, method: 'GET' | 'POST' | 'DELETE'): Promise<MachineWebhook> {
-  const res = await fetch(`/api/machines/${encodeURIComponent(machineId)}/webhook`, {
-    method,
-    credentials: 'include',
-  })
-  if (!res.ok) throw await relayError(res)
-  return (await res.json()) as MachineWebhook
-}
-
-export const fetchMachineWebhook = (machineId: string) => webhookCall(machineId, 'GET')
-/** Turn the receiver on, or replace its URL (the old one stops working). */
-export const enableMachineWebhook = (machineId: string) => webhookCall(machineId, 'POST')
-export const disableMachineWebhook = (machineId: string) => webhookCall(machineId, 'DELETE')

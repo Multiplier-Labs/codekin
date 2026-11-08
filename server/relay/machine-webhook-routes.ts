@@ -2,8 +2,8 @@
  * GitHub webhooks through the relay (docs/SELF-HOSTED-RELAY.md, "GitHub webhooks").
  *
  * Owner endpoints, cookie-authenticated:
- *   GET    /api/machines/:machineId/webhook   is a receiver on, and when it last delivered
- *   POST   /api/machines/:machineId/webhook   turn on or rotate; returns the URL once
+ *   GET    /api/machines/:machineId/webhook   is a receiver on, its URL, when it last delivered
+ *   POST   /api/machines/:machineId/webhook   turn on or rotate (the old URL stops working)
  *   DELETE /api/machines/:machineId/webhook   turn off
  *
  * Public receiver, called by GitHub:
@@ -33,7 +33,6 @@ import {
   getMachineWebhook,
   machineForWebhookToken,
   touchWebhookDelivery,
-  webhookUrl,
   WEBHOOK_INGRESS_PREFIX,
 } from './machine-webhooks.js'
 import type { RelayConfig } from './relay-config.js'
@@ -84,15 +83,15 @@ export function createMachineWebhookRouter(
   router.get('/api/machines/:machineId/webhook', requireActiveUser, (req, res) => {
     const machineId = ownedMachine(db, req, res)
     if (!machineId) return
-    res.json(getMachineWebhook(db, machineId))
+    res.json(getMachineWebhook(db, machineId, config.publicUrl))
   })
 
   router.post('/api/machines/:machineId/webhook', requireActiveUser, (req, res) => {
     const machineId = ownedMachine(db, req, res)
     if (!machineId) return
     const userId = req.session.user?.id ?? ''
-    const rotated = getMachineWebhook(db, machineId).enabled
-    const token = enableMachineWebhook(db, machineId, userId)
+    const rotated = getMachineWebhook(db, machineId, config.publicUrl).enabled
+    enableMachineWebhook(db, machineId, userId)
     recordAuditEvent(db, {
       kind: 'machine_webhook_enabled',
       actorUserId: userId,
@@ -101,7 +100,7 @@ export function createMachineWebhookRouter(
       userAgent: req.get('user-agent') ?? null,
       metadata: { rotated },
     })
-    res.json({ ...getMachineWebhook(db, machineId), url: webhookUrl(config.publicUrl, token) })
+    res.json(getMachineWebhook(db, machineId, config.publicUrl))
   })
 
   router.delete('/api/machines/:machineId/webhook', requireActiveUser, (req, res) => {
@@ -116,7 +115,7 @@ export function createMachineWebhookRouter(
         userAgent: req.get('user-agent') ?? null,
       })
     }
-    res.json(getMachineWebhook(db, machineId))
+    res.json(getMachineWebhook(db, machineId, config.publicUrl))
   })
 
   return router

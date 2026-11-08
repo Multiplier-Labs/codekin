@@ -5,7 +5,8 @@
  * The URL token only decides *which machine* a delivery is forwarded to, and
  * keeps random traffic from reaching it. It is not what makes a delivery
  * trusted: the machine's local server checks GitHub's HMAC signature with a
- * secret the relay never sees. Only the token's SHA-256 is stored.
+ * secret the relay never sees. The token is kept so the owner can see the URL
+ * again; lookups go by its SHA-256.
  */
 
 import { randomBytes } from 'crypto'
@@ -18,13 +19,17 @@ export interface MachineWebhookRow {
   created_by_user_id: string
   created_at: string
   last_delivery_at: string | null
+  /** Null for receivers created before tokens were kept; rotating sets it. */
+  token: string | null
 }
 
-/** What the owner's UI sees — never the token or its hash. */
+/** What the owner's UI sees. Only the machine owner is ever given this. */
 export interface MachineWebhookSummary {
   enabled: boolean
   createdAt: string | null
   lastDeliveryAt: string | null
+  /** The receiver URL; null when off, or for a receiver created before tokens were kept. */
+  url: string | null
 }
 
 /** URL path a webhook token is served under, behind the relay's public origin. */
@@ -34,7 +39,7 @@ export function webhookUrl(publicUrl: string, token: string): string {
   return `${publicUrl.replace(/\/+$/, '')}${WEBHOOK_INGRESS_PREFIX}${token}`
 }
 
-export function getMachineWebhook(db: Database.Database, machineId: string): MachineWebhookSummary {
+export function getMachineWebhook(db: Database.Database, machineId: string, publicUrl: string): MachineWebhookSummary {
   const row = db.prepare('SELECT * FROM machine_webhooks WHERE machine_id = ?').get(machineId) as
     | MachineWebhookRow
     | undefined
@@ -42,24 +47,26 @@ export function getMachineWebhook(db: Database.Database, machineId: string): Mac
     enabled: row !== undefined,
     createdAt: row?.created_at ?? null,
     lastDeliveryAt: row?.last_delivery_at ?? null,
+    url: row?.token ? webhookUrl(publicUrl, row.token) : null,
   }
 }
 
 /**
  * Turn the receiver on, or rotate it: a new token replaces any old one, so
- * the previous URL stops working at once. Returns the token, shown once.
+ * the previous URL stops working at once. Returns the token.
  */
 export function enableMachineWebhook(db: Database.Database, machineId: string, userId: string): string {
   const token = randomBytes(24).toString('base64url')
   db.prepare(
-    `INSERT INTO machine_webhooks (machine_id, token_hash, created_by_user_id)
-     VALUES (?, ?, ?)
+    `INSERT INTO machine_webhooks (machine_id, token_hash, token, created_by_user_id)
+     VALUES (?, ?, ?, ?)
      ON CONFLICT(machine_id) DO UPDATE SET
        token_hash = excluded.token_hash,
+       token = excluded.token,
        created_by_user_id = excluded.created_by_user_id,
        created_at = datetime('now'),
        last_delivery_at = NULL`,
-  ).run(machineId, sha256Hex(token), userId)
+  ).run(machineId, sha256Hex(token), token, userId)
   return token
 }
 
