@@ -27,7 +27,7 @@ import type { ConnectorOptions, ConnectorStatus } from './connector.js'
 import type { LocalServerTarget } from './connector-proxy.js'
 import { migrateCredentialToStore, readRelayCredentialState, relayCredentialPath } from './relay-credential.js'
 import { secretStoreFromEnv } from './secret-store.js'
-import { machineEnrolmentFor, prepareMachineTrust, recordOwnerFromRelay } from './machine-trust.js'
+import { intentVerifierFor, machineEnrolmentFor, prepareMachineTrust, recordOwnerFromRelay } from './machine-trust.js'
 import type { SecretStore } from './secret-store.js'
 import type { RelayCredential, RelayCredentialIdentity } from './relay-credential.js'
 
@@ -82,6 +82,8 @@ export interface EmbeddedConnectorOptions {
   log?: Pick<Console, 'log' | 'warn' | 'error'>
   /** Where the machine secret lives; default from CODEKIN_SECRET_HELPER (null: relay.json only). */
   secretStore?: SecretStore | null
+  /** The local intent log (default ~/.codekin/relay/intents.jsonl). */
+  intentLogFile?: string
 }
 
 export const DEFAULT_POLL_INTERVAL_MS = 5_000
@@ -232,6 +234,7 @@ export class EmbeddedConnectorSupervisor {
       localTarget: this.opts.localTarget?.(),
       identityKey,
       enrolment: machineEnrolmentFor(this.file, credential.machineId, this.store, this.log),
+      intents: intentVerifierFor(this.file, credential.machineId, this.opts.intentLogFile, this.log, this.store),
       onOwner: (ownerUserId) => {
         if (this.activeToken === token) recordOwnerFromRelay(this.file, credential.machineId, ownerUserId, this.log)
       },

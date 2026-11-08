@@ -7,16 +7,20 @@
  * between the relay and the machine, so it is the right place to refuse
  * replays:
  *
- * - a delivery id is accepted once: it is remembered for RETENTION_MS after
- *   the local server accepted it (2xx)
- * - a delivery whose own event timestamp is older than RETENTION_MS is
- *   refused, so a replay after the id has been forgotten fails too
+ * - a delivery is accepted once, keyed on the SHA-256 of its body: the bytes
+ *   GitHub's HMAC covers. (The `x-github-delivery` id is not covered, so a
+ *   relay could resend a captured body under a fresh id.)
+ * - a dated event is remembered for RETENTION_MS after the local server
+ *   accepted it (2xx), and one whose own timestamp is older than that is
+ *   refused, so a replay after it has been forgotten fails too
+ * - an undated event can't be aged, so it is remembered until the size cap
+ *   pushes it out
  *
- * Ids are recorded only after the local server accepted the delivery, so a
- * forged frame reusing a real id (which the HMAC check rejects) cannot block
- * the genuine one.
+ * Bodies are recorded only after the local server accepted the delivery, so
+ * a forged frame (which the HMAC check rejects) cannot block the genuine one.
  */
 
+import { createHash } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
@@ -30,7 +34,11 @@ const MAX_REMEMBERED = 20_000
 /** Payload objects whose `updated_at` dates the event. */
 const DATED_OBJECTS = ['workflow_run', 'workflow_job', 'check_run', 'check_suite', 'pull_request', 'issue'] as const
 
+/** `deliveryId` is the replay key to pass to record(): the body's hash, prefixed `u:` for undated events. */
 export type WebhookGuardVerdict = { ok: true; deliveryId: string } | { ok: false; reason: string }
+
+/** Prefix for undated events, which are never aged out. */
+const UNDATED = 'u:'
 
 export function defaultWebhookGuardFile(home = homedir()): string {
   return join(home, '.config', 'codekin', 'relay-webhook-deliveries.json')
@@ -53,14 +61,15 @@ export class WebhookReplayGuard {
       return { ok: false, reason: 'Delivery has no id' }
     }
     this.prune()
-    if (this.seen.has(deliveryId)) {
+    const eventAt = eventTimestamp(body)
+    const key = `${eventAt === null ? UNDATED : ''}${createHash('sha256').update(body ?? Buffer.alloc(0)).digest('hex')}`
+    if (this.seen.has(key)) {
       return { ok: false, reason: 'Delivery was already accepted' }
     }
-    const eventAt = eventTimestamp(body)
     if (eventAt !== null && this.now() - eventAt > WEBHOOK_RETENTION_MS) {
       return { ok: false, reason: 'Delivery is older than the replay window' }
     }
-    return { ok: true, deliveryId }
+    return { ok: true, deliveryId: key }
   }
 
   /** Remember a delivery the local server accepted. */
@@ -78,7 +87,7 @@ export class WebhookReplayGuard {
   private prune(): void {
     const cutoff = this.now() - WEBHOOK_RETENTION_MS
     for (const [id, at] of this.seen) {
-      if (at < cutoff) this.seen.delete(id)
+      if (at < cutoff && !id.startsWith(UNDATED)) this.seen.delete(id)
     }
   }
 

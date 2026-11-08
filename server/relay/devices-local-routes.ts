@@ -8,6 +8,8 @@
  *   DELETE /api/relay/devices/pending/:enrolId   turn a waiting request down
  *   DELETE /api/relay/devices/:keyId             remove a device
  *   PUT    /api/relay/devices/policy             { policy: off | warn | required }
+ *   GET    /api/relay/intents                    recent intent log entries (?limit, keyId, sessionId, verdict)
+ *   GET    /api/relay/intents/verify             check the intent log's hash chain
  *
  * Like the other /api/relay/* routes these need the local auth token and are
  * on neither of the connector's proxy allowlists, so the relay can never
@@ -26,6 +28,7 @@ import {
 } from './trust-store.js'
 import type { IntentPolicy, TrustStoreView } from './trust-store.js'
 import { approveEnrolment, rejectEnrolment } from './enrolment.js'
+import { intentLogPath, readRecentIntents, verifyIntentLog } from './intent-log.js'
 
 type VerifyFn = (token: string | undefined) => boolean
 type ExtractFn = (req: Request) => string | undefined
@@ -64,11 +67,12 @@ export function createRelayDevicesRouter(
   verifyToken: VerifyFn,
   extractToken: ExtractFn,
   credentialFile = relayCredentialPath(),
+  intentLogFile = intentLogPath(),
 ): Router {
   const router = Router()
   const { identityFile, devicesFile } = trustPathsFor(credentialFile)
 
-  router.use('/api/relay/devices', (req, res, next) => {
+  router.use(['/api/relay/devices', '/api/relay/intents'], (req, res, next) => {
     if (!verifyToken(extractToken(req))) {
       res.status(401).json({ error: 'Unauthorized' })
       return
@@ -138,6 +142,28 @@ export function createRelayDevicesRouter(
     } catch (err) {
       sendError(res, err)
     }
+  })
+
+  // The machine's own record of what the relay delivered (spec §7.2). The
+  // stored intents are left out: they are for `codekin relay audit verify`.
+  router.get('/api/relay/intents', (req, res) => {
+    const q = req.query
+    const verdict = q.verdict === 'accepted' || q.verdict === 'rejected' || q.verdict === 'unsigned' ? q.verdict : undefined
+    const entries = readRecentIntents(intentLogFile, {
+      limit: typeof q.limit === 'string' ? Number.parseInt(q.limit, 10) || 100 : 100,
+      ...(typeof q.keyId === 'string' ? { keyId: q.keyId } : {}),
+      ...(typeof q.sessionId === 'string' ? { sessionId: q.sessionId } : {}),
+      ...(verdict ? { verdict } : {}),
+    }).map(entry => {
+      const { intent: _intent, ...rest } = entry
+      void _intent
+      return rest
+    })
+    res.json({ entries })
+  })
+
+  router.get('/api/relay/intents/verify', (_req, res) => {
+    res.json(verifyIntentLog(intentLogFile))
   })
 
   router.delete('/api/relay/devices/:keyId', (req, res) => {

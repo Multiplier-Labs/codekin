@@ -6,7 +6,7 @@
  */
 
 import WebSocket from 'ws'
-import { ENROLMENT_FEATURE, envelope, parseEnvelope, RELAY_ERROR, STREAM_CLOSE } from './relay-protocol.js'
+import { ENROLMENT_FEATURE, envelope, INTENTS_FEATURE, parseEnvelope, RELAY_ERROR, STREAM_CLOSE } from './relay-protocol.js'
 import type {
   ConnectorHello,
   EnrolRequest,
@@ -28,6 +28,20 @@ import { WebhookReplayGuard } from './connector-webhook-guard.js'
 import { EnrolmentError } from './enrolment.js'
 import type { MachineEnrolment } from './enrolment.js'
 import { TrustStoreError } from './trust-store.js'
+import type { IntentDecision, IntentVerifier } from './intent-verify.js'
+import { describeIntentRefusal } from './connector-stream.js'
+
+/** The relay error for a refused intent (signed-intents spec §6.4, "Refusals"). */
+function intentError(verdict: IntentDecision): RelayError {
+  return {
+    code: RELAY_ERROR.notPermitted,
+    message: describeIntentRefusal(verdict.reason),
+    detail: verdict.reason ?? 'intent_required',
+    ...(verdict.nonce ? { intentNonce: verdict.nonce } : {}),
+    ...(verdict.machineTime !== undefined ? { machineTime: verdict.machineTime } : {}),
+    ...(verdict.machineTimeSig ? { machineTimeSig: verdict.machineTimeSig } : {}),
+  }
+}
 
 export interface ConnectorOptions {
   /** Hosted relay origin, e.g. https://app.codekin.ai */
@@ -56,6 +70,8 @@ export interface ConnectorOptions {
   onOwner?: (ownerUserId: string) => void
   /** Answers enrol_* frames (enrolment.ts); without it the connector doesn't advertise enrolment. */
   enrolment?: Pick<MachineEnrolment, 'handle'>
+  /** Checks signed intents on everything the relay delivers (intent-verify.ts). */
+  intents?: Pick<IntentVerifier, 'checkRequest' | 'checkChannelOpen' | 'checkFrame'>
 }
 
 export type ConnectorStatus =
@@ -140,7 +156,10 @@ export class RelayConnector {
         localCodekinVersion: this.opts.localCodekinVersion,
         capabilities: {
           restProxy: true, wsProxy: true, fileUpload: true, providers: [],
-          ...(this.opts.enrolment ? { features: [ENROLMENT_FEATURE] } : {}),
+          features: [
+            ...(this.opts.enrolment ? [ENROLMENT_FEATURE] : []),
+            ...(this.opts.intents ? [INTENTS_FEATURE] : []),
+          ],
         },
         ...(this.opts.identityKey ? { identityKey: this.opts.identityKey } : {}),
       }
@@ -177,7 +196,10 @@ export class RelayConnector {
       } else if (msg.kind === 'stream_open') {
         this.openChannel(ws, msg.channelId, msg.payload as StreamOpen)
       } else if (msg.kind === 'stream_data') {
-        if (msg.channelId) this.channels.get(msg.channelId)?.send((msg.payload as StreamData).data)
+        if (msg.channelId) {
+          const payload = msg.payload as StreamData
+          this.channels.get(msg.channelId)?.send(payload.data, payload.intent)
+        }
       } else if (msg.kind === 'stream_close') {
         this.closeChannel(msg.channelId, msg.payload as StreamClose)
       } else if (msg.kind === 'error') {
@@ -222,6 +244,13 @@ export class RelayConnector {
    */
   private async handleProxyRequest(ws: WebSocket, id: string | undefined, request: ProxyRequest): Promise<void> {
     if (!id) return
+    // The signature is checked before anything else looks at the request.
+    const verdict = this.opts.intents?.checkRequest(request)
+    if (verdict && !verdict.forward) {
+      this.opts.onProxy?.(request.method, request.path, verdict.reason ?? RELAY_ERROR.notPermitted)
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(envelope('error', intentError(verdict), { id })))
+      return
+    }
     // A forwarded GitHub delivery is accepted once, and only while fresh
     // (connector-webhook-guard.ts): the signature alone does not stop a relay
     // from sending a delivery it saw again.
@@ -321,6 +350,12 @@ export class RelayConnector {
       )
       return
     }
+    const intents = this.opts.intents
+    const opened = intents?.checkChannelOpen(principal, open.intent)
+    if (opened && !opened.decision.forward) {
+      ws.send(JSON.stringify(envelope('error', intentError(opened.decision), { channelId })))
+      return
+    }
     const policy: ChannelPolicy = {
       role: principal.role === 'owner' ? 'owner' : 'grantee',
       grants: principal.grants as GrantMap,
@@ -346,13 +381,14 @@ export class RelayConnector {
           this.opts.onStream?.('close', channelId, `${code} ${reason}`)
           send('stream_close', { code, reason })
         },
-        onDenied: (reason, permission) => {
-          this.opts.onStream?.('denied', channelId, reason)
-          send('error', { code: RELAY_ERROR.notPermitted, message: reason, permission })
+        onDenied: (reason, permission, refusal) => {
+          this.opts.onStream?.('denied', channelId, refusal?.detail ?? reason)
+          send('error', { code: RELAY_ERROR.notPermitted, message: reason, permission, ...refusal })
         },
       },
       this.opts.socketFactory,
       policy,
+      intents && opened ? (frame, intent) => intents.checkFrame(principal, frame, intent, opened.channel) : undefined,
     )
 
     this.channels.set(channelId, channel)

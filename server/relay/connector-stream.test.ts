@@ -19,7 +19,7 @@ import { UNLIMITED } from './quotas.js'
 import { BrowserHub } from './browser-hub.js'
 import { RelayConnector } from './connector.js'
 import { envelope, MAX_CHANNELS_PER_CLIENT, RELAY_ERROR, STREAM_CLOSE } from './relay-protocol.js'
-import { localWsUrl, StreamChannel } from './connector-stream.js'
+import { localWsUrl, LOCAL_FRAMES_PER_SECOND, SlidingBudget, StreamChannel } from './connector-stream.js'
 import type { SessionUser } from './relay-auth-routes.js'
 
 function waitFor(condition: () => boolean, timeoutMs = 3000): Promise<void> {
@@ -333,6 +333,41 @@ describe('session streaming over the relay', () => {
     )
     expect(JSON.parse(frame.payload.data as string)).toEqual({ type: 'claude_message', text: 'hi back' })
     browser.close()
+  })
+
+  it('answers ping itself and drops resize: nothing unsigned reaches the local server', async () => {
+    await startConnector()
+    const browser = await openChannel()
+    browser.send('stream_data', { data: JSON.stringify({ type: 'ping' }) }, { channelId: 'c1' })
+    browser.send('stream_data', { data: JSON.stringify({ type: 'resize', cols: 80, rows: 24 }) }, { channelId: 'c1' })
+    const pong = await browser.waitForFrame(f => f.kind === 'stream_data' && String(f.payload.data).includes('pong'))
+    expect(JSON.parse(pong.payload.data as string)).toEqual({ type: 'pong' })
+    browser.send('stream_data', { data: JSON.stringify({ type: 'input', data: 'x' }) }, { channelId: 'c1' })
+    await waitFor(() => local.received.length > 0)
+    expect(local.received.map(f => (JSON.parse(f) as { type: string }).type)).toEqual(['input'])
+    browser.close()
+  })
+
+  it('refuses, visibly, frames past the local server limit instead of letting it drop them', async () => {
+    await startConnector()
+    const browser = await openChannel()
+    for (let i = 0; i < LOCAL_FRAMES_PER_SECOND + 5; i++) {
+      browser.send('stream_data', { data: JSON.stringify({ type: 'get_diff', requestId: i }) }, { channelId: 'c1' })
+    }
+    const refused = await browser.waitForFrame(f => f.kind === 'error' && f.channelId === 'c1')
+    expect(refused.payload).toMatchObject({ code: 'not_permitted', detail: 'intent_rate_limited' })
+    await waitFor(() => local.received.length === LOCAL_FRAMES_PER_SECOND)
+    browser.close()
+  })
+
+  it('keeps any one second under the budget, however the window falls', () => {
+    let t = 0
+    const budget = new SlidingBudget(3, 1000, () => t)
+    expect([budget.allow(), budget.allow(), budget.allow(), budget.allow()]).toEqual([true, true, true, false])
+    t = 999
+    expect(budget.allow()).toBe(false)
+    t = 1000
+    expect(budget.allow()).toBe(true)
   })
 
   it('closes the browser channel when the local socket goes away', async () => {

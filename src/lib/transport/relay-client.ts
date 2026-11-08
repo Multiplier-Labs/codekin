@@ -7,6 +7,11 @@
  * in the URL or in application frames.
  */
 
+import {
+  CHANNEL_OPEN_ACTION, channelOpenPayload, channelSessionAfter, frameAction, framePayload, frameSession, isExemptFrame,
+  requestAction, requestPayload, requestSession,
+} from '../../../server/relay/intent-actions'
+
 export const RELAY_PROTOCOL_VERSION = 1
 
 export interface RelayProxyResponse {
@@ -23,12 +28,74 @@ export interface RelayErrorPayload {
 /** Thrown by `request()` when the relay or the machine refuses the call. */
 export class RelayRequestError extends Error {
   readonly code: string
+  /** For intent refusals: which check failed (`intent_stale`, …). */
+  readonly detail?: string
+  /** For `intent_stale`: the machine's clock. */
+  readonly machineTime?: number
+  /** For `intent_stale`: the machine key's signature over (intentNonce, machineTime). */
+  readonly machineTimeSig?: string
+  /** For intent refusals: the refused intent's nonce. */
+  readonly intentNonce?: string
 
-  constructor(code: string, message: string) {
+  constructor(code: string, message: string, extra: { detail?: string; machineTime?: number; machineTimeSig?: string; intentNonce?: string } = {}) {
     super(message)
     this.name = 'RelayRequestError'
     this.code = code
+    if (extra.detail !== undefined) this.detail = extra.detail
+    if (extra.machineTime !== undefined) this.machineTime = extra.machineTime
+    if (extra.machineTimeSig !== undefined) this.machineTimeSig = extra.machineTimeSig
+    if (extra.intentNonce !== undefined) this.intentNonce = extra.intentNonce
   }
+}
+
+/**
+ * Signs messages to the machine (src/hosted/intentSigner.ts). Resolves null
+ * when this browser isn't confirmed on the machine; the message then goes
+ * unsigned.
+ */
+export interface RelaySigner {
+  sign(intent: IntentInput): Promise<unknown>
+  setClockOffset(ms: number): void
+  /** Whether the machine's own key signed this time (so the relay didn't make it up). */
+  verifyMachineTime(nonce: string, machineTime: number, sig: string): Promise<boolean>
+}
+
+interface IntentInput {
+  action: string
+  sessionId: string | null
+  payload: Uint8Array
+  channel?: string
+  seq?: number
+  nonce?: string
+}
+
+/** One channel's signing state: the token its signed open fixed, the next seq, and its session. */
+interface SignedChannel {
+  token: string
+  seq: number
+  session: string | null
+  /** Closed by the app; frames still being signed are sent, then the close. */
+  closing: boolean
+}
+
+function channelToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  let binary = ''
+  for (const b of bytes) binary += String.fromCharCode(b)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function intentNonce(intent: unknown): string | undefined {
+  try {
+    const nonce = (JSON.parse((intent as { body: string }).body) as { nonce?: unknown }).nonce
+    return typeof nonce === 'string' ? nonce : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function base64Bytes(body: string | undefined): Uint8Array | null {
+  return body ? decodeBody(body) : null
 }
 
 export type RelayConnectionState = 'connecting' | 'open' | 'closed'
@@ -87,6 +154,8 @@ export interface RelayConnectionOptions {
   onStateChange?: (state: RelayConnectionState, detail?: string) => void
   /** Called when the machine's online flag arrives with hello_ack. */
   onMachineStatus?: (online: boolean, displayName: string) => void
+  /** Signs every request, channel open and frame (signed-intents spec §6.3). */
+  signer?: RelaySigner
 }
 
 export function browserRelayUrl(machineId: string): string {
@@ -98,6 +167,12 @@ export class RelayConnection {
   private ws: WebSocket | null = null
   private pending = new Map<string, Pending>()
   private channels = new Map<string, ChannelHandlers>()
+  /** Per-channel send order while frames are being signed. */
+  private chains = new Map<string, Promise<void>>()
+  /** Signing state per channel (token, seq, session), when signing. */
+  private signedChannels = new Map<string, SignedChannel>()
+  /** Set once the machine has told us its time; the relay's guess no longer applies. */
+  private machineClockKnown = false
   private queued: (() => void)[] = []
   private backoffMs = BACKOFF_MIN_MS
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -269,7 +344,57 @@ export class RelayConnection {
    * queued rather than rejected, so callers need not await connection.
    */
   request(method: string, path: string, body?: string, contentType?: string): Promise<RelayProxyResponse> {
-    return this.call('request', 'response', { method, path, body, contentType }) as Promise<RelayProxyResponse>
+    const signer = this.opts.signer
+    if (!signer) return this.call('request', 'response', { method, path, body, contentType }) as Promise<RelayProxyResponse>
+    let nonce: string | undefined
+    const signAndSend = async () => {
+      const intent = await this.signSafely({
+        action: requestAction(method, path),
+        sessionId: requestSession(path),
+        payload: requestPayload(method, path, contentType, base64Bytes(body)),
+        ...(nonce ? { nonce } : {}),
+      })
+      nonce ??= intent ? intentNonce(intent) : undefined
+      return this.call('request', 'response', { method, path, body, contentType, ...(intent ? { intent } : {}) }) as Promise<RelayProxyResponse>
+    }
+    return signAndSend().catch(async (err: unknown) => {
+      // A machine whose clock disagrees says so once; adopt its time and retry
+      // (§6.5) with the same nonce. If the first attempt actually ran and the
+      // "stale" reply was forged, the machine refuses the retry as a replay;
+      // and the time is only adopted when the machine's key signed it.
+      if (err instanceof RelayRequestError && err.detail === 'intent_stale' && await this.adoptMachineTime(err)) {
+        return signAndSend()
+      }
+      throw err
+    })
+  }
+
+  /**
+   * Adopt the machine's clock from a stale refusal, if its key signed it. From
+   * then on the relay's hello_ack guess no longer applies.
+   */
+  private async adoptMachineTime(err: { machineTime?: number; machineTimeSig?: string; intentNonce?: string }): Promise<boolean> {
+    const signer = this.opts.signer
+    if (!signer || err.machineTime === undefined || !err.machineTimeSig || !err.intentNonce) return false
+    if (!await signer.verifyMachineTime(err.intentNonce, err.machineTime, err.machineTimeSig)) return false
+    this.machineClockKnown = true
+    signer.setClockOffset(err.machineTime - Date.now())
+    return true
+  }
+
+  /** Never lets a signing failure lose a message: it goes unsigned instead. */
+  private async signSafely(intent: IntentInput): Promise<unknown> {
+    try {
+      return await this.opts.signer?.sign(intent) ?? null
+    } catch {
+      return null
+    }
+  }
+
+  /** Signing is async; each channel's frames go out in the order they were sent (§6.3). */
+  private inOrder(channelId: string, step: () => Promise<void>): void {
+    const prev = this.chains.get(channelId) ?? Promise.resolve()
+    this.chains.set(channelId, prev.then(step).catch(() => {}))
   }
 
   /**
@@ -310,19 +435,62 @@ export class RelayConnection {
    */
   openChannel(channelId: string, handlers: ChannelHandlers): void {
     this.channels.set(channelId, handlers)
-    this.sendOrQueue({ kind: 'stream_open', channelId, payload: {} })
+    if (!this.opts.signer) {
+      this.sendOrQueue({ kind: 'stream_open', channelId, payload: {} })
+      return
+    }
+    const state: SignedChannel = { token: channelToken(), seq: 0, session: null, closing: false }
+    this.signedChannels.set(channelId, state)
+    this.inOrder(channelId, async () => {
+      const intent = await this.signSafely({ action: CHANNEL_OPEN_ACTION, sessionId: null, payload: channelOpenPayload(), channel: state.token })
+      if (!this.channels.has(channelId) && !state.closing) return
+      this.sendOrQueue({ kind: 'stream_open', channelId, payload: intent ? { intent } : {} })
+    })
   }
 
   /** Relay a frame onto an open channel. */
   sendChannelData(channelId: string, data: string): void {
     if (!this.channels.has(channelId)) return
-    this.sendOrQueue({ kind: 'stream_data', channelId, payload: { data } })
+    if (!this.opts.signer) {
+      this.sendOrQueue({ kind: 'stream_data', channelId, payload: { data } })
+      return
+    }
+    const state = this.signedChannels.get(channelId)
+    if (!state) return
+    // Session and position are fixed now, in send order, the same way the
+    // machine tracks them (intent-actions.ts), even though signing finishes later.
+    const exempt = isExemptFrame(data)
+    const seq = exempt ? undefined : ++state.seq
+    const before = state.session
+    state.session = channelSessionAfter(data, before, seq)
+    this.inOrder(channelId, async () => {
+      const intent = exempt ? null : await this.signSafely({
+        action: frameAction(data), sessionId: frameSession(data, before), payload: framePayload(data), channel: state.token, seq,
+      })
+      this.sendOrQueue({ kind: 'stream_data', channelId, payload: intent ? { data, intent } : { data } })
+    })
   }
 
   /** Close a channel; its handlers stop firing immediately. */
   closeChannel(channelId: string, code?: number, reason?: string): void {
     if (!this.channels.delete(channelId)) return
-    this.sendOrQueue({ kind: 'stream_close', channelId, payload: { code, reason } })
+    const state = this.signedChannels.get(channelId)
+    if (!state) {
+      this.sendOrQueue({ kind: 'stream_close', channelId, payload: { code, reason } })
+      return
+    }
+    // Frames already being signed still go out, then the close.
+    state.closing = true
+    this.inOrder(channelId, () => {
+      this.sendOrQueue({ kind: 'stream_close', channelId, payload: { code, reason } })
+      this.forgetChannel(channelId)
+      return Promise.resolve()
+    })
+  }
+
+  private forgetChannel(channelId: string): void {
+    this.chains.delete(channelId)
+    this.signedChannels.delete(channelId)
   }
 
   private sendOrQueue(frame: { kind: string; channelId?: string; id?: string; payload: unknown }): void {
@@ -346,7 +514,9 @@ export class RelayConnection {
     }
 
     if (msg.kind === 'hello_ack') {
-      const ack = msg.payload as { online?: boolean; displayName?: string }
+      const ack = msg.payload as { online?: boolean; displayName?: string; serverTime?: unknown }
+      // A first guess at the clock offset, until the machine has given its own.
+      if (typeof ack.serverTime === 'number' && !this.machineClockKnown) this.opts.signer?.setClockOffset(ack.serverTime - Date.now())
       this.backoffMs = BACKOFF_MIN_MS
       this.setState('open')
       this.opts.onMachineStatus?.(ack.online === true, ack.displayName ?? this.opts.machineId)
@@ -368,8 +538,13 @@ export class RelayConnection {
     this.pending.delete(msg.id)
 
     if (msg.kind === 'error') {
-      const err = msg.payload as Partial<RelayErrorPayload>
-      entry.reject(new RelayRequestError(err.code ?? 'relay_error', err.message ?? 'Relay error'))
+      const err = msg.payload as Partial<RelayErrorPayload> & { detail?: unknown; machineTime?: unknown; machineTimeSig?: unknown; intentNonce?: unknown }
+      entry.reject(new RelayRequestError(err.code ?? 'relay_error', err.message ?? 'Relay error', {
+        ...(typeof err.detail === 'string' ? { detail: err.detail } : {}),
+        ...(typeof err.machineTime === 'number' ? { machineTime: err.machineTime } : {}),
+        ...(typeof err.machineTimeSig === 'string' ? { machineTimeSig: err.machineTimeSig } : {}),
+        ...(typeof err.intentNonce === 'string' ? { intentNonce: err.intentNonce } : {}),
+      }))
       return
     }
     if (msg.kind === entry.expects) {
@@ -395,12 +570,22 @@ export class RelayConnection {
     if (kind === 'stream_close') {
       const close = payload as { code?: number; reason?: string }
       this.channels.delete(channelId)
+      this.forgetChannel(channelId)
       handlers.onClose(close.code ?? 1000, close.reason ?? 'closed')
       return
     }
     if (kind === 'error') {
-      const err = payload as Partial<RelayErrorPayload>
+      const err = payload as Partial<RelayErrorPayload> & { detail?: unknown; machineTime?: unknown; machineTimeSig?: unknown; intentNonce?: unknown }
       const error = { code: err.code ?? 'relay_error', message: err.message ?? 'Relay error' }
+      // A stale-clock refusal closes this channel; fix the clock for the next one.
+      if (err.detail === 'intent_stale' && typeof err.machineTime === 'number') {
+        void this.adoptMachineTime({
+          machineTime: err.machineTime,
+          ...(typeof err.machineTimeSig === 'string' ? { machineTimeSig: err.machineTimeSig } : {}),
+          ...(typeof err.intentNonce === 'string' ? { intentNonce: err.intentNonce } : {}),
+        })
+      }
+      this.forgetChannel(channelId)
       this.channels.delete(channelId)
       handlers.onError(error)
       handlers.onClose(CLOSE_RELAY_GONE, error.message)
@@ -408,6 +593,8 @@ export class RelayConnection {
   }
 
   private failAllChannels(reason: string): void {
+    this.chains.clear()
+    this.signedChannels.clear()
     for (const [channelId, handlers] of [...this.channels]) {
       this.channels.delete(channelId)
       handlers.onClose(CLOSE_RELAY_GONE, reason)

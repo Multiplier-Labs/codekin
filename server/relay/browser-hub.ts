@@ -19,9 +19,11 @@ import {
   RELAY_ERROR,
   STREAM_CLOSE,
 } from './relay-protocol.js'
+import type { SignedIntent } from './intent-actions.js'
 import type {
   BrowserHello,
   EnrolRequestKind,
+  StreamOpen,
   ProxyRequest,
   ProxyResponse,
   RelayError,
@@ -330,6 +332,9 @@ export class BrowserHub {
               online: this.connectors.isOnline(machineId),
               role: access.kind,
               grants: access.kind === 'grantee' ? access.grants : undefined,
+              // A starting point for the browser's intent timestamps (§6.5);
+              // the machine's own clock corrects it if they differ.
+              serverTime: Date.now(),
             }),
           ),
         )
@@ -355,7 +360,7 @@ export class BrowserHub {
       } else if (msg.kind === 'enrol_commit' || msg.kind === 'enrol_reveal' || msg.kind === 'enrol_status') {
         return this.forwardEnrolment(client, msg.kind, msg.id, msg.payload)
       } else if (msg.kind === 'stream_open') {
-        this.openChannel(client, msg.channelId)
+        this.openChannel(client, msg.channelId, (msg.payload as StreamOpen | undefined)?.intent)
       } else if (msg.kind === 'stream_data') {
         this.forwardChannelData(client, msg.channelId, msg.payload as StreamData)
       } else if (msg.kind === 'stream_close') {
@@ -418,6 +423,8 @@ export class BrowserHub {
         contentType: typeof request.contentType === 'string' ? request.contentType : undefined,
         body: request.body,
         principal: toPrincipal(client.user, client.access),
+        // The browser's signature over this request, checked on the machine.
+        ...(request.intent ? { intent: request.intent } : {}),
       })
       if (!this.clients.has(client) || client.socket.readyState !== client.socket.OPEN) return
       if ('error' in outcome) {
@@ -476,7 +483,7 @@ export class BrowserHub {
   }
 
   /** Open a session stream for this client on its bound machine. */
-  private openChannel(client: BrowserClient, localId: string | undefined): void {
+  private openChannel(client: BrowserClient, localId: string | undefined, intent?: SignedIntent): void {
     if (!localId || client.channels.has(localId)) return
     if (client.channels.size >= MAX_CHANNELS_PER_CLIENT) {
       this.sendChannelError(client, localId, {
@@ -532,7 +539,7 @@ export class BrowserHub {
         client.channelSessions.delete(localId)
         this.connectors.closeChannel(client.machineId, remoteId)
       }
-    }, toPrincipal(client.user, client.access))
+    }, toPrincipal(client.user, client.access), intent)
 
     if (error) {
       console.log(`[relay] stream refused on machine ${client.machineId}: ${error.code} ${error.message}`)
@@ -546,7 +553,7 @@ export class BrowserHub {
     if (!localId) return
     const remoteId = client.channels.get(localId)
     if (!remoteId || typeof payload?.data !== 'string') return
-    if (this.connectors.sendChannelData(client.machineId, remoteId, payload.data)) {
+    if (this.connectors.sendChannelData(client.machineId, remoteId, payload.data, payload.intent)) {
       this.auditBrowserFrame(client, localId, payload.data)
     }
   }

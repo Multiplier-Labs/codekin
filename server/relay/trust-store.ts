@@ -249,11 +249,11 @@ const sleeper = new Int32Array(new SharedArrayBuffer(4))
  * older than LOCK_STALE_MS (left by a crashed process) is taken over by
  * renaming it aside first, which only one waiter can do.
  */
-export function withTrustStoreLock<T>(file: string, fn: () => T): T {
+export function withTrustStoreLock<T>(file: string, fn: () => T, waitMs = LOCK_WAIT_MS): T {
   mkdirSync(dirname(file), { recursive: true })
   const lock = `${file}.lock`
   const token = randomUUID()
-  const deadline = Date.now() + LOCK_WAIT_MS
+  const deadline = Date.now() + waitMs
   for (;;) {
     try {
       const fd = openSync(lock, 'wx', 0o600)
@@ -305,6 +305,8 @@ export function mutateTrustStore<T>(
   machineId: string | undefined,
   fn: (store: TrustStore) => T,
   now = Date.now(),
+  /** How long to wait for the lock; 0 gives up at once (callers on a hot path). */
+  waitMs = LOCK_WAIT_MS,
 ): T {
   return withTrustStoreLock(file, () => {
     const store = requireStore(file, machineId)
@@ -312,7 +314,7 @@ export function mutateTrustStore<T>(
     const result = fn(store)
     writeTrustStore(file, store)
     return result
-  })
+  }, waitMs)
 }
 
 export interface EnsureTrustStoreOptions {

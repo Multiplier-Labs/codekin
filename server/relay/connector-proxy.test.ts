@@ -102,6 +102,7 @@ describe('local-only relay routes', () => {
   const PATHS = [
     '/api/relay/devices', '/api/relay/devices/', '/api/relay/devices/q3abc', '/api/relay/devices/policy',
     '/api/relay/devices?x=1', '/api/relay/%64evices', '/api/relay/DEVICES', '/api/relay/pair', '/api/relay/unpair', '/api/relay/status',
+    '/api/relay/intents', '/api/relay/intents/verify', '/api/relay/intents?limit=1',
   ]
   const principals = [
     { userId: 'u1', role: 'owner' as const, grants: {} },

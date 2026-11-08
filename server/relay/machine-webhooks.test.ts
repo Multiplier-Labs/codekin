@@ -135,8 +135,11 @@ describe('GitHub webhooks through the relay', () => {
     return new URL(url).pathname
   }
 
+  // One fixed event: a replay resends exactly the same signed bytes.
+  const EVENT_AT = new Date().toISOString()
+
   function deliver(path: string, opts: { delivery?: string; body?: string; headers?: Record<string, string> } = {}): Promise<Response> {
-    const body = opts.body ?? JSON.stringify({ action: 'completed', workflow_run: { id: 1, updated_at: new Date().toISOString() } })
+    const body = opts.body ?? JSON.stringify({ action: 'completed', workflow_run: { id: 1, updated_at: EVENT_AT } })
     return fetch(`${baseUrl}${path}`, {
       method: 'POST',
       headers: {
@@ -253,24 +256,46 @@ describe('GitHub webhooks through the relay', () => {
     expect(localCalls).toHaveLength(0)
   })
 
-  it('keeps accepted delivery ids across connector restarts', () => {
+  it('keeps accepted deliveries across connector restarts, keyed on the signed body', () => {
     let cleanup: string | null = null
     vi.useFakeTimers()
     try {
       const dir = mkdtempSync(join(tmpdir(), 'ck-webhook-guard-'))
       cleanup = dir
       const file = join(dir, 'deliveries.json')
+      const dated = Buffer.from(JSON.stringify({ workflow_run: { updated_at: new Date().toISOString() } }))
       const first = new WebhookReplayGuard(file)
-      const verdict = first.check({ 'x-github-delivery': 'persist-1' }, undefined)
+      const verdict = first.check({ 'x-github-delivery': 'persist-1' }, dated)
       expect(verdict.ok).toBe(true)
-      first.record('persist-1')
+      if (verdict.ok) first.record(verdict.deliveryId)
       const second = new WebhookReplayGuard(file)
-      expect(second.check({ 'x-github-delivery': 'persist-1' }, undefined).ok).toBe(false)
+      expect(second.check({ 'x-github-delivery': 'persist-1' }, dated).ok).toBe(false)
+      // The delivery id isn't covered by GitHub's HMAC: a fresh one doesn't help a replay.
+      expect(second.check({ 'x-github-delivery': 'fresh-id' }, dated).ok).toBe(false)
       vi.setSystemTime(Date.now() + WEBHOOK_RETENTION_MS + 1000)
-      expect(second.check({ 'x-github-delivery': 'persist-1' }, undefined).ok).toBe(true)
+      // Forgotten by now, but by now the event itself is too old.
+      expect(second.check({ 'x-github-delivery': 'persist-1' }, dated)).toMatchObject({ ok: false, reason: expect.stringContaining('older') })
     } finally {
       vi.useRealTimers()
       if (cleanup) rmSync(cleanup, { recursive: true, force: true })
     }
   })
+
+  it('never ages out an undated delivery', () => {
+    vi.useFakeTimers()
+    try {
+      const guard = new WebhookReplayGuard(null)
+      const push = Buffer.from(JSON.stringify({ ref: 'refs/heads/main' }))
+      const verdict = guard.check({ 'x-github-delivery': 'p-1' }, push)
+      expect(verdict.ok).toBe(true)
+      if (verdict.ok) guard.record(verdict.deliveryId)
+      vi.setSystemTime(Date.now() + 2 * WEBHOOK_RETENTION_MS)
+      expect(guard.check({ 'x-github-delivery': 'p-2' }, push).ok).toBe(false)
+      // A different body is a different delivery.
+      expect(guard.check({ 'x-github-delivery': 'p-3' }, Buffer.from('{"ref":"refs/heads/dev"}')).ok).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
 })
