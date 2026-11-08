@@ -61,7 +61,7 @@ export class RelayRequestError extends Error {
  */
 export interface RelaySigner {
   sign(intent: IntentInput): Promise<unknown>
-  setClockOffset(ms: number): void
+  setClockOffset(ms: number, fromMachine?: boolean): void
   /** Whether the machine's own key signed this time (so the relay didn't make it up). */
   verifyMachineTime(nonce: string, machineTime: number, sig: string): Promise<boolean>
   /** Remember the passkeys a machine named when it asked for step-up. */
@@ -402,7 +402,7 @@ export class RelayConnection {
     if (!signer || err.machineTime === undefined || !err.machineTimeSig || !err.intentNonce) return false
     if (!await signer.verifyMachineTime(err.intentNonce, err.machineTime, err.machineTimeSig)) return false
     this.machineClockKnown = true
-    signer.setClockOffset(err.machineTime - Date.now())
+    signer.setClockOffset(err.machineTime - Date.now(), true)
     return true
   }
 

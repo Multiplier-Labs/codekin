@@ -65,7 +65,7 @@ export class HostedRelayTransport implements CodekinTransport {
     return this.signer.sign(intent)
   }
 
-  /** The clock intents are signed with (corrected to the machine's), for ids and expiries inside them. */
+  /** The trusted clock (corrected only by a machine-signed time), for grant ids and expiries. */
   now(): number {
     return this.signer.now()
   }

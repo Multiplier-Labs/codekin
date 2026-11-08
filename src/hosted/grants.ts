@@ -36,12 +36,12 @@ import { workspaceHeaders } from './workspace'
 
 /** The parts of the hosted transport grants need (HostedRelayTransport). */
 export interface GrantTransport {
-  signIntent(intent: { action: string; sessionId: string | null; payload: Uint8Array; stepUp?: boolean }): Promise<SignedIntent | null>
+  signIntent(intent: { action: string; sessionId: string | null; payload: Uint8Array; stepUp?: boolean; trustedClock?: boolean }): Promise<SignedIntent | null>
   sendDeviceFrame(kind: 'enrol_grant_revoke', payload: unknown): Promise<unknown>
   /**
-   * The clock intents are signed with (corrected to the machine's). Grant ids
-   * carry their issue time, which orders a share's grants on the machine, so
-   * they come from this clock, never the raw one.
+   * The trusted clock (corrected only by a machine-signed time, never by the
+   * relay). Grant ids carry their issue time, which orders a share's grants
+   * on the machine, so they and the grant intent are dated by it.
    */
   now?(): number
 }
@@ -255,7 +255,7 @@ export async function proposeGrant(
 async function storeGrant(transport: GrantTransport, share: Pick<ShareWithGrant, 'id' | 'localSessionId'>, grant: GrantBody): Promise<string> {
   const text = JSON.stringify(grant)
   const intent = await transport.signIntent({
-    action: GRANT_ACTION, sessionId: share.localSessionId, payload: grantPayload(text), stepUp: grantNeedsStepUp(grant.permissions),
+    action: GRANT_ACTION, sessionId: share.localSessionId, payload: grantPayload(text), stepUp: grantNeedsStepUp(grant.permissions), trustedClock: true,
   })
   if (!intent) throw new GrantError('not_confirmed', 'Confirm this browser on the computer first (Settings → Machines), then try again.')
   const res = await fetch(`/api/shares/${encodeURIComponent(share.id)}/grant`, {
