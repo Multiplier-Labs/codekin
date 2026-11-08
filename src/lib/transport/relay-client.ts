@@ -32,13 +32,19 @@ export class RelayRequestError extends Error {
   readonly detail?: string
   /** For `intent_stale`: the machine's clock. */
   readonly machineTime?: number
+  /** For `intent_stale`: the machine key's signature over (intentNonce, machineTime). */
+  readonly machineTimeSig?: string
+  /** For intent refusals: the refused intent's nonce. */
+  readonly intentNonce?: string
 
-  constructor(code: string, message: string, extra: { detail?: string; machineTime?: number } = {}) {
+  constructor(code: string, message: string, extra: { detail?: string; machineTime?: number; machineTimeSig?: string; intentNonce?: string } = {}) {
     super(message)
     this.name = 'RelayRequestError'
     this.code = code
     if (extra.detail !== undefined) this.detail = extra.detail
     if (extra.machineTime !== undefined) this.machineTime = extra.machineTime
+    if (extra.machineTimeSig !== undefined) this.machineTimeSig = extra.machineTimeSig
+    if (extra.intentNonce !== undefined) this.intentNonce = extra.intentNonce
   }
 }
 
@@ -50,6 +56,8 @@ export class RelayRequestError extends Error {
 export interface RelaySigner {
   sign(intent: IntentInput): Promise<unknown>
   setClockOffset(ms: number): void
+  /** Whether the machine's own key signed this time (so the relay didn't make it up). */
+  verifyMachineTime(nonce: string, machineTime: number, sig: string): Promise<boolean>
 }
 
 interface IntentInput {
@@ -349,22 +357,29 @@ export class RelayConnection {
       nonce ??= intent ? intentNonce(intent) : undefined
       return this.call('request', 'response', { method, path, body, contentType, ...(intent ? { intent } : {}) }) as Promise<RelayProxyResponse>
     }
-    return signAndSend().catch((err: unknown) => {
+    return signAndSend().catch(async (err: unknown) => {
       // A machine whose clock disagrees says so once; adopt its time and retry
       // (§6.5) with the same nonce. If the first attempt actually ran and the
-      // "stale" reply was forged, the machine refuses the retry as a replay.
-      if (err instanceof RelayRequestError && err.detail === 'intent_stale' && err.machineTime !== undefined) {
-        this.adoptMachineTime(err.machineTime)
+      // "stale" reply was forged, the machine refuses the retry as a replay;
+      // and the time is only adopted when the machine's key signed it.
+      if (err instanceof RelayRequestError && err.detail === 'intent_stale' && await this.adoptMachineTime(err)) {
         return signAndSend()
       }
       throw err
     })
   }
 
-  /** The machine's clock wins over the relay's hello_ack guess from then on. */
-  private adoptMachineTime(machineTime: number): void {
+  /**
+   * Adopt the machine's clock from a stale refusal, if its key signed it. From
+   * then on the relay's hello_ack guess no longer applies.
+   */
+  private async adoptMachineTime(err: { machineTime?: number; machineTimeSig?: string; intentNonce?: string }): Promise<boolean> {
+    const signer = this.opts.signer
+    if (!signer || err.machineTime === undefined || !err.machineTimeSig || !err.intentNonce) return false
+    if (!await signer.verifyMachineTime(err.intentNonce, err.machineTime, err.machineTimeSig)) return false
     this.machineClockKnown = true
-    this.opts.signer?.setClockOffset(machineTime - Date.now())
+    signer.setClockOffset(err.machineTime - Date.now())
+    return true
   }
 
   /** Never lets a signing failure lose a message: it goes unsigned instead. */
@@ -523,10 +538,12 @@ export class RelayConnection {
     this.pending.delete(msg.id)
 
     if (msg.kind === 'error') {
-      const err = msg.payload as Partial<RelayErrorPayload> & { detail?: unknown; machineTime?: unknown }
+      const err = msg.payload as Partial<RelayErrorPayload> & { detail?: unknown; machineTime?: unknown; machineTimeSig?: unknown; intentNonce?: unknown }
       entry.reject(new RelayRequestError(err.code ?? 'relay_error', err.message ?? 'Relay error', {
         ...(typeof err.detail === 'string' ? { detail: err.detail } : {}),
         ...(typeof err.machineTime === 'number' ? { machineTime: err.machineTime } : {}),
+        ...(typeof err.machineTimeSig === 'string' ? { machineTimeSig: err.machineTimeSig } : {}),
+        ...(typeof err.intentNonce === 'string' ? { intentNonce: err.intentNonce } : {}),
       }))
       return
     }
@@ -558,10 +575,16 @@ export class RelayConnection {
       return
     }
     if (kind === 'error') {
-      const err = payload as Partial<RelayErrorPayload> & { detail?: unknown; machineTime?: unknown }
+      const err = payload as Partial<RelayErrorPayload> & { detail?: unknown; machineTime?: unknown; machineTimeSig?: unknown; intentNonce?: unknown }
       const error = { code: err.code ?? 'relay_error', message: err.message ?? 'Relay error' }
       // A stale-clock refusal closes this channel; fix the clock for the next one.
-      if (err.detail === 'intent_stale' && typeof err.machineTime === 'number') this.adoptMachineTime(err.machineTime)
+      if (err.detail === 'intent_stale' && typeof err.machineTime === 'number') {
+        void this.adoptMachineTime({
+          machineTime: err.machineTime,
+          ...(typeof err.machineTimeSig === 'string' ? { machineTimeSig: err.machineTimeSig } : {}),
+          ...(typeof err.intentNonce === 'string' ? { intentNonce: err.intentNonce } : {}),
+        })
+      }
       this.forgetChannel(channelId)
       this.channels.delete(channelId)
       handlers.onError(error)

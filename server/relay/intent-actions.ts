@@ -16,6 +16,14 @@ export const MAX_INTENT_BODY_CHARS = 4096
 /** How far an intent's timestamp may be from the machine's clock (§6.4 step 6). */
 export const INTENT_MAX_SKEW_MS = 5 * 60_000
 
+/**
+ * Domain label for the machine's signature over its clock on an
+ * `intent_stale` refusal: sign_kM(T(label, nonce, String(machineTime))). The
+ * browser adopts the time only if it verifies against the pinned machine key,
+ * so a relay can't shift the browser's clock.
+ */
+export const MACHINE_TIME_LABEL = 'ck-intent-time-v1'
+
 /** How large a clock offset the browser will apply after a stale refusal (§6.5). */
 export const MAX_CLOCK_OFFSET_MS = 60 * 60_000
 

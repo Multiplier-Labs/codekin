@@ -502,6 +502,7 @@ export class ConnectorHub {
           ...(typeof err.detail === 'string' ? { detail: err.detail } : {}),
           ...(typeof err.intentNonce === 'string' ? { intentNonce: err.intentNonce } : {}),
           ...(typeof err.machineTime === 'number' ? { machineTime: err.machineTime } : {}),
+          ...(typeof err.machineTimeSig === 'string' ? { machineTimeSig: err.machineTimeSig } : {}),
         },
       })
       return

@@ -9,9 +9,9 @@
  * server/relay/intent-actions.ts, which the machine applies to verify.
  */
 
-import { INTENT_VERSION, MAX_CLOCK_OFFSET_MS } from '../../server/relay/intent-actions'
+import { INTENT_VERSION, MACHINE_TIME_LABEL, MAX_CLOCK_OFFSET_MS } from '../../server/relay/intent-actions'
 import type { IntentBody, SignedIntent } from '../../server/relay/intent-actions'
-import { DEVICE_TRUST_CHANGED, currentUserId, toB64url, trustStorage, type TrustStorage } from './deviceTrust'
+import { DEVICE_TRUST_CHANGED, currentUserId, fromB64url, toB64url, transcript, trustStorage, type TrustStorage } from './deviceTrust'
 
 export type { SignedIntent }
 
@@ -33,6 +33,8 @@ export interface IntentSigner {
   sign(intent: IntentToSign): Promise<SignedIntent | null>
   /** Adopt a clock correction (bounded to ±1 h, §6.5). */
   setClockOffset(ms: number): void
+  /** Whether the pinned machine key signed this time for this nonce (MACHINE_TIME_LABEL). */
+  verifyMachineTime(nonce: string, machineTime: number, sig: string): Promise<boolean>
 }
 
 const SIGN = { name: 'ECDSA', hash: 'SHA-256' } as const
@@ -85,6 +87,18 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
     },
     setClockOffset(ms) {
       offset = clampOffset(ms)
+    },
+    async verifyMachineTime(nonce, machineTime, sig) {
+      try {
+        const userId = await currentUserId()
+        const pin = userId ? await storage.getPin(userId, machineId) : undefined
+        if (!pin) return false
+        const key = await crypto.subtle.importKey('spki', fromB64url(pin.machineKey) as BufferSource, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify'])
+        const data = transcript(MACHINE_TIME_LABEL, nonce, String(machineTime))
+        return await crypto.subtle.verify(SIGN, key, fromB64url(sig) as BufferSource, data as BufferSource)
+      } catch {
+        return false
+      }
     },
   }
 }

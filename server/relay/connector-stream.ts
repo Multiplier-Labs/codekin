@@ -59,6 +59,7 @@ export interface IntentRefusalInfo {
   detail: string
   intentNonce?: string
   machineTime?: number
+  machineTimeSig?: string
 }
 
 /**
@@ -80,6 +81,29 @@ export type WebSocketFactory = (url: string, options?: { origin?: string }) => W
 /** The local server closes with this when the Origin header is unacceptable. */
 const LOCAL_CLOSE_ORIGIN_REJECTED = 4003
 
+/** What the local server answers a ping with. */
+const PONG = JSON.stringify({ type: 'pong' })
+
+/**
+ * Frames a second forwarded to the local socket. The local server allows 60
+ * in a fixed window; a sliding window of 50 keeps every one of its windows
+ * under that, whatever the alignment.
+ */
+export const LOCAL_FRAMES_PER_SECOND = 50
+
+/** At most `limit` events in any `windowMs`. */
+export class SlidingBudget {
+  private times: number[] = []
+  constructor(private readonly limit: number, private readonly windowMs: number, private readonly now: () => number = Date.now) {}
+  allow(): boolean {
+    const t = this.now()
+    while (this.times.length > 0 && t - this.times[0] >= this.windowMs) this.times.shift()
+    if (this.times.length >= this.limit) return false
+    this.times.push(t)
+    return true
+  }
+}
+
 /**
  * A single proxied session stream. Created on `stream_open`, closed when
  * either end goes away.
@@ -93,6 +117,7 @@ export class StreamChannel {
   private handshakeTimer: ReturnType<typeof setTimeout> | null = null
 
   private state: ChannelState = newChannelState()
+  private budget = new SlidingBudget(LOCAL_FRAMES_PER_SECOND, 1000)
 
   constructor(
     private target: LocalServerTarget,
@@ -165,8 +190,24 @@ export class StreamChannel {
    */
   send(data: string, intent?: unknown): void {
     if (this.closed) return
-    if (this.frameType(data) === 'auth') {
+    const type = this.frameType(data)
+    if (type === 'auth') {
       if (this.connectedFrame) this.callbacks.onData(this.connectedFrame)
+      return
+    }
+    // ping and resize carry nothing and need no intent, so they never reach
+    // the local server: a relay could otherwise spend the local socket's
+    // message budget with them and get a signed frame silently dropped there.
+    if (type === 'ping') {
+      this.callbacks.onData(PONG)
+      return
+    }
+    if (type === 'resize') return
+    // Stay under the local server's limit (60 a second, over which it drops
+    // frames silently), and refuse visibly instead: a frame dropped there
+    // after its intent was accepted would leave the session tracking wrong.
+    if (!this.budget.allow()) {
+      this.callbacks.onDenied?.('Too many messages at once', undefined, { detail: 'intent_rate_limited' })
       return
     }
 
@@ -178,6 +219,7 @@ export class StreamChannel {
           detail: verdict.reason ?? 'intent_required',
           ...(verdict.nonce ? { intentNonce: verdict.nonce } : {}),
           ...(verdict.machineTime !== undefined ? { machineTime: verdict.machineTime } : {}),
+          ...(verdict.machineTimeSig ? { machineTimeSig: verdict.machineTimeSig } : {}),
         })
         return
       }

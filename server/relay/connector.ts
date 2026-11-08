@@ -39,6 +39,7 @@ function intentError(verdict: IntentDecision): RelayError {
     detail: verdict.reason ?? 'intent_required',
     ...(verdict.nonce ? { intentNonce: verdict.nonce } : {}),
     ...(verdict.machineTime !== undefined ? { machineTime: verdict.machineTime } : {}),
+    ...(verdict.machineTimeSig ? { machineTimeSig: verdict.machineTimeSig } : {}),
   }
 }
 

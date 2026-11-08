@@ -207,6 +207,8 @@ export interface RelayError {
   intentNonce?: string
   /** For `intent_stale`: the machine's clock, so the browser can correct its own (§6.5). */
   machineTime?: number
+  /** For `intent_stale`: the machine key's signature over (intentNonce, machineTime). */
+  machineTimeSig?: string
 }
 
 /** Error codes used on the request/response and stream paths (spec §7.4). */

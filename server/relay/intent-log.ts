@@ -170,13 +170,21 @@ export class IntentLog {
     this.pruneRotated()
   }
 
-  private pruneRotated(): void {
-    const dir = dirname(this.file)
+  /** Rotated files beside the live log, oldest first (their names sort by time). */
+  private rotatedFiles(): string[] {
     const base = basename(this.file, '.jsonl')
     try {
-      const rotated = readdirSync(dir).filter(f => f.startsWith(`${base}-`) && f.endsWith('.jsonl')).sort()
-      for (const old of rotated.slice(0, Math.max(0, rotated.length - KEEP_ROTATED))) rmSync(join(dir, old), { force: true })
-    } catch { /* best effort */ }
+      return readdirSync(dirname(this.file)).filter(f => f.startsWith(`${base}-`) && f.endsWith('.jsonl')).sort()
+    } catch {
+      return []
+    }
+  }
+
+  private pruneRotated(): void {
+    const rotated = this.rotatedFiles()
+    for (const old of rotated.slice(0, Math.max(0, rotated.length - KEEP_ROTATED))) {
+      try { rmSync(join(dirname(this.file), old), { force: true }) } catch { /* best effort */ }
+    }
   }
 
   /** False when this refusal should be counted rather than written. */
@@ -223,10 +231,16 @@ export class IntentLog {
     }
   }
 
-  /** Nonces of intents accepted since `since`, to seed the replay cache after a restart. */
+  /**
+   * Nonces of intents accepted since `since`, to seed the replay cache after a
+   * restart. Reads the newest rotated file too: a rotation may have just
+   * happened.
+   */
   recentAcceptedNonces(since: number): Array<{ keyId: string; nonce: string; at: number }> {
     const out: Array<{ keyId: string; nonce: string; at: number }> = []
-    for (const entry of parseLines(readTail(this.file, TAIL_BYTES))) {
+    const newestRotated = this.rotatedFiles().at(-1)
+    const text = (newestRotated ? readTail(join(dirname(this.file), newestRotated), TAIL_BYTES) : '') + readTail(this.file, TAIL_BYTES)
+    for (const entry of parseLines(text)) {
       if (entry.verdict !== 'accepted' || !entry.intent || !entry.keyId) continue
       const at = Date.parse(entry.at)
       if (!(at >= since)) continue

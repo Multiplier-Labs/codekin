@@ -14,7 +14,9 @@
  */
 
 import { dirname, join } from 'path'
-import { ensureMachineIdentity, removeMachineIdentity, writeMachineIdentity } from './machine-identity.js'
+import { ensureMachineIdentity, loadMachineSigningKey, removeMachineIdentity, writeMachineIdentity } from './machine-identity.js'
+import { signP1363 } from './enrolment-crypto.js'
+import type { KeyObject } from 'crypto'
 import type { MachineIdentity, MachineKeyPair } from './machine-identity.js'
 import { emptyTrustStore, ensureTrustStore, recordOwnerUserId, removeTrustStore, writeTrustStore } from './trust-store.js'
 import { secretStoreFromEnv } from './secret-store.js'
@@ -121,18 +123,40 @@ export function machineEnrolmentFor(
   return new MachineEnrolment({ machineId, identityFile, devicesFile, secretStore: store, log })
 }
 
+/**
+ * Signs with this machine's identity key, loading it once; a key that can't
+ * be read is retried at most once a minute (each try may prompt the Keychain).
+ */
+export function machineKeySigner(
+  credentialFile: string,
+  store: SecretStore | null = secretStoreFromEnv(),
+): (data: Uint8Array) => string | null {
+  const { identityFile } = trustPathsFor(credentialFile)
+  let key: KeyObject | null = null
+  let failedAt = -Infinity
+  return data => {
+    if (!key && Date.now() - failedAt >= 60_000) {
+      key = loadMachineSigningKey(identityFile, store)
+      if (!key) failedAt = Date.now()
+    }
+    return key ? signP1363(key, data).toString('base64url') : null
+  }
+}
+
 /** The intent checks for this machine's connector, logging to the local intent log (§7.2). */
 export function intentVerifierFor(
   credentialFile: string,
   machineId: string,
   logFile: string = intentLogPath(),
   log: Log = console,
+  store: SecretStore | null = secretStoreFromEnv(),
 ): IntentVerifier {
   return new IntentVerifier({
     machineId,
     devicesFile: trustPathsFor(credentialFile).devicesFile,
     log: new IntentLog(logFile, Date.now, log),
     warn: log,
+    signWithMachineKey: machineKeySigner(credentialFile, store),
   })
 }
 

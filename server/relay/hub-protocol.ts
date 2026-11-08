@@ -57,7 +57,7 @@ const connector = z.discriminatedUnion('kind', [
     // Channel denials name the missing permission; intent refusals say which
     // check failed (signed-intents spec §6.4) so the browser can react.
     permission: z.string().max(100).optional(), detail: z.string().max(100).optional(),
-    intentNonce: z.string().max(100).optional(), machineTime: z.number().optional(),
+    intentNonce: z.string().max(100).optional(), machineTime: z.number().optional(), machineTimeSig: b64.optional(),
   })),
   frame('event', z.object({ sessions: summary.optional(), status: version.optional() })),
   streamData, connectorStreamClose, frame('ping', empty), frame('pong', empty),

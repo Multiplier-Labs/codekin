@@ -18,7 +18,10 @@ import { createIntentSigner, clampOffset } from './intentSigner'
 import { getOrCreateBrowserKey, type BrowserKey, type MachinePin, type TrustStorage } from './deviceTrust'
 import { RelayConnection } from '../lib/transport/relay-client'
 import { IntentVerifier } from '../../server/relay/intent-verify'
-import { requestAction, requestPayload, requestSession } from '../../server/relay/intent-actions'
+import { MACHINE_TIME_LABEL, requestAction, requestPayload, requestSession } from '../../server/relay/intent-actions'
+import { signP1363, transcript } from '../../server/relay/enrolment-crypto'
+import { generateKeyPairSync } from 'crypto'
+import type { KeyObject } from 'crypto'
 import { emptyTrustStore, writeTrustStore } from '../../server/relay/trust-store'
 import type { RelayPrincipal } from '../../server/relay/relay-protocol'
 
@@ -55,12 +58,19 @@ describe('browser intents verified by the machine', () => {
   let storage: TrustStorage
   let verifier: IntentVerifier
   let key: BrowserKey
+  let machineKey: KeyObject
+  /** What the machine sends with an intent_stale refusal. */
+  const signedTime = (nonce: string, machineTime: number) =>
+    signP1363(machineKey, transcript(MACHINE_TIME_LABEL, nonce, String(machineTime))).toString('base64url')
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'codekin-signer-'))
     storage = memoryStorage()
     key = await getOrCreateBrowserKey('u-owner', storage)
-    await storage.putPin({ userId: 'u-owner', machineId: 'm1', machineKey: 'mk', keyId: key.keyId, pinnedAt: 'x' })
+    const machinePair = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+    machineKey = machinePair.privateKey
+    const machineSpki = machinePair.publicKey.export({ format: 'der', type: 'spki' }).toString('base64url')
+    await storage.putPin({ userId: 'u-owner', machineId: 'm1', machineKey: machineSpki, keyId: key.keyId, pinnedAt: 'x' })
     const devicesFile = join(dir, 'relay-devices.json')
     writeTrustStore(devicesFile, {
       ...emptyTrustStore('m1', 'https://relay.test', 'u-owner'),
@@ -177,7 +187,10 @@ describe('browser intents verified by the machine', () => {
     await vi.waitFor(() => { expect(ws.sent.filter(f => f.kind === 'request')).toHaveLength(1) })
     const first = ws.sent.at(-1)!
     const machineTime = Date.now() + 20 * 60_000
-    ws.onmessage?.({ data: JSON.stringify({ kind: 'error', id: first.id, payload: { code: 'not_permitted', message: 'stale', detail: 'intent_stale', machineTime } }) })
+    const firstNonce = (JSON.parse((first.payload.intent as { body: string }).body) as { nonce: string }).nonce
+    ws.onmessage?.({ data: JSON.stringify({ kind: 'error', id: first.id, payload: {
+      code: 'not_permitted', message: 'stale', detail: 'intent_stale', machineTime, intentNonce: firstNonce, machineTimeSig: signedTime(firstNonce, machineTime),
+    } }) })
     await vi.waitFor(() => { expect(ws.sent.filter(f => f.kind === 'request')).toHaveLength(2) })
     expect(setOffset).toHaveBeenCalledWith(expect.any(Number))
     const retried = ws.sent.at(-1)!
@@ -195,7 +208,30 @@ describe('browser intents verified by the machine', () => {
     expect(setOffset).not.toHaveBeenCalled()
   })
 
-  it('a relay forging "stale" after a request ran cannot get it run twice', async () => {
+  it('a relay forging "stale" cannot move the clock or get a retry', async () => {
+    const signer = createIntentSigner('m1', storage)
+    const setOffset = vi.spyOn(signer, 'setClockOffset')
+    const conn = new RelayConnection({ machineId: 'm1', url: 'wss://relay.test/relay/browser', signer })
+    conn.connect()
+    const ws = FakeWebSocket.instances[0]
+    ws.readyState = 1
+    ws.onopen?.()
+    ws.onmessage?.({ data: JSON.stringify({ kind: 'hello_ack', payload: { online: true } }) })
+    const reply = conn.request('POST', '/api/sessions/create', btoa('{"name":"x"}'), 'application/json')
+    await vi.waitFor(() => { expect(ws.sent.filter(f => f.kind === 'request')).toHaveLength(1) })
+    const first = ws.sent.at(-1)!
+    const nonce = (JSON.parse((first.payload.intent as { body: string }).body) as { nonce: string }).nonce
+    // No signature, or one the relay made itself.
+    ws.onmessage?.({ data: JSON.stringify({ kind: 'error', id: first.id, payload: {
+      code: 'not_permitted', message: 'stale', detail: 'intent_stale', machineTime: Date.now() + 50 * 60_000, intentNonce: nonce,
+      machineTimeSig: Buffer.alloc(64).toString('base64url'),
+    } }) })
+    await expect(reply).rejects.toMatchObject({ detail: 'intent_stale' })
+    expect(ws.sent.filter(f => f.kind === 'request')).toHaveLength(1)
+    expect(setOffset).not.toHaveBeenCalled()
+  })
+
+  it('even an honest stale retry of a request that ran is refused as a replay', async () => {
     const signer = createIntentSigner('m1', storage)
     const conn = new RelayConnection({ machineId: 'm1', url: 'wss://relay.test/relay/browser', signer })
     conn.connect()
@@ -209,7 +245,11 @@ describe('browser intents verified by the machine', () => {
     const asRequest = (f: typeof first) => ({ method: 'POST', path: '/api/sessions/create', contentType: 'application/json', body: f.payload.body as string, principal: OWNER, intent: f.payload.intent })
     // The relay forwards it (it runs), then tells the browser it was stale.
     expect(verifier.checkRequest(asRequest(first)).verdict).toBe('accepted')
-    ws.onmessage?.({ data: JSON.stringify({ kind: 'error', id: first.id, payload: { code: 'not_permitted', message: 'stale', detail: 'intent_stale', machineTime: Date.now() } }) })
+    const nonce = (JSON.parse((first.payload.intent as { body: string }).body) as { nonce: string }).nonce
+    const machineTime = Date.now()
+    ws.onmessage?.({ data: JSON.stringify({ kind: 'error', id: first.id, payload: {
+      code: 'not_permitted', message: 'stale', detail: 'intent_stale', machineTime, intentNonce: nonce, machineTimeSig: signedTime(nonce, machineTime),
+    } }) })
     await vi.waitFor(() => { expect(ws.sent.filter(f => f.kind === 'request')).toHaveLength(2) })
     expect(verifier.checkRequest(asRequest(ws.sent.at(-1)!))).toMatchObject({ forward: false, reason: 'intent_replayed' })
     ws.onmessage?.({ data: JSON.stringify({ kind: 'error', id: ws.sent.at(-1)!.id, payload: { code: 'not_permitted', message: 'replayed', detail: 'intent_replayed' } }) })

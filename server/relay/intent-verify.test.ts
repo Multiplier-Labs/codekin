@@ -2,16 +2,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createHash, generateKeyPairSync, randomBytes } from 'crypto'
 import type { KeyObject } from 'crypto'
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
+import { appendFileSync, chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  channelSessionAfter, frameAction, framePayload, frameSession, isExemptFrame, requestAction, requestPayload, requestSession,
+  MACHINE_TIME_LABEL, channelSessionAfter, frameAction, framePayload, frameSession, isExemptFrame, requestAction, requestPayload, requestSession,
 } from './intent-actions.js'
 import type { IntentBody, SignedIntent } from './intent-actions.js'
 import { IntentVerifier, REPLAY_TTL_MS } from './intent-verify.js'
 import { GENESIS, IntentLog, KEEP_ROTATED, lineHash, readRecentIntents, REFUSALS_PER_MINUTE, ROTATE_AGE_MS, verifyIntentLog } from './intent-log.js'
-import { signP1363 } from './enrolment-crypto.js'
+import { signP1363, transcript, verifyP1363 } from './enrolment-crypto.js'
 import { keyIdForSpki } from './machine-identity.js'
 import { emptyTrustStore, readTrustStore, writeTrustStore } from './trust-store.js'
 import type { IntentPolicy } from './trust-store.js'
@@ -241,8 +241,27 @@ describe('IntentVerifier', () => {
     expect(verifier.checkRequest(r).reason).toBe('intent_stale')
   })
 
-  it('tells the browser the machine time on a stale intent', () => {
+  it('tells the browser the machine time on a stale intent, signed with the machine key', () => {
     expect(verifier.checkRequest(signedReq('/api/sessions/list', { ts: now + 10 * 60_000 }))).toMatchObject({ reason: 'intent_stale', machineTime: now })
+    expect(verifier.checkRequest(signedReq('/api/sessions/list', { ts: now + 10 * 60_000 })).machineTimeSig).toBeUndefined()
+    const machine = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+    const signing = new IntentVerifier({
+      machineId: 'm1', devicesFile, now: () => now,
+      signWithMachineKey: data => signP1363(machine.privateKey, data).toString('base64url'),
+    })
+    const decision = signing.checkRequest(signedReq('/api/sessions/list', { ts: now - 10 * 60_000 }))
+    const spki = machine.publicKey.export({ format: 'der', type: 'spki' })
+    expect(verifyP1363(spki, transcript(MACHINE_TIME_LABEL, decision.nonce!, String(now)), Buffer.from(decision.machineTimeSig!, 'base64url'))).toBe(true)
+  })
+
+  it('retries reading a device list after a failed read, even when the file did not change', () => {
+    writeStore('warn')
+    const fresh = new IntentVerifier({ machineId: 'm1', devicesFile, now: () => now })
+    // Unreadable for a moment (same size, mtime and inode afterwards).
+    chmodSync(devicesFile, 0o000)
+    expect(fresh.policy()).toBe('required')
+    chmodSync(devicesFile, 0o600)
+    expect(fresh.policy()).toBe('warn')
   })
 
   /** Open a channel with a signed open; returns the verifier's channel state and a frame signer for it. */

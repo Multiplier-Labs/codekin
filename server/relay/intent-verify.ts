@@ -22,12 +22,12 @@
 import { createHash } from 'crypto'
 import { existsSync, statSync } from 'fs'
 import {
-  CHANNEL_OPEN_ACTION, CHANNEL_TOKEN_CHARS, INTENT_MAX_SKEW_MS, INTENT_VERSION, MAX_INTENT_BODY_CHARS,
+  CHANNEL_OPEN_ACTION, CHANNEL_TOKEN_CHARS, INTENT_MAX_SKEW_MS, INTENT_VERSION, MACHINE_TIME_LABEL, MAX_INTENT_BODY_CHARS,
   channelOpenPayload, channelSessionAfter, frameAction, framePayload, frameSession, isExemptFrame, requestAction, requestPayload,
   requestSession,
 } from './intent-actions.js'
 import type { IntentBody, IntentRefusal, SignedIntent } from './intent-actions.js'
-import { fromB64url, SIGNATURE_BYTES, verifyP1363 } from './enrolment-crypto.js'
+import { fromB64url, SIGNATURE_BYTES, transcript, verifyP1363 } from './enrolment-crypto.js'
 import { mutateTrustStore, readTrustStore } from './trust-store.js'
 import type { BrowserCredential, IntentPolicy, TrustStore } from './trust-store.js'
 import type { IntentLog, IntentVerdict } from './intent-log.js'
@@ -48,6 +48,8 @@ export interface IntentDecision {
   nonce?: string
   /** Set on `intent_stale`, so the browser can correct its clock (§6.5). */
   machineTime?: number
+  /** sign_kM over (nonce, machineTime): lets the browser trust machineTime and not the relay. */
+  machineTimeSig?: string
 }
 
 /**
@@ -80,6 +82,8 @@ export interface IntentVerifierOptions {
   log?: IntentLog | null
   now?: () => number
   warn?: Pick<Console, 'warn'>
+  /** Signs with the machine identity key (base64url P1363), or null when it can't. */
+  signWithMachineKey?: (data: Uint8Array) => string | null
 }
 
 const EXEMPT: IntentDecision = { forward: true, verdict: 'exempt' }
@@ -120,6 +124,7 @@ export class IntentVerifier {
   private lastUsed = new Map<string, number>()
   private lastFlush = 0
   private flushScheduled = false
+  private lastReadWarning = -Infinity
   private readonly now: () => number
 
   constructor(private readonly opts: IntentVerifierOptions) {
@@ -141,16 +146,20 @@ export class IntentVerifier {
       signature = null
     }
     if (signature !== this.storeSignature) {
-      this.storeSignature = signature
       try {
         const store = signature ? readTrustStore(this.opts.devicesFile) : null
         this.store = store && store.machineId === this.opts.machineId ? store : null
         if (this.store) this.lastPolicy = this.store.policy
+        // Only a successful read is cached; a failed one is tried again next time.
+        this.storeSignature = signature
       } catch (err) {
         // A device list that exists but can't be read may be the one that
-        // said `required`: fail closed until the owner fixes it locally.
+        // said `required`: fail closed until it reads again.
         if (existsSync(this.opts.devicesFile)) this.lastPolicy = 'required'
-        this.opts.warn?.warn(`[relay] Can't read the device list; treating the policy as "${this.lastPolicy}": ${err instanceof Error ? err.message : String(err)}`)
+        if (this.now() - this.lastReadWarning > 60_000) {
+          this.lastReadWarning = this.now()
+          this.opts.warn?.warn(`[relay] Can't read the device list; treating the policy as "${this.lastPolicy}": ${err instanceof Error ? err.message : String(err)}`)
+        }
         this.store = null
       }
     }
@@ -283,8 +292,8 @@ export class IntentVerifier {
             const at = used.get(c.keyId)
             if (at !== undefined) c.lastUsedAt = new Date(at).toISOString()
           }
-        }, this.now())
-      } catch { /* best effort; retried at the next flush */ }
+        }, this.now(), 0)
+      } catch { /* lock busy or file unreadable: retried at the next flush */ }
     })
   }
 
@@ -316,7 +325,13 @@ export class IntentVerifier {
       verdict,
       ...(refusal ? { reason: refusal } : {}),
       ...(body ? { nonce: body.nonce } : {}),
-      ...(refusal === 'intent_stale' ? { machineTime: this.now() } : {}),
+      ...(refusal === 'intent_stale' && body ? this.signedTime(body.nonce) : {}),
     }
+  }
+
+  private signedTime(nonce: string): { machineTime: number; machineTimeSig?: string } {
+    const machineTime = this.now()
+    const sig = this.opts.signWithMachineKey?.(transcript(MACHINE_TIME_LABEL, nonce, String(machineTime)))
+    return { machineTime, ...(sig ? { machineTimeSig: sig } : {}) }
   }
 }

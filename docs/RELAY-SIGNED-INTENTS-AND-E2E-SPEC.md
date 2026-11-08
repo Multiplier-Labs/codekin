@@ -414,7 +414,13 @@ Verification sits at the relay message boundary in `connector.ts`: `request`, `s
   - `required`: forwards only messages that verify.
 
   Until slice 5, passkey-signed intents are refused as `intent_unsupported`. Until slice 6, grantees can't sign, so a `required` machine refuses them.
-- **Exempt.** `ping`, `resize`, and `auth` need no intent; the connector answers `auth` from its cached handshake and never forwards it. GitHub webhook deliveries are exempt too, since GitHub's HMAC authenticates them.
+- **Exempt.** `ping`, `resize` and `auth` need no intent, and none of them reaches the local server:
+  - the connector answers `ping` with `pong` itself;
+  - it drops `resize`, which does nothing locally anyway;
+  - it answers `auth` from its cached handshake.
+
+  So a relay can't spend the local socket's message budget with them. GitHub webhook deliveries are also exempt, because GitHub's HMAC authenticates them.
+- **Local message budget.** The local server silently drops anything past 60 messages a second. The connector forwards at most 50 a second on any sliding window and refuses the rest with `intent_rate_limited`, before verification. A frame can then never be accepted, advance the session tracking, and be dropped downstream.
 - **Channel and order.** The intent body gains two optional fields for streams: `channel` and `seq`.
   - The signed `channel:open` carries a random channel token. Every frame carries that token and a `seq` that starts at 1 on each channel.
   - The connector accepts only frames whose `seq` is higher than the last one it accepted. A relay can drop frames, but it can't reorder them (`intent_out_of_order`) or move them to another channel (`intent_wrong_channel`).
@@ -428,7 +434,8 @@ Verification sits at the relay message boundary in `connector.ts`: `request`, `s
 - **Ordering in the browser.** The browser signs asynchronously, but fixes each frame's session and `seq` when it is sent, and sends frames through a per-channel queue. Closing a channel lets frames still being signed go out first.
 - **Clocks.**
   - The browser hub's `hello_ack` carries the relay's `serverTime` as a first offset, used only until the machine has given its own time.
-  - A REST request refused as `intent_stale` is retried once with the machine's `machineTime` and the **same nonce**. If a relay forged the "stale" reply after the request actually ran, the retry is refused as a replay.
+  - An `intent_stale` refusal carries `machineTime` with `machineTimeSig = sign_kM(T("ck-intent-time-v1", nonce, machineTime))`. The browser adopts the time only if that verifies against its pinned machine key, so a relay can neither shift the clock nor trigger a retry.
+  - A REST request refused as genuinely stale is retried once with the **same nonce**. A retry of something that actually ran is refused as a replay.
   - A stale stream frame closes its channel, and the corrected offset applies to the next channel.
 - **Replay cache.**
   - Entries last 10 minutes (twice the skew window).
@@ -441,7 +448,8 @@ Verification sits at the relay message boundary in `connector.ts`: `request`, `s
   - 12 rotated files are kept. A torn last line is closed off before the next append.
   - Reads come from the tail.
   - The local view is Settings → Remote access → Activity, and on the command line `codekin relay audit [list | verify]`.
-- **Webhook replay (connector).** Forwarded GitHub deliveries are deduplicated on the SHA-256 of the body GitHub signs, not on the unsigned delivery id. Undated events are never aged out.
+- **Webhook replay (connector).** Forwarded GitHub deliveries are deduplicated on the SHA-256 of the body GitHub signs, not on the unsigned delivery id. Undated events are never aged out. GitHub's "Redeliver" therefore does nothing for a delivery that already succeeded.
+- **Known limit.** If the local server rejects a `create_session` (for example a bad working directory), both ends still move to `@created:<seq>` while the socket stays in its old session. Later frames are then signed for a session they don't run in. A relay can't cause this; it only mislabels honest frames until the next `join_session`.
 - **Deferred.**
   - `--against <relay export>`: relay audit events don't carry `keyId` or nonces yet.
   - The §6.2 audit-kind and step-up map: slice 5.

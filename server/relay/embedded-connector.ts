@@ -234,7 +234,7 @@ export class EmbeddedConnectorSupervisor {
       localTarget: this.opts.localTarget?.(),
       identityKey,
       enrolment: machineEnrolmentFor(this.file, credential.machineId, this.store, this.log),
-      intents: intentVerifierFor(this.file, credential.machineId, this.opts.intentLogFile, this.log),
+      intents: intentVerifierFor(this.file, credential.machineId, this.opts.intentLogFile, this.log, this.store),
       onOwner: (ownerUserId) => {
         if (this.activeToken === token) recordOwnerFromRelay(this.file, credential.machineId, ownerUserId, this.log)
       },
