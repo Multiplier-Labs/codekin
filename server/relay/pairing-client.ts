@@ -14,10 +14,12 @@
  * by status(), logged, or sent to the browser.
  */
 
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, existsSync, mkdirSync, rmSync, readFileSync } from 'fs'
 import { hostname as osHostname, platform as osPlatform } from 'os'
 import { dirname } from 'path'
-import { readRelayCredential, relayCredentialPath } from './relay-credential.js'
+import { readRelayCredential, relayCredentialPath, SECRET_REF_KEYCHAIN_FIELD, writeFileAtomic } from './relay-credential.js'
+import { secretStoreFromEnv } from './secret-store.js'
+import type { SecretStore } from './secret-store.js'
 
 export const DEFAULT_RELAY_URL = 'https://app.codekin.ai'
 
@@ -87,17 +89,45 @@ export function safeLogin(value: unknown): string | null {
  * Persist the machine credential. `managed: true` tells the local server to
  * run the connector itself. The installer writes the same shape.
  */
-export function writeRelayCredential(file: string, relayUrl: string, data: PairingCompletion, managed: boolean): void {
+export function writeRelayCredential(
+  file: string,
+  relayUrl: string,
+  data: PairingCompletion,
+  managed: boolean,
+  store: SecretStore | null = secretStoreFromEnv(),
+): void {
   mkdirSync(dirname(file), { recursive: true })
-  const credential: Record<string, unknown> = { url: relayUrl, machineId: data.machineId, machineSecret: data.machineSecret }
+  const credential: Record<string, unknown> = { url: relayUrl, machineId: data.machineId }
+  // With a secret store (the desktop app's Keychain), the file only points at
+  // the secret. If storing fails, fall back to the file: a pairing must not
+  // be lost to a Keychain hiccup.
+  let stored = false
+  if (store) {
+    try {
+      store.set(data.machineId, data.machineSecret)
+      stored = store.get(data.machineId) === data.machineSecret
+    } catch (err) {
+      console.warn(`[relay] Keeping the machine secret in ${file}: the Keychain refused it (${err instanceof Error ? err.message : String(err)})`)
+    }
+  }
+  if (stored) credential.secretRef = SECRET_REF_KEYCHAIN_FIELD
+  else credential.machineSecret = data.machineSecret
   if (managed) credential.managed = true
-  writeFileSync(file, JSON.stringify(credential, null, 2) + '\n', { mode: 0o600 })
+  writeFileAtomic(file, JSON.stringify(credential, null, 2) + '\n')
   chmodSync(file, 0o600)
 }
 
-/** Remove the local credential. Returns false when there was none. */
-export function removeRelayCredential(file = relayCredentialPath()): boolean {
+/** Remove the local credential, and its Keychain item if it has one. Returns false when there was none. */
+export function removeRelayCredential(file = relayCredentialPath(), store: SecretStore | null = secretStoreFromEnv()): boolean {
   if (!existsSync(file)) return false
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf-8')) as { machineId?: unknown; secretRef?: unknown }
+    if (store && parsed.secretRef === SECRET_REF_KEYCHAIN_FIELD && typeof parsed.machineId === 'string') {
+      store.delete(parsed.machineId)
+    }
+  } catch (err) {
+    console.warn(`[relay] Could not remove the Keychain item for this pairing: ${err instanceof Error ? err.message : String(err)}`)
+  }
   rmSync(file)
   return true
 }

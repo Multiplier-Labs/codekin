@@ -109,7 +109,9 @@ function readRelayCredential() {
   if (!existsSync(RELAY_CREDENTIAL_FILE)) return null
   try {
     const parsed = JSON.parse(readFileSync(RELAY_CREDENTIAL_FILE, 'utf-8'))
-    if (parsed && parsed.url && parsed.machineId && parsed.machineSecret) return parsed
+    // The desktop app keeps the secret in the Keychain and the file only says
+    // so ("secretRef"); the CLI never needs the secret itself.
+    if (parsed && parsed.url && parsed.machineId && (parsed.machineSecret || parsed.secretRef)) return parsed
     return null
   } catch {
     return null
@@ -301,8 +303,13 @@ function cmdRelayLogout() {
     console.log('Not paired; nothing to remove.')
     return
   }
+  const credential = readRelayCredential()
   rmSync(RELAY_CREDENTIAL_FILE)
   console.log('Removed local pairing credential.')
+  if (credential?.secretRef) {
+    console.log('Its secret stays in the macOS Keychain (item "ai.codekin.desktop.relay") until you remove it')
+    console.log('there or unpair from the Codekin desktop app, which removes both.')
+  }
   console.log('The Codekin service stops its relay connector within a few seconds.')
   console.log('To fully revoke this machine, also remove it in the hosted app under Settings → Machines.')
 }

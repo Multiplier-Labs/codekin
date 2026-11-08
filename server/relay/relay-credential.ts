@@ -7,10 +7,15 @@
  * runs its main() at import time.
  */
 
-import { readFileSync, existsSync } from 'fs'
+import { readFileSync, existsSync, openSync, writeSync, fsyncSync, closeSync, renameSync, rmSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
+import { secretStoreFromEnv, SECRET_REF_KEYCHAIN } from './secret-store.js'
+
+/** relay.json's `secretRef` value when the secret is in the Keychain. */
+export const SECRET_REF_KEYCHAIN_FIELD = SECRET_REF_KEYCHAIN
+import type { SecretStore } from './secret-store.js'
 
 export interface RelayCredential {
   url: string
@@ -30,26 +35,82 @@ export function relayCredentialPath(home = homedir()): string {
   return join(home, '.config', 'codekin', 'relay.json')
 }
 
-export function readRelayCredential(file = relayCredentialPath()): RelayCredential | null {
+/**
+ * Read relay.json. A `"secretRef": "keychain"` credential resolves its secret
+ * through the secret store (docs/RELAY-HARDENING.md §5); without a store, or
+ * if the store has no such item, it reads as not paired.
+ */
+export function readRelayCredential(
+  file = relayCredentialPath(),
+  store: SecretStore | null = secretStoreFromEnv(),
+): RelayCredential | null {
   if (!existsSync(file)) return null
   try {
-    const parsed = JSON.parse(readFileSync(file, 'utf-8')) as Partial<RelayCredential> | null
-    if (
-      parsed &&
-      typeof parsed.url === 'string' &&
-      typeof parsed.machineId === 'string' &&
-      typeof parsed.machineSecret === 'string'
-    ) {
-      return {
-        url: parsed.url,
-        machineId: parsed.machineId,
-        machineSecret: parsed.machineSecret,
-        managed: parsed.managed === true,
-      }
+    const parsed = JSON.parse(readFileSync(file, 'utf-8')) as (Partial<RelayCredential> & { secretRef?: unknown }) | null
+    if (!parsed || typeof parsed.url !== 'string' || typeof parsed.machineId !== 'string') return null
+    let secret: string | null = typeof parsed.machineSecret === 'string' ? parsed.machineSecret : null
+    if (secret === null && parsed.secretRef === SECRET_REF_KEYCHAIN && store) secret = store.get(parsed.machineId)
+    if (!secret) return null
+    return {
+      url: parsed.url,
+      machineId: parsed.machineId,
+      machineSecret: secret,
+      managed: parsed.managed === true,
     }
-    return null
   } catch {
     return null
+  }
+}
+
+/** Write a file in one step: temp file, fsync, rename. Mode 0600. */
+export function writeFileAtomic(file: string, content: string): void {
+  const tmp = `${file}.tmp-${process.pid}`
+  const fd = openSync(tmp, 'w', 0o600)
+  try {
+    writeSync(fd, content)
+    fsyncSync(fd)
+  } finally {
+    closeSync(fd)
+  }
+  try {
+    renameSync(tmp, file)
+  } catch (err) {
+    rmSync(tmp, { force: true })
+    throw err
+  }
+}
+
+/**
+ * Move a plaintext machine secret from relay.json into the secret store:
+ * store it, read it back and compare, then rewrite relay.json without it.
+ * Any failure leaves the file as it was, so the secret is never lost.
+ * Returns true when the file was rewritten.
+ */
+export function migrateCredentialToStore(
+  file: string,
+  store: SecretStore | null,
+  log: Pick<Console, 'warn'> = console,
+): boolean {
+  if (!store || !existsSync(file)) return false
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(readFileSync(file, 'utf-8')) as Record<string, unknown>
+  } catch {
+    return false
+  }
+  const machineId = parsed.machineId
+  const secret = parsed.machineSecret
+  if (typeof machineId !== 'string' || typeof secret !== 'string' || !secret) return false
+  try {
+    store.set(machineId, secret)
+    if (store.get(machineId) !== secret) throw new Error('read-back did not match')
+    const { machineSecret: _dropped, ...rest } = parsed
+    void _dropped
+    writeFileAtomic(file, JSON.stringify({ ...rest, secretRef: SECRET_REF_KEYCHAIN }, null, 2) + '\n')
+    return true
+  } catch (err) {
+    log.warn(`[relay] Kept the machine secret in ${file}: moving it to the Keychain failed (${err instanceof Error ? err.message : String(err)})`)
+    return false
   }
 }
 

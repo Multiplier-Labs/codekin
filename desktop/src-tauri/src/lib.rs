@@ -22,6 +22,7 @@ pub mod launcher;
 pub mod locations;
 pub mod protocol;
 pub mod relocate;
+pub mod secrets;
 pub mod supervisor;
 pub mod updater;
 mod welcome;
@@ -744,7 +745,7 @@ pub fn run() {
                     node: sidecar_node(),
                     cli: payload.join("bin").join("codekin.mjs"),
                     log,
-                    env: vec![],
+                    env: secret_helper_env(),
                 };
                 let supervisor = Supervisor {
                     spec,
@@ -831,4 +832,20 @@ pub fn run() {
         RunEvent::Reopen { .. } => show_main(app),
         _ => {}
     });
+}
+
+/// Point the bundled server at this executable as its Keychain helper
+/// (src/secrets.rs), so the relay machine secret never sits in a file.
+/// macOS only: elsewhere the server keeps the 0600 file.
+fn secret_helper_env() -> Vec<(String, String)> {
+    if !cfg!(target_os = "macos") {
+        return vec![];
+    }
+    match std::env::current_exe() {
+        Ok(exe) => vec![(
+            "CODEKIN_SECRET_HELPER".to_string(),
+            exe.to_string_lossy().into_owned(),
+        )],
+        Err(_) => vec![],
+    }
 }
