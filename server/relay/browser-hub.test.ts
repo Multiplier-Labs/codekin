@@ -14,6 +14,7 @@ import { openControlPlaneDb, upsertUserFromGithub } from './control-plane-db.js'
 import { startPairing, approvePairing, completePairing, removeMachine } from './pairing.js'
 import { ConnectorHub } from './connector-hub.js'
 import { BrowserHub, accessFingerprint } from './browser-hub.js'
+import { listAuditEvents } from './audit.js'
 import { RelayConnector } from './connector.js'
 import { envelope, RELAY_ERROR } from './relay-protocol.js'
 import type { SessionUser } from './relay-auth-routes.js'
@@ -202,6 +203,31 @@ describe('browser hub REST proxy', () => {
     })
     // The connector supplied the local credential; the browser never sees it
     expect(callsFor(localFetch, '/api/sessions/list')[0].headers.Authorization).toBe('Bearer local-token')
+    browser.close()
+  })
+
+  it('audits uploads and REST session creation by size and id, never by content', async () => {
+    localFetch.mockImplementation((url: string) => Promise.resolve(new Response(
+      JSON.stringify(String(url).includes('/api/sessions/create') ? { sessionId: 'sess-rest', session: {} } : { sessions: [] }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )))
+    await startConnector()
+    const browser = new TestBrowser(browserUrl)
+    await browser.open()
+    browser.send('hello', { machineId })
+    await browser.waitForFrame(f => f.kind === 'hello_ack')
+
+    const file = Buffer.from('screenshot bytes: confidential.png')
+    browser.send('request', { method: 'POST', path: '/api/upload', contentType: 'image/png; charset=binary', body: file.toString('base64') }, 'u1')
+    browser.send('request', { method: 'POST', path: '/api/sessions/create', contentType: 'application/json', body: Buffer.from('{"name":"secret-project","workingDir":"/x"}').toString('base64') }, 'c1')
+    await browser.waitForFrame(f => f.kind === 'response' && f.id === 'u1')
+    await browser.waitForFrame(f => f.kind === 'response' && f.id === 'c1')
+
+    const [created, uploaded] = listAuditEvents(db, { machineId, kinds: ['file_uploaded', 'session_created'] })
+    expect(uploaded.kind).toBe('file_uploaded')
+    expect(uploaded.metadata).toMatchObject({ bytes: file.length, contentType: 'image/png', role: 'owner' })
+    expect(created).toMatchObject({ kind: 'session_created', localSessionId: 'sess-rest', metadata: { via: 'rest' } })
+    expect(JSON.stringify(listAuditEvents(db, { machineId }))).not.toMatch(/confidential|secret-project/)
     browser.close()
   })
 

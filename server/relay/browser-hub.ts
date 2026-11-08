@@ -22,6 +22,7 @@ import {
 import type {
   BrowserHello,
   ProxyRequest,
+  ProxyResponse,
   RelayError,
   RelayPrincipal,
   StreamClose,
@@ -37,6 +38,8 @@ import { checkRestPolicy, isServerFrameVisible } from './connector-policy.js'
 import { BROWSER_FRAME_LIMIT, RateLimiter, isBackedUp } from './rate-limit.js'
 import { checkQuota, UNLIMITED } from './quotas.js'
 import { meterFrame } from './usage-meter.js'
+import { classifyBrowserFrame, classifyRestRequest, payloadHash, sessionFromMachineFrame } from './session-audit.js'
+import type { SessionAuditEvent } from './session-audit.js'
 import type { UsageMeter } from './usage-meter.js'
 import type { EntitlementsProvider } from './quotas.js'
 
@@ -82,6 +85,8 @@ interface BrowserClient {
    * name — or hijack — another's channel.
    */
   channels: Map<string, string>
+  /** The session each channel joined or created (local channel id → session id), for the audit log. */
+  channelSessions: Map<string, string>
   /** Whether the socket has shown any sign of life since the last heartbeat sweep. */
   alive: boolean
 }
@@ -307,7 +312,7 @@ export class BrowserHub {
 
         client = {
           user, sessionId, machineId, workspaceId: machine.workspace_id, socket, inflight: 0, access,
-          channels: new Map(), alive: true,
+          channels: new Map(), channelSessions: new Map(), alive: true,
         }
         this.clients.add(client)
         socket.send(
@@ -410,6 +415,7 @@ export class BrowserHub {
         this.sendError(client.socket, id, outcome.error)
       } else {
         client.socket.send(JSON.stringify(envelope('response', outcome.response, { id })))
+        this.auditRestRequest(client, request, outcome.response)
       }
     } finally {
       client.inflight -= 1
@@ -464,8 +470,10 @@ export class BrowserHub {
         return
       }
       client.socket.send(JSON.stringify(envelope(kind, payload, { channelId: localId })))
+      if (kind === 'stream_data') this.noteMachineFrame(client, localId, (payload as StreamData).data)
       if (kind === 'stream_close') {
         client.channels.delete(localId)
+        client.channelSessions.delete(localId)
         this.connectors.closeChannel(client.machineId, remoteId)
       }
     }, toPrincipal(client.user, client.access))
@@ -482,6 +490,65 @@ export class BrowserHub {
     const remoteId = client.channels.get(localId)
     if (!remoteId || typeof payload?.data !== 'string') return
     this.connectors.sendChannelData(client.machineId, remoteId, payload.data)
+    this.auditBrowserFrame(client, localId, payload.data)
+  }
+
+  /** Record what a forwarded browser frame did (no content), and bind channels to sessions. */
+  private auditBrowserFrame(client: BrowserClient, localId: string, data: string): void {
+    const event = classifyBrowserFrame(data)
+    if (!event) return
+    if ('join' in event) {
+      client.channelSessions.set(localId, event.join)
+      return
+    }
+    this.recordSessionEvent(client, event, client.channelSessions.get(localId) ?? null)
+  }
+
+  /** A machine announced the session on a channel: bind it, and audit creations. */
+  private noteMachineFrame(client: BrowserClient, localId: string, data: unknown): void {
+    if (typeof data !== 'string') return
+    const announced = sessionFromMachineFrame(data)
+    if (!announced) return
+    client.channelSessions.set(localId, announced.sessionId)
+    if (announced.created) {
+      this.recordSessionEvent(client, { kind: 'session_created', metadata: { via: 'stream' } }, announced.sessionId)
+    }
+  }
+
+  private recordSessionEvent(client: BrowserClient, event: SessionAuditEvent, sessionId: string | null): void {
+    recordAuditEvent(this.db, {
+      kind: event.kind,
+      actorUserId: client.user.id,
+      machineId: client.machineId,
+      localSessionId: event.sessionId ?? sessionId,
+      metadata: { role: client.access.kind, ...event.metadata },
+    })
+  }
+
+  /** Audit a forwarded REST call that uploads a file or creates a session (no content). */
+  private auditRestRequest(client: BrowserClient, request: ProxyRequest, response: ProxyResponse): void {
+    const kind = classifyRestRequest(request.method, request.path)
+    if (!kind || response.status < 200 || response.status >= 300) return
+    if (kind === 'upload') {
+      const body = typeof request.body === 'string' ? Buffer.from(request.body, 'base64') : Buffer.alloc(0)
+      this.recordSessionEvent(client, {
+        kind: 'file_uploaded',
+        metadata: {
+          bytes: body.length,
+          contentType: typeof request.contentType === 'string' ? request.contentType.split(';')[0].slice(0, 100) : null,
+          payloadHash: payloadHash(body),
+        },
+      }, null)
+      return
+    }
+    let sessionId: string | null = null
+    try {
+      const parsed = JSON.parse(Buffer.from(response.body ?? '', 'base64').toString('utf-8')) as { sessionId?: unknown }
+      if (typeof parsed.sessionId === 'string') sessionId = parsed.sessionId.slice(0, 200)
+    } catch {
+      // Not JSON: still audit the creation, without the id.
+    }
+    this.recordSessionEvent(client, { kind: 'session_created', metadata: { via: 'rest' } }, sessionId)
   }
 
   private closeChannel(client: BrowserClient, localId: string | undefined, payload?: StreamClose): void {
@@ -489,6 +556,7 @@ export class BrowserHub {
     const remoteId = client.channels.get(localId)
     if (!remoteId) return
     client.channels.delete(localId)
+    client.channelSessions.delete(localId)
     this.connectors.closeChannel(
       client.machineId,
       remoteId,

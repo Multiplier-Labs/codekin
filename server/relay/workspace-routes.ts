@@ -452,7 +452,19 @@ export function createWorkspaceRouter({ db, config, browserHub, connectorHub }: 
       return
     }
     const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined
-    res.json({ events: listAuditEvents(db, { workspaceId: membership.workspaceId, limit }) })
+    const str = (v: unknown) => (typeof v === 'string' && v.length > 0 && v.length <= 200 ? v : undefined)
+    // ?kind=prompt_sent,approval_answered &machineId= &sessionId= &actor=
+    const kinds = str(req.query.kind)?.split(',').map(k => k.trim()).filter(k => /^[a-z_]{1,40}$/.test(k)).slice(0, 20)
+    res.json({
+      events: listAuditEvents(db, {
+        workspaceId: membership.workspaceId,
+        limit,
+        kinds,
+        machineId: str(req.query.machineId),
+        localSessionId: str(req.query.sessionId),
+        actorUserId: str(req.query.actor),
+      }),
+    })
   })
 
   return router
