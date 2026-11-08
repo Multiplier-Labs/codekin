@@ -25,7 +25,9 @@ import type { Request } from 'express'
 import { RelayConnector } from './connector.js'
 import type { ConnectorOptions, ConnectorStatus } from './connector.js'
 import type { LocalServerTarget } from './connector-proxy.js'
-import { readRelayCredential, relayCredentialPath } from './relay-credential.js'
+import { migrateCredentialToStore, readRelayCredential, relayCredentialPath } from './relay-credential.js'
+import { secretStoreFromEnv } from './secret-store.js'
+import type { SecretStore } from './secret-store.js'
 import type { RelayCredential } from './relay-credential.js'
 
 export type EmbeddedConnectorState =
@@ -75,6 +77,8 @@ export interface EmbeddedConnectorOptions {
   /** Injectable connector, for tests. */
   createConnector?: (opts: ConnectorOptions) => ConnectorLike
   log?: Pick<Console, 'log' | 'warn' | 'error'>
+  /** Where the machine secret lives; default from CODEKIN_SECRET_HELPER (null: relay.json only). */
+  secretStore?: SecretStore | null
 }
 
 export const DEFAULT_POLL_INTERVAL_MS = 5_000
@@ -103,10 +107,12 @@ export class EmbeddedConnectorSupervisor {
   private detail: string | undefined
   private readonly file: string
   private readonly log: Pick<Console, 'log' | 'warn' | 'error'>
+  private readonly store: SecretStore | null
 
   constructor(private readonly opts: EmbeddedConnectorOptions) {
     this.file = opts.credentialFile ?? relayCredentialPath()
     this.log = opts.log ?? console
+    this.store = opts.secretStore !== undefined ? opts.secretStore : secretStoreFromEnv()
   }
 
   start(): void {
@@ -136,11 +142,18 @@ export class EmbeddedConnectorSupervisor {
 
   /** Re-read relay.json if it changed and reconcile the connector. Public for tests. */
   check(): void {
-    const signature = this.statSignature()
+    let signature = this.statSignature()
     if (signature === this.fileSignature) return
+    // With a secret store (the desktop app), a plaintext secret moves to the
+    // Keychain the first time it is seen, including after a pairing made by
+    // the CLI. The rewrite changes the file, so take the new signature.
+    if (signature !== null && migrateCredentialToStore(this.file, this.store, this.log)) {
+      this.log.log('[relay] Moved the machine secret from relay.json to the Keychain.')
+      signature = this.statSignature()
+    }
     this.fileSignature = signature
 
-    const credential = signature === null ? null : readRelayCredential(this.file)
+    const credential = signature === null ? null : readRelayCredential(this.file, this.store)
     this.credential = credential
 
     if (!credential) {

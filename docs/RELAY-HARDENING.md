@@ -1,6 +1,6 @@
 # Relay hardening
 
-**Status:** In progress. Built: §1 (health endpoints), §2 (error reporting), §3 (browser security headers), §4 (connector version floors), §6 (quotas, metering, abuse signals) and §7 (staging tools). The rest is spec.
+**Status:** Built: §1 (health endpoints), §2 (error reporting), §3 (browser security headers), §4 (connector version floors), §5 (secret storage), §6 (quotas, metering, abuse signals) and §7 (staging tools).
 **Date:** 2026-11-08
 **Scope:** hardening features for anyone who runs the relay (`server/relay`), whether self-hosted or as a public service. Values specific to a deployment, such as limits, thresholds and monitoring setup, belong in that deployment's own config. They are not defined here.
 **Related:** `docs/RELAY-SIGNED-INTENTS-AND-E2E-SPEC.md`, `docs/SELF-HOSTED-RELAY.md`, `docs/OPERATIONS.md` ("Hosted relay").
@@ -69,14 +69,20 @@ Supporting changes (**built**):
 
 ## 5. Secret storage
 
-- **Interface.** `server/relay/secret-store.ts` defines a `SecretStore` (`get`, `set`, `delete`) with two implementations:
-  - `FileSecretStore`: today's `relay.json` (0600), still the default for the CLI.
-  - `HelperSecretStore`: used when `CODEKIN_SECRET_HELPER` is set.
-- **Desktop app.** It bundles a signed helper (`codekin-secrets`, built on the Rust `keyring` crate) and points the server at it, so the machine secret lives in the macOS Keychain. `relay.json` then holds `"secretRef": "keychain"`.
-  - Secrets travel over stdin/stdout, never argv.
-  - Migrating an existing file is atomic: write to the Keychain, read it back and compare, then rewrite `relay.json` without the secret.
+**Built** (`server/relay/secret-store.ts`, `desktop/src-tauri/src/secrets.rs`).
+
+- **Default.** The machine secret stays in `relay.json` (mode 0600), as before. This is right for the CLI and headless Linux.
+- **Helper store.** When `CODEKIN_SECRET_HELPER` names an executable, `HelperSecretStore` keeps the secret there instead, and `relay.json` holds `"secretRef": "keychain"`. Protocol: `<helper> --codekin-secrets get|set|delete <service> <account>`. The secret travels on stdin/stdout, never argv. Exit 0 means ok, 1 means no such item, anything else is an error.
+- **Desktop app (macOS).** The helper is the **app's own executable**: `main` handles `--codekin-secrets` before Tauri starts, using the Rust `keyring` crate (Keychain item: service `ai.codekin.desktop.relay`, account = machine id). The app sets `CODEKIN_SECRET_HELPER` to itself when it starts the bundled server. Using the app binary rather than a separate helper means:
+  - the item's access list is bound to the app's code signature, so later reads don't prompt
+  - nothing extra needs signing, notarising or bundling
+
+  Helper mode only reaches services under `ai.codekin.`, so the app can't be used as a general Keychain reader.
+- **Pairing** writes through the store. If the Keychain refuses, the secret stays in the file: a pairing is never lost.
+- **Migration.** The desktop server moves a plaintext secret the first time it sees one, including one from a CLI pairing or an older version. It writes to the Keychain, reads it back and compares, then rewrites `relay.json` atomically (temp file, fsync, rename) without the secret. Any failure leaves the file as it was.
+- **Unpairing** from the app removes the Keychain item too. `codekin relay logout` in a terminal removes only the file and says where the item is.
 - **Other keys.** The L1 machine identity key and the L2 key-agreement key use the same store.
-- **Limit.** This protects against backups and sync tools. It doesn't protect against code already running as the user.
+- **Limit.** This protects against backups, sync tools and casual file reading. It doesn't protect against code already running as the user, which can run the helper too.
 
 ## 6. Quotas and abuse hooks
 

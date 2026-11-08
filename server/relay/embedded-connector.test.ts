@@ -12,6 +12,8 @@ import {
   embeddedConnectorDisabled,
 } from './embedded-connector.js'
 import { readRelayCredential } from './relay-credential.js'
+import type { SecretStore } from './secret-store.js'
+import { readFileSync } from 'fs'
 
 interface FakeConnector {
   opts: ConnectorOptions
@@ -33,7 +35,7 @@ describe('EmbeddedConnectorSupervisor', () => {
     utimesSync(file, new Date(), new Date(Date.now() + bump * 1000))
   }
 
-  function supervisor(extra: { disabled?: boolean } = {}): EmbeddedConnectorSupervisor {
+  function supervisor(extra: { disabled?: boolean; secretStore?: SecretStore | null } = {}): EmbeddedConnectorSupervisor {
     return new EmbeddedConnectorSupervisor({
       version: '1.2.3',
       credentialFile: file,
@@ -72,6 +74,26 @@ describe('EmbeddedConnectorSupervisor', () => {
     sup.check()
     expect(created).toHaveLength(0)
     expect(sup.status()).toMatchObject({ paired: true, managed: false, state: 'unmanaged', machineId: 'm1' })
+  })
+
+  it('moves a plaintext secret into the secret store, then connects with it', () => {
+    const items = new Map<string, string>()
+    const store: SecretStore = {
+      get: id => items.get(id) ?? null,
+      set: (id, secret) => { items.set(id, secret) },
+      delete: id => items.delete(id),
+    }
+    writeCredential({ machineId: 'm1', managed: true })
+    const sup = supervisor({ secretStore: store })
+    sup.check()
+    expect(items.get('m1')).toBe('s3cret')
+    expect(readFileSync(file, 'utf8')).not.toContain('s3cret')
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ machineId: 'm1', secretRef: 'keychain', managed: true })
+    expect(created).toHaveLength(1)
+    expect(created[0].opts.machineSecret).toBe('s3cret')
+    // The rewrite is not mistaken for a new pairing on the next poll.
+    sup.check()
+    expect(created).toHaveLength(1)
   })
 
   it('starts a connector for a managed credential and tracks its status', () => {
