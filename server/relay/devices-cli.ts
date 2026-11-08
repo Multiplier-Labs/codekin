@@ -56,6 +56,11 @@ function printList(view: TrustStoreView, identityKeyId: string | null, io: Devic
     for (const p of view.pending) io.out(`  ${p.enrolId}  ${p.label}  requested ${p.createdAt}`)
     io.out('')
   }
+  if (view.approved.length > 0) {
+    io.out('Just confirmed; type the code in that browser to finish:')
+    for (const a of view.approved) io.out(`  ${a.confirmCode}  ${a.label}`)
+    io.out('')
+  }
   if (view.credentials.length === 0) {
     io.out('No devices yet. In the browser, choose "Confirm this browser" for this computer, then type')
     io.out('the code it shows here with `codekin relay devices approve <code>`.')
@@ -105,6 +110,8 @@ export function runDevicesCommand(
         }
         const added = approveEnrolment(rest.join(''), devicesFile, paired.machineId)
         io.out(`Confirmed ${added.label}. It can now control this computer.`)
+        io.out('')
+        io.out(`To finish, type this code in the browser:  ${added.confirmCode}`)
         return 0
       }
       case 'reject': {

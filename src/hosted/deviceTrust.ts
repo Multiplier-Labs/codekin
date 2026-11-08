@@ -80,8 +80,15 @@ export async function shortAuthString(spkiM: Uint8Array, spkiB: Uint8Array, nonc
   return base32(await sha256(transcript('ck-sas-v1', spkiM, spkiB, NO_PASSKEYS, nonceB, nonceM))).slice(0, 8)
 }
 
-export function formatCode(sas: string): string {
-  return `${sas.slice(0, 4)}-${sas.slice(4, 8)}`
+/** The 6-character code the machine shows once it has approved this browser. */
+export async function confirmationCode(spkiM: Uint8Array, spkiB: Uint8Array, nonceB: Uint8Array, nonceM: Uint8Array): Promise<string> {
+  return base32(await sha256(transcript('ck-enrol-confirm-v1', spkiM, spkiB, NO_PASSKEYS, nonceB, nonceM))).slice(0, 6)
+}
+
+/** "K7QM2XPA" → "K7QM-2XPA"; "ABC234" → "ABC-234". */
+export function formatCode(code: string): string {
+  const half = code.length / 2
+  return `${code.slice(0, half)}-${code.slice(half)}`
 }
 
 /** base64url(SHA-256(SPKI))[0:22], the key id machines and the relay use. */
@@ -244,8 +251,23 @@ export interface Enrolment {
   code: string
   /** The machine identity key id, to show next to the code. */
   machineKeyId: string
-  /** Ask the machine once whether the code was typed. Null while it is still waiting. */
+  /**
+   * Ask the machine once whether the code was typed. Null while it is still
+   * waiting. 'approved' is news, not proof: a relay could forge it on a first
+   * enrolment, so it never pins anything. `confirm` does.
+   */
   check: () => Promise<EnrolOutcome | null>
+  /**
+   * The owner typed the code the machine showed after approving. Pins the
+   * machine key when it matches; false when it doesn't.
+   */
+  confirm: (typed: string) => Promise<boolean>
+}
+
+/** What a person typed, as a 6-character code; null unless it could be one. */
+export function normalizeConfirmCode(input: string): string | null {
+  const code = input.toUpperCase().replace(/[\s-]/g, '')
+  return /^[A-Z2-7]{6}$/.test(code) ? code : null
 }
 
 interface Challenge { enrolId: string; machineKey: string; nonceM: string; signature: string }
@@ -301,13 +323,24 @@ export async function startEnrolment(
     const signed = typeof result.signature === 'string' && await verifyWith(
       spkiM, transcript('ck-enrol-result-v1', challenge.enrolId, spkiB, result.state), fromB64url(result.signature))
     if (!signed) throw new EnrolmentFailure('bad_machine_signature', "The computer's answer was not signed by its key")
-    if (result.state === 'approved') {
-      await storage.putPin({
-        userId: opts.userId, machineId: opts.machineId, machineKey: challenge.machineKey, keyId: key.keyId, pinnedAt: new Date().toISOString(),
-      })
-    }
     return result.state
   }
 
-  return { enrolId: challenge.enrolId, code: formatCode(sas), machineKeyId: await keyIdForSpki(spkiM), check }
+  // The machine shows this only after the owner typed `sas` there and it
+  // added this key. If a relay had answered with its own key, the machine
+  // would have refused the code and shown nothing to type here.
+  const expected = await confirmationCode(spkiM, spkiB, nonceB, nonceM)
+  const confirm = async (typed: string): Promise<boolean> => {
+    const code = normalizeConfirmCode(typed)
+    if (code === null || code.length !== expected.length) return false
+    let diff = 0
+    for (let i = 0; i < code.length; i++) diff |= code.charCodeAt(i) ^ expected.charCodeAt(i)
+    if (diff !== 0) return false
+    await storage.putPin({
+      userId: opts.userId, machineId: opts.machineId, machineKey: challenge.machineKey, keyId: key.keyId, pinnedAt: new Date().toISOString(),
+    })
+    return true
+  }
+
+  return { enrolId: challenge.enrolId, code: formatCode(sas), machineKeyId: await keyIdForSpki(spkiM), check, confirm }
 }

@@ -25,7 +25,8 @@ import { randomBytes, randomUUID } from 'crypto'
 import type { KeyObject } from 'crypto'
 import {
   CHALLENGE_LABEL, DIGEST_BYTES, NONCE_BYTES, POP_LABEL, RESULT_LABEL, SIGNATURE_BYTES,
-  checkLabel, codesEqual, commitment, fromB64url, normalizeCode, shortAuthString, signP1363, transcript, verifyP1363,
+  checkLabel, codesEqual, commitment, confirmationCode, formatCode, fromB64url, normalizeCode, shortAuthString, signP1363,
+  transcript, verifyP1363,
 } from './enrolment-crypto.js'
 import type { EnrolPasskey } from './enrolment-crypto.js'
 import { keyIdForSpki, loadMachineSigningKey, parseP256Spki, readMachineIdentity } from './machine-identity.js'
@@ -203,6 +204,7 @@ export class MachineEnrolment {
         nonceB: nonceB.toString('base64url'),
         passkeys,
         code: shortAuthString(machineSpki, spkiB, passkeys, nonceB, nonceM),
+        confirmCode: confirmationCode(machineSpki, spkiB, passkeys, nonceB, nonceM),
         revealedAt: new Date(this.now()).toISOString(),
       }
       this.opts.log?.log(`[relay] A browser ("${label}") is asking to control this computer. Type the code it shows in Settings → Remote access, or run \`codekin relay devices approve <code>\`.`)
@@ -244,17 +246,20 @@ export class MachineEnrolment {
   }
 }
 
+/** A browser just added, and the code the owner types in that browser to finish. */
+export type ApprovedEnrolment = TrustedCredential & { confirmCode: string }
+
 /**
  * The owner typed a code on this machine: add the browser whose request
- * produced it. Throws TrustStoreError('not_found') when no waiting request
- * has that code.
+ * produced it, and return the finishing code to show (spec §5.2, as built).
+ * Throws TrustStoreError('not_found') when no waiting request has that code.
  */
 export function approveEnrolment(
   input: string,
   devicesFile: string,
   machineId: string,
   now: () => number = Date.now,
-): TrustedCredential {
+): ApprovedEnrolment {
   const code = normalizeCode(input)
   if (!code) throw new TrustStoreError('not_found', 'That is not a code: it has 8 letters and digits, like K7QM-2XPA')
   return mutateTrustStore(devicesFile, machineId, store => {
@@ -280,7 +285,7 @@ export function approveEnrolment(
     store.credentials = [...store.credentials.filter(c => c.keyId !== credential.keyId), credential]
     match.outcome = { state: 'approved', at }
     match.expiresAt = new Date(t + RESULT_TTL_MS).toISOString()
-    return credential
+    return { ...credential, confirmCode: formatCode(match.reveal.confirmCode ?? '') }
   }, now())
 }
 

@@ -910,6 +910,8 @@ export interface RelayDevices {
     /** Browsers waiting for their code to be typed here. The code is never included. */
     pending: Array<{ enrolId: string; userId: string; label: string; createdAt: string; expiresAt: string }>
     pendingCount: number
+    /** Approved here in the last hour: the code to type in each browser to finish. */
+    approved: Array<{ enrolId: string; label: string; confirmCode: string; approvedAt: string }>
   } | null
   error?: string
 }
@@ -921,11 +923,11 @@ export async function getRelayDevices(token: string): Promise<RelayDevices> {
 }
 
 /** Confirm the browser showing `code`. Rejects with the server's message (e.g. no such code). */
-export async function approveRelayDevice(token: string, code: string): Promise<{ keyId: string; label: string }> {
+export async function approveRelayDevice(token: string, code: string): Promise<{ keyId: string; label: string; confirmCode: string }> {
   const res = await transport.authFetch('/api/relay/devices/approve', {
     method: 'POST', headers: headers(token), body: JSON.stringify({ code }),
   })
-  const body = await jsonBody<{ added?: { keyId: string; label: string }; message?: string }>(res).catch(() => ({ added: undefined, message: undefined }))
+  const body = await jsonBody<{ added?: { keyId: string; label: string; confirmCode: string }; message?: string }>(res).catch(() => ({ added: undefined, message: undefined }))
   if (!res.ok || !body.added) throw new Error(body.message ?? `Failed to confirm the browser: ${res.status}`)
   return body.added
 }

@@ -58,15 +58,35 @@ afterEach(() => {
 })
 
 describe('TrustSheet', () => {
-  it('shows the code, then the approval once the machine signs it', async () => {
+  it('shows the code, and finishes only with the code the machine shows back', async () => {
     const check = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce('approved')
-    trust.startEnrolment.mockResolvedValue({ enrolId: 'e1', code: 'K7QM-2XPA', machineKeyId: 'mk', check })
+    const confirm = vi.fn((typed: string) => Promise.resolve(typed === 'KBY-PER'))
+    trust.startEnrolment.mockResolvedValue({ enrolId: 'e1', code: 'K7QM-2XPA', machineKeyId: 'mk', check, confirm })
     const { onTrusted } = await render()
     expect(el!.querySelector('[aria-label="Confirmation code"]')?.textContent).toBe('K7QM-2XPA')
     expect(el!.textContent).toContain('codekin relay devices approve K7QM-2XPA')
     await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
-    expect(onTrusted).not.toHaveBeenCalled()
     await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+    // A (possibly forged) approval only moves on to the finishing code.
+    expect(el!.textContent).toContain('Dev box accepted the code. Type the code it shows now to finish')
+    expect(onTrusted).not.toHaveBeenCalled()
+
+    const input = el!.querySelector<HTMLInputElement>('#trust-sheet-finish')!
+    const type = async (value: string) => {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+    }
+    const finish = () => [...el!.querySelectorAll('button')].find(b => b.textContent === 'Finish')!
+    await type('aaa-aaa')
+    await act(async () => { finish().click() })
+    expect(el!.textContent).toContain("That isn't the code Dev box showed")
+    expect(onTrusted).not.toHaveBeenCalled()
+
+    await type('kby-per')
+    await act(async () => { finish().click() })
+    expect(confirm).toHaveBeenLastCalledWith('KBY-PER')
     expect(el!.textContent).toContain('This browser is confirmed on Dev box.')
     expect(onTrusted).toHaveBeenCalledTimes(1)
   })

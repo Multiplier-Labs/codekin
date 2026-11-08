@@ -25,7 +25,7 @@ const UNPAIRED = { paired: false, managed: false, state: 'unpaired', machineId: 
 const PAIRED = { paired: true, managed: true, state: 'connected', machineId: 'm-1', relayUrl: 'https://app.codekin.ai' }
 const NO_DEVICES = {
   paired: true, machineId: 'm-1', identity: { keyId: 'idkey0000000000000000a', createdAt: '2026-11-08T10:00:00Z' },
-  devices: { machineId: 'm-1', ownerUserId: 'u1', policy: 'off', credentials: [], pending: [], pendingCount: 0 },
+  devices: { machineId: 'm-1', ownerUserId: 'u1', policy: 'off', credentials: [], pending: [], pendingCount: 0, approved: [] },
 }
 const IPHONE = { keyId: 'q3aaaaaaaaaaaaaaaaaaaa', kind: 'browser', userId: 'u1', label: 'Safari · iPhone', addedAt: '2026-11-08T10:00:00Z', addedBy: 'local' }
 const PENDING = { state: 'pending', relayUrl: 'https://app.codekin.ai', verificationUrl: 'https://app.codekin.ai/pair?code=ABCD-1234', userCode: 'ABCD-1234', expiresAt: null }
@@ -150,7 +150,7 @@ describe('RemoteAccessSection', () => {
     const waiting = { enrolId: 'e1', userId: 'u1', label: 'Chrome · Android', createdAt: '2026-11-08T10:00:00Z', expiresAt: '2026-11-08T10:10:00Z' }
     api.getRelayDevices.mockResolvedValue({ ...NO_DEVICES, devices: { ...NO_DEVICES.devices, pending: [waiting], pendingCount: 1 } })
     api.approveRelayDevice.mockRejectedValueOnce(new Error('No browser is waiting with that code.'))
-    api.approveRelayDevice.mockResolvedValueOnce({ keyId: 'k1', label: 'Chrome · Android' })
+    api.approveRelayDevice.mockResolvedValueOnce({ keyId: 'k1', label: 'Chrome · Android', confirmCode: 'KBY-PER' })
     api.rejectRelayEnrolment.mockResolvedValue(undefined)
     await render()
     expect(el!.textContent).toContain('A browser is waiting')
@@ -172,6 +172,7 @@ describe('RemoteAccessSection', () => {
     await act(async () => { button('Confirm')!.click() })
     expect(api.approveRelayDevice).toHaveBeenLastCalledWith('t', 'K7QM-2XPA')
     expect(el!.textContent).toContain('Chrome · Android can now control this computer.')
+    expect(el!.querySelector('[aria-label="Code for the browser"]')?.textContent).toBe('KBY-PER')
 
     await act(async () => { button('Turn down')!.click() })
     expect(api.rejectRelayEnrolment).toHaveBeenCalledWith('t', 'e1')

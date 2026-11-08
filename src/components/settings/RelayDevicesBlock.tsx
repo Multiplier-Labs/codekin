@@ -54,7 +54,7 @@ export function RelayDevicesBlock({ token, onError }: Props) {
   const [busy, setBusy] = useState(false)
   const [code, setCode] = useState('')
   const [codeError, setCodeError] = useState<string | null>(null)
-  const [added, setAdded] = useState<string | null>(null)
+  const [added, setAdded] = useState<{ label: string; confirmCode: string } | null>(null)
 
   const refresh = useCallback(async () => {
     setData(await getRelayDevices(token))
@@ -75,7 +75,7 @@ export function RelayDevicesBlock({ token, onError }: Props) {
     try {
       const device = await approveRelayDevice(token, code.trim())
       setCode('')
-      setAdded(device.label)
+      setAdded({ label: device.label, confirmCode: device.confirmCode })
       await refresh()
     } catch (err) {
       setCodeError(err instanceof Error ? err.message : "Couldn't confirm the browser")
@@ -110,6 +110,7 @@ export function RelayDevicesBlock({ token, onError }: Props) {
 
   const devices = data.devices?.credentials ?? []
   const pending = data.devices?.pending ?? []
+  const approved = data.devices?.approved ?? []
   return (
     <Block
       title="Devices that can control this computer"
@@ -143,11 +144,23 @@ export function RelayDevicesBlock({ token, onError }: Props) {
         >
           {codeError && <p className="mt-2 text-meta text-warning-5">{codeError}</p>}
           {added && (
-            <p className="mt-2 flex items-center gap-1.5 text-meta text-success-5">
-              <IconCircleCheckFilled size={14} /> {added} can now control this computer.
-            </p>
+            <div className="mt-3 rounded-control border border-edge bg-surface-raised px-3 py-2">
+              <p className="flex items-center gap-1.5 text-meta text-success-5">
+                <IconCircleCheckFilled size={14} /> {added.label} can now control this computer.
+              </p>
+              <p className="mt-1 text-meta text-ink-muted">To finish, type this code in that browser:</p>
+              <p className="mt-1 font-mono text-title tracking-widest text-ink" aria-label="Code for the browser">{added.confirmCode}</p>
+            </div>
           )}
         </Row>
+        {approved.filter(a => a.confirmCode !== added?.confirmCode).map(a => (
+          <Row
+            key={a.enrolId}
+            label={`Finish in ${a.label}`}
+            description="Confirmed here. Type this code in that browser to finish."
+            control={<span className="font-mono text-body tracking-widest text-ink">{a.confirmCode}</span>}
+          />
+        ))}
         {pending.map(p => (
           <Row
             key={p.enrolId}

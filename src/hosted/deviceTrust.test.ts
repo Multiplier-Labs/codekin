@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  base32, commitment, defaultBrowserLabel, formatCode, fromB64url, getOrCreateBrowserKey, shortAuthString, startEnrolment,
+  base32, commitment, confirmationCode, defaultBrowserLabel, formatCode, fromB64url, getOrCreateBrowserKey, shortAuthString, startEnrolment,
   toB64url, transcript, EnrolmentFailure,
   type BrowserKey, type EnrolSend, type MachinePin, type TrustStorage,
 } from './deviceTrust'
@@ -35,6 +35,7 @@ describe('encoding', () => {
     const spkiB = fromB64url('MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbrowser')
     expect(toB64url(await commitment(spkiB, 'Test browser', new Uint8Array(32).fill(1)))).toBe('rshF4jI0Db8X2A08Dzd3YzszZRKd7S-vSaIqoRt0VEY')
     expect(await shortAuthString(spkiM, spkiB, new Uint8Array(32).fill(1), new Uint8Array(32).fill(2))).toBe('I2C3EOOP')
+    expect(await confirmationCode(spkiM, spkiB, new Uint8Array(32).fill(1), new Uint8Array(32).fill(2))).toBe('KBYPER')
   })
 
   it('length-prefixes fields and encodes base32/base64url like the machine', () => {
@@ -74,19 +75,63 @@ describe('enrolment against the machine', () => {
   })
   afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
 
-  it('shows the same code the machine expects, and pins the machine key once approved', async () => {
+  it('shows the code the machine expects, and pins only once the machine’s finishing code is typed back', async () => {
     const enrolment = await startEnrolment(send, { userId: 'u-owner', machineId: 'm1', label: 'Firefox · Linux', storage })
     expect(enrolment.code).toMatch(/^[A-Z2-7]{4}-[A-Z2-7]{4}$/)
     expect(await enrolment.check()).toBeNull()
 
-    // The owner types the browser's code on the machine.
+    // The owner types the browser's code on the machine; the machine shows a finishing code.
     const added = approveEnrolment(enrolment.code, devicesFile, 'm1')
     const key = await getOrCreateBrowserKey('u-owner', storage)
     expect(added).toMatchObject({ keyId: key.keyId, spki: key.spki, label: 'Firefox · Linux' })
+    expect(added.confirmCode).toMatch(/^[A-Z2-7]{3}-[A-Z2-7]{3}$/)
 
+    // An approval alone pins nothing.
     expect(await enrolment.check()).toBe('approved')
+    expect(storage.pins.size).toBe(0)
+
+    expect(await enrolment.confirm('AAA-AAA')).toBe(added.confirmCode === 'AAA-AAA')
+    expect(storage.pins.size).toBe(0)
+    expect(await enrolment.confirm(added.confirmCode.toLowerCase().replace('-', ' '))).toBe(true)
     expect(storage.pins.get('u-owner:m1')).toMatchObject({ keyId: key.keyId })
     expect(readTrustStore(devicesFile)?.credentials).toHaveLength(1)
+  })
+
+  it('defeats a relay that answers as the machine on a first enrolment', async () => {
+    // The relay runs the real machine's ceremony on one side and its own key
+    // towards the browser on the other, and forges the approval.
+    const { generateKeyPairSync, sign } = await import('crypto')
+    const fake = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+    const fakeSpki = fake.publicKey.export({ format: 'der', type: 'spki' }).toString('base64url')
+    const signFake = (data: Uint8Array) => toB64url(sign('sha256', data, { key: fake.privateKey, dsaEncoding: 'ieee-p1363' }))
+    let commitB64 = ''
+    let realNonceM = ''
+    let spkiB = new Uint8Array()
+    const mitm: EnrolSend = async (kind, payload) => {
+      const p = payload as Record<string, string>
+      if (kind === 'enrol_commit') {
+        commitB64 = p.commit
+        const real = await send(kind, payload) as Record<string, string>
+        realNonceM = real.nonceM
+        // Same nonce, so the browser's proof of possession still works on the real machine.
+        return { ...real, machineKey: fakeSpki, signature: signFake(transcript('ck-enrol-challenge-v1', real.enrolId, fromB64url(commitB64), fromB64url(real.nonceM))) }
+      }
+      if (kind === 'enrol_reveal') {
+        spkiB = fromB64url(p.spki)
+        return send(kind, payload)
+      }
+      return { enrolId: p.enrolId, state: 'approved', signature: signFake(transcript('ck-enrol-result-v1', p.enrolId, spkiB, 'approved')) }
+    }
+    const enrolment = await startEnrolment(mitm, { userId: 'u-owner', machineId: 'm1', label: 'Chrome · Mac', storage })
+    // The forged approval looks valid…
+    expect(await enrolment.check()).toBe('approved')
+    // …but the code the browser shows was made with the relay's key, so the
+    // machine refuses it and has no finishing code to show.
+    expect(() => approveEnrolment(enrolment.code, devicesFile, 'm1')).toThrow(/No browser is waiting/)
+    expect(readTrustStore(devicesFile)?.credentials).toEqual([])
+    // The only code the relay could offer is its own; the owner reads codes off the machine.
+    expect(storage.pins.size).toBe(0)
+    expect(realNonceM).not.toBe('')
   })
 
   it('reports a rejection without pinning', async () => {
@@ -123,6 +168,7 @@ describe('enrolment against the machine', () => {
   })
 
   it('refuses an unsigned approval', async () => {
+    // (Approvals pin nothing either way; a bad signature is still reported.)
     const enrolment = await startEnrolment(async (kind, payload) => {
       if (kind === 'enrol_status') return { enrolId: 'x', state: 'approved', signature: toB64url(new Uint8Array(64)) }
       return send(kind, payload)

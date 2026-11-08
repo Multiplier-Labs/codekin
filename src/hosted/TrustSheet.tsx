@@ -24,7 +24,8 @@ const ONLINE_WAIT_MS = 90_000
 
 type Phase =
   | { kind: 'starting'; waitingForMachine: boolean }
-  | { kind: 'code'; enrolment: Enrolment }
+  /** `accepted`: the machine reported (signed) that the code was typed; the finishing code is next. */
+  | { kind: 'code'; enrolment: Enrolment; accepted: boolean }
   | { kind: 'done'; outcome: 'approved' | 'rejected' | 'expired' }
   | { kind: 'failed'; message: string; keyChanged?: boolean }
 
@@ -74,7 +75,7 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted }: Trust
       for (;;) {
         try {
           const enrolment = await startEnrolment((kind, payload) => conn.enrol(kind, payload), { userId, machineId })
-          if (!stopped()) setPhase({ kind: 'code', enrolment })
+          if (!stopped()) setPhase({ kind: 'code', enrolment, accepted: false })
           return
         } catch (err) {
           if (stopped()) return
@@ -101,7 +102,7 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted }: Trust
   // (a slow relay must not pile them up), until it decides or the request
   // expires.
   useEffect(() => {
-    if (phase.kind !== 'code') return
+    if (phase.kind !== 'code' || phase.accepted) return
     const life = { stopped: false }
     const giveUpAt = Date.now() + REQUEST_TTL_MS
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -114,8 +115,10 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted }: Trust
         .then(outcome => {
           if (life.stopped) return
           if (!outcome) { timer = setTimeout(ask, POLL_MS); return }
-          setPhase({ kind: 'done', outcome })
-          if (outcome === 'approved') onTrusted?.()
+          // An approval only moves the sheet on to the finishing code; it is
+          // never proof on its own (a relay could forge it). Polling stops.
+          if (outcome === 'approved') setPhase({ ...phase, accepted: true })
+          else setPhase({ kind: 'done', outcome })
         })
         .catch((err: unknown) => {
           if (life.stopped) return
@@ -125,7 +128,19 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted }: Trust
     }
     timer = setTimeout(ask, POLL_MS)
     return () => { life.stopped = true; clearTimeout(timer) }
-  }, [phase, onTrusted])
+  }, [phase])
+
+  const [typed, setTyped] = useState('')
+  const [typedWrong, setTypedWrong] = useState(false)
+  const finish = async () => {
+    if (phase.kind !== 'code') return
+    if (await phase.enrolment.confirm(typed)) {
+      setPhase({ kind: 'done', outcome: 'approved' })
+      onTrusted?.()
+    } else {
+      setTypedWrong(true)
+    }
+  }
 
   const forgetOldKey = useCallback(async () => {
     const userId = await currentUserId()
@@ -135,6 +150,8 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted }: Trust
   }, [machineId])
 
   const restart = () => {
+    setTyped('')
+    setTypedWrong(false)
     setPhase({ kind: 'starting', waitingForMachine: false })
     setAttempt(a => a + 1)
   }
@@ -160,9 +177,35 @@ export function TrustSheet({ machineId, machineName, onClose, onTrusted }: Trust
               <li>Or in a terminal there: <code className="font-mono text-ink">codekin relay devices approve {phase.enrolment.code}</code></li>
               <li>If you just ran <code className="font-mono">codekin relay login</code>, it is asking for this code.</li>
             </ul>
-            <p className="flex items-center gap-2 text-meta text-ink-faint">
-              <IconLoader2 size={14} className="animate-spin" /> Waiting for the code… It expires in 10 minutes.
-            </p>
+            <form
+              className="space-y-2 border-t border-edge pt-4"
+              onSubmit={e => { e.preventDefault(); void finish() }}
+            >
+              <label htmlFor="trust-sheet-finish" className="block text-body text-ink">
+                {phase.accepted
+                  ? `${machineName} accepted the code. Type the code it shows now to finish:`
+                  : `${machineName} then shows a 6-character code. Type it here to finish:`}
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="trust-sheet-finish"
+                  value={typed}
+                  onChange={e => { setTyped(e.target.value.toUpperCase()); setTypedWrong(false) }}
+                  placeholder="XXX-XXX"
+                  autoComplete="off"
+                  spellCheck={false}
+                  maxLength={9}
+                  className="w-32 rounded-control border border-edge bg-page px-3 py-1.5 font-mono text-body tracking-widest text-ink focus:border-focus focus:outline-none"
+                />
+                <button type="submit" disabled={typed.replace(/[\s-]/g, '').length < 6} className={button}>Finish</button>
+              </div>
+              {typedWrong && <p className="text-meta text-warning-5">That isn't the code {machineName} showed. Check it and try again.</p>}
+            </form>
+            {!phase.accepted && (
+              <p className="flex items-center gap-2 text-meta text-ink-faint">
+                <IconLoader2 size={14} className="animate-spin" /> Waiting for the code… It expires in 10 minutes.
+              </p>
+            )}
             <p className="text-meta text-ink-faint">Computer key {phase.enrolment.machineKeyId}</p>
           </div>
         )}

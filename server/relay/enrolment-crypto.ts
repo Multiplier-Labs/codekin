@@ -13,6 +13,13 @@
  *   popB  = sign_kB(T("ck-enrol-pop-v1", enrolId, nonceM))
  *   SAS   = base32(SHA-256(T("ck-sas-v1", SPKI(kM), SPKI(kB), P, nonceB, nonceM)))[0:8]
  *   sigR  = sign_kM(T("ck-enrol-result-v1", enrolId, SPKI(kB), outcome))
+ *   CC    = base32(SHA-256(T("ck-enrol-confirm-v1", SPKI(kM), SPKI(kB), P, nonceB, nonceM)))[0:6]
+ *
+ * SAS goes browser → machine (the owner types it on the machine, which then
+ * adds kB). CC goes back machine → browser: the machine shows it only after
+ * that approval, the owner types it in the browser, and only then does the
+ * browser pin kM. A relay that answered the browser with its own key never
+ * gets the machine to approve, so it never has a CC shown to type.
  *
  * P is the passkey list, encoded as UTF-8 JSON of [credentialId,
  * cosePublicKey, rpId] triples. Passkeys join the ceremony in slice 5; until
@@ -28,6 +35,7 @@ export const CHALLENGE_LABEL = 'ck-enrol-challenge-v1'
 export const POP_LABEL = 'ck-enrol-pop-v1'
 export const SAS_LABEL = 'ck-sas-v1'
 export const RESULT_LABEL = 'ck-enrol-result-v1'
+export const CONFIRM_LABEL = 'ck-enrol-confirm-v1'
 
 /** Bytes in each side's nonce. */
 export const NONCE_BYTES = 32
@@ -101,9 +109,21 @@ export function shortAuthString(
   return base32(sha256(transcript(SAS_LABEL, spkiM, spkiB, encodePasskeys(passkeys), nonceB, nonceM))).slice(0, 8)
 }
 
-/** "K7QM2XPA" → "K7QM-2XPA". */
-export function formatCode(sas: string): string {
-  return `${sas.slice(0, 4)}-${sas.slice(4, 8)}`
+/** The 6-character code the machine shows after approving, for the owner to type in the browser. */
+export function confirmationCode(
+  spkiM: Uint8Array,
+  spkiB: Uint8Array,
+  passkeys: readonly EnrolPasskey[],
+  nonceB: Uint8Array,
+  nonceM: Uint8Array,
+): string {
+  return base32(sha256(transcript(CONFIRM_LABEL, spkiM, spkiB, encodePasskeys(passkeys), nonceB, nonceM))).slice(0, 6)
+}
+
+/** "K7QM2XPA" → "K7QM-2XPA"; "ABC234" → "ABC-234". */
+export function formatCode(code: string): string {
+  const half = code.length / 2
+  return `${code.slice(0, half)}-${code.slice(half)}`
 }
 
 /**

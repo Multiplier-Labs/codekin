@@ -467,7 +467,9 @@ To add a browser, choose **Confirm this browser** for the machine in the web
 app (under Settings → Machines, or right after approving a pairing). The
 browser shows an 8-character code. Type it on the machine: in Settings →
 Remote access → Confirm a browser, with `codekin relay devices approve`, or
-at the prompt `codekin relay login` shows after pairing. The browser keeps its
+at the prompt `codekin relay login` shows after pairing. The machine then
+shows a 6-character code; type that into the browser to finish (the browser
+trusts the machine's key only after that). The browser keeps its
 signing key in IndexedDB and can't export it. Requests expire after 10
 minutes, and at most 3 can wait at once. In this version the list is kept
 but not enforced.

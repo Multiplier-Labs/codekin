@@ -146,7 +146,7 @@ describe('/api/relay/devices', () => {
     expect(wrong.status).toBe(404)
     const ok = await fetch(`${base}/approve`, { method: 'POST', headers: auth, body: JSON.stringify({ code }) })
     expect(ok.status).toBe(200)
-    expect(await ok.json()).toMatchObject({ added: { label: 'Edge · Windows' } })
+    expect(await ok.json()).toMatchObject({ added: { label: 'Edge · Windows', confirmCode: expect.stringMatching(/^[A-Z2-7]{3}-[A-Z2-7]{3}$/) } })
     expect(readTrustStore(devicesFile)?.credentials).toHaveLength(1)
   })
 
@@ -221,7 +221,12 @@ describe('codekin relay devices', () => {
     expect(run(['approve'])).toMatchObject({ code: 1 })
     expect(run(['approve', 'AAAA-AAAA'])).toMatchObject({ code: 1, err: expect.stringContaining('No browser is waiting') })
     // Typed with a space instead of the hyphen, in lower case.
-    expect(run(['approve', ...first.code.toLowerCase().split('-')])).toMatchObject({ code: 0, out: expect.stringContaining('Confirmed Edge · Windows') })
+    const approved = run(['approve', ...first.code.toLowerCase().split('-')])
+    expect(approved).toMatchObject({ code: 0, out: expect.stringContaining('Confirmed Edge · Windows') })
+    const finishing = /type this code in the browser: +([A-Z2-7]{3}-[A-Z2-7]{3})/.exec(approved.out)?.[1]
+    expect(finishing).toBeDefined()
+    // `list` keeps showing it for a while, in case it scrolled away.
+    expect(run(['list']).out).toContain(`${finishing!}  Edge · Windows`)
     expect(run(['reject', second.enrolId])).toMatchObject({ code: 0 })
     expect(readTrustStore(devicesFile)?.credentials.map(c => c.label)).toEqual(['Edge · Windows'])
   })

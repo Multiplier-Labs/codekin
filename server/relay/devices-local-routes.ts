@@ -122,7 +122,8 @@ export function createRelayDevicesRouter(
     const code = (req.body as { code?: unknown } | undefined)?.code
     try {
       const added = approveEnrolment(typeof code === 'string' ? code : '', devicesFile, machineId)
-      res.json({ added: { keyId: added.keyId, label: added.label } })
+      // The owner types confirmCode in the browser, which pins this machine's key only then.
+      res.json({ added: { keyId: added.keyId, label: added.label, confirmCode: added.confirmCode } })
     } catch (err) {
       sendError(res, err)
     }

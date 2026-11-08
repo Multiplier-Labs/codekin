@@ -25,6 +25,7 @@ import { randomUUID } from 'crypto'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
 import { writeFileAtomic } from './relay-credential.js'
+import { formatCode } from './enrolment-crypto.js'
 import type { EnrolPasskey } from './enrolment-crypto.js'
 
 export function relayDevicesPath(home = homedir()): string {
@@ -86,6 +87,8 @@ export interface PendingEnrolment {
     passkeys: EnrolPasskey[]
     /** The 8-character code, compared with what the owner types. */
     code: string
+    /** The 6-character code shown after approval, for the owner to type in the browser. */
+    confirmCode?: string
     revealedAt: string
   }
   outcome?: { state: 'approved' | 'rejected'; at: string }
@@ -164,6 +167,7 @@ function parsePending(value: unknown): PendingEnrolment | null {
     entry.reveal = {
       spki: r.spki, keyId: r.keyId, label: r.label, nonceB: r.nonceB, code: r.code, revealedAt: r.revealedAt,
       passkeys: r.passkeys as EnrolPasskey[],
+      ...(str(r.confirmCode, 16) ? { confirmCode: r.confirmCode } : {}),
     }
   }
   if (p.outcome !== undefined) {
@@ -425,7 +429,16 @@ export interface TrustStoreView {
    */
   pending: Array<{ enrolId: string; userId: string; label: string; createdAt: string; expiresAt: string }>
   pendingCount: number
+  /**
+   * Browsers approved here in the last hour, with the code to type in each
+   * to finish. Showing it is safe: the machine shows it only once it has
+   * approved, which is the point.
+   */
+  approved: Array<{ enrolId: string; label: string; confirmCode: string; approvedAt: string }>
 }
+
+/** How long a just-approved browser's finishing code stays listed. */
+const APPROVED_LISTED_MS = 60 * 60_000
 
 /** Requests that have a code and no decision yet. */
 export function awaitingCode(store: TrustStore, now = Date.now()): PendingEnrolment[] {
@@ -450,5 +463,9 @@ export function describeTrustStore(store: TrustStore, now = Date.now()): TrustSt
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map(p => ({ enrolId: p.enrolId, userId: p.userId, label: p.reveal?.label ?? '', createdAt: p.createdAt, expiresAt: p.expiresAt })),
     pendingCount: awaitingCode(store, now).length,
+    approved: store.pending
+      .filter(p => p.outcome?.state === 'approved' && p.reveal?.confirmCode && Date.parse(p.outcome.at) > now - APPROVED_LISTED_MS)
+      .sort((a, b) => (b.outcome?.at ?? '').localeCompare(a.outcome?.at ?? ''))
+      .map(p => ({ enrolId: p.enrolId, label: p.reveal?.label ?? '', confirmCode: formatCode(p.reveal?.confirmCode ?? ''), approvedAt: p.outcome?.at ?? '' })),
   }
 }

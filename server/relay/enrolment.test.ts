@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  CHALLENGE_LABEL, POP_LABEL, RESULT_LABEL, base32, commitment, formatCode, normalizeCode, shortAuthString, signP1363,
+  CHALLENGE_LABEL, POP_LABEL, RESULT_LABEL, base32, commitment, confirmationCode, formatCode, normalizeCode, shortAuthString, signP1363,
   transcript, verifyP1363, checkLabel,
 } from './enrolment-crypto.js'
 import { approveEnrolment, ENROL_TTL_MS, EnrolmentError, MachineEnrolment, MAX_ENROLMENTS_PER_WINDOW, MAX_PENDING_ENROLMENTS, rejectEnrolment } from './enrolment.js'
@@ -59,6 +59,7 @@ describe('enrolment crypto', () => {
     const nonceM = Buffer.alloc(32, 2)
     expect(commitment(spkiB, [], 'Test browser', nonceB).toString('base64url')).toBe(VECTOR.commit)
     expect(shortAuthString(spkiM, spkiB, [], nonceB, nonceM)).toBe(VECTOR.sas)
+    expect(confirmationCode(spkiM, spkiB, [], nonceB, nonceM)).toBe(VECTOR.confirm)
   })
 
   it('normalizes typed codes and refuses anything else', () => {
@@ -83,6 +84,7 @@ describe('enrolment crypto', () => {
 const VECTOR = {
   commit: 'rshF4jI0Db8X2A08Dzd3YzszZRKd7S-vSaIqoRt0VEY',
   sas: 'I2C3EOOP',
+  confirm: 'KBYPER',
 }
 
 describe('MachineEnrolment', () => {
@@ -131,6 +133,13 @@ describe('MachineEnrolment', () => {
 
     const added = approveEnrolment(formatCode(code).toLowerCase(), devicesFile, 'm1', () => now)
     expect(added).toMatchObject({ kind: 'browser', userId: 'u-owner', label: b.label, addedBy: 'local', spki: b.spki.toString('base64url') })
+    // The finishing code for the browser, shown here only now that it is approved.
+    const nonceM = Buffer.from(challenge.nonceM, 'base64url')
+    expect(added.confirmCode).toBe(formatCode(confirmationCode(machineSpki, b.spki, [], b.nonceB, nonceM)))
+    expect(describeTrustStore(readTrustStore(devicesFile)!, now).approved).toEqual([
+      { enrolId: challenge.enrolId, label: b.label, confirmCode: added.confirmCode, approvedAt: expect.any(String) },
+    ])
+    expect(readTrustStore(devicesFile)!.credentials[0]).not.toHaveProperty('confirmCode')
     expect(readTrustStore(devicesFile)?.credentials).toHaveLength(1)
 
     const status = enrolment.status(OWNER, { enrolId: challenge.enrolId })
