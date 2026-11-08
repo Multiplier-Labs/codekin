@@ -23,6 +23,7 @@ import { StreamChannel } from './connector-stream.js'
 import type { WebSocketFactory } from './connector-stream.js'
 import type { ChannelPolicy } from './connector-policy.js'
 import type { GrantMap } from './shares.js'
+import { WebhookReplayGuard } from './connector-webhook-guard.js'
 
 export interface ConnectorOptions {
   /** Hosted relay origin, e.g. https://app.codekin.ai */
@@ -43,6 +44,8 @@ export interface ConnectorOptions {
   onProxy?: (method: string, path: string, status: number | string) => void
   /** Called when a session stream opens or closes, for CLI output. */
   onStream?: (event: 'open' | 'close' | 'denied', channelId: string, detail?: string) => void
+  /** Replay protection for forwarded GitHub deliveries; persisted by default. */
+  webhookGuard?: WebhookReplayGuard
 }
 
 export type ConnectorStatus =
@@ -78,9 +81,11 @@ export class RelayConnector {
   private stopped = false
   private localTarget: LocalServerTarget
   private channels = new Map<string, StreamChannel>()
+  private webhookGuard: WebhookReplayGuard
 
   constructor(private opts: ConnectorOptions) {
     this.localTarget = opts.localTarget ?? resolveLocalTarget()
+    this.webhookGuard = opts.webhookGuard ?? new WebhookReplayGuard()
   }
 
   start(): void {
@@ -190,10 +195,29 @@ export class RelayConnector {
    */
   private async handleProxyRequest(ws: WebSocket, id: string | undefined, request: ProxyRequest): Promise<void> {
     if (!id) return
+    // A forwarded GitHub delivery is accepted once, and only while fresh
+    // (connector-webhook-guard.ts): the signature alone does not stop a relay
+    // from sending a delivery it saw again.
+    let deliveryId: string | null = null
+    if (request.principal?.role === 'webhook') {
+      const body = request.body ? Buffer.from(request.body, 'base64') : undefined
+      const verdict = this.webhookGuard.check(request.headers, body)
+      if (!verdict.ok) {
+        this.opts.onProxy?.(request.method, request.path, RELAY_ERROR.notPermitted)
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(envelope('error', { code: RELAY_ERROR.notPermitted, message: verdict.reason }, { id })))
+        }
+        return
+      }
+      deliveryId = verdict.deliveryId
+    }
     const outcome = await executeProxyRequest(request, {
       target: this.localTarget,
       fetchImpl: this.opts.fetchImpl,
     })
+    if (deliveryId && 'response' in outcome && outcome.response.status >= 200 && outcome.response.status < 300) {
+      this.webhookGuard.record(deliveryId)
+    }
     if (ws.readyState !== WebSocket.OPEN) return
 
     if ('error' in outcome) {
@@ -240,7 +264,8 @@ export class RelayConnector {
     if (!channelId || this.channels.has(channelId)) return
 
     const principal = open?.principal
-    if (!principal) {
+    // A webhook principal never streams: deliveries are one request each.
+    if (!principal || principal.role === 'webhook') {
       ws.send(
         JSON.stringify(
           envelope('error', { code: RELAY_ERROR.forbidden, message: 'Channel carried no principal' }, { channelId }),

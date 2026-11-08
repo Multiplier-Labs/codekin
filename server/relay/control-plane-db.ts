@@ -347,6 +347,21 @@ const MIGRATIONS: Array<(db: Database.Database) => void> = [
       CREATE INDEX idx_desktop_auth_requests_user ON desktop_auth_requests(user_id);
     `)
   },
+
+  // 7: GitHub webhook receivers per machine (docs/SELF-HOSTED-RELAY.md,
+  // "GitHub webhooks"). Only the SHA-256 of the URL token is kept; the token
+  // is shown once, when the owner turns the receiver on or rotates it.
+  db => {
+    db.exec(`
+      CREATE TABLE machine_webhooks (
+        machine_id TEXT PRIMARY KEY REFERENCES machines(id),
+        token_hash TEXT NOT NULL UNIQUE,
+        created_by_user_id TEXT NOT NULL REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_delivery_at TEXT
+      );
+    `)
+  },
 ]
 
 function runMigrations(db: Database.Database): void {

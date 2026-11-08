@@ -354,3 +354,52 @@ describe('local 401', () => {
     expect('error' in outcome && outcome.error.message).toMatch(/AUTH_TOKEN_FILE/)
   })
 })
+
+describe('webhook principal', () => {
+  const WEBHOOK = { userId: 'u1', role: 'webhook' as const, grants: {} }
+
+  it('reaches the local webhook receiver and nothing else', () => {
+    expect(checkProxyRequest({ method: 'POST', path: '/api/webhooks/github', principal: WEBHOOK }).allowed).toBe(true)
+    for (const req of [
+      { method: 'GET', path: '/api/webhooks/github' },
+      { method: 'POST', path: '/api/webhooks/github?x=1' },
+      { method: 'POST', path: '/api/webhooks/github/' },
+      { method: 'POST', path: '/api/webhooks/stepflow' },
+      { method: 'GET', path: '/api/sessions/list' },
+      { method: 'POST', path: '/api/sessions/create' },
+    ]) {
+      const decision = checkProxyRequest({ ...req, principal: WEBHOOK })
+      expect(decision.allowed, `${req.method} ${req.path}`).toBe(false)
+      expect(decision.error?.code).toBe(RELAY_ERROR.notPermitted)
+    }
+  })
+
+  it('stays out of reach for owners and grantees', () => {
+    expect(checkProxyRequest(asOwner({ method: 'POST', path: '/api/webhooks/github' })).allowed).toBe(false)
+    expect(checkProxyRequest({ method: 'POST', path: '/api/webhooks/github', principal: { userId: 'u2', role: 'grantee', grants: {} } }).allowed).toBe(false)
+  })
+
+  it('forwards only the GitHub delivery headers, and only for webhook principals', async () => {
+    const fetchImpl = vi.fn((_url: string, _init: RequestInit) => Promise.resolve(new Response('{}', { status: 202 })))
+    const headers = {
+      'x-github-event': 'workflow_run',
+      'x-github-delivery': 'abc',
+      'x-hub-signature-256': 'sha256=00',
+      authorization: 'Bearer stolen',
+      'x-github-event-bad': 'x',
+    }
+    await executeProxyRequest({ method: 'POST', path: '/api/webhooks/github', principal: WEBHOOK, headers, body: 'e30=' }, { target, fetchImpl })
+    const sent = fetchImpl.mock.calls[0][1].headers as Record<string, string>
+    expect(sent['x-github-event']).toBe('workflow_run')
+    expect(sent['x-github-delivery']).toBe('abc')
+    expect(sent['x-hub-signature-256']).toBe('sha256=00')
+    expect(sent.Authorization).toBe('Bearer local-token')
+    expect(sent.authorization).toBeUndefined()
+    expect(sent['x-github-event-bad']).toBeUndefined()
+
+    fetchImpl.mockClear()
+    await executeProxyRequest({ method: 'POST', path: '/api/sessions/create', principal: OWNER, headers, body: 'e30=' }, { target, fetchImpl })
+    const ownerSent = fetchImpl.mock.calls[0][1].headers as Record<string, string>
+    expect(ownerSent['x-github-delivery']).toBeUndefined()
+  })
+})

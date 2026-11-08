@@ -344,6 +344,14 @@ interface WebhookEvent {
 | `GITHUB_WEBHOOK_LOG_LINES` | No | `200` | 1 | Max lines of CI logs to include in prompt |
 | `GITHUB_WEBHOOK_ACTOR_ALLOWLIST` | No | `""` (all actors) | 1 | Comma-separated list of GitHub usernames allowed to trigger webhook processing. When non-empty, events from actors not in this list are filtered out with a `200 filtered` response. Comparison is case-insensitive. Overrides the `actorAllowlist` array in the config file. |
 
+### Receiving webhooks through the hosted relay
+
+A machine without a public URL can receive deliveries through its relay instead: GitHub posts
+to a per-machine URL on the relay, which forwards them over the connector to
+`/api/webhooks/github`. Signature checking stays on the machine, so the same
+`GITHUB_WEBHOOK_SECRET` applies. Setup and guarantees are in
+[SELF-HOSTED-RELAY.md, "GitHub webhooks"](SELF-HOSTED-RELAY.md#github-webhooks).
+
 ### Config File
 
 `~/.codekin/webhook-config.json`:

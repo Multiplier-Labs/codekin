@@ -189,6 +189,42 @@ The install script is downloaded from codekin.ai. It installs the published `cod
 package and pairs with *your* relay; nothing is routed through codekin.ai. On a computer that
 already has Codekin: `CODEKIN_PAIR_TOKEN=<token> codekin relay login --url https://codekin.example.com`.
 
+### GitHub webhooks
+
+A computer that only talks to the relay (no public URL of its own) can still receive GitHub
+webhooks, for example to trigger automatic CI fixes ([GITHUB-WEBHOOKS-SPEC.md](GITHUB-WEBHOOKS-SPEC.md)).
+Set it up in three steps:
+
+1. **On the computer:** configure Codekin's webhook receiver as usual, with
+   `GITHUB_WEBHOOK_ENABLED=true` and a `GITHUB_WEBHOOK_SECRET`.
+2. **In the web app:** while connected to that computer, open **Settings → Machines →
+   GitHub webhook** and choose **Turn on**. The relay shows a payload URL of the form
+   `https://codekin.example.com/api/hooks/github/<token>` **once**. It keeps only a hash of the
+   token; **New URL** replaces it, and the old URL stops working at once.
+3. **In GitHub** (repository or organization settings, then **Webhooks**): use that payload URL,
+   content type `application/json`, the same secret as on the computer, and the events you need
+   (**Workflow runs** for CI fixes).
+
+**What the relay can and can't do:**
+- It **can't** forge or alter a delivery. The computer's Codekin checks GitHub's HMAC signature
+  with a secret the relay never sees.
+- The connector lets a forwarded delivery reach the local webhook route and nothing else. It
+  forwards only the `X-GitHub-Event`, `X-GitHub-Delivery` and `X-Hub-Signature-256` headers.
+- It **can't** replay a delivery. The connector accepts each delivery id once, remembered for
+  7 days in `~/.config/codekin/relay-webhook-deliveries.json`, and refuses events whose own
+  timestamp is older than that.
+- It **can** read the payloads it forwards (repository, branch, commit message, run status). GitHub
+  doesn't encrypt webhook bodies, so they're outside end-to-end encryption.
+
+**Other behaviour:**
+- Deliveries are rate-limited per machine.
+- A receiver only forwards while its owner is active and still a member of the machine's
+  workspace. Removing the machine removes its receiver.
+- An offline machine answers `503`, and GitHub shows the failed delivery, which you can
+  redeliver from GitHub's UI once the machine is back.
+- The connector needs Codekin 0.10.6 or later; an older connector refuses webhook deliveries
+  (`403`).
+
 ## 8. Operating
 
 - **Upgrading:** check out the new release tag, rebuild both parts, copy the web app, then

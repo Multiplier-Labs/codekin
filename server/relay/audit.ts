@@ -55,6 +55,9 @@ export type AuditEventKind =
   | 'desktop_auth_approved'
   | 'desktop_signed_in'
   | 'desktop_session_revoked'
+  | 'machine_webhook_enabled'
+  | 'machine_webhook_disabled'
+  | 'webhook_delivered'
 
 export interface AuditEventInput {
   kind: AuditEventKind

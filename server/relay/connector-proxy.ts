@@ -15,6 +15,8 @@ import { join } from 'path'
 import {
   MAX_PROXY_BODY_BYTES,
   RELAY_ERROR,
+  WEBHOOK_FORWARDED_HEADERS,
+  WEBHOOK_LOCAL_PATH,
 } from './relay-protocol.js'
 import type { ProxyRequest, ProxyResponse, RelayError } from './relay-protocol.js'
 import { canonicalizePath, checkRestPolicy, filterSessionList, needsSessionListFilter } from './connector-policy.js'
@@ -107,6 +109,16 @@ export function checkProxyRequest(req: ProxyRequest): ProxyDecision {
   const canonical = canonicalizePath(req.path)
   if (!canonical) {
     return { allowed: false, error: { code: RELAY_ERROR.badRequest, message: 'Malformed path' } }
+  }
+  // A forwarded GitHub delivery reaches the local webhook receiver and
+  // nothing else. Its authority is GitHub's HMAC signature, which the local
+  // server checks and the relay cannot forge, so it never gains owner or
+  // grantee standing here.
+  if (principal.role === 'webhook') {
+    const exact = (req.method || '').toUpperCase() === 'POST' && canonical.pathname === WEBHOOK_LOCAL_PATH && canonical.search === ''
+    return exact
+      ? { allowed: true }
+      : { allowed: false, error: { code: RELAY_ERROR.notPermitted, message: 'Webhook deliveries may only reach the webhook receiver' } }
   }
   const permitted = checkRestPolicy(
     { role: principal.role === 'owner' ? 'owner' : 'grantee', grants: principal.grants as GrantMap },
@@ -265,6 +277,23 @@ export function resolveLocalTarget(
   return { origin, authToken, browserOrigin, tokenSource: tokenSource || undefined }
 }
 
+/**
+ * The GitHub delivery headers worth passing on, by allowlist: the event name,
+ * the delivery id, and the signature the local server verifies. Anything else
+ * the relay put in the frame is dropped.
+ */
+export function webhookHeaders(raw: Record<string, string> | undefined): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (!raw || typeof raw !== 'object') return out
+  for (const name of WEBHOOK_FORWARDED_HEADERS) {
+    const value = (raw as Record<string, unknown>)[name]
+    if (typeof value === 'string' && value.length > 0 && value.length <= 256 && /^[\x21-\x7e]+$/.test(value)) {
+      out[name] = value
+    }
+  }
+  return out
+}
+
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>
 
 export interface ProxyExecutionOptions {
@@ -292,8 +321,10 @@ export async function executeProxyRequest(
   const canonical = canonicalizePath(req.path)
   if (!canonical) return { error: { code: RELAY_ERROR.badRequest, message: 'Malformed path' } }
 
+  // Only a verified-owner principal gets the owner's unfiltered view; any
+  // other role is held to grantee filtering.
   const policy: ChannelPolicy = {
-    role: req.principal?.role === 'grantee' ? 'grantee' : 'owner',
+    role: req.principal?.role === 'owner' ? 'owner' : 'grantee',
     grants: (req.principal?.grants ?? {}) as GrantMap,
   }
 
@@ -304,6 +335,9 @@ export async function executeProxyRequest(
   }
   if (req.contentType) {
     headers['Content-Type'] = req.contentType
+  }
+  if (req.principal?.role === 'webhook') {
+    Object.assign(headers, webhookHeaders(req.headers))
   }
 
   let body: Buffer | undefined

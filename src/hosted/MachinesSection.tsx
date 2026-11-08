@@ -20,6 +20,7 @@ import { MACHINE_STATUS_DOT, type Machine } from './machines'
 import { useMachineSetup, type MachineSetup } from './useMachineSetup'
 import { InstallCommand } from './InstallCommand'
 import { PairingPanel, PendingSetup } from './SetupProgress'
+import { MachineWebhook } from './MachineWebhook'
 import { Row, button, dangerButton, quietButton } from '../components/settings/Block'
 
 interface MachinesSectionProps {
@@ -237,6 +238,12 @@ function MachinesView({ currentMachineId, onSwitch, onDisconnect, setup }: Machi
           Or, on a machine already running Codekin: run{' '}
           <code className={inlineCode}>codekin relay login</code> to pair it.
         </p>
+      )}
+
+      {current?.access === 'owner' && (
+        <div className="border-t border-edge">
+          <MachineWebhook machine={current} />
+        </div>
       )}
 
       {onDisconnect && (

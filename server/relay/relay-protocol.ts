@@ -81,7 +81,13 @@ export interface BrowserHelloAck {
  */
 export interface RelayPrincipal {
   userId: string
-  role: 'owner' | 'grantee'
+  /**
+   * `webhook` is a GitHub delivery the relay received for this machine
+   * (docs/SELF-HOSTED-RELAY.md, "GitHub webhooks"). It reaches exactly one
+   * local route, and the local server checks GitHub's HMAC signature, which
+   * the relay cannot produce. `userId` is then the machine owner.
+   */
+  role: 'owner' | 'grantee' | 'webhook'
   /** Session id → permissions. Empty for owners. */
   grants: Record<string, string[]>
 }
@@ -105,7 +111,18 @@ export interface ProxyRequest {
   contentType?: string
   /** base64-encoded request body, omitted when there is none. */
   body?: string
+  /**
+   * GitHub delivery headers, honoured only for `webhook` principals and only
+   * those named in WEBHOOK_FORWARDED_HEADERS.
+   */
+  headers?: Record<string, string>
 }
+
+/** The one local route a `webhook` principal may reach. */
+export const WEBHOOK_LOCAL_PATH = '/api/webhooks/github'
+
+/** Request headers the connector passes to the local webhook route. */
+export const WEBHOOK_FORWARDED_HEADERS = ['x-github-event', 'x-github-delivery', 'x-hub-signature-256'] as const
 
 export interface ProxyResponse {
   status: number
