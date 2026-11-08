@@ -707,6 +707,7 @@ export class ConnectorHub {
       })
     }
 
+    const storedPolicy = (this.db.prepare('SELECT intent_policy FROM machines WHERE id = ?').get(machineId) as { intent_policy: string | null } | undefined)?.intent_policy
     this.db.prepare(
       `UPDATE machines SET status = 'online', last_seen_at = datetime('now'),
          connector_version = COALESCE(?, connector_version),
@@ -718,6 +719,10 @@ export class ConnectorHub {
     const row = this.db.prepare('SELECT display_name, owner_user_id, identity_key FROM machines WHERE id = ?').get(machineId) as
       | { display_name: string; owner_user_id: string; identity_key: string | null }
       | undefined
+    // A policy changed while the machine was away is audited like one changed while connected.
+    if (storedPolicy && registered?.intentPolicy && registered.intentPolicy !== storedPolicy) {
+      recordAuditEvent(this.db, { kind: 'machine_policy_changed', machineId, metadata: { from: storedPolicy, to: registered.intentPolicy } })
+    }
     // The machine identity key is only a hint for browsers (they pin theirs
     // at enrolment), so a connector may replace it, but the change is audited.
     const identityKey = parseP256Spki(hello.identityKey)

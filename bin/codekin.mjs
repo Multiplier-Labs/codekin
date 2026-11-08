@@ -308,6 +308,7 @@ async function fetchLocalRelayStatus() {
 const RELAY_STATE_LABELS = {
   connected: 'online',
   update_required: 'connected, but the relay requires a newer Codekin (run `codekin upgrade`)',
+  devices_unconfirmed: 'connected, but your workspace requires confirmed devices (confirm a browser: `codekin relay devices approve <code>`)',
   connecting: 'connecting',
   disconnected: 'disconnected (retrying)',
   replaced: 'stopped — another connector took over this machine',

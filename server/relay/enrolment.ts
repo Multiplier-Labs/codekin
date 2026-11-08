@@ -391,6 +391,8 @@ export class MachineEnrolment {
     const { decision, signer } = this.opts.intents.checkDeviceIntent(
       principal, (payload as { intent?: unknown }).intent, POLICY_ACTION, policyPayload(policy), false)
     if (!signer) throw refuse(describeIntentRefusal(decision.reason))
+    // The key first: a raise that took effect must not come back as an error.
+    const { key } = this.machineKey()
     try {
       raiseIntentPolicy(policy, this.opts.devicesFile, this.opts.machineId, this.now())
     } catch (err) {
@@ -398,7 +400,6 @@ export class MachineEnrolment {
       throw err
     }
     this.opts.log?.log(`[relay] This computer's policy was raised to ${policy} by a signed request.`)
-    const { key } = this.machineKey()
     return {
       enrolId: `policy:${policy}`,
       state: 'approved',

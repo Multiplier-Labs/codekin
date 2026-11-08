@@ -411,6 +411,17 @@ describe('connector hub', () => {
       expect(JSON.parse(audit.metadata)).toEqual({ from: 'off', to: 'required' })
     })
 
+    it('audits a policy changed while the machine was away', async () => {
+      let connector = await connectWith()
+      connector.stop()
+      await waitFor(() => !hub.isOnline(machineId))
+      policy = 'warn'
+      connector = await connectWith()
+      const rows = db.prepare(`SELECT metadata FROM audit_events WHERE kind = 'machine_policy_changed'`).all() as Array<{ metadata: string }>
+      expect(rows.map(r => JSON.parse(r.metadata) as unknown)).toEqual([{ from: 'off', to: 'warn' }])
+      connector.stop()
+    })
+
     it('only flags machines during a grace period', async () => {
       rule(true, Date.now() + 60_000)
       const connector = await connectWith()
