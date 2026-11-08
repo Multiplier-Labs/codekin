@@ -1,7 +1,9 @@
 # L1 signed intents: code review and security audit
 
-Date: 2026-11-08  
-Reviewed baseline: `75c3c38b72e9828f81a8fc552ba80708964eabe3` (merged main)  
+Date: 2026-11-08
+
+Reviewed baseline: `75c3c38b72e9828f81a8fc552ba80708964eabe3` (merged main)
+
 Scope: all seven L1 slices, their browser/server integrations, and the L1 requirements in `docs/RELAY-SIGNED-INTENTS-AND-E2E-SPEC.md`.
 
 ## Assessment
