@@ -38,5 +38,13 @@ jobs:
       - name: Build
         run: npm run build
 
+      # The web app is served with a strict CSP (no inline script, no
+      # third-party origins); fail here rather than in a browser.
+      - name: Check builds against the CSP
+        if: matrix.node-version == 24
+        run: |
+          VITE_APP_MODE=hosted npx vite build --outDir dist-hosted
+          npm run check:csp
+
       - name: Test
         run: npm test

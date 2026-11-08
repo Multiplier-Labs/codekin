@@ -1,6 +1,6 @@
 # Relay hardening
 
-**Status:** In progress. Built: §1 (health endpoints). The rest is spec.
+**Status:** In progress. Built: §1 (health endpoints) and §3 (browser security headers). The rest is spec.
 **Date:** 2026-11-08
 **Scope:** hardening features for anyone who runs the relay (`server/relay`), whether self-hosted or as a public service. Values specific to a deployment, such as limits, thresholds and monitoring setup, belong in that deployment's own config. They are not defined here.
 **Related:** `docs/RELAY-SIGNED-INTENTS-AND-E2E-SPEC.md`, `docs/SELF-HOSTED-RELAY.md`, `docs/OPERATIONS.md` ("Hosted relay").
@@ -34,7 +34,7 @@
 
 ## 3. Browser security headers
 
-The hosted frontend is static and served by the reverse proxy. Today only `/api` responses carry security headers. The example config gains a snippet, `nginx/snippets/codekin-app-security-headers.conf`. Include it **in every `location` block**: nginx drops server-level `add_header` in any location that sets its own.
+**Built.** The hosted frontend is static and served by the reverse proxy. The example configs include a snippet, `nginx/snippets/codekin-security-headers.conf.example`. Include it **in every `location` block**: nginx drops server-level `add_header` in any location that sets its own. The policy, with the optional report endpoint added:
 
 ```nginx
 add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://avatars.githubusercontent.com; font-src 'self'; connect-src 'self' wss://relay.example.com; manifest-src 'self'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; upgrade-insecure-requests; report-uri /api/csp-report" always;
@@ -46,12 +46,13 @@ add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=()" always;
 ```
 
-Supporting changes:
+Supporting changes (**built**):
 - **Fonts** are bundled (`@fontsource`) instead of loaded from Google Fonts. This removes the only third-party origin.
-- **Rendered markdown** shows remote images as a link instead of loading them. Transcript content then never makes the browser contact third parties.
-- **CSP report endpoint:** `POST /api/csp-report`, unauthenticated, rate-limited, body ≤ 8 KB. Ship the policy as `Report-Only` first.
-- **CI check:** the hosted build's `index.html` has no inline `<script>` and no third-party origins.
-- **Self-hosters** replace `relay.example.com` with their own host.
+- **Rendered markdown** shows remote images as a link instead of loading them (`src/lib/remoteImage.ts`, used by every markdown renderer). Transcript content then never makes the browser contact third parties.
+- **CSP report endpoint:** `POST /api/csp-report` (`server/relay/csp-report-routes.ts`), unauthenticated, 5/min per IP, body ≤ 8 KB. It logs only the directive and the blocked host. Add `report-uri /api/csp-report` to the policy to use it; a new policy can ship as `Report-Only` first.
+- **API responses** also carry `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`.
+- **CI check:** `npm run check:csp` checks both builds: `index.html` has no inline `<script>`, and neither it nor the stylesheets name a third-party origin.
+- **Self-hosters** replace `YOUR_DOMAIN` in the snippet with their own host.
 
 ## 4. Connector version floors per capability
 

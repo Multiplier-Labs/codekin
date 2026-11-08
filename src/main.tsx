@@ -1,5 +1,11 @@
 import { StrictMode, Suspense, lazy } from 'react'
 import { createRoot } from 'react-dom/client'
+// Fonts are bundled, not fetched from Google Fonts: the CSP allows no
+// third-party origins, and visitors' IPs stay off Google's servers.
+import '@fontsource-variable/inconsolata/wght.css'
+import '@fontsource/lato/300.css'
+import '@fontsource/lato/400.css'
+import '@fontsource/lato/700.css'
 import './index.css'
 
 // VITE_APP_MODE=hosted builds the app.codekin.ai shell; the default build is

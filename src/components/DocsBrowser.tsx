@@ -79,7 +79,7 @@ export function DocsBrowser({
           </div>
         ) : content !== null ? (
           rawMode ? (
-            <pre className="px-6 py-4 text-body text-ink whitespace-pre-wrap" style={{ fontFamily: "'Inconsolata', monospace" }}>
+            <pre className="px-6 py-4 text-body text-ink whitespace-pre-wrap" style={{ fontFamily: "'Inconsolata Variable', 'Inconsolata', monospace" }}>
               {content}
             </pre>
           ) : (
