@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Opening a session always lands at the latest messages. The chat remembered whether you were at the bottom of the *previous* session, so after you had scrolled up anywhere (or WebKit reported a stale scroll position) the next session opened at the very top, where the browser had parked it while the transcript was empty — most visibly in Safari and the desktop app. A newly opened transcript now starts at the bottom and holds there for a moment while code blocks and images settle, unless you scroll it yourself
+
 ## [0.10.5] - 2026-11-07
 
 ### Fixed

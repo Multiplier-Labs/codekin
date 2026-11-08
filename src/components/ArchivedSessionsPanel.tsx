@@ -466,6 +466,7 @@ export function ArchivedSessionViewer({ token, sessionId, fontSize, onClose, onN
       </div>
       <div className="flex flex-1 flex-col overflow-hidden">
         <ChatView
+          sessionId={sessionId}
           messages={messages}
           fontSize={fontSize}
           planningMode={false}
