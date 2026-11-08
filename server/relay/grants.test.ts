@@ -6,7 +6,8 @@ import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  GRANT_ACTION, GRANT_REVOKED_LABEL, GRANT_REVOKE_ACTION, MAX_GRANT_LIFETIME_MS, frameAction, framePayload, grantPayload, grantRevokePayload, intentChallengeInput,
+  GRANT_ACTION, GRANT_REVOKED_LABEL, GRANT_REVOKE_ACTION, MAX_GRANT_LIFETIME_MS, frameAction, framePayload, grantIssuedAt, grantPayload, grantRevokePayload,
+  grantRevokedBy, grantRevokedParts, intentChallengeInput,
 } from './intent-actions.js'
 import type { GrantBody, IntentBody, SignedGrant, SignedIntent } from './intent-actions.js'
 import { IntentVerifier } from './intent-verify.js'
@@ -14,7 +15,7 @@ import { MachineEnrolment } from './enrolment.js'
 import { signP1363, transcript, verifyP1363 } from './enrolment-crypto.js'
 import { liveChannelPolicy } from './connector.js'
 import { ensureMachineIdentity, keyIdForSpki } from './machine-identity.js'
-import { emptyTrustStore, readTrustStore, writeTrustStore } from './trust-store.js'
+import { emptyTrustStore, readTrustStore, withRevocation, writeTrustStore } from './trust-store.js'
 import type { TrustedCredential, IntentPolicy } from './trust-store.js'
 import { keyIdForCoseKey } from './webauthn-verify.js'
 import { softPasskey } from './__fixtures__/authenticator.js'
@@ -199,5 +200,63 @@ describe('signed share grants on the machine', () => {
     store('warn')
     const principal = danaPrincipal([])
     expect(verifier.effectivePrincipal(principal)).toBe(principal)
+  })
+
+  /** A grant id as the owner's browser issues them: `<share>:<ms base 36><8 hex>`. */
+  const issued = (share: string, at: number) => `${share}:${at.toString(36)}0123abcd`
+
+  it('orders a share\'s grants by issue, so renewing a broader one never overtakes a narrowing', () => {
+    const t = Date.now()
+    // Issued first, renewed just now; the narrowing was issued later but signed earlier.
+    const broad = grant({ grantId: issued('g1', t - 60_000) })
+    const narrow = grant({ grantId: issued('g1', t - 30_000), permissions: ['view'] }, owner, { ts: t - 30_000 })
+    expect(verifier.effectivePrincipal(danaPrincipal([broad, narrow]))?.grants).toEqual({ s1: ['view'] })
+    expect(verifier.effectivePrincipal(danaPrincipal([narrow, broad]))?.grants).toEqual({ s1: ['view'] })
+  })
+
+  it('supersedes a share\'s earlier grants on the owner\'s word, keeping later ones, and confirms it', () => {
+    const identityFile = join(dir, 'relay-identity.json')
+    const identity = ensureMachineIdentity('m1', 'https://relay.test', { file: identityFile, store: null, log: { log: vi.fn(), warn: vi.fn() } })
+    const enrolment = new MachineEnrolment({ machineId: 'm1', identityFile, devicesFile, secretStore: null, intents: verifier })
+    const ownerPrincipal: RelayPrincipal = { userId: 'u-owner', role: 'owner', grants: {} }
+    const t = Date.now()
+    const [old, kept, later] = [issued('g1', t - 2000), issued('g1', t - 1000), issued('g1', t)]
+    // The kept grant must belong to the share; the intent must cover it.
+    expect(() => enrolment.revokeGrant(ownerPrincipal, { grantId: 'g1', keep: 'g2:x', intent: sign(owner, { action: GRANT_REVOKE_ACTION, payload: grantRevokePayload('g1', 'g2:x') }) })).toThrow()
+    expect(() => enrolment.revokeGrant(ownerPrincipal, { grantId: 'g1', keep: kept, intent: sign(owner, { action: GRANT_REVOKE_ACTION, payload: grantRevokePayload('g1') }) })).toThrow()
+    const result = enrolment.revokeGrant(ownerPrincipal, { grantId: 'g1', keep: kept, intent: sign(owner, { action: GRANT_REVOKE_ACTION, payload: grantRevokePayload('g1', kept) }) })
+    expect(verifyP1363(Buffer.from(identity.publicKey, 'base64url'), transcript(...grantRevokedParts('g1', kept)), Buffer.from(result.signature!, 'base64url'))).toBe(true)
+    // A full-revocation confirmation is not a supersede confirmation, and vice versa.
+    expect(verifyP1363(Buffer.from(identity.publicKey, 'base64url'), transcript(GRANT_REVOKED_LABEL, 'g1'), Buffer.from(result.signature!, 'base64url'))).toBe(false)
+    expect(verifier.effectivePrincipal(danaPrincipal([grant({ grantId: old })]))?.grants).toEqual({})
+    expect(verifier.effectivePrincipal(danaPrincipal([grant({ grantId: 'g1' })]))?.grants).toEqual({})
+    expect(verifier.effectivePrincipal(danaPrincipal([grant({ grantId: kept })]))?.grants).toEqual({ s1: ['view', 'send_prompt'] })
+    expect(verifier.effectivePrincipal(danaPrincipal([grant({ grantId: later })]))?.grants).toEqual({ s1: ['view', 'send_prompt'] })
+  })
+
+  it('reads issue times only from well-formed ids, and treats any other as superseded', () => {
+    const t = 1_790_000_000_000
+    expect(grantIssuedAt(issued('g1', t), 'g1')).toBe(t)
+    expect(grantIssuedAt('g1:a', 'g1')).toBeNull()
+    expect(grantIssuedAt(issued('g1', t), 'g2')).toBeNull()
+    const supersede = { grantId: 'g1', keep: issued('g1', t) }
+    expect(grantRevokedBy('g1:a', supersede)).toBe(true)
+    expect(grantRevokedBy(issued('g1', t + 1), supersede)).toBe(false)
+    expect(grantRevokedBy(issued('g10', t - 1), supersede)).toBe(false)
+  })
+
+  it('keeps one revocation per share, the broadest, and never lets one lapse', () => {
+    const t = Date.now()
+    let list = withRevocation([], { grantId: 'g1', keep: issued('g1', t) }, t)
+    list = withRevocation(list, { grantId: 'g1', keep: issued('g1', t - 5) }, t)
+    expect(list).toMatchObject([{ grantId: 'g1', keep: issued('g1', t) }])
+    list = withRevocation(list, { grantId: 'g1', keep: issued('g1', t + 5) }, t)
+    expect(list).toMatchObject([{ grantId: 'g1', keep: issued('g1', t + 5) }])
+    list = withRevocation(list, { grantId: 'g1' }, t)
+    expect(list).toEqual([{ grantId: 'g1', at: new Date(t).toISOString() }])
+    // A supersede after a full revocation changes nothing; a year on, it is still there.
+    list = withRevocation(list, { grantId: 'g1', keep: issued('g1', t + 9) }, t)
+    list = withRevocation(list, { grantId: 'g2' }, t + 365 * 24 * 60 * 60_000)
+    expect(list.map(r => [r.grantId, r.keep])).toEqual([['g1', undefined], ['g2', undefined]])
   })
 })

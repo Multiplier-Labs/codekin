@@ -140,7 +140,9 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
       }
       // Remember what the owner chose: Allow signs this, whatever the relay lists later.
       const created = (await res.json().catch(() => null)) as { share?: { id?: string } } | null
-      if (created?.share?.id) await recordShare(machineId, created.share.id, role, null).catch(() => {})
+      if (created?.share?.id) {
+        await recordShare(machineId, { shareId: created.share.id, sessionId, granteeUserId: granteeId, role, notAfter: null }).catch(() => {})
+      }
       setGranteeId('')
       await loadShares()
     } catch (err) {
@@ -268,9 +270,19 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
         {review && (
           <div className="mb-4 rounded-control border border-edge-strong bg-surface px-3 py-2" role="region" aria-label="Review grant">
             <p className="text-meta text-ink">
-              Let <span className="font-medium">{members?.find(m => m.userId === review.share.granteeUserId)?.login ?? 'this member'}</span> act as{' '}
+              Let <span className="font-medium">{members?.find(m => m.userId === review.grant.granteeUserId)?.login ?? 'this member'}</span> act as{' '}
               <span className="font-medium">{review.role === 'editor' ? 'Editor' : 'Viewer'}</span> on this session:
             </p>
+            {!review.recorded && (
+              <p className="mt-1 text-micro text-warning-5">
+                This browser has no record of making this share. Check the member and access before you sign.
+              </p>
+            )}
+            {review.duplicateOf && (
+              <p className="mt-1 text-micro text-warning-5">
+                You already shared this session with them in another share. Signing this one adds a second grant.
+              </p>
+            )}
             <p className="mt-1 text-micro text-ink-muted">{review.grant.permissions.join(', ')}</p>
             <p className="mt-1 text-micro text-ink-muted">
               {review.grant.notAfter

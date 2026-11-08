@@ -23,7 +23,7 @@ import { createHash } from 'crypto'
 import { existsSync, statSync } from 'fs'
 import {
   CHANNEL_OPEN_ACTION, CHANNEL_TOKEN_CHARS, INTENT_MAX_SKEW_MS, INTENT_VERSION, MACHINE_TIME_LABEL, MAX_INTENT_BODY_CHARS,
-  GRANT_ACTION, MAX_GRANT_LIFETIME_MS, PASSKEY_ANY, actionNeedsStepUp, grantNeedsStepUp, grantPayload, intentChallengeInput, channelOpenPayload, channelSessionAfter, frameAction, frameNeedsStepUp, framePayload, frameSession,
+  GRANT_ACTION, MAX_GRANT_LIFETIME_MS, PASSKEY_ANY, actionNeedsStepUp, grantIssuedAt, grantNeedsStepUp, grantPayload, grantRevokedBy, intentChallengeInput, channelOpenPayload, channelSessionAfter, frameAction, frameNeedsStepUp, framePayload, frameSession,
   isExemptFrame, requestAction, requestNeedsStepUp, requestPayload, requestSession,
 } from './intent-actions.js'
 import type { GrantBody, IntentBody, IntentRefusal, SignedGrant, SignedIntent } from './intent-actions.js'
@@ -415,10 +415,12 @@ export class IntentVerifier {
     for (const signed of principal.signedGrants.slice(0, 200)) {
       const verified = this.verifyGrant(store, principal.userId, signed)
       if (!verified) continue
-      // One grant per session: the most recently signed one, so a narrowed
-      // grant replaces a broader one (the owner also revokes the old id).
+      // One grant per session: the most recently issued one (renewal keeps
+      // a grant's id and so its place), then the most recently signed, so a
+      // narrowed grant replaces a broader one however often the broader one
+      // is renewed. The owner also supersedes the old grants on the machine.
       const current = best.get(verified.grant.sessionId)
-      if (!current || current.signedAt < verified.signedAt) best.set(verified.grant.sessionId, verified)
+      if (!current || isNewerGrant(verified, current)) best.set(verified.grant.sessionId, verified)
     }
     return new Map([...best].map(([sessionId, v]) => [sessionId, v.grant]))
   }
@@ -460,9 +462,10 @@ export class IntentVerifier {
     if (body.ts > now + INTENT_MAX_SKEW_MS) return null
     if (grant.expiresAt <= now || grant.expiresAt - body.ts > MAX_GRANT_LIFETIME_MS + INTENT_MAX_SKEW_MS) return null
     if (typeof grant.notAfter === 'number' && grant.expiresAt > grant.notAfter) return null
-    // Revoking X also revokes every X:… — a share's id covers all the grants
-    // signed for it, whichever ones the relay chooses to present.
-    if (store.revokedGrants.some(r => r.grantId === grant.grantId || grant.grantId.startsWith(`${r.grantId}:`))) return null
+    // Revoking X also revokes every X:… (a share's id covers all the grants
+    // signed for it, whichever ones the relay chooses to present); a
+    // supersede of X revokes every X:… issued up to the one it keeps.
+    if (store.revokedGrants.some(r => grantRevokedBy(grant.grantId, r))) return null
     return { grant, signedAt: body.ts }
   }
 
@@ -580,4 +583,17 @@ export class IntentVerifier {
     const sig = this.opts.signWithMachineKey?.(transcript(MACHINE_TIME_LABEL, nonce, String(machineTime)))
     return { machineTime, ...(sig ? { machineTimeSig: sig } : {}) }
   }
+}
+
+/** When a grant was issued: from its id (`<share>:<issued>`), else its signing time. */
+function issuedAt(v: { grant: GrantBody; signedAt: number }): number {
+  const colon = v.grant.grantId.lastIndexOf(':')
+  return (colon > 0 ? grantIssuedAt(v.grant.grantId, v.grant.grantId.slice(0, colon)) : null) ?? v.signedAt
+}
+
+/** Of two grants for one session, whether `a` should win: issued later, or renewed later. */
+function isNewerGrant(a: { grant: GrantBody; signedAt: number }, b: { grant: GrantBody; signedAt: number }): boolean {
+  const ia = issuedAt(a)
+  const ib = issuedAt(b)
+  return ia !== ib ? ia > ib : a.signedAt > b.signedAt
 }

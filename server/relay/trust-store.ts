@@ -27,6 +27,8 @@ import { dirname, join } from 'path'
 import { writeFileAtomic } from './relay-credential.js'
 import { formatCode } from './enrolment-crypto.js'
 import type { EnrolPasskey } from './enrolment-crypto.js'
+import { grantIssuedAt } from './intent-actions.js'
+import type { GrantRevocation } from './intent-actions.js'
 
 export function relayDevicesPath(home = homedir()): string {
   return join(home, '.config', 'codekin', 'relay-devices.json')
@@ -225,7 +227,8 @@ export function parseTrustStore(text: string): TrustStore {
     // An unreadable request is only a request: dropping it is harmless.
     pending: Array.isArray(v.pending) ? v.pending.map(parsePending).filter((e): e is PendingEnrolment => e !== null) : [],
     revokedGrants: Array.isArray(v.revokedGrants)
-      ? v.revokedGrants.filter((g): g is RevokedGrant => !!g && typeof g === 'object' && str((g as RevokedGrant).grantId, 200) && str((g as RevokedGrant).at, 64))
+      ? v.revokedGrants.filter((g): g is RevokedGrant => !!g && typeof g === 'object' && str((g as RevokedGrant).grantId, 200) && str((g as RevokedGrant).at, 64)
+        && ((g as RevokedGrant).keep === undefined || str((g as RevokedGrant).keep, 200)))
       : [],
   }
 }
@@ -295,23 +298,46 @@ export function withTrustStoreLock<T>(file: string, fn: () => T, waitMs = LOCK_W
   }
 }
 
-/** A grant the owner revoked on this machine (§6.7), kept past any grant's lifetime. */
-export interface RevokedGrant {
-  grantId: string
+/**
+ * A grant the owner revoked on this machine (§6.7). Kept for good: a browser
+ * of the owner's that never heard of the revocation may still re-sign the
+ * old grant with a fresh date, so letting the entry lapse would let it back.
+ */
+export interface RevokedGrant extends GrantRevocation {
   at: string
 }
 
-/** How long a revocation is kept: longer than a grant can live. */
-const REVOKED_GRANT_KEEP_MS = 31 * 24 * 60 * 60_000
+/** A bound on the list; entries coalesce to at most one per share, so this is a lot of shares. */
+export const MAX_REVOKED_GRANTS = 10_000
 
-/** Record a revoked grant (owner-signed grant_revoke). */
-export function addRevokedGrant(grantId: string, file: string, machineId: string, now = Date.now()): void {
+/**
+ * Record a revocation (owner-signed grant_revoke), coalescing with what is
+ * there: a full revocation of an id covers any supersede of it, and of two
+ * supersedes the one keeping the later grant covers the other.
+ */
+export function addRevokedGrant(revocation: GrantRevocation, file: string, machineId: string, now = Date.now()): void {
   mutateTrustStore(file, machineId, store => {
-    store.revokedGrants = [
-      ...store.revokedGrants.filter(g => g.grantId !== grantId && Date.parse(g.at) > now - REVOKED_GRANT_KEEP_MS),
-      { grantId, at: new Date(now).toISOString() },
-    ]
+    store.revokedGrants = withRevocation(store.revokedGrants, revocation, now)
   }, now)
+}
+
+export function withRevocation(list: RevokedGrant[], revocation: GrantRevocation, now = Date.now()): RevokedGrant[] {
+  const { grantId, keep } = revocation
+  const same = list.filter(r => r.grantId === grantId)
+  // Already covered: a full revocation, or a supersede keeping something no
+  // earlier than this one's kept grant (which that supersede then revokes).
+  const covered = same.some(r => r.keep === undefined || (keep !== undefined && (r.keep === keep || isEarlier(keep, r.keep, grantId))))
+  if (covered) return list
+  const entry: RevokedGrant = keep === undefined ? { grantId, at: new Date(now).toISOString() } : { grantId, keep, at: new Date(now).toISOString() }
+  const next = [...list.filter(r => r.grantId !== grantId), entry]
+  return next.length > MAX_REVOKED_GRANTS ? next.slice(next.length - MAX_REVOKED_GRANTS) : next
+}
+
+/** Whether grant `a` was issued before grant `b` (both under `shareId`). */
+function isEarlier(a: string, b: string, shareId: string): boolean {
+  const ta = grantIssuedAt(a, shareId)
+  const tb = grantIssuedAt(b, shareId)
+  return ta !== null && tb !== null && ta < tb
 }
 
 /** Drop requests past their expiry. Returns true when any were dropped. */

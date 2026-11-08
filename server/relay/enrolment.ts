@@ -35,8 +35,8 @@ import type { PasskeyCredential, PendingEnrolment, TrustedCredential, TrustStore
 import { coseToKey, keyIdForCoseKey, verifyPasskeyAssertion } from './webauthn-verify.js'
 import type { PasskeyAssertion } from './webauthn-verify.js'
 import {
-  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, GRANT_REVOKED_LABEL, GRANT_REVOKE_ACTION, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
-  grantRevokePayload, revokePayload,
+  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, GRANT_REVOKE_ACTION, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
+  grantRevokePayload, grantRevokedParts, revokePayload,
 } from './intent-actions.js'
 import type { IntentVerifier } from './intent-verify.js'
 import { describeIntentRefusal } from './connector-stream.js'
@@ -333,20 +333,24 @@ export class MachineEnrolment {
    * itself, so a relay replaying the old signed grant gets nowhere.
    */
   revokeGrant(principal: RelayPrincipal | undefined, payload: unknown): EnrolResult {
-    const grantId = (payload as { grantId?: unknown } | null)?.grantId
+    const p = payload as { grantId?: unknown; keep?: unknown } | null
+    const grantId = p?.grantId
+    const keep = p?.keep
     if (typeof grantId !== 'string' || !grantId || grantId.length > 200) throw refuse('Malformed request')
+    // A supersede keeps one of the share's own grants.
+    if (keep !== undefined && (typeof keep !== 'string' || keep.length > 200 || !keep.startsWith(`${grantId}:`))) throw refuse('Malformed request')
     if (!this.opts.intents) throw new EnrolmentError('enrol_unavailable', 'This computer cannot check signed requests')
     const { decision, signer } = this.opts.intents.checkDeviceIntent(
-      principal, (payload as { intent?: unknown }).intent, GRANT_REVOKE_ACTION, grantRevokePayload(grantId), false)
+      principal, (payload as { intent?: unknown }).intent, GRANT_REVOKE_ACTION, grantRevokePayload(grantId, keep), false)
     if (!signer) throw refuse(describeIntentRefusal(decision.reason))
-    addRevokedGrant(grantId, this.opts.devicesFile, this.opts.machineId, this.now())
+    addRevokedGrant(keep === undefined ? { grantId } : { grantId, keep }, this.opts.devicesFile, this.opts.machineId, this.now())
     // Signed, so the owner's browser can tell the machine really has it and
     // stop retrying; a relay can't fake the confirmation.
     const { key } = this.machineKey()
     return {
-      enrolId: `grant_revoke:${grantId}`,
+      enrolId: keep === undefined ? `grant_revoke:${grantId}` : `grant_revoke:${grantId}>${keep}`,
       state: 'approved',
-      signature: signP1363(key, transcript(GRANT_REVOKED_LABEL, grantId)).toString('base64url'),
+      signature: signP1363(key, transcript(...grantRevokedParts(grantId, keep))).toString('base64url'),
     }
   }
 

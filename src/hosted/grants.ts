@@ -13,22 +13,24 @@
  *   refused rather than signed;
  * - the owner sees role, permissions, expiry and each device's fingerprint
  *   before signing;
- * - what the owner chose (role, end) and every grant this browser issued are
- *   kept here (IndexedDB), and renewal and revocation work from that record;
+ * - what the owner chose (session, member, role, end) and every grant this
+ *   browser issued are kept here (IndexedDB); a grant names that session and
+ *   member, and renewal and revocation work from that record;
  * - renewal re-signs only a share's current grant, changing nothing but the
  *   expiry (never past its signed `notAfter`);
- * - every new signature revokes the one it supersedes, and revoking a share
- *   revokes its id, which the machine applies to all its grants;
+ * - every new signature supersedes, on the machine, every grant issued for
+ *   the share before it, from this browser or any other of the owner's; and
+ *   revoking a share revokes its id, which covers all its grants for good;
  * - revocations are kept here until the machine confirms them with its key.
  */
 
 import {
-  GRANT_ACTION, GRANT_REVOKED_LABEL, GRANT_REVOKE_ACTION, MAX_GRANT_LIFETIME_MS, grantNeedsStepUp, grantPayload, grantRevokePayload,
+  GRANT_ACTION, GRANT_REVOKE_ACTION, MAX_GRANT_LIFETIME_MS, grantIssuedAt, grantNeedsStepUp, grantPayload, grantRevokePayload, grantRevokedParts,
 } from '../../server/relay/intent-actions'
 import type { GrantBody, SignedIntent } from '../../server/relay/intent-actions'
 import {
   currentUserId, defaultBrowserLabel, fromB64url, getOrCreateBrowserKey, transcript, trustStorage, verifyWith,
-  type IssuedGrant, type TrustStorage,
+  type IssuedGrant, type PendingRevocation, type TrustStorage,
 } from './deviceTrust'
 import { workspaceHeaders } from './workspace'
 
@@ -124,14 +126,33 @@ function entryFor(ledger: Ledger, shareId: string): IssuedGrant | undefined {
   return ledger.entries.find(e => e.shareId === shareId)
 }
 
+/** What the owner chose when sharing, from their own input (never the relay's listing). */
+export interface SharedChoice {
+  shareId: string
+  sessionId: string
+  granteeUserId: string
+  role: ShareRole
+  notAfter: number | null
+}
+
 /**
- * Remember what the owner chose when sharing: the role and the share's end.
- * Allow later signs exactly this, whatever the relay lists by then.
+ * Remember what the owner chose when sharing: session, member, role and end.
+ * Allow later signs exactly this, whatever the relay lists by then. Sharing
+ * again (which keeps the share's id) replaces the choice, so narrowing a
+ * share signs the narrower role.
  */
-export async function recordShare(machineId: string, shareId: string, role: ShareRole, notAfter: number | null, storage: TrustStorage = trustStorage()): Promise<void> {
+export async function recordShare(machineId: string, choice: SharedChoice, storage: TrustStorage = trustStorage()): Promise<void> {
   const ledger = await loadLedger(machineId, storage)
-  if (!ledger || entryFor(ledger, shareId)) return
-  ledger.entries.push({ shareId, role, notAfter, current: null, issuedIds: [], revoked: false })
+  if (!ledger) return
+  const entry = entryFor(ledger, choice.shareId)
+  if (entry) {
+    entry.sessionId = choice.sessionId
+    entry.granteeUserId = choice.granteeUserId
+    entry.role = choice.role
+    entry.notAfter = choice.notAfter
+  } else {
+    ledger.entries.push({ ...choice, current: null, issuedIds: [], revoked: false })
+  }
   await ledger.save()
 }
 
@@ -161,15 +182,20 @@ export interface GrantProposal {
   devices: GranteeKey[]
   /** Devices added since this browser last signed for the share (the "new device" case). */
   added: GranteeKey[]
-  /** The grant this one supersedes; revoked on the machine once this is signed. */
-  replaces: string | null
+  /**
+   * False when this browser has no record of making the share: role, session
+   * and member then come from the relay's listing, so the owner must check them.
+   */
+  recorded: boolean
+  /** Another share this browser made for the same session and member, if any. */
+  duplicateOf: string | null
 }
 
 /**
- * Propose the grant for a share. Role and end come from what the owner chose
- * in this browser (recordShare); only a share made elsewhere falls back to
- * the relay's listing, which must then match a role exactly and is shown in
- * full for review.
+ * Propose the grant for a share. Session, member, role and end come from what
+ * the owner chose in this browser (recordShare), and a listing that disagrees
+ * is refused. Only a share made elsewhere falls back to the relay's listing,
+ * which must then match a role exactly and is flagged for review.
  */
 export async function proposeGrant(
   share: ShareWithGrant,
@@ -181,26 +207,32 @@ export async function proposeGrant(
   const ledger = await loadLedger(share.machineId, storage)
   const entry = ledger ? entryFor(ledger, share.id) : undefined
   if (entry?.revoked) throw new GrantError('rejected', 'This share was revoked.')
+  if (entry && (entry.sessionId !== share.localSessionId || entry.granteeUserId !== share.granteeUserId)) {
+    throw new GrantError('rejected', "This share doesn't match what you shared. Revoke it and share again.")
+  }
   const role = entry?.role ?? roleOf(share.permissions)
   if (!role) throw new GrantError('unknown_permissions', "This share lists permissions this page doesn't recognise. Revoke it and share again.")
-  if (!share.granteeUserId) throw new GrantError('rejected', 'This share has no member to grant to')
+  const granteeUserId = entry?.granteeUserId ?? share.granteeUserId
+  if (!granteeUserId) throw new GrantError('rejected', 'This share has no member to grant to')
   if (devices.length === 0) throw new GrantError('no_keys', 'They have no browser to allow yet. Ask them to open the session once, then come back here.')
   const notAfter = entry ? entry.notAfter : share.expiresAt ? Date.parse(share.expiresAt) : null
   const previous = parseGrantText(entry?.current?.grant)
   const previousKeys = new Set(previous?.granteeKeys.map(k => k.keyId) ?? [])
   const grant: GrantBody = {
     grantId: freshGrantId(share.id, now),
-    sessionId: share.localSessionId,
-    granteeUserId: share.granteeUserId,
+    sessionId: entry?.sessionId ?? share.localSessionId,
+    granteeUserId,
     permissions: [...ROLE_PERMISSIONS[role]],
     granteeKeys: devices.map(d => ({ keyId: d.keyId, spki: d.spki })),
     expiresAt: grantExpiry(notAfter, now),
     notAfter,
   }
+  const duplicate = ledger?.entries.find(e => e.shareId !== share.id && !e.revoked && e.sessionId === grant.sessionId && e.granteeUserId === granteeUserId)
   return {
     share, grant, role, devices,
     added: previous ? devices.filter(d => !previousKeys.has(d.keyId)) : devices,
-    replaces: entry?.current?.grantId ?? null,
+    recorded: !!entry,
+    duplicateOf: duplicate?.shareId ?? null,
   }
 }
 
@@ -223,22 +255,28 @@ async function storeGrant(transport: GrantTransport, share: Pick<ShareWithGrant,
   return text
 }
 
-/** Sign a proposal the owner has reviewed, record it, and revoke the grant it supersedes. */
+/**
+ * Sign a proposal the owner has reviewed, record it, and supersede on the
+ * machine every grant issued for the share before it — from this browser or
+ * any other, broader or not — so none of them can be renewed back into use.
+ */
 export async function signGrant(transport: GrantTransport, proposal: GrantProposal, storage: TrustStorage = trustStorage()): Promise<void> {
   const text = await storeGrant(transport, proposal.share, proposal.grant)
   const ledger = await loadLedger(proposal.share.machineId, storage)
   if (ledger) {
     let entry = entryFor(ledger, proposal.share.id)
     if (!entry) {
-      entry = { shareId: proposal.share.id, role: proposal.role, notAfter: proposal.grant.notAfter ?? null, current: null, issuedIds: [], revoked: false }
+      entry = {
+        shareId: proposal.share.id, sessionId: proposal.grant.sessionId, granteeUserId: proposal.grant.granteeUserId,
+        role: proposal.role, notAfter: proposal.grant.notAfter ?? null, current: null, issuedIds: [], revoked: false,
+      }
       ledger.entries.push(entry)
     }
     entry.current = { grantId: proposal.grant.grantId, grant: text }
     entry.issuedIds = [...entry.issuedIds, proposal.grant.grantId]
     await ledger.save()
   }
-  // Superseded grants are revoked whether they were broader or not.
-  if (proposal.replaces) await queueRevocations(transport, proposal.share.machineId, [proposal.replaces], storage)
+  await queueRevocations(transport, proposal.share.machineId, [{ grantId: proposal.share.id, keep: proposal.grant.grantId }], storage)
 }
 
 export type GrantStatus =
@@ -284,7 +322,7 @@ export async function renewGrants(transport: GrantTransport, machineId: string, 
     } catch (err) {
       if (err instanceof GrantError && err.code === 'gone') {
         entry.revoked = true
-        await queueRevocations(transport, machineId, [entry.shareId], storage)
+        await queueRevocations(transport, machineId, [{ grantId: entry.shareId }], storage)
       }
       // Otherwise (not confirmed here, relay error): try again next time.
     }
@@ -296,39 +334,66 @@ export async function renewGrants(transport: GrantTransport, machineId: string, 
 // --- Revocation ------------------------------------------------------------
 
 /**
- * Keep these grant ids revoked until the machine confirms each with its key,
- * then try now. The share can go from the relay at once; this list makes
- * sure a relay that keeps presenting the old grant gets nowhere.
+ * Fold `next` into the pending list: one entry per share, a full revocation
+ * covering any supersede, the supersede keeping the later grant covering an
+ * earlier one (mirrors the machine's trust-store withRevocation).
  */
-export async function queueRevocations(transport: GrantTransport, machineId: string, grantIds: string[], storage: TrustStorage = trustStorage()): Promise<string[]> {
-  const userId = await currentUserId()
-  if (userId && storage.getRevocations && storage.putRevocations) {
-    const pending = new Set(await storage.getRevocations(userId, machineId))
-    for (const id of grantIds) pending.add(id)
-    await storage.putRevocations(userId, machineId, [...pending])
-  }
-  return flushRevocations(transport, machineId, storage, grantIds)
+function addPending(list: PendingRevocation[], next: PendingRevocation): PendingRevocation[] {
+  const covered = list.some(r => r.grantId === next.grantId
+    && (r.keep === undefined || (next.keep !== undefined && (r.keep === next.keep || issuedBefore(next.keep, r.keep, next.grantId)))))
+  if (covered) return list
+  return [...list.filter(r => r.grantId !== next.grantId), next.keep === undefined ? { grantId: next.grantId } : { grantId: next.grantId, keep: next.keep }]
 }
 
-/** Send pending revocations; returns the ids still waiting for the machine's confirmation. */
-export async function flushRevocations(transport: GrantTransport, machineId: string, storage: TrustStorage = trustStorage(), extra: string[] = []): Promise<string[]> {
+function issuedBefore(a: string, b: string, shareId: string): boolean {
+  const ta = grantIssuedAt(a, shareId)
+  const tb = grantIssuedAt(b, shareId)
+  return ta !== null && tb !== null && ta < tb
+}
+
+/** Older stored entries were bare ids. */
+function asPending(value: unknown): PendingRevocation | null {
+  if (typeof value === 'string') return { grantId: value }
+  const v = value as Partial<PendingRevocation> | null
+  if (!v || typeof v.grantId !== 'string') return null
+  return typeof v.keep === 'string' ? { grantId: v.grantId, keep: v.keep } : { grantId: v.grantId }
+}
+
+/**
+ * Keep these revocations until the machine confirms each with its key, then
+ * try now. The share can go from the relay at once; this list makes sure a
+ * relay that keeps presenting an old grant gets nowhere.
+ */
+export async function queueRevocations(transport: GrantTransport, machineId: string, revocations: PendingRevocation[], storage: TrustStorage = trustStorage()): Promise<PendingRevocation[]> {
+  const userId = await currentUserId()
+  if (userId && storage.getRevocations && storage.putRevocations) {
+    let pending = (await storage.getRevocations(userId, machineId)).map(asPending).filter((r): r is PendingRevocation => r !== null)
+    for (const r of revocations) pending = addPending(pending, r)
+    await storage.putRevocations(userId, machineId, pending)
+  }
+  return flushRevocations(transport, machineId, storage, revocations)
+}
+
+/** Send pending revocations; returns those still waiting for the machine's confirmation. */
+export async function flushRevocations(transport: GrantTransport, machineId: string, storage: TrustStorage = trustStorage(), extra: PendingRevocation[] = []): Promise<PendingRevocation[]> {
   const userId = await currentUserId()
   if (!userId) return extra
-  const stored = storage.getRevocations ? await storage.getRevocations(userId, machineId) : []
-  const pending = [...new Set([...stored, ...extra])]
+  const stored = storage.getRevocations ? (await storage.getRevocations(userId, machineId)).map(asPending).filter((r): r is PendingRevocation => r !== null) : []
+  let pending: PendingRevocation[] = []
+  for (const r of [...stored, ...extra]) pending = addPending(pending, r)
   const pin = await storage.getPin(userId, machineId)
-  const left: string[] = []
-  for (const grantId of pending) {
+  const left: PendingRevocation[] = []
+  for (const r of pending) {
     try {
-      const intent = await transport.signIntent({ action: GRANT_REVOKE_ACTION, sessionId: null, payload: grantRevokePayload(grantId) })
-      if (!intent) { left.push(grantId); continue }
-      const reply = await transport.sendDeviceFrame('enrol_grant_revoke', { grantId, intent }) as { state?: unknown; signature?: unknown }
+      const intent = await transport.signIntent({ action: GRANT_REVOKE_ACTION, sessionId: null, payload: grantRevokePayload(r.grantId, r.keep) })
+      if (!intent) { left.push(r); continue }
+      const reply = await transport.sendDeviceFrame('enrol_grant_revoke', { grantId: r.grantId, ...(r.keep === undefined ? {} : { keep: r.keep }), intent }) as { state?: unknown; signature?: unknown }
       // Only the machine's own key confirms it; the relay could fake "approved".
       const confirmed = !!pin && reply.state === 'approved' && typeof reply.signature === 'string'
-        && await verifyWith(fromB64url(pin.machineKey), transcript(GRANT_REVOKED_LABEL, grantId), fromB64url(reply.signature))
-      if (!confirmed) left.push(grantId)
+        && await verifyWith(fromB64url(pin.machineKey), transcript(...grantRevokedParts(r.grantId, r.keep)), fromB64url(reply.signature))
+      if (!confirmed) left.push(r)
     } catch {
-      left.push(grantId)
+      left.push(r)
     }
   }
   if (storage.putRevocations) await storage.putRevocations(userId, machineId, left)
@@ -340,15 +405,20 @@ export async function flushRevocations(transport: GrantTransport, machineId: str
  * it (`<share>:…`), whatever the relay lists. Recorded here for good, so it
  * is never renewed or re-signed.
  */
-export async function revokeShareGrants(transport: GrantTransport, share: Pick<ShareWithGrant, 'id' | 'machineId'>, storage: TrustStorage = trustStorage()): Promise<string[]> {
+export async function revokeShareGrants(transport: GrantTransport, share: Pick<ShareWithGrant, 'id' | 'machineId' | 'localSessionId' | 'granteeUserId'>, storage: TrustStorage = trustStorage()): Promise<PendingRevocation[]> {
   const ledger = await loadLedger(share.machineId, storage)
   if (ledger) {
     const entry = entryFor(ledger, share.id)
     if (entry) entry.revoked = true
-    else ledger.entries.push({ shareId: share.id, role: 'viewer', notAfter: null, current: null, issuedIds: [], revoked: true })
+    else {
+      ledger.entries.push({
+        shareId: share.id, sessionId: share.localSessionId, granteeUserId: share.granteeUserId ?? '',
+        role: 'viewer', notAfter: null, current: null, issuedIds: [], revoked: true,
+      })
+    }
     await ledger.save()
   }
-  return queueRevocations(transport, share.machineId, [share.id], storage)
+  return queueRevocations(transport, share.machineId, [{ grantId: share.id }], storage)
 }
 
 /**

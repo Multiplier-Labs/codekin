@@ -161,8 +161,8 @@ export interface TrustStorage {
   putPin(pin: MachinePin): Promise<void>
   deletePin(userId: string, machineId: string): Promise<void>
   /** Grant revocations not yet confirmed by the machine (§6.7). Optional: storages without it don't persist them. */
-  getRevocations?(userId: string, machineId: string): Promise<string[]>
-  putRevocations?(userId: string, machineId: string, grantIds: string[]): Promise<void>
+  getRevocations?(userId: string, machineId: string): Promise<PendingRevocation[]>
+  putRevocations?(userId: string, machineId: string, revocations: PendingRevocation[]): Promise<void>
   /** The owner's own record of the share grants this browser issued (§6.7, grants.ts). */
   getIssuedGrants?(userId: string, machineId: string): Promise<IssuedGrant[]>
   putIssuedGrants?(userId: string, machineId: string, issued: IssuedGrant[]): Promise<void>
@@ -175,6 +175,9 @@ export interface TrustStorage {
  */
 export interface IssuedGrant {
   shareId: string
+  /** The session and member the owner shared with: a grant for this share names exactly these. */
+  sessionId: string
+  granteeUserId: string
   role: 'viewer' | 'editor'
   /** The share's end as the owner chose it (ms), or null. */
   notAfter: number | null
@@ -184,6 +187,15 @@ export interface IssuedGrant {
   issuedIds: string[]
   /** The owner revoked the share: never renew or re-sign it. Kept for good. */
   revoked: boolean
+}
+
+/**
+ * A revocation waiting for the machine's confirmation: a share id (all its
+ * grants), or with `keep` a supersede (all its grants issued up to `keep`).
+ */
+export interface PendingRevocation {
+  grantId: string
+  keep?: string
 }
 
 /** Fired on window whenever a machine pin is saved or removed (signers reload their key). */
@@ -233,11 +245,11 @@ export function indexedDbTrustStorage(): TrustStorage {
     putPin: async pin => { await request((await store(PINS, 'readwrite')).put(pin)); trustChanged() },
     deletePin: async (userId, machineId) => { await request((await store(PINS, 'readwrite')).delete([userId, machineId])); trustChanged() },
     getRevocations: async (userId, machineId) => {
-      const row = await request((await store(REVOCATIONS, 'readonly')).get([userId, machineId]) as IDBRequest<{ grantIds?: string[] } | undefined>)
-      return row?.grantIds ?? []
+      const row = await request((await store(REVOCATIONS, 'readonly')).get([userId, machineId]) as IDBRequest<{ revocations?: PendingRevocation[] } | undefined>)
+      return row?.revocations ?? []
     },
-    putRevocations: async (userId, machineId, grantIds) => {
-      await request((await store(REVOCATIONS, 'readwrite')).put({ userId, machineId, grantIds }))
+    putRevocations: async (userId, machineId, revocations) => {
+      await request((await store(REVOCATIONS, 'readwrite')).put({ userId, machineId, revocations }))
     },
     getIssuedGrants: async (userId, machineId) => {
       const row = await request((await store(ISSUED, 'readonly')).get([userId, machineId]) as IDBRequest<{ issued?: IssuedGrant[] } | undefined>)

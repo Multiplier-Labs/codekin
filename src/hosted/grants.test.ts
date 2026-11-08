@@ -20,20 +20,20 @@ import {
   flushRevocations, proposeGrant, recordShare, renewGrants, revokeShareGrants, signGrant,
   type GranteeKey, type GrantTransport, type ShareWithGrant,
 } from './grants'
-import { getOrCreateBrowserKey, type BrowserKey, type IssuedGrant, type MachinePin, type TrustStorage } from './deviceTrust'
+import { getOrCreateBrowserKey, type BrowserKey, type IssuedGrant, type MachinePin, type PendingRevocation, type TrustStorage } from './deviceTrust'
 import { createIntentSigner } from './intentSigner'
 import { IntentVerifier } from '../../server/relay/intent-verify'
 import { MachineEnrolment } from '../../server/relay/enrolment'
 import { ensureMachineIdentity } from '../../server/relay/machine-identity'
-import { emptyTrustStore, readTrustStore, writeTrustStore } from '../../server/relay/trust-store'
+import { addRevokedGrant, emptyTrustStore, readTrustStore, writeTrustStore, type TrustStore } from '../../server/relay/trust-store'
 import { frameAction, framePayload } from '../../server/relay/intent-actions'
 import type { GrantBody, SignedGrant } from '../../server/relay/intent-actions'
 import type { RelayPrincipal } from '../../server/relay/relay-protocol'
 
-function memoryStorage(): TrustStorage & { revocations: Map<string, string[]>; issued: Map<string, IssuedGrant[]> } {
+function memoryStorage(): TrustStorage & { revocations: Map<string, PendingRevocation[]>; issued: Map<string, IssuedGrant[]> } {
   const keys = new Map<string, BrowserKey>()
   const pins = new Map<string, MachinePin>()
-  const revocations = new Map<string, string[]>()
+  const revocations = new Map<string, PendingRevocation[]>()
   const issued = new Map<string, IssuedGrant[]>()
   return {
     revocations,
@@ -64,6 +64,7 @@ describe('share grants from the browser to the machine', () => {
   let devices: GranteeKey[]
   let share: ShareWithGrant
   let machineDown = false
+  let machine: MachineEnrolment
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'codekin-grants-browser-'))
@@ -80,7 +81,7 @@ describe('share grants from the browser to the machine', () => {
       credentials: [{ keyId: ownerKey.keyId, kind: 'browser', userId: 'u-owner', spki: ownerKey.spki, label: 'Owner', addedAt: 'x', addedBy: 'local' }],
     })
     verifier = new IntentVerifier({ machineId: 'm1', devicesFile })
-    const machine = new MachineEnrolment({ machineId: 'm1', identityFile, devicesFile, secretStore: null, intents: verifier })
+    machine = new MachineEnrolment({ machineId: 'm1', identityFile, devicesFile, secretStore: null, intents: verifier })
     const ownerSigner = createIntentSigner('m1', ownerStorage)
     const ownerPrincipal: RelayPrincipal = { userId: 'u-owner', role: 'owner', grants: {} }
     machineDown = false
@@ -121,7 +122,7 @@ describe('share grants from the browser to the machine', () => {
 
   /** Share, as the dialog does: record the owner's choice, then sign what is proposed. */
   async function shareAs(role: 'viewer' | 'editor', notAfter: number | null = null) {
-    await recordShare('m1', share.id, role, notAfter, ownerStorage)
+    await recordShare('m1', { shareId: share.id, sessionId: 's1', granteeUserId: 'u-dana', role, notAfter }, ownerStorage)
     const proposal = await proposeGrant(share, devices, { storage: ownerStorage })
     await signGrant(transport, proposal, ownerStorage)
     return proposal
@@ -143,7 +144,7 @@ describe('share grants from the browser to the machine', () => {
   })
 
   it('signs the role the owner chose, whatever the relay lists later', async () => {
-    await recordShare('m1', share.id, 'viewer', null, ownerStorage)
+    await recordShare('m1', { shareId: share.id, sessionId: 's1', granteeUserId: 'u-dana', role: 'viewer', notAfter: null }, ownerStorage)
     // The relay now claims Editor (or something stranger).
     const proposal = await proposeGrant({ ...share, permissions: [...EDITOR, 'approve_mutating_tool'] }, devices, { storage: ownerStorage })
     expect(proposal.grant.permissions).toEqual(['view', 'view_diff'])
@@ -176,13 +177,13 @@ describe('share grants from the browser to the machine', () => {
     expect(after.expiresAt).toBeGreaterThan(before.expiresAt)
   })
 
-  it('revokes every grant it supersedes, even if the relay hides them', async () => {
-    const first = await shareAs('editor')
+  it('supersedes every earlier grant, even if the relay hides the new one', async () => {
+    await shareAs('editor')
     const broad = stored()[0]
     share = { ...share, signedGrantRaw: null }
-    const second = await proposeGrant(share, devices, { storage: ownerStorage })
-    expect(second.replaces).toBe(first.grant.grantId)
+    const second = await proposeGrant(share, devices, { storage: ownerStorage, now: Date.now() + 1000 })
     await signGrant(transport, second, ownerStorage)
+    expect(readTrustStore(devicesFile)?.revokedGrants).toMatchObject([{ grantId: share.id, keep: second.grant.grantId }])
     // The relay keeps presenting the old one and leaves out the new: nothing.
     expect(verifier.effectivePrincipal(danaPrincipal([broad]))?.grants).toEqual({})
     expect(verifier.effectivePrincipal(danaPrincipal(stored()))?.grants).toEqual({ s1: EDITOR })
@@ -195,10 +196,10 @@ describe('share grants from the browser to the machine', () => {
     const second = stored()[0]
     machineDown = true
     const left = await revokeShareGrants(transport, share, ownerStorage)
-    expect(left).toEqual([share.id])
+    expect(left).toEqual([{ grantId: share.id }])
     // A relay answering "approved" without the machine's signature doesn't count.
     const fakeOk: GrantTransport = { ...transport, sendDeviceFrame: async () => ({ state: 'approved' }) }
-    expect(await flushRevocations(fakeOk, 'm1', ownerStorage)).toEqual([share.id])
+    expect(await flushRevocations(fakeOk, 'm1', ownerStorage)).toEqual([{ grantId: share.id }])
     machineDown = false
     expect(await flushRevocations(transport, 'm1', ownerStorage)).toEqual([])
     expect(verifier.effectivePrincipal(danaPrincipal([first]))?.grants).toEqual({})
@@ -223,5 +224,79 @@ describe('share grants from the browser to the machine', () => {
     const both = [...devices, { keyId: laptop.keyId, spki: laptop.spki, label: 'Mac Safari', lastSeenAt: null }]
     const proposal = await proposeGrant(share, both, { storage: ownerStorage })
     expect(proposal.added.map(d => d.label)).toEqual(['Mac Safari'])
+  })
+
+  it('narrows when the owner shares again: the new role is what gets signed', async () => {
+    await shareAs('editor')
+    // Sharing again keeps the share's id (upsertShare); the choice is replaced.
+    await recordShare('m1', { shareId: share.id, sessionId: 's1', granteeUserId: 'u-dana', role: 'viewer', notAfter: null }, ownerStorage)
+    const proposal = await proposeGrant({ ...share, permissions: ['view', 'view_diff'] }, devices, { storage: ownerStorage, now: Date.now() + 1000 })
+    expect(proposal.role).toBe('viewer')
+    expect(proposal.grant.permissions).toEqual(['view', 'view_diff'])
+  })
+
+  it('refuses a listing whose member or session differs from what the owner shared', async () => {
+    await recordShare('m1', { shareId: share.id, sessionId: 's1', granteeUserId: 'u-dana', role: 'editor', notAfter: null }, ownerStorage)
+    await expect(proposeGrant({ ...share, granteeUserId: 'u-eve' }, devices, { storage: ownerStorage })).rejects.toMatchObject({ code: 'rejected' })
+    await expect(proposeGrant({ ...share, localSessionId: 's2' }, devices, { storage: ownerStorage })).rejects.toMatchObject({ code: 'rejected' })
+  })
+
+  it('flags a share it has no record of, and one that repeats a recorded share', async () => {
+    await recordShare('m1', { shareId: share.id, sessionId: 's1', granteeUserId: 'u-dana', role: 'viewer', notAfter: null }, ownerStorage)
+    const unknown = await proposeGrant({ ...share, id: 'g2' }, devices, { storage: ownerStorage })
+    expect(unknown).toMatchObject({ recorded: false, duplicateOf: 'g1' })
+    expect((await proposeGrant(share, devices, { storage: ownerStorage })).recorded).toBe(true)
+  })
+
+  describe('an owner with two browsers', () => {
+    let laptopStorage: ReturnType<typeof memoryStorage>
+    let laptop: GrantTransport
+
+    beforeEach(async () => {
+      laptopStorage = memoryStorage()
+      const key = await getOrCreateBrowserKey('u-owner', laptopStorage)
+      const pin = await ownerStorage.getPin('u-owner', 'm1')
+      await laptopStorage.putPin({ ...pin!, keyId: key.keyId })
+      const store = readTrustStore(devicesFile) as TrustStore
+      writeTrustStore(devicesFile, {
+        ...store,
+        credentials: [...store.credentials, { keyId: key.keyId, kind: 'browser', userId: 'u-owner', spki: key.spki, label: 'Laptop', addedAt: 'x', addedBy: 'local' }],
+      })
+      const signer = createIntentSigner('m1', laptopStorage)
+      const ownerPrincipal: RelayPrincipal = { userId: 'u-owner', role: 'owner', grants: {} }
+      laptop = {
+        signIntent: intent => signer.sign(intent) as ReturnType<GrantTransport['signIntent']>,
+        sendDeviceFrame: async (kind, payload) => machine.handle(kind, ownerPrincipal, JSON.parse(JSON.stringify(payload))).payload,
+      }
+    })
+
+    it("a narrowing from one browser stands, however often the other renews the broader grant", async () => {
+      await shareAs('editor')
+      const broad = JSON.parse(stored()[0].grant) as GrantBody
+      // The laptop narrows; it has no record of the share.
+      share = { ...share, permissions: ['view', 'view_diff'] }
+      const narrow = await proposeGrant(share, devices, { storage: laptopStorage, now: Date.now() + 1000 })
+      expect(narrow).toMatchObject({ recorded: false, role: 'viewer' })
+      await signGrant(laptop, narrow, laptopStorage)
+      const narrowSigned = stored()[0]
+      // The first browser renews its (now superseded) broader grant.
+      expect(await renewGrants(transport, 'm1', { storage: ownerStorage, now: broad.expiresAt - 2 * DAY })).toBe(1)
+      const renewed = stored()[0]
+      expect((JSON.parse(renewed.grant) as GrantBody).grantId).toBe(broad.grantId)
+      // Presented alone or together, the broader grant gets nothing.
+      expect(verifier.effectivePrincipal(danaPrincipal([renewed]))?.grants).toEqual({})
+      expect(verifier.effectivePrincipal(danaPrincipal([renewed, narrowSigned]))?.grants).toEqual({ s1: ['view', 'view_diff'] })
+    })
+
+    it('a revocation from one browser outlasts the other one renewing', async () => {
+      await shareAs('editor')
+      const g = JSON.parse(stored()[0].grant) as GrantBody
+      expect(await revokeShareGrants(laptop, share, laptopStorage)).toEqual([])
+      expect(await renewGrants(transport, 'm1', { storage: ownerStorage, now: g.expiresAt - 2 * DAY })).toBe(1)
+      expect(verifier.effectivePrincipal(danaPrincipal())?.grants).toEqual({})
+      // Long after any grant could have lived, the revocation is still there.
+      addRevokedGrant({ grantId: 'other-share' }, devicesFile, 'm1', Date.now() + 90 * DAY)
+      expect(readTrustStore(devicesFile)?.revokedGrants.map(r => r.grantId)).toEqual([share.id, 'other-share'])
+    })
   })
 })

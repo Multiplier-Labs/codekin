@@ -341,7 +341,7 @@ export const MAX_GRANT_LIFETIME_MS = 30 * 24 * 60 * 60_000
 
 /** What an owner signs to let one person act on one session of one machine. */
 export interface GrantBody {
-  /** The relay's share id. */
+  /** `<share id>:<issued>`: the relay's share id, then when this grant was first signed (grantIssuedAt). */
   grantId: string
   sessionId: string
   granteeUserId: string
@@ -374,9 +374,56 @@ export function grantPayload(grantText: string): Uint8Array {
   return encoder.encode(grantText)
 }
 
-/** What a grant_revoke intent covers: the grant id. */
-export function grantRevokePayload(grantId: string): Uint8Array {
-  return framed([encoder.encode(grantId)])
+/**
+ * What a grant_revoke intent covers: the grant id, and for a supersede the
+ * one grant that survives it.
+ */
+export function grantRevokePayload(grantId: string, keep?: string): Uint8Array {
+  return framed(keep === undefined ? [encoder.encode(grantId)] : [encoder.encode(grantId), encoder.encode(keep)])
+}
+
+/**
+ * The parts the machine signs to confirm a revocation; a supersede has its
+ * kept grant as a third part.
+ */
+export function grantRevokedParts(grantId: string, keep?: string): [label: string, ...parts: string[]] {
+  return keep === undefined ? [GRANT_REVOKED_LABEL, grantId] : [GRANT_REVOKED_LABEL, grantId, keep]
+}
+
+/**
+ * When a grant for a share was first signed: the owner's browser names each
+ * new grant `<share>:<ms base 36><8 hex>` (renewal keeps the id), so this
+ * orders a share's grants by issue, never by renewal. Null for an id of any
+ * other shape.
+ */
+export function grantIssuedAt(grantId: string, shareId: string): number | null {
+  if (!grantId.startsWith(`${shareId}:`)) return null
+  const m = /^([0-9a-z]{1,11})[0-9a-f]{8}$/.exec(grantId.slice(shareId.length + 1))
+  if (!m) return null
+  const t = parseInt(m[1], 36)
+  return Number.isSafeInteger(t) ? t : null
+}
+
+/**
+ * A revocation recorded on the machine. Without `keep` it covers the id and
+ * every `<id>:…` grant. With `keep` it is a supersede: it covers the id and
+ * every `<id>:…` grant issued no later than `keep`, other than `keep` itself,
+ * so grants signed after it (by any of the owner's browsers) still stand.
+ */
+export interface GrantRevocation {
+  grantId: string
+  keep?: string
+}
+
+export function grantRevokedBy(grantId: string, r: GrantRevocation): boolean {
+  if (grantId === r.grantId) return true
+  if (!grantId.startsWith(`${r.grantId}:`)) return false
+  if (r.keep === undefined) return true
+  if (grantId === r.keep) return false
+  const kept = grantIssuedAt(r.keep, r.grantId)
+  const issued = grantIssuedAt(grantId, r.grantId)
+  // Anything not datable is revoked: only a later grant survives a supersede.
+  return kept === null || issued === null || issued <= kept
 }
 
 /** A grant that lets someone approve shell commands is privileged (§6.2). */
