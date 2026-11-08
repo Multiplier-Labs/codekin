@@ -1,6 +1,6 @@
 # Relay trust: device-signed intents and end-to-end encryption
 
-**Status:** Spec. Built: slice 1 (relay audit events, §7.1). The rest is not built.
+**Status:** Spec, decisions D1–D7 settled (§13). Built: slice 1 (relay audit events, §7.1). The rest is not built.
 **Date:** 2026-11-08
 **Context:** a hosted relay is trusted to say who the machine owner is (§3). This spec removes that trust in two levels: **L1 device-signed intents** and **L2 end-to-end content encryption**. It also adds the relay audit events that are declared but never emitted.
 **Basis:** `origin/main` at v0.10.5 (`a93f6e3`). All `path:line` references point there.
@@ -234,7 +234,10 @@ The two steps finish together: the user types one code on the machine, and the m
   2. The connector verifies the assertion the way any WebAuthn verifier does (§6.4, step 3).
   3. It adds `kB` with `addedBy: passkey:<id>`.
 
-  The new device is only as trusted as the user's passkey provider (iCloud Keychain, Google Password Manager, 1Password). That is a deliberate trade, listed in §13.
+  The new device is only as trusted as the user's passkey provider (iCloud Keychain, Google Password Manager, 1Password). That is a deliberate trade (D5 in §13), with these limits:
+  - The assertion must carry the user-verification flag.
+  - The machine's device list shows the browser as "added by passkey" with the time. The owner's other enrolled browsers are told about it.
+  - A machine-local setting, **"Only allow devices confirmed on this computer"** (default off), turns passkey certification off for owners who don't trust their passkey provider's sync. Like `policy`, only local surfaces can change it.
 - **Without one.** Run the §5.2 ceremony and confirm on the machine.
 - **New passkeys** can only be added through §5.2. A passkey can't add another passkey.
 
@@ -385,7 +388,10 @@ Verification sits at the relay message boundary in `connector.ts`: `request`, `s
 
 **Privileged actions** are listed in §6.2: saving standing approval rules, bypass permission mode, shell-approving grants, and device and policy changes. If the owner has a passkey enrolled on the machine, these need a passkey assertion. The OS prompt ("Use Face ID to approve: Share session 'api-fix' with Dana, shell approvals") is the one thing a compromised page can't fake. The prompt text comes from the intent, so the connector sees the same action the user approved.
 
-If the owner has no enrolled passkey, the browser key is accepted. This is decision D2 in §13.
+If the owner has no enrolled passkey, the browser key is accepted (D2 in §13). A passkey can't be required everywhere, because the desktop app's web view can't use passkeys (§4.2). Instead:
+- The pairing flow offers passkey enrolment while the user is at the machine (§5.3).
+- A workspace setting, **"Privileged actions need a passkey"** (default off), refuses browser-key step-up in that workspace. Workspaces turning it on should expect the desktop app's web mode to be unable to perform privileged actions.
+- The machine-local intent log (§7.2) records the step-up as `stepUp: "browser-key"` or `"passkey"`, so the owner can see which actions had only the weaker confirmation.
 
 ### 6.7 Signed share grants and grantee intents
 
@@ -413,7 +419,8 @@ The grant JSON travels next to the intent so the connector can hash it and read 
 
 **Lifecycle:**
 - **Revocation.** A signed `grant_revoke` intent adds the `grantId` to `revokedGrants`. Revoking is the safe direction: the relay can always stop including a grant. But a malicious relay could keep replaying a revoked one, so the connector holds the revocation list itself.
-- **Lifetime.** Grants live at most 30 days. While the owner's browser is open, it re-signs expiring grants silently. This is decision D3.
+- **Lifetime.** A grant lives at most 30 days, and never longer than the share's own expiry. While the owner's browser is open, it re-signs expiring grants silently (D3).
+- **Signer revocation.** A grant is only as good as the owner key that signed it. When that key is revoked (§5.6), the connector drops every grant it signed at once; the owner's remaining devices re-sign the ones that should continue. Without this, revoking a stolen browser key would leave its grants alive for up to 30 days.
 - **A grantee adds a device.** The owner sees "Dana added a new device. Allow it on 'api-fix'?" and has to act; this re-signs the grant. Renewal is never automatic for a *changed* key set. Otherwise the relay could slip keys in whenever the owner is online.
 
 **Residual risk.** The grantee key set comes from the relay at share time, effectively trust-on-first-use. Device labels in the dialog and the "new device" prompt narrow this. Closing it fully needs cross-signing or the L3 transparency log.
@@ -429,6 +436,8 @@ This also gives machine-side policy a principal it can rely on. A rule such as "
 | Connector without `intents` capability | The relay shows "Update Codekin on this computer". Workspaces that require the capability refuse the machine (connector version floors) |
 
 - Only local surfaces can set `policy` back to `off`. A remote `policy` intent may only **raise** it.
+- **The connector reports its policy** in `ConnectorHello` (`intentPolicy: off | warn | required`) and on change. The relay uses it for UI and for a workspace setting, **"Require confirmed devices"**, which refuses machines not in `required` with `connector_update_required` (reason "confirm a device on this computer"), the same way capability floors do. This report comes from the machine's own connector, so a forged one only weakens that owner's own machine.
+- **Grace period.** A relay may give existing workspaces a grace period (for example 30 days) during which "Require confirmed devices" only warns (D7).
 - In `warn` and `off` modes, the hosted UI says plainly, in the machine header, that the relay can control the machine.
 
 ### 6.9 Browser UX
@@ -518,7 +527,7 @@ Both: ikm = ECDH(e_self, e_peer)
 - `sigM` uses the pinned key, so the relay can't sit in the middle.
 - The browser keeps `kM` pinned in IndexedDB next to its own key. The relay's copy of the machine key isn't consulted.
 
-**Grantees.** A grantee's key must be listed in an owner-signed grant (§6.7). The grantee has no pin for `kM`, so it trusts the relay's copy on first use. The relay could pretend to be the machine to a grantee and feed them fake content. It still couldn't read the owner's data, because it can't complete a handshake with the real machine without the grantee's key. The grant can carry a fingerprint of `kM`, signed by the owner, for the grantee's browser to check. This is decision D6.
+**Grantees.** A grantee's key must be listed in an owner-signed grant (§6.7). The grantee has no pin for `kM`, so it trusts the relay's copy on first use. The relay could pretend to be the machine to a grantee and feed them fake content. It still couldn't read the owner's data, because it can't complete a handshake with the real machine without the grantee's key. **The grant carries a fingerprint of `kM`, signed by the owner, and the grantee's browser checks it** (D6). The grantee's browser also pins `kM` on first successful use and refuses a different key later, even in a newly signed grant, until the grantee confirms the change. A compromised owner browser therefore can't quietly swap the machine key for an existing grantee.
 
 ### 8.3 Frames
 
@@ -538,7 +547,10 @@ The `request` and `response` payloads become `{ sealed: { seq, ct } }`. The plai
 - account, workspace, machine and channel ids, and connection times
 - frame counts, sizes and timing
 - `principal` (who is asking, and their relay-side grants)
-- an **audit label** per sealed message: `{ action, sessionId, payloadHash, keyId }`, copied from the intent. This keeps §7.1 working under L2, and is decision D4.
+- an **audit label** per sealed message: `{ action, sessionId, keyId, payloadTag }`, copied from the intent. This keeps §7.1 working under L2 (D4).
+  - `payloadTag` is **not** a plain hash of the content. Short prompts ("yes", "continue") and approval answers could be recovered from a SHA-256 by guessing, which would quietly undo part of the encryption. It is `HMAC-SHA-256(kAudit, payload)`, where `kAudit` is a per-machine key in the machine's secret store, shared with enrolled owner devices at enrolment and never with the relay. The machine log (§7.2) records the same tag, so `codekin relay audit verify --against` still matches the two logs line by line.
+  - A workspace setting, **"Connection-level audit only"**, drops labels entirely: the relay then audits connections, not actions.
+  - Before L2 the relay sees plaintext anyway, and slice 1 stores a plain SHA-256 (§7.1). With L2 the label switches to the tag.
 - enrolment and device metadata
 
 ### 8.6 Moving relay-side filtering to the connector
@@ -594,12 +606,12 @@ Each slice is one PR with its own tests, behind capability flags until slice 7.
 | 2 | **Machine identity + trust store** | `relay-identity.json`, `relay-devices.json`, `/api/relay/devices*` local routes, `codekin relay devices` CLI, Settings → Remote access → Devices (read-only list, revoke). No enforcement yet |
 | 3 | **Enrolment ceremony** | `enrol_*` envelopes in the hub and connector; browser key generation (IndexedDB); trust sheet; code entry in local UI, desktop and CLI; pairing integration (§5.3); relay `device_keys` registry |
 | 4 | **Intent signing + verification** | `intent-actions.ts`; signing in `relay-client.ts` / `hosted.ts` with ordered async queue; verification at the connector boundary; replay cache; `warn` mode; local intent log (§7.2) |
-| 5 | **Passkeys** | Passkey enrolment in the ceremony; `device_certify`; step-up for privileged actions; remote `device_revoke` |
-| 6 | **Signed grants + grantee intents** | `grant` / `grant_revoke`; `signedGrants` in principal; intersection on the connector; share-dialog device list; "new device" re-sign prompt; silent renewal |
-| 7 | **Enforce** | `required` for new pairings and on first enrolment; migration prompts; minimum connector version per capability; forged-principal negative suite on staging (§11) |
+| 5 | **Passkeys** | Passkey enrolment in the ceremony; `device_certify` (user verification required, "added by passkey" notice, local "only devices confirmed here" switch); step-up for privileged actions with `stepUp` logged; "Privileged actions need a passkey" workspace setting; remote `device_revoke` |
+| 6 | **Signed grants + grantee intents** | `grant` / `grant_revoke`; `signedGrants` in principal; intersection on the connector; grants dropped when their signing key is revoked; share-dialog device list; "new device" re-sign prompt; silent renewal capped by share expiry |
+| 7 | **Enforce** | `required` for new pairings and on first enrolment; `intentPolicy` in `ConnectorHello`; "Require confirmed devices" workspace setting with optional grace; migration prompts; minimum connector version per capability; forged-principal negative suite on staging (§11) |
 | 8 | **E2E handshake + sealed streams** | §8.2–8.3 behind `e2e` capability; pinned machine key; rekey |
 | 9 | **Sealed REST** | §8.4, including multipart uploads |
-| 10 | **Relay goes blind** | Skip content inspection on E2E connections; minimum-version gate; audit labels; grantee E2E |
+| 10 | **Relay goes blind** | Skip content inspection on E2E connections; minimum-version gate; audit labels with `payloadTag` (HMAC under `kAudit`) and the "Connection-level audit only" setting; grantee E2E with the `kM` pin |
 | 11 | **UX + claims** | Lock indicator, fingerprints, workspace "require E2E", docs, security page |
 
 Slice 1 doesn't depend on anything else and can merge right away.
@@ -649,14 +661,16 @@ This level targets a malicious operator and targeted key injection.
 
 ---
 
-## 13. Decisions needed
+## 13. Decisions
 
-| # | Decision | Recommendation |
+Decided 2026-11-08. Each decision is written into the section it changes.
+
+| # | Decision | Decided |
 | --- | --- | --- |
-| D1 | Sign reads too, or control frames only? | **Sign everything** except `ping`/`resize`. This stops active exfiltration through `browse-dirs`, `docs` and `join_session`, at negligible cost |
-| D2 | Step-up when the owner has no passkey enrolled on the machine | Accept the browser key, and encourage passkey enrolment in the trust sheet |
-| D3 | Grant lifetime | 30 days with silent re-signing while the owner is online; key-set changes always need the owner |
-| D4 | Under L2, may the relay see per-message action labels and session ids for audit? | **Yes**: it keeps per-action audit working. Offer a workspace option to drop labels (audit then covers connections only) |
-| D5 | Allow passkey certification of new browsers (trusting the passkey provider's sync)? | **Yes**. Without it every new phone means a trip to the machine, and adoption suffers |
-| D6 | Grantee machine-key pin | Owner-signed `kM` fingerprint inside the grant (cheap, closes the grantee MITM-on-content gap) |
-| D7 | Existing machines | Switch to `required` on first enrolment; workspaces can require enrolment |
+| D1 | Sign reads too, or control frames only? | **Sign everything** except `ping` and `resize` (§2.2). Unsigned reads would let a compromised relay pull files and sessions itself. Codekin frames are chat-sized, so signing each costs under a millisecond |
+| D2 | Step-up when the owner has no passkey enrolled on the machine | **Accept the browser key**, offer passkey enrolment at pairing, add an opt-in workspace setting "Privileged actions need a passkey", and log which kind of step-up each action had (§6.6). Not required by default, because the desktop web view can't use passkeys |
+| D3 | Grant lifetime | **At most 30 days and never past the share's expiry**, re-signed silently while the owner is online. Changed key sets always need the owner. **Grants die when their signing key is revoked** (§6.7) |
+| D4 | Under L2, may the relay see per-message action labels and session ids for audit? | **Yes**, with a per-workspace "Connection-level audit only" opt-out. The label's content tag is an **HMAC under a machine-held key**, not a plain hash, so short content can't be recovered by guessing (§8.5) |
+| D5 | Allow passkey certification of new browsers (trusting the passkey provider's sync)? | **Yes**, with user verification required, "added by passkey" shown on the machine and announced to the owner's other devices, and a machine-local "Only allow devices confirmed on this computer" switch (§5.4) |
+| D6 | Grantee machine-key pin | An **owner-signed `kM` fingerprint in the grant**, plus **pin on first use** in the grantee's browser, which refuses a changed key until the grantee confirms it (§8.2) |
+| D7 | Existing machines | **`required` for new pairings and on first enrolment.** The connector reports its policy; a workspace setting "Require confirmed devices" refuses other machines through the version-floor mechanism, with an optional grace period (§6.8) |
