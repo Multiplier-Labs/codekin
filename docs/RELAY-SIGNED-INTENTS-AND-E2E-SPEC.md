@@ -578,7 +578,8 @@ L2 already supplies device ECDH keys and the trust store, so this needs no furth
 - **New fields.** Every addition is optional, and new behaviour is negotiated through `capabilities.intents` and `capabilities.e2e`. Old browsers talking to new connectors in `required` mode get `intent_required` and an "Update the page" notice. New browsers talking to old connectors sign nothing.
 - **Self-hosted relays.** These work unchanged. `relayOrigin` and the passkey rpID come from the relay URL in `relay.json`.
 - **Local UI.** It talks to the local server directly with the local token, not through the relay. It is unaffected.
-- **Joe, loops, workflows and webhooks.** These start on the machine and never cross the relay. They are unaffected.
+- **Joe, loops and workflows.** These start on the machine and never cross the relay. They are unaffected.
+- **GitHub webhooks forwarded by the relay** (`SELF-HOSTED-RELAY.md`, "GitHub webhooks") arrive as a `webhook` principal, not as user intents. GitHub's HMAC signature, checked on the machine, authenticates them. The connector lets them reach only the local webhook route and refuses replays. They need no device signature, and under L2 they stay outside end-to-end encryption because GitHub sends them in the clear.
 - **Desktop app.** Its own local UI is unaffected. Its hosted web mode uses browser keys (§4.2).
 
 ---

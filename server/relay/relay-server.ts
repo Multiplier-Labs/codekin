@@ -35,6 +35,7 @@ import { pruneAuditEvents } from './audit.js'
 import { sweepOrphanMachines } from './pairing.js'
 import type { SessionUser } from './relay-auth-routes.js'
 import { createMutationOriginGuard } from './origin-guard.js'
+import { createMachineWebhookRouter, createWebhookIngressRouter } from './machine-webhook-routes.js'
 
 const config = loadRelayConfig()
 const db = openControlPlaneDb(join(config.dataDir, 'control-plane.db'))
@@ -47,8 +48,6 @@ const app = express()
 // Behind nginx: trust X-Forwarded-* so secure cookies and req.ip work.
 app.set('trust proxy', 1)
 app.disable('x-powered-by')
-
-app.use(express.json({ limit: '1mb' }))
 
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff')
@@ -83,6 +82,15 @@ function ipRateLimiter(limit: number, windowMs: number): express.RequestHandler 
     next()
   }
 }
+
+// GitHub webhook receiver: before the JSON parser, which would consume the
+// body GitHub's signature covers, and before the session and origin guard,
+// which do not apply to it (its callers are GitHub's servers).
+const webhookIngress = createWebhookIngressRouter(db, hub)
+app.use('/api/hooks', ipRateLimiter(600, 60_000))
+app.use(webhookIngress)
+
+app.use(express.json({ limit: '1mb' }))
 
 // Auth endpoints: state generation + GitHub round trips.
 app.use('/api/auth', ipRateLimiter(20, 60_000))
@@ -142,6 +150,7 @@ app.use(createRelayAuthRouter({
   disconnectSession: (sessionId, reason) => { browserHub.disconnectSession(sessionId, reason) },
 }))
 app.use(createMachineRouter(db, hub, config))
+app.use(createMachineWebhookRouter(db, config))
 app.use(createPairingRouter(db, config, { connectorHub: hub, browserHub }))
 app.use(createShareRouter(db, browserHub, config))
 app.use(createUserRouter(db, config, browserHub, store))
@@ -270,6 +279,7 @@ function shutdown() {
   console.log('[relay] Shutting down')
   browserHub.close()
   hub.close()
+  webhookIngress.close()
   server.close(() => {
     store.close()
     db.close()

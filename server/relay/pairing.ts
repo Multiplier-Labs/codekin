@@ -250,6 +250,9 @@ export function verifyMachineCredential(
 export function removeMachine(db: Database.Database, machineId: string): boolean {
   return db.transaction(() => {
     db.prepare('DELETE FROM machine_credentials WHERE machine_id = ?').run(machineId)
+    // A removed machine's webhook URL must stop working, and the row would
+    // fail the FK delete anyway.
+    db.prepare('DELETE FROM machine_webhooks WHERE machine_id = ?').run(machineId)
     // Shares reference the machine; left in place they fail the FK delete.
     db.prepare('DELETE FROM session_shares WHERE machine_id = ?').run(machineId)
     db.prepare('UPDATE pairing_requests SET machine_id = NULL WHERE machine_id = ?').run(machineId)
