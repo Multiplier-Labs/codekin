@@ -483,7 +483,7 @@ If the owner has no enrolled passkey, the browser key is accepted (D2 in §13). 
   - an enrolment proof signs `SHA-256(T("ck-enrol-passkey-v1", …))`;
   - the relay's own sign-in and MFA step-up sign `SHA-256(T("ck-relay-auth-v1", relay challenge))`.
 
-  The browser applies the last wrapping itself (`src/hosted/relayChallenge.ts`), and the relay verifies against it. Without it, a relay could pick a sign-in challenge equal to the hash of an intent it wrote, and turn a routine Face ID into an approval on a machine.
+  The browser applies the last wrapping itself (`src/hosted/relayChallenge.ts`), and the relay verifies against it, pinned by a shared test vector. **The relay and the hosted webroot must be deployed together:** a cached older bundle can't sign in with a passkey. Without it, a relay could pick a sign-in challenge equal to the hash of an intent it wrote, and turn a routine Face ID into an approval on a machine.
 - **Passkey intents.** `SignedIntent.webauthn` carries `credentialId`, and the assertion's challenge is `SHA-256(T("ck-intent-v1", body))`. The body's `keyId` is the passkey's key id, or `"*"` when the user picked one (`device_certify`). The signer rules are the same as for browser keys.
 - **`device_certify`** (the `enrol_certify` frame) adds a browser with `addedBy: passkey:<keyId>`.
   - It is refused when "Only allow devices confirmed on this computer" (`localConfirmationOnly`) is set. That switch is available in Settings, `codekin relay devices passkey-adds on|off`, and `PUT /api/relay/devices/settings`.
@@ -496,13 +496,14 @@ If the owner has no enrolled passkey, the browser key is accepted (D2 in §13). 
 - **Step-up** (§6.2). Privileged actions are:
   - `prompt_response` answers of `always_allow` or `approve_pattern`, including through `POST /api/orchestrator/sessions/:id/respond`;
   - `create_session` or `set_permission_mode` with `bypassPermissions` or `dangerouslySkipPermissions`, over WebSocket or REST;
+  - creating a session, or an orchestrator child (`POST /api/orchestrator/children`), with a non-empty `allowedTools`. Pre-approved tools are a standing rule: `["Bash"]` approves every command;
   - `device_certify` and `device_revoke`.
 
   REST routes match the way Express does: case-insensitive, trailing slash ignored. A body that doesn't read as UTF-8 JSON counts as privileged.
   - Such an action needs a passkey intent when the signer has a passkey on the machine, or the workspace requires it. Otherwise the refusal is `intent_step_up_required`, listing the passkeys the machine accepts (`stepUpPasskeys`).
   - The browser signs privileged actions with the passkey it knows the machine trusts. It learns these from the enrolment result and from refusals, and retries a REST request once.
   - The log records `stepUp: "passkey" | "browser-key"`, and Activity shows "browser key only" in warning colour.
-  - Hints the browser learns are added to what it knows; they never replace it.
+  - Hints the browser learns are added to what it knows; they never replace it. For step-up, the browser offers every passkey it knows the machine trusts, and signs with `keyId: "*"`. The user's authenticator answers with the one it holds, so a wrong hint can't block step-up.
   - Step-up is **enforced only when the policy is `required`**. Under `off` or `warn` a relay can send the action unsigned anyway, so step-up there only shows up in the log. `device_certify` and `device_revoke` are always verified, whatever the policy.
 - **"Privileged actions need a passkey"** is a workspace setting (`workspaces.require_passkey_step_up`, migration 14).
   - It reaches connectors in `hello_ack`, and as a hub `event` when it changes.

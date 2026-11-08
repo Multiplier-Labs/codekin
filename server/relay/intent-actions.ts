@@ -261,6 +261,9 @@ const STANDING_ANSWERS = new Set(['always_allow', 'approve_pattern'])
 /** Permission modes that stop asking before tools run. */
 const AUTO_APPROVE_MODES = new Set(['bypassPermissions', 'dangerouslySkipPermissions'])
 
+/** Pre-approved tools (`--allowedTools`) are a standing rule too: `["Bash"]` approves every command. */
+const preApprovesTools = (value: unknown) => Array.isArray(value) && value.length > 0
+
 const answersStanding = (value: unknown) =>
   (Array.isArray(value) ? value : [value]).some(v => typeof v === 'string' && STANDING_ANSWERS.has(v))
 
@@ -292,6 +295,7 @@ export function frameNeedsStepUp(frame: string): boolean {
     case 'prompt_response':
       return answersStanding(msg.value)
     case 'create_session':
+      return (typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)) || preApprovesTools(msg.allowedTools)
     case 'set_permission_mode':
       return typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)
     default:
@@ -309,7 +313,9 @@ export function frameNeedsStepUp(frame: string): boolean {
 export function requestNeedsStepUp(method: string, path: string, body: Uint8Array | null): boolean {
   if (method.toUpperCase() !== 'POST') return false
   const route = routeOf(path)
-  const isCreate = route === '/api/sessions/create'
+  // Creating a session, or an orchestrator child session, in an auto-approve
+  // mode or with pre-approved tools.
+  const isCreate = route === '/api/sessions/create' || route === '/api/orchestrator/children'
   const isRespond = /^\/api\/orchestrator\/sessions\/[^/]+\/respond$/.test(route)
   if (!isCreate && !isRespond) return false
   if (!body || body.length === 0) return false
@@ -321,7 +327,7 @@ export function requestNeedsStepUp(method: string, path: string, body: Uint8Arra
   }
   if (!msg) return true
   return isCreate
-    ? typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)
+    ? (typeof msg.permissionMode === 'string' && AUTO_APPROVE_MODES.has(msg.permissionMode)) || preApprovesTools(msg.allowedTools)
     : answersStanding(msg.value)
 }
 

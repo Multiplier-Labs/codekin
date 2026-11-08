@@ -196,6 +196,12 @@ describe('passkeys on the machine', () => {
       expect(requestNeedsStepUp('POST', '/api/sessions/create', new Uint8Array([0xff, 0xfe, 0x7b, 0x00]))).toBe(true)
       expect(requestNeedsStepUp('POST', '/api/orchestrator/sessions/s1/respond', json({ value: 'always_allow' }))).toBe(true)
       expect(requestNeedsStepUp('POST', '/api/orchestrator/sessions/s1/respond', json({ value: 'allow' }))).toBe(false)
+      // Pre-approved tools are a standing rule too.
+      expect(frameNeedsStepUp('{"type":"create_session","name":"n","workingDir":"/w","allowedTools":["Bash"]}')).toBe(true)
+      expect(frameNeedsStepUp('{"type":"create_session","name":"n","workingDir":"/w","allowedTools":[]}')).toBe(false)
+      expect(requestNeedsStepUp('POST', '/api/sessions/create', json({ allowedTools: ['Bash'] }))).toBe(true)
+      expect(requestNeedsStepUp('POST', '/api/orchestrator/children', json({ repo: 'r', task: 't', allowedTools: ['Bash'] }))).toBe(true)
+      expect(requestNeedsStepUp('POST', '/api/orchestrator/children', json({ repo: 'r', task: 't' }))).toBe(false)
     })
 
     it('knows which actions are privileged', () => {

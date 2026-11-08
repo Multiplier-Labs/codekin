@@ -9,7 +9,7 @@
  * server/relay/intent-actions.ts, which the machine applies to verify.
  */
 
-import { INTENT_VERSION, MACHINE_TIME_LABEL, MAX_CLOCK_OFFSET_MS, intentChallengeInput } from '../../server/relay/intent-actions'
+import { INTENT_VERSION, MACHINE_TIME_LABEL, MAX_CLOCK_OFFSET_MS, PASSKEY_ANY, intentChallengeInput } from '../../server/relay/intent-actions'
 import type { IntentBody, SignedIntent } from '../../server/relay/intent-actions'
 import { DEVICE_TRUST_CHANGED, currentUserId, fromB64url, toB64url, transcript, trustStorage, type TrustStorage } from './deviceTrust'
 
@@ -71,14 +71,16 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
 
   /** A passkey intent for a privileged action, or null to fall back to the browser key. */
   const withPasskey = async (signing: SigningKey, body: IntentBody): Promise<SignedIntent | null> => {
-    const passkey = signing.passkeys.at(0)
-    if (!passkey || typeof window === 'undefined') return null
+    if (signing.passkeys.length === 0 || typeof window === 'undefined') return null
     try {
       const { assertWithPasskey, passkeysSupported } = await import('./passkeys')
       if (!passkeysSupported()) return null
-      const text = JSON.stringify({ ...body, keyId: passkey.keyId })
+      // Offer every passkey we know the machine trusts and let the user's
+      // authenticator answer with the one it has (keyId "*"): a wrong hint
+      // first in the list can't then block step-up.
+      const text = JSON.stringify({ ...body, keyId: PASSKEY_ANY })
       const challenge = new Uint8Array(await crypto.subtle.digest('SHA-256', intentChallengeInput(text) as BufferSource))
-      const assertion = await assertWithPasskey(challenge, [passkey.credentialId])
+      const assertion = await assertWithPasskey(challenge, signing.passkeys.map(p => p.credentialId))
       return { body: text, webauthn: assertion }
     } catch {
       // Cancelled or unavailable: the machine decides whether the browser key will do.

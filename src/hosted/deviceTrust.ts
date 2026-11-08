@@ -478,6 +478,10 @@ export async function certifyWithPasskey(
     userId: opts.userId, machineId: opts.machineId, machineKey: result.machineKey, keyId: key.keyId, pinnedAt: new Date().toISOString(),
     // A code-confirmed key stays code-confirmed; anything else was taken on first use.
     via: pinned?.via === 'code' && pinned.machineKey === result.machineKey ? 'code' : 'passkey',
-    passkeys: Array.isArray(result.passkeys) ? result.passkeys : [],
+    // An unsigned hint: add it to what is known, never replace it.
+    passkeys: [
+      ...(Array.isArray(result.passkeys) ? result.passkeys : []),
+      ...(pinned?.passkeys ?? []).filter(k => !(result.passkeys ?? []).some(p => p.credentialId === k.credentialId)),
+    ].slice(0, 10),
   })
 }
