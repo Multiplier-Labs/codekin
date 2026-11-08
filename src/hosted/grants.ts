@@ -104,7 +104,7 @@ export async function fetchGranteeKeys(shareId: string): Promise<GranteeKey[]> {
 interface Ledger {
   userId: string
   entries: IssuedGrant[]
-  update: (change: (entries: IssuedGrant[]) => void) => Promise<void>
+  update: (change: (entries: IssuedGrant[]) => void, revocations?: PendingRevocation[]) => Promise<void>
 }
 
 /** This browser's record of the grants it issued on a machine (never the relay's listing). */
@@ -120,8 +120,26 @@ async function loadLedger(machineId: string, storage: TrustStorage): Promise<Led
   }
   const put = storage.putIssuedGrants.bind(storage)
   const get = storage.getIssuedGrants.bind(storage)
-  return { userId, entries, update: async change => {
+  return { userId, entries, update: async (change, revocations = []) => {
     const apply = (current: IssuedGrant[]) => { change(current); return current }
+    if (revocations.length && storage.updateGrantState) {
+      await storage.updateGrantState(userId, machineId, state => {
+        for (const r of revocations) state.revocations = addPending(state.revocations, r)
+        return { issued: apply(state.issued), revocations: state.revocations }
+      })
+      return
+    }
+    // Nonpersistent test/embedding adapters share the process lock. Durable
+    // adapters must implement updateGrantState for crash-safe joint commits.
+    if (revocations.length) {
+      await withTrustStorageLock(storage, async () => {
+        let pending = await storage.getRevocations?.(userId, machineId) ?? []
+        for (const r of revocations) pending = addPending(pending, r)
+        await storage.putRevocations?.(userId, machineId, pending)
+        await put(userId, machineId, apply(await get(userId, machineId)))
+      })
+      return
+    }
     if (storage.updateIssuedGrants) { await storage.updateIssuedGrants(userId, machineId, apply); return }
     await withTrustStorageLock(storage, async () => {
       const current = await get(userId, machineId)
@@ -348,13 +366,15 @@ export async function signGrant(
       }
       // Never resurrect a concurrent revocation or replace a newer grant
       // with a signature whose slower network response arrived afterwards.
-      if (entry.revoked || (entry.current && issuedBefore(grant.grantId, entry.current.grantId, entry.shareId))) return
+      if (entry.revoked || (entry.current && (issuedBefore(grant.grantId, entry.current.grantId, entry.shareId)
+        || sameIssueTime(grant.grantId, entry.current.grantId, entry.shareId)))) return
       entry.current = { grantId: grant.grantId, grant: text }
       entry.issuedIds = [...entry.issuedIds, grant.grantId]
       entry.role = proposal.role
-    })
+    }, [{ grantId: proposal.share.id, keep: grant.grantId }])
   }
-  await queueRevocations(transport, proposal.share.machineId, [{ grantId: proposal.share.id, keep: grant.grantId }], storage)
+  if (ledger) await flushRevocations(transport, proposal.share.machineId, storage)
+  else await queueRevocations(transport, proposal.share.machineId, [{ grantId: proposal.share.id, keep: grant.grantId }], storage)
 }
 
 export type GrantStatus =
@@ -413,8 +433,8 @@ export async function renewGrants(transport: GrantTransport, machineId: string, 
         await ledger.update(entries => {
           const current = entries.find(e => e.shareId === entry.shareId)
           if (current) current.revoked = true
-        })
-        await queueRevocations(transport, machineId, [{ grantId: entry.shareId }], storage)
+        }, [{ grantId: entry.shareId }])
+        await flushRevocations(transport, machineId, storage)
       }
       // Otherwise (not confirmed here, relay error): try again next time.
     }
@@ -425,7 +445,8 @@ export async function renewGrants(transport: GrantTransport, machineId: string, 
 // --- Revocation ------------------------------------------------------------
 
 /**
- * Fold `next` into the pending list: one entry per share, a full revocation
+ * Fold `next` into the pending list: one entry per share except unresolved
+ * equal-time conflicts. A full revocation
  * covering any supersede, the supersede keeping the later grant covering an
  * earlier one (mirrors the machine's trust-store withRevocation).
  */
@@ -433,7 +454,14 @@ function addPending(list: PendingRevocation[], next: PendingRevocation): Pending
   const covered = list.some(r => r.grantId === next.grantId
     && (r.keep === undefined || (next.keep !== undefined && (r.keep === next.keep || issuedBefore(next.keep, r.keep, next.grantId)))))
   if (covered) return list
-  return [...list.filter(r => r.grantId !== next.grantId), next.keep === undefined ? { grantId: next.grantId } : { grantId: next.grantId, keep: next.keep }]
+  // Different grants at the same time revoke each other. Keep both pending
+  // until a later grant covers them; never silently lose the conflicting work.
+  return [...list.filter(r => r.grantId !== next.grantId || (r.keep !== undefined && next.keep !== undefined && sameIssueTime(r.keep, next.keep, next.grantId))), next.keep === undefined ? { grantId: next.grantId } : { grantId: next.grantId, keep: next.keep }]
+}
+
+function sameIssueTime(a: string, b: string, shareId: string): boolean {
+  const ta = grantIssuedAt(a, shareId)
+  return ta !== null && ta === grantIssuedAt(b, shareId)
 }
 
 function issuedBefore(a: string, b: string, shareId: string): boolean {
@@ -524,9 +552,10 @@ export async function revokeShareGrants(transport: GrantTransport, share: Pick<S
           role: 'viewer', notAfter: null, current: null, issuedIds: [], revoked: true,
         })
       }
-    })
+    }, [{ grantId: share.id }])
   }
-  return queueRevocations(transport, share.machineId, [{ grantId: share.id }], storage)
+  return ledger ? flushRevocations(transport, share.machineId, storage)
+    : queueRevocations(transport, share.machineId, [{ grantId: share.id }], storage)
 }
 
 /**

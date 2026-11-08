@@ -125,7 +125,7 @@ export interface TrustStore {
 
 export class TrustStoreError extends Error {
   constructor(
-    readonly code: 'unreadable' | 'not_found' | 'no_credentials' | 'invalid_policy' | 'wrong_machine' | 'busy' | 'full',
+    readonly code: 'unreadable' | 'not_found' | 'no_credentials' | 'invalid_policy' | 'wrong_machine' | 'busy' | 'full' | 'conflict',
     message: string,
   ) {
     super(message)
@@ -347,6 +347,12 @@ export function withRevocation(list: RevokedGrant[], revocation: GrantRevocation
   // earlier than this one's kept grant (which that supersede then revokes).
   const covered = same.some(r => r.keep === undefined || (keep !== undefined && (r.keep === keep || isEarlier(keep, r.keep, grantId))))
   if (covered) return list
+  // Existing records revoke every other grant at the kept timestamp.
+  // Replacing that keep on a tie would resurrect one of those grants.
+  if (keep !== undefined && same.some(r => r.keep !== undefined
+    && grantIssuedAt(r.keep, grantId) === grantIssuedAt(keep, grantId))) {
+    throw new TrustStoreError('conflict', 'Concurrent grants have the same issue time; allow the share again to issue a later grant')
+  }
   const entry: RevokedGrant = keep === undefined ? { grantId, at: new Date(now).toISOString() } : { grantId, keep, at: new Date(now).toISOString() }
   const next = [...list.filter(r => r.grantId !== grantId), entry]
   if (next.length > MAX_REVOKED_GRANTS) throw new TrustStoreError('full', 'This computer holds too many revoked shares to record another')

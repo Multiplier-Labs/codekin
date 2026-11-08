@@ -163,6 +163,8 @@ export interface TrustStorage {
   getOrInsertKey?(candidate: BrowserKey): Promise<BrowserKey>
   updateRevocations?(userId: string, machineId: string, update: (current: PendingRevocation[]) => PendingRevocation[]): Promise<PendingRevocation[]>
   updateIssuedGrants?(userId: string, machineId: string, update: (current: IssuedGrant[]) => IssuedGrant[]): Promise<IssuedGrant[]>
+  /** Commit the issued ledger and retry queue together, including on interruption. */
+  updateGrantState?(userId: string, machineId: string, update: (state: GrantState) => GrantState): Promise<void>
   getPin(userId: string, machineId: string): Promise<MachinePin | undefined>
   putPin(pin: MachinePin): Promise<void>
   deletePin(userId: string, machineId: string): Promise<void>
@@ -202,6 +204,11 @@ export interface IssuedGrant {
 export interface PendingRevocation {
   grantId: string
   keep?: string
+}
+
+export interface GrantState {
+  issued: IssuedGrant[]
+  revocations: PendingRevocation[]
 }
 
 /** Fired on window whenever a machine pin is saved or removed (signers reload their key). */
@@ -264,6 +271,27 @@ export function indexedDbTrustStorage(): TrustStorage {
     })
   }
   return {
+    updateGrantState: async (userId, machineId, update) => {
+      const tx = (await open()).transaction([ISSUED, REVOCATIONS], 'readwrite')
+      await new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => { resolve() }
+        tx.onabort = () => { reject(tx.error ?? new Error('Grant storage transaction aborted')) }
+        tx.onerror = () => { /* onabort reports the failed transaction */ }
+        const issued = tx.objectStore(ISSUED).get([userId, machineId]) as IDBRequest<{ issued: IssuedGrant[] } | undefined>
+        const revocations = tx.objectStore(REVOCATIONS).get([userId, machineId]) as IDBRequest<{ revocations: PendingRevocation[] } | undefined>
+        let reads = 0
+        const apply = () => {
+          if (++reads !== 2) return
+          try {
+            const state = update({ issued: issued.result?.issued ?? [], revocations: revocations.result?.revocations ?? [] })
+            tx.objectStore(ISSUED).put({ userId, machineId, issued: state.issued })
+            tx.objectStore(REVOCATIONS).put({ userId, machineId, revocations: state.revocations })
+          } catch (err) { tx.abort(); reject(err instanceof Error ? err : new Error('Grant storage update failed')) }
+        }
+        issued.onsuccess = apply
+        revocations.onsuccess = apply
+      })
+    },
     getOrInsertKey: candidate => updateRow<BrowserKey>(KEYS, candidate.userId, current => current ?? candidate),
     updateRevocations: async (userId, machineId, update) => {
       const row = await updateRow<{ userId: string; machineId: string; revocations: PendingRevocation[] }>(REVOCATIONS, [userId, machineId], current => ({ userId, machineId, revocations: update(current?.revocations ?? []) }))

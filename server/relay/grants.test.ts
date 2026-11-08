@@ -16,7 +16,7 @@ import { signP1363, transcript, verifyP1363 } from './enrolment-crypto.js'
 import { checkServerFrame, newChannelState } from './connector-policy.js'
 import { liveChannelPolicy } from './connector.js'
 import { ensureMachineIdentity, keyIdForSpki } from './machine-identity.js'
-import { MAX_REVOKED_GRANTS, emptyTrustStore, readTrustStore, withRevocation, writeTrustStore } from './trust-store.js'
+import { MAX_REVOKED_GRANTS, addRevokedGrant, emptyTrustStore, readTrustStore, withRevocation, writeTrustStore } from './trust-store.js'
 import type { TrustedCredential, IntentPolicy } from './trust-store.js'
 import { keyIdForCoseKey } from './webauthn-verify.js'
 import { softPasskey } from './__fixtures__/authenticator.js'
@@ -205,6 +205,24 @@ describe('signed share grants on the machine', () => {
         : { ...store, credentials: [] })
     }
     for (const frame of frames) expect(checkServerFrame(policy, state, frame)).toBe(false)
+  })
+
+  it.each([false, true])('never revives a grant on a conflicting equal-time supersede (reverse=%s)', reverse => {
+    const now = Date.now()
+    const ids = [`g1:${now.toString(36)}00000001`, `g1:${now.toString(36)}00000002`]
+    if (reverse) ids.reverse()
+    // Start with a persisted record in the old timestamp-only format.
+    const first = { grantId: 'g1', keep: ids[0], at: new Date(now).toISOString() }
+    writeTrustStore(devicesFile, { ...readTrustStore(devicesFile)!, revokedGrants: [first] })
+    const rejected = grant({ grantId: ids[1] })
+    expect(verifier.effectivePrincipal(danaPrincipal([rejected]))?.grants).toEqual({})
+    for (let i = 0; i < 2; i++) {
+      expect(() => addRevokedGrant({ grantId: 'g1', keep: ids[1] }, devicesFile, 'm1')).toThrow(/same issue time/)
+      expect(readTrustStore(devicesFile)!.revokedGrants).toEqual([first])
+      expect(verifier.effectivePrincipal(danaPrincipal([rejected]))?.grants).toEqual({})
+    }
+    addRevokedGrant({ grantId: 'g1', keep: `g1:${(now + 1).toString(36)}00000003` }, devicesFile, 'm1')
+    for (const grantId of ids) expect(verifier.effectivePrincipal(danaPrincipal([grant({ grantId })]))?.grants).toEqual({})
   })
 
   it('revokes every grant signed for a share when its id is revoked, and nothing else', () => {

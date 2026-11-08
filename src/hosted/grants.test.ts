@@ -212,6 +212,19 @@ describe('share grants from the browser to the machine', () => {
     await expect(proposeGrant(share, devices, { storage: ownerStorage })).rejects.toMatchObject({ code: 'rejected' })
   })
 
+  it('retains conflicting equal-time supersedes until a later grant covers both', async () => {
+    const now = Date.now()
+    const a = `g1:${now.toString(36)}00000001`
+    const b = `g1:${now.toString(36)}00000002`
+    const c = `g1:${(now + 1).toString(36)}00000003`
+    const offline: GrantTransport = { ...transport, sendDeviceFrame: async () => { throw new Error('offline') } }
+    await queueRevocations(offline, 'm1', [{ grantId: 'g1', keep: a }], ownerStorage)
+    await queueRevocations(offline, 'm1', [{ grantId: 'g1', keep: b }], ownerStorage)
+    expect(ownerStorage.revocations.get('u-owner:m1')).toEqual([{ grantId: 'g1', keep: a }, { grantId: 'g1', keep: b }])
+    expect(await flushRevocations(transport, 'm1', ownerStorage)).toEqual([{ grantId: 'g1', keep: b }])
+    expect(await queueRevocations(transport, 'm1', [{ grantId: 'g1', keep: c }], ownerStorage)).toEqual([])
+  })
+
   it('an older flush preserves concurrent additions and stronger revocations', async () => {
     await shareAs('viewer')
     const keep = ownerStorage.issued.get('u-owner:m1')![0].current!.grantId
