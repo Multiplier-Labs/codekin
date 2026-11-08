@@ -56,6 +56,12 @@ export interface RelayConfig {
   errorEnvironment: string
   /** JSON file of quota limits (RELAY_QUOTAS_FILE). Unset: no limits. */
   quotasFile?: string
+  /**
+   * RELAY_STAGING=1: a test deployment. The app shows a banner, responses
+   * ask not to be indexed, and the admin CLI may mint test sessions. Never
+   * set it on a relay real people use.
+   */
+  staging: boolean
 }
 
 /** Decode MFA_ENCRYPTION_KEY: 64 hex characters or base64 of exactly 32 bytes. */
@@ -137,6 +143,7 @@ export function loadRelayConfig(opts: { envFile?: string; requireSecrets?: boole
     browserErrorDsn: get('RELAY_BROWSER_ERROR_DSN').trim() || undefined,
     errorEnvironment: get('RELAY_ERROR_ENVIRONMENT').trim() || (isProduction ? 'production' : 'development'),
     quotasFile: get('RELAY_QUOTAS_FILE').trim() || undefined,
+    staging: get('RELAY_STAGING').trim() === '1',
   }
 
   if (requireSecrets) {

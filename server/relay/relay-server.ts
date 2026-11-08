@@ -89,6 +89,7 @@ app.use((_req, res, next) => {
   // The relay answers with JSON and redirects only: nothing it serves should
   // run, load or be framed if opened directly.
   res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'")
+  if (config.staging) res.setHeader('X-Robots-Tag', 'noindex, nofollow')
   next()
 })
 

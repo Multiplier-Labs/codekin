@@ -253,6 +253,8 @@ export function createRelayAuthRouter({
     res.json({
       inviteOnly: true,
       ...(config.accessRequestUrl ? { accessUrl: config.accessRequestUrl } : {}),
+      // A test deployment: the app marks itself so nobody mistakes it for the real one.
+      ...(config.staging ? { staging: true } : {}),
     })
   })
 

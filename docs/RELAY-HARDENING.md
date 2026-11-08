@@ -1,6 +1,6 @@
 # Relay hardening
 
-**Status:** In progress. Built: §1 (health endpoints), §2 (error reporting), §3 (browser security headers), §4 (connector version floors) and the discrete quotas in §6. The rest is spec.
+**Status:** In progress. Built: §1 (health endpoints), §2 (error reporting), §3 (browser security headers), §4 (connector version floors), the discrete quotas in §6 and §7 (staging tools). The rest is spec.
 **Date:** 2026-11-08
 **Scope:** hardening features for anyone who runs the relay (`server/relay`), whether self-hosted or as a public service. Values specific to a deployment, such as limits, thresholds and monitoring setup, belong in that deployment's own config. They are not defined here.
 **Related:** `docs/RELAY-SIGNED-INTENTS-AND-E2E-SPEC.md`, `docs/SELF-HOSTED-RELAY.md`, `docs/OPERATIONS.md` ("Hosted relay").
@@ -112,6 +112,19 @@ These are mechanisms only. No limits are built in, and a relay without config st
 
 ## 7. Test sessions for staging
 
-- **Command.** `relay-admin mint-session --user <githubId> --auth-level full` writes a session row to the local DB and prints a cookie, so automated suites can run against a staging relay without a test-login HTTP route.
-- **Guard.** It refuses unless `RELAY_STAGING=1` is set and `publicUrl` differs from the configured production URL.
-- **Suite.** `scripts/staging/gate.e2e.mts` runs against any relay URL. It covers the cross-tenant suite from `docs/HOSTED-WORKSPACES-AND-MFA-PLAN.md` (Phase 4), the forged-principal cases from the intents spec, and the checks in this document.
+**Built** (`server/relay/relay-admin-cli.ts`, `scripts/staging/gate.mjs`).
+
+- **Staging mode.** `RELAY_STAGING=1` marks a relay as a test deployment:
+  - The app shows a **STAGING** badge and title prefix (from `GET /api/auth/config`).
+  - API responses send `X-Robots-Tag: noindex, nofollow`. Set the same header on the static app in the reverse proxy.
+  - The admin CLI may mint sessions.
+- **Command.** `node server/dist/relay/relay-admin-cli.js mint-session <github-id> [--hours N]` (at most 24 hours, default 8) writes a fully signed-in session for an existing, active account and prints the cookie (`codekin_relay_sid=…`) on stdout. Automated suites can then run without a test-login HTTP route; using the command needs a shell on the host, the same trust as the database file. It is audited (`session_minted`).
+  - An account with a second factor gets a fresh one on its session, so step-up passes.
+  - An account that must have 2FA but doesn't is sent to enrollment, as a real sign-in would be.
+- **Guard.** The command refuses unless the relay's config has `RELAY_STAGING=1`, so it does nothing on a relay without that flag.
+- **Suite.** `node scripts/staging/gate.mjs [--report out.md] [--no-frontend]` with `GATE_URL` and `GATE_COOKIE_A/B/C` (A owns WS-A and a machine in it, B owns WS-B, C is a member of both). Each identity has a positive control, so a bad cookie fails the run instead of passing it vacuously. It checks:
+  - the public surface: health bodies, CSP and HSTS, anonymous access, operator stats
+  - workspace isolation over REST: reading, listing by naming another workspace, sharing, removing, pairing and inviting across workspaces, the origin guard
+  - machine isolation over the relay socket: a non-owner (even a fellow member) gets close 4003; a cross-origin socket is refused
+
+  The report adds the manual checklist (real machines, invitation misuse, concurrency, live demotion, MFA recovery). `server/relay/staging-gate.test.ts` runs the suite against a real relay process in CI. The forged-principal cases from the intents spec join it when L1 ships.

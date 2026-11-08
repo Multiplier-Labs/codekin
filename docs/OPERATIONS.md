@@ -349,6 +349,7 @@ misconfiguration fails at start rather than at first login.
 | `RELAY_NAME` | no | Name the desktop app suggests for this relay as a location; served by `GET /api/relay/info`. Defaults to the public host |
 | `RELAY_ERROR_DSN` | no | Sentry-API DSN (GlitchTip, Sentry) for the relay's errors; unset = no reporting. Only type, scrubbed message and stack frames are sent |
 | `RELAY_BROWSER_ERROR_DSN` | no | DSN for web-app errors tunnelled through `POST /api/telemetry/errors`; defaults to `RELAY_ERROR_DSN` |
+| `RELAY_STAGING` | no | `1` on a test deployment only: STAGING badge, `noindex`, and `relay-admin-cli mint-session <github-id>` for the gate suite (`scripts/staging/gate.mjs`) |
 | `RELAY_QUOTAS_FILE` | no | JSON file of usage limits, read at boot (restart to apply changes; a malformed file stops the relay). Unset = unlimited. Format and the list of quotas: [RELAY-HARDENING.md §6](RELAY-HARDENING.md#6-quotas-and-abuse-hooks) |
 | `RELAY_ERROR_ENVIRONMENT` | no | `environment` label on reported errors; defaults from `NODE_ENV` |
 | `NODE_ENV=production` | recommended | required for `Secure` session cookies |

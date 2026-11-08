@@ -20,6 +20,7 @@ const App =
 // them if error reporting is configured there.
 if (import.meta.env.VITE_APP_MODE === 'hosted') {
   void import('./hosted/errorReporting').then(m => { m.installErrorReporting() })
+  void import('./hosted/stagingBadge').then(m => m.showStagingBadgeIfNeeded())
 }
 
 createRoot(document.getElementById('root')!).render(
