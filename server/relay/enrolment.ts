@@ -35,7 +35,7 @@ import type { PasskeyCredential, PendingEnrolment, TrustedCredential, TrustStore
 import { coseToKey, keyIdForCoseKey, verifyPasskeyAssertion } from './webauthn-verify.js'
 import type { PasskeyAssertion } from './webauthn-verify.js'
 import {
-  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, GRANT_REVOKE_ACTION, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
+  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, GRANT_REVOKED_LABEL, GRANT_REVOKE_ACTION, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
   grantRevokePayload, revokePayload,
 } from './intent-actions.js'
 import type { IntentVerifier } from './intent-verify.js'
@@ -340,7 +340,14 @@ export class MachineEnrolment {
       principal, (payload as { intent?: unknown }).intent, GRANT_REVOKE_ACTION, grantRevokePayload(grantId), false)
     if (!signer) throw refuse(describeIntentRefusal(decision.reason))
     addRevokedGrant(grantId, this.opts.devicesFile, this.opts.machineId, this.now())
-    return { enrolId: `grant_revoke:${grantId}`, state: 'approved' }
+    // Signed, so the owner's browser can tell the machine really has it and
+    // stop retrying; a relay can't fake the confirmation.
+    const { key } = this.machineKey()
+    return {
+      enrolId: `grant_revoke:${grantId}`,
+      state: 'approved',
+      signature: signP1363(key, transcript(GRANT_REVOKED_LABEL, grantId)).toString('base64url'),
+    }
   }
 
   /** device_revoke (spec §5.6): remove a credential, on an owner's signed (and stepped-up) intent. */

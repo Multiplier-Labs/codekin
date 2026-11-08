@@ -19,11 +19,17 @@ export interface DeviceKeyRow {
   lastSeenAt: string | null
 }
 
-/** Record (or refresh) a key the user enrolled. Returns its key id, or null for an invalid key. */
+/** Most active keys one user may have registered (a grant names at most 20). */
+export const MAX_DEVICE_KEYS = 20
+
+/** Record (or refresh) a key the user enrolled. Returns its key id, or null for an invalid key or a full registry. */
 export function upsertDeviceKey(db: Database.Database, userId: string, spkiRaw: unknown, label: string): string | null {
   const spki = parseP256Spki(spkiRaw)
   if (!spki) return null
   const keyId = keyIdForSpki(spki)
+  const known = db.prepare('SELECT 1 FROM device_keys WHERE user_id = ? AND key_id = ? AND revoked_at IS NULL').get(userId, keyId)
+  const active = (db.prepare('SELECT COUNT(*) AS n FROM device_keys WHERE user_id = ? AND revoked_at IS NULL').get(userId) as { n: number }).n
+  if (!known && active >= MAX_DEVICE_KEYS) return null
   db.prepare(
     `INSERT INTO device_keys (user_id, key_id, spki, label, last_seen_at) VALUES (?, ?, ?, ?, datetime('now'))
      ON CONFLICT (user_id, key_id) DO UPDATE SET label = excluded.label, last_seen_at = datetime('now'), revoked_at = NULL`,

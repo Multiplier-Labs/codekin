@@ -160,7 +160,7 @@ export class IntentVerifier {
   private lastFlush = 0
   private flushScheduled = false
   /** Grant checks are cached briefly; the key includes the device list's signature, so a revoked signer counts at once. */
-  private grantCache = new Map<string, { grant: GrantBody | null; until: number }>()
+  private grantCache = new Map<string, { verified: { grant: GrantBody; signedAt: number } | null; until: number }>()
   /** The workspace's "Privileged actions need a passkey" (§6.6), as the relay reports it. */
   private requirePasskey = false
   private lastReadWarning = -Infinity
@@ -409,33 +409,42 @@ export class IntentVerifier {
    * long, and stepped up when they include approve_shell.
    */
   verifiedGrants(principal: RelayPrincipal | undefined): Map<string, GrantBody> {
-    const out = new Map<string, GrantBody>()
+    const best = new Map<string, { grant: GrantBody; signedAt: number }>()
     const store = this.currentStore()
-    if (!store || principal?.role !== 'grantee' || !Array.isArray(principal.signedGrants)) return out
+    if (!store || principal?.role !== 'grantee' || !Array.isArray(principal.signedGrants)) return new Map()
     for (const signed of principal.signedGrants.slice(0, 200)) {
-      const grant = this.verifyGrant(store, principal.userId, signed)
-      // One grant per session; a newer signature wins.
-      if (grant && (!out.has(grant.sessionId) || (out.get(grant.sessionId)?.expiresAt ?? 0) < grant.expiresAt)) out.set(grant.sessionId, grant)
+      const verified = this.verifyGrant(store, principal.userId, signed)
+      if (!verified) continue
+      // One grant per session: the most recently signed one, so a narrowed
+      // grant replaces a broader one (the owner also revokes the old id).
+      const current = best.get(verified.grant.sessionId)
+      if (!current || current.signedAt < verified.signedAt) best.set(verified.grant.sessionId, verified)
     }
-    return out
+    return new Map([...best].map(([sessionId, v]) => [sessionId, v.grant]))
+  }
+
+  /** Changes whenever the device list (and so any revocation or signer) changes. */
+  grantsVersion(): string {
+    this.currentStore()
+    return this.storeSignature ?? ''
   }
 
   /** `value` comes from the relay: anything at all. */
-  private verifyGrant(store: TrustStore, granteeUserId: string, value: unknown): GrantBody | null {
+  private verifyGrant(store: TrustStore, granteeUserId: string, value: unknown): { grant: GrantBody; signedAt: number } | null {
     const signed = value as Partial<SignedGrant> | null
     if (!signed || typeof signed.grant !== 'string' || signed.grant.length > MAX_GRANT_CHARS) return null
     const cacheKey = `${this.storeSignature ?? ''}|${granteeUserId}|${signed.grant}|${JSON.stringify(signed.intent)}`
     const cached = this.grantCache.get(cacheKey)
     const now = this.now()
-    if (cached && cached.until > now) return cached.grant && cached.grant.expiresAt > now ? cached.grant : null
+    if (cached && cached.until > now) return cached.verified && cached.verified.grant.expiresAt > now ? cached.verified : null
 
-    const grant = this.checkGrant(store, granteeUserId, { grant: signed.grant, intent: signed.intent as SignedIntent }, now)
+    const verified = this.checkGrant(store, granteeUserId, { grant: signed.grant, intent: signed.intent as SignedIntent }, now)
     if (this.grantCache.size > 1000) this.grantCache.clear()
-    this.grantCache.set(cacheKey, { grant, until: now + 60_000 })
-    return grant
+    this.grantCache.set(cacheKey, { verified, until: now + 60_000 })
+    return verified
   }
 
-  private checkGrant(store: TrustStore, granteeUserId: string, signed: SignedGrant, now: number): GrantBody | null {
+  private checkGrant(store: TrustStore, granteeUserId: string, signed: SignedGrant, now: number): { grant: GrantBody; signedAt: number } | null {
     const intent = asSignedIntent(signed.intent)
     const body = intent ? parseBody(intent.body) : null
     const grant = parseGrant(signed.grant)
@@ -450,8 +459,9 @@ export class IntentVerifier {
     if (grantNeedsStepUp(grant.permissions) && this.stepUpRefusal(store, credential)) return null
     if (body.ts > now + INTENT_MAX_SKEW_MS) return null
     if (grant.expiresAt <= now || grant.expiresAt - body.ts > MAX_GRANT_LIFETIME_MS + INTENT_MAX_SKEW_MS) return null
+    if (typeof grant.notAfter === 'number' && grant.expiresAt > grant.notAfter) return null
     if (store.revokedGrants.some(r => r.grantId === grant.grantId)) return null
-    return grant
+    return { grant, signedAt: body.ts }
   }
 
   /** The grantee key that may sign for `sessionId` (any verified grant's, for machine-level actions). */

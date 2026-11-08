@@ -79,6 +79,11 @@ export interface SessionShare {
   expiresAt: string | null
   /** Set once the owner has signed a grant for this share; null until then, or after its permissions changed. */
   signedGrant: SignedGrantSummary | null
+  /**
+   * The stored signed grant itself. The owner's browser renews only a grant it
+   * can verify it signed, changing nothing but the expiry.
+   */
+  signedGrantRaw: { grant: string; intent: unknown } | null
 }
 
 function summarizeSignedGrant(raw: string | null | undefined): SignedGrantSummary | null {
@@ -109,6 +114,17 @@ function toShare(row: SessionShareRow): SessionShare {
     createdAt: row.created_at,
     expiresAt: row.expires_at,
     signedGrant: summarizeSignedGrant(row.signed_grant),
+    signedGrantRaw: parseSignedGrant(row.signed_grant),
+  }
+}
+
+function parseSignedGrant(raw: string | null | undefined): { grant: string; intent: unknown } | null {
+  if (!raw) return null
+  try {
+    const v = JSON.parse(raw) as { grant?: unknown; intent?: unknown }
+    return typeof v.grant === 'string' ? { grant: v.grant, intent: v.intent } : null
+  } catch {
+    return null
   }
 }
 

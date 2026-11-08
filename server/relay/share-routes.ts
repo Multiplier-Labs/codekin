@@ -77,7 +77,10 @@ export function checkGrantForShare(
   if (typeof grantText !== 'string' || grantText.length > 8192) return { error: 'grant must be the signed grant text' }
   let grant: Partial<GrantBody>
   try { grant = JSON.parse(grantText) as Partial<GrantBody> } catch { return { error: 'grant is not JSON' } }
-  if (grant.grantId !== share.id || grant.sessionId !== share.localSessionId || grant.granteeUserId !== share.granteeUserId) {
+  // Grant ids are `<share id>` or `<share id>:<n>`: a narrowed grant gets a new
+  // one, so the owner can revoke the broader grant on the machine by id.
+  const idOk = typeof grant.grantId === 'string' && (grant.grantId === share.id || grant.grantId.startsWith(`${share.id}:`)) && grant.grantId.length <= 200
+  if (!idOk || grant.sessionId !== share.localSessionId || grant.granteeUserId !== share.granteeUserId) {
     return { error: 'grant does not describe this share' }
   }
   if (!Array.isArray(grant.permissions) || grant.permissions.some(p => !share.permissions.includes(p as SessionPermission))) {
@@ -85,6 +88,9 @@ export function checkGrantForShare(
   }
   if (!Array.isArray(grant.granteeKeys) || grant.granteeKeys.length > 20) return { error: 'grant keys are missing' }
   const shareExpiry = share.expiresAt ? Date.parse(share.expiresAt) : Infinity
+  if (grant.notAfter !== undefined && grant.notAfter !== null && (typeof grant.notAfter !== 'number' || grant.notAfter > shareExpiry + 60_000)) {
+    return { error: 'grant notAfter must be within the share' }
+  }
   if (typeof grant.expiresAt !== 'number' || grant.expiresAt <= now
     || grant.expiresAt > now + MAX_GRANT_LIFETIME_MS + 60_000 || grant.expiresAt > shareExpiry + 60_000) {
     return { error: 'grant expiry must be within 30 days and the share' }

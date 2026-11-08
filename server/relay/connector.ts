@@ -10,6 +10,7 @@ import { ENROLMENT_FEATURE, envelope, INTENTS_FEATURE, isEnrolRequestKind, parse
 import type {
   ConnectorHello,
   EnrolRequest,
+  RelayPrincipal,
   ConnectorHelloAck,
   ProxyRequest,
   RelayError,
@@ -30,6 +31,31 @@ import type { MachineEnrolment } from './enrolment.js'
 import { TrustStoreError } from './trust-store.js'
 import type { IntentDecision, IntentVerifier } from './intent-verify.js'
 import { describeIntentRefusal } from './connector-stream.js'
+
+/**
+ * The channel policy for a principal. A grantee acts on what the relay says
+ * AND the owner signed (spec §6.7), re-read while the channel is open (on any
+ * device-list change, and every few seconds for expiry): a revoked or expired
+ * grant stops what the grantee receives, not just what they send.
+ */
+export function liveChannelPolicy(
+  principal: RelayPrincipal,
+  intents?: Partial<Pick<IntentVerifier, 'effectivePrincipal' | 'grantsVersion'>>,
+  now: () => number = Date.now,
+): ChannelPolicy {
+  const grantsOf = (): GrantMap => (intents?.effectivePrincipal?.(principal) ?? principal).grants as GrantMap
+  let current = { grants: grantsOf(), version: intents?.grantsVersion?.() ?? '', at: now() }
+  return {
+    role: principal.role === 'owner' ? 'owner' : 'grantee',
+    get grants(): GrantMap {
+      if (principal.role !== 'grantee') return current.grants
+      const version = intents?.grantsVersion?.() ?? ''
+      if (version !== current.version || now() - current.at > 5_000) current = { grants: grantsOf(), version, at: now() }
+      return current.grants
+    },
+    userId: principal.userId,
+  }
+}
 
 /** The relay error for a refused intent (signed-intents spec §6.4, "Refusals"). */
 function intentError(verdict: IntentDecision): RelayError {
@@ -73,7 +99,7 @@ export interface ConnectorOptions {
   enrolment?: Pick<MachineEnrolment, 'handle'>
   /** Checks signed intents on everything the relay delivers (intent-verify.ts). */
   intents?: Pick<IntentVerifier, 'checkRequest' | 'checkChannelOpen' | 'checkFrame'>
-    & Partial<Pick<IntentVerifier, 'setRequirePasskey' | 'effectivePrincipal'>>
+    & Partial<Pick<IntentVerifier, 'setRequirePasskey' | 'effectivePrincipal' | 'grantsVersion'>>
 }
 
 export type ConnectorStatus =
@@ -366,13 +392,7 @@ export class RelayConnector {
       ws.send(JSON.stringify(envelope('error', intentError(opened.decision), { channelId })))
       return
     }
-    // A grantee acts on what the relay says AND the owner signed (spec §6.7).
-    const effective = intents?.effectivePrincipal?.(principal) ?? principal
-    const policy: ChannelPolicy = {
-      role: principal.role === 'owner' ? 'owner' : 'grantee',
-      grants: effective.grants as GrantMap,
-      userId: principal.userId,
-    }
+    const policy = liveChannelPolicy(principal, intents)
 
     const send = (kind: 'event' | 'stream_data' | 'stream_close' | 'error', payload: unknown) => {
       if (ws.readyState === WebSocket.OPEN) {

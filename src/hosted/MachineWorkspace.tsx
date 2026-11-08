@@ -13,7 +13,7 @@ import { useEffect, Suspense, lazy } from 'react'
 import { LocalHttpTransport, setTransport, transport as activeTransport } from '../lib/transport'
 import type { HostedRelayTransport } from '../lib/transport'
 import type { Machine } from './machines'
-import { registerThisBrowser, renewGrants } from './grants'
+import { flushRevocations, registerThisBrowser, renewGrants } from './grants'
 
 const App = lazy(() => import('../App.tsx'))
 
@@ -34,7 +34,11 @@ export function MachineWorkspace({ transport, onExit, onSwitchMachine }: Machine
   // re-sign grants about to run out (same devices only).
   useEffect(() => {
     void registerThisBrowser()
-    const renew = () => { void renewGrants(transport, transport.machineId).catch(() => {}) }
+    // Renew grants near expiry, and retry revocations the machine hasn't confirmed.
+    const renew = () => {
+      void renewGrants(transport, transport.machineId).catch(() => {})
+      void flushRevocations(transport, transport.machineId).catch(() => {})
+    }
     renew()
     const timer = setInterval(renew, RENEW_EVERY_MS)
     return () => { clearInterval(timer) }

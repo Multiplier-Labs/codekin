@@ -125,6 +125,7 @@ describe('share routes', () => {
         grantFor(share, { granteeUserId: owner.id }),
         grantFor(share, { permissions: ['view', 'send_prompt'] }),
         grantFor(share, { expiresAt: Date.now() + 40 * 24 * 60 * 60_000 }),
+        grantFor(share, { grantId: `x${share.id}:1` }),
         { ...grantFor(share), intent: { ...grantFor(share).intent, body: grantFor(share, { permissions: [] }).intent.body } },
       ]) {
         expect((await put(share.id, bad)).status).toBe(400)
@@ -132,6 +133,11 @@ describe('share routes', () => {
       expect(signedGrantsFor(db, guest.id, machineId)).toEqual([])
       // Only the owner who shared can sign.
       expect((await put(share.id, grantFor(share), { 'Content-Type': 'application/json' } as typeof asOwner)).status).toBe(401)
+    })
+
+    it('accepts a new grant id per signature, and a notAfter within the share', async () => {
+      const share = await createShare()
+      expect((await put(share.id, grantFor(share, { grantId: `${share.id}:2`, notAfter: null }))).status).toBe(200)
     })
 
     it('drops the grant when the share permissions change, so the owner signs again', async () => {

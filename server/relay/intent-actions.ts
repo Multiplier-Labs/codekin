@@ -350,7 +350,15 @@ export interface GrantBody {
   granteeKeys: Array<{ keyId: string; spki: string }>
   /** ms since epoch; at most 30 days after signing, never past the share's expiry. */
   expiresAt: number
+  /**
+   * The share's own end as the owner chose it (ms), or null for none. Signed,
+   * so renewal can never carry a grant past it, whatever the relay lists.
+   */
+  notAfter?: number | null
 }
+
+/** Domain label for the machine's confirmation that it recorded a grant revocation. */
+export const GRANT_REVOKED_LABEL = 'ck-grant-revoked-v1'
 
 /**
  * A grant as it travels: the grant JSON text exactly as signed, and the

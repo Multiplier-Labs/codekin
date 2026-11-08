@@ -113,7 +113,8 @@ export async function keyIdForSpki(spki: Uint8Array): Promise<string> {
 const ECDSA = { name: 'ECDSA', namedCurve: 'P-256' } as const
 const SIGN = { name: 'ECDSA', hash: 'SHA-256' } as const
 
-async function verifyWith(spki: Uint8Array, data: Uint8Array, signature: Uint8Array): Promise<boolean> {
+/** Verify a P1363 ECDSA P-256 signature with a public key given as SPKI. False on anything malformed. */
+export async function verifyWith(spki: Uint8Array, data: Uint8Array, signature: Uint8Array): Promise<boolean> {
   try {
     const key = await crypto.subtle.importKey('spki', spki as BufferSource, ECDSA, false, ['verify'])
     return await crypto.subtle.verify(SIGN, key, signature as BufferSource, data as BufferSource)
@@ -159,6 +160,9 @@ export interface TrustStorage {
   getPin(userId: string, machineId: string): Promise<MachinePin | undefined>
   putPin(pin: MachinePin): Promise<void>
   deletePin(userId: string, machineId: string): Promise<void>
+  /** Grant revocations not yet confirmed by the machine (§6.7). Optional: storages without it don't persist them. */
+  getRevocations?(userId: string, machineId: string): Promise<string[]>
+  putRevocations?(userId: string, machineId: string, grantIds: string[]): Promise<void>
 }
 
 /** Fired on window whenever a machine pin is saved or removed (signers reload their key). */
@@ -171,6 +175,7 @@ function trustChanged(): void {
 const DB_NAME = 'codekin-device-trust'
 const KEYS = 'keys'
 const PINS = 'pins'
+const REVOCATIONS = 'revocations'
 
 function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -184,10 +189,13 @@ export function indexedDbTrustStorage(): TrustStorage {
   let db: Promise<IDBDatabase> | null = null
   const open = () => {
     db ??= new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, 1)
-      req.onupgradeneeded = () => {
-        req.result.createObjectStore(KEYS, { keyPath: 'userId' })
-        req.result.createObjectStore(PINS, { keyPath: ['userId', 'machineId'] })
+      const req = indexedDB.open(DB_NAME, 2)
+      req.onupgradeneeded = event => {
+        if (event.oldVersion < 1) {
+          req.result.createObjectStore(KEYS, { keyPath: 'userId' })
+          req.result.createObjectStore(PINS, { keyPath: ['userId', 'machineId'] })
+        }
+        if (event.oldVersion < 2) req.result.createObjectStore(REVOCATIONS, { keyPath: ['userId', 'machineId'] })
       }
       req.onsuccess = () => { resolve(req.result) }
       req.onerror = () => { db = null; reject(req.error ?? new Error('IndexedDB unavailable')) }
@@ -201,6 +209,13 @@ export function indexedDbTrustStorage(): TrustStorage {
     getPin: async (userId, machineId) => request((await store(PINS, 'readonly')).get([userId, machineId]) as IDBRequest<MachinePin | undefined>),
     putPin: async pin => { await request((await store(PINS, 'readwrite')).put(pin)); trustChanged() },
     deletePin: async (userId, machineId) => { await request((await store(PINS, 'readwrite')).delete([userId, machineId])); trustChanged() },
+    getRevocations: async (userId, machineId) => {
+      const row = await request((await store(REVOCATIONS, 'readonly')).get([userId, machineId]) as IDBRequest<{ grantIds?: string[] } | undefined>)
+      return row?.grantIds ?? []
+    },
+    putRevocations: async (userId, machineId, grantIds) => {
+      await request((await store(REVOCATIONS, 'readwrite')).put({ userId, machineId, grantIds }))
+    },
   }
 }
 

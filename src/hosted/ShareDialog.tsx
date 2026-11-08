@@ -9,8 +9,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { currentWorkspaceId, fetchMembers, workspaceHeaders, type WorkspaceMember } from './workspace'
 import {
-  GrantError, fetchGranteeKeys, grantStatus, revokeShareGrant, signShareGrant,
-  type GrantStatus, type GrantTransport, type ShareWithGrant,
+  fetchGranteeKeys, fingerprint, flushRevocations, grantStatus, proposeGrant, revokeShareGrants, signGrant,
+  type GrantProposal, type GrantStatus, type GrantTransport, type ShareWithGrant,
 } from './grants'
 import { transport } from '../lib/transport'
 
@@ -62,9 +62,10 @@ function ShareRow({ share, login, status, busy, onAllow, onRevoke }: {
 
 function describeDevices(status: GrantStatus): string {
   if (status.kind === 'signed') return `Allowed on ${status.keyIds.length} device${status.keyIds.length === 1 ? '' : 's'}`
-  const keys = status.keys
+  // For a new device, name only what is new, with fingerprints (labels are free text).
+  const keys = status.kind === 'new_device' ? status.added : status.keys
   if (keys.length === 0) return 'No device yet'
-  return `${keys.length} device${keys.length === 1 ? '' : 's'}: ${keys.map(k => k.label).join(', ')}`
+  return `${keys.length} device${keys.length === 1 ? '' : 's'}: ${keys.map(k => `${k.label} (${fingerprint(k.keyId)})`).join(', ')}`
 }
 
 const ROLE_OPTIONS = [
@@ -88,6 +89,10 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
   const [error, setError] = useState<string | null>(null)
   /** Each share's grant against the grantee's current devices (§6.7). */
   const [grants, setGrants] = useState<Partial<Record<string, GrantStatus>>>({})
+  /** A grant the owner is reviewing before signing. */
+  const [review, setReview] = useState<GrantProposal | null>(null)
+  /** Revocations the computer hasn't confirmed yet. */
+  const [pendingRevocations, setPendingRevocations] = useState(0)
 
   const loadShares = useCallback(async () => {
     try {
@@ -142,25 +147,45 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
     }
   }
 
-  const revoke = async (shareId: string) => {
-    await fetch(`/api/shares/${shareId}`, { method: 'DELETE', credentials: 'include' })
-    // The machine keeps its own list, so a relay can't keep replaying the old grant.
+  const revoke = async (share: SessionShare) => {
+    await fetch(`/api/shares/${share.id}`, { method: 'DELETE', credentials: 'include' })
+    // The machine keeps its own list, so a relay can't keep presenting the old
+    // grant; this browser retries until the machine confirms it.
     const t = grantTransport()
-    if (t) await revokeShareGrant(t, shareId).catch(() => {})
+    if (t) setPendingRevocations((await revokeShareGrants(t, share).catch(() => ['?'])).length)
     await loadShares()
   }
 
-  /** Sign the grant for the devices shown (the owner has seen their names). */
-  const allow = async (share: SessionShare, status: GrantStatus) => {
+  const retryRevocations = async () => {
     const t = grantTransport()
-    if (!t || status.kind === 'signed') return
+    if (t) setPendingRevocations((await flushRevocations(t, machineId).catch(() => ['?'])).length)
+  }
+
+  useEffect(() => { void retryRevocations() }, [machineId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Work out the grant for the devices shown, for the owner to review. */
+  const allow = async (share: SessionShare, status: GrantStatus) => {
+    if (status.kind === 'signed') return
+    setError(null)
+    try {
+      setReview(await proposeGrant(share, status.keys))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  /** Sign exactly what the owner reviewed. */
+  const sign = async () => {
+    const t = grantTransport()
+    if (!t || !review) return
     setBusy(true)
     setError(null)
     try {
-      await signShareGrant(t, share, status.keys)
+      await signGrant(t, review)
+      setReview(null)
       await loadShares()
     } catch (err) {
-      setError(err instanceof GrantError || err instanceof Error ? err.message : String(err))
+      setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
     }
@@ -230,10 +255,46 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
                   status={grants[share.id]}
                   busy={busy}
                   onAllow={status => void allow(share, status)}
-                  onRevoke={() => void revoke(share.id)}
+                  onRevoke={() => void revoke(share)}
                 />
               ))}
             </ul>
+          </div>
+        )}
+
+        {review && (
+          <div className="mb-4 rounded-control border border-edge-strong bg-surface px-3 py-2" role="region" aria-label="Review grant">
+            <p className="text-meta text-ink">
+              Let <span className="font-medium">{members?.find(m => m.userId === review.share.granteeUserId)?.login ?? 'this member'}</span> act as{' '}
+              <span className="font-medium">{review.role === 'editor' ? 'Editor' : 'Viewer'}</span> on this session:
+            </p>
+            <p className="mt-1 text-micro text-ink-muted">{review.grant.permissions.join(', ')}</p>
+            <p className="mt-1 text-micro text-ink-muted">
+              {review.grant.notAfter
+                ? `Until ${new Date(review.grant.notAfter).toLocaleDateString()}, renewed while you are online.`
+                : 'For 30 days at a time, renewed while you are online.'}
+            </p>
+            <p className="mt-2 text-micro text-ink-muted">{review.added.length < review.devices.length ? 'New device:' : 'Their devices:'}</p>
+            <ul className="mt-1 space-y-0.5">
+              {(review.added.length < review.devices.length ? review.added : review.devices).map(d => (
+                <li key={d.keyId} className="text-micro text-ink">
+                  {d.label} <span className="font-mono text-ink-faint">{fingerprint(d.keyId)}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-2 flex justify-end gap-2">
+              <button onClick={() => { setReview(null) }} className="text-meta text-ink-muted hover:text-ink">Cancel</button>
+              <button onClick={() => void sign()} disabled={busy} className="rounded-control bg-primary-6 px-3 py-1 text-meta text-ink-inverse hover:bg-primary-7 disabled:opacity-50">
+                {busy ? 'Signing…' : 'Sign'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {pendingRevocations > 0 && (
+          <div className="mb-4 flex items-center gap-2 text-meta text-warning-5">
+            <span className="flex-1">Revocation not yet confirmed by the computer ({pendingRevocations}).</span>
+            <button onClick={() => void retryRevocations()} className="text-primary-5 hover:underline">Retry</button>
           </div>
         )}
 

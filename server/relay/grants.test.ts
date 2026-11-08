@@ -6,12 +6,13 @@ import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  GRANT_ACTION, GRANT_REVOKE_ACTION, MAX_GRANT_LIFETIME_MS, frameAction, framePayload, grantPayload, grantRevokePayload, intentChallengeInput,
+  GRANT_ACTION, GRANT_REVOKED_LABEL, GRANT_REVOKE_ACTION, MAX_GRANT_LIFETIME_MS, frameAction, framePayload, grantPayload, grantRevokePayload, intentChallengeInput,
 } from './intent-actions.js'
 import type { GrantBody, IntentBody, SignedGrant, SignedIntent } from './intent-actions.js'
 import { IntentVerifier } from './intent-verify.js'
 import { MachineEnrolment } from './enrolment.js'
-import { signP1363 } from './enrolment-crypto.js'
+import { signP1363, transcript, verifyP1363 } from './enrolment-crypto.js'
+import { liveChannelPolicy } from './connector.js'
 import { ensureMachineIdentity, keyIdForSpki } from './machine-identity.js'
 import { emptyTrustStore, readTrustStore, writeTrustStore } from './trust-store.js'
 import type { TrustedCredential, IntentPolicy } from './trust-store.js'
@@ -152,6 +153,38 @@ describe('signed share grants on the machine', () => {
     enrolment.revokeGrant(ownerPrincipal, { grantId: 'g1', intent: sign(owner, { action: GRANT_REVOKE_ACTION, payload: grantRevokePayload('g1') }) })
     expect(readTrustStore(devicesFile)?.revokedGrants.map(g => g.grantId)).toEqual(['g1'])
     expect(verifier.effectivePrincipal(danaPrincipal([grant()]))?.grants).toEqual({})
+  })
+
+  it('never lets a grant run past its signed notAfter', () => {
+    expect(verifier.effectivePrincipal(danaPrincipal([grant({ notAfter: Date.now() + 1000, expiresAt: Date.now() + 5 * 60_000 })]))?.grants).toEqual({})
+    expect(verifier.effectivePrincipal(danaPrincipal([grant({ notAfter: Date.now() + 10 * 60_000, expiresAt: Date.now() + 5 * 60_000 })]))?.grants)
+      .toEqual({ s1: ['view', 'send_prompt'] })
+  })
+
+  it('prefers the most recently signed grant for a session, so narrowing takes', () => {
+    const broad = grant({ grantId: 'g1:a', expiresAt: Date.now() + 20 * 24 * 60 * 60_000 }, owner, { ts: Date.now() - 60_000 })
+    const narrow = grant({ grantId: 'g1:b', permissions: ['view'], expiresAt: Date.now() + 24 * 60 * 60_000 })
+    expect(verifier.effectivePrincipal(danaPrincipal([broad, narrow]))?.grants).toEqual({ s1: ['view'] })
+    expect(verifier.effectivePrincipal(danaPrincipal([narrow, broad]))?.grants).toEqual({ s1: ['view'] })
+  })
+
+  it('confirms a revocation with the machine key, so the owner can stop retrying', () => {
+    const identityFile = join(dir, 'relay-identity.json')
+    const identity = ensureMachineIdentity('m1', 'https://relay.test', { file: identityFile, store: null, log: { log: vi.fn(), warn: vi.fn() } })
+    const enrolment = new MachineEnrolment({ machineId: 'm1', identityFile, devicesFile, secretStore: null, intents: verifier })
+    const result = enrolment.revokeGrant({ userId: 'u-owner', role: 'owner', grants: {} }, {
+      grantId: 'g1:a', intent: sign(owner, { action: GRANT_REVOKE_ACTION, payload: grantRevokePayload('g1:a') }),
+    })
+    expect(verifyP1363(Buffer.from(identity.publicKey, 'base64url'), transcript(GRANT_REVOKED_LABEL, 'g1:a'), Buffer.from(result.signature!, 'base64url'))).toBe(true)
+  })
+
+  it('stops an open channel acting on a grant revoked after it opened', () => {
+    const principal = danaPrincipal([grant()])
+    const policy = liveChannelPolicy(principal, verifier)
+    expect(policy.grants).toEqual({ s1: ['view', 'send_prompt'] })
+    const current = readTrustStore(devicesFile)!
+    writeTrustStore(devicesFile, { ...current, revokedGrants: [{ grantId: 'g1', at: new Date().toISOString() }] })
+    expect(policy.grants).toEqual({})
   })
 
   it('leaves the relay word standing outside required, where unsigned traffic goes through anyway', () => {

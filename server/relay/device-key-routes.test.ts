@@ -62,6 +62,11 @@ describe('device key registry', () => {
     expect(listDeviceKeys(db, alice)).toEqual([expect.objectContaining({ spki, label: 'Pixel Chrome' })])
   })
 
+  it('caps how many keys one user can register', () => {
+    for (let i = 0; i < 20; i++) expect(upsertDeviceKey(db, bob, generateMachineKeyPair().publicKey, `k${i}`)).not.toBeNull()
+    expect(upsertDeviceKey(db, bob, generateMachineKeyPair().publicKey, 'one too many')).toBeNull()
+  })
+
   it('lists and removes only the caller’s own keys', async () => {
     const mine = upsertDeviceKey(db, alice, generateMachineKeyPair().publicKey, 'Mine')!
     upsertDeviceKey(db, bob, generateMachineKeyPair().publicKey, 'Bob’s')
