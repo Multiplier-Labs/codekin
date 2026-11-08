@@ -14,17 +14,19 @@
  */
 
 import { dirname, join } from 'path'
+import { existsSync } from 'fs'
 import { ensureMachineIdentity, loadMachineSigningKey, removeMachineIdentity, writeMachineIdentity } from './machine-identity.js'
 import { signP1363 } from './enrolment-crypto.js'
 import type { KeyObject } from 'crypto'
 import type { MachineIdentity, MachineKeyPair } from './machine-identity.js'
-import { emptyTrustStore, ensureTrustStore, recordOwnerUserId, removeTrustStore, writeTrustStore } from './trust-store.js'
+import { emptyTrustStore, ensureTrustStore, readTrustStore, recordOwnerUserId, removeTrustStore, writeTrustStore } from './trust-store.js'
 import { secretStoreFromEnv } from './secret-store.js'
 import type { SecretStore } from './secret-store.js'
 import { relayCredentialPath } from './relay-credential.js'
 import { MachineEnrolment } from './enrolment.js'
 import { IntentVerifier } from './intent-verify.js'
 import { IntentLog, intentLogPath } from './intent-log.js'
+import { IntentReplayStore } from './intent-replay.js'
 
 export interface TrustPaths {
   identityFile: string
@@ -68,6 +70,11 @@ export function recordPairing(
     log.warn(`[relay] Could not save this machine's identity key (${reason(err)}); a new one is made when the connector starts.`)
   }
   try {
+    const previous = readTrustStore(devicesFile)
+    // Reusing an id is not a new replay domain. If an upgrade/re-pair is
+    // interrupted before the device list is reset, old keys may remain.
+    const fresh = !existsSync(devicesFile) || (previous !== null && previous.machineId !== machineId)
+    new IntentReplayStore(`${devicesFile}.replay.sqlite`, machineId).initialize(Date.now(), fresh)
     writeTrustStore(devicesFile, emptyTrustStore(machineId, relayUrl, ownerUserId))
   } catch (err) {
     log.warn(`[relay] Could not create this machine's device list (${reason(err)}).`)

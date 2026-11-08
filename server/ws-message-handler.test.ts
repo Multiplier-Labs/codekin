@@ -284,6 +284,17 @@ describe('handleWsMessage', () => {
     })
   })
 
+  it('detaches the previous session before a failed create and cannot stop it afterwards', () => {
+    realpathSyncMock.mockImplementation(() => { throw new Error('missing directory') })
+    handleWsMessage({ type: 'create_session', name: 'New', workingDir: '/missing' } as WsClientMessage, ctx)
+    expect(ctx.sessions.leave).toHaveBeenCalledWith('sess-1', ctx.ws)
+    expect(ctx.clientSessions.has(ctx.ws)).toBe(false)
+    handleWsMessage({ type: 'stop' }, ctx)
+    expect(ctx.sessions.stopSession).not.toHaveBeenCalled()
+    handleWsMessage({ type: 'input', data: 'new session input' }, ctx)
+    expect(ctx.sessions.sendInput).not.toHaveBeenCalled()
+  })
+
   /* ---- join_session ---- */
 
   describe('join_session', () => {

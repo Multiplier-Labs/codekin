@@ -34,10 +34,9 @@ import type { BrowserCredential, IntentPolicy, PasskeyCredential, TrustedCredent
 import { verifyPasskeyAssertion } from './webauthn-verify.js'
 import type { IntentLog, IntentVerdict } from './intent-log.js'
 import type { RelayPrincipal } from './relay-protocol.js'
+import { IntentReplayStore } from './intent-replay.js'
+export { REPLAY_TTL_MS, REPLAY_CACHE_MAX } from './intent-replay.js'
 
-/** How long a (keyId, nonce) pair is remembered: past the latest time its timestamp could still pass. */
-export const REPLAY_TTL_MS = 2 * INTENT_MAX_SKEW_MS
-export const REPLAY_CACHE_MAX = 50_000
 /** How often a device's lastUsedAt is written back to the device list. */
 const LAST_USED_FLUSH_MS = 10 * 60_000
 
@@ -154,8 +153,7 @@ export class IntentVerifier {
   private store: TrustStore | null = null
   private storeSignature: string | null = null
   private lastPolicy: IntentPolicy = 'off'
-  /** `${keyId}:${nonce}` → time until which it counts as used. */
-  private replay = new Map<string, number>()
+  private readonly replay: IntentReplayStore
   private lastUsed = new Map<string, number>()
   private lastFlush = 0
   private flushScheduled = false
@@ -168,11 +166,10 @@ export class IntentVerifier {
 
   constructor(private readonly opts: IntentVerifierOptions) {
     this.now = opts.now ?? Date.now
-    // A restart must not reopen the replay window: nonces accepted in the
-    // last few minutes are still in the log.
-    for (const { keyId, nonce, at } of opts.log?.recentAcceptedNonces(this.now() - REPLAY_TTL_MS) ?? []) {
-      this.replay.set(`${keyId}:${nonce}`, at + REPLAY_TTL_MS)
-    }
+    this.replay = new IntentReplayStore(`${opts.devicesFile}.replay.sqlite`, opts.machineId)
+    // Failures are retried by consume(), which refuses until a durable
+    // commit is possible. Never seed security state from an audit tail.
+    this.replay.initialize(this.now())
   }
 
   /** The device list, re-read only when the file changed (it is checked on every message). */
@@ -368,7 +365,7 @@ export class IntentVerifier {
       stepUp = ownerCredential.kind === 'passkey' ? 'passkey' : 'browser-key'
     }
 
-    const replay = this.remember(signerKeyId, body.nonce)
+    const replay = this.replay.consume(principal.userId, body.nonce, this.now())
     if (replay) return replay
     if (ownerCredential) this.noteUsed(signerKeyId)
     return { keyId: signerKeyId, ...(stepUp ? { stepUp } : {}) }
@@ -505,24 +502,6 @@ export class IntentVerifier {
     return { ...principal, grants }
   }
 
-  /** Record (keyId, nonce); refuse one already seen in the window, or when the cache is full. */
-  private remember(keyId: string, nonce: string): IntentRefusal | null {
-    const now = this.now()
-    const key = `${keyId}:${nonce}`
-    const until = this.replay.get(key)
-    if (until !== undefined && until >= now) return 'intent_replayed'
-    // Entries expire in insertion order (the TTL is fixed).
-    for (const [k, expiry] of this.replay) {
-      if (expiry >= now) break
-      this.replay.delete(k)
-    }
-    // Never evict a live entry: that would reopen a replay. A device sending
-    // this much (~80 a second for 10 minutes) waits instead.
-    if (this.replay.size >= REPLAY_CACHE_MAX) return 'intent_rate_limited'
-    this.replay.set(key, now + REPLAY_TTL_MS)
-    return null
-  }
-
   /** Remember when each device was used; written back off the request path, at most every 10 minutes. */
   private noteUsed(keyId: string): void {
     const now = this.now()
@@ -561,9 +540,9 @@ export class IntentVerifier {
       verdict,
       ...(refusal ? { reason: refusal } : {}),
       forwarded: forward,
-      action: expected.action,
-      sessionId: expected.sessionId,
-      userId: principal?.userId ?? null,
+      action: expected.action.slice(0, 256),
+      sessionId: expected.sessionId?.slice(0, 200) ?? null,
+      userId: typeof principal?.userId === 'string' ? principal.userId.slice(0, 200) : null,
       keyId: signerKeyId ?? body?.keyId ?? null,
       payloadHash: sha256b64url(expected.payload),
       ...(stepUp ? { stepUp } : {}),

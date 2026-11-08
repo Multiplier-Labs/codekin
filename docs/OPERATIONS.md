@@ -499,6 +499,17 @@ has to be allowed again. The log is `~/.codekin/relay/intents.jsonl` (0600, hash
 rotated at 30 days or 50 MB). It is also shown in Settings → Remote access →
 Activity.
 
+Signed actions also require durable replay state in `relay-devices.json.replay.sqlite`
+beside the device list (mode 0600). Keep this file with the machine's trust state;
+it is independent of the activity log. When upgrading an existing installation
+without it, the connector starts a one-time **10-minute recovery window** before
+accepting signed actions. Restarts preserve the deadline. New pairing has no
+recovery delay. Re-pairing with a reused machine id keeps the recovery
+precautions. `intent_replay_unavailable` after that window means the connector
+cannot commit its replay state: check the file's permissions, storage health and
+free space. Do not delete the database to clear the error; missing state starts
+a new recovery window.
+
 If your account has a passkey, confirming a browser can also confirm the
 passkey on the computer. After that:
 - The passkey can add further browsers without a code. To turn that off, run

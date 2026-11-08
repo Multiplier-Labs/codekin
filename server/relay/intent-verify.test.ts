@@ -1,3 +1,4 @@
+import Database from 'better-sqlite3'
 /** Tests for signed-intent rules, verification and the local intent log (signed-intents spec §6, §7.2). */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createHash, generateKeyPairSync, randomBytes } from 'crypto'
@@ -324,17 +325,35 @@ describe('IntentVerifier', () => {
     expect(verifier.checkFrame(OWNER, input, frame(input, '@created:2'), channel).forward).toBe(true)
   })
 
-  it('remembers accepted nonces across a restart, from the log', () => {
+  it('remembers accepted nonces across a restart, independently of the log', () => {
     const r = signedReq()
     expect(verifier.checkRequest(r).forward).toBe(true)
     const restarted = new IntentVerifier({ machineId: 'm1', devicesFile, log: new IntentLog(logFile, () => now), now: () => now })
     expect(restarted.checkRequest(r)).toMatchObject({ forward: false, reason: 'intent_replayed' })
   })
 
+  it('refuses malformed principal metadata without crashing the audit path', () => {
+    const request = { ...signedReq(), principal: { ...OWNER, userId: 42 } as unknown as RelayPrincipal }
+    expect(() => verifier.checkRequest(request)).not.toThrow()
+    expect(verifier.checkRequest(request).forward).toBe(false)
+  })
+
+  it('retains replay protection when the audit log is replaced or unavailable', () => {
+    const r = signedReq()
+    expect(verifier.checkRequest(r).forward).toBe(true)
+    rmSync(logFile)
+    const restarted = new IntentVerifier({ machineId: 'm1', devicesFile, now: () => now })
+    expect(restarted.checkRequest(r).reason).toBe('intent_replayed')
+  })
+
   it('refuses rather than forgets when the replay cache is full', async () => {
     const mod = await import('./intent-verify.js')
-    const cache = (verifier as unknown as { replay: Map<string, number> }).replay
-    for (let i = 0; i < mod.REPLAY_CACHE_MAX; i++) cache.set(`k:${i}`, now + REPLAY_TTL_MS)
+    const db = new Database(`${devicesFile}.replay.sqlite`)
+    const insert = db.prepare('INSERT INTO replay_nonces VALUES (?, ?, ?, ?)')
+    db.transaction(() => {
+      for (let i = 0; i < mod.REPLAY_CACHE_MAX; i++) insert.run('m1', 'u-owner', String(i), now + REPLAY_TTL_MS)
+    })()
+    db.close()
     expect(verifier.checkRequest(signedReq())).toMatchObject({ forward: false, reason: 'intent_rate_limited' })
   })
 
@@ -344,7 +363,9 @@ describe('IntentVerifier', () => {
     now += REPLAY_TTL_MS
     // Exactly at the edge the entry still counts (and the timestamp is long stale).
     expect(verifier.checkRequest(r).reason).toBe('intent_stale')
-    expect((verifier as unknown as { replay: Map<string, number> }).replay.size).toBe(1)
+    const db = new Database(`${devicesFile}.replay.sqlite`)
+    expect(db.prepare('SELECT count(*) AS n FROM replay_nonces').get()).toEqual({ n: 1 })
+    db.close()
   })
 
   it('fails closed on a device list that exists but cannot be read', () => {

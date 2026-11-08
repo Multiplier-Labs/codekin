@@ -153,4 +153,37 @@ describe('passkeys from the browser to the machine', () => {
     expect(readTrustStore(devicesFile)?.credentials.map(c => c.kind)).toEqual(['passkey'])
     expect(storage.pins.size).toBe(0)
   })
+
+  it('keeps the pin and pending state after an unauthenticated removal reply', async () => {
+    const storage = memoryStorage()
+    await enrolWithCodes(storage)
+    const signer = createIntentSigner('m1', storage)
+    await expect(removeFromMachine(async () => ({ state: 'approved' }), intent => signer.sign(intent), { userId: 'u-owner', machineId: 'm1', storage })).rejects.toThrow()
+    expect(storage.pins.get('u-owner:m1')).toMatchObject({ removalPending: true })
+    expect(readTrustStore(devicesFile)?.credentials.map(c => c.kind)).toContain('browser')
+  })
+
+  it('recovers a lost removal acknowledgement with a signed proof of absence', async () => {
+    const storage = memoryStorage()
+    await enrolWithCodes(storage)
+    const signer = createIntentSigner('m1', storage)
+    const lost: EnrolSend = async (kind, payload) => { await send(kind, payload); throw new Error('lost reply') }
+    await expect(removeFromMachine(lost, intent => signer.sign(intent), { userId: 'u-owner', machineId: 'm1', storage })).rejects.toThrow('lost reply')
+    expect(readTrustStore(devicesFile)?.credentials.map(c => c.kind)).toEqual(['passkey'])
+    expect(storage.pins.get('u-owner:m1')).toMatchObject({ removalPending: true })
+    await removeFromMachine(send, intent => signer.sign(intent), { userId: 'u-owner', machineId: 'm1', storage })
+    expect(storage.pins.size).toBe(0)
+  })
+
+  it('rejects a valid removal acknowledgement from a different attempt', async () => {
+    const storage = memoryStorage()
+    await enrolWithCodes(storage)
+    const signer = createIntentSigner('m1', storage)
+    let oldReply: unknown
+    const lost: EnrolSend = async (kind, payload) => { oldReply = await send(kind, payload); throw new Error('lost reply') }
+    await expect(removeFromMachine(lost, intent => signer.sign(intent), { userId: 'u-owner', machineId: 'm1', storage })).rejects.toThrow()
+    await expect(removeFromMachine(async () => oldReply, intent => signer.sign(intent), { userId: 'u-owner', machineId: 'm1', storage })).rejects.toThrow()
+    expect(storage.pins.get('u-owner:m1')).toMatchObject({ removalPending: true })
+  })
+
 })

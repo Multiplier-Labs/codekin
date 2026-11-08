@@ -55,6 +55,7 @@ const ERROR_STATUS: Record<TrustStoreError['code'], number> = {
   wrong_machine: 409,
   busy: 503,
   full: 507,
+  conflict: 409,
 }
 
 function sendError(res: Response, err: unknown): void {

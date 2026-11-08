@@ -15,7 +15,7 @@
  */
 
 import {
-  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, INTENT_VERSION, PASSKEY_ANY, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
+  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, DEVICE_REVOKED_LABEL, INTENT_VERSION, PASSKEY_ANY, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
   POLICY_ACTION, POLICY_RAISED_LABEL, intentChallengeInput, policyPayload, revokePayload,
 } from '../../server/relay/intent-actions'
 
@@ -152,11 +152,19 @@ export interface MachinePin {
   via?: 'code' | 'passkey'
   /** This user's passkeys the machine trusts, for step-up (§6.6). A hint. */
   passkeys?: Array<{ credentialId: string; keyId: string }>
+  /** Keep the pin until the machine proves removal; another attempt can retry. */
+  removalPending?: boolean
 }
 
 export interface TrustStorage {
   getKey(userId: string): Promise<BrowserKey | undefined>
   putKey(key: BrowserKey): Promise<void>
+  /** Atomic across tabs: return the stored key, inserting candidate only if absent. */
+  getOrInsertKey?(candidate: BrowserKey): Promise<BrowserKey>
+  updateRevocations?(userId: string, machineId: string, update: (current: PendingRevocation[]) => PendingRevocation[]): Promise<PendingRevocation[]>
+  updateIssuedGrants?(userId: string, machineId: string, update: (current: IssuedGrant[]) => IssuedGrant[]): Promise<IssuedGrant[]>
+  /** Commit the issued ledger and retry queue together, including on interruption. */
+  updateGrantState?(userId: string, machineId: string, update: (state: GrantState) => GrantState): Promise<void>
   getPin(userId: string, machineId: string): Promise<MachinePin | undefined>
   putPin(pin: MachinePin): Promise<void>
   deletePin(userId: string, machineId: string): Promise<void>
@@ -196,6 +204,11 @@ export interface IssuedGrant {
 export interface PendingRevocation {
   grantId: string
   keep?: string
+}
+
+export interface GrantState {
+  issued: IssuedGrant[]
+  revocations: PendingRevocation[]
 }
 
 /** Fired on window whenever a machine pin is saved or removed (signers reload their key). */
@@ -238,7 +251,56 @@ export function indexedDbTrustStorage(): TrustStorage {
     return db
   }
   const store = async (name: string, mode: IDBTransactionMode) => (await open()).transaction(name, mode).objectStore(name)
+  // All reads and writes inside this callback belong to ONE readwrite
+  // transaction. Resolve only at commit, not at request success.
+  const updateRow = async <T>(name: string, key: IDBValidKey, update: (value: T | undefined) => T): Promise<T> => {
+    const tx = (await open()).transaction(name, 'readwrite')
+    return new Promise<T>((resolve, reject) => {
+      const objectStore = tx.objectStore(name)
+      let result: T
+      tx.oncomplete = () => { resolve(result) }
+      tx.onabort = () => { reject(tx.error ?? new Error('Device storage transaction aborted')) }
+      tx.onerror = () => { /* onabort reports the failed transaction */ }
+      const read = objectStore.get(key)
+      read.onsuccess = () => {
+        try {
+          result = update(read.result as T | undefined)
+          objectStore.put(result)
+        } catch (err) { tx.abort(); reject(err instanceof Error ? err : new Error('Device storage update failed')) }
+      }
+    })
+  }
   return {
+    updateGrantState: async (userId, machineId, update) => {
+      const tx = (await open()).transaction([ISSUED, REVOCATIONS], 'readwrite')
+      await new Promise<void>((resolve, reject) => {
+        tx.oncomplete = () => { resolve() }
+        tx.onabort = () => { reject(tx.error ?? new Error('Grant storage transaction aborted')) }
+        tx.onerror = () => { /* onabort reports the failed transaction */ }
+        const issued = tx.objectStore(ISSUED).get([userId, machineId]) as IDBRequest<{ issued: IssuedGrant[] } | undefined>
+        const revocations = tx.objectStore(REVOCATIONS).get([userId, machineId]) as IDBRequest<{ revocations: PendingRevocation[] } | undefined>
+        let reads = 0
+        const apply = () => {
+          if (++reads !== 2) return
+          try {
+            const state = update({ issued: issued.result?.issued ?? [], revocations: revocations.result?.revocations ?? [] })
+            tx.objectStore(ISSUED).put({ userId, machineId, issued: state.issued })
+            tx.objectStore(REVOCATIONS).put({ userId, machineId, revocations: state.revocations })
+          } catch (err) { tx.abort(); reject(err instanceof Error ? err : new Error('Grant storage update failed')) }
+        }
+        issued.onsuccess = apply
+        revocations.onsuccess = apply
+      })
+    },
+    getOrInsertKey: candidate => updateRow<BrowserKey>(KEYS, candidate.userId, current => current ?? candidate),
+    updateRevocations: async (userId, machineId, update) => {
+      const row = await updateRow<{ userId: string; machineId: string; revocations: PendingRevocation[] }>(REVOCATIONS, [userId, machineId], current => ({ userId, machineId, revocations: update(current?.revocations ?? []) }))
+      return row.revocations
+    },
+    updateIssuedGrants: async (userId, machineId, update) => {
+      const row = await updateRow<{ userId: string; machineId: string; issued: IssuedGrant[] }>(ISSUED, [userId, machineId], current => ({ userId, machineId, issued: update(current?.issued ?? []) }))
+      return row.issued
+    },
     getKey: async userId => request((await store(KEYS, 'readonly')).get(userId) as IDBRequest<BrowserKey | undefined>),
     putKey: async key => { await request((await store(KEYS, 'readwrite')).put(key)) },
     getPin: async (userId, machineId) => request((await store(PINS, 'readonly')).get([userId, machineId]) as IDBRequest<MachinePin | undefined>),
@@ -267,6 +329,16 @@ export function trustStorage(): TrustStorage {
   return defaultStorage
 }
 
+/** Serialize legacy in-memory adapters; IndexedDB uses cross-tab transactions. */
+const storageWrites = new WeakMap<TrustStorage, Promise<unknown>>()
+export function withTrustStorageLock<T>(storage: TrustStorage, update: () => Promise<T>): Promise<T> {
+  const previous = storageWrites.get(storage) ?? Promise.resolve()
+  const next = previous.catch(() => {}).then(update)
+  storageWrites.set(storage, next)
+  void next.finally(() => { if (storageWrites.get(storage) === next) storageWrites.delete(storage) }).catch(() => {})
+  return next
+}
+
 /** Whether this browser can hold a signing key at all. */
 export function deviceTrustSupported(): boolean {
   return typeof indexedDB !== 'undefined' && typeof crypto !== 'undefined' && !!crypto.subtle
@@ -279,8 +351,15 @@ export async function getOrCreateBrowserKey(userId: string, storage: TrustStorag
   const keyPair = await crypto.subtle.generateKey(ECDSA, false, ['sign', 'verify'])
   const spki = new Uint8Array(await crypto.subtle.exportKey('spki', keyPair.publicKey))
   const key: BrowserKey = { userId, keyPair, spki: toB64url(spki), keyId: await keyIdForSpki(spki), createdAt: new Date().toISOString() }
-  await storage.putKey(key)
-  return key
+  if (storage.getOrInsertKey) return storage.getOrInsertKey(key)
+  // In-memory adapters used by embedders/tests share this lock. Persistent
+  // cross-tab storage must implement getOrInsertKey, as IndexedDB does.
+  return withTrustStorageLock(storage, async () => {
+    const winner = await storage.getKey(userId)
+    if (winner) return winner
+    await storage.putKey(key)
+    return key
+  })
 }
 
 export async function machinePin(userId: string, machineId: string, storage: TrustStorage = trustStorage()): Promise<MachinePin | undefined> {
@@ -490,9 +569,20 @@ export async function removeFromMachine(
   const storage = opts.storage ?? trustStorage()
   const key = await storage.getKey(opts.userId)
   if (!key) return
-  const intent = await sign({ action: DEVICE_REVOKE_ACTION, sessionId: null, payload: revokePayload(key.keyId), stepUp: true })
+  const pin = await storage.getPin(opts.userId, opts.machineId)
+  if (!pin || pin.via === 'passkey') {
+    throw new EnrolmentFailure('protocol', 'Remove this browser on the computer, or confirm its machine key with the codes before removing it remotely.')
+  }
+  const intent = await sign({ action: DEVICE_REVOKE_ACTION, sessionId: null, payload: revokePayload(key.keyId), stepUp: true }) as { body?: unknown } | null
   if (!intent) throw new EnrolmentFailure('protocol', 'This browser is not confirmed on that computer')
-  await send('enrol_revoke', { keyId: key.keyId, intent })
+  let nonce: unknown
+  try { nonce = (JSON.parse(String(intent.body)) as { nonce?: unknown }).nonce } catch { nonce = undefined }
+  if (typeof nonce !== 'string') throw new EnrolmentFailure('protocol', 'The removal request could not be signed')
+  await storage.putPin({ ...pin, removalPending: true })
+  const reply = await send('enrol_revoke', { keyId: key.keyId, intent }) as Partial<Result> | null
+  const confirmed = reply?.state === 'approved' && reply.keyId === key.keyId && typeof reply.signature === 'string'
+    && await verifyWith(fromB64url(pin.machineKey), transcript(DEVICE_REVOKED_LABEL, opts.machineId, key.keyId, nonce), fromB64url(reply.signature)).catch(() => false)
+  if (!confirmed) throw new EnrolmentFailure('bad_machine_signature', 'Removal is not confirmed by this computer. The request remains pending; retry, or remove the browser locally.')
   await storage.deletePin(opts.userId, opts.machineId)
 }
 

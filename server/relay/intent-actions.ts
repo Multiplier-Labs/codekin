@@ -115,6 +115,7 @@ export type IntentRefusal =
   | 'intent_wrong_session'
   | 'intent_stale'
   | 'intent_replayed'
+  | 'intent_replay_unavailable'
   | 'intent_unsupported'
   | 'intent_wrong_channel'
   | 'intent_out_of_order'
@@ -241,6 +242,8 @@ function framed(fields: Uint8Array[]): Uint8Array {
 
 export const DEVICE_CERTIFY_ACTION = 'device_certify'
 export const DEVICE_REVOKE_ACTION = 'device_revoke'
+/** Machine confirmation of credential absence, bound to the browser's fresh request. */
+export const DEVICE_REVOKED_LABEL = 'ck-device-revoked-v1'
 
 /** What a device_certify intent covers: the browser key being added and its label. */
 export function certifyPayload(spki: string, label: string): Uint8Array {

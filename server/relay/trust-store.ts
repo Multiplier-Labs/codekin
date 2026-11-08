@@ -30,6 +30,7 @@ import { formatCode } from './enrolment-crypto.js'
 import type { EnrolPasskey } from './enrolment-crypto.js'
 import { grantIssuedAt } from './intent-actions.js'
 import type { GrantRevocation } from './intent-actions.js'
+import { IntentReplayStore } from './intent-replay.js'
 
 export function relayDevicesPath(home = homedir()): string {
   return join(home, '.config', 'codekin', 'relay-devices.json')
@@ -124,7 +125,7 @@ export interface TrustStore {
 
 export class TrustStoreError extends Error {
   constructor(
-    readonly code: 'unreadable' | 'not_found' | 'no_credentials' | 'invalid_policy' | 'wrong_machine' | 'busy' | 'full',
+    readonly code: 'unreadable' | 'not_found' | 'no_credentials' | 'invalid_policy' | 'wrong_machine' | 'busy' | 'full' | 'conflict',
     message: string,
   ) {
     super(message)
@@ -257,6 +258,10 @@ export function readTrustStore(file = relayDevicesPath()): TrustStore | null {
 
 export function writeTrustStore(file: string, store: TrustStore): void {
   mkdirSync(dirname(file), { recursive: true })
+  // Only provisioning a new device list is positive evidence of a fresh
+  // trust boundary. Existing installations without a nonce database recover
+  // conservatively, even when their old audit log is empty or missing.
+  if (!existsSync(file)) new IntentReplayStore(`${file}.replay.sqlite`, store.machineId).initialize(Date.now(), true)
   writeFileAtomic(file, JSON.stringify(store, null, 2) + '\n')
 }
 
@@ -342,6 +347,12 @@ export function withRevocation(list: RevokedGrant[], revocation: GrantRevocation
   // earlier than this one's kept grant (which that supersede then revokes).
   const covered = same.some(r => r.keep === undefined || (keep !== undefined && (r.keep === keep || isEarlier(keep, r.keep, grantId))))
   if (covered) return list
+  // Existing records revoke every other grant at the kept timestamp.
+  // Replacing that keep on a tie would resurrect one of those grants.
+  if (keep !== undefined && same.some(r => r.keep !== undefined
+    && grantIssuedAt(r.keep, grantId) === grantIssuedAt(keep, grantId))) {
+    throw new TrustStoreError('conflict', 'Concurrent grants have the same issue time; allow the share again to issue a later grant')
+  }
   const entry: RevokedGrant = keep === undefined ? { grantId, at: new Date(now).toISOString() } : { grantId, keep, at: new Date(now).toISOString() }
   const next = [...list.filter(r => r.grantId !== grantId), entry]
   if (next.length > MAX_REVOKED_GRANTS) throw new TrustStoreError('full', 'This computer holds too many revoked shares to record another')

@@ -274,7 +274,7 @@ Headless servers use the CLI over SSH, or a local UI that is already exposed beh
 ### 5.6 Revocation and recovery
 
 - **Revoke locally.** Use any surface in §5.5. This is the authoritative path.
-- **Revoke remotely.** Send a `device_revoke` intent signed by *another* enrolled owner credential. The relay can drop this message but can't forge it. The UI notes that a revocation is confirmed only once the machine acknowledges it.
+- **Revoke remotely.** Send a `device_revoke` intent signed by an enrolled owner credential, with passkey step-up when required. The browser keeps its machine pin, marked removal-pending, until it verifies `sign_kM(T("ck-device-revoked-v1", machineId, keyId, requestNonce))`. An unsigned reply cannot confirm removal. If the acknowledgement is lost after self-revocation, another attempt can obtain a fresh signed proof that the key is absent. A machine key learned only through passkey enrolment must first be confirmed with the codes, or removal must happen locally.
 - **Signing out everywhere** (`/api/auth/logout-all`) leaves device keys in place, because they are machine trust, not relay sessions. The account security page offers "Also remove this browser from all my computers", which sends signed `device_revoke` intents.
 - **Lost every device.** Enrol again through the §5.2 ceremony on the machine. Being able to recover only from the machine is the point of the design.
 - **Machine reinstalled or re-paired.** It gets a new identity key and an empty trust store. Browsers drop the old pin when the relay reports a new machine id.
@@ -391,7 +391,7 @@ Verification sits at the relay message boundary in `connector.ts`: `request`, `s
    - Session-scoped stream frames: `sessionId` must equal the session the channel has joined (`ChannelState.sessionId`), or the frame's own `sessionId` field.
    - `ws:join_session`: `sessionId` must equal the session being joined.
    - REST paths with a session id: `sessionId` must equal it.
-6. **Freshness.** `|ts − now| ≤ 5 min` (otherwise `intent_stale`). `(keyId, nonce)` must not already be in the replay cache. The cache holds entries for 10 minutes, keyed by credential. Only real devices create valid entries, so it stays small; cap it at 50k entries anyway.
+6. **Freshness.** `|ts − now| ≤ 5 min` (otherwise `intent_stale`). `(machineId, userId, nonce)` must not already be in the replay store. The store holds entries for 10 minutes, shared across all of an account’s credentials on that machine. Only real devices create valid entries, so it stays small; cap it at 50k entries anyway.
 7. **Step-up.** If the action needs step-up (§6.2) and the signer has an enrolled passkey on this machine, the intent must be passkey-signed. Otherwise refuse with `intent_step_up_required`.
 8. **Hand on.** Pass the request or frame to the existing policy (`checkRestPolicy`, `checkClientFrame`). The "owner bypass" in those functions now means "verified owner" rather than "relay said owner". Append the outcome to the local intent log (§7.2).
 
@@ -436,12 +436,13 @@ Verification sits at the relay message boundary in `connector.ts`: `request`, `s
 - **Clocks.**
   - The browser hub's `hello_ack` carries the relay's `serverTime` as a first offset, used only until the machine has given its own time.
   - An `intent_stale` refusal carries `machineTime` with `machineTimeSig = sign_kM(T("ck-intent-time-v1", nonce, machineTime))`. The browser adopts the time only if that verifies against its pinned machine key, so a relay can neither shift the clock nor trigger a retry.
-  - A REST request refused as genuinely stale is retried once with the **same nonce**. A retry of something that actually ran is refused as a replay.
+  - A REST request refused as genuinely stale is retried once with the **same nonce**, using exactly the authenticated machine time for that nonce. Retries are only started within 60 seconds of the original call. A step-up retry is allowed only for a locally classified privileged action and preserves both the original nonce and timestamp, even when it changes signing credentials. An operation that already ran is refused as a replay.
   - A stale stream frame closes its channel, and the corrected offset applies to the next channel.
-- **Replay cache.**
-  - Entries last 10 minutes (twice the skew window).
-  - The cache is seeded at startup from nonces accepted in the log, so a restart doesn't reopen the window.
-  - At 50k entries it refuses (`intent_rate_limited`) rather than evicting a live entry.
+- **Durable replay protection.**
+  - Entries last 10 minutes (twice the skew window), keyed by machine, account and nonce. Browser-key and passkey retries share the same entry.
+  - The SQLite file beside the device list (`relay-devices.json.replay.sqlite`, mode 0600) commits each accepted nonce with full synchronization before forwarding. Independent connectors serialize consumption in a transaction. Audit rotation, unavailable logs and process restarts cannot discard live entries.
+  - An existing installation without this database refuses signed actions for a one-time 10-minute recovery window; the deadline survives restarts. New local pairing initializes an empty database without the delay; reusing a machine id does not prove that its replay history is empty. Corrupt or unavailable storage refuses with `intent_replay_unavailable`.
+  - At 50k entries per machine it refuses (`intent_rate_limited`) rather than evicting a live entry.
 - **Device list handling.** An unreadable device list fails closed, treated as `required`. A device's `lastUsedAt` is written back at most every 10 minutes, off the request path.
 - **Log.** `~/.codekin/relay/intents.jsonl` adds a `forwarded` field to each line.
   - Unsigned messages are logged only in `warn` and `required`. The full intent is stored only for accepted ones.
@@ -450,7 +451,7 @@ Verification sits at the relay message boundary in `connector.ts`: `request`, `s
   - Reads come from the tail.
   - The local view is Settings → Remote access → Activity, and on the command line `codekin relay audit [list | verify]`.
 - **Webhook replay (connector).** Forwarded GitHub deliveries are deduplicated on the SHA-256 of the body GitHub signs, not on the unsigned delivery id. Undated events are never aged out. GitHub's "Redeliver" therefore does nothing for a delivery that already succeeded.
-- **Known limit.** If the local server rejects a `create_session` (for example a bad working directory), both ends still move to `@created:<seq>` while the socket stays in its old session. Later frames are then signed for a session they don't run in. A relay can't cause this; it only mislabels honest frames until the next `join_session`.
+- **Failed session creation.** Before attempting `create_session`, the local server leaves the old session and clears the socket’s session binding. If creation fails, later input and stop frames have no old session to act on; the browser must join or create a session again.
 - **Deferred.**
   - `--against <relay export>`: relay audit events don't carry `keyId` or nonces yet.
   - The §6.2 audit-kind and step-up map: slice 5.
@@ -575,6 +576,8 @@ This also gives machine-side policy a principal it can rely on. A rule such as "
 - **Renewal.** The owner's open browser re-signs, about once an hour, any grant within 7 days of expiry. It works from its own record only: the current grant of each share it hasn't revoked. It keeps the id, permissions and devices, changes only the expiry, and never passes `notAfter`. The relay's listing plays no part. A share the relay answers 404 for is marked revoked and revoked on the machine. Without usable IndexedDB nothing renews silently.
 - **Open channels.** A grantee channel re-reads its effective grants whenever the device list changes, and every 5 seconds, so a revoked or expired grant also stops what the grantee receives.
 - **Not built:** a notice outside the share dialog when a grantee adds a device.
+
+Browser storage uses atomic IndexedDB read/write transactions for key creation, pending revocations and the issued-grant ledger. Concurrent tabs return the same committed browser key. A flush removes only the exact acknowledged revocations from the current queue, and a renewal cannot overwrite a concurrent revocation. The issued-ledger change and its pending revocation commit together across both object stores, so interruption cannot leave a tombstone without retry work. Conflicting supersedes that keep different grant ids with the same issue timestamp are refused without acknowledgement; the existing machine record remains authoritative and the browser retains the conflict until a later grant or full revocation covers it. This preserves already-recorded revocations from older versions. Open grantee channels check current authority on every output frame, including frames without a session id; expiry, share revocation or signer removal ends access immediately on the next frame.
 
 ### 6.8 Policy modes and migration
 

@@ -233,26 +233,7 @@ export class IntentLog {
     }
   }
 
-  /**
-   * Nonces of intents accepted since `since`, to seed the replay cache after a
-   * restart. Reads the newest rotated file too: a rotation may have just
-   * happened.
-   */
-  recentAcceptedNonces(since: number): Array<{ keyId: string; nonce: string; at: number }> {
-    const out: Array<{ keyId: string; nonce: string; at: number }> = []
-    const newestRotated = this.rotatedFiles().at(-1)
-    const text = (newestRotated ? readTail(join(dirname(this.file), newestRotated), TAIL_BYTES) : '') + readTail(this.file, TAIL_BYTES)
-    for (const entry of parseLines(text)) {
-      if (entry.verdict !== 'accepted' || !entry.intent || !entry.keyId) continue
-      const at = Date.parse(entry.at)
-      if (!(at >= since)) continue
-      try {
-        const nonce = (JSON.parse(entry.intent.body) as { nonce?: unknown }).nonce
-        if (typeof nonce === 'string') out.push({ keyId: entry.keyId, nonce, at })
-      } catch { /* skip */ }
-    }
-    return out
-  }
+
 }
 
 function parseLines(text: string): IntentLogEntry[] {
