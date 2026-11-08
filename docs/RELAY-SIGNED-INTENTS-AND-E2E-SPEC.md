@@ -2,7 +2,7 @@
 
 **Status:** Spec. Nothing here is built.
 **Date:** 2026-11-08
-**Source:** the SaaS launch research spec (`codekin-saas-launch-research-spec-2026-11-08.md`, §4.3 and §4.5). That spec made **L1 device-signed intents a launch blocker** for open signup on app.codekin.ai. It named **L2 end-to-end content encryption** as the next step and called the missing audit events a prerequisite for the team model.
+**Context:** a hosted relay is trusted to say who the machine owner is (§3). This spec removes that trust in two levels: **L1 device-signed intents** and **L2 end-to-end content encryption**. It also adds the relay audit events that are declared but never emitted.
 **Basis:** `origin/main` at v0.10.5 (`a93f6e3`). All `path:line` references point there.
 **Related:** `docs/HOSTED-RELAY-CONTROL-PLANE-SPEC.md` (§5 trust boundaries, §7 protocol, §14 open questions), `docs/DEVICE-LINK-AND-PASSKEY-SPEC.md`, `docs/HOSTED-SECURITY-AUDIT-2026-09-28.md`.
 
@@ -10,11 +10,11 @@
 
 ## 1. Summary
 
-Today a connected machine does whatever the relay tells it to, as long as the relay labels the request `role: 'owner'`. Anyone who controls app.codekin.ai can therefore drive every connected machine. That includes an attacker who has broken into it, an insider, or the operator. The relay also reads every prompt, response and tool call in clear text.
+Today a connected machine does whatever the relay tells it to, as long as the relay labels the request `role: 'owner'`. Anyone who controls the relay can therefore drive every connected machine. That includes an attacker who has broken into it, an insider, or the operator. The relay also reads every prompt, response and tool call in clear text.
 
 This spec fixes that in two stages.
 
-**L1: signed intents (launch blocker).**
+**L1: signed intents.**
 - Each browser the owner uses holds a private signing key that never leaves it.
 - The machine keeps its own local list of the public keys allowed to control it.
 - A key gets onto that list only through a confirmation done *on the machine*.
@@ -23,19 +23,14 @@ This spec fixes that in two stages.
 
 With L1 in place, the relay can still read traffic, delay it or drop it. It can't create, change, replay or redirect an action, and it can't grant itself access.
 
-**Audit (§4.5, ships first).** The relay starts recording the four declared-but-never-emitted events: `prompt_sent`, `approval_answered`, `file_uploaded` and `session_stopped`. These records hold no content: actor, machine, session, action, payload hash, signing key. The connector keeps its own hash-chained log of every intent it accepted or rejected. The owner can check the relay's audit against it.
+**Audit (ships first).** The relay starts recording the four declared-but-never-emitted events: `prompt_sent`, `approval_answered`, `file_uploaded` and `session_stopped`. These records hold no content: actor, machine, session, action, payload hash, signing key. The connector keeps its own hash-chained log of every intent it accepted or rejected. The owner can check the relay's audit against it.
 
-**L2: end-to-end encryption (within two quarters).**
+**L2: end-to-end encryption.**
 - Each browser↔machine connection runs an authenticated key exchange, using the device keys from L1 and a machine identity key that L1 introduces.
 - Every stream frame and REST body is encrypted with AES-256-GCM.
 - The relay keeps routing, rate limits and content-free audit metadata, and sees nothing else.
 - Relay-side frame filtering for grantees moves fully to the connector, which already does the same checks.
-- This spec uses per-connection keys rather than the per-session wrapped keys the audit suggested. The relay stores no content, so there is nothing at rest to wrap keys for (§8.1).
-
-**Estimates.**
-- L1 including signed grants: ~3½–4 engineer-weeks. The audit's 2–3 weeks didn't count signed share grants or the enrolment ceremony. Without signed grants, L1 would leave a compromised relay free to invent grantees (§6.7).
-- Audit events: ~2 days.
-- L2: ~4–5 engineer-weeks on top of L1.
+- This spec uses per-connection keys rather than per-session wrapped keys. The relay stores no content, so there is nothing at rest to wrap keys for (§8.1).
 
 ---
 
@@ -45,7 +40,7 @@ With L1 in place, the relay can still read traffic, delay it or drop it. It can'
 
 | Actor | Today (L0) | After L1 | After L2 |
 | --- | --- | --- | --- |
-| Another customer | Blocked (grantee isolation, `isolation-audit.test.ts`) | Blocked | Blocked |
+| Another tenant | Blocked (grantee isolation, `isolation-audit.test.ts`) | Blocked | Blocked |
 | A stolen relay session cookie | Full control of the victim's machines | Can't act: no device key. Can still read what the victim's browser is streaming | Can read nothing |
 | Relay backend compromise, or an operator using relay access | Full control of every machine, reads everything | **Can't act, can't grant itself access.** Reads traffic in transit. Can delay or drop | Reads metadata only (who, which machine, when, sizes). Can delay or drop |
 | Relay serving malicious web-app JavaScript | Full control | **Not defended.** The JS runs with the user's device key in the user's browser (§2.3) | Not defended |
@@ -63,8 +58,8 @@ With L1 in place, the relay can still read traffic, delay it or drop it. It can'
 
 ### 2.3 Out of scope, stated plainly
 
-- **Malicious frontend code.** app.codekin.ai serves the JavaScript that holds the device key. An attacker who can change that bundle can sign anything while the user has the app open. L1 protects against a compromised *backend* or operator API access. It doesn't protect against a compromised *frontend*. Partial mitigations available now:
-  - strict CSP and SRI (launch spec §4.6)
+- **Malicious frontend code.** The relay's origin serves the JavaScript that holds the device key. An attacker who can change that bundle can sign anything while the user has the app open. L1 protects against a compromised *backend* or operator API access. It doesn't protect against a compromised *frontend*. Partial mitigations available now:
+  - strict CSP and SRI
   - passkey step-up for privileged actions (§6.6), which shows an operating-system prompt the page can't hide
 
   The full answer is L3 (§12): a reproducible, signed frontend build, and the desktop app loading a bundled copy.
@@ -72,10 +67,10 @@ With L1 in place, the relay can still read traffic, delay it or drop it. It can'
 - **Traffic analysis** (sizes and timing) after L2.
 - **Local compromise** of the machine or of the browser profile.
 
-### 2.4 What we may claim, per level
+### 2.4 What each level lets an operator claim
 
-- **L1:** "Codekin's servers can't run anything on your computer. Only devices you approved on that computer can." Add a pointer to §2.3. Don't claim confidentiality.
-- **Until L2:** the privacy policy and DPA say that the relay processes session content in memory and in transit only, and doesn't store it. That is true today: `server/relay/audit.ts:1-7` persists metadata only.
+- **L1:** "The relay can't run anything on your computer. Only devices you approved on that computer can." Add a pointer to §2.3. Don't claim confidentiality.
+- **Until L2:** an operator can say that the relay processes session content in memory and in transit only, and doesn't store it. That is true today: `server/relay/audit.ts:1-7` persists metadata only.
 - **L2:** "Session content is end-to-end encrypted between your devices and your computer."
 
 ---
@@ -112,7 +107,7 @@ X25519/Ed25519 are deliberately avoided: WebCrypto support for them is still une
 
 - **When:** generated by the connector at pairing time, or on first start after upgrade for already-paired machines.
 - **What:** one ECDSA P-256 key pair for signing. L2 adds one ECDH P-256 key pair.
-- **Where:** `~/.config/codekin/relay-identity.json`, mode 0600, beside `relay.json`. The desktop app moves it into the macOS Keychain, the same as the planned move for the machine secret (launch spec §4.6).
+- **Where:** `~/.config/codekin/relay-identity.json`, mode 0600, beside `relay.json`. The desktop app moves it into the macOS Keychain, the same as the planned move for the machine secret.
 - **What it's for:**
   - The connector signs enrolment transcripts (§5.2), so the browser can tell it is talking to the real machine.
   - It authenticates the machine's side of the L2 handshake.
@@ -145,7 +140,7 @@ The trust store accepts two kinds of owner credential.
   "version": 1,
   "machineId": "m_…",
   "ownerUserId": "u_…",
-  "relayOrigin": "https://app.codekin.ai",
+  "relayOrigin": "https://relay.example.com",
   "policy": "required",
   "credentials": [
     {
@@ -164,7 +159,7 @@ The trust store accepts two kinds of owner credential.
       "userId": "u_…",
       "credentialId": "base64url…",
       "cosePublicKey": "base64url…",
-      "rpId": "app.codekin.ai",
+      "rpId": "relay.example.com",
       "label": "iCloud Keychain",
       "addedAt": "…",
       "addedBy": "local"
@@ -423,7 +418,7 @@ The grant JSON travels next to the intent so the connector can hash it and read 
 
 **Residual risk.** The grantee key set comes from the relay at share time, effectively trust-on-first-use. Device labels in the dialog and the "new device" prompt narrow this. Closing it fully needs cross-signing or the L3 transparency log.
 
-This also gives the provider-policy work (launch spec §5) a principal it can rely on. "Execution on personal-plan sessions is owner-only" becomes enforceable on the machine. Today it would depend on the relay's word about who is the owner.
+This also gives machine-side policy a principal it can rely on. A rule such as "execution on personal-plan sessions is owner-only" becomes enforceable on the machine. Today it would depend on the relay's word about who is the owner.
 
 ### 6.8 Policy modes and migration
 
@@ -431,7 +426,7 @@ This also gives the provider-policy work (launch spec §5) a principal it can re
 | --- | --- |
 | Paired after this ships | `required` from the first enrolled credential (§5.3) |
 | Paired before, connector upgraded | `off` until the owner enrols a first browser. The hosted UI prompts for this ("Protect this computer: confirm this browser on it"). Enrolling switches the machine to `required`. |
-| Connector without `intents` capability | The relay shows "Update Codekin on this computer". Before open signup, the relay refuses connectors below the minimum version for paid workspaces (launch spec §4.6) |
+| Connector without `intents` capability | The relay shows "Update Codekin on this computer". Workspaces that require the capability refuse the machine (connector version floors) |
 
 - Only local surfaces can set `policy` back to `off`. A remote `policy` intent may only **raise** it.
 - In `warn` and `off` modes, the hosted UI says plainly, in the machine header, that the relay can control the machine.
@@ -445,7 +440,7 @@ This also gives the provider-policy work (launch spec §5) a principal it can re
 
 ---
 
-## 7. Audit (§4.5 of the launch spec)
+## 7. Audit
 
 ### 7.1 Relay audit events
 
@@ -468,7 +463,7 @@ These ship first, before L1. They work on unsigned traffic too.
 - No prompt text, file names or tool input. For uploads, record the byte count only.
 - Under L2 the relay can't parse frames. It audits from the intent's cleartext action label instead (§8.5).
 
-The relay's audit is only as honest as the relay. That is fine for team accountability (the Team-tier feature). Tamper resistance comes from the machine's log in §7.2.
+The relay's audit is only as honest as the relay. That is fine for team accountability. Tamper resistance comes from the machine's log in §7.2.
 
 ### 7.2 Machine-local intent log
 
@@ -563,7 +558,7 @@ Grantee REST is still limited to `GRANTEE_ROUTES`. The connector enforces that a
 
 - A lock in the machine header shows "End-to-end encrypted". The detail sheet shows the machine key fingerprint and the browser key fingerprint.
 - Machines without `e2e` show "Encrypted in transit; the relay can read content". A workspace setting, "Require end-to-end encryption", refuses such machines.
-- Update the docs, security page, privacy policy and DPA once L2 is on by default.
+- Update the docs once L2 is on by default.
 
 ### 8.8 Later: per-session content keys
 
@@ -592,23 +587,21 @@ L2 already supplies device ECDH keys and the trust store, so this needs no furth
 
 Each slice is one PR with its own tests, behind capability flags until slice 7.
 
-| # | Slice | Contents | Est. |
-| --- | --- | --- | --- |
-| 1 | **Audit events** (§7.1) | Emit `prompt_sent`, `approval_answered`, `file_uploaded`, `session_stopped` (+ `session_created`, `permission_mode_changed`) from the hub, with relay-computed hashes; audit UI filters | 2 d |
-| 2 | **Machine identity + trust store** | `relay-identity.json`, `relay-devices.json`, `/api/relay/devices*` local routes, `codekin relay devices` CLI, Settings → Remote access → Devices (read-only list, revoke). No enforcement yet | 3 d |
-| 3 | **Enrolment ceremony** | `enrol_*` envelopes in the hub and connector; browser key generation (IndexedDB); trust sheet; code entry in local UI, desktop and CLI; pairing integration (§5.3); relay `device_keys` registry | 4–5 d |
-| 4 | **Intent signing + verification** | `intent-actions.ts`; signing in `relay-client.ts` / `hosted.ts` with ordered async queue; verification at the connector boundary; replay cache; `warn` mode; local intent log (§7.2) | 4–5 d |
-| 5 | **Passkeys** | Passkey enrolment in the ceremony; `device_certify`; step-up for privileged actions; remote `device_revoke` | 3 d |
-| 6 | **Signed grants + grantee intents** | `grant` / `grant_revoke`; `signedGrants` in principal; intersection on the connector; share-dialog device list; "new device" re-sign prompt; silent renewal | 3–4 d |
-| 7 | **Enforce** | `required` for new pairings and on first enrolment; migration prompts; minimum connector version per capability; forged-principal negative suite on staging (§11) | 2–3 d |
-| | **L1 total** | | **~3½–4 eng-wk** |
-| 8 | **E2E handshake + sealed streams** | §8.2–8.3 behind `e2e` capability; pinned machine key; rekey | 6–8 d |
-| 9 | **Sealed REST** | §8.4, including multipart uploads | 3–4 d |
-| 10 | **Relay goes blind** | Skip content inspection on E2E connections; minimum-version gate; audit labels; grantee E2E | 3 d |
-| 11 | **UX + claims** | Lock indicator, fingerprints, workspace "require E2E", docs, security page | 3 d |
-| | **L2 total** | | **~4–5 eng-wk** |
+| # | Slice | Contents |
+| --- | --- | --- |
+| 1 | **Audit events** (§7.1) | Emit `prompt_sent`, `approval_answered`, `file_uploaded`, `session_stopped` (+ `session_created`, `permission_mode_changed`) from the hub, with relay-computed hashes; audit UI filters |
+| 2 | **Machine identity + trust store** | `relay-identity.json`, `relay-devices.json`, `/api/relay/devices*` local routes, `codekin relay devices` CLI, Settings → Remote access → Devices (read-only list, revoke). No enforcement yet |
+| 3 | **Enrolment ceremony** | `enrol_*` envelopes in the hub and connector; browser key generation (IndexedDB); trust sheet; code entry in local UI, desktop and CLI; pairing integration (§5.3); relay `device_keys` registry |
+| 4 | **Intent signing + verification** | `intent-actions.ts`; signing in `relay-client.ts` / `hosted.ts` with ordered async queue; verification at the connector boundary; replay cache; `warn` mode; local intent log (§7.2) |
+| 5 | **Passkeys** | Passkey enrolment in the ceremony; `device_certify`; step-up for privileged actions; remote `device_revoke` |
+| 6 | **Signed grants + grantee intents** | `grant` / `grant_revoke`; `signedGrants` in principal; intersection on the connector; share-dialog device list; "new device" re-sign prompt; silent renewal |
+| 7 | **Enforce** | `required` for new pairings and on first enrolment; migration prompts; minimum connector version per capability; forged-principal negative suite on staging (§11) |
+| 8 | **E2E handshake + sealed streams** | §8.2–8.3 behind `e2e` capability; pinned machine key; rekey |
+| 9 | **Sealed REST** | §8.4, including multipart uploads |
+| 10 | **Relay goes blind** | Skip content inspection on E2E connections; minimum-version gate; audit labels; grantee E2E |
+| 11 | **UX + claims** | Lock indicator, fingerprints, workspace "require E2E", docs, security page |
 
-Slice 1 doesn't depend on anything else and can merge right away. Slices 2–7 make up Phase 1 of the launch plan.
+Slice 1 doesn't depend on anything else and can merge right away.
 
 ---
 
@@ -636,7 +629,7 @@ Slice 1 doesn't depend on anything else and can merge right away. Slices 2–7 m
 
 **L2.** Run a known-plaintext canary through a full session (prompt, approval, upload, diff) and assert it never appears in bytes the hub sees. Also cover sequence replay and reordering, swapped ephemeral keys, a machine key that doesn't match the pin, and rekeying across reconnects.
 
-**Staging gate.** Run the suite above against two real tenants on staging, together with the existing cross-tenant suite (launch plan Phase 1 exit gate).
+**Staging gate.** Run the suite above against two real tenants on staging, together with the existing cross-tenant suite.
 
 **Manual.** Cover these paths:
 - iPhone Safari (home-screen and tab): passkey certification and the 7-day eviction path
@@ -660,9 +653,9 @@ This level targets a malicious operator and targeted key injection.
 | # | Decision | Recommendation |
 | --- | --- | --- |
 | D1 | Sign reads too, or control frames only? | **Sign everything** except `ping`/`resize`. This stops active exfiltration through `browse-dirs`, `docs` and `join_session`, at negligible cost |
-| D2 | Step-up when the owner has no passkey enrolled on the machine | Accept the browser key, and encourage passkey enrolment in the trust sheet. Revisit for enterprise |
+| D2 | Step-up when the owner has no passkey enrolled on the machine | Accept the browser key, and encourage passkey enrolment in the trust sheet |
 | D3 | Grant lifetime | 30 days with silent re-signing while the owner is online; key-set changes always need the owner |
-| D4 | Under L2, may the relay see per-message action labels and session ids for audit? | **Yes**: it keeps the Team audit feature. Offer a workspace option to drop labels (audit then covers connections only) |
+| D4 | Under L2, may the relay see per-message action labels and session ids for audit? | **Yes**: it keeps per-action audit working. Offer a workspace option to drop labels (audit then covers connections only) |
 | D5 | Allow passkey certification of new browsers (trusting the passkey provider's sync)? | **Yes**. Without it every new phone means a trip to the machine, and adoption suffers |
 | D6 | Grantee machine-key pin | Owner-signed `kM` fingerprint inside the grant (cheap, closes the grantee MITM-on-content gap) |
-| D7 | Existing machines | Switch to `required` on first enrolment; refuse non-enrolled machines in paid workspaces from open signup onward |
+| D7 | Existing machines | Switch to `required` on first enrolment; workspaces can require enrolment |
