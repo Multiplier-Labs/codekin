@@ -604,7 +604,7 @@ Browser storage uses atomic IndexedDB read/write transactions for key creation, 
   - During the grace period machines are only flagged.
   - Changes apply to connected machines at once. A machine that becomes refused (the rule turned on, a lower policy reported, or a grace period running out) has its open channels closed, and its connector is told on each change. The machine list adds `intentsSupported`, so a machine that needs an update isn't told to confirm a device.
   - `PATCH` sets `requireConfirmedDevices` on its own, so nothing applies before another field is refused.
-- **Floor.** `CONNECTOR_FLOORS.capabilities.intents` is `0.10.6`, the release that carries this slice.
+- **Floor.** `CONNECTOR_FLOORS.capabilities.intents` is `0.11.0`, the release that carries this slice.
 - **Browser.** The machine header no longer exists in the hosted app (nothing is drawn over a session), so the warning sits on the machine's row in Settings → Machines:
   - "The relay can control this computer", with **Require confirmed devices** from a confirmed browser, or a pointer to confirm this browser;
   - "Update Codekin on it" for connectors that report no policy;

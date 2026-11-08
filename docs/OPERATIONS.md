@@ -536,7 +536,7 @@ a JSON array, empty by default). A machine below a floor, or missing a required
 feature, stays connected and shows as **update required** in the hosted app,
 and every request and stream to it fails with `connector_update_required`.
 Before raising a floor, check `connectorVersions` in `GET /api/admin/stats`.
-Signed intents (`intents`) have a floor of 0.10.6.
+Signed intents (`intents`) have a floor of 0.11.0.
 
 **Require confirmed devices.** A workspace owner or admin can refuse machines
 the relay alone could control: Settings → Workspace → **Require confirmed

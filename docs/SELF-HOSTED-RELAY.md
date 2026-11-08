@@ -232,7 +232,7 @@ Set it up in three steps:
   workspace. Removing the machine removes its receiver.
 - An offline machine answers `503`, and GitHub shows the failed delivery, which you can
   redeliver from GitHub's UI once the machine is back.
-- The connector needs Codekin 0.10.6 or later; an older connector refuses webhook deliveries
+- The connector needs Codekin 0.11.0 or later; an older connector refuses webhook deliveries
   (`403`).
 
 ## 8. Operating

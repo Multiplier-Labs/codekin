@@ -119,7 +119,7 @@ describe('signed intents over the relay', () => {
     localFetch = vi.fn().mockImplementation(() => Promise.resolve(new Response('{"sessions":[]}', { status: 200, headers: { 'content-type': 'application/json' } })))
     localSockets = []
     connector = new RelayConnector({
-      relayUrl, machineId, machineSecret, connectorVersion: '0.10.6-test',
+      relayUrl, machineId, machineSecret, connectorVersion: '0.11.0-test',
       localTarget: { origin: 'http://127.0.0.1:32352', authToken: 't' },
       fetchImpl: localFetch as never,
       socketFactory: (() => { const s = new FakeLocalSocket(); localSockets.push(s); return s as unknown as WebSocket }) as WebSocketFactory,

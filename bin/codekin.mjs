@@ -337,7 +337,7 @@ async function cmdRelayStatus() {
   }
   try {
     // `ready` checks the relay's database and sockets; relays older than
-    // 0.10.6 only have `/api/health`, which answers the same `{ ok }` shape.
+    // 0.11.0 only have `/api/health`, which answers the same `{ ok }` shape.
     let res = await fetch(`${credential.url}/api/health/ready`)
     if (res.status === 404) res = await fetch(`${credential.url}/api/health`)
     const data = await res.json()

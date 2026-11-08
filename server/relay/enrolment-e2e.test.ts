@@ -132,7 +132,7 @@ describe('enrolment over the relay', () => {
 
   async function startConnector(withEnrolment = true): Promise<void> {
     connector = new RelayConnector({
-      relayUrl, machineId, machineSecret, connectorVersion: '0.10.6-test',
+      relayUrl, machineId, machineSecret, connectorVersion: '0.11.0-test',
       localTarget: { origin: 'http://127.0.0.1:1', authToken: 't' },
       fetchImpl: (() => Promise.resolve(new Response('{"sessions":[]}'))) as never,
       ...(withEnrolment ? { enrolment: new MachineEnrolment({ machineId, identityFile, devicesFile, secretStore: null }) } : {}),

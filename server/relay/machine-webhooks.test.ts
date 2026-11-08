@@ -113,7 +113,7 @@ describe('GitHub webhooks through the relay', () => {
       relayUrl: baseUrl,
       machineId,
       machineSecret,
-      connectorVersion: '0.10.6-test',
+      connectorVersion: '0.11.0-test',
       localTarget: { origin: 'http://local.invalid', authToken: 'local-token' },
       fetchImpl,
       webhookGuard: guard,
