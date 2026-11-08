@@ -12,7 +12,10 @@ const text = z.string().max(16 * 1024)
 const empty = z.object({})
 const base = { version: z.literal(1), id: id.optional(), channelId: id.optional() }
 const frame = <K extends string, S extends z.ZodType>(kind: K, payload: S) => z.object({ ...base, kind: z.literal(kind), payload })
-const streamData = frame('stream_data', z.object({ data: z.string().max(MAX_PROXY_BODY_BYTES) })).extend({ channelId: id })
+// Stream frames are bounded by the socket's maxPayload (relay-server.ts). A
+// tighter cap here would only drop the whole connector at a lower size, e.g.
+// on a large session replay, without protecting anything more.
+const streamData = frame('stream_data', z.object({ data: z.string() })).extend({ channelId: id })
 const streamClose = frame('stream_close', z.object({
   // Close codes are ultimately passed to ws.close(), which rejects reserved values.
   code: z.number().int().refine(n => (n >= 1000 && n <= 1014 && ![1004, 1005, 1006].includes(n)) || (n >= 3000 && n <= 4999)).optional(),

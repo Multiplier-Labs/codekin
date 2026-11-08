@@ -34,6 +34,12 @@ describe('hub wire validation', () => {
     expect(parseHubEnvelope(wire('request', { method: 'GET', path: '/' }, { id: 'r' }), 'connector')).toBeNull()
   })
 
+  it('leaves stream frame size to the socket limit, so large session replays pass', () => {
+    const replay = wire('stream_data', { data: 'x'.repeat(9 * 1024 * 1024) }, { channelId: 'c' })
+    expect(parseHubEnvelope(replay, 'connector')).not.toBeNull()
+    expect(parseHubEnvelope(replay, 'browser')).not.toBeNull()
+  })
+
   it('contains synchronous and asynchronous handler failures without logging their contents', async () => {
     const log = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
