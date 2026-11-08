@@ -91,6 +91,8 @@
 
           root /var/www/codekin;
           try_files $uri $uri/ /index.html;
+          # Security headers: install nginx/snippets/codekin-security-headers.conf.example
+          include snippets/codekin-security-headers.conf;
       }
 
       listen 443 ssl;

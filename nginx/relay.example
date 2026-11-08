@@ -1,24 +1,27 @@
-# Hosted Codekin control plane + relay (app.codekin.ai).
+# Self-hosted Codekin relay + web app. See docs/SELF-HOSTED-RELAY.md.
 #
-# The hosted frontend is a static build (npm run build:hosted → dist-hosted/)
-# copied to /var/www/codekin-app. The relay server (server/relay) listens on
-# 127.0.0.1:32360 and owns /api; /relay carries the browser and connector
-# WebSockets in later phases. TLS is added by certbot --nginx.
+# Replace YOUR_DOMAIN with your relay's domain. The web app is a static build
+# (npm run build:hosted → dist-hosted/) copied to /var/www/codekin-app. The
+# relay server (server/relay) listens on 127.0.0.1:32360 and owns /api and
+# /relay (browser and connector WebSockets). TLS is added by certbot --nginx.
+# Security headers: install nginx/snippets/codekin-security-headers.conf.example.
 
 server {
     listen 80;
-    server_name app.codekin.ai;
+    server_name YOUR_DOMAIN;
 
     # Hosted frontend (static build)
     location / {
         root /var/www/codekin-app;
         try_files $uri $uri/ /index.html;
         add_header Cache-Control "no-cache";
+        include snippets/codekin-security-headers.conf;
     }
 
     location /assets/ {
         root /var/www/codekin-app;
         add_header Cache-Control "public, max-age=31536000, immutable";
+        include snippets/codekin-security-headers.conf;
     }
 
     # Control plane REST API

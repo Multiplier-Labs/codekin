@@ -152,7 +152,7 @@ To add local repositories, simply clone them into your `REPOS_ROOT` directory. T
 The server is configured only through environment variables (step 2). There is no separate deploy settings file.
 
 - **nginx serves the frontend (this guide)** — Copy the build output to a web root in step 7 and point nginx at it in step 8. Leave `FRONTEND_DIST` unset.
-- **Codekin serves the frontend** — Set `FRONTEND_DIST` to the built `dist/` directory in `~/.config/codekin/env`, and Express serves the app itself. nginx then only needs to proxy to port 32352.
+- **Codekin serves the frontend** — Set `FRONTEND_DIST` to the built `dist/` directory in `~/.config/codekin/env`, and Express serves the app itself. nginx then only needs to proxy to port 32352. Include the security-header snippet (step 8) in that proxy location.
 
 ## 7. Build and Deploy
 
@@ -175,6 +175,15 @@ sudo nano /etc/nginx/sites-available/codekin
 sudo ln -sf /etc/nginx/sites-available/codekin /etc/nginx/sites-enabled/
 ```
 
+Install the security headers the config includes (replace `YOUR_DOMAIN` here too):
+
+```bash
+sudo cp nginx/snippets/codekin-security-headers.conf.example /etc/nginx/snippets/codekin-security-headers.conf
+sudo nano /etc/nginx/snippets/codekin-security-headers.conf
+```
+
+The snippet sets a strict Content Security Policy, HSTS and anti-framing headers for the web app. It assumes HTTPS, so get the certificate in the next step before reloading. If you add your own `location` that serves the app and sets `add_header`, include the snippet there too. nginx doesn't inherit `add_header` into such locations.
+
 ### SSL with Let's Encrypt
 
 ```bash
@@ -192,7 +201,7 @@ sudo systemctl reload nginx
 
 | Location      | Backend                      | Notes                              |
 |---------------|------------------------------|------------------------------------|
-| `/`           | Static files                 | SPA with `try_files`               |
+| `/`           | Static files                 | SPA with `try_files`; security headers snippet |
 | `/cc/`        | `127.0.0.1:32352`           | WebSocket + REST + uploads, 24h timeout |
 | `/cc/api/webhooks/github` | `127.0.0.1:32352` | GitHub webhooks (no auth — HMAC validated) |
 | `/authelia/`  | `127.0.0.1:9091`           | Auth UI + API                      |
