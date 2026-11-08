@@ -22,6 +22,8 @@ export type AuditEventKind =
   | 'file_uploaded'
   | 'approval_answered'
   | 'session_stopped'
+  | 'session_created'
+  | 'permission_mode_changed'
   | 'access_denied'
   | 'user_updated'
   | 'device_link_created'
@@ -129,6 +131,9 @@ export interface AuditQuery {
   workspaceId?: string
   machineId?: string
   actorUserId?: string
+  localSessionId?: string
+  /** Only these event kinds. */
+  kinds?: string[]
   limit?: number
 }
 
@@ -151,6 +156,14 @@ export function listAuditEvents(db: Database.Database, query: AuditQuery = {}): 
   if (query.actorUserId) {
     clauses.push('actor_user_id = ?')
     params.push(query.actorUserId)
+  }
+  if (query.localSessionId) {
+    clauses.push('local_session_id = ?')
+    params.push(query.localSessionId)
+  }
+  if (query.kinds && query.kinds.length > 0) {
+    clauses.push(`kind IN (${query.kinds.map(() => '?').join(', ')})`)
+    params.push(...query.kinds)
   }
 
   const limit = Math.min(Math.max(query.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT)

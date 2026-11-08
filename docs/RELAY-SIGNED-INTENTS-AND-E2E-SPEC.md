@@ -1,6 +1,6 @@
 # Relay trust: device-signed intents and end-to-end encryption
 
-**Status:** Spec. Nothing here is built.
+**Status:** Spec. Built: slice 1 (relay audit events, §7.1). The rest is not built.
 **Date:** 2026-11-08
 **Context:** a hosted relay is trusted to say who the machine owner is (§3). This spec removes that trust in two levels: **L1 device-signed intents** and **L2 end-to-end content encryption**. It also adds the relay audit events that are declared but never emitted.
 **Basis:** `origin/main` at v0.10.5 (`a93f6e3`). All `path:line` references point there.
@@ -444,7 +444,7 @@ This also gives machine-side policy a principal it can rely on. A rule such as "
 
 ### 7.1 Relay audit events
 
-These ship first, before L1. They work on unsigned traffic too.
+**Built** (`server/relay/session-audit.ts`, `browser-hub.ts`). These ship first, before L1, and work on unsigned traffic too. `device_enrolled`, `device_revoked` and `intent_rejected` come with slices 3–4. `session_created` is recorded from the machine's `session_created` reply on a stream, or from a successful `POST /api/sessions/create`. Stream events carry the session the channel joined. `GET /api/workspaces/:id/audit` filters by `kind` (comma list), `machineId`, `sessionId` and `actor`; there is no audit UI yet.
 
 | Event | Emitted when the hub forwards | Metadata (no content) |
 | --- | --- | --- |

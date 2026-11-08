@@ -13,6 +13,7 @@ import type Database from 'better-sqlite3'
 import { openControlPlaneDb, upsertUserFromGithub } from './control-plane-db.js'
 import { startPairing, approvePairing, completePairing } from './pairing.js'
 import { ConnectorHub } from './connector-hub.js'
+import { listAuditEvents } from './audit.js'
 import { BrowserHub } from './browser-hub.js'
 import { RelayConnector } from './connector.js'
 import { envelope, MAX_CHANNELS_PER_CLIENT, RELAY_ERROR, STREAM_CLOSE } from './relay-protocol.js'
@@ -254,6 +255,39 @@ describe('session streaming over the relay', () => {
     await browser.waitForFrame(f => f.kind === 'event' && f.channelId === channelId)
     return browser
   }
+
+  it('audits what a browser does in a session, without recording content', async () => {
+    await startConnector()
+    const browser = await openChannel()
+    const send = (msg: unknown) => { browser.send('stream_data', { data: JSON.stringify(msg) }, { channelId: 'c1' }) }
+
+    send({ type: 'join_session', sessionId: 'sess-1' })
+    send({ type: 'input', data: 'TOP SECRET PROMPT about the API key' })
+    send({ type: 'prompt_response', value: 'always_allow', requestId: 'req-7' })
+    send({ type: 'set_permission_mode', permissionMode: 'acceptEdits' })
+    send({ type: 'stop' })
+    send({ type: 'get_diff', scope: 'all' })
+    await waitFor(() => local.received.some(f => f.includes('get_diff')))
+    // The machine announces a session created on this channel.
+    local.broadcast({ type: 'session_created', sessionId: 'sess-2', sessionName: 'n', workingDir: '/w' })
+    await browser.waitForFrame(f => f.kind === 'stream_data' && String(f.payload.data).includes('sess-2'))
+
+    const events = listAuditEvents(db, { machineId, kinds: ['prompt_sent', 'approval_answered', 'permission_mode_changed', 'session_stopped', 'session_created'] })
+      .reverse()
+    expect(events.map(e => [e.kind, e.localSessionId])).toEqual([
+      ['prompt_sent', 'sess-1'],
+      ['approval_answered', 'sess-1'],
+      ['permission_mode_changed', 'sess-1'],
+      ['session_stopped', 'sess-1'],
+      ['session_created', 'sess-2'],
+    ])
+    expect(events[0].metadata).toMatchObject({ via: 'input', role: 'owner', payloadHash: expect.stringMatching(/^[0-9a-f]{64}$/) })
+    expect(events[1].metadata).toMatchObject({ decision: 'always', requestId: 'req-7' })
+    expect(events[2].metadata).toMatchObject({ mode: 'acceptEdits' })
+    // Reads aren't audited, and no content is ever stored.
+    expect(JSON.stringify(listAuditEvents(db, { machineId }))).not.toMatch(/TOP SECRET|always_allow|get_diff/)
+    browser.close()
+  })
 
   it('authenticates to the local server with the machine token, not the browser', async () => {
     await startConnector()
