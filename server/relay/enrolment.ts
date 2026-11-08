@@ -35,7 +35,7 @@ import type { PasskeyCredential, PendingEnrolment, TrustedCredential, TrustStore
 import { coseToKey, keyIdForCoseKey, verifyPasskeyAssertion } from './webauthn-verify.js'
 import type { PasskeyAssertion } from './webauthn-verify.js'
 import {
-  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, GRANT_REVOKE_ACTION, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
+  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, GRANT_REVOKE_ACTION, MACHINE_CLOCK_LABEL, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
   grantRevokePayload, grantRevokedParts, revokePayload,
 } from './intent-actions.js'
 import type { IntentVerifier } from './intent-verify.js'
@@ -76,6 +76,8 @@ export interface EnrolResult {
   keyId?: string
   /** Set when approved or rejected: sign_kM(T(result, enrolId, SPKI(kB), state)), base64url. */
   signature?: string
+  /** enrol_time: this machine's clock (ms), signed with the nonce under MACHINE_CLOCK_LABEL. */
+  machineTime?: number
   /**
    * Set when approved: the signer's passkeys this machine trusts, so the
    * browser knows which one to use for step-up. A hint (unsigned); a wrong
@@ -354,6 +356,25 @@ export class MachineEnrolment {
     }
   }
 
+  /**
+   * enrol_time: this machine's clock, signed over the browser's fresh nonce,
+   * so the owner's browser can date share grants by a time the relay didn't
+   * choose (it times the round trip itself). Harmless to anyone: it is only
+   * the time.
+   */
+  time(payload: unknown): EnrolResult {
+    const nonce = (payload as { nonce?: unknown } | null)?.nonce
+    if (typeof nonce !== 'string' || !/^[A-Za-z0-9_-]{16,64}$/.test(nonce)) throw refuse('Malformed request')
+    const machineTime = this.now()
+    const { key } = this.machineKey()
+    return {
+      enrolId: `time:${nonce}`,
+      state: 'approved',
+      machineTime,
+      signature: signP1363(key, transcript(MACHINE_CLOCK_LABEL, nonce, String(machineTime))).toString('base64url'),
+    }
+  }
+
   /** device_revoke (spec §5.6): remove a credential, on an owner's signed (and stepped-up) intent. */
   revoke(principal: RelayPrincipal | undefined, payload: unknown): EnrolResult {
     const keyId = (payload as { keyId?: unknown } | null)?.keyId
@@ -381,6 +402,7 @@ export class MachineEnrolment {
       case 'enrol_certify': return { kind: 'enrol_result', payload: this.certify(principal, payload) }
       case 'enrol_revoke': return { kind: 'enrol_result', payload: this.revoke(principal, payload) }
       case 'enrol_grant_revoke': return { kind: 'enrol_result', payload: this.revokeGrant(principal, payload) }
+      case 'enrol_time': return { kind: 'enrol_result', payload: this.time(payload) }
       default: throw refuse('Unknown enrolment message')
     }
   }

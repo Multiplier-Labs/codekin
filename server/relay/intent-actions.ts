@@ -24,6 +24,13 @@ export const INTENT_MAX_SKEW_MS = 5 * 60_000
  */
 export const MACHINE_TIME_LABEL = 'ck-intent-time-v1'
 
+/**
+ * Domain label for the machine's answer to a clock probe (enrol_time):
+ * sign_kM(T(label, nonce, String(machineTime))). The owner's browser dates
+ * share grants by it (§6.7).
+ */
+export const MACHINE_CLOCK_LABEL = 'ck-machine-clock-v1'
+
 /** How large a clock offset the browser will apply after a stale refusal (§6.5). */
 export const MAX_CLOCK_OFFSET_MS = 60 * 60_000
 

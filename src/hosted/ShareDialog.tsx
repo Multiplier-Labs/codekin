@@ -173,8 +173,7 @@ export function ShareDialog({ machineId, sessionId, sessionName, onClose }: Shar
     if (status.kind === 'signed') return
     setError(null)
     try {
-      // Ids carry their issue time: take it from the machine-corrected clock.
-      setReview(await proposeGrant(share, status.keys, { now: grantTransport()?.now?.() }))
+      setReview(await proposeGrant(share, status.keys))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }

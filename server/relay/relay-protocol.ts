@@ -26,6 +26,7 @@ export type RelayEnvelopeKind =
   | 'enrol_certify'
   | 'enrol_revoke'
   | 'enrol_grant_revoke'
+  | 'enrol_time'
   /** …and connector → browser, each answering one request by id. */
   | 'enrol_challenge'
   | 'enrol_result'
@@ -245,7 +246,7 @@ export const RELAY_ERROR = {
 } as const
 
 /** Browser → connector enrolment frames, and the connector's replies. */
-export const ENROL_REQUEST_KINDS = ['enrol_commit', 'enrol_reveal', 'enrol_status', 'enrol_certify', 'enrol_revoke', 'enrol_grant_revoke'] as const
+export const ENROL_REQUEST_KINDS = ['enrol_commit', 'enrol_reveal', 'enrol_status', 'enrol_certify', 'enrol_revoke', 'enrol_grant_revoke', 'enrol_time'] as const
 export type EnrolRequestKind = (typeof ENROL_REQUEST_KINDS)[number]
 
 export function isEnrolRequestKind(kind: string): kind is EnrolRequestKind {

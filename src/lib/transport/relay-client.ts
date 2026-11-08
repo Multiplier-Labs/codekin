@@ -61,7 +61,7 @@ export class RelayRequestError extends Error {
  */
 export interface RelaySigner {
   sign(intent: IntentInput): Promise<unknown>
-  setClockOffset(ms: number, fromMachine?: boolean): void
+  setClockOffset(ms: number): void
   /** Whether the machine's own key signed this time (so the relay didn't make it up). */
   verifyMachineTime(nonce: string, machineTime: number, sig: string): Promise<boolean>
   /** Remember the passkeys a machine named when it asked for step-up. */
@@ -120,7 +120,7 @@ interface Pending {
 }
 
 /** Enrolment frames (signed-intents spec §5.2) and the reply each expects. */
-export type EnrolKind = 'enrol_commit' | 'enrol_reveal' | 'enrol_status' | 'enrol_certify' | 'enrol_revoke' | 'enrol_grant_revoke'
+export type EnrolKind = 'enrol_commit' | 'enrol_reveal' | 'enrol_status' | 'enrol_certify' | 'enrol_revoke' | 'enrol_grant_revoke' | 'enrol_time'
 const ENROL_REPLY: Record<EnrolKind, string> = {
   enrol_commit: 'enrol_challenge',
   enrol_reveal: 'enrol_result',
@@ -128,6 +128,7 @@ const ENROL_REPLY: Record<EnrolKind, string> = {
   enrol_certify: 'enrol_result',
   enrol_revoke: 'enrol_result',
   enrol_grant_revoke: 'enrol_result',
+  enrol_time: 'enrol_result',
 }
 
 /** Callbacks for one proxied session stream. */
@@ -402,7 +403,7 @@ export class RelayConnection {
     if (!signer || err.machineTime === undefined || !err.machineTimeSig || !err.intentNonce) return false
     if (!await signer.verifyMachineTime(err.intentNonce, err.machineTime, err.machineTimeSig)) return false
     this.machineClockKnown = true
-    signer.setClockOffset(err.machineTime - Date.now(), true)
+    signer.setClockOffset(err.machineTime - Date.now())
     return true
   }
 

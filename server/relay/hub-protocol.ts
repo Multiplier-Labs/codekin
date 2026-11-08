@@ -67,6 +67,7 @@ const connector = z.discriminatedUnion('kind', [
   frame('enrol_result', z.object({
     enrolId: id, state: z.enum(['awaiting_code', 'approved', 'rejected', 'expired']), keyId: b64.optional(), signature: b64.optional(),
     machineKey: b64.optional(), passkeys: z.array(z.object({ credentialId: b64, keyId: b64 })).max(20).optional(),
+    machineTime: z.number().optional(),
   })).extend({ id }),
 ])
 
@@ -86,7 +87,8 @@ const browser = z.discriminatedUnion('kind', [
   frame('enrol_status', z.object({ enrolId: id })).extend({ id }),
   frame('enrol_certify', z.object({ spki: b64, label: z.string().max(256), intent })).extend({ id }),
   frame('enrol_revoke', z.object({ keyId: z.string().max(64), intent })).extend({ id }),
-  frame('enrol_grant_revoke', z.object({ grantId: id, intent })).extend({ id }),
+  frame('enrol_grant_revoke', z.object({ grantId: id, keep: id.optional(), intent })).extend({ id }),
+  frame('enrol_time', z.object({ nonce: b64 })).extend({ id }),
 ])
 
 /** Validate fields before any cast, database binding, or socket operation. */

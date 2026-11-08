@@ -99,22 +99,6 @@ describe('browser intents verified by the machine', () => {
     expect(verifier.checkRequest({ ...request, body: Buffer.from('{"name":"y"}').toString('base64') }).reason).toBe('intent_wrong_payload')
   })
 
-  it("dates grants by a clock the relay can't move; only a machine-signed time corrects it", async () => {
-    const t = 1_790_000_000_000
-    const signer = createIntentSigner('m1', storage, () => t)
-    const tsOf = async (trustedClock: boolean) =>
-      (JSON.parse((await signer.sign({ action: 'grant', sessionId: 's1', payload: new Uint8Array(), trustedClock }))!.body) as { ts: number }).ts
-    // The relay's hello_ack guess: frames use it, grants and now() don't.
-    signer.setClockOffset(-60 * 60_000)
-    expect(await tsOf(false)).toBe(t - 60 * 60_000)
-    expect(await tsOf(true)).toBe(t)
-    expect(signer.now()).toBe(t)
-    // A time the machine's key signed corrects both.
-    signer.setClockOffset(-90_000, true)
-    expect(await tsOf(true)).toBe(t - 90_000)
-    expect(signer.now()).toBe(t - 90_000)
-  })
-
   it('does not sign for a machine this browser is not confirmed on', async () => {
     expect(await createIntentSigner('m-other', storage).sign({ action: 'ws:input', sessionId: null, payload: new Uint8Array() })).toBeNull()
   })
@@ -208,7 +192,7 @@ describe('browser intents verified by the machine', () => {
       code: 'not_permitted', message: 'stale', detail: 'intent_stale', machineTime, intentNonce: firstNonce, machineTimeSig: signedTime(firstNonce, machineTime),
     } }) })
     await vi.waitFor(() => { expect(ws.sent.filter(f => f.kind === 'request')).toHaveLength(2) })
-    expect(setOffset).toHaveBeenCalledWith(expect.any(Number), true)
+    expect(setOffset).toHaveBeenCalledWith(expect.any(Number))
     const retried = ws.sent.at(-1)!
     const body = JSON.parse((retried.payload.intent as { body: string }).body) as { ts: number; nonce: string }
     const firstBody = JSON.parse((first.payload.intent as { body: string }).body) as { nonce: string }

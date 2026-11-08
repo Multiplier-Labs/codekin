@@ -31,21 +31,17 @@ export interface IntentToSign {
   /** A privileged action (§6.6): signed with the passkey the machine trusts, when there is one. */
   stepUp?: boolean
   /**
-   * Date it by the trusted clock (see `now`), not one the relay may have
-   * set. Share grants: their dates order them on the machine (§6.7).
+   * The time to sign (ms), when the caller has one it trusts more than this
+   * signer's clock: share grants, dated by a machine-signed time (§6.7).
    */
-  trustedClock?: boolean
+  ts?: number
 }
 
 export interface IntentSigner {
   /** The signed intent, or null when this browser isn't confirmed on the machine. */
   sign(intent: IntentToSign): Promise<SignedIntent | null>
-  /**
-   * Adopt a clock correction (bounded to ±1 h, §6.5). `fromMachine` when the
-   * machine's key signed the time; otherwise (the relay's hello_ack guess)
-   * it only keeps frames fresh and never dates a grant.
-   */
-  setClockOffset(ms: number, fromMachine?: boolean): void
+  /** Adopt a clock correction (bounded to ±1 h, §6.5). */
+  setClockOffset(ms: number): void
   /** Whether the pinned machine key signed this time for this nonce (MACHINE_TIME_LABEL). */
   verifyMachineTime(nonce: string, machineTime: number, sig: string): Promise<boolean>
   /** Remember which of this user's passkeys the machine trusts (from a step-up refusal). */
@@ -56,11 +52,6 @@ export interface IntentSigner {
    * machine: the owner's signed grant names that key (§6.7).
    */
   setRole(role: 'owner' | 'grantee'): void
-  /**
-   * The trusted clock: this browser's, corrected only by a time the
-   * machine's key signed. Never moved by the relay.
-   */
-  now(): number
 }
 
 const SIGN = { name: 'ECDSA', hash: 'SHA-256' } as const
@@ -80,7 +71,6 @@ interface SigningKey {
 
 export function createIntentSigner(machineId: string, storage: TrustStorage = trustStorage(), now: () => number = Date.now): IntentSigner {
   let offset = 0
-  let trustedOffset = 0
   let key: Promise<SigningKey | null> | null = null
   let role: 'owner' | 'grantee' = 'owner'
 
@@ -133,7 +123,7 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
         action: intent.action,
         payloadHash,
         nonce: intent.nonce ?? toB64url(crypto.getRandomValues(new Uint8Array(16))),
-        ts: now() + (intent.trustedClock ? trustedOffset : offset),
+        ts: intent.ts ?? now() + offset,
         keyId: signing.keyId,
         ...(intent.channel !== undefined ? { channel: intent.channel } : {}),
         ...(intent.seq !== undefined ? { seq: intent.seq } : {}),
@@ -158,12 +148,8 @@ export function createIntentSigner(machineId: string, storage: TrustStorage = tr
       await storage.putPin({ ...pin, passkeys: merged })
       key = null
     },
-    setClockOffset(ms, fromMachine = false) {
+    setClockOffset(ms) {
       offset = clampOffset(ms)
-      if (fromMachine) trustedOffset = offset
-    },
-    now() {
-      return now() + trustedOffset
     },
     setRole(next) {
       if (next !== role) key = null

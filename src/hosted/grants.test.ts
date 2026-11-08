@@ -17,7 +17,7 @@ vi.mock('./deviceTrust', async importOriginal => ({
 vi.mock('./workspace', () => ({ workspaceHeaders: () => ({}) }))
 
 import {
-  flushRevocations, proposeGrant, recordShare, renewGrants, revokeShareGrants, signGrant,
+  flushRevocations, machineClockOffset, proposeGrant, recordShare, renewGrants, revokeShareGrants, signGrant,
   type GranteeKey, type GrantTransport, type ShareWithGrant,
 } from './grants'
 import { getOrCreateBrowserKey, type BrowserKey, type IssuedGrant, type MachinePin, type PendingRevocation, type TrustStorage } from './deviceTrust'
@@ -183,9 +183,10 @@ describe('share grants from the browser to the machine', () => {
     await shareAs('editor')
     const broad = stored()[0]
     share = { ...share, signedGrantRaw: null }
-    const second = await proposeGrant(share, devices, { storage: ownerStorage, now: Date.now() + 1000 })
-    await signGrant(transport, second, ownerStorage)
-    expect(readTrustStore(devicesFile)?.revokedGrants).toMatchObject([{ grantId: share.id, keep: second.grant.grantId }])
+    const second = await proposeGrant(share, devices, { storage: ownerStorage })
+    await signGrant(transport, second, ownerStorage, { now: Date.now() + 1000 })
+    const current = ownerStorage.issued.get('u-owner:m1')?.[0].current?.grantId
+    expect(readTrustStore(devicesFile)?.revokedGrants).toMatchObject([{ grantId: share.id, keep: current }])
     // The relay keeps presenting the old one and leaves out the new: nothing.
     expect(verifier.effectivePrincipal(danaPrincipal([broad]))?.grants).toEqual({})
     expect(verifier.effectivePrincipal(danaPrincipal(stored()))?.grants).toEqual({ s1: EDITOR })
@@ -258,12 +259,41 @@ describe('share grants from the browser to the machine', () => {
     expect(ownerStorage.issued.get('u-owner:m1')?.[0].role).toBe('viewer')
   })
 
-  it('renews by the clock it signs with, not the raw one', async () => {
+  it("dates grants and renewals by the machine's signed clock", async () => {
     await shareAs('viewer')
     const g = JSON.parse(stored()[0].grant) as GrantBody
-    const machineNow = g.expiresAt - 2 * DAY
-    expect(await renewGrants({ ...transport, now: () => machineNow }, 'm1', { storage: ownerStorage })).toBe(1)
-    expect((JSON.parse(stored()[0].grant) as GrantBody).expiresAt).toBe(machineNow + 30 * DAY)
+    // The machine's clock runs 28 days ahead of this browser's.
+    const ahead = g.expiresAt - 2 * DAY - Date.now()
+    const clockMachine = new MachineEnrolment({ machineId: 'm1', identityFile: join(dir, 'relay-identity.json'), devicesFile, secretStore: null, intents: verifier, now: () => Date.now() + ahead })
+    const viaClock: GrantTransport = {
+      ...transport,
+      sendDeviceFrame: async (kind, payload) => kind === 'enrol_time'
+        ? clockMachine.handle(kind, undefined, payload).payload
+        : transport.sendDeviceFrame(kind, payload),
+    }
+    expect(await renewGrants(viaClock, 'm1', { storage: ownerStorage })).toBe(1)
+    const renewed = JSON.parse(stored()[0].grant) as GrantBody
+    expect(Math.abs(renewed.expiresAt - (Date.now() + ahead + 30 * DAY))).toBeLessThan(2000)
+    expect(Math.abs((JSON.parse(stored()[0].intent.body) as { ts: number }).ts - (Date.now() + ahead))).toBeLessThan(2000)
+  })
+
+  it("won't take the machine's clock from a slow, replayed or unpinned answer", async () => {
+    expect(await machineClockOffset(transport, 'm1', ownerStorage)).toEqual(expect.any(Number))
+    // An answer for another nonce (a replay).
+    const old = await transport.sendDeviceFrame('enrol_time', { nonce: 'A'.repeat(22) })
+    expect(await machineClockOffset({ ...transport, sendDeviceFrame: async () => old }, 'm1', ownerStorage)).toBeNull()
+    // Held back by the relay past the bound.
+    const real = Date.now.bind(Date)
+    let skew = 0
+    vi.spyOn(Date, 'now').mockImplementation(() => real() + skew)
+    const slow: GrantTransport = { ...transport, sendDeviceFrame: async (k, p) => { const r = await transport.sendDeviceFrame(k, p); skew += 6000; return r } }
+    expect(await machineClockOffset(slow, 'm1', ownerStorage)).toBeNull()
+    vi.mocked(Date.now).mockRestore()
+    // A machine key taken on first use may be the relay's.
+    const pin = await ownerStorage.getPin('u-owner', 'm1')
+    await ownerStorage.putPin({ ...pin!, via: 'passkey' })
+    expect(await machineClockOffset(transport, 'm1', ownerStorage)).toBeNull()
+    await expect(signGrant(transport, await proposeGrant(share, devices, { storage: ownerStorage }), ownerStorage)).rejects.toMatchObject({ code: 'no_clock' })
   })
 
   describe('an owner with two browsers', () => {
@@ -293,9 +323,9 @@ describe('share grants from the browser to the machine', () => {
       const broad = JSON.parse(stored()[0].grant) as GrantBody
       // The laptop narrows; it has no record of the share.
       share = { ...share, permissions: ['view', 'view_diff'] }
-      const narrow = await proposeGrant(share, devices, { storage: laptopStorage, now: Date.now() + 1000 })
+      const narrow = await proposeGrant(share, devices, { storage: laptopStorage })
       expect(narrow).toMatchObject({ recorded: false, role: 'viewer' })
-      await signGrant(laptop, narrow, laptopStorage)
+      await signGrant(laptop, narrow, laptopStorage, { now: Date.now() + 1000 })
       const narrowSigned = stored()[0]
       // The first browser renews its (now superseded) broader grant.
       expect(await renewGrants(transport, 'm1', { storage: ownerStorage, now: broad.expiresAt - 2 * DAY })).toBe(1)

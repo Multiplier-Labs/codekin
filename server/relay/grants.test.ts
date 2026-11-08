@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  GRANT_ACTION, GRANT_REVOKED_LABEL, GRANT_REVOKE_ACTION, MAX_GRANT_LIFETIME_MS, frameAction, framePayload, grantIssuedAt, grantPayload, grantRevokePayload,
+  GRANT_ACTION, GRANT_REVOKED_LABEL, GRANT_REVOKE_ACTION, MACHINE_CLOCK_LABEL, MACHINE_TIME_LABEL, MAX_GRANT_LIFETIME_MS, frameAction, framePayload, grantIssuedAt, grantPayload, grantRevokePayload,
   grantRevokedBy, grantRevokedParts, intentChallengeInput,
 } from './intent-actions.js'
 import type { GrantBody, IntentBody, SignedGrant, SignedIntent } from './intent-actions.js'
@@ -271,5 +271,20 @@ describe('signed share grants on the machine', () => {
     expect(() => withRevocation(full, { grantId: 'new' })).toThrow(/too many/)
     // Coalescing into an existing share still works.
     expect(withRevocation(full, { grantId: 's1' })).toBe(full)
+  })
+
+  it("answers a clock probe with its own time, signed over the browser's nonce", () => {
+    const identityFile = join(dir, 'relay-identity.json')
+    const identity = ensureMachineIdentity('m1', 'https://relay.test', { file: identityFile, store: null, log: { log: vi.fn(), warn: vi.fn() } })
+    const at = 1_790_000_000_000
+    const enrolment = new MachineEnrolment({ machineId: 'm1', identityFile, devicesFile, secretStore: null, intents: verifier, now: () => at })
+    const nonce = 'N'.repeat(22)
+    const reply = enrolment.handle('enrol_time', undefined, { nonce }).payload as { machineTime: number; signature: string }
+    expect(reply.machineTime).toBe(at)
+    const pub = Buffer.from(identity.publicKey, 'base64url')
+    expect(verifyP1363(pub, transcript(MACHINE_CLOCK_LABEL, nonce, String(at)), Buffer.from(reply.signature, 'base64url'))).toBe(true)
+    // Its own label: never usable as a stale-intent refusal's signed time.
+    expect(verifyP1363(pub, transcript(MACHINE_TIME_LABEL, nonce, String(at)), Buffer.from(reply.signature, 'base64url'))).toBe(false)
+    expect(() => enrolment.handle('enrol_time', undefined, { nonce: 'short' })).toThrow()
   })
 })

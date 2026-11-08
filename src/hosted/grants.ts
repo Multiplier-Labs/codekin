@@ -25,25 +25,19 @@
  */
 
 import {
-  GRANT_ACTION, GRANT_REVOKE_ACTION, MAX_GRANT_LIFETIME_MS, grantIssuedAt, grantNeedsStepUp, grantPayload, grantRevokePayload, grantRevokedParts,
+  GRANT_ACTION, GRANT_REVOKE_ACTION, MACHINE_CLOCK_LABEL, MAX_GRANT_LIFETIME_MS, grantIssuedAt, grantNeedsStepUp, grantPayload, grantRevokePayload, grantRevokedParts,
 } from '../../server/relay/intent-actions'
 import type { GrantBody, SignedIntent } from '../../server/relay/intent-actions'
 import {
-  currentUserId, defaultBrowserLabel, fromB64url, getOrCreateBrowserKey, transcript, trustStorage, verifyWith,
+  currentUserId, defaultBrowserLabel, fromB64url, getOrCreateBrowserKey, toB64url, transcript, trustStorage, verifyWith,
   type IssuedGrant, type PendingRevocation, type TrustStorage,
 } from './deviceTrust'
 import { workspaceHeaders } from './workspace'
 
 /** The parts of the hosted transport grants need (HostedRelayTransport). */
 export interface GrantTransport {
-  signIntent(intent: { action: string; sessionId: string | null; payload: Uint8Array; stepUp?: boolean; trustedClock?: boolean }): Promise<SignedIntent | null>
-  sendDeviceFrame(kind: 'enrol_grant_revoke', payload: unknown): Promise<unknown>
-  /**
-   * The trusted clock (corrected only by a machine-signed time, never by the
-   * relay). Grant ids carry their issue time, which orders a share's grants
-   * on the machine, so they and the grant intent are dated by it.
-   */
-  now?(): number
+  signIntent(intent: { action: string; sessionId: string | null; payload: Uint8Array; stepUp?: boolean; ts?: number }): Promise<SignedIntent | null>
+  sendDeviceFrame(kind: 'enrol_grant_revoke' | 'enrol_time', payload: unknown): Promise<unknown>
 }
 
 export interface ShareWithGrant {
@@ -90,7 +84,7 @@ export function fingerprint(keyId: string): string {
 export const RENEW_WITHIN_MS = 7 * 24 * 60 * 60_000
 
 export class GrantError extends Error {
-  readonly code: 'not_confirmed' | 'no_keys' | 'rejected' | 'unknown_permissions' | 'gone'
+  readonly code: 'not_confirmed' | 'no_keys' | 'rejected' | 'unknown_permissions' | 'gone' | 'no_clock'
   constructor(code: GrantError['code'], message: string) {
     super(message)
     this.name = 'GrantError'
@@ -252,10 +246,49 @@ export async function proposeGrant(
   }
 }
 
-async function storeGrant(transport: GrantTransport, share: Pick<ShareWithGrant, 'id' | 'localSessionId'>, grant: GrantBody): Promise<string> {
+// --- The machine's clock ------------------------------------------------------
+
+/** The longest round trip a clock probe may take: the relay can shift the answer by at most half of it. */
+export const MAX_CLOCK_PROBE_MS = 5000
+
+/**
+ * The machine's clock, as an offset from this browser's: asked for with a
+ * fresh nonce, signed by the machine key this browser pinned with the codes,
+ * and timed here, so the relay can neither choose it nor replay an old one
+ * nor hold it back for long. Grant ids carry their issue time, which orders
+ * a share's grants on the machine, so grants are dated by this clock only.
+ * Null when it can't be had (offline, slow, or a pin taken on first use).
+ */
+export async function machineClockOffset(transport: GrantTransport, machineId: string, storage: TrustStorage = trustStorage()): Promise<number | null> {
+  const userId = await currentUserId()
+  const pin = userId ? await storage.getPin(userId, machineId) : undefined
+  // A key taken on first use (device_certify) may be the relay's own.
+  if (!pin || pin.via === 'passkey') return null
+  const nonce = toB64url(crypto.getRandomValues(new Uint8Array(16)))
+  const sent = Date.now()
+  let reply: { machineTime?: unknown; signature?: unknown }
+  try {
+    reply = await transport.sendDeviceFrame('enrol_time', { nonce }) as typeof reply
+  } catch {
+    return null
+  }
+  const received = Date.now()
+  if (received - sent > MAX_CLOCK_PROBE_MS) return null
+  if (typeof reply.machineTime !== 'number' || !Number.isSafeInteger(reply.machineTime) || typeof reply.signature !== 'string') return null
+  const ok = await verifyWith(fromB64url(pin.machineKey), transcript(MACHINE_CLOCK_LABEL, nonce, String(reply.machineTime)), fromB64url(reply.signature)).catch(() => false)
+  return ok ? reply.machineTime - Math.round((sent + received) / 2) : null
+}
+
+async function machineNow(transport: GrantTransport, machineId: string, storage: TrustStorage): Promise<number> {
+  const offset = await machineClockOffset(transport, machineId, storage)
+  if (offset === null) throw new GrantError('no_clock', "Couldn't check the computer's clock. Make sure it is online, then try again.")
+  return Date.now() + offset
+}
+
+async function storeGrant(transport: GrantTransport, share: Pick<ShareWithGrant, 'id' | 'localSessionId'>, grant: GrantBody, ts: number): Promise<string> {
   const text = JSON.stringify(grant)
   const intent = await transport.signIntent({
-    action: GRANT_ACTION, sessionId: share.localSessionId, payload: grantPayload(text), stepUp: grantNeedsStepUp(grant.permissions), trustedClock: true,
+    action: GRANT_ACTION, sessionId: share.localSessionId, payload: grantPayload(text), stepUp: grantNeedsStepUp(grant.permissions), ts,
   })
   if (!intent) throw new GrantError('not_confirmed', 'Confirm this browser on the computer first (Settings → Machines), then try again.')
   const res = await fetch(`/api/shares/${encodeURIComponent(share.id)}/grant`, {
@@ -276,8 +309,17 @@ async function storeGrant(transport: GrantTransport, share: Pick<ShareWithGrant,
  * machine every grant issued for the share before it — from this browser or
  * any other, broader or not — so none of them can be renewed back into use.
  */
-export async function signGrant(transport: GrantTransport, proposal: GrantProposal, storage: TrustStorage = trustStorage()): Promise<void> {
-  const text = await storeGrant(transport, proposal.share, proposal.grant)
+export async function signGrant(
+  transport: GrantTransport,
+  proposal: GrantProposal,
+  storage: TrustStorage = trustStorage(),
+  opts: { now?: number } = {},
+): Promise<void> {
+  // Dated by the machine's clock: a fresh id and expiry (neither shown for
+  // review in more detail than "30 days"), and the intent's time.
+  const now = opts.now ?? await machineNow(transport, proposal.share.machineId, storage)
+  const grant: GrantBody = { ...proposal.grant, grantId: freshGrantId(proposal.share.id, now), expiresAt: grantExpiry(proposal.grant.notAfter ?? null, now) }
+  const text = await storeGrant(transport, proposal.share, grant, now)
   const ledger = await loadLedger(proposal.share.machineId, storage)
   if (ledger) {
     let entry = entryFor(ledger, proposal.share.id)
@@ -288,12 +330,12 @@ export async function signGrant(transport: GrantTransport, proposal: GrantPropos
       }
       ledger.entries.push(entry)
     }
-    entry.current = { grantId: proposal.grant.grantId, grant: text }
-    entry.issuedIds = [...entry.issuedIds, proposal.grant.grantId]
+    entry.current = { grantId: grant.grantId, grant: text }
+    entry.issuedIds = [...entry.issuedIds, grant.grantId]
     entry.role = proposal.role
     await ledger.save()
   }
-  await queueRevocations(transport, proposal.share.machineId, [{ grantId: proposal.share.id, keep: proposal.grant.grantId }], storage)
+  await queueRevocations(transport, proposal.share.machineId, [{ grantId: proposal.share.id, keep: grant.grantId }], storage)
 }
 
 export type GrantStatus =
@@ -320,20 +362,26 @@ export function grantStatus(share: ShareWithGrant, keys: GranteeKey[]): GrantSta
  * revoked here and on the machine. Returns how many were renewed.
  */
 export async function renewGrants(transport: GrantTransport, machineId: string, opts: { now?: number; storage?: TrustStorage } = {}): Promise<number> {
-  const now = opts.now ?? transport.now?.() ?? Date.now()
   const storage = opts.storage ?? trustStorage()
   const ledger = await loadLedger(machineId, storage)
   if (!ledger) return 0
   let renewed = 0
+  if (!ledger.entries.some(e => !e.revoked && e.current)) return 0
+  // The machine's clock, asked for once: what is due and the new dates both
+  // go by it. Without it, nothing is renewed this time.
+  const offset = opts.now === undefined ? await machineClockOffset(transport, machineId, storage) : 0
+  if (offset === null) return 0
+  const clock = () => opts.now ?? Date.now() + offset
   for (const entry of ledger.entries) {
     if (entry.revoked || !entry.current) continue
     let grant: GrantBody
     try { grant = JSON.parse(entry.current.grant) as GrantBody } catch { continue }
+    const now = clock()
     if (grant.expiresAt - now > RENEW_WITHIN_MS) continue
     const expiresAt = grantExpiry(entry.notAfter, now)
     if (expiresAt <= grant.expiresAt) continue
     try {
-      const text = await storeGrant(transport, { id: entry.shareId, localSessionId: grant.sessionId }, { ...grant, expiresAt })
+      const text = await storeGrant(transport, { id: entry.shareId, localSessionId: grant.sessionId }, { ...grant, expiresAt }, now)
       entry.current = { grantId: grant.grantId, grant: text }
       renewed += 1
     } catch (err) {
