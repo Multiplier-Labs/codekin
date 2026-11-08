@@ -44,6 +44,8 @@ export type EmbeddedConnectorState =
   | 'connected'
   /** Connected, but the relay refuses traffic until Codekin is updated. */
   | 'update_required'
+  /** Connected, but the workspace refuses traffic until a browser is confirmed here (§6.8). */
+  | 'devices_unconfirmed'
   /** Lost the relay; the connector is backing off and will retry. */
   | 'disconnected'
   /** Another connector took this machine's slot. Terminal until relay.json changes. */
@@ -272,6 +274,12 @@ export class EmbeddedConnectorSupervisor {
           this.log.warn(`[relay] The relay won't serve this machine until Codekin is updated (${detail ?? 'version too old'}). Run \`codekin upgrade\`.`)
         }
         this.setState('update_required', detail)
+        break
+      case 'devices_unconfirmed':
+        if (this.state !== 'devices_unconfirmed') {
+          this.log.warn('[relay] The workspace requires confirmed devices: confirm a browser on this computer (Settings → Remote access, or `codekin relay devices approve`).')
+        }
+        this.setState('devices_unconfirmed', detail)
         break
       case 'disconnected':
       case 'reconnect_scheduled':

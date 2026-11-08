@@ -456,7 +456,7 @@ creates two files beside `relay.json` (both mode 0600; see
   account `<machineId>.identity`).
 - `relay-devices.json`: the browsers and passkeys allowed to control this
   machine through the relay, the owner's relay user id, and the intent
-  policy (`off` until a device is confirmed).
+  policy (`off` until your first device is confirmed, then `required`).
 
 Only local surfaces change the device list: Settings → Remote access on this
 machine, `codekin relay devices`, and `/api/relay/devices*` with the local
@@ -471,8 +471,10 @@ at the prompt `codekin relay login` shows after pairing. The machine then
 shows a 6-character code; type that into the browser to finish (the browser
 trusts the machine's key only after that). The browser keeps its
 signing key in IndexedDB and can't export it. Requests expire after 10
-minutes, and at most 3 can wait at once. In this version the list is kept
-but not enforced.
+minutes, and at most 3 can wait at once. Confirming your first device turns
+the policy from `off` to `required`, so from then on only confirmed devices
+can control the computer through the relay. Your other browsers need
+confirming too, and shares need **Allow** in the share dialog (below).
 
 Once a browser is confirmed on a machine, it signs everything it sends there,
 and the machine checks each signature before the request or frame goes any
@@ -485,7 +487,11 @@ depends on the policy:
 | `warn` | forwarded, logged | forwarded, logged |
 | `required` | forwarded, logged | refused, logged |
 
-Set `required` only once every browser you use is confirmed. Sharing a session
+Only the computer itself (Settings → Remote access, or
+`codekin relay devices policy`) can lower the policy. A confirmed browser can
+raise it (Settings → Machines → **Require confirmed devices**), never lower it.
+The connector reports its policy to the relay, which shows it in the machine
+list. Sharing a session
 with someone on a `required` machine also needs their devices allowed: the share
 dialog lists them, and **Allow** signs a grant for them. The grant lasts up to
 30 days and renews itself while your browser is open; a device they add later
@@ -519,6 +525,21 @@ a JSON array, empty by default). A machine below a floor, or missing a required
 feature, stays connected and shows as **update required** in the hosted app,
 and every request and stream to it fails with `connector_update_required`.
 Before raising a floor, check `connectorVersions` in `GET /api/admin/stats`.
+Signed intents (`intents`) have a floor of 0.10.6.
+
+**Require confirmed devices.** A workspace owner or admin can refuse machines
+the relay alone could control: Settings → Workspace → **Require confirmed
+devices** (or `PATCH /api/workspaces/:id` with `requireConfirmedDevices` and an
+optional `confirmedDevicesGraceDays`, 0–90). A machine is let through only
+when its connector is at or above the `intents` floor and reports the policy
+`required`. A machine whose Codekin is too old fails with
+`connector_update_required`. One that is new enough but doesn't require
+confirmed devices stays connected, but every request and stream fails with
+`devices_unconfirmed`, and open sessions are closed. Confirming a browser still
+works, since that is how the machine clears it. During the grace period such machines are only
+flagged (**confirm a device**). Turning the setting off, or adding grace, needs a
+recent sign-in check. The report comes from the machine's own connector, so a
+forged one only weakens that owner's own machine.
 
 **Unmanaged (self-supervised) connectors.** A credential without the
 `managed` field — every pairing made before it existed, or

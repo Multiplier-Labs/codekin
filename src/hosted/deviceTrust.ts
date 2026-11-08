@@ -16,7 +16,7 @@
 
 import {
   DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, INTENT_VERSION, PASSKEY_ANY, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
-  intentChallengeInput, revokePayload,
+  POLICY_ACTION, POLICY_RAISED_LABEL, intentChallengeInput, policyPayload, revokePayload,
 } from '../../server/relay/intent-actions'
 
 // --- Encoding ---------------------------------------------------------------
@@ -318,7 +318,7 @@ export function currentUserId(): Promise<string | null> {
 // --- The ceremony ------------------------------------------------------------
 
 /** Sends one enrol frame to the machine and resolves with its reply payload. */
-export type EnrolSend = (kind: 'enrol_commit' | 'enrol_reveal' | 'enrol_status' | 'enrol_certify' | 'enrol_revoke', payload: unknown) => Promise<unknown>
+export type EnrolSend = (kind: 'enrol_commit' | 'enrol_reveal' | 'enrol_status' | 'enrol_certify' | 'enrol_revoke' | 'enrol_policy', payload: unknown) => Promise<unknown>
 
 /** A passkey assertion over `challenge`, from one of `credentialIds` (src/hosted/passkeys.ts assertWithPasskey). */
 export type AssertPasskey = (challenge: Uint8Array, credentialIds: string[]) => Promise<{
@@ -494,6 +494,27 @@ export async function removeFromMachine(
   if (!intent) throw new EnrolmentFailure('protocol', 'This browser is not confirmed on that computer')
   await send('enrol_revoke', { keyId: key.keyId, intent })
   await storage.deletePin(opts.userId, opts.machineId)
+}
+
+/**
+ * device_policy (§6.8): ask a machine this browser is confirmed on to
+ * require confirmed devices. A remote request can only raise the policy;
+ * lowering it is for the computer itself.
+ */
+export async function requireConfirmedDevices(
+  send: EnrolSend,
+  sign: (intent: { action: string; sessionId: null; payload: Uint8Array }) => Promise<unknown>,
+  opts: { userId: string; machineId: string; storage?: TrustStorage },
+): Promise<boolean> {
+  const intent = await sign({ action: POLICY_ACTION, sessionId: null, payload: policyPayload('required') }) as { body?: unknown } | null
+  if (!intent) throw new EnrolmentFailure('protocol', 'This browser is not confirmed on that computer')
+  const reply = await send('enrol_policy', { policy: 'required', intent }) as { signature?: unknown } | null
+  // Only the machine's own key (pinned with the codes) confirms it: the relay could answer "approved" itself.
+  const pin = await (opts.storage ?? trustStorage()).getPin(opts.userId, opts.machineId)
+  let nonce: unknown
+  try { nonce = (JSON.parse(String(intent.body)) as { nonce?: unknown }).nonce } catch { nonce = undefined }
+  if (!pin || pin.via === 'passkey' || typeof reply?.signature !== 'string' || typeof nonce !== 'string') return false
+  return verifyWith(fromB64url(pin.machineKey), transcript(POLICY_RAISED_LABEL, 'required', nonce), fromB64url(reply.signature)).catch(() => false)
 }
 
 /** A passkey's key id: base64url(SHA-256(COSE_Key))[0:22], as machines compute it. */

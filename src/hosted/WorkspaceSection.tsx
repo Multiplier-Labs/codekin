@@ -26,7 +26,7 @@ import {
   removeMember,
   removeWorkspaceMachine,
   renameWorkspace,
-  setWorkspaceRequireMfa, setWorkspaceRequirePasskeyStepUp,
+  setWorkspaceRequireMfa, setWorkspaceRequireConfirmedDevices, setWorkspaceRequirePasskeyStepUp,
   switchWorkspace,
   unlockMachine,
   updateMember,
@@ -452,6 +452,64 @@ function Loading({ error }: { error: string | null }) {
 }
 
 /** Workspace → General: name, switching and creating, 2FA policy, leave/delete. */
+/**
+ * "Require confirmed devices" (signed-intents spec §6.8): machines that let
+ * the relay control them unsigned are refused, after an optional grace
+ * period during which they are only flagged.
+ */
+function ConfirmedDevicesRow({ workspace, act }: {
+  workspace: Workspace
+  act: (action: () => Promise<void>, after?: () => void) => Promise<void>
+}) {
+  const [graceDays, setGraceDays] = useState(0)
+  const on = workspace.requireConfirmedDevices === true
+  const graceUntil = workspace.confirmedDevicesGraceUntil ? new Date(workspace.confirmedDevicesGraceUntil) : null
+  const [shownAt] = useState(() => Date.now())
+  const graceRunning = graceUntil !== null && graceUntil.getTime() > shownAt
+  const turnOn = () => {
+    const when = graceDays > 0 ? `in ${graceDays} days` : 'straight away'
+    if (!window.confirm(`Computers in ${workspace.name} that don't require confirmed devices will be refused ${when}, until a browser is confirmed on them. Continue?`)) return
+    void act(() => setWorkspaceRequireConfirmedDevices(workspace.id, true, graceDays), () => { window.location.reload() })
+  }
+  return (
+    <Row
+      label="Require confirmed devices"
+      htmlFor="workspace-require-confirmed-devices"
+      description={on
+        ? graceRunning
+          ? `Computers that don't require confirmed devices are flagged until ${graceUntil.toLocaleDateString()}, then refused.`
+          : "Computers that don't require confirmed devices are refused until a browser is confirmed on them."
+        : 'Refuse computers here that the relay could control without a device confirmed on them. Each owner confirms a browser on their computer once.'}
+      control={
+        <div className="flex items-center gap-2">
+          {!on && (
+            <select
+              aria-label="Grace period"
+              value={graceDays}
+              onChange={e => { setGraceDays(Number(e.target.value)) }}
+              className="rounded-control border border-edge bg-page px-2 py-1.5 text-body text-ink focus:border-focus focus:outline-none"
+            >
+              <option value={0}>Straight away</option>
+              <option value={7}>After 7 days</option>
+              <option value={30}>After 30 days</option>
+            </select>
+          )}
+          <input
+            id="workspace-require-confirmed-devices"
+            type="checkbox"
+            className={checkbox}
+            checked={on}
+            onChange={e => {
+              if (e.target.checked) turnOn()
+              else void act(() => setWorkspaceRequireConfirmedDevices(workspace.id, false), () => { window.location.reload() })
+            }}
+          />
+        </div>
+      }
+    />
+  )
+}
+
 export function WorkspaceGeneral() {
   const { account, workspace, error: loadError } = useWorkspaceAccount()
   const [creating, setCreating] = useState(false)
@@ -572,6 +630,9 @@ export function WorkspaceGeneral() {
                 />
               }
             />
+          )}
+          {can(role, 'workspace.edit') && (
+            <ConfirmedDevicesRow workspace={workspace} act={act} />
           )}
           <Row
             label="Leave workspace"

@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { IconCheck, IconPlus, IconShieldCheck, IconTrash } from '@tabler/icons-react'
 import { TrustSheet } from './TrustSheet'
-import { currentUserId, deviceTrustSupported, machinePin, removeFromMachine } from './deviceTrust'
+import { currentUserId, deviceTrustSupported, machinePin, removeFromMachine, requireConfirmedDevices } from './deviceTrust'
 import { createIntentSigner } from './intentSigner'
 import { RelayConnection } from '../lib/transport/relay-client'
 import { MACHINE_STATUS_DOT, type Machine } from './machines'
@@ -89,6 +89,65 @@ async function removeThisBrowser(machineId: string): Promise<void> {
   } finally {
     conn.close()
   }
+}
+
+/** Ask the machine (which trusts this browser) to require confirmed devices (§6.8). */
+async function raisePolicy(machineId: string): Promise<boolean> {
+  const userId = await currentUserId()
+  if (!userId) throw new Error('Sign in again first')
+  const conn = new RelayConnection({ machineId })
+  try {
+    conn.connect()
+    const signer = createIntentSigner(machineId)
+    return await requireConfirmedDevices((kind, payload) => conn.enrol(kind, payload), intent => signer.sign(intent), { userId, machineId })
+  } finally {
+    conn.close()
+  }
+}
+
+/**
+ * Whether the relay alone can control this computer (signed-intents spec
+ * §6.8), and the way to stop it. Owners only.
+ */
+function PolicyLine({ machine, trusted, onChanged }: { machine: Machine; trusted: boolean; onChanged: () => void }) {
+  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'asked'>('idle')
+  const [error, setError] = useState<string | null>(null)
+  if (machine.access !== 'owner' || machine.status !== 'online') return null
+  if (machine.intentPolicy === 'required' || state === 'done') {
+    return <p className="pl-8 text-meta text-ink-faint">Only devices confirmed on it can control it through the relay.</p>
+  }
+  if (machine.intentPolicy === null || machine.intentPolicy === undefined) {
+    return <p className="pl-8 text-meta text-warning-5">The relay can control this computer. Update Codekin on it to protect it.</p>
+  }
+  const raise = async () => {
+    setState('busy')
+    setError(null)
+    try {
+      // 'done' only on the machine's own signed word; otherwise wait for its report.
+      setState(await raisePolicy(machine.id) ? 'done' : 'asked')
+      onChanged()
+    } catch (err) {
+      setState('idle')
+      setError(err instanceof Error ? err.message : "Couldn't change it")
+    }
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2 pl-8 text-meta">
+      <span className="text-warning-5">The relay can control this computer{machine.intentPolicy === 'warn' ? ' (unsigned requests are only logged)' : ''}.</span>
+      {trusted ? (
+        state === 'asked' ? (
+          <span className="text-ink-muted">Asked it; this updates once the computer reports its new setting.</span>
+        ) : (
+          <button type="button" disabled={state === 'busy'} onClick={() => { void raise() }} className="text-primary-5 hover:underline">
+            {state === 'busy' ? 'Asking it…' : 'Require confirmed devices'}
+          </button>
+        )
+      ) : (
+        <span className="text-ink-muted">Confirm this browser to protect it.</span>
+      )}
+      {error && <span className="text-warning-5">{error}</span>}
+    </div>
+  )
 }
 
 /** "Confirmed on this browser", or the way to get there (signed-intents spec §6.9). */
@@ -193,6 +252,18 @@ function MachineRow({ machine: m, isCurrent, onSwitch, setup, gutter, trusted, o
               shared with you
             </span>
           )}
+          {!m.updateRequired && (m.confirmedDevices === 'refused' || m.confirmedDevices === 'grace') && (
+            <span
+              className={`flex-shrink-0 rounded-control border px-1.5 py-0.5 text-meta ${m.confirmedDevices === 'refused' ? 'border-error-7/60 text-error-4' : 'border-warning-7/60 text-warning-5'}`}
+              title={m.intentsSupported === false
+                ? `This workspace ${m.confirmedDevices === 'refused' ? 'requires' : 'will soon require'} confirmed devices, which needs a newer Codekin on this computer. Run \`codekin upgrade\` on it; the desktop app updates itself.`
+                : m.confirmedDevices === 'refused'
+                  ? 'This workspace requires confirmed devices. Confirm a browser on this computer to use it again.'
+                  : 'This workspace will soon require confirmed devices. Confirm a browser on this computer before then.'}
+            >
+              {m.intentsSupported === false ? 'update required' : 'confirm a device'}
+            </span>
+          )}
           {isCurrent ? (
             <span className="ml-auto flex flex-shrink-0 items-center gap-1 text-meta text-primary-4">
               <IconCheck size={14} stroke={2.5} />
@@ -217,6 +288,7 @@ function MachineRow({ machine: m, isCurrent, onSwitch, setup, gutter, trusted, o
         ) : gutter && <span aria-hidden className="w-8 flex-shrink-0" />}
       </div>
       {trusted !== null && <TrustLine machine={m} trusted={trusted} onTrusted={onTrusted} />}
+      {trusted !== null && <PolicyLine machine={m} trusted={trusted} onChanged={onTrusted} />}
       {canRemove && confirmingRemove && (
         <ConfirmRemove machine={m} setup={setup} onClose={() => { setConfirmingRemove(false) }} />
       )}
@@ -321,7 +393,12 @@ function MachinesView({ currentMachineId, onSwitch, onDisconnect, setup }: Machi
               setup={setup}
               gutter={gutter}
               trusted={trusted && m.access === 'owner' ? trusted.has(m.id) : null}
-              onTrusted={refreshTrust}
+              onTrusted={() => {
+                refreshTrust()
+                void setup.refresh()
+                // Confirming the first browser raises the machine's policy; it reports that within seconds.
+                setTimeout(() => { void setup.refresh() }, 6000)
+              }}
             />
           ))}
         </ul>

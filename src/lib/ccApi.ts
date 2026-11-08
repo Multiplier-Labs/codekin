@@ -829,7 +829,7 @@ export async function testWebhookDelivery(
 export interface RelayStatus {
   paired: boolean
   managed: boolean
-  state: 'disabled' | 'unpaired' | 'secret_unavailable' | 'unmanaged' | 'connecting' | 'connected' | 'update_required' | 'disconnected' | 'replaced' | 'auth_failed' | 'stopped'
+  state: 'disabled' | 'unpaired' | 'secret_unavailable' | 'unmanaged' | 'connecting' | 'connected' | 'update_required' | 'devices_unconfirmed' | 'disconnected' | 'replaced' | 'auth_failed' | 'stopped'
   machineId: string | null
   relayUrl: string | null
   detail?: string
@@ -925,13 +925,27 @@ export async function getRelayDevices(token: string): Promise<RelayDevices> {
 }
 
 /** Confirm the browser showing `code`. Rejects with the server's message (e.g. no such code). */
-export async function approveRelayDevice(token: string, code: string): Promise<{ keyId: string; label: string; confirmCode: string }> {
+export async function approveRelayDevice(token: string, code: string): Promise<{ keyId: string; label: string; confirmCode: string; policyRaised?: boolean }> {
   const res = await transport.authFetch('/api/relay/devices/approve', {
     method: 'POST', headers: headers(token), body: JSON.stringify({ code }),
   })
-  const body = await jsonBody<{ added?: { keyId: string; label: string; confirmCode: string }; message?: string }>(res).catch(() => ({ added: undefined, message: undefined }))
+  const body = await jsonBody<{ added?: { keyId: string; label: string; confirmCode: string; policyRaised?: boolean }; message?: string }>(res).catch(() => ({ added: undefined, message: undefined }))
   if (!res.ok || !body.added) throw new Error(body.message ?? `Failed to confirm the browser: ${res.status}`)
   return body.added
+}
+
+/**
+ * What this computer accepts through the relay (signed-intents spec §6.8).
+ * Only here, on the computer itself, can it be lowered.
+ */
+export async function setRelayDevicePolicy(token: string, policy: 'off' | 'warn' | 'required'): Promise<void> {
+  const res = await transport.authFetch('/api/relay/devices/policy', {
+    method: 'PUT', headers: headers(token), body: JSON.stringify({ policy }),
+  })
+  if (!res.ok) {
+    const body = await jsonBody<{ message?: string; error?: string }>(res).catch(() => ({ message: undefined, error: undefined }))
+    throw new Error(body.message ?? body.error ?? `Failed to change the policy: ${res.status}`)
+  }
 }
 
 /** Whether an enrolled passkey may add a browser without a code typed here. */

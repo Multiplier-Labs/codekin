@@ -19,6 +19,7 @@ const api = vi.hoisted(() => ({
   getRelayIntents: vi.fn(),
   verifyRelayIntents: vi.fn(),
   setRelayLocalConfirmationOnly: vi.fn(),
+  setRelayDevicePolicy: vi.fn(),
 }))
 vi.mock('../../lib/ccApi', () => api)
 
@@ -130,6 +131,46 @@ describe('RemoteAccessSection', () => {
     expect(el!.textContent).toContain('idkey0000000000000000a')
     expect(el!.textContent).toContain('No devices yet')
     expect(onError).not.toHaveBeenCalled()
+  })
+
+  it('shows what the computer accepts through the relay, and lowers it only after a warning', async () => {
+    api.getRelayStatus.mockResolvedValue(PAIRED)
+    api.getRelayPairing.mockResolvedValue({ state: 'idle' })
+    api.getRelayDevices.mockResolvedValue({ ...NO_DEVICES, devices: { ...NO_DEVICES.devices, policy: 'required', credentials: [IPHONE] } })
+    api.setRelayDevicePolicy.mockResolvedValue(undefined)
+    await render()
+    expect(el!.textContent).toContain('Only they can control it through the relay')
+    const select = el!.querySelector<HTMLSelectElement>('#relay-device-policy')!
+    expect(select.value).toBe('required')
+    const choose = async (value: string) => {
+      await act(async () => {
+        select.value = value
+        select.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+    }
+    vi.stubGlobal('confirm', vi.fn(() => false))
+    await choose('off')
+    expect(api.setRelayDevicePolicy).not.toHaveBeenCalled()
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    await choose('off')
+    expect(api.setRelayDevicePolicy).toHaveBeenCalledWith('t', 'off')
+    vi.unstubAllGlobals()
+  })
+
+  it('says when confirming the first device turned enforcement on', async () => {
+    api.getRelayStatus.mockResolvedValue(PAIRED)
+    api.getRelayPairing.mockResolvedValue({ state: 'idle' })
+    api.getRelayDevices.mockResolvedValue(NO_DEVICES)
+    api.approveRelayDevice.mockResolvedValueOnce({ keyId: 'k1', label: 'Chrome · Android', confirmCode: 'KBY-PER', policyRaised: true })
+    await render()
+    expect(el!.textContent).toContain('The relay can still control it without one')
+    const input = el!.querySelector<HTMLInputElement>('#relay-device-code')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'k7qm-2xpa')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => { button('Confirm')!.click() })
+    expect(el!.textContent).toContain('It was your first device here')
   })
 
   it('removes a device only after inline confirmation', async () => {

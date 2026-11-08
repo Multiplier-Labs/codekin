@@ -34,7 +34,7 @@ import {
   totpStep,
   verifyTypedFactor,
 } from './mfa.js'
-import { createWorkspace, requiresPasskeyStepUp } from './workspaces.js'
+import { createWorkspace, getConfirmedDevicesRule, requiresPasskeyStepUp } from './workspaces.js'
 import { insertCredential } from './webauthn.js'
 import { resetMfa } from './relay-admin-cli.js'
 import { listAuditEvents } from './audit.js'
@@ -402,6 +402,46 @@ describe('2FA flows', () => {
     ageSession(cookie, { mfaVerifiedAt: Date.now() - 11 * 60 * 1000 })
     expect((await call(`/api/workspaces/${ws.id}`, cookie, { method: 'PATCH', body: { requirePasskeyStepUp: false } })).status).toBe(401)
     expect(requiresPasskeyStepUp(db, ws.id)).toBe(true)
+  })
+
+  it('lets an owner require confirmed devices, with a grace period, and guards lowering it', async () => {
+    const owner = await githubSignIn({ id: 2, login: 'pat' })
+    const patId = (db.prepare('SELECT id FROM users WHERE github_id = 2').get() as { id: string }).id
+    db.prepare('UPDATE users SET can_create_workspaces = 1 WHERE id = ?').run(patId)
+    const ws = createWorkspace(db, 'Team', patId)
+    const { cookie } = await enrollTotp(owner)
+    const patch = (body: Record<string, unknown>) => call(`/api/workspaces/${ws.id}`, cookie, { method: 'PATCH', body })
+    for (const bad of [
+      { requireConfirmedDevices: 'yes' }, { requireConfirmedDevices: true, confirmedDevicesGraceDays: 91 }, { requireConfirmedDevices: true, confirmedDevicesGraceDays: 1.5 },
+      // On its own only: nothing applies before another field is refused.
+      { requireConfirmedDevices: true, requirePasskeyStepUp: false }, { requireConfirmedDevices: true, name: '' },
+    ]) {
+      expect((await patch(bad)).status).toBe(400)
+    }
+    expect(getConfirmedDevicesRule(db, ws.id).required).toBe(false)
+    expect((await patch({ requireConfirmedDevices: true })).status).toBe(200)
+    expect(getConfirmedDevicesRule(db, ws.id)).toEqual({ required: true, graceUntil: null })
+    const listed = await (await call('/api/workspaces', cookie)).json() as { workspaces: Array<{ id: string; requireConfirmedDevices: boolean }> }
+    expect(listed.workspaces.find(w => w.id === ws.id)?.requireConfirmedDevices).toBe(true)
+    // Giving machines time, or turning it off, lowers protection: a fresh check first.
+    ageSession(cookie, { mfaVerifiedAt: Date.now() - 11 * 60 * 1000 })
+    expect((await patch({ requireConfirmedDevices: true, confirmedDevicesGraceDays: 30 })).status).toBe(401)
+    expect((await patch({ requireConfirmedDevices: false })).status).toBe(401)
+    expect(getConfirmedDevicesRule(db, ws.id)).toEqual({ required: true, graceUntil: null })
+  })
+
+  it('starts confirmed devices with a grace period without a fresh check, from off', async () => {
+    const owner = await githubSignIn({ id: 2, login: 'pat' })
+    const patId = (db.prepare('SELECT id FROM users WHERE github_id = 2').get() as { id: string }).id
+    db.prepare('UPDATE users SET can_create_workspaces = 1 WHERE id = ?').run(patId)
+    const ws = createWorkspace(db, 'Team', patId)
+    const { cookie } = await enrollTotp(owner)
+    ageSession(cookie, { mfaVerifiedAt: Date.now() - 11 * 60 * 1000 })
+    const res = await call(`/api/workspaces/${ws.id}`, cookie, { method: 'PATCH', body: { requireConfirmedDevices: true, confirmedDevicesGraceDays: 7 } })
+    expect(res.status).toBe(200)
+    const rule = getConfirmedDevicesRule(db, ws.id)
+    expect(rule.required).toBe(true)
+    expect(rule.graceUntil! - Date.now()).toBeGreaterThan(6.9 * 24 * 60 * 60_000)
   })
 
   it('refuses to require 2FA while the owner has none', async () => {

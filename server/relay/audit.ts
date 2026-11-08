@@ -15,6 +15,8 @@ export type AuditEventKind =
   | 'machine_removed'
   | 'machine_connected'
   | 'machine_disconnected'
+  /** The machine's connector reported a new intent policy (signed-intents spec §6.8). */
+  | 'machine_policy_changed'
   | 'session_shared'
   | 'session_unshared'
   | 'session_viewed'

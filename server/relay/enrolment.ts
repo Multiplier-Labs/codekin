@@ -30,12 +30,12 @@ import {
 } from './enrolment-crypto.js'
 import type { EnrolPasskey } from './enrolment-crypto.js'
 import { keyIdForSpki, loadMachineSigningKey, parseP256Spki, readMachineIdentity } from './machine-identity.js'
-import { addRevokedGrant, mutateTrustStore, readTrustStore, TrustStoreError } from './trust-store.js'
+import { addRevokedGrant, isIntentPolicy, mutateTrustStore, raiseIntentPolicy, readTrustStore, TrustStoreError } from './trust-store.js'
 import type { PasskeyCredential, PendingEnrolment, TrustedCredential, TrustStore } from './trust-store.js'
 import { coseToKey, keyIdForCoseKey, verifyPasskeyAssertion } from './webauthn-verify.js'
 import type { PasskeyAssertion } from './webauthn-verify.js'
 import {
-  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, GRANT_REVOKE_ACTION, MACHINE_CLOCK_LABEL, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
+  DEVICE_CERTIFY_ACTION, DEVICE_REVOKE_ACTION, GRANT_REVOKE_ACTION, MACHINE_CLOCK_LABEL, POLICY_ACTION, POLICY_RAISED_LABEL, policyPayload, PASSKEY_PROOF_LABEL, certifyPayload, encodePasskeyProofs,
   grantRevokePayload, grantRevokedParts, revokePayload,
 } from './intent-actions.js'
 import type { IntentVerifier } from './intent-verify.js'
@@ -162,10 +162,15 @@ export class MachineEnrolment {
     const { key, spki } = this.machineKey()
     return this.mutate(store => {
       const userId = this.checkPrincipal(principal, store)
+      // Every request counts, including ones later pushed out unrevealed: a
+      // relay can compute the honest browser's code, and each commit it makes
+      // is one more guess at a nonceM that gives its own key the same code.
       const windowStart = this.now() - ENROL_TTL_MS
-      if (store.pending.filter(p => Date.parse(p.createdAt) > windowStart).length >= MAX_ENROLMENTS_PER_WINDOW) {
+      const attempts = (store.enrolAttempts ?? []).filter(t => Date.parse(t) > windowStart)
+      if (attempts.length >= MAX_ENROLMENTS_PER_WINDOW) {
         throw refuse('Too many attempts to confirm a browser on this computer; try again in a few minutes')
       }
+      store.enrolAttempts = [...attempts, new Date(this.now()).toISOString()]
       // At the limit, a new request replaces the oldest undecided one: an
       // owner who reopened the sheet a few times shouldn't be locked out for
       // ten minutes, and a relay can drop requests anyway.
@@ -375,6 +380,33 @@ export class MachineEnrolment {
     }
   }
 
+  /**
+   * device_policy (spec §6.8): the owner raises this machine's policy from a
+   * browser. It never lowers it: only local surfaces can.
+   */
+  raisePolicy(principal: RelayPrincipal | undefined, payload: unknown): EnrolResult {
+    const policy = (payload as { policy?: unknown } | null)?.policy
+    if (!isIntentPolicy(policy)) throw refuse('Malformed request')
+    if (!this.opts.intents) throw new EnrolmentError('enrol_unavailable', 'This computer cannot check signed requests')
+    const { decision, signer } = this.opts.intents.checkDeviceIntent(
+      principal, (payload as { intent?: unknown }).intent, POLICY_ACTION, policyPayload(policy), false)
+    if (!signer) throw refuse(describeIntentRefusal(decision.reason))
+    // The key first: a raise that took effect must not come back as an error.
+    const { key } = this.machineKey()
+    try {
+      raiseIntentPolicy(policy, this.opts.devicesFile, this.opts.machineId, this.now())
+    } catch (err) {
+      if (err instanceof TrustStoreError && (err.code === 'invalid_policy' || err.code === 'no_credentials')) throw refuse(err.message)
+      throw err
+    }
+    this.opts.log?.log(`[relay] This computer's policy was raised to ${policy} by a signed request.`)
+    return {
+      enrolId: `policy:${policy}`,
+      state: 'approved',
+      signature: signP1363(key, transcript(POLICY_RAISED_LABEL, policy, parseIntentNonce((payload as { intent?: unknown }).intent))).toString('base64url'),
+    }
+  }
+
   /** device_revoke (spec §5.6): remove a credential, on an owner's signed (and stepped-up) intent. */
   revoke(principal: RelayPrincipal | undefined, payload: unknown): EnrolResult {
     const keyId = (payload as { keyId?: unknown } | null)?.keyId
@@ -403,6 +435,7 @@ export class MachineEnrolment {
       case 'enrol_revoke': return { kind: 'enrol_result', payload: this.revoke(principal, payload) }
       case 'enrol_grant_revoke': return { kind: 'enrol_result', payload: this.revokeGrant(principal, payload) }
       case 'enrol_time': return { kind: 'enrol_result', payload: this.time(payload) }
+      case 'enrol_policy': return { kind: 'enrol_result', payload: this.raisePolicy(principal, payload) }
       default: throw refuse('Unknown enrolment message')
     }
   }
@@ -454,7 +487,11 @@ function parseIntentNonce(intent: unknown): string {
 }
 
 /** A browser just added, and the code the owner types in that browser to finish. */
-export type ApprovedEnrolment = TrustedCredential & { confirmCode: string }
+export type ApprovedEnrolment = TrustedCredential & {
+  confirmCode: string
+  /** This was the owner's first device, so the machine now requires confirmed devices (§6.8). */
+  policyRaised?: boolean
+}
 
 /**
  * The owner typed a code on this machine: add the browser whose request
@@ -471,6 +508,7 @@ export function approveEnrolment(
   if (!code) throw new TrustStoreError('not_found', 'That is not a code: it has 8 letters and digits, like K7QM-2XPA')
   return mutateTrustStore(devicesFile, machineId, store => {
     const t = now()
+    let policyRaised = false
     // Compare against every waiting request, without stopping at a match.
     let match: PendingEnrolment | null = null
     for (const entry of store.pending) {
@@ -502,10 +540,18 @@ export function approveEnrolment(
     }))
     // Re-confirming a browser or passkey that is already listed replaces its entry.
     const added = new Set([credential.keyId, ...passkeys.map(c => c.keyId)])
+    // The owner's first confirmed device turns enforcement on (§5.3, §6.8,
+    // D7). Only from `off`, the default: an owner who chose `warn` keeps it.
+    const firstOwnerDevice = store.ownerUserId !== null && match.userId === store.ownerUserId
+      && !store.credentials.some(c => c.userId === store.ownerUserId)
+    if (firstOwnerDevice && store.policy === 'off') {
+      store.policy = 'required'
+      policyRaised = true
+    }
     store.credentials = [...store.credentials.filter(c => !added.has(c.keyId)), credential, ...passkeys]
     match.outcome = { state: 'approved', at }
     match.expiresAt = new Date(t + RESULT_TTL_MS).toISOString()
-    return { ...credential, confirmCode: formatCode(match.reveal.confirmCode ?? '') }
+    return { ...credential, confirmCode: formatCode(match.reveal.confirmCode ?? ''), ...(policyRaised ? { policyRaised } : {}) }
   }, now())
 }
 

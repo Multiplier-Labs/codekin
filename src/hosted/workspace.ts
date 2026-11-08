@@ -21,6 +21,10 @@ export interface Workspace {
   requireMfa: boolean
   /** "Privileged actions need a passkey" (signed-intents spec §6.6). */
   requirePasskeyStepUp?: boolean
+  /** "Require confirmed devices" (signed-intents spec §6.8). */
+  requireConfirmedDevices?: boolean
+  /** Until then (ISO time) machines that don't require confirmed devices are only warned about. */
+  confirmedDevicesGraceUntil?: string | null
 }
 
 export interface WorkspaceMember {
@@ -189,6 +193,11 @@ export async function renameWorkspace(id: string, name: string): Promise<void> {
 /** Require two-factor authentication of every member (owner only). */
 export async function setWorkspaceRequirePasskeyStepUp(id: string, requirePasskeyStepUp: boolean): Promise<void> {
   await call(ws(id), { method: 'PATCH', body: JSON.stringify({ requirePasskeyStepUp }) })
+}
+
+/** "Require confirmed devices", optionally only warning for `graceDays` first (§6.8). */
+export async function setWorkspaceRequireConfirmedDevices(id: string, requireConfirmedDevices: boolean, graceDays = 0): Promise<void> {
+  await call(ws(id), { method: 'PATCH', body: JSON.stringify({ requireConfirmedDevices, confirmedDevicesGraceDays: graceDays }) })
 }
 
 export async function setWorkspaceRequireMfa(id: string, requireMfa: boolean): Promise<void> {

@@ -97,9 +97,11 @@ export interface ConnectorOptions {
   onOwner?: (ownerUserId: string) => void
   /** Answers enrol_* frames (enrolment.ts); without it the connector doesn't advertise enrolment. */
   enrolment?: Pick<MachineEnrolment, 'handle'>
+  /** How often to look for a policy change to report (tests shorten it). */
+  policyWatchMs?: number
   /** Checks signed intents on everything the relay delivers (intent-verify.ts). */
   intents?: Pick<IntentVerifier, 'checkRequest' | 'checkChannelOpen' | 'checkFrame'>
-    & Partial<Pick<IntentVerifier, 'setRequirePasskey' | 'effectivePrincipal' | 'grantsVersion'>>
+    & Partial<Pick<IntentVerifier, 'setRequirePasskey' | 'effectivePrincipal' | 'grantsVersion' | 'policy'>>
 }
 
 export type ConnectorStatus =
@@ -107,6 +109,8 @@ export type ConnectorStatus =
   | 'connected'
   /** Connected, but the relay refuses traffic until this connector is updated. */
   | 'update_required'
+  /** Connected, but the workspace refuses traffic until a browser is confirmed on this machine (§6.8). */
+  | 'devices_unconfirmed'
   | 'auth_failed'
   | 'disconnected'
   | 'reconnect_scheduled'
@@ -114,6 +118,8 @@ export type ConnectorStatus =
   | 'stopped'
 
 const HEARTBEAT_INTERVAL_MS = 30_000
+/** How often the connector looks for a policy change to report (the CLI may change it from another process). */
+const POLICY_WATCH_MS = 5_000
 const BACKOFF_MIN_MS = 1_000
 const BACKOFF_MAX_MS = 60_000
 const CLOSE_AUTH_FAILED = 4001
@@ -132,6 +138,11 @@ export function connectorWsUrl(relayUrl: string): string {
 export class RelayConnector {
   private ws: WebSocket | null = null
   private heartbeat: ReturnType<typeof setInterval> | null = null
+  private policyWatch: ReturnType<typeof setInterval> | null = null
+  private reportedPolicy: string | null = null
+  /** From hello_ack: the relay refuses this connector until it is updated. */
+  private updateRequired = false
+  private displayName: string | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private backoffMs = BACKOFF_MIN_MS
   private stopped = false
@@ -164,6 +175,7 @@ export class RelayConnector {
 
   private clearTimers(): void {
     if (this.heartbeat) { clearInterval(this.heartbeat); this.heartbeat = null }
+    if (this.policyWatch) { clearInterval(this.policyWatch); this.policyWatch = null }
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null }
   }
 
@@ -191,6 +203,9 @@ export class RelayConnector {
         },
         ...(this.opts.identityKey ? { identityKey: this.opts.identityKey } : {}),
       }
+      const policy = this.currentPolicy()
+      if (policy) hello.intentPolicy = policy
+      this.reportedPolicy = policy
       ws.send(JSON.stringify(envelope('hello', hello)))
     })
 
@@ -200,6 +215,8 @@ export class RelayConnector {
       if (msg.kind === 'hello_ack') {
         this.backoffMs = BACKOFF_MIN_MS
         const ack = msg.payload as ConnectorHelloAck
+        this.updateRequired = !!ack.updateRequired
+        this.displayName = ack.displayName
         // The workspace's "Privileged actions need a passkey" (spec §6.6).
         this.opts.intents?.setRequirePasskey?.(ack.requirePasskeyStepUp === true)
         if (typeof ack.ownerUserId === 'string' && ack.ownerUserId && this.opts.onOwner) {
@@ -209,6 +226,8 @@ export class RelayConnector {
           // Stay connected (so the hosted UI shows "update required" rather
           // than offline) and keep the heartbeat; the relay refuses traffic.
           this.opts.onStatus?.('update_required', `needs ${ack.updateRequired.minimum} or later: ${ack.updateRequired.reason}`)
+        } else if (ack.unconfirmed) {
+          this.opts.onStatus?.('devices_unconfirmed', 'the workspace requires confirmed devices: confirm a browser on this computer')
         } else {
           this.opts.onStatus?.('connected', ack.displayName)
         }
@@ -218,6 +237,17 @@ export class RelayConnector {
           }
         }, HEARTBEAT_INTERVAL_MS)
         this.heartbeat.unref()
+        // Report policy changes (§6.8), so the relay can show them and apply
+        // the workspace's "Require confirmed devices". Only to a relay that
+        // says it understands the frame: an older one closes the socket on
+        // an unknown kind (it still gets the policy in each hello).
+        if (ack.policyReports === true) this.policyWatch = setInterval(() => {
+          const policy = this.currentPolicy()
+          if (!policy || policy === this.reportedPolicy || ws.readyState !== WebSocket.OPEN) return
+          this.reportedPolicy = policy
+          ws.send(JSON.stringify(envelope('intent_policy', { policy })))
+        }, this.opts.policyWatchMs ?? POLICY_WATCH_MS)
+        this.policyWatch?.unref()
         void this.advertiseSessions(ws)
       } else if (msg.kind === 'request') {
         void this.handleProxyRequest(ws, msg.id, msg.payload as ProxyRequest)
@@ -234,8 +264,15 @@ export class RelayConnector {
         this.closeChannel(msg.channelId, msg.payload as StreamClose)
       } else if (msg.kind === 'event' && !msg.channelId) {
         // A workspace policy change while connected (connector-hub announceWorkspacePolicy).
-        const policy = msg.payload as { requirePasskeyStepUp?: unknown }
+        const policy = msg.payload as { requirePasskeyStepUp?: unknown; unconfirmed?: unknown }
         if (typeof policy.requirePasskeyStepUp === 'boolean') this.opts.intents?.setRequirePasskey?.(policy.requirePasskeyStepUp)
+        // The workspace refuses this machine until it requires confirmed
+        // devices (§6.8), or no longer does. An update requirement outranks both.
+        if (!this.updateRequired && policy.unconfirmed === true) {
+          this.opts.onStatus?.('devices_unconfirmed', 'the workspace requires confirmed devices: confirm a browser on this computer')
+        } else if (!this.updateRequired && policy.unconfirmed === false) {
+          this.opts.onStatus?.('connected', this.displayName ?? undefined)
+        }
       } else if (msg.kind === 'error') {
         const err = msg.payload as RelayError
         this.opts.onStatus?.('disconnected', `${err.code}: ${err.message}`)
@@ -321,6 +358,15 @@ export class RelayConnector {
     ws.send(JSON.stringify(envelope('response', outcome.response, { id })))
   }
 
+
+  /** The machine's intent policy, or null when it can't be read (or this connector checks no intents). */
+  private currentPolicy(): 'off' | 'warn' | 'required' | null {
+    try {
+      return this.opts.intents?.policy?.() ?? null
+    } catch {
+      return null
+    }
+  }
 
   /**
    * Answer one enrolment frame from this machine's own state. Refusals go

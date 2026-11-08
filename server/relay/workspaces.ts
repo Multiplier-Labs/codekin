@@ -120,6 +120,10 @@ export interface UserWorkspace {
   role: WorkspaceRole
   requireMfa: boolean
   requirePasskeyStepUp: boolean
+  /** "Require confirmed devices" (signed-intents spec §6.8). */
+  requireConfirmedDevices: boolean
+  /** ISO time until which it only warns, or null. */
+  confirmedDevicesGraceUntil: string | null
 }
 
 /**
@@ -129,13 +133,21 @@ export interface UserWorkspace {
 export function listUserWorkspaces(db: Database.Database, userId: string): UserWorkspace[] {
   const rows = db
     .prepare(
-      `SELECT w.id, w.name, w.require_mfa, w.require_passkey_step_up, m.role FROM workspace_memberships m
+      `SELECT w.id, w.name, w.require_mfa, w.require_passkey_step_up, w.require_confirmed_devices, w.confirmed_devices_grace_until, m.role
+       FROM workspace_memberships m
        JOIN workspaces w ON w.id = m.workspace_id
        WHERE m.user_id = ? AND m.status = 'active' AND w.deleted_at IS NULL
        ORDER BY (w.id = ?) DESC, m.created_at, w.id`,
     )
-    .all(userId, BOOTSTRAP_WORKSPACE_ID) as Array<{ id: string; name: string; require_mfa: number; require_passkey_step_up: number; role: WorkspaceRole }>
-  return rows.map(r => ({ id: r.id, name: r.name, role: r.role, requireMfa: r.require_mfa === 1, requirePasskeyStepUp: r.require_passkey_step_up === 1 }))
+    .all(userId, BOOTSTRAP_WORKSPACE_ID) as Array<{
+      id: string; name: string; require_mfa: number; require_passkey_step_up: number
+      require_confirmed_devices: number; confirmed_devices_grace_until: string | null; role: WorkspaceRole
+    }>
+  return rows.map(r => ({
+    id: r.id, name: r.name, role: r.role, requireMfa: r.require_mfa === 1, requirePasskeyStepUp: r.require_passkey_step_up === 1,
+    requireConfirmedDevices: r.require_confirmed_devices === 1,
+    confirmedDevicesGraceUntil: r.require_confirmed_devices === 1 ? r.confirmed_devices_grace_until : null,
+  }))
 }
 
 export const MAX_WORKSPACE_NAME = 64
@@ -173,6 +185,35 @@ export function setRequirePasskeyStepUp(db: Database.Database, workspaceId: stri
 export function requiresPasskeyStepUp(db: Database.Database, workspaceId: string): boolean {
   const row = db.prepare('SELECT require_passkey_step_up FROM workspaces WHERE id = ?').get(workspaceId) as { require_passkey_step_up: number } | undefined
   return row?.require_passkey_step_up === 1
+}
+
+/**
+ * "Require confirmed devices" (signed-intents spec §6.8): machines in the
+ * workspace are refused traffic unless their connector enforces signed
+ * intents and reports `required`. Until `graceUntil` it only warns.
+ */
+export interface ConfirmedDevicesRule {
+  required: boolean
+  /** ms since epoch, or null for no grace period. */
+  graceUntil: number | null
+}
+
+export function getConfirmedDevicesRule(db: Database.Database, workspaceId: string): ConfirmedDevicesRule {
+  const row = db.prepare('SELECT require_confirmed_devices, confirmed_devices_grace_until FROM workspaces WHERE id = ?').get(workspaceId) as
+    | { require_confirmed_devices: number; confirmed_devices_grace_until: string | null }
+    | undefined
+  const grace = row?.confirmed_devices_grace_until ? Date.parse(row.confirmed_devices_grace_until) : NaN
+  return { required: row?.require_confirmed_devices === 1, graceUntil: Number.isFinite(grace) ? grace : null }
+}
+
+export function setConfirmedDevicesRule(db: Database.Database, workspaceId: string, rule: ConfirmedDevicesRule): void {
+  db.prepare('UPDATE workspaces SET require_confirmed_devices = ?, confirmed_devices_grace_until = ? WHERE id = ? AND deleted_at IS NULL')
+    .run(rule.required ? 1 : 0, rule.required && rule.graceUntil !== null ? new Date(rule.graceUntil).toISOString() : null, workspaceId)
+}
+
+/** Whether the rule refuses machines right now (required, and past any grace period). */
+export function confirmedDevicesEnforced(rule: ConfirmedDevicesRule | null | undefined, now = Date.now()): boolean {
+  return !!rule?.required && (rule.graceUntil === null || now >= rule.graceUntil)
 }
 
 /**

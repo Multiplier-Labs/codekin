@@ -30,9 +30,10 @@ import {
   RateLimiter,
   isBackedUp,
 } from './rate-limit.js'
-import { CONNECTOR_FLOORS, connectorUpdateRequired } from './connector-version.js'
+import { CONNECTOR_FLOORS, connectorUpdateRequired, hasCapability } from './connector-version.js'
 import type { ConnectorFloors, UpdateRequired } from './connector-version.js'
-import { getRequiredCapabilities, requiresPasskeyStepUp } from './workspaces.js'
+import { confirmedDevicesEnforced, getConfirmedDevicesRule, getRequiredCapabilities, requiresPasskeyStepUp } from './workspaces.js'
+import type { ConfirmedDevicesRule } from './workspaces.js'
 import { isMeterPaused, meterFrame } from './usage-meter.js'
 import type { UsageMeter } from './usage-meter.js'
 import { isWellFormedStreamData, recordFinding } from './abuse-signals.js'
@@ -93,7 +94,39 @@ interface ConnectedMachine {
   sessions: LocalSessionSummary | null
   /** Whether the connector answers enrol_* frames (ENROLMENT_FEATURE). */
   enrolment: boolean
+  /** Features the connector advertised (believed only at or above their floors). */
+  features: string[]
+  /** The intent policy the connector last reported (§6.8), or null if it never did. */
+  intentPolicy: IntentPolicyReport | null
+  /** The workspace's "Require confirmed devices" (§6.8). */
+  rule: ConfirmedDevicesRule | null
+  /** Whether the connector's claim of the intents capability is believed (fixed per connection). */
+  intentsCapable: boolean
+  /** Whether "Require confirmed devices" refused this machine when last evaluated (and the connector was told so). */
+  unconfirmed: boolean
+  /** The policy last written to the database and audit log, and when (writes are throttled). */
+  persistedPolicy: IntentPolicyReport | null
+  policyWrittenAt: number
+  policyFlush: ReturnType<typeof setTimeout> | null
 }
+
+/** At most one stored and audited policy change per machine this often; the latest still applies at once. */
+const POLICY_WRITE_INTERVAL_MS = 10_000
+
+type IntentPolicyReport = 'off' | 'warn' | 'required'
+
+const INTENT_POLICY_REPORTS: readonly string[] = ['off', 'warn', 'required']
+
+/** Where a machine stands against its workspace's "Require confirmed devices" (§6.8). */
+export type ConfirmedDevicesState =
+  /** The workspace doesn't require confirmed devices. */
+  | 'not_required'
+  /** The machine requires confirmed devices. */
+  | 'confirmed'
+  /** It doesn't yet, but the workspace's grace period is running: only a warning. */
+  | 'grace'
+  /** It doesn't, and its traffic is refused until it does. */
+  | 'refused'
 
 interface TrafficWindow {
   start: number
@@ -261,6 +294,8 @@ export class ConnectorHub {
         if (msg.channelId) this.channelListeners.get(msg.channelId)?.(msg.kind, msg.payload)
         else if (msg.id && this.pendingEnrol.has(msg.id)) this.settleEnrol(machineId, msg.id, msg.kind, msg.payload)
         else this.settleResponse(machineId, msg.id, msg.kind, msg.payload)
+      } else if (msg.kind === 'intent_policy') {
+        this.recordIntentPolicy(machine, (msg.payload as { policy?: unknown }).policy)
       } else if (msg.kind === 'event' && !msg.channelId) {
         // Machine-level event: currently only the session summary (§11.3).
         const payload = msg.payload as { sessions?: LocalSessionSummary }
@@ -306,6 +341,8 @@ export class ConnectorHub {
     if (machine.updateRequired) {
       return Promise.resolve({ error: updateRequiredError(machine.updateRequired) })
     }
+    const unconfirmed = this.confirmedDevicesRefusal(machine)
+    if (unconfirmed) return Promise.resolve({ error: unconfirmed.error })
     if (machine.pending.size >= MAX_PENDING_PER_MACHINE) {
       return Promise.resolve({
         error: { code: RELAY_ERROR.badRequest, message: 'Too many requests in flight for this machine' },
@@ -348,6 +385,84 @@ export class ConnectorHub {
     })
   }
 
+  /**
+   * The workspace's "Require confirmed devices" changed (§6.8): apply it to
+   * its connected machines at once, and tell each one where it stands.
+   */
+  applyConfirmedDevicesRule(workspaceId: string, rule: ConfirmedDevicesRule): void {
+    for (const machine of this.machines.values()) {
+      if (machine.workspaceId !== workspaceId) continue
+      machine.rule = rule
+      this.reevaluate(machine)
+    }
+  }
+
+  /** Where a machine stands against its workspace's "Require confirmed devices". */
+  confirmedDevicesState(machineId: string, now = Date.now()): ConfirmedDevicesState {
+    const machine = this.machines.get(machineId)
+    if (!machine?.rule?.required) return 'not_required'
+    if (this.meetsConfirmedDevices(machine)) return 'confirmed'
+    return confirmedDevicesEnforced(machine.rule, now) ? 'refused' : 'grace'
+  }
+
+  /** The policy a connected machine last reported (§6.8). */
+  intentPolicy(machineId: string): IntentPolicyReport | null {
+    return this.machines.get(machineId)?.intentPolicy ?? null
+  }
+
+  private meetsConfirmedDevices(machine: ConnectedMachine): boolean {
+    return machine.intentsCapable && machine.intentPolicy === 'required'
+  }
+
+  /** Whether a connected machine's connector can enforce signed intents (believed at or above the floor). */
+  intentsSupported(machineId: string): boolean {
+    return this.machines.get(machineId)?.intentsCapable ?? false
+  }
+
+  /**
+   * Why the workspace's "Require confirmed devices" refuses this machine, if
+   * it does. The report comes from the machine's own connector, so a forged
+   * one only weakens that owner's own machine (§6.8).
+   */
+  private confirmedDevicesRefusal(machine: ConnectedMachine, now = Date.now()): { error: RelayError; enrolmentAllowed: boolean } | null {
+    if (!confirmedDevicesEnforced(machine.rule, now) || this.meetsConfirmedDevices(machine)) return null
+    if (!machine.intentsCapable) {
+      const minimum = this.floors.capabilities.intents
+      return {
+        error: {
+          code: RELAY_ERROR.connectorUpdateRequired,
+          message: `This machine needs Codekin ${minimum ?? 'a newer version'} or later: the workspace requires confirmed devices`,
+        },
+        enrolmentAllowed: false,
+      }
+    }
+    return {
+      error: { code: RELAY_ERROR.devicesUnconfirmed, message: 'The workspace requires confirmed devices: confirm a browser on this computer' },
+      enrolmentAllowed: true,
+    }
+  }
+
+  /**
+   * Re-apply "Require confirmed devices" after anything it depends on
+   * changed (the rule, the reported policy, a grace period running out).
+   * Becoming refused closes the machine's open channels at once, so a
+   * session opened before can't carry on; the connector is told either way,
+   * for its status line, but only when it changes.
+   */
+  private reevaluate(machine: ConnectedMachine): void {
+    const refused = this.confirmedDevicesRefusal(machine) !== null
+    if (refused === machine.unconfirmed) return
+    machine.unconfirmed = refused
+    if (refused) {
+      for (const channelId of [...machine.channels]) {
+        this.dropChannel(machine, channelId, 'the workspace requires confirmed devices: confirm a browser on this computer')
+      }
+    }
+    if (!machine.updateRequired && machine.socket.readyState === machine.socket.OPEN) {
+      machine.socket.send(JSON.stringify(envelope('event', { unconfirmed: refused })))
+    }
+  }
+
   /** Tell the connected machines of a workspace that its intent policy changed (signed-intents spec §6.6). */
   announceWorkspacePolicy(workspaceId: string, policy: { requirePasskeyStepUp: boolean }): void {
     for (const machine of this.machines.values()) {
@@ -365,6 +480,10 @@ export class ConnectorHub {
     const machine = this.machines.get(machineId)
     if (!machine) return Promise.resolve({ error: { code: RELAY_ERROR.machineOffline, message: 'Machine is not connected' } })
     if (machine.updateRequired) return Promise.resolve({ error: updateRequiredError(machine.updateRequired) })
+    // A machine refused only for not yet requiring confirmed devices must
+    // still be able to confirm one: that is how it clears the refusal.
+    const unconfirmed = this.confirmedDevicesRefusal(machine)
+    if (unconfirmed && !unconfirmed.enrolmentAllowed) return Promise.resolve({ error: unconfirmed.error })
     if (!machine.enrolment) {
       return Promise.resolve({
         error: { code: RELAY_ERROR.connectorUpdateRequired, message: 'Update Codekin on this computer to confirm browsers on it' },
@@ -429,6 +548,8 @@ export class ConnectorHub {
     const machine = this.machines.get(machineId)
     if (!machine) return { code: RELAY_ERROR.machineOffline, message: 'Machine is not connected' }
     if (machine.updateRequired) return updateRequiredError(machine.updateRequired)
+    const unconfirmed = this.confirmedDevicesRefusal(machine)
+    if (unconfirmed) return unconfirmed.error
     if (machine.channels.size >= MAX_CHANNELS_PER_MACHINE) {
       return { code: RELAY_ERROR.tooManyChannels, message: 'This machine is serving too many sessions' }
     }
@@ -456,6 +577,9 @@ export class ConnectorHub {
   sendChannelData(machineId: string, channelId: string, data: string, intent?: SignedIntent): boolean {
     const machine = this.machines.get(machineId)
     if (!machine || machine.socket.readyState !== machine.socket.OPEN || !machine.channels.has(channelId)) return false
+    // A grace period may have run out since the channel opened.
+    if (machine.rule?.required && !machine.unconfirmed) this.reevaluate(machine)
+    if (!machine.channels.has(channelId)) return false
     if (isBackedUp(machine.socket)) {
       this.dropChannel(machine, channelId, 'machine connection is congested')
       return false
@@ -521,6 +645,8 @@ export class ConnectorHub {
 
   /** Fail everything riding on a machine that just went away. */
   private failPending(machine: ConnectedMachine, reason: string): void {
+    // A throttled policy write still due goes out now, rather than being lost.
+    if (machine.policyFlush) this.persistPolicy(machine)
     for (const id of [...machine.pending]) {
       this.pending.get(id)?.settle({ error: { code: RELAY_ERROR.machineOffline, message: reason } })
       this.pendingEnrol.get(id)?.settle({ error: { code: RELAY_ERROR.machineOffline, message: reason } })
@@ -561,7 +687,17 @@ export class ConnectorHub {
       updateRequired,
       sessions: hello.sessions ?? null,
       enrolment: features.includes(ENROLMENT_FEATURE),
+      features,
+      intentPolicy: isIntentPolicyReport(hello.intentPolicy) ? hello.intentPolicy : null,
+      rule: workspace ? getConfirmedDevicesRule(this.db, workspace.workspace_id) : null,
+      intentsCapable: hasCapability(connectorVersion, features, 'intents', this.floors),
+      unconfirmed: false,
+      persistedPolicy: isIntentPolicyReport(hello.intentPolicy) ? hello.intentPolicy : null,
+      policyWrittenAt: now,
+      policyFlush: null,
     })
+    const added = this.machines.get(machineId)
+    if (added) added.unconfirmed = this.confirmedDevicesRefusal(added) !== null
 
     const registered = this.machines.get(machineId)
     if (this.abuse && registered) {
@@ -571,16 +707,22 @@ export class ConnectorHub {
       })
     }
 
+    const storedPolicy = (this.db.prepare('SELECT intent_policy FROM machines WHERE id = ?').get(machineId) as { intent_policy: string | null } | undefined)?.intent_policy
     this.db.prepare(
       `UPDATE machines SET status = 'online', last_seen_at = datetime('now'),
          connector_version = COALESCE(?, connector_version),
-         local_codekin_version = COALESCE(?, local_codekin_version)
+         local_codekin_version = COALESCE(?, local_codekin_version),
+         intent_policy = ?
        WHERE id = ?`,
-    ).run(hello.connectorVersion ?? null, hello.localCodekinVersion ?? null, machineId)
+    ).run(hello.connectorVersion ?? null, hello.localCodekinVersion ?? null, registered?.intentPolicy ?? null, machineId)
 
     const row = this.db.prepare('SELECT display_name, owner_user_id, identity_key FROM machines WHERE id = ?').get(machineId) as
       | { display_name: string; owner_user_id: string; identity_key: string | null }
       | undefined
+    // A policy changed while the machine was away is audited like one changed while connected.
+    if (storedPolicy && registered?.intentPolicy && registered.intentPolicy !== storedPolicy) {
+      recordAuditEvent(this.db, { kind: 'machine_policy_changed', machineId, metadata: { from: storedPolicy, to: registered.intentPolicy } })
+    }
     // The machine identity key is only a hint for browsers (they pin theirs
     // at enrolment), so a connector may replace it, but the change is audited.
     const identityKey = parseP256Spki(hello.identityKey)
@@ -610,7 +752,32 @@ export class ConnectorHub {
     if (row?.owner_user_id) ack.ownerUserId = row.owner_user_id
     if (workspace && requiresPasskeyStepUp(this.db, workspace.workspace_id)) ack.requirePasskeyStepUp = true
     if (updateRequired) ack.updateRequired = updateRequired
+    if (registered && !updateRequired && registered.unconfirmed) ack.unconfirmed = true
+    ack.policyReports = true
     socket.send(JSON.stringify(envelope('hello_ack', ack)))
+  }
+
+  /** The connector reported a policy change (§6.8). */
+  private recordIntentPolicy(machine: ConnectedMachine, policy: unknown): void {
+    if (!isIntentPolicyReport(policy) || policy === machine.intentPolicy) return
+    // Applies at once; storing and auditing it is throttled, so a connector
+    // flipping its report can't flood the database or the audit log.
+    machine.intentPolicy = policy
+    this.reevaluate(machine)
+    const wait = machine.policyWrittenAt + POLICY_WRITE_INTERVAL_MS - Date.now()
+    if (wait <= 0) this.persistPolicy(machine)
+    else machine.policyFlush ??= setTimeout(() => { this.persistPolicy(machine) }, wait)
+  }
+
+  private persistPolicy(machine: ConnectedMachine): void {
+    if (machine.policyFlush) { clearTimeout(machine.policyFlush); machine.policyFlush = null }
+    machine.policyWrittenAt = Date.now()
+    const policy = machine.intentPolicy
+    if (policy === machine.persistedPolicy) return
+    const previous = machine.persistedPolicy
+    machine.persistedPolicy = policy
+    this.db.prepare('UPDATE machines SET intent_policy = ? WHERE id = ?').run(policy, machine.machineId)
+    recordAuditEvent(this.db, { kind: 'machine_policy_changed', machineId: machine.machineId, metadata: { from: previous, to: policy } })
   }
 
   private setStatus(machineId: string, status: 'online' | 'offline' | 'degraded'): void {
@@ -628,6 +795,8 @@ export class ConnectorHub {
   }
 
   private dropIdleConnections(): void {
+    // Also where a running-out grace period starts refusing machines that sent nothing since.
+    for (const machine of this.machines.values()) if (machine.rule?.required) this.reevaluate(machine)
     const cutoff = Date.now() - IDLE_TIMEOUT_MS
     for (const machine of [...this.machines.values()]) {
       if (isMeterPaused(machine.socket)) { machine.lastActivity = Date.now(); continue }
@@ -724,6 +893,10 @@ export class ConnectorHub {
     for (const id of this.traffic.keys()) this.abuse?.forget?.(id)
     this.traffic.clear()
   }
+}
+
+function isIntentPolicyReport(value: unknown): value is IntentPolicyReport {
+  return typeof value === 'string' && INTENT_POLICY_REPORTS.includes(value)
 }
 
 function updateRequiredError(update: UpdateRequired): RelayError {

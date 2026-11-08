@@ -29,6 +29,16 @@ export interface Machine {
    */
   updateRequired?: { minimum: string; missing: string[]; reason: string } | null
   /**
+   * The intent policy the machine's connector reports (signed-intents spec
+   * §6.8). Anything but `required` means the relay alone can control it.
+   * Null when its connector predates the report.
+   */
+  intentPolicy?: 'off' | 'warn' | 'required' | null
+  /** Where it stands against the workspace's "Require confirmed devices". */
+  confirmedDevices?: 'not_required' | 'confirmed' | 'grace' | 'refused'
+  /** False when its Codekin is too old to enforce signed intents: it needs an update, not a confirmed device. */
+  intentsSupported?: boolean
+  /**
    * Created by an install command that has not been run yet. Such a machine
    * has never connected; the UI shows it as "waiting for installation", not
    * as an ordinary offline machine.

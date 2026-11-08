@@ -46,8 +46,10 @@ describe('connectorUpdateRequired', () => {
     expect(connectorUpdateRequired('0.14.0', ['intents', 'e2e'], ['intents', 'e2e'], FLOORS)).toBeNull()
   })
 
-  it('ships with no capability floors, so only the base floor applies today', () => {
-    expect(CONNECTOR_FLOORS.capabilities).toEqual({})
+  it('ships a floor for signed intents only; end-to-end encryption has not shipped', () => {
+    expect(CONNECTOR_FLOORS.capabilities).toEqual({ intents: '0.10.6' })
     expect(connectorUpdateRequired('0.10.5', [], [])).toBeNull()
+    expect(hasCapability('0.10.5', ['intents'], 'intents')).toBe(false)
+    expect(hasCapability('0.10.6', ['intents'], 'intents')).toBe(true)
   })
 })

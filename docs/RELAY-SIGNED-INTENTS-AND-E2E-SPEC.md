@@ -1,6 +1,6 @@
 # Relay trust: device-signed intents and end-to-end encryption
 
-**Status:** Spec, decisions D1–D7 settled (§13). Built: slice 1 (relay audit events, §7.1), slice 2 (machine identity and trust store), slice 3 (enrolment ceremony, §5.2–5.5), slice 4 (intent signing and verification, §6.1–6.5, §7.2) slice 5 (passkeys: enrolment, `device_certify`, step-up, remote `device_revoke`, §5.4, §5.6, §6.6) and slice 6 (signed share grants and grantee intents, §6.7). Nothing turns enforcement on by itself yet: an owner can set `required` locally. The rest is not built.
+**Status:** Spec, decisions D1–D7 settled (§13). Built: slice 1 (relay audit events, §7.1), slice 2 (machine identity and trust store), slice 3 (enrolment ceremony, §5.2–5.5), slice 4 (intent signing and verification, §6.1–6.5, §7.2) slice 5 (passkeys: enrolment, `device_certify`, step-up, remote `device_revoke`, §5.4, §5.6, §6.6) slice 6 (signed share grants and grantee intents, §6.7) and slice 7 (enforcement, §6.8): L1 is complete. L2 (slices 8–11) is not built.
 **Date:** 2026-11-08
 **Context:** a hosted relay is trusted to say who the machine owner is (§3). This spec removes that trust in two levels: **L1 device-signed intents** and **L2 end-to-end content encryption**. It also adds the relay audit events that are declared but never emitted.
 **Basis:** `origin/main` at v0.10.5 (`a93f6e3`). All `path:line` references point there.
@@ -52,7 +52,7 @@ With L1 in place, the relay can still read traffic, delay it or drop it. It can'
 2. **The relay can't add keys.** A key enters the trust store only through local confirmation on the machine (§5), or through certification by a passkey that is already enrolled (§5.4).
 3. **Bound and fresh.** A signature covers the machine, the session, the action, a hash of the exact bytes that will run, a nonce and a timestamp. A signed intent can't be replayed, sent to another machine or session, or altered.
 4. **Grants are the owner's.** A grantee's access is the intersection of what the relay asserts and what the owner signed. A grantee's frames must be signed by one of that grantee's keys listed in the grant.
-5. **The relay can't lower the bar.** The machine's intent policy (`off | warn | required`) is local state only. Nothing reachable through the relay changes it.
+5. **The relay can't lower the bar.** The machine's intent policy (`off | warn | required`) is local state. Through the relay it can only be raised, by the owner's signed request (§6.8).
 
 **Reads are signed too.** If reads were unsigned, a compromised relay could actively pull data, not just watch: `GET /api/browse-dirs`, `/api/docs` and `/api/repos`, or `join_session` on any session. Signing everything changes the relay's position from "can read anything on the machine" to "can see only what your browser asks for". Signing costs well under a millisecond per frame.
 
@@ -343,7 +343,8 @@ A frame type that isn't in the map needs a signature and has no audit kind. It f
 | `ws:create_session`, `rest:POST /api/sessions/create` | `session_created` (new) | when `permissionMode` is `bypassPermissions` |
 | `ws:set_permission_mode` | `permission_mode_changed` (new) | to `bypassPermissions` |
 | `grant`, `grant_revoke` | `session_shared` / `session_unshared` | grants that include `approve_shell` |
-| `device_certify`, `device_revoke`, `policy` | `device_enrolled` / `device_revoked` (new) | always (`device_certify` *is* a passkey assertion) |
+| `device_certify`, `device_revoke` | `device_enrolled` / `device_revoked` (new) | always (`device_certify` *is* a passkey assertion) |
+| `device_policy` (raise only, §6.8) | `machine_policy_changed` (relay, from the connector's report) | never: raising is the safe direction |
 | reads (`rest:GET …`, `ws:join_session`, `ws:get_diff`, …), `channel:open` | — (covered by `session_viewed`) | — |
 
 ### 6.3 Wire changes
@@ -407,7 +408,7 @@ Verification sits at the relay message boundary in `connector.ts`: `request`, `s
 ### 6.5a As built (slice 4)
 
 - **Shared rules.** `server/relay/intent-actions.ts` has no Node or DOM imports, and the browser imports it directly. It defines action names, payload bytes, exemptions and session binding, so both ends compute them from one source.
-- **When the browser signs.** A browser signs only for a machine it has pinned (§5.2), and sends unsigned everywhere else, so no capability negotiation is needed. Connectors advertise `intents`, but its version floor stays unset until slice 7, so a workspace can't require it yet.
+- **When the browser signs.** A browser signs only for a machine it has pinned (§5.2), and sends unsigned everywhere else, so no capability negotiation is needed. Connectors advertise `intents`; slice 7 set its version floor (§6.8a).
 - **Policy modes.**
   - `off`: signed messages are verified and logged, and everything is forwarded.
   - `warn`: also logs unsigned messages.
@@ -510,7 +511,7 @@ If the owner has no enrolled passkey, the browser key is accepted (D2 in §13). 
   - Turning it off needs a recent sign-in.
   - Only the relay reports it. A lying relay can only leave the machine-side rule in force (a passkey enrolled here is always required).
 - **One relay hostname.** The origin and RP ID a machine checks come from the relay URL it paired with. The browser uses the hostname it was loaded from. A relay reached under another name (an alias, or a `PUBLIC_URL` that differs from the pairing URL) makes every passkey intent fail. Since an enrolled passkey rules out browser-key step-up, privileged actions then need the machine itself.
-- **Not built:** telling the owner's other enrolled browsers when a browser is added by passkey (§5.4); a remote `policy` intent (§6.8, slice 7); Account → Devices, "remove from all my computers".
+- **Not built:** telling the owner's other enrolled browsers when a browser is added by passkey (§5.4); Account → Devices, "remove from all my computers". The remote policy intent came with slice 7 (§6.8a).
 
 ### 6.7 Signed share grants and grantee intents
 
@@ -587,6 +588,26 @@ This also gives machine-side policy a principal it can rely on. A rule such as "
 - **The connector reports its policy** in `ConnectorHello` (`intentPolicy: off | warn | required`) and on change. The relay uses it for UI and for a workspace setting, **"Require confirmed devices"**, which refuses machines not in `required` with `connector_update_required` (reason "confirm a device on this computer"), the same way capability floors do. This report comes from the machine's own connector, so a forged one only weakens that owner's own machine.
 - **Grace period.** A relay may give existing workspaces a grace period (for example 30 days) during which "Require confirmed devices" only warns (D7).
 - In `warn` and `off` modes, the hosted UI says plainly, in the machine header, that the relay can control the machine.
+
+### 6.8a As built (slice 7)
+
+- **First device turns it on.** Confirming the owner's first device (the code typed on the machine) moves the policy from `off` to `required`, for new pairings and existing machines alike. A policy the owner set to `warn` is left alone. The CLI and local Settings say so when it happens.
+- **Raise only.** A `device_policy` intent (the `enrol_policy` frame, payload `framed(policy)`) from a confirmed owner browser raises the policy. Lowering is refused with "Only this computer can lower its policy". Raising needs no step-up. The machine confirms with `sign_kM(T("ck-policy-raised-v1", policy, intentNonce))`; the browser shows success only on that, verified against a machine key pinned with the codes. Lowering is only possible locally: Settings → Remote access → **Control through the relay**, `codekin relay devices policy`, or `/api/relay/devices/policy`.
+- **The connector reports its policy.** It sends `intentPolicy` in `ConnectorHello`, and an `intent_policy` frame within 5 seconds of a change (the CLI can change it from another process). It sends the frame only to a relay whose `hello_ack` has `policyReports: true`, because older relays close the socket on unknown kinds. The relay applies a report at once. It stores it (`machines.intent_policy`, migration 16) and audits changes as `machine_policy_changed` at most once every 10 seconds per machine, so a connector flipping its report can't flood either. It lists the policy with each machine.
+- **"Require confirmed devices"** is a workspace setting (`require_confirmed_devices`, `confirmed_devices_grace_until`). It is set with `PATCH /api/workspaces/:id` `{ requireConfirmedDevices, confirmedDevicesGraceDays: 0–90 }`; turning it off or adding grace needs a recent sign-in check.
+  - A machine passes only if its connector has the `intents` capability at or above the floor and reports `required`.
+  - **No intents capability:** everything is refused, enrolment included, with "needs Codekin <floor> or later".
+  - **Capable but not `required`:** requests and channels are refused with their own code, `devices_unconfirmed` ("confirm a browser on this computer"; updating won't help), and the connector's status is `devices_unconfirmed`. Enrolment frames still pass, since that is how the machine clears the refusal.
+  - During the grace period machines are only flagged.
+  - Changes apply to connected machines at once. A machine that becomes refused (the rule turned on, a lower policy reported, or a grace period running out) has its open channels closed, and its connector is told on each change. The machine list adds `intentsSupported`, so a machine that needs an update isn't told to confirm a device.
+  - `PATCH` sets `requireConfirmedDevices` on its own, so nothing applies before another field is refused.
+- **Floor.** `CONNECTOR_FLOORS.capabilities.intents` is `0.10.6`, the release that carries this slice.
+- **Browser.** The machine header no longer exists in the hosted app (nothing is drawn over a session), so the warning sits on the machine's row in Settings → Machines:
+  - "The relay can control this computer", with **Require confirmed devices** from a confirmed browser, or a pointer to confirm this browser;
+  - "Update Codekin on it" for connectors that report no policy;
+  - a **confirm a device** badge where the workspace refuses the machine or soon will.
+- **Attack harness.** `server/relay/relay-adversary.test.ts` (§11) runs a malicious hub against a real connector, verifier and enrolment, with a stub local server that records every hit. Writing it found that enrolment requests pushed out unrevealed weren't counted against the per-window budget; they are now (`enrolAttempts`).
+- **Not built:** the staging run of the harness against two real tenants (§11 staging gate) is a manual step before launch.
 
 ### 6.9 Browser UX
 
